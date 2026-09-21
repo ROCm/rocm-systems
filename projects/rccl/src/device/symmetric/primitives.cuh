@@ -563,7 +563,7 @@ static __device__ void bcastMultimem(ncclSymkArgsHandler& handler, int tn, int t
 #endif
 
   if (alignment % 16 == 0) {
-    constexpr int BytePerPack = ncclSymkBytePerPack, UnrollPacks = ncclSymkDeepUnrollPacks;
+    constexpr int BytePerPack = ncclSymkBytePerPack, UnrollPacks = ncclSymkDeepMaxUnrollPacks;
     constexpr int BytePerChunk = ncclSymkMultimemDeepBytePerChunk;
     uintptr_t cursor = nPreBytes;
     uint32_t nChunks = (nBytes - cursor) / BytePerChunk;

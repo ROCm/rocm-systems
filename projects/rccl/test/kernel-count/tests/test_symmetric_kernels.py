@@ -54,7 +54,14 @@ EXPECTED_DIMS = {
 # kernels are therefore invisible to the baselines above, so guard them separately:
 # +1 AllGather (TmaST), +5 AllReduce (RSxTmaLD_AGxTmaST, sum only), +10 ReduceScatter
 # (TmaLD, sum and avg).
-TDM_TARGET = "gfx1250"
+#
+# These two are GPU_TARGETS lists, not lists of movers: gfx942 has no TDM and is in
+# both on purpose. A build always passes GPU_TARGETS whole (src/CMakeLists.txt), so a
+# mixed list is the only shape the generator ever really sees, and testing a bare
+# "gfx1250" against a no-argument run would not distinguish a gate that looks for the
+# arch from one that only asks whether any target was given.
+GPU_TARGETS_WITHOUT_TDM = "gfx942;gfx950"
+GPU_TARGETS_WITH_TDM = "gfx942;gfx1250"
 EXPECTED_TDM_TOTAL = 58
 EXPECTED_TDM_PER_COLL = {
     "AllGather": 3,
@@ -188,8 +195,13 @@ def sym_host(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
+def sym_host_no_tdm(tmp_path_factory):
+    return _generate(tmp_path_factory, "sym_no_tdm", GPU_TARGETS_WITHOUT_TDM)
+
+
+@pytest.fixture(scope="session")
 def sym_host_tdm(tmp_path_factory):
-    return _generate(tmp_path_factory, "sym_tdm", TDM_TARGET)
+    return _generate(tmp_path_factory, "sym_tdm", GPU_TARGETS_WITH_TDM)
 
 
 def _count_literal(host):
@@ -311,9 +323,31 @@ def test_requirements_values_match_required_cuda(sym_host, sym_module):
 
 
 @pytest.mark.symmetric_generator
-def test_tdm_target_adds_only_the_tma_algos(sym_host, sym_host_tdm):
-    """A gfx1250 build gains exactly the Tma* algos, and nothing else moves."""
-    base = [parse_kernel_name(c) for c in _list_cnames(sym_host)]
+def test_non_tdm_target_list_stays_at_the_baseline(sym_host_no_tdm):
+    """A populated GPU_TARGETS without gfx1250 emits no Tma algos at all."""
+    records = [parse_kernel_name(c) for c in _list_cnames(sym_host_no_tdm)]
+    report = diff_report(
+        EXPECTED_TOTAL, len(records),
+        EXPECTED_PER_COLL, _per_coll(records),
+        EXPECTED_DIMS, _dims(records),
+    )
+    assert report is None, report
+
+    assert _count_literal(sym_host_no_tdm) == EXPECTED_TOTAL, (
+        "ncclSymkKernelCount %d != expected %d for %s"
+        % (_count_literal(sym_host_no_tdm), EXPECTED_TOTAL, GPU_TARGETS_WITHOUT_TDM)
+    )
+    emitted = {r["algo"] for r in records}
+    assert not (emitted & EXPECTED_TDM_ALGOS), (
+        "%s emitted mover algos %s; the gate must key on the arch, not on GPU_TARGETS "
+        "being non-empty" % (GPU_TARGETS_WITHOUT_TDM, sorted(emitted & EXPECTED_TDM_ALGOS))
+    )
+
+
+@pytest.mark.symmetric_generator
+def test_tdm_target_adds_only_the_tma_algos(sym_host_no_tdm, sym_host_tdm):
+    """Adding gfx1250 to GPU_TARGETS gains exactly the Tma* algos, nothing else moves."""
+    base = [parse_kernel_name(c) for c in _list_cnames(sym_host_no_tdm)]
     tdm = [parse_kernel_name(c) for c in _list_cnames(sym_host_tdm)]
 
     expected_dims = dict(EXPECTED_DIMS)
@@ -327,11 +361,11 @@ def test_tdm_target_adds_only_the_tma_algos(sym_host, sym_host_tdm):
 
     assert _count_literal(sym_host_tdm) == EXPECTED_TDM_TOTAL, (
         "ncclSymkKernelCount %d != expected %d for %s"
-        % (_count_literal(sym_host_tdm), EXPECTED_TDM_TOTAL, TDM_TARGET)
+        % (_count_literal(sym_host_tdm), EXPECTED_TDM_TOTAL, GPU_TARGETS_WITH_TDM)
     )
     # Every baseline kernel must survive: the arch algos are additive, never a swap.
     assert {tuple(sorted(r.items())) for r in base} <= {tuple(sorted(r.items())) for r in tdm}, (
-        "the %s target dropped kernels that the default target emits" % TDM_TARGET
+        "GPU_TARGETS=%s dropped kernels that %s emits" % (GPU_TARGETS_WITH_TDM, GPU_TARGETS_WITHOUT_TDM)
     )
 
 

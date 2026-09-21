@@ -207,15 +207,35 @@ constexpr __host__ __device__ int ncclSymkGetBytesPerChunk(int nWarps, int unrol
 constexpr int ncclSymkUnrollPacks = 4;
 constexpr int ncclSymkBytePerChunk = ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, ncclSymkUnrollPacks);
 
-// TMA kernel unroll packs
-constexpr int ncclSymkDeepUnrollPacks = 8;
-constexpr int ncclSymkDeepBytePerChunk = ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, ncclSymkDeepUnrollPacks);
+// TMA kernel unroll packs, by element size.
+//
+// [RCCL] The reduce deep loops carry acc0[UnrollPacks] of T plus acc1[UnrollPacks] of the
+// accumulator, and AccPack is BytePack<ncclSymkBytePerPack * sizeof(Acc) / sizeof(T)> with
+// Acc always float -- so a narrower T makes each accumulator pack WIDER: 32 B/pack at f32,
+// 48 B at 2-byte types, 80 B at 1-byte. A single pack count therefore cannot suit all of
+// them; at 16 packs everything below f32 spills the register file. Scaling the count the
+// other way holds the per-lane accumulator footprint roughly flat (~512 B), so each type
+// gets the widest tile it can actually hold.
+constexpr __host__ __device__ int ncclSymkDeepUnrollPacks(int eltSize) {
+  return eltSize >= 4 ? 16 : eltSize == 2 ? 8 : 4;
+}
+constexpr __host__ __device__ int ncclSymkDeepBytePerChunk(int eltSize) {
+  return ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, ncclSymkDeepUnrollPacks(eltSize));
+}
+// [RCCL] ncclSymkTmaDeepEligible() has no datatype, so it bars on the widest chunk any
+// element size produces. That is the safe direction: a narrower type's chunk is smaller,
+// so it needs fewer bytes to fill one, and the picker only ever asks for more than
+// necessary. The deep loops below still size themselves from their own sizeof(T).
+constexpr int ncclSymkDeepMaxUnrollPacks = ncclSymkDeepUnrollPacks(4);
+constexpr int ncclSymkDeepMaxBytePerChunk = ncclSymkDeepBytePerChunk(4);
 
-// Multimem bcast deep loop (single warp; shares unroll with ncclSymkDeepUnrollPacks)
-constexpr int ncclSymkMultimemDeepBytePerChunk = ncclSymkGetBytesPerChunk(1, ncclSymkDeepUnrollPacks);
+// Multimem bcast deep loop (single warp). A pure relay with no accumulators, so it takes
+// the widest tile regardless of type.
+constexpr int ncclSymkMultimemDeepBytePerChunk = ncclSymkGetBytesPerChunk(1, ncclSymkDeepMaxUnrollPacks);
 
-// Deep loop when input/output are 256 B-aligned
-constexpr int ncclSymkAlign256BDeepUnrollPacks = 16;
+// Deep loop when input/output are 256 B-aligned. AllGather stages a tile it never reduces,
+// so it carries no accumulator and can take double the packs without register pressure.
+constexpr int ncclSymkAlign256BDeepUnrollPacks = 32;
 constexpr int ncclSymkAlign256BDeepBytePerChunk =
   ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, ncclSymkAlign256BDeepUnrollPacks);
 

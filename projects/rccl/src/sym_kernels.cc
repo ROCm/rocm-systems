@@ -12,6 +12,9 @@
 #include "nccl_device/core_tmp.h"
 #include "transport.h"
 #include "tuning.h"
+#if defined(__HIP_PLATFORM_AMD__)
+#include "tdm/tdmCopy.h" // TDM_TOOLCHAIN_AVAILABLE, for ncclSymkTmaAvailable()
+#endif
 #include <cmath>
 #include <cfloat>
 
@@ -96,7 +99,7 @@ bool ncclSymkTmaDeepEligible(struct ncclComm* comm, ncclSymkKernelId k, size_t n
   switch (k) {
   case ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST:
   case ncclSymkKernelId_ReduceScatter_TmaLD:
-    bytePerChunk = ncclSymkDeepBytePerChunk;
+    bytePerChunk = ncclSymkDeepMaxBytePerChunk;
     chunkMod = comm->nRanks * nBlocks;
     break;
   case ncclSymkKernelId_AllGather_TmaST:
@@ -138,11 +141,15 @@ NCCL_PARAM(SymTmaEnable, "SYM_TMA_ENABLE", 0)
 bool ncclSymkTmaAvailable(struct ncclComm* comm) {
   if (!ncclParamSymTmaEnable()) return false;
 #if defined(__HIP_PLATFORM_AMD__)
-  // [RCCL] minCompCap is a CUDA compute capability and AMD never reports 100+, so
-  // gate on the arch that carries the Tensor Data Mover instead. These kernels are
-  // all LSA-scoped (kernelMask_LSA), so every participating rank is on this node
-  // and shares this arch.
-  return comm->archName && IsArchMatch(comm->archName, "gfx1250");
+  // [RCCL] minCompCap is ccMajor*10 + ccMinor, which gfx1250 reports as 125, so the
+  // upstream `>= 100` bar would also admit gfx11xx. Gate on the arch that actually
+  // carries the Tensor Data Mover. These kernels are all LSA-scoped (kernelMask_LSA),
+  // so every participating rank is on this node and shares this arch.
+  //
+  // TDM_TOOLCHAIN_AVAILABLE is the host-visible half of TDM_SUPPORTED (tdm/tdmCopy.h):
+  // without the SDK's descriptor header the device pass compiles the vector path, and
+  // these kernel ids would just be a slower spelling of their non-Tma twins.
+  return TDM_TOOLCHAIN_AVAILABLE && comm->archName && IsArchMatch(comm->archName, "gfx1250");
 #else
   return comm->minCompCap >= 100;
 #endif

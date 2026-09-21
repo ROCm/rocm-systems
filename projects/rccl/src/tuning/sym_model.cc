@@ -109,20 +109,20 @@ int ncclTuningCalcSatBlocksReduceScatterRailA2A(struct ncclComm* comm, bool ldmc
 static void queryModel_gin(struct ncclTuningInput_t* input, ncclSymkKernelId k, size_t nBytes, float* timeUs,
                            int* nBlocks);
 static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, size_t nBytes, float* timeUs,
-                           int* nBlocks, int* launchBlocks);
+                           int* nBlocks);
 
-// [RCCL] nBlocks is the count the cost model priced; launchBlocks is what to actually
-// run with. They differ only for TDM (see tdmBlocks()); everything else leaves
-// launchBlocks alone and picks up nBlocks below.
+// [RCCL] Occupancy cost, charged by the model rather than by the caller: TDM widens its
+// launch after pricing (see queryModel_lsa()), so by the time *nBlocks reaches the caller
+// it is no longer the count the price was based on.
+static constexpr float smPenalty = .025f; // 2.5% percent increase in time per SM
+
 static void queryModel(struct ncclTuningInput_t* input, ncclSymkKernelId k, size_t nBytes, float* timeUs,
-                       int* nBlocks, int* launchBlocks) {
-  *launchBlocks = 0;
+                       int* nBlocks) {
   if (ncclSymkGinKernelMask() >> k & 1) {
     queryModel_gin(input, k, nBytes, timeUs, nBlocks);
   } else {
-    queryModel_lsa(input, k, nBytes, timeUs, nBlocks, launchBlocks);
+    queryModel_lsa(input, k, nBytes, timeUs, nBlocks);
   }
-  if (*launchBlocks <= 0) *launchBlocks = *nBlocks;
 }
 
 static void queryModel_gin(struct ncclTuningInput_t* input, ncclSymkKernelId k, size_t nBytes, float* timeUs,
@@ -191,12 +191,13 @@ static void queryModel_gin(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
   default:
     break;
   }
+  *timeUs *= 1.0f + smPenalty * *nBlocks;
 }
 
 // [RCCL] True only when this kernel will actually stage tiles through the gfx1250
 // Tensor Data Mover. NVIDIA's TMA shares these kernel ids and the same
-// ncclSymkTmaAvailable() gate, but the block count below was measured against TDM,
-// so TMA keeps the shared model.
+// ncclSymkTmaAvailable() gate, but the widening below was measured against TDM, so
+// TMA keeps the shared model.
 static bool usesTdm(struct ncclComm* comm, ncclSymkKernelId k) {
 #if defined(__HIP_PLATFORM_AMD__)
   return (ncclSymkTmaKernelMask() >> k & 1) && ncclSymkTmaAvailable(comm);
@@ -206,33 +207,8 @@ static bool usesTdm(struct ncclComm* comm, ncclSymkKernelId k) {
 #endif
 }
 
-// [RCCL] Block count for the TDM kernels, which do not fit the shared model.
-//
-// A TDM warp moves its tile as a serialized chain -- load, drain, store, drain --
-// through a single LDS window, so a block contributes a roughly fixed rate and
-// throughput tracks the number of resident blocks rather than any bandwidth
-// ceiling. model() instead saturates at peakBw, and the search in queryModel_lsa()
-// then takes the smallest block count within 2.5% of that, landing on 14-16 and
-// leaving most of the part idle. Measured on gfx1250, 4 ranks, 1 GB: 14-16 blocks
-// reach about a third of what the fabric carries, and a quarter of the CUs is
-// worth 2-3x.
-//
-// A quarter is also the most that is safe to ask for. Every block has to be
-// co-resident for the grid-wide barrier these kernels build (lsaBarrierCount /
-// barrierCount are sized by ncclSymkMaxBlocks); asking for more than fits
-// deadlocks the launch. On gfx1250 a quarter of 256 CUs is 64, which is exactly
-// ncclSymkMaxBlocks, so the two bounds agree.
-static int tdmBlocks(struct ncclComm* comm, int nMinBlocks, int nMaxBlocks) {
-  constexpr int cuFraction = 4;
-  int target = comm->cuCount / cuFraction;
-  if (target > nMaxBlocks) target = nMaxBlocks;
-  if (target < nMinBlocks) target = nMinBlocks;
-  if (target > 1) target = roundDown(target, 2); // even counts, as below
-  return target < 1 ? 1 : target;
-}
-
 static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, size_t nBytes, float* timeUs,
-                           int* nBlocks, int* launchBlocks) {
+                           int* nBlocks) {
   constexpr double LL_BusFactor = 9; // 2X the bytes, plus some processing, plus no unrolling
 
   struct ncclComm* comm = input->comm;
@@ -371,12 +347,15 @@ static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
       break;
     }
   }
+  *timeUs *= 1.0f + smPenalty * *nBlocks;
 
-  // [RCCL] TDM launches wider than it is priced; see tdmBlocks(). nMaxBlocks is the
-  // largest count still deep-eligible at this size, so this cannot push the kernel
-  // off its own fast path, and *nBlocks is the floor so it never launches narrower
-  // than the model asked for.
-  *launchBlocks = usesTdm(comm, k) ? tdmBlocks(comm, *nBlocks, nMaxBlocks) : *nBlocks;
+  // [RCCL] TDM runs wider than it is priced. smPenalty charges a block as pure occupancy,
+  // which holds once its marginal throughput has saturated -- where the search above stops
+  // -- but a TDM warp moves its tile as a serialized load/drain/store/drain chain through
+  // one LDS window, so its throughput tracks resident blocks all the way up. nMaxBlocks
+  // already honours minCTAs/maxCTAs, NCCL_SYM_CTAS and deep eligibility, so widening to it
+  // cannot exceed a user's bound or push the kernel off its own fast path.
+  if (usesTdm(comm, k)) *nBlocks = nMaxBlocks;
 }
 
 ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, struct ncclTuningResult_t* const tuning) {
@@ -420,24 +399,15 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
 
   float kTime = 0.0f;
   int kBlocks = 0;
-  int kLaunchBlocks = 0;
-  constexpr float smPenalty = .025f; // 2.5% percent increase in time per SM
-  queryModel(inputs, (ncclSymkKernelId)tuning->symKernelId, inputs->nBytes, &kTime, &kBlocks, &kLaunchBlocks);
+  queryModel(inputs, (ncclSymkKernelId)tuning->symKernelId, inputs->nBytes, &kTime, &kBlocks);
   if (kBlocks <= 0) {
     tuning->valid = 0;
     tuning->timeUs = -1.0;
     return ncclSuccess;
   }
 
-  // [RCCL] Price at the block count the model chose, launch at the count the kernel
-  // needs. smPenalty charges 2.5% per block as pure occupancy cost, which holds once a
-  // block's marginal throughput has saturated -- true for the vector kernels, false for
-  // TDM, where blocks are the only source of throughput. Charging TDM's wider launch
-  // here would price it at 2.6x against the vector kernels' 1.35x and deselect TDM at
-  // every size. Recalibrating the shared model so the two can be compared honestly is
-  // the real fix and is tracked separately.
-  tuning->timeUs = kTime * (1.0f + smPenalty * kBlocks);
-  tuning->nChannels = kLaunchBlocks;
+  tuning->timeUs = kTime; // queryModel() has already charged smPenalty
+  tuning->nChannels = kBlocks;
   // LL kernels size their slots and iterations for ncclSymkMaxThreads. Convert
   // that thread count using the runtime wave size; other symmetric kernels keep
   // the upstream 16-warp launch.

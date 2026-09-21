@@ -337,12 +337,12 @@ static __device__ void allreduce(ncclSymkArgsHandler const& handler, int tn, int
     constexpr int BytePerPack = ncclSymkBytePerPack,
                   UnrollPacks =
 #if NCCL_SYMK_ASYNC_TILE
-                    EnableTma ? ncclSymkDeepUnrollPacks :
+                    EnableTma ? ncclSymkDeepUnrollPacks(sizeof(T)) :
 #endif
                                 ncclSymkUnrollPacks,
                   UnrollPeers = 2;
 
-    constexpr int BytePerChunk = EnableTma ? ncclSymkDeepBytePerChunk : ncclSymkBytePerChunk;
+    constexpr int BytePerChunk = EnableTma ? ncclSymkDeepBytePerChunk(sizeof(T)) : ncclSymkBytePerChunk;
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
     chunks -= imodFast32(chunks, nRanks * nBlocks, nRanks_nBlocks_rcp32);
     if (chunks != 0) {
