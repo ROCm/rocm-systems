@@ -36,6 +36,7 @@ def _args(**overrides) -> argparse.Namespace:
         "jobs": 4,
         "timeout": None,
         "base": None,
+        "verbose": False,
     }
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -355,6 +356,66 @@ def test_get_changed_files_untracked_overrides_diff_on_same_path(monkeypatch):
     # untracked entry wins for the shared path (dict.update override semantic)
     assert result["a.cpp"] is untracked_version
     assert result["b.cpp"] is other
+
+
+# --------------------------------------------------------------------------- #
+# main  (--verbose)
+# --------------------------------------------------------------------------- #
+_MIXED_DIAGNOSTICS_OUTPUT = (
+    "/repo/src/foo.cpp:15:1: warning: in diff [check-a]\n"
+    "/repo/src/foo.cpp:99:1: warning: preexisting [check-b]\n"
+)
+_PREEXISTING_ONLY_OUTPUT = "/repo/src/foo.cpp:99:1: warning: preexisting [check-b]\n"
+
+
+def _run_main_with_diagnostics(
+    monkeypatch: pytest.MonkeyPatch, *, verbose: bool, clang_tidy_output: str
+) -> int:
+    """Drive main() with one changed file and mocked clang-tidy output."""
+    changed_file = ctc.ChangedFile("src/foo.cpp", [(10, 20)])
+    monkeypatch.setattr(ctc, "get_repo_root", lambda: "/repo")
+    monkeypatch.setattr(ctc, "get_changed_files", lambda repo, base: [changed_file])
+    monkeypatch.setattr(ctc, "has_enabled_checks", lambda args: True)
+    monkeypatch.setattr(
+        ctc,
+        "run_clang_tidy",
+        lambda args, file_path, timeout: (clang_tidy_output, True),
+    )
+    monkeypatch.setattr(
+        ctc,
+        "parse_args",
+        lambda: _args(build_path="/build", verbose=verbose),
+    )
+    return ctc.main()
+
+
+@pytest.mark.parametrize("verbose", [False, True])
+def test_main_gates_preexisting_diagnostics_on_verbose(monkeypatch, capsys, verbose):
+    assert (
+        _run_main_with_diagnostics(
+            monkeypatch, verbose=verbose, clang_tidy_output=_MIXED_DIAGNOSTICS_OUTPUT
+        )
+        == 1
+    )
+    out = capsys.readouterr().out
+    assert "Detected clang-tidy rules (in this diff):" in out
+    assert "check-a" in out
+    assert ("Pre-existing issues (outside this diff):" in out) is verbose
+    assert ("check-b" in out) is verbose
+
+
+@pytest.mark.parametrize("verbose", [False, True])
+def test_main_preexisting_only_does_not_fail_run(monkeypatch, capsys, verbose):
+    # A pre-existing-only diagnostic must never flip the exit code: --verbose
+    # only changes what's printed, not what makes the run pass or fail.
+    assert (
+        _run_main_with_diagnostics(
+            monkeypatch, verbose=verbose, clang_tidy_output=_PREEXISTING_ONLY_OUTPUT
+        )
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert ("check-b" in out) is verbose
 
 
 if __name__ == "__main__":

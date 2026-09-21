@@ -165,9 +165,10 @@ NCCL_API(ncclResult_t, rcclGetCollImplInfo, struct ncclComm* comm, ncclFunc_t co
 ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream, bool query,
                                  bool graphCapturingHint, struct rcclCollDecision* decision);
-// Single source of truth for AllGather selection: DDA -> hierarchical -> CE ->
-// direct -> ring. query=true fills protocol/nMaxChannels for reporting. CE dispatch
-// lives in taskAppend(), so live returns RCCL_CE_REGISTERED but enqueues normally.
+// Single source of truth for AllGather selection: DDA -> hierarchical kernel ->
+// CE (single-node or hierarchical CE) -> direct -> ring. query=true fills
+// protocol/nMaxChannels for reporting. CE dispatch lives in taskAppend(), so live
+// returns RCCL_CE_REGISTERED but enqueues normally.
 // graphCapturingHint (query only) suppresses the graph-unsafe CE branch under capture.
 ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendcount,
                                  ncclDataType_t datatype, bool query, bool graphCapturingHint,
@@ -180,7 +181,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
 // Selection helpers shared between collectives.cc and the wrapped decision logic.
 // (rcclDdaEnabled is declared below, next to the DDA param decls.)
 bool isSymmetricKernelRequested(struct ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
-                                size_t nElts, const void* sendbuff, void* recvbuff);
+                                size_t nElts, const void* sendbuff, void* recvbuff, bool agreeAcrossRanks = false);
 NCCL_API(ncclResult_t, rcclSymKGetInfo, struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
          ncclRedOp_t op, int* algo, int* protocol, int* maxChannels);
 NCCL_API(ncclResult_t, rcclGetAlgoName, int algo, const char** algoName);
@@ -210,6 +211,10 @@ bool rcclCeAllReduceAllowed(struct ncclComm* comm);
 // the dispatch decision can be unit tested.
 bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, ncclDataType_t datatype,
                                     bool symEligible, bool ceAllReduceAllowed);
+// Decides whether ncclAlltoAll_impl takes the DDA early-return. AlltoAll has no
+// symmetric kernel, so unlike AllGather it cannot gate DDA on !symEligible.
+// `ceAlltoAllAllowed` is single-node CE (ncclCeAvailable); hier CE does not yield DDA.
+bool rcclAlltoAllShouldTakeDdaPath(const struct ncclComm* comm, size_t totalBytes, bool ceAlltoAllAllowed);
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);
@@ -233,6 +238,7 @@ RCCL_PARAM_DECLARE(DdaLLThreshold);
 RCCL_PARAM_DECLARE(DdaLL128);
 RCCL_PARAM_DECLARE(DdaLL128Threshold);
 RCCL_PARAM_DECLARE(DdaEnable);
+extern int64_t ncclParamP2pDisable();
 
 // Per-collective DDA AlltoAll thresholds (4 MiB for all supported archs).
 constexpr size_t kDdaAlltoAllGfx942ThresholdBytes = 4194304;
@@ -276,6 +282,8 @@ RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels);
 bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan);
+bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                            struct ncclTaskColl* collHead, int nCollTasks);
 ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes);
 int rcclGetMaxWarpsPerBlock(struct ncclComm* comm);
 bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes);

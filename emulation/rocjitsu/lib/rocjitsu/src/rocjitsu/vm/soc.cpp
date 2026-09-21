@@ -92,7 +92,11 @@ void SoC::set_dispatch_threads(uint32_t threads) {
 }
 
 void SoC::apply_dispatch_threads() {
-  uint32_t effective_threads = requested_dispatch_threads_;
+  size_t max_cp_cus = 1;
+  for_each_cp(
+      [&max_cp_cus](auto *cp) { max_cp_cus = std::max(max_cp_cus, cp->compute_units().size()); });
+  uint32_t effective_threads =
+      static_cast<uint32_t>(std::min<size_t>(requested_dispatch_threads_, max_cp_cus));
   if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL)
     effective_threads = 1;
 
