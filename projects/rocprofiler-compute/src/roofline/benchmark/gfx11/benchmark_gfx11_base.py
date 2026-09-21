@@ -27,7 +27,7 @@ class Bench_gfx11(benchmark_base.Bench_base):
             "HBM",
             "WMMA-F4",
             "WMMA-F6",
-            "WMMA-F6F4"
+            "WMMA-F6F4",
             "WMMA-MXF8",
             "WMMA-MXB8",
             "WMMA-F8",
