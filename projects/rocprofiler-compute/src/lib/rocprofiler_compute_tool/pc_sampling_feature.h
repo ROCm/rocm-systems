@@ -43,7 +43,6 @@ public:
     const std::filesystem::path& source_snapshot_path() const { return m_source_snapshot_path; }
 
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info);
-    void finalize();
 
     /// Writes the code object info and the source snapshot. Disabled PC
     /// sampling writes nothing.
@@ -52,6 +51,8 @@ public:
     std::string_view name() const override { return "pc_sampling"; }
 
 private:
+    void finalize();
+
     bool                         m_enabled = false;
     PcSamplingMode               m_mode    = PcSamplingMode::Disabled;
     std::filesystem::path        m_code_object_info_path;
