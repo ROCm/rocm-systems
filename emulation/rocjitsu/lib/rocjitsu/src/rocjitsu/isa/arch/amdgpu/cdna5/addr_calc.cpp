@@ -130,6 +130,16 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
                                      amdgpu::VectorMemState &d, bool decode_flat_private) {
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
+  // GFX1250 VGLOBAL transpose loads have OPF_EXEC_ALL_1 semantics: a nonzero
+  // incoming EXEC enables every wave32 lane. Do this before reading address
+  // VGPRs so the computed addresses, request mask, and eventual transpose all
+  // see the same effective execution mask. FLAT and ordinary VGLOBAL accesses
+  // continue to use architectural EXEC, and zero EXEC still skips the load.
+  if (!decode_flat_private && d.transpose != 0 && d.exec_mask != 0) {
+    constexpr uint64_t kWave32LaneMask = 0xFFFF'FFFFULL;
+    d.exec_mask = kWave32LaneMask;
+    d.lane_mask = kWave32LaneMask;
+  }
   uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   bool saddr_present = has_saddr(inst.saddr);
