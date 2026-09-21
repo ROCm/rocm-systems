@@ -1381,7 +1381,7 @@ HandleExportResult Device::GetHandleForAddressRange(void* dev_ptr, size_t size, 
   amd::Memory* amd_mem_obj = amd::MemObjMap::FindMemObj(dev_ptr);
   if (amd_mem_obj == nullptr) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-             "Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
+             "Cannot retrieve amd_mem_obj for dev_ptr: %p", dev_ptr);
     return HandleExportResult::kError;
   }
   
