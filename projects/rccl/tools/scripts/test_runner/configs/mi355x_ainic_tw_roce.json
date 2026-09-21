@@ -205,7 +205,7 @@
       "description": "GRH/GID addressing on the CAST path.",
       "tests": [
         {
-          "name": "A17_Cast_GrhSetOnRoceQp",
+          "name": "A20_Cast_GrhSetOnRoceQp",
           "description": "RoCE QPs use global (GRH/GID) addressing: is_global=1 read back from the driver via ibv_query_qp on every RoCE QP, plus a data-integrity send/recv.",
           "test_filter": "NetIbMPITest.CastGrhSetOnRoceQp"
         }
