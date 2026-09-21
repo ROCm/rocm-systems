@@ -82,10 +82,38 @@ get_default_max_library_functions()
         rocprofsys::env_vars::DEFAULT_MAX_LIBRARY_FUNCTIONS, 20000);
 }
 
-/// Run exe_path with LD_TRACE_LOADED_OBJECTS=1 so the dynamic loader prints the resolved
-/// library list and exits before main(). Returns the loader's stdout, or "" on failure.
+/// Read src_fd until EOF and return everything received. The caller must have closed
+/// every other copy of the pipe's write end first, or this blocks forever. On a read
+/// error, the bytes received so far are returned.
 std::string
-read_loader_trace(const std::string& exe_path)
+read_until_eof(int read_fd)
+{
+    constexpr size_t k_read_buffer_size = 4096;
+
+    auto out = std::string{};
+    auto buf = std::array<char, k_read_buffer_size>{};
+    while(true)
+    {
+        // bytes_read is ssize_t: >0 data, 0 EOF, <0 error (EINTR means retry)
+        const auto bytes_read = ::read(read_fd, buf.data(), buf.size());
+        if(bytes_read > 0)
+        {
+            out.append(buf.data(), static_cast<std::size_t>(bytes_read));
+        }
+        else if(bytes_read == 0 || errno != EINTR)  // EOF, or a real error
+        {
+            break;
+        }
+    }
+    return out;
+}
+
+/// Get the shared libraries exe_path actually loads, as absolute paths. Obtained by
+/// running it with LD_TRACE_LOADED_OBJECTS=1, which makes the dynamic loader print every
+/// resolved dependency and exit before main(), so the target is never really run. Empty
+/// if the binary cannot be executed.
+std::vector<std::string>
+read_dynamic_dependencies(const std::string& exe_path)
 {
     auto fds = std::array<int, 2>{ -1, -1 };  // -1 is invalid file descriptor
     if(::pipe(fds.data()) != 0)
@@ -98,13 +126,13 @@ read_loader_trace(const std::string& exe_path)
     // copied from env, so the later-listed paths will match what a real run would load.
     // Built before the fork: between fork and exec the child may only make
     // async-signal-safe calls, so it must not allocate or modify the environment.
-    auto envp = std::vector<char*>{};
+    auto tracing_envp = std::vector<char*>{};
     for(char** var = ::environ; var != nullptr && *var != nullptr; ++var)
     {
-        envp.emplace_back(*var);
+        tracing_envp.emplace_back(*var);
     }
-    envp.emplace_back(const_cast<char*>("LD_TRACE_LOADED_OBJECTS=1"));
-    envp.emplace_back(nullptr);
+    tracing_envp.emplace_back(const_cast<char*>("LD_TRACE_LOADED_OBJECTS=1"));
+    tracing_envp.emplace_back(nullptr);
 
     const auto pid = ::fork();
     if(pid < 0)  // fork failed
@@ -122,7 +150,7 @@ read_loader_trace(const std::string& exe_path)
         ::close(write_fd);
 
         auto argv = std::array<char*, 2>{ const_cast<char*>(exe_path.c_str()), nullptr };
-        ::execve(exe_path.c_str(), argv.data(), envp.data());
+        ::execve(exe_path.c_str(), argv.data(), tracing_envp.data());
         // Return from execve means it failed. Use conventional shell exit status
         // for "command could not be executed"
         constexpr int k_exec_failure_status = 127;
@@ -133,22 +161,7 @@ read_loader_trace(const std::string& exe_path)
 
     ::close(write_fd);  // the parent's copy must go, or the read below never sees EOF
 
-    constexpr size_t k_read_buffer_size = 4096;
-
-    auto out = std::string{};
-    auto buf = std::array<char, k_read_buffer_size>{};
-    while(true)  // read until EOF or error
-    {
-        const auto bytes_read = ::read(read_fd, buf.data(), buf.size());
-        if(bytes_read > 0)
-        {
-            out.append(buf.data(), static_cast<std::size_t>(bytes_read));
-        }
-        else if(bytes_read == 0 || errno != EINTR)
-        {
-            break;
-        }
-    }
+    const auto trace_output = read_until_eof(read_fd);
     ::close(read_fd);
 
     auto status = 0;
@@ -157,7 +170,17 @@ read_loader_trace(const std::string& exe_path)
         // do nothing
     }
 
-    return out;
+    // Each trace line is "<soname> => <path> (<addr>)".
+    // Parse and keep only absolute paths.
+    auto libs = std::vector<std::string>{};
+    for(const auto& trace_element : rocprofsys::delimit(trace_output, " \n\t=>"))
+    {
+        if(trace_element.starts_with('/'))
+        {
+            libs.emplace_back(trace_element);
+        }
+    }
+    return libs;
 }
 }  // namespace
 
@@ -2602,15 +2625,9 @@ main(int argc, char** argv)
             verbprintf(0, "Consider instrumenting the relevant libraries...\n");
             verbprintf(0, "\n");
 
-            // Each trace line is "<soname> => <path> (<addr>)".
-            // Print only absolute paths.
-            for(const auto& trace_element :
-                rocprofsys::delimit(read_loader_trace(cmdv0), " \n\t=>"))
+            for(const auto& lib_path : read_dynamic_dependencies(cmdv0))
             {
-                if(trace_element.starts_with('/'))
-                {
-                    verbprintf(0, "\t%s\n", trace_element.c_str());
-                }
+                verbprintf(0, "\t%s\n", lib_path.c_str());
             }
 
             verbprintf(0, "\n");
