@@ -38,8 +38,10 @@ namespace spm
 // with the HSA queue controller. Iterates active dispatch_spm contexts and calls
 // each callback's pre_kernel_call; appends produced packets to inst_pkt,
 // OR-folding each callback's serialize flag into is_serialized.
+// queue is nullable on the no-active-context path: the hook returns before it
+// dereferences the queue, so tests can exercise the no-op without an HSA runtime.
 void
-write_hook(const hsa::Queue&                                        queue,
+write_hook(const hsa::Queue*                                        queue,
            const hsa::rocprofiler_packet&                           kernel_packet,
            rocprofiler_kernel_id_t                                  kernel_id,
            rocprofiler_dispatch_id_t                                dispatch_id,

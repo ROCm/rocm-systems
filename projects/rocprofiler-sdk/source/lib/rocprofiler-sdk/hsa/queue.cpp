@@ -842,7 +842,7 @@ WriteInterceptor(const void* packets,
 
             // SPM is migrated off the per-queue callback registry: call its hook explicitly
             // (the other services still flow through signal_callback above).
-            spm::write_hook(queue,
+            spm::write_hook(&queue,
                             kernel_packet,
                             kernel_id,
                             dispatch_id,

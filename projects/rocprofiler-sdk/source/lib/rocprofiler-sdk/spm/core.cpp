@@ -344,8 +344,9 @@ set_dispatch_agents(rocprofiler_context_id_t      context_id,
     for(size_t i = 0; i < num_agents; ++i)
     {
         const auto* agent = rocprofiler::agent::get_agent(agents[i]);
-        if(!agent || agent->type != ROCPROFILER_AGENT_TYPE_GPU)
-            return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+        if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+        if(agent->type != ROCPROFILER_AGENT_TYPE_GPU)
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         selected.emplace(agents[i]);
     }
 

@@ -40,7 +40,7 @@ spm_contexts_filter()
 }  // namespace
 
 void
-write_hook(const hsa::Queue&                                        queue,
+write_hook(const hsa::Queue*                                        queue,
            const hsa::rocprofiler_packet&                           kernel_packet,
            rocprofiler_kernel_id_t                                  kernel_id,
            rocprofiler_dispatch_id_t                                dispatch_id,
@@ -50,9 +50,11 @@ write_hook(const hsa::Queue&                                        queue,
            hsa::inst_pkt_t&                                         inst_pkt,
            bool&                                                    is_serialized)
 {
-    const auto agent_id = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
-
     auto active = context::get_active_contexts(spm_contexts_filter());
+    if(active.empty()) return;
+
+    const auto agent_id = CHECK_NOTNULL(CHECK_NOTNULL(queue)->get_agent().get_rocp_agent())->id;
+
     for(const auto* ctx : active)
     {
         if(!ctx->dispatch_spm->collects_on(agent_id)) continue;
@@ -61,7 +63,7 @@ write_hook(const hsa::Queue&                                        queue,
         {
             auto [packet, bSerial] = pre_kernel_call(ctx,
                                                      cb,
-                                                     queue,
+                                                     *queue,
                                                      kernel_packet,
                                                      kernel_id,
                                                      dispatch_id,

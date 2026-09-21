@@ -1123,8 +1123,14 @@ TEST(spm_queue_hooks, stop_context_in_flight_completion_routes_via_hook_path)
         }
     }
 
-    if(!found_spm_agent) GTEST_SKIP() << "SPM unavailable";
-    FAIL() << "Could not exercise SPM in-flight completion hook path";
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+    set_client_ctx(get_client_ctx());
+    if(!found_spm_agent)
+        ROCP_ERROR << "SPM unavailable";
+    else
+        FAIL() << "Could not exercise SPM in-flight completion hook path";
 }
 
 // Verify that rocprofiler_spm_dispatch_counting_service_set_agents restricts serialization
@@ -1155,7 +1161,15 @@ TEST(spm_core, set_agents_restricts_collection)
         break;
     }
 
-    if(!target_agent) GTEST_SKIP() << "SPM unavailable";
+    if(!target_agent)
+    {
+        registration::set_init_status(1);
+        registration::finalize();
+        context::pop_client(1);
+        set_client_ctx(get_client_ctx());
+        ROCP_ERROR << "SPM unavailable";
+        return;
+    }
 
     rocprofiler_context_id_t ctx_id{};
     ROCPROFILER_CALL(rocprofiler_create_context(&ctx_id), "context creation failed");
@@ -1228,7 +1242,15 @@ TEST(spm_core, disjoint_contexts_no_conflict)
         spm_agents.push_back(rocp_agent->id);
     }
 
-    if(spm_agents.empty()) GTEST_SKIP() << "SPM unavailable";
+    if(spm_agents.empty())
+    {
+        registration::set_init_status(1);
+        registration::finalize();
+        context::pop_client(1);
+        set_client_ctx(get_client_ctx());
+        ROCP_ERROR << "SPM unavailable";
+        return;
+    }
 
     // ---- Single-agent case: two contexts claiming the same agent must conflict ----
     {
