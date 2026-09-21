@@ -412,6 +412,16 @@ DecodeResult decodeFlatStoreShortD16HiFlat(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error);
 DecodeResult decodeFlatStoreShortFlat(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeGlobalLoadLdsDwordFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeGlobalLoadLdsSbyteFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeGlobalLoadLdsSshortFlat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeGlobalLoadLdsUbyteFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeGlobalLoadLdsUshortFlat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
 DecodeResult decodeSAbsI32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeSAbsdiffI32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeSAddI32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
@@ -4681,11 +4691,11 @@ const std::array<DecoderImpl::DecodeFunc, 128> DecoderImpl::sub_decode_flat = {
     &detail::decodeFlatLoadSbyteD16HiFlat,
     &detail::decodeFlatLoadShortD16Flat,
     &detail::decodeFlatLoadShortD16HiFlat,
-    &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeGlobalLoadLdsUbyteFlat,
+    &detail::decodeGlobalLoadLdsSbyteFlat,
+    &detail::decodeGlobalLoadLdsUshortFlat,
+    &detail::decodeGlobalLoadLdsSshortFlat,
+    &detail::decodeGlobalLoadLdsDwordFlat,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,

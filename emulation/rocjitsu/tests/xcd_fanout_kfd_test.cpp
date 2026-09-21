@@ -103,6 +103,9 @@ struct KfdFanoutFixture {
     // work arrives from the doorbell poll thread, not from a pre-seeded queue.
     loaded.engine_config.max_ticks = 0;
     loaded.engine_config.await_primaries = true;
+    // This fixture installs no partition policy, so pin one worker rather than
+    // taking the config's default of one partition per XCD.
+    loaded.engine_config.num_threads = 1;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
 
     auto soc_root = std::unique_ptr<SoC>(static_cast<SoC *>(root.release()));

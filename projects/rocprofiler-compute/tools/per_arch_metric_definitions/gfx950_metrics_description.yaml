@@ -27,10 +27,6 @@ System Speed-of-Light:
     plain: 'The total number of 8-bit integer MFMA operations executed per second. Note: this does not include any 8-bit integer operations from VALU instructions. This is also presented as a percent of the peak theoretical INT8 MFMA operations achievable on the specific accelerator.'
     rst: 'The total number of 8-bit integer MFMA operations executed per second. Note: this does not include any 8-bit integer operations from VALU instructions. This is also presented as a percent of the peak theoretical INT8 MFMA operations achievable on the specific accelerator.'
     unit: GIOP/s
-  Active CUs (deprecated):
-    plain: Total number of active compute units (CUs) on the accelerator during the kernel execution. (Deprecated - See CU Utilization instead)
-    rst: Total number of active compute units (CUs) on the accelerator during the kernel execution. (Deprecated - See CU Utilization instead)
-    unit: CUs
   SALU Utilization:
     plain: Indicates what percent of the kernel's duration the SALU was busy executing instructions. Computed as the ratio of the total number of cycles spent by the scheduler issuing SALU or SMEM instructions over the total CU cycles.
     rst: Indicates what percent of the kernel's duration the :ref:`SALU <desc-salu>` was busy executing instructions. Computed as the ratio of the total number of cycles spent by the :ref:`scheduler <desc-scheduler>` issuing SALU / :ref:`SMEM <desc-smem>` instructions over the :ref:`total CU cycles <total-cu-cycles>`.

@@ -37,6 +37,8 @@ concurrency:
 env:
   GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
   ROCM_PATH: "/opt/rocm"
+  PYTHON_VENV_PATH: ".venv-rocprofiler-sdk"
+  CMAKE_VERSION_DEB: "4.4.3"
   ENABLE_ROCR_BUILD: "true"
   ENABLE_HIP_CLR_BUILD: "true"
   ENABLE_ROCPROFILER_REGISTER_BUILD: "false"
@@ -143,6 +145,7 @@ jobs:
             projects/rocr-runtime
             projects/clr
             projects/hip
+            projects/hrr
           submodules: false
           set-safe-directory: true
 
@@ -178,14 +181,18 @@ jobs:
         working-directory: projects/rocprofiler-sdk/
         run: |
           apt-get update
-          apt-get install -y cmake gcc g++ libdw-dev libsqlite3-dev rpm
-          python3 -m pip install -r requirements.txt
-          python3 -m pip install -U --user cmake==4.4.3
+          apt-get install -y cmake gcc g++ python3-venv libdw-dev libsqlite3-dev rpm
+          python3 -m venv --system-site-packages ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --upgrade -r requirements.txt
+          python3 -m pip install --upgrade cmake==${{ env.CMAKE_VERSION_DEB }}
 
       - name: Build ROCProfiler SDK Dependencies
         uses: ./.github/actions/rocprofiler-sdk-util
         with:
           rocm-path: ${{ env.ROCM_PATH }}
+          python-venv-path: ${{ env.PYTHON_VENV_PATH }}
           gpu-target: 'gfx94X'
           compiler-launcher: /usr/bin/ccache
           enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
@@ -200,6 +207,7 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk/
         run: |
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
           CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH} \
           cmake -B build \
             -DROCPROFILER_DEP_ROCMCORE=ON \
