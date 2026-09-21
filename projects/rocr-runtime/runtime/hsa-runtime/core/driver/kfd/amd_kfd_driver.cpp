@@ -209,10 +209,8 @@ hsa_status_t KfdDriver::ShutDown() {
 
   // Every stage runs even if an earlier one fails: stopping at the first error
   // would strand the references the remaining stages give back. Each stage
-  // drops its own ownership before calling the thunk, so a failed release is
-  // not retried into a double release later. Each also tests
-  // InheritedAcrossFork() for itself, so a forked child runs the same three
-  // stages and this function needs no special case.
+  // tests InheritedAcrossFork() for itself, so a forked child runs the same
+  // three stages and this function needs no special case.
   record("disable runtime", DisableRuntime());
   record("release topology snapshot", ReleaseTopologySnapshot());
   record("close KFD", Close());
@@ -235,30 +233,12 @@ hsa_status_t KfdDriver::QueryKernelModeDriver(core::DriverQuery query) {
   return HSA_STATUS_SUCCESS;
 }
 
-// KERNEL_ALREADY_OPENED means another in-process consumer opened the thunk
-// first - on WSL, amdsmi's opt-in WSL backend already reads the KMT topology
-// alongside this runtime, and rocprofiler-sdk joins it with #7016. It is
-// success because hsaKmtOpenKFD()'s already-opened branch in
-// libhsakmt/src/dxg/openclose.cpp increments dxg_open_count just as the first
-// open does: this driver holds a real reference and owes a real close. That is
-// why recording kfd_opened_ here is correct and not a double-count.
-//
-// libhsakmt/src/openclose.c increments hsakmt_kfd_open_count on its
-// already-opened branch too, so the same argument would hold for native KFD,
-// but this path still fails there, stranding that reference. Known,
-// pre-existing on develop, and out of scope for this change.
 hsa_status_t KfdDriver::Open() {
-  // A second open would take a second reference that nothing gives back, so
-  // once the open is owned this reports success without calling the thunk.
-  if (kfd_opened_) return HSA_STATUS_SUCCESS;
-
   const HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtOpenKFD());
   if (ret == HSAKMT_STATUS_SUCCESS ||
       (ret == HSAKMT_STATUS_KERNEL_ALREADY_OPENED &&
-       core::Runtime::runtime_singleton_->thunkLoader()->IsDXG())) {
-    kfd_opened_ = true;
+       core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()))
     return HSA_STATUS_SUCCESS;
-  }
 
   return HSA_STATUS_ERROR;
 }
@@ -268,33 +248,15 @@ hsa_status_t KfdDriver::Open() {
 // not also lose the runtime enable and the topology snapshot. ShutDown() is
 // the method that gives back everything.
 hsa_status_t KfdDriver::Close() {
-  // In a forked child the inherited open reference is the parent's, so drop
-  // the claim without closing.
-  //
-  // The damage this avoids is child-local, not damage to the parent. fork()
-  // gives the child its own descriptor table, so a close here would drop only
-  // the child's reference and the parent's fd would survive it; and
-  // hsaKmtOpenKFD()'s clear_after_fork() replaces *dxg_runtime wholesale, so
-  // the parent's heap state is not even reachable from the child. What an
-  // inherited claim destroys is the session the child just re-created: the
-  // count starts from zero in the child, so this close is the 1->0 transition
-  // that tears DXCore down and turns the WDDMDevice objects a consumer built
-  // after the fork into pointers into a dead session. amdsmi's WSL backend
-  // (projects/amdsmi/src/amd_smi/amd_smi_wsl_device.cc) is that consumer
-  // today: it dlopens librocdxg.so.1, calls hsaKmtOpenKFD(), accepts
-  // HSAKMT_STATUS_KERNEL_ALREADY_OPENED, and holds the snapshot for the
-  // process lifetime.
-  if (InheritedAcrossFork()) {
-    kfd_opened_ = false;
-    return HSA_STATUS_SUCCESS;
-  }
+  // In a forked child the open reference belongs to the parent, so give up the
+  // claim without calling the thunk. Neither hsaKmtCloseKFD() tests for a fork
+  // of its own: the native one in libhsakmt/src/openclose.c decrements the
+  // count it inherited and runs the last-close teardown -
+  // hsakmt_fmm_clear_all_aperture() and the inherited fd - over process state
+  // this one never built, and the DXG one in libhsakmt/src/dxg/openclose.cpp
+  // shuts DXCore down under whichever session dxg_open_count currently names.
+  if (InheritedAcrossFork()) return HSA_STATUS_SUCCESS;
 
-  // Owning no open reference is success: there is nothing to give back.
-  if (!kfd_opened_) return HSA_STATUS_SUCCESS;
-
-  // Dropped before the call rather than after, so a failed close is not
-  // retried into a double close.
-  kfd_opened_ = false;
   return HSAKMT_CALL(hsaKmtCloseKFD()) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
                                                                 : HSA_STATUS_ERROR;
 }

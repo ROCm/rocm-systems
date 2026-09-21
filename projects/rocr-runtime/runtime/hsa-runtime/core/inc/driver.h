@@ -128,14 +128,9 @@ public:
   /// this owes no Close(), and must not add one: a Close() after a successful
   /// ShutDown() is a second release of the same reference.
   ///
-  /// Must be idempotent, and must tolerate a driver whose Init() failed part
-  /// way through - so every stage has to treat owning nothing as success rather
-  /// than as an error. The rollback for a failed load calls this twice on the
-  /// same driver: InitializeDriver()'s guard calls it when Init() fails and
-  /// returns false, AMD::Load() then returns false, and its guard runs
-  /// Runtime::DestroyTopology() -> AMD::Unload() -> ShutDown() on that same
-  /// object. A kernel-side refcount will not absorb that on its own; see
-  /// AMD::KfdDriver::kfd_opened_ for why.
+  /// Must tolerate a driver whose Init() failed part way through, because
+  /// AMD::InitializeDriver() calls this on exactly that driver - so every stage
+  /// has to treat owning nothing as success rather than as an error.
   virtual hsa_status_t ShutDown() = 0;
 
   /// @brief Get driver version information.
