@@ -43,7 +43,6 @@ install(TARGETS rocprofiler-systems-exe DESTINATION ${CMAKE_INSTALL_BINDIR} OPTI
 
 foreach(
     _dep
-    rocprofiler-systems-sample
     rocprofiler-systems-run
     rocprofiler-systems-instrument
     rocprofiler-systems-causal

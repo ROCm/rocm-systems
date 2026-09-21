@@ -44,9 +44,10 @@ struct argv_builder
 };
 
 std::vector<std::string>
-forwarded_args(int argc, char** argv, bool strip, std::string_view argv0 = {})
+forwarded_args(int argc, char** argv, bool strip, std::string_view argv0 = {},
+               std::string_view extra_flag = {})
 {
-    auto                     fwd = make_forwarded_argv(argc, argv, strip, argv0);
+    auto                     fwd = make_forwarded_argv(argc, argv, strip, argv0, extra_flag);
     std::vector<std::string> out;
     out.reserve(static_cast<std::size_t>(fwd.argc()));
     for(int i = 0; i < fwd.argc(); ++i)
@@ -86,7 +87,7 @@ TEST(cli_dispatcher_test, implicit_default_with_separator)
     EXPECT_EQ(result.kind, dispatch_kind::in_process);
     EXPECT_EQ(result.mode, tool_mode::run);
     EXPECT_FALSE(result.strip_subcommand);
-    EXPECT_TRUE(result.subcommand_name.empty());
+    EXPECT_EQ(result.subcommand_name, "profile");
     EXPECT_EQ(result.binary_name, "rocprof-sys-run");
 }
 
@@ -99,19 +100,20 @@ TEST(cli_dispatcher_test, implicit_default_with_flags)
     EXPECT_FALSE(result.strip_subcommand);
 }
 
-TEST(cli_dispatcher_test, sample_is_in_process_sample)
+TEST(cli_dispatcher_test, profile_is_in_process_run)
 {
-    auto args   = argv_builder{ "rocsys", "sample", "--", "./app" };
+    auto args   = argv_builder{ "rocsys", "profile", "--", "./app" };
     auto result = parse_dispatch(args.argc(), args.argv());
     EXPECT_EQ(result.kind, dispatch_kind::in_process);
-    EXPECT_EQ(result.mode, tool_mode::sample);
+    EXPECT_EQ(result.mode, tool_mode::run);
     EXPECT_TRUE(result.strip_subcommand);
-    EXPECT_EQ(result.binary_name, "rocprof-sys-sample");
+    EXPECT_EQ(result.subcommand_name, "profile");
+    EXPECT_EQ(result.binary_name, "rocprof-sys-run");
 }
 
-TEST(cli_dispatcher_test, profile_and_trace_are_unknown_verbs)
+TEST(cli_dispatcher_test, sample_and_trace_are_unknown_verbs)
 {
-    for(const char* verb : { "profile", "trace" })
+    for(const char* verb : { "sample", "trace" })
     {
         auto args   = argv_builder{ "rocsys", verb, "--", "./app" };
         auto result = parse_dispatch(args.argc(), args.argv());
@@ -130,6 +132,17 @@ TEST(cli_dispatcher_test, instrument_execs_sibling_binary)
     EXPECT_EQ(result.kind, dispatch_kind::exec_tool);
     EXPECT_TRUE(result.strip_subcommand);
     EXPECT_EQ(result.binary_name, "rocprof-sys-instrument");
+    EXPECT_TRUE(result.extra_flag.empty());
+}
+
+TEST(cli_dispatcher_test, rewrite_execs_instrument_with_output_flag)
+{
+    auto args   = argv_builder{ "rocsys", "rewrite", "--", "./app" };
+    auto result = parse_dispatch(args.argc(), args.argv());
+    EXPECT_EQ(result.kind, dispatch_kind::exec_tool);
+    EXPECT_TRUE(result.strip_subcommand);
+    EXPECT_EQ(result.binary_name, "rocprof-sys-instrument");
+    EXPECT_EQ(result.extra_flag, "-o");
 }
 
 TEST(cli_dispatcher_test, causal_execs_sibling_binary)
@@ -168,19 +181,18 @@ TEST(cli_dispatcher_test, attach_execs_sibling_binary)
 TEST(cli_dispatcher_test, all_named_subcommands_are_registered)
 {
     int named = 0;
+    int defaults = 0;
     for(const auto& spec : subcommands)
     {
-        if(spec.name.empty())
-        {
-            EXPECT_TRUE(spec.is_default);
-            continue;
-        }
+        EXPECT_FALSE(spec.name.empty()) << spec.description;
         ++named;
         EXPECT_NE(find_subcommand(spec.name), nullptr) << spec.name;
-        EXPECT_FALSE(spec.is_default) << spec.name;
+        if(spec.is_default) ++defaults;
     }
-    EXPECT_EQ(named, 6);
+    EXPECT_EQ(named, 7);
+    EXPECT_EQ(defaults, 1);
     EXPECT_TRUE(rocprofsys::cli::default_subcommand().is_default);
+    EXPECT_EQ(rocprofsys::cli::default_subcommand().name, "profile");
     EXPECT_EQ(rocprofsys::cli::default_subcommand().mode, tool_mode::run);
 }
 
@@ -193,9 +205,9 @@ TEST(cli_dispatcher_test, unknown_subcommand_is_error)
     EXPECT_NE(result.error_message.find("hint: run 'rocsys --help'"), std::string::npos);
 }
 
-TEST(cli_dispatcher_test, sample_without_app_is_error)
+TEST(cli_dispatcher_test, profile_without_app_is_error)
 {
-    auto args   = argv_builder{ "rocsys", "sample" };
+    auto args   = argv_builder{ "rocsys", "profile" };
     auto result = parse_dispatch(args.argc(), args.argv());
     EXPECT_EQ(result.kind, dispatch_kind::error);
     EXPECT_NE(result.error_message.find("error: missing application argument"),
@@ -203,9 +215,9 @@ TEST(cli_dispatcher_test, sample_without_app_is_error)
     EXPECT_NE(result.error_message.find("hint:"), std::string::npos);
 }
 
-TEST(cli_dispatcher_test, sample_help_is_forwarded)
+TEST(cli_dispatcher_test, profile_help_is_forwarded)
 {
-    auto args   = argv_builder{ "rocsys", "sample", "--help" };
+    auto args   = argv_builder{ "rocsys", "profile", "--help" };
     auto result = parse_dispatch(args.argc(), args.argv());
     EXPECT_EQ(result.kind, dispatch_kind::in_process);
     EXPECT_TRUE(result.strip_subcommand);
@@ -213,13 +225,48 @@ TEST(cli_dispatcher_test, sample_help_is_forwarded)
 
 TEST(cli_dispatcher_test, make_forwarded_argv_strips_subcommand)
 {
-    auto args = argv_builder{ "rocsys", "sample", "--preset=quick", "--", "./app" };
+    auto args = argv_builder{ "rocsys", "profile", "--preset=quick", "--", "./app" };
     auto fwd  = forwarded_args(args.argc(), args.argv(), true);
     ASSERT_EQ(fwd.size(), 4u);
     EXPECT_EQ(fwd[0], "rocsys");
     EXPECT_EQ(fwd[1], "--preset=quick");
     EXPECT_EQ(fwd[2], "--");
     EXPECT_EQ(fwd[3], "./app");
+}
+
+TEST(cli_dispatcher_test, make_forwarded_argv_prepends_rewrite_output_flag)
+{
+    auto args = argv_builder{ "rocsys", "rewrite", "--", "./app" };
+    auto fwd  = forwarded_args(args.argc(), args.argv(), true, "rocprof-sys-instrument",
+                              "-o");
+    ASSERT_EQ(fwd.size(), 4u);
+    EXPECT_EQ(fwd[0], "rocprof-sys-instrument");
+    EXPECT_EQ(fwd[1], "-o");
+    EXPECT_EQ(fwd[2], "--");
+    EXPECT_EQ(fwd[3], "./app");
+}
+
+TEST(cli_dispatcher_test, make_forwarded_argv_skips_rewrite_flag_if_output_present)
+{
+    auto args = argv_builder{ "rocsys", "rewrite", "-o", "app.inst", "--", "./app" };
+    auto fwd  = forwarded_args(args.argc(), args.argv(), true, "rocprof-sys-instrument",
+                              "-o");
+    ASSERT_EQ(fwd.size(), 5u);
+    EXPECT_EQ(fwd[0], "rocprof-sys-instrument");
+    EXPECT_EQ(fwd[1], "-o");
+    EXPECT_EQ(fwd[2], "app.inst");
+    EXPECT_EQ(fwd[3], "--");
+    EXPECT_EQ(fwd[4], "./app");
+}
+
+TEST(cli_dispatcher_test, make_forwarded_argv_skips_rewrite_flag_if_long_output_present)
+{
+    auto args = argv_builder{ "rocsys", "rewrite", "--output=app.inst", "--", "./app" };
+    auto fwd  = forwarded_args(args.argc(), args.argv(), true, "rocprof-sys-instrument",
+                              "-o");
+    ASSERT_EQ(fwd.size(), 4u);
+    EXPECT_EQ(fwd[0], "rocprof-sys-instrument");
+    EXPECT_EQ(fwd[1], "--output=app.inst");
 }
 
 TEST(cli_dispatcher_test, make_forwarded_argv_keeps_implicit_args)
@@ -267,13 +314,13 @@ TEST(cli_dispatcher_test, print_help_lists_subcommands_and_example)
     const auto text = out.str();
     EXPECT_NE(text.find("Usage:"), std::string::npos);
     EXPECT_NE(text.find("rocsys -- ./app"), std::string::npos);
-    EXPECT_NE(text.find("rocsys sample -- ./app"), std::string::npos);
-    EXPECT_EQ(text.find("  profile"), std::string::npos);
+    EXPECT_NE(text.find("rocsys profile -- ./app"), std::string::npos);
+    EXPECT_NE(text.find("rocsys rewrite -- ./app"), std::string::npos);
+    EXPECT_EQ(text.find("  sample"), std::string::npos);
     EXPECT_EQ(text.find("  trace"), std::string::npos);
     for(const auto& spec : subcommands)
     {
-        const auto label = spec.name.empty() ? std::string_view{ "(none)" } : spec.name;
-        EXPECT_NE(text.find(std::string{ label }), std::string::npos) << label;
+        EXPECT_NE(text.find(std::string{ spec.name }), std::string::npos) << spec.name;
     }
 }
 
@@ -286,7 +333,7 @@ TEST(cli_dispatcher_test, print_version_includes_program_and_version)
 
 TEST(cli_dispatcher_test, forwarded_argv_is_null_terminated)
 {
-    auto args = argv_builder{ "rocsys", "sample", "--", "./app" };
+    auto args = argv_builder{ "rocsys", "profile", "--", "./app" };
     auto fwd  = make_forwarded_argv(args.argc(), args.argv(), true);
     ASSERT_GE(fwd.argc(), 1);
     EXPECT_EQ(fwd.argv()[fwd.argc()], nullptr);

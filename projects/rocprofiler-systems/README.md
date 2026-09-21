@@ -20,12 +20,13 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
 
 ```bash
 rocsys -- ./app
-rocsys sample -- ./app
+rocsys profile -- ./app
 ```
 
-`rocsys` is the unified command-line entry point. The default (`rocsys -- ./app`)
-collects a full trace profile. Use `sample` for call-stack sampling. Existing
-`rocprof-sys-*` binaries are unchanged.
+`rocsys` is the unified command-line entry point. The default (`rocsys -- ./app`
+or `rocsys profile -- ./app`) collects a full trace profile. Use
+`rocsys instrument` for runtime instrumentation and `rocsys rewrite` for
+binary rewrite. Existing `rocprof-sys-*` binaries are unchanged.
 
 ### Data collection modes
 

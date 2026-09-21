@@ -59,7 +59,7 @@ main(int argc, char** argv)
             }
             const auto path = join_sibling_path(dir, parsed.binary_name);
             auto       fwd  = make_forwarded_argv(argc, argv, parsed.strip_subcommand,
-                                                  parsed.binary_name);
+                                                  parsed.binary_name, parsed.extra_flag);
             execvp(path.c_str(), fwd.argv());
             std::cerr << prog << ": failed to execute '" << path
                       << "': " << std::strerror(errno) << '\n';

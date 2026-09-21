@@ -32,11 +32,11 @@ def _sibling_exists(config: RocprofsysConfig, name: str) -> bool:
 
 FORWARD_HELP_CASES = [
     pytest.param(
-        "sample",
-        "rocprof-sys-sample",
+        "profile",
+        "rocprof-sys-run",
         [r"QUICK START", r"Usage:"],
         False,
-        id="sample",
+        id="profile",
     ),
     pytest.param(
         "instrument",
@@ -44,6 +44,13 @@ FORWARD_HELP_CASES = [
         [r"rocprof-sys-instrument"],
         False,
         id="instrument",
+    ),
+    pytest.param(
+        "rewrite",
+        "rocprof-sys-instrument",
+        [r"rocprof-sys-instrument"],
+        False,
+        id="rewrite",
     ),
     pytest.param(
         "causal",
@@ -94,15 +101,15 @@ class TestRocsys(RocprofsysTest):
             result,
             pass_regex=[
                 r"Usage:",
-                r"\(none\)",
-                r"sample",
+                r"profile",
                 r"instrument",
+                r"rewrite",
                 r"causal",
                 r"avail",
                 r"python",
                 r"attach",
                 r"rocsys -- \./app",
-                r"rocsys sample -- \./app",
+                r"rocsys profile -- \./app",
             ],
         )
 
@@ -135,11 +142,11 @@ class TestRocsys(RocprofsysTest):
         )
 
     @pytest.mark.timeout(15)
-    def test_sample_missing_app(self) -> None:
+    def test_profile_missing_app(self) -> None:
         result = self.run_test(
             "baseline",
             target=self.target,
-            run_args=["sample"],
+            run_args=["profile"],
             fail_on_pass=True,
             fail_on_not_found=True,
         )
@@ -150,8 +157,8 @@ class TestRocsys(RocprofsysTest):
         )
 
     @pytest.mark.timeout(15)
-    @pytest.mark.parametrize("verb", ["profile", "trace"])
-    def test_legacy_profile_and_trace_unknown(self, verb: str) -> None:
+    @pytest.mark.parametrize("verb", ["sample", "trace"])
+    def test_sample_and_trace_unknown(self, verb: str) -> None:
         result = self.run_test(
             "baseline",
             target=self.target,
@@ -191,8 +198,8 @@ class TestRocsys(RocprofsysTest):
         self.assert_regex(result, pass_regex=pass_regex)
 
     @pytest.mark.timeout(120)
-    @pytest.mark.sampling
-    def test_sample_ls_produces_report(self, rocprof_config: RocprofsysConfig) -> None:
+    @pytest.mark.sys_run
+    def test_profile_ls_produces_report(self, rocprof_config: RocprofsysConfig) -> None:
         dl_lib = rocprof_config.rocprofsys_lib_dir / "librocprof-sys-dl.so"
         if not dl_lib.is_file():
             pytest.skip("librocprof-sys-dl.so not built")
@@ -207,14 +214,14 @@ class TestRocsys(RocprofsysTest):
                 "ROCPROFSYS_TIME_OUTPUT": "OFF",
                 "ROCPROFSYS_FILE_OUTPUT": "ON",
             },
-            run_args=["sample", "--", *ls_cmd],
+            run_args=["profile", "--", *ls_cmd],
             fail_on_not_found=True,
         )
         assert result.success, result.test_output
         report_files = result.rocpd_files + result.timemory_files
         metadata = list(Path(result.output_dir).glob("**/metadata*.json"))
         assert report_files or metadata, (
-            f"expected a sampling report under {result.output_dir}, "
+            f"expected a trace report under {result.output_dir}, "
             f"contents={list(result.output_dir.rglob('*'))}"
         )
 

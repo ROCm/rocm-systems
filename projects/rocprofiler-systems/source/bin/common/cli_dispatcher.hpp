@@ -33,23 +33,24 @@ struct subcommand_spec
     bool                    requires_app = true;
     common_utils::tool_mode mode         = common_utils::tool_mode::sample;
     bool                    is_default   = false;
+    // Inserted after argv0 when forwarding (e.g. "-o" for rewrite). Empty = none.
+    std::string_view extra_flag = {};
 };
 
-// Empty name = implicit default (not a typed verb). Exactly one row is
-// is_default; parse_dispatch uses that row when argv has flags or "--"
-// but no subcommand token.
+// Exactly one row is is_default. parse_dispatch uses that row for the
+// explicit verb and when argv has flags or "--" but no subcommand token.
 inline constexpr std::array<subcommand_spec, 7> subcommands{ {
-    { {},
+    { "profile",
       "Full trace profile (default)",
       "rocprof-sys-run",
       true,
       true,
       common_utils::tool_mode::run,
       true },
-    { "sample", "Call-stack sampling profile", "rocprof-sys-sample", true, true,
-      common_utils::tool_mode::sample },
-    { "instrument", "Binary instrumentation (Dyninst)", "rocprof-sys-instrument", false,
+    { "instrument", "Runtime instrumentation (Dyninst)", "rocprof-sys-instrument", false,
       true },
+    { "rewrite", "Binary rewrite (Dyninst)", "rocprof-sys-instrument", false, true,
+      common_utils::tool_mode::sample, false, "-o" },
     { "causal", "Causal profiling", "rocprof-sys-causal", false, true },
     { "avail", "Query available counters and settings", "rocprof-sys-avail", false,
       false },
@@ -80,7 +81,8 @@ default_subcommand() noexcept
 
 static_assert(default_subcommand_count() == 1,
               "exactly one subcommand_spec must be is_default");
-static_assert(default_subcommand().name.empty(), "default subcommand has no verb token");
+static_assert(default_subcommand().name == "profile",
+              "default subcommand verb is profile");
 
 struct dispatch_result
 {
@@ -89,12 +91,14 @@ struct dispatch_result
     std::string_view        binary_name      = {};
     std::string_view        subcommand_name  = {};
     bool                    strip_subcommand = false;
+    std::string_view        extra_flag       = {};
     std::string             error_message    = {};
 };
 
 struct forwarded_argv
 {
     std::string        argv0_storage;
+    std::string        extra_storage;
     std::vector<char*> ptrs;
 
     [[nodiscard]] int argc() const noexcept
@@ -136,10 +140,13 @@ parse_dispatch(int argc, char** argv);
  * Build a null-terminated argv for the selected tool. When
  * @p strip_subcommand is true, @p argv[1] (the subcommand token) is omitted.
  * When @p argv0_override is non-empty it replaces @p argv[0].
+ * When @p extra_flag is non-empty it is inserted after argv0 unless the
+ * payload already contains that flag (or ``-o`` / ``--output`` for ``-o``).
  */
 [[nodiscard]] forwarded_argv
 make_forwarded_argv(int argc, char** argv, bool strip_subcommand,
-                    std::string_view argv0_override = {});
+                    std::string_view argv0_override = {},
+                    std::string_view extra_flag     = {});
 
 void
 print_help(std::ostream& out, std::string_view program);
