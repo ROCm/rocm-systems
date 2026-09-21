@@ -22,8 +22,8 @@ from utils.mem_chart_common import (
     COLORS,
     build_arch_notes,
     build_bw_edges,
+    build_cu_panel,
     build_ip_block,
-    build_kernel_panel,
     build_legend,
     colored,
     format_edge,
@@ -211,7 +211,7 @@ def _build_kernel_and_l0(
     color_read = COLORS["read"]
     color_write = COLORS["write"]
 
-    kernel_panel = build_kernel_panel(height=_TOTAL_H, padding_lines=11)
+    kernel_panel = build_cu_panel(height=_TOTAL_H, padding_lines=11)
 
     kernel_arrow_left = kernel_arrows["left"]
     kernel_arrow_right = kernel_arrows["right"]
