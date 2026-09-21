@@ -95,7 +95,7 @@ The tool configures `ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY` through
 | --- | --- |
 | Subscription includes `CONFIG`, or all operations | Starting that context activates the replay gate. A `PASS`-only subscription cannot initiate replay. |
 | Another context already configured replay | Configuration returns `ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED`, even if the first context is stopped. Ownership is process-wide. |
-| Replay service configured | Enables allocation tracking, including while its context is stopped, so later replay can capture live allocations. |
+| Replay service configured | Enables allocation tracking, including while its context is stopped. |
 | No active replay context | Dispatches follow the ordinary path without replay locks or snapshots. |
 
 #### Callback contract
