@@ -17,7 +17,9 @@
 
 #include "signature-drift.h"
 
+#include "channel.h"            // rcclEffectiveP2pBatchEnable
 #include "enqueue_fakes.h"
+#include "nccl_fakes.h"         // g_loadParam, for the NCCL_PARAM body this file stands in for
 #include "sym_kernels_fakes.h"  // g_symkAvailable and the sym_kernels.cc seams below's canonical home
 #include "tuning_fakes.h"       // g_tuningCompute's canonical home
 
@@ -28,6 +30,7 @@ ASSERT_HOOK_MATCHES_PROD(g_addWorkBatchToPlan, ncclAddWorkBatchToPlan);
 ASSERT_HOOK_MATCHES_PROD(g_addProxyOpIfNeeded, ncclAddProxyOpIfNeeded);
 ASSERT_HOOK_MATCHES_PROD(g_getCollNetSupport, ncclGetCollNetSupport);
 ASSERT_HOOK_MATCHES_PROD(g_getRegBuff, ncclGetRegBuff);
+ASSERT_HOOK_MATCHES_PROD(g_rcclEffectiveP2pBatchEnable, rcclEffectiveP2pBatchEnable);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // Generous default: a deny-everything default would make even a single small task look over budget.
@@ -68,6 +71,17 @@ static ncclResult_t DefaultAddProxyOpIfNeeded(struct ncclComm*, struct ncclKerne
 std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, struct ncclProxyOp*)> g_addProxyOpIfNeeded =
     DefaultAddProxyOpIfNeeded;
 
+// enqueue.cc:1284. Default 0 is what the real one answers with RCCL_P2P_BATCH_ENABLE unset.
+static int DefaultEffectiveP2pBatchEnable(struct ncclComm*) { return 0; }
+std::function<int(struct ncclComm*)> g_rcclEffectiveP2pBatchEnable = DefaultEffectiveP2pBatchEnable;
+
+// enqueue.cc:437-441 splits the default on ROCm version; mirrored rather than pinned to one arm.
+#if ROCM_VERSION >= 71200
+int64_t ncclParamGraphRegister() { return g_loadParam("GRAPH_REGISTER", 1); }
+#else
+int64_t ncclParamGraphRegister() { return g_loadParam("GRAPH_REGISTER", 0); }
+#endif
+
 // Generous default: no real collnet/registration to report, matching a plain host-only comm.
 static ncclResult_t DefaultGetCollNetSupport(struct ncclComm*, struct ncclTaskColl*, int* out) {
   if (out) *out = 0;
@@ -90,6 +104,11 @@ void ResetEnqueueFakes() {
   g_addProxyOpIfNeeded = DefaultAddProxyOpIfNeeded;
   g_getCollNetSupport = DefaultGetCollNetSupport;
   g_getRegBuff = DefaultGetRegBuff;
+  g_rcclEffectiveP2pBatchEnable = DefaultEffectiveP2pBatchEnable;
+}
+
+int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
+  return g_rcclEffectiveP2pBatchEnable(comm);
 }
 
 // src/enqueue/enqueue.cc

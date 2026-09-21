@@ -147,6 +147,16 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   without pulling in that file's dependency floor. See
   `test_categories_micro_scheduler.yaml`.
 
+- **`rccl-UnitTestsMicroTaskPrep`** — `src/enqueue/task_prep/task_prep.cc` (via
+  `TASK_PREP_CC_PATH`); suite `TaskPrepMicrotest.*`. Its own binary, not sharing
+  `rccl-UnitTestsMicro`: that target links `collective_stubs.cc`, whose fail-loud
+  `ncclTaskPrepare` would be a duplicate symbol against the real one, and
+  `group-test.cc` drives the path that stub stands in for. The remaining three
+  files in the directory are compiled as separate TUs so `task_prep.cc`'s sibling
+  externs resolve to real code; each moves into its own test TU as that unit comes
+  under test. `ENABLE_WARP_SPEED` is deliberately absent: all four files are free
+  of it. See `test_categories_micro_taskprep.yaml`.
+
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
 
@@ -271,7 +281,10 @@ symbol.
 | `src/graph/*.cc` (topo, paths, search, connect, rome consensus) | `fakes/topo_stubs.cc` |
 | `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
 | `src/group.cc` | `fakes/group_fakes.cc` |
-| `src/init.cc` comm lifecycle | `fakes/comm_fakes.cc` |
+| `src/config/algorithm_*.cc` | compiled real (no fakes file) |
+| `src/config/collconfig.cc` (targets that do not compile the real file) | `fakes/collconfig_fakes.cc` |
+| `src/enqueue/enqueue.cc`'s own symbols (targets that do not compile the real file) | `fakes/enqueue_fakes.cc` |
+| `src/init.cc` comm lifecycle + CTA/channel params | `fakes/comm_fakes.cc` |
 | `src/init_nvtx.cc` | `fakes/init_nvtx_fakes.cc` |
 | `src/mem_manager.cc` | `fakes/mem_manager_fakes.cc` |
 | `src/misc/amdsmi_wrap.cc` | `fakes/amdsmi_fakes.cc` |
@@ -290,8 +303,8 @@ symbol.
 | `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
 | `src/register/*.cc` | `fakes/register_stubs.cc` |
+| `src/rma/*.cc` | `fakes/rma_fakes.cc` |
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
-| `src/scheduler/*.cc`'s dependencies (`rccl-UnitTestsMicroWarpSpeed`, which compiles the real files and tests them directly) | `fakes/enqueue_fakes.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`) | `fakes/libc_interposers.cc` |
@@ -325,12 +338,16 @@ Five things do NOT follow the TU-per-file rule, deliberately:
   `ncclOsSetAffinity` entries. It cannot link `os_fakes.cc` alongside them, so
   the `rccl-UnitTestsMicro` target keeps that pair target-shaped; every other
   target gets them from `os_fakes.cc`.
-- `transport_stubs.cc` and `collective_stubs.cc` both provide eight fail-loud
+- `transport_stubs.cc` and `collective_stubs.cc` both provide several fail-loud
   collective-transport setup symbols. `rccl-UnitTestsMicro` needs both floors,
   so `RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR` omits the transport copy in
   that target to avoid fakes-versus-fakes duplicate definitions.
+  `ncclTransportP2pSetup` is no longer one of them: it is a single seam in
+  `transport_stubs.cc`, the file that owns the subsystem. `ncclCeInit` moved the
+  same way, to `ce_fakes.cc`.
 - `rcclParamIntraGraphGen` stays in `fakes/init_fakes.cc` because its owner
-  (`graph/rccl_graph_gen.cc:34`) has no fakes file at all.
+  (`graph/rccl_graph_gen.cc:34`) has no fakes file at all. `rcclEffectiveP2pBatchEnable`
+  did have one and moved to `fakes/enqueue_fakes.cc`.
 - `IsArchMatch` and the `allocTracker` data symbol stay in `p2p-test.cc`
   itself rather than a fakes file, because neither has an owning production
   TU to name a fakes file after: `IsArchMatch` is declared in the
@@ -635,8 +652,8 @@ make -j $(nproc) rccl-UnitTestsMicro
 above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
-`rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`
-and `rccl-UnitTestsMicroSymKernels` — **without configuring/building all of
+`rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
+`rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
 
@@ -673,6 +690,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
+./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ tests
 ./build/rccl-HostUnitTests
 ```
 

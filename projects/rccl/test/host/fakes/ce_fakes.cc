@@ -13,6 +13,7 @@
 
 #include "ce_coll.h"
 #include "comm.h"
+#include "fail_loud.h"
 #include "nccl.h"
 #include "signature-drift.h"
 #include "sym_kernels.h"  // ncclSymRegType_t
@@ -22,7 +23,15 @@ ASSERT_HOOK_MATCHES_PROD(g_ceScratchAvailable, ncclCeScratchAvailable);
 ASSERT_HOOK_MATCHES_PROD(g_ceLocalReduceBlocks, ncclCeLocalReduceBlocks);
 ASSERT_HOOK_MATCHES_PROD(g_ceInitBatchOpsParams, ncclCeInitBatchOpsParams);
 ASSERT_HOOK_MATCHES_PROD(g_ceLaunchBatchOps, ncclCeLaunchBatchOps);
+ASSERT_HOOK_MATCHES_PROD(g_ncclCeInit, ncclCeInit);
 #undef ASSERT_HOOK_MATCHES_PROD
+
+static ncclResult_t DefaultCeInit(struct ncclComm*) {
+  FailLoudUnfaked("ce_fakes", "ncclCeInit");
+}
+std::function<ncclResult_t(struct ncclComm*)> g_ncclCeInit = DefaultCeInit;
+
+ncclResult_t ncclCeInit(struct ncclComm* comm) { return g_ncclCeInit(comm); }
 
 bool g_ceImplemented = false;
 bool g_ceAvailableValue = false;
@@ -117,6 +126,7 @@ void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
 void ResetCeFakes() {
   g_ceInitBatchOpsParams = DefaultCeInitBatchOpsParams;
   g_ceLaunchBatchOps     = DefaultCeLaunchBatchOps;
+  g_ncclCeInit = DefaultCeInit;
   g_ceImplemented = false;
   g_ceAvailableValue = false;
   g_ceScratchAvailableValue = false;

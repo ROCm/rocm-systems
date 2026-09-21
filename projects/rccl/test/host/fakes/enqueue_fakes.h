@@ -49,6 +49,9 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, stru
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getCollNetSupport;
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getRegBuff;
 
+// enqueue.cc's rcclEffectiveP2pBatchEnable: default 0 is batching off, the single-node answer.
+extern std::function<int(struct ncclComm*)> g_rcclEffectiveP2pBatchEnable;
+
 void ResetEnqueueFakes();
 
 #endif  // RCCL_TEST_HOST_FAKES_ENQUEUE_FAKES_H_

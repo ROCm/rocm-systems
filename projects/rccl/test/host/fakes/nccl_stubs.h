@@ -79,6 +79,10 @@ extern std::function<bool()> g_profilerPluginLoaded;
 // Generated device-function table (src/device/generate.py); empty default matches a miss (-1, with a WARN).
 extern std::unordered_map<uint64_t, int> ncclDevFuncNameToId;
 
+// src/misc/cudawrap.cc. ResetNcclStubs() restores this, so a raised version gate cannot leak forward.
+constexpr int kDefaultCudaDriverVersion = 12000;
+extern int ncclCudaDriverVersionCache;
+
 void ResetNcclStubs();
 
 #endif  // RCCL_TEST_HOST_NCCL_STUBS_H_
