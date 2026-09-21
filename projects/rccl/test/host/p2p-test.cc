@@ -6683,6 +6683,12 @@ TEST_F(P2pProxyLifecycleMicrotest, RecvProxySetup_CuMemEnabled_StashesCuMemProxy
     EXPECT_EQ(p2pTransport.recv.proxyFree(&conn_, &state_), ncclSuccess);
 }
 
+#endif  // ROCM_VERSION >= 70000
+
+// The two send-side size-check rejections return before any cuMem code, so
+// they live outside the ROCM_VERSION >= 70000 guard -- like their recv twins
+// below and GraphRegister_InvalidArgs above -- to keep the coverage on ROCm 6.
+
 // Send proxySetup rejects a response buffer whose size does not match the
 // expected ncclP2pBuff, returning an internal error before allocating.
 TEST_F(P2pProxyLifecycleMicrotest, SendProxySetup_WrongResponseSize_ReturnsInternalError)
@@ -6719,7 +6725,6 @@ TEST_F(P2pProxyLifecycleMicrotest, SendProxySetup_WrongRequestSize_ReturnsIntern
     EXPECT_EQ(done, 0);
 }
 
-#endif  // ROCM_VERSION >= 70000
 // Recv proxySetup, non-memcpy arm: mirrors the send path -- allocate, publish
 // into the response, stash on transportResources, latch *done.
 TEST_F(P2pProxyLifecycleMicrotest, RecvProxySetup_ValidRequest_AllocatesBufferAndPublishesResponse)
