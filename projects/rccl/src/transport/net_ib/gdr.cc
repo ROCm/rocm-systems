@@ -76,8 +76,14 @@ ncclResult_t ncclIbGdrSupport() {
       return;
     }
 
-    struct ibv_mr* mr = wrap_direct_ibv_reg_mr(
-      pd, gpuBuf, 4096, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+    unsigned int flags =
+      IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC;
+    struct ibv_mr* mr;
+    if (ncclIbRelaxedOrderingEnabled) {
+      mr = wrap_direct_ibv_reg_mr_iova2(pd, gpuBuf, 4096, (uint64_t)gpuBuf, flags | IBV_ACCESS_RELAXED_ORDERING);
+    } else {
+      mr = wrap_direct_ibv_reg_mr(pd, gpuBuf, 4096, flags);
+    }
     probeResult = (mr != nullptr);
     if (mr) (void)wrap_ibv_dereg_mr(mr);
     (void)wrap_ibv_dealloc_pd(pd);
