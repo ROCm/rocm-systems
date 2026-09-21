@@ -5235,10 +5235,6 @@ auto Device::dev_log_gpu_metrics(std::ostringstream& outstream_metrics, DevInfoT
   //  print all the gpu metrics content, we need to setup
   //  the environment first.
   status_code = setup_gpu_metrics_reading(type);
-  if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS && !m_gpu_metrics_ptr) {
-    // At this point we should have a valid gpu_metrics pointer.
-    status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
-  }
   if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Fail "
@@ -5401,9 +5397,6 @@ auto Device::run_internal_gpu_metrics_query(AMDGpuMetricsUnitType_t metric_count
   // Partition Path (::kDevGpuMetrics / m_is_partition_metrics):
   //            /sys/class/drm/renderDXXX/device/xcp/xcp_metrics
   status_code = setup_gpu_metrics_reading(type);
-  if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS && !m_gpu_metrics_ptr) {
-    status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
-  }
   if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Fail "
