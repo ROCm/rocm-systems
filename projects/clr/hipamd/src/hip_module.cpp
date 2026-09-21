@@ -348,29 +348,27 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
     LogPrintfError("%s", "Kernel object is invalid or null, possibly due to architecture mismatch.");
     return hipErrorInvalidValue;
   }
-  {
-    // Decided at load (roc::Kernel::init); named here, before a command exists.
-    const device::Kernel* devKernel = kernel->getDeviceKernel(*device);
-    if (devKernel != nullptr && devKernel->hostcallUnsatisfiable() && !HIP_HOSTCALL_ALLOW_MISSING) {
-      LogPrintfError("launch of %s refused: it declares a hostcall buffer and device %d has no PCIe atomics",
-                     kernel->name().c_str(), deviceId);
-      return hipErrorNotSupported;
-    }
-  }
   const amd::KernelSignature& signature = kernel->signature();
   if ((signature.numParameters() > 0) && (kernelParams == nullptr) && (extra == nullptr)) {
     LogPrintfError("%s", "At least one of kernelParams or extra Params should be provided");
     return hipErrorInvalidValue;
   }
-  if (!kernel->getDeviceKernel(*device)) {
+  const device::Kernel* devKernel = kernel->getDeviceKernel(*device);
+  if (!devKernel) {
     return hipErrorInvalidDevice;
+  }
+  // Decided at load (roc::Kernel::init); named here, before a command exists.
+  if (devKernel->hostcallUnsatisfiable() && !HIP_HOSTCALL_ALLOW_MISSING) {
+    LogPrintfError("launch of %s refused: it declares a hostcall buffer and device %d has no PCIe atomics",
+                   kernel->name().c_str(), deviceId);
+    return hipErrorNotSupported;
   }
   // Make sure the launch params are not larger than if specified launch_bounds
   // If it exceeds, then return a failure
-  if (launch_params.local_.product() > kernel->getDeviceKernel(*device)->workGroupInfo()->size_) {
+  if (launch_params.local_.product() > devKernel->workGroupInfo()->size_) {
     LogPrintfError("Launch params (%u, %u, %u) are larger than launch bounds (%lu) for kernel %s",
                    launch_params.local_[0], launch_params.local_[1], launch_params.local_[2],
-                   kernel->getDeviceKernel(*device)->workGroupInfo()->size_,
+                   devKernel->workGroupInfo()->size_,
                    kernel->name().c_str());
     return hipErrorLaunchFailure;
   }

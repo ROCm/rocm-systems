@@ -22,7 +22,7 @@ bool Kernel::init() {
   for (uint32_t i = sig.numParameters(); i < sig.numParametersAll(); ++i) {
     if (sig.at(i).info_.oclObject_ == amd::KernelParameterDescriptor::HiddenHostcallBuffer &&
         !device().info().pcie_atomics_) {
-      setHostcallUnsatisfiable(true);
+      flags_.hostcallUnsatisfiable_ = true;
       LogPrintfError("kernel %s declares hidden_hostcall_buffer (device printf/assert) but device %s "
                      "has no PCIe AtomicOps to the host (hipDeviceAttributeHostNativeAtomicSupported=0); %s",
                      name().c_str(), device().info().name_,

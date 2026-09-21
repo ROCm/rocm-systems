@@ -294,7 +294,6 @@ class Kernel {
   //! The kernel declares a hostcall buffer and this device cannot build one:
   //! decided once, when the metadata is read, not at every dispatch
   bool hostcallUnsatisfiable() const { return (flags_.hostcallUnsatisfiable_) ? true : false; }
-  void setHostcallUnsatisfiable(bool flag) { flags_.hostcallUnsatisfiable_ = flag; }
 
   //! Returns TRUE if kernel is internal kernel
   bool isInternalKernel() const { return (flags_.internalKernel_) ? true : false; }
