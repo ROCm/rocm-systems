@@ -1338,26 +1338,15 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
     // the same device spread evenly across that device's stream pool.
     std::unordered_map<int, size_t> dev_idx;
 
-    const std::vector<int>* assignment_order = &it->second;
-    std::vector<int> by_priority;
     if (priority_declared) {
-      by_priority = it->second;
-      std::stable_sort(by_priority.begin(), by_priority.end(),
+      std::stable_sort(it->second.begin(), it->second.end(),
                        [&](int lhs, int rhs) { return priority_of(lhs) < priority_of(rhs); });
-      assignment_order = &by_priority;
     }
 
-    for (int seg_id : *assignment_order) {
+    for (int seg_id : it->second) {
       if (seg_id >= 0 && seg_id < static_cast<int>(segments_.size())) {
         auto& seg = segments_[seg_id];
         seg.stream_id = static_cast<int>(dev_idx[seg.dev_id]++ % getPoolSize(seg.dev_id));
-        if (priority_declared) {
-          ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-                  "[hipGraph] RoundRobinStreamAssignment: level %d segment %d priority %d -> "
-                  "dev %d slot %d%s",
-                  level, seg_id, priority_of(seg_id), seg.dev_id, seg.stream_id,
-                  (seg.stream_id == 0) ? " (launch stream)" : "");
-        }
       }
     }
   }
