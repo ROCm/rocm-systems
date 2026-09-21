@@ -12,10 +12,12 @@ import pandas as pd
 import pytest
 
 import utils.utils_analysis as utils_analysis
+from utils.ml_api_trace_errors import MissingSourceLocationError
 from utils.utils_analysis import (
     CallTreeNode,
     KernelStats,
     NodeRollup,
+    attach_unlocated_trees_by_forward_thread,
     build_operator_summary,
     fold_identical_sibling_subtrees,
     rollup_node_stats,
@@ -897,6 +899,50 @@ def test_fold_identical_sibling_subtrees_merges_nested_children():
     assert len(folded[0].children) == 1
     assert folded[0].children[0].call_count == 2
     assert folded[0].children[0].kernels["k"].launches == 2
+
+
+def test_attach_defers_missing_source_and_grafts_other_roots():
+    backward = CallTreeNode(
+        name="torch.Tensor.backward",
+        file_name="simple.py",
+        line_number=28,
+        backend="torch",
+        start_timestamp=0.0,
+        end_timestamp=100.0,
+        t_tid="1",
+    )
+    backward.invocation_ids.add("bw")
+    detach = CallTreeNode(
+        name="aten::detach",
+        backend="torch",
+        start_timestamp=200.0,
+        end_timestamp=210.0,
+    )
+    detach.invocation_ids.add("detach")
+    child = CallTreeNode(
+        name="AddmmBackward0",
+        backend="torch",
+        start_timestamp=11.0,
+        end_timestamp=19.0,
+        f_tid="1",
+    )
+    child.invocation_ids.add("bw_op")
+    engine = CallTreeNode(
+        name="autograd::engine::evaluate_function: AddmmBackward0",
+        backend="torch",
+        start_timestamp=10.0,
+        end_timestamp=20.0,
+    )
+    engine.invocation_ids.add("eval")
+    engine.children = [child]
+    forest = {"9081": [backward, detach], "9247": [engine]}
+    errors = attach_unlocated_trees_by_forward_thread(forest)
+    assert len(errors) == 1
+    assert isinstance(errors[0], MissingSourceLocationError)
+    assert errors[0].operator_name == "aten::detach"
+    assert engine in backward.children
+    assert "9247" not in forest
+    assert detach in forest["9081"]
 
 
 def test_rollup_leaf_node():

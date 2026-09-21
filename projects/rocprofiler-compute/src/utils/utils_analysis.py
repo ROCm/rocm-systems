@@ -444,9 +444,14 @@ def _deepest_containing_node(
 
 def attach_unlocated_trees_by_forward_thread(
     forest: dict[str, list[CallTreeNode]],
-) -> None:
-    """Stack torch/triton trees with no source onto the matching forward thread."""
+) -> list[MissingSourceLocationError]:
+    """Stack torch/triton trees with no source onto the matching forward thread.
+
+    Roots with no usable F_Tid stay in the forest. Those MissingSourceLocationError
+    values are returned so the caller can report them after the call tree is shown.
+    """
     pending: list[tuple[str, CallTreeNode]] = []
+    missing_source_errors: list[MissingSourceLocationError] = []
     for thread_id, roots in forest.items():
         for root in roots:
             if root.file_name is not None:
@@ -459,11 +464,14 @@ def attach_unlocated_trees_by_forward_thread(
         end = float(root.end_timestamp or 0.0)
         f_tid = _forward_tid_from_tree(root)
         if f_tid is None:
-            raise MissingSourceLocationError(
-                operator_name=root.name,
-                thread_id=thread_id,
-                start_timestamp=start,
+            missing_source_errors.append(
+                MissingSourceLocationError(
+                    operator_name=root.name,
+                    thread_id=thread_id,
+                    start_timestamp=start,
+                )
             )
+            continue
         matches = _thread_ids_with_pytorch_tid(forest, f_tid)
         if len(matches) != 1:
             raise ForwardThreadNotFoundError(
@@ -491,6 +499,7 @@ def attach_unlocated_trees_by_forward_thread(
     for roots in forest.values():
         for node in roots:
             rollup_node_stats(node)
+    return missing_source_errors
 
 
 def _nested_invocation_keys(
@@ -1288,7 +1297,9 @@ def process_ml_api_trace_output(
         ])
     )
     workload.ml_api_call_trees = nest_marker_intervals(workload.ml_api_trace_df)
-    attach_unlocated_trees_by_forward_thread(workload.ml_api_call_trees)
+    workload.ml_api_missing_source_errors = attach_unlocated_trees_by_forward_thread(
+        workload.ml_api_call_trees
+    )
     _validate_all_markers_nested(workload.ml_api_trace_df, workload.ml_api_call_trees)
 
 
