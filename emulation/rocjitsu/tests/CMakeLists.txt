@@ -547,8 +547,12 @@ add_executable(
     readlane_selector_test.cpp
     decoder_c_api_test.cpp
     buffer_operand_test.cpp
+    buffer_descriptor_vcc_test.cpp
+    buffer_format_test.cpp
+    image_resource_test.cpp
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
+    scalar_buffer_test.cpp
     transcendental_test.cpp
     amdgpu_elf_test_support.cpp
     analysis/liveness_test.cpp
