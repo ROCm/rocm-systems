@@ -116,7 +116,7 @@ public:
      * @param rccl_device_idx The GPU device index
      * @note Calls PMC registrar if one was provided
      */
-    inline void register_gpu(std::uint32_t rccl_device_idx)
+    void register_gpu(std::uint32_t rccl_device_idx)
     {
         bool newly_registered = false;
         {
@@ -140,8 +140,7 @@ public:
      * @param bytes Number of bytes to add
      * @return The new cumulative byte count for the device
      */
-    [[nodiscard]] inline std::uint64_t add_bytes(std::uint32_t rccl_device_idx,
-                                                 size_t        bytes)
+    [[nodiscard]] std::uint64_t add_bytes(std::uint32_t rccl_device_idx, size_t bytes)
     {
         std::unique_lock<std::mutex> _lk{ m_cumulative_mutex };
         auto& device_bytes = m_cumulative_bytes_per_device[rccl_device_idx];
@@ -154,7 +153,7 @@ public:
      * @param rccl_device_idx The GPU device index
      * @return True if registered
      */
-    [[nodiscard]] inline bool is_registered(std::uint32_t rccl_device_idx) const
+    [[nodiscard]] bool is_registered(std::uint32_t rccl_device_idx) const
     {
         std::unique_lock<std::mutex> _lk{ m_registered_gpus_mutex };
         return m_registered_gpus.count(rccl_device_idx) > 0;
@@ -165,7 +164,7 @@ public:
      * @param rccl_device_idx The GPU device index
      * @return Cumulative bytes (0 if not tracked)
      */
-    [[nodiscard]] inline std::uint64_t get_bytes(std::uint32_t rccl_device_idx) const
+    [[nodiscard]] std::uint64_t get_bytes(std::uint32_t rccl_device_idx) const
     {
         std::unique_lock<std::mutex> _lk{ m_cumulative_mutex };
         auto it = m_cumulative_bytes_per_device.find(rccl_device_idx);
@@ -175,7 +174,7 @@ public:
     /**
      * @brief Reset all tracking state (for testing)
      */
-    inline void reset()
+    void reset()
     {
         {
             std::unique_lock<std::mutex> _lk{ m_registered_gpus_mutex };

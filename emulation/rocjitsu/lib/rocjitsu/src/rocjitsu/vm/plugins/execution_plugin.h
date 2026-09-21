@@ -72,6 +72,17 @@ public:
   /// value from construction onward.
   virtual bool requires_serial_hot_hooks() const { return false; }
 
+  /// Opt in to asynchronous arithmetic and its issue notification.
+  /// Leave false when relying on synchronous before/after state inspection:
+  /// any such plugin disables offload for its group. Async-aware plugins must
+  /// handle both issue notifications and synchronous callbacks, since offload can fall back to
+  /// synchronous execution. The group samples this capability outside the instruction path. Sampled
+  /// once on add(). Register hooks may run on helpers concurrently with issuer hooks for the SAME
+  /// wave, and may precede the issue notification. At issue, inspect only instruction/dispatch
+  /// metadata and synchronized plugin state: even sources may alias a destination currently being
+  /// written. Serializing hooks alone does not meet this contract.
+  virtual bool supports_async_instructions() const { return false; }
+
   // -- Lifecycle hooks ------------------------------------------------------
 
   /// Called when the emulated driver opens (simulation is ready to accept work).
@@ -85,8 +96,10 @@ public:
 
   // -- AMDGPU hooks --------------------------------------------------------
 
-  /// Called before every AMDGPU instruction is executed.
+  /// Called before a synchronously executed AMDGPU instruction.
   /// Wavefront state reflects the state prior to the instruction's effects.
+  /// Memory instructions expose their decoded issue metadata through
+  /// Instruction::amdgpu_memory_issue_info() at this point.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
@@ -102,12 +115,19 @@ public:
     onAmdgpuBeforeExecuteInstruction(pc, inst, wf);
   }
 
-  /// Called after every AMDGPU instruction is executed.
+  /// Called after a synchronously executed AMDGPU instruction.
   /// Wavefront state (wait targets, PC, etc.) reflects the instruction's effects.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
                                                amdgpu::Wavefront & /*wf*/) {}
+
+  /// Called on the issuer when an async job is accepted, before PC advance.
+  /// The job may already be running or finished; no register snapshot is safe
+  /// to inspect here. Replaces the ordinary before/after pair.
+  /// Inspect metadata only and do not retain the instruction or wave reference.
+  virtual void onAmdgpuAsyncInstructionIssued(uint64_t /*pc*/, const Instruction & /*inst*/,
+                                              amdgpu::Wavefront & /*wf*/) {}
 
   /// Called when an AMDGPU memory instruction is routed to a pipeline.
   /// Fires BEFORE routing decides anything: the instruction still carries the
