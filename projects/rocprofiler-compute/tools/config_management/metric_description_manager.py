@@ -200,6 +200,7 @@ def normalize_docs_metric_name(arch_name: str, metric_name: str) -> str:
 # All CDNA architectures share the same panel ID mapping.
 CDNA_PANEL_ID_TO_SECTION: dict[int, str] = {
     201: "System Speed-of-Light",
+    301: "Memory chart",
     401: "Roofline Performance Rates",
     402: "Roofline Plot Points",
     501: "Command processor fetcher (CPF)",
