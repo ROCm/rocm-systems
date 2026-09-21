@@ -128,9 +128,9 @@ consumer_producer_t
 start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
               const query_status_t&                           query_fn,
               rocprofiler_user_data_t                         userdata,
-              decltype(att_queue_t::submit_fn)                submit_fn           = mock_submit,
-              drain_t                                         drain_fn            = {},
-              size_t                                          active_buffer_size  = MOCK_BUFFER_SIZE,
+              decltype(att_queue_t::submit_fn)                submit_fn          = mock_submit,
+              drain_t                                         drain_fn           = {},
+              size_t                                          active_buffer_size = MOCK_BUFFER_SIZE,
               size_t                                          staging_buffer_size = 0)
 {
     // Build a synthetic queue + packet stack that mimics the runtime so we can
@@ -524,8 +524,8 @@ TEST(thread_trace, active_buffer_size_below_shared_staging_capacity)
     };
 
     auto userdata = rocprofiler_user_data_t{.ptr = &received};
-    auto threads =
-        start_threads(fetch_cb, query_once, userdata, mock_submit, {}, ACTIVE_SIZE, MOCK_BUFFER_SIZE);
+    auto threads  = start_threads(
+        fetch_cb, query_once, userdata, mock_submit, {}, ACTIVE_SIZE, MOCK_BUFFER_SIZE);
 
     while(!received)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));

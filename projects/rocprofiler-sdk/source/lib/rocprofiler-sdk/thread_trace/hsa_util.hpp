@@ -138,6 +138,5 @@ make_att_queue(rocprofiler_agent_id_t             agent_id,
                const std::vector<uint64_t>&       staging_sizes = {},
                std::shared_ptr<kfd_memory_pool_t> kfd_memory    = {});
 
-
 }  // namespace thread_trace
 }  // namespace rocprofiler

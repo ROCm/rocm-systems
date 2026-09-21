@@ -171,7 +171,7 @@ make_att_queue(rocprofiler_agent_id_t             agent_id,
         for(size_t i = 0; i < num_buffers; ++i)
         {
             auto& memory = queue.cpu_buffers.at(i);
-            memory = queue.kfd_memory->allocate(staging_sizes.at(i), kfd_memory_kind_t::host);
+            memory       = queue.kfd_memory->allocate(staging_sizes.at(i), kfd_memory_kind_t::host);
             if(!memory) return nullptr;
         }
         return result;
