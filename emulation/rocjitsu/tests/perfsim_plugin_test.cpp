@@ -96,13 +96,23 @@ FfmMemoryAccess make_memory_access(EntityId instruction_id, FfmWaveInfo wave_inf
   return access;
 }
 
-// Loader version errors share a prefix with ELF symbol versions (`GLIBC_2.33`).
-// They are not observer-ABI rejections; the host C/C++ runtime is simply too old
-// to map the backend. This can happen on any host, VM, chroot, or container.
+// ld.so reports an unsatisfied ELF symbol version as
+// `version `GLIBC_2.33' not found (required by ...)`. Match that form so a
+// missing path that merely contains `GLIBC_` (or GLIBCXX_/CXXABI_) still fails.
 bool is_loader_symbol_version_error(std::string_view error) {
-  return error.find("GLIBC_") != std::string_view::npos ||
-         error.find("GLIBCXX_") != std::string_view::npos ||
-         error.find("CXXABI_") != std::string_view::npos;
+  const auto version_pos = error.find("version ");
+  if (version_pos == std::string_view::npos)
+    return false;
+  const auto not_found_pos = error.find(" not found", version_pos);
+  if (not_found_pos == std::string_view::npos)
+    return false;
+  const std::string_view quoted = error.substr(version_pos, not_found_pos - version_pos);
+  constexpr std::string_view kFamilies[] = {"GLIBC_", "GLIBCXX_", "CXXABI_"};
+  for (const std::string_view family : kFamilies) {
+    if (quoted.find(family) != std::string_view::npos)
+      return true;
+  }
+  return false;
 }
 
 class SyntheticInstruction final : public Instruction {
@@ -339,6 +349,26 @@ private:
   std::condition_variable cv_;
   bool write_started_ = false;
 };
+
+TEST(PerfsimLoaderErrorTest, RecognizesQuotedRuntimeSymbolVersion) {
+  EXPECT_TRUE(is_loader_symbol_version_error(
+      "/lib64/libc.so.6: version `GLIBC_2.33' not found (required by "
+      "/so/libgpucsim_ffm_plugin.so)"));
+  EXPECT_TRUE(is_loader_symbol_version_error(
+      "/lib64/libstdc++.so.6: version `GLIBCXX_3.4.29' not found (required by "
+      "/so/libgpucsim_ffm_plugin.so)"));
+  EXPECT_TRUE(is_loader_symbol_version_error(
+      "/lib64/libstdc++.so.6: version `CXXABI_1.3.11' not found (required by "
+      "/so/libgpucsim_ffm_plugin.so)"));
+}
+
+TEST(PerfsimLoaderErrorTest, MissingPathWithVersionTokenStillFails) {
+  EXPECT_FALSE(is_loader_symbol_version_error(
+      "/tmp/GLIBC_/missing.so: cannot open shared object file: No such file or directory"));
+  EXPECT_FALSE(is_loader_symbol_version_error(
+      "/tmp/GLIBCXX_/missing.so: cannot open shared object file: No such file or directory"));
+  EXPECT_FALSE(is_loader_symbol_version_error("cannot load Perfsim backend: unknown error"));
+}
 
 TEST(PerfsimPluginConfigTest, EscapesBackendPathAsJson) {
   std::string path{"a\"b\\c\n"};
