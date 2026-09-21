@@ -275,7 +275,15 @@ class Signal {
   /// Signal is no longer in use.
   void DestroySignal() {
     // If handle is now invalid wake any retained sleepers.
-    if (--refcount_ == 0) CasRelaxed(0, 0);
+    if (--refcount_ == 0) {
+      if (NeedsHostWakeOnDestroy()) {
+        CasRelaxed(0, 0);
+      } else if (waiting_ != 0 || retained_ != 1) {
+        // Private packet-only objects must have no host waiters/async owners.
+        // Fail closed instead of issuing a CPU locked RMW against PCIe VRAM.
+        std::abort();
+      }
+    }
     // Release signal, last release will destroy the object.
     Release();
   }
@@ -481,6 +489,8 @@ class Signal {
 
  protected:
   virtual ~Signal();
+
+  virtual bool NeedsHostWakeOnDestroy() const { return true; }
 
   /// @brief Overrideable deletion function
   virtual void doDestroySignal() { delete this; }
