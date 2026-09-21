@@ -7,6 +7,9 @@ on:
     workflows: ["ABI Compliance Check"]
     types: [completed]
 
+permissions:
+  contents: read
+
 jobs:
   apply-labels:
     runs-on: ubuntu-22.04

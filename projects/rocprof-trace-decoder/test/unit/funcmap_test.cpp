@@ -105,11 +105,11 @@ TEST(MarkerEncoding, ComputesMasksAndDecodesClock)
         uint32_t sourceClockMask;
     };
     for (const Case& test : {
-             Case{"packed", {12, 4}, true,  0x000FFFFCu, 0xFFF00000u, 0x0000FFF0u},
-             Case{"legacy", {},      false, 0xFFFFFFFCu, 0u,          0u         },
-             Case{"high_bit", {1, 31}, true, 0x7FFFFFFCu, 0x80000000u, 0x80000000u},
-             Case{"wide", {29, 3},    true, 0x00000004u, 0xFFFFFFF8u, 0xFFFFFFF8u},
-         })
+             Case{"packed",   {12, 4}, true,  0x000FFFFCu, 0xFFF00000u, 0x0000FFF0u},
+             Case{"legacy",   {},      false, 0xFFFFFFFCu, 0u,          0u         },
+             Case{"high_bit", {1, 31}, true,  0x7FFFFFFCu, 0x80000000u, 0x80000000u},
+             Case{"wide",     {29, 3}, true,  0x00000004u, 0xFFFFFFF8u, 0xFFFFFFF8u},
+    })
     {
         SCOPED_TRACE(test.name);
         EXPECT_TRUE(test.encoding.is_valid());
@@ -241,6 +241,43 @@ TEST(ParseFuncmap, ParsesExtraPayloadAndMarkerEncoding)
     EXPECT_EQ(m.marker_encoding.marker_id_mask(), 0x000FFFFCu);
     EXPECT_EQ(m.marker_encoding.packed_shader_clock_mask(), 0xFFF00000u);
     EXPECT_EQ(m.marker_encoding.shader_clock_source_mask(), 0x0000FFF0u);
+}
+
+TEST(ParseFuncmap, ParsesLlvmSqttMarkerPluginOutput)
+{
+    // Captured verbatim from the .sqtt_funcmap section produced by
+    // llvm-project/amd/sqtt-marker's user-markers.hip test. Keep the trailing
+    // NUL because the plugin emits a null-terminated ELF section.
+    std::string blob = "K:marker_kernel\n"
+                       "U:1:outer\n"
+                       "U:2:inner\n"
+                       "P:3:point\n"
+                       "P:4:data\n"
+                       "R:4:extra_payload_count=1\n";
+    blob.push_back('\0');
+
+    Funcmap m = parse_funcmap_section(blob, /*silent=*/true);
+
+    ASSERT_EQ(m.entries.size(), 5u);
+    EXPECT_TRUE(m.diagnostics.empty());
+    EXPECT_EQ(m.entries.front()->kind, FuncmapEntryKind::Kernel);
+    EXPECT_EQ(m.entries.front()->name, "marker_kernel");
+
+    auto outer = m.find(1);
+    ASSERT_TRUE(outer);
+    EXPECT_EQ(outer->kind, FuncmapEntryKind::UserScope);
+    EXPECT_EQ(outer->name, "outer");
+
+    auto point = m.find(3);
+    ASSERT_TRUE(point);
+    EXPECT_EQ(point->kind, FuncmapEntryKind::Point);
+    EXPECT_EQ(point->name, "point");
+
+    auto data = m.find(4);
+    ASSERT_TRUE(data);
+    EXPECT_EQ(data->kind, FuncmapEntryKind::Point);
+    EXPECT_EQ(data->name, "data");
+    EXPECT_EQ(data->extra_payload_count, 1u);
 }
 
 TEST(ParseFuncmap, PackedMarkerEncodingRequiresClockShift)
@@ -488,19 +525,19 @@ TEST(ExtractElfSection, HandlesBasicSectionLayouts)
         bool warning;
     };
     for (const Case& test : {
-             Case{"find", {{".sqtt_funcmap", "F:1:foo\n"}}, "F:1:foo\n", false},
-             Case{"absent", {{".text", "xx"}}, nullptr, false},
-             Case{"empty", {{".sqtt_funcmap", {}}}, nullptr, true},
-             Case{"multiple", {{".text", "xxx"}, {".rodata", "hello"}, {".sqtt_funcmap", "F:1:hit\n"}},
-                  "F:1:hit\n", false},
-         })
+             Case{"find",     {{".sqtt_funcmap", "F:1:foo\n"}},                                         "F:1:foo\n", false},
+             Case{"absent",   {{".text", "xx"}},                                                        nullptr,     false},
+             Case{"empty",    {{".sqtt_funcmap", {}}},                                                  nullptr,     true },
+             Case{
+                  "multiple", {{".text", "xxx"}, {".rodata", "hello"}, {".sqtt_funcmap", "F:1:hit\n"}},
+                  "F:1:hit\n",                                                                                       false},
+    })
     {
         SCOPED_TRACE(test.name);
         auto elf = buildElf(test.sections);
         std::vector<FuncmapDiagnostic> diags;
-        auto section = extract_elf_section(
-            reinterpret_cast<const char*>(elf.data()), elf.size(), ".sqtt_funcmap", diags
-        );
+        auto section =
+            extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(), ".sqtt_funcmap", diags);
         if (test.expected)
         {
             ASSERT_TRUE(section);

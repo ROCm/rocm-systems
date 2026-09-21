@@ -308,7 +308,7 @@ def generate_dashboard_script(args):
         MEMCHECK = 0
 
     _script = f"""
-        cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+        cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
         macro(dashboard_submit)
             if("{SUBMIT}" GREATER 0)
@@ -573,10 +573,7 @@ def parse_args(args=None):
             ctest_args += ["-L", "tests"]
 
     if cdash_args.linter == "clang-tidy":
-        cmake_args += [
-            "-DROCPROFILER_ENABLE_CLANG_TIDY=ON",
-            "-DROCPROFILER_DISABLE_ATT_QUICK_SCAN=ON",
-        ]
+        cmake_args += ["-DROCPROFILER_ENABLE_CLANG_TIDY=ON"]
 
     if (
         cdash_args.mode == "Nightly"

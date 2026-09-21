@@ -165,7 +165,6 @@ class MemoryRegion : public core::MemoryRegion {
   __forceinline static size_t GetPageSize() { return kPageSize_; }
 
   __forceinline const HsaMemFlags &mem_flags() const { return mem_flag_; }
-  __forceinline const HsaMemMapFlags &map_flags() const { return map_flag_; }
 
   void *fragment_alloc(size_t size) const {
     return fragment_allocator_.alloc(size);
@@ -176,8 +175,6 @@ private:
   const HsaMemoryProperties mem_props_;
 
   HsaMemFlags mem_flag_;
-
-  HsaMemMapFlags map_flag_;
 
   size_t max_single_alloc_size_;
 

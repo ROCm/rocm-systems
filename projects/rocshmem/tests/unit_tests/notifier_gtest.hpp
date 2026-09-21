@@ -124,7 +124,7 @@ class NotifierBase : public ::testing::Test {
 
 class NotifierBlockTestFixture : public NotifierBase {
     using NotifierT = Notifier<detail::atomic::memory_scope_workgroup>;
-    using NotifierProxyT = NotifierProxy<HIPAllocator, detail::atomic::memory_scope_workgroup>;
+    using NotifierProxyT = NotifierProxy<detail::atomic::memory_scope_workgroup>;
 
   public:
     void
@@ -146,7 +146,7 @@ class NotifierBlockTestFixture : public NotifierBase {
 
 class NotifierAgentTestFixture : public NotifierBase {
     using NotifierT = Notifier<detail::atomic::memory_scope_agent>;
-    using NotifierProxyT = NotifierProxy<HIPAllocator, detail::atomic::memory_scope_agent>;
+    using NotifierProxyT = NotifierProxy<detail::atomic::memory_scope_agent>;
 
   public:
     void

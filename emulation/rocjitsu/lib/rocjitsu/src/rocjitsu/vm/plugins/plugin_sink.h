@@ -4,7 +4,7 @@
 /// @file plugin_sink.h
 /// @brief Output sink abstraction for the plugin system.
 ///
-/// Plugins produce diagnostic output (race reports, profiling data, kernel
+/// Plugins produce diagnostic output (race reports and kernel
 /// logs). Rather than writing directly to stderr, plugins write to a
 /// PluginSink. This decouples output destination from output generation:
 ///
@@ -12,7 +12,7 @@
 ///   - Tests: StringSink — captures output for assertions, no stderr scraping.
 ///   - Integration tests: FileSink — writes to <dir>/<plugin_name>.log for
 ///     structured parsing by test harnesses.
-///   - Mixed: CompositeSink — dispatches to multiple sinks simultaneously
+///   - Mixed: the plugin group dispatches to multiple configured sinks
 ///     (e.g., stderr for interactive viewing + file for test parsing).
 ///
 /// ## Wiring
@@ -25,19 +25,29 @@
 /// If a plugin is used without a group (unusual), it falls back to a
 /// static StderrSink so output is never silently lost.
 ///
-/// ## Environment variables (production path)
+/// ## Configuration (production path)
 ///
-///   RJ_SINKS=stderr,file   Comma-separated sink types: stderr, stdout, file
-///                          (default: stderr).
-///   RJ_SINK_DIR=/tmp/out   Directory for file sinks. Each plugin writes
-///                          to <dir>/<plugin_name>.log.
+/// Sinks are configured from the top-level `sinks` object in the rocjitsu
+/// config (parsed by PluginLoader::configure_plugin_group):
+///
+/// @code{.json}
+///   "sinks": { "types": ["stderr", "file"], "dir": "/tmp/out" }
+/// @endcode
+///
+///   types   Array of sink types: "stderr", "stdout", "file"
+///           (default: ["stderr"]).
+///   dir     Directory for file sinks. Each plugin writes to
+///           <dir>/<plugin_name>.log.
 
 #pragma once
 
+#include "util/log.h"
+
+#include <cerrno>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace rocjitsu {
 
@@ -63,17 +73,15 @@ public:
 class StdoutSink : public PluginSink {
 public:
   void write(std::string_view msg) override { std::fwrite(msg.data(), 1, msg.size(), stdout); }
-
-  static StdoutSink &instance() {
-    static StdoutSink s;
-    return s;
-  }
 };
 
 /// @brief Writes to a file. Owns the FILE* handle; flushes after each write.
 class FileSink : public PluginSink {
 public:
-  explicit FileSink(const std::string &path) : file_(std::fopen(path.c_str(), "w")) {}
+  explicit FileSink(const std::string &path) : file_(std::fopen(path.c_str(), "w")) {
+    if (!file_)
+      util::Logger::warn("cannot open plugin sink '", path, "': ", std::strerror(errno));
+  }
 
   ~FileSink() override {
     if (file_)
@@ -82,6 +90,8 @@ public:
 
   FileSink(const FileSink &) = delete;
   FileSink &operator=(const FileSink &) = delete;
+
+  bool is_open() const { return file_ != nullptr; }
 
   void write(std::string_view msg) override {
     if (file_) {
@@ -100,29 +110,9 @@ public:
   void write(std::string_view msg) override { buf_ += msg; }
 
   const std::string &str() const { return buf_; }
-  void clear() { buf_.clear(); }
 
 private:
   std::string buf_;
-};
-
-/// @brief Dispatches writes to multiple child sinks.
-class CompositeSink : public PluginSink {
-public:
-  void add(PluginSink *s) {
-    if (s)
-      children_.push_back(s);
-  }
-
-  void write(std::string_view msg) override {
-    for (auto *s : children_)
-      s->write(msg);
-  }
-
-  bool empty() const { return children_.empty(); }
-
-private:
-  std::vector<PluginSink *> children_;
 };
 
 } // namespace rocjitsu

@@ -33,6 +33,15 @@ struct mock_asic_info_t
     const char* vendor_name = "";
 };
 
+// Mirrors the field names of amdsmi_bdf_t so backend<>::get_device_bdf compiles.
+struct mock_bdf_t
+{
+    std::uint64_t function_number = 0;
+    std::uint64_t device_number   = 0;
+    std::uint64_t bus_number      = 0;
+    std::uint64_t domain_number   = 0;
+};
+
 struct mock_version_t
 {
     std::uint32_t major   = 0;
@@ -162,6 +171,8 @@ struct gmock_backend_api
                 (std::uint64_t handle, mock_gpu_metrics_t* out));
     MOCK_METHOD(mock_status_t, get_gpu_asic_info,
                 (std::uint64_t handle, mock_asic_info_t* out));
+    MOCK_METHOD(mock_status_t, get_gpu_device_bdf,
+                (std::uint64_t handle, mock_bdf_t* out));
     MOCK_METHOD(mock_status_t, get_memory_usage,
                 (std::uint64_t handle, std::uint32_t type, std::uint64_t* out));
     MOCK_METHOD(mock_status_t, get_temp_metric,
@@ -195,6 +206,7 @@ struct mock_backend
     using processor_handle        = std::uint64_t;
     using gpu_metrics_t           = mock_gpu_metrics_t;
     using asic_info_t             = mock_asic_info_t;
+    using bdf_t                   = mock_bdf_t;
     using memory_type_t           = std::uint32_t;
     using proc_info_t             = mock_proc_info_t;
     using processor_type          = std::uint32_t;
@@ -259,6 +271,11 @@ struct mock_backend
     status_t get_gpu_asic_info(processor_handle handle, asic_info_t* out) const
     {
         return g_mock_backend->get_gpu_asic_info(handle, out);
+    }
+
+    status_t get_gpu_device_bdf(processor_handle handle, bdf_t* out) const
+    {
+        return g_mock_backend->get_gpu_device_bdf(handle, out);
     }
 
     status_t get_memory_usage(processor_handle handle, memory_type_t type,

@@ -58,14 +58,14 @@ ReduceOnStreamTester::ReduceOnStreamTester(TesterArguments args)
   start_events_timed.resize(num_streams);
   stop_events_timed.resize(num_streams);
 
-  
+
   for (int i = 0; i < num_streams; i++) {
 
     CHECK_HIP(hipStreamCreate(&streams[i]));
     CHECK_HIP(hipEventCreate(&start_events_timed[i]));
     CHECK_HIP(hipEventCreate(&stop_events_timed[i]));
   }
-  
+
 }
 
 ReduceOnStreamTester::~ReduceOnStreamTester() {
@@ -96,7 +96,7 @@ void ReduceOnStreamTester::preLaunchKernel() {
 void ReduceOnStreamTester::postLaunchKernel() {
   for (int i = 0; i < num_streams; i++)
     CHECK_HIP(hipStreamSynchronize(streams[i]));
-  
+
   for (int i =0; i < num_streams; i++)
     rocshmem_ctx_destroy(ctxs[i]);
 

@@ -6,15 +6,18 @@
  ************************************************************************/
 
 #include "comm.h"
+#include "alloc.h"
 #include "info.h"
 #include "bootstrap.h"
 #define ENABLE_TIMER 0
 #include "timer.h"
 #include "transport.h"
 
-struct ncclTransport* ncclTransports[NTRANSPORTS + 1] = {
-  &p2pTransport, &shmTransport, &netTransport, &collNetTransport,
-  &profilerTransport // Not really used for transport, only to create proxy ops polling on profiler counters.
+struct ncclTransport* ncclTransports[NTRANSPORTS] = {
+  &p2pTransport,
+  &shmTransport,
+  &netTransport,
+  &collNetTransport,
 };
 
 template <int type>
@@ -153,7 +156,13 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
   cudaStream_t hostStream, deviceStream;
 
   int count = 0;
-  int num = MAXCHANNELS / 64;
+  int num = MAXCHANNELS / CHANNELS_PER_MASK_WORD;
+
+  // Pool a single side stream for all buffer allocations during this pre-connect
+  // phase (including proxy-thread ncclCudaCalloc for this device), avoiding
+  // transient per-connection stream create/destroy. Released when this returns
+  // so it does not persist into the steady-state collective phase.
+  ncclSideStreamScope sideScope(comm->cudaDev, comm->sideStreamPriority);
 
   NCCLCHECK(ncclCalloc(&data, maxPeers));
   NCCLCHECKGOTO(ncclCalloc(&recvData, maxPeers), ret, fail);
@@ -175,7 +184,8 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
     struct channelMasks recvMask = comm->connectRecv[recvPeer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)];
     struct channelMasks sendMask = comm->connectSend[sendPeer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)];
 
-    // Data[i] contains all ncclConnect information for all send and receive connections with a given send and recv peer
+    // Data[i] contains all ncclConnect information for all send and receive connections with a given send and recv
+    // peer
     // This data is packed in the array based on the number of sendChannels and recvChannels connected with these peers
     // The first N entries contain recvData, connection information for recv connections
     // The next M entries contain sendData, connection information for send connections
@@ -362,7 +372,7 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
     int recvPeer = (comm->rank - i + comm->nRanks) % comm->nRanks;
     int sendPeer = (comm->rank + i) % comm->nRanks;
 
-    for (int j = 0; j < MAXCHANNELS / 64; j++) {
+    for (int j = 0; j < MAXCHANNELS / CHANNELS_PER_MASK_WORD; j++) {
       if (recvPeer != sendPeer) {
         if (comm->connectSend[sendPeer].masks[j] != 0UL)
           NCCLCHECKGOTO(bootstrapSend(comm->bootstrap, sendPeer, bootstrapTag, NULL, 0), ret, fail);

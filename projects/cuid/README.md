@@ -52,7 +52,7 @@ revision_id=01
 family=0019
 model=0074
 unit_id=0004
-package_core_id=0:0
+package_id=0
 last_update=6980d761
 
 [NIC:0]
@@ -71,7 +71,7 @@ last_update=1753987166
 ```
 
 - **GPU:** `device_node` links the CUID to hardware.
-- **CPU:** `package_core_id` identifies cores (`package_id:core_id`).
+- **CPU:** `package_id` identifies physical CPU package, akin to the socket.
 - **NIC:** `device_node` links to the network device.
 - **PLATFORM:** Only the derived CUID is listed.
 
@@ -156,9 +156,8 @@ sphinx-build docs docs/_build/html
 
 | Component | Minimum Version | Notes |
 |-----------|-----------------|-------|
-| **OpenSSL** | 1.1.0 | Uses `HMAC_CTX_new()`/`HMAC_CTX_free()` (1.1.x) or `EVP_MAC` API (3.0+) |
 | **CMake** | 3.14 | Build system requirement |
-| **GCC** | 5.0 | C++14 standard required |
+| **GCC** | 7.0 | C++17 standard required |
 | **Kernel** | 2.6+ | Standard sysfs interfaces |
 | **Architecture** | x86_64 required for CPUID-based CPU fields | Limited fallback via `/proc/cpuinfo` on other architectures |
 
@@ -184,7 +183,7 @@ sphinx-build docs docs/_build/html
 
 #### Notes
 
-- **LibreSSL** and **BoringSSL** are supported via the HMAC_CTX backend
+- No third-party crypto dependency: SHA-256 and HMAC-SHA-256 are built from `lib/src/sha256.cc`, so the library links no TLS stack on any platform
 - Root/administrator privileges are required for full functionality (ACPI tables, SMBIOS UUID, PCI config space access)
 - systemd is only needed for `udevd` reloads and optional service management; the daemon can also be started using other mechanisms such as an `@reboot` cron job
 

@@ -190,7 +190,8 @@ void memcpytest2_get_host_memory(size_t* free, size_t* total) {
 //
 template <typename T> void memcpytest2(DeviceMemory<T>* dmem, HostMemory<T>* hmem,
                                        size_t numElements, bool useHostToHost,
-                                       bool useDeviceToDevice, bool useMemkindDefault) {
+                                       bool useDeviceToDevice, bool useMemkindDefault,
+                                       bool threadSafe = false) {
   size_t sizeElements = numElements * sizeof(T);
   int threads = 1024;
   int blocks =
@@ -204,44 +205,48 @@ template <typename T> void memcpytest2(DeviceMemory<T>* dmem, HostMemory<T>* hme
 
   if (useHostToHost) {
     // Do some extra host-to-host copies here to mix things up:
-    HIP_CHECK(hipMemcpy(hmem->A_hh, hmem->A_h(), sizeElements,
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpy(hmem->A_hh, hmem->A_h(), sizeElements,
                         useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToHost));
-    HIP_CHECK(hipMemcpy(hmem->B_hh, hmem->B_h(), sizeElements,
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpy(hmem->B_hh, hmem->B_h(), sizeElements,
                         useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToHost));
 
 
-    HIP_CHECK(hipMemcpy(dmem->A_d(), hmem->A_hh, sizeElements,
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpy(dmem->A_d(), hmem->A_hh, sizeElements,
                         useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dmem->B_d(), hmem->B_hh, sizeElements,
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpy(dmem->B_d(), hmem->B_hh, sizeElements,
                         useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToDevice));
   } else {
-    HIP_CHECK(hipMemcpy(dmem->A_d(), hmem->A_h(), sizeElements,
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpy(dmem->A_d(), hmem->A_h(), sizeElements,
                         useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dmem->B_d(), hmem->B_h(), sizeElements,
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpy(dmem->B_d(), hmem->B_h(), sizeElements,
                         useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToDevice));
   }
 
   hipLaunchKernelGGL(HipTest::vectorADD, blocks, threads, 0, 0, static_cast<const T*>(dmem->A_d()),
                      static_cast<const T*>(dmem->B_d()), dmem->C_d(), numElements);
-  HIP_CHECK(hipGetLastError());
+  HIP_CHECK_OPT_THREAD(threadSafe, hipGetLastError());
 
   if (useDeviceToDevice) {
     // Do an extra device-to-device copy here to mix things up:
-    HIP_CHECK(hipMemcpy(dmem->C_dd(), dmem->C_d(), sizeElements,
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpy(dmem->C_dd(), dmem->C_d(), sizeElements,
                         useMemkindDefault ? hipMemcpyDefault : hipMemcpyDeviceToDevice));
 
     // Destroy the original dmem->C_d():
-    HIP_CHECK(hipMemset(dmem->C_d(), 0x5A, sizeElements));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemset(dmem->C_d(), 0x5A, sizeElements));
 
-    HIP_CHECK(hipMemcpy(hmem->C_h(), dmem->C_dd(), sizeElements,
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpy(hmem->C_h(), dmem->C_dd(), sizeElements,
                         useMemkindDefault ? hipMemcpyDefault : hipMemcpyDeviceToHost));
   } else {
-    HIP_CHECK(hipMemcpy(hmem->C_h(), dmem->C_d(), sizeElements,
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemcpy(hmem->C_h(), dmem->C_d(), sizeElements,
                         useMemkindDefault ? hipMemcpyDefault : hipMemcpyDeviceToHost));
   }
 
-  HIP_CHECK(hipDeviceSynchronize());
-  HipTest::checkVectorADD(hmem->A_h(), hmem->B_h(), hmem->C_h(), numElements);
+  HIP_CHECK_OPT_THREAD(threadSafe, hipDeviceSynchronize());
+  if (threadSafe) {
+    HipTest::checkVectorADDT(hmem->A_h(), hmem->B_h(), hmem->C_h(), numElements);
+  } else {
+    HipTest::checkVectorADD(hmem->A_h(), hmem->B_h(), hmem->C_h(), numElements);
+  }
 
 
   printf("  %s success\n", __func__);
@@ -343,20 +348,36 @@ template <typename T> void multiThread_1(bool serialize, bool usePinnedHost,
   DeviceMemory<T> memD(NUM_ELM());
   HostMemory<T> mem1(NUM_ELM(), usePinnedHost);
 
-  std::thread t1(memcpytest2<T>, &memD, &mem1, NUM_ELM(), 0, 0, 0);
+  std::thread t1(memcpytest2<T>, &memD, &mem1, NUM_ELM(), 0, 0, 0, true);
   if (serialize) {
     t1.join();
   }
 
   if (singleThread) {
+    // Always join before finalizing, even when not serialized, to avoid
+    // destroying a joinable std::thread (std::terminate) and to ensure the
+    // worker has finished recording its results.
+    if (t1.joinable()) {
+      t1.join();
+    }
+    HIP_CHECK_THREAD_FINALIZE();
     return;
   }
 
   HostMemory<T> mem2(NUM_ELM(), usePinnedHost);
-  std::thread t2(memcpytest2<T>, &memD, &mem2, NUM_ELM(), 0, 0, 0);
+  std::thread t2(memcpytest2<T>, &memD, &mem2, NUM_ELM(), 0, 0, 0, true);
   if (serialize) {
     t2.join();
   }
+  // Ensure all worker threads are joined before finalizing, regardless of the
+  // serialize flag, to avoid std::terminate on joinable threads.
+  if (t1.joinable()) {
+    t1.join();
+  }
+  if (t2.joinable()) {
+    t2.join();
+  }
+  HIP_CHECK_THREAD_FINALIZE();
 }
 
 

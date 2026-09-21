@@ -6,6 +6,13 @@
 from amdisa.codegen._generator import CodeGenerator, _OperandCtx
 
 
+def test_ttmp_prefix_maps_to_architectural_register_class():
+    assert CodeGenerator._reg_class_for_prefix('ttmp') == 'RegClass::TTMP'
+    assert CodeGenerator._named_reg_ref('TTMP0') == ('RegClass::TTMP', 0)
+    assert CodeGenerator._named_reg_ref('ttmp15') == ('RegClass::TTMP', 15)
+    assert CodeGenerator._named_reg_ref('ttmp16') is None
+
+
 def test_legacy_buffer_vaddr_width_follows_address_mode():
     for enc_name in ('ENC_MUBUF', 'ENC_MTBUF'):
         assert CodeGenerator._buffer_vaddr_operand_size_expr(enc_name, 'vaddr') == (
@@ -180,3 +187,40 @@ def test_mfma_acc_without_acc_cd_does_not_fold_multiplicand_banks():
             )
         )
         assert expr == f'reinterpret_cast<const OpEncoding*>(inst)->{operand_name}'
+
+
+def test_accvgpr_dst_is_canonicalized_into_acc_range():
+    # v_accvgpr_write / v_accvgpr_mov dst: raw vdst (0..255) is shifted into the
+    # OPR_ACCVGPR selector range so name()/to_register_ref() resolve the acc reg.
+    expr = CodeGenerator._operand_encoding_value_expr(
+        _OperandCtx(
+            'vdst',
+            'ENC_VOP3P',
+            packed_16bit=False,
+            operand_type='OPR_ACCVGPR',
+        )
+    )
+    assert expr == (
+        '(reinterpret_cast<const OpEncoding*>(inst)->vdst + '
+        'OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN)'
+    )
+
+
+def test_accvgpr_src_is_canonicalized_into_acc_range():
+    # v_accvgpr_read / v_accvgpr_mov src: a well-formed raw src (256 + N) is shifted
+    # into the OPR_SRC_ACCVGPR range [768, 1023]; a raw < 256 is left unshifted so it
+    # cannot escape into the out-of-range [512, 767] band.
+    expr = CodeGenerator._operand_encoding_value_expr(
+        _OperandCtx(
+            'src0',
+            'ENC_VOP3P',
+            packed_16bit=False,
+            operand_type='OPR_SRC_ACCVGPR',
+        )
+    )
+    assert expr == (
+        '(reinterpret_cast<const OpEncoding*>(inst)->src0 >= 256 ? '
+        'reinterpret_cast<const OpEncoding*>(inst)->src0 + '
+        '(OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN - 256) : '
+        'reinterpret_cast<const OpEncoding*>(inst)->src0)'
+    )

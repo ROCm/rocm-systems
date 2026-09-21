@@ -33,8 +33,8 @@ __device__ void wg_team_fcollect([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_un
 #define TEAM_FCOLLECT_DEF_GEN(T, TNAME)                                        \
   template <>                                                                  \
   __device__ void wg_team_fcollect<T>(rocshmem_ctx_t ctx, rocshmem_team_t team,\
-                                      T * dest, const T *source, int nelem) {  \
-    rocshmem_ctx_##TNAME##_fcollect_wg(ctx, team, dest, source, nelem);        \
+                                      T * dest, const T *source, int nelems) { \
+    rocshmem_ctx_##TNAME##_fcollect_wg(ctx, team, dest, source, nelems);       \
   }
 
 TEAM_FCOLLECT_DEF_GEN(float, float)
@@ -79,7 +79,7 @@ __global__ void TeamFcollectTest(int loop, int skip, long long int *start_time,
     wg_team_fcollect<T1>(ctx, teams[wg_id],
                          dest_buf,          // T* dest
                          source_buf,        // const T* source
-                         num_elems);        // int nelement
+                         num_elems);        // int nelems
   }
 
   __syncthreads();

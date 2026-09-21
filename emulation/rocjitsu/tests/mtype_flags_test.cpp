@@ -12,6 +12,8 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
+
 namespace {
 
 using namespace rocjitsu::amdgpu;
@@ -124,6 +126,16 @@ TEST(MtypeFlagsTest, Gfx12NonTemporal) {
 
 TEST(MtypeFlagsTest, Gfx12NtOverridesScope) {
   EXPECT_EQ(mtype_from_flags_gfx12(3, GFX12_TH_NT), Mtype::NT);
+}
+
+TEST(MtypeFlagsTest, Gfx12CachePolicyDisassembly) {
+  std::string modifiers;
+  append_gfx12_cache_policy(modifiers, 3, 1, Gfx12TemporalHintKind::Load);
+  EXPECT_EQ(modifiers, " th:TH_LOAD_LU scope:SCOPE_SE");
+
+  modifiers.clear();
+  append_gfx12_cache_policy(modifiers, 6, 3, Gfx12TemporalHintKind::Atomic);
+  EXPECT_EQ(modifiers, " th:TH_ATOMIC_CASCADE_NT scope:SCOPE_SYS");
 }
 
 // ---------------------------------------------------------------------------

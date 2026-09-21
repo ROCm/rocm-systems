@@ -15,7 +15,7 @@ from typing import Optional, List
 # Compile regex patterns once at module level
 # Matches architecture IDs like gfx908, gfx90a, gfx942-xnack+, gfx90a-xnack-
 # Note: Tensile filenames use hyphens (gfx90a-xnack+), not colons (gfx90a:xnack+)
-_GFX_ARCH_PATTERN = re.compile(r"gfx\d+[a-z]*(?:-xnack[+-])?")
+_GFX_ARCH_PATTERN = re.compile(r"gfx\d+[a-z]*(?:-strict)?(?:-xnack[+-])?")
 
 # MIOpen-specific arch pattern. MIOpen filenames concatenate arch ID + CU count
 # without a separator (e.g., gfx90878 = gfx908 + 78 CUs, gfx942130 = gfx942 + 130).
@@ -27,7 +27,7 @@ _GFX_ARCH_PATTERN = re.compile(r"gfx\d+[a-z]*(?:-xnack[+-])?")
 _MIOPEN_ARCH_PATTERN = re.compile(
     r"gfx(?:"
     r"90a|900|906|908|940|941|942|950"
-    r"|1010|1030|1100|1101|1102|1150|1151|1200|1201"
+    r"|1010|1030|1100|1101|1102|1150|1151|1200|1201|1250(?:-strict)?"
     r")"
 )
 
@@ -324,6 +324,37 @@ class HipKernelProviderRockeHandler(DatabaseHandler):
         return None
 
 
+class HotswapCacheHandler(DatabaseHandler):
+    """Handler for packaged RocJitsu ahead-of-time translations.
+
+    RocJitsu owns the directory-domain spelling. Keep the mapping explicit so
+    a new translator profile cannot accidentally be assigned to an architecture
+    merely because its directory happens to contain a gfx-looking substring.
+    """
+
+    _DOMAIN_TO_BUNDLE = {
+        "gfx1250-b0-a0": "gfx1250",
+    }
+    _ENTRY_PATTERN = re.compile(r"^[0-9a-f]{64}\.(?:man|obj)$")
+
+    def name(self) -> str:
+        return "hotswap_cache"
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        parts = Path(self._relative_path(path, prefix_root)).parts
+        if len(parts) != 6 or parts[:3] != (
+            "share",
+            "rocjitsu",
+            "translations",
+        ):
+            return None
+
+        domain, schema, filename = parts[3:]
+        if schema != "v1" or not self._ENTRY_PATTERN.fullmatch(filename):
+            return None
+        return self._DOMAIN_TO_BUNDLE.get(domain)
+
+
 # Registry of available handlers
 AVAILABLE_HANDLERS = {
     "rocblas": RocBLASHandler,
@@ -332,6 +363,7 @@ AVAILABLE_HANDLERS = {
     "aotriton": AotritonHandler,
     "miopen": MIOpenHandler,
     "hipkernelprovider": HipKernelProviderRockeHandler,
+    "hotswap_cache": HotswapCacheHandler,
 }
 
 

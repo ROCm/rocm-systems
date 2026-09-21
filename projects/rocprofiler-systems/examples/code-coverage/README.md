@@ -64,7 +64,8 @@ CODE_COVERAGE_USE_FAKE=1 ./code-coverage
 rocprof-sys-run -- ./code-coverage 10 4 2000
 
 # Profile the alternate path
-rocprof-sys-run -e CODE_COVERAGE_USE_FAKE=1 -- ./code-coverage 10 4 2000
+CODE_COVERAGE_USE_FAKE=1 \
+rocprof-sys-run -- ./code-coverage 10 4 2000
 ```
 
 ### Recommended Configuration

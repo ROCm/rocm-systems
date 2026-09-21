@@ -21,9 +21,11 @@ add_library(
 )
 
 target_include_directories(${target} PUBLIC .)
+# compression is PRIVATE: not exposed in public headers.
 target_link_libraries(
     ${target}
     PUBLIC rocprofiler-sdk::rocprofiler-sdk gsl_assert pc-sampling-collector
+    PRIVATE compression
 )
 
 if(ENABLE_TESTS)

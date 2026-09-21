@@ -55,6 +55,15 @@ PARALLEL_CATEGORY_OPS = {
     "omp_masked",
 }
 
+# Likewise for the "task" category. Note that omp_implicit_task is not in this set: it
+# belongs to "parallel".
+TASK_CATEGORY_OPS = {
+    "omp_task_create",
+    "omp_task_schedule",
+    "omp_dependences",
+    "omp_task_dependence",
+}
+
 # Representative host-side (CPU) OpenMP operations
 HOST_PARALLEL_OPS = ("omp_parallel_begin", "omp_parallel_end")
 HOST_WORK_OPS = ("omp_work", "omp_sync_region", "omp_dispatch")
@@ -188,6 +197,25 @@ def test_granular_host_filter_only_parallel_ops(rocpd_conn):
     ), f"--ompt-trace parallel produced no parallel-region records; saw: {sorted(ops)}"
 
 
+def test_granular_host_filter_only_task_ops(rocpd_conn):
+    """Counterpart to the parallel filter: --ompt-trace task must record only the
+    task-category operations, must not leak parallel/sync/mutex/target ops, and must
+    record the explicit tasks the workload creates."""
+    ops = set(_ompt_op_counts(rocpd_conn))
+    if not ops:
+        pytest.skip("no OMPT records present; the task-filter run was likely not run")
+
+    leaks = {op for op in ops if op not in TASK_CATEGORY_OPS}
+    assert not leaks, (
+        f"--ompt-trace task leaked non-task-category operations into the trace: "
+        f"{sorted(leaks)}"
+    )
+    for op in ("omp_task_create", "omp_task_schedule"):
+        assert (
+            op in ops
+        ), f"--ompt-trace task produced no {op!r} records; saw: {sorted(ops)}"
+
+
 def test_ompt_all_form_is_complete(rocpd_conn):
     """--ompt-trace all must behave like bare --ompt-trace and produce the complete
     OpenMP trace: both host-side (parallel/implicit-task) and, on a target-offload
@@ -211,16 +239,14 @@ def test_ompt_all_form_is_complete(rocpd_conn):
 
 def test_sys_trace_implicit_ompt_in_rocpd(request):
     """Regression guard for the --sys-trace implicit-OMPT path. Profiling with
-    --sys-trace (no explicit --ompt-trace) and a non-rocpd --output-format must
-    still implicitly enable OMPT and auto-add the rocpd output so OMPT data is not
-    dropped. A missing database here means that auto-add regressed, so this asserts
-    the database exists (rather than skipping like the shared rocpd_conn fixture)
-    and that it actually contains OMPT records."""
+    --sys-trace and no explicit --ompt-trace must still enable OMPT tracing, so the
+    rocpd output contains OMPT records. A missing database means the run itself
+    failed, so this asserts the database exists (rather than skipping like the shared
+    rocpd_conn fixture) and that it actually contains OMPT records."""
     filename = request.config.getoption("--rocpd-input")
     assert os.path.isfile(filename), (
-        f"rocpd database '{filename}' was not created; --sys-trace should implicitly "
-        "enable OMPT and auto-add the 'rocpd' output format even when another "
-        "--output-format was requested"
+        f"rocpd database '{filename}' was not created; expected the --sys-trace run to "
+        "write a rocpd database containing implicitly-enabled OMPT records"
     )
     conn = sqlite3.connect(filename)
     try:

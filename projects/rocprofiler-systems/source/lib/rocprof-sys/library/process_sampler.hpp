@@ -24,12 +24,13 @@ namespace process_sampler
 {
 struct instance
 {
-    std::function<void()> setup        = []() {};
-    std::function<void()> shutdown     = []() {};
-    std::function<void()> config       = []() {};
-    std::function<void()> sample       = []() {};
-    std::function<void()> post_process = []() {};
-    std::function<void()> pause        = []() {};
+    std::function<void()> setup               = []() {};
+    std::function<void()> shutdown            = []() {};
+    std::function<void()> config              = []() {};
+    std::function<void()> sample              = []() {};
+    std::function<void()> post_process        = []() {};
+    std::function<void()> pause               = []() {};
+    std::function<void()> flush_pending_pause = []() {};
 };
 //
 struct sampler
@@ -39,7 +40,7 @@ struct sampler
     using nsec_t    = std::chrono::nanoseconds;
     using promise_t = std::promise<void>;
     using future_t  = std::future<void>;
-    using state_t   = State;
+    using state_t   = state::process::State;
 
     using timestamp_t = std::int64_t;
 

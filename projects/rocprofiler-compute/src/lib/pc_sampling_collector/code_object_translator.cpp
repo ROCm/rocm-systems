@@ -7,6 +7,11 @@
 
 using namespace rocprofiler_compute_tool;
 
+code_object_translator_t::ptr code_object_translator_t::create()
+{
+    return std::make_shared<code_object_translator_impl_t>();
+}
+
 code_object_translator_impl_t::code_object_translator_impl_t()
     : m_translator(std::make_unique<rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate>())
 {
