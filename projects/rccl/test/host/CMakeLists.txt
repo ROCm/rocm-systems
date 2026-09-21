@@ -53,6 +53,7 @@ set(RCCL_MICRO_TEST_SOURCES
   devcomm-test.cc
   wrap-test.cc                         # rccl_wrap.cc microtests (AICOMRCCL-2195)
   dev-runtime-test.cc                  # src/dev_runtime.cc (symmetric memory, windows, devcomm)
+  # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
   fakes/dev_runtime_micro_fakes.cc     # dev_runtime's non-HIP externs (shadow pool, space, gin, rma)
   fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
   fakes/libc_fakes.cc                  # libc seams (sockets/stdio/exit) for libc-only units
@@ -159,6 +160,13 @@ if(BUILD_TESTS)
     DEV_RUNTIME_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime.cc"
     DEV_RUNTIME_SEGMENTS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/dev_runtime_segments.cc"
   )
+
+  # sym_kernels_host.cc only exists when GENERATE_SYM_KERNELS is ON (OFF via --disable-sym-kernels).
+  if(GENERATE_SYM_KERNELS)
+    target_sources(rccl-UnitTestsMicro PRIVATE sym-kernels-index-test.cc)
+    target_compile_definitions(rccl-UnitTestsMicro PRIVATE
+      SYM_KERNELS_HOST_CC_PATH="${PROJECT_BINARY_DIR}/hipify/gensrc/symmetric/sym_kernels_host.cc")
+  endif()
 
   # Make sure the hipify step has run before trying to compile the test.
   add_dependencies(rccl-UnitTestsMicro hipify_all copy_nccl_device_headers)
@@ -496,6 +504,102 @@ if(BUILD_TESTS)
       )
     else()
       message(WARNING "Skipping test categories for rccl-UnitTestsMicroEnqueue: missing ${_enqueue_categories_yaml}")
+    endif()
+  endif()
+
+  # ---------------------------------------------------------------------------
+  # rccl-UnitTestsMicroSymKernels -- host-only microtests for the REAL src/sym_kernels.cc
+  # (ncclSymkMaxChunkElts, ncclSymkMask), compiled together with the GENERATED
+  # sym_kernels_host.cc it depends on for ncclSymkGetKernelIndex + the kernel arrays.
+  #
+  # Its own binary, not shared with rccl-UnitTestsMicro: fakes/sym_kernels_fakes.cc (needed
+  # there by dev_runtime.cc/wrap-test.cc callers) fakes the exact symbols (ncclSymkAvailable,
+  # ncclSymkInitOnce, ncclSymkFinalize, ncclGetSymRegType, rcclSymkKernelIdIsLL) the real
+  # sym_kernels.cc also defines -- a duplicate-symbol error if compiled into the same binary.
+  #
+  # getRequirements_gin pulls in a large tuning/GIN dependency surface this suite never calls;
+  # -ffunction-sections + --gc-sections drop that unreached code so it needs no fake
+  # (same technique as rccl-UnitTestsMicroEnqueue).
+  #
+  # Gated on GENERATE_SYM_KERNELS: it #includes the generated sym_kernels_host.cc, ON-only.
+  # ---------------------------------------------------------------------------
+  if(GENERATE_SYM_KERNELS)
+    set(TEST_MICRO_SYM_KERNELS_SOURCE_FILES
+      sym-kernels-test.cc
+      fakes/bootstrap_stubs.cc
+      fakes/topo_stubs.cc
+      fakes/transport_stubs.cc
+      fakes/nccl_stubs.cc
+      fakes/nccl_fakes.cc
+      fakes/hip_fakes.cc
+      fakes/env_fakes.cc                   # src/misc/param.cc's ncclGetEnv + getenv interposition
+      fakes/devcomm_fakes.cc               # ncclTeamLsa
+      fakes/os_fakes.cc
+      fakes/strongstream_stubs.cc
+      fakes/recorder_fakes.cc
+      ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
+      ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc  # real IsArchMatch
+      ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc     # real busId/hash helpers
+      ../common/main_altrsmi.cpp
+    )
+    set_source_files_properties(
+      ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc
+      ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc
+      ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc
+      PROPERTIES GENERATED TRUE)
+
+    add_executable(rccl-UnitTestsMicroSymKernels ${TEST_MICRO_SYM_KERNELS_SOURCE_FILES})
+    target_include_directories(rccl-UnitTestsMicroSymKernels PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${RCCL_COMMON_INCLUDE_DIRS})
+    target_compile_definitions(rccl-UnitTestsMicroSymKernels PRIVATE ${RCCL_COMMON_COMPILE_DEFS}
+      GENERATE_SYM_KERNELS
+      SYM_KERNELS_HOST_CC_PATH="${PROJECT_BINARY_DIR}/hipify/gensrc/symmetric/sym_kernels_host.cc"
+      SYM_KERNELS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/sym_kernels.cc")
+    if(ENABLE_ROCSHMEM_GIN)
+      target_compile_definitions(rccl-UnitTestsMicroSymKernels PRIVATE NCCL_GIN_ANVIL_SDMA_ENABLE=0)
+    endif()
+    foreach(_hip_tgt hip::host hip::device)
+      if(TARGET ${_hip_tgt})
+        target_include_directories(rccl-UnitTestsMicroSymKernels PRIVATE
+          $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+        target_compile_definitions(rccl-UnitTestsMicroSymKernels PRIVATE
+          $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
+        target_compile_options(rccl-UnitTestsMicroSymKernels PRIVATE
+          $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
+      endif()
+    endforeach()
+    target_link_libraries(rccl-UnitTestsMicroSymKernels PRIVATE ${MICRO_TEST_LINK_LIBS})
+    add_dependencies(rccl-UnitTestsMicroSymKernels hipify_all copy_nccl_device_headers)
+    target_compile_options(rccl-UnitTestsMicroSymKernels PRIVATE
+      --offload-host-only -ffunction-sections
+      -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(rccl-UnitTestsMicroSymKernels PRIVATE
+      -no-hip-rt
+      -fprofile-instr-generate -fcoverage-mapping
+      -Wl,--gc-sections)
+    if(BUILD_ADDRESS_SANITIZER)
+      target_compile_options(rccl-UnitTestsMicroSymKernels PRIVATE -fsanitize=address)
+      target_link_options(rccl-UnitTestsMicroSymKernels PRIVATE -fsanitize=address -shared-libasan)
+      if(DEFINED ASAN_RUNTIME_DIR)
+        target_link_options(rccl-UnitTestsMicroSymKernels PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+      endif()
+    endif()
+    rocm_install(TARGETS rccl-UnitTestsMicroSymKernels COMPONENT tests)
+    if(COMMAND apply_test_category_labels)
+      # Reuses rccl-UnitTestsMicro's yaml: its "Sym*" pattern already covers this binary's suites too.
+      set(_symk_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+      if(EXISTS "${_symk_categories_yaml}")
+        message(STATUS "Applying test categories for rccl-UnitTestsMicroSymKernels")
+        apply_test_category_labels(
+          rccl-UnitTestsMicroSymKernels
+          "${_symk_categories_yaml}"
+          "${PROJECT_BINARY_DIR}"
+          "${INSTALL_TEST_FILE}"
+        )
+      else()
+        message(WARNING "Skipping test categories for rccl-UnitTestsMicroSymKernels: missing ${_symk_categories_yaml}")
+      endif()
     endif()
   endif()
 
@@ -849,6 +953,15 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
+# No GENERATE_SYM_KERNELS variable exists in this standalone project(); check the file directly.
+if(EXISTS "${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
+  target_sources(rccl-UnitTestsMicro PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/sym-kernels-index-test.cc)
+  target_compile_definitions(rccl-UnitTestsMicro PRIVATE
+    SYM_KERNELS_HOST_CC_PATH="${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
+else()
+  message(WARNING "Skipping sym-kernels-index-test.cc for rccl-UnitTestsMicro: missing ${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
+endif()
+
 # -no-pie for the same reason as rccl-HostUnitTests: the RCCL-vendored
 # libgtest.a used by this standalone path is built without -fPIC, so a PIE
 # link fails with "relocation R_X86_64_32 cannot be used against local symbol".
@@ -1034,6 +1147,62 @@ foreach(_enq_variant "" "-devlinker")
     fmt::fmt-header-only
   )
 endforeach()
+
+# --- Standalone sym-kernels micro-test binary ---------------------------
+# rccl-UnitTestsMicroSymKernels -- see the in-build block for the rationale
+# behind the separate binary (fakes/sym_kernels_fakes.cc collision) and the
+# -ffunction-sections/--gc-sections dependency-dropping technique.
+# No GENERATE_SYM_KERNELS variable exists in this standalone project(); check the file directly.
+if(EXISTS "${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
+  set(TEST_MICRO_SYM_KERNELS_SOURCE_FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/sym-kernels-test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/transport_stubs.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_stubs.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/nccl_fakes.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/hip_fakes.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/env_fakes.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/devcomm_fakes.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/os_fakes.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/strongstream_stubs.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/recorder_fakes.cc
+    ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc
+    ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HIPIFY_DIR}/src/misc/utils.cc
+    ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
+  )
+
+  add_test_executable(rccl-UnitTestsMicroSymKernels ${TEST_MICRO_SYM_KERNELS_SOURCE_FILES})
+
+  target_compile_options(rccl-UnitTestsMicroSymKernels PRIVATE
+    -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
+
+  target_include_directories(rccl-UnitTestsMicroSymKernels PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${RCCL_INCLUDE_DIRS}
+  )
+
+  target_compile_definitions(rccl-UnitTestsMicroSymKernels PRIVATE
+    __HIP_PLATFORM_AMD__
+    NCCL_OS_LINUX
+    ROCM_VERSION=70000
+    USE_AMDSMI
+    $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+    $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
+    GENERATE_SYM_KERNELS
+    SYM_KERNELS_HOST_CC_PATH="${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc"
+    SYM_KERNELS_CC_PATH="${RCCL_HIPIFY_DIR}/src/sym_kernels.cc"
+  )
+
+  target_link_options(rccl-UnitTestsMicroSymKernels PRIVATE -no-hip-rt -Wl,--gc-sections)
+  target_link_libraries(rccl-UnitTestsMicroSymKernels PRIVATE
+    GTest::GTest
+    Threads::Threads
+    fmt::fmt-header-only
+  )
+
+endif()
 
 # --- Coverage (all host-only test binaries) -----------------------------
 # Single switch for the whole standalone build: llvm source-based coverage is
