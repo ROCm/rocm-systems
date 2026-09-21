@@ -319,10 +319,10 @@ __device__ void GDAContext::internal_get_broadcastmem_wave(void *dst, const void
   }
 }
 
-__device__ int GDAContext::broadcastmem_wave(rocshmem_team_t team, void *dest, 
+__device__ int GDAContext::broadcastmem_wave(rocshmem_team_t team, void *dest,
     const void* source, int nelems, int PE_root) {
-  if (dest == nullptr || 
-    source == nullptr || 
+  if (dest == nullptr ||
+    source == nullptr ||
     team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
 
@@ -470,15 +470,15 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
   __syncthreads();
 }
 
-__device__ int GDAContext::alltoallmem_wave(rocshmem_team_t team, 
-                                            void* dest, 
-                                            const void* source, 
+__device__ int GDAContext::alltoallmem_wave(rocshmem_team_t team,
+                                            void* dest,
+                                            const void* source,
                                             int nelems) {
   if (dest == nullptr || source == nullptr)
     return ROCSHMEM_ERROR;
 
   alltoallmem_linear_thread_puts_wave(team, dest, source, nelems);
-  
+
   return ROCSHMEM_SUCCESS;
 }
 

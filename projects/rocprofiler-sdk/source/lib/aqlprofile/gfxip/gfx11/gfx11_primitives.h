@@ -432,7 +432,7 @@ public:
     static uint32_t sq_control2_enable_value()
     {
         uint32_t sq_cntr_ctrl = SET_REG_FIELD_BITS(SQ_PERFCOUNTER_CTRL2, FORCE_EN, true) |
-                                SET_REG_FIELD_BITS(SQ_PERFCOUNTER_CTRL2, VMID_EN, 0xFFFF);
+                                SET_REG_FIELD_BITS(SQ_PERFCOUNTER_CTRL2, VMID_EN, 0xFF00);
         return sq_cntr_ctrl;
     }
 
