@@ -70,7 +70,7 @@ set(RCCL_MICRO_TEST_SOURCES
   fakes/collectives_fakes.cc           # src/collectives.cc name helpers
   fakes/dda_fakes.cc                   # src/algorithms/dda/* selection seams
   fakes/strongstream_stubs.cc          # src/misc/strongstream.cc capture seam
-  fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc: query, kernel-table, and dev-work seams
+  fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc: query/init/finalize seams (kernel-index symbols are real here)
   fakes/transport_stubs.cc             # transport/PXN/AINIC seams
   fakes/tuning_fakes.cc                # graph tuning/channel params
   fakes/wrap_fakes.cc                  # remaining uncategorized dependency seams
@@ -255,6 +255,7 @@ if(BUILD_TESTS)
     fakes/register_stubs.cc              # src/register/*.cc
     fakes/strongstream_stubs.cc          # src/misc/strongstream.cc
     fakes/sym_kernels_fakes.cc           # src/sym_kernels.cc
+    fakes/sym_kernels_index_fakes.cc     # kernel-index/table symbols: own file, rccl-UnitTestsMicro defines these for real
     fakes/tuning_fakes.cc                # src/graph/tuning.cc
     ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
     ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc  # real IsArchMatch
@@ -1103,6 +1104,7 @@ set(TEST_MICRO_SCHEDULER_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/register_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/strongstream_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/sym_kernels_fakes.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/fakes/sym_kernels_index_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/tuning_fakes.cc
   ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc
   ${RCCL_HIPIFY_DIR}/src/misc/archinfo.cc

@@ -29,21 +29,9 @@ extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, siz
 extern std::function<bool(int)> g_symkKernelIdIsLL;
 extern std::function<ncclResult_t(struct ncclComm*)> g_symkFinalize;
 
-// sym_kernels.cc's ncclSymkLLKernelMask: default has no bits set (the LL-kernel-init-once check never fires).
-extern std::function<int()> g_symkLLKernelMask;
-
-// sym_kernels.cc's ncclSymkDynamicSmemKernelMask: default has no bits set (kernelDynSmem stays 0).
-extern std::function<int()> g_symkDynamicSmemKernelMask;
-
-// sym_kernels.cc's ncclSymkGetKernelIndex: default always selects index 0.
-extern std::function<int(ncclSymkKernelId, int, ncclDataType_t)> g_symkGetKernelIndex;
-
-// sym_kernels.cc's ncclSymkKernelIdToString: default returns a fixed, recognizable name.
-extern std::function<const char*(int)> g_symkKernelIdToString;
-
-// sym_kernels.cc's ncclSymkMakeDevWork: trivial success; does not populate *outDevWork.
-extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*)>
-    g_symkMakeDevWork;
+// ncclSymkLLKernelMask/ncclSymkDynamicSmemKernelMask/ncclSymkGetKernelIndex/ncclSymkKernelIdToString/
+// ncclSymkMakeDevWork seams live in sym_kernels_index_fakes.h, not here (rccl-UnitTestsMicro links the
+// real sym_kernels_host.cc, which defines those symbols for real -- a duplicate-symbol error if faked here too).
 
 void ResetSymKernelsFakes();
 
