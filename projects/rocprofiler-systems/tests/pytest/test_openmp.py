@@ -357,23 +357,12 @@ class TestOpenMPTarget(RocprofsysTest):
             "sys_run",
         ],
     )
-    def test(self, mode, ompt_target_env, openmp_target_rules, gpu_info):
+    def test(self, mode, ompt_target_env, openmp_target_rules):
         result = self.run_test(mode, "openmp-target", env=ompt_target_env)
         self.assert_regex(result)
 
         if mode == "sampling":
-            # Do not pass full gpu_info.categories: MI300A is instinct+apu and
-            # would skip both rules. APU -> ["apu"]; discrete -> instinct/radeon.
-            is_apu = "apu" in gpu_info.categories
-            self.assert_rocpd(
-                result,
-                rules_files=openmp_target_rules,
-                gpu_category_to_skip=(
-                    ["apu"]
-                    if is_apu
-                    else [c for c in gpu_info.categories if c in ("instinct", "radeon")]
-                ),
-            )
+            self.assert_rocpd(result, rules_files=openmp_target_rules)
             self.assert_perfetto(
                 result,
                 subtest_name="Perfetto Kernel Dispatch Validation",
