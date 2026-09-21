@@ -5748,7 +5748,11 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdCrossProcess_ExportsFdsAndStoresImp
             ++exportCalls;
             EXPECT_EQ(type, hipMemHandleTypePosixFileDescriptor);
             if (shareableHandle) {
-                int fd = ::dup(0);
+                // dup(STDERR_FILENO), not dup(0): stdin may be closed in a
+                // ctest child, and a -1 fd would make the later EBADF closure
+                // check vacuously pass.
+                int fd = ::dup(STDERR_FILENO);
+                EXPECT_GE(fd, 0);
                 *static_cast<int*>(shareableHandle) = fd;
                 exportedFds.push_back(fd);
             }
@@ -5860,7 +5864,9 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdBatchQueryFails_ClosesFdsAndRelease
         [&](void* shareableHandle, hipMemGenericAllocationHandle_t,
             hipMemAllocationHandleType, unsigned long long) -> hipError_t {
             if (shareableHandle) {
-                int fd = ::dup(0);
+                // See above: dup(STDERR_FILENO) so the fd is always valid.
+                int fd = ::dup(STDERR_FILENO);
+                EXPECT_GE(fd, 0);
                 *static_cast<int*>(shareableHandle) = fd;
                 exportedFds.push_back(fd);
             }
@@ -6175,7 +6181,8 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CrossProcessPosixFd_ImportsFromF
     std::array<p2pIpcExpInfo, kNumSegments> req{};
     for (auto& seg : req) {
         seg.size  = 0x1000;
-        seg.impFd = ::dup(0);   // a real, closeable fd for production's close()
+        seg.impFd = ::dup(STDERR_FILENO);   // a real, closeable fd for production's close()
+        ASSERT_GE(seg.impFd, 0);             // stdin may be closed in a ctest child
     }
 
     ScopedHook reserve(g_hipMemAddressReserve,
