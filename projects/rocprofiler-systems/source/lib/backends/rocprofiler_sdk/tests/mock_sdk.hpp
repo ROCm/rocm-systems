@@ -191,6 +191,10 @@ struct kernel_dispatch_record
 {
     async_correlation_id_t correlation_id{};
 };
+struct memory_copy_record
+{
+    async_correlation_id_t correlation_id{};
+};
 struct stream_id
 {
     std::uint64_t handle{};
@@ -432,6 +436,7 @@ struct mock_sdk
     using kfd_event_page_migrate_record        = testing::kfd_event_page_migrate_record;
     using kfd_event_page_fault_record          = testing::kfd_event_page_fault_record;
     using kernel_dispatch_record               = testing::kernel_dispatch_record;
+    using memory_copy_record                   = testing::memory_copy_record;
     using async_correlation_id_t               = testing::async_correlation_id_t;
     using stream_id                            = testing::stream_id;
 
