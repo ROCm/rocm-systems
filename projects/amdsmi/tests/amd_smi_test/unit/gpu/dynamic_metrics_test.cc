@@ -367,3 +367,24 @@ TEST(GpuUnit, APUMetricsShortRevisionReadsTrailingFieldsAsNotApplicable) {
     EXPECT_EQ(apu.average_cpu_voltage, test_case.has_average_voltage ? kFilled16 : UINT16_MAX);
   }
 }
+
+// Reading a metrics table pre-fills and clamps using sizeof_metric_table(), so
+// that size must describe the very buffer get_metrics_table() hands back. v1.8
+// backs both the GPU table and the smaller partition table, so pin the pairing
+// for both modes: sizing the partition table as the GPU table would write past
+// the end of it.
+TEST(GpuUnit, GPUMetricsV18TableSizeMatchesSelectedTable) {
+  PRINT_VERBOSITY();
+
+  amd::smi::GpuMetricsBase_v18_t metrics;
+
+  metrics.set_is_partition_metrics(false);
+  EXPECT_EQ(metrics.sizeof_metric_table(), sizeof(amd::smi::AMDGpuMetrics_v18_t));
+
+  metrics.set_is_partition_metrics(true);
+  EXPECT_EQ(metrics.sizeof_metric_table(), sizeof(amd::smi::AMDGpuMetrics_v18_Partition_v1_0_t));
+
+  EXPECT_LT(sizeof(amd::smi::AMDGpuMetrics_v18_Partition_v1_0_t),
+            sizeof(amd::smi::AMDGpuMetrics_v18_t))
+      << "the partition table is the smaller of the two, so a size mismatch overruns it";
+}
