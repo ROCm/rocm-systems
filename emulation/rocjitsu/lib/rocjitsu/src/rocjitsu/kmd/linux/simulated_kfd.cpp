@@ -779,7 +779,6 @@ void SimulatedKfd::init_command_processors_locked() {
       if (!cp)
         continue;
       cp->set_scratch_wave_divisor(scratch_wave_divisor);
-      cp->set_scratch_xcc_layout(xcc_id, xcc_count);
     }
     // Same source as the apertures GET_PROCESS_APERTURES_NEW and the DBG_TRAP
     // device snapshot advertise: what the shaders translate LDS/scratch against

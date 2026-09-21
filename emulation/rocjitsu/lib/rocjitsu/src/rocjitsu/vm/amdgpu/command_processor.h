@@ -190,11 +190,8 @@ public:
   /// @details Test-only visibility for cross-layer teardown assertions.
   [[nodiscard]] size_t registered_pm4_queue_count_for_test() const;
 
-  /// @brief Identify this CP's XCC in the device-wide scratch allocation.
-  void set_scratch_xcc_layout(uint32_t xcc_id, uint32_t xcc_count) {
-    scratch_xcc_id_ = xcc_id;
-    scratch_xcc_count_ = xcc_count == 0 ? 1 : xcc_count;
-  }
+  /// @brief Override this CP's scratch XCC layout in a standalone unit test.
+  void set_scratch_xcc_layout_for_test(uint32_t xcc_id, uint32_t xcc_count);
 
   /// @brief Register a queue and return its CP-local lifetime identity.
   uint64_t register_queue(AqlQueueConfig queue);

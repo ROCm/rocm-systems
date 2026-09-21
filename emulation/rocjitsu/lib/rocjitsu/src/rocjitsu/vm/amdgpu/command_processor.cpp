@@ -828,14 +828,28 @@ void CommandProcessor::shutdown() {
 }
 
 void CommandProcessor::set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers) {
+  assert(!peers.empty() && "XCD topology must contain at least this CP");
+  assert(peers.size() <= MAX_NUM_XCC && "XCD topology exceeds the queue ABI capacity");
   assert(rank < peers.size() && "XCD rank must index its own SoC's CP list");
   assert(peers[rank] == this && "XCD rank must be this CP's own position");
   xcd_rank_ = rank;
+  // Fan-out and scratch address the same physical XCD topology. Keeping a
+  // frontend-owned scratch identity lets PCI/MES queues leave every CP at XCC
+  // zero, so corresponding wave slots on different XCDs alias one another.
+  scratch_xcc_id_ = rank;
+  scratch_xcc_count_ = static_cast<uint32_t>(peers.size());
   xcd_peers_ = std::move(peers);
   // Carve this XCD its own dispatch-id space; see allocate_dispatch_id().
   dispatch_id_stride_ = static_cast<uint32_t>(xcd_peers_.size());
   dispatch_id_base_ = 1 + rank;
   next_dispatch_id_ = dispatch_id_base_;
+}
+
+void CommandProcessor::set_scratch_xcc_layout_for_test(uint32_t xcc_id, uint32_t xcc_count) {
+  assert(xcc_count != 0 && xcc_count <= MAX_NUM_XCC);
+  assert(xcc_id < xcc_count);
+  scratch_xcc_id_ = xcc_id;
+  scratch_xcc_count_ = xcc_count;
 }
 
 AqlQueueRecord *CommandProcessor::find_aql_queue(uint32_t queue_id, uint32_t process_id) {
