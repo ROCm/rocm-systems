@@ -8,9 +8,14 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/graphics_draw.h"
 #include "rocjitsu/vm/amdgpu/graphics_stage.h"
+#include "rocjitsu/vm/amdgpu/image_address.h"
+#include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <gtest/gtest.h>
@@ -128,6 +133,138 @@ TEST_P(GraphicsExportTest, ParameterLoadUsesQuadMaskAndPrimitiveOffsets) {
     if (lane % 4 != 3) // The unused fourth coefficient is unspecified.
       EXPECT_EQ(wave_->debug_read_vgpr(3, lane), expected) << lane;
   }
+}
+
+TEST_P(GraphicsExportTest, RectangleRunsFragmentWavesAndWritesOnlyCoveredPixels) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+    GTEST_SKIP() << "RDNA4 render target layout";
+  amdgpu::Pm4QueueState state;
+  state.num_instances = 1;
+  state.uconfig_registers[0x242] = 0x11;
+  state.context_registers[0x3b0] = 10;
+  state.context_registers[0x31e] = (3 << 16) | 3;
+  state.context_registers[0x31f] = 3 << 15;
+  state.context_registers[0x318] = 0x1000;
+  state.context_registers[0x214] = 15;
+  state.context_registers[0x195] = 4;
+  state.context_registers[0x198] = 2;
+  state.context_registers[0x205] = 0x43f;
+  state.context_registers[0x10f] = state.context_registers[0x110] = state.context_registers[0x111] =
+      state.context_registers[0x112] = std::bit_cast<uint32_t>(2.0f);
+  state.context_registers[0x90] = 1 | (1 << 16);
+  state.context_registers[0x91] = 3 | (3 << 16);
+  auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
+  for (uint32_t i = 0; i < 3; ++i) {
+    const std::array<uint32_t, 4> position{std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
+                                           std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f), 0,
+                                           std::bit_cast<uint32_t>(1.0f)};
+    draw->export_lane(*wave_, i, 12, 15, position);
+  }
+  draw->export_lane(*wave_, 0, 20, 1, {0 | (1 << 9) | (2 << 18), 0, 0, 0});
+  const auto dispatch = draw->advance(memory_, 0);
+  ASSERT_TRUE(dispatch);
+  ASSERT_EQ(dispatch->total_wgs, 1);
+  wave_->set_wg_coord(0, 0, 0);
+  wave_->set_graphics_stage(draw);
+  draw->initialize(*wave_, 0, 0);
+  EXPECT_EQ(std::popcount(wave_->exec()), 4);
+  // Include helper lanes in exports; only the four covered fragments may write.
+  for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+    draw->export_lane(*wave_, lane, 0, 3, {0x00003c00, 0x3c000000, 0, 0});
+  EXPECT_FALSE(draw->advance(memory_, 0));
+  for (uint32_t y = 0; y < 4; ++y)
+    for (uint32_t x = 0; x < 4; ++x) {
+      const auto address = amdgpu::gfx12_image_offset(x, y, 4, 4, 3);
+      ASSERT_TRUE(address);
+      EXPECT_EQ(memory_.read32(0x100000 + *address),
+                x >= 1 && x < 3 && y >= 1 && y < 3 ? 0xff0000ffu : 0u)
+          << x << "," << y;
+    }
+}
+
+TEST_P(GraphicsExportTest, MergedVertexUserCountExcludesSystemRingPair) {
+  amdgpu::Pm4QueueState state;
+  state.num_instances = 1;
+  state.uconfig_registers[0x242] = 4;
+  state.sh_registers[0x8b] = 6 << 1;
+  for (uint32_t i = 0; i < 6; ++i)
+    state.sh_registers[0x8c + i] = 100 + i;
+  amdgpu::GraphicsDraw draw(state, GetParam(), 3);
+  draw.initialize(*wave_, 0, 0);
+  for (uint32_t i = 0; i < 6; ++i)
+    EXPECT_EQ(wave_->debug_read_sgpr(8 + i), 100 + i);
+}
+
+TEST(GraphicsImageAddressTest, MatchesGfx12CoordinateBitsAndCrossesTileRows) {
+  using amdgpu::gfx12_image_offset;
+  EXPECT_EQ(gfx12_image_offset(1, 0, 256, 4, 3), 4);
+  EXPECT_EQ(gfx12_image_offset(0, 1, 256, 4, 3), 8);
+  EXPECT_EQ(gfx12_image_offset(8, 0, 256, 4, 3), 512);
+  EXPECT_EQ(gfx12_image_offset(0, 8, 256, 4, 3), 256);
+  EXPECT_EQ(gfx12_image_offset(128, 0, 256, 4, 3), 65536);
+  EXPECT_EQ(gfx12_image_offset(0, 128, 256, 4, 3), 131072);
+  EXPECT_EQ(gfx12_image_offset(2, 3, 64, 4, 0), 776);
+  EXPECT_FALSE(gfx12_image_offset(64, 0, 64, 4, 3));
+  EXPECT_FALSE(gfx12_image_offset(0, 0, 64, 3, 3));
+  EXPECT_FALSE(gfx12_image_offset(0, 0, 64, 4, 5));
+  EXPECT_EQ(amdgpu::gfx12_image_address(0x140100, 0, 8, 256, 4, 4), 0x140000);
+  EXPECT_EQ(amdgpu::gfx12_image_address(0x140100, 255, 255, 256, 4, 4), 0x17fefc);
+  EXPECT_EQ(amdgpu::gfx12_image_address(0x140100, 256, 0, 512, 4, 4), 0x180100);
+}
+
+TEST_P(GraphicsExportTest, HardwareImageLoadReadsTiledUintChannelsAndPacksD16) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+    GTEST_SKIP() << "RDNA4 image transfer encoding";
+  const std::array<uint32_t, 8> descriptor{
+      0x1000, (46u << 17) | (3u << 30), 3u << 14, (9u << 28) | (3u << 20) | 0xfac, 0, 0, 0, 0};
+  for (uint32_t r = 0; r < descriptor.size(); ++r)
+    wave_->debug_write_sgpr(8 + r, descriptor[r]);
+  wave_->set_exec(5);
+  for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
+    wave_->debug_write_vgpr(0, lane, 0xdeadbeef);
+    wave_->debug_write_vgpr(1, lane, 0xdeadbeef);
+    wave_->debug_write_vgpr(2, lane, lane == 2 ? 4 : 1);
+    wave_->debug_write_vgpr(3, lane, 2);
+  }
+  // Byte address for texel (1,2) in a 4-byte GFX12 64 KiB tile.
+  memory_.write32(0x100000 + 36, 0x44332211);
+  const std::array<uint32_t, 4> words{0xd3c00021, 0x00001000, 0x00000302, 0};
+  auto decoded = decoder_->decode(words.data());
+  ASSERT_FALSE(decoded.failed());
+  auto instruction_owner = std::move(decoded).value();
+  auto *instruction = instruction_owner.get();
+  ASSERT_TRUE(instruction->is_memory_op());
+  ASSERT_TRUE(cu_->execute_instruction(instruction, *wave_).succeeded());
+  ASSERT_FALSE(wave_->instruction_execution_failed());
+  ASSERT_NE(instruction->data(), nullptr);
+  EXPECT_EQ(instruction->data_as<amdgpu::VectorMemState>()->wait_counter_type,
+            amdgpu::WaitCounterType::LOADCNT);
+  amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
+  pipeline.issue(instruction_owner.release(), *wave_);
+  EXPECT_EQ(wave_->debug_read_vgpr(0, 0), 0x00220011);
+  EXPECT_EQ(wave_->debug_read_vgpr(1, 0), 0x00440033);
+  EXPECT_EQ(wave_->debug_read_vgpr(0, 1), 0xdeadbeef);
+  EXPECT_EQ(wave_->debug_read_vgpr(1, 1), 0xdeadbeef);
+  EXPECT_EQ(wave_->debug_read_vgpr(0, 2), 0);
+  EXPECT_EQ(wave_->debug_read_vgpr(1, 2), 0);
+  wave_->debug_write_vgpr(0, 0, 0x00660055);
+  wave_->debug_write_vgpr(1, 0, 0x00880077);
+  const auto store = rdna4::build_vimage(
+      6, {.dim = 1, .d16 = 1, .dmask = 15, .rsrc = 8, .vaddr0 = 2, .vaddr1 = 3});
+  std::array<uint32_t, 4> store_words{};
+  std::copy(store.begin(), store.end(), store_words.begin());
+  auto decoded_store = decoder_->decode(store_words.data());
+  ASSERT_FALSE(decoded_store.failed());
+  auto store_instruction = std::move(decoded_store).value();
+  ASSERT_TRUE(store_instruction->is_memory_op());
+  ASSERT_TRUE(cu_->execute_instruction(store_instruction.get(), *wave_).succeeded());
+  ASSERT_NE(store_instruction->data(), nullptr);
+  EXPECT_EQ(store_instruction->data_as<amdgpu::VectorMemState>()->wait_counter_type,
+            amdgpu::WaitCounterType::STORECNT);
+  pipeline.issue(store_instruction.release(), *wave_);
+  cu_->l1_vector().flush_all();
+  cache_.flush_all();
+  EXPECT_EQ(memory_.read32(0x100000 + 36), 0x88776655);
 }
 
 TEST_P(GraphicsExportTest, HardwareInterpolationEncodingUsesVgprSelectors) {

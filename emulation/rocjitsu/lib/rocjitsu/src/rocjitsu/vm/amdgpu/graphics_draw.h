@@ -10,6 +10,7 @@
 #include "rocjitsu/vm/amdgpu/pm4.h"
 
 namespace rocjitsu::amdgpu {
+class GpuMemory;
 
 /// Register snapshot and shader outputs for one ordered graphics draw.
 class GraphicsDraw final : public GraphicsStage {
@@ -19,11 +20,15 @@ public:
   void initialize(Wavefront &wave, uint32_t workgroup, uint32_t wave_index) override;
   void export_lane(Wavefront &wave, uint32_t lane, uint32_t target, uint32_t mask,
                    const std::array<uint32_t, 4> &values) override;
-  void finish_vertices();
+  /// Advance only after the preceding shader dispatch has retired and caches are flushed.
+  std::optional<DispatchEntry> advance(GpuMemory &memory, uint32_t process_id);
+  bool fragment_stage() const { return fragment_stage_; }
 
 private:
   rj_code_arch_t arch_;
   uint32_t vertex_count_;
+  uint32_t total_vertices_, first_vertex_ = 0;
+  uint32_t instance_count_, instance_ = 0;
   uint32_t primitive_type_;
   std::array<uint32_t, 0x400> sh_;
   std::array<uint32_t, 0x2000> context_;
@@ -32,6 +37,31 @@ private:
   std::array<uint32_t, 64> layer_viewport_{};
   std::array<uint32_t, 64> primitives_{};
   std::array<bool, 64> primitive_valid_{};
+  struct Fragment {
+    int32_t x = 0, y = 0;
+    float i = 0, j = 0;
+    bool covered = false;
+    uint32_t mask = 0;
+    std::array<uint32_t, 4> color{};
+  };
+  struct FragmentWave {
+    std::array<Fragment, 64> lanes{};
+    std::vector<uint32_t> parameters;
+  };
+  std::vector<FragmentWave> fragments_;
+  bool fragment_stage_ = false;
+  uint32_t fragment_wave_size_ = 0;
+  uint32_t color_format_ = 0;
+  uint32_t memory_format_ = 0;
+  uint32_t width_ = 0, height_ = 0, swizzle_ = 0;
+  uint64_t color_base_ = 0;
+  void finish_vertices();
+  DispatchEntry fragment_dispatch() const;
+  void rasterize(GpuMemory &memory, uint32_t process_id);
+  void write_colors(GpuMemory &memory, uint32_t process_id);
+  uint32_t primitive_count() const;
+  void select_vertex_group();
+  std::optional<DispatchEntry> next_vertex_group();
 };
 
 } // namespace rocjitsu::amdgpu

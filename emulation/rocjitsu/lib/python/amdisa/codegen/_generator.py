@@ -7613,6 +7613,25 @@ class CodeGenerator:
         # single base+width Operand cannot express -- so decode it from the
         # machine-inst fields here. ``vdata`` and ``rsrc`` are field-bearing
         # and already modeled.
+        if self.isa_spec.arch_name == 'rdna4' and inst.name.upper() in (
+            'IMAGE_LOAD',
+            'IMAGE_STORE',
+        ):
+            load = inst.name.upper() == 'IMAGE_LOAD'
+            counter = 'LOADCNT' if load else 'STORECNT'
+            return '\n'.join(
+                [
+                    '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
+                    f'  d->is_load = {str(load).lower()};',
+                    '  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);',
+                    f'  d->wait_counter_type = amdgpu::WaitCounterType::{counter};',
+                    '  if (!amdgpu::prepare_image_transfer(wf, *d, inst_.rsrc, inst_.vdata,',
+                    '      {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2}, inst_.dim, inst_.dmask, inst_.d16,',
+                    '      inst_.r128 || inst_.a16 || inst_.tfe)) return;',
+                    '  set_data(std::move(d));',
+                ]
+            )
+
         if cls == 'image_load':
             # Minimal image load: treat as a flat read from the image resource base address.
             # Full image addressing (texture coordinates, dimensions) not yet implemented.
@@ -8036,6 +8055,11 @@ class CodeGenerator:
 
     def _memory_issue_semantic_class(self, sem: InstructionSemantics) -> str:
         """Return the issue-metadata variant for one decoded instruction."""
+        if self.isa_spec.arch_name == 'rdna4' and sem.name in (
+            'IMAGE_LOAD',
+            'IMAGE_STORE',
+        ):
+            return 'buffer_load' if sem.name == 'IMAGE_LOAD' else 'buffer_store'
         if (
             sem.semantic_class == 'ds_barrier_arrive'
             and getattr(sem, 'operation', None) == 'async_barrier_arrive'
@@ -11460,7 +11484,11 @@ class CodeGenerator:
 
                     ctor_body_parts.extend(vgpr_msb_role_body)
 
-                    if _mem_sem and _mem_sem.semantic_class in self._MEMORY_CLASSES:
+                    if _mem_sem and (
+                        _mem_sem.semantic_class in self._MEMORY_CLASSES
+                        or self._memory_issue_semantic_class(_mem_sem)
+                        in self._MEMORY_CLASSES
+                    ):
                         ctor_body_parts.append(
                             self._memory_issue_initializer(_mem_sem, inst_field_names)
                         )
@@ -12630,7 +12658,10 @@ class CodeGenerator:
                         'ENC_VBUFFER',
                     }
                 )
-                is_mem_enc = enc.enc_name.upper() in _MEM_ENC_NAMES
+                is_mem_enc = enc.enc_name.upper() in _MEM_ENC_NAMES or (
+                    self.isa_spec.arch_name == 'rdna4'
+                    and enc.enc_name.upper() == 'ENC_VIMAGE'
+                )
                 if is_mem_enc:
                     cpp_includes.extend(
                         [
@@ -12667,6 +12698,13 @@ class CodeGenerator:
                 if any(i.name.upper() == 'IMAGE_GET_RESINFO' for i in all_insts):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/image_resource.h', False)
+                    )
+                if (
+                    self.isa_spec.arch_name == 'rdna4'
+                    and enc.enc_name.upper() == 'ENC_VIMAGE'
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/image_transfer.h', False)
                     )
                 if enc.enc_name.upper() in (
                     'ENC_VINTERP',

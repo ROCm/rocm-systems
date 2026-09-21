@@ -2322,6 +2322,12 @@ void CommandProcessor::draw_pm4(const HwQueue &queue, HwQueueState &qs, uint32_t
     throw std::runtime_error("graphics draw requires a compute unit");
   auto draw = std::make_shared<GraphicsDraw>(*queue.pm4, cus_[0]->config().arch, vertices);
   auto dp = draw->vertex_dispatch();
+  queue.pm4->draw = std::move(draw);
+  dispatch_graphics_pm4(queue, qs, std::move(dp));
+}
+
+void CommandProcessor::dispatch_graphics_pm4(const HwQueue &queue, HwQueueState &qs,
+                                             DispatchEntry dp) {
   if (dp.vgprs_per_wf > cus_[0]->vgpr_allocation_block_size())
     throw std::runtime_error("graphics launch exceeds available VGPRs");
   dp.kind = DispatchPacketKind::Kernel;
@@ -2331,25 +2337,26 @@ void CommandProcessor::draw_pm4(const HwQueue &queue, HwQueueState &qs, uint32_t
   dp.sgprs_per_wf = cus_[0]->config().sgprs_per_wf;
   dp.pm4_abi = true;
   dp.pm4_failure = queue.pm4->submissions.front().failure;
-  dp.graphics_stage = draw;
+  dp.graphics_stage = queue.pm4->draw;
   flush_gpu_caches();
-  util::Logger::vm("graphics vertex dispatch pc=", std::hex, dp.kernel_entry_pc, std::dec,
-                   " vertices=", vertices);
+  util::Logger::cp("graphics dispatch pc=", std::hex, dp.kernel_entry_pc, std::dec,
+                   " workgroups=", dp.total_wgs);
   KernelDispatchInfo info{};
   info.dispatch_id = dp.dispatch_id;
   info.entry_pc = dp.kernel_entry_pc;
-  info.kernel_name = "PM4 vertex";
+  info.kernel_name = queue.pm4->draw->fragment_stage() ? "PM4 fragment" : "PM4 vertex";
   info.code_target = cus_[0]->config().target;
   info.lds_size_bytes = dp.group_segment_fixed_size;
   info.wave_size = dp.kernel_wave_size;
-  info.grid_size_x = info.workgroup_size_x = dp.kernel_wave_size;
+  info.grid_size_x = dp.grid_size_x;
+  info.workgroup_size_x = dp.kernel_wave_size;
   info.grid_size_y = info.grid_size_z = info.workgroup_size_y = info.workgroup_size_z = 1;
-  info.workgroup_count = info.wfs_per_workgroup = 1;
+  info.workgroup_count = dp.total_wgs;
+  info.wfs_per_workgroup = 1;
   info.sgprs_per_wf = dp.sgprs_per_wf;
   info.vgprs_per_wf = dp.vgprs_per_wf;
   plugin_group_->onAmdgpuDispatchPacketProcessed(info);
   ++total_dispatched_;
-  queue.pm4->draw = std::move(draw);
   qs.push_entry(std::move(dp));
 }
 
@@ -2391,7 +2398,10 @@ void CommandProcessor::fetch_pm4(HwQueue &queue, HwQueueState &qs, simdojo::Tick
   try {
     if (state.draw) {
       flush_gpu_caches();
-      state.draw->finish_vertices();
+      if (auto dp = state.draw->advance(*memory_, queue.process_id)) {
+        dispatch_graphics_pm4(queue, qs, std::move(*dp));
+        return;
+      }
       state.draw.reset();
     }
     // Bound one event's packet work, including IB chains.
