@@ -32,8 +32,8 @@ struct exit_gotcha : tim::component::base<exit_gotcha, void>
     static void configure();
     static void shutdown();
 
-    static inline void start() {}
-    static inline void stop() {}
+    static void start() {}
+    static void stop() {}
 
     // exit / _Exit / quick_exit
     void operator()(const gotcha_data&, exit_func_t, int) const;

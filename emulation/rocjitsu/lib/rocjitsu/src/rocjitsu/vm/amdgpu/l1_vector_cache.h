@@ -81,7 +81,8 @@ private:
                   bool request_l1_bypass, uint32_t vmid, RequestMtypeResolver &mtypes);
   void write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, bool non_temporal,
                    uint32_t vmid, RequestMtypeResolver &mtypes);
-  void ensure_line(uint64_t addr, uint32_t vmid);
+  // Skip fetching only when the caller immediately overwrites the entire line.
+  void ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss = true);
 
   CacheStore cache_;
   L2Cache *l2_;
