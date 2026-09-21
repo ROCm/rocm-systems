@@ -254,7 +254,7 @@ client_data::get_code_object_info(std::uint64_t code_object_id) const
         });
 }
 
-inline constexpr client_data*
+constexpr client_data*
 as_client_data(void* _ptr)
 {
     return static_cast<client_data*>(_ptr);
