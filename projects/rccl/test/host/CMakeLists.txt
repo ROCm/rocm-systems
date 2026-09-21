@@ -538,6 +538,19 @@ set(CMAKE_CXX_FLAGS_INIT "--gcc-install-dir=${_gcc_install_dir} --offload-host-o
 
 project(rccl-HostUnitTests LANGUAGES CXX)
 
+# hipcc prepends -O3 and CMake's Debug flags carry no -O, so Debug built at -O3.
+# Appended, not prepended: the last -O on the command line wins.
+string(APPEND CMAKE_CXX_FLAGS_DEBUG " -O0")
+
+option(HOST_TEST_CCACHE "Route host-test compiles through ccache when available" ON)
+if(HOST_TEST_CCACHE AND NOT CMAKE_CXX_COMPILER_LAUNCHER)
+  find_program(CCACHE_PROGRAM ccache)
+  if(CCACHE_PROGRAM)
+    message(STATUS "Using ccache: ${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+  endif()
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
