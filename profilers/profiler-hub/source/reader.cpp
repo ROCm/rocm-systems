@@ -15,7 +15,18 @@ reader_t::reader_t(std::unique_ptr<profiler_hub::storage_t> storage)
 : m_impl(std::make_unique<impl>(std::move(storage)))
 {}
 
+reader_t::reader_t(std::unique_ptr<profiler_hub::storage_t> storage,
+                   std::shared_ptr<reader_catalog_t>        catalog)
+: m_impl(std::make_unique<impl>(std::move(storage), std::move(catalog)))
+{}
+
 reader_t::~reader_t() = default;
+
+void
+reader_t::build_catalog_category(catalog_category_t category, reader_catalog_t& catalog)
+{
+    m_impl->build_catalog_category(category, catalog);
+}
 
 reader_types::node_info_list_t
 reader_t::get_all_nodes() const

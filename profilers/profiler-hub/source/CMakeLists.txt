@@ -8,6 +8,8 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/json_serializers.cpp
     ${CMAKE_CURRENT_LIST_DIR}/reader.cpp
     ${CMAKE_CURRENT_LIST_DIR}/reader_impl.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/reader_catalog.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/reader_catalog.hpp
     ${CMAKE_CURRENT_LIST_DIR}/storage.cpp
     ${CMAKE_CURRENT_LIST_DIR}/storage_impl.cpp
     ${CMAKE_CURRENT_LIST_DIR}/profiler_hub_ctx.cpp
