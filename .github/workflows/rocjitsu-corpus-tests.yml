@@ -83,8 +83,11 @@ jobs:
             enable_expensive_checks: 0
             sanitizer_runtime: STATIC
             run_simulator_corpus: true
-            corpus_soft_timeout: 45
-            corpus_hard_timeout: 60
+            # Each simulator process can use many host threads. Bound Release
+            # fanout so long FPSAN cases do not starve under runner load.
+            corpus_worker_limit: 4
+            corpus_soft_timeout: 360
+            corpus_hard_timeout: 600
             corpus_rerun_timeout: 600
             corpus_sanitizer: none
           - name: asan-ubsan
@@ -103,6 +106,7 @@ jobs:
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
             run_simulator_corpus: true
+            corpus_worker_limit: 4
             corpus_soft_timeout: 240
             corpus_hard_timeout: 480
             corpus_rerun_timeout: 1200
@@ -122,6 +126,7 @@ jobs:
             enable_expensive_checks: 0
             sanitizer_runtime: SHARED
             run_simulator_corpus: false
+            corpus_worker_limit: 16
             corpus_soft_timeout: 0
             corpus_hard_timeout: 0
             corpus_rerun_timeout: 0
@@ -143,6 +148,7 @@ jobs:
             c_compiler: gcc
             cxx_compiler: g++
             run_simulator_corpus: true
+            corpus_worker_limit: 4
             corpus_soft_timeout: 240
             corpus_hard_timeout: 480
             corpus_rerun_timeout: 1200
@@ -429,9 +435,10 @@ jobs:
 
           corpus_test_status=0
 
+          WORKER_LIMIT=${{ matrix.corpus_worker_limit }}
           WORKERS="$(nproc)"
-          if (( WORKERS > 16 )); then
-            WORKERS=16
+          if (( WORKERS > WORKER_LIMIT )); then
+            WORKERS="${WORKER_LIMIT}"
           fi
           corpus_test_flags=(
             --workers "${WORKERS}"

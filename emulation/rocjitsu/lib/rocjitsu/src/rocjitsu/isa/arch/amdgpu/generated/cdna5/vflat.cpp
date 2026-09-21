@@ -37,7 +37,10 @@ FlatLoadU8Vflat::FlatLoadU8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -69,7 +72,10 @@ FlatLoadI8Vflat::FlatLoadI8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -101,7 +107,10 @@ FlatLoadU16Vflat::FlatLoadU16Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -133,7 +142,10 @@ FlatLoadI16Vflat::FlatLoadI16Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -165,7 +177,10 @@ FlatLoadB32Vflat::FlatLoadB32Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -197,7 +212,10 @@ FlatLoadB64Vflat::FlatLoadB64Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -229,7 +247,10 @@ FlatLoadB96Vflat::FlatLoadB96Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -261,7 +282,10 @@ FlatLoadB128Vflat::FlatLoadB128Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -293,7 +317,10 @@ FlatStoreB8Vflat::FlatStoreB8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -325,7 +352,10 @@ FlatStoreB16Vflat::FlatStoreB16Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -357,7 +387,10 @@ FlatStoreB32Vflat::FlatStoreB32Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -389,7 +422,10 @@ FlatStoreB64Vflat::FlatStoreB64Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -421,7 +457,10 @@ FlatStoreB96Vflat::FlatStoreB96Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -453,7 +492,10 @@ FlatStoreB128Vflat::FlatStoreB128Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -485,7 +527,10 @@ FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -517,7 +562,10 @@ FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -549,7 +597,10 @@ FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -581,7 +632,10 @@ FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -613,7 +667,10 @@ FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -645,7 +702,10 @@ FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -677,7 +737,10 @@ FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -709,7 +772,10 @@ FlatStoreD16HiB16Vflat::FlatStoreD16HiB16Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -747,7 +813,12 @@ FlatAtomicSwapB32Vflat::FlatAtomicSwapB32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -785,7 +856,12 @@ FlatAtomicCmpswapB32Vflat::FlatAtomicCmpswapB32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -823,7 +899,12 @@ FlatAtomicAddU32Vflat::FlatAtomicAddU32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -861,7 +942,12 @@ FlatAtomicSubU32Vflat::FlatAtomicSubU32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -899,7 +985,12 @@ FlatAtomicSubClampU32Vflat::FlatAtomicSubClampU32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -937,7 +1028,12 @@ FlatAtomicMinI32Vflat::FlatAtomicMinI32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -975,7 +1071,12 @@ FlatAtomicMinU32Vflat::FlatAtomicMinU32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1013,7 +1114,12 @@ FlatAtomicMaxI32Vflat::FlatAtomicMaxI32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1051,7 +1157,12 @@ FlatAtomicMaxU32Vflat::FlatAtomicMaxU32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1089,7 +1200,12 @@ FlatAtomicAndB32Vflat::FlatAtomicAndB32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1127,7 +1243,12 @@ FlatAtomicOrB32Vflat::FlatAtomicOrB32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1165,7 +1286,12 @@ FlatAtomicXorB32Vflat::FlatAtomicXorB32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1203,7 +1329,12 @@ FlatAtomicIncU32Vflat::FlatAtomicIncU32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1241,7 +1372,12 @@ FlatAtomicDecU32Vflat::FlatAtomicDecU32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1279,7 +1415,12 @@ FlatAtomicSwapB64Vflat::FlatAtomicSwapB64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1317,7 +1458,12 @@ FlatAtomicCmpswapB64Vflat::FlatAtomicCmpswapB64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1355,7 +1501,12 @@ FlatAtomicAddU64Vflat::FlatAtomicAddU64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1393,7 +1544,12 @@ FlatAtomicSubU64Vflat::FlatAtomicSubU64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1431,7 +1587,12 @@ FlatAtomicMinI64Vflat::FlatAtomicMinI64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1469,7 +1630,12 @@ FlatAtomicMinU64Vflat::FlatAtomicMinU64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1507,7 +1673,12 @@ FlatAtomicMaxI64Vflat::FlatAtomicMaxI64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1545,7 +1716,12 @@ FlatAtomicMaxU64Vflat::FlatAtomicMaxU64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1583,7 +1759,12 @@ FlatAtomicAndB64Vflat::FlatAtomicAndB64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1621,7 +1802,12 @@ FlatAtomicOrB64Vflat::FlatAtomicOrB64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1659,7 +1845,12 @@ FlatAtomicXorB64Vflat::FlatAtomicXorB64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1697,7 +1888,12 @@ FlatAtomicIncU64Vflat::FlatAtomicIncU64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1735,7 +1931,12 @@ FlatAtomicDecU64Vflat::FlatAtomicDecU64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1773,7 +1974,12 @@ FlatAtomicCondSubU32Vflat::FlatAtomicCondSubU32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1811,7 +2017,12 @@ FlatAtomicMinNumF32Vflat::FlatAtomicMinNumF32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1849,7 +2060,12 @@ FlatAtomicMaxNumF32Vflat::FlatAtomicMaxNumF32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1887,7 +2103,12 @@ FlatAtomicAddF64Vflat::FlatAtomicAddF64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1925,7 +2146,12 @@ FlatAtomicAddF32Vflat::FlatAtomicAddF32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -1963,7 +2189,12 @@ FlatAtomicPkAddF16Vflat::FlatAtomicPkAddF16Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -2001,7 +2232,12 @@ FlatAtomicPkAddBf16Vflat::FlatAtomicPkAddBf16Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -2039,7 +2275,12 @@ FlatAtomicMinNumF64Vflat::FlatAtomicMinNumF64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -2077,7 +2318,12 @@ FlatAtomicMaxNumF64Vflat::FlatAtomicMaxNumF64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -2137,7 +2383,10 @@ FlatLoadMonitorB32Vflat::FlatLoadMonitorB32Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -2169,7 +2418,10 @@ FlatLoadMonitorB64Vflat::FlatLoadMonitorB64Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
@@ -2201,7 +2453,10 @@ FlatLoadMonitorB128Vflat::FlatLoadMonitorB128Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
 namespace detail {
