@@ -12,7 +12,7 @@ wavefront dispatches, memory instructions, register reads, barriers, etc.
 | `KernelLoggingPlugin` | `logging/` | Logs kernel dispatches and detects MMA instruction usage. |
 | `ThroughputPlugin` | `throughput/` | Reports per-dispatch and aggregate wave-instruction MIPS with an exclusive instruction-family breakdown. |
 | `DataHazardPlugin` | `data_hazard/` | Detects RAW, WAR and WAW hazards caused by missing or insufficient `s_wait_*` instructions, plus LDS and global memory races. See [data-hazard.md](data-hazard.md). |
-| `PerfsimPlugin` | `perfsim/` | Adapts gfx1250 execution observations to an external Perfsim FFM-v8 backend. Built only when explicitly enabled. See the [Perfsim adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md). |
+| `PerfsimPlugin` | `perfsim/` | Adapts gfx1250 execution observations to an external Perfsim backend implementing FFM observer APIs v8 through v13. Built only when explicitly enabled. See the [Perfsim adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md). |
 
 The race detector plugin contains both the core detection algorithm
 (`race_detector/core/`) and the rocjitsu adapter (`race_detector/plugin.h`).
@@ -303,7 +303,9 @@ public:
 ```
 
 The sink is assigned by the `ExecutionPluginGroup` when the plugin is
-added. If no group configures a sink, the default is stderr.
+added. Writes through sinks assigned by one group are serialized at the
+group's fanout boundary, including writes from asynchronous plugin workers.
+If no group configures a sink, the default is stderr.
 
 `KernelDispatchInfo` reports the effective LDS allocation in
 `lds_size_bytes`, the descriptor-selected `wave_size`, the configured
@@ -361,7 +363,13 @@ group divides hooks by frequency and synchronization cost:
   register-access callbacks are high-frequency and run concurrently with both
   other high-frequency callbacks and infrequent callbacks by default. Each
   callback is scoped to a wavefront below the simulation's shader-engine
-  partition granularity.
+  partition granularity. During the before-instruction callback, a memory
+  instruction exposes its decoded wait-counter obligations and completion-order
+  metadata through `amdgpu_memory_issue_info()`, before address or store-data
+  operands are read. This metadata describes operations
+  routed through the scalar, vector, and local memory pipelines; it is not a
+  complete inventory of non-memory events, such as messages and timestamp
+  queries, that hardware wait counters may also track.
 
 A plugin whose high-frequency callbacks reach shared mutable state may override
 `requires_serial_hot_hooks()` to return `true`. The group samples that stable
