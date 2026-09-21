@@ -75,7 +75,7 @@ or report planning proportionally cheaper. Even at execution time, fallback
 placement and shared routing can leave fixed per-access costs. Treat stride as
 an evidence-selection control, not as a promised overhead divisor.
 
-Use `RJ_CONSAN_PRESET=high` for small reproductions and `max`
+Use `RJ_CONSAN_PRESET=higher` for small reproductions and `max`
 to remove workgroup and cell sampling. Bounded retention still applies at
 `max`. See [USAGE.md](USAGE.md#presets) for preset values and overrides.
 
