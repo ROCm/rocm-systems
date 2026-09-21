@@ -794,6 +794,9 @@ struct gmock_buffer_storage
     MOCK_METHOD(void, store_memory_allocation,
                 (const memory_allocation_sample_data_t& sample));
     MOCK_METHOD(void, store_scratch_memory, (const scratch_memory_sample_data_t& sample));
+    MOCK_METHOD(bool, get_use_timemory, ());
+    MOCK_METHOD(void, write_timemory_bundle,
+                (std::string_view name, std::uint64_t tid, std::uint64_t elapsed_ns));
 };
 
 inline std::unique_ptr<::testing::StrictMock<gmock_buffer_storage>> g_buffer_storage_mock;
@@ -1135,11 +1138,13 @@ struct externals
 
     static std::uint64_t get_thread_info_sequent_tid(std::uint64_t /*tid*/) { return 0; }
 
-    static bool get_use_timemory() { return false; }
+    static bool get_use_timemory() { return g_buffer_storage_mock->get_use_timemory(); }
 
-    static void write_timemory_bundle(std::string_view /*name*/, std::uint64_t /*tid*/,
-                                      std::uint64_t /*elapsed_ns*/)
-    {}
+    static void write_timemory_bundle(std::string_view name, std::uint64_t tid,
+                                      std::uint64_t elapsed_ns)
+    {
+        g_buffer_storage_mock->write_timemory_bundle(name, tid, elapsed_ns);
+    }
 };
 
 // Every SdkBackend member on_tracing_api_enter/exit

@@ -7,8 +7,6 @@
 
 #include "library/rocprofiler-sdk/types.hpp"
 
-#include "logger/debug.hpp"
-
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 

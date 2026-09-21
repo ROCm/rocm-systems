@@ -19,6 +19,7 @@ namespace
 {
 
 using ::testing::Eq;
+using ::testing::Return;
 using ::testing::StrictMock;
 
 using test_support::externals;
@@ -56,22 +57,22 @@ TEST(memory_copy_test, descriptor_uses_default_buffer_properties)
               k_default_buffer_properties.buffer_watermark);
 }
 
-TEST(memory_copy_test, on_memory_copy_handles_null_record_without_crashing)
+TEST(memory_copy_test, on_memory_copy_configure_adds_category_string)
 {
     g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
-    g_buffer_storage_mock    = std::make_unique<StrictMock<gmock_buffer_storage>>();
 
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info).Times(1);
-    EXPECT_CALL(*g_metadata_registry_mock, add_track).Times(1);
-    EXPECT_CALL(*g_metadata_registry_mock, add_stream).Times(1);
-    EXPECT_CALL(*g_buffer_storage_mock, store_memory_copy).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock,
+                add_string(Eq(externals::memory_copy_category_name)))
+        .Times(1);
 
-    mock_sdk::memory_copy_record_t record{};
-
-    on_memory_copy<mock_sdk, externals>(&record, nullptr);
+    on_memory_copy_configure<externals>();
 
     g_metadata_registry_mock.reset();
-    g_buffer_storage_mock.reset();
+}
+
+TEST(memory_copy_test, on_memory_copy_handles_null_record_without_crashing)
+{
+    on_memory_copy<mock_sdk, externals>(nullptr, nullptr);
 }
 
 TEST(memory_copy_test, on_memory_copy_forwards_record_fields_to_dependencies)
@@ -126,6 +127,42 @@ TEST(memory_copy_test, on_memory_copy_forwards_record_fields_to_dependencies)
     EXPECT_CALL(*g_metadata_registry_mock, add_track(Eq(expected_track))).Times(1);
     EXPECT_CALL(*g_metadata_registry_mock, add_stream(Eq(k_mock_stream_id))).Times(1);
     EXPECT_CALL(*g_buffer_storage_mock, store_memory_copy(Eq(expected_sample))).Times(1);
+    EXPECT_CALL(*g_buffer_storage_mock, get_use_timemory).WillOnce(Return(false));
+
+    on_memory_copy<mock_sdk, externals>(&record, nullptr);
+
+    g_metadata_registry_mock.reset();
+    g_buffer_storage_mock.reset();
+}
+
+TEST(memory_copy_test, on_memory_copy_writes_timemory_bundle_when_enabled)
+{
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
+    g_buffer_storage_mock    = std::make_unique<StrictMock<gmock_buffer_storage>>();
+
+    mock_sdk::memory_copy_record_t record{};
+    record.thread_id       = 111;
+    record.start_timestamp = 1000;
+    record.end_timestamp   = 2500;
+
+    // src/dst agent logical_node_id and get_thread_info_sequent_tid are fixed at 0 in
+    // mock_domain_service.hpp.
+    constexpr std::int32_t  k_mock_logical_node_id = 0;
+    constexpr std::uint64_t k_mock_sequent_tid     = 0;
+    const std::string       expected_name          = fmt::format(
+        "memory_copy: {} -> {}", k_mock_logical_node_id, k_mock_logical_node_id);
+    const std::uint64_t expected_elapsed_ns =
+        record.end_timestamp - record.start_timestamp;
+
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, add_track).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, add_stream).Times(1);
+    EXPECT_CALL(*g_buffer_storage_mock, store_memory_copy).Times(1);
+    EXPECT_CALL(*g_buffer_storage_mock, get_use_timemory).WillOnce(Return(true));
+    EXPECT_CALL(*g_buffer_storage_mock,
+                write_timemory_bundle(Eq(expected_name), Eq(k_mock_sequent_tid),
+                                      Eq(expected_elapsed_ns)))
+        .Times(1);
 
     on_memory_copy<mock_sdk, externals>(&record, nullptr);
 
