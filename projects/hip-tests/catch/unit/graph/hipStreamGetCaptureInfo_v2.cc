@@ -20,7 +20,7 @@
  */
 
 void checkStreamCaptureInfo_v2(hipStreamCaptureMode mode, hipStream_t stream) {
-  constexpr size_t N = 1000000;
+  const size_t N = isQuickLevel() ? 65536 : 1000000;
   size_t Nbytes = N * sizeof(float);
 
   hipGraph_t graph{nullptr}, capInfoGraph{nullptr};
@@ -105,7 +105,8 @@ void checkStreamCaptureInfo_v2(hipStreamCaptureMode mode, hipStream_t stream) {
   REQUIRE(graphExec != nullptr);
 
   // Replay the recorded sequence multiple times
-  for (size_t i = 0; i < kLaunchIters; i++) {
+  const size_t launchIters = isQuickLevel() ? 2 : kLaunchIters;
+  for (size_t i = 0; i < launchIters; i++) {
     std::fill_n(A_h.host_ptr(), N, static_cast<float>(i));
     HIP_CHECK(hipGraphLaunch(graphExec, stream));
     HIP_CHECK(hipStreamSynchronize(stream));

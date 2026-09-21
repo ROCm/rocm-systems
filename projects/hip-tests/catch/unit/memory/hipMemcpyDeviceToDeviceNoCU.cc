@@ -217,10 +217,10 @@ HIP_TEST_CASE(Unit_hipMemcpyDeviceToDeviceNoCU_NoCU_MulStrm) {
  *    - HIP_VERSION >= 6.1
  */
 HIP_TEST_CASE(Unit_hipMemcpyDeviceToDeviceNoCU_Memcpy_Kernel_InParallel) {
-  constexpr int N = 1 << 24;
+  const int N = isQuickLevel() ? (1 << 18) : (1 << 24);
   size_t buffer_size = N * sizeof(int);
   constexpr unsigned threadsPerBlock = 1024;
-  constexpr int blocks =
+  const int blocks =
       (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   // Allocate device resources
   int *Ad, *Bd, *Cd;

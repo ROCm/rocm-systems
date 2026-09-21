@@ -257,7 +257,9 @@ HIP_TEST_CASE(Unit_Grid_Group_Sync_Positive_Basic) {
     HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
   }
 
-  auto loops = GENERATE(2, 4, 8, 16);
+  const auto loop_vals =
+      isQuickLevel() ? std::vector<int>{2, 4} : std::vector<int>{2, 4, 8, 16};
+  auto loops = GENERATE_COPY(from_range(loop_vals));
   dim3 blocks;
   dim3 threads;
   if (IsStrixHalo()) {

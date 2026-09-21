@@ -42,9 +42,9 @@ static __global__ void vectorSum(const float* A_d, const float* B_d, float* C_d,
  */
 static void UpdateStreamCaptureDependenciesSet(hipStream_t stream,
                                                hipStreamCaptureMode captureMode) {
-  constexpr size_t N = 1000000;
+  const size_t N = isQuickLevel() ? 65536 : 1000000;
   constexpr unsigned threadsPerBlock = 256;
-  constexpr int blocks =
+  const int blocks =
       (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   size_t Nbytes = N * sizeof(float);
 
@@ -146,7 +146,8 @@ static void UpdateStreamCaptureDependenciesSet(hipStream_t stream,
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
 
   // Replay the recorded sequence multiple times
-  for (size_t i = 0; i < kLaunchIters; i++) {
+  const size_t launchIters = isQuickLevel() ? 2 : kLaunchIters;
+  for (size_t i = 0; i < launchIters; i++) {
     std::fill_n(A_h.host_ptr(), N, static_cast<float>(i));
     std::fill_n(C_h.host_ptr(), N, static_cast<float>(i));
     HIP_CHECK(hipGraphLaunch(graphExec, stream));

@@ -375,7 +375,7 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_ReleaseThreshold) {
       // create a stream
       hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  constexpr int N = 1 << 20;
+  const int N = isQuickLevel() ? (1 << 10) : (1 << 20);
   REQUIRE(true == checkMaximumAndDefaultThreshold(stream, N, testdefault));
   REQUIRE(true == checkMaximumAndDefaultThreshold(stream, N, testMaximum));
   HIP_CHECK(hipStreamDestroy(stream));
@@ -392,7 +392,7 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_ReleaseThreshold) {
  *    - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_NullStream) {
-  checkMempoolSupported(0) constexpr int N = 1 << 20;
+  checkMempoolSupported(0) const int N = isQuickLevel() ? (1 << 10) : (1 << 20);
   REQUIRE(true == checkMaximumAndDefaultThreshold(0, N, testdefault));
   REQUIRE(true == checkMaximumAndDefaultThreshold(0, N, testMaximum));
 }
@@ -408,7 +408,7 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_NullStream) {
  *    - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_hipStreamPerThread) {
-  checkMempoolSupported(0) constexpr int N = 1 << 20;
+  checkMempoolSupported(0) const int N = isQuickLevel() ? (1 << 10) : (1 << 20);
   REQUIRE(true == checkMaximumAndDefaultThreshold(hipStreamPerThread, N, testdefault));
   REQUIRE(true == checkMaximumAndDefaultThreshold(hipStreamPerThread, N, testMaximum));
 }
@@ -424,7 +424,7 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_hipStreamPerThread) {
  *    - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_ReleaseThreshold_Mgpu) {
-  constexpr int N = 1 << 20;
+  const int N = isQuickLevel() ? (1 << 10) : (1 << 20);
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int dev = 0; dev < numDevices; dev++) {

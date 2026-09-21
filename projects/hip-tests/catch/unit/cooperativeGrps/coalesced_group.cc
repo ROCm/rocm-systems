@@ -706,7 +706,8 @@ template <bool global_memory, typename T> void CoalescedGroupSyncTest() {
   const auto randomized_run_count = GENERATE(range(0, cmd_options.cg_iterations));
   const auto blocks = GenerateBlockDimensionsForShuffle();
   const auto threads = GenerateThreadDimensionsForShuffle();
-  auto test_case = GENERATE(range(0, 4));
+  const int max_test_cases = isQuickLevel() ? 2 : 4;
+  auto test_case = GENERATE_COPY(range(0, max_test_cases));
   uint64_t active_mask = get_active_mask(test_case, warp_size);
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
   INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
