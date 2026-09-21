@@ -80,7 +80,7 @@ jobs:
         cd projects/rocprofiler-sdk
         git config --global --add safe.directory '*'
         apt update
-        apt install -y wget build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev libdrm-dev pkg-config
+        apt install -y wget build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev libdrm-dev libnuma-dev pkg-config
 
         # Older ROCm versions don't provide these packages.
         apt install -y rccl-dev rccl-unittests || true

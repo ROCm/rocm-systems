@@ -29,7 +29,7 @@ find_path(
     HINTS "${ROCM_PATH}/include" "${ROCM_PATH}/lib/rocm_sysdeps/include")
 
 include(FindPackageHandleStandardArgs)
-find_package_handle_standard_args(NUMA DEFAULT_MSG NUMA_LIBRARY)
+find_package_handle_standard_args(NUMA DEFAULT_MSG NUMA_LIBRARY NUMA_INCLUDE_DIR)
 
 if(NUMA_FOUND)
     set(NUMA_LIBRARIES "${NUMA_LIBRARY}")
