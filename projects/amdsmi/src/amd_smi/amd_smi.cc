@@ -1724,28 +1724,32 @@ amdsmi_status_t amdsmi_get_ampp_profiles(amdsmi_processor_handle processor_handl
   }
 #endif
 
-  // Only a null caller buffer means "sizing call". A non-null buffer with
-  // *num_profiles == 0 is an undersized buffer, so the staging vector must
-  // still hand a non-null pointer down -- resize(0) yields data() == nullptr,
-  // which would otherwise be indistinguishable from a sizing call and would
-  // bypass the capacity check below.
-  std::vector<rsmi_ampp_profile_t> rsmi_profiles;
-  if (profiles != nullptr) {
-    rsmi_profiles.resize(std::max<size_t>(1, *num_profiles));
-  }
+  static_assert(AMDSMI_MAX_STRING_LENGTH == RSMI_AMPP_MAX_STRING_LENGTH,
+                "AMDSMI and RSMI AMPP string lengths must match");
+  static_assert(sizeof(amdsmi_ampp_profile_t) == sizeof(rsmi_ampp_profile_t),
+                "AMDSMI and RSMI AMPP profile structs must match");
+  static_assert(offsetof(amdsmi_ampp_profile_t, name) == offsetof(rsmi_ampp_profile_t, name),
+                "AMDSMI and RSMI AMPP profile name offsets must match");
+  static_assert(offsetof(amdsmi_ampp_profile_t, index) == offsetof(rsmi_ampp_profile_t, index),
+                "AMDSMI and RSMI AMPP profile index offsets must match");
+  static_assert(
+      offsetof(amdsmi_ampp_profile_t, is_active) == offsetof(rsmi_ampp_profile_t, is_active),
+      "AMDSMI and RSMI AMPP profile active offsets must match");
+  static_assert(
+      offsetof(amdsmi_ampp_profile_t, is_writable) == offsetof(rsmi_ampp_profile_t, is_writable),
+      "AMDSMI and RSMI AMPP profile writable offsets must match");
+  static_assert(offsetof(amdsmi_ampp_profile_t, is_configured) ==
+                    offsetof(rsmi_ampp_profile_t, is_configured),
+                "AMDSMI and RSMI AMPP profile configured offsets must match");
+  static_assert(
+      offsetof(amdsmi_ampp_profile_t, reserved) == offsetof(rsmi_ampp_profile_t, reserved),
+      "AMDSMI and RSMI AMPP profile reserved offsets must match");
 
   amdsmi_status_t amdsmi_status =
       rsmi_wrapper(rsmi_dev_ampp_profiles_get, processor_handle, 0, version,
-                   profiles != nullptr ? rsmi_profiles.data() : nullptr, num_profiles);
+                   reinterpret_cast<rsmi_ampp_profile_t*>(profiles), num_profiles);
   if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
     return amdsmi_status;
-  }
-
-  if (profiles != nullptr) {
-    if (sizeof(amdsmi_ampp_profile_t) != sizeof(rsmi_ampp_profile_t)) {
-      return AMDSMI_STATUS_UNEXPECTED_SIZE;
-    }
-    std::memcpy(profiles, rsmi_profiles.data(), (*num_profiles) * sizeof(amdsmi_ampp_profile_t));
   }
 
   return AMDSMI_STATUS_SUCCESS;
@@ -1766,24 +1770,29 @@ amdsmi_status_t amdsmi_get_ampp_fields(amdsmi_processor_handle processor_handle,
   }
 #endif
 
-  // Same non-null-but-zero-capacity reasoning as amdsmi_get_ampp_profiles.
-  std::vector<rsmi_ampp_field_t> rsmi_fields;
-  if (fields != nullptr) {
-    rsmi_fields.resize(std::max<size_t>(1, *num_fields));
-  }
+  static_assert(sizeof(amdsmi_ampp_field_t) == sizeof(rsmi_ampp_field_t),
+                "AMDSMI and RSMI AMPP field structs must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, name) == offsetof(rsmi_ampp_field_t, name),
+                "AMDSMI and RSMI AMPP field name offsets must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, unit) == offsetof(rsmi_ampp_field_t, unit),
+                "AMDSMI and RSMI AMPP field unit offsets must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, value) == offsetof(rsmi_ampp_field_t, value),
+                "AMDSMI and RSMI AMPP field value offsets must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, limit_min) == offsetof(rsmi_ampp_field_t, limit_min),
+                "AMDSMI and RSMI AMPP field minimum offsets must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, limit_max) == offsetof(rsmi_ampp_field_t, limit_max),
+                "AMDSMI and RSMI AMPP field maximum offsets must match");
+  static_assert(
+      offsetof(amdsmi_ampp_field_t, has_limits) == offsetof(rsmi_ampp_field_t, has_limits),
+      "AMDSMI and RSMI AMPP field limit flag offsets must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, reserved) == offsetof(rsmi_ampp_field_t, reserved),
+                "AMDSMI and RSMI AMPP field reserved offsets must match");
 
   amdsmi_status_t amdsmi_status =
       rsmi_wrapper(rsmi_dev_ampp_fields_get, processor_handle, 0, profile_name, num_fields,
-                   fields != nullptr ? rsmi_fields.data() : nullptr);
+                   reinterpret_cast<rsmi_ampp_field_t*>(fields));
   if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
     return amdsmi_status;
-  }
-
-  if (fields != nullptr) {
-    if (sizeof(amdsmi_ampp_field_t) != sizeof(rsmi_ampp_field_t)) {
-      return AMDSMI_STATUS_UNEXPECTED_SIZE;
-    }
-    std::memcpy(fields, rsmi_fields.data(), (*num_fields) * sizeof(amdsmi_ampp_field_t));
   }
 
   return AMDSMI_STATUS_SUCCESS;

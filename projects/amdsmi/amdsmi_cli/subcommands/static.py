@@ -1026,11 +1026,26 @@ class StaticCommands:
 
                 # Get vram type string
                 vram_type_enum = vram_info["vram_type"]
-                vram_type = amdsmi_interface.amdsmi_wrapper.amdsmi_vram_type_t__enumvalues[
-                    vram_type_enum
-                ]
-                # Remove amdsmi enum prefix
-                vram_type = vram_type.replace("AMDSMI_VRAM_TYPE_", "").replace("_", "")
+                # The generated map keeps the sentinel name for aliased values;
+                # prefer the corresponding real enum name when available.
+                if vram_type_enum == amdsmi_interface.amdsmi_wrapper.AMDSMI_VRAM_TYPE__MAX:
+                    enum_name = next(
+                        (
+                            name
+                            for name, value in vars(amdsmi_interface.amdsmi_wrapper).items()
+                            if name.startswith("AMDSMI_VRAM_TYPE_")
+                            and name != "AMDSMI_VRAM_TYPE__MAX"
+                            and value == vram_type_enum
+                        ),
+                        "AMDSMI_VRAM_TYPE__MAX",
+                    )
+                    vram_type = enum_name.replace("AMDSMI_VRAM_TYPE_", "").replace("_", "")
+                else:
+                    vram_type = amdsmi_interface.amdsmi_wrapper.amdsmi_vram_type_t__enumvalues[
+                        vram_type_enum
+                    ]
+                    # Remove amdsmi enum prefix
+                    vram_type = vram_type.replace("AMDSMI_VRAM_TYPE_", "").replace("_", "")
 
                 # Get vram vendor string
                 vram_vendor = vram_info["vram_vendor"]

@@ -313,6 +313,10 @@ std::vector<AmppProfileInternal> enumerate_profiles(const std::string& root,
     }
     profiles.push_back({idx, name, configured});
   }
+  if (ec) {
+    *status = convert_ampp_errno(ec.value());
+    return {};
+  }
   std::sort(
       profiles.begin(), profiles.end(),
       [](const AmppProfileInternal& a, const AmppProfileInternal& b) { return a.index < b.index; });
@@ -339,6 +343,10 @@ std::vector<std::string> enumerate_field_names(const std::string& profile_dir,
     if (entry.is_regular_file()) {
       names.push_back(entry.path().filename().string());
     }
+  }
+  if (ec) {
+    *status = convert_ampp_errno(ec.value());
+    return {};
   }
   return names;
 }
