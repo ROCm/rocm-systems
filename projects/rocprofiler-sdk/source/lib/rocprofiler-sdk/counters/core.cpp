@@ -176,13 +176,13 @@ stop_context(const context::context* ctx)
 {
     if(!ctx || !ctx->dispatch_counter_collection) return;
 
-    auto* controller = hsa::get_queue_controller();
+    auto* controller  = hsa::get_queue_controller();
     bool  was_enabled = false;
 
     ctx->dispatch_counter_collection->enabled.wlock([&](auto& enabled) {
         if(!enabled) return;
         was_enabled = true;
-        enabled = false;
+        enabled     = false;
     });
 
     if(controller && was_enabled)
@@ -222,8 +222,7 @@ set_dispatch_agents(rocprofiler_context_id_t      context_id,
 
     auto* ctx_p = context::get_mutable_registered_context(context_id);
     if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
-    if(!ctx_p->dispatch_counter_collection)
-        return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+    if(!ctx_p->dispatch_counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
     // The agent set is read without a lock on the dispatch path and is what scopes
     // serialization at start, so it may only change while the context is stopped.
