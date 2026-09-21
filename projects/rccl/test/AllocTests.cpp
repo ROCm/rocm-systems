@@ -574,35 +574,48 @@ TEST(Alloc, CuMemAllocNoScopeLeavesPoolEmpty)
     );
 }
 
-// With NCCL_CUMEM_ENABLE=1 every allocation and registration reaches
-// ncclCuMemRuntimeSupported(), so it must run the capability check once rather
-// than once per call. The kernel version it logs is the visible side effect.
+// ncclCuMemRuntimeSupported() must run the capability check once, not once per
+// call. clearVariable: an inherited NCCL_DEBUG_FILE repoints the log off stdout.
 TEST(Alloc, CuMemRuntimeSupportedChecksOnce)
 {
-    RUN_ISOLATED_TEST_WITH_ENV(
-        "CuMemRuntimeSupportedChecksOnce",
-        []()
-        {
-            ASSERT_EQ(hipSetDevice(0), hipSuccess);
-
-            testing::internal::CaptureStdout();
-            const int first = ncclCuMemRuntimeSupported();
-            for(int i = 0; i < 64; ++i)
+    RUN_ISOLATED_TESTS(
+        ProcessIsolatedTestRunner::TestConfig(
+            "CuMemRuntimeSupportedChecksOnce",
+            []()
             {
-                EXPECT_EQ(ncclCuMemRuntimeSupported(), first) << "call " << i << " disagreed";
-            }
-            const std::string log = testing::internal::GetCapturedStdout();
+                ASSERT_EQ(hipSetDevice(0), hipSuccess);
 
-            // Trailing space keeps this off init.cc's "Kernel version: <string>".
-            size_t seen = 0;
-            for(size_t pos = log.find("Kernel version "); pos != std::string::npos;
-                pos      = log.find("Kernel version ", pos + 1))
-            {
-                ++seen;
+                // Nothing may assert while the capture is active: gtest writes
+                // failure text to stdout, which would land in the buffer.
+                constexpr int kRepeats = 64;
+                int           later[kRepeats];
+                testing::internal::CaptureStdout();
+                const int first = ncclCuMemRuntimeSupported();
+                for(int i = 0; i < kRepeats; ++i)
+                {
+                    later[i] = ncclCuMemRuntimeSupported();
+                }
+                const std::string log = testing::internal::GetCapturedStdout();
+
+                for(int i = 0; i < kRepeats; ++i)
+                {
+                    EXPECT_EQ(later[i], first) << "call " << i << " disagreed";
+                }
+
+                // Trailing space keeps this off init.cc's "Kernel version: <string>".
+                size_t seen = 0;
+                for(size_t pos = log.find("Kernel version "); pos != std::string::npos;
+                    pos      = log.find("Kernel version ", pos + 1))
+                {
+                    ++seen;
+                }
+                EXPECT_EQ(seen, 1u) << "expected exactly one capability check, log:\n" << log;
             }
-            EXPECT_EQ(seen, 1u) << "expected exactly one capability check, log:\n" << log;
-        },
-        {{"NCCL_CUMEM_ENABLE", "1"}, {"NCCL_DEBUG", "INFO"}, {"NCCL_DEBUG_SUBSYS", "INIT"}}
+        )
+            .withEnvironment(
+                {{"NCCL_CUMEM_ENABLE", "1"}, {"NCCL_DEBUG", "INFO"}, {"NCCL_DEBUG_SUBSYS", "INIT"}}
+            )
+            .clearVariable("NCCL_DEBUG_FILE")
     );
 }
 #endif // ROCM_VERSION >= 70000
