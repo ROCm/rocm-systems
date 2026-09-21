@@ -12,8 +12,11 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <memory>
+#include <new>
 #include <vector>
 
 namespace simdojo {
@@ -85,6 +88,8 @@ struct CacheTag {
 /// @details Pure data structure, not a simulation Component. Cache controllers wrap
 /// this to implement protocol-specific behavior (write-back, write-through,
 /// coherence transitions).
+/// Only allocation methods may make a line valid. Controllers may update dirty
+/// and coherence metadata on resident lines returned by the cache.
 ///
 /// @tparam LineSizeBits Log2 of the cache line size in bytes.
 /// @tparam NumSets Number of sets in the cache.
@@ -98,16 +103,14 @@ public:
   static constexpr uint32_t LINE_MASK = LINE_SIZE - 1;
   static constexpr uint64_t TAG_SHIFT = LineSizeBits;
   static constexpr uint64_t SET_MASK = NumSets - 1;
-  static constexpr uint32_t TOTAL_SIZE = LINE_SIZE * NumSets * Associativity;
+  static constexpr size_t TOTAL_SIZE = static_cast<size_t>(LINE_SIZE) * NumSets * Associativity;
 
   struct Allocation {
     CacheTag *tag = nullptr;
     uint8_t *data = nullptr;
   };
 
-  Cache()
-      : tags_(static_cast<size_t>(NumSets) * Associativity),
-        data_(static_cast<size_t>(LINE_SIZE) * NumSets * Associativity, 0) {
+  Cache() : tags_(static_cast<size_t>(NumSets) * Associativity), touched_sets_(NumSets, 0) {
     static_assert(util::is_power_of_2(NumSets), "NumSets must be a power of 2");
   }
 
@@ -159,6 +162,9 @@ public:
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
       if (!t.valid) {
+        // Adjacent markers can share a host cache line. Write only on first use.
+        if (!touched_sets_[set])
+          touched_sets_[set] = 1;
         t.tag = tag;
         t.coherence_epoch = 0;
         t.vmid = vmid;
@@ -172,7 +178,7 @@ public:
       }
     }
 
-    // Evict LRU victim.
+    // A full set is already marked, so eviction need not write its shared marker.
     uint32_t victim_way = policy_.victim(set);
     auto &vt = tag_at(set, victim_way);
     if (evicted_tag)
@@ -226,11 +232,17 @@ public:
 
   /// @brief Invalidate all cache lines.
   void invalidate_all() {
-    for (auto &t : tags_) {
-      t.coherence_epoch = 0;
-      t.valid = false;
-      t.dirty = false;
-      t.coherence = CoherenceState::INVALID;
+    for (uint32_t s = 0; s < NumSets; ++s) {
+      if (!touched_sets_[s])
+        continue;
+      for (uint32_t w = 0; w < Associativity; ++w) {
+        auto &t = tag_at(s, w);
+        t.coherence_epoch = 0;
+        t.valid = false;
+        t.dirty = false;
+        t.coherence = CoherenceState::INVALID;
+      }
+      touched_sets_[s] = 0;
     }
   }
 
@@ -329,7 +341,9 @@ public:
   /// @tparam F Callable with signature void(CacheTag&, uint64_t, uint8_t*).
   /// @param fn Callback invoked for each dirty cache line.
   template <typename F> void for_each_dirty(F &&fn) {
-    for (uint32_t s = 0; s < NumSets; ++s)
+    for (uint32_t s = 0; s < NumSets; ++s) {
+      if (!touched_sets_[s])
+        continue;
       for (uint32_t w = 0; w < Associativity; ++w) {
         auto &t = tag_at(s, w);
         if (t.valid && t.dirty) {
@@ -338,6 +352,7 @@ public:
           fn(t, line_addr, line_data(s, w));
         }
       }
+    }
   }
 
   /// @brief Reconstruct the line-aligned address from a tag entry and set index.
@@ -363,6 +378,54 @@ public:
   static uint64_t tag_bits(uint64_t addr) { return addr >> (LineSizeBits + log2_sets()); }
 
 private:
+  // calloc preserves zero-initialized data while allowing the allocator and OS
+  // to provide untouched zero pages for large caches. A vector's explicit fill
+  // writes every page before any cache line is used.
+  class DataStorage {
+  public:
+    DataStorage() : bytes_(allocate()) {}
+    DataStorage(const DataStorage &other) : bytes_(other.bytes_ ? allocate() : nullptr) {
+      if (bytes_)
+        std::memcpy(bytes_.get(), other.bytes_.get(), size());
+    }
+    DataStorage &operator=(const DataStorage &other) {
+      if (this != &other) {
+        if (other.bytes_) {
+          if (!bytes_)
+            bytes_.reset(allocate());
+          std::memcpy(bytes_.get(), other.bytes_.get(), size());
+        } else {
+          bytes_.reset();
+        }
+      }
+      return *this;
+    }
+    DataStorage(DataStorage &&) noexcept = default;
+    DataStorage &operator=(DataStorage &&) noexcept = default;
+
+    uint8_t &operator[](size_t index) { return bytes_[index]; }
+    const uint8_t &operator[](size_t index) const { return bytes_[index]; }
+
+  private:
+    class Free {
+    public:
+      void operator()(uint8_t *ptr) const { std::free(ptr); }
+    };
+    static constexpr size_t size() { return TOTAL_SIZE; }
+    static uint8_t *allocate() {
+      while (true) {
+        auto *ptr = static_cast<uint8_t *>(std::calloc(size(), sizeof(uint8_t)));
+        if (ptr || size() == 0)
+          return ptr;
+        std::new_handler handler = std::get_new_handler();
+        if (!handler)
+          throw std::bad_alloc();
+        handler();
+      }
+    }
+    std::unique_ptr<uint8_t[], Free> bytes_;
+  };
+
   static constexpr uint32_t log2_sets() {
     uint32_t n = NumSets, bits = 0;
     while (n > 1) {
@@ -389,8 +452,15 @@ private:
   }
 
   std::vector<CacheTag> tags_;
-  std::vector<uint8_t> data_;
+  DataStorage data_;
   Policy policy_;
+  // Keep this allocation after existing storage to preserve its allocator layout.
+  // Track sets allocated since full invalidation, even if their individual lines
+  // have since been invalidated. Full invalidation clears each marker after
+  // visiting every way. Separate bytes preserve the existing contract allowing
+  // different sets to be accessed concurrently under controller-provided set locks.
+  // Full-cache operations still require exclusive maintenance access.
+  std::vector<uint8_t> touched_sets_;
 };
 
 } // namespace simdojo

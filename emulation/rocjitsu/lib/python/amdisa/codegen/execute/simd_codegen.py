@@ -1262,15 +1262,15 @@ SIMD_VOP3P_PK_BINARY_FP16: dict[str, str] = {
 SIMD_VOP3P_PK_TERNARY_FP16: dict[str, str] = {}
 
 # VOP3P packed-f32 binary. Each operand is a 64-bit consecutive-VGPR pair of two
-# f32 (lo/hi). Glue extracts each f32 half (narrow32 width), applies neg/neg_hi
-# (sign-bit toggle), runs the per-half functor, repacks. No clamp on any pk_f32
-# scalar body. Default packing only (op_sel = 0, op_sel_hi = 3).
+# f32 (lo/hi). Glue selects each source half at native width, including broadcasts,
+# applies neg/neg_hi (sign-bit toggle), and runs the per-half functor. Rounding,
+# denormal and clamp policies match the scalar helper.
 SIMD_VOP3P_PK_BINARY_F32: dict[str, str] = {
     'v_pk_add_f32_vop3p': '[](auto a, auto b) { return a + b; }',
     'v_pk_mul_f32_vop3p': '[](auto a, auto b) { return a * b; }',
 }
 
-# pk_fma_f32 — 3-source FMA per half. op_sel_hi_2 == 1 gate (src2-hi select).
+# pk_fma_f32 — 3-source FMA per half, with independent source-half selection.
 # NaN-input payload divergence accepted.
 SIMD_VOP3P_PK_TERNARY_F32: dict[str, str] = {
     'v_pk_fma_f32_vop3p': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
