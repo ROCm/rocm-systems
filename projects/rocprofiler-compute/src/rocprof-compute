@@ -13,11 +13,17 @@ from pathlib import Path
 # Suppress pandas FutureWarning about chained assignment
 warnings.filterwarnings("ignore", category=FutureWarning)
 
+_ANALYZE_DEPS_DOC = (
+    "Install the analyze dependencies into their own virtual environment: "
+    "https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/"
+    "install/core-install.html#analyze-deps"
+)
+
 try:
     from importlib import metadata
 
     from rocprof_compute_base import RocProfCompute
-    from utils.logger import console_error
+    from utils.logger import console_error, console_log
 except ImportError as e:
     print(f"{e}")
     # In wheel package, softlink is not supported.
@@ -33,7 +39,7 @@ except ImportError as e:
         from importlib import metadata
 
         from rocprof_compute_base import RocProfCompute
-        from utils.logger import console_error
+        from utils.logger import console_error, console_log
     except ImportError:
         print(
             "\n[ERROR] Could not import rocprofiler-compute modules. "
@@ -147,11 +153,9 @@ def verify_deps() -> None:
 
             if error:
                 console_error(
-                    "\nPlease verify all of the python dependencies called out "
-                    "in the requirements file"
-                    "\nare installed locally prior to running "
-                    "rocprofiler-compute."
-                    f"\n\nSee: {check_file}"
+                    "\nAnalyze mode needs every dependency listed above before "
+                    "it can run."
+                    f"\n\n{_ANALYZE_DEPS_DOC}"
                 )
             return
 
@@ -172,6 +176,9 @@ def main() -> None:
         # Analyze mode needs a higher Python floor and external dependencies
         check_analyze_python_version()
         verify_deps()
+        if rocprof_compute.get_args().verify_deps:
+            console_log("All analyze dependencies are installed.")
+            sys.exit(0)
         rocprof_compute.run_analysis()
     else:
         console_error("Unsupported execution mode")
