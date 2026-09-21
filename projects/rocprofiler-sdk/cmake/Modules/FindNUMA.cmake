@@ -20,7 +20,7 @@
 
 find_library(
     NUMA_LIBRARY
-    NAMES numa libnuma.so.1
+    NAMES numa
     HINTS "${ROCM_PATH}/lib/rocm_sysdeps")
 
 find_path(
