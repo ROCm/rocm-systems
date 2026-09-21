@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <sys/utsname.h>
 #include <fstream>
+#include <mutex>
 
 #define DECLARE_ROCM_PFN(symbol) PFN_##symbol pfn_##symbol = nullptr
 
@@ -45,7 +46,7 @@ static int ncclCuMemSupported = 0;
 
 #define KERNEL_VERSION_CODE(major, minor) ((major << 16) | (minor << 8))
 
-static int ncclGetKernelVersionCode() {
+static int ncclProbeKernelVersionCode() {
   struct utsname u;
   int major = 0, minor = 0;
 
@@ -54,6 +55,14 @@ static int ncclGetKernelVersionCode() {
   INFO(NCCL_INIT, "Kernel version %d.%d", major, minor);
 
   return KERNEL_VERSION_CODE(major, minor);
+}
+
+// uname() cannot change under a running process, so probe and log once.
+static int ncclGetKernelVersionCode() {
+  static std::once_flag once;
+  static int code = -1;
+  std::call_once(once, [] { code = ncclProbeKernelVersionCode(); });
+  return code;
 }
 
 // Runtime probe: run the cuMem VMM cycle + register.cc pointer queries once; some ROCm builds advertise cuMem but reject the ops at runtime. Returns 1 if all succeed, 0 otherwise; never fatal.
@@ -179,11 +188,16 @@ int ncclIsCuMemSupported() {
 
 // Runtime cuMem capability without the gfx1250 auto-enable gate. Used when
 // NCCL_CUMEM_ENABLE=1 forces the VMM path on non-gfx1250 platforms.
+// Memoized because ncclCuMemEnable() calls this on every allocation and the
+// check runs a full VMM create/map/unmap cycle.
 #if defined(__GNUC__)
 __attribute__((visibility("default")))
 #endif
 int ncclCuMemRuntimeSupported() {
-  return ncclCuMemCapabilityCheck(/*requireGfx1250ForAutoEnable=*/0);
+  static std::once_flag once;
+  static int supported = 0;
+  std::call_once(once, [] { supported = ncclCuMemCapabilityCheck(/*requireGfx1250ForAutoEnable=*/0); });
+  return supported;
 }
 
 int ncclCuMemEnable() {

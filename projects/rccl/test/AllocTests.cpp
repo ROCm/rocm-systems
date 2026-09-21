@@ -573,6 +573,38 @@ TEST(Alloc, CuMemAllocNoScopeLeavesPoolEmpty)
         {{"NCCL_CUMEM_ENABLE", "1"}}
     );
 }
+
+// With NCCL_CUMEM_ENABLE=1 every allocation and registration reaches
+// ncclCuMemRuntimeSupported(), so it must run the capability check once rather
+// than once per call. The kernel version it logs is the visible side effect.
+TEST(Alloc, CuMemRuntimeSupportedChecksOnce)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "CuMemRuntimeSupportedChecksOnce",
+        []()
+        {
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+            testing::internal::CaptureStdout();
+            const int first = ncclCuMemRuntimeSupported();
+            for(int i = 0; i < 64; ++i)
+            {
+                EXPECT_EQ(ncclCuMemRuntimeSupported(), first) << "call " << i << " disagreed";
+            }
+            const std::string log = testing::internal::GetCapturedStdout();
+
+            // Trailing space keeps this off init.cc's "Kernel version: <string>".
+            size_t seen = 0;
+            for(size_t pos = log.find("Kernel version "); pos != std::string::npos;
+                pos      = log.find("Kernel version ", pos + 1))
+            {
+                ++seen;
+            }
+            EXPECT_EQ(seen, 1u) << "expected exactly one capability check, log:\n" << log;
+        },
+        {{"NCCL_CUMEM_ENABLE", "1"}, {"NCCL_DEBUG", "INFO"}, {"NCCL_DEBUG_SUBSYS", "INIT"}}
+    );
+}
 #endif // ROCM_VERSION >= 70000
 
 // When the device supports multiple priorities, the pool creates and returns
