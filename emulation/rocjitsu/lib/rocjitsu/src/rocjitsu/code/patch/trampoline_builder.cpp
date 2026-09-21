@@ -215,6 +215,47 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   }
   const RegisterSet arg_regs = arg_registers(abi);
 
+  // Target/scc/special-state selection is capped at plan.kernel_sgpr_count so a
+  // temp never lands past the patched kernel's actual .sgpr_count (a wider kernel
+  // is not synthesized). The orchestrator sets the bound; it defaults to the
+  // conservative cross-ISA allocatable limit.
+  const uint32_t sgpr_bound =
+      std::min<uint32_t>(plan.kernel_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS);
+
+  // The entry-storage pair holds a value produced once at kernel entry and read
+  // at arbitrary later sites, so both lanes must be inside the allocation the
+  // temps are drawn from
+  RegisterSet entry_storage;
+  if (plan.entry_storage_base) {
+    const uint32_t last = static_cast<uint32_t>(*plan.entry_storage_base) + 1u;
+    if (last >= sgpr_bound) {
+      report(error_out,
+             ("probe-call resource planning: entry-storage pair s[" +
+              std::to_string(*plan.entry_storage_base) + ":" + std::to_string(last) +
+              "] is not inside the kernel's " + std::to_string(sgpr_bound) + "-SGPR allocation")
+                 .c_str());
+      return false;
+    }
+    entry_storage.expand(RegisterRef{RegClass::SGPR, *plan.entry_storage_base, 2});
+    // Excluding the pair from the envelope's temps is not enough on its own: the
+    // probe body runs with the pair still holding the pointer, and a body that
+    // writes it destroys the value for every site after this one. Nothing saves
+    // and restores it, so such a probe is rejected rather than bracketed.
+    if (probe_body_clobbers.intersects(entry_storage)) {
+      report(error_out,
+             ("probe-call resource planning: the probe body writes the framework's "
+              "entry-storage pair s[" +
+              std::to_string(*plan.entry_storage_base) + ":" + std::to_string(last) + "]")
+                 .c_str());
+      return false;
+    }
+  } else if (std::any_of(plan.probe_args.begin(), plan.probe_args.end(),
+                         [](const ProbeArgValue &a) { return reads_entry_storage(a.source); })) {
+    report(error_out, "probe-call resource planning: an argument reads the framework's entry "
+                      "storage, but the plan names no entry-storage pair");
+    return false;
+  }
+
   // Reject if either lane of the link pair is live at the anchor; saving a live
   // link pair is deferred.
   if (live_at_anchor.intersects(probe_link_pair(abi))) {
@@ -228,17 +269,10 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   RegisterSet link_pair;
   link_pair.expand(probe_link_pair(abi));
 
-  // Target/scc/special-state selection is capped at plan.kernel_sgpr_count so a
-  // temp never lands past the patched kernel's actual .sgpr_count (a wider kernel
-  // is not synthesized). The orchestrator sets the bound; it defaults to the
-  // conservative cross-ISA allocatable limit.
-  const uint32_t sgpr_bound =
-      std::min<uint32_t>(plan.kernel_sgpr_count, REGISTER_SET_ALLOCATABLE_SGPRS);
-
   // Target-address pair: dead, even-aligned, and not the link pair. It is
   // read by s_swappc before the probe body runs, so it may overlap
   // probe_body_clobbers.
-  const RegisterSet target_unavail = live_at_anchor | link_pair;
+  const RegisterSet target_unavail = live_at_anchor | link_pair | entry_storage;
   const std::optional<uint16_t> target_pair = find_free_sgpr_pair(target_unavail, sgpr_bound);
   if (!target_pair) {
     report(error_out, "probe-call resource planning: no dead SGPR pair available for the probe "
@@ -338,6 +372,8 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
       break;
     case ProbeArgSource::AnchorExecLo:
     case ProbeArgSource::AnchorExecHi:
+    case ProbeArgSource::LogBufferPtrLo:
+    case ProbeArgSource::LogBufferPtrHi:
       before_words += 1;
       break;
     }
@@ -434,6 +470,17 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     return std::nullopt;
   }
 
+  // Same shape as the EXEC temp above: planning rejects this combination, so
+  // reaching it means the plan came from somewhere else. Checked once here rather
+  // than dereferenced per argument in the loop below.
+  if (!plan.entry_storage_base &&
+      std::any_of(plan.probe_args.begin(), plan.probe_args.end(),
+                  [](const ProbeArgValue &a) { return reads_entry_storage(a.source); })) {
+    report(error_out, "probe-call emission: an argument reads the framework's entry storage, but "
+                      "the plan names no entry-storage pair");
+    return std::nullopt;
+  }
+
   // Special-state saves: copy each preserved EXEC/VCC/M0 into its dead temp. Before
   // the stores so EXEC is captured before we force it to -1. Plain s_mov, SCC-safe.
   for (const SpecialStateSlot &s : plan.special_state_saves)
@@ -487,6 +534,16 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
       break;
     case ProbeArgSource::AnchorExecHi:
       env.push_back(build_v_mov_b32_src(vdst, static_cast<uint16_t>(exec_temp + 1), plan.arch));
+      break;
+    // The pair is read, never written, so it needs no save/restore here: the
+    // prologue defined it at kernel entry and planning kept the envelope and the
+    // probe body off it.
+    case ProbeArgSource::LogBufferPtrLo:
+      env.push_back(build_v_mov_b32_src(vdst, *plan.entry_storage_base, plan.arch));
+      break;
+    case ProbeArgSource::LogBufferPtrHi:
+      env.push_back(build_v_mov_b32_src(vdst, static_cast<uint16_t>(*plan.entry_storage_base + 1),
+                                        plan.arch));
       break;
     }
   }
