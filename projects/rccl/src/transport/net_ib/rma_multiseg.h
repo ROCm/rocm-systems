@@ -13,6 +13,7 @@
 #include <stdint.h>
 
 #include "multiseg.h"
+#include "nccl.h"
 
 // Shared limits and dependency-free boundary helpers for classic and CAST
 // NET/IB RMA. Keep these here so host tests exercise the exact production math.
@@ -169,6 +170,13 @@ static inline int ncclRmaCountLayoutDataWrs(const size_t* localOff, int nLocal, 
     n++;
   }
   return n;
+}
+
+// After a prefix post, keep the request and return success so Test() drains.
+// Callers NCCLCHECK the complete helper and never reach test() on error.
+static inline ncclResult_t ncclRmaPostedRequestStatus(ncclResult_t postRet, int posted) {
+  if (postRet != ncclSuccess && posted > 0) return ncclSuccess;
+  return postRet;
 }
 
 // Registration stores MRs/rkeys in recvComm device-slot order. Posts use a
