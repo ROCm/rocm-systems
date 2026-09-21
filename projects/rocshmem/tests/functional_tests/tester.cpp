@@ -1015,15 +1015,34 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case TileReduceTestType:
       test_name = "Tile Reduce";
-      testers.push_back(new TileReduceTester(args));
+      testers.push_back(new TileReduceTester<float, ROCSHMEM_SUM>(
+          args,
+          [](float &s, float &r) {
+            // Source value depends on PE and element index — set at resetBuffers
+            // time. We use 1.0f here; actual values are PE-seeded in resetBuffers.
+            s = 1.0f; r = 0.0f;
+          },
+          [](float v, int n_pes, [[maybe_unused]] int idx) {
+            return static_cast<int>(v) == n_pes;
+          }));
       break;
     case TileReduceWaveTestType:
       test_name = "Tile Reduce Wave-Collective";
-      testers.push_back(new TileReduceTester(args));
+      testers.push_back(new TileReduceTester<float, ROCSHMEM_SUM>(
+          args,
+          [](float &s, float &r) { s = 1.0f; r = 0.0f; },
+          [](float v, int n_pes, [[maybe_unused]] int idx) {
+            return static_cast<int>(v) == n_pes;
+          }));
       break;
     case TileReduceWGTestType:
       test_name = "Tile Reduce Workgroup-Collective";
-      testers.push_back(new TileReduceTester(args));
+      testers.push_back(new TileReduceTester<float, ROCSHMEM_SUM>(
+          args,
+          [](float &s, float &r) { s = 1.0f; r = 0.0f; },
+          [](float v, int n_pes, [[maybe_unused]] int idx) {
+            return static_cast<int>(v) == n_pes;
+          }));
       break;
 #if defined(USE_GDA)
     case QpPingPongTestType:

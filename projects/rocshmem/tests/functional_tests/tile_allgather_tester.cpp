@@ -62,28 +62,37 @@ __global__ void TileAllgatherThreadTest(rocshmem_team_t team,
                                         int tile_extent_0, int tile_extent_1,
                                         int my_world_pe, int n_pes,
                                         ShmemContextType ctx_type,
+                                        int loop, int skip,
+                                        long long int *start_time,
+                                        long long int *end_time,
                                         int *error_flag) {
   __shared__ rocshmem_ctx_t ctx;
+  int wg_id = get_flat_grid_id();
 
-  // Create context from team (single WG)
   rocshmem_wg_team_create_ctx(team, ctx_type, &ctx);
 
-  // Each PE has one source tile, and receives n_pes tiles in dest
   int tile_size = tile_extent_0 * tile_extent_1;
 
   Tensor2D<float> src_tensor(source, tile_extent_0, tile_extent_1);
   Tensor2D<float> dst_tensor(dest, tile_extent_0 * n_pes, tile_extent_1);
-  Tuple2D start(0, 0);
+  Tuple2D start_coord(0, 0);
   Tuple2D boundary(tile_extent_0, tile_extent_1);
 
-  // Only thread 0 performs allgather
-  if (threadIdx.x == 0) {
-    rocshmem_ctx_tile_allgather(ctx, team, dst_tensor, src_tensor,
-                                start, boundary, 0);
+  for (int i = 0; i < loop + skip; i++) {
+    if (i == skip && threadIdx.x == 0) {
+      start_time[wg_id] = wall_clock64();
+    }
+    if (threadIdx.x == 0) {
+      rocshmem_ctx_tile_allgather(ctx, team, dst_tensor, src_tensor,
+                                  start_coord, boundary, 0);
+    }
+    __syncthreads();
   }
-  __syncthreads();
 
-  // Verify results: each PE should have all tiles from all PEs
+  if (threadIdx.x == 0) {
+    end_time[wg_id] = wall_clock64();
+  }
+
   if (threadIdx.x == 0) {
     for (int pe = 0; pe < n_pes; pe++) {
       int offset = pe * tile_size;
@@ -110,16 +119,18 @@ __global__ void TileAllgatherWaveTest(rocshmem_team_t *teams,
                                       int my_world_pe, int n_pes,
                                       ShmemContextType ctx_type,
                                       int wf_size, int num_waves_per_wg,
+                                      int loop, int skip,
+                                      long long int *start_time,
+                                      long long int *end_time,
                                       int *error_flag) {
   extern __shared__ rocshmem_ctx_t ctx_array[];
 
-  int t_id      = get_flat_block_id();
-  int wg_id     = get_flat_grid_id();
-  int wf_id     = t_id / wf_size;
-  int wg_offset = wg_id * num_waves_per_wg;
+  int t_id       = get_flat_block_id();
+  int wg_id      = get_flat_grid_id();
+  int wf_id      = t_id / wf_size;
+  int wg_offset  = wg_id * num_waves_per_wg;
   int flat_wf_id = wg_offset + wf_id;
 
-  // All threads in the WG collectively create one context per wave.
   for (int wf_i = 0; wf_i < num_waves_per_wg; wf_i++) {
     rocshmem_wg_team_create_ctx(teams[wg_offset + wf_i], ctx_type,
                                 &ctx_array[wf_i]);
@@ -127,20 +138,27 @@ __global__ void TileAllgatherWaveTest(rocshmem_team_t *teams,
   }
 
   int tile_size = tile_extent_0 * tile_extent_1;
-  // Each wave has its own source tile and its own n_pes-wide dest region
   float *my_source = source + flat_wf_id * tile_size;
   float *my_dest   = dest   + flat_wf_id * tile_size * n_pes;
 
   Tensor2D<float> src_tensor(my_source, tile_extent_0, tile_extent_1);
   Tensor2D<float> dst_tensor(my_dest, tile_extent_0 * n_pes, tile_extent_1);
-  Tuple2D start(0, 0);
+  Tuple2D start_coord(0, 0);
   Tuple2D boundary(tile_extent_0, tile_extent_1);
 
-  rocshmem_ctx_tile_allgather_wave(ctx_array[wf_id], teams[flat_wf_id],
-                                   dst_tensor, src_tensor, start, boundary, 0);
+  for (int i = 0; i < loop + skip; i++) {
+    if (i == skip && t_id % wf_size == 0) {
+      start_time[flat_wf_id] = wall_clock64();
+    }
+    rocshmem_ctx_tile_allgather_wave(ctx_array[wf_id], teams[flat_wf_id],
+                                     dst_tensor, src_tensor, start_coord, boundary, 0);
+  }
   __syncthreads();
 
-  // Verify — one thread per wave checks its own dest region
+  if (t_id % wf_size == 0) {
+    end_time[flat_wf_id] = wall_clock64();
+  }
+
   if (t_id % wf_size == 0) {
     for (int pe = 0; pe < n_pes; pe++) {
       int offset = pe * tile_size;
@@ -158,7 +176,6 @@ __global__ void TileAllgatherWaveTest(rocshmem_team_t *teams,
 
   __syncthreads();
 
-  // Destroy all contexts — WG-collective, same order as creation
   for (int wf_i = 0; wf_i < num_waves_per_wg; wf_i++) {
     rocshmem_wg_ctx_destroy(&ctx_array[wf_i]);
     __syncthreads();
@@ -171,37 +188,40 @@ __global__ void TileAllgatherTest(rocshmem_team_t *teams, int num_teams,
                                    int tile_extent_0, int tile_extent_1,
                                    int my_world_pe, int n_pes,
                                    ShmemContextType ctx_type,
+                                   int loop, int skip,
+                                   long long int *start_time,
+                                   long long int *end_time,
                                    int *error_flag) {
   extern __shared__ rocshmem_ctx_t ctx_array[];
   int wg_id = get_flat_grid_id();
 
-  // Each workgroup uses a DIFFERENT team
   rocshmem_team_t my_team = teams[wg_id % num_teams];
-
-  // Create context from this workgroup's specific team
   rocshmem_wg_team_create_ctx(my_team, ctx_type, &ctx_array[0]);
 
-  // Calculate offset for this workgroup's tiles
-  int tile_size = tile_extent_0 * tile_extent_1;
+  int tile_size  = tile_extent_0 * tile_extent_1;
   int src_offset = tile_size * wg_id;
   int dst_offset = tile_size * n_pes * wg_id;
 
-  // Create tensors for source (one tile) and destination (n_pes tiles)
   Tensor2D<float> src_tensor(source + src_offset, tile_extent_0, tile_extent_1);
   Tensor2D<float> dst_tensor(dest + dst_offset, tile_extent_0 * n_pes, tile_extent_1);
-  Tuple2D start(0, 0);
+  Tuple2D start_coord(0, 0);
   Tuple2D boundary(tile_extent_0, tile_extent_1);
 
-  // Perform tile allgather - each PE contributes its tile, all PEs receive all tiles
-  rocshmem_ctx_tile_allgather_wg(ctx_array[0], my_team, dst_tensor, src_tensor,
-                                  start, boundary, 0);
+  for (int i = 0; i < loop + skip; i++) {
+    if (i == skip && threadIdx.x == 0) {
+      start_time[wg_id] = wall_clock64();
+    }
+    rocshmem_ctx_tile_allgather_wg(ctx_array[0], my_team, dst_tensor, src_tensor,
+                                    start_coord, boundary, 0);
+    __syncthreads();
+  }
 
-  __syncthreads();
+  if (threadIdx.x == 0) {
+    end_time[wg_id] = wall_clock64();
+  }
 
-  // Verify results: each PE should have received all tiles from all PEs
   if (threadIdx.x == 0) {
     for (int pe = 0; pe < n_pes; pe++) {
-      // Each PE's data is: pe * 100 + wg_id * 1000 + element_index
       int pe_offset = pe * tile_size;
       for (int i = 0; i < tile_extent_0; i++) {
         for (int j = 0; j < tile_extent_1; j++) {
@@ -219,10 +239,7 @@ __global__ void TileAllgatherTest(rocshmem_team_t *teams, int num_teams,
   }
 
   __syncthreads();
-
-  // Team barrier - each workgroup synchronizes on its own team
   rocshmem_ctx_sync_wg(ctx_array[0], my_team);
-
   rocshmem_wg_ctx_destroy(&ctx_array[0]);
 }
 
@@ -243,13 +260,29 @@ TileAllgatherTester::TileAllgatherTester(TesterArguments args)
     teams[i] = ROCSHMEM_TEAM_INVALID;
   }
 
-  // Allocate tile data — one source tile and n_pes dest tiles per wave slot
+  // Derive tile dimensions from max_msg_size if provided.
+  // max_msg_size = tile_extent_0 * tile_extent_1 * sizeof(float) (source tile).
   tile_extent_0 = 8;
   tile_extent_1 = 8;
+  if (args.max_msg_size_set) {
+    int derived = static_cast<int>(args.max_msg_size / (tile_extent_0 * sizeof(float)));
+    if (derived >= 1) tile_extent_1 = derived;
+  }
+  // Sweep from one column to the full tile.
+  size_t tile_size_bytes = static_cast<size_t>(tile_extent_0) * tile_extent_1 * sizeof(float);
+  size_t row_bytes       = static_cast<size_t>(tile_extent_0) * sizeof(float);
+  this->args.min_msg_size = row_bytes;
+  max_msg_size            = tile_size_bytes;
+
+  // Fix num_timers for the wave variant.
+  if (_type == TileAllgatherWaveTestType) {
+    num_timers = args.num_wgs * num_warps;
+  }
+
   int tile_size = tile_extent_0 * tile_extent_1;
   int n_pes = rocshmem_n_pes();
 
-  // num_teams slots, each needing 1 source tile + n_pes destination tiles
+  // Allocate for max tile size; smaller sweep steps use a subset.
   int total_src_size = tile_size * num_teams;
   int total_dst_size = tile_size * n_pes * num_teams;
 
@@ -279,20 +312,25 @@ TileAllgatherTester::~TileAllgatherTester() {
   CHECK_HIP(hipHostFree(teams));
 }
 
-void TileAllgatherTester::resetBuffers([[maybe_unused]] size_t size) {
-  int tile_size = tile_extent_0 * tile_extent_1;
+void TileAllgatherTester::resetBuffers(size_t size) {
+  int t1 = tile_extent_1;
+  if (size > 0) {
+    int derived = static_cast<int>(size / (tile_extent_0 * sizeof(float)));
+    if (derived >= 1 && derived <= tile_extent_1) t1 = derived;
+  }
+  int tile_size     = tile_extent_0 * t1;
+  int max_tile_size = tile_extent_0 * tile_extent_1;
   int n_pes = rocshmem_n_pes();
-  int total_dst_size = tile_size * n_pes * num_teams;
+  int total_dst_size = max_tile_size * n_pes * num_teams;
 
+  for (int i = 0; i < total_dst_size; i++) dest[i] = -1.0f;
+
+  // Source stride matches the kernel's per-slot offset (tile_size per slot).
   for (int slot = 0; slot < num_teams; slot++) {
     int src_offset = slot * tile_size;
     for (int i = 0; i < tile_size; i++) {
       source[src_offset + i] = args.myid * 100.0f + slot * 1000.0f + i;
     }
-  }
-
-  for (int i = 0; i < total_dst_size; i++) {
-    dest[i] = -1.0f;
   }
 
   int zero = 0;
@@ -326,37 +364,42 @@ void TileAllgatherTester::preLaunchKernel() {
 }
 
 void TileAllgatherTester::launchKernel(dim3 gridSize, dim3 blockSize,
-                                       [[maybe_unused]] int loop,
-                                       [[maybe_unused]] size_t size) {
+                                       int loop, size_t size) {
   int n_pes = rocshmem_n_pes();
+
+  int ke_t1 = tile_extent_1;
+  if (size > 0) {
+    int derived = static_cast<int>(size / (tile_extent_0 * sizeof(float)));
+    if (derived >= 1 && derived <= tile_extent_1) ke_t1 = derived;
+  }
 
   switch (_type) {
     case TileAllgatherTestType:
-      // Thread-level test: single WG, single wave
       hipLaunchKernelGGL(TileAllgatherThreadTest, dim3(1), blockSize, 0, stream,
-                         teams[0], source, dest, tile_extent_0, tile_extent_1,
-                         args.myid, n_pes, _shmem_context, error_flag);
+                         teams[0], source, dest, tile_extent_0, ke_t1,
+                         args.myid, n_pes, _shmem_context,
+                         loop, args.skip, start_time, end_time, error_flag);
       break;
 
     case TileAllgatherWaveTestType: {
-      // Wave-level test: all WGs, each wave uses its own team and context
       size_t wave_shared = num_warps * sizeof(rocshmem_ctx_t);
       hipLaunchKernelGGL(TileAllgatherWaveTest, gridSize, blockSize,
                          wave_shared, stream,
-                         teams, source, dest, tile_extent_0, tile_extent_1,
+                         teams, source, dest, tile_extent_0, ke_t1,
                          args.myid, n_pes, _shmem_context,
-                         wf_size, num_warps, error_flag);
+                         wf_size, num_warps,
+                         loop, args.skip, start_time, end_time, error_flag);
       break;
     }
 
     case TileAllgatherWGTestType: {
-      // Workgroup-level test: multiple WGs, each with its own team and context
       size_t wg_shared = sizeof(rocshmem_ctx_t);
       hipLaunchKernelGGL(TileAllgatherTest, dim3(args.num_wgs), blockSize,
                          wg_shared, stream,
                          teams, args.num_wgs, source, dest,
-                         tile_extent_0, tile_extent_1,
-                         args.myid, n_pes, _shmem_context, error_flag);
+                         tile_extent_0, ke_t1,
+                         args.myid, n_pes, _shmem_context,
+                         loop, args.skip, start_time, end_time, error_flag);
       break;
     }
 
@@ -364,6 +407,15 @@ void TileAllgatherTester::launchKernel(dim3 gridSize, dim3 blockSize,
       fprintf(stderr, "Unknown TileAllgather test type\n");
       exit(EXIT_FAILURE);
   }
+
+  size_t tiles_per_loop;
+  if (_type == TileAllgatherWaveTestType) {
+    tiles_per_loop = gridSize.x * num_warps;
+  } else {
+    tiles_per_loop = gridSize.x;
+  }
+  num_msgs       = (loop + args.skip) * tiles_per_loop;
+  num_timed_msgs = loop * tiles_per_loop;
 }
 
 void TileAllgatherTester::postLaunchKernel() {
@@ -394,7 +446,7 @@ void TileAllgatherTester::verifyResults([[maybe_unused]] size_t size) {
     exit(EXIT_FAILURE);
   }
 
-  if (args.myid == 0) {
+  if (args.myid == 0 && size == max_msg_size) {
     printf("PE %d: Tile allgather verification PASSED\n", args.myid);
   }
 }
