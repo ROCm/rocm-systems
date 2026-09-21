@@ -69,7 +69,7 @@ TEST(locked_file_append, creates_parent_directory_and_appends_in_order)
 {
     const auto root = std::filesystem::path{ ::testing::TempDir() } /
                       "rocprofsys-locked-file-append-test";
-    const auto path = root / "nested" / "merged.proto";
+    const auto path = root / "nested" / "merged.pftrace";
 
     std::filesystem::remove_all(root);
 
@@ -115,7 +115,7 @@ TEST(write_proto_to, nested_directory_write_succeeds_and_registers_file)
 {
     const auto root =
         std::filesystem::path{ ::testing::TempDir() } / "rocprofsys-write-proto-to-test";
-    const auto path = root / "nested" / "trace.proto";
+    const auto path = root / "nested" / "trace.pftrace";
     std::filesystem::remove_all(root);
 
     rocprofsys::output_file_registry registry;
@@ -162,7 +162,7 @@ TEST(write_proto_to, unwritable_parent_directory_fails_and_does_not_register)
     std::filesystem::permissions(root, std::filesystem::perms::owner_read |
                                            std::filesystem::perms::owner_exec);
 
-    const auto path = root / "nested" / "trace.proto";
+    const auto path = root / "nested" / "trace.pftrace";
 
     rocprofsys::output_file_registry registry;
     const std::string                data{ "x" };
@@ -498,7 +498,7 @@ TEST(single_file_sink, finalize_creates_parent_directories)
 {
     const auto root = std::filesystem::path{ ::testing::TempDir() } /
                       "rocprofsys-single-file-sink-test";
-    const auto path = root / "nested" / "trace.proto";
+    const auto path = root / "nested" / "trace.pftrace";
     std::filesystem::remove_all(root);
 
     rocprofsys::output_file_registry   registry;

@@ -55,7 +55,7 @@
     "gin_perf_gda": {
       "extends": "gin_perf_base",
       "env_variables": {
-        "NCCL_GIN_TYPE": "5"
+        "NCCL_GIN_TYPE": "6"
       },
       "tests": [
         { "name": "GIN_GDA_D3", "description": "GDA alltoall, GinAlltoAllKernel, pure-GIN (-R 2 -D 3)", "command_args": "-R 2 -D 3" },
@@ -68,7 +68,7 @@
       "num_ranks": 8,
       "num_nodes": 1,
       "env_variables": {
-        "NCCL_GIN_TYPE": "5"
+        "NCCL_GIN_TYPE": "6"
       },
       "tests": [
         { "name": "GIN_GDA_1N_D3", "description": "GDA alltoall single-node, GinAlltoAllKernel, pure-GIN (-R 2 -D 3)", "command_args": "-R 2 -D 3" },
@@ -81,7 +81,7 @@
       "num_ranks": 8,
       "num_nodes": 1,
       "env_variables": {
-        "NCCL_GIN_TYPE": "6"
+        "NCCL_GIN_TYPE": "7"
       },
       "tests": [
         { "name": "GIN_SDMA_D3", "description": "SDMA alltoall, GinAlltoAllKernel, pure-GIN (-R 2 -D 3)", "command_args": "-R 2 -D 3" },
@@ -95,7 +95,7 @@
       "num_nodes": 1,
       "command_args": "-b 1 -e 4G -f 2 -g 1",
       "env_variables": {
-        "NCCL_GIN_TYPE": "6"
+        "NCCL_GIN_TYPE": "7"
       },
       "tests": [
         { "name": "GIN_SDMA_INTERNAL", "description": "GIN-SDMA alltoall via ncclAlltoAll (-R 2)", "command_args": "-R 2" }
@@ -191,7 +191,7 @@
     "gin_devmpi_gda": {
       "extends": "gin_devmpi_common",
       "env_variables": {
-        "NCCL_GIN_TYPE": "5"
+        "NCCL_GIN_TYPE": "6"
       }
     },
     "gin_devmpi_sdma": {
@@ -200,7 +200,7 @@
       "num_nodes": 1,
       "num_gpus": 2,
       "env_variables": {
-        "NCCL_GIN_TYPE": "6"
+        "NCCL_GIN_TYPE": "7"
       },
       "tests": [
         { "name": "BarrierSession_LsaOnly",      "num_gpus": 4 },
