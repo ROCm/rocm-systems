@@ -7,6 +7,8 @@
  // Note: InPlace is not supported for All-To-All
 
 #include "TestBed.hpp"
+#include "SingleProcMemRegTestUtils.hpp"
+#include "StandaloneUtils.hpp"
 
 namespace RcclUnitTesting
 {
@@ -100,7 +102,7 @@ namespace RcclUnitTesting
         std::vector<bool>           const inPlaceList     = {false};
         std::vector<bool>           const managedMemList  = {false};
         std::vector<bool>           const useHipGraphList = {false, true};
-        std::vector<const char *>   const channelList     = {"112"}; 
+        std::vector<const char *>   const channelList     = {"112"};
         bool                        const enableSweep     = false;
         for (auto channel : channelList) {
           setenv("NCCL_MIN_NCHANNELS", channel, 1);
@@ -111,5 +113,39 @@ namespace RcclUnitTesting
         }
       }
     }
+  }
+
+
+  TEST(AlltoAll, SingleProcMemReg)
+  {
+    SingleProcMemRegTestConfig config;
+    config.mode = SingleProcMemRegMode::Enabled;
+    config.funcTypes = {ncclCollAlltoAll};
+    config.dataTypes = {ncclUint8, ncclBfloat16, ncclUint32, ncclUint64};
+    config.redOps = {ncclSum};
+    config.roots = {0};
+    config.numElements = {1, 4096, 4314};
+    config.inPlaceList = {false};
+    config.useHipGraphList = {false};
+    RunSingleProcMemRegTest(config);
+  }
+
+  TEST(AlltoAll, SingleProcMemRegGraph)
+  {
+    SingleProcMemRegTestConfig config;
+    config.mode = SingleProcMemRegMode::Enabled;
+    config.funcTypes = {ncclCollAlltoAll};
+    config.dataTypes = {ncclUint8, ncclBfloat16, ncclUint32, ncclUint64};
+    config.redOps = {ncclSum};
+    config.roots = {0};
+    config.numElements = {1, 4096, 5003, 5012};
+    config.inPlaceList = {false};
+    config.useHipGraphList = {true};
+    RunSingleProcMemRegTest(config);
+  }
+
+  TEST(AlltoAll, SingleProcMemRegDisabledSmoke)
+  {
+    RunSingleProcMemRegDisabledSmoke(ncclCollAlltoAll, ncclUint32, false);
   }
 }

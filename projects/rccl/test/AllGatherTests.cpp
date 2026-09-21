@@ -5,6 +5,8 @@
  ************************************************************************/
 #include "TestBed.hpp"
 #include "CallCollectiveForked.hpp"
+#include "SingleProcMemRegTestUtils.hpp"
+#include "StandaloneUtils.hpp"
 
 namespace RcclUnitTesting
 {
@@ -122,8 +124,27 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
+  TEST(AllGather, SingleProcMemReg)
+  {
+    SingleProcMemRegTestConfig config;
+    config.mode = SingleProcMemRegMode::Enabled;
+    config.funcTypes = {ncclCollAllGather};
+    config.dataTypes = {ncclUint64, ncclUint32, ncclBfloat16, ncclUint8};
+    config.redOps = {ncclSum};
+    config.roots = {0};
+    config.numElements = {1, 3, 7, 4314, 5003, 1048575, 1048576};
+    config.inPlaceList = {true, false};
+    config.useHipGraphList = {true, false};
+    RunSingleProcMemRegTest(config);
+  }
+
+  TEST(AllGather, SingleProcMemRegDisabledSmoke)
+  {
+    RunSingleProcMemRegDisabledSmoke(ncclCollAllGather, ncclUint32, true);
+  }
+
   TEST(AllGather, UserBufferRegistration)
-  {          
+  {
     const int nranks = 8;
     size_t count = 2048;
     std::vector<int> sendBuff(count, 0);
@@ -142,7 +163,7 @@ namespace RcclUnitTesting
   }
 
   TEST(AllGather, ManagedMemUserBufferRegistration)
-  {          
+  {
     const int nranks = 8;
     size_t count = 2048;
     std::vector<int> sendBuff(count, 0);
