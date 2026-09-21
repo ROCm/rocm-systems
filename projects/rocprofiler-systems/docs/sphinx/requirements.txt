@@ -228,7 +228,7 @@ requests==2.33.0
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core[api-reference,llms]==1.40.0
+rocm-docs-core[api-reference,llms]==1.40.2
     # via -r requirements.in
 rpds-py==0.22.3
     # via
@@ -240,7 +240,7 @@ smmap==5.0.1
     # via gitdb
 snowballstemmer==2.2.0
     # via sphinx
-soupsieve==2.8.4
+soupsieve==2.9
     # via beautifulsoup4
 sphinx==8.0.2
     # via
@@ -289,7 +289,7 @@ tabulate==0.9.0
     #   sphinx-markdown-builder
 tomli==2.0.2
     # via sphinx
-tornado==6.5.7
+tornado==6.5.8
     # via
     #   ipykernel
     #   jupyter-client

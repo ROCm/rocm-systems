@@ -65,6 +65,55 @@ def glob_filter_matches(name: str, pattern_str: str) -> bool:
     return (not pos) or any(p.match(name) for p in pos)
 
 
+def configure_coverage_build(install_flags, cmake_options, coverage_report):
+    """Return build options for the requested coverage mode."""
+    install_flags = list(install_flags)
+
+    def remove_flag(flag):
+        while flag in install_flags:
+            install_flags.remove(flag)
+
+    # Drop any pre-existing (e.g. cached-config) coverage -D options so the
+    # authoritative values appended below are the only ones present, rather than
+    # leaning on CMake's last-wins to override a contradictory earlier token.
+    cmake_options = " ".join(
+        tok for tok in cmake_options.split()
+        if not tok.startswith("-DENABLE_CODE_COVERAGE=")
+        and not tok.startswith("-DENABLE_FULL_COVERAGE=")
+    )
+
+    def append_cmake_option(option):
+        nonlocal cmake_options
+        cmake_options = f"{cmake_options} {option}".strip()
+
+    if not coverage_report:
+        remove_flag("--enable-code-coverage")
+        remove_flag("--enable-full-coverage")
+        append_cmake_option("-DENABLE_CODE_COVERAGE=OFF")
+        append_cmake_option("-DENABLE_FULL_COVERAGE=OFF")
+    else:
+        remove_flag("--enable-full-coverage")
+        if "--debug" not in install_flags and "--debug-fast" not in install_flags:
+            install_flags.append("--debug")
+        if "--enable-code-coverage" not in install_flags:
+            install_flags.append("--enable-code-coverage")
+        append_cmake_option("-DENABLE_CODE_COVERAGE=ON")
+        append_cmake_option("-DENABLE_FULL_COVERAGE=AUTO")
+
+    return install_flags, cmake_options
+
+
+def rccl_build_type(build_config, args, using_custom_lib=False):
+    """Return the RCCL build type selected by the runner."""
+    if using_custom_lib:
+        return "custom"
+    install_flags = build_config.get("install_flags", [])
+    if (any(flag in install_flags for flag in ("--debug", "--debug-fast"))
+            or getattr(args, "coverage_report", False)):
+        return "debug"
+    return "release"
+
+
 class ExitCode(IntEnum):
     """Exit codes for processes"""
     EXIT_SUCCESS = 0
@@ -314,13 +363,22 @@ class TestExecutor:
         """Setup build and log directories"""
         workdir = self.paths.get("workdir", os.getcwd())
 
-        # Determine workspace name for logs/reports (always timestamped)
-        suffix_part = f"_{self.args.report_suffix}" if self.args.report_suffix else ""
-        timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")
-        workspace_name = f"rccl_test_artifacts{suffix_part}_{timestamp}"
-
-        # Create workspace directory path
-        self.workspace_dir = os.path.join(workdir, workspace_name)
+        output_dir = getattr(self.args, "output", None)
+        if output_dir:
+            # --output takes the workspace path verbatim, so --report-suffix (only
+            # consumed by the timestamped-name branch below) would be silently
+            # dropped. Warn rather than ignore it without a trace.
+            if getattr(self.args, "report_suffix", ""):
+                print("NOTE: --report-suffix is ignored when --output is given "
+                      "(the workspace directory is taken verbatim from --output)")
+            self.workspace_dir = os.path.abspath(
+                os.path.expanduser(os.path.expandvars(output_dir))
+            )
+        else:
+            suffix_part = f"_{self.args.report_suffix}" if self.args.report_suffix else ""
+            timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")
+            workspace_name = f"rccl_test_artifacts{suffix_part}_{timestamp}"
+            self.workspace_dir = os.path.join(workdir, workspace_name)
 
         # Determine build directory (priority: --build-dir > env var > default)
         custom_rccl_path = os.environ.get('RCCL_LIB_PATH') or os.environ.get('RCCL_BUILD_DIR')
@@ -338,24 +396,29 @@ class TestExecutor:
             if self.args.verbose:
                 print(f"Using custom RCCL library path from environment: {self.build_dir}")
         else:
-            # Use default build directory matching install.sh convention
+            # Use default build directory matching install.sh convention.
+            # --coverage-report forces a Debug build (configure_coverage_build
+            # appends --debug), so mirror that here or the runner would look for
+            # librccl.so / device-*.elf under build/release while install.sh
+            # built them into build/debug.
             self.using_custom_lib = False
-            install_flags = self.build_config.get("install_flags", [])
-            if "--debug" in install_flags or "--debug-fast" in install_flags:
-                build_type = "debug"
-            else:
-                build_type = "release"
+            build_type = rccl_build_type(self.build_config, self.args)
             self.build_dir = os.path.join(workdir, "build", build_type)
 
         # Set log and report directories under workspace
         self.log_dir = os.path.join(self.workspace_dir, "logs")
         self.report_dir = os.path.join(self.workspace_dir, "report")
+        self.rawfiles_dir = os.path.join(self.log_dir, "rawfiles")
 
         # Create directories (skip build_dir if using custom lib)
         if not self.using_custom_lib:
             os.makedirs(self.build_dir, exist_ok=True)
         os.makedirs(self.log_dir, exist_ok=True)
         os.makedirs(self.report_dir, exist_ok=True)
+        os.makedirs(self.rawfiles_dir, exist_ok=True)
+        if self.args.coverage_report and not getattr(self.args, "skip_tests", False):
+            for profile in Path(self.rawfiles_dir).glob("*.profraw"):
+                profile.unlink()
 
         if self.args.verbose:
             print(f"Work directory:   {workdir}")
@@ -365,6 +428,49 @@ class TestExecutor:
                 print(f"  (Custom path via {'--build-dir' if self.args.build_dir else 'RCCL_LIB_PATH/RCCL_BUILD_DIR'})")
             print(f"Log directory:    {self.log_dir}")
             print(f"Report directory: {self.report_dir}")
+
+    def _coverage_profile_pattern(self):
+        """Absolute per-host/process profile path for the current workspace."""
+        return os.path.join(
+            self.rawfiles_dir,
+            "rccl_tests_%h_%p_%m.profraw",
+        )
+
+    def _apply_coverage_profile_env(self, env):
+        """Export LLVM_PROFILE_FILE when this run is collecting coverage.
+
+        Returns the absolute pattern, or None when coverage is off, so the MPI
+        argv can forward the same value to remote ranks.
+        """
+        if not self.args.coverage_report:
+            return None
+        pattern = self._coverage_profile_pattern()
+        env["LLVM_PROFILE_FILE"] = pattern
+        return pattern
+
+    def _cmake_cache_value(self, name):
+        """Return the CMake cache VALUE for <name>, or None if absent."""
+        cache_path = os.path.join(self.build_dir, "CMakeCache.txt")
+        prefix = name + ":"
+        try:
+            with open(cache_path, encoding="utf-8") as cache:
+                for line in cache:
+                    if line.startswith(prefix):
+                        return line.rstrip("\n").split("=", 1)[-1]
+        except OSError:
+            return None
+        return None
+
+    def _full_coverage_resolved(self):
+        """True when this build's CMakeCache resolved ENABLE_FULL_COVERAGE to ON.
+
+        AUTO is FORCEd to ON or OFF in the cache, so the cache holds the answer.
+        device-*.elf is produced for every device-linker build, including the
+        host-only AUTO fallback, and llvm-cov fails on objects with no
+        __llvm_covmap.
+        """
+        value = self._cmake_cache_value("ENABLE_FULL_COVERAGE")
+        return value is not None and value.upper() == "ON"
 
     def _emit_log_path(self, test_name):
         """Unique per-test captured-log path under log_dir (used when result
@@ -660,20 +766,17 @@ class TestExecutor:
                 cmake_options = "-DENABLE_MPI_TESTS=OFF"
             print("NOTE: MPI tests disabled in build (--skip-mpi-check)")
 
-        # Drop code coverage instrumentation when no coverage report is requested.
-        # Coverage instrumentation slows down both runtime (counter updates) and
-        # process exit (profraw file write per PID), which is significant when
-        # many short-lived test processes are spawned.
+        install_flags, cmake_options = configure_coverage_build(
+            install_flags,
+            cmake_options,
+            self.args.coverage_report,
+        )
         if not self.args.coverage_report:
-            if "--enable-code-coverage" in install_flags:
-                install_flags.remove("--enable-code-coverage")
-            # Explicitly disable to override any cached CMake value from prior builds
-            if cmake_options:
-                cmake_options += " -DENABLE_CODE_COVERAGE=OFF"
-            else:
-                cmake_options = "-DENABLE_CODE_COVERAGE=OFF"
-            print("NOTE: Code coverage instrumentation disabled in build "
+            print("NOTE: Code coverage instrumentation disabled "
                   "(use --coverage-report to enable)")
+        else:
+            print("NOTE: Coverage instrumentation enabled; CMake will use device "
+                  "coverage when supported and otherwise fall back to host-only")
 
         # Build install.sh command
         install_script = os.path.join(workdir, "install.sh")
@@ -1237,12 +1340,12 @@ class TestExecutor:
         # exit is a significant overhead when many short-lived test processes
         # are spawned.
         #
+        # %h  — unique per host when MPI ranks write to shared storage.
         # %p  — unique per child PID (ProcessIsolatedTestRunner re-execs each
         #        test as a separate process, so each gets its own file).
         # %m  — binary/module signature (keeps test-binary and librccl.so
         #        profiles in separate files since each has its own runtime).
-        if self.args.coverage_report:
-            env['LLVM_PROFILE_FILE'] = "rccl_tests_%p_%m.profraw"
+        profile_pattern = self._apply_coverage_profile_env(env)
 
         # Add test-specific env vars.  LD_LIBRARY_PATH is already merged above.
         for key, value in merged_env.items():
@@ -1384,9 +1487,9 @@ class TestExecutor:
                 mpi_args += " " + env_fmt.format(key=key, value=value)
 
             mpi_args += " " + env_fmt.format(key="LD_LIBRARY_PATH", value=env['LD_LIBRARY_PATH'])
-            if self.args.coverage_report:
+            if profile_pattern:
                 mpi_args += " " + env_fmt.format(
-                    key="LLVM_PROFILE_FILE", value="rccl_tests_%p_%m.profraw"
+                    key="LLVM_PROFILE_FILE", value=profile_pattern
                 )
 
             # Forward LD_PRELOAD so UCX core libraries are preloaded with
@@ -1643,8 +1746,7 @@ class TestExecutor:
             ld_parts.append(os.path.join(mpi_path, "lib"))
         env["LD_LIBRARY_PATH"] = ":".join(ld_parts)
         env.setdefault("RCCL_BUILD", self.build_dir)
-        if self.args.coverage_report:
-            env["LLVM_PROFILE_FILE"] = "rccl_tests_%p_%m.profraw"
+        self._apply_coverage_profile_env(env)
         for key, value in merged_env.items():
             if key != "LD_LIBRARY_PATH":
                 env[key] = str(value)
@@ -2039,53 +2141,26 @@ class TestExecutor:
     def generate_coverage_report(self):
         """Generate code coverage report.
 
-        Supports the report-only workflow: when invoked with
-        ``--no-build --skip-tests --coverage-report`` after a previous run that
-        executed an instrumented binary, this method picks up the existing
-        ``*.profraw`` files left in ``<build_dir>/test/`` and produces a fresh
-        HTML/text report under the current run's workspace ``report/``.
+        Profiles are isolated under the current workspace. For report-only use,
+        pass ``--output`` with the workspace from the original coverage run.
         """
         if not self.args.coverage_report:
-            return
+            return True
 
         print(f"\n{'='*80}")
         print("GENERATING COVERAGE REPORT")
         print(f"{'='*80}")
 
-        # Check for profraw files
-        import glob
-        import shutil
-
-        # Tests run with cwd=<build_dir>/test, so RCCL profraw files are written
-        # there. The rccl-tests perf binaries are instrumented separately and
-        # their profraw files live under the rccl-tests build tree, so search
-        # both roots. A recursive glob also picks up files written elsewhere
-        # under either tree (e.g. by ad-hoc runs).
-        profraw_search_roots = [self.build_dir]
         rccl_tests_build_dir = self._rccl_tests_build_dir()
-        if rccl_tests_build_dir:
-            profraw_search_roots.append(rccl_tests_build_dir)
-
-        profraw_files = []
-        for root in profraw_search_roots:
-            profraw_files.extend(
-                glob.glob(os.path.join(root, "**/*.profraw"), recursive=True)
-            )
-        # De-duplicate in case the roots overlap or are nested.
-        profraw_files = sorted({os.path.abspath(p) for p in profraw_files})
+        profraw_files = sorted(glob.glob(os.path.join(self.rawfiles_dir, "*.profraw")))
 
         if not profraw_files:
-            print("ERROR: No .profraw files found under the build directories:")
-            for root in profraw_search_roots:
-                print(f"           {root}")
+            print(f"ERROR: No .profraw files found in {self.rawfiles_dir}")
             if self.args.skip_tests:
                 print()
                 print("--coverage-report --skip-tests was requested, so this run did")
-                print("not execute any tests. Run the tests at least once with")
-                print("--coverage-report (without --skip-tests) so the instrumented")
-                print("binary writes .profraw files, then re-run with")
-                print("--no-build --skip-tests --coverage-report to regenerate the")
-                print("report from those files.")
+                print("not execute any tests. Re-run with --output pointing to the")
+                print("workspace from a previous coverage run, or execute tests first.")
             else:
                 print()
                 print("Tests ran but produced no coverage data. Confirm that the RCCL")
@@ -2093,42 +2168,31 @@ class TestExecutor:
                 print("(--enable-code-coverage / -DENABLE_CODE_COVERAGE=ON) and that the")
                 print("test processes terminated cleanly so the runtime could flush the")
                 print("profraw files.")
-            return
+            return False
 
         print(f"Found {len(profraw_files)} profraw files")
 
         os.makedirs(self.report_dir, exist_ok=True)
 
-        # Create rawfiles directory
-        rawfiles_dir = os.path.join(self.log_dir, "rawfiles")
-        os.makedirs(rawfiles_dir, exist_ok=True)
-
-        # Move all profraw files into a single location
-        print("Copying profraw files...")
-        for profraw in profraw_files:
-            shutil.copy(profraw, rawfiles_dir)
-
         # Create a list of raw files to merge
         rawprofiles_list = os.path.join(self.log_dir, "rawprofiles.list")
         with open(rawprofiles_list, 'w') as f:
-            for profraw in glob.glob(os.path.join(rawfiles_dir, "*.profraw")):
+            for profraw in profraw_files:
                 f.write(f"{profraw}\n")
 
-        # Resolve LLVM tools from the same ROCm root used to build/run so the
-        # profraw format matches the compiler that produced it.
         rocm_path = self._rocm_root()
         try:
             llvm_profdata = self._resolve_llvm_tool("llvm-profdata")
             llvm_cov = self._resolve_llvm_tool("llvm-cov")
-        except FileNotFoundError as e:
-            print(f"ERROR: {e}")
-            return
+        except FileNotFoundError as error:
+            print(f"ERROR: {error}")
+            return False
 
         if self.args.verbose:
             print(f"ROCm path:      {rocm_path}")
-            print(f"llvm-profdata:  {llvm_profdata} (exists: {os.path.isfile(llvm_profdata)})")
-            print(f"llvm-cov:       {llvm_cov} (exists: {os.path.isfile(llvm_cov)})")
-            print(f"Rawfiles dir:   {rawfiles_dir}")
+            print(f"llvm-profdata:  {llvm_profdata}")
+            print(f"llvm-cov:       {llvm_cov}")
+            print(f"Rawfiles dir:   {self.rawfiles_dir}")
 
         # Create the merged profdata
         print("Merging profraw files...")
@@ -2159,7 +2223,7 @@ class TestExecutor:
             print(f"ERROR: Failed to merge profraw files")
             print(f"Command: {' '.join(merge_cmd)}")
             print(f"Error: {e.stderr}")
-            return
+            return False
 
         # Build list of object files
         object_files = []
@@ -2187,6 +2251,7 @@ class TestExecutor:
         host_test_dir = os.path.join(test_dir, "host")
         for binary in ["rccl-UnitTestsMicro", "rccl-UnitTestsMicroInit",
                        "rccl-UnitTestsMicroInit-uncached",
+                       "rccl-UnitTestsMicroInit-faultinj",
                        "rccl-UnitTestsMicroEnqueue"]:
             binary_path = os.path.join(host_test_dir, binary)
             if os.path.isfile(binary_path):
@@ -2203,9 +2268,26 @@ class TestExecutor:
                     if self.args.verbose:
                         print(f"Found perf binary: {perf_binary}")
 
+        # Add device code objects only when the build actually resolved full
+        # coverage. DeviceLinker.cmake creates device-*.elf for every
+        # device-linker build, including AUTO's host-only fallback, and those
+        # uninstrumented ELFs make llvm-cov show fail.
+        if self._full_coverage_resolved():
+            device_elfs = sorted(glob.glob(os.path.join(self.build_dir, "device-*.elf")))
+            for device_elf in device_elfs:
+                object_files.extend(["--object", device_elf])
+                if self.args.verbose:
+                    print(f"Found device object: {device_elf}")
+            if not device_elfs and self.args.verbose:
+                print("NOTE: no device-*.elf found next to librccl.so; device-side "
+                      "coverage will not appear")
+        elif self.args.verbose:
+            print("NOTE: skipping device-*.elf; CMakeCache ENABLE_FULL_COVERAGE "
+                  "did not resolve to ON (host-only coverage)")
+
         if not object_files:
             print("WARNING: No object files found for coverage report")
-            return
+            return False
 
         if self.args.verbose:
             print(f"Total object files for coverage: {len(object_files) // 2}")
@@ -2250,6 +2332,7 @@ class TestExecutor:
             print(f"Error: {e.stderr}")
             if self.args.verbose:
                 print(f"Command was: {' '.join(html_cmd)}")
+            return False
 
         # Generate function coverage summary (text report)
         print("Generating text coverage report...")
@@ -2291,6 +2374,7 @@ class TestExecutor:
             print(f"Error: {e.stderr}")
             if self.args.verbose:
                 print(f"Command was: {' '.join(text_cmd)}")
+            return False
 
         # Generate a plain (no --show-functions) llvm-cov report. Unlike the
         # per-file --show-functions report above, a plain report ends in a single
@@ -2326,6 +2410,7 @@ class TestExecutor:
             print(f"Error: {e.stderr}")
             if self.args.verbose:
                 print(f"Command was: {' '.join(summary_cmd)}")
+            return False
 
         print(f"\n{'='*80}")
         print("COVERAGE REPORT GENERATION COMPLETE")
@@ -2335,6 +2420,7 @@ class TestExecutor:
         print(f"Text report: {text_report}")
         if os.path.isfile(summary_report):
             print(f"Summary report: {summary_report}")
+        return True
 
     def _resolve_rccl_lib(self):
         """Best-effort: identify the librccl.so the tests actually loaded, and --
@@ -2510,13 +2596,12 @@ class TestExecutor:
             md = host_metadata.collect(rocm_version=re_mod._rocm_version(self._rocm_root()))
 
             # RCCL build type (perf configs should use a Release build).
-            install_flags = self.build_config.get("install_flags", []) if isinstance(self.build_config, dict) else []
-            if getattr(self, "using_custom_lib", False):
-                build_type = "custom"
-            elif any(f in install_flags for f in ("--debug", "--debug-fast")):
-                build_type = "debug"
-            else:
-                build_type = "release"
+            build_config = self.build_config if isinstance(self.build_config, dict) else {}
+            build_type = rccl_build_type(
+                build_config,
+                self.args,
+                getattr(self, "using_custom_lib", False),
+            )
             md["rccl_build_type"] = build_type
             md["mpi_impl"] = self.mpi_impl
             # Which librccl.so the tests actually loaded (and, if it came from a
@@ -2567,4 +2652,3 @@ class TestExecutor:
 
         if getattr(self.args, "db_push", False):
             emitter.push_postgres(timeout=getattr(self.args, "db_timeout", 10))
-

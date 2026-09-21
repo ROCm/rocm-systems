@@ -1582,6 +1582,13 @@ void *hsakmt_fmm_allocate_scratch(HsaKFDContext *ctx,
 					    0, (void *)LONG_MAX, -1);
 	}
 
+	/* A partially initialized aperture (base NULL, limit derived from the
+	 * requested size) would claim every low VA in the process, so leave the
+	 * aperture untouched and let the caller see the failure instead.
+	 */
+	if (!mem)
+		return NULL;
+
 	/* Remember scratch backing aperture for later */
 	aperture_phy->base = mem;
 	aperture_phy->limit = VOID_PTR_ADD(mem, aligned_size-1);
@@ -3246,24 +3253,6 @@ void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx)
 		fmm_ctx->first_gpu_mem = NULL;
 	}
 	fmm_ctx->gpu_mem_count = 0;
-}
-
-HSAKMT_STATUS hsakmt_fmm_get_default_host_gpu(HsaKFDContext *ctx,
-					      HSAuint32 *node_id,
-					      HSAuint32 *gpu_id)
-{
-	struct hsa_kfd_fmm_context *fmm_ctx;
-
-	if (!ctx || !node_id || !gpu_id)
-		return HSAKMT_STATUS_INVALID_PARAMETER;
-
-	fmm_ctx = ctx->fmm_context;
-	if (!fmm_ctx || !fmm_ctx->first_gpu_mem)
-		return HSAKMT_STATUS_ERROR;
-
-	*node_id = fmm_ctx->first_gpu_mem->node_id;
-	*gpu_id = fmm_ctx->first_gpu_mem->gpu_id;
-	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS hsakmt_fmm_advance_vm_timeline(HsaKFDContext *ctx,

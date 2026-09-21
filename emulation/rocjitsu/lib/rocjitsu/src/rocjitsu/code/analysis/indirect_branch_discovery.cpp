@@ -1435,16 +1435,17 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
 
 [[nodiscard]] std::vector<uint8_t>
 explicit_external_entries(const std::vector<AnalysisBlock> &blocks,
-                          std::span<const uint64_t> sorted_extra_leaders) {
+                          std::span<const uint64_t> sorted_extra_leaders,
+                          ExternalEntryPolicy entry_policy) {
   std::vector<uint8_t> entries(blocks.size(), 0);
-  if (!entries.empty())
+  if (!entries.empty() && entry_policy == ExternalEntryPolicy::InferPredecessorless)
     entries[0] = 1;
   // Analysis blocks are built from the ordered instruction stream. Both input
   // sequences are therefore ascending and can be matched in one merge pass.
   assert(std::ranges::is_sorted(blocks, {}, &AnalysisBlock::offset));
   assert(std::ranges::is_sorted(sorted_extra_leaders));
   auto leader = sorted_extra_leaders.begin();
-  for (size_t block_index = 1; block_index < blocks.size(); ++block_index) {
+  for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
     while (leader != sorted_extra_leaders.end() && *leader < blocks[block_index].offset)
       ++leader;
     if (leader != sorted_extra_leaders.end() && *leader == blocks[block_index].offset)
@@ -1453,7 +1454,7 @@ explicit_external_entries(const std::vector<AnalysisBlock> &blocks,
   return entries;
 }
 
-[[nodiscard]] bool is_analysis_root(size_t block_index, std::span<const uint8_t> external_entries,
+[[nodiscard]] bool is_external_root(size_t block_index, std::span<const uint8_t> external_entries,
                                     const std::vector<std::vector<size_t>> &predecessors,
                                     ExternalEntryPolicy entry_policy) {
   if (external_entries[block_index] != 0)
@@ -1901,9 +1902,11 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
   finalize_block_transfers(block, state, ctx.consumer_pairs);
 }
 
-[[nodiscard]] std::vector<LatticeFacts> run_block_dataflow(
-    const std::vector<AnalysisBlock> &blocks, std::span<const PendingConsumer> pending_consumers,
-    std::span<const uint64_t> sorted_extra_leaders, ExternalEntryPolicy entry_policy) {
+[[nodiscard]] std::vector<LatticeFacts>
+run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
+                   std::span<const PendingConsumer> pending_consumers,
+                   std::span<const uint64_t> sorted_extra_leaders, ExternalEntryPolicy entry_policy,
+                   std::span<const uint8_t> analysis_roots) {
   // Phase 3: compute block-entry facts to a fixed point.
   //
   // entry[B] = JOIN(exit[P]) for every predecessor P of B.
@@ -1913,13 +1916,15 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
   // hardware-supplied value unless a predecessor later mentions it. Under the
   // ExplicitOnly policy, a predecessorless non-entry is instead unreachable
   // (BOTTOM), so its empty map must not participate in a successor join.
+  // Independent decode roots opt into reachability without introducing a new
+  // external path; any real predecessor facts still determine their entry map.
   std::vector<std::vector<size_t>> predecessors(blocks.size());
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
     for (size_t successor : blocks[block_index].successors)
       predecessors[successor].push_back(block_index);
   }
   const std::vector<uint8_t> external_entries =
-      explicit_external_entries(blocks, sorted_extra_leaders);
+      explicit_external_entries(blocks, sorted_extra_leaders, entry_policy);
 
   // Dataflow results are consumed only by pending cross-block branches. A pair
   // that is built or killed somewhere but never reaches such a consumer cannot
@@ -2024,7 +2029,8 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
     LatticeFacts new_entry;
     std::bitset<REGISTER_SET_MAX_SGPRS> mentioned_pairs;
     const bool new_reachable =
-        is_analysis_root(block_index, external_entries, predecessors, entry_policy) ||
+        is_external_root(block_index, external_entries, predecessors, entry_policy) ||
+        (!analysis_roots.empty() && analysis_roots[block_index] != 0) ||
         std::ranges::any_of(predecessors[block_index],
                             [&](size_t predecessor) { return reachable[predecessor]; });
     if (new_reachable && !predecessors[block_index].empty()) {
@@ -2600,7 +2606,8 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
                                      std::span<const IndirectCallFixup> known_fixups,
                                      std::vector<IndirectCallFixup> &recovered,
                                      std::span<const uint64_t> sorted_extra_leaders,
-                                     ExternalEntryPolicy entry_policy) {
+                                     ExternalEntryPolicy entry_policy,
+                                     std::span<const uint8_t> analysis_roots) {
   // gfx1250 device functions sometimes keep a small static call set in one
   // VGPR: getpc-built low/high halves are written to fixed lanes, then read
   // back into an SGPR pair before swappc. Track only fixed-lane
@@ -2637,7 +2644,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
     return;
   const size_t initial_recovered_size = recovered.size();
   const std::vector<uint8_t> external_entries =
-      explicit_external_entries(blocks, sorted_extra_leaders);
+      explicit_external_entries(blocks, sorted_extra_leaders, entry_policy);
 
   std::unordered_map<uint64_t, size_t> instruction_by_offset;
   instruction_by_offset.reserve(ctx.insts.size());
@@ -3232,7 +3239,13 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
     on_worklist[block_index] = 0;
 
     VectorLaneFlowState new_entry;
-    bool new_reachable = false;
+    // A decode root enables analysis but supplies no external lane/mode state.
+    // Preserve any predecessor facts instead of meeting them with an empty stash.
+    bool new_reachable = !analysis_roots.empty() && analysis_roots[block_index] != 0;
+    // Unsupported indexing is an architectural fact, not an entry-mode promise.
+    // Mutable mode bits such as VGPR_MSB remain unknown until code sets them.
+    if (new_reachable && !isa_properties(ctx.arch).mode_has_gpr_idx_en)
+      new_entry.gpr_idx_enabled = false;
     bool have_predecessor_state = false;
     const auto meet_predecessor = [&](const VectorLaneFlowState &incoming) {
       new_reachable = true;
@@ -3271,7 +3284,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
     // Meet a root's external state with any reachable predecessor: it
     // contributes no lane stash, and explicit entries begin in bank zero
     // according to the entry contract.
-    if (is_analysis_root(block_index, external_entries, predecessors, entry_policy)) {
+    if (is_external_root(block_index, external_entries, predecessors, entry_policy)) {
       new_reachable = true;
       VectorLaneFlowState external_entry;
       if (external_entries[block_index] != 0) {
@@ -3483,7 +3496,8 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges_unfiltered(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
-    std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points) {
+    std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points,
+    std::span<const uint64_t> analysis_root_offsets) {
   std::vector<IndirectCallFixup> recovered;
   FixupIndex recovered_index;
   AnalysisContext ctx = build_context(insts, text, arch);
@@ -3496,7 +3510,11 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
   // every explicit entry is treated as externally entered, so promoting an ordinary helper to one
   // would discard the incoming SGPR-pair facts its real callers establish and leave otherwise
   // recoverable getpc flows unresolved.
+  std::vector<uint64_t> sorted_analysis_roots(analysis_root_offsets.begin(),
+                                              analysis_root_offsets.end());
+  std::ranges::sort(sorted_analysis_roots);
   std::vector<uint64_t> leaders(sorted_extra_leaders);
+  leaders.insert(leaders.end(), sorted_analysis_roots.begin(), sorted_analysis_roots.end());
   leaders.insert(leaders.end(), extra_split_points.begin(), extra_split_points.end());
   std::ranges::sort(leaders);
   leaders.erase(std::ranges::unique(leaders).begin(), leaders.end());
@@ -3507,6 +3525,16 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 
     std::vector<AnalysisBlock> blocks = build_analysis_blocks(ctx, leaders);
     add_recovered_successors(recovered, blocks);
+    // Decode roots start dataflow without injecting unconstrained external state.
+    // Match only actual block starts: an optional seed may name a literal or
+    // padding that reachable decoding deliberately did not turn into an instruction.
+    // Keep the ordinary FullSection path free of this allocation and scan.
+    std::vector<uint8_t> analysis_roots;
+    if (!sorted_analysis_roots.empty()) {
+      analysis_roots.reserve(blocks.size());
+      for (const AnalysisBlock &block : blocks)
+        analysis_roots.push_back(std::ranges::binary_search(sorted_analysis_roots, block.offset));
+    }
 
     std::vector<PendingConsumer> pending_consumers;
     std::vector<IndirectCallFixup> iteration_recovered;
@@ -3515,7 +3543,7 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     // from leaders: recovered targets become reachable through those edges, not
     // by being promoted to external roots.
     recover_vector_lane_stashed_pcs(ctx, blocks, recovered, iteration_recovered,
-                                    sorted_extra_leaders, entry_policy);
+                                    sorted_extra_leaders, entry_policy, analysis_roots);
     // Recovered leaders can split a block between rounds, which changes where a
     // builder's block-exit value is observed. Keep only the final round's view
     // so the published records are internally consistent with one CFG.
@@ -3525,8 +3553,8 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     recover_signed_delta_templates(ctx, blocks, iteration_recovered);
 
     if (!pending_consumers.empty()) {
-      const auto entry_facts =
-          run_block_dataflow(blocks, pending_consumers, sorted_extra_leaders, entry_policy);
+      const auto entry_facts = run_block_dataflow(blocks, pending_consumers, sorted_extra_leaders,
+                                                  entry_policy, analysis_roots);
       (void)classify_pending_consumers(ctx, blocks, entry_facts, pending_consumers,
                                        iteration_recovered);
     }
@@ -3571,7 +3599,8 @@ bool is_callee_saved_sgpr(uint16_t sgpr) {
 std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
-    std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points) {
+    std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points,
+    std::span<const uint64_t> analysis_root_offsets) {
   if (pc_builders != nullptr)
     pc_builders->clear();
   if (insts.empty())
@@ -3590,14 +3619,16 @@ std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     // Keep the cheap predicate coupled to every fixup producer. A future
     // recovery path for another consumer kind must extend the predicate above.
     const auto unfiltered = discover_indirect_branch_edges_unfiltered(
-        insts, text, arch, extra_leaders, entry_policy, nullptr, extra_split_points);
+        insts, text, arch, extra_leaders, entry_policy, nullptr, extra_split_points,
+        analysis_root_offsets);
     assert(unfiltered.empty() && "indirect-recovery prefilter skipped a fixup-producing consumer");
 #endif
     return {};
   }
 
   return discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders, entry_policy,
-                                                   pc_builders, extra_split_points);
+                                                   pc_builders, extra_split_points,
+                                                   analysis_root_offsets);
 }
 
 } // namespace rocjitsu
