@@ -2867,11 +2867,11 @@ hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
     HIP_RETURN(hipErrorGraphExecUpdateFailure);
   }
 
-  std::unordered_map<hip::GraphNode*, hip::GraphNode*> nodeMap;
+  std::unordered_map<hip::GraphNode*, hip::GraphNode*> newToOldNodeMap;
   if (!originalTopologyUnchanged) {
-    nodeMap.reserve(newGraphNodeCount);
+    newToOldNodeMap.reserve(newGraphNodeCount);
     for (size_t i = 0; i < newGraphNodeCount; ++i) {
-      nodeMap.emplace(newGraphNodes[i], oldGraphExecNodes[i]);
+      newToOldNodeMap.emplace(newGraphNodes[i], oldGraphExecNodes[i]);
     }
   }
 
@@ -2920,7 +2920,7 @@ hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
       }
       if (!originalTopologyUnchanged &&
           !hip::HasMatchingDependencies(oldGraphExecNodes[i]->GetDependencies(),
-                                        newGraphNode->GetDependencies(), nodeMap)) {
+                                        newGraphNode->GetDependencies(), newToOldNodeMap)) {
         *hErrorNode_out = reinterpret_cast<hipGraphNode_t>(newGraphNode);
         *updateResult_out = hipGraphExecUpdateErrorTopologyChanged;
         HIP_RETURN(hipErrorGraphExecUpdateFailure);
