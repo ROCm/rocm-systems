@@ -416,10 +416,9 @@ protected:
     // reader_t queue_id/stream_id are SQLite row ids, not ROCm queue/stream handles.
     void expect_readback_queue_named(const char* expected_name) const
     {
-        const auto& queues = m_reader->get_all_queues();
-        const auto  queue_it =
-            std::find_if(queues.begin(), queues.end(),
-                         [&](const auto& queue) { return queue->name == expected_name; });
+        const auto& queues   = m_reader->get_all_queues();
+        const auto  queue_it = std::ranges::find_if(
+            queues, [&](const auto& queue) { return queue->name == expected_name; });
         ASSERT_NE(queue_it, queues.end()) << "queue not in reader: " << expected_name;
         ASSERT_NE((*queue_it)->process_info, nullptr);
         EXPECT_EQ((*queue_it)->process_info->pid, k_pid);
@@ -427,11 +426,9 @@ protected:
 
     void expect_readback_stream_named(const char* expected_name) const
     {
-        const auto& streams = m_reader->get_all_streams();
-        const auto  stream_it =
-            std::find_if(streams.begin(), streams.end(), [&](const auto& stream) {
-                return stream->name == expected_name;
-            });
+        const auto& streams   = m_reader->get_all_streams();
+        const auto  stream_it = std::ranges::find_if(
+            streams, [&](const auto& stream) { return stream->name == expected_name; });
         ASSERT_NE(stream_it, streams.end()) << "stream not in reader: " << expected_name;
         ASSERT_NE((*stream_it)->process_info, nullptr);
         EXPECT_EQ((*stream_it)->process_info->pid, k_pid);
@@ -479,11 +476,10 @@ protected:
 
     void expect_readback_agent_fields(const agent_fields_expect& expected) const
     {
-        const auto agents = m_reader->get_all_agents();
-        const auto agent_it =
-            std::find_if(agents.begin(), agents.end(), [&](const auto& agent_ptr) {
-                return agent_ptr->agent_type == expected.agent_type;
-            });
+        const auto agents   = m_reader->get_all_agents();
+        const auto agent_it = std::ranges::find_if(agents, [&](const auto& agent_ptr) {
+            return agent_ptr->agent_type == expected.agent_type;
+        });
         ASSERT_NE(agent_it, agents.end())
             << "agent type not found in read-back: " << expected.agent_type;
         EXPECT_EQ((*agent_it)->name, expected.name);
@@ -1842,70 +1838,82 @@ struct multi_event_timestamps
 
 void
 insert_multiple_event_type_samples(rocpd_processor_t&            processor,
-                                   const multi_event_timestamps& ts)
+                                   const multi_event_timestamps& timestamps)
 {
-    const region_sample hip_region{ ts.thread_id,    "hipLaunchKernel", 1,  0,
-                                    ts.hip_start_ts, ts.hip_end_ts,     "", "",
+    const region_sample hip_region{ timestamps.thread_id,
+                                    "hipLaunchKernel",
+                                    1,
+                                    0,
+                                    timestamps.hip_start_ts,
+                                    timestamps.hip_end_ts,
+                                    "",
+                                    "",
                                     "HIP_API" };
     processor.handle(hip_region);
 
-    const kernel_dispatch_sample kds{ ts.kd_start_ts,
-                                      ts.kd_end_ts,
-                                      ts.thread_id,
-                                      ts.managed_gpu_handle,
+    const kernel_dispatch_sample kds{ timestamps.kd_start_ts,
+                                      timestamps.kd_end_ts,
+                                      timestamps.thread_id,
+                                      timestamps.managed_gpu_handle,
                                       1,
                                       1,
-                                      ts.queue_id,
-                                      ts.kd_corr_id,
+                                      timestamps.queue_id,
+                                      timestamps.kd_corr_id,
                                       1,
                                       0,
                                       0,
-                                      ts.wg_size_x,
+                                      timestamps.wg_size_x,
                                       1,
                                       1,
-                                      ts.grid_size_x,
+                                      timestamps.grid_size_x,
                                       1,
                                       1,
-                                      ts.stream_id };
+                                      timestamps.stream_id };
     processor.handle(kds);
 
     const memory_copy_sample mcs{
-        ts.mc_start_ts,
-        ts.mc_end_ts,
-        ts.thread_id,
-        ts.managed_gpu_handle,
-        ts.managed_cpu_handle,
+        timestamps.mc_start_ts,
+        timestamps.mc_end_ts,
+        timestamps.thread_id,
+        timestamps.managed_gpu_handle,
+        timestamps.managed_cpu_handle,
         static_cast<std::int32_t>(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY),
         static_cast<std::int32_t>(ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE),
-        ts.mc_size,
+        timestamps.mc_size,
         3,
         0,
         0,
         0,
-        ts.stream_id
+        timestamps.stream_id
     };
     processor.handle(mcs);
 
     const scratch_memory_sample sms{
-        ts.sms_start_ts,
-        ts.sms_end_ts,
-        ts.thread_id,
-        ts.managed_gpu_handle,
-        ts.queue_id,
+        timestamps.sms_start_ts,
+        timestamps.sms_end_ts,
+        timestamps.thread_id,
+        timestamps.managed_gpu_handle,
+        timestamps.queue_id,
         static_cast<std::int32_t>(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY),
         static_cast<std::int32_t>(ROCPROFILER_SCRATCH_MEMORY_ALLOC),
         0,
-        ts.sms_size,
+        timestamps.sms_size,
         4,
         0,
-        ts.stream_id
+        timestamps.stream_id
     };
     processor.handle(sms);
 
-    const backtrace_region_sample bts{
-        0,          ts.thread_id, "Sampling", "bt_func", ts.bt_start_ts, ts.bt_end_ts,
-        "sampling", "",           "",         ""
-    };
+    const backtrace_region_sample bts{ 0,
+                                       timestamps.thread_id,
+                                       "Sampling",
+                                       "bt_func",
+                                       timestamps.bt_start_ts,
+                                       timestamps.bt_end_ts,
+                                       "sampling",
+                                       "",
+                                       "",
+                                       "" };
     processor.handle(bts);
 }
 
@@ -1944,23 +1952,23 @@ void
 expect_multi_db_region_details(
     profiler_hub::reader_t&                             reader,
     const profiler_hub::reader_types::timeline_event_t& tl_event,
-    const multi_event_timestamps& ts, multi_event_saw_flags& saw)
+    const multi_event_timestamps& timestamps, multi_event_saw_flags& saw)
 {
     const auto detail = require_optional(reader.get_region_details(tl_event),
                                          "region detail not readable");
     if(detail.name == "hipLaunchKernel")
     {
         saw.hip_region = true;
-        EXPECT_EQ(detail.start_timestamp, ts.hip_start_ts);
-        EXPECT_EQ(detail.end_timestamp, ts.hip_end_ts);
+        EXPECT_EQ(detail.start_timestamp, timestamps.hip_start_ts);
+        EXPECT_EQ(detail.end_timestamp, timestamps.hip_end_ts);
         ASSERT_NE(detail.event, nullptr);
         EXPECT_EQ(detail.event->event_category, "HIP_API");
     }
     else if(detail.name == "bt_func")
     {
         saw.bt_region = true;
-        EXPECT_EQ(detail.start_timestamp, ts.bt_start_ts);
-        EXPECT_EQ(detail.end_timestamp, ts.bt_end_ts);
+        EXPECT_EQ(detail.start_timestamp, timestamps.bt_start_ts);
+        EXPECT_EQ(detail.end_timestamp, timestamps.bt_end_ts);
     }
 }
 
@@ -1968,30 +1976,30 @@ void
 expect_multi_db_kernel_details(
     profiler_hub::reader_t&                             reader,
     const profiler_hub::reader_types::timeline_event_t& tl_event,
-    const multi_event_timestamps& ts, multi_event_saw_flags& saw)
+    const multi_event_timestamps& timestamps, multi_event_saw_flags& saw)
 {
     saw.kernel        = true;
     const auto detail = require_optional(reader.get_kernel_dispatch_details(tl_event),
                                          "kernel dispatch detail not readable");
     EXPECT_EQ(detail.name, "test_kernel");
-    EXPECT_EQ(detail.start_timestamp, ts.kd_start_ts);
-    EXPECT_EQ(detail.end_timestamp, ts.kd_end_ts);
-    EXPECT_EQ(detail.workgroup_size_x, ts.wg_size_x);
-    EXPECT_EQ(detail.grid_size_x, ts.grid_size_x);
+    EXPECT_EQ(detail.start_timestamp, timestamps.kd_start_ts);
+    EXPECT_EQ(detail.end_timestamp, timestamps.kd_end_ts);
+    EXPECT_EQ(detail.workgroup_size_x, timestamps.wg_size_x);
+    EXPECT_EQ(detail.grid_size_x, timestamps.grid_size_x);
 }
 
 void
 expect_multi_db_memory_copy_details(
     profiler_hub::reader_t&                             reader,
     const profiler_hub::reader_types::timeline_event_t& tl_event,
-    const multi_event_timestamps& ts, multi_event_saw_flags& saw)
+    const multi_event_timestamps& timestamps, multi_event_saw_flags& saw)
 {
     saw.memory_copy   = true;
     const auto detail = require_optional(reader.get_memory_copy_details(tl_event),
                                          "memory_copy detail not readable");
-    EXPECT_EQ(detail.size, ts.mc_size);
-    EXPECT_EQ(detail.start_timestamp, ts.mc_start_ts);
-    EXPECT_EQ(detail.end_timestamp, ts.mc_end_ts);
+    EXPECT_EQ(detail.size, timestamps.mc_size);
+    EXPECT_EQ(detail.start_timestamp, timestamps.mc_start_ts);
+    EXPECT_EQ(detail.end_timestamp, timestamps.mc_end_ts);
     EXPECT_EQ(detail.name, "MEMORY_COPY_HOST_TO_DEVICE");
 }
 
@@ -1999,21 +2007,21 @@ void
 expect_multi_db_scratch_details(
     profiler_hub::reader_t&                             reader,
     const profiler_hub::reader_types::timeline_event_t& tl_event,
-    const multi_event_timestamps& ts, multi_event_saw_flags& saw)
+    const multi_event_timestamps& timestamps, multi_event_saw_flags& saw)
 {
     saw.scratch_alloc = true;
     const auto detail = require_optional(reader.get_memory_alloc_details(tl_event),
                                          "memory_allocate detail not readable");
-    EXPECT_EQ(detail.size, ts.sms_size);
+    EXPECT_EQ(detail.size, timestamps.sms_size);
     EXPECT_EQ(detail.type, "ALLOC");
     EXPECT_EQ(detail.level, "SCRATCH");
-    EXPECT_EQ(detail.start_timestamp, ts.sms_start_ts);
-    EXPECT_EQ(detail.end_timestamp, ts.sms_end_ts);
+    EXPECT_EQ(detail.start_timestamp, timestamps.sms_start_ts);
+    EXPECT_EQ(detail.end_timestamp, timestamps.sms_end_ts);
 }
 
 void
 expect_multiple_event_type_details(profiler_hub::reader_t&       reader,
-                                   const multi_event_timestamps& ts)
+                                   const multi_event_timestamps& timestamps)
 {
     multi_event_saw_flags saw{};
 
@@ -2022,16 +2030,16 @@ expect_multiple_event_type_details(profiler_hub::reader_t&       reader,
         switch(tl_event.unique_identifier.type)
         {
             case profiler_hub::reader_types::event_type_t::region:
-                expect_multi_db_region_details(reader, tl_event, ts, saw);
+                expect_multi_db_region_details(reader, tl_event, timestamps, saw);
                 break;
             case profiler_hub::reader_types::event_type_t::kernel_dispatch:
-                expect_multi_db_kernel_details(reader, tl_event, ts, saw);
+                expect_multi_db_kernel_details(reader, tl_event, timestamps, saw);
                 break;
             case profiler_hub::reader_types::event_type_t::memory_copy:
-                expect_multi_db_memory_copy_details(reader, tl_event, ts, saw);
+                expect_multi_db_memory_copy_details(reader, tl_event, timestamps, saw);
                 break;
             case profiler_hub::reader_types::event_type_t::memory_allocate:
-                expect_multi_db_scratch_details(reader, tl_event, ts, saw);
+                expect_multi_db_scratch_details(reader, tl_event, timestamps, saw);
                 break;
             default: break;
         }
@@ -2047,7 +2055,7 @@ expect_multiple_event_type_details(profiler_hub::reader_t&       reader,
 TEST_F(rocpd_write_read_test_interface, multiple_event_types_in_single_db)
 {
     // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
-    const multi_event_timestamps ts{};
+    const multi_event_timestamps timestamps{};
     const auto                   gpu = managed_gpu_agent();
     const auto                   cpu = managed_cpu_agent();
     run_processor_and_open_reader(
@@ -2059,13 +2067,13 @@ TEST_F(rocpd_write_read_test_interface, multiple_event_types_in_single_db)
                                        .thread_id  = k_thread_id,
                                        .extdata    = std::string{} });
         },
-        [&ts](rocpd_processor_t& processor) {
-            insert_multiple_event_type_samples(processor, ts);
+        [&timestamps](rocpd_processor_t& processor) {
+            insert_multiple_event_type_samples(processor, timestamps);
         });
 
     // Validate: profiler_hub::reader_t read-back matches inserted values.
     expect_multiple_event_type_counts(*m_reader);
-    expect_multiple_event_type_details(*m_reader, ts);
+    expect_multiple_event_type_details(*m_reader, timestamps);
     expect_readback_agent_fields({ .agent_type   = "GPU",
                                    .name         = "gfx90a",
                                    .model_name   = "MI210",

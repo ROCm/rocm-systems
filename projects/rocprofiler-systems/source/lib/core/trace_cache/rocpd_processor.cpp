@@ -1330,14 +1330,15 @@ rocpd_processor_t::post_process_metadata()
         uid.name                = pmc_info.name;
         uid.agent_id            = pmc_agent_uid;
         pmc_info_data.unique_id = uid;
-        // Copy into owned string: writer API stores string_view.
-        const std::optional<std::string> target_arch =
+        // pmc_info_t uses string_view fields throughout, this is safe here because
+        // register_pmc_info() consumes the data synchronously (SQLite bind + step)
+        // and does NOT retain the string_view after returning. If that contract
+        // ever changes, target_arch (and the other string_view fields in pmc_info_t)
+        // must be changed to std::string.
+        pmc_info_data.target_arch =
             pmc_info.target_arch.empty()
                 ? std::nullopt
-                : std::optional<std::string>{ pmc_info.target_arch };
-        pmc_info_data.target_arch      = target_arch.has_value()
-                                             ? std::optional<std::string_view>{ *target_arch }
-                                             : std::nullopt;
+                : std::optional<std::string_view>{ pmc_info.target_arch };
         pmc_info_data.event_code       = pmc_info.event_code;
         pmc_info_data.instance_id      = pmc_info.instance_id;
         pmc_info_data.symbol           = pmc_info.symbol;
