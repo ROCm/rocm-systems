@@ -3,6 +3,8 @@
 
 #include "rocjitsu/config/config_loader.h"
 
+#include "rocjitsu/vm/amdgpu/pci/gpu_generation_registry.h"
+
 #include "rocjitsu/config/config_common.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "rocjitsu/vm/virtual_machine.h"
@@ -934,6 +936,8 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
   // mismatches fail before any simulator components are exposed.
   if (fb_config->vm()->gpu() && fb_config->vm()->gpu()->device())
     result.device = kfd_device_from_fb(fb_config->vm()->gpu()->device(), "vm.gpu.device");
+  if (result.device.present)
+    (void)resolve_gpu_generation_topology(result.device);
   if (target != nullptr && target->gfx_target_version != 0 && result.device.present &&
       result.device.gfx_target_version != 0 &&
       result.device.gfx_target_version != target->gfx_target_version)
@@ -1059,6 +1063,8 @@ DeviceIdentityConfig load_device_identity(const std::string &json_path,
           return identity;
         }
         identity.device = kfd_device_from_fb(config->vm()->gpu()->device(), "vm.gpu.device");
+        if (identity.device.present)
+          (void)resolve_gpu_generation_topology(identity.device);
         identity.pci = pci_device_from_fb(config->vm()->gpu()->pci());
         return identity;
       });

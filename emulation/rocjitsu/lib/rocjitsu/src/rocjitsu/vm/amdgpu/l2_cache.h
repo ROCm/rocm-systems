@@ -285,7 +285,8 @@ private:
   std::shared_lock<std::shared_mutex> acquire_cache_access();
   std::unique_lock<std::shared_mutex> acquire_cache_maintenance();
   void synchronize_epoch_locked();
-  void ensure_line(uint64_t addr, uint32_t vmid = 0);
+  // Skip fetching only when the caller immediately overwrites the entire line.
+  void ensure_line(uint64_t addr, uint32_t vmid = 0, bool fetch_on_miss = true);
   void flush_line_locked(uint64_t addr, uint32_t vmid = 0);
   void flush_dirty_locked();
   using DirtyMask = std::array<uint64_t, LINE_SIZE / 64>;
