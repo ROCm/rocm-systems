@@ -1,0 +1,31 @@
+[package]
+name = "libamdf"
+description = "Early-access AMDF C API implementation over the private rocddi core"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "amdf"
+crate-type = ["cdylib", "staticlib"]
+doc = false
+doctest = false
+
+[dependencies]
+rocddi = { path = "../.." }
+
+[lints.rust]
+missing_docs = "deny"
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+expect_used = "deny"
+panic = "deny"
+pedantic = { level = "warn", priority = -1 }
+unreachable = "deny"
+unwrap_used = "deny"
