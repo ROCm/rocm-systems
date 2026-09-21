@@ -1154,8 +1154,7 @@
       "description": "ib-cast data path with software BY_ORDER matching and CTS offload forced off (the no-offload BY_ORDER arm). QP scheduler left off so TX fan-out stays at base nqps.",
       "env_variables": {
         "RCCL_CTS_OFFLOAD_ENABLED": "0",
-        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "2",
-        "RCCL_IB_QP_SCHED_ENABLE": "0"
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "2"
       }
     },
     "net_ib_multirecv_cast_by_order_no_cts": {

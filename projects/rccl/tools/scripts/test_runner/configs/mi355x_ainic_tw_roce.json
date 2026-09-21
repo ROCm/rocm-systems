@@ -302,6 +302,16 @@
           "name": "A18_ByOrder_NoCts_MultiRecv",
           "description": "irecv batching matched by posted WR identity (software BY_ORDER, no CTS offload).",
           "test_filter": "NetIbMPITest.MultiRecv"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_MultiRecvShuffled",
+          "description": "Shuffled irecv slots: wr_id is the request index, not the CTS slot (software BY_ORDER, no CTS offload).",
+          "test_filter": "NetIbMPITest.MultiRecvShuffled"
+        },
+        {
+          "name": "A18_ByOrder_NoCts_FlushAfterRecv",
+          "description": "GDR flush after recv hits the BY_ORDER IBV_WC_RDMA_READ completion arm (skipped if GDR unavailable).",
+          "test_filter": "NetIbMPITest.FlushAfterRecv"
         }
       ]
     },
