@@ -27,6 +27,8 @@
 #include <timemory/utility/signals.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cerrno>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
@@ -78,6 +80,84 @@ get_default_max_library_functions()
     // default to 20000
     return rocprofsys::get_env<size_t>(
         rocprofsys::env_vars::DEFAULT_MAX_LIBRARY_FUNCTIONS, 20000);
+}
+
+/// Run exe_path with LD_TRACE_LOADED_OBJECTS=1 so the dynamic loader prints the resolved
+/// library list and exits before main(). Returns the loader's stdout, or "" on failure.
+std::string
+read_loader_trace(const std::string& exe_path)
+{
+    auto fds = std::array<int, 2>{ -1, -1 };  // -1 is invalid file descriptor
+    if(::pipe(fds.data()) != 0)
+    {
+        return {};
+    }
+    auto& [read_fd, write_fd] = fds;
+
+    // Copy current env and add tracing env var. LD_LIBRARY_PATH and LD_PRELOAD are also
+    // copied from env, so the later-listed paths will match what a real run would load.
+    // Built before the fork: between fork and exec the child may only make
+    // async-signal-safe calls, so it must not allocate or modify the environment.
+    auto envp = std::vector<char*>{};
+    for(char** var = ::environ; var != nullptr && *var != nullptr; ++var)
+    {
+        envp.emplace_back(*var);
+    }
+    envp.emplace_back(const_cast<char*>("LD_TRACE_LOADED_OBJECTS=1"));
+    envp.emplace_back(nullptr);
+
+    const auto pid = ::fork();
+    if(pid < 0)  // fork failed
+    {
+        ::close(read_fd);
+        ::close(write_fd);
+        return {};
+    }
+
+    if(pid == 0)  // we are in the child
+    {
+        // child: stdout -> pipe, then become the target binary
+        ::close(read_fd);
+        ::dup2(write_fd, STDOUT_FILENO);
+        ::close(write_fd);
+
+        auto argv = std::array<char*, 2>{ const_cast<char*>(exe_path.c_str()), nullptr };
+        ::execve(exe_path.c_str(), argv.data(), envp.data());
+        // Return from execve means it failed. Use conventional shell exit status
+        // for "command could not be executed"
+        constexpr int k_exec_failure_status = 127;
+        ::_exit(k_exec_failure_status);
+    }
+
+    // If we are here - we are in the parent
+
+    ::close(write_fd);  // the parent's copy must go, or the read below never sees EOF
+
+    constexpr size_t k_read_buffer_size = 4096;
+
+    auto out = std::string{};
+    auto buf = std::array<char, k_read_buffer_size>{};
+    while(true)  // read until EOF or error
+    {
+        const auto bytes_read = ::read(read_fd, buf.data(), buf.size());
+        if(bytes_read > 0)
+        {
+            out.append(buf.data(), static_cast<std::size_t>(bytes_read));
+        }
+        else if(bytes_read == 0 || errno != EINTR)
+        {
+            break;
+        }
+    }
+    ::close(read_fd);
+
+    auto status = 0;
+    while(::waitpid(pid, &status, 0) < 0 && errno == EINTR)
+    {
+        // do nothing
+    }
+
+    return out;
 }
 }  // namespace
 
@@ -2522,19 +2602,16 @@ main(int argc, char** argv)
             verbprintf(0, "Consider instrumenting the relevant libraries...\n");
             verbprintf(0, "\n");
 
-            auto cmdv_envp = std::array<char*, 2>{};
-            cmdv_envp.fill(nullptr);
-            cmdv_envp.at(0) = strdup("LD_TRACE_LOADED_OBJECTS=1");
-            auto ldd        = tim::popen::popen(cmdv0.c_str(), nullptr, cmdv_envp.data());
-            auto linked_libs = tim::popen::read_ldd_fork(ldd);
-            auto perr        = tim::popen::pclose(ldd);
-            for(auto& itr : cmdv_envp)
-                ::free(itr);
-
-            if(perr != 0) perror("Error in rocprofsys_fork");
-
-            for(const auto& itr : linked_libs)
-                verbprintf(0, "\t%s\n", itr.c_str());
+            // Each trace line is "<soname> => <path> (<addr>)".
+            // Print only absolute paths.
+            for(const auto& trace_element :
+                rocprofsys::delimit(read_loader_trace(cmdv0), " \n\t=>"))
+            {
+                if(trace_element.starts_with('/'))
+                {
+                    verbprintf(0, "\t%s\n", trace_element.c_str());
+                }
+            }
 
             verbprintf(0, "\n");
         }
