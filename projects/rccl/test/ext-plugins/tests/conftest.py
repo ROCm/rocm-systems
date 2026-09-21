@@ -71,6 +71,29 @@ os.makedirs(LOGDIR, exist_ok=True)
 # config per call that produced hundreds of MB of debug output per suite run.
 TUNER_PERF_ARGS = ["-b", "8", "-e", "128M", "-f", "8", "-g", "1", "-n", "1", "-w", "1"]
 
+def run_tuner_mpirun(args, env, log_file):
+    """Run a tuner rccl-tests job and return (rc, combined log text).
+
+    TUNING logs on the collective path hang multi-node pytest if they go through
+    mpirun stdout, so each rank writes NCCL_DEBUG_FILE next to log_file instead
+    (log_file.%p). Assertions read those shards plus the captured stdout.
+    """
+    os.makedirs(os.path.dirname(os.path.abspath(log_file)), exist_ok=True)
+    env = dict(env)
+    env["NCCL_DEBUG_FILE"] = log_file + ".%p"
+    with open(log_file, "w") as out:
+        result = subprocess.run(
+            args, env=env, stdout=out, stderr=subprocess.STDOUT, universal_newlines=True
+        )
+    chunks = []
+    if os.path.isfile(log_file):
+        with open(log_file) as fh:
+            chunks.append(fh.read())
+    for path in sorted(glob.glob(log_file + ".*")):
+        with open(path) as fh:
+            chunks.append(fh.read())
+    return result.returncode, "\n".join(chunks)
+
 PROFILER_DUMP_DIR = os.path.join(WORKDIR, "profiler_dumps")
 INSPECTOR_DUMP_DIR = os.path.join(WORKDIR, "inspector_dumps")
 
@@ -234,6 +257,7 @@ def paths():
         check_node_interface=check_node_interface,
         find_common_interface=find_common_interface,
         get_available_nodes=get_available_nodes,
+        run_tuner_mpirun=run_tuner_mpirun,
         # Helper Functions for Ext-Profiler
         validate_json_trace=validate_json_trace,
         check_event_in_log=check_event_in_log,
