@@ -4756,7 +4756,9 @@ TEST_F(P2pShareableBufferMicrotest,
     ScopedHook gran(g_hipMemGetAllocationGranularity, GranularitySucceeds());
     ScopedHook getFd(g_ncclProxyClientGetFdBlocking,
         [](struct ncclComm*, int, void*, int* fd) -> ncclResult_t {
-            if (fd) *fd = dup(STDERR_FILENO);   // a real, closable fd
+            // Import fails before production's close(fd), so hand back a
+            // fabricated fd rather than a real dup that would leak here.
+            if (fd) *fd = 1 << 30;
             return ncclSuccess;
         });
     ScopedHook import(g_hipMemImportFromShareableHandle,
