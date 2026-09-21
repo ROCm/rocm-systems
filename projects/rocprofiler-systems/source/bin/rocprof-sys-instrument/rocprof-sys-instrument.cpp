@@ -1741,7 +1741,7 @@ main(int argc, char** argv)
     // symbol that has the same start address, allowing Dyninst to latch onto that.
     // However, if problems persist, users should specify their main with
     // "--main-function"
-    if(!main_func) main_func = find_function(filtered_modules, main_fname.c_str());
+    if(!main_func) main_func = find_function(filtered_modules, main_fname);
 
     if(!main_func && main_fname == "main")
         main_func = find_function(filtered_modules, "_main");
@@ -2562,7 +2562,8 @@ main(int argc, char** argv)
             else if(app_thread->terminationStatus() == ExitedViaSignal)
             {
                 auto sign = app_thread->getExitSignal();
-                fprintf(stderr, "\nApplication exited with signal: %i\n", int(sign));
+                fprintf(stderr, "\nApplication exited with signal: %i\n",
+                        static_cast<int>(sign));
             }
             code = app_thread->getExitCode();
         };

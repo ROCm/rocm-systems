@@ -913,6 +913,15 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
   for (int c = 0; c < MAXCHANNELS; c++) channelCounts[c] = 0;
 #endif
 
+  int const planCollCount = nPlanColls;
+
+#ifdef ENABLE_WARP_SPEED
+  // The plan queue is populated below, so evaluate the exact budgeted prefix
+  // now with the same plan-wide predicate used at launch.
+  bool warpSpeedPlan = rcclWarpSpeedSupported(
+    comm, plan, ncclIntruQueueHead(&planner->collTaskQueue), planCollCount);
+#endif
+
   while (nPlanColls != 0 && !ncclIntruQueueEmpty(&planner->collTaskQueue)) {
     struct ncclTaskColl* task = ncclIntruQueueHead(&planner->collTaskQueue);
     struct ncclWorkList* workNode = ncclIntruQueueHead(&planner->collWorkQueue);
@@ -920,8 +929,33 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
     size_t elementSize = ncclTypeSize(task->datatype);
 
     int kind = 2 * task->isCollnet + task->isNvls;
+#ifdef ENABLE_WARP_SPEED
+    // WarpSpeed loads one batch chain from the lead channel per physical block.
+    // Multi-collective plans must reuse the same channel range so every channel
+    // queues all colls (AG#1 then AG#2 via nextJump), not sequential channel slices.
+    // Pack each coll from its own trafficBytes across the full channel set. The
+    // plan-wide trafficBytes[kind] sum would keep each coll on nChannels/K even
+    // after resetting channelId to 0 (Argus/Alex on ROCM-29990 / PR 10799).
+    bool const warpSpeedReuseChannels = warpSpeedPlan && planCollCount > 1;
+    if (warpSpeedReuseChannels) {
+      int const nPackChannels = nMaxChannels[kind] > 0 ? nMaxChannels[kind] : 1;
+      size_t const taskTraffic = std::max(MinTrafficPerChannel, task->trafficBytes);
+      trafficPerChannel =
+          std::max<size_t>(MinTrafficPerChannel, divUp(taskTraffic / nPackChannels, 16) * 16);
+      if ((planCollCount - nPlanColls) > 0) {
+        channelId = 0;
+        currentTraffic = 0;
+      }
+    }
+#endif
     if (kind != kindPrev) {
-      trafficPerChannel = std::max<size_t>(MinTrafficPerChannel, divUp(trafficBytes[kind] / nChannels[kind], 16) * 16);
+#ifdef ENABLE_WARP_SPEED
+      if (!warpSpeedReuseChannels)
+#endif
+      {
+        trafficPerChannel =
+            std::max<size_t>(MinTrafficPerChannel, divUp(trafficBytes[kind] / nChannels[kind], 16) * 16);
+      }
       kindPrev = kind;
       channelId = 0;
       currentTraffic = 0;
@@ -1260,6 +1294,28 @@ static bool rcclP2pBatchEligible(struct ncclComm* comm, ssize_t sendBytes, ssize
                               rcclParamP2pBatchThreshold());
 }
 
+static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task) {
+  struct Policy {
+    const char* arch;
+    ncclFunc_t collAPI;
+    int nChannels;
+  };
+  // This workaround targets direct P2P/IPC traffic only. When P2P is disabled,
+  // preserve the normal channel selection for the fallback transport.
+  if (task == nullptr || ncclParamP2pDisable()) return -1;
+  constexpr Policy policies[] = {
+    // Two-channel full-mesh traffic has high variance on gfx110x. Keep the
+    // workaround specific to AllToAll so Gather, Scatter, and SendRecv retain
+    // their higher-throughput multi-channel paths.
+    {"gfx110", ncclFuncAlltoAll, 1},
+  };
+  for (const auto& policy : policies) {
+    if (task->collAPI == policy.collAPI &&
+        IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, policy.arch)) return policy.nChannels;
+  }
+  return -1;
+}
+
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget
 // and sizeof(ncclDevWorkP2p) in work budget. "sendRank" and "recvRank" must
 // match the corresponding values for this round of the p2p schedule (no -1's).
@@ -1281,6 +1337,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   bool proxySameProcess[2] = {true, true};
   void** handles[2] = {NULL, NULL};
   uint64_t p2pDirChannelMask[2] = {0, 0}; // per-direction channels (idx 0 recv, 1 send)
+  // Keep policy direction-local so a different task paired in the same planner
+  // round cannot change the channel count selected by this task's peer.
+  int kChannels[2] = {rcclP2pPolicyChannels(comm, p2pTasks[0]), rcclP2pPolicyChannels(comm, p2pTasks[1])};
   bool batchP2P = rcclP2pBatchEligible(comm, sendBytes, recvBytes);
   // Keep work-fusion size-gated (batchP2P) but select the channel map from the
   // communicator flag. Keying the map to eligibility collapsed large AllToAll
@@ -1370,10 +1429,12 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       // sides of a P2P pair agree on nChStart — planTotalTasks varies per rank.
       bool asymmetric =
         p2pTasks[dir] && (p2pTasks[dir]->collAPI == ncclFuncGather || p2pTasks[dir]->collAPI == ncclFuncScatter);
-      int nChStart = (comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin;
+      int nChMax = kChannels[dir] > 0 ? std::min(kChannels[dir], nChannelsMax) : nChannelsMax;
+      int nChStart =
+        kChannels[dir] > 0 ? nChMax : ((comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin);
       nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
-      while (partSize > maxPartSize && nChannels[dir] <= nChannelsMax / 2) {
+      while (partSize > maxPartSize && nChannels[dir] <= nChMax / 2) {
         nChannels[dir] *= 2;
         partSize = divUp(bytes[dir], nChannels[dir]);
       }
@@ -1474,10 +1535,12 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       // sides of a P2P pair agree on nChStart — planTotalTasks varies per rank.
       bool asymmetric =
         p2pTasks[dir] && (p2pTasks[dir]->collAPI == ncclFuncGather || p2pTasks[dir]->collAPI == ncclFuncScatter);
-      int nChStart = (comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin;
+      int nChMax = kChannels[dir] > 0 ? std::min(kChannels[dir], nChannelsMax) : nChannelsMax;
+      int nChStart =
+        kChannels[dir] > 0 ? nChMax : ((comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin);
       nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
-      while (partSize > maxPartSize && nChannels[dir] <= nChannelsMax / 2) {
+      while (partSize > maxPartSize && nChannels[dir] <= nChMax / 2) {
         nChannels[dir] *= 2;
         partSize = divUp(bytes[dir], nChannels[dir]);
       }
