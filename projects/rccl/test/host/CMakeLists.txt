@@ -753,12 +753,12 @@ if(BUILD_TESTS)
   # their five MAXCHANNELS uses are clamp arguments rather than layout.
   #
   # The four production files are separate TUs so task_prep.cc's three sibling externs resolve to
-  # real code. task-prep-test.cc #includes TASK_PREP_CC_PATH; each remaining file moves from this
-  # source list into its own test TU as that unit comes under test.
+  # real code. Each file leaves this source list for its own test TU, which #includes its *_CC_PATH,
+  # as that unit comes under test; listing both would be a duplicate symbol.
   # ---------------------------------------------------------------------------
   set(TEST_MICRO_TASKPREP_SOURCE_FILES
     task-prep-test.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_classify.cc
+    task-classify-test.cc
     ${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_pretuning.cc
     ${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_posttuning.cc
     fakes/bootstrap_stubs.cc
@@ -794,7 +794,6 @@ if(BUILD_TESTS)
     ../common/main_altrsmi.cpp
   )
   set_source_files_properties(
-    ${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_classify.cc
     ${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_pretuning.cc
     ${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_posttuning.cc
     ${PROJECT_BINARY_DIR}/hipify/src/config/algorithm_parser.cc
@@ -1557,7 +1556,7 @@ endif()
 # ---------------------------------------------------------------------------
 set(TEST_MICRO_TASKPREP_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/task-prep-test.cc
-  ${RCCL_HIPIFY_DIR}/src/enqueue/task_prep/task_classify.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/task-classify-test.cc
   ${RCCL_HIPIFY_DIR}/src/enqueue/task_prep/task_pretuning.cc
   ${RCCL_HIPIFY_DIR}/src/enqueue/task_prep/task_posttuning.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc

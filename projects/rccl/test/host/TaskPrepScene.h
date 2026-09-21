@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <cstring>
 #include <memory>
 #include <vector>
 
@@ -43,8 +44,17 @@ constexpr size_t kCount = 100;
 constexpr float kTunedTimeUs = 12.5f;
 constexpr float kUnwrittenEstimate = -777.0f;
 constexpr int kTunedValid = 1;
+constexpr unsigned char kPoison = 0xA5;
 
 using TaskTuningInfoQueue = struct ncclIntruQueue<struct ncclTaskTuningInfo, &ncclTaskTuningInfo::next>;
+
+// One poisoned value per type, so an unwritten field reads back as kPoison rather than as a plausible zero.
+template <typename T>
+T TaskPrep_Poisoned() {
+  T value;
+  std::memset(&value, kPoison, sizeof(value));
+  return value;
+}
 
 // ncclComm carries channels[MAXCHANNELS] inline, so it lives on the heap; a stack instance overflows.
 class TaskPrepScene {
