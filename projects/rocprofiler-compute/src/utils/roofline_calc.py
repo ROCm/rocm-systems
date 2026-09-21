@@ -128,6 +128,7 @@ SUPPORTED_DATATYPES: dict[str, dict[str, OpsSupport]] = {
         "FP4": OpsSupport.MATRIX,
         "FP6": OpsSupport.MATRIX,
         "FP8": OpsSupport.MATRIX,
+        "MXFP8": OpsSupport.MATRIX,
         "FP16": OpsSupport.VALU | OpsSupport.MATRIX,
         "BF16": OpsSupport.MATRIX,
         "FP32": OpsSupport.VALU | OpsSupport.MATRIX,

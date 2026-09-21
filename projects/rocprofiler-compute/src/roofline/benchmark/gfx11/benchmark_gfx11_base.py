@@ -27,7 +27,9 @@ class Bench_gfx11(benchmark_base.Bench_base):
             "HBM",
             "WMMA-F4",
             "WMMA-F6",
-            "WMMA-F6F4",
+            "WMMA-F6F4"
+            "WMMA-MXF8",
+            "WMMA-MXB8",
             "WMMA-F8",
             "WMMA-F16",
             "WMMA-BF16",
@@ -81,6 +83,7 @@ class Bench_gfx11(benchmark_base.Bench_base):
             "WMMA-F4": "WMMAF4Flops",
             "WMMA-F6": "WMMAF6Flops",
             "WMMA-F6F4": "WMMAF6F4Flops",
+            "WMMA-MXF8": "WMMAMXF8Flops",
             "WMMA-F8": "WMMAF8Flops",
             "WMMA-F16": "WMMAF16Flops",
             "WMMA-BF16": "WMMABF16Flops",
