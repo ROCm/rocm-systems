@@ -114,3 +114,6 @@ kernel:
   Unit_hipLaunchParmFunctor_kernel_arg_prefetch:
     <<: *level_2
     tags: [launch]
+  Unit_kernel_BlockDim3D_Validation_Functional:
+    <<: *level_2
+    tags: [launch]

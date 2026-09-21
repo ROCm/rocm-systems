@@ -22,75 +22,58 @@ set(SRC_FILES
   allocator.cc
   bootstrap.cc
   ce_coll.cc
+  cft_dev_runtime.cc
   channel.cc
   collectives.cc
   commDump.cc
-  mem_manager.cc
-  debug.cc
-  dev_runtime.cc
-  dev_runtime_segments.cc
-  dev_runtime_internal.h
-  algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
-  algorithms/dda/reduce_scatter/dda_reduce_scatter_ipc.cu
-  algorithms/dda/all_gather/dda_all_gather_ipc.cu
-  algorithms/dda/alltoall/dda_alltoall_ipc.cu
-  algorithms/dda/all_reduce/dda_all_reduce_fabric.cu
-  algorithms/dda/all_reduce/dda_all_reduce_fabric_ll.cu
-  algorithms/dda/all_reduce/dda_all_reduce_fabric_ll128.cu
-  algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu
+  config/algorithm_parser.cc
+  config/algorithm_registry.cc
+  config/collconfig.cc
   algorithms/dda/all_gather/dda_all_gather_fabric.cu
   algorithms/dda/all_gather/dda_all_gather_fabric_ll.cu
   algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu
+  algorithms/dda/all_gather/dda_all_gather_ipc.cu
+  algorithms/dda/all_reduce/dda_all_reduce_fabric.cu
+  algorithms/dda/all_reduce/dda_all_reduce_fabric_ll.cu
+  algorithms/dda/all_reduce/dda_all_reduce_fabric_ll128.cu
+  algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
   algorithms/dda/alltoall/dda_alltoall_fabric.cu
   algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu
   algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu
+  algorithms/dda/alltoall/dda_alltoall_ipc.cu
+  algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu
   algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu
   algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu
-  algorithms/dda/device/device_buffer.cc
-  enqueue.cc
-  algorithms/dda/fabric/fabric_gpu_barrier.cu
-  algorithms/dda/fabric/fabric_init.cu
-  algorithms/dda/fabric/fabric_mem_handler.cc
-  group.cc
-  algorithms/dda/ipc/ipc_gpu_barrier.cu
-  algorithms/dda/ipc/ipc_init.cu
-  algorithms/dda/ipc/ipc_mem_handler.cc
-  init.cc
-  init_nvtx.cc
-  mnnvl.cc
-  proxy.cc
-  rccl_wrap.cc
-  sym_kernels.cc
-  transport.cc
+  algorithms/dda/reduce_scatter/dda_reduce_scatter_ipc.cu
+  debug.cc
+  dev_runtime.cc
+  dev_runtime_internal.h
+  dev_runtime_segments.cc
   device/all_gather.h
   device/all_gather_v.h
   device/all_reduce.h
-  device/alltoall_pivot.h
   device/alltoall_gda.h
+  device/alltoall_pivot.h
   device/alltoallv_gda.h
   device/broadcast.h
+  device/ce_reduce.cc
+  device/common.cu
   device/common.h
   device/common_kernel.h
+  device/hierarchical_shuffle.h
+  device/network/unpack/unpack.h
+  device/network/unpack/unpack_defs.h
+  device/onerank.cu
   device/op128.h
   device/primitives.h
-  device/prims_ll128.h
   device/prims_ll.h
+  device/prims_ll128.h
   device/prims_simple.h
+  device/rccl_metadata.h
   device/reduce.h
   device/reduce_kernel.h
   device/reduce_scatter.h
-  device/rccl_metadata.h
   device/sendrecv.h
-  device/hierarchical_shuffle.h
-  device/ce_reduce.cc
-  device/common.cu
-  device/onerank.cu
-  device/tdm/cachePolicy.h
-  device/tdm/syncPolicy.h
-  device/tdm/asyncCopy.h
-  device/tdm/tdmCopy.h
-  device/network/unpack/unpack_defs.h
-  device/network/unpack/unpack.h
   device/symmetric/all_gather.cuh
   device/symmetric/all_gather_gin.cuh
   device/symmetric/all_reduce.cuh
@@ -102,9 +85,41 @@ set(SRC_FILES
   device/symmetric/primitives.cuh
   device/symmetric/reduce_scatter.cuh
   device/symmetric/reduce_scatter_gin.cuh
+  device/tdm/asyncCopy.h
+  device/tdm/cachePolicy.h
+  device/tdm/syncPolicy.h
+  device/tdm/tdmCopy.h
+  algorithms/dda/device/device_buffer.cc
+  diagnostics.cc
+  diagnostics.h
+  diagnostics/device/p2p.cu
+  diagnostics/p2p.cc
+  diagnostics/p2p.h
+  enqueue/enqueue.cc
+  enqueue/mgmt_task_enq.cc
+  enqueue/task_prep/task_classify.cc
+  enqueue/task_prep/task_posttuning.cc
+  enqueue/task_prep/task_prep.cc
+  enqueue/task_prep/task_pretuning.cc
+  enqueue/task_sched/allgatherv_sched.cc
+  enqueue/task_sched/ce_sched.cc
+  enqueue/task_sched/legacy_sched.cc
+  enqueue/task_sched/p2p_sched.cc
+  enqueue/task_sched/rma_sched.cc
+  enqueue/task_sched/sym_sched.cc
+  enqueue/task_sched/task_sched.cc
+  algorithms/dda/fabric/fabric_gpu_barrier.cu
+  algorithms/dda/fabric/fabric_init.cu
+  algorithms/dda/fabric/fabric_mem_handler.cc
+  gin/gin_host.cc
+  gin/gin_host_proxy.cc
+  gin/proxy_gpucontext/gpucontext.cc
+  gin/proxy_gpucontext/gpucontext.h
+  gin/proxy_gpucontext/gpucontext_v1.cc
+  gin/proxy_gpucontext/gpucontext_v1.h
   graph/connect.cc
-  graph/paths.cc
   graph/rccl_graph_gen.cc
+  graph/paths.cc
   graph/rings.cc
   graph/rings.h
   graph/rome_models.cc
@@ -118,139 +133,129 @@ set(SRC_FILES
   graph/tuning.cc
   graph/xml.cc
   graph/xml.h
-  include/alloc.h
-  include/mem_manager.h
-  include/allocator.h
+  group.cc
+  include/BfdBacktrace.hpp
   algorithms/dda/device/CollCommon.h
   algorithms/dda/device/CollCommon_ll128.h
-  algorithms/dda/all_reduce/all_reduce_dda.h
-  algorithms/dda/all_reduce/all_reduce_dda_ll.h
-  algorithms/dda/all_reduce/all_reduce_dda_ll_twoshot.h
-  algorithms/dda/all_reduce/all_reduce_dda_fabric_ll128.h
-  algorithms/dda/reduce_scatter/reduce_scatter_dda.h
   algorithms/dda/all_gather/all_gather_dda.h
-  algorithms/dda/alltoall/alltoall_dda.h
-  algorithms/dda/all_reduce/all_reduce_dda_fabric.h
-  algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric.h
   algorithms/dda/all_gather/all_gather_dda_fabric.h
   algorithms/dda/all_gather/all_gather_dda_fabric_ll.h
   algorithms/dda/all_gather/all_gather_dda_fabric_ll128.h
+  algorithms/dda/all_reduce/all_reduce_dda.h
+  algorithms/dda/all_reduce/all_reduce_dda_fabric.h
+  algorithms/dda/all_reduce/all_reduce_dda_fabric_ll128.h
+  algorithms/dda/all_reduce/all_reduce_dda_ll.h
+  algorithms/dda/all_reduce/all_reduce_dda_ll128.h
+  algorithms/dda/all_reduce/all_reduce_dda_ll128_twoshot.h
+  algorithms/dda/all_reduce/all_reduce_dda_ll_twoshot.h
+  algorithms/dda/alltoall/alltoall_dda.h
   algorithms/dda/alltoall/alltoall_dda_fabric.h
   algorithms/dda/alltoall/alltoall_dda_fabric_ll.h
   algorithms/dda/alltoall/alltoall_dda_fabric_ll128.h
+  algorithms/dda/reduce_scatter/reduce_scatter_dda.h
+  algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
   algorithms/gin/gin_alltoall.h
   algorithms/gin/gin_all_reduce.h
   algorithms/gin/gin_all_reduce_policy.h
-  algorithms/gin/sdma/all_reduce_gin_sdma.h 
+  algorithms/gin/sdma/all_reduce_gin_sdma.h
+  include/alloc.h
+  include/allocator.h
   include/alltoallv_meta.h
   include/alt_rsmi.h
-  include/archinfo.h
   include/api_trace.h
+  include/archinfo.h
   include/argcheck.h
-  include/BfdBacktrace.hpp
   include/bitops.h
   include/bootstrap.h
   include/ce_coll.h
   include/ce_fault_inject.h
   include/channel.h
   include/checks.h
-  include/collectives.h
   include/coll_net.h
-  include/cudawrap.h
+  include/collectives.h
   include/comm.h
   include/compiler.h
   include/compiler/gcc.h
   include/compiler/msvc.h
+  include/config/algorithm_parser.h
+  include/config/algorithm_registry.h
+  include/config/collconfig.h
   include/core.h
   include/cpuset.h
-# include/cudawrap.h
-  algorithms/dda/all_reduce/dda_all_reduce.h
-  algorithms/dda/reduce_scatter/dda_reduce_scatter.h
+  include/cudawrap.h
   algorithms/dda/all_gather/dda_all_gather.h
+  algorithms/dda/all_reduce/dda_all_reduce.h
   algorithms/dda/alltoall/dda_alltoall.h
   algorithms/dda/dda_init_detail.h
+  algorithms/dda/reduce_scatter/dda_reduce_scatter.h
   include/debug.h
   include/dev_runtime.h
   include/device.h
-  include/env.h
   algorithms/dda/device/device_buffer.h
+  include/diagnostics_log.h
   include/enqueue.h
-  algorithms/dda/fabric/fabric_init.h
+  include/enqueue/mgmt_task_enq.h
+  include/enqueue/raw_task.h
+  include/enqueue/task_classify.h
+  include/enqueue/task_posttuning.h
+  include/enqueue/task_pretuning.h
+  include/enqueue/task_sched.h
+  include/env.h
   algorithms/dda/fabric/fabric_gpu_barrier.h
+  algorithms/dda/fabric/fabric_init.h
   algorithms/dda/fabric/fabric_mem_handler.h
   include/gdr_peermem.h
   include/gdrwrap.h
-  include/git_version.h
-  include/graph.h
-  include/group.h
   include/gin.h
   include/gin/gin_host.h
+  include/gin/gin_host_anvil_sdma.h
   include/gin/gin_host_proxy.h
   include/gin/gin_host_rocshmem_gda.h
   include/gin/gin_rocshmem_gda_factory.h
-  include/gin/gin_host_anvil_sdma.h
+  include/git_version.h
+  include/graph.h
+  include/group.h
   include/hip_rocm_version_info.h
   include/ibvcore.h
   include/ibvsymbols.h
   include/ibvwrap.h
   include/info.h
+  include/ionic/ionicdvcore.h
+  include/ionic/ionicdvsymbols.h
+  include/ionic/ionicdvwrap.h
   algorithms/dda/ipc/ipc_gpu_barrier.h
   algorithms/dda/ipc/ipc_init.h
   algorithms/dda/ipc/ipc_mem_handler.h
   include/ipcsocket.h
-  include/mem_manager.h
-  include/mnnvl.h
-  include/nccl_common.h
-  include/nccl_device.h
-  include/nccl_device/net_device.h
-  include/net.h
-  include/net_telemetry.h
-  include/nvmlwrap.h
-  include/nvtx.h
-  include/nvtx_payload_schemas.h
-  include/nvtx_stub.h
-  include/p2p.h
-  include/param.h
-  include/profiler.h
-  include/proxy.h
-  include/ras.h
-  include/rccl_common.h
-  include/rccl_decision.h
-  include/rccl_vars.h
-  include/register.h
-  include/register_inline.h
-  include/rccl_float8.h
   include/rccl_graph_gen.h
-  include/rocmwrap.h
-  include/roctx.h
-  include/recorder.h
-  include/scheduler.h
-  include/shm.h
-  include/shmutils.h
-  include/signals.h
-  include/socket.h
-  include/strongstream.h
-  include/sym_kernels.h
-  include/timer.h
-  include/transport.h
-  include/trees.h
-  include/tuner.h
-  include/utils.h
   include/kernel_config.h
+  include/latency_profiler/CollTrace.h
+  include/latency_profiler/CollTraceEvent.h
+  include/latency_profiler/CollTraceFunc.h
+  include/latency_profiler/CollTraceUtils.h
+  include/latency_profiler/EventQueue.h
+  include/mem_manager.h
   include/mlx5/mlx5dvcore.h
   include/mlx5/mlx5dvsymbols.h
   include/mlx5/mlx5dvwrap.h
-  include/ionic/ionicdvcore.h
-  include/ionic/ionicdvsymbols.h
-  include/ionic/ionicdvwrap.h
+  include/mnnvl.h
+  include/nccl_common.h
+  include/nccl_device.h
+  include/nccl_device/barrier.h
+  include/nccl_device/cft.h
+  include/nccl_device/cft_barrier.h
   include/nccl_device/comm.h
   include/nccl_device/coop.h
   include/nccl_device/core.h
-  include/nccl_device/barrier.h
   include/nccl_device/gin.h
-  include/nccl_device/gin_barrier.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_copy.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table_device.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h
   include/nccl_device/gin/gdaki/gin_gdaki.h
   include/nccl_device/gin/gdaki/gin_gdaki_device_host_common.h
   include/nccl_device/gin/gin_device_api.h
@@ -258,26 +263,20 @@ set(SRC_FILES
   include/nccl_device/gin/gin_device_host_common.h
   include/nccl_device/gin/proxy/gin_proxy.h
   include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
-  include/nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h
   include/nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h
+  include/nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h
   include/nccl_device/gin/rocshmem_gda/queue_pair_device.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_copy.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table_device.h
-  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h
-  include/nccl_device/ll_a2a.h
-  include/nccl_device/lsa_barrier.h
-  include/nccl_device/ptr.h
-  include/nccl_device/rccl_ptr.h
-  include/nccl_device/utility.h
+  include/nccl_device/gin_barrier.h
+  include/nccl_device/impl/barrier__funcs.h
+  include/nccl_device/impl/barrier__types.h
+  include/nccl_device/impl/cft__funcs.h
+  include/nccl_device/impl/cft__types.h
+  include/nccl_device/impl/cft_barrier__funcs.h
+  include/nccl_device/impl/cft_barrier__types.h
   include/nccl_device/impl/comm__funcs.h
   include/nccl_device/impl/comm__types.h
   include/nccl_device/impl/core__funcs.h
   include/nccl_device/impl/core__types.h
-  include/nccl_device/impl/barrier__funcs.h
-  include/nccl_device/impl/barrier__types.h
   include/nccl_device/impl/gin__funcs.h
   include/nccl_device/impl/gin__types.h
   include/nccl_device/impl/gin_barrier__funcs.h
@@ -286,15 +285,25 @@ set(SRC_FILES
   include/nccl_device/impl/ll_a2a__types.h
   include/nccl_device/impl/lsa_barrier__funcs.h
   include/nccl_device/impl/lsa_barrier__types.h
+  include/nccl_device/impl/multimem__funcs.h
   include/nccl_device/impl/ptr__funcs.h
   include/nccl_device/impl/ptr__types.h
-  include/nccl_device/impl/multimem__funcs.h
   include/nccl_device/impl/reduce_copy__funcs.h
   include/nccl_device/impl/reduce_copy__impl.h
   include/nccl_device/impl/reduce_copy__types.h
   include/nccl_device/impl/vector__funcs.h
   include/nccl_device/impl/vector__types.h
+  include/nccl_device/ll_a2a.h
+  include/nccl_device/lsa_barrier.h
+  include/nccl_device/net_device.h
+  include/nccl_device/ptr.h
+  include/nccl_device/rccl_ptr.h
   include/nccl_device/reduce_copy.h
+  include/nccl_device/utility.h
+  include/net.h
+  include/net_telemetry.h
+  include/nvmlwrap.h
+  include/nvtx.h
   include/nvtx3/nvToolsExt.h
   include/nvtx3/nvToolsExtCounters.h
   include/nvtx3/nvToolsExtCuda.h
@@ -311,8 +320,8 @@ set(SRC_FILES
   include/nvtx3/nvtxDetail/nvtxExtHelperMacros.h
   include/nvtx3/nvtxDetail/nvtxExtImpl.h
   include/nvtx3/nvtxDetail/nvtxExtImplCounters_v1.h
-  include/nvtx3/nvtxDetail/nvtxExtImplMem_v1.h
   include/nvtx3/nvtxDetail/nvtxExtImplMemCudaRt_v1.h
+  include/nvtx3/nvtxDetail/nvtxExtImplMem_v1.h
   include/nvtx3/nvtxDetail/nvtxExtImplPayload_v1.h
   include/nvtx3/nvtxDetail/nvtxExtInit.h
   include/nvtx3/nvtxDetail/nvtxExtPayloadHelperInternal.h
@@ -320,8 +329,8 @@ set(SRC_FILES
   include/nvtx3/nvtxDetail/nvtxExtTypes.h
   include/nvtx3/nvtxDetail/nvtxImpl.h
   include/nvtx3/nvtxDetail/nvtxImplCore.h
-  include/nvtx3/nvtxDetail/nvtxImplCuda_v3.h
   include/nvtx3/nvtxDetail/nvtxImplCudaRt_v3.h
+  include/nvtx3/nvtxDetail/nvtxImplCuda_v3.h
   include/nvtx3/nvtxDetail/nvtxImplOpenCL_v3.h
   include/nvtx3/nvtxDetail/nvtxImplSync_v3.h
   include/nvtx3/nvtxDetail/nvtxInit.h
@@ -329,83 +338,14 @@ set(SRC_FILES
   include/nvtx3/nvtxDetail/nvtxInitDefs.h
   include/nvtx3/nvtxDetail/nvtxLinkOnce.h
   include/nvtx3/nvtxDetail/nvtxTypes.h
-  include/proxy_diag_counters.h
-  include/plugin/nccl_net.h
-  include/plugin/nccl_profiler.h
-  include/plugin/nccl_tuner.h
-  include/plugin/nccl_env.h
-  include/plugin/env/env_v1.h
-  include/plugin/env/env_v2.h
-  include/plugin/plugin.h
-  include/plugin/net/net_v6.h
-  include/plugin/net/net_v7.h
-  include/plugin/net/net_v8.h
-  include/plugin/net/net_v9.h
-  include/plugin/net/net_v10.h
-  include/plugin/net/net_v11.h
-  include/plugin/net/net_v12.h
-  include/plugin/profiler/net_ib_v1.h
-  include/plugin/profiler/net_ib.h
-  include/plugin/profiler/net_socket_v1.h
-  include/plugin/profiler/net_socket.h
-  include/plugin/profiler/profiler_v1.h
-  include/plugin/profiler/profiler_v2.h
-  include/plugin/profiler/profiler_v3.h
-  include/plugin/profiler/profiler_v4.h
-  include/plugin/profiler/profiler_v5.h
-  include/plugin/profiler/profiler_v6.h
-  include/plugin/tuner/tuner_v2.h
-  include/plugin/tuner/tuner_v3.h
-  include/plugin/tuner/tuner_v4.h
-  include/plugin/tuner/tuner_v5.h
-  include/plugin/tuner/tuner_v6.h
-  include/plugin/nccl_gin.h
-  include/plugin/gin/gin_v13.h
-  include/plugin/gin/gin_v14.h
-  include/plugin/nccl_rma.h
-  include/plugin/rma/rma_v13.h
-  include/plugin/rma/rma_v14.h
-  misc/alt_rsmi.cc
-  misc/archinfo.cc
-  misc/argcheck.cc
-  misc/api_trace.c
-  misc/api_trace.cc
-# misc/cudawrap.cc
-  misc/gdr_peermem.cc
-# misc/gdrwrap.cc
-  misc/ibvsymbols.cc
-  misc/ibvwrap.cc
-  os/linux_ipcsocket.cc
-  os/linux_socket_pair.cc
-  misc/mlx5dvsymbols.cc
-  misc/mlx5dvwrap.cc
-  misc/ionicdvsymbols.cc
-  misc/ionicdvwrap.cc
-# misc/nvmlwrap.cc
-  misc/nvmlwrap_stub.cc
-  misc/kernel_config.cc
-  misc/param.cc
-  misc/rocmwrap.cc
-  misc/roctx.cc
-  misc/recorder.cc
-  misc/shmutils.cc
-  misc/signals.cc
-  misc/socket.cc
-  misc/strongstream.cc
-  misc/utils.cc
-  nccl_device/core.cc
-  nccl_device/gin_barrier.cc
-  nccl_device/gin_scratch.cc
-  nccl_device/ll_a2a.cc
-  nccl_device/lsa_barrier.cc
-  os/linux.cc
+  include/nvtx_payload_schemas.h
+  include/nvtx_stub.h
   include/os.h
-  include/os_socket_pair.h
   include/os/linux.h
   include/os/windows.h
-  param/c_api.cc
-  param/param.cc
-  param/param_registry.cc
+  include/os_socket_pair.h
+  include/p2p.h
+  include/param.h
   include/param/common.h
   include/param/param.h
   include/param/param_registry.h
@@ -416,69 +356,194 @@ set(SRC_FILES
   include/param/parser_list.h
   include/param/parsers.h
   include/param/utils.h
-  rma/rma.cc
-  rma/rma_ce.cc
-  rma/rma_proxy.cc
-  rma/rma_proxy_launch.cc
-  rma/rma_proxy_progress.cc
+  include/plugin/env/env_v1.h
+  include/plugin/env/env_v2.h
+  include/plugin/gin/gin_v13.h
+  include/plugin/gin/gin_v14.h
+  include/plugin/nccl_env.h
+  include/plugin/nccl_gin.h
+  include/plugin/nccl_net.h
+  include/plugin/nccl_profiler.h
+  include/plugin/nccl_rma.h
+  include/plugin/nccl_tuner.h
+  include/plugin/net/net_v10.h
+  include/plugin/net/net_v11.h
+  include/plugin/net/net_v12.h
+  include/plugin/net/net_v6.h
+  include/plugin/net/net_v7.h
+  include/plugin/net/net_v8.h
+  include/plugin/net/net_v9.h
+  include/plugin/plugin.h
+  include/plugin/profiler/net_ib.h
+  include/plugin/profiler/net_ib_v1.h
+  include/plugin/profiler/net_socket.h
+  include/plugin/profiler/net_socket_v1.h
+  include/plugin/profiler/profiler_v1.h
+  include/plugin/profiler/profiler_v2.h
+  include/plugin/profiler/profiler_v3.h
+  include/plugin/profiler/profiler_v4.h
+  include/plugin/profiler/profiler_v5.h
+  include/plugin/profiler/profiler_v6.h
+  include/plugin/profiler/profiler_v7.h
+  include/plugin/rma/rma_v13.h
+  include/plugin/rma/rma_v14.h
+  include/plugin/rma/rma_v15.h
+  include/plugin/tuner/tuner_v2.h
+  include/plugin/tuner/tuner_v3.h
+  include/plugin/tuner/tuner_v4.h
+  include/plugin/tuner/tuner_v5.h
+  include/plugin/tuner/tuner_v6.h
+  include/profiler.h
+  include/proxy.h
+  include/proxy_diag_counters.h
+  include/ras.h
+  include/rccl_common.h
+  include/rccl_decision.h
+  include/rccl_float8.h
+  include/rccl_vars.h
+  include/recorder.h
+  include/register.h
+  include/register_inline.h
   include/rma.h
   include/rma/rma.h
   include/rma/rma_ce.h
   include/rma/rma_proxy.h
   include/rma/rma_proxy_mem.h
-  plugin/net.cc
+  include/rocmwrap.h
+  include/roctx.h
+  include/scheduler.h
+  include/shm.h
+  include/shmutils.h
+  include/signals.h
+  include/socket.h
+  include/strongstream.h
+  include/sym_kernels.h
+  include/timer.h
+  include/transport.h
+  include/trees.h
+  include/tuner.h
+  include/tuning.h
+  include/utils.h
+  init.cc
+  init_nvtx.cc
+  algorithms/dda/ipc/ipc_gpu_barrier.cu
+  algorithms/dda/ipc/ipc_init.cu
+  algorithms/dda/ipc/ipc_mem_handler.cc
+  mem_manager.cc
+  misc/alt_rsmi.cc
+  misc/api_trace.c
+  misc/api_trace.cc
+  misc/archinfo.cc
+  misc/argcheck.cc
+  misc/gdr_peermem.cc
+  misc/ibvsymbols.cc
+  misc/ibvwrap.cc
+  misc/ionicdvsymbols.cc
+  misc/ionicdvwrap.cc
+  misc/kernel_config.cc
+  misc/latency_profiler/CollTrace.cc
+  misc/latency_profiler/CollTraceEvent.cc
+  misc/latency_profiler/CollTraceFunc.cc
+  misc/latency_profiler/CollTraceUtils.cc
+  misc/mlx5dvsymbols.cc
+  misc/mlx5dvwrap.cc
+  misc/nvmlwrap_stub.cc
+  misc/param.cc
+  misc/recorder.cc
+  misc/rocmwrap.cc
+  misc/roctx.cc
+  misc/shmutils.cc
+  misc/signals.cc
+  misc/socket.cc
+  misc/strongstream.cc
+  misc/utils.cc
+  mnnvl.cc
+  nccl_device/cft_barrier.cc
+  nccl_device/core.cc
+  nccl_device/gin_barrier.cc
+  nccl_device/gin_scratch.cc
+  nccl_device/ll_a2a.cc
+  nccl_device/lsa_barrier.cc
+  os/linux.cc
+  os/linux_ipcsocket.cc
+  os/linux_socket_pair.cc
+  param/c_api.cc
+  param/param.cc
+  param/param_registry.cc
   plugin/env.cc
+  plugin/env/default_env.cc
   plugin/env/env_v1.cc
   plugin/env/env_v2.cc
-  plugin/env/default_env.cc
-  plugin/plugin_open.cc
-  plugin/profiler.cc
-  plugin/tuner.cc
+  plugin/gin.cc
+  plugin/gin/gin_v13.cc
+  plugin/gin/gin_v14.cc
+  plugin/net.cc
+  plugin/net/net_v10.cc
+  plugin/net/net_v11.cc
+  plugin/net/net_v12.cc
   plugin/net/net_v6.cc
   plugin/net/net_v7.cc
   plugin/net/net_v8.cc
   plugin/net/net_v9.cc
-  plugin/net/net_v10.cc
-  plugin/net/net_v11.cc
-  plugin/net/net_v12.cc
+  plugin/plugin_open.cc
+  plugin/profiler.cc
   plugin/profiler/profiler_v1.cc
   plugin/profiler/profiler_v2.cc
   plugin/profiler/profiler_v3.cc
   plugin/profiler/profiler_v4.cc
   plugin/profiler/profiler_v5.cc
   plugin/profiler/profiler_v6.cc
+  plugin/profiler/profiler_v7.cc
+  plugin/rma.cc
+  plugin/rma/rma_v13.cc
+  plugin/rma/rma_v14.cc
+  plugin/rma/rma_v15.cc
+  plugin/tuner.cc
+  plugin/tuner/csv_tuner.cc
   plugin/tuner/tuner_v2.cc
   plugin/tuner/tuner_v3.cc
   plugin/tuner/tuner_v4.cc
   plugin/tuner/tuner_v5.cc
   plugin/tuner/tuner_v6.cc
-  plugin/tuner/csv_tuner.cc
-  plugin/gin.cc
-  plugin/gin/gin_v13.cc
-  plugin/gin/gin_v14.cc
-  plugin/rma.cc
-  plugin/rma/rma_v13.cc
-  plugin/rma/rma_v14.cc
+  proxy.cc
   ras/client.cc
   ras/client_support.cc
   ras/collectives.cc
+  ras/diagnostics.cc
+  ras/diagnostics.h
+  ras/diagnostics_checks.h
+  ras/diagnostics_checks_common.cc
+  ras/diagnostics_checks_common.h
+  ras/diagnostics_env.cc
+  ras/diagnostics_gpu.cc
   ras/peers.cc
   ras/ras.cc
   ras/ras_internal.h
+  ras/ras_param.cc
+  ras/ras_param.h
   ras/rasnet.cc
+  rccl_wrap.cc
   register/coll_reg.cc
   register/register.cc
   register/sendrecv_reg.cc
-  scheduler/symmetric_sched.cc
+  rma/rma.cc
+  rma/rma_ce.cc
+  rma/rma_proxy.cc
+  rma/rma_proxy_launch.cc
+  rma/rma_proxy_progress.cc
   scheduler/allgatherv_sched.cc
+  scheduler/symmetric_sched.cc
+  sym_kernels.cc
+  transport.cc
   transport/coll_net.cc
   transport/generic.cc
   transport/net.cc
-  transport/net_ib_limits.h
+  transport/net_telemetry.cc
   transport/net_ib/common.cc
   transport/net_ib/common.h
   transport/net_ib/connect.cc
   transport/net_ib/connect.h
+  transport/net_ib/gdaki/gin_host_gdaki.h
   transport/net_ib/gdr.cc
   transport/net_ib/gin.cc
   transport/net_ib/gin.h
@@ -490,28 +555,27 @@ set(SRC_FILES
   transport/net_ib/p2p_resiliency_recovery.cc
   transport/net_ib/p2p_resiliency_recovery.h
   transport/net_ib/reg.cc
+  transport/net_ib/wqe_lat_mon.cc
+  transport/net_ib/wqe_lat_mon.h
   transport/net_ib_cast/net_ib_cast_inspect.h
   transport/net_ib_cast/net_ib_fault_inject.h
-  transport/net_ib/gdaki/gin_host_gdaki.h
-  transport/net_telemetry.cc
+  transport/net_ib_limits.h
   transport/net_socket.cc
   transport/nvls.cc
   transport/p2p.cc
-  transport/profiler.cc
   transport/shm.cc
-  gin/gin_host.cc
-  gin/gin_host_proxy.cc
-  gin/proxy_gpucontext/gpucontext.h
-  gin/proxy_gpucontext/gpucontext_v1.h
-  include/latency_profiler/CollTrace.h
-  include/latency_profiler/CollTraceEvent.h
-  include/latency_profiler/CollTraceFunc.h
-  include/latency_profiler/CollTraceUtils.h
-  include/latency_profiler/EventQueue.h
-  misc/latency_profiler/CollTrace.cc
-  misc/latency_profiler/CollTraceEvent.cc
-  misc/latency_profiler/CollTraceFunc.cc
-  misc/latency_profiler/CollTraceUtils.cc
+  tuning/ce_model.cc
+  tuning/collnet.cc
+  tuning/cost_model.cc
+  tuning/cost_model.h
+  tuning/nvls.cc
+  tuning/pat.cc
+  tuning/ring.cc
+  tuning/sym_model.cc
+  tuning/tree.cc
+  tuning/tuning.cc
+  tuning/tuning_general.cc
+  tuning/tuning_int.h
 )
 
 # Prepend src/ to all source files for proper paths from root
@@ -727,6 +791,28 @@ foreach(_hdr core comm gin)
   list(APPEND NCCL_DEVICE_HEADER_SYMLINKS "${NCCL_DEVICE_HIPIFY_DIR}/${_hdr}.h")
 endforeach()
 add_custom_target(nccl_device_header_symlinks DEPENDS ${NCCL_DEVICE_HEADER_SYMLINKS})
+add_dependencies(hipify_all nccl_device_header_symlinks)
+
+# NCCL 2.31 added src/include/param/ and src/include/p2p.h, whose basenames collide
+# with earlier-listed files (param/utils.h vs utils.h, param/param.h vs param.h,
+# param/common.h vs device/common.h, net_ib/p2p.h vs p2p.h). add_file_unique() gives
+# the later-listed one the _tmp name, but consumers such as alloc.h still
+# #include "utils.h", so symlink the un-suffixed names back, same as above.
+set(COLLIDING_HEADER_SYMLINKS "")
+foreach(_hdr include/utils include/p2p include/param/common include/param/param ras/diagnostics)
+  get_filename_component(_dir "${HIPIFY_DIR}/src/${_hdr}" DIRECTORY)
+  get_filename_component(_name "${_hdr}" NAME)
+  add_custom_command(
+    OUTPUT  "${_dir}/${_name}.h"
+    DEPENDS "${_dir}/${_name}_tmp.h"
+    COMMAND ${CMAKE_COMMAND} -E create_symlink
+            "${_name}_tmp.h" "${_dir}/${_name}.h"
+    COMMENT "Symlinking ${_hdr}_tmp.h -> ${_hdr}.h"
+  )
+  list(APPEND COLLIDING_HEADER_SYMLINKS "${_dir}/${_name}.h")
+endforeach()
+add_custom_target(colliding_header_symlinks DEPENDS ${COLLIDING_HEADER_SYMLINKS})
+add_dependencies(hipify_all colliding_header_symlinks)
 
 # Create the symlinks before the nccl_device headers are copied into
 # ${PROJECT_BINARY_DIR}/include (consumed by the IR bitcode build).
@@ -815,6 +901,7 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "onerank\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "collectives\\.cc$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "diagnostics/device/p2p\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_ipc\\.cu\\.cpp$")
@@ -904,6 +991,9 @@ if(USE_AMDSMI)
   target_compile_definitions(rccl PRIVATE USE_AMDSMI)
   if(AMDSMI_FABRIC_API)
     target_compile_definitions(rccl PRIVATE AMDSMI_FABRIC_DIRECT)
+  endif()
+  if(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
+    target_compile_definitions(rccl PRIVATE AMDSMI_HEADER_HAS_FABRIC_TELEMETRY)
   endif()
 else()
   if(HAVE_ROCM_SMI64CONFIG)
@@ -1114,62 +1204,33 @@ if(ENABLE_CODE_COVERAGE)
 
   message(STATUS "Code coverage is enabled with build type '${CMAKE_BUILD_TYPE}'.")
 
-  # Host-only and host+device coverage instrument with the same two flags and
-  # differ only in whether the instrumentation is restricted to host code.
-  # Device coverage (ROCm 7.15+) drops -Xarch_host so the flags also reach the
-  # device compilation; host-only keeps -Xarch_host so device code is untouched.
-  if(ENABLE_FULL_COVERAGE)
-    message(STATUS "Device-side coverage is enabled (host + device instrumented).")
-    set(_coverage_instr_flags
-      -fprofile-instr-generate
-      -fcoverage-mapping)
-  else()
-    set(_coverage_instr_flags
-      "SHELL:-Xarch_host -fprofile-instr-generate"
-      "SHELL:-Xarch_host -fcoverage-mapping")
-  endif()
   target_compile_options(rccl PRIVATE
     -fvisibility=default
-    ${_coverage_instr_flags})
+    "SHELL:-Xarch_host -fprofile-instr-generate"
+    "SHELL:-Xarch_host -fcoverage-mapping")
 
   set(COVERAGE_SHARED_LINKER_FLAGS
     -fprofile-generate
     -Wl,--enable-new-dtags,--build-id=sha1,--rpath,$ORIGIN
   )
 
+  set(COVERAGE_EXE_LINKER_FLAGS
+    -fprofile-generate
+    -Wl,--enable-new-dtags,--build-id=sha1,--rpath,$ORIGIN/../lib
+  )
+
   target_link_options(rccl PRIVATE ${COVERAGE_SHARED_LINKER_FLAGS})
+  target_link_options(rccl PRIVATE ${COVERAGE_EXE_LINKER_FLAGS})
 
   # Expose explicit profile-flush wrappers so test harnesses that bypass
   # atexit() handlers (e.g. ProcessIsolatedTestRunner using _exit()) can
   # still flush librccl's private LLVM profile runtime instance.
   target_sources(rccl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/misc/coverage_flush.cc)
-
-  # Force-link the HIP device-data drain symbol so the host profile RT's
-  # InstrProfilingPlatformROCm.cpp.o gets pulled in (it's only included on
-  # demand). That .o registers the atexit hook which walks loaded HSA code
-  # objects, reads each device.elf's __llvm_prf_cnts via HSA introspection,
-  # and merges device counters into the same .profraw the host writes.
-  # Without this, .profraw contains host counters only and llvm-cov reports
-  # 0% on every device kernel.
-  #
-  # We add it on librccl's link rather than relying on the clang driver
-  # heuristic (the driver only force-links it for explicit `-x hip` link
-  # invocations; .o-only links from rccl-tests and friends don't qualify).
-  # One reference anywhere in the process is sufficient — once librccl is
-  # loaded, the atexit handler is registered for the whole process.
-  if(ENABLE_FULL_COVERAGE)
-    # Newer compiler-rt packages keep the ROCm collector and its interception
-    # dependencies in a self-contained companion archive. Explicitly link it
-    # for this object-only host link; older packages leave this path empty and
-    # continue to use the generic profile runtime.
-    if(RCCL_HOST_ROCM_PROFILE_RT)
-      target_link_libraries(rccl PRIVATE "${RCCL_HOST_ROCM_PROFILE_RT}")
-    endif()
-    target_link_options(rccl PRIVATE
-      "LINKER:-u,__llvm_profile_hip_collect_device_data")
-  endif()
 elseif(BUILD_TESTS) # Enable default/hidden visibility based on build type and ROCM_VERSION
-  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
+  # MPI tests include internal headers (comm.h, ce_coll, mem_manager, transports)
+  # and link those symbols. Debug already exports them; Release must too when
+  # ENABLE_MPI_TESTS=ON or the MPI binary fails to link (hidden shmTransport etc.).
+  if(ENABLE_MPI_TESTS OR (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug"))
     target_compile_options(rccl PRIVATE -fvisibility=default)
   else()
     target_compile_options(rccl PRIVATE -fvisibility=hidden)
@@ -1247,31 +1308,6 @@ if(RCCL_ROCPROFILER_REGISTER)
   target_link_libraries(
       rccl PRIVATE rocprofiler-register::rocprofiler-register)
 endif()
-
-# Poison the __hip_atomic_* builtins
-#==================================================================================================
-# RCCL spells device atomics with the Clang scoped-atomic builtins so that memory
-# scope is explicit at every call site. Force-include (rather than #include) the
-# poison header so it also covers hipified and generated sources, and set it here,
-# before DeviceLinker.cmake snapshots COMPILE_OPTIONS, so the per-kernel device
-# compiles inherit it too. See src/include/poison_hip_atomics.h for the coverage
-# this does and does not give.
-if(RCCL_POISON_HIP_ATOMICS)
-  if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
-    message(STATUS "RCCL_POISON_HIP_ATOMICS is not supported with ENABLE_ROCSHMEM or ENABLE_ROCSHMEM_GIN - disabling RCCL_POISON_HIP_ATOMICS")
-    set(RCCL_POISON_HIP_ATOMICS OFF)
-  else()
-    # Joined --include=<file> rather than separate-argument -include <file>: as a
-    # single token it needs no cooperation from anything that forwards flags one
-    # at a time, so it survives rccl-device-compile's catch-all for unrecognized
-    # `-*` tokens as-is. That script also parses the separate-argument spelling
-    # (see the -include/-imacros branch in parse_compiler_flags), so either form
-    # works today; the joined one is used because it does not depend on that.
-    target_compile_options(rccl PRIVATE --include=${RCCL_SOURCE_DIR}/src/include/poison_hip_atomics.h)
-    message(STATUS "RCCL_POISON_HIP_ATOMICS enabled - __hip_atomic_* builtins rejected in RCCL sources")
-  endif()
-endif()
-
 # Device Linker: include pipeline and wire up dependencies
 # (placed after all target_compile_definitions so DeviceLinker.cmake
 #  can read the rccl target's definitions directly)
@@ -1345,8 +1381,8 @@ if(ROCM_MAJOR_VERSION GREATER_EQUAL 6)
 endif()
 # Wrap fmt in $<BUILD_INTERFACE:...> so it's only used while building rccl
 # and is omitted from the exported rccl-targets export set. Without this,
-# a FetchContent-built fmt-header-only target leaks into rccl's link
-# interface and breaks install(EXPORT) for static builds.
+# a fmt-header-only target leaks into rccl's link interface and breaks
+# install(EXPORT) for static builds.
 target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
 if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   # Resolve to a full path: nothing on the link line supplies ${ROCM_PATH}/lib, so a bare
@@ -1573,7 +1609,12 @@ endif()
 #==================================================================================================
 message("Building rccl RAS client executable")
 
-add_executable(rcclras "${HIPIFY_DIR}/src/ras/client.cc")
+# client.cc gained calls to rasTimeoutFactorSec() in 2.31, so the standalone
+# client needs its own copy of ras_param.cc; librccl does not export it. Building
+# it with NCCL_RAS_CLIENT strips the debug/param dependencies, matching how
+# upstream builds ras_param_client.o.
+add_executable(rcclras "${HIPIFY_DIR}/src/ras/client.cc" "${HIPIFY_DIR}/src/ras/ras_param.cc")
+target_compile_definitions(rcclras PRIVATE NCCL_RAS_CLIENT)
 
 target_include_directories(rcclras PRIVATE ${PROJECT_BINARY_DIR}/include)
 target_include_directories(rcclras PRIVATE ${HIPIFY_DIR}/src)

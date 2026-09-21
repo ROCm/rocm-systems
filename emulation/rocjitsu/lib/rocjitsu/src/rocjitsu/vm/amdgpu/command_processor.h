@@ -75,6 +75,7 @@ struct HwQueue {
   uint64_t last_doorbell = 0;
   bool host_accessible = false;
   bool is_sdma = false;
+  QueueCuSelection enabled_cus = std::nullopt;
   /// @brief Set when a packet faulted; the queue stops until it is torn down.
   /// @details A faulted packet is retired rather than retried, because its
   /// endpoint will never resolve. Continuing the scan would then run the FENCE
@@ -85,8 +86,9 @@ struct HwQueue {
   bool faulted = false;
   bool debug_suspended = false;
   bool runtime_suspended = false;
-  /// A command-processor pass observed this queue while its debugger gate was closed.
-  /// Cleared on resume after scheduling one pass to process the deferred work.
+  /// Queue work was deferred while either the runtime or debugger gate was
+  /// closed. SDMA work is bounded by the published doorbell.
+  /// Cleared after both gates reopen and a pass is scheduled for the deferred work.
   bool debug_work_deferred = false;
   uint64_t queue_desc_va = 0;
   uint64_t exception_status_va = 0;
@@ -191,6 +193,8 @@ public:
 
   void register_queue(HwQueue queue);
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
+  void set_queue_cu_selection(uint32_t queue_id, uint32_t process_id,
+                              const QueueCuSelection &enabled_cus);
 
   /// @brief Take one XCD's share of a dispatch fanned out by a peer XCD.
   ///
@@ -446,8 +450,8 @@ private:
   /// the peer XCDs, all sharing one GridCompletion so the completion signal fires
   /// once. Does nothing when the SoC has a single XCD.
   ///
-  /// Every XCD gets an entry even when the grid is too small to give it any
-  /// workgroups. An empty share is what keeps the replicas' queues in step with
+  /// Every XCD gets an entry even when the CU mask excludes it or the grid
+  /// gives it no workgroups. An empty share keeps the replicas' queues in step with
   /// the owner's for the packets that are replicated, and barrier_satisfied()
   /// reads that ordering from the entries sitting ahead of a barrier'd packet;
   /// skipping the empty ones would leave a replica with a shorter prefix than the
@@ -715,6 +719,11 @@ private:
 
   /// @brief Read a uint64 from GPU virtual address space via GpuMemory translation.
   uint64_t read_gpu_u64(uint64_t va, uint32_t vmid) const;
+
+  /// @brief Acquire-load one doorbell, preserving transient mapping failures.
+  /// @returns Complete on success, Unavailable for mappings that may recover,
+  ///          or Faulted for a missing/malformed address or permanent fault.
+  CopyOutcome read_doorbell(const HwQueue &queue, uint64_t &value) const;
 
   /// @brief Read a uint32 from GPU virtual address space via GpuMemory translation.
   uint32_t read_gpu_u32(uint64_t va, uint32_t vmid) const;
