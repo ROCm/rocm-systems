@@ -32,6 +32,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <type_traits>
 
 namespace rocjitsu::cdna5 {
@@ -783,9 +784,9 @@ inline util::native<double> finish_f64_mode_simd(util::native<double> value, uin
 /// Per-half f32 reader for the packed-f32 VOP3P family (v_pk_add/mul/fma_f32).
 /// In a VGPR pair {N, N+1}, register N holds the LO f32 of every lane and N+1
 /// the HI f32, so each half is a native-width native<float> read of one
-/// register (no 64-bit-lane / narrow32 detour). Scalar-backed pair views follow
-/// read_lane_pair32: 64-bit register pairs and literal64 operands preserve
-/// distinct words, while inline, literal32, and other single-word sources splat.
+/// register (no 64-bit-lane / narrow32 detour). The pair view carries the
+/// architecture's scalar-source policy: CDNA5 replicates one scalar DWORD;
+/// earlier CDNA preserves scalar register pairs.
 struct PkF32Halves {
   util::native<float> lo;
   util::native<float> hi;
@@ -848,6 +849,72 @@ template <typename T, typename Inst, typename BinOp>
 /// call site costs nothing on toolchains without `<experimental/simd>`.
 template <typename T, typename Inst, typename BinOp>
 [[nodiscard]] bool try_execute_binary_vop2_simd(Inst &, Wavefront &, BinOp) {
+  return false;
+}
+
+/// Execute the paired integer operations found in streaming-store kernels.
+/// Resolve checked views once and load both slot results before either write,
+/// since the two destinations may alias the other slot's sources. Opcode IDs
+/// come from the generated ISA rather than being duplicated in this helper.
+template <uint16_t kMovOp, uint16_t kAddOp, uint16_t kLshlOp, typename Slot>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_vopd_integer_pair_simd(Wavefront &wf, const Slot &x,
+                                                             const Slot &y) {
+  if (wf.wf_size() != 32 || simd_force_scalar())
+    return false;
+  const auto is_integer_slot = [](const Slot &slot) {
+    if (slot.neg != 0 || slot.has_src2_operand || slot.src2_is_imm)
+      return false;
+    if (slot.op != kMovOp && slot.op != kAddOp && slot.op != kLshlOp)
+      return false;
+    return slot.dst->simd_capable() && slot.src0->simd_capable() &&
+           (slot.op == kMovOp || slot.src1->simd_capable());
+  };
+  if (!is_integer_slot(x) || !is_integer_slot(y))
+    return false;
+  const uint64_t exec = static_cast<uint32_t>(wf.exec());
+  if (exec == 0)
+    return true;
+  RegisterAccess registers(wf);
+  const auto x_src0 = registers.read_operand(*x.src0, exec);
+  const auto y_src0 = registers.read_operand(*y.src0, exec);
+  std::optional<RegisterAccess::OperandReadView> x_src1;
+  std::optional<RegisterAccess::OperandReadView> y_src1;
+  if (x.op != kMovOp)
+    x_src1.emplace(registers.read_operand(*x.src1, exec));
+  if (y.op != kMovOp)
+    y_src1.emplace(registers.read_operand(*y.src1, exec));
+  const auto x_dst = registers.write_operand(*x.dst, exec);
+  const auto y_dst = registers.write_operand(*y.dst, exec);
+  const auto evaluate = [](const Slot &slot, const auto &src0_view, const auto &src1_view,
+                           uint32_t lane_base) {
+    const auto src0 = src0_view.template load_native<uint32_t>(lane_base);
+    switch (slot.op) {
+    case kMovOp:
+      return src0;
+    case kAddOp:
+      return src0 + src1_view->template load_native<uint32_t>(lane_base);
+    case kLshlOp:
+      return simd_lshl_u32(src1_view->template load_native<uint32_t>(lane_base), src0);
+    default:
+      throw util::UnimplementedInst("unsupported VOPD integer SIMD operation");
+    }
+  };
+  constexpr uint32_t kWidth = util::native_width_v<uint32_t>;
+  for (uint32_t lane_base = 0; lane_base < wf.wf_size(); lane_base += kWidth) {
+    const uint64_t lane_mask = (exec >> lane_base) & util::mask<uint64_t>(kWidth);
+    if (lane_mask == 0)
+      continue;
+    const auto x_result = evaluate(x, x_src0, x_src1, lane_base);
+    const auto y_result = evaluate(y, y_src0, y_src1, lane_base);
+    x_dst.template store_native<uint32_t>(lane_base, x_result, lane_mask);
+    y_dst.template store_native<uint32_t>(lane_base, y_result, lane_mask);
+  }
+  return true;
+}
+
+template <uint16_t kMovOp, uint16_t kAddOp, uint16_t kLshlOp, typename Slot>
+[[nodiscard]] bool try_execute_vopd_integer_pair_simd(Wavefront &, const Slot &, const Slot &) {
   return false;
 }
 
@@ -3917,12 +3984,11 @@ template <typename Inst, typename Op>
 /// VOP3P packed-f32 binary fast path (v_pk_add_f32 / v_pk_mul_f32). In a VGPR
 /// pair {N, N+1} register N is the LO f32 of every lane, N+1 the HI f32, so each
 /// half is a native-width native<float> read of one register (read_pkf32_halves)
-/// and the per-half arithmetic runs at full native width. Default-packing gate
-/// (op_sel == 0, op_sel_hi == 3) bails to scalar otherwise — under default
-/// packing the lo result comes from the lo halves and hi from the hi halves.
+/// and the per-half arithmetic runs at full native width. OP_SEL chooses each
+/// source half independently, including broadcasts and swapped halves.
 /// neg/neg_hi bits 0/1 sign-flip the respective half. MODE and CLAMP match
-/// the scalar helper. Scalar-backed sources use the same pair-or-splat contract as
-/// read_lane_pair32.
+/// the scalar helper. CDNA5 scalar sources replicate one DWORD independently
+/// of OP_SEL; earlier CDNA preserves scalar register pairs.
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_pk_binary_f32_simd(Inst &inst, Wavefront &wf,
@@ -3931,11 +3997,17 @@ template <typename Inst, typename Op>
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
-  if (op_sel != 0u || op_sel_hi != 3u)
-    return false;
   fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
   auto flush_input = [&wf](util::native<float> value) {
     return (wf.fp_denorm_mode_f32() & 1u) ? value : util::flush_denorm_f32_simd(value);
+  };
+  auto binary = [&op](util::native<float> first, util::native<float> second) {
+    util::native<float> result = op(first, second);
+    // Preserve the first input's quieted NaN whenever that input is NaN.
+    // Host SIMD arithmetic can otherwise choose the second input's payload.
+    util::stdx::where(util::stdx::isnan(first), result) = std::bit_cast<util::native<float>>(
+        std::bit_cast<util::native<uint32_t>>(first) | 0x00400000u);
+    return result;
   };
   auto flush_output = [&wf, &inst](util::native<float> value) {
     if (inst.inst_.clamp)
@@ -3950,8 +4022,10 @@ template <typename Inst, typename Op>
   const bool neg0_hi = inst.inst_.neg_hi & 1u;
   const bool neg1_hi = inst.inst_.neg_hi & 2u;
   RegisterAccess regs(wf);
-  auto src0 = regs.read_operand_pair32(inst.src0, exec);
-  auto src1 = regs.read_operand_pair32(inst.src1, exec);
+  const auto scalar_mode = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? ScalarPairMode::Replicate32
+                                                                      : ScalarPairMode::Preserve;
+  auto src0 = regs.read_operand_pair32(inst.src0, exec, scalar_mode);
+  auto src1 = regs.read_operand_pair32(inst.src1, exec, scalar_mode);
   auto dst = regs.write_operand_pair32(inst.vdst, exec);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
@@ -3960,9 +4034,11 @@ template <typename Inst, typename Op>
     const PkF32Halves a = read_pkf32_halves(src0, base);
     const PkF32Halves b = read_pkf32_halves(src1, base);
     const util::native<float> r_lo =
-        op(flush_input(pkf32_neg(a.lo, neg0_lo)), flush_input(pkf32_neg(b.lo, neg1_lo)));
+        binary(flush_input(pkf32_neg((op_sel & 1u) ? a.hi : a.lo, neg0_lo)),
+               flush_input(pkf32_neg((op_sel & 2u) ? b.hi : b.lo, neg1_lo)));
     const util::native<float> r_hi =
-        op(flush_input(pkf32_neg(a.hi, neg0_hi)), flush_input(pkf32_neg(b.hi, neg1_hi)));
+        binary(flush_input(pkf32_neg((op_sel_hi & 1u) ? a.hi : a.lo, neg0_hi)),
+               flush_input(pkf32_neg((op_sel_hi & 2u) ? b.hi : b.lo, neg1_hi)));
     dst.template store_native_pair<float>(base, flush_output(r_lo), flush_output(r_hi), chunk);
   }
   return true;
@@ -3987,12 +4063,11 @@ template <typename Inst, typename Op>
 }
 
 /// VOP3P packed-f32 ternary fast path (v_pk_fma_f32). 3-source FMA per half;
-/// same per-register native<float> read/write as the binary form. Default-
-/// packing gate adds op_sel_hi_2 == 1 (the src2-hi select). neg/neg_hi bits
-/// 0/1/2 sign-flip the respective half. MODE and CLAMP match the scalar helper.
-/// NaN-input payload divergence
-/// between stdx::fma and std::fma accepted (same carve-out as the f16 pk ternary
-/// / fma_mix slices).
+/// same per-register native<float> read/write as the binary form. OP_SEL
+/// chooses each source half independently; op_sel_hi_2 selects src2-hi.
+/// neg/neg_hi bits 0/1/2 sign-flip the respective half. MODE and CLAMP match
+/// the scalar helper. NaN-input payload divergence between stdx::fma and
+/// std::fma is accepted, as in the f16 packed ternary and fma_mix helpers.
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_pk_ternary_f32_simd(Inst &inst, Wavefront &wf,
@@ -4000,8 +4075,6 @@ template <typename Inst, typename Op>
                                                                 uint32_t op_sel_hi_2, Op op) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
-    return false;
-  if (op_sel != 0u || op_sel_hi != 3u || op_sel_hi_2 != 1u)
     return false;
   fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
   auto flush_input = [&wf](util::native<float> value) {
@@ -4022,9 +4095,11 @@ template <typename Inst, typename Op>
   const bool neg1_hi = inst.inst_.neg_hi & 2u;
   const bool neg2_hi = inst.inst_.neg_hi & 4u;
   RegisterAccess regs(wf);
-  auto src0 = regs.read_operand_pair32(inst.src0, exec);
-  auto src1 = regs.read_operand_pair32(inst.src1, exec);
-  auto src2 = regs.read_operand_pair32(inst.src2, exec);
+  const auto scalar_mode = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? ScalarPairMode::Replicate32
+                                                                      : ScalarPairMode::Preserve;
+  auto src0 = regs.read_operand_pair32(inst.src0, exec, scalar_mode);
+  auto src1 = regs.read_operand_pair32(inst.src1, exec, scalar_mode);
+  auto src2 = regs.read_operand_pair32(inst.src2, exec, scalar_mode);
   auto dst = regs.write_operand_pair32(inst.vdst, exec);
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
@@ -4034,11 +4109,13 @@ template <typename Inst, typename Op>
     const PkF32Halves b = read_pkf32_halves(src1, base);
     const PkF32Halves c = read_pkf32_halves(src2, base);
     const util::native<float> r_lo =
-        op(flush_input(pkf32_neg(a.lo, neg0_lo)), flush_input(pkf32_neg(b.lo, neg1_lo)),
-           flush_input(pkf32_neg(c.lo, neg2_lo)));
+        op(flush_input(pkf32_neg((op_sel & 1u) ? a.hi : a.lo, neg0_lo)),
+           flush_input(pkf32_neg((op_sel & 2u) ? b.hi : b.lo, neg1_lo)),
+           flush_input(pkf32_neg((op_sel & 4u) ? c.hi : c.lo, neg2_lo)));
     const util::native<float> r_hi =
-        op(flush_input(pkf32_neg(a.hi, neg0_hi)), flush_input(pkf32_neg(b.hi, neg1_hi)),
-           flush_input(pkf32_neg(c.hi, neg2_hi)));
+        op(flush_input(pkf32_neg((op_sel_hi & 1u) ? a.hi : a.lo, neg0_hi)),
+           flush_input(pkf32_neg((op_sel_hi & 2u) ? b.hi : b.lo, neg1_hi)),
+           flush_input(pkf32_neg(op_sel_hi_2 ? c.hi : c.lo, neg2_hi)));
     dst.template store_native_pair<float>(base, flush_output(r_lo), flush_output(r_hi), chunk);
   }
   return true;
@@ -5081,7 +5158,7 @@ template <bool Vop3, typename Inst>
   return
 
 /// VOP3P packed-f32 binary probe (v_pk_add_f32 / v_pk_mul_f32). Functor takes
-/// (a, b) as narrow32<float> (neg-applied) and returns narrow32<float>.
+/// (a, b) as native<float> (neg-applied) and returns native<float>.
 #define ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_F32(...)                                                 \
   if (::rocjitsu::amdgpu::try_execute_vop3p_pk_binary_f32_simd(inst, wf, __VA_ARGS__))             \
   return
@@ -5094,7 +5171,7 @@ template <bool Vop3, typename Inst>
   return
 
 /// VOP3P packed-f32 ternary probe (v_pk_fma_f32). Functor takes (a, b, c) as
-/// narrow32<float>; default-packing gate adds op_sel_hi_2 == 1.
+/// native<float>; selectors choose each source half, including broadcasts.
 #define ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32(...)                                                \
   if (::rocjitsu::amdgpu::try_execute_vop3p_pk_ternary_f32_simd(inst, wf, __VA_ARGS__))            \
   return

@@ -61,6 +61,13 @@ class ComputeUnitTestAccess;
 namespace amdgpu {
 
 class CommandProcessor;
+class AsyncInstructionWindow;
+class MmaAdmissionCache;
+struct AsyncInstructionWindowStorage;
+namespace matrix_coexecution {
+class ExecutionResources;
+class SharedPool;
+} // namespace matrix_coexecution
 
 inline constexpr int32_t kWorkgroupBarrierId = -1;
 inline constexpr int32_t kWorkgroupTrapBarrierId = -2;
@@ -106,6 +113,8 @@ struct FunctionalQuantumResult {
 /// implemented by IsaExecComputeUnit<Mode, Isa>. Use the create() factory
 /// to construct.
 class ComputeUnitCore : public simdojo::CompositeComponent {
+  friend class AsyncInstructionWindow;
+
 public:
   static constexpr uint32_t kFunctionalQuantum = 1024;
   static constexpr uint32_t kDebugFunctionalQuantum = 64;
@@ -122,6 +131,8 @@ public:
     /// Maximum CU step() iterations per functional slice. One step can issue
     /// one instruction for every runnable wavefront resident on the CU.
     uint32_t functional_quantum = kFunctionalQuantum;
+    /// Shared VM resources; null preserves direct-construction environment controls.
+    std::shared_ptr<matrix_coexecution::ExecutionResources> async_resources = nullptr;
   };
 
   ~ComputeUnitCore() override = default;
@@ -384,10 +395,12 @@ public:
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
     observes_sgpr_reads_ = plugin_group_->observes_sgpr_reads();
+    observes_memory_routing_ = plugin_group_->observes_memory_routing();
   }
 
   /// @brief Return the execution plugin group.
   ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
+  const ExecutionPluginGroup &plugin_group() const { return *plugin_group_; }
 
   /// @brief Return the number of resident (not-yet-halted) wavefront slots.
   /// @details A wave frees its resources and its slot at s_endpgm, so halted
@@ -426,6 +439,8 @@ public:
   /// @brief Return the CU configuration.
   /// @returns Const reference to the CU configuration.
   const Config &config() const { return config_; }
+  /// @brief Lazily acquire and cache the VM helper pool.
+  matrix_coexecution::SharedPool &async_pool();
 
   /// @brief Return the shared GPU memory.
   /// @returns Pointer to the GPU memory.
@@ -963,6 +978,21 @@ protected:
 
   /// @brief Fetch, decode, execute one instruction from the given wavefront.
   void issue_instruction(Wavefront *wf);
+  /// @brief Try the diagnostic adjacent-MMA batch modes before ordinary issue.
+  /// @brief Issue a bounded MMA window and drain it before returning to scheduling.
+  void issue_async_instruction(Wavefront *wf, MmaAdmissionCache *admission, uint32_t wave_size,
+                               bool has_accvgprs);
+  struct NoAsyncWindow {};
+  /// @brief Share ordinary instruction execution with the optional scoreboard adapter.
+  template <bool EnableAsync>
+  void issue_instruction_impl(
+      Wavefront *wf,
+      std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window = {},
+      std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage = {});
+  /// @brief Advance CU scheduling with compile-time selection of the issue adapter.
+  template <bool EnableAsync>
+  bool step_impl(MmaAdmissionCache *admission = nullptr, uint32_t async_wave_size = 0,
+                 bool has_accvgprs = false);
 
   /// @brief Apply any I$ invalidation a debug attach or detach published.
   /// @details Runs on this CU's own thread, which is the I$'s sole accessor.
@@ -983,6 +1013,21 @@ protected:
   /// @param wf The issuing wavefront.
   void route_memory_inst(Instruction *inst, Wavefront &wf);
 
+  /// @brief Tell the plugin group what the memory system is about to be asked
+  ///        for, once routing has settled.
+  /// @param inst The routed instruction.
+  /// @param wf The issuing wavefront.
+  /// @param route_tag The pipeline tag the instruction ended up with.
+  /// @param decoded_route_tag The pipeline tag before routing changed it.
+  /// @param normalized_to_local Whether a FLAT access was rewritten into LDS.
+  /// @param pre_routing_addresses Original addresses when routing rewrote them.
+  /// @param flat_local_lane_mask Requesting FLAT lanes in the LDS aperture half.
+  /// @param flat_dds_lane_mask Requesting FLAT lanes in the DDS aperture half.
+  void report_routed_access(const Instruction &inst, const Wavefront &wf, uint8_t route_tag,
+                            uint8_t decoded_route_tag, bool normalized_to_local,
+                            std::span<const uint64_t> pre_routing_addresses,
+                            uint64_t flat_local_lane_mask, uint64_t flat_dds_lane_mask);
+
   /// @brief Fire the on_idle callback if registered.
   void notify_idle() {
     if (on_idle_)
@@ -995,6 +1040,7 @@ protected:
   }
 
   Config config_;
+  matrix_coexecution::SharedPool *async_pool_ = nullptr;
   GpuMemory *memory_;
   uint32_t wf_size_ = 0;
   uint32_t shader_engine_id_ = 0;
@@ -1104,6 +1150,7 @@ protected:
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
   bool observes_sgpr_reads_ = false;
   bool pool_driven_ = false;
+  bool observes_memory_routing_ = false;
 
   /// @brief Resolve the owner of a physical SGPR from its allocation block.
   /// @details Power-of-two block sizes use a shift on the instruction read path;
@@ -1168,6 +1215,13 @@ inline bool InstructionComputeUnitView::handle_sendmsg(Wavefront &wf, uint32_t m
 }
 inline void InstructionComputeUnitView::notify_trap_complete(Wavefront &wf) {
   raw_cu().notify_trap_complete(wf);
+}
+inline bool InstructionComputeUnitView::observes_tensor_dma_memory_access() const {
+  return raw_cu().plugin_group().observes_tensor_dma_memory_access();
+}
+inline void InstructionComputeUnitView::report_tensor_dma_memory_access(
+    const TensorDmaMemoryAccessObservation &access) {
+  raw_cu().plugin_group().onAmdgpuTensorDmaMemoryAccess(access);
 }
 
 /// @brief Execution-mode-aware compute unit shell.
@@ -1306,6 +1360,9 @@ private:
 template <simdojo::ExecMode Mode, GpuIsa Isa>
 class IsaExecComputeUnit : public ExecComputeUnit<Mode> {
 public:
+  static constexpr bool supports_async_execution =
+      Mode == simdojo::ExecMode::FUNCTIONAL && HasAsyncMma<Isa>;
+
   static_assert(Isa::WF_SIZE_MAX <= 64, "AMDGPU VGPR storage supports at most Wave64");
   using Vgpr = simdojo::VectorReg<Isa::WF_SIZE_MAX, uint32_t>;
   static constexpr uint32_t MAX_ACCVGPR_PHYSICAL_LIMIT =

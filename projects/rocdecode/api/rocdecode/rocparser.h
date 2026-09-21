@@ -266,30 +266,28 @@ typedef struct _RocdecParserParams {
     RocdecVideoFormatEx *ext_video_info;          /**< IN: [Optional] sequence header data from system layer                   */
 } RocdecParserParams;
 
-/************************************************************************************************/
-//! \ingroup group_rocparser
-//! \fn rocDecodeStatus ROCDECAPI rocDecCreateVideoParser(RocdecVideoParser *parser_handle, RocdecParserParams *params)
-//! Create video parser object and initialize
-/************************************************************************************************/
+/**
+ * \ingroup group_rocparser
+ * \brief Create video parser object and initialize
+ */
 extern rocDecStatus ROCDECAPI rocDecCreateVideoParser(RocdecVideoParser *parser_handle, RocdecParserParams *params);
 
-/************************************************************************************************/
-//! \ingroup group_rocparser
-//! \fn rocDecodeStatus ROCDECAPI rocDecParseVideoData(RocdecVideoParser parser_handle, RocdecSourceDataPacket *packet)
-//! Parse the video data from source data packet in pPacket
-//! Extracts parameter sets like SPS, PPS, bitstream etc. from pPacket and
-//! calls back pfn_decode_picture with RocdecPicParams data for kicking of HW decoding
-//! calls back pfn_sequence_callback with RocdecVideoFormat data for initial sequence header or when
-//! the decoder encounters a video format change
-//! calls back pfn_display_picture with RocdecParserDispInfo data to display a video frame
-/************************************************************************************************/
+/**
+ * \ingroup group_rocparser
+ * \brief Parse the video data from source data packet in pPacket
+ *
+ * Extracts parameter sets like SPS, PPS, bitstream etc. from pPacket and
+ * calls back pfn_decode_picture with RocdecPicParams data for kicking of HW decoding
+ * calls back pfn_sequence_callback with RocdecVideoFormat data for initial sequence header or when
+ * the decoder encounters a video format change
+ * calls back pfn_display_picture with RocdecParserDispInfo data to display a video frame
+ */
 extern rocDecStatus ROCDECAPI rocDecParseVideoData(RocdecVideoParser parser_handle, RocdecSourceDataPacket *packet);
 
-/************************************************************************************************/
-//! \ingroup group_rocparser
-//! \fn rocDecStatus ROCDECAPI rocDecDestroyVideoParser(RocdecVideoParser parser_handle)
-//! Destroy the video parser object
-/************************************************************************************************/
+/**
+ * \ingroup group_rocparser
+ * \brief Destroy the video parser object
+ */
 extern rocDecStatus ROCDECAPI rocDecDestroyVideoParser(RocdecVideoParser parser_handle);
 
 #if defined(__cplusplus)
