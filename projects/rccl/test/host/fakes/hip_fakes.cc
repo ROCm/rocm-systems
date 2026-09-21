@@ -28,6 +28,22 @@
 #include "hip_fakes.h"   // g_hip* hook declarations + ResetHipFakes()
 #include "hip_profile_interceptor_fakes.h"  // X-list of the profile-runtime HIP entry points
 
+// ---------------------------------------------------------------------------
+// Signature-drift watchdog: anchor each controllable HIP seam to its
+// production declaration so a hook whose signature drifts from the real
+// symbol becomes a compile error rather than a silent std::function coercion
+// (templates + macro live in fakes/signature-drift.h).
+#include "signature-drift.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_hipMemGetAddressRange,         hipMemGetAddressRange);
+ASSERT_HOOK_MATCHES_PROD(g_hipIpcGetMemHandle,            hipIpcGetMemHandle);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemRetainAllocationHandle,  hipMemRetainAllocationHandle);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemExportToShareableHandle, hipMemExportToShareableHandle);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemRelease,                 hipMemRelease);
+ASSERT_HOOK_MATCHES_PROD(g_hipPointerGetAttribute,        hipPointerGetAttribute);
+
+#undef ASSERT_HOOK_MATCHES_PROD
+
 // ===========================================================================
 // Section 1: controllable HIP seams (defaults return hipErrorInvalidValue)
 // ===========================================================================
@@ -552,8 +568,11 @@ hipError_t hipDeviceEnablePeerAccess(int, unsigned int)
 
 hipError_t hipDeviceGet(hipDevice_t* device, int)
 {
+    // fillInfo() CUCHECKs cuDeviceGet (hipDeviceGet) on every rank before it
+    // probes the fabric-handle attribute, so this must succeed on the default
+    // TransportsRankComm path or initTransportsRank never reaches the postset.
     if (device) *device = 0;
-    return hipErrorInvalidValue;
+    return hipSuccess;
 }
 
 hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t)

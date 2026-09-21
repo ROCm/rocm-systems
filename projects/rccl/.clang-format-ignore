@@ -2,6 +2,7 @@
 external/fmt/**
 src/include/nvtx3/**
 src/transport/net_ib/gdaki/doca-gpunetio/**
+src/transport/net_efa_gda/efa-dp-direct/**
 src/include/gdrwrap.h
 src/include/mlx5/mlx5dvcore.h
 src/include/ibvcore.h

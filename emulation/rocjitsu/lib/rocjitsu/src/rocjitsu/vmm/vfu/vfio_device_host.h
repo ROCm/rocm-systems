@@ -142,6 +142,11 @@ public:
   ///   which keeps a faulty request from taking the device down but does NOT
   ///   make throwing a supported way to report failure.
   /// - **It may never run.** If serving stops first the request is discarded.
+  /// - **State referenced by @p work must stay alive until the request has
+  ///   finished or the serving thread has stopped.** The request is one-shot
+  ///   but asynchronous: an accepted callback can still be executing while
+  ///   the caller moves on, so anything it touches by reference must outlive
+  ///   that window.
   ///
   /// @param[in] work What the serving thread should do.
   /// @retval true The request was accepted and will run, unless serving stops.

@@ -499,8 +499,10 @@ def test_gfx1250_dual_atomic_generator_covers_each_variant(
 ) -> None:
     codegen = object.__new__(CodeGenerator)
     codegen._vgpr_base_expr = lambda operand, **_kwargs: operand
-    codegen._append_wait_counter_type = lambda lines, _semantic_class: lines.append(
-        '  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;'
+    codegen._append_wait_counter_type = (
+        lambda lines, _sem, *_args, **_kwargs: lines.append(
+            '  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;'
+        )
     )
     sem = InstructionSemantics(
         name, 'ds_atomic2', operation='swap', elem_size=elem_size, num_elems=1
@@ -5217,7 +5219,7 @@ def test_gfx1251_packed_u64_decode_rejects_undefined_layouts_and_register_tuples
         assert '->neg & 4u) != 0u' in body
         assert '->neg_hi & 4u) != 0u' in body
         assert 'does not support combined source negation and clamp' not in body
-        assert 'vdst register tuple that exceeds the selector range' in body
+        assert 'vdst register tuple that exceeds the selector range' not in body
         assert 'src0 register tuple that exceeds the selector range' in body
         assert 'src1 register tuple that exceeds the selector range' in body
         assert 'invalid vdst register tuple alignment' in body
@@ -5238,7 +5240,7 @@ def test_gfx1251_packed_u64_decode_rejects_undefined_layouts_and_register_tuples
     lshl_constructor = _generated_constructor_body(source, 'VPkLshlAddU64Vop3p')
     assert 'has an invalid packed U64 element layout' in lshl
     assert 'does not support source modifiers or clamp' in lshl
-    assert 'vdst register tuple that exceeds the selector range' in lshl
+    assert 'vdst register tuple that exceeds the selector range' not in lshl
     assert 'src0 register tuple that exceeds the selector range' in lshl
     assert 'src1 register tuple that exceeds the selector range' in lshl
     assert 'src2 register tuple that exceeds the selector range' in lshl
@@ -5260,6 +5262,101 @@ def test_gfx1251_packed_u64_decode_rejects_undefined_layouts_and_register_tuples
     assert 'src1 == 231u' not in lshl
     assert 'src1(64, OperandType::OPR_SRC,' in lshl_constructor
     assert 'make_after_selector_validation' not in lshl_constructor
+
+
+def test_gfx1251_packed_f64_decode_rejects_undefined_layouts_and_register_tuples(
+    gfx1250_generated_root: Path, tmp_path: Path
+):
+    args = SimpleNamespace(
+        isafiles=[f'cdna5:{_mrisa_dir() / "amdgpu_isa_cdna5.xml"}'],
+        isa_additions=[f'cdna5:{_mrisa_dir() / "amdgpu_isa_cdna5_gfx1251_delta.xml"}'],
+        isa_variants=[f'cdna5:{_mrisa_dir() / "amdgpu_isa_cdna5_variants.json"}'],
+        gen_isas=True,
+        gen_dbt=False,
+        isa_output=str(tmp_path),
+        dbt_output=None,
+    )
+    _run(args)
+
+    for generated_root in (gfx1250_generated_root, tmp_path / 'cdna5'):
+        source = (generated_root / 'vop3p.cpp').read_text()
+        for class_name in (
+            'VPkAddF64Vop3p',
+            'VPkMulF64Vop3p',
+            'VPkMaxNumF64Vop3p',
+            'VPkMinNumF64Vop3p',
+        ):
+            body = _generated_decode_body(source, class_name)
+            assert 'has an invalid packed F64 element layout' in body
+            assert 'has an invalid unused src2 encoding' in body
+            assert '->neg & 4u) != 0u' in body
+            assert '->neg_hi & 4u) != 0u' in body
+            assert 'vdst register tuple that exceeds the selector range' not in body
+            assert 'src0 register tuple that exceeds the selector range' in body
+            assert 'src1 register tuple that exceeds the selector range' in body
+            assert 'invalid vdst register tuple alignment' in body
+            assert 'invalid src0 register tuple alignment' in body
+            assert 'invalid src1 register tuple alignment' in body
+            assert 'invalid src0 packed F64 source selector' in body
+            assert 'invalid src1 packed F64 source selector' in body
+            for operand_name in ('src0', 'src1'):
+                assert f'{operand_name} != 104u' in body
+                assert f'{operand_name} == 104u' in body
+                assert f'{operand_name} <= 100u' in body
+                assert f'{operand_name} >= 108u' in body
+                assert f'{operand_name} <= 120u' in body
+                assert f'{operand_name} == 124u' in body
+                assert f'{operand_name} >= 128u' in body
+                assert f'{operand_name} <= 208u' in body
+                assert f'{operand_name} >= 240u' in body
+                assert f'{operand_name} <= 248u' in body
+                assert f'{operand_name} == 255u' in body
+                assert f'{operand_name} >= 256u' in body
+                assert f'{operand_name} <= 510u' in body
+                for invalid_selector in (230, 231, 235, 236, 253):
+                    assert f'{operand_name} == {invalid_selector}u' not in body
+            assert 'does not support source modifiers or clamp' not in body
+
+
+def test_gfx1251_packed_f64_fma_rejects_undefined_layouts_and_register_tuples(
+    gfx1250_generated_root: Path,
+):
+    source = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+    body = _generated_decode_body(source, 'VPkFmaF64Vop3p')
+
+    assert 'has an invalid packed F64 element layout' in body
+    assert 'has an invalid unused src2 encoding' not in body
+    assert 'vdst register tuple that exceeds the selector range' not in body
+    assert 'invalid vdst register tuple alignment' in body
+    assert 'src0 register tuple that exceeds the selector range' in body
+    assert 'invalid src0 register tuple alignment' in body
+    assert 'invalid src0 packed F64 source selector' in body
+    assert 'src1 register tuple that exceeds the selector range' in body
+    assert 'invalid src1 register tuple alignment' in body
+    assert 'invalid src1 packed F64 source selector' in body
+    assert 'src2 register tuple that exceeds the selector range' in body
+    assert 'invalid src2 register tuple alignment' in body
+    assert 'invalid src2 packed F64 source selector' in body
+    for operand_name in ('src0', 'src1', 'src2'):
+        assert f'{operand_name} <= 510u' in body
+
+
+def test_gfx1251_packed_f64_literals_use_f64_high_bits_widening(
+    gfx1250_generated_root: Path,
+):
+    source = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+
+    for class_name in (
+        'VPkFmaF64Vop3p',
+        'VPkMulF64Vop3p',
+        'VPkAddF64Vop3p',
+        'VPkMaxNumF64Vop3p',
+        'VPkMinNumF64Vop3p',
+    ):
+        constructor = source.split(f'{class_name}::{class_name}(', 1)[1].split(
+            '\n}', 1
+        )[0]
+        assert 'Operand::Literal32Widening::F64HighBits' in constructor
 
 
 def test_gfx1250_matrix_codegen_uses_public_opsel_hi_2_field(
@@ -5346,14 +5443,7 @@ def test_split_execution_ids_name_and_match_callbacks(
 def test_cdna5_variant_execution_callback_inventory(
     gfx1250_generated_root: Path,
 ) -> None:
-    model_only_classes = (
-        'VPkFmaF64Vop3p',
-        'VPkMulF64Vop3p',
-        'VPkAddF64Vop3p',
-        'VPkMaxNumF64Vop3p',
-        'VPkMinNumF64Vop3p',
-        'VWmmaF6416x16x4F64Vop3p',
-    )
+    model_only_classes = ('VWmmaF6416x16x4F64Vop3p',)
     header = (gfx1250_generated_root / 'vop3p.h').read_text()
     model = (gfx1250_generated_root / 'vop3p.cpp').read_text()
     backend_header = (gfx1250_generated_root / 'execution_backend.h').read_text()
@@ -5372,8 +5462,13 @@ def test_cdna5_variant_execution_callback_inventory(
         assert class_name not in execution_source
 
     executable_classes = (
+        'VPkFmaF64Vop3p',
+        'VPkMulF64Vop3p',
+        'VPkAddF64Vop3p',
         'VPkAddNcU64Vop3p',
         'VPkSubNcU64Vop3p',
+        'VPkMaxNumF64Vop3p',
+        'VPkMinNumF64Vop3p',
         'VPkLshlAddU64Vop3p',
     )
     for executable_class in executable_classes:
@@ -5399,11 +5494,18 @@ def test_cdna5_variant_execution_callback_inventory(
     )[0]
     assert 'const auto reg = operand.to_register_ref();' in u64_read_helper
     assert 'if (!reg || reg->cls != RegClass::VGPR)' in u64_read_helper
+    assert 'packed_vgpr_physical_base(operand, wf)' in u64_read_helper
+    assert 'packed_register_dword_offset' not in execution_source
+    assert 'make_after_selector_validation' not in execution_source
+    assert 'Isa::resolved_vgpr_offset(' in execution_source
+    assert 'operand.vgpr_msb_role()' in execution_source
+    assert 'read_vgpr64(base + 2, lane)' in execution_source
+    assert 'write_vgpr64(base + 2, lane, value.hi)' in execution_source
     u32_read_helper = execution_source.split('PkU32Pair read_pk_u32_pair', 1)[1].split(
         '\n}', 1
     )[0]
     assert 'const auto reg = operand.to_register_ref();' in u32_read_helper
-    assert 'if (reg && reg->cls == RegClass::SGPR)' in u32_read_helper
+    assert 'if (!reg || reg->cls != RegClass::VGPR)' in u32_read_helper
     assert 'read_lane(operand, lane)' in u32_read_helper
     assert 'read_lane_pair32(operand, lane)' in u32_read_helper
 
@@ -6888,6 +6990,37 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'kVopdFmacF64' not in exec_cpp
 
 
+@pytest.mark.parametrize('missing_op', [None, 'VopdAddNcU32', 'VopdLshlrevB32'])
+def test_vopd_integer_simd_probe_requires_available_opcodes(tmp_path, missing_op):
+    class ReducedVopdProfile(Rdna4Profile):
+        @property
+        def vopd_slot_ops(self):
+            return tuple(
+                op for op in super().vopd_slot_ops if op.enum_name != missing_op
+            )
+
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='rdna4',
+        generated_dir_name='rdna4',
+        cpp_namespace='rdna4',
+        profile=ReducedVopdProfile(),
+        operand_types={'OPR_SRC'},
+    )
+    codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
+    codegen.gen_vopd()
+    exec_cpp = (tmp_path / 'rdna4' / 'vopd_exec.cpp').read_text()
+    assert ('try_execute_vopd_integer_pair_simd<' in exec_cpp) == (missing_op is None)
+    if missing_op is not None:
+        assert f'k{missing_op}' not in exec_cpp
+
+    # MOV must observe only src0 while preserving the generated negation policy.
+    execute_slot = exec_cpp[exec_cpp.index('uint32_t Vopd::execute_slot') :]
+    assert execute_slot.index('src0 = apply_neg(') < execute_slot.index('return src0;')
+    assert execute_slot.index('return src0;') < execute_slot.index('uint32_t src1 =')
+
+
 def test_rdna4_profile_enables_generated_vopd():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
@@ -7027,6 +7160,335 @@ def test_addk_and_mulk_register_their_read_write_destination_as_a_source():
     assert codegen._dst_is_also_source(SimpleNamespace(name='S_MULK_I32'))
 
 
+@pytest.mark.parametrize(
+    ('arch_name', 'profile'),
+    [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', Cdna4Profile()),
+        ('rdna1', Rdna1Profile()),
+        ('rdna2', Rdna2Profile()),
+        ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+        ('rdna4', Rdna4Profile()),
+        ('cdna5', Cdna5Profile()),
+    ],
+)
+def test_memory_issue_metadata_covers_every_memory_semantic(arch_name, profile):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name=arch_name, profile=profile)
+
+    for semantic_class in CodeGenerator._MEMORY_CLASSES:
+        sem = SimpleNamespace(
+            name=semantic_class.upper(), semantic_class=semantic_class, operation=None
+        )
+        assert codegen._wait_counter_type(semantic_class) is not None
+        assert codegen._memory_completion_class(sem, set()) != (
+            'amdgpu::MemoryCompletionClass::UNCLASSIFIED'
+        )
+        assert 'set_memory_issue_info' in codegen._memory_issue_initializer(sem, set())
+
+    assert codegen._wait_counter_type('scalar_add') is None
+    with pytest.raises(ValueError, match='missing memory issue metadata'):
+        codegen._append_wait_counter_type(
+            [], SimpleNamespace(name='NEW_MEMORY_OP'), 'new_memory_op'
+        )
+
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='future',
+        profile=SimpleNamespace(waitcnt_family='future'),
+    )
+    with pytest.raises(ValueError, match='unknown wait-counter family'):
+        codegen._wait_counter_type('buffer_load')
+
+
+def test_memory_execution_sets_resolved_counter_before_operand_reads():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna4', profile=Cdna4Profile())
+    store = InstructionSemantics(
+        'BUFFER_STORE_DWORD', 'buffer_store', elem_size=4, num_elems=1
+    )
+
+    body = codegen._gen_buffer_store([], [], store)
+
+    assert 'before_memory_instruction' not in body
+    assert body.count('d->wait_counter_type =') == 1
+    assert body.index('d->wait_counter_type =') < body.index(
+        'mubuf_calculate_addresses'
+    )
+    assert body.index('d->wait_counter_type =') < body.index('read_vgpr')
+
+
+def test_generic_flat_issue_names_both_counter_obligations():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='rdna3_5', profile=Rdna3_5Profile())
+    load = InstructionSemantics(
+        'FLAT_LOAD_DWORD', 'flat_load', elem_size=4, num_elems=1
+    )
+    flat_info = codegen._memory_issue_initializer(load, {'seg'})
+
+    assert 'amdgpu::WaitCounterType::LOADCNT' in flat_info
+    assert 'inst_.seg == 0' in flat_info
+    assert 'amdgpu::WaitCounterType::DSCNT' in flat_info
+    assert 'amdgpu::MemoryCompletionClass::VMEM' in flat_info
+    assert 'amdgpu::MemoryCompletionClass::LDS' in flat_info
+    assert 'amdgpu::MemoryCompletionClass::UNORDERED' not in flat_info
+
+    codegen.isa_spec = SimpleNamespace(arch_name='rdna4', profile=Rdna4Profile())
+    global_load = InstructionSemantics(
+        'GLOBAL_LOAD_DWORD', 'flat_load', elem_size=4, num_elems=1
+    )
+    global_info = codegen._memory_issue_initializer(global_load, set())
+
+    assert 'amdgpu::WaitCounterType::DSCNT' not in global_info
+    assert 'amdgpu::MemoryCompletionClass::VMEM' in global_info
+
+
+@pytest.mark.parametrize(
+    ('arch_name', 'profile'),
+    [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', Cdna4Profile()),
+    ],
+)
+def test_cdna_generic_flat_requires_zero_wait_for_both_counters(arch_name, profile):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name=arch_name, profile=profile)
+    load = InstructionSemantics(
+        'FLAT_LOAD_DWORD', 'flat_load', elem_size=4, num_elems=1
+    )
+
+    flat_info = codegen._memory_issue_initializer(load, {'seg'})
+
+    assert (
+        'inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED : '
+        'amdgpu::MemoryCompletionClass::VMEM' in flat_info
+    )
+    assert (
+        'amdgpu::WaitCounterType::LGKMCNT, '
+        'amdgpu::MemoryCompletionClass::UNORDERED' in flat_info
+    )
+    assert 'amdgpu::MemoryCompletionClass::LDS' not in flat_info
+
+
+def test_decoded_issue_metadata_handles_exec_and_returning_atomics():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='rdna3_5', profile=Rdna3_5Profile())
+
+    scalar = InstructionSemantics('S_LOAD_DWORD', 'smem_load')
+    assert codegen._memory_issue_initializer(scalar, set()).endswith('}, false);')
+
+    atomic = InstructionSemantics(
+        'BUFFER_ATOMIC_ADD_U32', 'buffer_atomic', operation='add'
+    )
+    atomic_info = codegen._memory_issue_initializer(atomic, set())
+    assert '(inst_.glc != 0) ? amdgpu::WaitCounterType::LOADCNT' in atomic_info
+    assert '(inst_.glc != 0) ? amdgpu::MemoryCompletionClass::VMEM' in atomic_info
+    assert 'MemoryCounterObligation' in atomic_info
+    assert not atomic_info.endswith('false);')
+
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna5', profile=Cdna5Profile())
+    transpose = InstructionSemantics('DS_READ_TR_B16', 'ds_read_tr_b16')
+    assert codegen._memory_issue_initializer(transpose, set()).endswith('}, false);')
+
+
+@pytest.mark.parametrize(
+    ('arch_name', 'profile', 'counter', 'completion'),
+    [
+        (
+            'cdna4',
+            Cdna4Profile(),
+            'amdgpu::WaitCounterType::VMCNT',
+            'amdgpu::MemoryCompletionClass::VMEM',
+        ),
+        (
+            'rdna2',
+            Rdna2Profile(),
+            'amdgpu::WaitCounterType::VSCNT',
+            'amdgpu::MemoryCompletionClass::UNORDERED',
+        ),
+        (
+            'rdna3',
+            Rdna3Profile(),
+            'amdgpu::WaitCounterType::STORECNT',
+            'amdgpu::MemoryCompletionClass::UNORDERED',
+        ),
+        (
+            'cdna5',
+            Cdna5Profile(),
+            'amdgpu::WaitCounterType::STORECNT',
+            'amdgpu::MemoryCompletionClass::VMEM',
+        ),
+    ],
+)
+def test_vmem_store_issue_metadata_follows_arch_profile(
+    arch_name, profile, counter, completion
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name=arch_name, profile=profile)
+    store = InstructionSemantics(
+        'BUFFER_STORE_DWORD', 'buffer_store', elem_size=4, num_elems=1
+    )
+
+    issue = codegen._memory_issue_initializer(store, set())
+
+    assert counter in issue
+    assert completion in issue
+
+
+def test_pre_gfx12_stores_and_gds_preserve_expcnt_obligations():
+    codegen = object.__new__(CodeGenerator)
+    store = InstructionSemantics(
+        'BUFFER_STORE_DWORD', 'buffer_store', elem_size=4, num_elems=1
+    )
+    ds = InstructionSemantics('DS_READ_B32', 'ds_read', elem_size=4, num_elems=1)
+
+    for arch_name, profile in (
+        ('cdna2', Cdna2Profile()),
+        ('rdna2', Rdna2Profile()),
+        ('rdna3', Rdna3Profile()),
+    ):
+        codegen.isa_spec = SimpleNamespace(arch_name=arch_name, profile=profile)
+        store_info = codegen._memory_issue_initializer(store, set())
+        assert 'amdgpu::WaitCounterType::EXPCNT' in store_info
+
+        ds_info = codegen._memory_issue_initializer(ds, {'gds'})
+        assert 'inst_.gds != 0' in ds_info
+        assert 'amdgpu::MemoryCompletionClass::GDS' in ds_info
+        assert 'amdgpu::WaitCounterType::EXPCNT' in ds_info
+
+
+def test_cdna5_async_completion_domains_are_explicit():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna5', profile=Cdna5Profile())
+
+    cases = (
+        ('GLOBAL_LOAD_ASYNC_TO_LDS_B32', 'global_load_async_to_lds', 'ASYNC_LOAD'),
+        (
+            'GLOBAL_STORE_ASYNC_FROM_LDS_B32',
+            'global_store_async_from_lds',
+            'ASYNC_STORE',
+        ),
+        ('DS_ATOMIC_ASYNC_BARRIER_ARRIVE_B64', 'ds_barrier_arrive', 'ASYNC_LOAD'),
+    )
+    for name, semantic_class, completion in cases:
+        operation = (
+            'async_barrier_arrive' if semantic_class == 'ds_barrier_arrive' else None
+        )
+        sem = InstructionSemantics(name, semantic_class, operation=operation)
+        issue = codegen._memory_issue_initializer(sem, set())
+        assert 'amdgpu::WaitCounterType::ASYNCCNT' in issue
+        assert f'amdgpu::MemoryCompletionClass::{completion}' in issue
+
+
+def test_wide_scalar_load_contributes_two_counter_tokens():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna4', profile=Cdna4Profile())
+    narrow = InstructionSemantics('S_LOAD_DWORD', 'smem_load', num_elems=1)
+    wide = InstructionSemantics('S_LOAD_DWORDX2', 'smem_load', num_elems=2)
+
+    assert (
+        'MemoryCompletionClass::UNORDERED, 2}'
+        not in codegen._memory_issue_initializer(narrow, set())
+    )
+    assert 'MemoryCompletionClass::UNORDERED, 2}' in codegen._memory_issue_initializer(
+        wide, set()
+    )
+
+
+@pytest.mark.parametrize(
+    'arch',
+    ['cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2', 'rdna3', 'rdna3_5'],
+)
+def test_generated_segmented_flat_metadata_uses_current_encoding_fields(
+    amdgpu_generated_root: Path, arch: str
+):
+    source = (amdgpu_generated_root / arch / 'flat.cpp').read_text()
+    descriptors = re.findall(r'set_memory_issue_info\(.*?\);', source, flags=re.DOTALL)
+    segmented_descriptors = [d for d in descriptors if 'inst_.seg' in d]
+
+    assert descriptors
+    assert segmented_descriptors
+    assert all(
+        'inst_.seg == 0 ? amdgpu::MemoryCounterObligation' in descriptor
+        for descriptor in segmented_descriptors
+    )
+
+
+@pytest.mark.parametrize('arch', ['rdna4', 'cdna5'])
+def test_generated_vflat_metadata_has_two_counter_obligations(
+    amdgpu_generated_root: Path, arch: str
+):
+    flat_source = (amdgpu_generated_root / arch / 'vflat.cpp').read_text()
+    flat_descriptors = flat_source.count('set_memory_issue_info(')
+    assert flat_descriptors > 0
+    assert (
+        flat_source.count(
+            'amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT'
+        )
+        == flat_descriptors
+    )
+
+    for known_segment in ('vglobal.cpp', 'vscratch.cpp'):
+        source = (amdgpu_generated_root / arch / known_segment).read_text()
+        assert 'amdgpu::WaitCounterType::DSCNT' not in source
+
+
+def test_generated_memory_paths_use_decoded_issue_metadata(
+    amdgpu_generated_root: Path,
+):
+    total_states = 0
+    for path in amdgpu_generated_root.rglob('*_exec*.cpp'):
+        source = path.read_text()
+        state_pattern = r'std::make_unique<amdgpu::(?:Scalar|Vector)MemState>'
+        states = len(re.findall(state_pattern, source))
+        counter_initializers = source.count('d->wait_counter_type =')
+        assert 'before_memory_instruction' not in source, path
+        assert counter_initializers == states, path
+
+        # Check the independently generated model constructors as well as the
+        # execution bodies.  Iterating _MEMORY_ISSUE_KINDS alone cannot detect a
+        # new memory-pipeline semantic that was omitted from that mapping.
+        execution_classes = set()
+        current_class = None
+        for line in source.splitlines():
+            if match := re.match(r'void (\w+)::execute_impl\(', line):
+                current_class = match.group(1)
+            if re.search(state_pattern, line):
+                assert current_class is not None, path
+                execution_classes.add(current_class)
+
+        if execution_classes:
+            model_path = path.with_name(path.name.replace('_exec.cpp', '.cpp'))
+            assert model_path.exists(), path
+            model_source = model_path.read_text()
+            metadata_classes = set()
+            current_class = None
+            for line in model_source.splitlines():
+                if match := re.match(r'(\w+)::\1\(const MachineInst \*inst\)', line):
+                    current_class = match.group(1)
+                if 'set_memory_issue_info(' in line:
+                    assert current_class is not None, model_path
+                    metadata_classes.add(current_class)
+            assert execution_classes <= metadata_classes, path
+
+        total_states += states
+    assert total_states > 0
+
+    issue_descriptors = 0
+    for path in amdgpu_generated_root.rglob('*.cpp'):
+        if '_exec' in path.stem or path.name == 'execute_shared.h':
+            continue
+        source = path.read_text()
+        issue_descriptors += source.count('set_memory_issue_info(')
+        assert 'flags_ |= MEMORY_OP;' not in source, path
+        assert 'MemoryCompletionClass::UNCLASSIFIED' not in source, path
+    assert issue_descriptors > 0
+
+
 def test_gfx1250_ds_atomic_routes_data_through_vgpr_resolver():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
@@ -7055,8 +7517,10 @@ def test_ds_atomic_codegen_returns_only_with_explicit_vdst(
 ):
     codegen = object.__new__(CodeGenerator)
     codegen._vgpr_base_expr = lambda operand, **_kwargs: operand
-    codegen._append_wait_counter_type = lambda lines, _semantic_class: lines.append(
-        '  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;'
+    codegen._append_wait_counter_type = (
+        lambda lines, _sem, *_args, **_kwargs: lines.append(
+            '  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;'
+        )
     )
     sem = InstructionSemantics(
         'DS_ADD_RTN_U64' if returns_data else 'DS_ADD_U64',
