@@ -7151,12 +7151,20 @@ TEST_F(P2pProxyCeMicrotestIsolated, SendProxyFree_MemcpyResources_TearsDownCeSta
         auto* info = static_cast<p2pShmProxyInfo*>(
             std::calloc(1, sizeof(p2pShmProxyInfo)));
         info->ceRecvMem = nullptr;   // ncclCudaHostFree(nullptr) is a no-op
-        info->ceDevBuff = nullptr;
+        // Sentinel device buffer so the ncclCudaFree release is observable in
+        // g_freeCalls (the shutdown guard short-circuits before HIP but the
+        // recording shim still logs the pointer).
+        info->ceDevBuff = reinterpret_cast<char*>(0x8000);
         conn.transportResources = info;
 
+        g_freeCalls.clear();
         auto r = p2pTransport.send.proxyFree(&conn, &state);
 
         EXPECT_EQ(r, ncclSuccess);
+        // The CE device buffer is released through ncclCudaFree; deleting that
+        // release in production drops this entry.
+        EXPECT_EQ(g_freeCalls, (std::vector<FreeCall>{
+            {FreeKind::CudaFree, reinterpret_cast<void*>(0x8000)}}));
         rcclShutdownFlag().store(false, std::memory_order_release);
         // production free(proxyInfo) already released `info`.
     });
