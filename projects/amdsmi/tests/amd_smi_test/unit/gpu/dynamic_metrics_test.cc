@@ -388,3 +388,27 @@ TEST(GpuUnit, GPUMetricsV18TableSizeMatchesSelectedTable) {
             sizeof(amd::smi::AMDGpuMetrics_v18_t))
       << "the partition table is the smaller of the two, so a size mismatch overruns it";
 }
+
+// A revision we cannot model has no table to build, and the public entry points
+// rely on that being reported as NOT_SUPPORTED rather than as unexpected data.
+// Pin both halves of that contract: the setup stage classifies the revision,
+// and the copy stage -- which callers must not reach -- reports the generic
+// failure that would otherwise mask it.
+TEST(GpuUnit, UnsupportedMetricRevisionReportsNotSupported) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("unsupported_v2_5");
+  // v2.5 is past the newest APU layout we model, so it cannot be read.
+  fake_device.WriteMetrics(BuildApuMetricsBlob(5, sizeof(ApuMetrics)));
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  std::ostringstream metrics_log;
+
+  EXPECT_EQ(device.dev_log_gpu_metrics(metrics_log), rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED);
+
+  const auto [copy_status, metrics] = device.dev_copy_internal_to_external_metrics();
+  EXPECT_EQ(copy_status, rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA)
+      << "the copy stage cannot tell an unsupported revision apart, which is why callers "
+         "stop on the setup status instead";
+  EXPECT_EQ(metrics.apu_metrics, nullptr);
+}
