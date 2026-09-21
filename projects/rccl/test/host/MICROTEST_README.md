@@ -148,9 +148,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `test_categories_micro_scheduler.yaml`.
 
 - **`rccl-UnitTestsMicroTaskPrep`** — `src/enqueue/task_prep/task_prep.cc` (via
-  `TASK_PREP_CC_PATH`, suite `TaskPrepMicrotest.*`) and
+  `TASK_PREP_CC_PATH`, suite `TaskPrepMicrotest.*`),
   `src/enqueue/task_prep/task_classify.cc` (via `TASK_CLASSIFY_CC_PATH`, suite
-  `TaskClassifyMicrotest.*`). Its own binary, not sharing
+  `TaskClassifyMicrotest.*`) and `src/enqueue/task_prep/task_pretuning.cc` (via
+  `TASK_PRETUNING_CC_PATH`, suite `TaskPreTuningMicrotest.*`). Its own binary, not sharing
   `rccl-UnitTestsMicro`: that target links `collective_stubs.cc`, whose fail-loud
   `ncclTaskPrepare` would be a duplicate symbol against the real one, and
   `group-test.cc` drives the path that stub stands in for. The files not yet under

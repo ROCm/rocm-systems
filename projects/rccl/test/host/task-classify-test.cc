@@ -25,8 +25,6 @@ constexpr int kRoot = 2;
 constexpr int kOffRootRank = 1;
 constexpr int kAboveRootRank = 3;
 constexpr int kPeer = 3;
-constexpr int kNoGraphUsage = 0;
-constexpr unsigned long long kCapturingGraphId = 1;
 constexpr ncclDataType_t kP2pDatatype = ncclFloat64;
 constexpr size_t kP2pElemSize = 8;
 constexpr size_t kP2pBytes = kCount * kP2pElemSize;
@@ -49,38 +47,6 @@ auto TaskClassify_FailRegLocalIsValidFrom(int nth) {
     return ncclSuccess;
   };
 }
-
-void TaskClassify_SetGraphCapture(TaskPrepScene* scene, bool capturing) {
-  struct ncclCudaGraph graph = ncclCudaGraphNone(kNoGraphUsage);
-  if (capturing) {
-    graph.graphId = kCapturingGraphId;
-  }
-  scene->comm()->planner.capturingGraph = graph;
-}
-
-// Publishes one registration covering [base, base + bytes) so the real inline ncclRegFind finds it.
-class TaskClassify_RegisteredRange {
- public:
-  TaskClassify_RegisteredRange(TaskPrepScene* scene, const void* base, size_t bytes) : comm_(scene->comm()) {
-    reg_.begAddr = reinterpret_cast<uintptr_t>(base);
-    reg_.endAddr = reg_.begAddr + bytes;
-    comm_->regCache.slots = &slot_;
-    comm_->regCache.capacity = 1;
-    comm_->regCache.population = 1;
-  }
-
-  // The comm outlives this object at every use site, so the slots it published have to go with it.
-  ~TaskClassify_RegisteredRange() {
-    comm_->regCache.slots = nullptr;
-    comm_->regCache.capacity = 0;
-    comm_->regCache.population = 0;
-  }
-
- private:
-  struct ncclComm* comm_;
-  struct ncclReg reg_{};
-  struct ncclReg* slot_ = &reg_;
-};
 
 // Self-constructing: a site that forgets ncclIntruQueueConstruct gets a garbage head, not an empty queue.
 struct TaskClassify_Queue : TaskTuningInfoQueue {
@@ -161,7 +127,7 @@ class TaskClassifyMicrotest : public TaskPrepFakesFixture {};
 
 TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_UnregisteredBuffer_CopiesTheRawFieldsAndClearsRegBuff) {
   TaskPrepScene scene;
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   struct ncclRawTask* raw = TaskClassify_NewP2pRaw(&scene);
   ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
 
@@ -181,9 +147,9 @@ TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_UnregisteredBuffer_CopiesT
 
 TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_RegisteredAndLocallyValid_SetsRegBuff) {
   TaskPrepScene scene;
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   struct ncclRawTask* raw = TaskClassify_NewP2pRaw(&scene);
-  TaskClassify_RegisteredRange registered(&scene, raw->sendRecv.buff, kP2pBytes);
+  RegisteredRanges registered(&scene, {{raw->sendRecv.buff, kP2pBytes}});
   struct ncclReg* probed = nullptr;
   ScopedHook isValid(g_regLocalIsValid, [&probed](struct ncclReg* reg, bool* out) {
     probed = reg;
@@ -201,9 +167,9 @@ TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_RegisteredAndLocallyValid_
 
 TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_RegisteredButNotLocallyValid_ClearsRegBuff) {
   TaskPrepScene scene;
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   struct ncclRawTask* raw = TaskClassify_NewP2pRaw(&scene);
-  TaskClassify_RegisteredRange registered(&scene, raw->sendRecv.buff, kP2pBytes);
+  RegisteredRanges registered(&scene, {{raw->sendRecv.buff, kP2pBytes}});
   struct ncclReg* probed = nullptr;
   ScopedHook isValid(g_regLocalIsValid, [&probed](struct ncclReg* reg, bool* out) {
     probed = reg;
@@ -220,9 +186,9 @@ TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_RegisteredButNotLocallyVal
 
 TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_RegistrationShorterThanTheBuffer_ClearsRegBuff) {
   TaskPrepScene scene;
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   struct ncclRawTask* raw = TaskClassify_NewP2pRaw(&scene);
-  TaskClassify_RegisteredRange registered(&scene, raw->sendRecv.buff, kP2pBytes - 1);
+  RegisteredRanges registered(&scene, {{raw->sendRecv.buff, kP2pBytes - 1}});
   ScopedHook isValid(g_regLocalIsValid, [](struct ncclReg*, bool* out) {
     *out = true;
     return ncclSuccess;
@@ -236,7 +202,7 @@ TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_RegistrationShorterThanThe
 
 TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_CapturingGraphWithGraphRegister_SetsRegBuff) {
   TaskPrepScene scene;
-  TaskClassify_SetGraphCapture(&scene, true);
+  scene.SetGraphCapture(true);
   struct ncclRawTask* raw = TaskClassify_NewP2pRaw(&scene);
   ScopedHook param(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
     return std::strcmp(env, "GRAPH_REGISTER") == 0 ? 1 : deft;
@@ -252,7 +218,7 @@ TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_GraphArmHalfSatisfied_Clea
   for (bool capturing : {true, false}) {
     const int64_t graphRegister = capturing ? 0 : 1;
     TaskPrepScene scene;
-    TaskClassify_SetGraphCapture(&scene, capturing);
+    scene.SetGraphCapture(capturing);
     struct ncclRawTask* raw = TaskClassify_NewP2pRaw(&scene);
     ScopedHook param(g_loadParam, [graphRegister](const char* env, int64_t deft) -> int64_t {
       return std::strcmp(env, "GRAPH_REGISTER") == 0 ? graphRegister : deft;
@@ -267,7 +233,7 @@ TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_GraphArmHalfSatisfied_Clea
 
 TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_RegLocalIsValidFails_PropagatesBeforeWritingRegBuff) {
   TaskPrepScene scene;
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   struct ncclRawTask* raw = TaskClassify_NewP2pRaw(&scene);
   ScopedHook isValid(g_regLocalIsValid, TaskClassify_FailRegLocalIsValidFrom(1));
   ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
@@ -280,7 +246,7 @@ TEST_F(TaskClassifyMicrotest, FillSendRecvTuningInput_RegLocalIsValidFails_Propa
 
 TEST_F(TaskClassifyMicrotest, EnqueueP2pTask_Called_BuildsTheRawTaskAndItsTuningInput) {
   TaskPrepScene scene;
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   std::vector<double> buff(kCount);
   TaskClassify_Queue queue;
 
@@ -309,7 +275,7 @@ TEST_F(TaskClassifyMicrotest, EnqueueP2pTask_Called_BuildsTheRawTaskAndItsTuning
 
 TEST_F(TaskClassifyMicrotest, EnqueueP2pTask_TwoCalls_AppendInCallOrderWithDistinctRawTasks) {
   TaskPrepScene scene;
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   std::vector<double> sendBuff(kCount);
   std::vector<double> recvBuff(kCount);
   TaskClassify_Queue queue;
@@ -331,7 +297,7 @@ TEST_F(TaskClassifyMicrotest, EnqueueP2pTask_TwoCalls_AppendInCallOrderWithDisti
 
 TEST_F(TaskClassifyMicrotest, EnqueueP2pTask_TuningInputFails_PropagatesAndLeavesTheQueueEmpty) {
   TaskPrepScene scene;
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   std::vector<double> buff(kCount);
   TaskClassify_Queue queue;
   ScopedHook isValid(g_regLocalIsValid, TaskClassify_FailRegLocalIsValidFrom(1));
@@ -345,7 +311,7 @@ TEST_F(TaskClassifyMicrotest, EnqueueP2pTask_TuningInputFails_PropagatesAndLeave
 
 TEST_F(TaskClassifyMicrotest, CollToP2pTasks_AllToAll_EnqueuesAStridedSendRecvPairPerRank) {
   TaskPrepScene scene(kRanks, kOffRootRank);
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   struct ncclTaskTuningInfo* tInfo = TaskClassify_NewCollInfo(&scene, ncclFuncAlltoAll, kRoot);
   const void* sendBase = tInfo->raw->coll.sendbuff;
   const void* recvBase = tInfo->raw->coll.recvbuff;
@@ -364,7 +330,7 @@ TEST_F(TaskClassifyMicrotest, CollToP2pTasks_AllToAll_EnqueuesAStridedSendRecvPa
 
 TEST_F(TaskClassifyMicrotest, CollToP2pTasks_AllToAllAtANarrowerDatatype_ScalesTheOffsetsAndBytes) {
   TaskPrepScene scene(kRanks, kOffRootRank);
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   struct ncclTaskTuningInfo* tInfo =
     TaskClassify_NewCollInfo(&scene, ncclFuncAlltoAll, kRoot, ncclInt8);
   const void* sendBase = tInfo->raw->coll.sendbuff;
@@ -384,7 +350,7 @@ TEST_F(TaskClassifyMicrotest, CollToP2pTasks_AllToAllAtANarrowerDatatype_ScalesT
 
 TEST_F(TaskClassifyMicrotest, CollToP2pTasks_GatherAtRoot_SendsToTheRootThenReceivesFromEveryRank) {
   TaskPrepScene scene(kRanks, kRoot);
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   struct ncclTaskTuningInfo* tInfo = TaskClassify_NewCollInfo(&scene, ncclFuncGather, kRoot);
   const void* sendBase = tInfo->raw->coll.sendbuff;
   const void* recvBase = tInfo->raw->coll.recvbuff;
@@ -403,7 +369,7 @@ TEST_F(TaskClassifyMicrotest, CollToP2pTasks_GatherAtRoot_SendsToTheRootThenRece
 TEST_F(TaskClassifyMicrotest, CollToP2pTasks_GatherOffRoot_EnqueuesOnlyTheSendToTheRoot) {
   for (int rank : {kOffRootRank, kAboveRootRank}) {
     TaskPrepScene scene(kRanks, rank);
-    TaskClassify_SetGraphCapture(&scene, false);
+    scene.SetGraphCapture(false);
     struct ncclTaskTuningInfo* tInfo = TaskClassify_NewCollInfo(&scene, ncclFuncGather, kRoot);
     const void* sendBase = tInfo->raw->coll.sendbuff;
     TaskClassify_Queue queue;
@@ -417,7 +383,7 @@ TEST_F(TaskClassifyMicrotest, CollToP2pTasks_GatherOffRoot_EnqueuesOnlyTheSendTo
 
 TEST_F(TaskClassifyMicrotest, CollToP2pTasks_ScatterAtRoot_SendsToEveryRankThenReceivesFromTheRoot) {
   TaskPrepScene scene(kRanks, kRoot);
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   struct ncclTaskTuningInfo* tInfo = TaskClassify_NewCollInfo(&scene, ncclFuncScatter, kRoot);
   const void* sendBase = tInfo->raw->coll.sendbuff;
   const void* recvBase = tInfo->raw->coll.recvbuff;
@@ -437,7 +403,7 @@ TEST_F(TaskClassifyMicrotest, CollToP2pTasks_ScatterAtRoot_SendsToEveryRankThenR
 TEST_F(TaskClassifyMicrotest, CollToP2pTasks_ScatterOffRoot_EnqueuesOnlyTheRecvFromTheRoot) {
   for (int rank : {kOffRootRank, kAboveRootRank}) {
     TaskPrepScene scene(kRanks, rank);
-    TaskClassify_SetGraphCapture(&scene, false);
+    scene.SetGraphCapture(false);
     struct ncclTaskTuningInfo* tInfo = TaskClassify_NewCollInfo(&scene, ncclFuncScatter, kRoot);
     const void* recvBase = tInfo->raw->coll.recvbuff;
     TaskClassify_Queue queue;
@@ -451,7 +417,7 @@ TEST_F(TaskClassifyMicrotest, CollToP2pTasks_ScatterOffRoot_EnqueuesOnlyTheRecvF
 
 TEST_F(TaskClassifyMicrotest, CollToP2pTasks_Lowered_ReturnsTheCollRawTaskToThePoolAndClearsTheLink) {
   TaskPrepScene scene(kRanks, kRoot);
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   struct ncclTaskTuningInfo* tInfo = TaskClassify_NewCollInfo(&scene, ncclFuncGather, kRoot);
   struct ncclRawTask* raw = tInfo->raw;
   TaskClassify_Queue queue;
@@ -466,7 +432,7 @@ TEST_F(TaskClassifyMicrotest, CollToP2pTasks_Lowered_ReturnsTheCollRawTaskToTheP
 // The ladder routes only AllToAll/Gather/Scatter here, so this arm is reachable by direct call alone.
 TEST_F(TaskClassifyMicrotest, CollToP2pTasks_UnsupportedFunc_ReturnsInternalErrorAndKeepsTheRawTask) {
   TaskPrepScene scene(kRanks, kRoot);
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   struct ncclTaskTuningInfo* tInfo = TaskClassify_NewCollInfo(&scene, ncclFuncAllReduce, kRoot);
   struct ncclRawTask* raw = tInfo->raw;
   TaskClassify_Queue queue;
@@ -480,7 +446,7 @@ TEST_F(TaskClassifyMicrotest, CollToP2pTasks_UnsupportedFunc_ReturnsInternalErro
 
 TEST_F(TaskClassifyMicrotest, CollToP2pTasks_EnqueueFails_PropagatesAndKeepsTheRawTask) {
   TaskPrepScene scene(kRanks, kOffRootRank);
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   struct ncclTaskTuningInfo* tInfo = TaskClassify_NewCollInfo(&scene, ncclFuncAlltoAll, kRoot);
   struct ncclRawTask* raw = tInfo->raw;
   TaskClassify_Queue queue;
@@ -588,7 +554,7 @@ TEST_F(TaskClassifyMicrotest, TaskClassification_NullRawTask_ReturnsInternalErro
 
 TEST_F(TaskClassifyMicrotest, TaskClassification_EachTaskKind_LandsInItsOwnQueue) {
   TaskPrepScene scene;
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   struct ncclTaskTuningInfo* p2p = scene.NewTuningInfo(scene.NewSendRecv(ncclFuncSend, kPeer));
   struct ncclTaskTuningInfo* rma = scene.NewTuningInfo(scene.NewRma(ncclFuncPutSignal));
   struct ncclTaskTuningInfo* sym = scene.NewTuningInfo(scene.NewColl(ncclFuncAllGather));
@@ -614,7 +580,7 @@ TEST_F(TaskClassifyMicrotest, TaskClassification_EachTaskKind_LandsInItsOwnQueue
 
 TEST_F(TaskClassifyMicrotest, TaskClassification_TaskKind_OutranksTheTuningResultArms) {
   TaskPrepScene scene;
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   struct ncclTaskTuningInfo* p2p = scene.NewTuningInfo(scene.NewSendRecv(ncclFuncSend, kPeer));
   struct ncclTaskTuningInfo* rma = scene.NewTuningInfo(scene.NewRma(ncclFuncPutSignal));
   for (struct ncclTaskTuningInfo* task : {p2p, rma}) {
@@ -637,7 +603,7 @@ TEST_F(TaskClassifyMicrotest, TaskClassification_TaskKind_OutranksTheTuningResul
 // Only a synthesized tuning result reaches the CE arm; the production tuningMask never selects one.
 TEST_F(TaskClassifyMicrotest, TaskClassification_CeMethodResult_OutranksTheSymKernelArm) {
   TaskPrepScene scene;
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   struct ncclTaskTuningInfo* tInfo = scene.NewTuningInfo(scene.NewColl(ncclFuncAllGather));
   TaskClassify_SelectSymKernel(tInfo, ncclSymkKernelId_AllGather_LL);
   TaskClassify_SelectCeMethod(tInfo, ncclCeMethodId_AllGather_MC);
@@ -654,7 +620,7 @@ TEST_F(TaskClassifyMicrotest, TaskClassification_CeMethodResult_OutranksTheSymKe
 
 TEST_F(TaskClassifyMicrotest, TaskClassification_AllToAllScatterGatherColls_AreLoweredIntoThePeerQueue) {
   TaskPrepScene scene(kRanks, kRoot);
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   TaskClassify_TuningInfoQueue tiq;
   const void* sendBase = nullptr;
   const void* recvBase = nullptr;
@@ -693,7 +659,7 @@ TEST_F(TaskClassifyMicrotest, TaskClassification_AllToAllScatterGatherColls_AreL
 TEST_F(TaskClassifyMicrotest, TaskClassification_LoweringFails_PropagatesAndStrandsTheEarlierTasks) {
   constexpr int kFailingProbe = 3;
   TaskPrepScene scene(kRanks, kRoot);
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   TaskClassify_TuningInfoQueue tiq;
   ncclIntruQueueEnqueue(&tiq.queue, TaskClassify_NewCollInfo(&scene, ncclFuncAlltoAll, kRoot));
   ncclIntruQueueEnqueue(&tiq.queue, TaskClassify_NewCollInfo(&scene, ncclFuncAllReduce, kRoot));
@@ -709,7 +675,7 @@ TEST_F(TaskClassifyMicrotest, TaskClassification_LoweringFails_PropagatesAndStra
 
 TEST_F(TaskClassifyMicrotest, TaskClassification_SeveralTasksPerQueue_PreserveTheirEnqueueOrder) {
   TaskPrepScene scene;
-  TaskClassify_SetGraphCapture(&scene, false);
+  scene.SetGraphCapture(false);
   struct ncclTaskTuningInfo* firstLegacy = scene.NewTuningInfo(scene.NewColl(ncclFuncAllReduce));
   struct ncclTaskTuningInfo* firstRma = scene.NewTuningInfo(scene.NewRma(ncclFuncPutSignal));
   struct ncclTaskTuningInfo* secondLegacy = scene.NewTuningInfo(scene.NewColl(ncclFuncBroadcast));

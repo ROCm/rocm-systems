@@ -2,13 +2,14 @@
 #
 # gtest's `*` does not match across the literal `.`, so a suite with no pattern
 # here builds and passes locally but never runs under CTest. Keep this in sync
-# with the TEST_F suite names in task-prep-test.cc and task-classify-test.cc.
+# with the TEST_F suite names in the task-*-test.cc files.
 test_categories:
   quick: &micro_taskprep_quick
     description: "Smoke - host-only src/enqueue/task_prep/*.cc micro-tests, sub-second."
     test_patterns:
       - "TaskPrepMicrotest.*"
       - "TaskClassifyMicrotest.*"
+      - "TaskPreTuningMicrotest.*"
     exclude_windows:
       - "*"
     labels:
