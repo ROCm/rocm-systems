@@ -1467,18 +1467,21 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
        (int)ceRegInWindow, (int)hasSysmemSegment, (int)comm->config.CTAPolicy, (int)force);
 
   if (symEligible) {
-    decision->algo = RCCL_SYMMETRIC;
     // Reporting only: fill the symk protocol/channels that will actually run.
     // Live path: collTaskAppend tags the task (symkExtract=1) so
     // ncclMakeSymmetricTaskList honors this choice instead of re-deriving it.
-    if (query) {
-      int a, p, ch;
-      if (rcclSymkQuery(comm, ncclFuncAllReduce, count, datatype, op, &a, &p, &ch)) {
-        decision->protocol = p;
-        decision->nMaxChannels = ch;
-      }
+    if (!query) {
+      decision->algo = RCCL_SYMMETRIC;
+      return ncclSuccess;
     }
-    return ncclSuccess;
+    int a, p, ch;
+    if (rcclSymkQuery(comm, ncclFuncAllReduce, count, datatype, op, &a, &p, &ch)) {
+      decision->algo = RCCL_SYMMETRIC;
+      decision->protocol = p;
+      decision->nMaxChannels = ch;
+      return ncclSuccess;
+    }
+    // symk query failed — fall through to next candidate
   }
 
   // (6) Standard ring/tree/pat kernel. Fill algo/protocol/channels for reporting
@@ -1692,15 +1695,18 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // Placed after CE so CE-registered wins for sizes above the symk/CE crossover
     // (symSuppressedBySize), mirroring rcclSelectAllReduce and rcclSelectReduceScatter.
     if (symEligible) {
-      decision->algo = RCCL_SYMMETRIC;
-      if (query) {
-        int a, p, ch;
-        if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch)) {
-          decision->protocol = p;
-          decision->nMaxChannels = ch;
-        }
+      if (!query) {
+        decision->algo = RCCL_SYMMETRIC;
+        return ncclSuccess;
       }
-      return ncclSuccess;
+      int a, p, ch;
+      if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch)) {
+        decision->algo = RCCL_SYMMETRIC;
+        decision->protocol = p;
+        decision->nMaxChannels = ch;
+        return ncclSuccess;
+      }
+      // symk query failed — fall through to next candidate
     }
 
   }
@@ -1820,15 +1826,18 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
 
     // (5) Symmetric kernel. Live path dispatches symk via the downstream extraction.
     if (symEligible) {
-      decision->algo = RCCL_SYMMETRIC;
-      if (query) {
-        int a, p, ch;
-        if (rcclSymkQuery(comm, ncclFuncReduceScatter, recvcount, datatype, op, &a, &p, &ch)) {
-          decision->protocol = p;
-          decision->nMaxChannels = ch;
-        }
+      if (!query) {
+        decision->algo = RCCL_SYMMETRIC;
+        return ncclSuccess;
       }
-      return ncclSuccess;
+      int a, p, ch;
+      if (rcclSymkQuery(comm, ncclFuncReduceScatter, recvcount, datatype, op, &a, &p, &ch)) {
+        decision->algo = RCCL_SYMMETRIC;
+        decision->protocol = p;
+        decision->nMaxChannels = ch;
+        return ncclSuccess;
+      }
+      // symk query failed — fall through to next candidate
     }
   }
 
