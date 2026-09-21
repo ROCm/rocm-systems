@@ -19,8 +19,5 @@ add_library(
 
 target_link_libraries(
     lib-common-tests
-    PUBLIC
-        rocprofiler-systems-common-library
-        rocprofiler-systems-googletest-library
-        rocprofiler-systems-ghc-filesystem
+    PUBLIC rocprofiler-systems-common-library rocprofiler-systems-googletest-library
 )

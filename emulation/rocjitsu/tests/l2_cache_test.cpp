@@ -514,6 +514,160 @@ TEST_F(L1CacheMtypeTest, VectorStoreKeepsUcThenRwMtypeAcrossBoundary) {
   EXPECT_EQ(l2_.backing_read_transactions(), 1u);
 }
 
+TEST(L2CacheTest, FullLineStoresSkipBackingReads) {
+  constexpr uint64_t kAddr = 0x180000;
+  constexpr uint32_t kLanes = L2Cache::LINE_SIZE / sizeof(uint32_t);
+  constexpr uint64_t kLaneMask = ~uint64_t{0} >> (64 - kLanes);
+  for (Mtype mtype : {Mtype::RW, Mtype::CC, Mtype::WB, Mtype::UC}) {
+    for (bool through_l1 : {false, true}) {
+      SCOPED_TRACE(static_cast<int>(mtype));
+      SCOPED_TRACE(through_l1);
+      GpuMemory memory("memory");
+      L2Cache l2("l2");
+      l2.set_backing_memory(&memory);
+      L1VectorCache l1(&l2);
+      std::array<uint64_t, kLanes> addrs{};
+      std::array<uint32_t, kLanes> values{};
+      std::array<uint32_t, kLanes> actual{};
+      for (uint32_t lane = 0; lane < kLanes; ++lane)
+        addrs[lane] = kAddr + lane * sizeof(uint32_t);
+
+      for (uint32_t iteration = 0; iteration < 2; ++iteration) {
+        for (uint32_t lane = 0; lane < kLanes; ++lane)
+          values[lane] = 0x12340000 + iteration * kLanes + lane;
+        const auto *bytes = reinterpret_cast<const uint8_t *>(values.data());
+        const uint64_t reads_before = l2.backing_read_transactions();
+        if (through_l1)
+          l1.store(addrs.data(), /*lane_mask=*/kLaneMask, sizeof(uint32_t), /*num_elems=*/1, bytes,
+                   mtype, /*non_temporal=*/false, /*wf_size=*/kLanes);
+        else
+          l2.write(kAddr, bytes, sizeof(values), mtype);
+        EXPECT_EQ(l2.backing_read_transactions(), reads_before);
+        memory.read_block(
+            kAddr, std::span<uint8_t>(reinterpret_cast<uint8_t *>(actual.data()), sizeof(actual)));
+        EXPECT_EQ(actual, values);
+        if (through_l1)
+          l1.load(addrs.data(), /*lane_mask=*/kLaneMask, sizeof(uint32_t), /*num_elems=*/1,
+                  reinterpret_cast<uint8_t *>(actual.data()), mtype,
+                  /*non_temporal=*/false, /*request_l1_bypass=*/false, /*wf_size=*/kLanes);
+        else
+          l2.read(kAddr, reinterpret_cast<uint8_t *>(actual.data()), sizeof(actual), mtype);
+        EXPECT_EQ(actual, values);
+      }
+    }
+  }
+}
+
+TEST(L2CacheTest, FullLineStorePublishesDirtyEviction) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  constexpr uint64_t kAddr = 0x180000;
+  constexpr uint64_t kSetStride = L2Cache::LINE_SIZE * L2Cache::NUM_SETS;
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> replacement{};
+  dirty.fill(0x55);
+  replacement.fill(0xaa);
+  for (uint32_t way = 0; way < L2Cache::ASSOCIATIVITY; ++way)
+    l2.writeback_line(kAddr + way * kSetStride, dirty.data());
+
+  const uint64_t destination = kAddr + L2Cache::ASSOCIATIVITY * kSetStride;
+  const uint64_t reads_before = l2.backing_read_transactions();
+  l2.write(destination, replacement.data(), replacement.size());
+  EXPECT_EQ(l2.backing_read_transactions(), reads_before);
+  std::array<uint8_t, L2Cache::LINE_SIZE> actual{};
+  memory.read_block(kAddr, actual);
+  EXPECT_EQ(actual, dirty);
+  memory.read_block(destination, actual);
+  EXPECT_EQ(actual, replacement);
+}
+
+TEST(L2CacheTest, FullLineStoreEvictsDirtyLineUnderItsOwningVmid) {
+  constexpr uint32_t kVmidA = 7;
+  constexpr uint32_t kVmidB = 11;
+  constexpr uint64_t kAddr = 0x180000;
+  constexpr uint64_t kSetStride = L2Cache::LINE_SIZE * L2Cache::NUM_SETS;
+  std::array<std::array<uint8_t, GpuMemory::PAGE_SIZE>, L2Cache::ASSOCIATIVITY> pages_a{};
+  std::array<uint8_t, GpuMemory::PAGE_SIZE> page_b{};
+  rocjitsu::KfdProcess process_a(kVmidA), process_b(kVmidB);
+  GpuMemory memory("memory");
+  for (uint32_t way = 0; way < pages_a.size(); ++way)
+    process_a.map_pages(kAddr + way * kSetStride, pages_a[way].data(), pages_a[way].size());
+  process_b.map_pages(kAddr, page_b.data(), page_b.size());
+  for (auto *process : {&process_a, &process_b})
+    memory.register_process(process == &process_a ? kVmidA : kVmidB, &process->page_table_,
+                            &process->page_table_mutex_, process->page_table_generation(),
+                            process->page_table_request_mutex());
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{}, replacement{}, actual{};
+  dirty.fill(0x55);
+  replacement.fill(0xaa);
+  for (uint32_t way = 0; way < pages_a.size(); ++way)
+    l2.writeback_line(kAddr + way * kSetStride, dirty.data(), Mtype::RW, kVmidA);
+  EXPECT_EQ(pages_a[0][0], 0u);
+  const uint64_t reads_before = l2.backing_read_transactions();
+  // The same GPU VA misses because the store belongs to a different process.
+  l2.write(kAddr, replacement.data(), replacement.size(), Mtype::RW, kVmidB);
+  EXPECT_EQ(l2.backing_read_transactions(), reads_before);
+  memory.read_block(kAddr, actual, kVmidA);
+  EXPECT_EQ(actual, dirty);
+  memory.read_block(kAddr, actual, kVmidB);
+  EXPECT_EQ(actual, replacement);
+  l2.read(kAddr, actual.data(), actual.size(), Mtype::RW, kVmidB);
+  EXPECT_EQ(actual, replacement);
+  l2.read(kAddr, actual.data(), actual.size(), Mtype::RW, kVmidA);
+  EXPECT_EQ(actual, dirty);
+}
+
+TEST(L2CacheTest, FullLineStoreReplacesResidentDirtyBytes) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  constexpr uint64_t kAddr = 0x180000;
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{}, replacement{}, external{}, actual{};
+  dirty.fill(0x55);
+  replacement.fill(0xaa);
+  external.fill(0x33);
+  l2.writeback_line(kAddr, dirty.data());
+  const uint64_t reads_before = l2.backing_read_transactions();
+  l2.write(kAddr, replacement.data(), replacement.size());
+  EXPECT_EQ(l2.backing_read_transactions(), reads_before);
+  l2.read(kAddr, actual.data(), actual.size());
+  EXPECT_EQ(actual, replacement);
+  memory.read_block(kAddr, actual);
+  EXPECT_EQ(actual, replacement);
+  // A subsequent flush must not publish stale dirty bytes over a host update.
+  memory.write_block(kAddr, external);
+  l2.flush_line(kAddr);
+  memory.read_block(kAddr, actual);
+  EXPECT_EQ(actual, external);
+}
+
+TEST(L2CacheTest, UnalignedVectorStoreFetchesOnlyPartialLines) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  L1VectorCache l1(&l2);
+  constexpr uint64_t kAddr = 0x180000;
+  std::array<uint8_t, 3 * L2Cache::LINE_SIZE> initial{};
+  initial.fill(0xa5);
+  memory.write_block(kAddr, initial);
+  std::array<uint8_t, 2 * L2Cache::LINE_SIZE> values{};
+  for (uint32_t i = 0; i < values.size(); ++i)
+    values[i] = static_cast<uint8_t>(i);
+  std::array<uint8_t, 3 * L2Cache::LINE_SIZE> expected = initial;
+  std::copy(values.begin(), values.end(), expected.begin() + sizeof(uint32_t));
+  const uint64_t addrs[] = {kAddr + sizeof(uint32_t)};
+  l1.store(addrs, /*lane_mask=*/1, sizeof(uint32_t), values.size() / sizeof(uint32_t),
+           values.data(), Mtype::RW,
+           /*non_temporal=*/false, /*wf_size=*/1);
+  EXPECT_EQ(l2.backing_read_transactions(), 2u);
+  std::array<uint8_t, initial.size()> actual{};
+  memory.read_block(kAddr, actual);
+  EXPECT_EQ(actual, expected);
+}
+
 TEST(L2CacheThreadingTest, ConcurrentDifferentSetWritesArePreserved) {
   GpuMemory memory("memory");
   L2Cache l2("l2");

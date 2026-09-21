@@ -97,7 +97,7 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
         if(control_ptr[se_index].status & sqttbuilder->GetUTCErrorMask())
         {
             ERR_LOGGING("SQTT memory error received, SE({})", se_index);
-            status = HSA_STATUS_ERROR_EXCEPTION;
+            if(status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
         }
         auto status2_value = (pm4_factory->GetGpuId() >= aql_profile::GFX12_GPU_ID)
                                  ? control_ptr[se_index].status2
