@@ -164,4 +164,35 @@ std::optional<DbiEntryPrologue> build_dbi_entry_prologue(const KD &desc, rj_code
   return prologue;
 }
 
+std::optional<DbiEntryProloguePlan> plan_dbi_entry_prologue(KernelBlockScope blocks, const KD &desc,
+                                                            rj_code_arch_t arch,
+                                                            uint32_t kernel_sgpr_count,
+                                                            const RegisterSet &reserved,
+                                                            std::string *error_out) {
+  // A kernel compiled with kernarg preloading has two hardware entries 256 bytes
+  // apart. A prologue reached through only one of them leaves the storage
+  // uninitialized on the other path, and nothing here can patch a firmware entry
+  // that the descriptor does not name.
+  if (const uint32_t preload = kernarg_preload_length(desc); preload != 0) {
+    if (error_out != nullptr) {
+      *error_out = "kernel preloads " + std::to_string(preload) +
+                   " kernarg dwords, so it has a second hardware entry the DBI entry "
+                   "prologue would not cover";
+    }
+    return std::nullopt;
+  }
+
+  const std::optional<DbiEntryStorage> storage =
+      plan_dbi_entry_storage(blocks, desc, arch, kernel_sgpr_count, reserved, error_out);
+  if (!storage)
+    return std::nullopt;
+
+  std::optional<DbiEntryPrologue> prologue =
+      build_dbi_entry_prologue(desc, arch, *storage, error_out);
+  if (!prologue)
+    return std::nullopt;
+
+  return DbiEntryProloguePlan{.storage = *storage, .prologue = std::move(*prologue)};
+}
+
 } // namespace rocjitsu

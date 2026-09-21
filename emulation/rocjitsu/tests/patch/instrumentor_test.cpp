@@ -1480,6 +1480,93 @@ TEST(InstrumentorSpill, SpillSetIsLiveIntersectClobbers) {
   EXPECT_FALSE(has_sgpr(spill, 31));
 }
 
+//==============================================================================
+// Probe-call reserved registers
+//
+// What framework storage has to stay out of: nothing saves and restores it
+// across a probe call.
+//==============================================================================
+
+namespace {
+
+// A registry entry carrying only what compute_probe_reserved_registers reads.
+ProbeCallable reserved_test_probe(std::string symbol) {
+  ProbeCallable probe;
+  probe.symbol = std::move(symbol);
+  probe.abi = *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31);
+  return probe;
+}
+
+ProbeClobberSummary summary_clobbering(std::initializer_list<uint16_t> sgprs) {
+  ProbeClobberSummary summary;
+  summary.ordinary_clobbers = make_sgpr_set(sgprs);
+  return summary;
+}
+
+} // namespace
+
+// The body's own writes plus the pair the convention returns through. The link
+// pair is absent from the summary, since the envelope writes it, not the body.
+TEST(InstrumentorProbeReserved, UnionsBodyClobbersAndTheLinkPair) {
+  const std::vector<ProbeCallable> probes{reserved_test_probe("p")};
+  const std::vector<ProbeClobberSummary> summaries{summary_clobbering({4, 5})};
+
+  RegisterSet reserved;
+  std::string err;
+  ASSERT_TRUE(compute_probe_reserved_registers(probes, summaries, reserved, &err)) << err;
+  EXPECT_TRUE(has_sgpr(reserved, 4));
+  EXPECT_TRUE(has_sgpr(reserved, 5));
+  EXPECT_TRUE(has_sgpr(reserved, 30));
+  EXPECT_TRUE(has_sgpr(reserved, 31));
+  EXPECT_FALSE(has_sgpr(reserved, 6));
+}
+
+// Unioned over every probe, not just the ones a given site calls: a pointer
+// loaded at kernel entry passes through every probe call in between.
+TEST(InstrumentorProbeReserved, CoversEveryProbeNotJustOne) {
+  const std::vector<ProbeCallable> probes{reserved_test_probe("first"),
+                                          reserved_test_probe("second")};
+  const std::vector<ProbeClobberSummary> summaries{summary_clobbering({4}),
+                                                   summary_clobbering({12})};
+
+  RegisterSet reserved;
+  std::string err;
+  ASSERT_TRUE(compute_probe_reserved_registers(probes, summaries, reserved, &err)) << err;
+  EXPECT_TRUE(has_sgpr(reserved, 4));
+  EXPECT_TRUE(has_sgpr(reserved, 12));
+}
+
+// Nothing to avoid when the patch calls no probes.
+TEST(InstrumentorProbeReserved, EmptyWithoutProbes) {
+  RegisterSet reserved;
+  std::string err;
+  ASSERT_TRUE(compute_probe_reserved_registers({}, {}, reserved, &err)) << err;
+  EXPECT_TRUE(reserved.none());
+}
+
+// The spans are indexed together, so a mismatch would pair one probe's ABI with
+// another's clobbers.
+TEST(InstrumentorProbeReserved, MismatchedSpansFail) {
+  const std::vector<ProbeCallable> probes{reserved_test_probe("p")};
+  RegisterSet reserved;
+  std::string err;
+  EXPECT_FALSE(compute_probe_reserved_registers(probes, {}, reserved, &err));
+  EXPECT_NE(err.find("different sizes"), std::string::npos) << err;
+}
+
+// An ABI that did not come from derive_probe_abi names no pair worth reserving.
+// Skipping it would under-reserve silently.
+TEST(InstrumentorProbeReserved, UnusableAbiFails) {
+  std::vector<ProbeCallable> probes{reserved_test_probe("p")};
+  probes.front().abi.link_pair_base = 7; // odd base; no convention selects it
+  const std::vector<ProbeClobberSummary> summaries{summary_clobbering({4})};
+
+  RegisterSet reserved;
+  std::string err;
+  EXPECT_FALSE(compute_probe_reserved_registers(probes, summaries, reserved, &err));
+  EXPECT_NE(err.find("unusable ABI"), std::string::npos) << err;
+}
+
 // Coarse SGPR-allocation gate for probe calls: a kernel must allocate through
 // the fixed return-link pair s[link_base:link_base+1] to own it.
 TEST(InstrumentorSgprGate, LinkPairFitsRequiresAllocationThroughPair) {
@@ -2179,6 +2266,134 @@ TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) 
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("bound VGPR selection"), std::string::npos)
       << result.errors.front();
+}
+
+//==============================================================================
+// The DBI entry prologue
+//
+// A probe asking for the framework's entry storage makes the instrumentor
+// synthesize a site at the kernel entry that defines it. These cover the gates
+// that refuse a kernel the prologue could not cover; the acceptance path needs a
+// descriptor carrying ENABLE_SGPR_KERNARG_SEGMENT_PTR, which arrives with the
+// simulator fixtures.
+//==============================================================================
+
+namespace {
+
+// A probe declaring one argument sourced from the framework's entry storage,
+// which is what asks the instrumentor for a prologue.
+InstrumentationPoint log_buffer_point(const AmdGpuCodeObject &probe_obj, uint64_t anchor_offset) {
+  InstrumentationPoint pt;
+  pt.anchor_offset = anchor_offset;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args = {{ProbeArgSource::LogBufferPtrLo, 0}};
+  return pt;
+}
+
+} // namespace
+
+// The prologue loads its pointer out of the kernarg wrapper the CP delivers, so
+// a kernel that never receives a kernarg pointer has nothing to load through.
+TEST(InstrumentorEntryPrologue, KernelWithoutAKernargPointerFailsClosed) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("ENABLE_SGPR_KERNARG_SEGMENT_PTR"), std::string::npos)
+      << result.errors.front();
+  // The diagnostic names the probes the storage had to avoid, so it does not read
+  // as a plain "this kernel has no room".
+  EXPECT_NE(result.errors.front().find("rj_test_probe"), std::string::npos)
+      << result.errors.front();
+}
+
+// The prologue and a user point would each splice a branch over the same bytes.
+// Checked before storage selection, so it reports the collision rather than
+// whatever the storage planner would have said next.
+TEST(InstrumentorEntryPrologue, PointOnTheKernelEntryFailsClosed) {
+  auto target = make_gfx950_kernel_elf_with_two_nops(); // entry at .text offset 0.
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/0));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("overlaps the kernel entry"), std::string::npos)
+      << result.errors.front();
+}
+
+// The entry is an anchor like any other, so an entry the trampoline machinery
+// cannot relocate refuses the prologue instead of being spliced anyway.
+TEST(InstrumentorEntryPrologue, UnrelocatableKernelEntryFailsClosed) {
+  const uint32_t branch = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4);
+  auto target = make_gfx950_kernel_elf({branch, 0xBF800000u}, /*private_bytes=*/0);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("cannot anchor the entry prologue"), std::string::npos)
+      << result.errors.front();
+}
+
+// Instrumentation does not support multi-kernel objects, so neither does the
+// prologue. Rejected here rather than downstream at the argument-VGPR bound,
+// which would reject it for a reason that reads as unrelated.
+TEST(InstrumentorEntryPrologue, MultipleKernelsFailClosed) {
+  auto target = make_gfx950_two_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/0));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("multi-kernel code object"), std::string::npos)
+      << result.errors.front();
+}
+
+// Nothing asks for the storage, so no prologue is planned and no gate applies.
+// The entry keeps its original instruction, which is what makes every other
+// probe-call test independent of this machinery.
+TEST(InstrumentorEntryPrologue, OrdinaryProbeCallLeavesTheEntryAlone) {
+  auto target = make_gfx950_kernel_elf_with_two_nops();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 4;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args = {probe_arg_imm(1)};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  ASSERT_FALSE(text.empty());
+  EXPECT_EQ(text[0], 0xBF800000u) << "the kernel entry must still hold its original s_nop";
 }
 
 // An inline nop has nowhere to put arguments.

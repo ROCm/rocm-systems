@@ -380,5 +380,77 @@ TEST(BuildDbiEntryPrologue, FailsClosedOnAWrapperPastTheSmemImmediateRange) {
   EXPECT_FALSE(error.empty());
 }
 
+// The composed planner hands back storage choice and words in one answer.
+TEST(PlanDbiEntryPrologue, ReturnsTheStorageAndTheWordsItEncoded) {
+  const Kernel kernel(kernel_naming_sgpr(4));
+  std::string error;
+  const auto plan =
+      plan_dbi_entry_prologue(kernel.scope(), kernarg_descriptor(/*kernarg_size=*/16), kArch,
+                              /*kernel_sgpr_count=*/32, link_pair(), &error);
+  ASSERT_TRUE(plan.has_value()) << error;
+
+  // Floor 5 (the kernel's s4) aligns to 6, and the run is contiguous.
+  EXPECT_EQ(plan->storage.persistent_base, 6u);
+  EXPECT_EQ(plan->storage.entry_temp_base, 8u);
+
+  // The words are build_dbi_entry_prologue's, not a second encoding of them.
+  const auto direct = build_dbi_entry_prologue(kernarg_descriptor(/*kernarg_size=*/16), kArch,
+                                               plan->storage, &error);
+  ASSERT_TRUE(direct.has_value()) << error;
+  EXPECT_EQ(plan->prologue.words, direct->words);
+  EXPECT_EQ(plan->prologue.payload_byte_offset, direct->payload_byte_offset);
+  EXPECT_EQ(plan->prologue.original_kernarg_pointer_offset,
+            direct->original_kernarg_pointer_offset);
+}
+
+// A preloading kernel has a second hardware entry 256 bytes past the
+// descriptor's, which a prologue at the descriptor entry would not cover.
+TEST(PlanDbiEntryPrologue, FailsClosedOnAKernargPreloadingKernel) {
+  const Kernel kernel(kernel_naming_sgpr(4));
+  KD desc = kernarg_descriptor(/*kernarg_size=*/16);
+  AMDHSA_BITS_SET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+
+  std::string error;
+  const auto plan = plan_dbi_entry_prologue(kernel.scope(), desc, kArch,
+                                            /*kernel_sgpr_count=*/32, link_pair(), &error);
+  EXPECT_FALSE(plan.has_value());
+  EXPECT_NE(error.find("preloads"), std::string::npos) << error;
+}
+
+// The reserved set reaches storage selection rather than being dropped on the
+// way through. Without it the run would start at s6.
+TEST(PlanDbiEntryPrologue, StepsPastTheReservedRegisters) {
+  const Kernel kernel(kernel_naming_sgpr(4));
+  RegisterSet reserved = link_pair();
+  reserved.expand({RegClass::SGPR, 6, 4});
+
+  std::string error;
+  const auto plan =
+      plan_dbi_entry_prologue(kernel.scope(), kernarg_descriptor(/*kernarg_size=*/16), kArch,
+                              /*kernel_sgpr_count=*/32, reserved, &error);
+  ASSERT_TRUE(plan.has_value()) << error;
+  EXPECT_EQ(plan->storage.persistent_base, 10u);
+  EXPECT_EQ(plan->storage.entry_temp_base, 12u);
+}
+
+// Either composed step failing fails the planner, not a partially-filled plan.
+TEST(PlanDbiEntryPrologue, PropagatesStorageAndWordFailures) {
+  const Kernel kernel(kernel_naming_sgpr(4));
+  std::string error;
+
+  // No room for the run inside the allocation.
+  EXPECT_FALSE(plan_dbi_entry_prologue(kernel.scope(), kernarg_descriptor(), kArch,
+                                       /*kernel_sgpr_count=*/6, link_pair(), &error)
+                   .has_value());
+  EXPECT_FALSE(error.empty());
+
+  // Storage is available, but the descriptor has no kernarg pointer to load through.
+  error.clear();
+  EXPECT_FALSE(plan_dbi_entry_prologue(kernel.scope(), descriptor(/*user_sgpr_count=*/2), kArch,
+                                       /*kernel_sgpr_count=*/32, link_pair(), &error)
+                   .has_value());
+  EXPECT_FALSE(error.empty());
+}
+
 } // namespace
 } // namespace rocjitsu
