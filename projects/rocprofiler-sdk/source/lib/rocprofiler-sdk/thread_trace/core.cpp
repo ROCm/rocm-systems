@@ -35,6 +35,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -534,17 +535,21 @@ DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t& aql,
 
     for(auto& aql_pkt : aql)
     {
+        if(aql_pkt.second != hsa::queue_hooks::THREAD_TRACE_CLIENT_ID) continue;
+
         auto* pkt = dynamic_cast<hsa::TraceControlAQLPacket*>(aql_pkt.first.get());
         if(!pkt) continue;
 
         std::shared_lock<std::shared_mutex> lk(agents_map_mut);
+
+        auto it = agents.find(pkt->GetAgent());
+        if(it == agents.end() || it->second == nullptr) continue;
+
         post_move_data.fetch_sub(1);
 
         if(pkt->after_krn_pkt.empty()) continue;
 
-        auto it = agents.find(pkt->GetAgent());
-        if(it != agents.end() && it->second != nullptr)
-            it->second->iterate_data(pkt->GetHandle(), packet_data.user_data);
+        it->second->iterate_data(pkt->GetHandle(), packet_data.user_data);
     }
 }
 
@@ -578,7 +583,7 @@ DispatchThreadTracer::intersects(const DispatchThreadTracer& rhs) const
 }
 
 void
-DispatchThreadTracer::start_context()
+DispatchThreadTracer::start_context() const
 {
     // Thread trace no longer registers a per-queue callback with the queue controller; the
     // HSA write interceptor now calls thread_trace::write_hook / signal_completion_hook
@@ -590,11 +595,15 @@ DispatchThreadTracer::start_context()
 }
 
 void
-DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-functions-to-static)
+DispatchThreadTracer::stop_context() const
 {
     // Stop injecting ATT packets before transitioning serialization. Completion hooks remain
     // reachable for packets already in the queues while the serializer transition drains.
     if(!enabled.exchange(false, std::memory_order_acq_rel)) return;
+
+    // Drain in-flight dispatches before tearing down serialization so post_kernel_call can
+    // still run while the context remains registered.
+    hsa::queue_controller_sync();
 
     const auto serialization_agents = configured_agents();
     if(auto* controller = hsa::get_queue_controller())
