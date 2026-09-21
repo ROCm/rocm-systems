@@ -1211,8 +1211,14 @@ amd_dbgapi_convert_address_space (
              == address_space_t::kind_t::global)
       {
         *destination_segment_address = source_segment_address;
-        *destination_contiguous_bytes
-          = source_address_space->last_address () - source_segment_address + 1;
+
+        if (*destination_segment_address
+            == destination_address_space->null_address ())
+          *destination_contiguous_bytes = 0;
+        else
+          *destination_contiguous_bytes
+            = source_address_space->last_address ()
+            - source_segment_address + 1;
       }
     else
       {
