@@ -896,6 +896,29 @@ TEST(Rdna35FuzzDecodeTest, PreservesRoundTripSignificantSyntax) {
   }
 }
 
+TEST(RdnaMimgDecodeTest, NsaStorePreservesExtensionAndNextInstruction) {
+  // RADV's image clear shader uses three nonconsecutive address registers.
+  // Both GFX11 families encode them with one additional instruction DWORD.
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    std::array<uint32_t, 4> words{0xf0180f95, 0x00040402, 0x00000803, S_NOP};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->size(), 12);
+    EXPECT_EQ(inst->mnemonic(), "image_store");
+    words[2] = 0;
+    EXPECT_EQ(inst->raw_encoding()[2], 0x803u);
+    std::unique_ptr<Instruction> next(decode_valid(*decoder, words.data() + inst->size() / 4));
+    ASSERT_NE(next, nullptr);
+    EXPECT_EQ(next->mnemonic(), "s_nop");
+    words[0] &= ~1u;
+    inst.reset(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->size(), 8);
+  }
+}
+
 TEST(Rdna35MimgDecodeTest, PartialNsaUsesOneExtensionDword) {
   struct TestCase {
     std::array<uint32_t, 6> words;

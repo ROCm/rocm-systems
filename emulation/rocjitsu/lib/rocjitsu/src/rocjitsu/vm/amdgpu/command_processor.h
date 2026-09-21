@@ -453,6 +453,7 @@ private:
   /// @brief Decode shader launch registers and append a compute dispatch to qs.
   void dispatch_pm4(const HwQueue &queue, HwQueueState &qs,
                     const std::array<uint32_t, 4> &dimensions);
+  void draw_pm4(const HwQueue &queue, HwQueueState &qs, uint32_t vertices);
 
   rocr::llvm::amdhsa::kernel_descriptor_t
   read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid, bool host_accessible = false);

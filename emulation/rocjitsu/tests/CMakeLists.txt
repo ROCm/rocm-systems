@@ -520,6 +520,7 @@ add_executable(
     division_macro_test.cpp
     valu_floating_policy_test.cpp
     atomic_semantics_and_decode_test.cpp
+    graphics_export_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
     scalar_scc_test.cpp
@@ -1686,6 +1687,8 @@ rj_add_interposer_test_suite(
 )
 
 set(_rj_interposer_pm4_tests
+    GraphicsRegistersRetainAllPacketForms
+    MalformedPackedGraphicsRegistersFailFence
     DependencyDefersMemoryWriteAndCompletion
     MalformedPacketFailsCompletion
     FaultedQueueRejectsNewSubmission
