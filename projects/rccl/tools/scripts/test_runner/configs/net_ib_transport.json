@@ -1119,6 +1119,76 @@
       "extends": "net_ib_multithread_multiqp_nosplit",
       "command_args": "--net_ib_nthreads=4"
     },
+    "cast_opt_recv": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "description": "Optional recv completion enabled: QP sched off, RCCL_IB_OPT_RECV_COMPLETION=1. Reuses transfer tests plus dedicated flag/skip-path gtests.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_IB_QP_SCHED_ENABLE": "0",
+        "RCCL_IB_OPT_RECV_COMPLETION": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,INIT"
+      },
+      "tests": [
+        {
+          "name": "Cast_OptRecv_SimpleSendRecv",
+          "description": "Basic send/recv with optRecvCompletion enabled (no hint from this test)",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "Cast_OptRecv_MultipleSizes",
+          "description": "Multiple buffer sizes with optRecvCompletion enabled",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "Cast_OptRecv_LargeTransfer",
+          "description": "Large transfer with optRecvCompletion enabled",
+          "test_filter": "NetIbMPITest.LargeTransfer"
+        },
+        {
+          "name": "Cast_OptRecv_MultipleSequential",
+          "description": "Sequential transfers with optRecvCompletion enabled",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        },
+        {
+          "name": "Cast_OptRecv_FlagEnabled",
+          "description": "White-box: commBase.optRecvCompletion is 1 when control=1 and QP sched=0",
+          "test_filter": "NetIbMPITest.OptRecvCompletionFlagEnabled"
+        },
+        {
+          "name": "Cast_OptRecv_SkipWritePath",
+          "description": "1-req send/recv with NCCL_NET_OPTIONAL_RECV_COMPLETION hint; data matches after send CQE",
+          "test_filter": "NetIbMPITest.OptRecvCompletionSkipWritePath"
+        },
+        {
+          "name": "Cast_OptRecv_MultiRecvNoHint",
+          "description": "n>1 irecv without the optional-recv hint still transfers correctly",
+          "test_filter": "NetIbMPITest.OptRecvCompletionMultiRecvNoHint"
+        }
+      ]
+    },
+
+    "cast_opt_recv_disabled_sched": {
+      "extends": "cast_base",
+      "timeout": 120,
+      "description": "QP scheduler on (cast_base): optRecvCompletion must stay off.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "RCCL_IB_OPT_RECV_COMPLETION": "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_OptRecv_FlagDisabledByQpSched",
+          "description": "White-box: commBase.optRecvCompletion is 0 when QP scheduling is enabled",
+          "test_filter": "NetIbMPITest.OptRecvCompletionFlagDisabledByQpSched"
+        }
+      ]
+    },
+
     "cast_wrr_split_long_interval": {
       "extends": "cast_base",
       "timeout": 120,
@@ -1457,6 +1527,18 @@
       "name": "NET IB - Multithread Multi-QP NoSplit (4)",
       "description": "4 worker threads/rank with 4 QPs per connection on the nDataQps path",
       "config": "net_ib_multithread_multiqp_nosplit_4",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST optional recv completion",
+      "description": "optRecvCompletion enabled (QP sched off): transfer sanity plus skip-CQ WRITE path",
+      "config": "cast_opt_recv",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST optional recv completion disabled by QP sched",
+      "description": "White-box: QP scheduler forces optRecvCompletion off",
+      "config": "cast_opt_recv_disabled_sched",
       "enabled": true
     },
     {

@@ -196,6 +196,13 @@ void* IbCastAsyncThreadMain(void* args) {
   return NULL;
 }
 
+extern "C" ncclResult_t ncclIbCastGetOptRecvCompletion(void* comm, int* out) {
+  if (!comm || !out) return ncclInvalidArgument;
+  struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
+  *out = base->optRecvCompletion ? 1 : 0;
+  return ncclSuccess;
+}
+
 ncclNet_t netIbCast = {
   "IB-CAST",
   IbCastInit,

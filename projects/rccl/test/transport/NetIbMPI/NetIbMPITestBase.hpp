@@ -310,15 +310,18 @@ protected:
         return net_->deregMr(comm, mhandle);
     }
 
-    // Helper: Post send operation
+    // Helper: Post send operation. When optRecvHint is true, seed *request with
+    // NCCL_NET_OPTIONAL_RECV_COMPLETION so the plugin may skip the remote CQ.
     ncclResult_t PostSend(void* sendComm, void* data, size_t size, int tag,
-                         void* mhandle, void** request) {
+                         void* mhandle, void** request, bool optRecvHint = false) {
+        if (optRecvHint && request) *request = (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION;
         return net_->isend(sendComm, data, size, tag, mhandle, nullptr, request);
     }
 
-    // Helper: Post recv operation
+    // Helper: Post recv operation. See PostSend for optRecvHint.
     ncclResult_t PostRecv(void* recvComm, int n, void** data, size_t* sizes,
-                         int* tags, void** mhandles, void** request) {
+                         int* tags, void** mhandles, void** request, bool optRecvHint = false) {
+        if (optRecvHint && request) *request = (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION;
         return net_->irecv(recvComm, n, data, sizes, tags, mhandles, nullptr, request);
     }
 
@@ -422,18 +425,19 @@ protected:
     }
 
     // Helper: Retry until the receiver's FIFO slot is ready.
+    // Re-seed the optional-recv hint on every attempt: a NULL return overwrites it.
     void PostSendWithRetry(void* sendComm, void* data, size_t size, int tag,
-                           void* mhandle, void** request) {
+                           void* mhandle, void** request, bool optRecvHint = false) {
         int attempts = 0;
         do {
-            ncclResult_t result = PostSend(sendComm, data, size, tag, mhandle, request);
+            ncclResult_t result = PostSend(sendComm, data, size, tag, mhandle, request, optRecvHint);
             ASSERT_EQ(result, ncclSuccess);
-            if (*request != nullptr) break;
+            if (*request != nullptr && *request != (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION) break;
             if (++attempts >= kMaxRetryAttempts) {
                 FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
             }
             usleep(kPollIntervalUs);
-        } while (*request == nullptr);
+        } while (*request == nullptr || *request == (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION);
     }
 
     // Helper: Wait for request completion with timeout
@@ -510,12 +514,12 @@ protected:
 
     // Composite block: Post a single irecv. Wraps the 4-array boilerplate.
     void PostSingleRecv(void* recvComm, void* buf, size_t size, int tag,
-                        void* mhandle, void** request) {
+                        void* mhandle, void** request, bool optRecvHint = false) {
         void*  bufs[1]    = {buf};
         size_t sizes[1]   = {size};
         int    tags[1]    = {tag};
         void*  handles[1] = {mhandle};
-        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, request), ncclSuccess);
+        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, request, optRecvHint), ncclSuccess);
     }
 
     static bool PortIsEthernet(const char* portsPath, const char* port) {

@@ -524,6 +524,25 @@
       ]
     },
 
+    "opt_recv_completion": {
+      "extends": "rccl_tests_base",
+      "timeout": 600,
+      "description": "Optional recv completion: plugin skip-CQ / RDMA WRITE path. QP sched off (otherwise the flag is forced off). CTS offload plus RCCL_IB_OPT_RECV_COMPLETION cover both enable rules. Allreduce forces LL/LL128 so NCCL_NET_OPTIONAL_RECV_COMPLETION is actually planted by net.cc.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_IB_QP_SCHED_ENABLE": "0",
+        "RCCL_CTS_OFFLOAD_ENABLED": "1",
+        "RCCL_IB_P2P_DISABLE_CTS": "0",
+        "NCCL_NET_OPTIONAL_RECV_COMPLETION": "1",
+        "RCCL_IB_OPT_RECV_COMPLETION": "1"
+      },
+      "tests": [
+        { "name": "B13_alltoall_optRecvCompletion", "binary": "alltoall_perf", "command_args": "-b 1024 -e 16M -f 2 -g 1", "description": "Alltoall with optional recv completion enabled (P2P/CTS-offload comms)." },
+        { "name": "B13_allreduce_optRecvCompletion_LL", "binary": "all_reduce_perf", "command_args": "-b 8 -e 1M -f 2 -g 1 -p 0", "description": "Allreduce LL (-p 0): net.cc plants NCCL_NET_OPTIONAL_RECV_COMPLETION." },
+        { "name": "B13_allreduce_optRecvCompletion_LL128", "binary": "all_reduce_perf", "command_args": "-b 8 -e 1M -f 2 -g 1 -p 1", "description": "Allreduce LL128 (-p 1): net.cc plants NCCL_NET_OPTIONAL_RECV_COMPLETION." }
+      ]
+    },
+
     "alltoall_fullrange_guard": {
       "extends": "rccl_tests_base",
       "command_args": "-b 1K -e 16G -f 2 -g 1",
@@ -578,6 +597,7 @@
     { "config": "autodetect_off",        "enabled": true, "smoke": true },
     { "config": "rocmib_no_cts_offload", "enabled": true, "smoke": true },
     { "config": "cts_force_override",    "enabled": true, "smoke": true },
+    { "config": "opt_recv_completion",   "enabled": true, "smoke": true },
     { "config": "alltoall_fullrange_guard", "enabled": true, "smoke": true },
 
     { "config": "ionic_counters",        "enabled": true }
