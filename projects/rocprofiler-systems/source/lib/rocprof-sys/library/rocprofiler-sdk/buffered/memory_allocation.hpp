@@ -22,13 +22,43 @@ namespace rocprofsys::domains::buffered
 template <policies::domain_service::externals Externals>
 inline void
 on_memory_allocation_configure()
-{}
+{
+    Externals::get_metadata_registry().add_string(
+        Externals::memory_allocation_category_name);
+}
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline void
 on_memory_allocation(typename SdkBackend::memory_allocation_record_t* record, void* data)
-{}
+{
+    if(record == nullptr)
+    {
+        return;
+    }
+
+    (void) data;
+
+    constexpr const char* k_empty_json           = "{}";
+    constexpr auto        k_zero_start_timestamp = 0;
+    constexpr auto        k_zero_end_timestamp   = 0;
+
+    const std::uint64_t stream_id = SdkBackend::get_stream_id(record).handle;
+
+    Externals::get_metadata_registry().add_thread_info(
+        { Externals::get_ppid(), Externals::get_pid(), record->thread_id,
+          k_zero_start_timestamp, k_zero_end_timestamp, k_empty_json });
+
+    Externals::get_metadata_registry().add_stream(stream_id);
+
+    Externals::get_buffer_storage().store(typename Externals::memory_allocation_sample_t{
+        record->start_timestamp, record->end_timestamp, record->thread_id,
+        record->agent_id.handle, static_cast<std::int32_t>(record->kind),
+        static_cast<std::int32_t>(record->operation), record->allocation_size,
+        record->correlation_id.internal,
+        SdkBackend::get_parent_stack_id(record->correlation_id),
+        SdkBackend::get_memory_allocation_address(*record), stream_id });
+}
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
