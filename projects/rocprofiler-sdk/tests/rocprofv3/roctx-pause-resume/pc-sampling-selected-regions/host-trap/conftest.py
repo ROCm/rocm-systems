@@ -1,6 +1,7 @@
+#!/usr/bin/env python3
 # MIT License
 #
-# Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,21 +21,36 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-#
+import json
+import os
 
-set(PACKAGE_OUTPUT_DIR
-    ${ROCPROFILER_SDK_TESTS_BINARY_DIR}/pytest-packages/rocprofiler_sdk/pc_sampling)
+import pandas as pd
+import pytest
 
-file(
-    WRITE "${PACKAGE_OUTPUT_DIR}/__init__.py"
-    "#
-from __future__ import absolute_import
 
-from . import exec_mask_manipulation
-from . import selected_regions
-")
+def pytest_addoption(parser):
+    parser.addoption("--input-csv", action="store", default=None)
+    parser.addoption("--input-json", action="store", default=None)
+    # --ref-count gating check
+    parser.addoption("--ref-count", action="store_true", default=False)
 
-add_subdirectory(exec_mask_manipulation)
-add_subdirectory(stochastic)
-add_subdirectory(transpose_multiple_agents)
-add_subdirectory(selected_regions)
+
+@pytest.fixture
+def pc_csv(request):
+    # load the PC sampling CSV
+    fname = request.config.getoption("--input-csv")
+    if not fname or not os.path.isfile(fname):
+        pytest.skip("PC sampling unavailable")
+    return pd.read_csv(
+        fname, na_filter=False, keep_default_na=False, dtype={"Exec_Mask": "uint64"}
+    )
+
+
+@pytest.fixture
+def json_data(request):
+    # load the full JSON result
+    fname = request.config.getoption("--input-json")
+    if not fname or not os.path.isfile(fname):
+        pytest.skip("PC sampling unavailable")
+    with open(fname, "r") as inp:
+        return json.load(inp)
