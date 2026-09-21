@@ -132,10 +132,16 @@ separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
   "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
 list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
 
-list(JOIN GPU_ARCH "," OFFLOAD_ARCH)
+set(DEVICE_ASM_COMMANDS)
+foreach(ARCH ${GPU_ARCH})
+  list(APPEND DEVICE_ASM_COMMANDS
+    COMMAND ${HIP_CLANG} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -x hip -c -S -I${INCLUDES} --cuda-device-only --offload-arch=${ARCH} -o square-hip-amdgcn-amd-amdhsa-${ARCH}.s ${SRCS}
+  )
+endforeach()
+
 add_custom_target(src_to_asm ${ALL_OPTION}
   COMMAND ${HIP_CLANG} -x hip -c -S -I${INCLUDES} --cuda-host-only -fuse-cuid=none -target ${HOST_TARGET} -o ${SQ_HOST_ASM} ${SRCS}
-  COMMAND ${HIP_CLANG} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -x hip -c -S -I${INCLUDES} --cuda-device-only --offload-arch=${OFFLOAD_ARCH} ${SRCS}
+  ${DEVICE_ASM_COMMANDS}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
