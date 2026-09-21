@@ -271,6 +271,31 @@ class NDRangeContainer {
   const NDRange32& global() const { return global_; }
   const NDRange16& local() const { return local_; }
   const NDRange8& cluster() const { return cluster_; }
+
+  //! Fold cluster dimensions obtained outside the launch API (e.g. carried by the kernel's
+  //! metadata) into this container. A cluster of <= 1 in every dimension is the default and
+  //! is a no-op. Otherwise the dims must fit the AQL cluster_size dtype and the grid
+  //! (global / local) must be divisible by them; on success the cluster dims are updated.
+  //! Returns false if the cluster dimensions are not usable (invalid launch).
+  bool UpdateNumClusters(uint32_t clusterX, uint32_t clusterY, uint32_t clusterZ) {
+    if (clusterX <= 1 && clusterY <= 1 && clusterZ <= 1) {
+      return true;
+    }
+    if (!NDRange8::CanSafelyNarrow(clusterX, clusterY, clusterZ)) {
+      return false;
+    }
+    // The grid (total number of workgroups) is global / local. It must be divisible by the
+    // cluster dimensions, otherwise the work cannot be split evenly across the cluster.
+    if (((global_[0] / local_[0]) % clusterX != 0) ||
+        ((global_[1] / local_[1]) % clusterY != 0) ||
+        ((global_[2] / local_[2]) % clusterZ != 0)) {
+      return false;
+    }
+    cluster_[0] = static_cast<uint8_t>(clusterX);
+    cluster_[1] = static_cast<uint8_t>(clusterY);
+    cluster_[2] = static_cast<uint8_t>(clusterZ);
+    return true;
+  }
 };
 
 static_assert(sizeof(NDRangeContainer) <= 64,
