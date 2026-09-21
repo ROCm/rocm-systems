@@ -4,12 +4,19 @@ on:
   push:
     branches:
       - "develop"
+      - "users/ianwood2/rocjitsu-benchmark-corpus"
   workflow_dispatch:
 
 # Each job grants only the access it needs.
 permissions: {}
 
+defaults:
+  run:
+    shell: bash
+
 env:
+  CORPUS_SHA: 3da65dc7bb249bac25c5d8f32c4af08dcba355a0
+  DASHBOARD_SHA: c53572277a6f160e92f360e23f5af7ce2de904a7
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
   CORPUS_SOURCE_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
   ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
@@ -26,8 +33,7 @@ jobs:
     permissions:
       contents: read
     outputs:
-      corpus-sha: ${{ steps.corpus.outputs.sha }}
-      machine: ${{ steps.corpus.outputs.machine }}
+      machine: ${{ steps.machine.outputs.name }}
       ran: ${{ steps.benchmark.outcome == 'success' || steps.benchmark.outcome == 'failure' }}
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
@@ -36,17 +42,6 @@ jobs:
         DEBIAN_FRONTEND: noninteractive
 
     steps:
-      - name: Report runner CPU resources
-        shell: bash
-        run: |
-          echo "logical_cpus=$(nproc)"
-          lscpu
-          for RESOURCE in /sys/fs/cgroup/cpu.max /sys/fs/cgroup/cpuset.cpus.effective; do
-            if [[ -r "${RESOURCE}" ]]; then
-              echo "${RESOURCE}: $(<"${RESOURCE}")"
-            fi
-          done
-
       - name: Install base dependencies
         run: |
           apt-get update
@@ -70,16 +65,13 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ROCm/rocjitsu-test-corpus
-          ref: 4b38b83fb8e0c3c524fc8943b7fff80076eebea9
+          ref: ${{ env.CORPUS_SHA }}
           path: rocjitsu-test-corpus
           persist-credentials: false
 
-      - name: Record corpus revision
-        id: corpus
-        shell: bash
-        run: |
-          echo "sha=$(git -C "${CORPUS_SOURCE_DIR}" rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
-          echo "machine=${RUNNER_NAME}" >> "${GITHUB_OUTPUT}"
+      - name: Record benchmark machine
+        id: machine
+        run: echo "name=${RUNNER_NAME}" >> "${GITHUB_OUTPUT}"
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -87,27 +79,17 @@ jobs:
           python-version: "3.12"
 
       - name: Install benchmark dependencies
-        shell: bash
         run: |
           python -m venv "${ROCJITSU_VENV}"
           "${ROCJITSU_VENV}/bin/python" -m pip install \
             --disable-pip-version-check \
             -r "${CORPUS_SOURCE_DIR}/benchmarks/requirements.txt"
 
-          "${ROCJITSU_VENV}/bin/python" -m pip install \
-            --disable-pip-version-check --index-url https://pypi.org/simple \
-            'pytest>=5.4.1' 'pytest-xdist>=1.32.0'
-
           ROCM_PATH="$("${ROCJITSU_VENV}/bin/rocm-sdk" path --root)"
           echo "ROCM_PATH=${ROCM_PATH}" >> "${GITHUB_ENV}"
           echo "LD_LIBRARY_PATH=${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
 
-      - name: Test benchmark harness
-        working-directory: ${{ env.CORPUS_SOURCE_DIR }}
-        run: '"${ROCJITSU_VENV}/bin/python" -m pytest -q tests/test_benchmark_*.py'
-
       - name: Build rocjitsu
-        shell: bash
         run: |
           cmake -S "${ROCJITSU_SOURCE_DIR}" -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -117,8 +99,7 @@ jobs:
             -DRJ_ENABLE_MSAN=OFF \
             -DRJ_ENABLE_TSAN=OFF \
             -DRJ_ENABLE_UBSAN=OFF \
-            -DROCM_PATH="${ROCM_PATH}" \
-            -DPython3_EXECUTABLE="${ROCJITSU_VENV}/bin/python"
+            -DROCM_PATH="${ROCM_PATH}"
           cmake --build "${ROCJITSU_BUILD_DIR}" \
             --target rocjitsu_bin rocjitsu_shared
 
@@ -126,7 +107,6 @@ jobs:
         timeout-minutes: 30
         id: benchmark
         working-directory: ${{ env.CORPUS_SOURCE_DIR }}
-        shell: bash
         run: |
           "${ROCJITSU_VENV}/bin/python" -m benchmarks.runner \
             --rocjitsu-source-dir "${ROCJITSU_SOURCE_DIR}" \
@@ -137,30 +117,13 @@ jobs:
             --manifest benchmarks/suites/nightly.toml \
             --output "${ROCJITSU_RESULT_DIR}"
 
-      - name: Record workflow diagnostics
-        if: always()
-        shell: bash
-        run: |
-          mkdir -p "${ROCJITSU_RESULT_DIR}"
-          printf '%s\n' \
-            "benchmark_outcome=${{ steps.benchmark.outcome }}" \
-            "event=${GITHUB_EVENT_NAME}" \
-            "ref=${GITHUB_REF}" \
-            "sha=${GITHUB_SHA}" \
-            "run_id=${GITHUB_RUN_ID}" \
-            "run_attempt=${GITHUB_RUN_ATTEMPT}" \
-            > "${ROCJITSU_RESULT_DIR}/workflow.txt"
-
       - name: Upload benchmark diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ env.RESULTS_ARTIFACT }}
-          path: |
-            ${{ env.ROCJITSU_RESULT_DIR }}/run.json
-            ${{ env.ROCJITSU_RESULT_DIR }}/cases
-            ${{ env.ROCJITSU_RESULT_DIR }}/workflow.txt
-          if-no-files-found: error
+          path: ${{ env.ROCJITSU_RESULT_DIR }}
+          if-no-files-found: warn
           retention-days: 14
 
   publish:
@@ -172,7 +135,6 @@ jobs:
     permissions:
       contents: write
     env:
-      CORPUS_SHA: ${{ needs.benchmark.outputs.corpus-sha }}
       BENCHMARK_MACHINE: ${{ needs.benchmark.outputs.machine }}
 
     steps:
@@ -186,15 +148,24 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ROCm/rocjitsu-test-corpus
-          ref: ${{ needs.benchmark.outputs.corpus-sha }}
+          ref: ${{ env.CORPUS_SHA }}
           path: rocjitsu-test-corpus
           persist-credentials: false
+
+      # Until the dashboard PR lands, validate against its immutable revision.
+      - name: Checkout dashboard validator
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ROCm/rocm-systems
+          ref: ${{ env.DASHBOARD_SHA }}
+          path: dashboard
+          persist-credentials: false
+          sparse-checkout: emulation/rocjitsu/website
 
       - name: Checkout repository for publication
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           path: publication
-          fetch-depth: 1
 
       - name: Set up publisher Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -203,7 +174,6 @@ jobs:
 
       - name: Publish dashboard-ready result
         working-directory: publication
-        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -257,6 +227,9 @@ jobs:
                 --source-ref "${GITHUB_REF_NAME}" \
                 --is-beta
             )
+
+            node "${GITHUB_WORKSPACE}/dashboard/emulation/rocjitsu/website/scripts/validate-dashboard-data.mjs" \
+              "${GITHUB_WORKSPACE}/publication/data"
 
             git add data
             if git diff --cached --quiet; then

@@ -7,7 +7,8 @@ See its `benchmarks/README.md` for workload definitions, source revisions,
 measurement details, plugin profiles, and result formats.
 
 The nightly suite runs 28 cases on each of `gfx950` and `gfx1250` (56 cells),
-with eight simulator threads. Sixteen cases cover FP16/BF16 GEMMs across square,
+with eight simulator engine threads. Dispatch and helper threads follow the
+target config and host CPU budget. Sixteen cases cover FP16/BF16 GEMMs across square,
 tall, wide, long-reduction, and ragged shapes. The benchmark step has a 30-minute
 timeout; dependency installation, building, and publication are separate.
 Compilation, allocation, and warmup happen outside measured samples. Follow
@@ -32,7 +33,7 @@ cmake -S "$src" -B "$build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DLTO=OFF \
   -DRJ_ENABLE_ASAN=OFF -DRJ_ENABLE_MSAN=OFF \
   -DRJ_ENABLE_TSAN=OFF -DRJ_ENABLE_UBSAN=OFF \
-  -DROCM_PATH="$ROCM_PATH" -DPython3_EXECUTABLE="$python"
+  -DROCM_PATH="$ROCM_PATH"
 cmake --build "$build" --target rocjitsu_bin rocjitsu_shared
 
 cd "$corpus"
@@ -67,7 +68,18 @@ Use `--list` to inspect cases without building or installing GPU dependencies.
 `.github/workflows/rocjitsu-benchmarks.yml` runs the nightly suite
 against an immutable corpus revision and records that revision in results.
 The publisher checks out the same corpus commit and validates clean, matching
-rocjitsu and corpus provenance before publication.
+rocjitsu and corpus provenance before publication. It also runs the dashboard’s
+validator against the complete staged dataset before every publication attempt.
+Until the dashboard PR lands, its validator comes from the immutable
+`DASHBOARD_SHA` revision; it runs directly with Node.js without npm dependencies.
+
+Pushes to `users/ianwood2/rocjitsu-benchmark-corpus` run the workflow before it
+lands. This temporary trigger can be removed after the hosted run. The repository
+receiving the push must have Actions enabled and access to a runner labeled
+`rocjitsu-benchmark`; a fork does not automatically inherit upstream’s runners.
+Branch runs upload diagnostics and skip the publication job. Check that all
+56 nightly cells complete and inspect the uploaded `run.json` and case logs.
+This tests the build and benchmarks, but not remote publication permissions.
 
 Pushes and manual dispatches on `develop` publish to
 `shared/rocjitsu-benchmark-results`. Manual dispatches on other branches run the
@@ -82,11 +94,12 @@ Finalized partial runs remain publishable while the benchmark job reports
 failure. Diagnostics are uploaded for failed runs. The publisher writes
 `data/metadata.json`, `data/index.json`, immutable catalogs under
 `data/test-catalogs/`, and target-grouped executions under `data/runs/`, matching
-the [dashboard contract](https://github.com/ROCm/rocm-systems/blob/64c135a1314a94d7156ccb352c9ae48b65ec59a5/emulation/rocjitsu/website/docs/website-data-contract.md).
+the [dashboard contract](https://github.com/ROCm/rocm-systems/blob/c53572277a6f160e92f360e23f5af7ce2de904a7/emulation/rocjitsu/website/docs/website-data-contract.md).
 The benchmark job targets the `rocjitsu-benchmark` runner label; publication
 runs separately on `ubuntu-24.04`. The site metadata enables the Beta label,
 and results record the benchmark runner's machine ID.
 
 Publication starts a fresh dataset; the old dashboard format is not migrated.
 Website build and deployment remain separate from data publication. A fresh
-dataset needs a completed Vanilla run before the dashboard can display it.
+dataset needs a valid Vanilla run, which can contain failed or timed-out results.
+Every run in the dataset must use the same benchmark machine.
