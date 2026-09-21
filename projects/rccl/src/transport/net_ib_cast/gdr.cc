@@ -18,6 +18,9 @@ extern int64_t ncclParamIbCastPciRelaxedOrdering();
 // ncclSystemError : no module or module loaded but not supported by GPU
 #define KNL_MODULE_LOADED(a) ((access(a, F_OK) == -1) ? 0 : 1)
 static int IbCastGdrModuleLoaded = 0; // 1 = true, 0 = false
+// Set by a platform-specific safety override (e.g. Hyper-V below) that
+// deliberately disables GDR despite a present peermem client.
+static int IbCastGdrBlacklisted = 0; // 1 = true, 0 = false
 static void ibGdrSupportInitOnce() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (rcclParamIbCastForceEnableGdrdma() == 1) {
@@ -36,7 +39,10 @@ static void ibGdrSupportInitOnce() {
     if (strncmp("Hyper-V UEFI Release", strValue, 20) == 0) {
       int roMode = ncclParamIbCastPciRelaxedOrdering();
       ncclOsTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue, sizeof(strValue));
-      if (strcmp(strValue, "1") == 0 && roMode == 0) IbCastGdrModuleLoaded = 0;
+      if (strcmp(strValue, "1") == 0 && roMode == 0) {
+        IbCastGdrModuleLoaded = 0;
+        IbCastGdrBlacklisted = 1;
+      }
     }
   }
 #else
@@ -47,12 +53,35 @@ static void ibGdrSupportInitOnce() {
 #endif
 }
 
-// Returns ncclSuccess if any of the peermem modules are loaded.
+// Returns ncclSuccess if a peermem module is loaded, or a runtime probe on
+// device 0 confirms GPU registration works without one (e.g. bnxt_re).
 ncclResult_t IbCastGdrSupport() {
   static std::once_flag once;
   std::call_once(once, ibGdrSupportInitOnce);
-  if (!IbCastGdrModuleLoaded) return ncclSystemError;
-  return ncclSuccess;
+  if (IbCastGdrModuleLoaded) return ncclSuccess;
+  // Don't probe past a deliberate safety override.
+  if (IbCastGdrBlacklisted) return ncclSystemError;
+
+  static std::once_flag probeOnce;
+  static bool probeResult = false;
+  std::call_once(probeOnce, []() {
+    void* gpuBuf = nullptr;
+    if (hipMalloc(&gpuBuf, 4096) != hipSuccess) return;
+
+    struct ibv_pd* pd;
+    if (wrap_ibv_alloc_pd(&pd, IbCastDevs[0].context) != ncclSuccess) {
+      (void)hipFree(gpuBuf);
+      return;
+    }
+
+    struct ibv_mr* mr = wrap_direct_ibv_reg_mr(
+      pd, gpuBuf, 4096, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+    probeResult = (mr != nullptr);
+    if (mr) (void)wrap_ibv_dereg_mr(mr);
+    (void)wrap_ibv_dealloc_pd(pd);
+    (void)hipFree(gpuBuf);
+  });
+  return probeResult ? ncclSuccess : ncclSystemError;
 }
 
 static int IbCastPeerMemModuleLoaded = 0; // 1 = true, 0 = false
