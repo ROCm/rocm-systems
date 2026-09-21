@@ -172,6 +172,74 @@ std::vector<uint64_t> TuningMasks(struct ncclTaskTuningInfoQueue* tiq) {
 // task_pretuning.cc:37 for the coll path; :89/:106/:130 use NCCL_TUNING_MASK_ALL for the other three.
 constexpr uint64_t kCollTuningMask = NCCL_TUNING_MASK_SYM_KERNELS | NCCL_TUNING_MASK_GENERAL_KERNELS;
 
+using TaskTuningInfoQueue = struct ncclIntruQueue<struct ncclTaskTuningInfo, &ncclTaskTuningInfo::next>;
+
+std::vector<struct ncclTaskTuningInfo*> QueueTasks(TaskTuningInfoQueue* queue) {
+  std::vector<struct ncclTaskTuningInfo*> tasks;
+  for (struct ncclTaskTuningInfo* t = ncclIntruQueueHead(queue); t != nullptr; t = t->next) {
+    tasks.push_back(t);
+  }
+  return tasks;
+}
+
+constexpr float kTunedTimeUs = 12.5f;
+constexpr float kUnwrittenEstimate = -777.0f;
+constexpr int kTunedValid = 1;
+
+// At rank == root: AlltoAll lowers 2 per rank, Gather 1 send plus nRanks recvs, Scatter the mirror of that.
+constexpr size_t kLoweredP2pTasks = 2 * kRanks + (1 + kRanks) + (kRanks + 1);
+
+::testing::AssertionResult CarriesNoTuningEstimate(const struct ncclTuningResult_t& out) {
+  if (out.valid != NCCL_TUNING_ENTRY_INIT_VALUE) {
+    return ::testing::AssertionFailure() << "tuningOut.valid = " << out.valid;
+  }
+  if (out.timeUs != NCCL_TUNING_IGNORE) {
+    return ::testing::AssertionFailure() << "tuningOut.timeUs = " << out.timeUs;
+  }
+  return ::testing::AssertionSuccess();
+}
+
+::testing::AssertionResult CarriesTuningEstimate(const struct ncclTuningResult_t& out) {
+  if (out.valid != kTunedValid) {
+    return ::testing::AssertionFailure() << "tuningOut.valid = " << out.valid;
+  }
+  if (out.timeUs != kTunedTimeUs) {
+    return ::testing::AssertionFailure() << "tuningOut.timeUs = " << out.timeUs;
+  }
+  return ::testing::AssertionSuccess();
+}
+
+// Records the func of every tuning call and writes a result distinct from NCCL_TUNING_RESULT_INIT.
+class TaskPrep_TuningSpy {
+ public:
+  explicit TaskPrep_TuningSpy(ncclResult_t result = ncclSuccess)
+    : result_(result),
+      hook_(g_tuningCompute,
+            [this](struct ncclTuningInput_t* in, struct ncclTuningResult_t* out) -> ncclResult_t {
+              funcs_.push_back(in->func);
+              if (result_ != ncclSuccess) {
+                return result_;
+              }
+              out->valid = kTunedValid;
+              out->timeUs = kTunedTimeUs;
+              out->algo = NCCL_ALGO_RING;
+              return ncclSuccess;
+            }) {}
+
+  const std::vector<ncclFunc_t>& funcs() const { return funcs_; }
+
+ private:
+  ncclResult_t result_;
+  std::vector<ncclFunc_t> funcs_;
+  ScopedHook<ncclResult_t(struct ncclTuningInput_t*, struct ncclTuningResult_t*)> hook_;
+};
+
+ncclSimInfo_t PoisonedSimInfo() {
+  ncclSimInfo_t sim = NCCL_SIM_INFO_INITIALIZER;
+  sim.estimatedTime = kUnwrittenEstimate;
+  return sim;
+}
+
 class TaskPrepMicrotest : public ::testing::Test {
  protected:
   void SetUp() override { ResetTaskPrepFakes(); }
@@ -371,6 +439,153 @@ TEST_F(TaskPrepMicrotest, HandWrittenParamsDefaultAndFollowTheEnvSeam) {
   EXPECT_EQ(9, ncclParamNvlsChannels());
   EXPECT_EQ(10, ncclParamCGAClusterSize());
   EXPECT_EQ(ROCM_VERSION >= 71200 ? 1 : 0, ncclParamGraphRegister());
+}
+
+TEST_F(TaskPrepMicrotest, TaskPrepare_EligibleColls_TunesEachInQueueOrderAndForwardsSimInfo) {
+  // Production routes every Broadcast to bcastQueue, which ncclTaskPreTuning drains after the generic one.
+  const std::vector<ncclFunc_t> kEligible = {ncclFuncAllReduce, ncclFuncReduceScatter,
+                                             ncclFuncBroadcast};
+  TaskPrepScene scene;
+  TaskPrep_TuningSpy spy;
+  scene.EnqueueGeneric(scene.NewColl(ncclFuncAllReduce));
+  scene.EnqueueGeneric(scene.NewColl(ncclFuncReduceScatter));
+  scene.EnqueueBcast(scene.NewColl(ncclFuncBroadcast));
+
+  // A non-null sim returns out of ncclTaskPostTuning early, so the classified queues survive to be read.
+  ncclSimInfo_t sim = PoisonedSimInfo();
+  ASSERT_EQ(ncclSuccess, ncclTaskPrepare(scene.comm(), &sim));
+
+  EXPECT_EQ(kEligible, spy.funcs());
+  std::vector<struct ncclTaskTuningInfo*> legacy =
+    QueueTasks(&scene.comm()->classifiedTaskQueues.legacyTaskQueue);
+  ASSERT_EQ(kEligible.size(), legacy.size());
+  for (size_t i = 0; i < legacy.size(); ++i) {
+    EXPECT_EQ(kEligible[i], legacy[i]->tuningIn.func) << "legacy index " << i;
+    EXPECT_TRUE(CarriesTuningEstimate(legacy[i]->tuningOut));
+  }
+  EXPECT_FLOAT_EQ(kEligible.size() * kTunedTimeUs, sim.estimatedTime);
+}
+
+TEST_F(TaskPrepMicrotest, TaskPrepare_NonCollKinds_SkipTuningAndCarryNoEstimate) {
+  TaskPrepScene scene;
+  TaskPrep_TuningSpy spy;
+  scene.EnqueueGeneric(scene.NewColl(ncclFuncAllReduce));
+  scene.EnqueueGeneric(scene.NewSendRecv(ncclFuncSend, 1));
+  scene.EnqueueGeneric(scene.NewRma(ncclFuncPutSignal));
+  scene.EnqueueGeneric(scene.NewAllGatherV());
+
+  ncclSimInfo_t sim = PoisonedSimInfo();
+  ASSERT_EQ(ncclSuccess, ncclTaskPrepare(scene.comm(), &sim));
+
+  EXPECT_EQ(std::vector<ncclFunc_t>{ncclFuncAllReduce}, spy.funcs());
+  struct ncclClassifiedTaskQueues* ctq = &scene.comm()->classifiedTaskQueues;
+  const struct {
+    TaskTuningInfoQueue* queue;
+    ncclTaskKind kind;
+  } kRouted[] = {{&ctq->p2pTaskQueue, ncclTaskKindSendRecv},
+                 {&ctq->rmaTaskQueue, ncclTaskKindRma},
+                 {&ctq->allgathervTaskQueue, ncclTaskKindAllGatherV}};
+  for (const auto& routed : kRouted) {
+    std::vector<struct ncclTaskTuningInfo*> tasks = QueueTasks(routed.queue);
+    ASSERT_EQ(1u, tasks.size());
+    EXPECT_EQ(routed.kind, tasks[0]->raw->kind);
+    EXPECT_TRUE(CarriesNoTuningEstimate(tasks[0]->tuningOut));
+  }
+  ASSERT_EQ(1u, QueueTasks(&ctq->legacyTaskQueue).size());
+  EXPECT_TRUE(CarriesTuningEstimate(QueueTasks(&ctq->legacyTaskQueue)[0]->tuningOut));
+  // postTuningSimulation never accumulates allgathervTaskQueue, so only the p2p and rma entries land.
+  EXPECT_FLOAT_EQ(kTunedTimeUs + 2 * NCCL_TUNING_IGNORE, sim.estimatedTime);
+}
+
+TEST_F(TaskPrepMicrotest, TaskPrepare_TuningExcludedCollFuncs_SkipTuningAndCarryNoEstimate) {
+  TaskPrepScene scene;
+  TaskPrep_TuningSpy spy;
+  scene.EnqueueGeneric(scene.NewColl(ncclFuncAllReduce));
+  scene.EnqueueGeneric(scene.NewColl(ncclFuncAlltoAll));
+  scene.EnqueueGeneric(scene.NewColl(ncclFuncScatter));
+  scene.EnqueueGeneric(scene.NewColl(ncclFuncGather));
+  // Harness-only pair: no collectives.cc entry point builds a coll raw whose func is ncclFuncAllGatherV.
+  scene.EnqueueGeneric(scene.NewColl(ncclFuncAllGatherV));
+
+  ncclSimInfo_t sim = PoisonedSimInfo();
+  ASSERT_EQ(ncclSuccess, ncclTaskPrepare(scene.comm(), &sim));
+
+  EXPECT_EQ(std::vector<ncclFunc_t>{ncclFuncAllReduce}, spy.funcs());
+  struct ncclClassifiedTaskQueues* ctq = &scene.comm()->classifiedTaskQueues;
+  std::vector<struct ncclTaskTuningInfo*> legacy = QueueTasks(&ctq->legacyTaskQueue);
+  ASSERT_EQ(2u, legacy.size());
+  EXPECT_TRUE(CarriesTuningEstimate(legacy[0]->tuningOut));
+  EXPECT_EQ(ncclFuncAllGatherV, legacy[1]->tuningIn.func);
+  EXPECT_TRUE(CarriesNoTuningEstimate(legacy[1]->tuningOut));
+  EXPECT_EQ(kLoweredP2pTasks, QueueTasks(&ctq->p2pTaskQueue).size());
+  EXPECT_FLOAT_EQ(kTunedTimeUs + (1 + kLoweredP2pTasks) * NCCL_TUNING_IGNORE, sim.estimatedTime);
+}
+
+TEST_F(TaskPrepMicrotest, TaskPrepare_PreTuningFails_PropagatesWithoutTuningOrPostTuning) {
+  TaskPrepScene scene;
+  TaskPrep_TuningSpy spy;
+  ScopedHook findWindow(g_devrFindWindow,
+                        [](struct ncclComm*, void const*, struct ncclDevrWindow**) {
+                          return ncclInternalError;
+                        });
+  scene.EnqueueGeneric(scene.NewColl(ncclFuncAllReduce));
+
+  ncclSimInfo_t sim = PoisonedSimInfo();
+  EXPECT_EQ(ncclInternalError, ncclTaskPrepare(scene.comm(), &sim));
+
+  EXPECT_TRUE(spy.funcs().empty());
+  EXPECT_FLOAT_EQ(kUnwrittenEstimate, sim.estimatedTime);
+}
+
+TEST_F(TaskPrepMicrotest, TaskPrepare_TuningComputeFails_PropagatesAtTheFirstFailure) {
+  TaskPrepScene scene;
+  TaskPrep_TuningSpy spy(ncclSystemError);
+  scene.EnqueueGeneric(scene.NewColl(ncclFuncAllReduce));
+  scene.EnqueueGeneric(scene.NewColl(ncclFuncReduceScatter));
+
+  ncclSimInfo_t sim = PoisonedSimInfo();
+  EXPECT_EQ(ncclSystemError, ncclTaskPrepare(scene.comm(), &sim));
+
+  EXPECT_EQ(std::vector<ncclFunc_t>{ncclFuncAllReduce}, spy.funcs());
+  EXPECT_TRUE(QueueTasks(&scene.comm()->classifiedTaskQueues.legacyTaskQueue).empty());
+  EXPECT_FLOAT_EQ(kUnwrittenEstimate, sim.estimatedTime);
+}
+
+TEST_F(TaskPrepMicrotest, TaskPrepare_ClassificationFails_PropagatesWithoutPostTuning) {
+  TaskPrepScene scene;
+  bool tuningStageDone = false;
+  ScopedHook tuning(g_tuningCompute,
+                    [&tuningStageDone](struct ncclTuningInput_t*, struct ncclTuningResult_t*) {
+                      tuningStageDone = true;
+                      return ncclSuccess;
+                    });
+  ScopedHook regValid(g_regLocalIsValid,
+                      [&tuningStageDone](struct ncclReg*, bool* isValid) -> ncclResult_t {
+                        if (tuningStageDone) {
+                          return ncclInternalError;
+                        }
+                        *isValid = false;
+                        return ncclSuccess;
+                      });
+  scene.EnqueueGeneric(scene.NewColl(ncclFuncAllReduce));
+  scene.EnqueueGeneric(scene.NewColl(ncclFuncAlltoAll));
+
+  ncclSimInfo_t sim = PoisonedSimInfo();
+  EXPECT_EQ(ncclInternalError, ncclTaskPrepare(scene.comm(), &sim));
+
+  EXPECT_EQ(1, tuning.calls);
+  EXPECT_FLOAT_EQ(kUnwrittenEstimate, sim.estimatedTime);
+}
+
+TEST_F(TaskPrepMicrotest, TaskPrepare_PostTuningFails_Propagates) {
+  TaskPrepScene scene;
+  TaskPrep_TuningSpy spy;
+  scene.comm()->hostRmaSupport = false;
+  scene.EnqueueGeneric(scene.NewRma(ncclFuncPutSignal));
+
+  EXPECT_EQ(ncclInvalidArgument, ncclTaskPrepare(scene.comm(), nullptr));
+
+  EXPECT_TRUE(spy.funcs().empty());
 }
 
 // A leaked value here silently clears the version gate at task_posttuning.cc:336-342 for the next test.
