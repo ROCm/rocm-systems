@@ -47,6 +47,7 @@ unset(_rccl_src_root)
 set(RCCL_MICRO_TEST_SOURCES
   p2p-test.cc
   rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
+  ras-test.cc                          # src/ras/ras.cc: complete host-side line coverage
   ras-client-test.cc                   # src/ras/client.cc: libc-only seams, no HIP/nccl deps
   group-test.cc
   devcomm-test.cc
@@ -147,6 +148,7 @@ if(BUILD_TESTS)
   # the build directory layout.
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE
     P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p_tmp.cc"
+    RAS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/ras/ras.cc"
     RAS_CLIENT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/ras/client.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rma/rma_proxy_progress.cc"
     GROUP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/group.cc"
@@ -587,16 +589,10 @@ if(TARGET GTest::gtest AND NOT TARGET GTest::GTest)
   add_library(GTest::GTest ALIAS GTest::gtest)
 endif()
 
-# --- Resolve fmt: system -> FetchContent fallback ---
-find_package(fmt QUIET)
-if(NOT fmt_FOUND)
-  message(STATUS "Downloading fmt via FetchContent")
-  FetchContent_Declare(fmt
-    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-    GIT_TAG        10.2.1
-    GIT_SHALLOW    TRUE
-  )
-  FetchContent_MakeAvailable(fmt)
+# --- fmt: the RCCL-vendored header-only copy (already defined for in-tree builds) ---
+if(NOT TARGET fmt::fmt-header-only)
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../external/fmt"
+                   "${CMAKE_BINARY_DIR}/external/fmt")
 endif()
 
 # --- Resolve RCCL build directory ---
@@ -827,6 +823,7 @@ target_include_directories(rccl-UnitTestsMicro PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${RCCL_HIPIFY_DIR}/src/devcomm      # devcomm_v22902.h, included unqualified
   ${RCCL_INCLUDE_DIRS}
+  ${RCCL_HIPIFY_DIR}/src/include/nccl_device  # device.h includes rccl_ptr.h unqualified
 )
 
 target_compile_definitions(rccl-UnitTestsMicro PRIVATE
@@ -834,6 +831,7 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   NCCL_OS_LINUX
   ROCM_VERSION=70000
   P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
+  RAS_CC_PATH="${RCCL_HIPIFY_DIR}/src/ras/ras.cc"
   RAS_CLIENT_CC_PATH="${RCCL_HIPIFY_DIR}/src/ras/client.cc"
   RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
   GROUP_CC_PATH="${RCCL_HIPIFY_DIR}/src/group.cc"
@@ -858,6 +856,9 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
 # surface (fakes/wrap_fakes.cc) is large and mostly unreached by
 # these tests; this drops the unreferenced deep deps, matching
 # rccl-UnitTestsMicroInit's rationale for the same flag.
+# Section GC can also hide an uncalled function's coverage mapping, so a
+# whole-file claim must confirm that ras.cc's linked function inventory still
+# matches its compiled source inventory.
 target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -no-pie -Wl,--gc-sections)
 target_link_libraries(rccl-UnitTestsMicro PRIVATE
   GTest::GTest
