@@ -25,12 +25,10 @@
 #    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 0
 #endif
 
-namespace rocprofsys
-{
 //
 //      Initialization routines
 //
-inline namespace config
+namespace rocprofsys::inline config
 {
 using signal_handler_t = void (*)(void);
 
@@ -477,5 +475,4 @@ get_causal_source_exclude();
 
 std::vector<std::string>
 get_causal_function_exclude();
-}  // namespace config
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline config
