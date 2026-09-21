@@ -56,6 +56,19 @@ TEST(scratch_memory_test, descriptor_uses_default_buffer_properties)
               k_default_buffer_properties.buffer_watermark);
 }
 
+TEST(scratch_memory_test, on_scratch_memory_configure_adds_category_string)
+{
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
+
+    EXPECT_CALL(*g_metadata_registry_mock,
+                add_string(Eq(externals::scratch_memory_category_name)))
+        .Times(1);
+
+    on_scratch_memory_configure<externals>();
+
+    g_metadata_registry_mock.reset();
+}
+
 TEST(scratch_memory_test, on_scratch_memory_handles_null_record_without_crashing)
 {
     on_scratch_memory<mock_sdk, externals>(nullptr, nullptr);
