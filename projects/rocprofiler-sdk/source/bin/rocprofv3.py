@@ -1241,7 +1241,7 @@ For attachment profiling of running processes:
 
     att_options.add_argument(
         "--att-resource-mode",
-        help="When to allocate thread trace resources: profiler-selected, HSA initialization, or the first code object per GPU.",
+        help="When to allocate thread trace resources: profiler-selected, HSA initialization, or the first code object per GPU. Default: code-object.",
         default=None,
         choices=ATT_RESOURCE_MODES,
     )

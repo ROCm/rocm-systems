@@ -31,8 +31,8 @@
 #include "lib/output/format_path.hpp"
 #include "lib/output/output_config.hpp"
 
-#include <rocprofiler-sdk/cxx/serialization.hpp>
 #include <rocprofiler-sdk/experimental/thread-trace/core.h>
+#include <rocprofiler-sdk/cxx/serialization.hpp>
 
 #include <fmt/format.h>
 
@@ -175,9 +175,9 @@ struct config : output_config
     uint64_t att_param_perf_ctrl   = get_env<uint64_t>("ROCPROF_ATT_PARAM_PERFCOUNTER_CTRL", 0);
     bool     att_param_target_only = get_env<int>("ROCPROF_ATT_PARAM_TARGET_ONLY", 0) != 0;
     uint64_t att_consecutive_kernels = get_env<uint64_t>("ROCPROF_ATT_CONSECUTIVE_KERNELS", 0);
-    std::string att_resource_mode       = get_env("ROCPROF_ATT_PARAM_RESOURCE_MODE", "default");
+    std::string att_resource_mode    = get_env("ROCPROF_ATT_PARAM_RESOURCE_MODE", "code-object");
     rocprofiler_thread_trace_resource_mode_t att_resource_mode_value =
-        ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT;
+        ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT;
 
     size_t      spm_sample_interval      = get_env<uint64_t>("ROCPROF_SPM_SAMPLE_INTERVAL", 0);
     std::string spm_sample_interval_unit = get_env("ROCPROF_SPM_SAMPLE_INTERVAL_UNIT", "none");

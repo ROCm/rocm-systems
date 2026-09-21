@@ -59,13 +59,14 @@ def test_resource_mode_cli(launch, monkeypatch, mode):
     assert env["ROCPROF_ATT_PARAM_RESOURCE_MODE"] == mode
 
 
-def test_resource_mode_omitted_uses_sdk_default(launch):
+def test_resource_mode_omitted_uses_tool_default(launch):
     assert "ROCPROF_ATT_PARAM_RESOURCE_MODE" not in launch()
 
 
-def test_resource_mode_omitted_preserves_environment(launch, monkeypatch):
-    monkeypatch.setenv("ROCPROF_ATT_PARAM_RESOURCE_MODE", "code-object")
-    assert launch()["ROCPROF_ATT_PARAM_RESOURCE_MODE"] == "code-object"
+@pytest.mark.parametrize("mode", ["default", "hsa", "code-object"])
+def test_resource_mode_omitted_preserves_environment(launch, monkeypatch, mode):
+    monkeypatch.setenv("ROCPROF_ATT_PARAM_RESOURCE_MODE", mode)
+    assert launch()["ROCPROF_ATT_PARAM_RESOURCE_MODE"] == mode
 
 
 @pytest.mark.parametrize("mode", ["hip", "all", "dispatch", "invalid", "4"])

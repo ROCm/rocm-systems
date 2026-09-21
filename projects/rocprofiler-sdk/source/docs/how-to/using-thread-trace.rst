@@ -110,7 +110,7 @@ The following table lists the parameters relevant to thread tracing:
 | att-buffer-size             | Bytes   | 1MB-2GB | 96MB      | Specifies the trace buffer size. This is shared for all SEs. |
 |                             |         |         |           | Increase this value if the buffer tends to get full.         |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| att-resource-mode           | String  |         | default   | Selects when thread trace resources are allocated per GPU.   |
+| att-resource-mode           | String  |         |code-object| Selects when thread trace resources are allocated per GPU.   |
 |                             |         |         |           | Values: default, hsa, code-object. See below for details.    |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | att-serialize-all           | Bool    |         | False     | If set to "True", turns on serialization for untraced kernels|
@@ -147,9 +147,9 @@ The following table lists the parameters relevant to thread tracing:
 
 Use ``--att-resource-mode`` to choose when thread trace queues, signals, and memory are allocated for each GPU. It applies to both dispatch tracing and device-wide tracing, including ``--att-no-intercept``. Supported values are:
 
-- ``default``: Lets the profiler select the mode; currently equivalent to ``code-object``. This is used when neither the option nor the environment variable is set.
+- ``default``: Lets the profiler select the mode; currently equivalent to ``code-object``.
 - ``hsa``: Allocates resources during HSA initialization for configured GPUs visible to ROCr.
-- ``code-object``: Defers allocation until a code object is registered for each configured GPU. GPUs that never load a code object do not allocate thread trace resources, even when ``ROCR_VISIBLE_DEVICES`` is unset.
+- ``code-object``: Defers allocation until a code object is registered for each configured GPU. GPUs that never load a code object do not allocate thread trace resources, even when ``ROCR_VISIBLE_DEVICES`` is unset. This is used when neither the option nor the environment variable is set.
 
 For example:
 
