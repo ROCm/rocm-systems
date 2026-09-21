@@ -117,14 +117,14 @@ returns an error.
 
 ```
 
-| Feature | MI200 | MI300 | MI350 | RDNA 3 | RDNA 4 |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| `--perf-level AUTO` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `--perf-level LOW` | ✅ | ❌ | ❌ | ✅ | ✅ |
-| `--perf-level HIGH` | ✅ | ❌ | ❌ | ✅ | ✅ |
-| `--perf-level MANUAL` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `--perf-level STABLE_*` | ✅ | ❌ | ❌ | ✅ | ✅ |
-| `--perf-determinism` | ✅ | ⚠️ | ❌ | ❌ | ❌ |
+| Feature | MI200 | MI300 | MI350 | MI450 | RDNA 3 | RDNA 4 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| `--perf-level AUTO` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `--perf-level LOW` | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| `--perf-level HIGH` | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| `--perf-level MANUAL` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `--perf-level STABLE_*` | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| `--perf-determinism` | ✅ | ⚠️ | ❌ | ❌ | ❌ | ❌ |
 
 **Legend:** ✅ Supported  ⚠️ Limited / ASIC-dependent  ❌ Not supported
 
@@ -141,6 +141,8 @@ returns an error.
   `STABLE_*` are rejected by PMFW. Performance determinism is **defeatured**; CSC
   (Clock Stretching Compensation) is intended to address the variability use case
   that determinism previously covered.
+- **MI450** -- Only `AUTO` and `MANUAL` are supported; all other performance
+  levels and performance determinism are **not** supported.
 - **RDNA 3 (Navi 3x)** -- All performance levels (`AUTO`, `LOW`, `HIGH`,
   `MANUAL`, `STABLE_*`) are supported. Performance determinism is **not**
   supported on the tested consumer parts (Navi 31 / RX 7900 XTX, Navi 32 /
