@@ -470,8 +470,9 @@ if(BUILD_TESTS)
   endif()
 
   # rccl-UnitTestsGinAnvilSdmaFactory: exercises the real gin_anvil_sdma_factory
-  # (probe/create/destroy) compiled into librccl.so. HW-dependent tests skip
-  # via GTEST_SKIP when probe() fails. Links librccl.so (factory symbols live there).
+  # Self-contained SDMA factory test: compiles gin_anvil_sdma_factory.cc +
+  # anvil.cpp directly (no librccl.so link). HW-dependent tests skip via
+  # GTEST_SKIP when probe() fails.
   if(ENABLE_ROCSHMEM_GIN)
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsGinAnvilSdmaFactory)
 
@@ -497,6 +498,7 @@ if(BUILD_TESTS)
         ${ROCSHMEM_SOURCE_DIR}/include)
     endif()
     target_compile_definitions(rccl-UnitTestsGinAnvilSdmaFactory PRIVATE ENABLE_ROCSHMEM_GIN)
+    add_dependencies(rccl-UnitTestsGinAnvilSdmaFactory hipify_all)
     # anvil.cpp links HSAKMT which transitively needs drm/drm_amdgpu/numa.
     # Reuse the same cache variables as the MPI test block — find_library is
     # a no-op when the result is already cached.

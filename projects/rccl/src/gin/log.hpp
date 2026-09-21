@@ -28,6 +28,7 @@
 #else
 // Installed context: no RCCL internals available.
 #include <cstdio>
+#include <cstdlib>
 #define LOG_ERROR(fmt, ...)       fprintf(stderr, "GIN: " fmt "\n", ##__VA_ARGS__)
 #define LOG_ERROR_EXIT(fmt, ...)  do { fprintf(stderr, "GIN FATAL: " fmt "\n", ##__VA_ARGS__); abort(); } while(0)
 #define LOG_ERROR_ABORT(fmt, ...) do { fprintf(stderr, "GIN ABORT: " fmt "\n", ##__VA_ARGS__); abort(); } while(0)
