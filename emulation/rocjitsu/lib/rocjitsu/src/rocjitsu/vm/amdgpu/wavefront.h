@@ -958,10 +958,10 @@ protected:
   uint32_t cluster_rank_ = 0; ///< Workgroup rank inside the dispatch cluster.
   uint32_t cluster_size_ = 1; ///< Number of workgroups in the dispatch cluster.
 
-  uint32_t wf_size_ = 0;            ///< Lanes in the current dispatched wavefront.
-  uint32_t default_wf_size_ = 0;    ///< ISA default wavefront width.
-  uint32_t max_wf_size_ = 0;        ///< Maximum wavefront width supported by the ISA.
-  uint32_t num_sgprs_ = 0;          ///< Allocated scalar registers (set at dispatch).
+  uint32_t wf_size_ = 0;         ///< Lanes in the current dispatched wavefront.
+  uint32_t default_wf_size_ = 0; ///< ISA default wavefront width.
+  uint32_t max_wf_size_ = 0;     ///< Maximum wavefront width supported by the ISA.
+  uint32_t num_sgprs_ = 0;       ///< Allocated scalar registers (set at dispatch).
   bool trap_handler_enabled_ = false;
   uint32_t num_vgprs_ = 0;          ///< Total/unified vector allocation (set at dispatch).
   uint32_t num_ordinary_vgprs_ = 0; ///< Descriptor-owned ordinary VGPR prefix.
