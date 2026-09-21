@@ -177,13 +177,15 @@ stop_context(const context::context* ctx)
     if(!ctx || !ctx->dispatch_counter_collection) return;
 
     auto* controller = hsa::get_queue_controller();
+    bool  was_enabled = false;
 
     ctx->dispatch_counter_collection->enabled.wlock([&](auto& enabled) {
         if(!enabled) return;
+        was_enabled = true;
         enabled = false;
     });
 
-    if(controller)
+    if(controller && was_enabled)
     {
         // Drain in-flight dispatches before anything else is torn down. The review of #8891
         // accepted provenance-based completion routing on the condition that the callback thread

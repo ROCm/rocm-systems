@@ -324,13 +324,15 @@ stop_context(const context::context* ctx)
     if(!ctx || !ctx->dispatch_spm) return;
 
     auto* controller = hsa::get_queue_controller();
+    bool  was_enabled = false;
 
     ctx->dispatch_spm->enabled.wlock([&](auto& enabled) {
         if(!enabled) return;
+        was_enabled = true;
         enabled = false;
     });
 
-    if(controller)
+    if(controller && was_enabled)
     {
         hsa::queue_controller_sync();
         controller->disable_serialization();
