@@ -282,7 +282,7 @@ TEST_F(AqlProfileV2Test, SpmDecodeShaderEngineExpanded)
     int sa_index  = -1;
     int wgp_index = -1;
 
-    const int packed = (7 << 24) | (5 << 16) | 11;
+    const int          packed = (7 << 24) | (5 << 16) | 11;
     const hsa_status_t status =
         aqlprofile_spm_decode_shader_engine(packed, &se_index, &sa_index, &wgp_index);
 
@@ -623,9 +623,9 @@ protected:
         last_callback_name_  = "";
     }
 
-    static int         callback_call_count_;
-    static int         last_callback_id_;
-    static std::string last_callback_name_;
+    static int                                                   callback_call_count_;
+    static int                                                   last_callback_id_;
+    static std::string                                           last_callback_name_;
     static std::vector<aqlprofile_spm_available_configuration_t> captured_spm_configs_;
 
     // Mock callback functions for testing
@@ -705,9 +705,9 @@ protected:
 };
 
 // Initialize static members
-int         AqlProfileV2ApiTest::callback_call_count_ = 0;
-int         AqlProfileV2ApiTest::last_callback_id_    = -1;
-std::string AqlProfileV2ApiTest::last_callback_name_  = "";
+int                                                   AqlProfileV2ApiTest::callback_call_count_ = 0;
+int                                                   AqlProfileV2ApiTest::last_callback_id_   = -1;
+std::string                                           AqlProfileV2ApiTest::last_callback_name_ = "";
 std::vector<aqlprofile_spm_available_configuration_t> AqlProfileV2ApiTest::captured_spm_configs_{};
 
 TEST_F(AqlProfileV2ApiTest, SpmQueryAgentConfigurations_NullCallback)

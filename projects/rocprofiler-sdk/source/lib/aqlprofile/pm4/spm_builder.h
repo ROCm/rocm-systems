@@ -100,9 +100,9 @@ public:
     void Begin(CmdBuffer* cmd_buffer, const SpmConfig* config, const counters_vector& counters_vec)
     {
         // SPM parameters
-        const uint32_t sampling_rate = config->sampleRate;
-        const uint64_t buffer_ptr    = reinterpret_cast<uint64_t>(config->data_buffer_ptr);
-        const uint32_t buffer_size   = config->data_buffer_size;
+        const uint32_t sampling_rate        = config->sampleRate;
+        const uint64_t buffer_ptr           = reinterpret_cast<uint64_t>(config->data_buffer_ptr);
+        const uint32_t buffer_size          = config->data_buffer_size;
         const size_t   original_event_count = counters_vec.get_original_event_count();
 
         // Initialize SPM counter buffer metadata.
@@ -173,7 +173,8 @@ public:
             {
                 counter_info_even[block_des.id].push_back({block_des.id, index});
                 counter_info_odd[block_des.id].push_back({block_des.id, index});
-                if(counter_des.block_info->attr & CounterBlockSpmGlobalAttr) has_global_32bit_spm = true;
+                if(counter_des.block_info->attr & CounterBlockSpmGlobalAttr)
+                    has_global_32bit_spm = true;
             }
             else
             {
@@ -212,14 +213,15 @@ public:
             }
         }
 
-        auto counter_map_value = [&](uint16_t index, const counter_des_t& counter_des, bool is_32bit) {
-            const auto* block_info = counter_des.block_info;
-            uint16_t    flags      = 0;
-            if(block_info->attr & CounterBlockSaAttr) flags |= SPM_COUNTER_MAP_SA_FLAG;
-            if(block_info->attr & CounterBlockWgpAttr) flags |= SPM_COUNTER_MAP_WGP_FLAG;
-            if(is_32bit) flags |= SPM_COUNTER_MAP_32BIT_FLAG;
-            return static_cast<uint16_t>(index | flags);
-        };
+        auto counter_map_value =
+            [&](uint16_t index, const counter_des_t& counter_des, bool is_32bit) {
+                const auto* block_info = counter_des.block_info;
+                uint16_t    flags      = 0;
+                if(block_info->attr & CounterBlockSaAttr) flags |= SPM_COUNTER_MAP_SA_FLAG;
+                if(block_info->attr & CounterBlockWgpAttr) flags |= SPM_COUNTER_MAP_WGP_FLAG;
+                if(is_32bit) flags |= SPM_COUNTER_MAP_32BIT_FLAG;
+                return static_cast<uint16_t>(index | flags);
+            };
 
         // compute segment size for global(0) and se(1)
         uint32_t ss_even[2] = {};
@@ -267,7 +269,7 @@ public:
 
         // fill in mux_ram data according to even and odd arrays
         std::vector<mux_info_t> mux_ram[2];
-        mux_info_t              mxinf = {0xFFFF};
+        mux_info_t              mxinf        = {0xFFFF};
         mux_info_t              mxinf_filler = {0xFFFF};
 
         // global mux_ram: initialize with all 0xFFFF.
@@ -312,8 +314,9 @@ public:
                         const auto counter  = uint16_t(counter_des.index);
                         const auto block    = counter_des_0.block_info->spm_block_id;
                         const auto instance = uint16_t(counter_des.block_des.index);
-                        mux_ram[0][even_idx] = Primitives::spm_mux_ram_value(counter, block, instance);
-                        counter_map[index]   =
+                        mux_ram[0][even_idx] =
+                            Primitives::spm_mux_ram_value(counter, block, instance);
+                        counter_map[index] =
                             even_idx | SPM_COUNTER_MAP_GLOBAL_FLAG | SPM_COUNTER_MAP_32BIT_FLAG;
                     }
                     else
@@ -333,7 +336,8 @@ public:
                         const auto counter  = uint16_t(counter_des.index) + 1;
                         const auto block    = counter_des_0.block_info->spm_block_id;
                         const auto instance = uint16_t(counter_des.block_des.index);
-                        mux_ram[0][odd_idx] = Primitives::spm_mux_ram_value(counter, block, instance);
+                        mux_ram[0][odd_idx] =
+                            Primitives::spm_mux_ram_value(counter, block, instance);
                     }
                     else
                     {
@@ -367,8 +371,9 @@ public:
                         const auto counter  = uint16_t(counter_des.index);
                         const auto block    = counter_des_0.block_info->spm_block_id;
                         const auto instance = uint16_t(counter_des.block_des.index);
-                        mux_ram[1][even_idx] = Primitives::spm_mux_ram_value(counter, block, instance);
-                        counter_map[index]   = counter_map_value(even_idx, counter_des, true);
+                        mux_ram[1][even_idx] =
+                            Primitives::spm_mux_ram_value(counter, block, instance);
+                        counter_map[index] = counter_map_value(even_idx, counter_des, true);
                     }
                     else
                     {
@@ -387,7 +392,8 @@ public:
                         const auto counter  = uint16_t(counter_des.index) + 1;
                         const auto block    = counter_des_0.block_info->spm_block_id;
                         const auto instance = uint16_t(counter_des.block_des.index);
-                        mux_ram[1][odd_idx] = Primitives::spm_mux_ram_value(counter, block, instance);
+                        mux_ram[1][odd_idx] =
+                            Primitives::spm_mux_ram_value(counter, block, instance);
                     }
                     else
                     {
@@ -416,7 +422,8 @@ public:
                 if(!has_even && !has_odd) continue;
 
                 const auto& counter_des =
-                    counters_vec[(has_even ? counter_info_even[i][0] : counter_info_odd[i][0]).second];
+                    counters_vec[(has_even ? counter_info_even[i][0] : counter_info_odd[i][0])
+                                     .second];
                 const auto* block_info = counter_des.block_info;
 
                 if(block_info->attr & CounterBlockSpmGlobalAttr)
@@ -424,12 +431,14 @@ public:
                     // For each instance of a global block we program its delay once.
                     for(size_t j = 0; j < block_info->instance_count; ++j)
                     {
-                        builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                                           Primitives::GRBM_GFX_INDEX_ADDR,
-                                                           Primitives::grbm_inst_se_sh_index_value(j, 0, 0));
-                        builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                                           block_info->delay_info.reg,
-                                                           Primitives::get_spm_global_delay(counter_des, j));
+                        builder.BuildWriteUConfigRegPacket(
+                            cmd_buffer,
+                            Primitives::GRBM_GFX_INDEX_ADDR,
+                            Primitives::grbm_inst_se_sh_index_value(j, 0, 0));
+                        builder.BuildWriteUConfigRegPacket(
+                            cmd_buffer,
+                            block_info->delay_info.reg,
+                            Primitives::get_spm_global_delay(counter_des, j));
                     }
                 }
                 else
@@ -438,27 +447,29 @@ public:
                     {
                         for(size_t j = 0; j < block_info->instance_count; ++j)
                         {
-                            builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                                               Primitives::GRBM_GFX_INDEX_ADDR,
-                                                               Primitives::grbm_inst_se_index_value(j, se));
-                            builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                                               block_info->delay_info.reg,
-                                                               Primitives::get_spm_se_delay(counter_des, se, j));
+                            builder.BuildWriteUConfigRegPacket(
+                                cmd_buffer,
+                                Primitives::GRBM_GFX_INDEX_ADDR,
+                                Primitives::grbm_inst_se_index_value(j, se));
+                            builder.BuildWriteUConfigRegPacket(
+                                cmd_buffer,
+                                block_info->delay_info.reg,
+                                Primitives::get_spm_se_delay(counter_des, se, j));
                         }
                     }
                 }
             }
-            builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                               Primitives::GRBM_GFX_INDEX_ADDR,
-                                               Primitives::grbm_broadcast_value());
+            builder.BuildWriteUConfigRegPacket(
+                cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, Primitives::grbm_broadcast_value());
         }
 
-        // 4. Program the Block instance streaming performance counters in order to specify which items
+        // 4. Program the Block instance streaming performance counters in order to specify which
+        // items
         //    (events) the counters should count, if any. This is done by programming the
         //    GRBM_GFX_INDEX register to specify the type of access (broadcast or instance specific)
         //    followed by the actual register value. The first step may be to clear all counters of
-        //    all instances to select zero (no counting). Then program the GRBM_GFX_INDEX, followed by
-        //    the [BLK]_STRMPERFMON_SELECTx register.
+        //    all instances to select zero (no counting). Then program the GRBM_GFX_INDEX, followed
+        //    by the [BLK]_STRMPERFMON_SELECTx register.
         for(size_t i = 0; i < Primitives::NUMBER_OF_BLOCKS; ++i)
         {
             if(counter_info_even[i].empty()) continue;
@@ -469,18 +480,17 @@ public:
 
             if constexpr(Primitives::GFXIP_LEVEL >= 11)
             {
-                is_sqc_block = ((!is_sqg_block) && (block_info->attr & CounterBlockSqAttr)) ? true
-                                                                                               : false;
+                is_sqc_block =
+                    ((!is_sqg_block) && (block_info->attr & CounterBlockSqAttr)) ? true : false;
             }
 
             if(is_sqg_block)
             {
                 for(size_t k = 0; k < counter_info_even[i].size(); ++k)
                 {
-                    const auto&       counter_des = counters_vec[counter_info_even[i][k].second];
-                    const auto&       reg_info    = block_info->counter_reg_info[counter_des.index / 2];
-                    bool              is_32bit    =
-                        counter_des.spm_depth == AQLPROFILE_SPM_DEPTH_32_BITS;
+                    const auto& counter_des = counters_vec[counter_info_even[i][k].second];
+                    const auto& reg_info    = block_info->counter_reg_info[counter_des.index / 2];
+                    bool        is_32bit    = counter_des.spm_depth == AQLPROFILE_SPM_DEPTH_32_BITS;
 
                     if(k == 0)
                     {
@@ -488,17 +498,20 @@ public:
                         SetGrbmGfxIndex(cmd_buffer, grbm_index_value);
                         if(!(Primitives::SQ_PERFCOUNTER_MASK_ADDR == Register()))
                         {
-                            builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                                               Primitives::SQ_PERFCOUNTER_MASK_ADDR,
-                                                               Primitives::sq_mask_value(counter_des));
+                            builder.BuildWriteUConfigRegPacket(
+                                cmd_buffer,
+                                Primitives::SQ_PERFCOUNTER_MASK_ADDR,
+                                Primitives::sq_mask_value(counter_des));
                         }
-                        builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                                           reg_info.control_addr,
-                                                           Primitives::sq_control_value(counter_des));
+                        builder.BuildWriteUConfigRegPacket(
+                            cmd_buffer,
+                            reg_info.control_addr,
+                            Primitives::sq_control_value(counter_des));
                         if(Primitives::GFXIP_LEVEL >= 11)
-                            builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                                               Primitives::SQG_PERFCOUNTER_CTRL2_ADDR,
-                                                               Primitives::sq_control2_enable_value());
+                            builder.BuildWriteUConfigRegPacket(
+                                cmd_buffer,
+                                Primitives::SQG_PERFCOUNTER_CTRL2_ADDR,
+                                Primitives::sq_control2_enable_value());
                     }
 
                     builder.BuildWriteUConfigRegPacket(
@@ -515,21 +528,24 @@ public:
                 {
                     const auto& counter_des_even = counters_vec[counter_info_even[i][je].second];
                     const auto* sqc_block_info   = counter_des_even.block_info;
-                    bool        is_32bit = counter_des_even.spm_depth == AQLPROFILE_SPM_DEPTH_32_BITS;
+                    bool is_32bit = counter_des_even.spm_depth == AQLPROFILE_SPM_DEPTH_32_BITS;
 
-                    const auto& reg_info = sqc_block_info->counter_reg_info[counter_des_even.index / 2];
+                    const auto& reg_info =
+                        sqc_block_info->counter_reg_info[counter_des_even.index / 2];
 
                     if(je == 0)
                     {
                         const uint32_t grbm_index_value = Primitives::grbm_broadcast_value();
                         SetGrbmGfxIndex(cmd_buffer, grbm_index_value);
-                        builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                                           reg_info.control_addr,
-                                                           Primitives::sq_control_value(counter_des_even));
+                        builder.BuildWriteUConfigRegPacket(
+                            cmd_buffer,
+                            reg_info.control_addr,
+                            Primitives::sq_control_value(counter_des_even));
                         if(Primitives::GFXIP_LEVEL >= 11)
-                            builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                                               Primitives::SQ_PERFCOUNTER_CTRL2_ADDR,
-                                                               Primitives::sq_control2_enable_value());
+                            builder.BuildWriteUConfigRegPacket(
+                                cmd_buffer,
+                                Primitives::SQ_PERFCOUNTER_CTRL2_ADDR,
+                                Primitives::sq_control2_enable_value());
                     }
 
                     if(!programmed_select_offsets.insert(reg_info.select_addr.offset).second)
@@ -559,30 +575,31 @@ public:
                 std::map<uint64_t, uint32_t> programmed_select_values;
                 uint32_t                     grbm_index_value =
                     (block_info->attr & CounterBlockWgpAttr)
-                        ? Primitives::grbm_broadcast_value()
-                        : Primitives::grbm_inst_index_value(
-                              Primitives::decode_spm_instance_index(block_info,
-                                                                    counter_des_0.block_des.index));
+                                            ? Primitives::grbm_broadcast_value()
+                                            : Primitives::grbm_inst_index_value(Primitives::decode_spm_instance_index(
+                              block_info, counter_des_0.block_des.index));
                 SetGrbmGfxIndex(cmd_buffer, grbm_index_value);
                 int je, jo;  // je & jo store even/odd array index
                 for(je = jo = 0; je < counter_info_even[i].size(); ++je)
                 {
                     // get 16-bit SPM select value for even counters
                     const auto& counter_des = counters_vec[counter_info_even[i][je].second];
-                    bool        is_32bit = counter_des.spm_depth == AQLPROFILE_SPM_DEPTH_32_BITS;
+                    bool        is_32bit    = counter_des.spm_depth == AQLPROFILE_SPM_DEPTH_32_BITS;
                     uint32_t    spm_select_value =
                         is_32bit ? Primitives::spm_select_value(counter_des)
-                                 : Primitives::spm_even_select_value(counter_des);
+                                    : Primitives::spm_even_select_value(counter_des);
 
                     // get 16-bit SPM select value for odd counters
                     if(jo < counter_info_odd[i].size())
                     {
                         if(!is_32bit)
                         {
-                            const auto& counter_des_odd = counters_vec[counter_info_odd[i][jo].second];
+                            const auto& counter_des_odd =
+                                counters_vec[counter_info_odd[i][jo].second];
                             if(counter_des_odd.block_des.index == counter_des.block_des.index)
                             {
-                                spm_select_value |= Primitives::spm_odd_select_value(counter_des_odd);
+                                spm_select_value |=
+                                    Primitives::spm_odd_select_value(counter_des_odd);
                                 jo++;
                             }
                         }
@@ -590,7 +607,7 @@ public:
                             jo++;
                     }
 
-                    int      index = (counter_des.index) >> 2;
+                    int      index  = (counter_des.index) >> 2;
                     int      select = ((counter_des.index) % 4) >> 1;
                     Register spm_select_addr =
                         (select == 0) ? block_info->counter_reg_info[index].select_addr
@@ -598,10 +615,13 @@ public:
                     // GFX12 note:
                     // - SA-scoped SPM data is still streamed through the SE line.
                     // - The non-WGP path uses grbm_inst_index_value(), which broadcasts SA.
-                    // - WGP blocks share the INST field with WGP selection, so they use full GRBM broadcast.
-                    // - This is only correct when the caller uses the same counter select programming for
+                    // - WGP blocks share the INST field with WGP selection, so they use full GRBM
+                    // broadcast.
+                    // - This is only correct when the caller uses the same counter select
+                    // programming for
                     //   every SA/WGP/INST participating in that SE line.
-                    // - Under that constraint, broadcast and explicit topology programming converge to the
+                    // - Under that constraint, broadcast and explicit topology programming converge
+                    // to the
                     //   same end result while keeping the PM4 programming path simple.
                     {
                         if(je != 0 && !(block_info->attr & CounterBlockWgpAttr))
@@ -623,13 +643,12 @@ public:
                         }
                         else if(programmed_select_it->second != spm_select_value)
                         {
-                            WARN_LOGGING(
-                                "conflicting SPM select programming for grbm_index=0x{:x} "
-                                "select_addr=0x{:x} old=0x{:x} new=0x{:x}",
-                                grbm_index_value,
-                                spm_select_addr.offset,
-                                programmed_select_it->second,
-                                spm_select_value);
+                            WARN_LOGGING("conflicting SPM select programming for grbm_index=0x{:x} "
+                                         "select_addr=0x{:x} old=0x{:x} new=0x{:x}",
+                                         grbm_index_value,
+                                         spm_select_addr.offset,
+                                         programmed_select_it->second,
+                                         spm_select_value);
                         }
                     }
                 }
@@ -640,12 +659,10 @@ public:
         // Set segment size
         uint32_t global_count = ss[0];
         uint32_t se_count     = ss[1];
-        builder.BuildWriteUConfigRegPacket(
-            cmd_buffer,
-            Primitives::RLC_SPM_PERFMON_SEGMENT_SIZE__ADDR,
-            Primitives::rlc_spm_perfmon_segment_size_value(global_count,
-                                                           se_count,
-                                                           config->se_number));
+        builder.BuildWriteUConfigRegPacket(cmd_buffer,
+                                           Primitives::RLC_SPM_PERFMON_SEGMENT_SIZE__ADDR,
+                                           Primitives::rlc_spm_perfmon_segment_size_value(
+                                               global_count, se_count, config->se_number));
         if(config->spm_has_core1)
         {
             builder.BuildWriteUConfigRegPacket(
@@ -729,7 +746,8 @@ public:
         if(config->spm_force_sample_before_stop)
         {
             // Force one last RLC sample pulse before SPM stop so the current partial interval is
-            // materialized into the stream instead of being dropped when CP_PERFMON_CNTL stops/reset SPM.
+            // materialized into the stream instead of being dropped when CP_PERFMON_CNTL
+            // stops/reset SPM.
             builder.BuildWriteUConfigRegPacket(cmd_buffer,
                                                Primitives::RLC_SPM_PERFMON_CNTL__ADDR,
                                                Primitives::rlc_spm_perfmon_cntl_value(1, 0));

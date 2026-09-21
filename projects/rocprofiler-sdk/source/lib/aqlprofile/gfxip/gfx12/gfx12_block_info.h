@@ -168,7 +168,8 @@ static const uint32_t TcpCounterBlockNumCounters      = 4;
 static const uint32_t TdCounterBlockNumCounters       = 2;
 static const uint32_t Utcl1CounterBlockNumCounters    = 4;
 
-namespace spm {
+namespace spm
+{
 static const uint32_t ChaCounterBlockNumCounters      = 4 * 4;
 static const uint32_t ChcCounterBlockNumCounters      = 4 * 4;
 static const uint32_t CpcCounterBlockNumCounters      = 1 * 4;
@@ -326,7 +327,8 @@ static const uint32_t TdCounterBlockNumCounters            = 2;
 static const uint32_t Utcl1CounterBlockNumCounters         = 4;
 static const uint32_t SpCounterBlockNumCounters            = 4;
 
-namespace spm {
+namespace spm
+{
 static const uint32_t AtcCounterBlockNumCounters           = 0;
 static const uint32_t ChaCounterBlockNumCounters           = 4 * 4;
 static const uint32_t ChcCounterBlockNumCounters           = 4 * 4;

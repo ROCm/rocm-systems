@@ -63,9 +63,9 @@ namespace gfx9
 class gfx9_cntx_prim
 {
 public:
-    static const uint32_t     GFXIP_LEVEL          = 9;
+    static const uint32_t     GFXIP_LEVEL                    = 9;
     static const bool         SPM_DELAY_PROGRAMMING_REQUIRED = true;
-    static const uint32_t     NUMBER_OF_BLOCKS     = LastCounterBlockId + 1;
+    static const uint32_t     NUMBER_OF_BLOCKS               = LastCounterBlockId + 1;
     static constexpr Register GRBM_GFX_INDEX_ADDR  = REG_32B_ADDR(GC, 0, regGRBM_GFX_INDEX);
     static constexpr Register GRBMA_GFX_INDEX_ADDR = REG_32B_NULL;
     static constexpr Register COMPUTE_PERFCOUNT_ENABLE_ADDR =
@@ -364,8 +364,7 @@ public:
             SET_REG_FIELD_BITS(SQ_PERFCOUNTER0_SELECT, PERF_SEL, counter_des.id);
         return sq_perfcounter0_select;
     }
-    static uint32_t sq_spm_select_value(const counter_des_t& counter_des,
-                                        const uint32_t&)
+    static uint32_t sq_spm_select_value(const counter_des_t& counter_des, const uint32_t&)
     {
         uint32_t sq_perfcounter0_select =
             SET_REG_FIELD_BITS(SQ_PERFCOUNTER0_SELECT, SIMD_MASK, 0xF) |
@@ -602,8 +601,7 @@ public:
         return 0;
     }
 
-    static uint32_t rlc_spm_perfmon_cntl_value(const uint32_t& sampling_rate,
-                                               const uint32_t&)
+    static uint32_t rlc_spm_perfmon_cntl_value(const uint32_t& sampling_rate, const uint32_t&)
     {
         const uint32_t ring_mode = 3;  // Stall and send Interrupt
         uint32_t       rlc_spm_perfmon_cntl =

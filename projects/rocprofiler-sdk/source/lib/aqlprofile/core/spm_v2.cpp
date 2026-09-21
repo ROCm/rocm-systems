@@ -217,9 +217,9 @@ std::vector<aqlprofile_spm_parameter_t> default_spm_params = {
 static_assert(AQLPROFILE_SPM_PARAMETER_TYPE_LAST == 4 && "Dont forget to add default param!");
 
 static bool
-resolve_spm_depth(aql_profile::Pm4Factory*            pm4_factory,
-                  const aqlprofile_pmc_event_t&       event,
-                  aqlprofile_spm_depth_t*             resolved_depth = nullptr)
+resolve_spm_depth(aql_profile::Pm4Factory*      pm4_factory,
+                  const aqlprofile_pmc_event_t& event,
+                  aqlprofile_spm_depth_t*       resolved_depth = nullptr)
 {
     const auto depth_name = [](aqlprofile_spm_depth_t depth) {
         switch(depth)
@@ -231,15 +231,12 @@ resolve_spm_depth(aql_profile::Pm4Factory*            pm4_factory,
         }
     };
 
-    const auto requested_depth =
-        static_cast<aqlprofile_spm_depth_t>(event.flags.spm_flags.depth);
-    const bool is_gfx9_sq =
-        (pm4_factory->GetGpuId() <= aql_profile::GFX10_GPU_ID &&
-         event.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ);
-    const bool is_gfx12_sqg =
-        (pm4_factory->GetGpuId() > aql_profile::GFX10_GPU_ID &&
-         event.block_name ==
-             static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_SQG));
+    const auto requested_depth = static_cast<aqlprofile_spm_depth_t>(event.flags.spm_flags.depth);
+    const bool is_gfx9_sq      = (pm4_factory->GetGpuId() <= aql_profile::GFX10_GPU_ID &&
+                             event.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ);
+    const bool is_gfx12_sqg    = (pm4_factory->GetGpuId() > aql_profile::GFX10_GPU_ID &&
+                               event.block_name == static_cast<hsa_ven_amd_aqlprofile_block_name_t>(
+                                                       AQLPROFILE_BLOCK_NAME_SQG));
     const bool requires_32bit_default = is_gfx9_sq || is_gfx12_sqg;
 
     if(requested_depth == AQLPROFILE_SPM_DEPTH_NONE)
@@ -253,7 +250,8 @@ resolve_spm_depth(aql_profile::Pm4Factory*            pm4_factory,
     if(requested_depth != AQLPROFILE_SPM_DEPTH_16_BITS &&
        requested_depth != AQLPROFILE_SPM_DEPTH_32_BITS)
     {
-        WARN_LOGGING("unsupported explicit SPM depth {} requested", static_cast<int>(requested_depth));
+        WARN_LOGGING("unsupported explicit SPM depth {} requested",
+                     static_cast<int>(requested_depth));
         return false;
     }
 
@@ -284,11 +282,11 @@ static std::vector<aqlprofile_spm_available_configuration_t>
 get_spm_available_configurations(aql_profile::Pm4Factory* pm4_factory)
 {
     auto add_interval_mode = [](std::vector<aqlprofile_spm_available_configuration_t>& configs,
-                                uint64_t                                             min_interval,
-                                uint64_t                                             max_interval,
-                                aqlprofile_spm_parameter_interval_mode_t             mode) {
-        auto& interval_config = configs.emplace_back();
-        interval_config.type  = AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL;
+                                uint64_t                                               min_interval,
+                                uint64_t                                               max_interval,
+                                aqlprofile_spm_parameter_interval_mode_t               mode) {
+        auto& interval_config                 = configs.emplace_back();
+        interval_config.type                  = AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL;
         interval_config.interval.min_interval = min_interval;
         interval_config.interval.max_interval = max_interval;
         interval_config.interval.mode         = mode;
@@ -305,14 +303,8 @@ get_spm_available_configurations(aql_profile::Pm4Factory* pm4_factory)
     }
     else
     {
-        add_interval_mode(configs,
-                          1,
-                          0x10000,
-                          AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK);
-        add_interval_mode(configs,
-                          1,
-                          0x10000,
-                          AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK);
+        add_interval_mode(configs, 1, 0x10000, AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK);
+        add_interval_mode(configs, 1, 0x10000, AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK);
     }
 
     return configs;
@@ -329,16 +321,17 @@ GetCounter(aql_profile::Pm4Factory* pm4_factory, const aqlprofile_pmc_event_t& e
     if(int(event.block_name) == AQLPROFILE_BLOCK_NAME_SP)
         WARN_LOGGING("SP block used in SPM path without explicit validation coverage yet");
 
-    const bool is_sq_accum_counter =
-        event.flags.raw && event.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ &&
-        event.flags.sq_flags.accum != 0;
+    const bool is_sq_accum_counter = event.flags.raw &&
+                                     event.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ &&
+                                     event.flags.sq_flags.accum != 0;
     const bool is_sqg_accum_counter =
         event.flags.raw &&
         event.block_name ==
             static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_SQG) &&
         event.flags.sq_flags.accum != 0;
     if(is_sq_accum_counter || is_sqg_accum_counter)
-        WARN_LOGGING("ACCUM_PREV counter used in SPM path without explicit validation coverage yet");
+        WARN_LOGGING(
+            "ACCUM_PREV counter used in SPM path without explicit validation coverage yet");
 
     aqlprofile_spm_depth_t resolved_depth = AQLPROFILE_SPM_DEPTH_NONE;
     if(!resolve_spm_depth(pm4_factory, event, &resolved_depth))
@@ -349,23 +342,22 @@ GetCounter(aql_profile::Pm4Factory* pm4_factory, const aqlprofile_pmc_event_t& e
 
 struct spm_counter_des_t
 {
-    uint32_t index    = 0;      // in 16bit
+    uint32_t index    = 0;  // in 16bit
     bool     is_32bit = false;
 };
 
 void
-AllocateCounter(counter_des_t&                                            counter_des,
-                aql_profile::Pm4Factory*                                   pm4_factory,
+AllocateCounter(counter_des_t&                                          counter_des,
+                aql_profile::Pm4Factory*                                pm4_factory,
                 std::map<block_des_t, spm_counter_des_t, lt_block_des>& index_map)
 {
-    const auto block_info    = counter_des.block_info;
-    const auto block_des     = counter_des.block_des;
-    const auto is_32bit      = counter_des.spm_depth == AQLPROFILE_SPM_DEPTH_32_BITS;
-    const auto is_gfx12_sqc  =
-        (pm4_factory->GetGpuId() > aql_profile::GFX10_GPU_ID &&
-         block_des.id == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ);
-    const auto ret           = index_map.insert({block_des, {0, is_32bit}});
-    auto       reg_index     = ret.first->second.index;
+    const auto block_info     = counter_des.block_info;
+    const auto block_des      = counter_des.block_des;
+    const auto is_32bit       = counter_des.spm_depth == AQLPROFILE_SPM_DEPTH_32_BITS;
+    const auto is_gfx12_sqc   = (pm4_factory->GetGpuId() > aql_profile::GFX10_GPU_ID &&
+                               block_des.id == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ);
+    const auto ret            = index_map.insert({block_des, {0, is_32bit}});
+    auto       reg_index      = ret.first->second.index;
     const auto is_first_16bit = !is_32bit && ret.first->second.is_32bit;
 
     ret.first->second.is_32bit = is_32bit;
@@ -377,8 +369,9 @@ AllocateCounter(counter_des_t&                                            counte
         throw std::runtime_error(std::string("SPM not supported for block ") + block_info->name);
 
     if(reg_index >= block_info->spm_counter_count)
-        throw std::runtime_error(std::string("Event is out of block counter registers number limit for ") +
-                                 block_info->name);
+        throw std::runtime_error(
+            std::string("Event is out of block counter registers number limit for ") +
+            block_info->name);
 
     counter_des.index = reg_index;
 
@@ -416,7 +409,7 @@ CountersVec(const aqlprofile_pmc_event_t* events,
             {
                 if((sa == 0) && (wgp == 0)) continue;
 
-                auto expanded_event      = event;
+                auto expanded_event = event;
                 expanded_event.block_index =
                     pm4_factory->EncodeSpmBlockIndex(event.block_index, sa, wgp);
                 vec.push_back(GetCounter(pm4_factory, expanded_event));
@@ -430,7 +423,7 @@ CountersVec(const aqlprofile_pmc_event_t* events,
     {
         for(uint32_t index = 0; index < vec.size(); ++index)
         {
-            auto&       counter_des = vec[index];
+            auto& counter_des = vec[index];
             if(counter_des.spm_depth != depth[n]) continue;
             AllocateCounter(counter_des, pm4_factory, index_map);
         }
@@ -549,17 +542,16 @@ _internal_aqlprofile_spm_create_packets(aqlprofile_handle_t*          handle,
 
         const pm4_builder::counters_vector countersVec =
             CountersVec(profile.events, profile.event_count, pm4_factory);
-        if(countersVec.size() > SPM_COUNTER_MAP_CAPACITY)
-            return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+        if(countersVec.size() > SPM_COUNTER_MAP_CAPACITY) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
         pm4_builder::TraceConfig& trace_config = memory->config;
 
-        trace_config.spm_has_core1     = (pm4_factory->GetGpuId() == aql_profile::MI100_GPU_ID) ||
+        trace_config.spm_has_core1 = (pm4_factory->GetGpuId() == aql_profile::MI100_GPU_ID) ||
                                      (pm4_factory->GetGpuId() == aql_profile::MI200_GPU_ID);
         trace_config.spm_force_sample_before_stop =
             pm4_factory->GetGpuId() >= aql_profile::GFX11_GPU_ID;
         trace_config.spm_sample_delay_max = pm4_factory->GetSpmSampleDelayMax();
-        trace_config.sampleRate = normalize_spm_sample_interval(
+        trace_config.sampleRate           = normalize_spm_sample_interval(
             pm4_factory, s->parameters.at(AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL));
         if(trace_config.sampleRate == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
@@ -576,8 +568,8 @@ _internal_aqlprofile_spm_create_packets(aqlprofile_handle_t*          handle,
         trace_config.xcc_number = pm4_factory->GetXccNumber();
         trace_config.se_number  = pm4_factory->GetShaderEnginesNumber() / trace_config.xcc_number;
         trace_config.sa_number  = pm4_factory->GetGpuId() >= aql_profile::GFX10_GPU_ID
-                                     ? pm4_factory->GetShaderArraysNumber()
-                                     : 0;
+                                      ? pm4_factory->GetShaderArraysNumber()
+                                      : 0;
         trace_config.wgp_per_sa = pm4_factory->GetNumWGPs();
 
         trace_config.data_buffer_ptr  = memory->GetOutputBuf();

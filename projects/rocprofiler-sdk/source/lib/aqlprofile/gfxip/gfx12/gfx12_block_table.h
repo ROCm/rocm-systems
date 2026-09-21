@@ -192,7 +192,7 @@ static const CounterRegInfo GcEaCpwdCounterRegAddr[] = {REG_INFO_2_SELECT1_1(GC_
 #if GFX12_VARIANT == GFX12_VARIANT_1250
 static const CounterRegInfo GcEaSeCounterRegAddr[] = {REG_INFO_WITH_INST_2_SELECT1_1(GC_EA_SE, 8)};
 #else
-static const CounterRegInfo GcEaSeCounterRegAddr[] = {REG_INFO_2_SELECT1_1(GC_EA_SE)};
+static const CounterRegInfo GcEaSeCounterRegAddr[]   = {REG_INFO_2_SELECT1_1(GC_EA_SE)};
 #endif
 static const CounterRegInfo Gl1aCounterRegAddr[] = {REG_INFO_4_SELECT1_4(GL1A)};
 static const CounterRegInfo Gl1cCounterRegAddr[] = {REG_INFO_4_SELECT1_4(GL1C)};
@@ -200,8 +200,8 @@ static const CounterRegInfo Gl1cCounterRegAddr[] = {REG_INFO_4_SELECT1_4(GL1C)};
 static const CounterRegInfo Gl2aCounterRegAddr[] = {REG_INFO_WITH_INST_4_SELECT1_4(GL2A, 8)};
 static const CounterRegInfo Gl2cCounterRegAddr[] = {REG_INFO_WITH_INST_4_SELECT1_4(GL2C, 8)};
 #else
-static const CounterRegInfo Gl2aCounterRegAddr[] = {REG_INFO_4_SELECT1_4(GL2A)};
-static const CounterRegInfo Gl2cCounterRegAddr[] = {REG_INFO_4_SELECT1_4(GL2C)};
+static const CounterRegInfo Gl2aCounterRegAddr[]     = {REG_INFO_4_SELECT1_4(GL2A)};
+static const CounterRegInfo Gl2cCounterRegAddr[]     = {REG_INFO_4_SELECT1_4(GL2C)};
 #endif
 #if GFX12_VARIANT == GFX12_VARIANT_1250
 static const CounterRegInfo GlarbaCounterRegAddr[] = {REG_INFO_4_SELECT1_4(GLARBA)};
@@ -217,7 +217,7 @@ static const CounterRegInfo RlcCounterRegAddr[]   = {REG_INFO_2(RLC)};
 static const CounterRegInfo SdmaCounterRegAddr[] = {REG_INFO_6_SELECT1_6(SDMA0_SDMA),
                                                     REG_INFO_6_SELECT1_6(SDMA1_SDMA)};
 #else
-static const CounterRegInfo SdmaCounterRegAddr[] = {REG_INFO_2_SELECT1_2(SDMA0),
+static const CounterRegInfo SdmaCounterRegAddr[]     = {REG_INFO_2_SELECT1_2(SDMA0),
                                                     REG_INFO_2_SELECT1_2(SDMA1)};
 #endif
 static const CounterRegInfo SpiCounterRegAddr[] = {REG_INFO_6_SELECT1_6(SPI)};
@@ -232,13 +232,13 @@ static const CounterRegInfo TaCounterRegAddr[] = {REG_INFO_2_SELECT1_1(TA)};
 #if GFX12_VARIANT == GFX12_VARIANT_1250
 static const CounterRegInfo TcpCounterRegAddr[] = {REG_INFO_8_SELECT1_4(TCP)};
 #else
-static const CounterRegInfo TcpCounterRegAddr[] = {REG_INFO_4_SELECT1_2(TCP)};
+static const CounterRegInfo TcpCounterRegAddr[]      = {REG_INFO_4_SELECT1_2(TCP)};
 #endif
 static const CounterRegInfo TdCounterRegAddr[] = {REG_INFO_2_SELECT1_1(TD)};
 #if GFX12_VARIANT == GFX12_VARIANT_1250
 static const CounterRegInfo Utcl1CounterRegAddr[] = {REG_INFO_4_SELECT1_2(UTCL1)};
 #else
-static const CounterRegInfo Utcl1CounterRegAddr[] = {REG_INFO_4(UTCL1)};
+static const CounterRegInfo Utcl1CounterRegAddr[]    = {REG_INFO_4(UTCL1)};
 #endif
 
 // Special handling of SQC:
@@ -250,69 +250,71 @@ static const CounterRegInfo Utcl1CounterRegAddr[] = {REG_INFO_4(UTCL1)};
 //   CounterRegInfo.select1_addr is repurposed here to store the odd SELECT register.
 //   It is not a real SQ SELECT1 register, but keeps the current 16bit SQC SPM hook in the
 //   existing table shape without adding SQC-only plumbing.
-static const CounterRegInfo SqcCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER0_SELECT),
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER0_LO),
-                                                    REG_32B_NULL,
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER1_SELECT)},
-                                                   {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER2_SELECT),
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER1_LO),
-                                                    REG_32B_NULL,
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER3_SELECT)},
-                                                   {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER4_SELECT),
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER2_LO),
-                                                    REG_32B_NULL,
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER5_SELECT)},
-                                                   {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER6_SELECT),
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER3_LO),
-                                                    REG_32B_NULL,
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER7_SELECT)},
-                                                   {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER8_SELECT),
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER4_LO),
-                                                    REG_32B_NULL,
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER9_SELECT)},
-                                                   {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER10_SELECT),
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER5_LO),
-                                                    REG_32B_NULL,
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER11_SELECT)},
-                                                   {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER12_SELECT),
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER6_LO),
-                                                    REG_32B_NULL,
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER13_SELECT)},
-                                                   {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER14_SELECT),
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER7_LO),
-                                                    REG_32B_NULL,
-                                                    REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER15_SELECT)}};
+static const CounterRegInfo SqcCounterRegAddr[] = {
+    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER0_SELECT),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER0_LO),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER1_SELECT)},
+    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER2_SELECT),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER1_LO),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER3_SELECT)},
+    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER4_SELECT),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER2_LO),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER5_SELECT)},
+    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER6_SELECT),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER3_LO),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER7_SELECT)},
+    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER8_SELECT),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER4_LO),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER9_SELECT)},
+    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER10_SELECT),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER5_LO),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER11_SELECT)},
+    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER12_SELECT),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER6_LO),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER13_SELECT)},
+    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER14_SELECT),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER7_LO),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER15_SELECT)}};
 
 #if GFX12_VARIANT == GFX12_VARIANT_1250
 // SP shares the SQ perfcounter registers
-static const CounterRegInfo SpCounterRegAddr[] = {{REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER0_SELECT),
-                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER0_LO),
-                                                   REG_32B_NULL,
-                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER1_SELECT)},
-                                                  {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER4_SELECT),
-                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER2_LO),
-                                                   REG_32B_NULL,
-                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER5_SELECT)},
-                                                  {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER8_SELECT),
-                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER4_LO),
-                                                   REG_32B_NULL,
-                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER9_SELECT)},
-                                                  {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER12_SELECT),
-                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
-                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER6_LO),
-                                                   REG_32B_NULL,
-                                                   REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER13_SELECT)}};
+static const CounterRegInfo SpCounterRegAddr[] = {
+    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER0_SELECT),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER0_LO),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER1_SELECT)},
+    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER4_SELECT),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER2_LO),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER5_SELECT)},
+    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER8_SELECT),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER4_LO),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER9_SELECT)},
+    {REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER12_SELECT),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL),
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER6_LO),
+     REG_32B_NULL,
+     REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER13_SELECT)}};
 #endif
 #if GFX12_VARIANT != GFX12_VARIANT_1250
 // Special handling of GCVML2 (SPM only):
@@ -335,7 +337,7 @@ static const CounterRegInfo Gcvml2CounterRegAddr[] = {
 //   (Not enabled for gfx12): CHCG GDS GUS
 #if GFX12_VARIANT == GFX12_VARIANT_1250
 // AIGC blocks: EA GL2A GL2C GRBMA UTCL2(GPUVM/ATCL2/FFBM)
-static const GpuBlockInfo GceaSeCounterBlockInfo        = {"GCEA_SE",
+static const GpuBlockInfo GceaSeCounterBlockInfo = {"GCEA_SE",
                                                     __BLOCK_ID(GCEA_SE),
                                                     GcEaSeCounterBlockNumInstances,
                                                     GcEaSeCounterBlockMaxEvent,
@@ -346,30 +348,30 @@ static const GpuBlockInfo GceaSeCounterBlockInfo        = {"GCEA_SE",
                                                     BLOCK_DELAY_NONE,
                                                     0,
                                                     spm::GcEaSeCounterBlockNumCounters};
-static const GpuBlockInfo Gl2aCounterBlockInfo          = {"GL2A",
-                                                  __BLOCK_ID_HSA(GL2A),
-                                                  Gl2aCounterBlockNumInstances,
-                                                  Gl2aCounterBlockMaxEvent,
-                                                  Gl2aCounterBlockNumCounters,
-                                                  Gl2aCounterRegAddr,
-                                                  gfx12_cntx_prim::select_value,
-                                                  CounterBlockGrbmaAttr | CounterBlockTcAttr |
-                                                      CounterBlockSpmGlobalAttr,
-                                                  BLOCK_DELAY_NONE,
-                                                  SPM_GLOBAL_BLOCK_NAME_GL2A,
-                                                  spm::Gl2aCounterBlockNumCounters};
-static const GpuBlockInfo Gl2cCounterBlockInfo          = {"GL2C",
-                                                  __BLOCK_ID_HSA(GL2C),
-                                                  Gl2cCounterBlockNumInstances,
-                                                  Gl2cCounterBlockMaxEvent,
-                                                  Gl2cCounterBlockNumCounters,
-                                                  Gl2cCounterRegAddr,
-                                                  gfx12_cntx_prim::select_value,
-                                                  CounterBlockGrbmaAttr | CounterBlockTcAttr |
-                                                      CounterBlockSpmGlobalAttr,
-                                                  BLOCK_DELAY_NONE,
-                                                  SPM_GLOBAL_BLOCK_NAME_GL2C,
-                                                  spm::Gl2cCounterBlockNumCounters};
+static const GpuBlockInfo Gl2aCounterBlockInfo   = {
+    "GL2A",
+    __BLOCK_ID_HSA(GL2A),
+    Gl2aCounterBlockNumInstances,
+    Gl2aCounterBlockMaxEvent,
+    Gl2aCounterBlockNumCounters,
+    Gl2aCounterRegAddr,
+    gfx12_cntx_prim::select_value,
+    CounterBlockGrbmaAttr | CounterBlockTcAttr | CounterBlockSpmGlobalAttr,
+    BLOCK_DELAY_NONE,
+    SPM_GLOBAL_BLOCK_NAME_GL2A,
+    spm::Gl2aCounterBlockNumCounters};
+static const GpuBlockInfo Gl2cCounterBlockInfo = {
+    "GL2C",
+    __BLOCK_ID_HSA(GL2C),
+    Gl2cCounterBlockNumInstances,
+    Gl2cCounterBlockMaxEvent,
+    Gl2cCounterBlockNumCounters,
+    Gl2cCounterRegAddr,
+    gfx12_cntx_prim::select_value,
+    CounterBlockGrbmaAttr | CounterBlockTcAttr | CounterBlockSpmGlobalAttr,
+    BLOCK_DELAY_NONE,
+    SPM_GLOBAL_BLOCK_NAME_GL2C,
+    spm::Gl2cCounterBlockNumCounters};
 static const GpuBlockInfo GrbmaCounterBlockInfo         = {"GRBMA",
                                                    __BLOCK_ID(GRBMA),
                                                    GrbmaCounterBlockNumInstances,
@@ -414,18 +416,19 @@ static const GpuBlockInfo GcL2tlbCounterBlockInfo       = {"GC_L2TLB",
                                                      BLOCK_DELAY_NONE,
                                                      0,
                                                      spm::GcL2tlbCounterBlockNumCounters};
-static const GpuBlockInfo Gcutcl2NhttlbCounterBlockInfo = {"GC_NHTTLB",
-                                                           __BLOCK_ID(GC_NHTTLB),
-                                                           Gcutcl2NhttlbCounterBlockNumInstances,
-                                                           Gcutcl2NhttlbCounterBlockMaxEvent,
-                                                           Gcutcl2NhttlbCounterBlockNumCounters,
-                                                           Gcutcl2NhttlbCounterRegAddr,
-                                                           gfx12_cntx_prim::mc_select_value,
-                                                           CounterBlockUtcl2Attr,
-                                                           BLOCK_DELAY_NONE,
-                                                           0,
-                                                           spm::Gcutcl2NhttlbCounterBlockNumCounters};
-static const GpuBlockInfo GcUtcl2CounterBlockInfo       = {"GC_UTCL2",
+static const GpuBlockInfo Gcutcl2NhttlbCounterBlockInfo = {
+    "GC_NHTTLB",
+    __BLOCK_ID(GC_NHTTLB),
+    Gcutcl2NhttlbCounterBlockNumInstances,
+    Gcutcl2NhttlbCounterBlockMaxEvent,
+    Gcutcl2NhttlbCounterBlockNumCounters,
+    Gcutcl2NhttlbCounterRegAddr,
+    gfx12_cntx_prim::mc_select_value,
+    CounterBlockUtcl2Attr,
+    BLOCK_DELAY_NONE,
+    0,
+    spm::Gcutcl2NhttlbCounterBlockNumCounters};
+static const GpuBlockInfo GcUtcl2CounterBlockInfo = {"GC_UTCL2",
                                                      __BLOCK_ID(GC_UTCL2),
                                                      Gcutcl2CounterBlockNumInstances,
                                                      Gcutcl2CounterBlockMaxEvent,
@@ -436,7 +439,7 @@ static const GpuBlockInfo GcUtcl2CounterBlockInfo       = {"GC_UTCL2",
                                                      BLOCK_DELAY_NONE,
                                                      0,
                                                      spm::Gcutcl2CounterBlockNumCounters};
-static const GpuBlockInfo GcVml2CounterBlockInfo        = {"GC_VML2",
+static const GpuBlockInfo GcVml2CounterBlockInfo  = {"GC_VML2",
                                                     __BLOCK_ID(GC_VML2),
                                                     GcmcVmL2CounterBlockNumInstances,
                                                     GcmcVmL2CounterBlockMaxEvent,
@@ -484,31 +487,31 @@ static const GpuBlockInfo GlarbcCounterBlockInfo = {
     0,
     spm::GlarbcCounterBlockNumCounters};
 #else
-static const GpuBlockInfo   Gl2aCounterBlockInfo      = {"GL2A",
-                                                  __BLOCK_ID_HSA(GL2A),
-                                                  Gl2aCounterBlockNumInstances,
-                                                  Gl2aCounterBlockMaxEvent,
-                                                  Gl2aCounterBlockNumCounters,
-                                                  Gl2aCounterRegAddr,
-                                                  gfx12_cntx_prim::select_value,
-                                                  CounterBlockDfltAttr | CounterBlockTcAttr |
-                                                      CounterBlockSpmGlobalAttr,
-                                                  BLOCK_DELAY_NONE,
-                                                  SPM_GLOBAL_BLOCK_NAME_GL2A,
-                                                  spm::Gl2aCounterBlockNumCounters};
-static const GpuBlockInfo   Gl2cCounterBlockInfo      = {"GL2C",
-                                                  __BLOCK_ID_HSA(GL2C),
-                                                  Gl2cCounterBlockNumInstances,
-                                                  Gl2cCounterBlockMaxEvent,
-                                                  Gl2cCounterBlockNumCounters,
-                                                  Gl2cCounterRegAddr,
-                                                  gfx12_cntx_prim::select_value,
-                                                  CounterBlockDfltAttr | CounterBlockTcAttr |
-                                                      CounterBlockSpmGlobalAttr,
-                                                  BLOCK_DELAY_NONE,
-                                                  SPM_GLOBAL_BLOCK_NAME_GL2C,
-                                                  spm::Gl2cCounterBlockNumCounters};
-static const GpuBlockInfo   GcUtcl2CounterBlockInfo   = {"GC_UTCL2",
+static const GpuBlockInfo   Gl2aCounterBlockInfo     = {
+    "GL2A",
+    __BLOCK_ID_HSA(GL2A),
+    Gl2aCounterBlockNumInstances,
+    Gl2aCounterBlockMaxEvent,
+    Gl2aCounterBlockNumCounters,
+    Gl2aCounterRegAddr,
+    gfx12_cntx_prim::select_value,
+    CounterBlockDfltAttr | CounterBlockTcAttr | CounterBlockSpmGlobalAttr,
+    BLOCK_DELAY_NONE,
+    SPM_GLOBAL_BLOCK_NAME_GL2A,
+    spm::Gl2aCounterBlockNumCounters};
+static const GpuBlockInfo Gl2cCounterBlockInfo = {
+    "GL2C",
+    __BLOCK_ID_HSA(GL2C),
+    Gl2cCounterBlockNumInstances,
+    Gl2cCounterBlockMaxEvent,
+    Gl2cCounterBlockNumCounters,
+    Gl2cCounterRegAddr,
+    gfx12_cntx_prim::select_value,
+    CounterBlockDfltAttr | CounterBlockTcAttr | CounterBlockSpmGlobalAttr,
+    BLOCK_DELAY_NONE,
+    SPM_GLOBAL_BLOCK_NAME_GL2C,
+    spm::Gl2cCounterBlockNumCounters};
+static const GpuBlockInfo GcUtcl2CounterBlockInfo   = {"GC_UTCL2",
                                                      __BLOCK_ID(GC_UTCL2),
                                                      Gcutcl2CounterBlockNumInstances,
                                                      Gcutcl2CounterBlockMaxEvent,
@@ -519,7 +522,7 @@ static const GpuBlockInfo   GcUtcl2CounterBlockInfo   = {"GC_UTCL2",
                                                      BLOCK_DELAY_NONE,
                                                      0,
                                                      spm::Gcutcl2CounterBlockNumCounters};
-static const GpuBlockInfo   GcVml2CounterBlockInfo    = {"GC_VML2",
+static const GpuBlockInfo GcVml2CounterBlockInfo    = {"GC_VML2",
                                                     __BLOCK_ID(GC_VML2),
                                                     GcmcVmL2CounterBlockNumInstances,
                                                     GcmcVmL2CounterBlockMaxEvent,
@@ -530,44 +533,44 @@ static const GpuBlockInfo   GcVml2CounterBlockInfo    = {"GC_VML2",
                                                     BLOCK_DELAY_NONE,
                                                     0,
                                                     spm::GcmcVmL2CounterBlockNumCounters};
-static const GpuBlockInfo   GcVml2SpmCounterBlockInfo = {"GC_VML2_SPM",
-                                                       __BLOCK_ID(GC_VML2_SPM),
-                                                       GcmcVmL2CounterBlockNumInstances,
-                                                       Gcvml2CounterBlockMaxEvent,
-                                                       Gcvml2CounterBlockNumCounters,
-                                                       Gcvml2CounterRegAddr,
-                                                       gfx12_cntx_prim::select_value,
-                                                       CounterBlockDfltAttr |
-                                                           CounterBlockSpmGlobalAttr,
-                                                       BLOCK_DELAY_NONE,
-                                                       SPM_GLOBAL_BLOCK_NAME_VML2,
-                                                       spm::Gcvml2CounterBlockNumCounters};
+static const GpuBlockInfo GcVml2SpmCounterBlockInfo = {
+    "GC_VML2_SPM",
+    __BLOCK_ID(GC_VML2_SPM),
+    GcmcVmL2CounterBlockNumInstances,
+    Gcvml2CounterBlockMaxEvent,
+    Gcvml2CounterBlockNumCounters,
+    Gcvml2CounterRegAddr,
+    gfx12_cntx_prim::select_value,
+    CounterBlockDfltAttr | CounterBlockSpmGlobalAttr,
+    BLOCK_DELAY_NONE,
+    SPM_GLOBAL_BLOCK_NAME_VML2,
+    spm::Gcvml2CounterBlockNumCounters};
 #endif
-static const GpuBlockInfo ChaCounterBlockInfo  = {"CHA",
-                                                 __BLOCK_ID(CHA),
-                                                 ChaCounterBlockNumInstances,
-                                                 ChaCounterBlockMaxEvent,
-                                                 ChaCounterBlockNumCounters,
-                                                 ChaCounterRegAddr,
-                                                 gfx12_cntx_prim::select_value,
-                                                 CounterBlockDfltAttr | CounterBlockTcAttr |
-                                                     CounterBlockSpmGlobalAttr,
-                                                 BLOCK_DELAY_NONE,
-                                                 SPM_GLOBAL_BLOCK_NAME_CHA,
-                                                 spm::ChaCounterBlockNumCounters};
-static const GpuBlockInfo ChcCounterBlockInfo  = {"CHC",
-                                                 __BLOCK_ID(CHC),
-                                                 ChcCounterBlockNumInstances,
-                                                 ChcCounterBlockMaxEvent,
-                                                 ChcCounterBlockNumCounters,
-                                                 ChcCounterRegAddr,
-                                                 gfx12_cntx_prim::select_value,
-                                                 CounterBlockDfltAttr | CounterBlockTcAttr |
-                                                     CounterBlockSpmGlobalAttr,
-                                                 BLOCK_DELAY_NONE,
-                                                 SPM_GLOBAL_BLOCK_NAME_CHC,
-                                                 spm::ChcCounterBlockNumCounters};
-static const GpuBlockInfo CpcCounterBlockInfo  = {"CPC",
+static const GpuBlockInfo ChaCounterBlockInfo = {
+    "CHA",
+    __BLOCK_ID(CHA),
+    ChaCounterBlockNumInstances,
+    ChaCounterBlockMaxEvent,
+    ChaCounterBlockNumCounters,
+    ChaCounterRegAddr,
+    gfx12_cntx_prim::select_value,
+    CounterBlockDfltAttr | CounterBlockTcAttr | CounterBlockSpmGlobalAttr,
+    BLOCK_DELAY_NONE,
+    SPM_GLOBAL_BLOCK_NAME_CHA,
+    spm::ChaCounterBlockNumCounters};
+static const GpuBlockInfo ChcCounterBlockInfo = {
+    "CHC",
+    __BLOCK_ID(CHC),
+    ChcCounterBlockNumInstances,
+    ChcCounterBlockMaxEvent,
+    ChcCounterBlockNumCounters,
+    ChcCounterRegAddr,
+    gfx12_cntx_prim::select_value,
+    CounterBlockDfltAttr | CounterBlockTcAttr | CounterBlockSpmGlobalAttr,
+    BLOCK_DELAY_NONE,
+    SPM_GLOBAL_BLOCK_NAME_CHC,
+    spm::ChcCounterBlockNumCounters};
+static const GpuBlockInfo CpcCounterBlockInfo = {"CPC",
                                                  __BLOCK_ID_HSA(CPC),
                                                  CpcCounterBlockNumInstances,
                                                  CpcCounterBlockMaxEvent,
@@ -578,7 +581,7 @@ static const GpuBlockInfo CpcCounterBlockInfo  = {"CPC",
                                                  BLOCK_DELAY_NONE,
                                                  SPM_GLOBAL_BLOCK_NAME_CPC,
                                                  spm::CpcCounterBlockNumCounters};
-static const GpuBlockInfo CpfCounterBlockInfo  = {"CPF",
+static const GpuBlockInfo CpfCounterBlockInfo = {"CPF",
                                                  __BLOCK_ID_HSA(CPF),
                                                  CpfCounterBlockNumInstances,
                                                  CpfCounterBlockMaxEvent,
@@ -589,7 +592,7 @@ static const GpuBlockInfo CpfCounterBlockInfo  = {"CPF",
                                                  BLOCK_DELAY_NONE,
                                                  SPM_GLOBAL_BLOCK_NAME_CPF,
                                                  spm::CpfCounterBlockNumCounters};
-static const GpuBlockInfo CpgCounterBlockInfo  = {"CPG",
+static const GpuBlockInfo CpgCounterBlockInfo = {"CPG",
                                                  __BLOCK_ID(CPG),
                                                  CpgCounterBlockNumInstances,
                                                  CpgCounterBlockMaxEvent,
@@ -600,18 +603,18 @@ static const GpuBlockInfo CpgCounterBlockInfo  = {"CPG",
                                                  BLOCK_DELAY_NONE,
                                                  SPM_GLOBAL_BLOCK_NAME_CPG,
                                                  spm::CpgCounterBlockNumCounters};
-static const GpuBlockInfo GcrCounterBlockInfo  = {"GCR",
-                                                 __BLOCK_ID_HSA(GCR),
-                                                 GcrCounterBlockNumInstances,
-                                                 GcrCounterBlockMaxEvent,
-                                                 GcrCounterBlockNumCounters,
-                                                 GcrCounterRegAddr,
-                                                 gfx12_cntx_prim::select_value,
-                                                 CounterBlockDfltAttr | CounterBlockTcAttr |
-                                                     CounterBlockSpmGlobalAttr,
-                                                 BLOCK_DELAY_NONE,
-                                                 SPM_GLOBAL_BLOCK_NAME_GCR,
-                                                 spm::GcrCounterBlockNumCounters};
+static const GpuBlockInfo GcrCounterBlockInfo = {
+    "GCR",
+    __BLOCK_ID_HSA(GCR),
+    GcrCounterBlockNumInstances,
+    GcrCounterBlockMaxEvent,
+    GcrCounterBlockNumCounters,
+    GcrCounterRegAddr,
+    gfx12_cntx_prim::select_value,
+    CounterBlockDfltAttr | CounterBlockTcAttr | CounterBlockSpmGlobalAttr,
+    BLOCK_DELAY_NONE,
+    SPM_GLOBAL_BLOCK_NAME_GCR,
+    spm::GcrCounterBlockNumCounters};
 static const GpuBlockInfo GceaCounterBlockInfo = {"GCEA",
                                                   __BLOCK_ID_HSA(GCEA),
                                                   GcEaCpwdCounterBlockNumInstances,
@@ -672,7 +675,7 @@ static const GpuBlockInfo GceaSeCounterBlockInfo = {"GCEA_SE",
                                                     SPM_SE_BLOCK_NAME_EA,
                                                     spm::GcEaSeCounterBlockNumCounters};
 #endif
-static const GpuBlockInfo GrbmhCounterBlockInfo   = {"GRBMH",
+static const GpuBlockInfo GrbmhCounterBlockInfo = {"GRBMH",
                                                    __BLOCK_ID(GRBMH),
                                                    GrbmhCounterBlockNumInstances,
                                                    GrbmhCounterBlockMaxEvent,
@@ -683,30 +686,30 @@ static const GpuBlockInfo GrbmhCounterBlockInfo   = {"GRBMH",
                                                    BLOCK_DELAY_NONE,
                                                    0,
                                                    spm::GrbmhCounterBlockNumCounters};
-static const GpuBlockInfo SpiCounterBlockInfo     = {"SPI",
-                                                 __BLOCK_ID_HSA(SPI),
-                                                 SpiCounterBlockNumInstances,
-                                                 SpiCounterBlockMaxEvent,
-                                                 SpiCounterBlockNumCounters,
-                                                 SpiCounterRegAddr,
-                                                 gfx12_cntx_prim::select_value,
-                                                 CounterBlockSeAttr | CounterBlockSpmSeAttr |
-                                                     CounterBlockSPIAttr,
-                                                 BLOCK_DELAY_NONE,
-                                                 SPM_SE_BLOCK_NAME_SPI,
-                                                 spm::SpiCounterBlockNumCounters};
-static const GpuBlockInfo SqgCounterBlockInfo     = {"SQG",
-                                                 __BLOCK_ID(SQG),
-                                                 SqgCounterBlockNumInstances,
-                                                 SqgCounterBlockMaxEvent,
-                                                 SqgCounterBlockNumCounters,
-                                                 SqgCounterRegAddr,
-                                                 gfx12_cntx_prim::sq_select_value,
-                                                 CounterBlockSeAttr | CounterBlockSpmSeAttr |
-                                                     CounterBlockSqAttr,
-                                                 BLOCK_DELAY_NONE,
-                                                 SPM_SE_BLOCK_NAME_SQG,
-                                                 spm::SqgCounterBlockNumCounters};
+static const GpuBlockInfo SpiCounterBlockInfo   = {
+    "SPI",
+    __BLOCK_ID_HSA(SPI),
+    SpiCounterBlockNumInstances,
+    SpiCounterBlockMaxEvent,
+    SpiCounterBlockNumCounters,
+    SpiCounterRegAddr,
+    gfx12_cntx_prim::select_value,
+    CounterBlockSeAttr | CounterBlockSpmSeAttr | CounterBlockSPIAttr,
+    BLOCK_DELAY_NONE,
+    SPM_SE_BLOCK_NAME_SPI,
+    spm::SpiCounterBlockNumCounters};
+static const GpuBlockInfo SqgCounterBlockInfo = {
+    "SQG",
+    __BLOCK_ID(SQG),
+    SqgCounterBlockNumInstances,
+    SqgCounterBlockMaxEvent,
+    SqgCounterBlockNumCounters,
+    SqgCounterRegAddr,
+    gfx12_cntx_prim::sq_select_value,
+    CounterBlockSeAttr | CounterBlockSpmSeAttr | CounterBlockSqAttr,
+    BLOCK_DELAY_NONE,
+    SPM_SE_BLOCK_NAME_SQG,
+    spm::SqgCounterBlockNumCounters};
 static const GpuBlockInfo GcUtcl1CounterBlockInfo = {"GC_UTCL1",
                                                      __BLOCK_ID(GC_UTCL1),
                                                      Utcl1CounterBlockNumInstances,
@@ -720,30 +723,30 @@ static const GpuBlockInfo GcUtcl1CounterBlockInfo = {"GC_UTCL1",
                                                      spm::Utcl1CounterBlockNumCounters};
 #if GFX12_VARIANT == GFX12_VARIANT_1250
 // SE blocks (gfx1250): GL1A GL1C (moved from SA)
-static const GpuBlockInfo Gl1aCounterBlockInfo = {"GL1A",
-                                                  __BLOCK_ID_HSA(GL1A),
-                                                  Gl1aCounterBlockNumInstances,
-                                                  Gl1aCounterBlockMaxEvent,
-                                                  Gl1aCounterBlockNumCounters,
-                                                  Gl1aCounterRegAddr,
-                                                  gfx12_cntx_prim::select_value,
-                                                  CounterBlockSeAttr | CounterBlockSpmSeAttr |
-                                                      CounterBlockTcAttr,
-                                                  BLOCK_DELAY_NONE,
-                                                  SPM_SE_BLOCK_NAME_GL1A,
-                                                  spm::Gl1aCounterBlockNumCounters};
-static const GpuBlockInfo Gl1cCounterBlockInfo = {"GL1C",
-                                                  __BLOCK_ID_HSA(GL1C),
-                                                  Gl1cCounterBlockNumInstances,
-                                                  Gl1cCounterBlockMaxEvent,
-                                                  Gl1cCounterBlockNumCounters,
-                                                  Gl1cCounterRegAddr,
-                                                  gfx12_cntx_prim::select_value,
-                                                  CounterBlockSeAttr | CounterBlockSpmSeAttr |
-                                                      CounterBlockTcAttr,
-                                                  BLOCK_DELAY_NONE,
-                                                  SPM_SE_BLOCK_NAME_GL1C,
-                                                  spm::Gl1cCounterBlockNumCounters};
+static const GpuBlockInfo Gl1aCounterBlockInfo = {
+    "GL1A",
+    __BLOCK_ID_HSA(GL1A),
+    Gl1aCounterBlockNumInstances,
+    Gl1aCounterBlockMaxEvent,
+    Gl1aCounterBlockNumCounters,
+    Gl1aCounterRegAddr,
+    gfx12_cntx_prim::select_value,
+    CounterBlockSeAttr | CounterBlockSpmSeAttr | CounterBlockTcAttr,
+    BLOCK_DELAY_NONE,
+    SPM_SE_BLOCK_NAME_GL1A,
+    spm::Gl1aCounterBlockNumCounters};
+static const GpuBlockInfo Gl1cCounterBlockInfo = {
+    "GL1C",
+    __BLOCK_ID_HSA(GL1C),
+    Gl1cCounterBlockNumInstances,
+    Gl1cCounterBlockMaxEvent,
+    Gl1cCounterBlockNumCounters,
+    Gl1cCounterRegAddr,
+    gfx12_cntx_prim::select_value,
+    CounterBlockSeAttr | CounterBlockSpmSeAttr | CounterBlockTcAttr,
+    BLOCK_DELAY_NONE,
+    SPM_SE_BLOCK_NAME_GL1C,
+    spm::Gl1cCounterBlockNumCounters};
 #endif
 // SA blocks: GL1A GL1C
 //   (Grphics only - not supported in ROCm): CB DB SC SX
@@ -775,101 +778,101 @@ static const GpuBlockInfo Gl1cCounterBlockInfo = {
     spm::Gl1cCounterBlockNumCounters};
 #endif
 // WGP blocks: SQC TA TCP TD
-static const GpuBlockInfo SqcCounterBlockInfo = {
-    "SQ",
-    __BLOCK_ID_HSA(SQ),
-    SqcCounterBlockNumInstances,
-    SqcCounterBlockMaxEvent,
-    SqcCounterBlockNumCounters,
-    SqcCounterRegAddr,
-    gfx12_cntx_prim::sq_select_value,
-    CounterBlockSeAttr | CounterBlockSaAttr | CounterBlockWgpAttr | CounterBlockSpmSeAttr |
-        CounterBlockSqAttr,
-    BLOCK_DELAY_NONE,
-    SPM_SE_BLOCK_NAME_SQC,
-    spm::SqcCounterBlockNumCounters};
+static const GpuBlockInfo SqcCounterBlockInfo = {"SQ",
+                                                 __BLOCK_ID_HSA(SQ),
+                                                 SqcCounterBlockNumInstances,
+                                                 SqcCounterBlockMaxEvent,
+                                                 SqcCounterBlockNumCounters,
+                                                 SqcCounterRegAddr,
+                                                 gfx12_cntx_prim::sq_select_value,
+                                                 CounterBlockSeAttr | CounterBlockSaAttr |
+                                                     CounterBlockWgpAttr | CounterBlockSpmSeAttr |
+                                                     CounterBlockSqAttr,
+                                                 BLOCK_DELAY_NONE,
+                                                 SPM_SE_BLOCK_NAME_SQC,
+                                                 spm::SqcCounterBlockNumCounters};
 #if GFX12_VARIANT == GFX12_VARIANT_1250
-static const GpuBlockInfo SpCounterBlockInfo = {
-    "SP",
-    __BLOCK_ID(SP),
-    SpCounterBlockNumInstances,
-    SpCounterBlockMaxEvent,
-    SpCounterBlockNumCounters,
-    SpCounterRegAddr,
-    gfx12_cntx_prim::sq_select_value,
-    CounterBlockSeAttr | CounterBlockSaAttr | CounterBlockWgpAttr | CounterBlockSpmSeAttr |
-        CounterBlockSqAttr,
-    BLOCK_DELAY_NONE,
-    SPM_SE_BLOCK_NAME_SQC,
-    spm::SqcCounterBlockNumCounters};
+static const GpuBlockInfo SpCounterBlockInfo = {"SP",
+                                                __BLOCK_ID(SP),
+                                                SpCounterBlockNumInstances,
+                                                SpCounterBlockMaxEvent,
+                                                SpCounterBlockNumCounters,
+                                                SpCounterRegAddr,
+                                                gfx12_cntx_prim::sq_select_value,
+                                                CounterBlockSeAttr | CounterBlockSaAttr |
+                                                    CounterBlockWgpAttr | CounterBlockSpmSeAttr |
+                                                    CounterBlockSqAttr,
+                                                BLOCK_DELAY_NONE,
+                                                SPM_SE_BLOCK_NAME_SQC,
+                                                spm::SqcCounterBlockNumCounters};
 #endif
-static const GpuBlockInfo TaCounterBlockInfo = {
-    "TA",
-    __BLOCK_ID_HSA(TA),
-    TaCounterBlockNumInstances,
-    TaCounterBlockMaxEvent,
-    TaCounterBlockNumCounters,
-    TaCounterRegAddr,
-    gfx12_cntx_prim::select_value,
-    CounterBlockSeAttr | CounterBlockSaAttr | CounterBlockWgpAttr | CounterBlockSpmSeAttr |
-        CounterBlockTcAttr,
-    BLOCK_DELAY_NONE,
-    SPM_SE_BLOCK_NAME_TA,
-    spm::TaCounterBlockNumCounters};
-static const GpuBlockInfo TdCounterBlockInfo = {
-    "TD",
-    __BLOCK_ID_HSA(TD),
-    TdCounterBlockNumInstances,
-    TdCounterBlockMaxEvent,
-    TdCounterBlockNumCounters,
-    TdCounterRegAddr,
-    gfx12_cntx_prim::select_value,
-    CounterBlockSeAttr | CounterBlockSaAttr | CounterBlockWgpAttr | CounterBlockSpmSeAttr |
-        CounterBlockTcAttr,
-    BLOCK_DELAY_NONE,
-    SPM_SE_BLOCK_NAME_TD,
-    spm::TdCounterBlockNumCounters};
-static const GpuBlockInfo TcpCounterBlockInfo = {
-    "TCP",
-    __BLOCK_ID_HSA(TCP),
-    TcpCounterBlockNumInstances,
-    TcpCounterBlockMaxEvent,
-    TcpCounterBlockNumCounters,
-    TcpCounterRegAddr,
-    gfx12_cntx_prim::select_value,
-    CounterBlockSeAttr | CounterBlockSaAttr | CounterBlockWgpAttr | CounterBlockSpmSeAttr |
-        CounterBlockTcAttr,
-    BLOCK_DELAY_NONE,
-    SPM_SE_BLOCK_NAME_TCP,
-    spm::TcpCounterBlockNumCounters};
+static const GpuBlockInfo TaCounterBlockInfo  = {"TA",
+                                                __BLOCK_ID_HSA(TA),
+                                                TaCounterBlockNumInstances,
+                                                TaCounterBlockMaxEvent,
+                                                TaCounterBlockNumCounters,
+                                                TaCounterRegAddr,
+                                                gfx12_cntx_prim::select_value,
+                                                CounterBlockSeAttr | CounterBlockSaAttr |
+                                                    CounterBlockWgpAttr | CounterBlockSpmSeAttr |
+                                                    CounterBlockTcAttr,
+                                                BLOCK_DELAY_NONE,
+                                                SPM_SE_BLOCK_NAME_TA,
+                                                spm::TaCounterBlockNumCounters};
+static const GpuBlockInfo TdCounterBlockInfo  = {"TD",
+                                                __BLOCK_ID_HSA(TD),
+                                                TdCounterBlockNumInstances,
+                                                TdCounterBlockMaxEvent,
+                                                TdCounterBlockNumCounters,
+                                                TdCounterRegAddr,
+                                                gfx12_cntx_prim::select_value,
+                                                CounterBlockSeAttr | CounterBlockSaAttr |
+                                                    CounterBlockWgpAttr | CounterBlockSpmSeAttr |
+                                                    CounterBlockTcAttr,
+                                                BLOCK_DELAY_NONE,
+                                                SPM_SE_BLOCK_NAME_TD,
+                                                spm::TdCounterBlockNumCounters};
+static const GpuBlockInfo TcpCounterBlockInfo = {"TCP",
+                                                 __BLOCK_ID_HSA(TCP),
+                                                 TcpCounterBlockNumInstances,
+                                                 TcpCounterBlockMaxEvent,
+                                                 TcpCounterBlockNumCounters,
+                                                 TcpCounterRegAddr,
+                                                 gfx12_cntx_prim::select_value,
+                                                 CounterBlockSeAttr | CounterBlockSaAttr |
+                                                     CounterBlockWgpAttr | CounterBlockSpmSeAttr |
+                                                     CounterBlockTcAttr,
+                                                 BLOCK_DELAY_NONE,
+                                                 SPM_SE_BLOCK_NAME_TCP,
+                                                 spm::TcpCounterBlockNumCounters};
 }  // namespace gfx1200/gfx1250
 
 namespace gfx1201
 {
-static const GpuBlockInfo Gl2cCounterBlockInfo   = {"GL2C",
-                                                  __BLOCK_ID_HSA(GL2C),
-                                                  gfx1201::Gl2cCounterBlockNumInstances,
-                                                  Gl2cCounterBlockMaxEvent,
-                                                  Gl2cCounterBlockNumCounters,
-                                                  Gl2cCounterRegAddr,
-                                                  gfx12_cntx_prim::select_value,
-                                                  CounterBlockDfltAttr | CounterBlockTcAttr |
-                                                      CounterBlockSpmGlobalAttr,
-                                                  BLOCK_DELAY_NONE,
-                                                  SPM_GLOBAL_BLOCK_NAME_GL2C,
-                                                  spm::Gl2cCounterBlockNumCounters};
-static const GpuBlockInfo ChcCounterBlockInfo    = {"CHC",
-                                                 __BLOCK_ID(CHC),
-                                                 gfx1201::ChcCounterBlockNumInstances,
-                                                 ChcCounterBlockMaxEvent,
-                                                 ChcCounterBlockNumCounters,
-                                                 ChcCounterRegAddr,
-                                                 gfx12_cntx_prim::select_value,
-                                                 CounterBlockDfltAttr | CounterBlockTcAttr |
-                                                     CounterBlockSpmGlobalAttr,
-                                                 BLOCK_DELAY_NONE,
-                                                 SPM_GLOBAL_BLOCK_NAME_CHC,
-                                                 spm::ChcCounterBlockNumCounters};
+static const GpuBlockInfo Gl2cCounterBlockInfo = {
+    "GL2C",
+    __BLOCK_ID_HSA(GL2C),
+    gfx1201::Gl2cCounterBlockNumInstances,
+    Gl2cCounterBlockMaxEvent,
+    Gl2cCounterBlockNumCounters,
+    Gl2cCounterRegAddr,
+    gfx12_cntx_prim::select_value,
+    CounterBlockDfltAttr | CounterBlockTcAttr | CounterBlockSpmGlobalAttr,
+    BLOCK_DELAY_NONE,
+    SPM_GLOBAL_BLOCK_NAME_GL2C,
+    spm::Gl2cCounterBlockNumCounters};
+static const GpuBlockInfo ChcCounterBlockInfo = {
+    "CHC",
+    __BLOCK_ID(CHC),
+    gfx1201::ChcCounterBlockNumInstances,
+    ChcCounterBlockMaxEvent,
+    ChcCounterBlockNumCounters,
+    ChcCounterRegAddr,
+    gfx12_cntx_prim::select_value,
+    CounterBlockDfltAttr | CounterBlockTcAttr | CounterBlockSpmGlobalAttr,
+    BLOCK_DELAY_NONE,
+    SPM_GLOBAL_BLOCK_NAME_CHC,
+    spm::ChcCounterBlockNumCounters};
 static const GpuBlockInfo GceaCounterBlockInfo   = {"GCEA",
                                                   __BLOCK_ID_HSA(GCEA),
                                                   gfx1201::GcEaCpwdCounterBlockNumInstances,

@@ -156,10 +156,10 @@ struct lt_block_des
 // Counter descriptor
 struct counter_des_t
 {
-    uint32_t            id;
-    uint32_t            index;
-    block_des_t         block_des;
-    const GpuBlockInfo* block_info;
+    uint32_t               id;
+    uint32_t               index;
+    block_des_t            block_des;
+    const GpuBlockInfo*    block_info;
     aqlprofile_spm_depth_t spm_depth;
 };
 

@@ -122,8 +122,8 @@ aqlprofile_spm_decode_stream_v1(aqlprofile_spm_buffer_desc_t        desc_bin,
             bool     is_32bit  = (index & SPM_COUNTER_MAP_32BIT_FLAG) ? true : false;
             bool     is_wgp    = (index & SPM_COUNTER_MAP_WGP_FLAG) ? true : false;
             index &= SPM_COUNTER_MAP_INDEX_MASK;
-            uint32_t sa_count       = is_sa ? desc->num_sa : 1;
-            uint32_t wgp_count      = is_wgp ? desc->num_wgp : 1;
+            uint32_t sa_count  = is_sa ? desc->num_sa : 1;
+            uint32_t wgp_count = is_wgp ? desc->num_wgp : 1;
 #if defined(DEBUG_TRACE)
             if(is_wgp && wgp_count == 0)
             {
@@ -131,26 +131,25 @@ aqlprofile_spm_decode_stream_v1(aqlprofile_spm_buffer_desc_t        desc_bin,
                              "Invalid SPM descriptor: WGP-flagged event has num_wgp == 0\n");
             }
 #endif
-            size_t   expanded_count = size_t(sa_count) * size_t(wgp_count) - 1;
+            size_t expanded_count = size_t(sa_count) * size_t(wgp_count) - 1;
 
             if(is_global)
             {
-                auto bufvalue = decode_bufvalue(datain[index], is_32bit ? datain[index + 16] : 0,
-                                               is_32bit);
+                auto bufvalue =
+                    decode_bufvalue(datain[index], is_32bit ? datain[index + 16] : 0, is_32bit);
                 decode_cb(timestamp, bufvalue, i, -1, userdata);
             }
             else
             {
-                uint16_t se_base = desc->global_num_line * 16;
-                uint16_t se_step = desc->se_num_line * 16;
+                uint16_t se_base         = desc->global_num_line * 16;
+                uint16_t se_step         = desc->se_num_line * 16;
                 size_t   event_exp_start = i_exp;
                 for(int j = 0; j < desc->num_se; j++)
                 {
-                    auto bufvalue = decode_bufvalue(datain[index + se_base + se_step * j],
-                                                   is_32bit ? datain[index + 16 + se_base +
-                                                                          se_step * j]
-                                                            : 0,
-                                                   is_32bit);
+                    auto bufvalue =
+                        decode_bufvalue(datain[index + se_base + se_step * j],
+                                        is_32bit ? datain[index + 16 + se_base + se_step * j] : 0,
+                                        is_32bit);
                     decode_cb(timestamp, bufvalue, i, encode_spm_shader_engine(j), userdata);
 
                     size_t event_i_exp = event_exp_start;
@@ -163,12 +162,10 @@ aqlprofile_spm_decode_stream_v1(aqlprofile_spm_buffer_desc_t        desc_bin,
 
                             uint16_t expanded_index =
                                 desc->get_counter_map()[event_i_exp++] & SPM_COUNTER_MAP_INDEX_MASK;
-                            auto bufvalue =
-                                decode_bufvalue(datain[expanded_index + se_base + se_step * j],
-                                                is_32bit ? datain[expanded_index + 16 + se_base +
-                                                                      se_step * j]
-                                                         : 0,
-                                                is_32bit);
+                            auto bufvalue = decode_bufvalue(
+                                datain[expanded_index + se_base + se_step * j],
+                                is_32bit ? datain[expanded_index + 16 + se_base + se_step * j] : 0,
+                                is_32bit);
                             decode_cb(timestamp,
                                       bufvalue,
                                       i,

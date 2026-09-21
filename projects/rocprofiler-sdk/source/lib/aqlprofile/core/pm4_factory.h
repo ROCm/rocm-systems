@@ -172,7 +172,8 @@ public:
     virtual bool IsGFX12() const { return false; }
     virtual bool IsGFX1250() const { return false; }
 
-    virtual uint32_t EncodeSpmBlockIndex(uint32_t inst_index, uint32_t sa_index,
+    virtual uint32_t EncodeSpmBlockIndex(uint32_t inst_index,
+                                         uint32_t sa_index,
                                          uint32_t wgp_index) const
     {
         return inst_index;

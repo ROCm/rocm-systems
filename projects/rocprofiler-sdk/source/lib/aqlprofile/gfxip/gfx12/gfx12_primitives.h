@@ -46,9 +46,9 @@ namespace gfx1200
 class gfx12_cntx_prim
 {
 public:
-    static const uint32_t     GFXIP_LEVEL         = 12;
+    static const uint32_t     GFXIP_LEVEL                    = 12;
     static const bool         SPM_DELAY_PROGRAMMING_REQUIRED = false;
-    static const uint32_t     NUMBER_OF_BLOCKS    = LastCounterBlockId + 1;
+    static const uint32_t     NUMBER_OF_BLOCKS               = LastCounterBlockId + 1;
     static constexpr Register GRBM_GFX_INDEX_ADDR = REG_32B_ADDR(GC, 0, regGRBM_GFX_INDEX);
 #if GFX12_VARIANT == GFX12_VARIANT_1250
     static constexpr Register GRBMA_GFX_INDEX_ADDR = REG_32B_ADDR(GC, 8, regGRBMA_GFX_INDEX);
@@ -135,8 +135,7 @@ public:
         REG_32B_ADDR(GC, 0, regRLC_SPM_PERFMON_RING_SIZE);
     static constexpr Register RLC_SPM_PERFMON_SEGMENT_SIZE__ADDR =
         REG_32B_ADDR(GC, 0, regRLC_SPM_PERFMON_SEGMENT_SIZE);
-    static constexpr Register RLC_SPM_SAMPLE_CNT__ADDR =
-        REG_32B_ADDR(GC, 0, regRLC_SPM_SAMPLE_CNT);
+    static constexpr Register RLC_SPM_SAMPLE_CNT__ADDR = REG_32B_ADDR(GC, 0, regRLC_SPM_SAMPLE_CNT);
     static constexpr Register RLC_SPM_PERFMON_SEGMENT_SIZE_CORE1__ADDR{};
     static constexpr Register RLC_SPM_GLOBAL_MUXSEL_ADDR__ADDR =
         REG_32B_ADDR(GC, 0, regRLC_SPM_GLOBAL_MUXSEL_ADDR);

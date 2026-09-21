@@ -46,7 +46,8 @@ public:
     bool IsGFX12() const override { return true; }
     bool IsGFX1250() const override { return true; }
 
-    uint32_t EncodeSpmBlockIndex(uint32_t inst_index, uint32_t sa_index,
+    uint32_t EncodeSpmBlockIndex(uint32_t inst_index,
+                                 uint32_t sa_index,
                                  uint32_t wgp_index) const override
     {
         return gfx12_cntx_prim::encode_spm_block_index(inst_index, sa_index, wgp_index);

@@ -744,7 +744,8 @@ typedef enum
 {
     AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE = 0,
     AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL,  ///< Sample interval in clock cycles.
-                                                    ///< Exact range/alignment is GPU-family dependent.
+                                                    ///< Exact range/alignment is GPU-family
+                                                    ///< dependent.
     AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT,
     AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,
     AQLPROFILE_SPM_PARAMETER_TYPE_LAST,
