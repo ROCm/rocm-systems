@@ -92,14 +92,6 @@ get_client_index()
     return _v;
 }
 
-stable_context_vec_t*&
-get_registered_contexts_impl()
-{
-    static auto*& _v = common::static_object<stable_context_vec_t>::construct(
-        reserve_size_t{stable_context_vec_t::chunk_size});
-    return _v;
-}
-
 auto&
 get_num_active_contexts()
 {
@@ -147,13 +139,38 @@ store_snapshot(published_snapshot_t& _v, context_snapshot_ptr_t&& _new)
 }
 #endif
 
-// Shares the registry's lifetime so that reads after common::destroy_static_objects() see an
-// empty snapshot rather than a destroyed one.
+// The registry and the snapshot published from it live in one static object rather than two.
+// common::destroy_static_objects() tears static objects down in reverse construction order, so two
+// objects would be ordered by whichever happened to be touched first -- and if the snapshot
+// outlived the registry it would be holding the last reference to every context, destroying them
+// after the HSA tables that a context destructor calls into are already gone. As members, the
+// snapshot is destroyed before the registry by the ordinary reverse-member rule.
+struct registry_state
+{
+    stable_context_vec_t registry =
+        stable_context_vec_t{reserve_size_t{stable_context_vec_t::chunk_size}};
+    published_snapshot_t published = {};
+};
+
+registry_state*
+get_registry_state()
+{
+    static auto*& _v = common::static_object<registry_state>::construct();
+    return _v;
+}
+
+stable_context_vec_t*
+get_registered_contexts_impl()
+{
+    auto* _state = get_registry_state();
+    return (_state) ? &_state->registry : nullptr;
+}
+
 published_snapshot_t*
 get_published_snapshot()
 {
-    static auto*& _v = common::static_object<published_snapshot_t>::construct();
-    return _v;
+    auto* _state = get_registry_state();
+    return (_state) ? &_state->published : nullptr;
 }
 
 context_snapshot_ptr_t
