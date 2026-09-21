@@ -28,6 +28,10 @@
 name: TheRock Multi-Arch CI
 
 on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
   pull_request:
     types:
       - opened
@@ -92,28 +96,11 @@ concurrency:
   # (postsubmit). The workflow name is prepended to avoid conflicts between
   # different workflows.
   group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
-  cancel-in-progress: >-
-    ${{
-      (github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'ci:multi-arch'
-    }}
+  cancel-in-progress: true
 
 jobs:
-  ci-gate:
-    name: Check CI Label
-    runs-on: ubuntu-24.04
-    outputs:
-      enabled: ${{ steps.gate.outputs.enabled }}
-    steps:
-      - name: Check for multi-arch opt-in
-        id: gate
-        run: |
-          echo "enabled=${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:multi-arch') }}" >> "${GITHUB_OUTPUT}"
-
   configure:
     name: Configure Changed Projects
-    needs: ci-gate
-    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
     runs-on: ubuntu-24.04
     outputs:
       changed_projects: ${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}
@@ -147,17 +134,17 @@ jobs:
             build_tools/artifact_subprojects.json
           sparse-checkout-cone-mode: false
 
-      - name: Configure CI for pull request
+      - name: Configure CI for pull request or push
         id: configure-pr
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
             --event-name "${{ github.event_name }}" \
             --github-repo "${{ github.repository }}" \
-            --base-sha "${{ github.event.pull_request.base.sha }}" \
-            --head-sha "${{ github.event.pull_request.head.sha }}" \
+            --base-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}" \
+            --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
             --config-path ".github/repos-config.json"
 
       - name: Configure CI for manual run
@@ -181,8 +168,7 @@ jobs:
             --therock-path "_therock"
 
   setup:
-    needs: [ci-gate, configure]
-    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
+    needs: configure
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@54ed4ae0a9cf2d5a531d55f206a4d5f2235b6624 # 2026-09-19
     with:
       build_variant: "release"
@@ -282,7 +268,6 @@ jobs:
     name: Multi-Arch CI Summary
     if: always()
     needs:
-      - ci-gate
       - configure
       - setup
       - linux_build_and_test
@@ -290,7 +275,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
-        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'true' }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
@@ -299,21 +283,8 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Evaluate workflow results
-        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 build_tools/github_actions/workflow_summary.py \
             --needs-json '${{ toJSON(needs) }}'
-
-      - name: Report skipped workflow
-        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'false' }}
-        run: |
-          echo "TheRock Multi-Arch CI is skipped by default for pull requests."
-          echo "Add the ci:multi-arch label to enable it."
-
-      - name: Report gate failure
-        if: ${{ needs.ci-gate.result != 'success' }}
-        run: |
-          echo "TheRock Multi-Arch CI gate did not complete successfully."
-          exit 1

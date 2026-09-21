@@ -15,7 +15,9 @@ namespace rocprofsys::policies::domain_service
 /// @brief Contract required of the rocprofiler-sdk backend by
 /// rocprofsys::domain_service and its buffered_domain/callback_domain/registry
 /// collaborators: the buffer/callback tracing-service API used by the KFD event
-/// domains. Does not cover the device-counting (GPU perf-counter) API — see
+/// domains, plus the timestamp/backtrace/arg-iteration API used by
+/// domains::callback::on_tracing_api_enter/exit (the hip/hsa callback domains). Does
+/// not cover the device-counting (GPU perf-counter) API — see
 /// policies::gpu_perf_counters::backend for that.
 template <typename Backend>
 concept backend =
@@ -32,20 +34,27 @@ concept backend =
         typename Backend::on_records_cb_t;
         typename Backend::on_record_cb_t;
         typename Backend::buffer_policy_t;
+        typename Backend::timestamp_t;
+        typename Backend::correlation_id_t;
+        typename Backend::callback_tracing_operation_args_cb_t;
         { Backend::compile_time_version } -> std::convertible_to<std::uint32_t>;
         {
             Backend::BUFFER_POLICY_LOSSLESS
         } -> std::convertible_to<typename Backend::buffer_policy_t>;
-    } && requires(Backend::context_id_t context, Backend::context_id_t* context_ptr,
-                  Backend::buffer_id_t buffer, Backend::buffer_id_t* buffer_ptr,
-                  Backend::buffer_tracing_kind_t   buffer_kind,
-                  Backend::callback_tracing_kind_t callback_kind,
-                  Backend::tracing_operation_t*    operations,
-                  Backend::callback_thread_id_t*   thread_ptr,
-                  Backend::callback_thread_id_t    thread,
-                  Backend::on_records_cb_t on_records, Backend::on_record_cb_t on_record,
-                  std::size_t num_operations, std::uint32_t operation,
-                  void* callback_data, Backend::buffer_policy_t policy) {
+    } &&
+    requires(Backend::context_id_t context, Backend::context_id_t* context_ptr,
+             Backend::buffer_id_t buffer, Backend::buffer_id_t* buffer_ptr,
+             Backend::buffer_tracing_kind_t   buffer_kind,
+             Backend::callback_tracing_kind_t callback_kind,
+             Backend::tracing_operation_t*    operations,
+             Backend::callback_thread_id_t*   thread_ptr,
+             Backend::callback_thread_id_t thread, Backend::on_records_cb_t on_records,
+             Backend::on_record_cb_t on_record, std::size_t num_operations,
+             std::uint32_t operation, void* callback_data,
+             Backend::buffer_policy_t policy, Backend::callback_tracing_record_t record,
+             Backend::callback_tracing_operation_args_cb_t args_callback,
+             Backend::correlation_id_t correlation_id, std::int32_t max_deref,
+             Backend::user_data_t user_data, Backend::timestamp_t timestamp) {
         { Backend::create_context(context_ptr) };
         { Backend::start_context(context) };
         {
@@ -90,6 +99,18 @@ concept backend =
             { callback_entry.operations } -> std::ranges::range;
             { callback_entry.value } -> std::convertible_to<std::size_t>;
         };
+        // ─── Members required by domains::callback::on_tracing_api_enter/exit ──────
+        {
+            Backend::get_timestamp()
+        } -> std::convertible_to<typename Backend::timestamp_t>;
+        {
+            Backend::get_parent_stack_id(correlation_id)
+        } -> std::convertible_to<std::uint64_t>;
+        {
+            Backend::iterate_callback_tracing_kind_operation_args(
+                record, args_callback, max_deref, callback_data)
+        };
+        { user_data.value = timestamp };
     };
 
 }  // namespace rocprofsys::policies::domain_service
