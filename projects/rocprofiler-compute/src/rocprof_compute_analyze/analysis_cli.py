@@ -12,7 +12,6 @@ from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
 from utils.logger import console_error, console_log, console_warning, demarcate
-from utils.ml_api_trace_errors import MlApiTraceError
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
     CallTreeNode,
@@ -100,9 +99,13 @@ def _assign_kernel_ids_from_top(
     return kernel_ids
 
 
-def _warn_missing_source_location_errors(workload: schema.Workload) -> None:
-    """Print deferred missing-source messages after the call tree."""
-    for exc in workload.ml_api_missing_source_errors:
+def _warn_ml_api_trace_errors(workload: schema.Workload) -> None:
+    """Print accumulated ML API trace errors after the call tree."""
+    errors = workload.ml_api_trace_errors
+    if not errors:
+        return
+    console_warning("analysis", f"{len(errors)} ML API trace error(s):")
+    for exc in errors:
         console_warning("analysis", str(exc))
 
 
@@ -197,15 +200,12 @@ class cli_analysis(OmniAnalyze_Base):
             workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
 
             if _ml_api_operator_cli_requested(args):
-                try:
-                    process_ml_api_trace_output(workload, path_info[0])
-                except MlApiTraceError as exc:
-                    console_warning("analysis", str(exc))
+                process_ml_api_trace_output(workload, path_info[0])
 
             for backend, cli in _ML_API_ANALYSIS_CLI_OPTIONS.items():
                 if getattr(args, cli["list_attr"], False):
                     self.list_operators(path_info[0], kernel_top_df, backend)
-                    _warn_missing_source_location_errors(workload)
+                    _warn_ml_api_trace_errors(workload)
                     sys.exit(0)
 
             for backend, cli in _ML_API_ANALYSIS_CLI_OPTIONS.items():
@@ -241,6 +241,11 @@ class cli_analysis(OmniAnalyze_Base):
         for backend, cli in _ML_API_ANALYSIS_CLI_OPTIONS.items():
             if getattr(args, cli["filter_attr"], None) is not None:
                 self.handle_operator(args, workload, backend)
+        if any(
+            getattr(args, cli["filter_attr"], None) is not None
+            for cli in _ML_API_ANALYSIS_CLI_OPTIONS.values()
+        ):
+            _warn_ml_api_trace_errors(workload)
 
         if args.list_stats:
             tty.show_kernel_stats(
@@ -363,7 +368,7 @@ class cli_analysis(OmniAnalyze_Base):
                 "ml api trace",
                 f"No {label} operators matched the pattern(s): {pattern_list}",
             )
-            _warn_missing_source_location_errors(workload)
+            _warn_ml_api_trace_errors(workload)
             sys.exit(0)
 
         kernel_top_df = workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID]
@@ -391,12 +396,14 @@ class cli_analysis(OmniAnalyze_Base):
                 "for metric analysis.",
             )
         elif workload.filter_kernel_ids:
+            _warn_ml_api_trace_errors(workload)
             console_error(
                 "ml api trace",
                 f"No {label}-operator kernels overlap with the -k filter "
                 f"{workload.filter_kernel_ids}. No kernels to analyze.",
             )
         else:
+            _warn_ml_api_trace_errors(workload)
             console_error(
                 "ml api trace",
                 "No kernels found for matched operators. No kernels to analyze.",
@@ -407,7 +414,6 @@ class cli_analysis(OmniAnalyze_Base):
     ) -> None:
         """Display the matched operator call tree for a single backend."""
         if not workload.ml_api_glob_matches:
-            _warn_missing_source_location_errors(workload)
             return
         cli = _ML_API_ANALYSIS_CLI_OPTIONS[backend]
         label = cli["label"]
@@ -422,4 +428,3 @@ class cli_analysis(OmniAnalyze_Base):
         tty.show_call_tree(subtree)
         tty.show_operator_summary(build_operator_summary(subtree))
         print(f"{'=' * 80}")
-        _warn_missing_source_location_errors(workload)
