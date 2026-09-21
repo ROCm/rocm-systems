@@ -184,6 +184,9 @@ using rocprofiler_sdk::wrapper;
 
 using production_backend = backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>;
 
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+extern client_data* g_tool_data;
+
 struct external_dependencies
 {
     using agent_t         = ::rocprofsys::agent;
@@ -363,6 +366,54 @@ struct external_dependencies
         return get_backtrace(bt_data);
     }
 
+    // ─── kernel_dispatch buffered-domain dependencies ────────────────────────────
+    using kernel_dispatch_sample_t = trace_cache::kernel_dispatch_sample;
+    using metadata_registry_t      = trace_cache::metadata_registry;
+    using buffer_storage_t         = trace_cache::buffer_storage_t;
+
+    static constexpr std::string_view kernel_dispatch_category_name =
+        trait::name<category::rocm_kernel_dispatch>::value;
+
+    static metadata_registry_t& get_metadata_registry()
+    {
+        return trace_cache::get_metadata_registry();
+    }
+
+    static buffer_storage_t& get_buffer_storage()
+    {
+        return trace_cache::get_buffer_storage();
+    }
+
+    static std::string_view get_kernel_symbol_name(std::uint64_t kernel_id)
+    {
+        auto symbol = get_metadata_registry().get_kernel_symbol(kernel_id);
+        return symbol.has_value() ? std::string_view{ symbol->kernel_name }
+                                  : std::string_view{};
+    }
+
+    static std::uint64_t get_thread_info_sequent_tid(std::uint64_t tid)
+    {
+        const auto& thread_info_data = thread_info::get(tid, SystemTID);
+        return thread_info_data->index_data->sequent_value;
+    }
+
+    static void write_timemory_bundle(std::string_view name, std::uint64_t tid,
+                                      std::uint64_t elapsed_ns)
+    {
+        using kernel_dispatch_bundle_t =
+            tim::lightweight_tuple<tim::component::wall_clock>;
+
+        auto kernel_dispatch_bundle_data = kernel_dispatch_bundle_t{ name };
+        kernel_dispatch_bundle_data.push(static_cast<std::int64_t>(tid)).start().stop();
+        kernel_dispatch_bundle_data.get(
+            [elapsed_ns](tim::component::wall_clock* wall_clock_data) {
+                wall_clock_data->set_value(static_cast<std::int64_t>(elapsed_ns));
+                wall_clock_data->set_accum(static_cast<std::int64_t>(elapsed_ns));
+            });
+
+        kernel_dispatch_bundle_data.pop();
+    }
+
     // Single source of truth is core/trace_cache/cacheable.hpp's ABSOLUTE constant;
     // kfd_events.hpp never includes that header, so the value is surfaced here.
     static constexpr std::string_view k_pmc_value_type_absolute = trace_cache::ABSOLUTE;
@@ -427,7 +478,7 @@ thread_postcreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
     state::thread::pop();
 }
 
-#if(ROCPROFILER_VERSION < 700)
+#if (ROCPROFILER_VERSION < 700)
 /**
  * @brief Stream ID.
  */
@@ -438,7 +489,7 @@ typedef struct rocprofiler_stream_id_t
 
 #endif
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
 
 struct rocprofsys_ompt_data_storage_t
 {
@@ -682,7 +733,7 @@ template <typename CorrelationIdType>
 std::uint64_t
 get_parent_stack_id([[maybe_unused]] const CorrelationIdType& correlation_id)
 {
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
     if constexpr(std::is_same_v<rocprofiler_correlation_id_t, CorrelationIdType>)
     {
         return correlation_id.ancestor;
@@ -751,7 +802,7 @@ using kernel_rename_stack_t = std::stack<std::uint64_t>;
 thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
 thread_local auto thread_dispatch_rename_dtor = scope_destructor{ []() {
     delete thread_dispatch_rename;
-    thread_dispatch_rename                    = nullptr;
+    thread_dispatch_rename = nullptr;
 } };
 
 template <typename Category>
@@ -783,7 +834,7 @@ size_t
 get_mem_copy_dst_address(
     [[maybe_unused]] const rocprofiler_buffer_tracing_memory_copy_record_t& record)
 {
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
     return record.dst_address.value;
 #else
     return 0;
@@ -794,19 +845,19 @@ size_t
 get_mem_copy_src_address(
     [[maybe_unused]] const rocprofiler_buffer_tracing_memory_copy_record_t& record)
 {
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
     return record.src_address.value;
 #else
     return 0;
 #endif
 }
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
 size_t
 get_mem_alloc_address(
     [[maybe_unused]] const rocprofiler_buffer_tracing_memory_allocation_record_t& record)
 {
-#    if(ROCPROFILER_VERSION >= 700)
+#    if (ROCPROFILER_VERSION >= 700)
     return record.address.value;
 #    else
     return static_cast<size_t>(record.address.handle);
@@ -913,7 +964,7 @@ cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record,
         stream_handle });
 }
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
 void
 // NOLINTNEXTLINE(misc-const-correctness) - signature must match
 // rocprofiler_buffer_tracing_cb_t exactly
@@ -1105,7 +1156,7 @@ get_kernel_dispatch_timestamps()
     return _v;
 }
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
 
 /**
  * @brief rocprofiler_iterate_callback_tracing_kind_operation_args wrapper for OMPT
@@ -1657,7 +1708,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         }
     };
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     // Skip implicit_task associated with an "initial-task-begin" occurrence as
     // well as the thread_begin associated with an "initial-thread-begin" occurrence
     // as they are generated by our tool.
@@ -1728,7 +1779,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         user_data->value = ts;
         switch(record.kind)
         {
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
                 ompt_tracing_callback_start(record, user_data, ts);
@@ -1752,11 +1803,11 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
             case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
             case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
 #endif
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
             case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
@@ -1787,7 +1838,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
         switch(record.kind)
         {
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
                 ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
@@ -1815,11 +1866,11 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
             case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
             case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
 #endif
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
             case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
@@ -1864,7 +1915,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 }
             }
             break;
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
                 // Callbacks that are received but that we do not process
@@ -2334,7 +2385,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     }
                 }
             }
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)
             {
                 auto* record =
@@ -2651,7 +2702,7 @@ set_kernel_rename_and_stream_correlation_id(
     return 0;
 }
 
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
 void
 tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
                          rocprofiler_user_data_t* /* user_data */, void* /* data */)
@@ -2770,7 +2821,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         std::array<rocprofiler_external_correlation_id_request_kind_t, 3>{
             ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
             ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION
 #endif
         };
@@ -2792,7 +2843,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             // k_hipfile_api) below, on their own context, to avoid double-registering
             // these kinds on primary_ctx.
             ROCPROFILER_CALLBACK_TRACING_RCCL_API,
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
             ROCPROFILER_CALLBACK_TRACING_OMPT,
 #endif
         })
@@ -2816,7 +2867,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         external_corr_id_request_kinds.size(),
         set_kernel_rename_and_stream_correlation_id, _data));
 
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
     if((_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH)) ||
        (_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)))
     {
@@ -2867,7 +2918,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             _data->scratch_memory_buffer));
     }
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION))
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
@@ -2893,7 +2944,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     std::vector<domain_selection> domain_selection_list;
 
-#if(ROCPROFILER_VERSION >= 10202)
+#if (ROCPROFILER_VERSION >= 10202)
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT))
     {
         domain_selection selection;
@@ -3071,7 +3122,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         domain_selection_list.push_back(selection);
     }
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API))
     {
         _data->backtrace_operations.emplace(
@@ -3087,7 +3138,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API))
     {
         _data->backtrace_operations.emplace(
@@ -3103,7 +3154,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 10304)
+#if (ROCPROFILER_VERSION >= 10304)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API))
     {
         _data->backtrace_operations.emplace(
@@ -3119,7 +3170,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 10305)
+#if (ROCPROFILER_VERSION >= 10305)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API))
     {
         _data->backtrace_operations.emplace(
@@ -3228,7 +3279,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 void
 finalize_sdk_common()
 {
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     ompt_finalize_orphan_events();
 #endif
 
