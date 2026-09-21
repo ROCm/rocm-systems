@@ -97,19 +97,22 @@ FfmMemoryAccess make_memory_access(EntityId instruction_id, FfmWaveInfo wave_inf
 }
 
 // ld.so reports an unsatisfied ELF symbol version as
-// `version `GLIBC_2.33' not found (required by ...)`. Match that form so a
-// missing path that merely contains `GLIBC_` (or GLIBCXX_/CXXABI_) still fails.
+// `version `GLIBC_2.33' not found (required by ...)`. Require those quote
+// delimiters so a missing path that contains the same words still fails.
 bool is_loader_symbol_version_error(std::string_view error) {
-  const auto version_pos = error.find("version ");
-  if (version_pos == std::string_view::npos)
+  constexpr std::string_view kOpen = "version `";
+  constexpr std::string_view kClose = "' not found";
+  const auto open = error.find(kOpen);
+  if (open == std::string_view::npos)
     return false;
-  const auto not_found_pos = error.find(" not found", version_pos);
-  if (not_found_pos == std::string_view::npos)
+  const auto token_begin = open + kOpen.size();
+  const auto close = error.find(kClose, token_begin);
+  if (close == std::string_view::npos)
     return false;
-  const std::string_view quoted = error.substr(version_pos, not_found_pos - version_pos);
+  const std::string_view token = error.substr(token_begin, close - token_begin);
   constexpr std::string_view kFamilies[] = {"GLIBC_", "GLIBCXX_", "CXXABI_"};
   for (const std::string_view family : kFamilies) {
-    if (quoted.find(family) != std::string_view::npos)
+    if (token.size() > family.size() && token.substr(0, family.size()) == family)
       return true;
   }
   return false;
@@ -367,6 +370,9 @@ TEST(PerfsimLoaderErrorTest, MissingPathWithVersionTokenStillFails) {
       "/tmp/GLIBC_/missing.so: cannot open shared object file: No such file or directory"));
   EXPECT_FALSE(is_loader_symbol_version_error(
       "/tmp/GLIBCXX_/missing.so: cannot open shared object file: No such file or directory"));
+  EXPECT_FALSE(is_loader_symbol_version_error(
+      "/tmp/version GLIBC_2.33 not found/missing.so: cannot open shared object file: No such "
+      "file or directory"));
   EXPECT_FALSE(is_loader_symbol_version_error("cannot load Perfsim backend: unknown error"));
 }
 
