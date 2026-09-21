@@ -1556,4 +1556,49 @@ TEST_F(NetIbMPITest, CastGrhSetOnRoceQp) {
     TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
+// =============================================================================
+// Test: CastSubnetAwareRoutingSameSubnet
+//
+// Smoke test for NCCL_IB_SUBNET_AWARE_ROUTING=1 (env set by the test config,
+// not this test). On single-subnet hardware, enabling the param drives
+// IbCastFindDevBySubnet down its "default device's PFs all match the peer's
+// subnet -> keep it" fast path (connect.cc IbCastFindDevBySubnet, called from
+// IbCastListen and Connect/Accept) on every real connection setup. This does
+// not exercise cross-subnet device switching or the IB GRH+FLID path -- those
+// require a multi-subnet/IB-router fabric this suite does not have. The goal
+// here is only to prove the routing param does not regress normal
+// same-subnet connectivity on production topology.
+// =============================================================================
+TEST_F(NetIbMPITest, CastSubnetAwareRoutingSameSubnet) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 1024;
+    char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>((i * 11) & 0xFF);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 901, mhandle);
+    if (rank == 0)
+        EXPECT_EQ(memcmp(sendBuf, recvBuf, kMsgSize), 0) << "data mismatch";
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
 #endif // MPI_TESTS_ENABLED
