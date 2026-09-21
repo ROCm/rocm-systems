@@ -10,6 +10,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+  - Fixed `rocprofv3 --stats` being silently ignored when none of the selected output
+    formats support statistics. `rocprofv3` now warns that statistics are emitted only
+    to CSV and JSON output and directs ROCpd users to `rocpd2summary`.
+
 ### Known issues
 
 ### Removed

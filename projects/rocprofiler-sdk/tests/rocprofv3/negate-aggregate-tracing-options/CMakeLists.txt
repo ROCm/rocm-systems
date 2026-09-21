@@ -108,3 +108,55 @@ rocprofiler_add_integration_execute_test(
     PASS_REGULAR_EXPRESSION
         "direct rocprofv3 output format.*deprecated: CSV.*hipFILE, rocSHMEM, and HIP event"
     )
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-stats-default-rocpd-warning
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --stats --kernel-trace --echo --
+            ${CMAKE_COMMAND}
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION
+        "--stats has no effect.*output format\\(s\\) rocpd.*rocpd2summary -i <database>.db"
+    )
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-stats-unsupported-output-formats-warning
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --stats --kernel-trace
+            --output-format pftrace otf2 --echo -- ${CMAKE_COMMAND}
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION
+        "--stats has no effect.*output format\\(s\\) pftrace, otf2.*only to csv and json"
+    )
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-stats-supported-output-format-no-warning
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --stats --kernel-trace
+            --output-format rocpd csv --echo -- ${CMAKE_COMMAND}
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+        "--stats has no effect"
+    )
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-stats-output-format-env-no-warning
+    COMMAND
+        ${CMAKE_COMMAND} -E env ROCPROF_OUTPUT_FORMAT=json
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --stats --kernel-trace --echo --
+        ${CMAKE_COMMAND}
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+        "--stats has no effect"
+    )
