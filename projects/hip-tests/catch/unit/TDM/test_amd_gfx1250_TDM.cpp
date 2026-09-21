@@ -78,7 +78,7 @@ __global__ void TDM_load_store_tester_nd(const int* data, int* result, int e0, i
     if constexpr (Rank >= 5) {
         group3.tensorDim3Stride((uint64_t)e0 * e1 * e2 * e3);
         group3.tensorDim4(e4);
-        group3.m_tile_dim4 = e4;
+        group3.tileDim4(e4);
     }
 
     v8i v8i_zeros{0, 0, 0, 0, 0, 0, 0, 0};
@@ -210,9 +210,9 @@ static void SkipIfNotTDMCapable(const char* test_name) {
 #endif
 }
 
-TEST_CASE("TDM_Basic_load_2d")
+TEST_CASE("test_amd_gfx1250_TDM_2d")
 {
-    SkipIfNotTDMCapable("TDM_Basic_load_2d");
+    SkipIfNotTDMCapable("test_amd_gfx1250_TDM_2d");
     constexpr int kAllocSize = 10 * 10;
     const auto alloc_size = kAllocSize * sizeof(int);
 
@@ -270,19 +270,19 @@ static void RunTdmNdTest(const char* test_name, int e0, int e1, int e2 = 1, int 
     }
 }
 
-TEST_CASE("TDM_Basic_load_3d")
+TEST_CASE("test_amd_gfx1250_TDM_3d")
 {
-    RunTdmNdTest<3, 4 * 5 * 3>("TDM_Basic_load_3d", 4, 5, 3);
+    RunTdmNdTest<3, 4 * 5 * 3>("test_amd_gfx1250_TDM_3d", 4, 5, 3);
 }
 
-TEST_CASE("TDM_Basic_load_4d")
+TEST_CASE("test_amd_gfx1250_TDM_4d")
 {
-    RunTdmNdTest<4, 3 * 4 * 2 * 5>("TDM_Basic_load_4d", 3, 4, 2, 5);
+    RunTdmNdTest<4, 3 * 4 * 2 * 5>("test_amd_gfx1250_TDM_4d", 3, 4, 2, 5);
 }
 
-TEST_CASE("TDM_Basic_load_5d")
+TEST_CASE("test_amd_gfx1250_TDM_5d")
 {
-    RunTdmNdTest<5, 2 * 3 * 2 * 2 * 3>("TDM_Basic_load_5d", 2, 3, 2, 2, 3);
+    RunTdmNdTest<5, 2 * 3 * 2 * 2 * 3>("test_amd_gfx1250_TDM_5d", 2, 3, 2, 2, 3);
 }
 
 TEST_CASE("TDM_Gather_load_16bit_indices")
