@@ -96,6 +96,8 @@ deviceLib:
     tags: [memory]
   Unit_deviceAllocationAfterDeviceReset:
     <<: *level_2
+    # AIRUNTIME-263: segfaults inside amdhip64 on Windows gfx110X PAL.
+    disabled: [amd_windows]
     tags: [memory]
   Unit_AtomicFunctions_Inc:
     <<: *level_2

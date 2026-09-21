@@ -250,6 +250,15 @@ collected in the following table.
       - | Protocol name string
         | Used to override automatic protocol selection
 
+    * - | ``RCCL_DIRECT_ALLGATHER_DISABLE``
+        | Controls the direct AllGather algorithm. Because the algorithm builds a full
+          point-to-point mesh, its queue-pair footprint grows with the square
+          of the job size.
+      - | ``-1``: Automatic (default). Not selected on AINIC above 8 nodes.
+        | ``0``: Skips the automatic AINIC check. The size, architecture and
+          CTA-policy gates in ``rcclUseAllGatherDirect`` still apply.
+        | Any other value: Disabled.
+
 Network and topology
 ====================
 
@@ -383,6 +392,28 @@ in the following table.
         | Values ``> MAXCHANNELS`` set through ``ncclConfig_t`` are rejected
         | with ``ncclInvalidArgument`` at communicator initialization.
 
+    * - | ``NCCL_P2P_MAX_PEERS``
+        | Sets the maximum number of peers a rank communicates with concurrently
+        | over P2P. This overrides the value of the ``maxP2pPeers`` field in
+        | ``ncclConfig_t``. Where it applies, RCCL divides the P2P channel pool
+        | among this many peers instead of among all ranks, so a smaller value
+        | gives each peer more channels, affecting ``ncclSend``/``ncclRecv`` and
+        | the send/recv-based collectives (all-to-all, scatter, gather). It does
+        | not restrict which peers a rank is allowed to communicate with.
+        | It is read in two places only: the per-peer channel tiling enabled by
+        | ``RCCL_SATURATE_P2P_NCHANNELS`` (on by default for gfx1250 only), and
+        | the multi-node per-peer reduction, which requires more than one node
+        | and ``NCCL_NCHANNELS_PER_NET_PEER`` / ``nChannelsPerNetPeer`` unset.
+        | A single-node job on another architecture with default settings is
+        | therefore unaffected.
+      - | Integer value, ``1`` to the number of ranks (default: unset, which
+        | means the number of ranks in the communicator)
+        | Values ``<= 0`` are ignored and a message is logged.
+        | Values greater than the communicator size are capped to it.
+        | Values ``<= 0`` other than ``NCCL_CONFIG_UNDEF_INT`` set through
+        | ``ncclConfig_t`` are rejected with ``ncclInvalidArgument`` at
+        | communicator initialization.
+
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.
       - | Ring topology specification string
@@ -471,7 +502,7 @@ application adds explicit synchronization between streams.
 Inspector profiling
 ===================
 
-The NCCL Inspector is a profiler plugin that emits per-communicator,
+The RCCL Inspector is a profiler plugin that emits per-communicator,
 per-operation performance data (collectives and point-to-point) as JSON or
 Prometheus textfile metrics. For a full walkthrough, see
 :doc:`../how-to/using-rccl-inspector-plugin`. The Inspector environment
@@ -503,6 +534,13 @@ variables are collected in the following table.
       - | ``0``: JSON output (default).
         | ``1``: Prometheus textfile output.
 
+    * - | ``NCCL_INSPECTOR_CLUSTER``
+        | Overrides the Prometheus ``cluster`` label. When unset, the Inspector
+        | uses ``SLURM_CLUSTER_NAME``. Set this when that name is missing.
+      - | String.
+        | Default: unset (falls back to ``SLURM_CLUSTER_NAME``, else
+        | ``unknown``).
+
     * - | ``NCCL_INSPECTOR_DUMP_THREAD_ENABLE``
         | Enables the internal dump thread. When disabled, output is only
         | written at communicator teardown, regardless of the configured
@@ -522,7 +560,8 @@ variables are collected in the following table.
         | Output directory for Inspector logs/metrics. For Prometheus mode,
         | point this at the node-exporter textfile collector directory.
       - | String path.
-        | Default: ``nccl-inspector-<slurm_job_id>`` or
+        | Default: ``nccl-inspector-<jobid>`` from ``SLURM_JOB_ID``,
+        | ``SLURM_JOBID``, ``PBS_JOBID``, or ``LSB_JOBID``, else
         | ``nccl-inspector-unknown-jobid``.
 
     * - | ``NCCL_INSPECTOR_DUMP_VERBOSE``
