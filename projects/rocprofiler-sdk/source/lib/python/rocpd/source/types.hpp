@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -410,6 +410,34 @@ struct scratch_memory
     rocprofiler_timestamp_t start            = 0;
     rocprofiler_timestamp_t end              = 0;
     uint64_t                size             = 0;
+    uint64_t                stack_id         = 0;
+    uint64_t                parent_stack_id  = 0;
+    uint64_t                corr_id          = 0;
+};
+
+struct hip_events
+{
+    uint64_t                id               = 0;
+    guid_t                  guid             = {};
+    std::string             category         = {};
+    uint64_t                nid              = 0;
+    pid_t                   pid              = 0;
+    pid_t                   tid              = 0;
+    rocprofiler_timestamp_t start            = 0;
+    rocprofiler_timestamp_t end              = 0;
+    uint64_t                duration         = 0;
+    std::string             name             = {};
+    uint64_t                stream_id        = 0;
+    uint64_t                queue_id         = 0;
+    std::string             stream_name      = {};
+    std::string             queue_name       = {};
+    std::string             device           = {};
+    uint64_t                agent_abs_index  = 0;
+    uint64_t                agent_log_index  = 0;
+    uint64_t                agent_type_index = 0;
+    std::string             agent_type       = {};
+    uint64_t                hip_event_handle = 0;
+    uint64_t                source_queue_id  = 0;
     uint64_t                stack_id         = 0;
     uint64_t                parent_stack_id  = 0;
     uint64_t                corr_id          = 0;
@@ -906,6 +934,36 @@ load(ArchiveT& ar, rocpd::types::scratch_memory& data)
     LOAD_DATA_FIELD(end);
     LOAD_DATA_FIELD(size);
     LOAD_DATA_FIELD(category);
+    LOAD_DATA_FIELD(stack_id);
+    LOAD_DATA_FIELD(parent_stack_id);
+    LOAD_DATA_FIELD(corr_id);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, rocpd::types::hip_events& data)
+{
+    LOAD_DATA_FIELD(id);
+    LOAD_DATA_FIELD(guid);
+    LOAD_DATA_FIELD(category);
+    LOAD_DATA_FIELD(nid);
+    LOAD_DATA_FIELD(pid);
+    LOAD_DATA_FIELD(tid);
+    LOAD_DATA_FIELD(start);
+    LOAD_DATA_FIELD(end);
+    LOAD_DATA_FIELD(duration);
+    LOAD_DATA_FIELD(name);
+    LOAD_DATA_FIELD(stream_id);
+    LOAD_DATA_FIELD(queue_id);
+    LOAD_DATA_FIELD(stream_name);
+    LOAD_DATA_FIELD(queue_name);
+    LOAD_DATA_FIELD(device);
+    LOAD_DATA_FIELD(agent_abs_index);
+    LOAD_DATA_FIELD(agent_log_index);
+    LOAD_DATA_FIELD(agent_type_index);
+    LOAD_DATA_FIELD(agent_type);
+    LOAD_DATA_FIELD(hip_event_handle);
+    LOAD_DATA_FIELD(source_queue_id);
     LOAD_DATA_FIELD(stack_id);
     LOAD_DATA_FIELD(parent_stack_id);
     LOAD_DATA_FIELD(corr_id);

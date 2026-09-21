@@ -4,6 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #include <csignal>
+#include <cstring>
 #include <unistd.h>
 #include "TestBed.hpp"
 #include <rccl/rccl.h>
@@ -48,6 +49,12 @@
 
 namespace RcclUnitTesting
 {
+  namespace
+  {
+    // Matched by suite, not by test: one sweep's sample, so exact test names leave siblings exposed.
+    char const* const kGfx95NoPoolSuites[] = {"AlltoAll", "ReduceScatter", "AllGather", "P2pChannelScaling"};
+  }
+
   TestBed::TestBed() :
     numDevicesAvailable(0),
     numActiveChildren(0),
@@ -64,6 +71,28 @@ namespace RcclUnitTesting
     // Communicator process pool: ON by default; set UT_COMM_POOL=0 to disable.
     // Parsed/registered centrally in EnvVars (shown in the config banner) like every UT_* var.
     this->poolMode = ev.commPool;
+
+    // Unstable on gfx95 when comms/workers are reused across configs (AICOMRCCL-2275); unconditional,
+    // so UT_COMM_POOL=1 cannot defeat it. Exact match excludes AlltoAllv, whose hang is AICOMRCCL-1900.
+    if (this->poolMode && ev.isGfx95)
+    {
+      // TestBed is a local in each TEST body, so current_test_info() is null only outside one.
+      ::testing::TestInfo const* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
+      if (testInfo != nullptr && testInfo->test_suite_name() != nullptr)
+      {
+        for (char const* const suiteName : kGfx95NoPoolSuites)
+        {
+          if (strcmp(testInfo->test_suite_name(), suiteName) != 0)
+          {
+            continue;
+          }
+          this->poolMode = false;
+          TEST_INFO("Comm pool (UT_COMM_POOL) forced off for %s.%s: pool reuse is unstable for this suite on gfx95",
+                    testInfo->test_suite_name(), testInfo->name());
+          break;
+        }
+      }
+    }
     this->configUsedPool = false;
   }
 

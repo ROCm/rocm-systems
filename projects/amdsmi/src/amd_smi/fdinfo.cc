@@ -13,15 +13,11 @@
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_container_id_parser.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 
 extern "C" {
-
-static const char* container_type_name[AMDSMI_MAX_CONTAINER_TYPE] = {
-    [AMDSMI_CONTAINER_LXC] = "lxc",
-    [AMDSMI_CONTAINER_DOCKER] = "docker",
-};
 
 amdsmi_status_t gpuvsmi_pid_is_gpu(const std::string& path, const char* bdf) {
   DIR* d;
@@ -186,26 +182,22 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
   //        In case the other info fail, get at least something.
   char exe_realpath[PATH_MAX] = {0};
   ssize_t len = readlink(name_path.c_str(), exe_realpath, sizeof(exe_realpath) - 1);
-  std::string name = (len > 0) ? std::string(exe_realpath, len) : "N/A";
+  std::string name = (len > 0) ? std::string(exe_realpath, static_cast<size_t>(len)) : "N/A";
 
   if (name.empty()) return AMDSMI_STATUS_API_FAILED;
 
-  strncpy(info.name, name.c_str(),
-          std::min((unsigned long)AMDSMI_MAX_STRING_LENGTH, name.length()));
+  // strncpy(dst, src, min(CAP, len)) leaves info.name unterminated when
+  // name.length() >= AMDSMI_MAX_STRING_LENGTH; readlink() of /proc/<pid>/exe
+  // can produce up to PATH_MAX bytes.
+  amd::smi::CopyBounded(info.name, sizeof(info.name), name);
 
-  for (int i = 0; i < AMDSMI_MAX_CONTAINER_TYPE; i++) {
+  std::vector<std::string> cgroup_lines;
+  {
     std::ifstream cgroup_info(cgroup_path.c_str());
-    std::string container_id;
-    for (std::string line; getline(cgroup_info, line);) {
-      if (line.find(container_type_name[i]) != std::string::npos) {
-        container_id =
-            line.substr(line.find(container_type_name[i]) + strlen(container_type_name[i]) + 1, 16);
-        strcpy(info.container_name, container_id.c_str());
-        break;
-      }
-    }
-    if (strlen(info.container_name) > 0) break;
+    for (std::string line; getline(cgroup_info, line);) cgroup_lines.push_back(line);
   }
+  amd::smi::ResolveContainerId(cgroup_lines, info.container_name, sizeof(info.container_name));
+
   info.pid = (uint32_t)pid;
 
   return AMDSMI_STATUS_SUCCESS;

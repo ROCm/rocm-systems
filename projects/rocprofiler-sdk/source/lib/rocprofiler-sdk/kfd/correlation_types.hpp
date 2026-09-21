@@ -56,7 +56,7 @@ steady_now_ns()
 // now representable (the hub's multimap) and resolved by window containment.
 struct correlation_key
 {
-    uint32_t doorbell_off       = 0;
+    uint32_t doorbell_slot      = 0;
     uint32_t dispatch_idx_low32 = 0;
     // Doorbell slots and dispatch indices are per-GPU and both restart from low
     // values, so without this a record from one GPU can match a dispatch on
@@ -65,7 +65,7 @@ struct correlation_key
 
     bool operator==(const correlation_key& rhs) const
     {
-        return doorbell_off == rhs.doorbell_off && dispatch_idx_low32 == rhs.dispatch_idx_low32 &&
+        return doorbell_slot == rhs.doorbell_slot && dispatch_idx_low32 == rhs.dispatch_idx_low32 &&
                gpu_id == rhs.gpu_id;
     }
 
@@ -98,7 +98,7 @@ struct correlation_key_hash
         auto mix = [](size_t seed, uint32_t value) {
             return seed ^ (std::hash<uint32_t>{}(value) + 0x9e3779b9UL + (seed << 6) + (seed >> 2));
         };
-        size_t seed = std::hash<uint32_t>{}(key.doorbell_off);
+        size_t seed = std::hash<uint32_t>{}(key.doorbell_slot);
         seed        = mix(seed, key.dispatch_idx_low32);
         seed        = mix(seed, key.gpu_id);
         return seed;

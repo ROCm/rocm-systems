@@ -11,6 +11,7 @@ on:
       - synchronize
       - reopened
       - labeled
+      - unlabeled
   workflow_dispatch:
     inputs:
       projects:
@@ -37,8 +38,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ci-gate:
+    name: Check CI Label
+    runs-on: ubuntu-24.04
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+    steps:
+      - name: Check for single-arch opt-in
+        id: gate
+        run: |
+          echo "enabled=${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:single-arch')) }}" >> "${GITHUB_OUTPUT}"
+
   setup:
     name: "Setup"
+    needs: ci-gate
+    if: ${{ needs.ci-gate.outputs.enabled == 'true' }}
     runs-on: ubuntu-24.04
     env:
       # The commit being checked out is the merge commit for a PR. Its first
@@ -81,7 +95,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: b45a06045cbb29c85e221748e653ac2521c6e1bf # 2026-08-26
+          ref: 54ed4ae0a9cf2d5a531d55f206a4d5f2235b6624 # 2026-09-19
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -197,7 +211,7 @@ jobs:
   # TODO: Remove this separate job once MI455 test infrastructure is stable and
   # we have sufficient MI455 machine capacity to run tests without blocking PRs.
   therock-test-linux-mi455:
-    name: Linux MI455 Test
+    name: Linux MI455 Test (non-blocking)
     needs: [setup, therock-build-linux-mi455]
     if: ${{ needs.setup.outputs.run_mi455_test == 'true' }}
     uses: ./.github/workflows/therock-test-packages.yml
@@ -258,6 +272,7 @@ jobs:
     name: TheRock CI Summary
     if: always()
     needs:
+      - ci-gate
       - setup
       - therock-ci-linux
       - therock-build-linux-mi455
@@ -265,7 +280,20 @@ jobs:
       - therock-ci-windows
     runs-on: ubuntu-24.04
     steps:
+      - name: Report gate failure
+        if: ${{ needs.ci-gate.result != 'success' }}
+        run: |
+          echo "TheRock CI gate did not complete successfully."
+          exit 1
+
+      - name: Report skipped workflow
+        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'false' }}
+        run: |
+          echo "TheRock CI is skipped by default for push and pull_request events."
+          echo "Use workflow_dispatch or add the ci:single-arch label to a pull request to enable it."
+
       - name: Output failed jobs
+        if: ${{ needs.ci-gate.result == 'success' && needs.ci-gate.outputs.enabled == 'true' }}
         run: |
           echo '${{ toJson(needs) }}'
           FAILED_JOBS="$(echo '${{ toJson(needs) }}' \

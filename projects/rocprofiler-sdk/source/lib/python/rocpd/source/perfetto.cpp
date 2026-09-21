@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -203,7 +203,8 @@ write_perfetto(
     const tool::generator<types::graph_launch>&      graph_launch_gen,
     const tool::generator<types::scratch_memory>&    scratch_memory_gen,
     const tool::generator<types::memory_allocation>& memory_allocation_gen,
-    const tool::generator<types::counter>&           counter_collection_gen)
+    const tool::generator<types::counter>&           counter_collection_gen,
+    const tool::generator<types::hip_events>&        hip_events_gen)
 {
     namespace sdk    = ::rocprofiler::sdk;
     namespace common = ::rocprofiler::common;
@@ -319,6 +320,12 @@ write_perfetto(
                 }
             }
     }
+
+    for(auto ditr : hip_events_gen)
+        for(const auto& itr : hip_events_gen.get(ditr))
+        {
+            agent_stream_ids.emplace(rocprofiler_stream_id_t{.handle = itr.stream_id});
+        }
 
     for(auto ditr : memory_allocation_gen)
         for(const auto& itr : memory_allocation_gen.get(ditr))
@@ -646,6 +653,34 @@ write_perfetto(
                                   });
                 TRACE_EVENT_END(
                     sdk::perfetto_category<sdk::category::memory_copy>::name, *_track, itr.end);
+            }
+            tracing_session->FlushBlocking();
+        }
+
+        for(auto ditr : hip_events_gen)
+        {
+            for(auto itr : hip_events_gen.get(ditr))
+            {
+                auto  stream_id = rocprofiler_stream_id_t{.handle = itr.stream_id};
+                auto& _track    = stream_tracks.at(stream_id);
+
+                TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::hip_event>::name,
+                                  perfetto_session.get_static_event_name(itr.name),
+                                  _track,
+                                  itr.start,
+                                  ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
+                                  "begin_ns",
+                                  itr.start,
+                                  "end_ns",
+                                  itr.end,
+                                  "delta_ns",
+                                  (itr.end - itr.start),
+                                  "hip_event_handle",
+                                  itr.hip_event_handle,
+                                  "source_queue_id",
+                                  itr.source_queue_id);
+                TRACE_EVENT_END(
+                    sdk::perfetto_category<sdk::category::hip_event>::name, _track, itr.end);
             }
             tracing_session->FlushBlocking();
         }

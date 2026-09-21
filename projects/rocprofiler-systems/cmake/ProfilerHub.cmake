@@ -14,9 +14,9 @@ set(ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY
 )
 
 set(ROCPROFSYS_PROFILER_HUB_GIT_TAG
-    "0e57a383b016cfd75b02e83dfb2adcd55f395b42"
+    "aacea4ed5c99bdc9e537778859b5136d7d086ddb"
     CACHE STRING
-    "Git commit for profiler-hub fallback sparse checkout (pinned to the #8610 merge commit that fixes profiler-hub's export-set and schema-API build failures)"
+    "Git commit for profiler-hub fallback sparse checkout (pinned to merged #10459: NIC agent support and RocPD schema 3.0.1)"
 )
 
 set(ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR

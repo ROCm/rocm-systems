@@ -24,6 +24,7 @@
 
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 
@@ -149,6 +150,17 @@ discover_stream_dispatch_log_gpus(const char* nodes_path)
     return gpu_ids;
 }
 
+// F15: is any registered context actually tracing kernel dispatch? Same predicate
+// as the interposition arm (buffer OR callback kernel-dispatch tracing).
+bool
+kernel_dispatch_context_registered()
+{
+    return !context::get_registered_contexts([](const context::context* ctx) {
+                return ctx->is_tracing_one_of(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                              ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH);
+            }).empty();
+}
+
 void
 init_kfd_profiler()
 {
@@ -204,10 +216,12 @@ init_kfd_profiler()
     // a tool that starts its kernel-dispatch context in tool_init calls
     // start_context BEFORE HSA loads, so the arm there is a guaranteed no-op and
     // the ring is armed only lazily on the first dispatch -- losing the earliest
-    // ones. This runs at HSA-table install, gated by the feature and reached only
-    // because a kernel-dispatch context enabled interception, so arm now that
-    // probe_ok is set. Idempotent (establish_session early-outs).
-    if(signal_less_feature_enabled()) arm_dispatch_log_sessions();
+    // ones. This runs at HSA-table install, so arm eagerly ONLY when a
+    // kernel-dispatch context is actually registered (F15); the start_context arm
+    // and the lazy first-dispatch fallback still cover a context started later.
+    // Idempotent (establish_session early-outs).
+    if(signal_less_feature_enabled() && kernel_dispatch_context_registered())
+        arm_dispatch_log_sessions();
 
     // Neither the reader thread nor the ring is created here: installing the HSA
     // table says nothing about whether anyone wants kernel traces, and the SDK
