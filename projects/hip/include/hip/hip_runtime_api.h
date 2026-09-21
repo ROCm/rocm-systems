@@ -96,6 +96,12 @@ typedef struct hipUUID_t {
 #define __HIP_NODISCARD
 #endif
 
+#if defined(_MSC_VER) && (_MSC_VER >= 1800)
+#define UINT32_BASE :uint32_t
+#else
+#define UINT32_BASE
+#endif
+
 /**
  * HIP error type
  *
@@ -103,7 +109,7 @@ typedef struct hipUUID_t {
 // Developer note - when updating these, update the hipErrorName and hipErrorString functions in
 // NVCC and HIP-Clang paths Also update the hipCUDAErrorTohipError function in NVCC path.
 
-typedef enum __HIP_NODISCARD hipError_t {
+typedef enum __HIP_NODISCARD hipError_t UINT32_BASE {
   hipSuccess = 0,            ///< Successful completion.
   hipErrorInvalidValue = 1,  ///< One or more of the parameters passed to the API call is NULL
                              ///< or not in an acceptable range.
@@ -227,6 +233,7 @@ typedef enum __HIP_NODISCARD hipError_t {
 } hipError_t;
 
 #undef __HIP_NODISCARD
+#undef UINT32_BASE
 
 /*
  Versioning struct. Because each public API must use the versioned struct to
@@ -5013,6 +5020,18 @@ hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr);
  * guarantee correct results if different devices write to different parts of the same cache block -
  * typically one of the writes will "win" and overwrite data from the other registered memory
  * region.
+ *
+ *  @warning Avoid registering very large host memory allocations (for example,
+ * multi-gigabyte buffers such as LLM KV caches) with hipHostRegister.
+ *
+ * Unregistering large pinned allocations through hipHostUnregister, or
+ * during process termination, requires synchronous kernel-level page-table
+ * cleanup and unmapping. This operation can incur significant delays and
+ * may trigger kernel CPU soft-lockup warnings.
+ *
+ * For large shared-memory workloads, use Shared Virtual Memory (SVM) via
+ * hipMallocManaged or Heterogeneous Memory Management (HMM)-based memory
+ * management instead.
  *
  *  @returns #hipSuccess, #hipErrorOutOfMemory
  *

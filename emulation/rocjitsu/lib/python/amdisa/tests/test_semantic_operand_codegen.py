@@ -4,6 +4,7 @@
 """Codegen regressions for semantic register operands."""
 
 from amdisa.codegen._generator import CodeGenerator, _OperandCtx
+from amdisa.semantics import derive_semantics
 
 
 def test_ttmp_prefix_maps_to_architectural_register_class():
@@ -224,3 +225,26 @@ def test_accvgpr_src_is_canonicalized_into_acc_range():
         '(OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN - 256) : '
         'reinterpret_cast<const OpEncoding*>(inst)->src0)'
     )
+
+
+def test_sdwa_conversion_result_formats():
+    for name, expected in (
+        ('V_CVT_F16_F32', 'F16'),
+        ('V_CVT_F16_I16', 'F16'),
+        ('V_CVT_F16_U16', 'F16'),
+        ('V_CVT_F32_F16', 'F32'),
+        ('V_CVT_F32_I32', 'F32'),
+        ('V_CVT_F32_U32', 'F32'),
+        ('V_CVT_F32_UBYTE0', 'F32'),
+        ('V_CVT_F32_FP8', 'NONE'),
+        ('V_CVT_F32_BF8', 'NONE'),
+        ('V_CVT_I32_F32', 'NONE'),
+        ('V_CVT_U32_F32', 'NONE'),
+        ('V_CVT_I16_F16', 'NONE'),
+        ('V_CVT_NORM_I16_F16', 'NONE'),
+    ):
+        semantics = derive_semantics(name, 'VOP1')
+        assert semantics is not None
+        assert CodeGenerator._sdwa_result_format(semantics) == (
+            f'amdgpu::sdwa::ResultFormat::{expected}'
+        )

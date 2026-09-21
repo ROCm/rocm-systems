@@ -1469,9 +1469,29 @@ class _AmdgpuProfileBase(IsaProfile):
                    6-bit at [9:4], vmcnt 6-bit at [15:10]).
                    ISAs: RDNA3, RDNA3.5.
         'gfx12' — S_WAITCNT removed; replaced by split S_WAIT_* instructions.
-                   ISAs: RDNA4.
+                   ISAs: RDNA4, CDNA5.
         """
         return 'gfx9'
+
+    @property
+    def vmem_stores_complete_in_order(self) -> bool:
+        """Whether non-FLAT VMEM stores join the ordered VMEM completion class."""
+        return False
+
+    @property
+    def generic_flat_counters_complete_in_order(self) -> bool:
+        """Whether nonzero waits prove progress for generic FLAT operations."""
+        return True
+
+    @property
+    def vmem_writes_use_expcnt(self) -> bool:
+        """Whether vector-memory writes also contribute to EXPCNT."""
+        return False
+
+    @property
+    def gds_uses_expcnt(self) -> bool:
+        """Whether GDS operations also contribute to EXPCNT."""
+        return False
 
     @property
     def has_mfma(self) -> bool:
@@ -1650,6 +1670,24 @@ class CdnaProfile(_AmdgpuProfileBase):
     @property
     def ds_compare_store_compare_first(self) -> bool:
         # CDNA1-4 / RDNA1-2 DS CMPST reverses the BUFFER operand order.
+        return True
+
+    @property
+    def vmem_stores_complete_in_order(self) -> bool:
+        return True
+
+    @property
+    def generic_flat_counters_complete_in_order(self) -> bool:
+        # CDNA1-4 can report early completion for generic FLAT operations on
+        # both VMCNT and LGKMCNT. Fixed GLOBAL/SCRATCH segments remain ordered.
+        return False
+
+    @property
+    def vmem_writes_use_expcnt(self) -> bool:
+        return True
+
+    @property
+    def gds_uses_expcnt(self) -> bool:
         return True
 
     @property
@@ -1998,6 +2036,14 @@ class Rdna1Profile(_AmdgpuProfileBase):
     _SKIP_DPP_SDWA = True
 
     @property
+    def vmem_writes_use_expcnt(self) -> bool:
+        return True
+
+    @property
+    def gds_uses_expcnt(self) -> bool:
+        return True
+
+    @property
     def ds_compare_store_compare_first(self) -> bool:
         # CDNA1-4 / RDNA1-2 DS CMPST reverses the BUFFER operand order.
         return True
@@ -2121,6 +2167,14 @@ class Rdna3Profile(_AmdgpuProfileBase):
     _SKIP_DPP_SDWA = True
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
     _SOP1_BASE_COND = 'Nothas_lit_0_Nothas_lit_1'
+
+    @property
+    def vmem_writes_use_expcnt(self) -> bool:
+        return True
+
+    @property
+    def gds_uses_expcnt(self) -> bool:
+        return True
 
     def normalize_encoding_condition(self, enc_name: str, cond_name: str) -> str:
         if enc_name.upper() == 'ENC_SOP1' and cond_name == self._SOP1_BASE_COND:
@@ -2694,6 +2748,10 @@ class Cdna5Profile(Rdna4Profile):
     logical target used by parser/codegen rules while generated and handwritten
     C++ lives under ``amdgpu/cdna5`` in the ``cdna5`` namespace.
     """
+
+    @property
+    def vmem_stores_complete_in_order(self) -> bool:
+        return True
 
     @property
     def global_addtid_offset_expr(self) -> str:
