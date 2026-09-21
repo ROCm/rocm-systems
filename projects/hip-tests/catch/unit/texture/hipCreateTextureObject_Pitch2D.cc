@@ -226,6 +226,86 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_Pitch2DResource) {
   HIP_CHECK(hipFree(devPtrA));
 }
 
+/**
+ * Test Description
+ * ------------------------
+ *  - Validates that Pitch2D resources reject normalized coordinates and linear filtering:
+ *    -# When normalizedCoords is set and filterMode is point
+ *      - Expected output: return `hipErrorNotSupported`
+ *    -# When normalizedCoords is unset and filterMode is linear
+ *      - Expected output: return `hipErrorNotSupported`
+ *    -# When normalizedCoords is set and filterMode is linear
+ *      - Expected output: return `hipErrorNotSupported`
+ *    -# When normalizedCoords is unset and filterMode is point (positive control)
+ *      - Expected output: return `hipSuccess`
+ * Test source
+ * ------------------------
+ *  - unit/texture/hipCreateTextureObject_Pitch2D.cc
+ * Test requirements
+ * ------------------------
+ *  - Textures supported on device
+ *  - AMD only
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_hipCreateTextureObject_Pitch2D_NormalizedCoordsLinearFilter) {
+  CHECK_IMAGE_SUPPORT
+
+  hipResourceDesc resDesc;
+  hipTextureDesc texDesc;
+  hipTextureObject_t texObj;
+  size_t devPitchA;
+  float* devPtrA;
+
+  // Initialization
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devPtrA), &devPitchA, SIZE_W * sizeof(float),
+                           SIZE_H));
+  memset(&resDesc, 0, sizeof(resDesc));
+  memset(&texDesc, 0, sizeof(texDesc));
+  resDesc.resType = hipResourceTypePitch2D;
+  resDesc.res.pitch2D.devPtr = devPtrA;
+  resDesc.res.pitch2D.height = SIZE_H;
+  resDesc.res.pitch2D.width = SIZE_W;
+  resDesc.res.pitch2D.pitchInBytes = devPitchA;
+  resDesc.res.pitch2D.desc = hipCreateChannelDesc<float>();
+  texDesc.readMode = hipReadModeElementType;
+
+  // Sections
+  SECTION("hipResourceTypePitch2D and normalizedCoords(1)") {
+    texDesc.normalizedCoords = 1;
+    texDesc.filterMode = hipFilterModePoint;
+
+    HIP_CHECK_ERROR(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr),
+                    hipErrorNotSupported);
+  }
+
+  SECTION("hipResourceTypePitch2D and hipFilterModeLinear") {
+    texDesc.normalizedCoords = 0;
+    texDesc.filterMode = hipFilterModeLinear;
+
+    HIP_CHECK_ERROR(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr),
+                    hipErrorNotSupported);
+  }
+
+  SECTION("hipResourceTypePitch2D and normalizedCoords(1)/hipFilterModeLinear") {
+    texDesc.normalizedCoords = 1;
+    texDesc.filterMode = hipFilterModeLinear;
+
+    HIP_CHECK_ERROR(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr),
+                    hipErrorNotSupported);
+  }
+
+  SECTION("hipResourceTypePitch2D and normalizedCoords(0)/hipFilterModePoint") {
+    texDesc.normalizedCoords = 0;
+    texDesc.filterMode = hipFilterModePoint;
+
+    HIP_CHECK(hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr));
+    HIP_CHECK(hipDestroyTextureObject(texObj));
+  }
+
+  // De-Initialization
+  HIP_CHECK(hipFree(devPtrA));
+}
+
 
 /**
  * End doxygen group TextureTest.
