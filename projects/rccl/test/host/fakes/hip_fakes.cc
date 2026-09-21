@@ -50,6 +50,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipMemMap,                     hipMemMap);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemSetAccess,               hipMemSetAccess);
 ASSERT_HOOK_MATCHES_PROD(g_hipIpcOpenMemHandle,           hipIpcOpenMemHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGetPCIBusId,          hipDeviceGetPCIBusId);
+ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -210,6 +211,7 @@ std::function<hipError_t(int*)> g_hipGetDeviceCount = DefaultHipGetDeviceCount;
 static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device);
 static hipError_t DefaultHipDeviceSetLimit(hipLimit_t limit, size_t value);
 static hipError_t DefaultHipDeviceGetPCIBusId(char* pciBusId, int len, int device);
+static hipError_t DefaultHipEventRecord(hipEvent_t event, hipStream_t stream);
 
 static hipError_t DefaultHipDeviceCanAccessPeer(int* canAccessPeer, int, int)
 {

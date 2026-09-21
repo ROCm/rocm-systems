@@ -164,6 +164,11 @@ extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamDestroy;
 extern std::function<hipError_t(hipStreamCaptureMode* /*mode*/)> g_hipThreadExchangeStreamCaptureMode;
 extern std::function<hipError_t(void)> g_hipGetLastError;
 
+// Event-record seam. The default delegates to g_hipAsyncOpsResult so the CE
+// proxy-progress tests keep the existing behaviour, but exposing it as a hook
+// lets a test drive hipEventRecord independently of the shared async-ops seam.
+extern std::function<hipError_t(hipEvent_t /*event*/, hipStream_t /*stream*/)> g_hipEventRecord;
+
 // Install a working host-memory stand-in for the VMM surface: mmap-backed
 // reserve/free (honouring the requested alignment), succeeding map/unmap/
 // create/import, and copies that actually copy.
