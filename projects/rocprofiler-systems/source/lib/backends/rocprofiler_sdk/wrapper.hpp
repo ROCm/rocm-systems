@@ -331,6 +331,8 @@ struct wrapper
         ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
     static constexpr status_t STATUS_ERROR_INVALID_ARGUMENT =
         ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    static constexpr status_t STATUS_ERROR_NOT_IMPLEMENTED =
+        ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 
     // ─── Callback phase constants ────────────────────────────────────────────────
     static constexpr callback_phase_t CALLBACK_PHASE_ENTER =
