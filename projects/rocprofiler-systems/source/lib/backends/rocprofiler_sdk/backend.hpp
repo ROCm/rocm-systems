@@ -88,7 +88,11 @@ struct backend
     using kernel_dispatch_record_t       = Wrapper::kernel_dispatch_record;
     using memory_copy_record_t           = Wrapper::memory_copy_record;
     using async_correlation_id_t         = Wrapper::async_correlation_id_t;
+    using correlation_id_t               = Wrapper::correlation_id_t;
     using stream_id_t                    = Wrapper::stream_id;
+#if ROCPROFILER_VERSION >= 600
+    using memory_allocation_record_t = Wrapper::memory_alloc_record;
+#endif
 
     static constexpr auto           compile_time_version = Wrapper::compile_time_version;
     static constexpr counter_flag_t flag_none            = Wrapper::COUNTER_FLAG_NONE;
@@ -599,6 +603,22 @@ public:
             return 0;
         }
     }
+
+#if ROCPROFILER_VERSION >= 600
+    static std::uint64_t get_memory_allocation_address(
+        [[maybe_unused]] const memory_allocation_record_t& record)
+    {
+        constexpr auto k_version_700 = 700;
+        if constexpr(Wrapper::compile_time_version >= k_version_700)
+        {
+            return record.address.value;
+        }
+        else
+        {
+            return static_cast<std::uint64_t>(record.address.handle);
+        }
+    }
+#endif
 
 private:
     struct kernel_dispatch_stream_correlation_t

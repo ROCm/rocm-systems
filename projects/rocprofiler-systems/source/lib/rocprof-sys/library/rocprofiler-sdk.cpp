@@ -380,6 +380,12 @@ struct external_dependencies
     static constexpr std::string_view memory_copy_category_name =
         trait::name<category::rocm_memory_copy>::value;
 
+    // ─── memory_allocation buffered-domain dependencies ──────────────────────────
+    using memory_allocation_sample_t = trace_cache::memory_allocate_sample;
+
+    static constexpr std::string_view memory_allocation_category_name =
+        trait::name<category::rocm_memory_allocate>::value;
+
     static metadata_registry_t& get_metadata_registry()
     {
         return trace_cache::get_metadata_registry();

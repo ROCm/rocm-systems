@@ -234,11 +234,29 @@ struct memory_copy_record_t
 };
 struct memory_allocation_record_t
 {
-    std::uint32_t operation = 0;
-    std::int32_t  pid       = 0;
-    agent_id_t    agent_id{};
-    std::uint64_t start_timestamp = 0;
-    std::uint64_t end_timestamp   = 0;
+    struct correlation_id_t
+    {
+        struct external_t
+        {
+            void*         ptr   = nullptr;
+            std::uint64_t value = 0;
+        };
+
+        std::uint64_t internal = 0;
+        external_t    external{};
+        std::uint64_t ancestor = 0;
+    };
+
+    std::uint32_t    kind      = 0;
+    std::uint32_t    operation = 0;
+    std::int32_t     pid       = 0;
+    agent_id_t       agent_id{};
+    address_t        address{};
+    std::uint64_t    allocation_size = 0;
+    std::uint64_t    start_timestamp = 0;
+    std::uint64_t    end_timestamp   = 0;
+    std::uint64_t    thread_id       = 0;
+    correlation_id_t correlation_id{};
 };
 struct scratch_memory_record_t
 {
@@ -476,6 +494,11 @@ struct mock_sdk
         return stream_id_t{};
     }
 
+    static stream_id_t get_stream_id(memory_allocation_record_t* /*record*/)
+    {
+        return stream_id_t{};
+    }
+
     static std::uint64_t get_parent_stack_id(
         const kernel_dispatch_record_t::correlation_id_t& /*correlation_id*/)
     {
@@ -488,6 +511,12 @@ struct mock_sdk
         return 0;
     }
 
+    static std::uint64_t get_parent_stack_id(
+        const memory_allocation_record_t::correlation_id_t& correlation_id)
+    {
+        return correlation_id.ancestor;
+    }
+
     // ── memory_copy buffered-domain support ──────────────────────────────────
     static std::uint64_t get_memory_copy_dst_address(
         const memory_copy_record_t& /*record*/)
@@ -497,6 +526,13 @@ struct mock_sdk
 
     static std::uint64_t get_memory_copy_src_address(
         const memory_copy_record_t& /*record*/)
+    {
+        return 0;
+    }
+
+    // ── memory_allocation buffered-domain support ────────────────────────────
+    static std::uint64_t get_memory_allocation_address(
+        const memory_allocation_record_t& /*record*/)
     {
         return 0;
     }
@@ -657,6 +693,25 @@ struct memory_copy_sample_data_t
     bool operator==(const memory_copy_sample_data_t&) const = default;
 };
 
+// Mirrors the field layout of trace_cache::memory_allocate_sample's constructor --
+// tests verify calls via gmock_buffer_storage, not by reading fields back.
+struct memory_allocation_sample_data_t
+{
+    std::uint64_t start_timestamp         = 0;
+    std::uint64_t end_timestamp           = 0;
+    std::uint64_t thread_id               = 0;
+    std::uint64_t agent_id_handle         = 0;
+    std::int32_t  kind                    = 0;
+    std::int32_t  operation               = 0;
+    std::uint64_t allocation_size         = 0;
+    std::uint64_t correlation_id_internal = 0;
+    std::uint64_t correlation_id_ancestor = 0;
+    std::uint64_t address_value           = 0;
+    std::uint64_t stream_handle           = 0;
+
+    bool operator==(const memory_allocation_sample_data_t&) const = default;
+};
+
 // Every production on_kernel_dispatch() body calls these members unconditionally on
 // every record; mocked so tests can verify they ran correctly instead of just not
 // crashing (mirrors gmock_externals above).
@@ -676,6 +731,8 @@ struct gmock_buffer_storage
 {
     MOCK_METHOD(void, store, (const kernel_dispatch_sample_data_t& sample));
     MOCK_METHOD(void, store_memory_copy, (const memory_copy_sample_data_t& sample));
+    MOCK_METHOD(void, store_memory_allocation,
+                (const memory_allocation_sample_data_t& sample));
 };
 
 inline std::unique_ptr<::testing::StrictMock<gmock_buffer_storage>> g_buffer_storage_mock;
@@ -942,6 +999,12 @@ struct externals
 
     static constexpr std::string_view memory_copy_category_name = "rocm_memory_copy";
 
+    // ── memory_allocation buffered-domain support ────────────────────────────
+    using memory_allocation_sample_t = test_support::memory_allocation_sample_data_t;
+
+    static constexpr std::string_view memory_allocation_category_name =
+        "rocm_memory_allocate";
+
     // Forward to gmock_metadata_registry/gmock_buffer_storage (defined at namespace
     // scope above, alongside gmock_externals) so tests can EXPECT_CALL every member
     // on_kernel_dispatch() touches, instead of only asserting it doesn't crash.
@@ -975,6 +1038,10 @@ struct externals
         void store(memory_copy_sample_t&& sample)
         {
             g_buffer_storage_mock->store_memory_copy(sample);
+        }
+        void store(memory_allocation_sample_t&& sample)
+        {
+            g_buffer_storage_mock->store_memory_allocation(sample);
         }
     };
 
