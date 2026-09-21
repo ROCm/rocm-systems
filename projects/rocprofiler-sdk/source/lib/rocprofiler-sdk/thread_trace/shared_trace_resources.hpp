@@ -44,9 +44,6 @@ struct TraceMemoryPool;
 
 namespace thread_trace
 {
-class kfd_copy_queue_t;
-class kfd_memory_pool_t;
-
 struct trace_resource_requirements_t
 {
     // Size of each GPU output slot. A context occupies one slot per requested buffer, so

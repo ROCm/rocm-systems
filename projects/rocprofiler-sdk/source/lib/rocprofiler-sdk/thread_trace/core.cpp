@@ -37,10 +37,6 @@
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
-#ifndef _WIN32
-#    include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
-#endif
-
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/intercept_table.h>

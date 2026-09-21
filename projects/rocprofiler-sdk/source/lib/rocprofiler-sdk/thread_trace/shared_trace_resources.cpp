@@ -200,6 +200,9 @@ AgentTraceResources::~AgentTraceResources()
     ROCP_FATAL_IF(m_active_traces != 0)
         << "Destroying ATT resources for agent " << m_agent_id.handle << " with " << m_active_traces
         << " active trace(s)";
+    // Close the engines while all command, signal and trace allocations are still owned.
+    if(m_queue && m_queue->kfd_copy_queue) m_queue->kfd_copy_queue->close();
+
     for(auto& buffer : m_output_buffers)
     {
         if(!buffer.raw) continue;
@@ -208,9 +211,6 @@ AgentTraceResources::~AgentTraceResources()
         else if(buffer.free_fn)
             buffer.free_fn(buffer.raw);
     }
-    // Packet/marker destructors share the pool. Close the engines while all
-    // command, signal and trace allocations are still owned.
-    if(m_queue && m_queue->kfd_copy_queue) m_queue->kfd_copy_queue->close();
     m_queue.reset();
 }
 
