@@ -28,10 +28,7 @@ target_include_directories(
     consan_capability_manifest
     PRIVATE "${CMAKE_SOURCE_DIR}/lib/rocjitsu/src"
 )
-target_link_libraries(
-    consan_capability_manifest
-    PRIVATE rocjitsu_dbt_internal
-)
+target_link_libraries(consan_capability_manifest PRIVATE rocjitsu_dbt_internal)
 rj_configure_target(consan_capability_manifest TEST)
 add_custom_target(
     consan_capability_manifest_update
@@ -204,8 +201,7 @@ function(rj_add_consan_hip_case)
         )
         list(REMOVE_DUPLICATES _case_LABELS)
         if(NOT _case_RESOURCE_LOCK)
-            set(
-                _case_RESOURCE_LOCK
+            set(_case_RESOURCE_LOCK
                 "consan_physical_${_rj_consan_physical_target}"
             )
         endif()
@@ -238,7 +234,9 @@ function(rj_add_consan_hip_case)
         elseif(_environment_entry MATCHES "^RJ_CONSAN_TRACK_ATOMICS=")
             set(_case_sets_atomic_tracking TRUE)
         elseif(
-            _environment_entry MATCHES "^RJ_CONSAN_(PRESET|RUNTIME_SAMPLE_STRIDE|WORKGROUP_SAMPLE_(STRIDE|OFFSET)|CELL_SAMPLE_(STRIDE|OFFSET))="
+            _environment_entry
+                MATCHES
+                "^RJ_CONSAN_(PRESET|RUNTIME_SAMPLE_STRIDE|WORKGROUP_SAMPLE_(STRIDE|OFFSET)|CELL_SAMPLE_(STRIDE|OFFSET))="
         )
             set(_case_sets_runtime_sample_stride TRUE)
         endif()
@@ -255,10 +253,7 @@ function(rj_add_consan_hip_case)
         # supplies a sampling stride; production defaults remain covered by
         # configuration tests and large-object validation.
         if(NOT _case_sets_runtime_sample_stride)
-            list(
-                APPEND _case_ENVIRONMENT
-                "RJ_CONSAN_RUNTIME_SAMPLE_STRIDE=1"
-            )
+            list(APPEND _case_ENVIRONMENT "RJ_CONSAN_RUNTIME_SAMPLE_STRIDE=1")
         endif()
     endif()
 
@@ -304,8 +299,7 @@ function(rj_add_consan_hip_case)
                 MD5 _additional_regex_id
                 "${_case_NAME}|${_additional_regex_index}|${_additional_regex}"
             )
-            set(
-                _additional_regex_file
+            set(_additional_regex_file
                 "${CMAKE_CURRENT_BINARY_DIR}/consan-expected-${_additional_regex_id}.txt"
             )
             file(WRITE "${_additional_regex_file}" "${_additional_regex}")
@@ -457,7 +451,16 @@ function(rj_add_consan_device_conformance_cases)
     endif()
     set(_labels consan consan-device "${_device_TARGET}" "${_backend}")
 
-    foreach(_epoch_case IN ITEMS LastOrderedPair LastEpochRace ExhaustedOrderedPair RepeatedExhaustion OverflowPolicy)
+    foreach(
+        _epoch_case
+        IN
+        ITEMS
+            LastOrderedPair
+            LastEpochRace
+            ExhaustedOrderedPair
+            RepeatedExhaustion
+            OverflowPolicy
+    )
         set(_epoch_filter "${_epoch_case}")
         set(_epoch_exit 0)
         set(_epoch_forbid_overflow 0)
@@ -510,24 +513,47 @@ function(rj_add_consan_device_conformance_cases)
     # Exact masks currently require ordinary VGPR addressing, without the
     # selectable-bank state of gfx1250.
     if(NOT _device_TARGET STREQUAL "gfx1250")
-        foreach(_uniform_case IN ITEMS DifferentValues DefaultSelected SingleWriter Disjoint ReadOnly Atomic PartialExec EmptyExec CrossWave)
+        foreach(
+            _uniform_case
+            IN
+            ITEMS
+                DifferentValues
+                DefaultSelected
+                SingleWriter
+                Disjoint
+                ReadOnly
+                Atomic
+                PartialExec
+                EmptyExec
+                CrossWave
+        )
             set(_uniform_stride 1)
             set(_uniform_race 0)
             set(_uniform_records 1)
             set(_uniform_clean 1)
             set(_uniform_regex "conflicts=0")
-            if(_uniform_case MATCHES "^(DifferentValues|DefaultSelected|PartialExec|CrossWave)$")
+            if(
+                _uniform_case
+                    MATCHES
+                    "^(DifferentValues|DefaultSelected|PartialExec|CrossWave)$"
+            )
                 set(_uniform_race 1)
                 set(_uniform_clean 0)
-                set(_uniform_regex "first_lanes=0x0000000000000001 second_lanes=0x[0-9a-f]*[1-9a-f][0-9a-f]*")
+                set(_uniform_regex
+                    "first_lanes=0x0000000000000001 second_lanes=0x[0-9a-f]*[1-9a-f][0-9a-f]*"
+                )
             endif()
             if(_uniform_case STREQUAL "EmptyExec")
                 set(_uniform_records 0)
                 set(_uniform_regex "visible=0.*conflicts=0")
             elseif(_uniform_case STREQUAL "PartialExec")
-                set(_uniform_regex "first_lanes=0x0000000000000001 second_lanes=0x0000000000000008")
+                set(_uniform_regex
+                    "first_lanes=0x0000000000000001 second_lanes=0x0000000000000008"
+                )
             elseif(_uniform_case STREQUAL "CrossWave")
-                set(_uniform_regex "first_lanes=0x[0f]*ffffffff second_lanes=0x[0f]*ffffffff")
+                set(_uniform_regex
+                    "first_lanes=0x[0f]*ffffffff second_lanes=0x[0f]*ffffffff"
+                )
             endif()
             if(_uniform_case STREQUAL "DefaultSelected")
                 set(_uniform_stride 256)
@@ -558,7 +584,12 @@ function(rj_add_consan_device_conformance_cases)
 
     if(NOT _device_TARGET STREQUAL "gfx1250")
         foreach(_preset IN ITEMS high higher max)
-            set(_preset_cases DifferentValues CrossWave SingleWriter NonzeroCell)
+            set(_preset_cases
+                DifferentValues
+                CrossWave
+                SingleWriter
+                NonzeroCell
+            )
             if(_preset STREQUAL "high")
                 # A single workgroup can be filtered out at stride 16. This
                 # case launches 256 groups and exercises both preset selectors.
@@ -570,7 +601,9 @@ function(rj_add_consan_device_conformance_cases)
                 set(_clean 0)
                 set(_regex "conflicts=[1-9][0-9]*")
                 if(_case STREQUAL "CrossWave")
-                    set(_regex "first_lanes=0x[0f]*ffffffff second_lanes=0x[0f]*ffffffff")
+                    set(_regex
+                        "first_lanes=0x[0f]*ffffffff second_lanes=0x[0f]*ffffffff"
+                    )
                 endif()
                 if(_case STREQUAL "SingleWriter")
                     set(_race 0)
@@ -611,25 +644,31 @@ function(rj_add_consan_device_conformance_cases)
     endif()
 
     foreach(_allow_uniform IN ITEMS 0 1)
-
-            foreach(_value_case IN ITEMS IdenticalWords VaryingLastWord CrossWave)
-                # gfx1250 has no exact-lane evidence for same-instruction collisions.
-                if(_device_TARGET STREQUAL "gfx1250"
-                   AND (_value_case STREQUAL "VaryingLastWord" OR
-                        (_value_case STREQUAL "IdenticalWords" AND NOT _allow_uniform)))
-                    continue()
-                endif()
-                set(_value_race 1)
-                set(_value_clean 0)
-                if(_value_case STREQUAL "IdenticalWords" AND _allow_uniform)
-                    set(_value_race 0)
-                    set(_value_clean 1)
-                endif()
-                set(_value_regex "conflicts=[1-9][0-9]*")
-                if(_value_clean)
-                    set(_value_regex "conflicts=0")
-                endif()
-                rj_add_consan_hip_case(
+        foreach(_value_case IN ITEMS IdenticalWords VaryingLastWord CrossWave)
+            # gfx1250 has no exact-lane evidence for same-instruction collisions.
+            if(
+                _device_TARGET STREQUAL "gfx1250"
+                AND (
+                    _value_case STREQUAL "VaryingLastWord"
+                    OR (
+                        _value_case STREQUAL "IdenticalWords"
+                        AND NOT _allow_uniform
+                    )
+                )
+            )
+                continue()
+            endif()
+            set(_value_race 1)
+            set(_value_clean 0)
+            if(_value_case STREQUAL "IdenticalWords" AND _allow_uniform)
+                set(_value_race 0)
+                set(_value_clean 1)
+            endif()
+            set(_value_regex "conflicts=[1-9][0-9]*")
+            if(_value_clean)
+                set(_value_regex "conflicts=0")
+            endif()
+            rj_add_consan_hip_case(
                     NAME "${_device_PREFIX}.UniformValue.default.${_value_case}.Allow${_allow_uniform}"
                     TARGET hip_consan_device_selection_${_device_TARGET}_test
                     FILTER "ConSanDeviceUniformValueTest.${_value_case}"
@@ -651,23 +690,25 @@ function(rj_add_consan_device_conformance_cases)
                         "RJ_CONSAN_REQUIRE_DIAGNOSTICS=${_value_race}"
                         "RJ_CONSAN_FORBID_DIAGNOSTICS=${_value_clean}"
                     LABELS ${_labels} uniform-value
-                )
-            endforeach()
-
-
+            )
+        endforeach()
     endforeach()
 
     # Production-rate qualification is separate from the dense semantic
     # matrix. Every selector is explicit to avoid inherited environment and
     # the helper's usual stride-1 override.
-    foreach(_selection_case IN ITEMS
+    foreach(
+        _selection_case
+        IN
+        ITEMS
             "DefaultSelected|RaceCellZero|256|0|256|0|legacy|race"
             "DefaultUnselectedAddress|RaceCellOne|256|0|256|0|legacy|empty"
             "DefaultOrdered|OrderedCellZero|256|0|256|0|legacy|clean"
             "OffsetSelectsAddress|RaceCellOne|256|0|256|1|independent|race"
             "OtherWorkgroupOffset|RaceCellZero|256|1|1|0|independent|race"
             "DenseSelectsAddress|RaceCellOneSingleWorkgroup|1|0|1|0|independent|race"
-            "DenseWorkgroupSparseCell|RaceCellZeroSingleWorkgroup|1|0|256|0|independent|race")
+            "DenseWorkgroupSparseCell|RaceCellZeroSingleWorkgroup|1|0|256|0|independent|race"
+    )
         string(REPLACE "|" ";" _selection_fields "${_selection_case}")
         list(GET _selection_fields 0 _selection_name)
         list(GET _selection_fields 1 _selection_filter)
@@ -684,7 +725,8 @@ function(rj_add_consan_device_conformance_cases)
                 "RJ_CONSAN_WORKGROUP_SAMPLE_STRIDE="
                 "RJ_CONSAN_WORKGROUP_SAMPLE_OFFSET="
                 "RJ_CONSAN_CELL_SAMPLE_STRIDE="
-                "RJ_CONSAN_CELL_SAMPLE_OFFSET=")
+                "RJ_CONSAN_CELL_SAMPLE_OFFSET="
+            )
         else()
             set(_selection_environment
                 "RJ_CONSAN_RUNTIME_SAMPLE_STRIDE="
@@ -692,24 +734,35 @@ function(rj_add_consan_device_conformance_cases)
                 "RJ_CONSAN_WORKGROUP_SAMPLE_STRIDE=${_workgroup_stride}"
                 "RJ_CONSAN_WORKGROUP_SAMPLE_OFFSET=${_workgroup_offset}"
                 "RJ_CONSAN_CELL_SAMPLE_STRIDE=${_cell_stride}"
-                "RJ_CONSAN_CELL_SAMPLE_OFFSET=${_cell_offset}")
+                "RJ_CONSAN_CELL_SAMPLE_OFFSET=${_cell_offset}"
+            )
         endif()
         if(_expectation STREQUAL "race")
             set(_selection_regex "conflicts=[1-9][0-9]*")
-            list(APPEND _selection_environment
+            list(
+                APPEND _selection_environment
                 "RJ_CONSAN_REQUIRE_RECORDS=1"
                 "RJ_CONSAN_REQUIRE_DIAGNOSTICS=1"
-                "RJ_CONSAN_FORBID_DIAGNOSTICS=0")
+                "RJ_CONSAN_FORBID_DIAGNOSTICS=0"
+            )
         else()
-            list(APPEND _selection_environment
+            list(
+                APPEND _selection_environment
                 "RJ_CONSAN_REQUIRE_DIAGNOSTICS=0"
-                "RJ_CONSAN_FORBID_DIAGNOSTICS=1")
+                "RJ_CONSAN_FORBID_DIAGNOSTICS=1"
+            )
             if(_expectation STREQUAL "empty")
                 set(_selection_regex "visible=0.*conflicts=0")
-                list(APPEND _selection_environment "RJ_CONSAN_REQUIRE_RECORDS=0")
+                list(
+                    APPEND _selection_environment
+                    "RJ_CONSAN_REQUIRE_RECORDS=0"
+                )
             else()
                 set(_selection_regex "visible=[1-9][0-9]*.*conflicts=0")
-                list(APPEND _selection_environment "RJ_CONSAN_REQUIRE_RECORDS=1")
+                list(
+                    APPEND _selection_environment
+                    "RJ_CONSAN_REQUIRE_RECORDS=1"
+                )
             endif()
         endif()
         rj_add_consan_hip_case(
@@ -745,8 +798,7 @@ function(rj_add_consan_device_conformance_cases)
     # allocating topology-sensitive coarse memory.
     foreach(_outcome IN ITEMS Correct Incorrect)
         string(TOLOWER "${_outcome}" _outcome_label)
-        set(
-            _hook_default_environment
+        set(_hook_default_environment
             "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
             "RJ_CONSAN_MODE="
             "RJ_CONSAN_POLICY="
@@ -759,10 +811,7 @@ function(rj_add_consan_device_conformance_cases)
                 "RJ_CONSAN_FORBID_DIAGNOSTICS=1"
             )
         else()
-            list(
-                APPEND _hook_default_environment
-                "RJ_CONSAN_REQUIRE_RECORDS=1"
-            )
+            list(APPEND _hook_default_environment "RJ_CONSAN_REQUIRE_RECORDS=1")
         endif()
         if(_outcome STREQUAL "Correct")
             set(_hook_default_conflicts "conflicts=0")
@@ -867,20 +916,13 @@ function(rj_add_consan_device_conformance_cases)
     # Vary workgroup selection while observing every LDS cell. The correct
     # reduction must remain diagnostic-free; omitting the publication barrier
     # must produce a diagnostic even when only a sparse workgroup is selected.
-    foreach(
-        _sampling_profile
-        IN
-        ITEMS
-            "Dense|1"
-            "Sparse|4"
-    )
+    foreach(_sampling_profile IN ITEMS "Dense|1" "Sparse|4")
         string(REPLACE "|" ";" _sampling_fields "${_sampling_profile}")
         list(GET _sampling_fields 0 _sampling_name)
         list(GET _sampling_fields 1 _sampling_stride)
         foreach(_outcome IN ITEMS Correct Incorrect)
             string(TOLOWER "${_outcome}" _outcome_label)
-            set(
-                _sampling_environment
+            set(_sampling_environment
                 "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                 "RJ_CONSAN_MODE=default"
                 "RJ_CONSAN_POLICY=strict"
@@ -1070,8 +1112,7 @@ function(rj_add_consan_device_conformance_cases)
             set(_spill_environment)
             string(TOLOWER "${_spill_mode}" _spill_label)
             if(_spill_mode STREQUAL "SuperCollider")
-                set(
-                    _spill_environment
+                set(_spill_environment
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_MODE=supercollider"
                     "RJ_CONSAN_POLICY=strict"
@@ -1089,7 +1130,8 @@ function(rj_add_consan_device_conformance_cases)
                 LABELS ${_labels} ${_spill_label} clean
             )
             if(_spill_mode STREQUAL "SuperCollider")
-                list(APPEND _instrumented_tests
+                list(
+                    APPEND _instrumented_tests
                     "${_device_PREFIX}.${_spill_mode}RdnaWmmaSpill.Correct"
                 )
             endif()
@@ -1135,13 +1177,7 @@ function(rj_add_consan_device_conformance_cases)
     endforeach()
 
     set(_instrumented_tests)
-    foreach(
-        _mode
-        IN
-        ITEMS
-            "SuperCollider|supercollider"
-            "ConSan|default"
-    )
+    foreach(_mode IN ITEMS "SuperCollider|supercollider" "ConSan|default")
         string(REPLACE "|" ";" _mode_fields "${_mode}")
         list(GET _mode_fields 0 _mode_name)
         list(GET _mode_fields 1 _mode_value)
@@ -1258,13 +1294,14 @@ function(rj_add_consan_device_conformance_cases)
                 # in the CTest contract instead of relying on the test name.
                 list(
                     APPEND _correct_pass_regex_args
-                    PASS_REGEX "raw_dispatch_ids=1,1 same_kernel=1 same_kernarg=0 round=1"
+                    PASS_REGEX
+                    "raw_dispatch_ids=1,1 same_kernel=1 same_kernarg=0 round=1"
                 )
                 list(
                     APPEND _incorrect_pass_regex_args
-                    PASS_REGEX "raw_dispatch_ids=1,1 same_kernel=1 same_kernarg=0 round=1"
+                    PASS_REGEX
+                    "raw_dispatch_ids=1,1 same_kernel=1 same_kernarg=0 round=1"
                 )
-
             endif()
 
             # HIP does not expose its stream-to-HSA-queue mapping to this
@@ -1279,19 +1316,19 @@ function(rj_add_consan_device_conformance_cases)
                 set(_hip_launch_count 2)
             endif()
             if(_hip_launch_count)
-                set(
-                    _hip_integration_regex
+                set(_hip_integration_regex
                     "CONSAN_HIP_INTEGRATION workload=${_workload_target} completed_launches=${_hip_launch_count} underlying_hsa_queues=unobserved raw_dispatch_id_reuse=unobserved"
                 )
                 list(
                     APPEND _correct_pass_regex_args
-                    PASS_REGEX "${_hip_integration_regex}"
+                    PASS_REGEX
+                    "${_hip_integration_regex}"
                 )
                 list(
                     APPEND _incorrect_pass_regex_args
-                    PASS_REGEX "${_hip_integration_regex}"
+                    PASS_REGEX
+                    "${_hip_integration_regex}"
                 )
-
             endif()
 
             if(_workload_name STREQUAL "HistogramScatter")
@@ -1308,17 +1345,18 @@ function(rj_add_consan_device_conformance_cases)
                     APPEND _incorrect_environment
                     "RJ_CONSAN_TEST_KERNEL_FILTER=histogram_scatter_for_consan"
                 )
-                set(
-                    _histogram_coverage_regex
+                set(_histogram_coverage_regex
                     "access_discovered=[1-9][0-9]* access_supported=[1-9][0-9]* access_selected=[1-9][0-9]* access_patched=[1-9][0-9]*"
                 )
                 list(
                     APPEND _correct_pass_regex_args
-                    PASS_REGEX "${_histogram_coverage_regex}"
+                    PASS_REGEX
+                    "${_histogram_coverage_regex}"
                 )
                 list(
                     APPEND _incorrect_pass_regex_args
-                    PASS_REGEX "${_histogram_coverage_regex}"
+                    PASS_REGEX
+                    "${_histogram_coverage_regex}"
                 )
             endif()
 
@@ -1413,17 +1451,18 @@ function(rj_add_consan_device_conformance_cases)
                 # Four initial objects plus alternating odd/even reloads must
                 # all contribute complete dynamic evidence. This count is the
                 # workload's lifecycle contract, not a patch-layout detail.
-                set(
-                    _module_lifecycle_coverage_regex
+                set(_module_lifecycle_coverage_regex
                     "applicable_code_objects=8 incomplete_code_objects=0 access=32/32"
                 )
                 list(
                     APPEND _correct_pass_regex_args
-                    PASS_REGEX "${_module_lifecycle_coverage_regex}"
+                    PASS_REGEX
+                    "${_module_lifecycle_coverage_regex}"
                 )
                 list(
                     APPEND _incorrect_pass_regex_args
-                    PASS_REGEX "${_module_lifecycle_coverage_regex}"
+                    PASS_REGEX
+                    "${_module_lifecycle_coverage_regex}"
                 )
             endif()
 
@@ -2071,8 +2110,8 @@ function(rj_add_consan_device_fixture_targets target)
             OUTPUT "${_two_queue_bundle}"
             COMMAND
                 ${_two_queue_compiler_command} -x hip --cuda-device-only
-                --offload-arch=gfx950 --rocm-path=${ROCM_PATH} -std=c++20 -O2
-                -o "${_two_queue_bundle}" "${_two_queue_kernel_source}"
+                --offload-arch=gfx950 --rocm-path=${ROCM_PATH} -std=c++20 -O2 -o
+                "${_two_queue_bundle}" "${_two_queue_kernel_source}"
             DEPENDS "${_two_queue_kernel_source}"
             COMMENT "Compiling gfx950 two-queue ConSan kernel bundle"
             VERBATIM
@@ -2417,29 +2456,29 @@ function(
 )
     # Exact second-address-group provenance is currently implemented on RDNA4.
     if(prefix MATCHES "Gfx1201" OR prefix STREQUAL "ConSanHipTest")
-    rj_add_consan_hip_case(
-        NAME "${prefix}.SecondAddressGroupRace"
-        TARGET ${target}
-        FILTER "${conflict_filter}"
-        CONFIG "${config}"
-        TIMEOUT 60
-        RUN_SERIAL
-        PASS_REGEX
-            "first_lds=\\[4,8\\) second_lds=\\[4,8\\).*first_lane_mask=0x2 second_lane_mask=0x4"
-        FAIL_REGEX "RJ_CONSAN_REQUIRE_(RECORDS|DIAGNOSTICS) requested"
-        ENVIRONMENT
-            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
-            "RJ_CONSAN_MODE=default"
-            "RJ_CONSAN_REQUIRE_RECORDS=1"
-            "RJ_CONSAN_REQUIRE_DIAGNOSTICS=1"
-            "RJ_CONSAN_FORBID_OVERFLOW=1"
-            "RJ_CONSAN_TRACK_BARRIERS=0"
-            "RJ_CONSAN_TRACK_ATOMICS=0"
-            "RJ_CONSAN_TEST_KERNEL_FILTER=second_address_group_race_for_instrumentation"
-            "RJ_CONSAN_LOG=3"
-            "RJ_CONSAN_MAX_PATCHES=1"
-            "RJ_CONSAN_REQUIRE_PATCH=1"
-    )
+        rj_add_consan_hip_case(
+            NAME "${prefix}.SecondAddressGroupRace"
+            TARGET ${target}
+            FILTER "${conflict_filter}"
+            CONFIG "${config}"
+            TIMEOUT 60
+            RUN_SERIAL
+            PASS_REGEX
+                "first_lds=\\[4,8\\) second_lds=\\[4,8\\).*first_lane_mask=0x2 second_lane_mask=0x4"
+            FAIL_REGEX "RJ_CONSAN_REQUIRE_(RECORDS|DIAGNOSTICS) requested"
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_MODE=default"
+                "RJ_CONSAN_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_REQUIRE_DIAGNOSTICS=1"
+                "RJ_CONSAN_FORBID_OVERFLOW=1"
+                "RJ_CONSAN_TRACK_BARRIERS=0"
+                "RJ_CONSAN_TRACK_ATOMICS=0"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=second_address_group_race_for_instrumentation"
+                "RJ_CONSAN_LOG=3"
+                "RJ_CONSAN_MAX_PATCHES=1"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
     endif()
     rj_add_consan_hip_case(
         NAME "${prefix}.DisjointLaneB128StoresAreClean"
@@ -2625,7 +2664,6 @@ function(rj_add_consan_common_sim_cases)
         LDS_TARGET
         TARGET
         CONFIG
-
         TEST
         SHARED_TEST
         ACCESS_KERNEL
@@ -2647,7 +2685,6 @@ function(rj_add_consan_common_sim_cases)
             LDS_TARGET
             TARGET
             CONFIG
-
             TEST
             SHARED_TEST
             ACCESS_KERNEL
@@ -2802,9 +2839,13 @@ endfunction()
 
 function(rj_add_consan_scalar_spill_exec_cases)
     set(_options PHYSICAL)
-    set(
-        _one_value_args
-        PREFIX TARGET CONFIG ARCH_LABEL CORRECT_TEST INCORRECT_TEST
+    set(_one_value_args
+        PREFIX
+        TARGET
+        CONFIG
+        ARCH_LABEL
+        CORRECT_TEST
+        INCORRECT_TEST
     )
     cmake_parse_arguments(
         PARSE_ARGV
@@ -2842,7 +2883,8 @@ function(rj_add_consan_scalar_spill_exec_cases)
     if(_spill_PHYSICAL)
         list(
             APPEND _resource_args
-            RESOURCE_LOCK "consan_physical_${_spill_ARCH_LABEL}"
+            RESOURCE_LOCK
+            "consan_physical_${_spill_ARCH_LABEL}"
         )
         set(_execution_label physical)
     endif()
@@ -2930,7 +2972,13 @@ function(rj_add_consan_scalar_spill_exec_cases)
 endfunction()
 
 function(rj_add_consan_cdna_sim_cases)
-    set(_one_value_args PREFIX LDS_TARGET TARGET CONFIG ARCH_LABEL)
+    set(_one_value_args
+        PREFIX
+        LDS_TARGET
+        TARGET
+        CONFIG
+        ARCH_LABEL
+    )
     cmake_parse_arguments(PARSE_ARGV 0 _sim "" "${_one_value_args}" "")
     if(_sim_UNPARSED_ARGUMENTS)
         message(
@@ -2938,7 +2986,11 @@ function(rj_add_consan_cdna_sim_cases)
             "unknown ConSan CDNA simulator arguments: ${_sim_UNPARSED_ARGUMENTS}"
         )
     endif()
-    foreach(_required IN ITEMS PREFIX LDS_TARGET TARGET CONFIG ARCH_LABEL)
+    foreach(
+        _required
+        IN
+        ITEMS PREFIX LDS_TARGET TARGET CONFIG ARCH_LABEL
+    )
         if(NOT _sim_${_required})
             message(
                 FATAL_ERROR
@@ -3060,12 +3112,7 @@ function(rj_add_consan_rdna4_b96_cases)
     if(_b96_CONFIG)
         list(APPEND _config_args CONFIG "${_b96_CONFIG}")
     endif()
-    foreach(
-        _mode
-        IN
-        ITEMS
-            "ConSan|default"
-    )
+    foreach(_mode IN ITEMS "ConSan|default")
         string(REPLACE "|" ";" _mode_fields "${_mode}")
         list(GET _mode_fields 0 _mode_name)
         list(GET _mode_fields 1 _mode_mode)
@@ -3373,12 +3420,9 @@ function(rj_add_consan_rdna3_compact_sim_cases)
             "RJ_CONSAN_REQUIRE_PATCH=1"
     )
 
-    set(_sim_clean_test
-        "ConSanRdna3Test.BarrierOrderedAccessesPreserveOutput"
-    )
+    set(_sim_clean_test "ConSanRdna3Test.BarrierOrderedAccessesPreserveOutput")
 
-
-        rj_add_consan_hip_case(
+    rj_add_consan_hip_case(
             NAME "${_sim_PREFIX}.Detection"
             TARGET ${_sim_TARGET}
             FILTER "${_sim_clean_test}"
@@ -3396,8 +3440,7 @@ function(rj_add_consan_rdna3_compact_sim_cases)
                 "RJ_CONSAN_REQUIRE_PATCH=1"
                 "RJ_CONSAN_REQUIRE_RECORDS=1"
                 "RJ_CONSAN_FORBID_DIAGNOSTICS=1"
-        )
-
+    )
 
     rj_add_consan_hip_case(
         NAME "${_sim_PREFIX}.DetectsRace"
@@ -3425,11 +3468,7 @@ endfunction()
 function(rj_add_consan_fuzzers)
     if(RJ_BUILD_FUZZERS)
         set(_rj_consan_transform_fuzz_targets)
-        foreach(
-            _rj_profile
-            IN
-            ITEMS supercollider default
-        )
+        foreach(_rj_profile IN ITEMS supercollider default)
             set(_rj_fuzz_target "consan_transform_${_rj_profile}_fuzz")
             add_executable(${_rj_fuzz_target} fuzz/consan_transform_fuzz.cpp)
             target_link_libraries(
@@ -3537,8 +3576,14 @@ function(rj_add_consan_hip_tests)
                 INCLUDE_DIRS "${_rj_consan_include_dir}"
                 EXTRA_DEPENDS "${_rj_consan_hip_fixture_headers}"
         )
-        foreach(_spill_case IN ITEMS Gfx950VgprScratchRoundTrip
-                Gfx950PartialExecVgprScratchRoundTrip Gfx950RepeatedScratchRoundTrips)
+        foreach(
+            _spill_case
+            IN
+            ITEMS
+                Gfx950VgprScratchRoundTrip
+                Gfx950PartialExecVgprScratchRoundTrip
+                Gfx950RepeatedScratchRoundTrips
+        )
             rj_add_consan_hip_case(
                 NAME "ConSanSpillGfx950Sim.${_spill_case}"
                 TARGET hip_consan_spill_gfx950_test
@@ -3577,8 +3622,14 @@ function(rj_add_consan_hip_tests)
             # Successful per-site resource plans are intentionally summarized
             # to keep normal hook logging bounded. Spill cases match the
             # aggregate emission proof or a typed patch record at log level 3.
-            foreach(_spill_case IN ITEMS Gfx950VgprScratchRoundTrip
-                    Gfx950PartialExecVgprScratchRoundTrip Gfx950RepeatedScratchRoundTrips)
+            foreach(
+                _spill_case
+                IN
+                ITEMS
+                    Gfx950VgprScratchRoundTrip
+                    Gfx950PartialExecVgprScratchRoundTrip
+                    Gfx950RepeatedScratchRoundTrips
+            )
                 rj_add_consan_hip_case(
                     NAME "ConSanSpillHipTest.${_spill_case}"
                     TARGET hip_consan_spill_gfx950_test
@@ -3754,8 +3805,7 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
 
-
-                rj_add_consan_hip_case(
+            rj_add_consan_hip_case(
                     NAME "ConSanGfx1100Physical.Detection"
                     TARGET hip_consan_gfx1100_test
                     FILTER "${_rj_consan_gfx1100_clean}"
@@ -3772,7 +3822,7 @@ function(rj_add_consan_hip_tests)
                         "RJ_CONSAN_REQUIRE_PATCH=1"
                         "RJ_CONSAN_REQUIRE_RECORDS=1"
                         "RJ_CONSAN_FORBID_DIAGNOSTICS=1"
-                )
+            )
 
             rj_add_consan_hip_case(
                 NAME "ConSanGfx1100Physical.DetectsRace"
