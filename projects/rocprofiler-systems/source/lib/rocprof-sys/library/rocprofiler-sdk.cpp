@@ -374,6 +374,12 @@ struct external_dependencies
     static constexpr std::string_view kernel_dispatch_category_name =
         trait::name<category::rocm_kernel_dispatch>::value;
 
+    // ─── memory_copy buffered-domain dependencies ────────────────────────────────
+    using memory_copy_sample_t = trace_cache::memory_copy_sample;
+
+    static constexpr std::string_view memory_copy_category_name =
+        trait::name<category::rocm_memory_copy>::value;
+
     static metadata_registry_t& get_metadata_registry()
     {
         return trace_cache::get_metadata_registry();
