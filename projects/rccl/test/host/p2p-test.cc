@@ -3387,12 +3387,12 @@ const ConnectInfoView* AsConnectInfo(const ncclConnect& c) {
     return reinterpret_cast<const ConnectInfoView*>(c.data);
 }
 
-// The p2pType enum values, duplicated here so tests can name the expected
-// resource type without reaching into the included .cc's anonymous scope.
-// (enum p2pType { P2P_DIRECT, P2P_INTERMEDIATE, P2P_IPC, P2P_CUMEM }.)
-enum { kP2pDirect = 0, kP2pIntermediate = 1, kP2pIpc = 2, kP2pCumem = 3 };
-
 }  // namespace
+
+// res->type is compared against the real p2pType enumerators (P2P_DIRECT etc.),
+// which p2p.cc declares at file scope and are visible through the #include
+// above -- so a production reorder of the enum is caught rather than silently
+// matching a hardcoded ordinal.
 
 // Fixture: a comm whose peerInfo[0] is "me", plus a myInfo/peerInfo pair the
 // setup call takes by pointer. A real backing buffer stands in for the
@@ -3513,7 +3513,7 @@ TEST_F(P2pSetupMicrotest, SendSetup_SameProcessPeer_SelectsDirectAndFillsConnect
     // Resources were allocated and typed as the same-process direct path.
     auto* res = static_cast<p2pResources*>(send_.transportResources);
     ASSERT_NE(res, nullptr);
-    EXPECT_EQ(res->type, kP2pDirect);
+    EXPECT_EQ(res->type, P2P_DIRECT);
 
     // The connect info is well-formed: this rank, write (read=0) flag.
     const auto* info = AsConnectInfo(connect_info_);
@@ -3560,7 +3560,7 @@ TEST_F(P2pSetupMicrotest, SendSetup_CrossProcessLegacyPeer_SelectsIpc)
 
     auto* res = static_cast<p2pResources*>(send_.transportResources);
     ASSERT_NE(res, nullptr);
-    EXPECT_EQ(res->type, kP2pIpc);
+    EXPECT_EQ(res->type, P2P_IPC);
 
     p2pTransport.send.free(&comm_, &send_);
 }
@@ -3579,7 +3579,7 @@ TEST_F(P2pSetupMicrotest, SendSetup_CrossProcessCuMemPeer_SelectsCumem)
 
     auto* res = static_cast<p2pResources*>(send_.transportResources);
     ASSERT_NE(res, nullptr);
-    EXPECT_EQ(res->type, kP2pCumem);
+    EXPECT_EQ(res->type, P2P_CUMEM);
 
     p2pTransport.send.free(&comm_, &send_);
 }
@@ -3597,7 +3597,7 @@ TEST_F(P2pSetupMicrotest, RecvSetup_SameProcessPeer_SelectsDirectAndFillsConnect
 
     auto* res = static_cast<p2pResources*>(recv.transportResources);
     ASSERT_NE(res, nullptr);
-    EXPECT_EQ(res->type, kP2pDirect);
+    EXPECT_EQ(res->type, P2P_DIRECT);
 
     const auto* info = AsConnectInfo(connect_info_);
     EXPECT_EQ(info->rank, myInfo_.rank);
@@ -3652,7 +3652,7 @@ TEST_F(P2pSetupMicrotest, SendSetup_DirectDisableParam_SelectsIpcForSameProcessP
 
     auto* res = static_cast<p2pResources*>(send_.transportResources);
     ASSERT_NE(res, nullptr);
-    EXPECT_EQ(res->type, kP2pIpc);
+    EXPECT_EQ(res->type, P2P_IPC);
 
     p2pTransport.send.free(&comm_, &send_);
 }
@@ -3672,7 +3672,7 @@ TEST_F(P2pSetupMicrotest, SendSetup_IntermediateHop_SelectsIntermediateAndRoutes
 
     auto* res = static_cast<p2pResources*>(send_.transportResources);
     ASSERT_NE(res, nullptr);
-    EXPECT_EQ(res->type, kP2pIntermediate);
+    EXPECT_EQ(res->type, P2P_INTERMEDIATE);
     EXPECT_EQ(AsConnectInfo(connect_info_)->rank, 0);
 
     p2pTransport.send.free(&comm_, &send_);
@@ -3744,7 +3744,7 @@ TEST_F(P2pSetupMicrotest, RecvSetup_IntermediateHop_SelectsIntermediateAndRoutes
 
     auto* res = static_cast<p2pResources*>(recv.transportResources);
     ASSERT_NE(res, nullptr);
-    EXPECT_EQ(res->type, kP2pIntermediate);
+    EXPECT_EQ(res->type, P2P_INTERMEDIATE);
     EXPECT_EQ(AsConnectInfo(connect_info_)->rank, 0);
 
     p2pTransport.recv.free(&comm_, &recv);
@@ -3764,7 +3764,7 @@ TEST_F(P2pSetupMicrotest, RecvSetup_CrossProcessCuMemPeer_SelectsCumem)
 
     auto* res = static_cast<p2pResources*>(recv.transportResources);
     ASSERT_NE(res, nullptr);
-    EXPECT_EQ(res->type, kP2pCumem);
+    EXPECT_EQ(res->type, P2P_CUMEM);
 
     p2pTransport.recv.free(&comm_, &recv);
 }
