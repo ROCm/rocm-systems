@@ -152,23 +152,22 @@ start_context(const context::context* ctx)
 
     auto* controller = hsa::get_queue_controller();
 
-    bool already_enabled = true;
+    bool should_enable = false;
+    ctx->dispatch_counter_collection->enabled.wlock([&](auto& enabled) {
+        if(enabled) return;
+        enabled       = true;
+        should_enable = true;
+    });
+
+    if(!should_enable) return;
+
     // Scope serialization to the agents this context collects on. An empty set still means
     // every agent, so an unrestricted context serializes the whole machine as before.
     CHECK_NOTNULL(controller)->enable_serialization(ctx->dispatch_counter_collection->agents);
-    ctx->dispatch_counter_collection->enabled.wlock([&](auto& enabled) {
-        if(enabled) return;
-        already_enabled = false;
-        enabled         = true;
-    });
-
-    if(!already_enabled)
-    {
-        // Counter collection no longer registers a per-queue callback with the queue
-        // controller; the HSA write interceptor calls counters::kernel_dispatch_phase_enter_hook /
-        // kernel_dispatch_phase_exit_hook directly (see hsa/queue.cpp). Keep the callback thread.
-        callback_thread_start();
-    }
+    // Counter collection no longer registers a per-queue callback with the queue
+    // controller; the HSA write interceptor calls counters::kernel_dispatch_phase_enter_hook /
+    // kernel_dispatch_phase_exit_hook directly (see hsa/queue.cpp). Keep the callback thread.
+    callback_thread_start();
 }
 
 void
@@ -177,11 +176,15 @@ stop_context(const context::context* ctx)
     if(!ctx || !ctx->dispatch_counter_collection) return;
 
     auto* controller = hsa::get_queue_controller();
+    bool  should_disable = false;
 
     ctx->dispatch_counter_collection->enabled.wlock([&](auto& enabled) {
         if(!enabled) return;
-        enabled = false;
+        enabled        = false;
+        should_disable = true;
     });
+
+    if(!should_disable) return;
 
     if(controller)
     {

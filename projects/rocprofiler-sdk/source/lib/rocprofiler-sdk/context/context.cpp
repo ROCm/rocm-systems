@@ -296,87 +296,71 @@ start_context(rocprofiler_context_id_t context_id)
     if(validate_context(cfg) != ROCPROFILER_STATUS_SUCCESS)
         return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
-    auto current_contexts = context_array_t{};
-    for(const auto* itr : get_active_contexts(current_contexts))
-    {
-        if(cfg->context_idx == itr->context_idx)
-        {
-            return ROCPROFILER_STATUS_SUCCESS;
-        }
-        else if(cfg->dispatch_counter_collection && itr->dispatch_counter_collection &&
-                cfg->dispatch_counter_collection->intersects(*itr->dispatch_counter_collection))
-        {
-            // Conflicting context. Two counter-collection contexts can run concurrently as
-            // long as they target disjoint sets of GPU agents -- the hardware counters they
-            // program are per-agent, so contexts that never touch the same agent cannot
-            // contend. A context with no agent restriction claims every agent and therefore
-            // still conflicts with any other counter-collection context.
-            return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
-        }
-    }
-
+    auto     status            = ROCPROFILER_STATUS_SUCCESS;
     uint64_t rocp_tot_contexts = get_registered_contexts_impl()->size();
     auto     idx               = rocp_tot_contexts;
     auto&    active_contexts   = get_active_contexts_impl();
     {
         // hold a lock here to prevent multiple threads from finding the same nullptr slot
         auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
-        // try to find a nullptr slot first
+
         for(size_t i = 0; i < active_contexts.size(); ++i)
         {
-            const auto* itr = active_contexts.at(i).load(std::memory_order_relaxed);
+            const auto* itr = active_contexts.at(i).load(std::memory_order_acquire);
             if(itr == nullptr)
             {
-                idx = i;
-                break;
+                if(idx == rocp_tot_contexts) idx = i;
+                continue;
             }
             else if(context_id.handle == itr->context_idx)
             {
                 return ROCPROFILER_STATUS_SUCCESS;
             }
+            else if(cfg->dispatch_counter_collection && itr->dispatch_counter_collection &&
+                    cfg->dispatch_counter_collection->intersects(*itr->dispatch_counter_collection))
+            {
+                // Conflicting context. Two counter-collection contexts can run concurrently as
+                // long as they target disjoint sets of GPU agents -- the hardware counters they
+                // program are per-agent, so contexts that never touch the same agent cannot
+                // contend. A context with no agent restriction claims every agent and therefore
+                // still conflicts with any other counter-collection context.
+                return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+            }
         }
-        // if no nullptr slot was found, then create one while lock is held
+
         if(idx == rocp_tot_contexts)
         {
             idx = active_contexts.size();
             active_contexts.emplace_back();
         }
 
-        get_num_active_contexts().fetch_add(1, std::memory_order_release);
-    }
-
-    rocprofiler::hsa::queue_interposition::notify_queue_interposition_consumer_context_started(cfg);
-
-    // atomic swap the pointer into the "active" array used internally
-    const context* _expected = nullptr;
-    bool           success   = active_contexts.at(idx).compare_exchange_strong(
-        _expected, get_registered_context(context_id));
-
-    if(!success)
-    {
-        rocprofiler::hsa::queue_interposition::notify_queue_interposition_consumer_context_stopped(
+        rocprofiler::hsa::queue_interposition::notify_queue_interposition_consumer_context_started(
             cfg);
-        get_num_active_contexts().fetch_sub(1, std::memory_order_release);
-        return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
-    }
 
-    auto status = ROCPROFILER_STATUS_SUCCESS;
+        active_contexts.at(idx).store(cfg, std::memory_order_release);
+        get_num_active_contexts().fetch_add(1, std::memory_order_release);
 
-    // A context that traces kernel dispatch is the only reason to arm the KFD
-    // dispatch-log ring, so arm it here rather than at startup. Idempotent, and
-    // early enough that the firmware is recording before the first dispatch.
-    if(cfg->is_tracing_one_of(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
-                              ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH))
-        rocprofiler::kfd::arm_dispatch_log_sessions();
+        // Keep the active-slot publication, start transition, and stop transition serialized under
+        // the same mutex. That makes the dispatch-counter agent-set snapshot stable for the
+        // conflict scan above and prevents stop_context() from tearing the service back down before
+        // the start path finishes arming it.
 
-    if(cfg->dispatch_counter_collection) rocprofiler::counters::start_context(cfg);
-    if(cfg->dispatch_spm) status = rocprofiler::spm::start_context(cfg);
-    if(cfg->device_thread_trace) cfg->device_thread_trace->start_context();
-    if(cfg->dispatch_thread_trace) cfg->dispatch_thread_trace->start_context();
-    if(cfg->device_counter_collection) status = rocprofiler::counters::start_agent_ctx(cfg);
+        // A context that traces kernel dispatch is the only reason to arm the KFD
+        // dispatch-log ring, so arm it here rather than at startup. Idempotent, and
+        // early enough that the firmware is recording before the first dispatch.
+        if(cfg->is_tracing_one_of(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                  ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH))
+            rocprofiler::kfd::arm_dispatch_log_sessions();
+
+        if(cfg->dispatch_counter_collection) rocprofiler::counters::start_context(cfg);
+        if(cfg->dispatch_spm) status = rocprofiler::spm::start_context(cfg);
+        if(cfg->device_thread_trace) cfg->device_thread_trace->start_context();
+        if(cfg->dispatch_thread_trace) cfg->dispatch_thread_trace->start_context();
+        if(cfg->device_counter_collection) status = rocprofiler::counters::start_agent_ctx(cfg);
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
-    if(cfg->pc_sampler) status = rocprofiler::pc_sampling::start_service(cfg);
+        if(cfg->pc_sampler) status = rocprofiler::pc_sampling::start_service(cfg);
 #endif
+    }
 
     return status;
 }

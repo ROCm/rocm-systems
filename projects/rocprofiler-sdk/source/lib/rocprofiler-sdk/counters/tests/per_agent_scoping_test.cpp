@@ -345,6 +345,36 @@ TEST(counters_per_agent, serialization_is_scoped_to_the_contexts_agents)
     EXPECT_FALSE(controller->is_serialization_enabled(agent_b));
 }
 
+TEST(counters_per_agent, duplicate_start_does_not_leak_serialization)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto agents = get_two_agents();
+    if(!agents.first) GTEST_SKIP() << "no GPU agent available";
+
+    auto  agent_a    = agents.first->get_rocp_agent()->id;
+    auto* controller = hsa::get_queue_controller();
+    auto  queue_a    = hsa::PerAgentFakeQueue{*agents.first, {.handle = 151}};
+    controller->serializer(&queue_a);
+
+    auto ctx = make_counter_context();
+    ASSERT_EQ(rocprofiler_dispatch_counting_service_set_agents(ctx, &agent_a, 1),
+              ROCPROFILER_STATUS_SUCCESS);
+
+    ASSERT_FALSE(controller->is_serialization_enabled(agent_a));
+
+    ASSERT_EQ(rocprofiler_start_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_TRUE(controller->is_serialization_enabled(agent_a));
+
+    EXPECT_EQ(rocprofiler_start_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_TRUE(controller->is_serialization_enabled(agent_a));
+
+    ASSERT_EQ(rocprofiler_stop_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_FALSE(controller->is_serialization_enabled(agent_a))
+        << "duplicate starts must not leave the serializer pinned after one stop";
+}
+
 // Counter collection, thread trace and SPM each enable serialization independently. Without
 // reference counting the first one to stop unserializes the others, which is a pre-existing
 // bug that per-agent scoping would otherwise make easier to hit.
