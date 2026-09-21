@@ -97,9 +97,9 @@ init_parser(parser_data& _data)
     config::configure_settings(false);
 
     _data.env.dl_libpath =
-        path::realpath(path::get_internal_libpath("librocprof-sys-dl.so").c_str());
+        path::realpath(path::get_internal_libpath("librocprof-sys-dl.so"));
     _data.env.omni_libpath =
-        path::realpath(path::get_internal_libpath("librocprof-sys.so").c_str());
+        path::realpath(path::get_internal_libpath("librocprof-sys.so"));
 
     auto _libexecpath = path::realpath(path::get_internal_script_path());
     update_env(_data, env_vars::SCRIPT_PATH, _libexecpath, update_mode::replace);
@@ -141,7 +141,7 @@ output_format_selection
 resolve_output_format(const strset_t& tokens)
 {
     output_format_selection _sel;
-    _sel.perfetto = tokens.contains("proto");
+    _sel.perfetto = tokens.contains("pftrace") || tokens.contains("proto");
     _sel.rocpd    = tokens.contains("rocpd");
     _sel.json     = tokens.contains("json");
     _sel.text     = tokens.contains("text") || tokens.contains("txt");
@@ -805,18 +805,21 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
 
     if(_data.reg.environ_filter("output_format", _data))
     {
+        static const strvec_t k_output_format_choices = { "pftrace", "proto", "rocpd",
+                                                          "json",    "text",  "txt" };
         _parser
             .add_argument(
                 { "--output-format" },
                 "Select output format(s); only the listed formats are produced: "
-                "proto (Perfetto trace), rocpd (RocPD database), json/text (Timemory "
-                "profile; txt aliases text). Space- or comma-separated, e.g. "
-                "--output-format proto rocpd. Cannot be combined with --trace, "
-                "--profile, --flat-profile, or --profile-format.")
+                "pftrace (Perfetto trace; proto aliases pftrace), rocpd (RocPD "
+                "database), json/text (Timemory profile; txt aliases text). Space- or "
+                "comma-separated, e.g. --output-format pftrace rocpd. Cannot be "
+                "combined with --trace, --profile, --flat-profile, or "
+                "--profile-format.")
             .min_count(1)
-            .max_count(5)
+            .max_count(static_cast<int>(k_output_format_choices.size()))
             .dtype("[format...]")
-            .choices({ "proto", "rocpd", "json", "text", "txt" })
+            .choices(k_output_format_choices)
             .conflicts(
                 { "trace", "profile", "flat-profile", "profile-format", "use-rocpd" })
             .action([&](parser_t& p) {

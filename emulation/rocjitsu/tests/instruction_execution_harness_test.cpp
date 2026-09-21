@@ -191,7 +191,7 @@ struct ForceScalarGuard {
   bool old_force_scalar;
 };
 
-TEST(CdnaVop3pPackedF32Test, SgprSourcesReadBothRegisters) {
+TEST(CdnaVop3pPackedF32Test, SgprSourcesUseArchitectureSpecificWidth) {
   struct ArchCase {
     rj_code_arch_t arch;
     std::string_view name;
@@ -271,10 +271,12 @@ TEST(CdnaVop3pPackedF32Test, SgprSourcesReadBothRegisters) {
       ASSERT_EQ(std::string_view(inst->mnemonic()), "v_pk_fma_f32") << arch.name;
       EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
+      // CDNA5 ISA 7.7.1 replicates s8; earlier CDNA reads the s[8:9] pair.
+      const float expected_hi = arch.arch == ROCJITSU_CODE_ARCH_CDNA5 ? 12.0f : 15.0f;
       for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
         EXPECT_EQ(cu->read_vgpr(vb + 2, lane), std::bit_cast<uint32_t>(8.0f))
             << arch.name << " force_scalar=" << force_scalar << " lane " << lane;
-        EXPECT_EQ(cu->read_vgpr(vb + 3, lane), std::bit_cast<uint32_t>(15.0f))
+        EXPECT_EQ(cu->read_vgpr(vb + 3, lane), std::bit_cast<uint32_t>(expected_hi))
             << arch.name << " force_scalar=" << force_scalar << " lane " << lane;
       }
 
