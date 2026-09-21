@@ -4262,6 +4262,23 @@ class P2pShareableBufferMicrotest : public P2pMicrotest {
 protected:
     ncclIpcDesc ipcDesc{};
     void*       ptr = nullptr;
+
+    // Import-path state, hoisted out of the eleven import tests so each is a
+    // single CallImport(). commStorage_ is heap-allocated (~3.8 MB, not
+    // stack-safe) on first use; peerInfo_ backs comm.peerInfo, which the cuMem
+    // tracking call reads as peerInfo[peer].cudaDev. devMem_ receives the
+    // mapped/reserved pointer the caller relies on.
+    std::unique_ptr<ncclComm>   commStorage_;
+    std::array<ncclPeerInfo, 4> peerInfo_{};
+    void*                       devMem_ = nullptr;
+
+    ncclResult_t CallImport(int peer = 1, std::size_t size = 256)
+    {
+        commStorage_ = std::make_unique<ncclComm>();
+        commStorage_->peerInfo = peerInfo_.data();
+        return ncclP2pImportShareableBuffer(commStorage_.get(), peer, size,
+                                            &ipcDesc, &devMem_);
+    }
 };
 
 // Legacy-IPC arm (ncclCuMemEnable() == 0): the buffer is allocated through
@@ -4497,15 +4514,11 @@ TEST_F(P2pShareableBufferMicrotest,
             return hipSuccess;
         });
 
-    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
-    ncclComm& comm = *commStorage;
-    void* devMem = nullptr;
-    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
-                                          &ipcDesc, &devMem);
+    auto r = CallImport();
 
     EXPECT_EQ(r, ncclSuccess);
     EXPECT_EQ(openCalls, 1);
-    EXPECT_EQ(devMem, kMapped);   // caller receives the mapped pointer
+    EXPECT_EQ(devMem_, kMapped);   // caller receives the mapped pointer
 }
 
 // Legacy-IPC arm, hipIpcOpenMemHandle fails: the error is propagated.
@@ -4517,11 +4530,7 @@ TEST_F(P2pShareableBufferMicrotest,
             return hipErrorInvalidValue;
         });
 
-    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
-    ncclComm& comm = *commStorage;
-    void* devMem = nullptr;
-    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
-                                          &ipcDesc, &devMem);
+    auto r = CallImport();
 
     EXPECT_NE(r, ncclSuccess);
 }
@@ -4569,22 +4578,14 @@ TEST_F(P2pShareableBufferMicrotest,
             return ncclSuccess;
         });
 
-    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
-    ncclComm& comm = *commStorage;
-    // peerInfo[peer].cudaDev is read for the tracking call.
-    std::array<ncclPeerInfo, 4> peerInfo{};
-    comm.peerInfo = peerInfo.data();
-    void* devMem = nullptr;
-
-    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
-                                          &ipcDesc, &devMem);
+    auto r = CallImport();
 
     EXPECT_EQ(r, ncclSuccess);
     EXPECT_EQ(importCalls, 1);
     EXPECT_EQ(mapCalls, 1);
     EXPECT_EQ(accessCalls, 1);
     EXPECT_EQ(trackCalls, 1);
-    EXPECT_EQ(devMem, kReserved);
+    EXPECT_EQ(devMem_, kReserved);
 }
 
 // cuMem arm, POSIX_FD handle type: the remote handle is converted to a local
@@ -4634,19 +4635,12 @@ TEST_F(P2pShareableBufferMicrotest,
             return ncclSuccess;
         });
 
-    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
-    ncclComm& comm = *commStorage;
-    std::array<ncclPeerInfo, 4> peerInfo{};
-    comm.peerInfo = peerInfo.data();
-    void* devMem = nullptr;
-
-    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
-                                          &ipcDesc, &devMem);
+    auto r = CallImport();
 
     EXPECT_EQ(r, ncclSuccess);
     EXPECT_EQ(getFdCalls, 1);     // the POSIX_FD conversion fired
     EXPECT_EQ(importCalls, 1);
-    EXPECT_EQ(devMem, kReserved);
+    EXPECT_EQ(devMem_, kReserved);
 }
 
 // cuMem arm, import failure: hipMemImportFromShareableHandle's error is
@@ -4670,14 +4664,7 @@ TEST_F(P2pShareableBufferMicrotest,
             return hipErrorInvalidValue;
         });
 
-    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
-    ncclComm& comm = *commStorage;
-    std::array<ncclPeerInfo, 4> peerInfo{};
-    comm.peerInfo = peerInfo.data();
-    void* devMem = nullptr;
-
-    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
-                                          &ipcDesc, &devMem);
+    auto r = CallImport();
 
     EXPECT_NE(r, ncclSuccess);
 }
@@ -4703,14 +4690,7 @@ TEST_F(P2pShareableBufferMicrotest,
             return hipErrorInvalidValue;
         });
 
-    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
-    ncclComm& comm = *commStorage;
-    std::array<ncclPeerInfo, 4> peerInfo{};
-    comm.peerInfo = peerInfo.data();
-    void* devMem = nullptr;
-
-    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
-                                          &ipcDesc, &devMem);
+    auto r = CallImport();
 
     EXPECT_NE(r, ncclSuccess);
 }
@@ -4735,14 +4715,7 @@ TEST_F(P2pShareableBufferMicrotest,
             return hipErrorInvalidValue;
         });
 
-    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
-    ncclComm& comm = *commStorage;
-    std::array<ncclPeerInfo, 4> peerInfo{};
-    comm.peerInfo = peerInfo.data();
-    void* devMem = nullptr;
-
-    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
-                                          &ipcDesc, &devMem);
+    auto r = CallImport();
 
     EXPECT_NE(r, ncclSuccess);
 }
@@ -4768,14 +4741,7 @@ TEST_F(P2pShareableBufferMicrotest,
             return hipErrorInvalidValue;
         });
 
-    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
-    ncclComm& comm = *commStorage;
-    std::array<ncclPeerInfo, 4> peerInfo{};
-    comm.peerInfo = peerInfo.data();
-    void* devMem = nullptr;
-
-    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
-                                          &ipcDesc, &devMem);
+    auto r = CallImport();
 
     EXPECT_NE(r, ncclSuccess);
 }
@@ -4810,14 +4776,7 @@ TEST_F(P2pShareableBufferMicrotest,
             return hipSuccess;
         });
 
-    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
-    ncclComm& comm = *commStorage;
-    std::array<ncclPeerInfo, 4> peerInfo{};
-    comm.peerInfo = peerInfo.data();
-    void* devMem = nullptr;
-
-    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
-                                          &ipcDesc, &devMem);
+    auto r = CallImport();
 
     EXPECT_NE(r, ncclSuccess);
 }
@@ -4871,14 +4830,7 @@ TEST_P(P2pImportMapStageFails, CuMem_MappingStageRefuses_Propagates)
             return ncclSuccess;
         });
 
-    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
-    ncclComm& comm = *commStorage;
-    std::array<ncclPeerInfo, 4> peerInfo{};
-    comm.peerInfo = peerInfo.data();
-    void* devMem = nullptr;
-
-    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
-                                          &ipcDesc, &devMem);
+    auto r = CallImport();
 
     EXPECT_NE(r, ncclSuccess);
 }
@@ -4922,14 +4874,7 @@ TEST_F(P2pShareableBufferMicrotest,
            hipMemAllocationHandleType, ncclMemType_t, int, int,
            void*) -> ncclResult_t { return ncclSystemError; });
 
-    auto commStorage = std::make_unique<ncclComm>();  // ~3.8 MB: heap, not stack-safe
-    ncclComm& comm = *commStorage;
-    std::array<ncclPeerInfo, 4> peerInfo{};
-    comm.peerInfo = peerInfo.data();
-    void* devMem = nullptr;
-
-    auto r = ncclP2pImportShareableBuffer(&comm, /*peer=*/1, /*size=*/256,
-                                          &ipcDesc, &devMem);
+    auto r = CallImport();
 
     EXPECT_EQ(r, ncclSystemError);
 }
