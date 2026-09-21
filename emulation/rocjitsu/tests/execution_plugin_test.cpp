@@ -47,6 +47,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -2878,6 +2879,58 @@ TEST(ExecutionPluginTest, DppInstructionReuseRestagesOriginalSource) {
   EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), 0x22222222u);
 }
 
+TEST(ExecutionPluginTest, SdwaFp8ConversionsIgnoreNumericalOutputModifiers) {
+  // CDNA3 section 7.2 and CDNA4 section 7.3: these VOP1 conversions use only
+  // the SDWA source register and byte selection; CLAMP and OMOD are ignored.
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    amdgpu::GpuMemory memory("sdwa_fp8_memory");
+    amdgpu::L2Cache cache("sdwa_fp8_cache");
+    cache.set_backing_memory(&memory);
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 106;
+    config.vgprs_per_wf = 256;
+    config.lds_size_kb = 64;
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu =
+        amdgpu::ComputeUnitCore::create("sdwa_fp8", config, &memory, &cache);
+    std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+    amdgpu::Wavefront *wave = cu->dispatch_wf(0, 0, 106, 256);
+    ASSERT_NE(wave, nullptr);
+    wave->set_mode_raw(0); // Enable ordinary OMOD so the opcode exception is exercised.
+    const uint32_t base = wave->vgpr_alloc().base;
+    for (uint32_t opcode : {84u, 85u}) {
+      // Both encodings represent +2; CDNA3 uses the FNUZ biases.
+      const uint32_t input =
+          arch == ROCJITSU_CODE_ARCH_CDNA3 ? (opcode == 84 ? 0x48u : 0x44u) : 0x40u;
+      for (uint32_t byte = 0; byte < 4; ++byte) {
+        for (uint32_t modifiers = 0; modifiers < 8; ++modifiers) {
+          SCOPED_TRACE(::testing::Message() << "arch=" << arch << " opcode=" << opcode
+                                            << " byte=" << byte << " modifiers=" << modifiers);
+          const std::array<uint32_t, 2> words{
+              0x7e000000u | (6u << 17) | (opcode << 9) | amdgpu::SRC_SDWA,
+              2u | (amdgpu::sdwa::DWORD << 8) | (modifiers << 13) | (byte << 16),
+          };
+          std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+          ASSERT_NE(instruction, nullptr);
+          for (uint64_t exec : {uint64_t{0b101}, ~uint64_t{0}}) {
+            wave->set_exec(exec);
+            for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+              cu->write_vgpr(base + 2, lane, input << (8 * byte));
+              cu->write_vgpr(base + 6, lane, 0xdeadbeefu);
+            }
+            ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
+            for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+              EXPECT_EQ(cu->read_vgpr_storage(base + 6, lane),
+                        (exec & (uint64_t{1} << lane)) ? 0x40000000u : 0xdeadbeefu);
+          }
+        }
+      }
+    }
+    wave->halt();
+  }
+}
+
 TEST(ExecutionPluginTest, Sdwa64BitDestinationWritesLegalConversionResult) {
   ForceScalarOverride force_scalar(true);
   ScopedIsaExecutionBackend execution_backend_scope{&cdna3::execution_backend()};
@@ -4463,7 +4516,11 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
   std::memcpy(image_host, image.data(), image.size());
 
   KfdProcess process(process_id);
-  f.mem->register_process(process_id, &process.page_table_, &process.page_table_mutex_);
+  amdgpu::LegacyGpuVmAdapter legacy_vm(f.soc->gpu_vm(), f.soc->memory());
+  const amdgpu::AddressSpaceHandle address_space =
+      legacy_vm.register_address_space(process_id, &process.page_table_, &process.page_table_mutex_,
+                                       process.page_table_generation());
+  ASSERT_TRUE(address_space);
   process.map_pages(code_object_va, image_host, image.size());
 
   std::vector<uint8_t> ring(4096, 0);
@@ -4490,7 +4547,8 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
   std::memcpy(ring.data(), &packet, sizeof(packet));
 
   constexpr uint32_t queue_id = 7;
-  amdgpu::HwQueue queue{};
+  amdgpu::AqlQueueConfig queue{};
+  queue.address_space = address_space;
   queue.queue_id = queue_id;
   queue.process_id = process_id;
   queue.ring_base_va = ring_va;
@@ -4498,7 +4556,8 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
   queue.read_ptr_va = read_ptr_va;
   queue.write_ptr_va = write_ptr_va;
   queue.doorbell_base = &doorbell;
-  queue.host_accessible = true;
+  queue.doorbell_mode = amdgpu::QueueDoorbellMode::HostPolled;
+  queue.uses_kfd_queue_abi = true;
   f.cp()->register_queue(std::move(queue));
   f.cp()->engine()->schedule_event_now(f.cp()->doorbell_event());
   f.run_until_idle();
@@ -4512,7 +4571,7 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
 
   f.cp()->unregister_queue(queue_id, process_id);
   f.shutdown();
-  f.mem->unregister_process(process_id);
+  EXPECT_TRUE(legacy_vm.unregister_address_space(address_space));
 
   ASSERT_TRUE(found_dispatch);
   EXPECT_EQ(kernel_name, "vmid_dispatch_kernel");

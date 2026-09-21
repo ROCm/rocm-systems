@@ -1226,6 +1226,11 @@
           "test_filter": "ParameterApiTests.*:ParameterApiTypedTests*"
         },
         {
+          "name": "CollConfigTests",
+          "description": "Per-collective ncclCollConfig_t validation tests",
+          "test_filter": "CollConfigTests.*:CollConfigTypedTests*"
+        },
+        {
           "name": "ArgCheck",
           "description": "Argument validation tests",
           "test_filter": "ArgCheckTest.*"

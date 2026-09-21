@@ -10,7 +10,9 @@
 #include "rocjitsu/vm/amdgpu/spi.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include "legacy_gpu_memory_fixture.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
 
 #include <gtest/gtest.h>
 
@@ -19,6 +21,7 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <vector>
 
@@ -36,7 +39,7 @@ constexpr uint32_t kGfx12STrap = 0xBF900003u;      // s_trap 3 on gfx12+
 constexpr uint32_t kSEndpgm = 0xBF810000u;         // s_endpgm
 
 struct WaveDebugFixture {
-  amdgpu::GpuMemory gpu_mem;
+  test::LegacyGpuMemoryFixture gpu_mem;
   amdgpu::L2Cache l2;
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   amdgpu::Wavefront *wf = nullptr;
@@ -50,6 +53,8 @@ struct WaveDebugFixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     cu = amdgpu::ComputeUnitCore::create("cu_wave_debug", cfg, &gpu_mem, &l2);
+    l2.set_gpu_vm(&gpu_mem.gpu_vm());
+    cu->set_gpu_vm(&gpu_mem.gpu_vm());
   }
 
   amdgpu::Wavefront *dispatch(uint64_t pc) {
@@ -695,6 +700,7 @@ TEST(WaveDebugTest, DeclinedMemoryViolationStillIssuesTheAccess) {
   constexpr uint64_t kUnmappedAddr = 0x900000;
 
   std::vector<uint8_t> kernel_page(kPageSize);
+  std::vector<uint8_t> data_page(kPageSize);
   KfdProcess::PageTable page_table;
   std::shared_mutex page_table_mutex;
   page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
@@ -718,9 +724,8 @@ TEST(WaveDebugTest, DeclinedMemoryViolationStillIssuesTheAccess) {
   const uint32_t sbase = wave->sgpr_alloc().base;
   fx.cu->write_sgpr(sbase + 0, static_cast<uint32_t>(kUnmappedAddr));
   fx.cu->write_sgpr(sbase + 1, static_cast<uint32_t>(kUnmappedAddr >> 32));
-  // A recognisable value at the unmapped address, which falls through to sparse
-  // backing, so a load that really issued can be told from one that did not.
-  fx.gpu_mem.write32(kUnmappedAddr, 0xFEEDFACEu, kProcessId);
+  constexpr uint32_t kExpectedValue = 0xFEEDFACEu;
+  std::memcpy(data_page.data(), &kExpectedValue, sizeof(kExpectedValue));
 
   bool handler_called = false;
   fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront &, uint64_t, bool) {
@@ -733,8 +738,20 @@ TEST(WaveDebugTest, DeclinedMemoryViolationStillIssuesTheAccess) {
   EXPECT_TRUE(handler_called);
   EXPECT_FALSE(wave->debug_halted());
   EXPECT_EQ(wave->pc, kKernelAddr + 8);
-  // The load was issued rather than discarded, so s0 holds what memory held.
-  EXPECT_EQ(fx.cu->read_sgpr(sbase + 0), 0xFEEDFACEu);
+  EXPECT_EQ(fx.cu->read_sgpr(sbase + 0), static_cast<uint32_t>(kUnmappedAddr));
+
+  // A declined debugger notification must leave the operation retryable. Once
+  // the missing translation is published, the retained load completes instead
+  // of being discarded or fabricated from sparse backing.
+  {
+    std::unique_lock lock(page_table_mutex);
+    page_table[kUnmappedAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {data_page.data(),
+                                                                  amdgpu::Mtype::RW};
+  }
+  for (int step = 0; step < 8 && fx.cu->read_sgpr(sbase + 0) != kExpectedValue; ++step)
+    fx.cu->step();
+
+  EXPECT_EQ(fx.cu->read_sgpr(sbase + 0), kExpectedValue);
 
   fx.gpu_mem.unregister_process(kProcessId);
 }
