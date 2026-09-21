@@ -408,8 +408,7 @@ flowchart TD
 ### Context inventory and lifecycle
 
 This section presumes the [prerequisites](#prerequisites) are satisfied. Given them, the native tool
-owns five contexts. Splitting them is what makes per-pass control expressible: each one is
-positioned differently across the pass loop.
+owns five contexts. Splitting them is what makes per-pass control expressible.
 
 | Context | Carries | Created | Globally started | Local toggle inside the loop | Globally stopped |
 | --- | --- | --- | --- | --- | --- |
@@ -556,20 +555,8 @@ flowchart TD
 
 ### Output and dispatch ID
 
-A single dispatch produces one consolidated counter result. The SDK already supplies the shared
+A single logical dispatch produces one consolidated counter result. The SDK already supplies the shared
 dispatch ID; compute preserves it instead of inferring identity from timestamps or dispatch order.
-Per-pass counter records remain distinct until completeness is checked.
-
-| Step | What happens |
-| --- | --- |
-| 1. Associate passes | The native tool records pass identity at `PASS` enter and carries it to counter-record delivery. Other service callbacks cannot assume replay metadata is present. |
-| 2. Consolidate | Within each process's results, group by the SDK dispatch ID and require every expected counter bucket exactly once. Do not renumber replay passes as separate dispatches. |
-| 3. Normalize timestamps | Give the group one canonical start/end pair using pass 0's logical duration. |
-| 4. Hand off | The existing contracts see a single counter set per dispatch (FR-7 through FR-10). |
-
-The pass association must survive delivery on the HSA completion thread; submission-thread local
-state alone is insufficient. An admitted one-bucket dispatch uses ordinary counting state because
-its `CONFIG` exit precedes execution and no `PASS` callbacks occur.
 
 ### Co-active service composition
 
@@ -584,8 +571,8 @@ its `CONFIG` exit precedes execution and no `PASS` callbacks occur.
 
 #### Kernel dispatch records
 
-Native-tool ownership of kernel dispatch tracing is a [prerequisite](#prerequisites). It has one consequence beyond the pass loop: the native tool produces the
-dispatch records too with exactly one dispatch record per logical dispatch.
+Native-tool ownership of kernel dispatch tracing is a [prerequisite](#prerequisites). It has one consequence: the native tool produces
+dispatch records with exactly one dispatch record per logical dispatch.
 
 ### Mode and option compatibility
 
@@ -595,7 +582,7 @@ flags kernel replay as experimental.
 | Option or condition | With kernel replay |
 | --- | --- |
 | `--iteration-multiplexing` | Rejected |
-| `--attach-pid` | Rejected. Live attach cannot open a replay window over an already-running process. |
+| `--attach-pid` | Rejected |
 | `--no-native-tool`, the non-native counter-collection backend | Rejected |
 | `--pc-sampling` | Accepted, *N*+1 passes |
 | `--roof-only`, `--set`, `--block` | Accepted, unchanged |
@@ -604,7 +591,7 @@ flags kernel replay as experimental.
 ### Failure behavior
 
 Every failure below rejects partial replay data. Compute does not retry with application replay or
-accept the SDK's ordinary single execution as a successful multi-bucket profile.
+accept the SDK's single pass fallback.
 
 | Condition | Required behavior |
 | --- | --- |
@@ -616,23 +603,6 @@ accept the SDK's ordinary single execution as a successful multi-bucket profile.
 | SDK declines the device-memory snapshot | Abandon the entire profile without retry, reject incomplete output, and recommend application replay. |
 | Requested replay completes fewer passes than expected | Reject the profile with dispatch identity and requested/completed counts. |
 | Upstream restore failure, drain timeout, or process abort | Report the failed run without recovery. |
-
-The native tool keeps completion state behind the sequence's `user_data.ptr`. It records the count
-returned by `pass_count_cb`, advances the completed count at each `PASS` exit, and checks it at
-`CONFIG` exit (FR-17, NFR-2).
-
-| Requested path | Observation at `CONFIG` exit | Compute action |
-| --- | --- | --- |
-| Filter opt-out or admitted one-bucket dispatch | No `PASS` callbacks, as specified | Accept the callback sequence. For an admitted dispatch, verify the ordinary counter result after execution. |
-| Fixed replay of more than one pass | No completed passes | Detect declined replay and fail the profile. In the current SDK, snapshot decline reaches `CONFIG` exit before the single-execution fallback. |
-| Fixed replay | Some, but fewer than the requested passes | Fail the profile; compute did not authorize early termination. |
-| Fixed replay | All requested passes completed | Continue to counter-bucket completeness checks before publishing results. |
-
-The native tool reports an incomplete-replay error at that boundary; a successful workload exit
-cannot override it. This rejects partial data without depending on SDK warning spelling. Detailed
-capture-failure reasons remain SDK diagnostics because the callback payload has no status field.
-Unsupported submissions that never reach `CONFIG` are covered by result completeness checks for
-any dispatch admitted for profiling, not by this callback count.
 
 ## Implementation phases
 
@@ -649,16 +619,14 @@ any dispatch admitted for profiling, not by this callback count.
 | # | Check | Pass criterion |
 | --- | --- | --- |
 | 1 | **Counter accuracy** | For a deterministic workload requesting more than one bucket; for each logical dispatch, every kernel-replay counter value matches its corresponding application-replay counter value. Evaluate cache-sensitive counters separately, as a documented limitation. |
-| 2 | **Completeness and identity** | Integration and output checks verify the same SDK dispatch ID across replay callbacks and counter passes, every expected bucket exactly once, and one consolidated `Dispatch_ID` (FR-8, NFR-2). An admitted one-bucket dispatch completes ordinary counting without `PASS` callbacks. |
+| 2 | **Completeness and identity** | Integration and output checks verify the same SDK dispatch ID across replay callbacks and counter passes, every expected bucket exactly once, and one consolidated `Dispatch_ID` (FR-8, NFR-2). |
 | 3 | **Filtering** | Kernels excluded by the kernel or dispatch filter are not profiled and no errors are thrown. The same `--dispatch` range selects the same dispatches in both replay modes. |
 | 4 | **Application-replay comparison** | Profile the same deterministic workload and multi-bucket counter request in both modes. Compare corresponding buckets for each logical dispatch; bucket membership, counter values, and final analysis results agree, and existing application replay is unchanged. |
 | 5 | **Kernel tracing** | Exactly one kernel dispatch record per logical dispatch, from pass 0. |
 | 6 | **PC sampling** | Each admitted dispatch replays *N*+1 times. Every bucket appears exactly once across passes 0 through *N*−1, and pass *N* produces PC sampling output and no counter rows. |
 | 7 | **Compatibility** | Every accepted option behaves as expected — PC sampling, roofline selection, a kernel-replay-specific multi-rank diagnostic that names the collective kernel risk, and default-off — and every rejected combination is rejected: iteration multiplexing, live attach-detach. |
 | 8 | **Configuration rejection** | Each unmet condition on its own — no native tool, unsupported ROCm version, unresolvable library, fails before profiling starts, with a diagnostic naming that specific condition. |
-| 9 | **Failure paths** | Fault-injection and integration checks reject an unsupported SDK, missing profiles, snapshot decline, short replay, and restore/drain aborts (FR-16 through FR-19). Snapshot decline fails even if the SDK fallback exits successfully or warning text changes. Zero-bucket bypass and deliberate opt-out are not failures. |
-| 10 | **Replay callback contract** | SDK unit/sample coverage verifies fixed counts, early exit, terminating indefinite replay, zero without continuation, per-pass overrides, user-data copies, and local-toggle errors. Compute integration verifies fixed counts with continuation unset and completion state surviving through `CONFIG` exit (FR-5, FR-17). |
-| 11 | **Memory and queue isolation** | SDK snapshot and replay integration coverage checks supported allocations and module variables, unchanged inputs between passes, retained final outputs, sibling-queue draining, and independent agents. Unsupported memory and external mutation remain outside the equivalence guarantee (NFR-1). |
+| 9 | **Failure paths** | Fault-injection and integration checks reject an unsupported SDK, missing profiles, snapshot decline, short replay, and restore/drain aborts (FR-16 through FR-19). Snapshot decline fails even if the SDK fallback exits successfully. Zero-bucket bypass and deliberate opt-out are not failures. |
 
 ### Security
 
