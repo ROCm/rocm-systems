@@ -152,6 +152,38 @@ bool SimulatedKfd::gem_va_unmap(uint64_t gpu_va, size_t size) {
   return true;
 }
 
+int SimulatedKfd::submit_pm4(uint32_t render_minor, uint64_t queue_key,
+                             amdgpu::Pm4Submission submission) {
+  const auto process = find_process(local_process_id_);
+  if (!process)
+    return -ENODEV;
+  std::lock_guard op_lock(process->op_mutex_);
+  if (process->event_state_.is_closing())
+    return -ENODEV;
+  const uint32_t ordinal = num_gpus() == 1 ? 0 : render_minor - 128;
+  if (ordinal >= gpus_.size())
+    return -ENODEV;
+  std::lock_guard lock(pm4_mutex_);
+  auto it = pm4_queues_.find(queue_key);
+  if (it == pm4_queues_.end()) {
+    auto *cp = gpus_[ordinal].soc->assign_queue_owner_cp(0);
+    if (!cp)
+      return -ENODEV;
+    amdgpu::Pm4SubmitQueue queue;
+    queue.address_space = process->gpu(ordinal).address_space;
+    queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
+    queue.process_id = local_process_id_;
+    queue.queue_id = next_pm4_queue_id_++;
+    const uint32_t queue_id = queue.queue_id;
+    if (!cp->register_drm_queue(std::move(queue)))
+      return -EIO;
+    it = pm4_queues_.emplace(queue_key, std::pair{cp, queue_id}).first;
+  }
+  return it->second.first->submit_pm4(it->second.second, local_process_id_, std::move(submission))
+             ? 0
+             : -EIO;
+}
+
 namespace {
 
 /// @brief mmap via the real libc, bypassing the interposer.
@@ -1174,6 +1206,17 @@ int SimulatedKfd::close(uint32_t process_id) {
     event_dispatch_.erase(process_id);
   }
 
+  // Release queue binding leases and submission BO references before revoking
+  // this process's address spaces or unmapping its allocations.
+  if (process_id == local_process_id_) {
+    std::lock_guard lock(pm4_mutex_);
+    for (const auto &[key, queue] : pm4_queues_) {
+      (void)key;
+      queue.first->unregister_drm_queues(process_id);
+    }
+    pm4_queues_.clear();
+  }
+
   const bool trace_enabled = vm_trace_enabled();
   size_t leaked_allocations = 0;
   uint64_t leaked_bytes = 0;
@@ -2014,7 +2057,11 @@ int SimulatedKfd::get_tile_config_ioctl(void *arg) {
 
   args->num_tile_configs = tile_write_count;
   args->num_macro_tile_configs = macro_write_count;
-  args->gb_addr_config = kmd::gb_addr_config_for_arch(gpu->soc->arch());
+  const uint32_t ordinal = gpu_ordinal(args->gpu_id);
+  args->gb_addr_config =
+      ordinal < gpu_infos_.size()
+          ? kmd::gb_addr_config_for_gfx_target_version(gpu_infos_[ordinal].gfx_target_version)
+          : kmd::gb_addr_config_for_arch(gpu->soc->arch());
   args->num_banks = 0;
   args->num_ranks = 0;
   return 0;

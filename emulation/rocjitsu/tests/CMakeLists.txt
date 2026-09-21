@@ -1708,11 +1708,10 @@ rj_add_test(
         "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}:bin/${CMAKE_SHARED_LIBRARY_PREFIX}early_mmap_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
 )
 
-# --- interposer dup/backend bookkeeping test (CLI launcher) ---
-# Runs a small gtest binary via the rocjitsu CLI launcher (which preloads the
-# interposer and writes the config_path file it reads) so open("/dev/kfd") is
-# serviced by the simulated driver, then exercises dup/dup2/dup3/fcntl(F_DUPFD)
-# fd tracking that the SimulatedKfd-level unit tests cannot reach.
+# --- interposer KFD/DRM integration tests (CLI launcher) ---
+# The launcher preloads the interposer and supplies its config_path file.
+# Exercise fd tracking, device discovery, GEM/PRIME mappings, synchronization
+# and PM4 dispatch through the public driver interface.
 add_executable(interposer_dup_test interposer_dup_test.cpp)
 rj_configure_target(interposer_dup_test TEST)
 target_include_directories(
@@ -1728,13 +1727,22 @@ if(RJ_INSTALL_TESTS)
     rj_install_test_target(interposer_dup_test)
 endif()
 function(rj_add_interposer_test_suite _suite)
-    foreach(_case IN LISTS ARGN)
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "CONFIG" "")
+    set(_config "${RJ_CDNA4_KMD_CONFIG}")
+    set(_suffix "")
+    if(ARG_CONFIG)
+        set(_config "${ARG_CONFIG}")
+        get_filename_component(_suffix "${_config}" NAME_WE)
+        set(_suffix ".${_suffix}")
+    endif()
+    get_filename_component(_config_name "${_config}" NAME)
+    foreach(_case IN LISTS ARG_UNPARSED_ARGUMENTS)
         rj_add_test(
-            NAME "${_suite}.${_case}"
+            NAME "${_suite}.${_case}${_suffix}"
             COMMAND
                 ${RJ_CLI}
                 --config
-                ${RJ_CDNA4_KMD_CONFIG}
+                ${_config}
                 --
                 $<TARGET_FILE:interposer_dup_test>
                 "--gtest_filter=${_suite}.${_case}"
@@ -1743,7 +1751,7 @@ function(rj_add_interposer_test_suite _suite)
             INSTALL_COMMAND
                 "\${RJ_INSTALLED_BINDIR}/rocjitsu"
                 "--config"
-                "\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA4_KMD_CONFIG_NAME}"
+                "\${RJ_INSTALLED_CONFIG_DIR}/${_config_name}"
                 "--"
                 "bin/interposer_dup_test"
                 "--gtest_filter=${_suite}.${_case}"
@@ -1787,7 +1795,44 @@ rj_add_interposer_test_suite(
     InterposerDrmTest
     DeviceInfoReportsActiveCuCount
     OpensWithinCurrentDescriptorLimit
+    RenderNodePathMetadataMatchesDescriptor
+    TimestampUsesAdvertisedNanosecondClock
 )
+
+set(_rj_interposer_pm4_tests
+    DependencyDefersMemoryWriteAndCompletion
+    MalformedPacketFailsCompletion
+    FaultedQueueRejectsNewSubmission
+    UnmappedWaitFailsCompletion
+    UnmappedIndirectDispatchFailsCompletion
+    ClosedBufferSurvivesQueuedSubmissions
+    CompletionRacingWaitDoesNotLoseWakeup
+    UnmappedScratchFailsFence
+    InsufficientScratchFailsFence
+    TimelineSignalDoesNotCompleteSharedJobFence
+    TimelineTransferRetainsPendingPredecessor
+    TimelineSubmissionWaitsForEarlierQueue
+    RepeatedTimelineTransfersVisitSharedDependenciesOnce
+    GraphicsQueueAcceptsBufferOwnershipFlushEvents
+    MergedSyncFilesRetainPendingFenceAcrossDupAndImport
+    GridProductOverflowFailsFence
+    UnmappedShaderFailsFence
+    OversizedLdsFailsFence
+    FailedFenceIsStillAvailable
+    MappedScalarLoadSucceeds
+    UnmappedScalarLoadFailsFence
+    MappedVectorLoadSucceeds
+    UnmappedVectorLoadFailsFence
+    ChainedIndirectBufferDoesNotReturn
+    NestedIndirectBufferReturns
+)
+foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700)
+    rj_add_interposer_test_suite(
+        InterposerPm4Test
+        CONFIG "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
+        ${_rj_interposer_pm4_tests}
+    )
+endforeach()
 
 rj_add_interposer_test_suite(
     InterposerFreshForkTest

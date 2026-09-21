@@ -90,14 +90,20 @@ public:
 
   [[nodiscard]] VmTranslationResult probe_translation(uint64_t address, std::size_t size,
                                                       VmAccessKind access) const override {
-    const bool accessible = access == VmAccessKind::Execute
-                                ? address_space_->is_fetchable(address, vmid_)
-                            : access == VmAccessKind::Write || access == VmAccessKind::Atomic
-                                ? address_space_->has_writable_host_backing(address, vmid_, size)
-                                : address_space_->has_host_backing(address, vmid_, size);
+    const auto translated = translate(address, size, access);
+    if (!translated)
+      return translated;
+    // GpuVmAccess walks translation spans. Probe only this span so a large
+    // range does not repeatedly rescan every remaining host page.
+    const auto span_size = std::min<uint64_t>(size, translated.translation.contiguous_bytes);
+    const bool accessible =
+        access == VmAccessKind::Execute ? address_space_->is_fetchable(address, vmid_)
+        : access == VmAccessKind::Write || access == VmAccessKind::Atomic
+            ? address_space_->has_writable_host_backing(address, vmid_, span_size)
+            : address_space_->has_host_backing(address, vmid_, span_size);
     if (!accessible)
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
-    return translate(address, size, access);
+    return translated;
   }
 
   [[nodiscard]] VmAccessOutcome read(VmMemoryDomain domain, uint64_t address,
