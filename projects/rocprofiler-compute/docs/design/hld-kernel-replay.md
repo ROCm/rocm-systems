@@ -249,21 +249,17 @@ in use.
 
 #### Memory capture and lifetime
 
-HSA allocation/free interception maintains the live allocation inventory and its owning agents.
-For example, this inventory can contain an input or output array created with `hipMalloc` that
-remains allocated while a dispatch is replayed.
-At capture time, the SDK also enumerates loaded executables for module-scope variables, which do
-not come from the allocation inventory. Examples include a `__device__` global counter or a
-`__constant__` lookup table compiled into a loaded code object. A kernel can access these examples
-through a pointer or symbol without the underlying storage appearing directly in its launch
-arguments.
+HSA allocation/free interception tracks supported device memory.
+This includes input or output arrays created with `hipMalloc` that remain allocated during replay.
+The SDK also enumerates loaded executables to find device data defined in the code object. Examples
+include a `__device__` global counter or a `__constant__` lookup table.
 
 | Stage | SDK behavior |
 | --- | --- |
-| Capture | Copies the replaying agent's supported live allocations and discovered module variables to host buffers once. It does not restrict capture to the selected kernel's arguments. |
-| Restore | Copies captured bytes back only before another pass. Tracked allocation copies check liveness under the inventory lock, excluding concurrent frees during each copy. |
-| Allocation retired after inventory capture | Skips a region that is no longer live or is smaller than the captured size. Allocation/free operations are not globally frozen by replay. |
-| Capture failure | Host-memory exhaustion, a failed device-to-host copy, or incomplete module enumeration declines replay. The SDK closes `CONFIG` and executes once without `PASS` callbacks. |
+| Capture | Copies supported device memory and discovered executable data for the replaying agent to host buffers once. |
+| Restore | Copies captured bytes back only before another pass. |
+| Allocation retired after inventory capture | Skips a region that was freed or became smaller than the captured size. Allocation/free operations are not globally frozen by replay. |
+| Capture failure | Host-memory exhaustion, a failed device-to-host copy, or incomplete executable enumeration declines replay. The SDK closes `CONFIG` and executes once without `PASS` callbacks. |
 | Restore failure | A failed host-to-device copy aborts the process; partially restored state cannot safely drive another pass. |
 | Loop termination | Keeps the last executed pass's device results and releases the host snapshot. Early termination follows the same rule. |
 
@@ -272,15 +268,15 @@ arguments.
 | State or feature | Coverage or limitation |
 | --- | --- |
 | Tracked coarse-grained device allocations, including ordinary `hipMalloc` | Captured for the owning agent and restored between passes. |
-| Module-scope `__device__` / `__constant__` state | Captures variables discoverable through loaded executable symbols. Variables above the implementation's 1 GiB sanity cap are warned about and omitted; that omission does not decline replay. |
+| Executable-defined `__device__` / `__constant__` state | Captures data discoverable through loaded executable symbols. Data above the implementation's 1 GiB sanity cap is warned about and omitted; that omission does not decline replay. |
 | Unified, managed, `hipMallocAsync`, and other virtual-memory-mapped allocations | Not captured. Writes can accumulate across passes. |
 | Host, fine-grained, and kernel-argument memory | Not captured. Input equivalence is not guaranteed for kernels that modify it. |
-| Executable-flag allocations | Excluded to avoid restoring live runtime argument pools and profiler buffers. Direct-HSA application data using the same flag is also omitted without declining replay. |
+| Executable-memory allocations | Allocations created with the HSA executable-memory flag are not captured because they can hold code, runtime argument pools, or profiler buffers. Direct-HSA application data using the same flag is also omitted without declining replay. |
 | Cache state | Not restored. Cache-sensitive counter values may vary between passes. |
 | HIP graphs or multi-packet/multi-dispatch submissions | Warn once per unsupported case and execute once without `CONFIG` or `PASS`. Only eligible single-packet, single-dispatch submissions reach configuration. |
 | Asynchronous SDMA or HSA copies | Bypass the replay gate and are not fenced by the replay window. |
 | Other processes, ranks, and cross-agent shared state | Not coordinated by the process-local per-agent locks. Collectives and external writes can make replay unsafe. |
-| Host-memory capacity | Requires the captured bytes plus metadata, including module variables. Concurrent replay on different agents can retain multiple snapshots. |
+| Host-memory capacity | Requires the captured bytes plus metadata for executable-defined data. Concurrent replay on different agents can retain multiple snapshots. |
 
 ## Problem statement
 
