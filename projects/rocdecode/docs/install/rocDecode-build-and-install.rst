@@ -51,9 +51,10 @@ Windows prerequisites
 ---------------------
 
 * HIP runtime from `TheRock <https://github.com/ROCm/TheRock>`__ for Windows
-* vaon12 — VA-API on D3D12 libraries (``va.dll``, ``va_win32.dll``, ``vaon12_drv_video.dll``), available via the `Microsoft.Direct3D.VideoAccelerationCompatibilityPack NuGet package <https://www.nuget.org/packages/Microsoft.Direct3D.VideoAccelerationCompatibilityPack>`__
+* vaon12 — VA-API on D3D12 libraries (Mesa's ``vaon12_drv_video.dll`` plus libva), provided by
+  TheRock for Windows under ``%ROCM_PATH%\lib\rocm_sysdeps``; no separate download is required
 * Visual Studio 2022 with C++ desktop workload (MSVC compiler, C++17)
-* CMake 3.10 or later
+* CMake 3.21 or later (the ``Visual Studio 17 2022`` generator requires 3.21)
 * Windows SDK (provides D3D12 and DXGI headers/libraries)
 * FFmpeg (optional) — pre-built libraries or built from source, required for samples and the host decoder library
 
@@ -86,53 +87,54 @@ Clone the repository
 Build on Linux
 --------------
 
-3. Build and install rocDecode using the following commands:
+Build and install rocDecode using the following commands:
 
-   .. code-block:: bash
+.. code-block:: bash
 
-      mkdir build && cd build
-      cmake ../
-      make -j8
-      sudo make install
+   mkdir build && cd build
+   cmake ../
+   make -j8
+   sudo make install
 
-   After installation, the rocDecode libraries will be copied to ``/opt/rocm/lib`` and the rocDecode header files will be copied to ``/opt/rocm/include/rocdecode``.
+After installation, the rocDecode libraries will be copied to ``/opt/rocm/lib`` and the rocDecode header files will be copied to ``/opt/rocm/include/rocdecode``.
 
-4. To run the installed CTest-based verification:
+To run the installed CTest-based verification:
 
-   .. code-block:: bash
+.. code-block:: bash
 
-      mkdir rocdecode-test && cd rocdecode-test
-      cmake /opt/rocm/share/rocdecode/test/
-      ctest -VV
+   mkdir rocdecode-test && cd rocdecode-test
+   cmake /opt/rocm/share/rocdecode/test/
+   ctest -VV
 
-   Run ``make test`` to test your build. To run the test with the verbose option, run ``make test ARGS="-VV"``.
+Run ``make test`` to test your build. To run the test with the verbose option, run ``make test ARGS="-VV"``.
 
 Build on Windows
 ----------------
 
-3. Build and install rocDecode using the following commands:
+Build and install rocDecode using the following commands:
 
-   .. code-block:: bat
+.. code-block:: bat
 
-      mkdir build && cd build
-      cmake .. -DROCM_PATH=<path-to-TheRock-build>
-      cmake --build . --config Release
-      cmake --install . --config Release
+   mkdir build && cd build
+   cmake .. -DROCM_PATH=<path-to-TheRock-build>
+   cmake --build . --config Release
+   cmake --install . --config Release
 
-   .. note::
+.. note::
 
-      * Set ``ROCM_PATH`` to the TheRock build output directory. The VA-API runtime and
-        driver are picked up from there; no separate path needs to be supplied.
-      * To include FFmpeg support for samples and the host decoder, add ``-DFFMPEG_ROOT=<path-to-ffmpeg>``.
+   * Set ``ROCM_PATH`` to the TheRock build output directory. The VA-API headers and
+     import libraries are found there at build time. At run time, the VA-API driver is
+     located through ``LIBVA_DRIVERS_PATH``; see :doc:`../reference/rocDecode-env-vars`.
+   * To include FFmpeg support for samples and the host decoder, add ``-DFFMPEG_ROOT=<path-to-ffmpeg>``.
 
-4. To verify the build, run a sample:
+To verify the build, build and run a sample from the installed location:
 
-   .. code-block:: bat
+.. code-block:: bat
 
-      cd samples\videoDecodeRaw
-      mkdir build && cd build
-      cmake .. -DROCM_PATH=<path-to-install>
-      cmake --build . --config Release
-      cd Release
-      videodecoderaw.exe -i <input_stream> -f 5
+   mkdir rocdecode-sample && cd rocdecode-sample
+   cmake %ROCM_PATH%\share\rocdecode\samples\videoDecodeRaw -DROCM_PATH=%ROCM_PATH%
+   cmake --build . --config Release
+   set PATH=%ROCM_PATH%\bin;%PATH%
+   set LIBVA_DRIVERS_PATH=%ROCM_PATH%\lib\rocm_sysdeps\bin
+   Release\videodecoderaw.exe -i %ROCM_PATH%\share\rocdecode\video\AMD_driving_virtual_20-H265.265 -f 5
 

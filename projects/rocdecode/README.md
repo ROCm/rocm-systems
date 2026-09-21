@@ -17,7 +17,7 @@ access the video decoding features available on your GPU.
 ## Supported platforms
 
 * **Linux** (Ubuntu 22.04 / 24.04)
-* **Windows** (Windows 10/11) — experimental, via the VA-API on D3D12 (vaon12) backend
+* **Windows** (Windows 11) — experimental, via the VA-API on D3D12 (vaon12) backend
 
 ## Prerequisites
 
@@ -50,11 +50,10 @@ source builds and nightly/CI artifacts.
 
 ### Windows additional dependencies
 
-On Windows, rocDecode uses the [vaon12](https://devblogs.microsoft.com/directx/video-acceleration-api-va-api-now-available-on-windows/) backend (Mesa's VA-API on D3D12 translation layer) for hardware-accelerated decoding. In addition to the TheRock-provided dependencies, the following are needed:
+On Windows, rocDecode uses the [vaon12](https://devblogs.microsoft.com/directx/video-acceleration-api-va-api-now-available-on-windows/) backend (Mesa's VA-API on D3D12 translation layer) for hardware-accelerated decoding. The vaon12 driver and libva are provided by TheRock for Windows under `%ROCM_PATH%\lib\rocm_sysdeps`; no separate download is required. The following additional tools are needed:
 
-* **vaon12** — VA-API on D3D12 libraries (`va.dll`, `va_win32.dll`, `vaon12_drv_video.dll`), available via the [Microsoft.Direct3D.VideoAccelerationCompatibilityPack NuGet package](https://www.nuget.org/packages/Microsoft.Direct3D.VideoAccelerationCompatibilityPack)
 * **Visual Studio 2022** with C++ desktop workload (MSVC compiler, C++17)
-* **CMake** 3.10 or later
+* **CMake** 3.21 or later (the `Visual Studio 17 2022` generator requires 3.21)
 * **Windows SDK** (provides D3D12 and DXGI headers/libraries)
 
 **Optional:**
@@ -143,8 +142,9 @@ cmake --install . --config Release
 ```
 
 > [!NOTE]
-> * Set `ROCM_PATH` to the TheRock build output directory. The VA-API runtime and driver are
->   picked up from there; no separate path needs to be supplied.
+> * Set `ROCM_PATH` to the TheRock build output directory. The VA-API headers and import
+>   libraries are found there at build time. At run time, the VA-API driver is located through
+>   `LIBVA_DRIVERS_PATH` — set it to `%ROCM_PATH%\lib\rocm_sysdeps\bin`.
 > * To include FFmpeg support, add `-DFFMPEG_ROOT=<path-to-ffmpeg>`.
 
 ### Run tests
@@ -162,6 +162,7 @@ cmake --install . --config Release
 
   ```bat
   set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
+  set LIBVA_DRIVERS_PATH=%ROCM_PATH%\lib\rocm_sysdeps\bin
   ctest -C Release
   ```
 
@@ -233,6 +234,7 @@ guide for other options.
   cmake %ROCM_PATH%\share\rocdecode\samples\videoDecode -DROCM_PATH=%ROCM_PATH% -DFFMPEG_ROOT=%FFMPEG_ROOT%
   cmake --build . --config Release
   set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
+  set LIBVA_DRIVERS_PATH=%ROCM_PATH%\lib\rocm_sysdeps\bin
   Release\videodecode.exe -i %ROCM_PATH%\share\rocdecode\video\AMD_driving_virtual_20-H265.mp4
   ```
 
@@ -253,6 +255,7 @@ guide for other options.
   cmake %ROCM_PATH%\share\rocdecode\test -DROCM_PATH=%ROCM_PATH% -DFFMPEG_ROOT=%FFMPEG_ROOT%
   cmake --build . --config Release
   set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
+  set LIBVA_DRIVERS_PATH=%ROCM_PATH%\lib\rocm_sysdeps\bin
   ctest -C Release -VV
   ```
 
@@ -273,6 +276,6 @@ individual folders to build and run the samples.
 * Linux
   * Ubuntu - `22.04` / `24.04`
 * Windows (experimental)
-  * Windows 10 / 11
+  * Windows 11 - build `26100`
 * [TheRock](https://github.com/ROCm/TheRock) - `7.12` or later
 * FFmpeg - `4.4.2` / `6.1.1`
