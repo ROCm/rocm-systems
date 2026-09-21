@@ -262,7 +262,7 @@ For the exact configuration behind a preset, run ``rocprof-sys-run --explain=<na
 Output formats
 ================
 
-ROCm Systems Profiler supports several output formats, each suited to a different analysis or visualization workflow. ``rocpd`` is expected to become the default output format in an upcoming release.
+ROCm Systems Profiler supports several output formats, each suited to a different analysis or visualization workflow. ``rocpd`` is the default output format.
 
 .. list-table::
    :header-rows: 1
@@ -271,14 +271,14 @@ ROCm Systems Profiler supports several output formats, each suited to a differen
      - File extension
      - Description
      - Viewer
-   * - Perfetto (proto)
-     - ``.proto``
-     - Detailed trace stored as a protocol buffer for interactive timeline visualization
-     - `ui.perfetto.dev <https://ui.perfetto.dev>`_
    * - ROCm Profiling Data (rocpd)
      - ``.db``
      - Detailed trace and counter data stored as a SQLite3 database; queryable with SQL or convertible to other formats via ``rocpd convert``
      - `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/>`_
+   * - Perfetto (pftrace)
+     - ``.pftrace``
+     - Detailed trace stored as a protocol buffer for interactive timeline visualization
+     - `ui.perfetto.dev <https://ui.perfetto.dev>`_
    * - Text
      - ``.txt``
      - Aggregated results (mean, min, max, stddev per function) as human-readable text
@@ -300,7 +300,7 @@ Output-format selection differs by tool:
 
   .. code-block:: shell
 
-     rocprof-sys-run --output-format proto rocpd json text -- ./my_app
+     rocprof-sys-run --output-format pftrace rocpd json text -- ./my_app
 
 * ``rocprof-sys-attach`` uses its own ``-F`` flag with different token names for the same formats (``perfetto`` instead of ``proto``):
 

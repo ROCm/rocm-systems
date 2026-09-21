@@ -66,6 +66,8 @@ namespace rocjitsu::waitcheck_detail {
 /// Lower bounds on the age of the newest possibly pending request of each kind.
 /// kNoPendingEventAge denotes absence. These summaries include counter-only
 /// requests and may overlap materialized PendingEvents; they are not token counts.
+/// Byte storage keeps the dense per-counter summaries compact. Ages saturate at
+/// the target dependency-wait limit, below the reserved absence value.
 struct PendingEventAges {
   std::array<uint8_t, kWaitEventKindCount> values = [] {
     std::array<uint8_t, kWaitEventKindCount> result;
@@ -131,7 +133,8 @@ struct PendingEvent {
   bool check_program_end = false;
   bool check_counter_parity_order = false;
   // Lower bound on younger requests issued on this counter, independent of the
-  // event's canonical vector position. Matching events join by minimum.
+  // event's canonical vector position. Matching events join by minimum. Use the
+  // wait-threshold width for arithmetic; only dense per-kind summaries are packed.
   uint32_t min_younger = 0;
 
   bool operator==(const PendingEvent &) const = default;
@@ -310,9 +313,6 @@ struct WaitcheckStateOps : WaitcheckTarget {
 
   static util::Result apply_kmcnt_wait(PendingState &state, uint32_t count, rj_code_arch_t arch);
 
-  [[nodiscard]] static bool vm_vsrc_event_implied_by_wait(WaitEventKind kind,
-                                                          WaitCounterKind counter);
-
   static void apply_implied_vm_vsrc_wait(PendingState &state, WaitCounterKind counter,
                                          uint32_t count);
 
@@ -334,9 +334,6 @@ struct WaitcheckStateOps : WaitcheckTarget {
 
   [[nodiscard]] static bool counter_has_event_kind(const PendingState &state,
                                                    WaitCounterKind counter, WaitEventKind kind);
-
-  [[nodiscard]] static std::optional<WaitEventKind>
-  normalized_hardware_event_kind(WaitCounterKind counter, WaitEventKind kind, WaitcntModel model);
 
   [[nodiscard]] static bool flat_memory_makes_counter_out_of_order(const PendingState &state,
                                                                    WaitCounterKind counter,
