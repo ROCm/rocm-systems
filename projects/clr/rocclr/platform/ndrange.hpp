@@ -107,119 +107,6 @@ enum class LaunchConfigStatus : uint32_t {
   kClusterIndivisible,  //!< grid is not divisible by the requested cluster dimensions
 };
 
-//! Stucture to store launch parameters.
-struct LaunchParams {
-  NDRange32 global_;         //!< Total number of work-items in N-dims (matches AQL grid_size)
-  NDRange16 local_;          //!< Number of work-items per workgroup (matches AQL workgroup_size)
-  NDRange8 cluster_;         //!< Cluster dims (matches AQL cluster_size, max 255)
-  NDRange32 grid_;           //!< Total number of workgroups in grid in N-dims
-  uint32_t sharedMemBytes_;  //!< Shared Memory bytes
-  bool hipParams_;           //!< If this is launched through hipParams_
-  //! Reason the config was rejected (kOk when valid). IsValidConfig() is derived from this.
-  LaunchConfigStatus configStatus_;
-
-  LaunchParams(size_t globalX, size_t globalY, size_t globalZ, uint32_t localX, uint32_t localY,
-               uint32_t localZ, uint32_t sharedMemBytes, const Device& device,
-               uint32_t clusterX = 1, uint32_t clusterY = 1, uint32_t clusterZ = 1,
-               uint32_t gridX = 1, uint32_t gridY = 1, uint32_t gridZ = 1, bool hipParams = false)
-      : global_(static_cast<uint32_t>(globalX), static_cast<uint32_t>(globalY),
-                static_cast<uint32_t>(globalZ)),
-        local_(static_cast<uint16_t>(localX), static_cast<uint16_t>(localY),
-               static_cast<uint16_t>(localZ)),
-        cluster_(static_cast<uint8_t>(clusterX), static_cast<uint8_t>(clusterY),
-                 static_cast<uint8_t>(clusterZ)),
-        grid_(gridX, gridY, gridZ),
-        sharedMemBytes_(sharedMemBytes),
-        hipParams_(hipParams),
-        configStatus_(LaunchConfigStatus::kOk) {
-    if (!NDRange8::CanSafelyNarrow(clusterX, clusterY, clusterZ)) {
-      RecordFirstRejection(LaunchConfigStatus::kClusterOverflow);
-    }
-
-    if (!NDRange16::CanSafelyNarrow(localX, localY, localZ)) {
-      RecordFirstRejection(LaunchConfigStatus::kBlockOverflow);
-    }
-
-    if (hipParams_) {
-      // Check that the size_t globals fit in uint32_t before the narrowing cast above.
-      if (!NDRange32::CanSafelyNarrow(globalX, globalY, globalZ)) {
-        RecordFirstRejection(LaunchConfigStatus::kGlobalOverflow);
-      }
-    } else {
-      // Non HIPLaunchParams, App directly calculated the global and local size,
-      // manually deduce the grid (total blocks) size.
-      if (local_[0] == 0 || local_[1] == 0 || local_[2] == 0) {
-        RecordFirstRejection(LaunchConfigStatus::kZeroBlock);
-        return;
-      }
-      grid_[0] = global_[0] / local_[0];
-      grid_[1] = global_[1] / local_[1];
-      grid_[2] = global_[2] / local_[2];
-    }
-
-    // If cluster parameters is set, then check if it is divisble by grid (total blocks).
-    if (clusterX > 1 || clusterY > 1 || clusterZ > 1) {
-      if (!CheckClusterDivisibility(clusterX, clusterY, clusterZ)) {
-        RecordFirstRejection(LaunchConfigStatus::kClusterIndivisible);
-      }
-    }
-  }
-
-  //! Record \a status only if no earlier check already rejected the config, so the reason
-  //! reported is the first one detected. Without this a block dim that overflows uint16_t
-  //! would narrow to 0 and be re-reported as kZeroBlock, masking the real reason.
-  void RecordFirstRejection(LaunchConfigStatus status) {
-    if (configStatus_ == LaunchConfigStatus::kOk) {
-      configStatus_ = status;
-    }
-  }
-
-  bool CheckClusterDivisibility(uint32_t clusterX, uint32_t clusterY, uint32_t clusterZ) {
-    // With cluster launch, the total number of blocks or threads the work is launched doesnt
-    // change, except that the work is launch into different CU/WGP's under the same shader engine.
-    // So, the grid values are basically split among different CUs based on cluster dims, hence
-    // grid dims has to be divisble by cluster dims.
-    if ((grid_[0] % clusterX != 0) || (grid_[1] % clusterY != 0) || (grid_[2] % clusterZ != 0)) {
-      return false;
-    }
-    return true;
-  }
-
-  //! Sometimes we receive cluster launch info from kernel, not through HIP launch kernel APIs.
-  bool UpdateClusterLaunchParams(uint32_t clusterX, uint32_t clusterY, uint32_t clusterZ) {
-    // If cluster parameters are not > 1, we dont need to update since it is the default value set.
-    if (clusterX > 1 || clusterY > 1 || clusterZ > 1) {
-      if (!CheckClusterDivisibility(clusterX, clusterY, clusterZ)) {
-        return false;
-      }
-      cluster_[0] = static_cast<uint8_t>(clusterX);
-      cluster_[1] = static_cast<uint8_t>(clusterY);
-      cluster_[2] = static_cast<uint8_t>(clusterZ);
-    }
-    return true;
-  }
-
-  bool IsValidConfig() const { return configStatus_ == LaunchConfigStatus::kOk; }
-
-  //! Reason the config was rejected (kOk when valid); callers map this to a hipError_t.
-  LaunchConfigStatus configStatus() const { return configStatus_; }
-};
-
-//! Structure to store launch parameters in HIP Style (global and local size needs computation).
-struct HIPLaunchParams : public LaunchParams {
-
-  HIPLaunchParams(uint32_t gridX, uint32_t gridY, uint32_t gridZ, uint32_t blockX,
-                  uint32_t blockY, uint32_t blockZ, uint32_t sharedMemBytes, const Device& device,
-                  uint32_t globalX_remainder = 0, uint32_t globalY_remainder = 0,
-                  uint32_t globalZ_remainder = 0, uint32_t clusterX = 1,
-                  uint32_t clusterY = 1, uint32_t clusterZ = 1)
-                  : LaunchParams(static_cast<size_t>(gridX) * blockX + globalX_remainder,
-                                 static_cast<size_t>(gridY) * blockY + globalY_remainder,
-                                 static_cast<size_t>(gridZ) * blockZ + globalZ_remainder,
-                                 blockX, blockY, blockZ, sharedMemBytes, device, clusterX, clusterY,
-                                 clusterZ, gridX, gridY, gridZ, true /*hipParams*/) {}
-};
-
 //! A container for the local and global worksizes.
 class NDRangeContainer {
  private:
@@ -246,7 +133,7 @@ class NDRangeContainer {
     }
   }
 
-  //! From typed NDRange arrays (LaunchParams::Data() callers — includes cluster).
+  //! From typed AQL-width arrays (HIP launch make-function callers — includes cluster).
   NDRangeContainer(size_t dimensions, const size_t* globalWorkOffset,
                    const uint32_t* globalWorkSize, const uint16_t* localWorkSize,
                    const uint8_t* clusterWorkSize)
@@ -295,6 +182,16 @@ class NDRangeContainer {
     cluster_[1] = static_cast<uint8_t>(clusterY);
     cluster_[2] = static_cast<uint8_t>(clusterZ);
     return true;
+  }
+
+  //! Shrink any local (workgroup) dimension that is larger than the corresponding global
+  //! dimension down to it, so a workgroup is never bigger than the work it covers.
+  void ClampLocalToGlobal() {
+    for (size_t i = 0; i < 3; ++i) {
+      if (global_[i] < local_[i]) {
+        local_[i] = static_cast<uint16_t>(global_[i]);
+      }
+    }
   }
 };
 
