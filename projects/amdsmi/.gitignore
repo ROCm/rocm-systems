@@ -41,6 +41,10 @@ esmi_ib_library/
 *.backup
 *.orig
 
+# local build output from the run-amdsmi-local workflow
+ci-build/
+ci-artifact/
+
 # do NOT ignore these files
 !.clang-format
 !.clang-tidy

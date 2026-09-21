@@ -19,6 +19,4 @@ __pycache__
 /.rocshmem-worktree
 /projects/cuid/_build
 build/
-ci-build/
-ci-artifact/
 .worktrees/
