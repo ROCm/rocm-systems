@@ -10,7 +10,7 @@
 #include "data_ops.cuh"
 #endif
 
-template <template <typename> typename Red, typename T, bool multimem>
+template <bool EnableProfiler, template <typename> typename Red, typename T, bool multimem>
 static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multimem> multimemTag) {
   ncclCoopCta cta;
   ncclSymkArgsHandler handler{args};
@@ -76,6 +76,7 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
 
   ncclLsaBarrierSession<ncclCoopCta> lsaBar{cta, handler.comm, ncclTeamTagLsa(), blockIdx.x, multimem};
   lsaBar.sync(cta, cuda::memory_order_acquire);
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
 
   AccT* accum = (AccT*)((char*)ncclGetResourceBufferLocalPointer(handler.comm, handler.rsGinAccumBuf) +
                         size_t(blockIdx.x) * handler.rsGinAccumBytesPerBlock);
@@ -267,14 +268,15 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
 #endif
   }
 
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
   lsaBar.sync(cta, cuda::memory_order_relaxed);
 }
 
-template <template <typename> typename Red, typename T>
+template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_ReduceScatter_RailA2A_LsaLD(ncclSymkDevWorkArgs const* args) {
-  rsAlgoHier<Red, T>(args, /*multimem=*/BoolTag<false>{});
+  rsAlgoHier<EnableProfiler, Red, T>(args, /*multimem=*/BoolTag<false>{});
 }
-template <template <typename> typename Red, typename T>
+template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_ReduceScatter_RailA2A_LsaLDMC(ncclSymkDevWorkArgs const* args) {
-  rsAlgoHier<Red, T>(args, /*multimem=*/BoolTag<true>{});
+  rsAlgoHier<EnableProfiler, Red, T>(args, /*multimem=*/BoolTag<true>{});
 }

@@ -105,6 +105,9 @@ device:
   Unit_hipGetDeviceProperties_NegTst:
     <<: *level_2
     tags: [query, P0]
+  Unit_hipGetDeviceProperties_R0000:
+    <<: *level_2
+    tags: [query, P0]
   Unit_hipRuntimeGetVersion_Positive:
     <<: *level_2
     tags: [init, smoke, P0]

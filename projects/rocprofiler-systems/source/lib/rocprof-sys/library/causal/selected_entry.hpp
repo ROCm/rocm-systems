@@ -12,7 +12,6 @@
 #include <timemory/hash/types.hpp>
 #include <timemory/unwind/dlinfo.hpp>
 #include <timemory/unwind/stack.hpp>
-#include <timemory/utility/macros.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
 #include <cstddef>

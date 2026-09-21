@@ -7,12 +7,6 @@
 // Reusable fakes for NCCL (`nccl*`) symbols that the micro-test binary
 // links against instead of pulling in librccl.so.
 //
-// These fakes are not p2p-specific -- any micro-test that #includes a
-// production TU referencing these `nccl*` functions can link against
-// nccl_fakes.cc. p2p-specific fakes (the alloc-macro emulators, arch/topo
-// helpers) live in p2p_fakes.{h,cc}; HIP runtime seams live in
-// hip_fakes.{h,cc}.
-//
 // Several of the symbols below are "controllable seams": a std::function
 // hook whose default preserves the historical stub behaviour, plus a thin
 // `nccl*` wrapper that dispatches through the hook. Tests install per-test
@@ -88,8 +82,20 @@ extern std::function<ncclResult_t(struct ncclComm*,
 extern std::function<int64_t(const char* /*env*/, int64_t /*deftVal*/)>
     g_loadParam;
 
+// The two device ids and the isXGMI out-parameter; the topo system and the inter-GPU knobs are dropped.
+// maxInter is carried because init.cc:1834 passes an explicit 1 where graph.h:90 defaults to MAX_XGMI_INTER_GPUS.
+extern std::function<ncclResult_t(int /*cudaDev1*/, int /*cudaDev2*/, bool* /*isXGMI*/, int /*maxInter*/)>
+    g_ncclTopoGetLinkType;
+extern int g_ncclTopoGetLinkTypeCalls;
+
 // Restore every NCCL controllable seam in this header to its default.
 // Called by ResetP2pFakes(); exposed for tests that only touch NCCL hooks.
+// Hands back an fd the caller must close. Defaults to ncclSystemError (the
+// historical fixed return); the dev_runtime suite installs one that opens
+// /dev/null so its symmetric-memory export path can run.
+extern std::function<ncclResult_t(struct ncclComm*, int, void*, int*)>
+    g_ncclProxyClientGetFdBlocking;
+
 void ResetNcclFakes();
 
 #endif  // RCCL_TEST_HOST_NCCL_FAKES_H_
