@@ -1354,9 +1354,17 @@ amd_dbgapi_address_dependency (
         if (wave_id != AMD_DBGAPI_WAVE_NONE)
           THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_WAVE_ID);
 
-        if (address_space->address_dependency (segment_address)
-            != AMD_DBGAPI_SEGMENT_ADDRESS_DEPENDENCE_PROCESS)
-          THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY);
+        /* Without a wave, we do not know which agent to use.  Try all
+           agents.  Results should be consistent.  */
+        for (auto &agent : process->range<agent_t> ())
+          {
+            auto [lowered_aspace, lowered_addr]
+              = address_space->lower (agent, segment_address);
+
+            if (lowered_aspace.address_dependency (lowered_addr)
+                != AMD_DBGAPI_SEGMENT_ADDRESS_DEPENDENCE_PROCESS)
+              THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY);
+          }
 
         *segment_address_dependency
           = AMD_DBGAPI_SEGMENT_ADDRESS_DEPENDENCE_PROCESS;
