@@ -6,6 +6,18 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 
+### Changed
+
+### Resolved issues
+
+### Known issues
+
+### Removed
+
+## ROCprofiler-SDK 1.4.1 for ROCm release 10.0.1
+
+### Added
+
 **API:**
 
   - Advanced Thread Trace (ATT) support in the live attach workflow:
@@ -21,6 +33,26 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - New `--hip-event-trace` CLI flag, automatically enabled by `--hip-trace` and `--hip-runtime-trace`.
     - rocpd schema bumped to 3.0.4 with new `rocpd_hip_event` table and `hip_events` data view.
 
+  - Kernel replay service (beta): In-process kernel dispatch replay allowing several counter groups to be collected in a single application run:
+    - New experimental API in `rocprofiler-sdk/experimental/kernel_replay.h`, exposed as the callback tracing domain `ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY` with the operations `ROCPROFILER_KERNEL_REPLAY_CONFIG` and `ROCPROFILER_KERNEL_REPLAY_PASS` (`rocprofiler_kernel_replay_operation_t`).
+    - A tool sets `replay_pass_count` during CONFIG to choose the pass count per dispatch (fixed loop, indefinite loop, or per-dispatch opt-out), and optionally `replay_continue` to leave the loop early.
+    - `replay_start_context` and `replay_stop_context` mark an already-active context enabled or disabled for the current replay loop only, so a tool can position services per pass without touching global context state. Each context's pre-replay state is restored when the loop completes.
+    - Device memory is snapshotted and restored between passes so every pass observes identical inputs.
+    - Samples under `samples/kernel_replay/` cover counter collection, ATT, SPM, PC sampling, service sequencing, per-dispatch opt-out, and early exit.
+    - Beta, with documented limitations: only a single-packet, single-dispatch submission is replayed (HIP graph launches and multi-packet submissions run once), and the snapshot covers coarse-grained device allocations owned by the agent plus module-scope `__device__`/`__constant__` variables. Unified or managed memory, `hipMallocAsync` and other virtual-memory-mapped allocations, and host, fine-grained, and kernarg memory are not captured. See `how-to/using-kernel-replay.rst` for the full list.
+
+  - Anytime initialization support:
+    - Tools can call `rocprofiler_force_configure` after one or more other tools have configured ROCprofiler-SDK.
+    - NOTE: during the initialization of another tool, there is a small window where previously existing tools don't receive records generated from the application's background threads.
+
+**rocprofv3 (CLI):**
+
+  - Kernel replay for multi-group counter collection through the new `--replay-mode` flag (beta):
+    - `--replay-mode kernel` collects every counter group in a single application run by replaying each dispatch once per group, with a device-memory snapshot and restore between passes, instead of re-running the whole application per group.
+    - `--replay-mode application` is the existing behavior and remains the default.
+    - Requires `--pmc` (or `pmc_groups` from an input file) and the `--kernel-replay-beta-enabled` acknowledgement flag. It can't be combined with `--att`, PC sampling, or `--spm`, because those services stay enabled across every pass and would report each kernel once per pass.
+    - Documented in `how-to/using-kernel-replay-rocprofv3.rst`.
+
 **rocprof-trace-decoder:**
 
   - Python API for decoding Advanced Thread Trace (ATT) / SQTT data directly from Python, without writing a C++ consumer:
@@ -35,6 +67,11 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
   - Fixed `rocprofv3` crashing during output generation when a second tool subscribed to code object tracing in the same process, which blocked profiling PyTorch and Triton workloads through rocprofiler-compute.
   - Fixed `rocprofv3` hanging instead of exiting when a fatal signal arrives while it is already handling one, for example when output generation aborts. It previously left GPU child processes running and required killing the process manually.
+  - Fixed memory write-bandwidth telemetry reporting N/A on gfx1250 (MI455X) by adding the missing `WRITE_SIZE` derived counter, computed from the `GL2C_WRITE_SECTORS` hardware counter. The read-side `FETCH_SIZE` counter was already defined for gfx1250 while the write side was not, so downstream consumers such as the memory write-bandwidth field exposed through RDC reported N/A.
+
+### Known issues
+
+- Dynamic attachment with `rocprofv3 --attach` can fail when the target process already exposes `rocprofiler_configure`. `rocprofiler-register` can interpret this symbol as an active profiling tool, preventing the attachment listener from starting. For example, some PyTorch workloads are affected because `libtorch_cpu.so` exports this symbol.
 
 ### Removed
 

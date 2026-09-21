@@ -14,19 +14,19 @@ class TestNativeToolFinder:
         self,
     ) -> None:
         with pytest.raises(RuntimeError):
-            NativeToolFinder(Path("incorrect_src")).get_collector_library_path()
+            NativeToolFinder(Path("incorrect_src")).get_artifact_path()
 
     def test_when_run_from_install_dir__finds_prebuilt_native_collector(
         self, rocm_install_dir: tuple[Path, Path]
     ) -> None:
         root_path, installed_lib_path = rocm_install_dir
-        lib_path = NativeToolFinder(root_path).get_collector_library_path()
+        lib_path = NativeToolFinder(root_path).get_artifact_path()
         assert lib_path == installed_lib_path
 
     def test_when_run_from_source_dir__builds_and_returns_collector(self, sources_dir):
         root_path, built_lib_path = sources_dir
 
-        def mock_build_collector(_: Path) -> None:
+        def mock_build_collector() -> None:
             self.__create_file(built_lib_path)
 
         with patch.object(NativeToolFinder, "_generate_cmake", return_value=None):
@@ -35,7 +35,7 @@ class TestNativeToolFinder:
                 "_build_cmake",
                 side_effect=mock_build_collector,
             ):
-                lib_path = NativeToolFinder(root_path).get_collector_library_path()
+                lib_path = NativeToolFinder(root_path).get_artifact_path()
         assert lib_path == built_lib_path
 
     def test_when_run_from_source_dir_and_collector_not_found_after_build__throws(
@@ -46,7 +46,7 @@ class TestNativeToolFinder:
         with patch.object(NativeToolFinder, "_generate_cmake", return_value=None):
             with patch.object(NativeToolFinder, "_build_cmake", return_value=None):
                 with pytest.raises(RuntimeError):
-                    NativeToolFinder(root_path).get_collector_library_path()
+                    NativeToolFinder(root_path).get_artifact_path()
 
     def test_when_run_from_source_dir_and_generation_fails__throws(
         self, sources_dir: tuple[Path, Path]
@@ -54,8 +54,30 @@ class TestNativeToolFinder:
         root_path, _ = sources_dir
         lib_path = None
         with pytest.raises(RuntimeError):
-            lib_path = NativeToolFinder(root_path).get_collector_library_path()
-        assert lib_path == None
+            lib_path = NativeToolFinder(root_path).get_artifact_path()
+        assert lib_path is None
+
+    def test_importing_the_finder_does_not_import_torch(self) -> None:
+        """The profile path imports this module, which must stay free of torch."""
+        import os
+        import subprocess
+        import sys
+
+        import utils.native_tool_finder as finder_module
+
+        src_root = Path(finder_module.__file__).resolve().parents[1]
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys\nimport utils.native_tool_finder\n"
+                "assert 'torch' not in sys.modules, 'torch imported'\n",
+            ],
+            env={**os.environ, "PYTHONPATH": str(src_root)},
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
 
     @pytest.fixture(params=["lib", "lib32", "lib64"])
     def rocm_install_dir(

@@ -46,10 +46,11 @@ set(NIC_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/")
 
 set(SRC_LIST
     "${SRC_DIR}/amd_smi.cc"
+    "${SRC_DIR}/fwupd_carveout.cc"
+    "${SRC_DIR}/fwupd_carveout_parse.cc"
     "${SRC_DIR}/amd_smi_cper.cc"
     "${SRC_DIR}/amd_smi_common.cc"
     "${SRC_DIR}/amd_smi_drm.cc"
-    "${SRC_DIR}/amd_smi_fabric_ualink.cc"
     "${SRC_DIR}/amd_smi_gpu_device.cc"
     "${SRC_DIR}/amd_smi_lib_loader.cc"
     "${SRC_DIR}/amd_smi_socket.cc"
@@ -343,6 +344,7 @@ install(
 # both of amd_smi_cper.h's declarations).
 set(INSTALL_IMPL_HEADERS ${IMPL_HEADERS})
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "_test")
+list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_container_id_parser")
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_cper")
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_device")
 list(FILTER INSTALL_IMPL_HEADERS EXCLUDE REGEX "amd_smi_wsl_syms")
