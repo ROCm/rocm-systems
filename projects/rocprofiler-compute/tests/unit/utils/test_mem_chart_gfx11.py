@@ -85,9 +85,9 @@ class TestZeroVersusMissingMetrics:
 
     GUARDED_LINES = [
         ("LDS Utilization", "Util 0.0%"),
-        ("LDS Estimated Bandwidth", "BW 0.0 B/s"),
+        ("LDS Estimated Bandwidth", "BW 0.000 GB/s"),
         ("LDS Bank Conflict Rate", "Bank Conflict"),
-        ("GL0 Cache BW (TCP Cache)", "BW 0.0 B/s"),
+        ("GL0 Cache BW (TCP Cache)", "BW 0.000 GB/s"),
     ]
 
     @pytest.mark.parametrize(("metric", "expected"), GUARDED_LINES)

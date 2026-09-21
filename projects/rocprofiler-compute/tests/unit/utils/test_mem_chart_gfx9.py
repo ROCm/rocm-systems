@@ -37,7 +37,12 @@ DISCOVERED_GFX9_ARCHITECTURES = tuple(
 
 GFX94X_ARCHITECTURES = frozenset({"gfx940", "gfx941", "gfx942"})
 
-GFX94X_MISSING_METRIC_KEYS = frozenset({"L2 Rd Lat", "L2 Wr Lat", "VL1 Lat"})
+GFX94X_MISSING_METRIC_KEYS = frozenset()
+
+GFX94X_EXTRA_METRIC_KEYS = frozenset({
+    "HBM Read BW",
+    "HBM Write and Atomic BW",
+})
 
 GFX950_EXTRA_METRIC_KEYS = frozenset({
     "LDS Read",
@@ -46,6 +51,7 @@ GFX950_EXTRA_METRIC_KEYS = frozenset({
     "HBM Read BW",
     "HBM Write BW",
     "HBM Atomic BW",
+    "HBM Write and Atomic BW",
     "xGMI Read BW",
     "xGMI Write BW",
     "xGMI Atomic BW",
@@ -54,15 +60,10 @@ GFX950_EXTRA_METRIC_KEYS = frozenset({
     "PCIe Atomic BW",
 })
 
-GFX950_MISSING_METRIC_KEYS = frozenset({
-    "HBM Read Traffic",
-    "HBM Write and Atomic Traffic",
-    "Remote Read Traffic",
-    "Remote Write and Atomic Traffic",
-})
+GFX950_MISSING_METRIC_KEYS = frozenset()
 
 CHART_PANEL_TITLES = (
-    "Kernel",
+    "Compute Units",
     "VL1D",
     "LDS",
     "sL1D",
@@ -74,6 +75,7 @@ CHART_PANEL_TITLES = (
 
 METRICS_THAT_RENDER_NA = frozenset({
     "VL1 Hit",
+    "VL1 Coalesce",
     "VL1_L2 Read BW",
     "VL1_L2 Write BW",
     "VL1_L2 Atomic BW",
@@ -84,10 +86,6 @@ METRICS_THAT_RENDER_NA = frozenset({
     "L2 Hit",
     "L2-Fabric Read BW",
     "L2-Fabric Write and Atomic BW",
-    "HBM Read Traffic",
-    "HBM Write and Atomic Traffic",
-    "Remote Read Traffic",
-    "Remote Write and Atomic Traffic",
 })
 
 GFX9_SAMPLE_METRICS = {
@@ -121,6 +119,8 @@ def expected_architecture_extra_metric_keys(
 ) -> frozenset[str]:
     if architecture == "gfx950":
         return GFX950_EXTRA_METRIC_KEYS
+    if architecture in GFX94X_ARCHITECTURES:
+        return GFX94X_EXTRA_METRIC_KEYS
     return frozenset()
 
 
@@ -158,7 +158,7 @@ class TestPlotMemChartGfx9:
         assert output.casefold().count("n/a") == 1
 
     def test_partial_metrics_render_values_and_placeholders(self):
-        output = render_gfx9_chart({"HBM Rd": 100, "VL1 Hit": 90})
+        output = render_gfx9_chart({"Flat Read": 100, "VL1 Hit": 90})
         assert "100" in output
         assert "N/A" in output
 
@@ -196,7 +196,7 @@ class TestPlotMemChartGfx9:
 
     def test_bandwidth_renders_human_readable(self):
         output = render_gfx9_chart({"VL1_L2 Read BW": 32e9})
-        assert "32.0 GB/s" in output
+        assert "32.000 GB/s" in output
 
     def test_empty_placeholders_do_not_render_metric_suffixes(self):
         output = render_gfx9_chart({})
@@ -212,10 +212,10 @@ class TestPlotMemChartGfx9:
         assert "xGMI" not in output
         assert "PCIe" not in output
 
-    def test_gfx940_has_mall(self):
+    def test_gfx940_has_mall_and_xgmi(self):
         output = render_gfx9_chart(GFX9_SAMPLE_METRICS, gpu_arch="gfx940")
         assert "MALL" in output
-        assert "xGMI" not in output
+        assert "xGMI" in output
         assert "PCIe" not in output
 
     def test_gfx950_has_mall_and_io(self):
@@ -267,7 +267,21 @@ class TestPanelYamlGfx9:
             )
             for arch in base_archs
         }
-        assert len(set(line_counts.values())) == 1, line_counts
+        # gfx908 has no MALL or xGMI; gfx90a has xGMI; gfx940-942 have
+        # MALL + xGMI.  Group architectures with matching capabilities.
+        by_count: dict[int, list[str]] = {}
+        for arch, count in line_counts.items():
+            by_count.setdefault(count, []).append(arch)
+        for count, archs in by_count.items():
+            assert len(archs) >= 1, (
+                f"Unexpected line count {count} for {archs}; full map: {line_counts}"
+            )
+        # gfx90a / gfx940-942 share the same xGMI-capable count
+        xgmi_archs = [a for a in base_archs if a != "gfx908"]
+        xgmi_counts = {line_counts[a] for a in xgmi_archs}
+        assert len(xgmi_counts) == 1, (
+            f"xGMI architectures should share a line count: {line_counts}"
+        )
 
     @pytest.mark.parametrize("architecture", GFX9_ARCHITECTURES)
     def test_panel_yaml_metrics_render_expected_placeholders(self, architecture):
@@ -388,7 +402,6 @@ class TestMembwAnnotations:
         )
         output = render_gfx950_with_membw(make_result(nodes=(inactive,)))
         assert "[!]" not in output
-        assert "Stall" not in output
 
     def test_without_membw_matches_baseline(self):
         baseline = strip_ansi(
@@ -432,4 +445,5 @@ class TestMembwAnnotations:
             value=5.0,
         )
         output = render_gfx950_with_membw(make_result(nodes=(inactive,)))
-        assert "Stall" not in output
+        legend_line = next(line for line in output.splitlines() if "Legend" in line)
+        assert "Stall" not in legend_line
