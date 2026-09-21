@@ -565,6 +565,19 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
 
 [[nodiscard]] bool refresh_report_config_from_env(HookConfig *config);
 
+void report_config_rejection() {
+  HookPolicy policy = HookPolicy::Default;
+  // Re-read policy independently: parsing may have failed before reaching it.
+  const bool terminate = parse_policy_env(&policy) && policy == HookPolicy::Strict;
+  std::fprintf(stderr,
+               "[rocjitsu-dbi-hooks] ConSan configuration rejected: ConSan is NOT installed; "
+               "this run is unchecked action=%s exit_code=%d\n",
+               terminate ? "terminate" : "continue", terminate ? 92 : 0);
+  std::fflush(stderr);
+  if (terminate)
+    std::_Exit(92);
+}
+
 [[nodiscard]] std::optional<HookConfig> parse_config() {
   HookConfig config;
   if (!parse_log_level(&config.log_level))

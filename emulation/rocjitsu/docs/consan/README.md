@@ -32,7 +32,7 @@ cmake --build "$ROCJITSU_BUILD_DIR" --target rocjitsu_dbi_hooks
 
 export CONSAN_HOOK="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
 
-env HSA_TOOLS_LIB="$CONSAN_HOOK" ./application
+env HSA_TOOLS_LIB="$CONSAN_HOOK" HSA_TOOLS_DISABLE_REGISTER=1 ./application
 ```
 
 Loading the hook is itself the activation action; no separate enable variable

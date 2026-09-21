@@ -19,7 +19,7 @@ export CONSAN_HOOK="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocji
 Start with one ordinary run:
 
 ```sh
-env HSA_TOOLS_LIB="$CONSAN_HOOK" \
+env HSA_TOOLS_LIB="$CONSAN_HOOK" HSA_TOOLS_DISABLE_REGISTER=1 \
   RJ_CONSAN_LOG=1 \
   ./application
 ```
@@ -98,7 +98,7 @@ SuperCollider is a separate ConSan mode. Select it with the same mode
 variable and use it for its complementary delayed redundant-observation signal:
 
 ```sh
-env HSA_TOOLS_LIB="$CONSAN_HOOK" \
+env HSA_TOOLS_LIB="$CONSAN_HOOK" HSA_TOOLS_DISABLE_REGISTER=1 \
   RJ_CONSAN_MODE=supercollider \
   RJ_CONSAN_LOG=1 \
   ./application
@@ -121,7 +121,7 @@ automatic ConSan reports, and forbid report overflow. Individual controls can
 still override those defaults. Enable it alongside the default analysis:
 
 ```sh
-env HSA_TOOLS_LIB="$CONSAN_HOOK" \
+env HSA_TOOLS_LIB="$CONSAN_HOOK" HSA_TOOLS_DISABLE_REGISTER=1 \
   RJ_CONSAN_POLICY=strict \
   RJ_CONSAN_LOG=1 \
   ./application
@@ -165,7 +165,7 @@ ConSan to inventory candidates without changing the code. This example looks
 for atomic release operations whose ordering can be weakened:
 
 ```sh
-env HSA_TOOLS_LIB="$CONSAN_HOOK" \
+env HSA_TOOLS_LIB="$CONSAN_HOOK" HSA_TOOLS_DISABLE_REGISTER=1 \
   RJ_CONSAN_LOG=1 \
   RJ_CONSAN_FAULT_DRY_RUN=1 \
   RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER=1 \
@@ -178,7 +178,7 @@ The proposed `ConSan fault plan` names a `primary=` identity. Find the matching
 other fields. Then copy the complete `primary=` value into a live run:
 
 ```sh
-env HSA_TOOLS_LIB="$CONSAN_HOOK" \
+env HSA_TOOLS_LIB="$CONSAN_HOOK" HSA_TOOLS_DISABLE_REGISTER=1 \
   RJ_CONSAN_LOG=1 \
   RJ_CONSAN_FAULT_ATOMIC_WEAKEN_ORDER=1 \
   RJ_CONSAN_FAULT_ATOMIC_ORDER_EDGE=release \

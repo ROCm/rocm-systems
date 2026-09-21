@@ -393,6 +393,7 @@ extern std::atomic<uint64_t> g_dump_sequence;
 extern std::atomic<TransformOverride> g_test_transform_override;
 
 [[nodiscard]] std::optional<HookConfig> parse_config();
+void report_config_rejection();
 [[nodiscard]] bool refresh_report_config_from_env(HookConfig *config);
 
 [[gnu::format(printf, 2, 3)]] void log_message(int required_level, const char *format, ...);

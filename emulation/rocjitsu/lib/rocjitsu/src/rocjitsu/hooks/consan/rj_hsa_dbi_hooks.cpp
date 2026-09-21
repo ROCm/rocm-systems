@@ -2612,6 +2612,14 @@ public:
                  static_cast<unsigned long long>(trust.visible_evidence_count),
                  static_cast<unsigned long long>(dynamic_incomplete_count));
     std::fflush(stderr);
+    if (!analysis_complete) {
+      std::fprintf(stderr,
+                   "[rocjitsu-dbi-hooks] ConSan analysis incomplete: no clean result is "
+                   "available; inspect coverage and runtime evidence (applicable=%s). "
+                   "Use RJ_CONSAN_POLICY=strict to reject ineffective instrumentation.\n",
+                   static_coverage_summary.applicable_code_objects != 0 ? "true" : "false");
+    }
+
     if (trust.dropped_record_count != 0) {
       std::fprintf(stderr,
                    "[rocjitsu-dbi-hooks] ConSan report overflow: "
@@ -5067,8 +5075,10 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
     return false;
 
   auto config = parse_config();
-  if (!config)
+  if (!config) {
+    report_config_rejection();
     return false;
+  }
 
   g_log_level.store(config->log_level, std::memory_order_relaxed);
   InstrumentationClock::instance().reset();

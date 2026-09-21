@@ -2021,6 +2021,35 @@ TransformArtifacts process_growth_replacement_result(size_t replacement_size = 1
   return result;
 }
 
+TEST(HsaHooksUnitTest, ConSanRejectedConfigurationHonorsStrictPolicy) {
+  for (const char *policy : {"default", "strict", "StRiCt"}) {
+    for (const char *mode : {"default", "supercollider"}) {
+      EXPECT_EXIT(
+          {
+            ScopedEnvVar selected_policy("RJ_CONSAN_POLICY", policy);
+            ScopedEnvVar selected_mode("RJ_CONSAN_MODE", mode);
+            ScopedEnvVar preset("RJ_CONSAN_PRESET",
+                                std::string_view(mode) == "default" ? "higer" : "default");
+            FakeApiTable api;
+            InstalledDbiHook hook(api);
+            std::_Exit(hook.installed() ? 3 : 0);
+          },
+          ::testing::ExitedWithCode(std::string_view(policy) == "default" ? 0 : 92),
+          "ConSan is NOT installed; this run is unchecked");
+    }
+  }
+  // Even a rejection before normal policy parsing must honor strict mode.
+  EXPECT_EXIT(
+      {
+        ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
+        ScopedEnvVar log("RJ_CONSAN_LOG", "invalid");
+        FakeApiTable api;
+        InstalledDbiHook hook(api);
+        std::_Exit(3);
+      },
+      ::testing::ExitedWithCode(92), "ConSan is NOT installed; this run is unchecked");
+}
+
 TEST(HsaHooksUnitTest, ConSanProcessExitFinalizesWithoutRuntimeUnload) {
   EXPECT_EXIT(
       {
@@ -2462,6 +2491,8 @@ TEST(HsaHooksUnitTest, ConSanConcurrentTransformLimitFailsOpenBeforeTransform) {
   hook.unload();
   const std::string log = testing::internal::GetCapturedStderr();
 
+  EXPECT_NE(log.find("ConSan analysis incomplete: no clean result is available"), std::string::npos)
+      << log;
   EXPECT_TRUE(g_transform_override_flavors.empty());
   EXPECT_EQ(g_loaded_code_object_readers, (std::vector<uint64_t>{reader.handle}));
   const std::string expected_limit_log =
