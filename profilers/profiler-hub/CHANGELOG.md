@@ -66,6 +66,19 @@ downstream consumer of the library.
   pool's own connections. Measured ~5x faster `ph_ctx_create()` on a
   5-connection pool against a 1.8GB trace (~780ms -> ~160ms
   steady-state).
+- **Breaking (reader behavior):** `reader_t::get_all_tracks()` (and
+  `ph_get_track_list()`) no longer derive `thread`/`pmc_agent` tracks from
+  the trace's `rocpd_track` table. They're now derived directly from
+  `GROUP BY` queries over the raw event/counter-sample tables, matching
+  optiq's own discovery philosophy — a track only exists if it actually
+  has events. A `writer_t::register_track_info()`-registered track with
+  zero events is no longer reader-visible until it has data. Track ids are
+  also now assigned densely in discovery order (`0,1,2,...`) instead of
+  reusing the trace's own (sparse) `rocpd_track.id`. As a side effect,
+  duplicate `rocpd_track` rows that happened to share the same
+  `(nid,pid,tid)` (observed in real traces, previously exposed as
+  separate, redundant tracks reporting identical event counts) now
+  correctly collapse into a single track.
 
 ### Fixed
 

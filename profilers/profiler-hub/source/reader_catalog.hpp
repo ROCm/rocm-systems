@@ -108,11 +108,14 @@ struct reader_catalog_t
     std::unordered_map<reader_types::track_info_ptr_t, size_t>         track_to_db_id;
 
 private:
-    // Track id -> total event count, used to populate track_info_t::event_count.
-    // `tracks` must be the raw rows just read from track_info_statement().
-    [[nodiscard]] std::unordered_map<size_t, size_t> get_track_event_counts(
-        data_storage::schema_v3::read_statements&                      stmts,
-        const std::vector<data_storage::schema_v3::track_info_result>& raw_tracks);
+    // Discovers "thread" tracks directly from the duration-event tables
+    // (region/kernel_dispatch/memory_allocate/memory_copy, grouped by
+    // (nid,pid,tid)) -- a track only exists if this returns a non-empty
+    // group for it, matching optiq's own "no rocpd_track dependency"
+    // discovery philosophy (see build_tracks()'s doc comment). Returns
+    // per-key summed event counts; called from build_tracks().
+    [[nodiscard]] std::unordered_map<topology_key_t, size_t, topology_key_hash_t>
+    discover_thread_tracks(data_storage::schema_v3::read_statements& stmts);
 
     // Appends optiq-parity category tracks (kernel-dispatch/memory-allocate/
     // memory-copy, per agent+queue and per host-stream) to `tracks`,

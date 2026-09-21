@@ -4,7 +4,6 @@
 #include "reader_catalog.hpp"
 #include "common/debug.hpp"
 
-#include <algorithm>
 #include <limits>
 #include <map>
 #include <memory>
@@ -185,134 +184,87 @@ reader_catalog_t::build_agents(data_storage::schema_v3::read_statements& stmts)
 void
 reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
 {
-    const auto& statement       = stmts.track_info_statement();
-    const auto  track_info_list = statement().to_vector();
-    const auto  event_counts    = get_track_event_counts(stmts, track_info_list);
+    // No rocpd_track dependency: "thread" and "pmc_agent" tracks are derived
+    // directly from grouped queries over the raw event tables, same as the
+    // 4 optiq-parity category tracks below -- a track only exists if a
+    // GROUP BY over real event data produces it, so no zero-event "ghost"
+    // tracks are ever created (matches optiq's own discovery philosophy;
+    // see rocprofvis_db_profile.cpp's CallBackAddTrack/CallBackLoadTrack,
+    // fed by GROUP BY ... COUNT(*) queries).
+    const auto thread_track_counts = discover_thread_tracks(stmts);
 
-    std::unordered_map<size_t, std::vector<std::pair<size_t, size_t>>>
-        agent_counts_by_track;
-    for(const auto& row : stmts.track_agent_count_statement()().to_vector())
+    // No real db id backs these thread tracks any more; get_events_for_track()
+    // still binds a 4th "db_id" parameter for its (now-moot) sample-linked
+    // UNION branch, so bind a value that can never collide with a real one.
+    constexpr size_t no_db_id = std::numeric_limits<size_t>::max();
+
+    size_t next_id = 0;
+
+    tracks.reserve(thread_track_counts.size());
+    for(const auto& [topo, count] : thread_track_counts)
     {
-        agent_counts_by_track[row.track_id].emplace_back(row.agent_id, row.count);
-    }
+        auto track_info_ptr         = std::make_shared<reader_types::track_info_t>();
+        track_info_ptr->id          = next_id++;
+        track_info_ptr->name        = fmt::format("Thread {}", topo.tid);
+        track_info_ptr->event_count = count;
 
-    size_t next_synthetic_id = 0;
-    for(const auto& track_info : track_info_list)
-    {
-        next_synthetic_id = std::max(next_synthetic_id, track_info.id + 1);
-    }
-
-    tracks.reserve(track_info_list.size());
-    for(const auto& track_info : track_info_list)
-    {
-        const char* track_name = nullptr;
-        if(track_info.name_id.has_value())
-        {
-            const auto track_name_ptr = string_utility.find(track_info.name_id.value());
-            if(track_name_ptr == string_utility.end())
-            {
-                LOG_ERROR("Corrupted database detected. Track name is not available for "
-                          "track info with id: {}",
-                          track_info.id);
-            }
-            else
-            {
-                track_name = track_name_ptr->second.c_str();
-            }
-        }
-
-        auto track_info_ptr     = std::make_shared<reader_types::track_info_t>();
-        track_info_ptr->id      = track_info.id;
-        track_info_ptr->name    = track_name != nullptr ? track_name : "";
-        track_info_ptr->extdata = track_info.extdata;
-
-        const auto agent_it = agent_counts_by_track.find(track_info.id);
-        const bool has_agent_split =
-            agent_it != agent_counts_by_track.end() && !agent_it->second.empty();
-
-        if(has_agent_split)
-        {
-            track_info_ptr->agent_id    = agent_it->second.front().first;
-            track_info_ptr->event_count = agent_it->second.front().second;
-            track_info_ptr->category    = reader_types::track_kind_t::pmc_agent;
-        }
-        else
-        {
-            const auto count_it = event_counts.find(track_info.id);
-            track_info_ptr->event_count =
-                count_it != event_counts.end() ? count_it->second : 0;
-        }
-
-        auto node_it = node_utility.find(track_info.nid);
-        if(node_it != node_utility.end() && node_it->second)
+        if(const auto node_it = node_utility.find(topo.nid);
+           node_it != node_utility.end())
         {
             track_info_ptr->node_info = node_it->second;
         }
-
-        if(track_info.pid.has_value())
+        if(const auto process_it = process_utility.find(topo.pid);
+           process_it != process_utility.end())
         {
-            auto process_it = process_utility.find(track_info.pid.value());
-            if(process_it != process_utility.end() && process_it->second)
-            {
-                track_info_ptr->process_info = process_it->second;
-            }
+            track_info_ptr->process_info = process_it->second;
         }
-
-        if(track_info.tid.has_value())
+        if(const auto thread_it = thread_utility.find(topo.tid);
+           thread_it != thread_utility.end())
         {
-            auto thread_it = thread_utility.find(track_info.tid.value());
-            if(thread_it != thread_utility.end() && thread_it->second)
-            {
-                track_info_ptr->thread_info = thread_it->second;
-            }
+            track_info_ptr->thread_info = thread_it->second;
         }
 
         tracks.push_back(track_info_ptr);
-        track_utility.emplace(track_info.id, track_info_ptr);
-        track_to_db_id.emplace(track_info_ptr, track_info.id);
-
-        topology_key_t topo{ track_info.nid,
-                             track_info.pid.value_or(0),
-                             track_info.tid.value_or(0) };
+        track_utility.emplace(track_info_ptr->id, track_info_ptr);
+        track_to_db_id.emplace(track_info_ptr, no_db_id);
         track_to_topology.emplace(track_info_ptr, topo);
         topology_to_track.emplace(topo, track_info_ptr);
-
-        // Additional devices for this track (beyond the first) each get
-        // their own synthetic track entry, sharing the real db track id
-        // for future per-track queries but exposing a distinct public id.
-        if(has_agent_split)
-        {
-            for(size_t i = 1; i < agent_it->second.size(); ++i)
-            {
-                const auto [agent_id, count] = agent_it->second[i];
-
-                auto extra_track_ptr =
-                    std::make_shared<reader_types::track_info_t>(*track_info_ptr);
-                extra_track_ptr->id          = next_synthetic_id++;
-                extra_track_ptr->agent_id    = agent_id;
-                extra_track_ptr->event_count = count;
-
-                tracks.push_back(extra_track_ptr);
-                track_utility.emplace(extra_track_ptr->id, extra_track_ptr);
-                track_to_db_id.emplace(extra_track_ptr, track_info.id);
-                track_to_topology.emplace(extra_track_ptr, topo);
-            }
-        }
     }
 
-    add_category_tracks(stmts, next_synthetic_id);
+    // PMC/counter tracks: one row per (nid,agent_id,pmc_id), already grouped
+    // directly off the counter-sample tables -- naturally one track per
+    // device+counter, no per-track-id agent-split bookkeeping needed.
+    for(const auto& row : stmts.pmc_track_statement()().to_vector())
+    {
+        auto track_ptr         = std::make_shared<reader_types::track_info_t>();
+        track_ptr->id          = next_id++;
+        track_ptr->name        = row.name;
+        track_ptr->category    = reader_types::track_kind_t::pmc_agent;
+        track_ptr->agent_id    = row.agent_id;
+        track_ptr->pmc_id      = row.pmc_id;
+        track_ptr->event_count = row.count;
+
+        if(const auto node_it = node_utility.find(row.nid); node_it != node_utility.end())
+        {
+            track_ptr->node_info = node_it->second;
+        }
+        if(const auto process_it = process_utility.find(row.pid);
+           process_it != process_utility.end())
+        {
+            track_ptr->process_info = process_it->second;
+        }
+
+        tracks.push_back(track_ptr);
+        track_utility.emplace(track_ptr->id, track_ptr);
+    }
+
+    add_category_tracks(stmts, next_id);
 }
 
 void
 reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& stmts,
                                       size_t& next_synthetic_id)
 {
-    // optiq-parity category tracks (kernel-dispatch/memory-allocate/
-    // memory-copy, per agent+queue and per host-stream): derived directly
-    // from the raw event tables, no rocpd_track row backs them. Deliberately
-    // NOT added to track_to_topology/topology_to_track/track_to_db_id --
-    // reader_t::impl::get_events_for_track() dispatches these by category to
-    // get_category_track_events() instead.
     auto add_agent_queue_track = [&](reader_types::track_kind_t kind,
                                      std::string                name,
                                      size_t                     nid,
@@ -399,11 +351,6 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
             row.count);
     }
 
-    // optiq exposes one stream track per (nid,pid,stream_id) spanning all
-    // operation kinds, not one per event table -- merge the 3 per-table
-    // stream statements by identity before synthesizing tracks (confirmed
-    // against a real roc_optiq_track_info cache: e.g. stream 1's record
-    // count there is kernel-dispatch-stream + memory-copy-stream summed).
     std::map<std::tuple<size_t, size_t, size_t>, size_t> stream_counts;
     auto accumulate_stream = [&](const auto& rows) {
         for(const auto& row : rows)
@@ -427,26 +374,18 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
     }
 }
 
-std::unordered_map<size_t, size_t>
-reader_catalog_t::get_track_event_counts(
-    data_storage::schema_v3::read_statements&                      stmts,
-    const std::vector<data_storage::schema_v3::track_info_result>& raw_tracks)
+std::unordered_map<topology_key_t, size_t, topology_key_hash_t>
+reader_catalog_t::discover_thread_tracks(data_storage::schema_v3::read_statements& stmts)
 {
-    // NULL pid/tid must not collide with a real 0 (e.g. a track with no thread
-    // vs. a track whose thread id is genuinely 0), so use an out-of-band
-    // sentinel instead of value_or(0) for the missing case.
-    constexpr size_t no_id = std::numeric_limits<size_t>::max();
-    auto             key_of =
-        [no_id](size_t nid, std::optional<size_t> pid, std::optional<size_t> tid) {
-            return topology_key_t{ nid, pid.value_or(no_id), tid.value_or(no_id) };
-        };
-
     std::unordered_map<topology_key_t, size_t, topology_key_hash_t> key_counts;
 
     auto accumulate = [&](const auto& statement) {
         for(const auto& row : statement().to_vector())
         {
-            key_counts[key_of(row.nid, row.pid, row.tid)] += row.count;
+            topology_key_t key{ .nid = row.nid,
+                                .pid = row.pid.value_or(0),
+                                .tid = row.tid.value_or(0) };
+            key_counts[key] += row.count;
         }
     };
 
@@ -456,30 +395,7 @@ reader_catalog_t::get_track_event_counts(
     accumulate(track_stmts.memory_allocate);
     accumulate(track_stmts.memory_copy);
 
-    std::unordered_map<size_t, size_t> sample_counts;
-    for(const auto& row : track_stmts.sample().to_vector())
-    {
-        sample_counts.emplace(row.track_id, row.count);
-    }
-
-    std::unordered_map<size_t, size_t> counts;
-    for(const auto& track : raw_tracks)
-    {
-        const topology_key_t key = key_of(track.nid, track.pid, track.tid);
-
-        size_t total = 0;
-        if(const auto it = key_counts.find(key); it != key_counts.end())
-        {
-            total += it->second;
-        }
-        if(const auto it = sample_counts.find(track.id); it != sample_counts.end())
-        {
-            total += it->second;
-        }
-        counts.emplace(track.id, total);
-    }
-
-    return counts;
+    return key_counts;
 }
 
 void

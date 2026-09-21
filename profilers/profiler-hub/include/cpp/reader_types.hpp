@@ -299,6 +299,11 @@ struct track_info_t
     // pid, not the FK.
     size_t db_pid{};
 
+    // rocpd_info_pmc.id -- which counter this track represents. Only set
+    // for track_kind_t::pmc_agent (derived directly from the counter-sample
+    // tables, not a rocpd_track row); needed to filter sample queries.
+    size_t pmc_id{};
+
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
     std::shared_ptr<thread_info_t>  thread_info;

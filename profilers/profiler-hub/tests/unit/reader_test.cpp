@@ -127,17 +127,10 @@ TEST_F(reader_test, get_events_for_track_returns_empty_for_null_track)
     EXPECT_TRUE(reader->get_events_for_track(nullptr).empty());
 }
 
-TEST_F(reader_test, get_events_for_track_returns_events_for_registered_track)
+TEST_F(reader_test, get_events_for_track_returns_events_for_track_with_data)
 {
     auto writer = make_writer();
-
-    const writer_types::node_info_t node_info{ 1, 42, "machine-1" };
-    writer->register_node_info(node_info);
-
-    writer_types::track_info_t track_info;
-    track_info.node_id = 1;
-    writer->register_track_info(track_info);
-
+    seed_region_with_full_event(*writer);
     writer->flush_in_memory_data_to_disk();
     writer.reset();
 
@@ -145,7 +138,7 @@ TEST_F(reader_test, get_events_for_track_returns_events_for_registered_track)
     auto tracks = reader->get_all_tracks();
     ASSERT_EQ(tracks.size(), 1);
 
-    EXPECT_TRUE(reader->get_events_for_track(tracks[0]).empty());
+    EXPECT_EQ(reader->get_events_for_track(tracks[0]).size(), 1);
 }
 
 TEST_F(reader_test, get_region_details_returns_matching_data)
