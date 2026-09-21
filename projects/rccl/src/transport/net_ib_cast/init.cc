@@ -554,17 +554,6 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
            "IB Use Inline: enabled; GDR Flush: disabled",
            IbCastUseInline ? "Enabled" : "Disabled", IbCastOffloadEnabled ? "Enabled" : "Disabled");
     }
-    if (IbCastByOrderRequested()) {
-      if (ncclParamIbCastResiliencyPortFailover() > 0) {
-        WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d): disabling resiliency "
-             "(port failover and port recovery)", BY_ORDER);
-      }
-      if (ncclParamIbCastOooRq()) {
-	      WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d):"
-              " disabling out-of-order RQ", BY_ORDER);
-      }
-    }
-    IbCastReportMatchingScheme();
   }
 exit:
   if (ret == ncclSuccess) ret = IbCastQpSchedInitParms(&castGlobalQpSchedParms);
@@ -579,6 +568,21 @@ exit:
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : PORT_FAILOVER/RECOVERY enabled - disabling CTS offload "
                                "(not compatible with resiliency)");
     IbCastOffloadEnabled = false;
+  }
+  // After all offload/scheduler mutations so BY_ORDER + failover logs match
+  // the scheme comms will actually use (IbCastByOrderRequested reads live).
+  if (ret == ncclSuccess && IbCastNDevs > 0) {
+    if (IbCastByOrderRequested()) {
+      if (ncclParamIbCastResiliencyPortFailover() > 0) {
+        WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d): disabling resiliency "
+             "(port failover and port recovery)", BY_ORDER);
+      }
+      if (ncclParamIbCastOooRq()) {
+        WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d):"
+             " disabling out-of-order RQ", BY_ORDER);
+      }
+    }
+    IbCastReportMatchingScheme();
   }
   return ret;
 fail:
