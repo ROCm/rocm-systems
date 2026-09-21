@@ -366,6 +366,11 @@ union gfx1250_TDM_GROUP3
         m_tensor_dim_4_lo = value & 0xFFFF;
         m_tensor_dim_4_hi = value >> 16;
     }
+
+    void __device__ inline tileDim4(uint16_t value)
+    {
+        m_tile_dim4 = value;
+    }
 };
 #pragma clang diagnostic pop
 #endif // HIP_INCLUDE_HIP_AMD_GFX1250_TDM_H
