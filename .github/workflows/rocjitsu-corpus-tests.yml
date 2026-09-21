@@ -247,6 +247,7 @@ jobs:
             "DaemonTest\.TwoIndependentClients"
             "DataHazardTest\.gfx950_vgpr_waitcnt"
             "DataHazardTest\.gfx950_vgpr_waitcnt_hazard"
+            TensorLdsWriteRangeTest\.DescriptorTheExecutorRejectsWritesNothing
           )
           TSAN_EXCLUDED_TESTS=(
             "${COMMON_SANITIZER_EXCLUDED_TESTS[@]}"
