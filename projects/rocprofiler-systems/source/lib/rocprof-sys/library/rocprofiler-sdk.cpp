@@ -386,6 +386,12 @@ struct external_dependencies
     static constexpr std::string_view memory_allocation_category_name =
         trait::name<category::rocm_memory_allocate>::value;
 
+    // ─── scratch_memory buffered-domain dependencies ─────────────────────────────
+    using scratch_memory_sample_t = trace_cache::scratch_memory_sample;
+
+    static constexpr std::string_view scratch_memory_category_name =
+        trait::name<category::rocm_scratch_memory>::value;
+
     static metadata_registry_t& get_metadata_registry()
     {
         return trace_cache::get_metadata_registry();
@@ -866,20 +872,6 @@ get_mem_alloc_address(
 }
 #endif
 
-std::uint64_t
-get_scratch_mem_alloc_size(
-    [[maybe_unused]] const rocprofiler_buffer_tracing_scratch_memory_record_t& record)
-{
-// The version of rocprofiler_buffer_tracing_scratch_memory_record_t from ROCm < 7.1 does
-// not have the allocation_size field. ROCPROFILER_VERSION for both ROCm 7.0 and 7.1
-// is 1.0.0, so we need to check the ROCm version.
-#if ROCPROFSYS_ROCM_VERSION >= 70100
-    return record.allocation_size;
-#else
-    return 0;
-#endif
-}
-
 void
 cache_region(const rocprofiler_callback_tracing_record_t* record,
              const rocprofiler_timestamp_t                start_timestamp,
@@ -926,22 +918,6 @@ cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* recor
         record->dispatch_info.workgroup_size.y, record->dispatch_info.workgroup_size.z,
         record->dispatch_info.grid_size.x, record->dispatch_info.grid_size.y,
         record->dispatch_info.grid_size.z, stream_handle });
-}
-
-void
-cache_scratch_memory(rocprofiler_buffer_tracing_scratch_memory_record_t* record,
-                     std::uint64_t                                       stream_handle)
-{
-    trace_cache::get_metadata_registry().add_queue(record->queue_id.handle);
-    trace_cache::get_metadata_registry().add_stream(stream_handle);
-    trace_cache::get_buffer_storage().store(trace_cache::scratch_memory_sample{
-        record->start_timestamp, record->end_timestamp, record->thread_id,
-        record->agent_id.handle, record->queue_id.handle,
-        static_cast<std::int32_t>(record->kind),
-        static_cast<std::int32_t>(record->operation),
-        static_cast<std::int32_t>(record->flags), get_scratch_mem_alloc_size(*record),
-        record->correlation_id.internal, get_parent_stack_id(record->correlation_id),
-        stream_handle });
 }
 
 void
@@ -1899,170 +1875,6 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     }
 }
 
-using kernel_dispatch_bundle_t = tim::lightweight_tuple<tim::component::wall_clock>;
-
-void
-tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
-                      rocprofiler_buffer_id_t /*buffer_id*/,
-                      rocprofiler_record_header_t** headers, size_t num_headers,
-                      void* /*user_data*/, std::uint64_t /*drop_count*/)
-{
-    if(num_headers == 0 || headers == nullptr) return;
-
-    auto _track_desc_stream = [](std::uint64_t _stream_id) {
-        return fmt::format("HIP Activity Stream {}", _stream_id);
-    };
-
-    const bool _default_group_by_queue = config::get_group_by_queue();
-
-    static auto _mtx = std::mutex{};
-    auto        _lk  = std::unique_lock<std::mutex>{ _mtx };
-
-    for(size_t i = 0; i < num_headers; ++i)
-    {
-        auto* header = headers[i];
-
-        if(ROCPROFSYS_LIKELY(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING))
-        {
-            if(header->kind == ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY)
-            {
-                auto* record =
-                    static_cast<rocprofiler_buffer_tracing_scratch_memory_record_t*>(
-                        header->payload);
-
-                bool _group_by_queue = _default_group_by_queue;
-
-                const auto* agent     = g_tool_data->get_gpu_tool_agent(record->agent_id);
-                auto        device_id = static_cast<std::uint32_t>(agent->device_id);
-
-                const auto& t_info = thread_info::get(record->thread_id, SystemTID);
-                auto        thread_id_sequent = t_info->index_data->sequent_value;
-
-                auto _corr_id = record->correlation_id.internal;
-                auto _beg_ns  = record->start_timestamp;
-                auto _end_ns  = record->end_timestamp;
-                auto name     = g_tool_data->buffered_tracing_info.at(record->kind,
-                                                                      record->operation);
-
-                auto _stream_id = get_stream_id(record).handle;
-                if(_stream_id == 0)
-                {
-                    // Scratch memory event is not associated with a HIP stream
-                    _group_by_queue = true;
-                }
-
-                {
-                    auto track_name = fmt::format("GPU Scratch Memory [{}] Thread {}",
-                                                  device_id, record->thread_id);
-                    cache_category<category::rocm_scratch_memory>();
-                    cache_add_thread_info(record->thread_id);
-                    cache_add_track(track_name.c_str(), record->thread_id);
-                    cache_scratch_memory(record, _stream_id);
-                }
-
-                if(get_use_timemory())
-                {
-                    auto _bundle = kernel_dispatch_bundle_t{ name };
-
-                    _bundle.push(thread_id_sequent).start().stop();
-                    _bundle.get([_beg_ns, _end_ns](tim::component::wall_clock* _wc) {
-                        _wc->set_value(_end_ns - _beg_ns);
-                        _wc->set_accum(_end_ns - _beg_ns);
-                    });
-                    _bundle.pop();
-                }
-
-                if(get_use_perfetto())
-                {
-// The version of rocprofiler_buffer_tracing_scratch_memory_record_t from ROCm < 7.1 does
-// not have the allocation_size field. ROCPROFILER_VERSION for both ROCm 7.0 and 7.1
-// is 1.0.0, so we need to check the ROCm version.
-#if ROCPROFSYS_ROCM_VERSION >= 70100
-                    using counter_track = perfetto_counter_track<
-                        rocprofiler_buffer_tracing_scratch_memory_record_t>;
-
-                    if(!counter_track::exists(device_id))
-                    {
-                        auto track_name_alloc_size =
-                            fmt::format("GPU Scratch Memory [{}] (S) Thread {}",
-                                        device_id, thread_id_sequent);
-                        counter_track::emplace(device_id, track_name_alloc_size, "bytes");
-                    }
-
-                    if(record->operation == ROCPROFILER_SCRATCH_MEMORY_ALLOC)
-                    {
-                        TRACE_COUNTER("rocm_scratch_memory",
-                                      counter_track::at(device_id, 0), _beg_ns,
-                                      record->allocation_size);
-                    }
-#endif
-                    auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
-                        if(config::get_perfetto_annotations())
-                        {
-                            tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
-                            tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
-                            tracing::add_perfetto_annotation(ctx, "corr_id", _corr_id);
-                            tracing::add_perfetto_annotation(ctx, "stream_id",
-                                                             _stream_id);
-                        }
-                    };
-
-                    if(_group_by_queue)
-                    {
-                        auto track_name_events = [&]() {
-                            return fmt::format("GPU Scratch Memory (S) Events Thread {}",
-                                               thread_id_sequent);
-                        };
-                        const auto _track = tracing::get_perfetto_track(
-                            category::rocm_scratch_memory{}, track_name_events);
-
-                        tracing::push_perfetto(category::rocm_scratch_memory{},
-                                               name.data(), _track, _beg_ns,
-                                               ::perfetto::Flow::ProcessScoped(_corr_id),
-                                               add_perfetto_annotations);
-
-                        tracing::pop_perfetto(category::rocm_scratch_memory{}, "", _track,
-                                              _end_ns);
-                    }
-                    else
-                    {
-                        const auto _track = tracing::get_perfetto_track(
-                            category::rocm_hip_stream{}, _track_desc_stream, _stream_id);
-
-                        tracing::push_perfetto(category::rocm_hip_stream{}, name.data(),
-                                               _track, _beg_ns,
-                                               ::perfetto::Flow::ProcessScoped(_corr_id),
-                                               add_perfetto_annotations);
-
-                        tracing::pop_perfetto(category::rocm_hip_stream{}, "", _track,
-                                              _end_ns);
-                    }
-                }
-            }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
-                    header->kind == ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API)
-            {
-                // Not handling those buffered events
-                continue;
-            }
-            else
-            {
-                throw std::runtime_error(fmt::format(
-                    "unexpected rocprofiler_record_header_t buffer tracing category "
-                    "kind. category: {}, kind: {}",
-                    static_cast<int>(header->category), static_cast<int>(header->kind)));
-            }
-        }
-        else
-        {
-            throw std::runtime_error(fmt::format(
-                "unexpected rocprofiler_record_header_t buffer tracing category "
-                "kind. category: {}, kind: {}",
-                static_cast<int>(header->category), static_cast<int>(header->kind)));
-        }
-    }
-}
-
 auto&
 get_counter_dispatch_data()
 {
@@ -2469,9 +2281,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         }
     }
 
-    constexpr auto buffer_size = 16 * 4096;
-    constexpr auto watermark   = 15 * 4096;
-
     ROCPROFILER_CALL(rocprofiler_configure_external_correlation_id_request_service(
         _data->primary_ctx, external_corr_id_request_kinds.data(),
         external_corr_id_request_kinds.size(),
@@ -2490,18 +2299,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     if(_callback_domains.count(ROCPROFILER_CALLBACK_TRACING_RCCL_API) > 0)
     {
         rocprofiler_sdk::rccl_comm_data_initialize();
-    }
-
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY) > 0)
-    {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, g_tool_data,
-            &_data->scratch_memory_buffer));
-
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY, nullptr, 0,
-            _data->scratch_memory_buffer));
     }
 
     g_domain_service =
@@ -2531,6 +2328,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         domain_selection_list.push_back(selection);
     }
 #endif
+
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY))
+    {
+        domain_selection selection;
+        selection.name = "scratch_memory";
+        domain_selection_list.push_back(selection);
+    }
 
 #if (ROCPROFILER_VERSION >= 10202)
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT))

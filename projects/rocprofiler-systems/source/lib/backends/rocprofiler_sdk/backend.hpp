@@ -87,6 +87,7 @@ struct backend
     using correlation_id_t               = Wrapper::correlation_id_t;
     using kernel_dispatch_record_t       = Wrapper::kernel_dispatch_record;
     using memory_copy_record_t           = Wrapper::memory_copy_record;
+    using scratch_memory_record_t        = Wrapper::scratch_memory_record;
     using async_correlation_id_t         = Wrapper::async_correlation_id_t;
     using correlation_id_t               = Wrapper::correlation_id_t;
     using stream_id_t                    = Wrapper::stream_id;
@@ -619,6 +620,19 @@ public:
         }
     }
 #endif
+
+    static std::uint64_t get_scratch_memory_allocation_size(
+        const scratch_memory_record_t& record)
+    {
+        if constexpr(requires { record.allocation_size; })
+        {
+            return record.allocation_size;
+        }
+        else
+        {
+            return 0;
+        }
+    }
 
 private:
     struct kernel_dispatch_stream_correlation_t
