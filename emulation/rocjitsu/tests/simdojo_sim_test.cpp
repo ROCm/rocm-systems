@@ -1434,14 +1434,11 @@ TEST(StressTest, AsyncInjectionDuringActiveSimulation) {
 }
 
 // ============================================================================
-// Cache VMID-tagging invariants
+// Cache storage, maintenance, and VMID invariants
 // ============================================================================
 //
-// The memory hierarchy tags every line by (vmid, addr) so two processes that
-// alias the same guest VA do not share a cached line. These tests exercise that
-// invariant directly on the header-only Cache: distinct data per VMID at the
-// same address, eviction reporting the evicted line's owner VMID, and per-VMID
-// invalidation.
+// Exercise byte storage lifetime, maintenance behavior, and VMID isolation
+// directly on the header-only Cache.
 
 namespace {
 // 64B lines, 4 sets, 2-way. Small associativity makes eviction easy to force.
@@ -1462,6 +1459,140 @@ uint32_t read_line_word(TestCache &cache, uint64_t addr, uint32_t vmid) {
   return word;
 }
 } // namespace
+
+TEST(CacheStorageTest, InitialBytesAreZeroAndInvalidationRetainsData) {
+  TestCache cache;
+  for (uint32_t set = 0; set < 4; ++set) {
+    for (uint32_t way = 0; way < 2; ++way) {
+      const uint64_t addr = (set + way * 4) * TestCache::LINE_SIZE;
+      auto allocation = cache.allocate_with_data(addr);
+      ASSERT_NE(allocation.data, nullptr);
+      for (uint32_t i = 0; i < TestCache::LINE_SIZE; ++i)
+        EXPECT_EQ(allocation.data[i], 0);
+      std::fill_n(allocation.data, TestCache::LINE_SIZE, 0xA5);
+    }
+  }
+  cache.invalidate_all();
+  TestCache invalid_copy(cache);
+  for (auto *retained : {&cache, &invalid_copy}) {
+    auto allocation = retained->allocate_with_data(0);
+    for (uint32_t i = 0; i < TestCache::LINE_SIZE; ++i)
+      EXPECT_EQ(allocation.data[i], 0xA5);
+  }
+}
+
+TEST(CacheStorageTest, CopyIsIndependentAndMoveRetainsContents) {
+  TestCache original;
+  fill_line_word(original, 0x4000, 7, 0x12345678);
+  TestCache copied(original);
+  EXPECT_EQ(read_line_word(copied, 0x4000, 7), 0x12345678u);
+  const uint32_t replacement = 0x87654321;
+  copied.write_line(0x4000, reinterpret_cast<const uint8_t *>(&replacement), 0, sizeof(replacement),
+                    7);
+  EXPECT_EQ(read_line_word(original, 0x4000, 7), 0x12345678u);
+
+  TestCache assigned;
+  auto *assigned_bytes = assigned.allocate_with_data(0x4000, 7).data;
+  assigned = copied;
+  EXPECT_EQ(read_line_word(assigned, 0x4000, 7), replacement);
+  EXPECT_EQ(assigned.line_data_for_read(0x4000, 7), assigned_bytes);
+  TestCache moved(std::move(assigned));
+  EXPECT_EQ(read_line_word(moved, 0x4000, 7), replacement);
+  TestCache move_assigned;
+  move_assigned = std::move(moved);
+  EXPECT_EQ(read_line_word(move_assigned, 0x4000, 7), replacement);
+  // Assignment must also restore a moved-from cache to usable storage.
+  assigned = original;
+  EXPECT_EQ(read_line_word(assigned, 0x4000, 7), 0x12345678u);
+}
+
+TEST(CacheMaintenanceTest, FullInvalidationClearsRetainedMetadataAfterRefill) {
+  TestCache cache;
+  for (uint32_t round = 0; round < 4; ++round) {
+    const uint64_t addr = round * TestCache::LINE_SIZE;
+    auto *tag = cache.allocate(addr, round + 1);
+    tag->dirty = true;
+    tag->coherence = CoherenceState::MODIFIED;
+    tag->coherence_epoch = 17;
+
+    cache.invalidate_all();
+    EXPECT_FALSE(cache.lookup(addr, nullptr, round + 1));
+    EXPECT_FALSE(tag->valid);
+    EXPECT_FALSE(tag->dirty);
+    EXPECT_EQ(tag->coherence, CoherenceState::INVALID);
+    EXPECT_EQ(tag->coherence_epoch, 0u);
+    cache.invalidate_all();
+  }
+}
+
+TEST(CacheMaintenanceTest, DirtyWalkPreservesOrderAcrossReplacementAndInvalidation) {
+  TestCache cache;
+  constexpr uint64_t kLineSize = TestCache::LINE_SIZE;
+  auto fill_dirty = [&](uint64_t addr, uint32_t vmid) {
+    fill_line_word(cache, addr, vmid, vmid);
+    CacheTag *tag = nullptr;
+    ASSERT_TRUE(cache.lookup(addr, &tag, vmid));
+    tag->dirty = true;
+  };
+  // Set three is visited after set one regardless of allocation order.
+  fill_dirty(3 * kLineSize, 3);
+  fill_dirty(kLineSize, 1);
+  fill_dirty(5 * kLineSize, 5);
+  // Replace set one's LRU way without allocating into an invalid way.
+  fill_dirty(9 * kLineSize, 9);
+
+  auto dirty_addresses = [&] {
+    std::vector<uint64_t> addresses;
+    cache.for_each_dirty([&](CacheTag &tag, uint64_t addr, uint8_t *data) {
+      addresses.push_back(addr);
+      uint32_t word = 0;
+      std::memcpy(&word, data, sizeof(word));
+      EXPECT_EQ(tag.vmid, word);
+    });
+    return addresses;
+  };
+  EXPECT_EQ(dirty_addresses(),
+            (std::vector<uint64_t>{9 * kLineSize, 5 * kLineSize, 3 * kLineSize}));
+  cache.invalidate(5 * kLineSize, 5);
+  EXPECT_EQ(dirty_addresses(), (std::vector<uint64_t>{9 * kLineSize, 3 * kLineSize}));
+  cache.invalidate_all();
+  EXPECT_TRUE(dirty_addresses().empty());
+  fill_dirty(kLineSize, 11);
+  EXPECT_EQ(dirty_addresses(), (std::vector<uint64_t>{kLineSize}));
+}
+
+TEST(CacheMaintenanceTest, CopiesAndMovesRetainDirtyAndInvalidationState) {
+  TestCache original;
+  auto allocation = original.allocate_with_data(2 * TestCache::LINE_SIZE, 7);
+  allocation.data[0] = 42;
+  allocation.tag->dirty = true;
+  TestCache copied(original);
+  TestCache assigned;
+  assigned.allocate(0)->dirty = true;
+  assigned = original;
+  TestCache moved(std::move(copied));
+  original.invalidate_all();
+
+  for (auto *cache : {&assigned, &moved}) {
+    uint32_t count = 0;
+    cache->for_each_dirty([&](CacheTag &tag, uint64_t addr, uint8_t *data) {
+      ++count;
+      EXPECT_EQ(addr, 2u * TestCache::LINE_SIZE);
+      EXPECT_EQ(tag.vmid, 7u);
+      EXPECT_EQ(data[0], 42);
+    });
+    EXPECT_EQ(count, 1u);
+    cache->invalidate_all();
+    EXPECT_FALSE(cache->lookup(2 * TestCache::LINE_SIZE, nullptr, 7));
+    cache->for_each_dirty([](CacheTag &, uint64_t, uint8_t *) { ADD_FAILURE(); });
+  }
+}
+
+// The memory hierarchy tags every line by (vmid, addr) so two processes that
+// alias the same guest VA do not share a cached line. These tests exercise that
+// invariant directly on the header-only Cache: distinct data per VMID at the
+// same address, eviction reporting the evicted line's owner VMID, and per-VMID
+// invalidation.
 
 TEST(CacheVmidTest, SameAddressUnderTwoVmidsStoresDistinctData) {
   TestCache cache;

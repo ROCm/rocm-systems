@@ -30,6 +30,7 @@
 #include "ScopedHook.h"
 #include "fakes/rma_fakes.h"
 
+#include "gin/gin_host.h"  // NCCL_GIN_MAX_CONNECTIONS before comm.h's RMA declarations.
 #include "nccl.h"
 #include "comm.h"
 #include "rma/rma_proxy.h"
