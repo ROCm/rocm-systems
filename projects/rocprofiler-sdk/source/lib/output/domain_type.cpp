@@ -64,6 +64,8 @@ DEFINE_BUFFER_TYPE_NAME(PC_SAMPLING_HOST_TRAP,
                         "pc_sampling_host_trap_stats")
 DEFINE_BUFFER_TYPE_NAME(ROCDECODE, "ROCDECODE_API", "rocdecode_api_trace", "rocdecode_api_stats")
 DEFINE_BUFFER_TYPE_NAME(ROCJPEG, "ROCJPEG_API", "rocjpeg_api_trace", "rocjpeg_api_stats")
+DEFINE_BUFFER_TYPE_NAME(ROCSHMEM, "ROCSHMEM_API", "rocshmem_api_trace", "rocshmem_api_stats")
+DEFINE_BUFFER_TYPE_NAME(HIPFILE, "HIPFILE_API", "hipfile_api_trace", "hipfile_api_stats")
 DEFINE_BUFFER_TYPE_NAME(PC_SAMPLING_STOCHASTIC,
                         "PC_SAMPLING_STOCHASTIC",
                         "pc_sampling_stochastic",
@@ -78,6 +80,7 @@ DEFINE_BUFFER_TYPE_NAME(SPM_COUNTER_VALUES,
                         "SPM_counter_values")
 DEFINE_BUFFER_TYPE_NAME(OMPT, "OMPT", "ompt_trace", "ompt_stats")
 DEFINE_BUFFER_TYPE_NAME(HIP_GRAPH, "HIP_GRAPH", "hip_graph_trace", "hip_graph_stats")
+DEFINE_BUFFER_TYPE_NAME(HIP_EVENT, "HIP_EVENT", "hip_event_trace", "hip_event_stats")
 
 #undef DEFINE_BUFFER_TYPE_NAME
 

@@ -33,7 +33,7 @@ CollTrace::CollTrace(ncclComm* comm) : comm_(comm), commHash_(std::to_string(com
 
 CollTrace::~CollTrace() {
   try {
-    INFO(NCCL_INIT, "COLLTRACE: commHash %s rank %d - Destroy START", commHash_.c_str(), rank_);
+    INFO(NCCL_DESTROY, "COLLTRACE: commHash %s rank %d - Destroy START", commHash_.c_str(), rank_);
     eventQueue_.push(std::unique_ptr<CollTraceEvent>(new CollTraceEvent(CollTraceEvent::EventType::TERMINATE)));
     if (profilingWorkerThread_.joinable()) {
       profilingWorkerThread_.join();
@@ -43,7 +43,7 @@ CollTrace::~CollTrace() {
       reportIfNeeded(false);
     }
 
-    INFO(NCCL_INIT, "COLLTRACE: commHash %s rank %d - Destroy COMPLETE", commHash_.c_str(), rank_);
+    INFO(NCCL_DESTROY, "COLLTRACE: commHash %s rank %d - Destroy COMPLETE", commHash_.c_str(), rank_);
   } catch (const std::exception& e) {
     WARN("COLLTRACE: commHash %s rank %d - Destroy FAILED: %s", commHash_.c_str(), rank_, e.what());
   }
@@ -84,7 +84,7 @@ void* CollTrace::collTraceThreadFn(int cudaDev) {
     curEvent_.reset();
   }
 
-  INFO(NCCL_INIT, "COLLTRACE: commHash %s rank %d - worker thread TERMINATE", commHash_.c_str(), rank_);
+  INFO(NCCL_DESTROY, "COLLTRACE: commHash %s rank %d - worker thread TERMINATE", commHash_.c_str(), rank_);
   return nullptr;
 }
 

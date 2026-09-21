@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Copyright Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: MIT
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 """Run the rocprofiler-compute project's installed CTest suite.
 
 This runner is installed with the rocprofiler-compute test payload and executes
@@ -25,7 +25,6 @@ EXCLUDED_TESTS = [
 ]
 
 QUICK_TESTS = [
-    "test_autogen_config",
     "test_utils",
     "test_num_xcds_cli_output",
     "test_num_xcds_spec_class",
@@ -144,6 +143,14 @@ def rocm_lib_dirs(rocm_path: Path) -> List[Path]:
 def setup_env(rocm_path: Path) -> Dict[str, str]:
     env = os.environ.copy()
     env["ROCM_PATH"] = str(rocm_path)
+
+    # Multi-GPU CI runners inject a GPU_DEVICE_ORDINAL alongside
+    # HIP_VISIBLE_DEVICES via their GPU-isolation env-file. Newer HIP treats the
+    # mismatch as a fatal agent-visibility conflict and exposes zero GPU agents,
+    # so profiling collects no kernel data. HIP_VISIBLE_DEVICES supersedes it, so
+    # drop the ordinal. Mirrors the fix in TheRock's test_rocprofiler_sdk.py.
+    if env.get("HIP_VISIBLE_DEVICES"):
+        env.pop("GPU_DEVICE_ORDINAL", None)
 
     prepend_env_path(env, "PATH", [rocm_path / "bin"])
     prepend_env_path(

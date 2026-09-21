@@ -93,8 +93,7 @@ OMP_NUM_THREADS=4 rocprof-sys-run -- ./openmp-cg
 
 ```bash
 OMP_NUM_THREADS=4 OMP_PROC_BIND=spread OMP_PLACES=threads \
-    rocprof-sys-run \
-    -e ROCPROFSYS_TRACE=true \
-    -e ROCPROFSYS_USE_SAMPLING=ON \
-    -- ./openmp-cg
+ROCPROFSYS_TRACE=true \
+ROCPROFSYS_USE_SAMPLING=ON \
+rocprof-sys-run -- ./openmp-cg
 ```

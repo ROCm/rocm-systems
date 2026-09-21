@@ -4,7 +4,7 @@
 #pragma once
 
 #include "common/defines.h"
-#include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
+#include "rocprofiler-systems/categories.h"  // in rocprof-sys-common-api
 
 #if defined(TIMEMORY_PERFETTO_CATEGORIES)
 #    error "TIMEMORY_PERFETTO_CATEGORIES is already defined. Please include \"" __FILE__ "\" before including any timemory files"
@@ -84,10 +84,14 @@ ROCPROFSYS_DEFINE_CATEGORY(category, rocm_counter_collection, ROCPROFSYS_CATEGOR
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_marker_api, ROCPROFSYS_CATEGORY_ROCM_MARKER_API, "rocm_marker_api", "ROCTx labels")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rocdecode_api, ROCPROFSYS_CATEGORY_ROCM_ROCDECODE_API, "rocm_rocdecode_api", "ROCm RocDecode API")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rocjpeg_api, ROCPROFSYS_CATEGORY_ROCM_ROCJPEG_API, "rocm_rocjpeg_api", "ROCm RocJPEG API")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_hipfile_api, ROCPROFSYS_CATEGORY_ROCM_HIPFILE_API, "rocm_hipfile_api", "ROCm hipFILE API")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl_api, ROCPROFSYS_CATEGORY_ROCM_RCCL_API, "rocm_rccl_api", "ROCm RCCL API")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rocshmem_api, ROCPROFSYS_CATEGORY_ROCM_ROCSHMEM_API, "rocm_rocshmem_api", "ROCm rocSHMEM API")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_ompt_api, ROCPROFSYS_CATEGORY_ROCM_OMPT_API, "rocm_ompt_api", "ROCm OMPT API")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_page_fault, ROCPROFSYS_CATEGORY_ROCM_KFD_PAGE_FAULT, "rocm_kfd_page_fault", "KFD Page Fault Events")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_page_migrate, ROCPROFSYS_CATEGORY_ROCM_KFD_PAGE_MIGRATE, "rocm_kfd_page_migrate", "KFD Page Migration Events")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_page_fault, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_PAGE_FAULT, "rocm_kfd_event_page_fault", "KFD Event Page Fault Events")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_page_migrate, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_PAGE_MIGRATE, "rocm_kfd_event_page_migrate", "KFD Event Page Migration Events")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_queue, ROCPROFSYS_CATEGORY_ROCM_KFD_QUEUE, "rocm_kfd_queue", "KFD Queue Events")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_queue, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_QUEUE, "rocm_kfd_event_queue", "KFD Event Queue Operations")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_unmap_from_gpu, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_UNMAP_FROM_GPU, "rocm_kfd_event_unmap_from_gpu", "KFD Unmap from GPU Events")
@@ -189,10 +193,14 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_marker_api),                         \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rocdecode_api),                      \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rocjpeg_api),                        \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_hipfile_api),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rccl_api),                           \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rocshmem_api),                       \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_ompt_api),                           \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_page_fault),                     \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_page_migrate),                   \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_event_page_fault),               \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_event_page_migrate),             \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_queue),                          \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_event_queue),                    \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_event_unmap_from_gpu),           \

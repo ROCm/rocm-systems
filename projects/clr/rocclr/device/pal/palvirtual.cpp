@@ -1955,6 +1955,13 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
   syncFlags.skipEntire_ = cmd.isEntireMemory();
   amd::Coord3D size = cmd.size();
 
+  if (!p2pAllowed) {
+    // Force-drain this vGPU's compute engine so data is valid before the staged cross-device read.
+    GpuEvent drainEvt;
+    drainEvt.id_ = queue(MainEngine).submit(/*forceFlush=*/true);
+    drainEvt.engineId_ = MainEngine;
+    waitForEvent(&drainEvt);
+  }
   bool result = false;
   switch (cmd.type()) {
     case CL_COMMAND_COPY_BUFFER: {
@@ -3997,16 +4004,68 @@ void* VirtualGPU::getOrCreateHostcallBuffer() {
     return nullptr;
   }
 
+#ifdef USE_NEW_HOSTCALL_IMPL
+  uint32_t occupiedWords = (numPackets + 31) / 32;
+  size_t occupiedSize = occupiedWords * sizeof(uint32_t);
+  amd::Buffer* occupiedBuf =
+      new (dev().context()) amd::Buffer(dev().context(), CL_MEM_READ_WRITE, occupiedSize, nullptr);
+  if (occupiedBuf == nullptr || !occupiedBuf->create()) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "Failed to allocate occupied bitfield for hostcall buffer");
+    if (occupiedBuf != nullptr) {
+      occupiedBuf->release();
+    }
+    dev().svmFree(hostcallBuffer_);
+    hostcallBuffer_ = nullptr;
+    return nullptr;
+  }
+
+  device::Memory* occupiedMem = occupiedBuf->getDeviceMemory(dev());
+  if (occupiedMem == nullptr || occupiedMem->virtualAddress() == 0) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "Failed to get device memory for hostcall occupied bitfield");
+    occupiedBuf->release();
+    dev().svmFree(hostcallBuffer_);
+    hostcallBuffer_ = nullptr;
+    return nullptr;
+  }
+
+  uint32_t zero = 0;
+  // xferMgr() is synchronous, so the fill completes before any kernel reads it.
+  if (!dev().xferMgr().fillBuffer(*occupiedMem, &zero, sizeof(zero), amd::Coord3D(occupiedSize, 1, 1),
+                                  amd::Coord3D(0, 0, 0), amd::Coord3D(occupiedSize, 1, 1), true)) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
+            "Failed to zero-initialize hostcall occupied bitfield");
+    occupiedBuf->release();
+    dev().svmFree(hostcallBuffer_);
+    hostcallBuffer_ = nullptr;
+    return nullptr;
+  }
+
+#endif  // USE_NEW_HOSTCALL_IMPL
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
           "Created hostcall buffer %p (numPackets == %d, size == %d, align == %d) for virtual "
           "queue %p\n",
           hostcallBuffer_, numPackets, size, align, this);
 
+#ifdef USE_NEW_HOSTCALL_IMPL
+  if (!amd::enableHostcalls(dev(), hostcallBuffer_, numPackets, occupiedBuf)) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to register hostcall buffer %p with listener",
+            hostcallBuffer_);
+    occupiedBuf->release();
+    dev().svmFree(hostcallBuffer_);
+    hostcallBuffer_ = nullptr;
+    return nullptr;
+  }
+#else  // !USE_NEW_HOSTCALL_IMPL
   if (!amd::enableHostcalls(dev(), hostcallBuffer_, numPackets)) {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to register hostcall buffer %p with listener",
             hostcallBuffer_);
+    dev().svmFree(hostcallBuffer_);
+    hostcallBuffer_ = nullptr;
     return nullptr;
   }
+#endif  // USE_NEW_HOSTCALL_IMPL
   return hostcallBuffer_;
 }
 

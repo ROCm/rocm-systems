@@ -7,7 +7,7 @@
 #include "core/trace_cache/cache_type_traits.hpp"
 #include "core/trace_cache/cacheable.hpp"
 
-#include "common/defines.h"
+#include "policies/thread_state_policy.hpp"
 
 #include <atomic>
 #include <cassert>
@@ -81,7 +81,8 @@ struct flush_worker_factory_t
     }
 };
 
-template <typename WorkerFactory, typename TypeIdentifierEnum>
+template <typename WorkerFactory, typename TypeIdentifierEnum,
+          rocprofsys::policies::thread_state_policy ThreadStatePolicy = state::thread>
 class buffer_storage
 {
     static_assert(type_traits::is_enum_class_v<TypeIdentifierEnum>,
@@ -150,7 +151,7 @@ public:
         // for position management; extending the critical section to cover the
         // actual memcpy closes the window that TSan (correctly) flags.
         //
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
         std::lock_guard scope{ m_mutex };
 
         auto*  buf      = reserve_memory_space(bytes_to_reserve);
@@ -163,7 +164,7 @@ public:
         serialize(buf + position, value);
     }
 
-    ROCPROFSYS_INLINE bool is_running() const
+    [[nodiscard]] __attribute__((always_inline)) bool is_running() const
     {
         return m_worker_synchronization != nullptr &&
                m_worker_synchronization->is_running;
@@ -174,7 +175,7 @@ private:
     {
         // Hold m_mutex for the full read so store() cannot write into the
         // region we are draining to the file.
-        ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
         std::lock_guard guard{ m_mutex };
 
         size_t _head = m_head;
@@ -228,7 +229,8 @@ private:
     }
 
     // Caller must hold m_mutex.
-    ROCPROFSYS_INLINE std::uint8_t* reserve_memory_space(const size_t& number_of_bytes)
+    [[nodiscard]] __attribute__((always_inline)) std::uint8_t* reserve_memory_space(
+        const size_t& number_of_bytes)
     {
         if(__builtin_expect((m_head + number_of_bytes + header_size<TypeIdentifierEnum>) >
                                 buffer_size,

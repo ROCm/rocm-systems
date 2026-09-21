@@ -1,11 +1,11 @@
 .. meta::
-   :description: Installation instructions for ROCr Debug Agent
-   :keywords: rocm, rocr debug agent, install, debugger, tool
+   :description: Installation instructions for ROCR Debug Agent
+   :keywords: rocm, ROCR debug agent, install, debugger, tool
 
 .. _installation:
 
 ************************
-Install ROCr Debug Agent
+Install ROCR Debug Agent
 ************************
 
 Before you begin, verify that your system is supported. For more information,
@@ -19,7 +19,7 @@ For advanced workflows, source builds, or custom configurations, see
 Install the ROCm Core SDK
 =========================
 
-ROCr Debug Agent is included with the ROCm Core SDK on Linux. For the most
+ROCR Debug Agent is included with the ROCm Core SDK on Linux. For the most
 complete installation, we recommend that developers use the
 ``amdrocm-core-sdk`` meta package.
 
@@ -32,7 +32,7 @@ environment.
 Install ROCm debuggers on Linux
 ===============================
 
-Alternatively, if you want to install ROCr Debug Agent as part of the ROCm
+Alternatively, if you want to install ROCR Debug Agent as part of the ROCm
 Debugger package (a subset of the ROCm Core SDK ``amdrocm-core-sdk``) without
 additional ROCm libraries and tools, install the ``amdrocm-debugger`` package.
 This includes the ROCm debuggers, dependencies, and base packages.
@@ -79,6 +79,6 @@ Install a nightly build
 =======================
 
 The `TheRock <https://github.com/ROCm/TheRock>`__ build system also publishes
-nightly builds for the ROCm Core SDK and its components, including ROCr Debug
+nightly builds for the ROCm Core SDK and its components, including ROCR Debug
 Agent. See `Nightly release status
 <https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.

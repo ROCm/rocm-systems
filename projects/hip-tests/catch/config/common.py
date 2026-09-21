@@ -1,5 +1,4 @@
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-#
+# Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
 import glob
@@ -15,6 +14,7 @@ NON_UNIT_GROUPS = [
     "performance",
     "stress",
     "TypeQualifiers",
+    "contract",
 ]
 
 _use_color = sys.stderr.isatty() and not os.environ.get("NO_COLOR")

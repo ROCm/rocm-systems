@@ -25,7 +25,7 @@ install(
     COMPONENT tools)
 
 configure_file(rocprof-attach.py
-               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprof-attach COPYONLY)
+               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprof-attach @ONLY)
 
 install(
     FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprof-attach
@@ -69,3 +69,7 @@ foreach(_EXE IN LISTS ROCPD_EXECUTABLES)
                     WORLD_READ WORLD_EXECUTE
         COMPONENT rocpd)
 endforeach()
+
+if(ROCPROFILER_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()

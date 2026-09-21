@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <mutex>
 #include "top.hpp"
 
@@ -25,6 +26,9 @@
 #include "hsa/hsa_ven_amd_aqlprofile.h"
 #endif
 
+typedef hsa_status_t HSA_API hsa_amd_queue_create_fn(
+    hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t num_descs);
+
 namespace amd {
 namespace roc {
 
@@ -39,6 +43,7 @@ struct RocrEntryPoints {
   decltype(hsa_agent_get_info)* hsa_agent_get_info_;
   decltype(hsa_queue_create)* hsa_queue_create_;
   decltype(hsa_queue_destroy)* hsa_queue_destroy_;
+  decltype(hsa_amd_queue_get_info)* hsa_amd_queue_get_info_;
   decltype(hsa_queue_load_read_index_scacquire)* hsa_queue_load_read_index_scacquire_;
   decltype(hsa_queue_load_read_index_relaxed)* hsa_queue_load_read_index_relaxed_;
   decltype(hsa_queue_load_write_index_scacquire)* hsa_queue_load_write_index_scacquire_;
@@ -104,6 +109,7 @@ struct RocrEntryPoints {
   decltype(hsa_amd_signal_create)* hsa_amd_signal_create_;
   decltype(hsa_amd_register_system_event_handler)* hsa_amd_register_system_event_handler_;
   decltype(hsa_amd_queue_set_priority)* hsa_amd_queue_set_priority_;
+  hsa_amd_queue_create_fn* hsa_amd_queue_create_;
   decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_;
   decltype(hsa_amd_memory_lock_to_pool)* hsa_amd_memory_lock_to_pool_;
   decltype(hsa_amd_signal_value_pointer)* hsa_amd_signal_value_pointer_;
@@ -111,7 +117,7 @@ struct RocrEntryPoints {
   decltype(hsa_amd_svm_attributes_get)* hsa_amd_svm_attributes_get_;
   decltype(hsa_amd_svm_prefetch_async)* hsa_amd_svm_prefetch_async_;
   decltype(hsa_amd_svm_discard_batch_async)* hsa_amd_svm_discard_batch_async_;
-  decltype(hsa_amd_portable_export_dmabuf)* hsa_amd_portable_export_dmabuf_;
+  decltype(hsa_amd_portable_export_dmabuf_v2)* hsa_amd_portable_export_dmabuf_v2_;
   decltype(hsa_amd_portable_close_dmabuf)* hsa_amd_portable_close_dmabuf_;  // CLR doesn't use it?
   decltype(hsa_amd_vmem_address_reserve)* hsa_amd_vmem_address_reserve_;
   decltype(hsa_amd_vmem_address_free)* hsa_amd_vmem_address_free_;
@@ -153,7 +159,7 @@ struct RocrEntryPoints {
     return false;                                                                                 \
   }
 #define GET_ROCR_OPTIONAL_SYMBOL(NAME)                                                            \
-  cep_.NAME = reinterpret_cast<t_##NAME>(Os::getSymbol(cep_.handle, #NAME));
+  cep_.NAME##_ = reinterpret_cast<NAME##_fn*>(Os::getSymbol(cep_.handle, #NAME));
 #else
 #define ROCR_DYN(NAME) NAME
 #define GET_ROCR_SYMBOL(NAME)
@@ -190,6 +196,10 @@ class Hsa : public amd::AllStatic {
   }
   static hsa_status_t queue_destroy(hsa_queue_t* queue) {
     return ROCR_DYN(hsa_queue_destroy)(queue);
+  }
+  static hsa_status_t amd_queue_get_info(hsa_queue_t* queue,
+                                         hsa_queue_info_attribute_t attribute, void* value) {
+    return ROCR_DYN(hsa_amd_queue_get_info)(queue, attribute, value);
   }
   static uint64_t queue_load_read_index_scacquire(const hsa_queue_t* queue) {
     return ROCR_DYN(hsa_queue_load_read_index_scacquire)(queue);
@@ -442,6 +452,26 @@ class Hsa : public amd::AllStatic {
   static hsa_status_t queue_set_priority(hsa_queue_t* queue, hsa_amd_queue_priority_t priority) {
     return ROCR_DYN(hsa_amd_queue_set_priority)(queue, priority);
   }
+  static bool amd_queue_create_available() {
+#ifdef ROCR_DYN_DLL
+    return ROCR_DYN(hsa_amd_queue_create) != nullptr;
+#else
+    return true;
+#endif
+  }
+  static hsa_status_t amd_queue_create(hsa_agent_t agent,
+                                       hsa_amd_queue_create_desc_t* descs,
+                                       uint32_t num_descs) {
+#ifdef ROCR_DYN_DLL
+    auto fn = ROCR_DYN(hsa_amd_queue_create);
+    if (fn == nullptr) {
+      return HSA_STATUS_ERROR;
+    }
+    return fn(agent, descs, num_descs);
+#else
+    return hsa_amd_queue_create(agent, descs, num_descs);
+#endif
+  }
   static hsa_status_t memory_async_copy_rect(
     const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src,
     const hsa_dim3_t* src_offset, const hsa_dim3_t* range, hsa_agent_t copy_agent,
@@ -473,9 +503,9 @@ class Hsa : public amd::AllStatic {
     return ROCR_DYN(hsa_amd_svm_discard_batch_async)(ptrs, sizes, count, num_dep_signals,
         dep_signals, completion_signal);
   }
-  static hsa_status_t portable_export_dmabuf(const void* ptr, size_t size, int* dmabuf,
-    uint64_t* offset) {
-    return ROCR_DYN(hsa_amd_portable_export_dmabuf)(ptr, size, dmabuf, offset);
+  static hsa_status_t portable_export_dmabuf_v2(const void* ptr, size_t size, int* dmabuf,
+    uint64_t* offset, uint64_t flags) {
+    return ROCR_DYN(hsa_amd_portable_export_dmabuf_v2)(ptr, size, dmabuf, offset, flags);
   }
   static hsa_status_t vmem_address_reserve(void** ptr, size_t size, uint64_t address,
     uint64_t flags) {

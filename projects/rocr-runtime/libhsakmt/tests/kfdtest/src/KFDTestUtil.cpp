@@ -333,7 +333,6 @@ HsaMemoryBuffer::HsaMemoryBuffer(HSAuint64 size, unsigned int node, bool zero, b
     m_Node(node) {
     m_Flags.Value = 0;
 
-    HsaMemMapFlags mapFlags = {0};
     bool map_specific_gpu = (node && !isScratch);
 
     if (isScratch) {
@@ -367,7 +366,7 @@ HsaMemoryBuffer::HsaMemoryBuffer(HSAuint64 size, unsigned int node, bool zero, b
     EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, m_Node, m_Size, m_Flags, &m_pBuf));
     if (hsakmt_is_dgpu()) {
         if (map_specific_gpu)
-            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, g_baseTest->m_hsakmt_current_ctx, m_pBuf, m_Size, NULL, mapFlags, 1, &m_Node));
+            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, g_baseTest->m_hsakmt_current_ctx, m_pBuf, m_Size, NULL, m_Flags, 1, &m_Node));
         else
             EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, m_pBuf, m_Size, NULL));
         m_MappedNodes = 1 << m_Node;
@@ -527,10 +526,9 @@ unsigned int HsaMemoryBuffer::Node() const {
 }
 
 int HsaMemoryBuffer::MapMemToNodes(unsigned int *nodes, unsigned int nodes_num) {
-    HsaMemMapFlags mapFlags = {0};
     int ret, bit;
 
-    ret = HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, g_baseTest->m_hsakmt_current_ctx, m_pBuf, m_Size, NULL, mapFlags, nodes_num, nodes);
+    ret = HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, g_baseTest->m_hsakmt_current_ctx, m_pBuf, m_Size, NULL, m_Flags, nodes_num, nodes);
     if (ret != 0) {
         return ret;
     }

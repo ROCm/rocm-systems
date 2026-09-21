@@ -21,8 +21,11 @@
 // SOFTWARE.
 
 #include "mi400wave.h"
+
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
+#include <new>
 #include <utility>
 #include <vector>
 
@@ -205,7 +208,11 @@ enum EINST
     einst_final
 };
 
-static std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
+// clang-format off
+using instruction_table_t = std::unordered_map<int, mapped_inst_t>;
+alignas(instruction_table_t) static std::byte table_map_to_common_type_storage[sizeof(instruction_table_t)];
+static instruction_table_t& table_map_to_common_type =
+    *::new (static_cast<void*>(table_map_to_common_type_storage)) instruction_table_t{
     {(int) EINST::salu,                   {WaveInstCategory::SALU, 1}           },
     {(int) EINST::smem_rd,                {WaveInstCategory::SMEM, 1}           },
     {(int) EINST::smem_wr,                {WaveInstCategory::SMEM, 1}           },
@@ -347,6 +354,7 @@ static std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
     {(int) EINST::reserved_valu_16,       {WaveInstCategory::VALU, 16}          },
     {(int) EINST::reserved_valu_32,       {WaveInstCategory::VALU, 32}          }
 };
+// clang-format on
 
 mapped_inst_t map_to_common_type(int einst, int trans2)
 {

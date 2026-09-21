@@ -218,6 +218,73 @@ TEST_F(KFDTopologyTest, GetNodeCacheProperties) {
     TEST_END
 }
 
+// Test that L2 cache line size is reported with a valid value
+// This is critical for newer ASICs which have 128 or 256 byte cache lines.
+// Cache line size affects alignment requirements for kernargs and other data structures.
+TEST_F(KFDTopologyTest, ValidateL2CacheLineSize) {
+    TEST_START(TESTPROFILE_RUNALL)
+
+    const HsaNodeProperties *pNodeProperties;
+    bool foundGpuWithL2 = false;
+
+    for (unsigned node = 0; node < m_SystemProperties.NumNodes; node++) {
+        pNodeProperties = m_NodeInfo.GetNodeProperties(node);
+        ASSERT_NE(pNodeProperties, nullptr) << "Failed to get properties for node " << node;
+
+        if (pNodeProperties->NumFComputeCores > 0) {  // GPU node
+            HsaCacheProperties *cacheProperties = new HsaCacheProperties[pNodeProperties->NumCaches];
+            auto status = HSAKMT_CALL(hsaKmtGetNodeCacheProperties, g_baseTest->m_hsakmt_current_ctx,
+                           node, pNodeProperties->CComputeIdLo,
+                           pNodeProperties->NumCaches, cacheProperties);
+            EXPECT_SUCCESS(status);
+            if (status != HSAKMT_STATUS_SUCCESS) {
+                delete [] cacheProperties;
+                continue;
+            }
+
+            for (unsigned n = 0; n < pNodeProperties->NumCaches; n++) {
+                if (cacheProperties[n].CacheLevel == 2) {
+                    foundGpuWithL2 = true;
+                    HSAuint32 size = cacheProperties[n].CacheLineSize;
+
+                    LOG() << "GPU Node " << node << " L2 cache line size: "
+                          << size << " bytes" << std::endl;
+
+                    // Cache line size must not be zero - it is not valid
+                    EXPECT_NE(size, 0UL)
+                        << "GPU Node " << node << " L2 cache line size is 0. "
+                        << "This is not valid - KFD topology must be correctly configured. "
+                        << "Newer ASICs typically have 128 or 256 byte cache lines.";
+
+                    // For non-zero values, validate they are reasonable
+                    if (size != 0) {
+                        // Must be a power of 2
+                        EXPECT_EQ(size & (size - 1), 0UL)
+                            << "GPU Node " << node << " L2 cache line size " << size
+                            << " is not a power of 2";
+
+                        // Should be in reasonable range for modern GPUs
+                        // Typical values: 64, 128, 256 bytes
+                        EXPECT_GE(size, 64UL)
+                            << "GPU Node " << node << " L2 cache line size " << size
+                            << " is unexpectedly small (< 64 bytes)";
+                        EXPECT_LE(size, 256UL)
+                            << "GPU Node " << node << " L2 cache line size " << size
+                            << " is unexpectedly large (> 256 bytes)";
+                    }
+                }
+            }
+            delete [] cacheProperties;
+        }
+    }
+
+    if (!foundGpuWithL2) {
+        LOG() << "No GPU nodes with L2 cache found, skipping validation" << std::endl;
+    }
+
+    TEST_END
+}
+
 // Test that we can get NodeIoLink property successfully per node
 // TODO: Check validity of values returned
 // GetNodeIoLinkProperties is disabled for now, test fails due to bug in BIOS

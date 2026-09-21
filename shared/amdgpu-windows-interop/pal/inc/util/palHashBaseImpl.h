@@ -231,13 +231,6 @@ void* HashAllocator<Allocator>::Allocate()
         // Allocate memory if needed (note that this may rarely fail)
         if (pBlock->pMemory == nullptr)
         {
-            // Here we allocate another chunk of memory from outside, that we can later distribute internally
-            // to whichever bucket needs another group linked to it.
-            PAL_DPWARN("HashAllocator allocating more external memory, enough to hold %u Groups. "
-                "Consider increasing the GroupSize(%llu) in order to fit more Entries"
-                "In a Group.",
-                pBlock->numGroups, static_cast<uint64>(m_groupSize));
-
             pBlock->pMemory = PAL_CALLOC_ALIGNED(pBlock->numGroups * m_groupSize, m_alignment,
                                                  m_pAllocator, AllocInternal);
         }
@@ -729,20 +722,6 @@ Entry* HashBase<Key, Entry, Allocator, HashFunc, EqualFunc, AllocFunc, GroupSize
 
     if (pNextGroup == nullptr)
     {
-        // This warning is useful in order to tune hash maps, but probably doesn't need to be enabled for anyone not
-        // actively tuning. We're not asking for more memory here, just assigning more of the memory chunk we have
-        // already asked for to a bucket. Each bucket starts with a group that it can place hash hits in.
-        // when the group for that bucket fills up, we call this function and link another group for the same bucket,
-        // in the form of a linked list, onto that.
-        // This is expected to happen a bit, as hash distributions aren't perfect. But if this happens too many times,
-        // you're really searching a linked list, not a hash map, which is much slower.
-        // It's at that point you need this warning: to help balance out the number of buckets and group sizes
-        // to better fit your use case.
-        //PAL_DPWARN("HashBase needs to allocate more internal memory after inserting %u entries. "
-        //           "Consider increasing the NumBuckets(%u) or GroupSize(%llu) in order to "
-        //           "fit more Entries In a Group(%u).",
-        //           m_numEntries, m_numBuckets, GroupSize, EntriesInGroup);
-
         // We allocate the next entry group if it does not exist.
         pNextGroup = static_cast<Entry*>(m_allocator.Allocate());
         SetGroupFooterNextGroup(pGroup, pNextGroup);

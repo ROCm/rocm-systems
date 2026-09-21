@@ -30,6 +30,7 @@
 #include "ipc_policy.hpp"
 #include "profiler.hpp"
 #include "queue.hpp"
+#include "memory/hip_allocator.hpp"
 
 namespace rocshmem {
 
@@ -52,9 +53,8 @@ struct BlockHandle {
   AWF_Queue_ret_buffT *default_ctx_atomic_ret{nullptr};
 };
 
-template <typename ALLOCATOR>
 class DefaultBlockHandleProxy {
-  using ProxyT = DeviceProxy<ALLOCATOR, BlockHandle>;
+  using ProxyT = DeviceProxy<BlockHandle>;
 
  public:
   DefaultBlockHandleProxy() = default;
@@ -64,8 +64,9 @@ class DefaultBlockHandleProxy {
                           AWF_Queue_statusT *default_ctx_status,
                           AWF_Queue_ret_buffT *default_ctx_g_ret,
                           AWF_Queue_ret_buffT *default_ctx_atomic_ret,
+                          const HIPAllocatorFinegrained& alloc = HIPAllocatorFinegrained(),
                           size_t num_elems = 1)
-    : proxy_{num_elems} {
+    : alloc_{alloc}, proxy_{num_elems, alloc_} {
 
     // TODO(bpotter): create a default queue for this queue descriptor
     auto queue_descriptor{queue->descriptor(0)};
@@ -96,21 +97,20 @@ class DefaultBlockHandleProxy {
   __host__ __device__ BlockHandle *get() { return proxy_.get(); }
 
  private:
+  HIPAllocatorFinegrained alloc_{};
   ProxyT proxy_{};
 };
 
-using DefaultBlockHandleProxyT = DefaultBlockHandleProxy<HIPDefaultFinegrainedAllocator>;
-
-template <typename ALLOCATOR>
 class BlockHandleProxy {
-  using ProxyT = DeviceProxy<ALLOCATOR, BlockHandle>;
+  using ProxyT = DeviceProxy<BlockHandle>;
 
  public:
   BlockHandleProxy() = default;
 
   BlockHandleProxy(void *g_ret, void *atomic_ret, Queue *queue, size_t offset,
-                   volatile char *status, size_t max_blocks)
-    : proxy_{max_blocks} {
+                   volatile char *status, size_t max_blocks,
+                   const HIPAllocatorFinegrained& alloc = HIPAllocatorFinegrained())
+    : alloc_{alloc}, proxy_{max_blocks, alloc_} {
 
     for (size_t i{0}; i < max_blocks; i++) {
       auto queue_descriptor{queue->descriptor(i)};
@@ -141,12 +141,9 @@ class BlockHandleProxy {
   __host__ __device__ BlockHandle *get() { return proxy_.get(); }
 
  private:
+  HIPAllocatorFinegrained alloc_{};
   ProxyT proxy_{};
-
-  size_t num_blocks_{};
 };
-
-using BlockHandleProxyT = BlockHandleProxy<HIPDefaultFinegrainedAllocator>;
 
 }  // namespace rocshmem
 

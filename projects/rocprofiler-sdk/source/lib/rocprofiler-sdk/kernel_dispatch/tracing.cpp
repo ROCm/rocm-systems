@@ -55,65 +55,73 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
 }
 
 void
+emit_kernel_dispatch_record(tracing::tracing_data&                               tracing_data_v,
+                            rocprofiler_callback_tracing_kernel_dispatch_data_t& callback_record,
+                            context::correlation_id*                             _corr_id,
+                            rocprofiler_thread_id_t                              _tid,
+                            uint64_t                                             start_timestamp,
+                            uint64_t                                             end_timestamp)
+{
+    using kernel_dispatch_record_t = rocprofiler_buffer_tracing_kernel_dispatch_record_t;
+
+    // get the contexts that were active when the dispatch was traced
+    if(tracing_data_v.callback_contexts.empty() && tracing_data_v.buffered_contexts.empty()) return;
+
+    const auto& _extern_corr_ids  = tracing_data_v.external_correlation_ids;
+    auto        _internal_corr_id = (_corr_id) ? _corr_id->internal : 0;
+    auto        _ancestor_corr_id = (_corr_id) ? _corr_id->ancestor : 0;
+
+    callback_record.start_timestamp = start_timestamp;
+    callback_record.end_timestamp   = end_timestamp;
+
+    if(!tracing_data_v.callback_contexts.empty())
+    {
+        auto tracer_data = callback_record;
+        tracing::execute_phase_none_callbacks(tracing_data_v.callback_contexts,
+                                              _tid,
+                                              _internal_corr_id,
+                                              _extern_corr_ids,
+                                              _ancestor_corr_id,
+                                              ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                              ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
+                                              tracer_data);
+    }
+
+    if(!tracing_data_v.buffered_contexts.empty())
+    {
+        auto record = kernel_dispatch_record_t{sizeof(kernel_dispatch_record_t),
+                                               ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                               ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
+                                               rocprofiler_async_correlation_id_t{},
+                                               _tid,
+                                               callback_record.start_timestamp,
+                                               callback_record.end_timestamp,
+                                               callback_record.dispatch_info};
+
+        tracing::execute_buffer_record_emplace(tracing_data_v.buffered_contexts,
+                                               _tid,
+                                               _internal_corr_id,
+                                               _extern_corr_ids,
+                                               _ancestor_corr_id,
+                                               ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                               ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
+                                               record);
+    }
+}
+
+void
 dispatch_complete(queue_info_session_t& session,
                   packet_data_t&        packet_data,
                   profiling_time        dispatch_time)
 {
-    using kernel_dispatch_record_t = rocprofiler_buffer_tracing_kernel_dispatch_record_t;
+    if(dispatch_time.status != HSA_STATUS_SUCCESS) return;
 
-    // get the contexts that were active when the signal was created
-    auto& tracing_data_v = packet_data.tracing_data;
-    if(tracing_data_v.callback_contexts.empty() && tracing_data_v.buffered_contexts.empty()) return;
-
-    // we need to decrement this reference count at the end of the functions
-    auto* _corr_id = session.correlation_id;
-
-    // only do the following work if there are contexts that require this info
-    auto&       callback_record   = packet_data.callback_record;
-    const auto& _extern_corr_ids  = packet_data.tracing_data.external_correlation_ids;
-    auto        _tid              = session.tid;
-    auto        _internal_corr_id = (_corr_id) ? _corr_id->internal : 0;
-    auto        _ancestor_corr_id = (_corr_id) ? _corr_id->ancestor : 0;
-
-    if(dispatch_time.status == HSA_STATUS_SUCCESS)
-    {
-        callback_record.start_timestamp = dispatch_time.start;
-        callback_record.end_timestamp   = dispatch_time.end;
-
-        if(!tracing_data_v.callback_contexts.empty())
-        {
-            auto tracer_data = callback_record;
-            tracing::execute_phase_none_callbacks(tracing_data_v.callback_contexts,
-                                                  _tid,
-                                                  _internal_corr_id,
-                                                  _extern_corr_ids,
-                                                  _ancestor_corr_id,
-                                                  ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
-                                                  ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
-                                                  tracer_data);
-        }
-
-        if(!tracing_data_v.buffered_contexts.empty())
-        {
-            auto record = kernel_dispatch_record_t{sizeof(kernel_dispatch_record_t),
-                                                   ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
-                                                   ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
-                                                   rocprofiler_async_correlation_id_t{},
-                                                   _tid,
-                                                   callback_record.start_timestamp,
-                                                   callback_record.end_timestamp,
-                                                   callback_record.dispatch_info};
-
-            tracing::execute_buffer_record_emplace(tracing_data_v.buffered_contexts,
-                                                   _tid,
-                                                   _internal_corr_id,
-                                                   _extern_corr_ids,
-                                                   _ancestor_corr_id,
-                                                   ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
-                                                   ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
-                                                   record);
-        }
-    }
+    emit_kernel_dispatch_record(packet_data.tracing_data,
+                                packet_data.callback_record,
+                                session.correlation_id,
+                                session.tid,
+                                dispatch_time.start,
+                                dispatch_time.end);
 }
 }  // namespace kernel_dispatch
 }  // namespace rocprofiler

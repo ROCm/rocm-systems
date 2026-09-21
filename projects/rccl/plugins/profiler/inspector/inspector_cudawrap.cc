@@ -73,10 +73,10 @@ inspectorResult_t inspectorCudaWrapInit(void) {
   dlerror();
 
   // Try to load CUDA driver library
-  cudaDriverLib = dlopen("libcuda.so", RTLD_LAZY);
+  cudaDriverLib = dlopen(INSPECTOR_GPU_DRIVER_LIB, RTLD_LAZY);
   if (!cudaDriverLib) {
     // Try alternative name
-    cudaDriverLib = dlopen("libcuda.so.1", RTLD_LAZY);
+    cudaDriverLib = dlopen(INSPECTOR_GPU_DRIVER_LIB_ALT, RTLD_LAZY);
     if (!cudaDriverLib) {
       INFO_INSPECTOR("Inspector: Failed to load CUDA driver library: %s", dlerror());
       return inspectorCudaError;
@@ -84,23 +84,23 @@ inspectorResult_t inspectorCudaWrapInit(void) {
   }
 
   // Load required CUDA driver functions
-  pfn_cuGetErrorString = (PFN_cuGetErrorString)loadCudaSymbol("cuGetErrorString");
+  pfn_cuGetErrorString = (PFN_cuGetErrorString)loadCudaSymbol(INSPECTOR_GPU_SYM_GET_ERROR_STRING);
   if (!pfn_cuGetErrorString) {
-    INFO_INSPECTOR("Inspector: Failed to load cuGetErrorString");
+    INFO_INSPECTOR("Inspector: Failed to load %s", INSPECTOR_GPU_SYM_GET_ERROR_STRING);
     inspectorCudaWrapCleanup();
     return inspectorCudaError;
   }
 
-  pfn_cuDeviceGet = (PFN_cuDeviceGet)loadCudaSymbol("cuDeviceGet");
+  pfn_cuDeviceGet = (PFN_cuDeviceGet)loadCudaSymbol(INSPECTOR_GPU_SYM_DEVICE_GET);
   if (!pfn_cuDeviceGet) {
-    INFO_INSPECTOR("Inspector: Failed to load cuDeviceGet");
+    INFO_INSPECTOR("Inspector: Failed to load %s", INSPECTOR_GPU_SYM_DEVICE_GET);
     inspectorCudaWrapCleanup();
     return inspectorCudaError;
   }
 
-  pfn_cuDeviceGetUuid = (PFN_cuDeviceGetUuid)loadCudaSymbol("cuDeviceGetUuid");
+  pfn_cuDeviceGetUuid = (PFN_cuDeviceGetUuid)loadCudaSymbol(INSPECTOR_GPU_SYM_DEVICE_GET_UUID);
   if (!pfn_cuDeviceGetUuid) {
-    INFO_INSPECTOR("Inspector: Failed to load cuDeviceGetUuid");
+    INFO_INSPECTOR("Inspector: Failed to load %s", INSPECTOR_GPU_SYM_DEVICE_GET_UUID);
     inspectorCudaWrapCleanup();
     return inspectorCudaError;
   }

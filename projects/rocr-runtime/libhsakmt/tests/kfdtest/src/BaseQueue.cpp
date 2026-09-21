@@ -38,7 +38,8 @@ BaseQueue::~BaseQueue(void) {
     Destroy();
 }
 
-HSAKMT_STATUS BaseQueue::Create(unsigned int NodeId, unsigned int size, HSAuint64 *pointers) {
+HSAKMT_STATUS BaseQueue::Create(unsigned int NodeId, unsigned int size, HSAuint64 *pointers,
+                                unsigned int queuePercentage) {
     HSAKMT_STATUS status;
     HSA_QUEUE_TYPE type = GetQueueType();
 
@@ -50,7 +51,8 @@ HSAKMT_STATUS BaseQueue::Create(unsigned int NodeId, unsigned int size, HSAuint6
     memset(&m_Resources, 0, sizeof(m_Resources));
 
     m_QueueBuf = new HsaMemoryBuffer(size, NodeId, true/*zero*/, false/*local*/, true/*exec*/,
-                        /*isScratch */ false, /* isReadOnly */false, /* isUncached */true);
+                        /*isScratch */ false, /* isReadOnly */false, /* isUncached */true,
+                        /* NonPaged */ true);
 
     if (type == HSA_QUEUE_COMPUTE_AQL) {
         m_Resources.Queue_read_ptr_aql = &pointers[0];
@@ -61,7 +63,7 @@ HSAKMT_STATUS BaseQueue::Create(unsigned int NodeId, unsigned int size, HSAuint6
         status = HSAKMT_CALL(hsaKmtCreateQueueExt, m_KFDContext,
                              NodeId,
                              type,
-                             DEFAULT_QUEUE_PERCENTAGE,
+                             queuePercentage,
                              DEFAULT_PRIORITY,
                              m_SdmaEngineId,
                              m_QueueBuf->As<unsigned int*>(),
@@ -72,7 +74,7 @@ HSAKMT_STATUS BaseQueue::Create(unsigned int NodeId, unsigned int size, HSAuint6
         status = HSAKMT_CALL(hsaKmtCreateQueue, m_KFDContext,
                              NodeId,
                              type,
-                             DEFAULT_QUEUE_PERCENTAGE,
+                             queuePercentage,
                              DEFAULT_PRIORITY,
                              m_QueueBuf->As<unsigned int*>(),
                              m_QueueBuf->Size(),

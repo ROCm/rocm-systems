@@ -49,7 +49,7 @@ TEST(track_registry, two_instances_no_shared_state)
     rocprofsys::track_registry second;
 
     {
-        std::lock_guard<std::mutex> _lk{ first.mutex() };
+        const std::lock_guard<std::mutex> _lk{ first.mutex() };
         first.map().emplace(std::uint64_t{ 0xABC }, std::string{ "first-track" });
     }
 
@@ -59,16 +59,16 @@ TEST(track_registry, two_instances_no_shared_state)
 
 TEST(track_registry, set_active_round_trip)
 {
-    rocprofsys::track_registry reg;
-    scoped_active_registry     guard{ &reg };
+    rocprofsys::track_registry   reg;
+    const scoped_active_registry guard{ &reg };
 
     EXPECT_EQ(rocprofsys::get_active_track_registry(), &reg);
 }
 
 TEST(track_registry, set_active_null_clears)
 {
-    rocprofsys::track_registry reg;
-    scoped_active_registry     guard{ &reg };
+    rocprofsys::track_registry   reg;
+    const scoped_active_registry guard{ &reg };
     EXPECT_EQ(rocprofsys::get_active_track_registry(), &reg);
 
     rocprofsys::set_active_track_registry(nullptr);
@@ -77,8 +77,8 @@ TEST(track_registry, set_active_null_clears)
 
 TEST(track_registry, active_is_thread_local)
 {
-    rocprofsys::track_registry main_reg;
-    scoped_active_registry     guard{ &main_reg };
+    rocprofsys::track_registry   main_reg;
+    const scoped_active_registry guard{ &main_reg };
     EXPECT_EQ(rocprofsys::get_active_track_registry(), &main_reg);
 
     rocprofsys::track_registry* other_thread_view = nullptr;
@@ -116,7 +116,7 @@ TEST(track_registry, concurrent_emplace_under_mutex_is_race_free)
             {
                 const auto uuid = static_cast<std::uint64_t>(t) * inserts_each +
                                   static_cast<std::uint64_t>(i);
-                std::lock_guard<std::mutex> _lk{ reg.mutex() };
+                const std::lock_guard<std::mutex> _lk{ reg.mutex() };
                 reg.map().emplace(uuid, std::string{ "track-" } + std::to_string(uuid));
             }
         });
@@ -141,7 +141,7 @@ TEST(track_registry, scoped_guard_restores_previous_active)
     ASSERT_EQ(rocprofsys::get_active_track_registry(), &outer);
 
     {
-        scoped_active_registry guard{ &inner };
+        const scoped_active_registry guard{ &inner };
         EXPECT_EQ(rocprofsys::get_active_track_registry(), &inner);
     }
 

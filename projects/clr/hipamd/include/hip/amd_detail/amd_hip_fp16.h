@@ -617,7 +617,8 @@ inline __HOST_DEVICE__ bool __heq(__half x, __half y) {
   return static_cast<__half_raw>(x).data == static_cast<__half_raw>(y).data;
 }
 inline __HOST_DEVICE__ bool __hne(__half x, __half y) {
-  return static_cast<__half_raw>(x).data != static_cast<__half_raw>(y).data;
+  return (static_cast<__half_raw>(x).data < static_cast<__half_raw>(y).data) ||
+         (static_cast<__half_raw>(x).data > static_cast<__half_raw>(y).data);
 }
 inline __HOST_DEVICE__ bool __hle(__half x, __half y) {
   return static_cast<__half_raw>(x).data <= static_cast<__half_raw>(y).data;
@@ -656,7 +657,8 @@ inline __HOST_DEVICE__ __half2 __heq2(__half2 x, __half2 y) {
   return __builtin_convertvector(-r, _Float16_2);
 }
 inline __HOST_DEVICE__ __half2 __hne2(__half2 x, __half2 y) {
-  auto r = static_cast<__half2_raw>(x).data != static_cast<__half2_raw>(y).data;
+  auto r = (static_cast<__half2_raw>(x).data < static_cast<__half2_raw>(y).data) |
+           (static_cast<__half2_raw>(x).data > static_cast<__half2_raw>(y).data);
   return __builtin_convertvector(-r, _Float16_2);
 }
 inline __HOST_DEVICE__ __half2 __hle2(__half2 x, __half2 y) {
@@ -725,12 +727,30 @@ inline __HOST_DEVICE__ bool __hbgt2(__half2 x, __half2 y) {
   auto r = static_cast<__half2_raw>(__hgt2(x, y));
   return r.data.x != 0 && r.data.y != 0;
 }
-inline __HOST_DEVICE__ bool __hbequ2(__half2 x, __half2 y) { return __hbeq2(x, y); }
-inline __HOST_DEVICE__ bool __hbneu2(__half2 x, __half2 y) { return __hbne2(x, y); }
-inline __HOST_DEVICE__ bool __hbleu2(__half2 x, __half2 y) { return __hble2(x, y); }
-inline __HOST_DEVICE__ bool __hbgeu2(__half2 x, __half2 y) { return __hbge2(x, y); }
-inline __HOST_DEVICE__ bool __hbltu2(__half2 x, __half2 y) { return __hblt2(x, y); }
-inline __HOST_DEVICE__ bool __hbgtu2(__half2 x, __half2 y) { return __hbgt2(x, y); }
+inline __HOST_DEVICE__ bool __hbequ2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hequ2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
+inline __HOST_DEVICE__ bool __hbneu2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hneu2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
+inline __HOST_DEVICE__ bool __hbleu2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hleu2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
+inline __HOST_DEVICE__ bool __hbgeu2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hgeu2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
+inline __HOST_DEVICE__ bool __hbltu2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hltu2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
+inline __HOST_DEVICE__ bool __hbgtu2(__half2 x, __half2 y) {
+  auto r = static_cast<__half2_raw>(__hgtu2(x, y));
+  return r.data.x != 0 && r.data.y != 0;
+}
 inline __HOST_DEVICE__ bool __hisnan(__half x) {
   __half_raw hr = x;
   return (hr.x & 0x7FFFU) > 0x7C00u;

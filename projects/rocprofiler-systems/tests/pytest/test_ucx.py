@@ -78,7 +78,6 @@ def ucx_env(ucx_base_env) -> dict[str, str]:
     env = ucx_base_env.copy()
     env.update(
         {
-            "ROCPROFSYS_TRACE_LEGACY": "ON",
             "ROCPROFSYS_PERFETTO_COMBINE_TRACES": "ON",
         }
     )
@@ -137,7 +136,7 @@ class TestUCX(RocprofsysTest):
         if mode == "sys_run":
             self.assert_perfetto(
                 result,
-                perfetto_file="merged.proto",
+                perfetto_file="merged.pftrace",
                 categories=["ucx"],
                 counter_names=["UCX Comm Recv", "UCX Comm Send"],
             )
@@ -173,7 +172,7 @@ class TestUCX(RocprofsysTest):
         if mode == "sys_run":
             self.assert_perfetto(
                 result,
-                perfetto_file="merged.proto",
+                perfetto_file="merged.pftrace",
                 categories=["ucx"],
                 counter_names=["UCX Comm Recv", "UCX Comm Send"],
             )

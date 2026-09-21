@@ -146,8 +146,8 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_Positive_Functional) {
 
 static void thread_func(hipStream_t stream) {
   hipStreamCaptureStatus cStatus;
-  HIP_CHECK(hipStreamIsCapturing(stream, &cStatus));
-  REQUIRE(hipStreamCaptureStatusActive == cStatus);
+  HIP_CHECK_THREAD(hipStreamIsCapturing(stream, &cStatus));
+  REQUIRE_THREAD(hipStreamCaptureStatusActive == cStatus);
 }
 
 /**
@@ -182,6 +182,7 @@ HIP_TEST_CASE(Unit_hipStreamIsCapturing_Positive_Thread) {
 
   std::thread t(thread_func, stream);
   t.join();
+  HIP_CHECK_THREAD_FINALIZE();
 
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   HIP_CHECK(hipGraphDestroy(graph));

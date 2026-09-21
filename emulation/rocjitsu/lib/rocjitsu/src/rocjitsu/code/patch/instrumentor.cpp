@@ -3,20 +3,25 @@
 
 #include "rocjitsu/code/patch/instrumentor.h"
 
-#include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/analysis/exec_state.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/error_report.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
+#include "rocjitsu/code/patch/probe_live_in.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
+#include "util/except.h"
 
 #include <algorithm>
 #include <array>
@@ -88,70 +93,162 @@ struct AppliedSite {
   uint16_t target_pair_base = 0;
 };
 
-// Human-readable single-lane register name for spill diagnostics.
+// Human-readable register name for spill diagnostics. Ordinary registers are
+// named by prefix and index (s5, v3, acc2); special singletons carry no index.
 std::string reg_name(RegisterRef ref) {
-  const char *prefix = "?";
   switch (ref.cls) {
   case RegClass::SGPR:
-    prefix = "s";
-    break;
+    return "s" + std::to_string(ref.index);
   case RegClass::VGPR:
-    prefix = "v";
-    break;
+    return "v" + std::to_string(ref.index);
   case RegClass::ACC_VGPR:
-    prefix = "acc";
-    break;
-  default:
-    break;
+    return "acc" + std::to_string(ref.index);
+  case RegClass::TTMP:
+    return "ttmp" + std::to_string(ref.index);
+  case RegClass::EXEC:
+    return "exec";
+  case RegClass::VCC:
+    return "vcc";
+  case RegClass::SCC:
+    return "scc";
+  case RegClass::M0:
+    return "m0";
+  case RegClass::FLAT_SCRATCH:
+    return "flat_scratch";
+  case RegClass::PC:
+    return "pc";
   }
-  return std::string(prefix) + std::to_string(ref.index);
+  return "?" + std::to_string(ref.index);
 }
 
-// Special machine state has no save/restore path across a probe call yet.
-// Only SCC (via the trampoline envelope) and ordinary GPRs (via the spill
-// policy) are handled today. Until each special register gains a real consumer,
-// fail closed on any probe whose body touches them rather than letting it
-// silently corrupt the host kernel's state.
-bool check_probe_special_state(const ProbeClobberSummary &summary, std::string *error_out) {
-  std::vector<const char *> touched;
-  if (summary.touches_exec)
-    touched.push_back("EXEC");
-  if (summary.touches_vcc)
-    touched.push_back("VCC");
-  if (summary.touches_m0)
-    touched.push_back("M0");
-  if (summary.touches_flat_scratch)
-    touched.push_back("FLAT_SCRATCH");
-  if (touched.empty())
-    return true;
-  if (error_out != nullptr) {
-    std::string msg = "probe body writes special machine state not yet preserved across a "
-                      "probe call:";
-    bool first = true;
-    for (const char *name : touched) {
-      msg += first ? " " : ", ";
-      msg += name;
-      first = false;
-    }
-    *error_out = std::move(msg);
+// Largest positive byte offset encodable in the scratch store/load offset field,
+// per arch. 0 means the arch has no scratch spill emitter (spilling unsupported).
+// The fields are signed, so the cap is the positive half: the CDNA FLAT path
+// writes the 12-bit offset (pad_12 left 0), RDNA4 has a signed 24-bit VSCRATCH
+// ioffset.
+uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return 0xFFF; // 12-bit, pad_12 = 0
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return 0x7FFFFF; // positive half of signed 24-bit
+  default:
+    return 0;
   }
-  return false;
+}
+
+// TODO: these two arch predicates duplicate logic that also lives in DBT
+// (kernel_descriptor_translator.cpp's arch_has_accvgpr / uses_gfx90a_accum_offset)
+// and code_object_patcher.cpp (target_uses_gfx90a_accum_offset). They should be
+// consolidated into isa/isa_traits.h alongside arch_is_cdna_4_or_lower/arch_is_rdna,
+// but the
+// arch_has_accvgpr copies disagree on CDNA1 (this one follows the physical AGPR file;
+// DBT's follows the HasAccVgpr trait, which models CDNA1 as zero), so unifying needs a
+// deliberate CDNA1-semantics decision. Kept DBI-local until then.
+
+// All CDNA generations (gfx908/gfx90a/gfx942/gfx950) have an AccVGPR file.
+// RDNA/gfx1250 have none.
+bool arch_has_accvgpr(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// CDNA2-4 (gfx90a/gfx942/gfx950) carve the AccVGPR file out of a single unified VGPR
+// allocation, split at the descriptor's ACCUM_OFFSET field. CDNA1/gfx908 allocates
+// AGPRs separately and has no such field; RDNA and gfx1250 have no AccVGPR file at
+// all.
+bool arch_has_unified_vgpr_allocation(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return true;
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return false;
+  default:
+    throw util::UnimplementedInst("unified VGPR allocation for target architecture");
+  }
+}
+
+// How one kernel's VGPR allocation divides into an ordinary prefix and an
+// AccVGPR window.
+struct KernelVgprBounds {
+  uint32_t total = 0;          // Allocated VGPRs: ordinary prefix plus AccVGPR window.
+  uint32_t ordinary_bound = 0; // One past the last ordinary VGPR.
+  uint32_t acc_count = 0;      // AccVGPRs in the window; 0 when there is none.
+};
+
+// Decode @p desc's VGPR allocation for @p arch.
+KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
+                                    const rocr::llvm::amdhsa::kernel_descriptor_t &desc) {
+  const uint32_t granulated = AMDHSA_BITS_GET(
+      desc.compute_pgm_rsrc1, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+  // The descriptor encoding granule is wave-size dependent on RDNA (8 for
+  // Wave32, 4 for Wave64); using the Wave32 granule for a Wave64 kernel would
+  // overcount the allocation and let the SGPR bridge scan pick an unallocated
+  // VGPR. Share the wave-aware decoder with DBT so the two cannot diverge.
+  const uint32_t total = (granulated + 1) * descriptor_vgpr_granularity_for_wavefront(
+                                                arch, kernel_wavefront_size(arch, desc));
+  // On a unified-allocation arch the VGPR allocation splits at the ACCUM_OFFSET
+  // base ((encoded+1)*4) into an ordinary-VGPR prefix and the AccVGPR window.
+  // Arches without that split (non-CDNA, and CDNA1/gfx908 whose AGPRs allocate
+  // separately) have no ACCUM_OFFSET field, so the whole allocation is ordinary.
+  const uint32_t accum_base =
+      arch_has_unified_vgpr_allocation(arch)
+          ? (AMDHSA_BITS_GET(desc.compute_pgm_rsrc3,
+                             rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
+             1) *
+                4
+          : total;
+  return KernelVgprBounds{
+      .total = total,
+      // An ordinary VGPR is one below the accumulator window: an index inside it
+      // would alias an AGPR.
+      .ordinary_bound = std::min(total, accum_base),
+      .acc_count = total > accum_base ? total - accum_base : 0,
+  };
+}
+
+// Special machine state preserved across a probe call: SCC (via the trampoline
+// envelope), EXEC/VCC/M0 (saved to a dead SGPR temp; the orchestrator sets the
+// plan.preserve_* flags below), and ordinary GPRs (via the spill policy).
+// FLAT_SCRATCH stays rejected: the spill store/load depend on it, so a probe
+// that clobbers it entangles with the spill mechanism. Fail closed there rather
+// than let it silently corrupt the host kernel's state.
+bool check_probe_special_state(const ProbeClobberSummary &summary, std::string *error_out) {
+  if (summary.touches_flat_scratch) {
+    report(error_out, "probe body writes FLAT_SCRATCH, which the spill store/load depend on; "
+                      "not preservable across a probe call");
+    return false;
+  }
+  return true;
 }
 
 // Check that the probe does not clobber the link pair.
-bool check_probe_link_pair(const ProbeClobberSummary &summary, ProbeCallingConvention cc,
+bool check_probe_link_pair(const ProbeClobberSummary &summary, const ProbeAbi &abi,
                            std::string *error_out) {
-  const std::optional<uint16_t> link_base = link_pair_for(cc);
-  if (!link_base)
-    return true; // Unknown convention: plan_probe_call rejects it with a cc-specific error.
-  RegisterSet link_pair;
-  link_pair.expand(RegisterRef{RegClass::SGPR, *link_base, 2});
-  if (!summary.ordinary_clobbers.intersects(link_pair))
+  if (!is_valid_probe_abi(abi))
+    return true; // plan_probe_call rejects an unusable ABI with its own error.
+  if (!summary.ordinary_clobbers.intersects(probe_link_pair(abi)))
     return true;
   if (error_out != nullptr) {
-    const uint16_t hi = static_cast<uint16_t>(*link_base + 1);
-    *error_out = "probe body overwrites its own return-link pair s[" + std::to_string(*link_base) +
-                 ":" + std::to_string(hi) +
+    const uint16_t hi = static_cast<uint16_t>(abi.link_pair_base + 1);
+    *error_out = "probe body overwrites its own return-link pair s[" +
+                 std::to_string(abi.link_pair_base) + ":" + std::to_string(hi) +
                  "] before returning; it would return through a corrupted PC";
   }
   return false;
@@ -229,9 +326,15 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                       "(a probe call) or both be empty (the inline nop)");
     return std::nullopt;
   }
-  // TODO: consume force_full_exec when EXEC policy management is implemented
-  if (pt.force_full_exec) {
-    fail("InstrumentationPoint::force_full_exec must be false temporarily");
+  // The inline nop has nowhere to put arguments. Rejected rather than ignored,
+  // so a caller that meant to request a probe call finds out.
+  if (pt.probe_obj == nullptr && !pt.probe_args.empty()) {
+    fail("InstrumentationPoint::probe_args requires a probe_obj / probe_symbol");
+    return std::nullopt;
+  }
+  // Likewise, the inline nop has no envelope whose mask could be widened.
+  if (pt.probe_obj == nullptr && pt.force_full_exec) {
+    fail("InstrumentationPoint::force_full_exec requires a probe_obj / probe_symbol");
     return std::nullopt;
   }
 
@@ -280,16 +383,200 @@ RegisterSet compute_spill_set(const RegisterSet &live_at_anchor,
   return live_at_anchor & instrumentation_clobbers;
 }
 
-bool check_spill_policy(const RegisterSet &spill_set, SpillPolicy policy, std::string *error_out) {
-  if (policy == SpillPolicy::NoSpillsSupported && !spill_set.none()) {
-    std::string msg = "probe-call requires spilling live registers, not yet supported:";
-    bool first = true;
-    spill_set.for_each([&](RegisterRef ref) {
-      msg += first ? " " : ", ";
-      msg += reg_name(ref);
-      first = false;
-    });
-    report(error_out, msg.c_str());
+bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills, rj_code_arch_t arch,
+                      std::vector<SpillSlot> &out, std::string *error_out) {
+  out.clear();
+
+  // Plans VGPR spills only; the orchestrator routes SGPRs to plan_sgpr_spills.
+  // Reject any non-VGPR here defensively before reserving anything.
+  std::string non_vgpr;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (ref.cls != RegClass::VGPR) {
+      non_vgpr += non_vgpr.empty() ? " " : ", ";
+      non_vgpr += reg_name(ref);
+    }
+  });
+  if (!non_vgpr.empty()) {
+    report(error_out,
+           ("probe-call spill of non-VGPR registers not yet supported:" + non_vgpr).c_str());
+    return false;
+  }
+
+  const uint32_t max_offset = max_scratch_offset_bytes(arch);
+  if (max_offset == 0) {
+    report(error_out, "probe-call spilling not supported for target architecture");
+    return false;
+  }
+
+  bool ok = true;
+  std::string fail;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (!ok)
+      return;
+    const std::optional<uint32_t> off = spills.allocate_slot(ref);
+    if (!off) {
+      fail = "probe-call spill of " + reg_name(ref) + " exceeds the per-lane scratch limit";
+      ok = false;
+    } else if (*off > max_offset) {
+      fail = "probe-call spill offset for " + reg_name(ref) +
+             " exceeds the scratch instruction offset field";
+      ok = false;
+    } else {
+      out.push_back(SpillSlot{RegClass::VGPR, ref.index, *off});
+    }
+  });
+  if (!ok) {
+    out.clear();
+    report(error_out, fail.c_str());
+    return false;
+  }
+  return true;
+}
+
+bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &bridge_unavailable,
+                      const std::vector<SpillSlot> &vgpr_spills, uint32_t kernel_vgpr_count,
+                      SpillManager &spills, rj_code_arch_t arch, std::vector<SpillSlot> &out,
+                      uint16_t &out_bridge, std::string *error_out) {
+  out.clear();
+
+  // Only SGPRs bridge through a VGPR here; other classes (AccVGPR) are unhandled.
+  std::string non_sgpr;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (ref.cls != RegClass::SGPR) {
+      non_sgpr += non_sgpr.empty() ? " " : ", ";
+      non_sgpr += reg_name(ref);
+    }
+  });
+  if (!non_sgpr.empty()) {
+    report(error_out,
+           ("probe-call spill of non-SGPR registers not yet supported:" + non_sgpr).c_str());
+    return false;
+  }
+  if (spill_set.none())
+    return true;
+
+  const uint32_t max_offset = max_scratch_offset_bytes(arch);
+  if (max_offset == 0) {
+    report(error_out, "probe-call spilling not supported for target architecture");
+    return false;
+  }
+
+  // Bridge, within the kernel's allocated VGPR count (never an unallocated index).
+  // Prefer a VGPR the site is not already using; else reuse a spilled VGPR, whose
+  // own value is already on scratch and gets reloaded after the bridge's last use
+  // (build_spill_bracket orders the VGPR fills after the SGPR ones). Those are the
+  // only two safe choices: the prologue's writelane destroys whatever the bridge
+  // held, so anything live that is not spilled would be lost. bridge_unavailable
+  // covers the live set, so the first scan never returns one of those.
+  const uint16_t vgpr_bound =
+      static_cast<uint16_t>(std::min<uint32_t>(kernel_vgpr_count, REGISTER_SET_MAX_VGPRS));
+  std::optional<uint16_t> bridge;
+  for (uint16_t v = 0; v < vgpr_bound; ++v) {
+    if (!bridge_unavailable.contains(RegisterRef{RegClass::VGPR, v, 1})) {
+      bridge = v;
+      break;
+    }
+  }
+  if (!bridge && !vgpr_spills.empty())
+    bridge = vgpr_spills.front().reg; // allocated by construction, so in bounds
+  if (!bridge) {
+    report(error_out, "probe-call SGPR spill needs a bridge VGPR, but none is dead or already "
+                      "spilled within the kernel's allocated VGPRs");
+    return false;
+  }
+
+  bool ok = true;
+  std::string fail;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (!ok)
+      return;
+    const std::optional<uint32_t> off = spills.allocate_slot(ref);
+    if (!off) {
+      fail = "probe-call spill of " + reg_name(ref) + " exceeds the per-lane scratch limit";
+      ok = false;
+    } else if (*off > max_offset) {
+      fail = "probe-call spill offset for " + reg_name(ref) +
+             " exceeds the scratch instruction offset field";
+      ok = false;
+    } else {
+      out.push_back(SpillSlot{RegClass::SGPR, ref.index, *off});
+    }
+  });
+  if (!ok) {
+    out.clear();
+    report(error_out, fail.c_str());
+    return false;
+  }
+  out_bridge = *bridge;
+  return true;
+}
+
+bool plan_acc_spills(const RegisterSet &spill_set, uint32_t acc_count, SpillManager &spills,
+                     rj_code_arch_t arch, std::vector<SpillSlot> &out, std::string *error_out) {
+  out.clear();
+
+  // Plans AccVGPR spills only; the orchestrator routes VGPRs/SGPRs elsewhere.
+  std::string non_acc;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (ref.cls != RegClass::ACC_VGPR) {
+      non_acc += non_acc.empty() ? " " : ", ";
+      non_acc += reg_name(ref);
+    }
+  });
+  if (!non_acc.empty()) {
+    report(error_out, ("AccVGPR spill planning received non-AccVGPR registers:" + non_acc).c_str());
+    return false;
+  }
+  if (spill_set.none())
+    return true;
+
+  if (!arch_has_accvgpr(arch)) {
+    report(error_out, "AccVGPR spilling is only supported on CDNA1-4 targets");
+    return false;
+  }
+
+  const uint32_t max_offset = max_scratch_offset_bytes(arch);
+  if (max_offset == 0) {
+    report(error_out, "probe-call spilling not supported for target architecture");
+    return false;
+  }
+
+  // Never spill an AccVGPR the kernel did not allocate: acc_count is the AGPR
+  // window size (unified VGPR budget minus the ACCUM_OFFSET base). Reject out of
+  // band before reserving anything.
+  std::string oob;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (ref.index >= acc_count) {
+      oob += oob.empty() ? " " : ", ";
+      oob += reg_name(ref);
+    }
+  });
+  if (!oob.empty()) {
+    report(error_out,
+           ("probe-call spill of AccVGPR past the kernel's allocated count:" + oob).c_str());
+    return false;
+  }
+
+  bool ok = true;
+  std::string fail;
+  spill_set.for_each([&](RegisterRef ref) {
+    if (!ok)
+      return;
+    const std::optional<uint32_t> off = spills.allocate_slot(ref);
+    if (!off) {
+      fail = "probe-call spill of " + reg_name(ref) + " exceeds the per-lane scratch limit";
+      ok = false;
+    } else if (*off > max_offset) {
+      fail = "probe-call spill offset for " + reg_name(ref) +
+             " exceeds the scratch instruction offset field";
+      ok = false;
+    } else {
+      out.push_back(SpillSlot{RegClass::ACC_VGPR, ref.index, *off});
+    }
+  });
+  if (!ok) {
+    out.clear();
+    report(error_out, fail.c_str());
     return false;
   }
   return true;
@@ -344,13 +631,33 @@ void Instrumentor::add_point_by_offset(uint64_t anchor_offset, InstrumentationKi
 bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   if (blocks_built_)
     return true;
-  auto decoder = Decoder::create(arch_);
+  if (arch_ == ROCJITSU_CODE_ARCH_RV32I || arch_ == ROCJITSU_CODE_ARCH_RV64I) {
+    report(error_out, "AMDGPU instrumentation does not support RISC-V architectures");
+    return false;
+  }
+  const auto &registry = default_isa_target_registry();
+  const rj_code_target_id_t target = obj_.target_id();
+  if (target != ROCJITSU_CODE_TARGET_INVALID) {
+    const IsaTargetDescriptor *descriptor = registry.find(target);
+    if (descriptor == nullptr || descriptor->architecture_id != arch_) {
+      report(error_out, "code-object target does not match the requested architecture");
+      return false;
+    }
+  }
+  auto decoder = target == ROCJITSU_CODE_TARGET_INVALID ? Decoder::create(arch_)
+                                                        : Decoder::create(registry, target);
   if (!decoder) {
     report(error_out, "no decoder available for the requested architecture");
     return false;
   }
   decoder_ = std::move(decoder);
-  blocks_ = BasicBlock::build(obj_, *decoder_, arch_);
+  util::StringDiagnostic decode_error;
+  auto blocks = BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter());
+  if (blocks.failed()) {
+    report(error_out, decode_error.message().c_str());
+    return false;
+  }
+  blocks_ = std::move(blocks).value();
   // BasicBlock::build returns blocks in .text order. Keep clause state across
   // block boundaries because a branch target may split the linear instruction
   // stream in the middle of a clause.
@@ -399,25 +706,112 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
                                             text->size());
 
-  // Store probe objects and symbols together in probe_keys (object, symbol).
-  std::vector<std::pair<const AmdGpuCodeObject *, std::string>> probe_keys;
+  const auto &registry = default_isa_target_registry();
+  const IsaTargetDescriptor *arch_descriptor = registry.find(arch_);
+  auto effective_target = [&](const AmdGpuCodeObject &object) {
+    if (object.target_id() != ROCJITSU_CODE_TARGET_INVALID)
+      return object.target_id();
+    if (arch_descriptor == nullptr)
+      return ROCJITSU_CODE_TARGET_INVALID;
+    const IsaGpuTargetDescription *gpu_target = registry.find_default_gpu_target(*arch_descriptor);
+    return gpu_target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : gpu_target->public_id;
+  };
+  const rj_code_target_id_t destination_target = effective_target(obj_);
+
+  // A probe is identified by the object it came from and the symbol inside it,
+  // and its body is copied into the cave once per identity. The rest of the call
+  // shape (how many argument dwords, where each one comes from, which lanes the
+  // body runs on) describes that one body, so it is recorded on the
+  // ProbeCallable rather than keyed here. Two points naming one probe and
+  // declaring it differently are not two probes; they are one probe declared
+  // twice, and the second declaration is rejected. Only the immediate *values*
+  // are genuinely per-site.
+  //
+  // Whichever point resolves first supplies the declaration. Nothing here can do
+  // better: a body reveals neither its arity nor its mask policy, so the two
+  // declarations are equally credible and the diagnostic names the conflict
+  // instead of blaming the later point.
+  struct ProbeKey {
+    const AmdGpuCodeObject *obj;
+    std::string symbol;
+  };
+  // The shape half of a point's argument list, which belongs to the probe.
+  auto arg_sources_of = [](const InstrumentationPoint &pt) {
+    std::vector<ProbeArgSource> sources;
+    sources.reserve(pt.probe_args.size());
+    for (const ProbeArgValue &arg : pt.probe_args)
+      sources.push_back(arg.source);
+    return sources;
+  };
+  std::vector<ProbeKey> probe_keys;
   // Helper function to get a probe index for a given InstrumentationPoint
   // If the probe is new, then resolve it and get probe info; add it to
   // probe_keys and out.probes.
   auto resolve_probe_index = [&](const InstrumentationPoint &pt,
                                  std::string &perr) -> std::optional<size_t> {
+    const std::vector<ProbeArgSource> sources = arg_sources_of(pt);
     for (size_t i = 0; i < probe_keys.size(); ++i) {
-      if (probe_keys[i].first == pt.probe_obj && probe_keys[i].second == pt.probe_symbol)
-        return i;
+      if (probe_keys[i].obj != pt.probe_obj || probe_keys[i].symbol != pt.probe_symbol)
+        continue;
+      const ProbeCallable &declared = out.probes[i];
+      if (static_cast<size_t>(declared.abi.num_arg_vgprs) != pt.probe_args.size()) {
+        perr = "probe '" + pt.probe_symbol + "' was already declared with " +
+               std::to_string(declared.abi.num_arg_vgprs) +
+               " argument dwords; this point declares " + std::to_string(pt.probe_args.size());
+        return std::nullopt;
+      }
+      if (declared.arg_sources != sources) {
+        perr =
+            "probe '" + pt.probe_symbol + "' was already declared with different argument sources";
+        return std::nullopt;
+      }
+      if (declared.force_full_exec != pt.force_full_exec) {
+        perr = std::string("probe '") + pt.probe_symbol + "' was already declared with " +
+               (declared.force_full_exec ? "force_full_exec" : "the anchor mask") +
+               "; this point declares " +
+               (pt.force_full_exec ? "force_full_exec" : "the anchor mask");
+        return std::nullopt;
+      }
+      return i;
+    }
+    // Bounded before the narrowing cast below, which would wrap a large count
+    // into a small in-range one.
+    if (pt.probe_args.size() > kMaxProbeArgVgprs) {
+      perr = "probe '" + pt.probe_symbol + "' was given " + std::to_string(pt.probe_args.size()) +
+             " arguments; the limit is " + std::to_string(kMaxProbeArgVgprs);
+      return std::nullopt;
+    }
+    const rj_code_target_id_t probe_target = effective_target(*pt.probe_obj);
+    if (destination_target != ROCJITSU_CODE_TARGET_INVALID &&
+        probe_target != ROCJITSU_CODE_TARGET_INVALID && destination_target != probe_target) {
+      perr = "probe concrete target does not match the destination code-object target";
+      return std::nullopt;
     }
     auto sym = resolve_probe_symbol(*pt.probe_obj, pt.probe_symbol, &perr);
     if (!sym)
       return std::nullopt;
-    auto callable = build_probe_callable(*pt.probe_obj, *sym, arch_, &perr);
+    auto callable = build_probe_callable(*pt.probe_obj, *sym, arch_,
+                                         static_cast<uint8_t>(pt.probe_args.size()), &perr);
     if (!callable)
       return std::nullopt;
+    // Inputs the probe reads that its convention does not supply. Typically a
+    // value only the kernel prologue produces -- workitem_id_x in v31, say --
+    // which a trampoline at an arbitrary site cannot reproduce, so the probe
+    // would read whatever the instrumented kernel left behind. An ordinary
+    // uninitialized read lands here too, and is equally unusable.
+    auto live_ins = analyze_probe_live_ins(*pt.probe_obj, *sym, arch_, callable->abi, &perr);
+    if (!live_ins)
+      return std::nullopt;
+    if (!live_ins->none()) {
+      perr = "probe '" + pt.probe_symbol + "' reads " + format_register_set(*live_ins) +
+             " before defining it, and its ABI (" + std::to_string(pt.probe_args.size()) +
+             " argument dwords) does not supply it";
+      return std::nullopt;
+    }
+    callable->arg_sources = sources;
+    callable->force_full_exec = pt.force_full_exec;
     out.probes.push_back(std::move(*callable));
-    probe_keys.emplace_back(pt.probe_obj, pt.probe_symbol);
+    probe_keys.push_back({pt.probe_obj, pt.probe_symbol});
     return out.probes.size() - 1;
   };
 
@@ -461,6 +855,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
         continue;
       }
       site->probe_index = *index;
+      site->probe_args = pt.probe_args;
     }
 
     sites.push_back(std::move(*site));
@@ -541,9 +936,31 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     cave_cursor += probe.body_words.size() * sizeof(uint32_t);
   }
 
+  // Register spilling targets a single-kernel code object for now: any site that
+  // must spill grows that one kernel's per-lane scratch. The SpillManager is
+  // created lazily on the first spilling site and shared by the rest; its final
+  // size is written back to the descriptor after all sites succeed.
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(patcher.image_bytes(), patcher.text_offset(), patcher.text_size());
+
   // Temporary SGPR-allocation bound. The probe-call return-link pair is fixed
-  // by the calling convention, so the kernel must allocate up to it.
-  const std::optional<uint32_t> kernel_sgpr_count = obj_.min_kernel_sgpr_count(arch_);
+  // by the calling convention, so the kernel must allocate up to it. Derived from
+  // the descriptors already scanned above.
+  const std::optional<uint32_t> kernel_sgpr_count =
+      AmdGpuCodeObject::min_kernel_sgpr_count(arch_, kernels);
+
+  // The kernel's VGPR allocation, decoded once: it depends only on the
+  // descriptor and the arch, both loop-invariant. Stays all-zero unless exactly
+  // one kernel was discovered, since with several there is no single allocation
+  // to name; `kernels.size() != 1` is the guard every use tests. The zero state
+  // fails closed rather than silently widening a bound: `ordinary_bound == 0`
+  // leaves the SGPR bridge scan with nothing to pick, and `acc_count == 0`
+  // rejects every AccVGPR index.
+  const KernelVgprBounds vgpr_bounds = kernels.size() == 1
+                                           ? kernel_vgpr_bounds(arch_, kernels.front().descriptor)
+                                           : KernelVgprBounds{};
+  std::optional<SpillManager> spills;
+  uint64_t spill_descriptor_file_offset = 0;
 
   std::vector<AppliedSite> applied;
   applied.reserve(sites.size());
@@ -561,16 +978,73 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     if (site.is_probe_call()) {
       const ProbeCallable &probe = resolved.probes[*site.probe_index];
 
-      // The kernel must own the fixed return-link pair.
-      if (const std::optional<uint16_t> link_base = link_pair_for(probe.cc);
-          link_base && kernel_sgpr_count &&
-          !probe_link_pair_fits_in_kernel(*kernel_sgpr_count, *link_base)) {
-        result.errors.push_back(
-            "probe call needs the return-link pair s[" + std::to_string(*link_base) + ":" +
-            std::to_string(*link_base + 1) + "] but the kernel allocates only " +
-            std::to_string(*kernel_sgpr_count) + " SGPRs; rebuild the kernel with at least " +
-            std::to_string(*link_base + 2) + " SGPRs");
+      // A probe call selects temp SGPRs (link/target/SCC/special-state) bounded by
+      // the kernel's own allocation. Without a discovered descriptor that bound is
+      // unknown, so a temp could land past the kernel's .sgpr_count; fail closed
+      // rather than fall back to the device-wide default (growing the allocation is
+      // deferred).
+      if (!kernel_sgpr_count) {
+        result.errors.push_back("probe call at anchor_offset " +
+                                std::to_string(site.anchor_offset) +
+                                " requires a discovered kernel descriptor to bound SGPR "
+                                "selection, but none was found");
         continue;
+      }
+
+      // The kernel must own the fixed return-link pair.
+      if (const uint16_t link_base = probe.abi.link_pair_base;
+          is_valid_probe_abi(probe.abi) &&
+          !probe_link_pair_fits_in_kernel(*kernel_sgpr_count, link_base)) {
+        result.errors.push_back(
+            "probe call needs the return-link pair s[" + std::to_string(link_base) + ":" +
+            std::to_string(link_base + 1) + "] but the kernel allocates only " +
+            std::to_string(*kernel_sgpr_count) + " SGPRs; rebuild the kernel with at least " +
+            std::to_string(link_base + 2) + " SGPRs");
+        continue;
+      }
+
+      // The kernel must likewise own the argument VGPRs. Only asked of a call
+      // that passes arguments, so a zero-argument probe call stays independent
+      // of the VGPR allocation entirely.
+      if (probe.abi.num_arg_vgprs != 0) {
+        // vgpr_bounds stays all-zero when no single kernel descriptor was
+        // discovered, so `kernels.size() != 1` is the guard, matching every other
+        // use. Same fail-closed case as the SGPR bound above: the allocation the
+        // argument VGPRs must fit inside is unknown. The zero state would reject
+        // any non-zero count anyway; asking here is what makes the diagnostic say
+        // which of the two things went wrong.
+        if (kernels.size() != 1) {
+          result.errors.push_back("probe call at anchor_offset " +
+                                  std::to_string(site.anchor_offset) +
+                                  " passes arguments, which requires a discovered kernel "
+                                  "descriptor to bound VGPR selection, but none was found");
+          continue;
+        }
+        if (!probe_args_fit_in_kernel(vgpr_bounds.ordinary_bound, probe.abi)) {
+          const uint16_t last =
+              static_cast<uint16_t>(probe.abi.arg_vgpr_base + probe.abi.num_arg_vgprs - 1);
+          result.errors.push_back("probe call at anchor_offset " +
+                                  std::to_string(site.anchor_offset) + " needs argument VGPRs v" +
+                                  std::to_string(probe.abi.arg_vgpr_base) + "..v" +
+                                  std::to_string(last) + " but the kernel allocates only " +
+                                  std::to_string(vgpr_bounds.ordinary_bound) + " ordinary VGPRs");
+          continue;
+        }
+        // A Wave32 kernel's EXEC is one dword; exec_hi is not part of the mask
+        // the guest ran under, so handing it to a probe would deliver whatever
+        // the register happens to hold. The probe's own signature is already
+        // wave-size specific (uint32_t or uint64_t at compile time), so this is
+        // the caller declaring the wrong one, not a gap to paper over.
+        if (kernel_wavefront_size(arch_, kernels.front().descriptor) == 32 &&
+            std::any_of(site.probe_args.begin(), site.probe_args.end(), [](const ProbeArgValue &a) {
+              return a.source == ProbeArgSource::AnchorExecHi;
+            })) {
+          result.errors.push_back(
+              "probe call at anchor_offset " + std::to_string(site.anchor_offset) +
+              " passes the high dword of the anchor EXEC mask, but the kernel is Wave32 and "
+              "has no such dword");
+          continue;
+        }
       }
 
       // Callee clobbers (probe body) + liveness at the anchor feed envelope
@@ -588,7 +1062,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       }
 
       // The probe must not overwrite its own return-link pair before returning.
-      if (!check_probe_link_pair(*summary, probe.cc, &err)) {
+      if (!check_probe_link_pair(*summary, probe.abi, &err)) {
         result.errors.push_back(std::move(err));
         continue;
       }
@@ -604,22 +1078,88 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // Set the probe's offset
       TrampolinePlan plan = make_base_plan(site, arch_, trampoline_offset);
       plan.probe_target_offset = probe.output_text_offset;
+      // Preserve special state the probe clobbers by saving it to a dead SGPR
+      // around the call. EXEC/VCC are saved unconditionally as a conservative
+      // policy: the summary detects the special-state writes the decoder exposes as
+      // operands, but always saving keeps correctness independent of per-opcode
+      // implicit-def coverage. M0 stays clobber-gated.
+      plan.preserve_exec = true;
+      plan.preserve_vcc = true;
+      plan.preserve_m0 = summary->touches_m0;
+      // Cap envelope/temp SGPR selection at the kernel's own allocation so a temp
+      // never lands past its .sgpr_count
+      plan.kernel_sgpr_count = *kernel_sgpr_count;
+      plan.probe_args = site.probe_args;
+      plan.force_full_exec = probe.force_full_exec;
       // Given liveness, clobbers, and calling convention, select registers
       // for trampoline and determine how big the trampoline will be
-      if (!TrampolineBuilder::plan_probe_call(plan, probe.cc, live, summary->ordinary_clobbers,
+      if (!TrampolineBuilder::plan_probe_call(plan, probe.abi, live, summary->ordinary_clobbers,
                                               &err)) {
         result.errors.push_back(std::move(err));
         continue;
       }
 
-      // Check that we do not need to spill registers since that is not
-      // implemented yet.
+      // Spill any register that is both live at the anchor and clobbered by the
+      // instrumentation envelope/probe. VGPRs spill to the kernel's per-lane
+      // scratch; SGPRs bridge through a dead VGPR; AccVGPRs and over-cap sites
+      // fail closed inside the planners.
       const RegisterSet clobbers =
           compute_instrumentation_clobbers(*summary, plan.builder_clobbers);
       const RegisterSet spill = compute_spill_set(live, clobbers);
-      if (!check_spill_policy(spill, SpillPolicy::NoSpillsSupported, &err)) {
-        result.errors.push_back(std::move(err));
-        continue;
+      if (!spill.none()) {
+        // Single-kernel assumption: spilling needs exactly one kernel descriptor
+        // with non-zero fixed scratch to grow. That is the same condition under
+        // which vgpr_bounds was decoded, so testing it here is what licenses the
+        // reads below.
+        if (kernels.size() != 1 || kernels.front().descriptor.private_segment_fixed_size == 0) {
+          result.errors.push_back(
+              "probe call at anchor_offset " + std::to_string(site.anchor_offset) +
+              " must spill live registers, but the code object does not have a single kernel with "
+              "fixed scratch to spill into");
+          continue;
+        }
+        const KernelDescriptorInfo &kernel = kernels.front();
+        if (!spills) {
+          // Cap total per-lane scratch at the widest slot the scratch offset field
+          // can encode, so the SpillManager limit and the per-instruction offset
+          // guards in the planners agree.
+          const uint32_t scratch_limit = max_scratch_offset_bytes(arch_) + SpillManager::kSlotBytes;
+          spills.emplace(kernel.descriptor.private_segment_fixed_size, scratch_limit);
+          spill_descriptor_file_offset = kernel.descriptor_file_offset;
+        }
+        // Split by class: VGPRs go straight to scratch; SGPRs bridge through a dead
+        // VGPR; AccVGPRs go straight to scratch via the CDNA `acc` bit (no bridge).
+        RegisterSet vgpr_spill = spill;
+        vgpr_spill.clear_class(RegClass::SGPR);
+        vgpr_spill.clear_class(RegClass::ACC_VGPR);
+        RegisterSet sgpr_spill = spill;
+        sgpr_spill.clear_class(RegClass::VGPR);
+        sgpr_spill.clear_class(RegClass::ACC_VGPR);
+        RegisterSet acc_spill = spill;
+        acc_spill.clear_class(RegClass::VGPR);
+        acc_spill.clear_class(RegClass::SGPR);
+        if (!plan_vgpr_spills(vgpr_spill, *spills, arch_, plan.vgpr_spills, &err)) {
+          result.errors.push_back(std::move(err));
+          continue;
+        }
+        // The SGPR bridge must be an ordinary VGPR: an index in the accumulator
+        // window would alias an AGPR that is not part of acc_spills.
+        // Defensively exclude the argument VGPRs from bridge selection as well
+        // as the live set.
+        const RegisterSet bridge_unavailable = live | arg_registers(probe.abi);
+        if (!sgpr_spill.none() &&
+            !plan_sgpr_spills(sgpr_spill, bridge_unavailable, plan.vgpr_spills,
+                              vgpr_bounds.ordinary_bound, *spills, arch_, plan.sgpr_spills,
+                              plan.spill_bridge_vgpr, &err)) {
+          result.errors.push_back(std::move(err));
+          continue;
+        }
+        // AccVGPRs (CDNA only): reject an index past the allocated AGPR window.
+        if (!acc_spill.none() && !plan_acc_spills(acc_spill, vgpr_bounds.acc_count, *spills, arch_,
+                                                  plan.acc_spills, &err)) {
+          result.errors.push_back(std::move(err));
+          continue;
+        }
       }
 
       // Get trampoline from TrampolineBuilder
@@ -655,6 +1195,18 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // All-or-nothing: bail before mutating the patcher if any site failed.
   if (!result.errors.empty())
     return result;
+
+  // Grow the spilled kernel's per-lane scratch to cover its DBI spill zone. Done
+  // before replace_text so the edit lands at the descriptor's original file offset;
+  // replace_text then relocates the descriptor with the rest of the ELF.
+  if (spills) {
+    if (!patcher.set_private_segment_fixed_size(spill_descriptor_file_offset,
+                                                spills->total_private_bytes())) {
+      result.errors.emplace_back(
+          "failed to grow private_segment_fixed_size for the spilled kernel descriptor");
+      return result;
+    }
+  }
 
   // Every per-site validation, branch-range check, and trampoline-byte
   // construction has succeeded up to this point. Assemble the new .text in one

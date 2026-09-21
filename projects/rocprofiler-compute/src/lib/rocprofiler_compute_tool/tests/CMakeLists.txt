@@ -6,10 +6,14 @@ add_executable(
     ${target}
     test_rocprofiler_compute_tool.h
     test_rocprofiler_compute_tool.cpp
+    test_pc_sampling_feature.h
+    test_pc_sampling_feature.cpp
     test_sdk_callbacks.h
     test_sdk_callbacks.cpp
     test_environ_cache.h
     test_environ_cache.cpp
+    test_counters_writer.h
+    test_counters_writer.cpp
     mocks.h
     mocks.cpp
     main.cpp
@@ -26,6 +30,9 @@ target_link_libraries(
         asan_build_dependencies
 )
 
+# TheRock's post-hook overwrites INSTALL_RPATH with its own computed value, so
+# this only takes effect in standalone TEST_FROM_INSTALL builds, where nothing
+# else stamps an RPATH and librocprofiler-compute-tool.so is otherwise unfound.
 set_target_properties(
     ${target}
     PROPERTIES

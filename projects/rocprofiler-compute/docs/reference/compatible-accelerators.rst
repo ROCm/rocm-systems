@@ -51,5 +51,5 @@ ROCm Compute Profiler. See :doc:`rocm:reference/gpu-arch-specs` for full AMD Ins
       * - Platform
         - Status
 
-      * - AMD Ryzen AI Max / Ryzen™ AI Max+ 300 and 400 Series integrated graphics (Strix/Halo, Gorgon/Halo)
+      * - AMD Ryzen AI Max / Ryzen™ AI Max+ 300 and 400 Series integrated graphics (Strix/Halo, Gorgon/Halo, Gorgon/Point gfx1153)
         - Supported ✅ (see :doc:`/conceptual/rdna/rdna-performance-model`)

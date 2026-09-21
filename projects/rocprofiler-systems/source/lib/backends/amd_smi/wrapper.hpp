@@ -38,6 +38,7 @@ public:
     using processor_handle     = amdsmi_processor_handle;
     using gpu_metrics_t        = amdsmi_gpu_metrics_t;
     using asic_info_t          = amdsmi_asic_info_t;
+    using bdf_t                = amdsmi_bdf_t;
     using memory_type_t        = amdsmi_memory_type_t;
     using temperature_type_t   = amdsmi_temperature_type_t;
     using temperature_metric_t = amdsmi_temperature_metric_t;
@@ -138,6 +139,11 @@ public:
     static status_t get_gpu_asic_info(processor_handle handle, asic_info_t* out)
     {
         return amdsmi_get_gpu_asic_info(handle, out);
+    }
+
+    static status_t get_gpu_device_bdf(processor_handle handle, bdf_t* out)
+    {
+        return amdsmi_get_gpu_device_bdf(handle, out);
     }
 
     static status_t get_memory_usage(processor_handle handle, memory_type_t type,
