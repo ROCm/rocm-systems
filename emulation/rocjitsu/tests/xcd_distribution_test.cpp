@@ -74,10 +74,12 @@ struct XcdDistributionFixture {
   SoC *soc = nullptr;
   amdgpu::GpuMemory *memory = nullptr;
 
-  explicit XcdDistributionFixture(Threading threading = Threading::Single)
+  explicit XcdDistributionFixture(Threading threading = Threading::Single,
+                                  uint32_t dispatch_threads = 1)
       : loaded(config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema)) {
     soc = loaded.soc();
     memory = loaded.memory();
+    soc->set_dispatch_threads(dispatch_threads);
     // load_config() resolves an unset num_threads to one partition per XCD, so
     // Single has to pin one worker rather than just leave the config alone.
     loaded.engine_config.num_threads =
@@ -783,8 +785,8 @@ TEST(XcdDistributionTest, DispatchIdClassesStayDisjointAcrossTheWrap) {
 // peer's completion_signal, and drain_completions() fires only for the shard
 // that is not a peer. Defeating either alone still yields one decrement, so this
 // pins the property rather than either implementation of it.
-void run_fanout_completion_signal(Threading threading) {
-  XcdDistributionFixture fx(threading);
+void run_fanout_completion_signal(Threading threading, uint32_t dispatch_threads = 1) {
+  XcdDistributionFixture fx(threading, dispatch_threads);
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
 
   // amd_signal_t::value lives 8 bytes into the signal object.
@@ -837,6 +839,11 @@ TEST(XcdDistributionTest, FanoutFiresTheCompletionSignalExactlyOnceThreaded) {
   run_fanout_completion_signal(Threading::ThreadPerXcd);
 }
 
+TEST(XcdDistributionTest, SharedPoolFiresTheCompletionSignalExactlyOnceThreaded) {
+  // Eight XCD engines share three pool workers and join their batches independently.
+  run_fanout_completion_signal(Threading::ThreadPerXcd, /*dispatch_threads=*/4);
+}
+
 // The two ordering regressions above run on a single engine thread, where every
 // XCD is driven by one drain loop and two command processors never actually run
 // at the same time. That leaves the properties they check resting on an
@@ -877,8 +884,8 @@ TEST(XcdDistributionTest, DispatchIdsAreDisjointAcrossXcdsThreaded) {
             uint64_t{kTotalXcds} * kTotalXcds);
 }
 
-TEST(XcdDistributionTest, BarrierBitWaitsForEveryXcdsShareThreaded) {
-  XcdDistributionFixture fx(Threading::ThreadPerXcd);
+void run_threaded_fanout_barrier(uint32_t dispatch_threads) {
+  XcdDistributionFixture fx(Threading::ThreadPerXcd, dispatch_threads);
   ASSERT_GT(fx.loaded.engine_config.num_threads, 1u) << "fixture did not actually go concurrent";
 
   auto plugin = std::make_unique<WorkgroupOrderPlugin>();
@@ -906,6 +913,15 @@ TEST(XcdDistributionTest, BarrierBitWaitsForEveryXcdsShareThreaded) {
   ASSERT_EQ(ids.size(), 2u) << "expected exactly two distinct dispatch ids";
   EXPECT_GT(order->first_dispatched(ids[1]), order->last_completed(ids[0]))
       << "an XCD began the barrier'd dispatch while a peer still ran the previous one";
+}
+
+TEST(XcdDistributionTest, BarrierBitWaitsForEveryXcdsShareThreaded) {
+  run_threaded_fanout_barrier(/*dispatch_threads=*/1);
+}
+
+TEST(XcdDistributionTest, SharedPoolBarrierBitWaitsForEveryXcdsShareThreaded) {
+  // Exercise barrier ordering when peer XCDs execute and join shared-pool work concurrently.
+  run_threaded_fanout_barrier(/*dispatch_threads=*/4);
 }
 
 // One matched begin/end pair is owed per packet, not per share, and the pair

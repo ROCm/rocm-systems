@@ -430,6 +430,76 @@
         }
       ]
     },
+    "maxp2ppeers_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_IB_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "MaxP2pPeers_ConfigField_HonoredAcrossRanks",
+          "description": "ncclConfig_t::maxP2pPeers resolves to the requested value on every rank and all ranks agree",
+          "test_filter": "MaxP2pPeersMPITest.ConfigField_HonoredAcrossRanks",
+          "timeout": 120
+        },
+        {
+          "name": "MaxP2pPeers_Env_HonoredAcrossRanks",
+          "description": "NCCL_P2P_MAX_PEERS is honored across ranks (own mpirun so the per-process NCCL_PARAM cache is fresh)",
+          "test_filter": "MaxP2pPeersMPITest.Env_HonoredAcrossRanks",
+          "timeout": 120
+        },
+        {
+          "name": "MaxP2pPeers_Env_OverridesConfig_AcrossRanks",
+          "description": "NCCL_P2P_MAX_PEERS overrides an explicit config field consistently on every rank (own mpirun for a fresh param cache)",
+          "test_filter": "MaxP2pPeersMPITest.Env_OverridesConfig_AcrossRanks",
+          "timeout": 120
+        },
+        {
+          "name": "MaxP2pPeers_Default_LeavesUndefAndP2pMaxPeersEqualsNRanks",
+          "description": "With neither config nor env set the field stays UNDEF and the divisor resolves to the communicator size",
+          "test_filter": "MaxP2pPeersMPITest.Default_LeavesUndefAndP2pMaxPeersEqualsNRanks",
+          "timeout": 120
+        },
+        {
+          "name": "MaxP2pPeers_AboveRankCount_CappedToNRanks",
+          "description": "A maxP2pPeers above the rank count is capped to the communicator size rather than rejected",
+          "test_filter": "MaxP2pPeersMPITest.AboveRankCount_CappedToNRanks",
+          "timeout": 120
+        },
+        {
+          "name": "MaxP2pPeers_Zero_RejectedWithInvalidArgument",
+          "description": "maxP2pPeers <= 0 through ncclConfig_t fails communicator init with ncclInvalidArgument",
+          "test_filter": "MaxP2pPeersMPITest.Zero_RejectedWithInvalidArgument",
+          "timeout": 120
+        },
+        {
+          "name": "MaxP2pPeers_MultiNode_PerPeerChannelsRespondToMaxP2pPeers",
+          "description": "Multi-node per-peer channel count responds to maxP2pPeers and the halving loop stops at the maximal value for it",
+          "test_filter": "MaxP2pPeersMPITest.MultiNode_PerPeerChannelsRespondToMaxP2pPeers",
+          "timeout": 300
+        },
+        {
+          "name": "MaxP2pPeers_MultiNode_SaturateDividesByMaxP2pPeers",
+          "description": "With RCCL_SATURATE_P2P_NCHANNELS on, the per-peer count is pool/maxP2pPeers exactly; pins the divisor to an observable value",
+          "test_filter": "MaxP2pPeersMPITest.MultiNode_SaturateDividesByMaxP2pPeers",
+          "timeout": 180
+        },
+        {
+          "name": "MaxP2pPeers_Functional_AlltoAll_WithMaxP2pPeers",
+          "description": "A communicator built with maxP2pPeers set runs a correct AllToAll across all ranks",
+          "test_filter": "MaxP2pPeersMPITest.Functional_AlltoAll_WithMaxP2pPeers",
+          "timeout": 180
+        }
+      ]
+    },
     "net_ib_base": {
       "extends": "default",
       "is_gtest": true,
@@ -804,7 +874,7 @@
         {
           "name": "ParameterApiTests",
           "description": "Public ncclParam C API tests",
-          "test_filter": "ParameterApiTests.*"
+          "test_filter": "ParameterApiTests.*:ParameterApiTypedTests*"
         },
         {
           "name": "ArgCheck",
@@ -884,8 +954,8 @@
         },
         {
           "name": "DdaFabricEligibilityTest",
-          "description": "Dda Fabric eligibility tests",
-          "test_filter": "DdaFabricEligibilityTest.*"
+          "description": "Dda Fabric eligibility and block-cap tests",
+          "test_filter": "DdaFabricEligibilityTest.*:DdaFabricMaxBlocksTest.*:DdaFabricScratchSizingTest.*"
         },
         {
           "name": "CeAlltoAllvEligibilityTest",
@@ -901,6 +971,16 @@
           "name": "TimeoutTests",
           "description": "ncclTimeout host API unit tests: enum ordering, error string, async-error set/get/clear, argument validation",
           "test_filter": "TimeoutTests.*"
+        },
+        {
+          "name": "ChannelDefaults",
+          "description": "P2P channel pool and per-peer defaults, including the maxP2pPeers saturate divisor",
+          "test_filter": "ChannelDefaults.*"
+        },
+        {
+          "name": "P2pMaxNchannels",
+          "description": "NCCL_MAX_P2P_NCHANNELS resolution, p2pnChannels upper bound, and the multi-node maxP2pPeers per-peer reduction",
+          "test_filter": "P2pMaxNchannels*"
         }
       ]
     },
@@ -2815,7 +2895,7 @@
         {
           "name": "CE_Internal_Init",
           "description": "ncclCeInit lifecycle: allocates sync window; ncclCeFinalize tears it down; double-fini is safe; independent state per comm",
-          "test_filter": "CeInternalMPITest.InitSetsWindowPointers:CeInternalMPITest.FiniNullsPointers:CeInternalMPITest.DoubleFiniIsSafe:CeInternalMPITest.IndependentCeStatePerComm:CeInternalMPITest.FiniAfterZeroCollectives"
+          "test_filter": "CeInternalMPITest.InitSetsWindowPointers:CeInternalMPITest.FiniNullsPointers:CeInternalMPITest.DoubleFiniIsSafe:CeInternalMPITest.IndependentCeStatePerComm:CeInternalMPITest.FiniAfterZeroCollectives:CeInternalMPITest.FreeBatchOpsParamsIsIdempotent"
         },
         {
           "name": "CE_Internal_Sync",
@@ -4190,6 +4270,12 @@
       "name": "P2P Tests - Complete Suite",
       "description": "All peer-to-peer transport tests (single node)",
       "config": "p2p_comprehensive",
+      "enabled": true
+    },
+    {
+      "name": "MaxP2pPeers MPI Tests - Multi-Node (4-rank, 2-node)",
+      "description": "ncclConfig_t::maxP2pPeers and NCCL_P2P_MAX_PEERS: resolution across ranks, cap, rejection, and the per-peer channel divisor",
+      "config": "maxp2ppeers_multinode",
       "enabled": true
     },
     {

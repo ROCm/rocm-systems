@@ -51,6 +51,10 @@ struct OperandPair32 {
   uint32_t hi;
 };
 
+/// Physical scalar-source width for a logical pair of 32-bit components.
+/// CDNA5 packed FP32 consumes one scalar word even though its operand is 64 bits.
+enum class ScalarPairMode { Preserve, Replicate32 };
+
 /// @brief Facade for instruction-visible register reads and writes.
 ///
 /// @details This class centralizes the observation contract for
@@ -629,11 +633,11 @@ public:
     friend class RegisterAccess;
 
     OperandReadPair32View(const Operand &op, const Wavefront &wf, ConstVgprStoragePair64 storage,
-                          uint8_t byte_mask, bool denied)
+                          uint8_t byte_mask, bool denied, ScalarPairMode scalar_mode)
         : storage_(storage), byte_mask_(byte_mask) {
       if (!storage_.lo)
         scalar_fallback_.emplace(denied ? OperandPair32{}
-                                        : RegisterAccess(wf).read_lane_pair32(op, 0));
+                                        : RegisterAccess(wf).read_lane_pair32(op, 0, scalar_mode));
     }
 
     uint32_t scalar_fallback(bool high) const {
@@ -1011,7 +1015,11 @@ public:
   /// scalar sources are read as 32-bit values and splatted. Pair classification
   /// uses the same execution predicate as resolve_src_scalar64(), independently
   /// of the narrower analysis-liveness mapping in to_register_ref().
-  [[nodiscard]] OperandPair32 read_lane_pair32(const Operand &op, uint32_t lane) const {
+  /// Replicate32 instead reads one scalar word for instruction families whose
+  /// logical pair is formed by replication, including named scalar registers.
+  [[nodiscard]] OperandPair32
+  read_lane_pair32(const Operand &op, uint32_t lane,
+                   ScalarPairMode scalar_mode = ScalarPairMode::Preserve) const {
     if (const auto literal = op.literal64_value())
       return {static_cast<uint32_t>(*literal), static_cast<uint32_t>(*literal >> 32)};
 
@@ -1023,7 +1031,8 @@ public:
     const Wavefront &wf = wavefront();
     const bool is_register_pair =
         op.size_bits() >= 64 &&
-        (op.simd_vgpr_base(wf).has_value() || is_src_scalar_register_pair(op.encoding_value()));
+        (op.simd_vgpr_base(wf).has_value() || (scalar_mode == ScalarPairMode::Preserve &&
+                                               is_src_scalar_register_pair(op.encoding_value())));
     if (is_register_pair) {
       const uint64_t pair = op.read_lane64(wf, lane);
       return {static_cast<uint32_t>(pair), static_cast<uint32_t>(pair >> 32)};
@@ -1162,13 +1171,19 @@ public:
 
   [[nodiscard]] OperandReadPair32View read_operand_pair32(const Operand &op, uint64_t lane_mask,
                                                           uint8_t byte_mask = 0xF) const {
+    return read_operand_pair32(op, lane_mask, ScalarPairMode::Preserve, byte_mask);
+  }
+
+  [[nodiscard]] OperandReadPair32View read_operand_pair32(const Operand &op, uint64_t lane_mask,
+                                                          ScalarPairMode scalar_mode,
+                                                          uint8_t byte_mask = 0xF) const {
     const Wavefront &wf = wavefront();
     auto base = op.simd_vgpr_base(wf);
     const bool valid = !base || cu_->owns_vgpr_range(wf, *base, 2);
     ConstVgprStoragePair64 storage = valid ? op.simd_vgpr_storage64(wf) : ConstVgprStoragePair64{};
     if (storage.lo)
       op.simd_notify_read64(wf, lane_mask, byte_mask);
-    return OperandReadPair32View(op, wf, storage, byte_mask, base && !valid);
+    return OperandReadPair32View(op, wf, storage, byte_mask, base && !valid, scalar_mode);
   }
 
   [[nodiscard]] OperandWriteView

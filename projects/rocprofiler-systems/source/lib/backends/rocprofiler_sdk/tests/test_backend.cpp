@@ -66,33 +66,6 @@ TEST_F(backend_test, make_agent_id_constructs_from_handle)
 
 // ─── Pure SDK delegations (return status_t) ────────────────────────────────────
 
-TEST_F(backend_test, create_context_returns_sdk_status)
-{
-    context_id ctx{};
-    EXPECT_CALL(*g_mock_sdk, create_context(&ctx))
-        .WillOnce(gm::Return(mock_sdk::STATUS_SUCCESS));
-
-    EXPECT_EQ(sut::create_context(&ctx), mock_sdk::STATUS_SUCCESS);
-}
-
-TEST_F(backend_test, start_context_returns_sdk_status)
-{
-    const context_id ctx{ 3 };
-    EXPECT_CALL(*g_mock_sdk, start_context(ctx))
-        .WillOnce(gm::Return(mock_sdk::STATUS_SUCCESS));
-
-    EXPECT_EQ(sut::start_context(ctx), mock_sdk::STATUS_SUCCESS);
-}
-
-TEST_F(backend_test, stop_context_returns_sdk_status)
-{
-    const context_id ctx{ 3 };
-    EXPECT_CALL(*g_mock_sdk, stop_context(ctx))
-        .WillOnce(gm::Return(mock_sdk::STATUS_SUCCESS));
-
-    EXPECT_EQ(sut::stop_context(ctx), mock_sdk::STATUS_SUCCESS);
-}
-
 TEST_F(backend_test, sample_device_counting_service_returns_sdk_status)
 {
     const context_id ctx{ 1 };
@@ -371,6 +344,33 @@ TEST_F(backend_test, get_status_string_delegates_to_sdk)
 
 // ─── Void forwarders — success path ──────────────────────────────────────────
 
+TEST_F(backend_test, create_context_succeeds)
+{
+    context_id ctx{};
+    EXPECT_CALL(*g_mock_sdk, create_context(&ctx))
+        .WillOnce(gm::Return(mock_sdk::STATUS_SUCCESS));
+
+    EXPECT_NO_THROW(sut::create_context(&ctx));
+}
+
+TEST_F(backend_test, start_context_succeeds)
+{
+    const context_id ctx{ 3 };
+    EXPECT_CALL(*g_mock_sdk, start_context(ctx))
+        .WillOnce(gm::Return(mock_sdk::STATUS_SUCCESS));
+
+    EXPECT_NO_THROW(sut::start_context(ctx));
+}
+
+TEST_F(backend_test, stop_context_succeeds)
+{
+    const context_id ctx{ 3 };
+    EXPECT_CALL(*g_mock_sdk, stop_context(ctx))
+        .WillOnce(gm::Return(mock_sdk::STATUS_SUCCESS));
+
+    EXPECT_NO_THROW(sut::stop_context(ctx));
+}
+
 TEST_F(backend_test, create_buffer_succeeds)
 {
     buffer_id buf{};
@@ -528,6 +528,20 @@ TEST_F(backend_test, iterate_callback_tracing_kind_operation_args_throws_on_erro
         std::runtime_error);
 }
 
+// Some callback-tracing kinds (e.g. ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API)
+// declare a kind but do not implement argument iteration for it. Argument
+// iteration only supplies best-effort debug-annotation data, so this must not
+// be fatal.
+TEST_F(backend_test, iterate_callback_tracing_kind_operation_args_ignores_not_implemented)
+{
+    EXPECT_CALL(*g_mock_sdk,
+                iterate_callback_tracing_kind_operation_args(gm::_, gm::_, gm::_, gm::_))
+        .WillOnce(gm::Return(mock_sdk::STATUS_ERROR_NOT_IMPLEMENTED));
+
+    EXPECT_NO_THROW(
+        sut::iterate_callback_tracing_kind_operation_args({}, nullptr, 0, nullptr));
+}
+
 TEST_F(backend_test, iterate_counter_dimensions_succeeds)
 {
     const counter_id cid{ 5 };
@@ -558,6 +572,39 @@ TEST_F(backend_test, query_counter_info_throws_on_sdk_error)
 }
 
 // ─── Void forwarders — error path ────────────────────────────────────────────
+
+TEST_F(backend_test, create_context_throws_on_sdk_error)
+{
+    EXPECT_CALL(*g_mock_sdk, create_context(gm::_))
+        .WillOnce(gm::Return(mock_sdk::STATUS_ERROR));
+    EXPECT_CALL(*g_mock_sdk, get_status_string(mock_sdk::STATUS_ERROR))
+        .WillOnce(gm::Return("create_context failed"));
+
+    context_id ctx{};
+    EXPECT_THROW(sut::create_context(&ctx), std::runtime_error);
+}
+
+TEST_F(backend_test, start_context_throws_on_sdk_error)
+{
+    const context_id ctx{ 3 };
+    EXPECT_CALL(*g_mock_sdk, start_context(ctx))
+        .WillOnce(gm::Return(mock_sdk::STATUS_ERROR));
+    EXPECT_CALL(*g_mock_sdk, get_status_string(mock_sdk::STATUS_ERROR))
+        .WillOnce(gm::Return("start_context failed"));
+
+    EXPECT_THROW(sut::start_context(ctx), std::runtime_error);
+}
+
+TEST_F(backend_test, stop_context_throws_on_sdk_error)
+{
+    const context_id ctx{ 3 };
+    EXPECT_CALL(*g_mock_sdk, stop_context(ctx))
+        .WillOnce(gm::Return(mock_sdk::STATUS_ERROR));
+    EXPECT_CALL(*g_mock_sdk, get_status_string(mock_sdk::STATUS_ERROR))
+        .WillOnce(gm::Return("stop_context failed"));
+
+    EXPECT_THROW(sut::stop_context(ctx), std::runtime_error);
+}
 
 TEST_F(backend_test, create_buffer_throws_on_sdk_error)
 {
