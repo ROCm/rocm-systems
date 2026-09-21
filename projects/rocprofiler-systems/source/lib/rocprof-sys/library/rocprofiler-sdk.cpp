@@ -832,47 +832,6 @@ cache_add_thread_info(std::uint64_t tid)
 }
 
 void
-cache_add_track(const char* track_name, std::uint64_t tid)
-{
-    trace_cache::get_metadata_registry().add_track({ track_name, tid, "{}" });
-}
-
-size_t
-get_mem_copy_dst_address(
-    [[maybe_unused]] const rocprofiler_buffer_tracing_memory_copy_record_t& record)
-{
-#if (ROCPROFILER_VERSION >= 700)
-    return record.dst_address.value;
-#else
-    return 0;
-#endif
-}
-
-size_t
-get_mem_copy_src_address(
-    [[maybe_unused]] const rocprofiler_buffer_tracing_memory_copy_record_t& record)
-{
-#if (ROCPROFILER_VERSION >= 700)
-    return record.src_address.value;
-#else
-    return 0;
-#endif
-}
-
-#if (ROCPROFILER_VERSION >= 600)
-size_t
-get_mem_alloc_address(
-    [[maybe_unused]] const rocprofiler_buffer_tracing_memory_allocation_record_t& record)
-{
-#    if (ROCPROFILER_VERSION >= 700)
-    return record.address.value;
-#    else
-    return static_cast<size_t>(record.address.handle);
-#    endif
-}
-#endif
-
-void
 cache_region(const rocprofiler_callback_tracing_record_t* record,
              const rocprofiler_timestamp_t                start_timestamp,
              const rocprofiler_timestamp_t end_timestamp, const std::string& call_stack,
@@ -898,57 +857,6 @@ cache_region(const rocprofiler_callback_tracing_record_t* record,
         get_parent_stack_id(record->correlation_id), start_timestamp, end_timestamp,
         call_stack, args_str, category });
 }
-
-void
-cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* record,
-                      std::uint64_t                                        stream_handle)
-{
-    auto queue_handle = record->dispatch_info.queue_id.handle;
-
-    trace_cache::get_metadata_registry().add_queue(queue_handle);
-    trace_cache::get_metadata_registry().add_stream(stream_handle);
-
-    trace_cache::get_buffer_storage().store(trace_cache::kernel_dispatch_sample{
-        record->start_timestamp, record->end_timestamp, record->thread_id,
-        record->dispatch_info.agent_id.handle, record->dispatch_info.kernel_id,
-        record->dispatch_info.dispatch_id, record->dispatch_info.queue_id.handle,
-        record->correlation_id.internal, get_parent_stack_id(record->correlation_id),
-        record->dispatch_info.private_segment_size,
-        record->dispatch_info.group_segment_size, record->dispatch_info.workgroup_size.x,
-        record->dispatch_info.workgroup_size.y, record->dispatch_info.workgroup_size.z,
-        record->dispatch_info.grid_size.x, record->dispatch_info.grid_size.y,
-        record->dispatch_info.grid_size.z, stream_handle });
-}
-
-void
-cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record,
-                  std::uint64_t                                    stream_handle)
-{
-    trace_cache::get_metadata_registry().add_stream(stream_handle);
-    trace_cache::get_buffer_storage().store(trace_cache::memory_copy_sample{
-        record->start_timestamp, record->end_timestamp, record->thread_id,
-        record->dst_agent_id.handle, record->src_agent_id.handle,
-        static_cast<std::int32_t>(record->kind),
-        static_cast<std::int32_t>(record->operation), record->bytes,
-        record->correlation_id.internal, get_parent_stack_id(record->correlation_id),
-        get_mem_copy_dst_address(*record), get_mem_copy_src_address(*record),
-        stream_handle });
-}
-
-#if (ROCPROFILER_VERSION >= 600)
-void
-cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* record,
-                        std::uint64_t stream_handle)
-{
-    trace_cache::get_metadata_registry().add_stream(stream_handle);
-    trace_cache::get_buffer_storage().store(trace_cache::memory_allocate_sample{
-        record->start_timestamp, record->end_timestamp, record->thread_id,
-        record->agent_id.handle, static_cast<std::int32_t>(record->kind),
-        static_cast<std::int32_t>(record->operation), record->allocation_size,
-        record->correlation_id.internal, get_parent_stack_id(record->correlation_id),
-        get_mem_alloc_address(*record), stream_handle });
-}
-#endif
 
 template <typename CategoryT>
 void
