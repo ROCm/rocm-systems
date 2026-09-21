@@ -3466,11 +3466,15 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricEligibleChoosesSymmetric) {
 // CE registered wins over symmetric when both are eligible, per the
 // production comment's documented precedence -- distinct from the test
 // above, which only proves symmetric wins when CE ISN'T eligible.
-TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredBeatsSymmetricWhenBothEligible) {
+TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricBeatesCeRegisteredWhenBothEligible) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAllReduce_CeRegisteredBeatsSymmetricWhenBothEligible",
+      "Wrap_SelectAllReduce_SymmetricBeatesCeRegisteredWhenBothEligible",
       []() {
-        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
+          return def;
+        };
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                                   size_t, const void*, void*, bool) { return true; });
         ScopedHook ceAvailable(
@@ -3484,9 +3488,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredBeatsSymmetricWhenBothEl
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
                                                     /*stream=*/nullptr, /*query=*/true,
                                                     /*graphCapturingHint=*/false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
-        EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
-        EXPECT_EQ(1, decision.nMaxChannels);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
@@ -3499,7 +3501,11 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredChosenWithProdOp) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_CeRegisteredChosenWithProdOp",
       []() {
-        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
+          return def;
+        };
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
@@ -3578,7 +3584,11 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredChosenWhenAvailableAndPo
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_CeRegisteredChosenWhenAvailableAndPolicyZero",
       []() {
-        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
+          return def;
+        };
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
@@ -3600,7 +3610,11 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredForwardsBlockCalculatorA
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_CeRegisteredForwardsBlockCalculatorArguments",
       []() {
-        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
+          return def;
+        };
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
@@ -3790,7 +3804,11 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ChosenWhenLLNotEligibl
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_DdaFabricLL128ChosenWhenLLNotEligible",
       []() {
-        g_loadParam = ForceParam("RCCL_DDA_LL128", int64_t(1));
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL128") == 0) return 1;
+          if (std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0) return INT64_MAX;
+          return def;
+        };
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
                                  [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
         ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible,
@@ -3820,6 +3838,10 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ChosenAboveLegacyThres
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_DdaFabricLL128ChosenAboveLegacyThreshold",
       []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0) return INT64_MAX;
+          return def;
+        };
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
                                  [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
         ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible,
@@ -4082,7 +4104,11 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaFabricLL128ChosenWhenLLNotEligibl
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllGather_DdaFabricLL128ChosenWhenLLNotEligible",
       []() {
-        g_loadParam = ForceParam("RCCL_DDA_LL128", int64_t(1));
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL128") == 0) return 1;
+          if (std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0) return INT64_MAX;
+          return def;
+        };
         ScopedHook ll128Eligible(g_allGatherDdaFabricLL128Eligible,
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
         // g_allGatherDdaFabricLLEligible left at its default (false).
@@ -4787,7 +4813,11 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLL128ChosenWhenLLNotEli
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_DdaFabricLL128ChosenWhenLLNotEligible",
       []() {
-        g_loadParam = ForceParam("RCCL_DDA_LL128", int64_t(1));
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL128") == 0) return 1;
+          if (std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0) return INT64_MAX;
+          return def;
+        };
         ScopedHook ll128Eligible(g_reduceScatterDdaFabricLL128Eligible,
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                    return true;

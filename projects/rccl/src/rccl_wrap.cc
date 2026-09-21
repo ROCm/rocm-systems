@@ -1177,7 +1177,10 @@ bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t dataty
   const size_t twoShotMax = rcclCeAr2ShotMax(comm);
   if (twoShotMax == 0) return false;
   size_t msgBytes = count * ncclTypeSize(datatype);
-  if (msgBytes > twoShotMax) return false;
+  if (msgBytes > twoShotMax) {
+    WARN("Skipping CE AllReduce: msgBytes (%zu) > twoShotMax (%zu)", msgBytes, twoShotMax);
+    return false;
+  }
 
   if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO && !force) {
     WARN("Skipping CE AllReduce: CTA policy is not ZERO");
