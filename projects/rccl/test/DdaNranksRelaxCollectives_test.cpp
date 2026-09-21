@@ -8,11 +8,11 @@
 // AllGather / ReduceScatter / AllToAll DDA IPC paths (the non-AllReduce
 // single-node DDA collectives). Mirrors the AllReduce DdaNranksRelax tests:
 // with relax off only the full kDdaNranks clique is eligible; with relax on
-// any 2..kDdaNranks participant count is eligible. No CI config sets
-// RCCL_DDA_NRANKS_RELAX, so the low-rank runtime kernel these collectives
-// dispatch to (NRANKS == 0) does not execute anywhere in CI;
+// any 2..kDdaNranks participant count is eligible. The low-rank runtime kernel
+// these collectives dispatch to (NRANKS == 0) is covered in two places:
 // DdaCollectivesNranksRelaxIsolatedTest.RelaxedPathAdmitsTwoThroughEightRanks
-// below is what actually covers the dispatch, in-process.
+// below covers the dispatch in-process, and DdaNranksRelaxIsolatedTest's 4-rank
+// fork test runs each kernel on a live communicator with a checked result.
 
 #include "common/DdaAlltoAllTestHelpers.hpp"
 #include "common/DdaIpcTestHelpers.hpp"
