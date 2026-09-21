@@ -22,15 +22,10 @@
 
 namespace {
 
-using dda::common::kDdaLLAgSlotStridePkts;
-using dda::common::kDdaLLMaxBytes;
+using dda::common::ddaBankSize;
+using dda::common::ddaLLAgSlotPkts;
 using dda::common::LLPacket16;
 using nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer;
-
-// LL scratch: 2 banks * nRanks slots * kDdaLLAgSlotStridePkts * 16B.
-static inline size_t ddaLLAgScratchSize(int nRanks) {
-  return (size_t)2 * (size_t)nRanks * kDdaLLAgSlotStridePkts * sizeof(LLPacket16);
-}
 
 // Adaptive block-per-peer fan-out. One block per peer for small messages
 // larger ones split a peer's packet range across blocksPerPeer blocks
@@ -77,6 +72,7 @@ static ncclResult_t ncclAllGatherDdaFabricLLTyped(
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
+  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
 
   INFO(NCCL_COLL, "DDA fabric AllGather LL: nRanks=%d perRankBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%u)",
        nRanks, perRankBytes, grid.x, grid.y, block.x, blocksPerPeer);
@@ -86,17 +82,17 @@ static ncclResult_t ncclAllGatherDdaFabricLLTyped(
   case 4:
     dda::common::ddaAllGatherFabricLL<T, 4><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
                                                                         static_cast<const T*>(sendbuff), perRankBytes,
-                                                                        comm->rank, nRanks, epochDev, epochLen);
+                                                                        comm->rank, nRanks, epochDev, epochLen, bankSize);
     break;
   case 8:
     dda::common::ddaAllGatherFabricLL<T, 8><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
                                                                         static_cast<const T*>(sendbuff), perRankBytes,
-                                                                        comm->rank, nRanks, epochDev, epochLen);
+                                                                        comm->rank, nRanks, epochDev, epochLen, bankSize);
     break;
   default:
     dda::common::ddaAllGatherFabricLL<T, 0><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
                                                                         static_cast<const T*>(sendbuff), perRankBytes,
-                                                                        comm->rank, nRanks, epochDev, epochLen);
+                                                                        comm->rank, nRanks, epochDev, epochLen, bankSize);
     break;
   }
 
@@ -138,11 +134,10 @@ bool ncclAllGatherDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
   if (perRankBytes * (size_t)comm->nRanks > (size_t)rcclParamDdaLLThreshold()) {
     return false;
   }
-  // expand from 8B to 16B
-  if (perRankBytes * 2 > kDdaLLMaxBytes) {
-    return false;
-  }
-  if (ddaLLAgScratchSize(comm->nRanks) > comm->ddaScratchBytes) {
+  // One packet carries 8B of payload, so this rank's contribution has to fit the
+  // slot the bank gives each rank. A bank too small for one packet per rank takes
+  // the tier out entirely.
+  if ((perRankBytes >> 3) > ddaLLAgSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
     return false;
   }
 

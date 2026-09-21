@@ -12,17 +12,24 @@
 /// independently. Completion signals fire when all WGs of a dispatch finish,
 /// in per-queue submission order.
 
+#include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/xcd_shard.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <optional>
+#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+class ComputeUnitCore;
+using QueueCuSelection = std::optional<std::vector<ComputeUnitCore *>>;
 
 struct WorkgroupCoord {
   uint32_t x = 0;
@@ -34,15 +41,6 @@ struct WorkitemCoord {
   uint32_t x = 0;
   uint32_t y = 0;
   uint32_t z = 0;
-};
-
-struct ClusterDispatchShape {
-  uint32_t count_x = 0;
-  uint32_t count_y = 0;
-  uint32_t count_z = 0;
-  uint32_t size_x = 1;
-  uint32_t size_y = 1;
-  uint32_t size_z = 1;
 };
 
 /// @brief What a queue entry carries, which decides how it retires.
@@ -102,6 +100,12 @@ struct DispatchEntry {
   uint32_t queue_id = 0;
   uint32_t queue_packet_id = 0;
   uint32_t process_id = 0;
+
+  /// Snapshot of the queue's physical CU selection; nullopt means unrestricted.
+  QueueCuSelection enabled_cus = std::nullopt;
+  bool allows_cu(const ComputeUnitCore *cu) const {
+    return !enabled_cus || std::ranges::find(*enabled_cus, cu) != enabled_cus->end();
+  }
 
   /// AQL ring packet id (queue read index at which this dispatch's packet was
   /// fetched). Used only for rocm-dbgapi wave/dispatch correlation.

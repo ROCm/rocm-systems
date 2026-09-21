@@ -31,10 +31,6 @@ Panel Config:
           value: ROUND(SUM(SQ_INSTS_GDS) / SUM($denom), 0)
         BR:
           value: ROUND(SUM(SQ_INSTS_BRANCH) / SUM($denom), 0)
-        Active CUs (deprecated):
-          value: $numActiveCUs
-        Num CUs:
-          value: $cu_per_gpu
         VGPR:
           value: ROUND(AVG(Arch_VGPR), 0)
         SGPR:
@@ -49,12 +45,30 @@ Panel Config:
         Workgroups:
           value: ROUND(AVG(SPI_CS0_NUM_THREADGROUPS + SPI_CS1_NUM_THREADGROUPS + SPI_CS2_NUM_THREADGROUPS
             + SPI_CS3_NUM_THREADGROUPS), 0)
+        Flat Read:
+          value: ROUND(SUM(TA_FLAT_READ_WAVEFRONTS_sum) / SUM($denom), 0)
+        Flat Write:
+          value: ROUND(SUM(TA_FLAT_WRITE_WAVEFRONTS_sum) / SUM($denom), 0)
+        Flat Atomic:
+          value: ROUND(SUM(TA_FLAT_ATOMIC_WAVEFRONTS_sum) / SUM($denom), 0)
+        Buffer Read:
+          value: ROUND(SUM(TA_BUFFER_READ_WAVEFRONTS_sum) / SUM($denom), 0)
+        Buffer Write:
+          value: ROUND(SUM(TA_BUFFER_WRITE_WAVEFRONTS_sum) / SUM($denom), 0)
+        Buffer Atomic:
+          value: ROUND(SUM(TA_BUFFER_ATOMIC_WAVEFRONTS_sum) / SUM($denom), 0)
         LDS Req:
           value: ROUND(SUM(SQ_INSTS_LDS) / SUM($denom), 0)
         LDS Util:
           value: ROUND(100 * SUM(SQ_LDS_IDX_ACTIVE) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu), 0)
         LDS Latency:
           value: ROUND(SUM(SQ_INST_LEVEL_LDS_ACCUM) / SUM(SQ_INSTS_LDS),0)
+        LDS Read:
+          value: ROUND(SUM(SQ_INSTS_LDS_LOAD) / SUM($denom), 0)
+        LDS Write:
+          value: ROUND(SUM(SQ_INSTS_LDS_STORE) / SUM($denom), 0)
+        LDS Atomic:
+          value: ROUND(SUM(SQ_INSTS_LDS_ATOMIC) / SUM($denom), 0)
         VL1 Rd:
           value: ROUND(SUM(TCP_TOTAL_READ_sum) / SUM($denom), 0)
         VL1 Wr:
@@ -75,6 +89,15 @@ Panel Config:
           value: ROUND(SUM(TCP_TCC_WRITE_REQ_sum) / SUM($denom), 0)
         VL1_L2 Atomic:
           value: ROUND(SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM($denom), 0)
+        VL1_L2 Read BW:
+          value: 128 * SUM(TCP_TCC_READ_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+        VL1_L2 Write BW:
+          value: 64 * SUM(TCP_TCC_WRITE_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+        VL1_L2 Atomic BW:
+          value: 64 * SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         sL1D Rd:
           value: ROUND(SUM(SQC_DCACHE_REQ) / SUM($denom), 0)
         sL1D Hit:
@@ -87,6 +110,9 @@ Panel Config:
           value: ROUND(SUM(SQC_TC_DATA_WRITE_REQ) / SUM($denom), 0)
         sL1D_L2 Atomic:
           value: ROUND(SUM(SQC_TC_DATA_ATOMIC_REQ) / SUM($denom), 0)
+        sL1D_L2 Read BW:
+          value: 64 * SUM(SQC_TC_DATA_READ_REQ) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         IL1 Fetch:
           value: ROUND(SUM(SQC_ICACHE_REQ) / SUM($denom), 0)
         IL1 Hit:
@@ -95,6 +121,9 @@ Panel Config:
           value: ROUND(100 * SUM(SQC_ICACHE_INFLIGHT_LEVEL_ACCUM) / SUM(SQC_ICACHE_REQ), 0)
         IL1_L2 Rd:
           value: ROUND(SUM(SQC_TC_INST_REQ) / SUM($denom), 0)
+        IL1_L2 Read BW:
+          value: 64 * SUM(SQC_TC_INST_REQ) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         L2 Rd:
           value: ROUND(SUM(TCC_READ_sum) / SUM($denom), 0)
         L2 Wr:
@@ -113,6 +142,12 @@ Panel Config:
           value: ROUND(SUM(TCC_EA0_WRREQ_sum) / SUM($denom), 0)
         Fabric_L2 Atomic:
           value: ROUND(SUM(TCC_EA0_ATOMIC_sum) / SUM($denom), 0)
+        L2-Fabric Read BW:
+          value: SUM(TCC_EA0_RDREQ_32B_sum * 32 + TCC_EA0_RDREQ_64B_sum * 64 + TCC_EA0_RDREQ_128B_sum * 128) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+        L2-Fabric Write and Atomic BW:
+          value: SUM(TCC_EA0_WRREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
         Fabric Rd Lat:
           value: ROUND(SUM(TCC_EA0_RDREQ_LEVEL_sum) / SUM(TCC_EA0_RDREQ_sum), 0)
         Fabric Wr Lat:
@@ -123,6 +158,33 @@ Panel Config:
           value: ROUND(SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM($denom), 0)
         HBM Wr:
           value: ROUND(SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM($denom), 0)
+        HBM Read BW:
+          value: 32 * SUM(TCC_EA0_RDREQ_DRAM_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+        HBM Write BW:
+          value: 32 * SUM(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+        HBM Atomic BW:
+          value: 32 * SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+        xGMI Read BW:
+          value: 32 * SUM(TCC_EA0_RDREQ_GMI_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+        xGMI Write BW:
+          value: 32 * SUM(TCC_EA0_WRREQ_WRITE_GMI_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+        xGMI Atomic BW:
+          value: 32 * SUM(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+        PCIe Read BW:
+          value: 32 * SUM(TCC_EA0_RDREQ_IO_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+        PCIe Write BW:
+          value: 32 * SUM(TCC_EA0_WRREQ_WRITE_IO_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+        PCIe Atomic BW:
+          value: 32 * SUM(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
       comparable: false
       cli_style: mem_chart
       tui_style: mem_chart
@@ -143,9 +205,6 @@ Panel Config:
     GWS: Total number of GDS (global data sync) instructions issued per normalization
       unit.
     BR: Total number of BRANCH instructions issued per normalization unit.
-    Active CUs (deprecated): Total number of active compute units (CUs) on the accelerator during
-      the kernel execution. (Deprecated - See CU Utilization instead)
-    Num CUs: Total number of compute units (CUs) on the accelerator.
     VGPR: >-
       The number of architected vector general-purpose registers allocated
       for the kernel, see VALU. Note: this may not exactly match the number of VGPRs
@@ -164,6 +223,12 @@ Panel Config:
     Wavefronts: The total number of wavefronts, summed over all workgroups, forming
       this kernel launch.
     Workgroups: The total number of workgroups forming this kernel launch.
+    Flat Read: The total number of flat read wavefronts per normalization unit.
+    Flat Write: The total number of flat write wavefronts per normalization unit.
+    Flat Atomic: The total number of flat atomic wavefronts per normalization unit.
+    Buffer Read: The total number of buffer read wavefronts per normalization unit.
+    Buffer Write: The total number of buffer write wavefronts per normalization unit.
+    Buffer Atomic: The total number of buffer atomic wavefronts per normalization unit.
     LDS Req: The total number of LDS instructions (including, but not limited to,
       read/write/atomics and HIP's __shfl instructions) executed per normalization
       unit.
@@ -173,6 +238,9 @@ Panel Config:
       LDS was active over the total CU cycles.
     LDS Latency: The average number of round-trip cycles (i.e., from issue to data-return
       / acknowledgment) required for an LDS instruction to complete.
+    LDS Read: The total number of LDS load instructions per normalization unit.
+    LDS Write: The total number of LDS store instructions per normalization unit.
+    LDS Atomic: The total number of LDS atomic instructions per normalization unit.
     VL1 Rd: The total number of incoming read requests from the address processing
       unit after coalescing per normalization unit
     VL1 Wr: The total number of incoming write requests from the address processing
@@ -198,6 +266,12 @@ Panel Config:
     VL1_L2 Atomic: The number of atomic requests that are sent through the vL1D to
       the L2 cache, per normalization unit. This includes requests for atomics with,
       and without return.
+    VL1_L2 Read BW: Bandwidth of read requests from the vL1D cache to the L2
+      cache per unit time.
+    VL1_L2 Write BW: Bandwidth of write requests from the vL1D cache to the L2
+      cache per unit time.
+    VL1_L2 Atomic BW: Bandwidth of atomic requests from the vL1D cache to the L2
+      cache per unit time.
     sL1D Rd: The total number of requests, of any size or type, made to the sL1D per
       normalization unit.
     sL1D Hit: The total number of sL1D requests that hit on a previously loaded cache
@@ -208,12 +282,16 @@ Panel Config:
       unit. Typically unused on current CDNA accelerators.
     sL1D_L2 Atomic: The total number of atomic requests from sL1D to the L2, per normalization
       unit. Typically unused on current CDNA accelerators.
+    sL1D_L2 Read BW: Bandwidth of read requests from the sL1D cache to the L2
+      cache per unit time.
     IL1 Fetch: The total number of requests made to the L1I per normalization-unit.
     IL1 Hit: The percent of L1I requests that hit on a previously loaded line the
       cache. Calculated as the ratio of the number of L1I requests that hit over the
       number of all L1I requests.
     IL1 Lat: The average number of cycles spent to fetch instructions to a CU.
     IL1_L2 Rd: The total number of requests across the L1I - L2 interface per normalization-unit.
+    IL1_L2 Read BW: Bandwidth of read requests from the instruction L1 cache to
+      the L2 cache per unit time.
     L2 Rd: The total number of read requests to the L2 from all clients.
     L2 Wr: The total number of write requests to the L2 from all clients.
     L2 Atomic: The total number of atomic requests (with and without return) to the
@@ -233,6 +311,10 @@ Panel Config:
     Fabric_L2 Atomic: Number of L2 cache - Infinity Fabric write requests (either
       32-byte or 64-byte) that are actually atomic requests summed over TCC instances
       per normalization unit.
+    L2-Fabric Read BW: The number of bytes read by the L2 over the Infinity Fabric
+      interface per unit time.
+    L2-Fabric Write and Atomic BW: The number of bytes sent by the L2 over the Infinity
+      Fabric interface by write and atomic operations per unit time.
     Fabric Rd Lat: The time-averaged number of cycles read requests spent in Infinity
       Fabric before data was returned to the L2.
     Fabric Wr Lat: The time-averaged number of cycles write requests spent in Infinity
@@ -246,3 +328,21 @@ Panel Config:
       The total number of L2 requests to Infinity Fabric to write or atomically
       update 32B or 64B of data in the accelerator's local HBM, per normalization
       unit.
+    HBM Read BW: Total number of bytes due to L2 read requests routed to Infinity
+      Fabric targeting the accelerator's local HBM (DRAM), divided by total duration.
+    HBM Write BW: Total number of bytes due to L2 write requests routed to Infinity
+      Fabric targeting the accelerator's local HBM (DRAM), divided by total duration.
+    HBM Atomic BW: Total number of bytes due to L2 atomic requests routed to Infinity
+      Fabric targeting the accelerator's local HBM (DRAM), divided by total duration.
+    xGMI Read BW: Total number of bytes due to L2 read requests routed to Infinity
+      Fabric (xGMI peer GPU traffic), divided by total duration.
+    xGMI Write BW: Total number of bytes due to L2 write requests routed to Infinity
+      Fabric (xGMI peer GPU traffic), divided by total duration.
+    xGMI Atomic BW: Total number of bytes due to L2 atomic requests routed to Infinity
+      Fabric (xGMI peer GPU traffic), divided by total duration.
+    PCIe Read BW: Total number of bytes due to L2 read requests routed to PCIe
+      (CPU or non-xGMI connected GPU traffic), divided by total duration.
+    PCIe Write BW: Total number of bytes due to L2 write requests routed to PCIe
+      (CPU or non-xGMI connected GPU traffic), divided by total duration.
+    PCIe Atomic BW: Total number of bytes due to L2 atomic requests routed to PCIe
+      (CPU or non-xGMI connected GPU traffic), divided by total duration.
