@@ -602,6 +602,94 @@ TEST(TrampolineBuilderPlan, AnchorExecArgumentsCostOneWordEach) {
   EXPECT_EQ(mask.before_word_count, immediates.before_word_count - 2);
 }
 
+// A log-buffer argument reads the entry-storage pair, so like an EXEC-sourced
+// one its v_mov_b32 carries no literal and costs a single word.
+TEST(TrampolineBuilderPlan, LogBufferArgumentsCostOneWordEach) {
+  TrampolinePlan immediates;
+  immediates.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  immediates.probe_args = {probe_arg_imm(1), probe_arg_imm(2)};
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(immediates, arg_abi(2), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+
+  TrampolinePlan pointer;
+  pointer.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  pointer.entry_storage_base = 10;
+  pointer.probe_args = {{ProbeArgSource::LogBufferPtrLo, 0}, {ProbeArgSource::LogBufferPtrHi, 0}};
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(pointer, arg_abi(2), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  EXPECT_EQ(pointer.before_word_count, immediates.before_word_count - 2);
+}
+
+// The pair carries a value produced once at kernel entry and read at arbitrary
+// later sites, so nothing in the envelope may land on it. Liveness cannot say
+// so: the prologue's write lives in the cave, which leaves the pair reading dead
+// at every anchor. With only s4 live the target pair would otherwise be s[0:1],
+// which is what makes this observable rather than accidental.
+TEST(TrampolineBuilderPlan, EnvelopeTempsAvoidTheEntryStoragePair) {
+  TrampolinePlan plan;
+  plan.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  plan.entry_storage_base = 0;
+  plan.preserve_exec = true;
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(0), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+
+  const RegisterRef storage{RegClass::SGPR, 0, 2};
+  EXPECT_NE(plan.target_pair_base, 0u);
+  EXPECT_FALSE(plan.builder_clobbers.contains(storage));
+  EXPECT_NE(plan.scc_temp, 0u);
+  EXPECT_NE(plan.scc_temp, 1u);
+  for (const SpecialStateSlot &s : plan.special_state_saves) {
+    EXPECT_NE(s.temp_base, 0u);
+    EXPECT_NE(s.temp_base, 1u);
+  }
+}
+
+// Keeping the envelope off the pair is not enough: the probe body runs with the
+// pointer still in it. A body that writes the pair destroys the value for every
+// site after this one, and nothing brackets it, so the site is rejected.
+TEST(TrampolineBuilderPlan, ProbeBodyClobberingEntryStorageFails) {
+  TrampolinePlan plan;
+  plan.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  plan.entry_storage_base = 10;
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, arg_abi(0), make_sgpr_set({4}),
+                                                  make_sgpr_set({11}), &err));
+  EXPECT_NE(err.find("entry-storage pair"), std::string::npos) << err;
+  EXPECT_FALSE(plan.is_probe_call);
+}
+
+// Both lanes must sit inside the allocation the temps are drawn from; a pair at
+// or past the bound is one the exclusion cannot keep the envelope away from.
+TEST(TrampolineBuilderPlan, EntryStoragePairPastTheKernelAllocationFails) {
+  TrampolinePlan plan;
+  plan.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  plan.kernel_sgpr_count = 16;
+  plan.entry_storage_base = 15;
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, arg_abi(0), make_sgpr_set({4}),
+                                                  /*probe_body_clobbers=*/{}, &err));
+  EXPECT_NE(err.find("entry-storage pair"), std::string::npos) << err;
+  EXPECT_FALSE(plan.is_probe_call);
+}
+
+// A kernel with no entry prologue has no pair to read, so the argument names a
+// value the framework cannot produce at this site.
+TEST(TrampolineBuilderPlan, LogBufferArgumentWithoutEntryStorageFails) {
+  TrampolinePlan plan;
+  plan.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  plan.probe_args = {{ProbeArgSource::LogBufferPtrLo, 0}};
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}),
+                                                  /*probe_body_clobbers=*/{}, &err));
+  EXPECT_NE(err.find("no entry-storage pair"), std::string::npos) << err;
+  EXPECT_FALSE(plan.is_probe_call);
+}
+
 // A full-exec site opens the full-mask window even with nothing to spill and no
 // arguments, since the probe itself runs inside it. Two toggles rather than
 // three: the widen, and the re-widen guarding the (here empty) epilogue against
@@ -907,6 +995,44 @@ TEST(TrampolineBuilderEmit, AnchorExecArgumentsReadTheSavedPair) {
 
   // Nothing reads the live EXEC register into a VGPR.
   EXPECT_EQ(std::count(w.begin(), w.end(), build_v_mov_b32_src(0, exec_lo, plan.arch)), 0);
+}
+
+// Both halves of the pointer come straight out of the entry-storage pair the
+// prologue loaded, in declaration order into the ABI's argument VGPRs.
+TEST(TrampolineBuilderEmit, LogBufferArgumentsReadTheEntryStoragePair) {
+  TrampolinePlan plan = make_probe_plan();
+  plan.entry_storage_base = 20;
+  plan.probe_args = {{ProbeArgSource::LogBufferPtrLo, 0}, {ProbeArgSource::LogBufferPtrHi, 0}};
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(2), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &err);
+  ASSERT_TRUE(bytes.has_value()) << err;
+
+  const std::vector<uint32_t> &w = bytes->trampoline_words;
+  const uint32_t lo = build_v_mov_b32_src(0, 20, plan.arch);
+  const uint32_t hi = build_v_mov_b32_src(1, 21, plan.arch);
+  const auto lo_at = std::find(w.begin(), w.end(), lo);
+  ASSERT_NE(lo_at, w.end());
+  ASSERT_NE(lo_at + 1, w.end());
+  EXPECT_EQ(lo_at[1], hi);
+}
+
+// Emission screens the combination too rather than inheriting planning's
+// rejection: the two entry points are separately callable.
+TEST(TrampolineBuilderEmit, LogBufferArgumentWithoutEntryStorageFails) {
+  TrampolinePlan plan = make_probe_plan();
+  plan.entry_storage_base = 20;
+  plan.probe_args = {{ProbeArgSource::LogBufferPtrLo, 0}};
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+
+  plan.entry_storage_base.reset();
+  EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan, &err).has_value());
+  EXPECT_NE(err.find("no entry-storage pair"), std::string::npos) << err;
 }
 
 // Under force_full_exec the call is reached with EXEC still -1: no anchor-mask
