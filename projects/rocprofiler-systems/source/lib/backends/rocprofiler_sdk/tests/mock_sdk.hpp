@@ -204,6 +204,11 @@ struct memory_alloc_record
 {
     correlation_id_t correlation_id{};
 };
+struct scratch_memory_record
+{
+    async_correlation_id_t correlation_id{};
+    std::uint64_t          allocation_size{};
+};
 struct stream_id
 {
     std::uint64_t handle{};
@@ -449,6 +454,7 @@ struct mock_sdk
     using async_correlation_id_t               = testing::async_correlation_id_t;
     using correlation_id_t                     = testing::correlation_id_t;
     using memory_alloc_record                  = testing::memory_alloc_record;
+    using scratch_memory_record                = testing::scratch_memory_record;
     using stream_id                            = testing::stream_id;
 
     // compile_time_version >= 10000 selects the v1 branch in query_counter_details.
