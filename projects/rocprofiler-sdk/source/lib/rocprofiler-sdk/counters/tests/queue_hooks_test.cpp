@@ -88,13 +88,6 @@ get_client_ctx()
     return ctx;
 }
 
-// Reset the shared handle so a later test in this binary starts from a fresh context.
-void
-set_client_ctx(rocprofiler_context_id_t& ctx)
-{
-    ctx = rocprofiler_context_id_t{0};
-}
-
 void
 test_init()
 {
@@ -193,7 +186,7 @@ TEST(counters_queue_hooks, exit_hook_skips_when_inst_pkt_has_no_counter_client_i
     auto packet = rocprofiler::hsa::packet_data_t{};
     auto fq_pkt = rocprofiler::hsa::rocprofiler_packet{};
 
-    // Must return without touching registered counter contexts (no init required).
+    // Must return without touching registered counter contexts.
     rocprofiler::counters::kernel_dispatch_phase_exit_hook(
         nullptr, fq_pkt, sess, packet, inst_pkt, rocprofiler::kernel_dispatch::profiling_time{});
     SUCCEED();
@@ -222,7 +215,7 @@ TEST(counters_queue_hooks, is_any_active_true_while_context_started)
     registration::set_init_status(1);
     registration::finalize();
     context::pop_client(1);
-    set_client_ctx(get_client_ctx());
+    get_client_ctx() = rocprofiler_context_id_t{0};
 }
 
 // Regression for callback-registry removal, per the review on #8891: dispatches enqueued while the

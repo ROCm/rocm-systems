@@ -40,6 +40,15 @@ RJ_DIAGNOSTIC_POP
 #ifdef HAS_HOST_AMDGPU
 using namespace rocjitsu;
 
+// ROCR serializes its async-event pool with an uninstrumented HybridMutex.
+// TSan cannot observe that lock and can report the pool's allocator reuse or
+// process-lifetime worker as a race or thread leak. Ignore only reports rooted
+// in the external runtime while keeping rocjitsu and this test instrumented.
+extern "C" RJ_API_EXPORT const char *__tsan_default_suppressions() {
+  return "called_from_lib:libhsa-runtime64.so\n"
+         "thread:rocr::os::os_thread\n";
+}
+
 namespace {
 
 using test::kernel_path;

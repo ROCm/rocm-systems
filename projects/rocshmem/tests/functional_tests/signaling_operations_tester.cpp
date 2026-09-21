@@ -119,7 +119,7 @@ SignalingOperationsTester::SignalingOperationsTester(TesterArguments args)
   s_buf = (char *)alloc_test_buffer(max_msg_size * args.wg_size, args.local_buf_type);
   r_buf = (char *)alloc_test_buffer(max_msg_size * args.wg_size);
   sig_addr = (uint64_t *)alloc_test_buffer(sizeof(uint64_t));
-  CHECK_HIP(hipMallocManaged(&fetched_value, sizeof(uint64_t), hipMemAttachHost));
+  CHECK_HIP(hipHostMalloc(&fetched_value, sizeof(uint64_t)));
 }
 
 SignalingOperationsTester::SignalingOperationsTester(TesterArguments args,
@@ -132,7 +132,7 @@ SignalingOperationsTester::~SignalingOperationsTester() {
   free_test_buffer(s_buf, args.local_buf_type);
   free_test_buffer(r_buf);
   free_test_buffer(sig_addr);
-  CHECK_HIP(hipFree(fetched_value));
+  CHECK_HIP(hipFreeHost(fetched_value));
 }
 
 void SignalingOperationsTester::resetBuffers([[maybe_unused]] size_t size) {

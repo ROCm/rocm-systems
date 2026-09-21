@@ -18,11 +18,67 @@
 #include <atomic>
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <string>
+#include <sys/types.h>
 #include <unordered_map>
 #include <vector>
 
 namespace rocjitsu {
+
+/// @brief What Yama's ptrace_scope implies for the daemon's cross-process reads.
+/// @details Only one of these states makes the grant both necessary and
+/// sufficient, and the others are not interchangeable: two of them mean the
+/// access already works, and two mean naming a ptracer cannot make it work. The
+/// distinction decides whether a failed grant is worth reporting, which is the
+/// difference between a diagnosable failure and an SDMA copy that never retires.
+enum class PtraceScopePolicy {
+  Absent,     ///< Yama is not built in; process_vm_* is already permitted.
+  Disabled,   ///< scope 0: unrestricted, so nothing needs restoring.
+  Relational, ///< scope 1: descendants only, so the grant is required and works.
+  AdminOnly,  ///< scope 2: CAP_SYS_PTRACE only; naming a ptracer changes nothing.
+  NoAttach,   ///< scope 3: attaching is off entirely and cannot be re-enabled.
+  Unknown,    ///< Present but unparsable; treated as if a grant were needed.
+};
+
+/// @brief Classify the contents of /proc/sys/kernel/yama/ptrace_scope.
+/// @param[in] contents File contents, or nullopt when the file does not exist.
+/// @returns The policy the value denotes.
+[[nodiscard]] PtraceScopePolicy
+ptrace_scope_policy_from_text(const std::optional<std::string> &contents);
+
+/// @brief Whether a socket peer may be named a permitted ptracer of this process.
+/// @details Separated from the syscalls so the policy is testable on its own.
+/// This is the whole of the trust decision; everything around it is mechanism.
+enum class PtracerGrantVerdict {
+  Grant,               ///< The peer is the daemon this client's launcher started.
+  GrantUnverifiedPeer, ///< No launcher named one, so the socket's owner is trusted.
+  RefusedNoPeer,       ///< SO_PEERCRED gave nothing usable.
+  RefusedForeignUser,  ///< The peer belongs to another user.
+  RefusedPeerMismatch, ///< Someone other than that daemon is on this socket.
+};
+
+/// @brief Whether @p verdict authorizes the peer, however it was reached.
+[[nodiscard]] constexpr bool grants(PtracerGrantVerdict verdict) {
+  return verdict == PtracerGrantVerdict::Grant ||
+         verdict == PtracerGrantVerdict::GrantUnverifiedPeer;
+}
+
+/// @brief Decide whether @p peer_pid may reach into this address space.
+/// @param[in] launched_daemon_pid PID the launcher forked, or nullopt if none.
+/// @param[in] peer_pid PID the kernel reports for the socket peer.
+/// @param[in] peer_uid UID the kernel reports for the socket peer.
+/// @param[in] self_uid Effective UID of this process.
+/// @returns Why the grant is or is not permitted.
+/// @details Where a launcher named a daemon, a peer that is not that process is
+/// refused -- which is the case a well-known socket makes reachable, since any
+/// process of this user can be the one listening on it. Where no launcher named
+/// one, there is nothing to check against and the peer is trusted; that grant is
+/// distinguished here rather than merged, because it is the weaker of the two
+/// and its callers report it differently.
+[[nodiscard]] PtracerGrantVerdict ptracer_grant_verdict(std::optional<pid_t> launched_daemon_pid,
+                                                        pid_t peer_pid, uid_t peer_uid,
+                                                        uid_t self_uid);
 
 /// @brief Client-side driver that forwards ioctls to the rocjitsu daemon.
 ///
@@ -44,6 +100,16 @@ public:
   /// @brief Get GPU metadata received from the daemon handshake.
   [[nodiscard]] const Sysfs::GpuInfo *gpu_info() const {
     return has_gpu_info_ ? &gpu_info_ : nullptr;
+  }
+
+  /// @brief What the last open() decided about authorizing its peer.
+  /// @details Reported because the decision is otherwise invisible: a refusal
+  /// leaves no trace in this object, and the grant itself is process-wide state
+  /// no interface can read back -- the kernel offers no PR_GET_PTRACER. Without
+  /// this, that a peer was refused, and that a failed handshake never reached
+  /// the question at all, are both untestable. nullopt until open() runs.
+  [[nodiscard]] std::optional<PtracerGrantVerdict> ptracer_verdict() const {
+    return ptracer_verdict_;
   }
 
   /// @brief Outcome of find_memfd_for_addr(): distinguishes "no matching range"
@@ -140,12 +206,13 @@ private:
   /// @note Must be called with rpc_mutex_ held.
   int poison_stream();
 
-  int sock_ = -1;                    ///< Unix socket connection to the daemon.
-  uint32_t next_id_ = 0;             ///< Monotonic request ID counter (for debugging).
-  std::string topology_path_;        ///< Daemon's sysfs topology directory path.
-  std::string drm_path_;             ///< Daemon's DRM sysfs directory path.
-  Sysfs::GpuInfo gpu_info_{};        ///< GPU metadata received from daemon handshake.
-  bool has_gpu_info_ = false;        ///< True when gpu_info_ is valid.
+  int sock_ = -1;             ///< Unix socket connection to the daemon.
+  uint32_t next_id_ = 0;      ///< Monotonic request ID counter (for debugging).
+  std::string topology_path_; ///< Daemon's sysfs topology directory path.
+  std::string drm_path_;      ///< Daemon's DRM sysfs directory path.
+  Sysfs::GpuInfo gpu_info_{}; ///< GPU metadata received from daemon handshake.
+  bool has_gpu_info_ = false; ///< True when gpu_info_ is valid.
+  std::optional<PtracerGrantVerdict> ptracer_verdict_; ///< Last open()'s trust decision.
   std::atomic<bool> closing_{false}; ///< Set by close() to break WAIT_EVENTS loops.
   /// @brief Set when the RPC stream is known to be unusable.
   /// @details Any frame that is not written or read in full leaves the stream
@@ -155,7 +222,9 @@ private:
   /// is set the connection is terminal and further ioctl/mmap/munmap calls fail
   /// with -EPROTO rather than returning bogus results from a poisoned stream.
   std::atomic<bool> protocol_failed_{false};
-  int shutdown_efd_ = -1; ///< eventfd written by close() to wake WAIT_EVENTS pollers.
+  int shutdown_efd_ = -1;      ///< eventfd written by close() to wake WAIT_EVENTS pollers.
+  void *kfd_marker_ = nullptr; ///< Non-readable mapping identifying /dev/kfd in proc maps.
+  size_t kfd_marker_size_ = 0;
 
   /// @brief Serializes all RPC send+recv pairs on sock_.
   /// @details ROCR is multithreaded — concurrent ioctl/mmap calls interleave

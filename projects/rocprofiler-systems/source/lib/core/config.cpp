@@ -3,19 +3,22 @@
 
 #include "config.hpp"
 #include "amd_smi.hpp"
+#include "backends/rocprofiler_sdk/backend.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
 #include "common/static_object.hpp"
-#include "constraint.hpp"
+#include "common/string_utility.hpp"
 #include "gpu.hpp"
 #include "logger/logger.hpp"
 #include "mproc.hpp"
 #include "perf.hpp"
 #include "perfetto.hpp"
-#include "rocprofiler-sdk.hpp"
+#include "sdk/tracing-config-deps.hpp"
+#include "sdk/tracing-config.hpp"
 #include "utility.hpp"
 
 #include <timemory/backends/capability.hpp>
@@ -23,23 +26,29 @@
 #include <timemory/backends/mpi.hpp>
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
+#include <timemory/components/papi/papi_common.hpp>
+#include <timemory/components/papi/papi_config.hpp>
+#include <timemory/components/papi/papi_vector.hpp>
+#include <timemory/components/papi/types.hpp>
+#include <timemory/components/roofline/types.hpp>
 #include <timemory/log/color.hpp>
 #include <timemory/log/logger.hpp>
 #include <timemory/manager.hpp>
+#include <timemory/mpl/types.hpp>
 #include <timemory/process/process.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/settings.hpp>
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/declaration.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/signals.hpp>
 #include <timemory/utility/types.hpp>
 
 #include "logger/debug.hpp"
 
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
-#include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
 #include <array>
@@ -53,16 +62,19 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <linux/capability.h>
 #include <numeric>
 #include <ostream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <unistd.h>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -76,7 +88,7 @@ int  verbose_value  = rocprofsys::get_env<int>(env_vars::VERBOSE, 0);
 bool debug_value    = rocprofsys::get_env<bool>(env_vars::DEBUG_MODE, false);
 auto configure_once = std::once_flag{};
 
-TIMEMORY_NOINLINE bool&
+bool&
 _settings_are_configured()
 {
     static bool _v = false;
@@ -100,16 +112,6 @@ get_config()
         (void) _once;
     }
     return settings::shared_instance();
-}
-
-std::string
-get_setting_name(std::string _v)
-{
-    constexpr auto _prefix = std::string_view{ "rocprofsys_" };
-    for(auto& itr : _v)
-        itr = tolower(itr);
-    if(_v.starts_with(_prefix)) return _v.substr(_prefix.length());
-    return _v;
 }
 
 template <typename Tp>
@@ -145,41 +147,35 @@ struct config_value_validation
 // ROCPROFSYS_TRACE_DURATION=abc -> 0.0. If timemory callbacks become
 // unconditional and available before constructor parsing, the explicit env and
 // config-file validation paths can be removed.
-const auto strict_config_value_validations = std::array<config_value_validation, 5>{ {
-    { env_vars::MODE, config_value_rule::choice, "one of the registered choices" },
-    { env_vars::PERFETTO_BACKEND, config_value_rule::choice,
-      "one of the registered choices" },
-    { env_vars::TRACE, config_value_rule::boolean,
-      "a boolean value (0, non-zero integer, true, false, on, off, yes, no, "
-      "y, n, t, f)" },
-    { env_vars::TRACE_DURATION, config_value_rule::floating_point,
-      "a finite floating-point value" },
+const auto k_strict_config_value_validations = std::array<config_value_validation, 6>{ {
+    { .name        = env_vars::MODE,
+      .rule        = config_value_rule::choice,
+      .expectation = "one of the registered choices" },
+    { .name        = env_vars::PERFETTO_BACKEND,
+      .rule        = config_value_rule::choice,
+      .expectation = "one of the registered choices" },
+    { .name = env_vars::TRACE,
+      .rule = config_value_rule::boolean,
+      .expectation =
+          "a boolean value (0, non-zero integer, true, false, on, off, yes, no, "
+          "y, n, t, f)" },
+    { .name        = env_vars::TRACE_DURATION,
+      .rule        = config_value_rule::floating_point,
+      .expectation = "a finite floating-point value" },
     // Only validate positive ranges for settings without sentinel values.
     // CPUTIME/REALTIME sampling frequencies intentionally default to -1.0.
-    { env_vars::SAMPLING_FREQ, config_value_rule::positive_floating_point,
-      "a positive finite floating-point value" },
+    { .name        = env_vars::SAMPLING_FREQ,
+      .rule        = config_value_rule::positive_floating_point,
+      .expectation = "a positive finite floating-point value" },
+    { .name        = env_vars::TRACE_PERIOD_CLOCK_ID,
+      .rule        = config_value_rule::choice,
+      .expectation = "one of the registered choices" },
 } };
-
-[[nodiscard]] std::string
-trim_config_value(std::string_view value)
-{
-    auto str = std::string{ value };
-    utility::trim_str(str);
-    return str;
-}
-
-[[nodiscard]] std::string
-lower_config_value(std::string value)
-{
-    for(auto& itr : value)
-        itr = static_cast<char>(std::tolower(static_cast<unsigned char>(itr)));
-    return value;
-}
 
 [[nodiscard]] bool
 has_config_value_reference(std::string_view raw_value)
 {
-    auto value = trim_config_value(raw_value);
+    auto value = utility::string::trim(raw_value);
     return !value.empty() && value.front() == '$';
 }
 
@@ -204,7 +200,7 @@ is_recognized_boolean_text_value(std::string_view value)
 [[nodiscard]] bool
 is_valid_boolean_config_value(std::string_view raw_value)
 {
-    auto value = lower_config_value(trim_config_value(raw_value));
+    auto value = utility::string::to_lower(utility::string::trim(raw_value));
     if(value.empty()) return false;
 
     if(is_integer_config_value(value)) return true;
@@ -215,14 +211,14 @@ is_valid_boolean_config_value(std::string_view raw_value)
 [[nodiscard]] bool
 parse_floating_point_config_value(std::string_view raw_value, double& parsed_value)
 {
-    auto value = trim_config_value(raw_value);
+    auto value = utility::string::trim(raw_value);
     if(value.empty()) return false;
 
     char* end    = nullptr;
     errno        = 0;
-    parsed_value = std::strtod(value.c_str(), &end);
+    parsed_value = std::strtod(value.data(), &end);
 
-    if(end == value.c_str()) return false;
+    if(end == value.data()) return false;
 
     while(end && std::isspace(static_cast<unsigned char>(*end)) != 0)
         ++end;
@@ -251,10 +247,10 @@ get_setting_choices(const std::shared_ptr<settings>& _config, std::string_view n
 [[nodiscard]] const config_value_validation*
 find_config_value_validation(std::string_view name)
 {
-    auto itr = std::find_if(
-        strict_config_value_validations.begin(), strict_config_value_validations.end(),
+    auto itr = std::ranges::find_if(
+        k_strict_config_value_validations,
         [name](const auto& validation) { return validation.name == name; });
-    return (itr != strict_config_value_validations.end()) ? &*itr : nullptr;
+    return (itr != k_strict_config_value_validations.end()) ? &*itr : nullptr;
 }
 
 void
@@ -285,7 +281,7 @@ validate_config_setting_value(std::string_view name, std::string_view raw_value,
         }
         case config_value_rule::choice:
         {
-            auto value = trim_config_value(raw_value);
+            auto value = utility::string::trim(raw_value);
             if(choices)
             {
                 valid =
@@ -308,7 +304,7 @@ validate_config_setting_value(std::string_view name, std::string_view raw_value,
 void
 validate_environment_config_values(const std::shared_ptr<settings>& _config)
 {
-    for(const auto& validation : strict_config_value_validations)
+    for(const auto& validation : k_strict_config_value_validations)
     {
         if(auto* raw_value = std::getenv(std::string{ validation.name }.c_str()))
             validate_config_setting_value(validation.name, raw_value,
@@ -331,7 +327,7 @@ validate_config_file_values(const std::string& config_file, const std::string& t
     {
         ++line_number;
 
-        auto trimmed_line = trim_config_value(line);
+        auto trimmed_line = utility::string::trim(line);
         if(trimmed_line.empty() || trimmed_line.front() == '#') continue;
 
         auto key       = std::string{};
@@ -339,25 +335,25 @@ validate_config_file_values(const std::string& config_file, const std::string& t
 
         if(auto equal_pos = trimmed_line.find('='); equal_pos != std::string::npos)
         {
-            key =
-                trim_config_value(std::string_view{ trimmed_line }.substr(0, equal_pos));
-            raw_value =
-                trim_config_value(std::string_view{ trimmed_line }.substr(equal_pos + 1));
+            key = utility::string::trim(
+                std::string_view{ trimmed_line }.substr(0, equal_pos));
+            raw_value = utility::string::trim(
+                std::string_view{ trimmed_line }.substr(equal_pos + 1));
         }
         else
         {
             auto split_pos = trimmed_line.find_first_of(" \t");
             if(split_pos == std::string::npos) continue;
 
-            key =
-                trim_config_value(std::string_view{ trimmed_line }.substr(0, split_pos));
-            raw_value =
-                trim_config_value(std::string_view{ trimmed_line }.substr(split_pos + 1));
+            key = utility::string::trim(
+                std::string_view{ trimmed_line }.substr(0, split_pos));
+            raw_value = utility::string::trim(
+                std::string_view{ trimmed_line }.substr(split_pos + 1));
         }
 
         if(auto comment_pos = raw_value.find('#'); comment_pos != std::string::npos)
-            raw_value =
-                trim_config_value(std::string_view{ raw_value }.substr(0, comment_pos));
+            raw_value = utility::string::trim(
+                std::string_view{ raw_value }.substr(0, comment_pos));
 
         if(!raw_value.empty() && has_config_value_reference(raw_value)) continue;
 
@@ -376,7 +372,7 @@ validate_config_file_values(const std::string& config_file, const std::string& t
 void
 install_strict_config_value_callbacks(const std::shared_ptr<settings>& _config)
 {
-    for(const auto& validation : strict_config_value_validations)
+    for(const auto& validation : k_strict_config_value_validations)
     {
         auto itr = _config->find(std::string{ validation.name });
         if(itr == _config->end() || !itr->second) continue;
@@ -393,52 +389,58 @@ install_strict_config_value_callbacks(const std::shared_ptr<settings>& _config)
 
 // Accepts either a `const char*` literal or `std::string_view` (e.g. env_vars::FOO)
 // for ENV_NAME -- std::string{} can be constructed from either.
-#define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)           \
-    [&]() {                                                                                  \
-        auto _env_name = std::string{ ENV_NAME };                                            \
-        auto _ret      = _config->insert<TYPE, TYPE>(                                        \
-            _env_name, get_setting_name(_env_name), DESCRIPTION, TYPE{ INITIAL_VALUE }, \
-            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",            \
-                                        __VA_ARGS__ });                                      \
-        if(!_ret.second)                                                                     \
-        {                                                                                    \
-            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(_env_name),           \
-                        _env_name);                                                          \
-        }                                                                                    \
-        return _config->find(_env_name)->second;                                             \
+#define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)       \
+    [&]() {                                                                              \
+        auto       _env_name = std::string{ ENV_NAME };                                  \
+        const auto _ret      = _config->insert<TYPE, TYPE>(                              \
+            _env_name,                                                              \
+            std::string{ utility::string::strip_rocprofsys_prefix(_env_name) },     \
+            DESCRIPTION, TYPE{ INITIAL_VALUE },                                     \
+            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",        \
+                                        __VA_ARGS__ });                                  \
+        if(!_ret.second)                                                                 \
+        {                                                                                \
+            LOG_WARNING("Duplicate setting: {} / {}",                                    \
+                        utility::string::strip_rocprofsys_prefix(_env_name), _env_name); \
+        }                                                                                \
+        return _config->find(_env_name)->second;                                         \
     }()
 
 // below does not include "librocprof-sys"
-#define ROCPROFSYS_CONFIG_EXT_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)       \
-    [&]() {                                                                                  \
-        auto _env_name = std::string{ ENV_NAME };                                            \
-        auto _ret      = _config->insert<TYPE, TYPE>(                                        \
-            _env_name, get_setting_name(_env_name), DESCRIPTION, TYPE{ INITIAL_VALUE }, \
-            std::set<std::string>{ "custom", "rocprofsys", __VA_ARGS__ });              \
-        if(!_ret.second)                                                                     \
-        {                                                                                    \
-            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(_env_name),           \
-                        _env_name);                                                          \
-        }                                                                                    \
-        return _config->find(_env_name)->second;                                             \
+#define ROCPROFSYS_CONFIG_EXT_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)   \
+    [&]() {                                                                              \
+        auto _env_name = std::string{ ENV_NAME };                                        \
+        auto _ret      = _config->insert<TYPE, TYPE>(                                    \
+            _env_name,                                                              \
+            std::string{ utility::string::strip_rocprofsys_prefix(_env_name) },     \
+            DESCRIPTION, TYPE{ INITIAL_VALUE },                                     \
+            std::set<std::string>{ "custom", "rocprofsys", __VA_ARGS__ });          \
+        if(!_ret.second)                                                                 \
+        {                                                                                \
+            LOG_WARNING("Duplicate setting: {} / {}",                                    \
+                        utility::string::strip_rocprofsys_prefix(_env_name), _env_name); \
+        }                                                                                \
+        return _config->find(_env_name)->second;                                         \
     }()
 
 // setting + command line option
-#define ROCPROFSYS_CONFIG_CL_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE,             \
-                                     CMD_LINE, ...)                                          \
-    [&]() {                                                                                  \
-        auto _env_name = std::string{ ENV_NAME };                                            \
-        auto _ret      = _config->insert<TYPE, TYPE>(                                        \
-            _env_name, get_setting_name(_env_name), DESCRIPTION, TYPE{ INITIAL_VALUE }, \
-            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",            \
-                                        __VA_ARGS__ },                                       \
-            std::vector<std::string>{ CMD_LINE });                                      \
-        if(!_ret.second)                                                                     \
-        {                                                                                    \
-            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(_env_name),           \
-                        _env_name);                                                          \
-        }                                                                                    \
-        return _config->find(_env_name)->second;                                             \
+#define ROCPROFSYS_CONFIG_CL_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE,         \
+                                     CMD_LINE, ...)                                      \
+    [&]() {                                                                              \
+        auto _env_name = std::string{ ENV_NAME };                                        \
+        auto _ret      = _config->insert<TYPE, TYPE>(                                    \
+            _env_name,                                                              \
+            std::string{ utility::string::strip_rocprofsys_prefix(_env_name) },     \
+            DESCRIPTION, TYPE{ INITIAL_VALUE },                                     \
+            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",        \
+                                        __VA_ARGS__ },                                   \
+            std::vector<std::string>{ CMD_LINE });                                  \
+        if(!_ret.second)                                                                 \
+        {                                                                                \
+            LOG_WARNING("Duplicate setting: {} / {}",                                    \
+                        utility::string::strip_rocprofsys_prefix(_env_name), _env_name); \
+        }                                                                                \
+        return _config->find(_env_name)->second;                                         \
     }()
 }  // namespace
 
@@ -464,6 +466,122 @@ json_has_project_name_root(const std::string& json_path)
     {
         return false;
     }
+}
+
+void
+register_operation_include_setting(const std::shared_ptr<settings>& _config,
+                                   std::unordered_set<std::string>& registered,
+                                   const auto&                      spec)
+{
+    if(!registered.emplace(spec.env_names.operations_include_env_name).second)
+    {
+        return;
+    }
+    ROCPROFSYS_CONFIG_SETTING(std::string, spec.env_names.operations_include_env_name,
+                              "Inclusive filter for domain operations (for API "
+                              "domains, this selects the functions to trace) "
+                              "[regex supported]",
+                              std::string{}, "rocm", "rocprofiler-sdk", "advanced")
+        ->set_choices(spec.operation_choices);
+}
+
+void
+register_operation_exclude_setting(const std::shared_ptr<settings>& _config,
+                                   std::unordered_set<std::string>& registered,
+                                   const auto&                      spec)
+{
+    if(!registered.emplace(spec.env_names.operations_exclude_env_name).second)
+    {
+        return;
+    }
+    ROCPROFSYS_CONFIG_SETTING(std::string, spec.env_names.operations_exclude_env_name,
+                              "Exclusive filter for domain operations applied "
+                              "after the inclusive filter (for API domains, "
+                              "removes function from trace) [regex supported]",
+                              std::string{}, "rocm", "rocprofiler-sdk", "advanced")
+        ->set_choices(spec.operation_choices);
+}
+
+void
+register_operation_backtrace_setting(const std::shared_ptr<settings>& _config,
+                                     std::unordered_set<std::string>& registered,
+                                     const auto&                      spec)
+{
+    if(!registered.emplace(spec.env_names.operations_annotate_backtrace_env_name).second)
+    {
+        return;
+    }
+    ROCPROFSYS_CONFIG_SETTING(std::string,
+                              spec.env_names.operations_annotate_backtrace_env_name,
+                              "Specification of domain operations which will "
+                              "record a backtrace (for API domains, this is a "
+                              "list of function names) [regex supported]",
+                              std::string{}, "rocm", "rocprofiler-sdk", "advanced")
+        ->set_choices(spec.operation_choices);
+}
+
+void
+register_rocm_operation_settings(const std::shared_ptr<settings>& _config,
+                                 const auto&                      operation_settings)
+{
+    auto registered_operation_settings = std::unordered_set<std::string>{};
+    for(const auto& spec : operation_settings)
+    {
+        register_operation_include_setting(_config, registered_operation_settings, spec);
+        register_operation_exclude_setting(_config, registered_operation_settings, spec);
+        register_operation_backtrace_setting(_config, registered_operation_settings,
+                                             spec);
+    }
+}
+
+void
+register_rocm_group_by_queue_setting(const std::shared_ptr<settings>& _config,
+                                     const std::vector<std::string>&  rocm_domain_choices)
+{
+    // Add the ROCPROFSYS_ROCM_GROUP_BY_QUEUE setting if the hip_stream domain is
+    // present in supported ROCProfiler-SDK domains.
+    if(std::ranges::find(rocm_domain_choices, std::string{ "hip_stream" }) ==
+       rocm_domain_choices.end())
+    {
+        return;
+    }
+
+    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::ROCM_GROUP_BY_QUEUE,
+                              "By default, Perfetto trace will show the HIP streams "
+                              "to which kernel and memory copy operations submitted. "
+                              "With the `ROCPROFSYS_ROCM_GROUP_BY_QUEUE` option, the "
+                              "trace will display HSA queues to which these kernel "
+                              "and memory operations were submitted.",
+                              false, "rocm", "perfetto");
+}
+
+void
+configure_rocm_tracing_settings(const std::shared_ptr<settings>& _config)
+{
+    using tracing_config_t = rocprofiler_sdk::tracing_config<
+        backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>,
+        rocprofiler_sdk::default_externals>;
+
+    const auto rocm_domain_choices = tracing_config_t::get_domain_choices();
+    const auto rocm_domain_description =
+        fmt::format("Specification of ROCm domains to trace/profile. Choices: {}",
+                    fmt::join(rocm_domain_choices, ", "));
+
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, env_vars::ROCM_DOMAINS, rocm_domain_description,
+        tracing_config_t::get_domain_defaults(), "rocm", "rocprofiler-sdk")
+        ->set_choices(rocm_domain_choices);
+
+    ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::ROCM_EVENTS,
+                              "ROCm hardware counters. Use ':device=N' syntax to "
+                              "specify collection on device number N, e.g. ':device=0'. "
+                              "If no device specification is provided, the event is "
+                              "collected on every available device",
+                              std::string{}, "rocm", "hardware_counters");
+
+    register_rocm_operation_settings(_config, tracing_config_t::get_operation_settings());
+
+    register_rocm_group_by_queue_setting(_config, rocm_domain_choices);
 }
 }  // namespace
 
@@ -531,9 +649,6 @@ configure_settings(bool _init)
 
     auto _config = *get_config_impl();
 
-    // if using timemory, default to perfetto being off
-    auto _default_perfetto_v = !rocprofsys::get_env<bool>(env_vars::PROFILE, false);
-
     auto _system_backend = rocprofsys::get_env(env_vars::PERFETTO_BACKEND_SYSTEM, false);
 
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::LOG_LEVEL,
@@ -583,8 +698,8 @@ configure_settings(bool _init)
         "parallelism", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::TRACE,
-                              "Enable perfetto backend for tracing", _default_perfetto_v,
-                              "backend", "perfetto");
+                              "Enable perfetto backend for tracing", false, "backend",
+                              "perfetto");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::TRACE_LEGACY,
                               "[DEPRECATED] The new default option is to use data from "
@@ -598,20 +713,18 @@ configure_settings(bool _init)
                               "[DEPRECATED] Renamed to ROCPROFSYS_TRACE", false,
                               "backend", "perfetto", "deprecated");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::PROFILE, "Enable timemory backend",
-                              !_config->get<bool>(std::string{ env_vars::TRACE }),
+    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::PROFILE, "Enable timemory backend", false,
                               "backend", "timemory");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_TIMEMORY,
-                              "[DEPRECATED] Renamed to ROCPROFSYS_PROFILE",
-                              !_config->get<bool>(std::string{ env_vars::TRACE }),
+                              "[DEPRECATED] Renamed to ROCPROFSYS_PROFILE", false,
                               "backend", "timemory", "deprecated");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_CAUSAL,
                               "Enable causal profiling analysis", false, "backend",
                               "causal", "analysis");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_ROCPD, "Enable rocpd backend", false,
+    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_ROCPD, "Enable rocpd backend", true,
                               "backend", "rocpd");
 
     ROCPROFSYS_CONFIG_SETTING(
@@ -724,29 +837,26 @@ configure_settings(bool _init)
         "roctxRangeStart/roctxRangeStop markers.",
         std::string{}, "trace", "profile", "perfetto", "rocpd", "timemory", "rocm");
 
-    auto _clock_choices = std::vector<std::string>{};
-    for(const auto& itr : constraint::get_valid_clock_ids())
-    {
-        _clock_choices.emplace_back(
-            fmt::format("({}|{}|{})", itr.name, itr.value, itr.raw_name));
-    }
-
-    ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::TRACE_PERIODS,
-                              "Similar to specify trace delay and/or duration except in "
-                              "the form <DELAY>:<DURATION>, <DELAY>:<DURATION>:<REPEAT>, "
-                              "and/or <DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>",
-                              std::string{}, "trace", "profile", "perfetto", "timemory");
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, env_vars::TRACE_PERIODS,
+        "Space- or semicolon-separated list of trace windows. Each entry has the form "
+        "<DELAY>:<DURATION> or <DELAY>:<DURATION>:<REPEAT>. The clock used for all "
+        "entries is controlled by ROCPROFSYS_TRACE_PERIOD_CLOCK_ID.",
+        std::string{}, "trace", "profile", "perfetto", "timemory");
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::TRACE_PERIOD_CLOCK_ID,
-        "Set the default clock ID for ROCPROFSYS_TRACE_DELAY, ROCPROFSYS_TRACE_DURATION, "
-        "and/or ROCPROFSYS_TRACE_PERIODS. E.g. \"realtime\" == the delay/duration is "
-        "governed by the elapsed realtime, \"cputime\" == the delay/duration is governed "
-        "by the elapsed CPU-time within the process, etc. Note: when using CPU-based "
-        "timing, it is recommened to scale the value by the number of threads and be "
-        "aware that rocprof-sys may contribute to advancing the process CPU-time",
-        "CLOCK_REALTIME", "trace", "profile", "perfetto", "timemory")
-        ->set_choices(_clock_choices);
+        "Clock used to measure delay and duration for ROCPROFSYS_TRACE_DELAY, "
+        "ROCPROFSYS_TRACE_DURATION, and ROCPROFSYS_TRACE_PERIODS.\n"
+        "  realtime (default) : wall-clock time. A 10-second delay waits for\n"
+        "    10 real seconds regardless of how many CPU cores are active.\n"
+        "  cputime : process CPU time (CLOCK_PROCESS_CPUTIME_ID). A 10-second\n"
+        "    delay waits until the process has consumed 10 CPU-seconds in total\n"
+        "    across all threads. Useful when you want to skip a fixed amount of\n"
+        "    computation rather than a fixed elapsed time. Note: rocprof-sys\n"
+        "    instrumentation itself contributes to the CPU-time counter.",
+        "realtime", "trace", "profile", "perfetto", "timemory")
+        ->set_choices({ "realtime", "cputime" });
 
     ROCPROFSYS_CONFIG_SETTING(
         double, env_vars::SAMPLING_FREQ,
@@ -983,7 +1093,7 @@ configure_settings(bool _init)
         std::string{ "perf::PERF_COUNT_HW_CACHE_REFERENCES" }, "sampling",
         "hardware_counters");
 
-    rocprofiler_sdk::config_settings(_config);
+    configure_rocm_tracing_settings(_config);
     amd_smi::config_settings(_config);
 
     ROCPROFSYS_CONFIG_SETTING(size_t, env_vars::PERFETTO_SHMEM_SIZE_HINT_KB,
@@ -1048,7 +1158,7 @@ configure_settings(bool _init)
                               "perfetto", "io", "filename", "deprecated", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::PERFETTO_FILE, "Perfetto filename",
-                              std::string{ "perfetto-trace.proto" }, "perfetto", "io",
+                              std::string{ "perfetto-trace.pftrace" }, "perfetto", "io",
                               "filename", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(
@@ -1327,27 +1437,53 @@ configure_settings(bool _init)
         if(_fparanoid) _fparanoid >> _paranoid;
     }
 
-    auto  _cap_status        = timemory::linux::capability::cap_read(process::get_id());
-    auto* _cap_data          = &_cap_status.effective;
-    bool  _has_cap_sys_admin = false;
-    for(auto itr : timemory::linux::capability::cap_decode(*_cap_data))
-        if(itr == CAP_SYS_ADMIN) _has_cap_sys_admin = true;
+    // Capability numbers are stable kernel ABI, but CAP_* macros come from the host
+    // Name the PERFMON bit here to keep it visible even where those headers predate it
+    constexpr unsigned _cap_sys_admin_bit = CAP_SYS_ADMIN;
+    constexpr unsigned _cap_perfmon_bit   = 38;  // linux 5.8+
 
-    if(_paranoid > 2 && !_has_cap_sys_admin)
+    // CAP_PERFMON is the narrower grant; either one permits perf_event_open
+    const auto _cap_effective =
+        timemory::linux::capability::cap_read(process::get_id()).effective;
+    const bool _has_perf_cap = ((_cap_effective >> _cap_sys_admin_bit) & 1ULL) != 0 ||
+                               ((_cap_effective >> _cap_perfmon_bit) & 1ULL) != 0;
+
+    // The PAPI net component reads /proc/net/dev and does not use perf_event.
+    // Bypass the perf_event_paranoid gate when all PAPI events use the net:::
+    // prefix so NIC profiling works without requiring perf_event_paranoid <= 2.
+    if(_paranoid > 2 && !_has_perf_cap)
     {
-        LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
-                    "Disabling PAPI (requires a value <= 2)",
-                    _paranoid);
-        LOG_WARNING("In order to enable PAPI support, run 'echo N | sudo tee "
-                    "/proc/sys/kernel/perf_event_paranoid' where N is <= 2");
-        trait::runtime_enabled<comp::papi_config>::set(false);
-        trait::runtime_enabled<comp::papi_common<void>>::set(false);
-        trait::runtime_enabled<comp::papi_array_t>::set(false);
-        trait::runtime_enabled<comp::papi_vector>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_flops>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
-        trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
-        _config->get_papi_events() = std::string{};
+        constexpr std::string_view k_papi_net_component_prefix = "net:::";
+        const auto papi_events = rocprofsys::delimit(_config->get_papi_events(), " ,\t;");
+        const bool all_events_network_related = std::ranges::all_of(
+            papi_events, [k_papi_net_component_prefix](const std::string& event) {
+                return event.starts_with(k_papi_net_component_prefix);
+            });
+        if(!all_events_network_related)
+        {
+            LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
+                        "Disabling PAPI (requires a value <= 2, CAP_PERFMON, or "
+                        "CAP_SYS_ADMIN)",
+                        _paranoid);
+            LOG_WARNING("In order to enable PAPI support, run 'echo N | sudo tee "
+                        "/proc/sys/kernel/perf_event_paranoid' where N is <= 2, or "
+                        "grant the process CAP_PERFMON (or CAP_SYS_ADMIN)");
+            trait::runtime_enabled<comp::papi_config>::set(false);
+            trait::runtime_enabled<comp::papi_common<void>>::set(false);
+            trait::runtime_enabled<comp::papi_array_t>::set(false);
+            trait::runtime_enabled<comp::papi_vector>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_flops>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
+            trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
+            _config->get_papi_events() = std::string{};
+        }
+        else if(!papi_events.empty())
+        {
+            LOG_DEBUG("perf_event_paranoid={} but all PAPI events use the net component "
+                      "(reads /proc/net/dev, no perf_event required). "
+                      "Proceeding with NIC profiling.",
+                      _paranoid);
+        }
     }
     else
     {
@@ -1392,22 +1528,21 @@ configure_settings(bool _init)
     }
     if(!_found_sep && _cmd.size() > 1) _cmd.insert(_cmd.begin() + 1, "--");
 
-    auto _pid       = getpid();
-    auto _ppid      = getppid();
-    auto _proc      = mproc::get_concurrent_processes(_ppid);
-    bool _main_proc = (_proc.size() < 2 || *_proc.begin() == _pid);
+    auto       _pid       = getpid();
+    auto       _ppid      = getppid();
+    auto       _proc      = mproc::get_concurrent_processes(_ppid);
+    const bool _main_proc = (_proc.size() < 2 || *_proc.begin() == _pid);
 
     for(auto&& filename : rocprofsys::delimit(
             _config->get<std::string>(std::string{ env_vars::CONFIG_FILE }), ";:"))
     {
-        if(_config->get_suppress_config()) continue;
-
         const auto expanded_filename = settings::format(filename, _config->get_tag());
 
         // Prevent Timemory's read() silently dropping JSON config files without proper
         // root. Non-existing JSONs should not throw: default ROCPROFSYS_CONFIG_FILE
         // includes '~/.rocprofiler-systems.json' that can be missing
-        if(expanded_filename.ends_with(".json") && filepath::exists(expanded_filename) &&
+        if(expanded_filename.ends_with(".json") &&
+           path::is_regular_file(expanded_filename) &&
            !json_has_project_name_root(expanded_filename))
         {
             throw std::runtime_error(
@@ -1416,6 +1551,14 @@ configure_settings(bool _init)
                             "configuration, pass it via --preset instead.",
                             expanded_filename, TIMEMORY_PROJECT_NAME));
         }
+
+        // Timemory parses config files during static init before main() (see
+        // timemory_library_constructor()->init_config()). Bad .json files fail to parse
+        // but Timemory error message is uninformative. Meanwhile, the suppress_config
+        // flag is always true in the launcher. So, to produce a proper diagnostic message
+        // for bad .json files, the above .json root check MUST stay above this 'continue'
+        // gate to run regardless of suppress_config flag.
+        if(_config->get_suppress_config()) continue;
 
         LOG_DEBUG("Reading config file {}", filename);
         validate_config_file_values(filename, _config->get_tag(), _config);
@@ -1550,7 +1693,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         }
         else
         {
-            bool _changed = get_setting_value<bool>(_name).value_or(!_v) != _v;
+            const bool _changed = get_setting_value<bool>(_name).value_or(!_v) != _v;
             if(_changed)
             {
                 LOG_WARNING("[configure_mode_settings] Overriding {} to {} in {} mode...",
@@ -1562,12 +1705,13 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
     auto _use_causal = get_setting_value<bool>(std::string{ env_vars::USE_CAUSAL });
     if(_use_causal && *_use_causal) set_env(env_vars::MODE, "causal", 1);
 
-    if(get_mode() == state::process::Mode::Coverage)
+    if(get_mode() == state::process::Mode::coverage)
     {
         set_default_setting_value(std::string{ env_vars::USE_CODE_COVERAGE }, true);
         _set(env_vars::TRACE, false);
         _set(env_vars::PROFILE, false);
         _set(env_vars::USE_CAUSAL, false);
+        _set(env_vars::USE_ROCPD, false);
         _set(env_vars::USE_AMD_SMI, false);
         _set(env_vars::USE_KOKKOSP, false);
         _set(env_vars::USE_RCCLP, false);
@@ -1575,15 +1719,16 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set(env_vars::USE_SAMPLING, false);
         _set(env_vars::USE_PROCESS_SAMPLING, false);
     }
-    else if(get_mode() == state::process::Mode::Causal)
+    else if(get_mode() == state::process::Mode::causal)
     {
         _set(env_vars::USE_CAUSAL, true);
         _set(env_vars::TRACE, false);
         _set(env_vars::PROFILE, false);
+        _set(env_vars::USE_ROCPD, false);
         _set(env_vars::USE_SAMPLING, false);
         _set(env_vars::USE_PROCESS_SAMPLING, false);
     }
-    else if(get_mode() == state::process::Mode::Sampling)
+    else if(get_mode() == state::process::Mode::sampling)
     {
         set_default_setting_value(std::string{ env_vars::USE_SAMPLING }, true);
         set_default_setting_value(std::string{ env_vars::USE_PROCESS_SAMPLING }, true);
@@ -1624,6 +1769,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set(env_vars::TRACE, false);
         _set(env_vars::PROFILE, false);
         _set(env_vars::USE_CAUSAL, false);
+        _set(env_vars::USE_ROCPD, false);
         _set(env_vars::USE_AMD_SMI, false);
         _set(env_vars::USE_KOKKOSP, false);
         _set(env_vars::USE_RCCLP, false);
@@ -1848,7 +1994,7 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
 
     // exclude some timemory settings which are not relevant to rocprof-sys
     //  exact matches, e.g. ROCPROFSYS_BANNER
-    std::string _hidden_exact_re =
+    const std::string _hidden_exact_re =
         "^ROCPROFSYS_(BANNER|DESTRUCTOR_REPORT|COMPONENTS|(GLOBAL|MPIP|NCCLP|OMPT|"
         "PROFILER|TRACE|KOKKOS)_COMPONENTS|PYTHON_EXE|PAPI_ATTACH|PLOT_OUTPUT|SEPARATOR_"
         "FREQ|STACK_CLEARING|TARGET_PID|THROTTLE_(COUNT|VALUE)|(AUTO|FLAMEGRAPH)_OUTPUT|"
@@ -1856,7 +2002,7 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
         "ROOFLINE|ADD_SECONDARY|MAX_THREAD_BOOKMARKS)$";
 
     //  leading matches, e.g. ROCPROFSYS_MPI_[A-Z_]+
-    std::string _hidden_begin_re =
+    const std::string _hidden_begin_re =
         "^ROCPROFSYS_(ERT|DART|MPI|UPCXX|ROOFLINE|CUDA|NVTX|CUPTI)_[A-Z_]+$";
 
     auto _hidden_exact = std::set<std::string>{};
@@ -1989,8 +2135,9 @@ print_settings(
 
     std::stringstream _os{};
 
-    bool _print_desc = get_debug() || rocprofsys::get_env(env_vars::SETTINGS_DESC, false);
-    bool _md         = rocprofsys::get_env<bool>(env_vars::SETTINGS_DESC_MARKDOWN, false);
+    const bool _print_desc =
+        get_debug() || rocprofsys::get_env(env_vars::SETTINGS_DESC, false);
+    const bool _md = rocprofsys::get_env<bool>(env_vars::SETTINGS_DESC_MARKDOWN, false);
 
     constexpr size_t nfields = 3;
     using str_array_t        = std::array<std::string, nfields>;
@@ -2008,9 +2155,9 @@ print_settings(
                                             _disp.at("description") });
             for(size_t i = 0; i < nfields; ++i)
             {
-                size_t _wextra = (_md && i < 2) ? 2 : 0;
-                _widths.at(i)  = std::max<size_t>(_widths.at(i),
-                                                  _data.back().at(i).length() + _wextra);
+                const size_t _wextra = (_md && i < 2) ? 2 : 0;
+                _widths.at(i)        = std::max<size_t>(_widths.at(i),
+                                                        _data.back().at(i).length() + _wextra);
             }
         }
     }
@@ -2059,7 +2206,7 @@ print_settings(
             {
                 std::stringstream _ss{};
                 _ss.setf(_os.flags());
-                std::string _extra = (i < 2) ? "`" : "";
+                const std::string _extra = (i < 2) ? "`" : "";
                 _ss << _extra << itr.at(i) << _extra;
                 _os << std::setw(_widths.at(i)) << _ss.str() << " | ";
                 if(!_print_desc && i == 1) break;
@@ -2108,7 +2255,7 @@ print_settings(bool _include_env)
 
     // generic filter for filtering relevant options
     auto _is_rocprofsys_option = [](const auto& _v, const auto&) {
-        return (_v.find("ROCPROFSYS_") == 0);
+        return _v.starts_with("ROCPROFSYS_");
     };
 
     if(_include_env)
@@ -2116,8 +2263,15 @@ print_settings(bool _include_env)
         std::stringstream _ss1{};
         tim::print_env(_ss1, [_is_rocprofsys_option](const std::string& _v) {
             auto _is_omni_opt = _is_rocprofsys_option(_v, std::set<std::string>{});
-            if(settings::verbose() >= 2 || settings::debug()) return _is_omni_opt;
-            return (_is_omni_opt && _v.find("ROCPROFSYS_SIGNAL_") != 0);
+            if(settings::verbose() >= 2 || settings::debug())
+            {
+                return _is_omni_opt;
+            }
+            if(_is_omni_opt && !_v.starts_with("ROCPROFSYS_SIGNAL_"))
+            {
+                return true;
+            }
+            return false;
         });
 
         LOG_INFO("{}", _ss1.str());
@@ -2161,18 +2315,18 @@ get_mode()
         auto _mode = rocprofsys::get_env_choice<std::string>(
             env_vars::MODE, "trace", { "trace", "sampling", "causal", "coverage" });
         if(_mode == "sampling")
-            return state::process::Mode::Sampling;
+            return state::process::Mode::sampling;
         else if(_mode == "causal")
-            return state::process::Mode::Causal;
+            return state::process::Mode::causal;
         else if(_mode == "coverage")
-            return state::process::Mode::Coverage;
-        return state::process::Mode::Trace;
+            return state::process::Mode::coverage;
+        return state::process::Mode::trace;
     }
     static auto _m = std::unordered_map<std::string_view, state::process::Mode>{
-        { "trace", state::process::Mode::Trace },
-        { "causal", state::process::Mode::Causal },
-        { "sampling", state::process::Mode::Sampling },
-        { "coverage", state::process::Mode::Coverage }
+        { "trace", state::process::Mode::trace },
+        { "causal", state::process::Mode::causal },
+        { "sampling", state::process::Mode::sampling },
+        { "coverage", state::process::Mode::coverage }
     };
     static auto _v = get_config()->find(std::string{ env_vars::MODE });
     try
@@ -2188,7 +2342,7 @@ get_mode()
         throw std::runtime_error(
             fmt::format("[{}] invalid mode {}. Choices: {}", __FUNCTION__, _mode, _msg));
     }
-    return state::process::Mode::Trace;
+    return state::process::Mode::trace;
 }
 
 bool&
@@ -2228,7 +2382,7 @@ get_debug()
 bool
 get_debug_sampling()
 {
-    static bool _v = rocprofsys::get_env<bool>(
+    static const bool _v = rocprofsys::get_env<bool>(
         env_vars::DEBUG_SAMPLING,
         (settings_are_configured() ? get_debug() : get_debug_env()));
     return _v;
@@ -2381,8 +2535,9 @@ get_use_vaapi_tracing()
     {
         return false;  // Setting not found
     }
-    std::string domains = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-    auto        domain_list = rocprofsys::delimit(domains, " ,;:\t\n");
+    const std::string domains =
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+    auto domain_list = rocprofsys::delimit(domains, " ,;:\t\n");
     return std::find(domain_list.begin(), domain_list.end(), "rocdecode_api") !=
                domain_list.end() ||
            std::find(domain_list.begin(), domain_list.end(), "rocjpeg_api") !=
@@ -2579,7 +2734,7 @@ get_perfetto_annotations()
 std::uint64_t
 get_thread_pool_size()
 {
-    static std::uint64_t _v =
+    static const std::uint64_t _v =
         get_config()->get<std::uint64_t>(std::string{ env_vars::THREAD_POOL_SIZE });
     return _v;
 }
@@ -2603,13 +2758,13 @@ get_perfetto_output_filename()
     {
         LOG_ERROR("Error! ROCPROFSYS_PERFETTO_FILE not found. Please check your "
                   "environment configuration.");
-        return fmt::format("{}/perfetto-trace-{}.proto", pwd, getpid());
+        return fmt::format("{}/perfetto-trace-{}.pftrace", pwd, getpid());
     }
 
     auto basename = dynamic_cast<tim::tsettings<std::string>&>(*setting->second).get();
 
     auto dir = std::string{};
-    auto ext = std::string{ "proto" };
+    auto ext = std::string{ "pftrace" };
 
     if(const auto pos_dir = basename.find_last_of('/'); pos_dir != std::string::npos)
     {
@@ -2807,6 +2962,14 @@ get_gpu_perf_counters()
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
+std::vector<std::string>
+get_rocm_counter_events()
+{
+    static auto _val = get_config()->find(std::string{ env_vars::ROCM_EVENTS });
+    return rocprofsys::delimit(
+        static_cast<tim::tsettings<std::string>&>(*_val->second).get(), " ,;\t\n");
+}
+
 bool
 get_trace_thread_locks()
 {
@@ -2855,7 +3018,7 @@ get_debug_tid()
     static auto _vlist =
         parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
             rocprofsys::get_env<std::string>(env_vars::DEBUG_TIDS, ""), "debug tids", 1L);
-    static thread_local bool _v =
+    static thread_local const bool _v =
         _vlist.empty() || _vlist.count(tim::threading::get_id()) > 0;
     return _v;
 }
@@ -2866,8 +3029,8 @@ get_debug_pid()
     static auto _vlist =
         parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
             rocprofsys::get_env<std::string>(env_vars::DEBUG_PIDS, ""), "debug pids", 1L);
-    static bool _v = _vlist.empty() || _vlist.count(tim::process::get_id()) > 0 ||
-                     _vlist.count(dmp::rank()) > 0;
+    static const bool _v = _vlist.empty() || _vlist.count(tim::process::get_id()) > 0 ||
+                           _vlist.count(dmp::rank()) > 0;
     return _v;
 }
 
@@ -2906,7 +3069,7 @@ int         s_db_path_session_id = 0;
 std::string
 get_database_absolute_path(std::string_view database_name, std::string_view suffix)
 {
-    std::unique_lock<std::mutex> lk{ s_db_path_mutex };
+    const std::unique_lock<std::mutex> lk{ s_db_path_mutex };
 
     auto cfg = settings::compose_filename_config{
         settings::use_output_suffix(),
@@ -2935,7 +3098,7 @@ get_database_absolute_path(std::string_view database_name, std::string_view suff
 void
 reset_database_path_memo()
 {
-    std::unique_lock<std::mutex> lk{ s_db_path_mutex };
+    const std::unique_lock<std::mutex> lk{ s_db_path_mutex };
     s_db_path_memo.clear();
 }
 
@@ -2962,77 +3125,97 @@ get_output_absolute_path(std::string_view basename, std::string_view extension,
     return result;
 }
 
+/**
+ * Get the Perfetto output filename with a suffix.
+ *
+ * @param suffix The suffix to add to the Perfetto output filename.
+ * @return The Perfetto output filename with the suffix.
+ */
 std::string
 get_perfetto_output_filename_with_suffix(std::string_view suffix)
 {
-    static auto _v   = get_config()->find(std::string{ env_vars::PERFETTO_FILE });
-    auto        _val = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+    static auto s_setting = get_config()->find(std::string{ env_vars::PERFETTO_FILE });
+    auto        val = static_cast<tim::tsettings<std::string>&>(*s_setting->second).get();
 
-    LOG_DEBUG("Initial ROCPROFSYS_PERFETTO_FILE='{}', suffix='{}'", _val, suffix);
+    LOG_DEBUG("Initial ROCPROFSYS_PERFETTO_FILE='{}', suffix='{}'", val, suffix);
 
     // If absolute path is provided, return it as-is
-    if(!_val.empty() && _val.at(0) == '/')
+    if(!val.empty() && val.at(0) == '/')
     {
-        LOG_DEBUG("Absolute path, returning: '{}'", _val);
-        return _val;
+        LOG_DEBUG("Absolute path, returning: '{}'", val);
+        return val;
     }
 
-    auto _pos_dir = _val.find_last_of('/');
-    auto _dir     = std::string{};
-    auto _ext     = std::string{ "proto" };
+    // Parse the filename into directory, basename, and extension
+    auto pos_dir = val.find_last_of('/');
+    auto dir     = std::string{};
+    auto ext     = std::string{ "pftrace" };
 
-    if(_pos_dir != std::string::npos)
+    // If the filename contains a directory, extract it
+    if(pos_dir != std::string::npos)
     {
-        _dir = _val.substr(0, _pos_dir + 1);
-        _val = _val.substr(_pos_dir + 1);
+        dir = val.substr(0, pos_dir + 1);
+        val = val.substr(pos_dir + 1);
     }
 
-    auto _pos_ext = _val.find_last_of('.');
-    if(_pos_ext + 1 < _val.length())
+    // Extract the extension
+    auto pos_ext = val.find_last_of('.');
+    if(pos_ext != std::string::npos && pos_ext + 1 < val.length())
     {
-        _ext = _val.substr(_pos_ext + 1);
-        _val = _val.substr(0, _pos_ext);
+        ext = val.substr(pos_ext + 1);
+        val = val.substr(0, pos_ext);
     }
 
     // Check if explicitly set via environment OR config file
     // If explicitly set, don't add suffix; otherwise use provided suffix
-    bool _explicitly_set =
-        (_v->second->get_environ_updated() || _v->second->get_config_updated());
+    bool explicitly_set = (s_setting->second->get_environ_updated() ||
+                           s_setting->second->get_config_updated());
 
-    LOG_DEBUG("Parsed: dir='{}', basename='{}', ext='{}', explicitly_set={}", _dir, _val,
-              _ext, _explicitly_set);
+    LOG_DEBUG("Parsed: dir='{}', basename='{}', ext='{}', explicitly_set={}", dir, val,
+              ext, explicitly_set);
     LOG_DEBUG("settings::output_path()='{}'", settings::output_path());
 
-    auto _cfg = settings::compose_filename_config{
-        !_explicitly_set && !suffix.empty(),  // use_suffix only if not explicitly set
-        suffix,                               // suffix value
-        false,                                // make_dir
-        _dir                                  // explicit_path
+    auto cfg = settings::compose_filename_config{
+        !explicitly_set && !suffix.empty(),  // use_suffix only if not explicitly set
+        suffix,                              // suffix value
+        false,                               // make_dir
+        dir                                  // explicit_path
     };
 
-    _val = settings::compose_output_filename(_val, _ext, _cfg);
+    val = settings::compose_output_filename(val, ext, cfg);
 
-    LOG_DEBUG("After compose_output_filename: '{}'", _val);
+    LOG_DEBUG("After compose_output_filename: '{}'", val);
 
-    if(!_val.empty() && _val.at(0) != '/')
+    // If the path is relative, prepend the current working directory
+    if(!val.empty() && val.at(0) != '/')
     {
-        auto _result = settings::format(fmt::format("{}/{}", getenv("PWD"), _val),
-                                        get_config()->get_tag());
-        LOG_DEBUG("Path is relative, prepending PWD: '{}'", _result);
-        return _result;
+        const auto* pwd    = getenv("PWD");
+        auto        result = settings::format(
+            fmt::format("{}/{}", (pwd != nullptr && pwd[0] != '\0') ? pwd : ".", val),
+            get_config()->get_tag());
+        LOG_DEBUG("Path is relative, prepending PWD: '{}'", result);
+        return result;
     }
 
-    LOG_DEBUG("Path is absolute, returning: '{}'", _val);
-    return _val;
+    // If the path is absolute, return it as-is
+    LOG_DEBUG("Path is absolute, returning: '{}'", val);
+    return val;
 }
 
 std::string
 get_ump_absolute_path()
 {
-    auto ensure_dir = [](std::string path) {
-        if(!path.empty() && !path::is_directory(path))
+    auto try_create_directory = [](std::string path) {
+        if(!path.empty())
         {
-            tim::filepath::makedir(path);
+            try
+            {
+                std::filesystem::create_directories(path);
+            } catch(const std::filesystem::filesystem_error& e)
+            {
+                LOG_WARNING("Failed to create unified memory output directory '{}': {}",
+                            path, e.code().message());
+            }
         }
         return path;
     };
@@ -3067,14 +3250,14 @@ get_ump_absolute_path()
         auto explicit_path = get_setting_value<std::string>(
             std::string{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH });
         if(explicit_path && !explicit_path->empty())
-            return ensure_dir(make_absolute(*explicit_path));
+            return try_create_directory(make_absolute(*explicit_path));
     }
 
     if(!settings_are_configured())
     {
         auto env_path =
             rocprofsys::get_env<std::string>(env_vars::UNIFIED_MEMORY_OUTPUT_PATH, "");
-        if(!env_path.empty()) return ensure_dir(make_absolute(env_path));
+        if(!env_path.empty()) return try_create_directory(make_absolute(env_path));
         return settings::output_path();
     }
 
@@ -3228,9 +3411,8 @@ bool
 rank_passes_filter(std::optional<std::uint64_t> current_rank,
                    std::optional<std::uint64_t> world_size, std::string enabled_ranks_str)
 {
-    rocprofsys::utility::trim_str(enabled_ranks_str);
-    for(auto& ch : enabled_ranks_str)
-        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    enabled_ranks_str = rocprofsys::utility::string::to_lower(
+        rocprofsys::utility::string::trim(enabled_ranks_str));
 
     if(enabled_ranks_str.empty() || enabled_ranks_str == "all") return true;
     if(enabled_ranks_str == "none") return false;
@@ -3337,11 +3519,14 @@ tmp_file::~tmp_file()
 void
 tmp_file::touch() const
 {
-    if(!filepath::exists(filename))
+    if(!path::is_regular_file(filename))
     {
         // if the filepath does not exist, open in out mode to create it
         auto _ofs = std::ofstream{};
-        filepath::open(_ofs, filename);
+        if(!path::create_parent_dirs_and_open_ofstream(_ofs, filename))
+        {
+            LOG_ERROR("Failed to create temporary file '{}'", filename);
+        }
     }
 }
 
@@ -3371,20 +3556,6 @@ tmp_file::open(std::ios::openmode _mode)
 }
 
 bool
-tmp_file::fopen(const char* _mode)
-{
-    LOG_DEBUG("Opening temporary file '{}'...", filename);
-
-    touch();
-
-    m_pid = getpid();
-    file  = filepath::fopen(filename, _mode);
-    if(file) fd = ::fileno(file);
-
-    return (file != nullptr && fd > 0);
-}
-
-bool
 tmp_file::flush()
 {
     if(m_pid != getpid()) return false;
@@ -3392,18 +3563,6 @@ tmp_file::flush()
     if(stream.is_open())
     {
         stream.flush();
-    }
-    else if(file != nullptr)
-    {
-        int _ret = fflush(file);
-        int _cnt = 0;
-        while(_ret == EAGAIN || _ret == EINTR)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds{ 100 });
-            _ret = fflush(file);
-            if(++_cnt > 10) break;
-        }
-        return (_ret == 0);
     }
     else if(fd > 0)
     {
@@ -3433,16 +3592,6 @@ tmp_file::close()
         stream.close();
         return !stream.is_open();
     }
-    else if(file != nullptr)
-    {
-        auto _ret = fclose(file);
-        if(_ret == 0)
-        {
-            file = nullptr;
-            fd   = -1;
-        }
-        return (_ret == 0);
-    }
     else if(fd > 0)
     {
         auto _ret = ::close(fd);
@@ -3462,7 +3611,7 @@ tmp_file::remove()
     if(m_pid != getpid()) return false;
 
     close();
-    if(filepath::exists(filename))
+    if(path::is_regular_file(filename))
     {
         LOG_DEBUG("Removing temporary file '{}'...", filename);
         auto _ret = ::remove(filename.c_str());
@@ -3474,9 +3623,7 @@ tmp_file::remove()
 
 tmp_file::operator bool() const
 {
-    return (m_pid == getpid()) &&
-           ((stream.is_open() && stream.good()) || (file != nullptr && fd > 0) ||
-            (file == nullptr && fd > 0));
+    return (m_pid == getpid()) && ((stream.is_open() && stream.good()) || fd > 0);
 }
 
 std::shared_ptr<tmp_file>
@@ -3486,8 +3633,8 @@ get_tmp_file(std::string _basename, std::string _ext)
 
     static auto _existing_files =
         std::unordered_map<std::string, std::shared_ptr<tmp_file>>{};
-    static std::mutex            _mutex{};
-    std::unique_lock<std::mutex> _lk{ _mutex };
+    static std::mutex                  _mutex{};
+    const std::unique_lock<std::mutex> _lk{ _mutex };
 
     cfg_fini_callbacks.emplace_back([]() {
         for(auto itr : _existing_files)
@@ -3537,9 +3684,9 @@ state::process::CausalBackend
 get_causal_backend()
 {
     static auto _m = std::unordered_map<std::string_view, state::process::CausalBackend>{
-        { "auto", state::process::CausalBackend::Auto },
-        { "perf", state::process::CausalBackend::Perf },
-        { "timer", state::process::CausalBackend::Timer },
+        { "auto", state::process::CausalBackend::automatic },
+        { "perf", state::process::CausalBackend::perf },
+        { "timer", state::process::CausalBackend::timer },
     };
 
     auto _v = get_config()->find(std::string{ env_vars::CAUSAL_BACKEND });
@@ -3553,7 +3700,7 @@ get_causal_backend()
             fmt::format("[{}] invalid causal backend {}. Choices: {}", __FUNCTION__,
                         _mode, fmt::join(_v->second->get_choices(), ", ")));
     }
-    return state::process::CausalBackend::Auto;
+    return state::process::CausalBackend::automatic;
 }
 
 state::process::CausalMode
@@ -3561,31 +3708,35 @@ get_causal_mode()
 {
     if(!settings_are_configured())
     {
-        auto _mode = rocprofsys::get_env_choice<std::string>(
+        auto mode = rocprofsys::get_env_choice<std::string>(
             env_vars::CAUSAL_MODE, "function", { "line", "function" });
-        if(_mode == "line") return state::process::CausalMode::Line;
-        return state::process::CausalMode::Function;
+        if(mode == "line")
+        {
+            return state::process::CausalMode::line;
+        }
+        return state::process::CausalMode::function;
     }
-    static auto _causal_mode = []() {
-        auto _m = std::unordered_map<std::string_view, state::process::CausalMode>{
-            { "line", state::process::CausalMode::Line },
-            { "func", state::process::CausalMode::Function },
-            { "function", state::process::CausalMode::Function }
+    static auto s_causal_mode = [function_name = __FUNCTION__]() {
+        auto map = std::unordered_map<std::string_view, state::process::CausalMode>{
+            { "line", state::process::CausalMode::line },
+            { "func", state::process::CausalMode::function },
+            { "function", state::process::CausalMode::function }
         };
-        auto _v = get_config()->find(std::string{ env_vars::CAUSAL_MODE });
+        auto value = get_config()->find(std::string{ env_vars::CAUSAL_MODE });
         try
         {
-            return _m.at(static_cast<tim::tsettings<std::string>&>(*_v->second).get());
-        } catch(std::runtime_error& _e)
+            return map.at(
+                static_cast<tim::tsettings<std::string>&>(*value->second).get());
+        } catch(std::runtime_error& error)
         {
-            auto _mode = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+            auto mode = static_cast<tim::tsettings<std::string>&>(*value->second).get();
             throw std::runtime_error(
-                fmt::format("[{}] invalid causal mode {}. Choices: {}", __FUNCTION__,
-                            _mode, fmt::join(_v->second->get_choices(), ", ")));
+                fmt::format("[{}] invalid causal mode {}. Choices: {}", function_name,
+                            mode, fmt::join(value->second->get_choices(), ", ")));
         }
-        return state::process::CausalMode::Function;
+        return state::process::CausalMode::function;
     }();
-    return _causal_mode;
+    return s_causal_mode;
 }
 
 bool
@@ -3611,10 +3762,11 @@ get_causal_output_filename()
     auto        _fname = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
     for(auto&& itr : std::initializer_list<std::string>{ ".txt", ".json", ".xml" })
     {
-        auto _pos = _fname.find(itr);
         // if extension is found at end of string, remove
-        if(_pos != std::string::npos && (_pos + itr.length()) == _fname.length())
+        if(_fname.ends_with(itr))
+        {
             _fname = _fname.substr(0, _fname.length() - itr.length());
+        }
     }
     return _fname;
 }

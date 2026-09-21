@@ -114,10 +114,9 @@ WARN_LOGFILE           = doc/warnings.log
 # Configuration options related to the input files
 #---------------------------------------------------------------------------
 INPUT                  = ../../README.md \
-                         ../../source/lib/rocprof-sys-user/rocprofiler-systems/types.h \
-                         ../../source/lib/rocprof-sys-user/rocprofiler-systems/categories.h \
-                         ../../source/lib/rocprof-sys-user/rocprofiler-systems/user.h \
-                         ../../source/lib/rocprof-sys-user/rocprofiler-systems/causal.h
+                         ../../source/lib/rocprof-sys-common-api/rocprofiler-systems/annotation.h \
+                         ../../source/lib/rocprof-sys-causal-api/rocprofiler-systems/causal_api.h \
+                         ../../source/lib/rocprof-sys-causal-api/rocprofiler-systems/causal.h
 INPUT_ENCODING         = UTF-8
 FILE_PATTERNS          = *.h \
                          *.hh \
@@ -311,7 +310,7 @@ ENABLE_PREPROCESSING   = YES
 MACRO_EXPANSION        = YES
 EXPAND_ONLY_PREDEF     = NO
 SEARCH_INCLUDES        = YES
-INCLUDE_PATH           = ../../source/lib/rocprof-sys-user
+INCLUDE_PATH           = ../../source/lib/rocprof-sys-common-api ../../source/lib/rocprof-sys-causal-api
 INCLUDE_FILE_PATTERNS  = *.h \
                          *.hpp
 PREDEFINED             = ROCPROFSYS_PUBLIC_API= \

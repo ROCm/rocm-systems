@@ -7,7 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vscratch.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna4 {
@@ -26,8 +26,20 @@ ScratchLoadU8Vscratch::ScratchLoadU8Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
+
+namespace detail {
+DecodeResult decodeScratchLoadU8Vscratch(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_u8", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchLoadU8Vscratch>(opcode);
+}
+} // namespace detail
 
 ScratchLoadI8Vscratch::ScratchLoadI8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_i8", reinterpret_cast<const OpEncoding *>(inst),
@@ -43,8 +55,20 @@ ScratchLoadI8Vscratch::ScratchLoadI8Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
+
+namespace detail {
+DecodeResult decodeScratchLoadI8Vscratch(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_i8", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchLoadI8Vscratch>(opcode);
+}
+} // namespace detail
 
 ScratchLoadU16Vscratch::ScratchLoadU16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -60,8 +84,20 @@ ScratchLoadU16Vscratch::ScratchLoadU16Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
+
+namespace detail {
+DecodeResult decodeScratchLoadU16Vscratch(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_u16", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchLoadU16Vscratch>(opcode);
+}
+} // namespace detail
 
 ScratchLoadI16Vscratch::ScratchLoadI16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_i16", reinterpret_cast<const OpEncoding *>(inst),
@@ -77,8 +113,20 @@ ScratchLoadI16Vscratch::ScratchLoadI16Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
+
+namespace detail {
+DecodeResult decodeScratchLoadI16Vscratch(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_i16", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchLoadI16Vscratch>(opcode);
+}
+} // namespace detail
 
 ScratchLoadB32Vscratch::ScratchLoadB32Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -94,8 +142,20 @@ ScratchLoadB32Vscratch::ScratchLoadB32Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
+
+namespace detail {
+DecodeResult decodeScratchLoadB32Vscratch(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_b32", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchLoadB32Vscratch>(opcode);
+}
+} // namespace detail
 
 ScratchLoadB64Vscratch::ScratchLoadB64Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -111,8 +171,20 @@ ScratchLoadB64Vscratch::ScratchLoadB64Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
+
+namespace detail {
+DecodeResult decodeScratchLoadB64Vscratch(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_b64", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchLoadB64Vscratch>(opcode);
+}
+} // namespace detail
 
 ScratchLoadB96Vscratch::ScratchLoadB96Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_b96", reinterpret_cast<const OpEncoding *>(inst),
@@ -128,8 +200,20 @@ ScratchLoadB96Vscratch::ScratchLoadB96Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
+
+namespace detail {
+DecodeResult decodeScratchLoadB96Vscratch(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_b96", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchLoadB96Vscratch>(opcode);
+}
+} // namespace detail
 
 ScratchLoadB128Vscratch::ScratchLoadB128Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_b128", reinterpret_cast<const OpEncoding *>(inst),
@@ -145,8 +229,20 @@ ScratchLoadB128Vscratch::ScratchLoadB128Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
+
+namespace detail {
+DecodeResult decodeScratchLoadB128Vscratch(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_b128", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchLoadB128Vscratch>(opcode);
+}
+} // namespace detail
 
 ScratchStoreB8Vscratch::ScratchStoreB8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b8", reinterpret_cast<const OpEncoding *>(inst),
@@ -162,8 +258,20 @@ ScratchStoreB8Vscratch::ScratchStoreB8Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
+
+namespace detail {
+DecodeResult decodeScratchStoreB8Vscratch(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_b8", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchStoreB8Vscratch>(opcode);
+}
+} // namespace detail
 
 ScratchStoreB16Vscratch::ScratchStoreB16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b16", reinterpret_cast<const OpEncoding *>(inst),
@@ -179,8 +287,20 @@ ScratchStoreB16Vscratch::ScratchStoreB16Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
+
+namespace detail {
+DecodeResult decodeScratchStoreB16Vscratch(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_b16", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchStoreB16Vscratch>(opcode);
+}
+} // namespace detail
 
 ScratchStoreB32Vscratch::ScratchStoreB32Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -196,8 +316,20 @@ ScratchStoreB32Vscratch::ScratchStoreB32Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
+
+namespace detail {
+DecodeResult decodeScratchStoreB32Vscratch(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_b32", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchStoreB32Vscratch>(opcode);
+}
+} // namespace detail
 
 ScratchStoreB64Vscratch::ScratchStoreB64Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -213,8 +345,20 @@ ScratchStoreB64Vscratch::ScratchStoreB64Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
+
+namespace detail {
+DecodeResult decodeScratchStoreB64Vscratch(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_b64", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchStoreB64Vscratch>(opcode);
+}
+} // namespace detail
 
 ScratchStoreB96Vscratch::ScratchStoreB96Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b96", reinterpret_cast<const OpEncoding *>(inst),
@@ -230,8 +374,20 @@ ScratchStoreB96Vscratch::ScratchStoreB96Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
+
+namespace detail {
+DecodeResult decodeScratchStoreB96Vscratch(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_b96", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchStoreB96Vscratch>(opcode);
+}
+} // namespace detail
 
 ScratchStoreB128Vscratch::ScratchStoreB128Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_b128", reinterpret_cast<const OpEncoding *>(inst),
@@ -247,8 +403,20 @@ ScratchStoreB128Vscratch::ScratchStoreB128Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
+
+namespace detail {
+DecodeResult decodeScratchStoreB128Vscratch(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_b128", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchStoreB128Vscratch>(opcode);
+}
+} // namespace detail
 
 ScratchLoadD16U8Vscratch::ScratchLoadD16U8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
@@ -264,8 +432,20 @@ ScratchLoadD16U8Vscratch::ScratchLoadD16U8Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
+
+namespace detail {
+DecodeResult decodeScratchLoadD16U8Vscratch(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_d16_u8", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchLoadD16U8Vscratch>(opcode);
+}
+} // namespace detail
 
 void ScratchLoadD16U8Vscratch::implicit_uses(RegisterSet &uses) const {
   Vscratch::implicit_uses(uses);
@@ -287,8 +467,20 @@ ScratchLoadD16I8Vscratch::ScratchLoadD16I8Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
+
+namespace detail {
+DecodeResult decodeScratchLoadD16I8Vscratch(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_d16_i8", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchLoadD16I8Vscratch>(opcode);
+}
+} // namespace detail
 
 void ScratchLoadD16I8Vscratch::implicit_uses(RegisterSet &uses) const {
   Vscratch::implicit_uses(uses);
@@ -310,8 +502,20 @@ ScratchLoadD16B16Vscratch::ScratchLoadD16B16Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
+
+namespace detail {
+DecodeResult decodeScratchLoadD16B16Vscratch(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_d16_b16", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchLoadD16B16Vscratch>(opcode);
+}
+} // namespace detail
 
 void ScratchLoadD16B16Vscratch::implicit_uses(RegisterSet &uses) const {
   Vscratch::implicit_uses(uses);
@@ -333,8 +537,20 @@ ScratchLoadD16HiU8Vscratch::ScratchLoadD16HiU8Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
+
+namespace detail {
+DecodeResult decodeScratchLoadD16HiU8Vscratch(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_d16_hi_u8", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchLoadD16HiU8Vscratch>(opcode);
+}
+} // namespace detail
 
 void ScratchLoadD16HiU8Vscratch::implicit_uses(RegisterSet &uses) const {
   Vscratch::implicit_uses(uses);
@@ -356,8 +572,20 @@ ScratchLoadD16HiI8Vscratch::ScratchLoadD16HiI8Vscratch(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
+
+namespace detail {
+DecodeResult decodeScratchLoadD16HiI8Vscratch(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_d16_hi_i8", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchLoadD16HiI8Vscratch>(opcode);
+}
+} // namespace detail
 
 void ScratchLoadD16HiI8Vscratch::implicit_uses(RegisterSet &uses) const {
   Vscratch::implicit_uses(uses);
@@ -379,8 +607,21 @@ ScratchLoadD16HiB16Vscratch::ScratchLoadD16HiB16Vscratch(const MachineInst *inst
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
+
+namespace detail {
+DecodeResult decodeScratchLoadD16HiB16Vscratch(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_d16_hi_b16", reinterpret_cast<const Vscratch::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchLoadD16HiB16Vscratch>(opcode);
+}
+} // namespace detail
 
 void ScratchLoadD16HiB16Vscratch::implicit_uses(RegisterSet &uses) const {
   Vscratch::implicit_uses(uses);
@@ -402,8 +643,21 @@ ScratchStoreD16HiB8Vscratch::ScratchStoreD16HiB8Vscratch(const MachineInst *inst
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
+
+namespace detail {
+DecodeResult decodeScratchStoreD16HiB8Vscratch(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_d16_hi_b8", reinterpret_cast<const Vscratch::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchStoreD16HiB8Vscratch>(opcode);
+}
+} // namespace detail
 
 ScratchStoreD16HiB16Vscratch::ScratchStoreD16HiB16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
@@ -419,8 +673,21 @@ ScratchStoreD16HiB16Vscratch::ScratchStoreD16HiB16Vscratch(const MachineInst *in
   num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
+
+namespace detail {
+DecodeResult decodeScratchStoreD16HiB16Vscratch(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_d16_hi_b16", reinterpret_cast<const Vscratch::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchStoreD16HiB16Vscratch>(opcode);
+}
+} // namespace detail
 
 ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst)
     : Vscratch("scratch_load_block", reinterpret_cast<const OpEncoding *>(inst),
@@ -438,8 +705,20 @@ ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
+
+namespace detail {
+DecodeResult decodeScratchLoadBlockVscratch(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_load_block", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchLoadBlockVscratch>(opcode);
+}
+} // namespace detail
 
 ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst)
     : Vscratch("scratch_store_block", reinterpret_cast<const OpEncoding *>(inst),
@@ -457,8 +736,20 @@ ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
 }
+
+namespace detail {
+DecodeResult decodeScratchStoreBlockVscratch(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vscratch::validate_encoding(
+      "scratch_store_block", reinterpret_cast<const Vscratch::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ScratchStoreBlockVscratch>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna4
 } // namespace rocjitsu

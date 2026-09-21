@@ -41,6 +41,8 @@ INTERFACE library that contributes an include path and nothing to link.
 | File | Description |
 |------|-------------|
 | `log.h` | Compile-time and runtime configurable logging with named groups (VM, CP). Thread-safe, supports lazy evaluation via lambda forms. Use `Logger::print<GroupId>()` for group-filtered output. |
+| `result.h` | No-throw `Result` and `FailureOr<T>` return types for expected failures. |
+| `diagnostic.h` | Non-owning diagnostic sinks and stream-style error construction for result-returning APIs. |
 | `except.h` | Exception hierarchy: `Exception` (base), `InvalidInst`, `UnimplementedInst`, `ConfigError`. All derive from `std::exception`. |
 
 ### Miscellaneous

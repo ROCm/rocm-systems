@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
+#include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
 #include "simdojo/sim/exec_mode.h"
 
 #include <gtest/gtest.h>
@@ -19,6 +20,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <future>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -42,6 +44,7 @@ using rocjitsu::amdgpu::L1VectorCache;
 using rocjitsu::amdgpu::L2Cache;
 using rocjitsu::amdgpu::MemorySideCache;
 using rocjitsu::amdgpu::Mtype;
+using rocjitsu::amdgpu::RequestMtypeResolver;
 
 void increment_u32(uint8_t *line, uint32_t offset) {
   uint32_t value = 0;
@@ -318,6 +321,352 @@ private:
   std::vector<uint8_t> bytes_;
   simdojo::Port *port_ = nullptr;
 };
+
+class L1CacheMtypeTest : public testing::Test {
+protected:
+  static constexpr uint32_t kVmid = 7;
+  static constexpr uint64_t kBase = 0x100000;
+  static constexpr uint64_t kAddr = kBase + GpuMemory::PAGE_SIZE - sizeof(uint32_t);
+  static constexpr uint32_t kFirst = 0x11112222;
+  static constexpr uint32_t kSecond = 0x33334444;
+  static constexpr uint32_t kFirstReplacement = 0x55556666;
+  static constexpr uint32_t kSecondReplacement = 0x77778888;
+  static constexpr std::array<uint32_t, 2> kValues = {kFirst, kSecond};
+
+  void map_pages(Mtype first_mtype, Mtype second_mtype) {
+    process_.map_pages(kBase, first_page_.data(), first_page_.size(), first_mtype);
+    process_.map_pages(kBase + GpuMemory::PAGE_SIZE, second_page_.data(), second_page_.size(),
+                       second_mtype);
+    memory_.register_process(kVmid, &process_.page_table_, &process_.page_table_mutex_,
+                             process_.page_table_generation(), process_.page_table_request_mutex());
+    l2_.set_backing_memory(&memory_);
+  }
+
+  void write_words(uint32_t first, uint32_t second) {
+    std::memcpy(first_page_.data() + GpuMemory::PAGE_SIZE - sizeof(first), &first, sizeof(first));
+    std::memcpy(second_page_.data(), &second, sizeof(second));
+  }
+
+  std::array<uint32_t, 2> read_words() const {
+    std::array<uint32_t, 2> result{};
+    std::memcpy(&result[0], first_page_.data() + GpuMemory::PAGE_SIZE - sizeof(result[0]),
+                sizeof(result[0]));
+    std::memcpy(&result[1], second_page_.data(), sizeof(result[1]));
+    return result;
+  }
+
+  std::array<uint8_t, GpuMemory::PAGE_SIZE> first_page_{};
+  std::array<uint8_t, GpuMemory::PAGE_SIZE> second_page_{};
+  rocjitsu::KfdProcess process_{kVmid};
+  GpuMemory memory_{"memory"};
+  L2Cache l2_{"l2"};
+};
+
+TEST_F(L1CacheMtypeTest, ScalarLoadKeepsPageSpecificMtypeAcrossBoundary) {
+  write_words(kFirst, kSecond);
+  map_pages(Mtype::RW, Mtype::UC);
+  L1ScalarCache l1(&l2_);
+  l1.set_memory(&memory_);
+
+  std::array<uint32_t, 2> result{};
+  l1.load(kAddr, result.size(), result.data(), kVmid);
+  ASSERT_EQ(result, kValues);
+
+  write_words(kFirstReplacement, kSecondReplacement);
+  l1.load(kAddr, result.size(), result.data(), kVmid);
+
+  EXPECT_EQ(result[0], kFirst);
+  EXPECT_EQ(result[1], kSecondReplacement);
+}
+
+TEST_F(L1CacheMtypeTest, ScalarLoadBytesKeepsPageSpecificMtypeAcrossBoundary) {
+  write_words(kFirst, kSecond);
+  map_pages(Mtype::RW, Mtype::UC);
+  L1ScalarCache l1(&l2_);
+  l1.set_memory(&memory_);
+
+  std::array<uint32_t, 2> result{};
+  l1.load_bytes(kAddr, sizeof(result), reinterpret_cast<uint8_t *>(result.data()), kVmid);
+  ASSERT_EQ(result, kValues);
+
+  write_words(kFirstReplacement, kSecondReplacement);
+  l1.load_bytes(kAddr, sizeof(result), reinterpret_cast<uint8_t *>(result.data()), kVmid);
+
+  EXPECT_EQ(result[0], kFirst);
+  EXPECT_EQ(result[1], kSecondReplacement);
+}
+
+TEST_F(L1CacheMtypeTest, PageMtypeMutationRefreshesLiveResolver) {
+  write_words(kFirst, kSecond);
+  map_pages(Mtype::RW, Mtype::UC);
+  L1ScalarCache l1(&l2_);
+  l1.set_memory(&memory_);
+
+  uint32_t result = 0;
+  l1.load(kAddr, 1, &result, kVmid);
+  ASSERT_EQ(result, kFirst);
+
+  RequestMtypeResolver request(&memory_, kVmid);
+  ASSERT_EQ(request.at(kAddr), Mtype::RW);
+  process_.set_page_mtype(kBase, GpuMemory::PAGE_SIZE, Mtype::CC);
+  write_words(kFirstReplacement, kSecond);
+  EXPECT_EQ(request.at(kAddr + 1), Mtype::CC);
+
+  l1.load(kAddr, 1, &result, kVmid);
+  EXPECT_EQ(result, kFirstReplacement);
+}
+
+TEST_F(L1CacheMtypeTest, VmidRebindingRefreshesLiveResolverAndUsesNewPolicy) {
+  write_words(kFirst, kSecond);
+  map_pages(Mtype::RW, Mtype::RW);
+  L1ScalarCache l1(&l2_);
+  l1.set_memory(&memory_);
+
+  uint32_t result = 0;
+  l1.load(kAddr, 1, &result, kVmid);
+  ASSERT_EQ(result, kFirst);
+
+  rocjitsu::KfdProcess replacement_process(kVmid);
+  std::array<uint8_t, GpuMemory::PAGE_SIZE> replacement_page{};
+  std::memcpy(replacement_page.data() + GpuMemory::PAGE_SIZE - sizeof(kFirstReplacement),
+              &kFirstReplacement, sizeof(kFirstReplacement));
+  replacement_process.map_pages(kBase, replacement_page.data(), replacement_page.size(), Mtype::UC);
+
+  RequestMtypeResolver request(&memory_, kVmid);
+  ASSERT_EQ(request.at(kAddr), Mtype::RW);
+  memory_.register_process(
+      kVmid, &replacement_process.page_table_, &replacement_process.page_table_mutex_,
+      replacement_process.page_table_generation(), replacement_process.page_table_request_mutex());
+  EXPECT_EQ(request.at(kAddr + 1), Mtype::UC);
+
+  l1.load(kAddr, 1, &result, kVmid);
+  EXPECT_EQ(result, kFirstReplacement);
+}
+
+TEST_F(L1CacheMtypeTest, VmidUnregistrationRefreshesLiveResolver) {
+  map_pages(Mtype::UC, Mtype::UC);
+
+  RequestMtypeResolver request(&memory_, kVmid);
+  ASSERT_EQ(request.at(kAddr), Mtype::UC);
+  memory_.unregister_process(kVmid);
+  EXPECT_EQ(request.at(kAddr + 1), Mtype::RW);
+  EXPECT_FALSE(memory_.is_mapped(kAddr, kVmid));
+}
+
+TEST_F(L1CacheMtypeTest, VectorLoadKeepsPageSpecificMtypeAcrossBoundary) {
+  write_words(kFirst, kSecond);
+  map_pages(Mtype::RW, Mtype::UC);
+  L1VectorCache l1(&l2_);
+  l1.set_memory(&memory_);
+
+  const uint64_t addrs[] = {kAddr};
+  std::array<uint32_t, 2> result{};
+  l1.load(addrs, /*lane_mask=*/1, sizeof(uint32_t), result.size(),
+          reinterpret_cast<uint8_t *>(result.data()), Mtype::RW, /*non_temporal=*/false,
+          /*request_l1_bypass=*/false, /*wf_size=*/1, kVmid);
+  ASSERT_EQ(result, kValues);
+
+  write_words(kFirstReplacement, kSecondReplacement);
+  l1.load(addrs, /*lane_mask=*/1, sizeof(uint32_t), result.size(),
+          reinterpret_cast<uint8_t *>(result.data()), Mtype::RW, /*non_temporal=*/false,
+          /*request_l1_bypass=*/false, /*wf_size=*/1, kVmid);
+
+  EXPECT_EQ(result[0], kFirst);
+  EXPECT_EQ(result[1], kSecondReplacement);
+}
+
+TEST_F(L1CacheMtypeTest, ScalarStoreKeepsPageSpecificMtypeAcrossBoundary) {
+  map_pages(Mtype::RW, Mtype::UC);
+  L1ScalarCache l1(&l2_);
+  l1.set_memory(&memory_);
+
+  l1.store(kAddr, kValues.size(), kValues.data(), kVmid);
+
+  EXPECT_EQ(read_words(), kValues);
+  EXPECT_EQ(l2_.backing_read_transactions(), 1u);
+}
+
+TEST_F(L1CacheMtypeTest, VectorStoreKeepsPageSpecificMtypeAcrossBoundary) {
+  map_pages(Mtype::RW, Mtype::UC);
+  L1VectorCache l1(&l2_);
+  l1.set_memory(&memory_);
+
+  const uint64_t addrs[] = {kAddr};
+  l1.store(addrs, /*lane_mask=*/1, sizeof(uint32_t), kValues.size(),
+           reinterpret_cast<const uint8_t *>(kValues.data()), Mtype::RW,
+           /*non_temporal=*/false, /*wf_size=*/1, kVmid);
+
+  EXPECT_EQ(read_words(), kValues);
+  EXPECT_EQ(l2_.backing_read_transactions(), 1u);
+}
+
+TEST_F(L1CacheMtypeTest, VectorStoreKeepsUcThenRwMtypeAcrossBoundary) {
+  map_pages(Mtype::UC, Mtype::RW);
+  L1VectorCache l1(&l2_);
+  l1.set_memory(&memory_);
+
+  const uint64_t addrs[] = {kAddr};
+  l1.store(addrs, /*lane_mask=*/1, sizeof(uint32_t), kValues.size(),
+           reinterpret_cast<const uint8_t *>(kValues.data()), Mtype::RW,
+           /*non_temporal=*/false, /*wf_size=*/1, kVmid);
+
+  EXPECT_EQ(read_words(), kValues);
+  EXPECT_EQ(l2_.backing_read_transactions(), 1u);
+}
+
+TEST(L2CacheTest, FullLineStoresSkipBackingReads) {
+  constexpr uint64_t kAddr = 0x180000;
+  constexpr uint32_t kLanes = L2Cache::LINE_SIZE / sizeof(uint32_t);
+  constexpr uint64_t kLaneMask = ~uint64_t{0} >> (64 - kLanes);
+  for (Mtype mtype : {Mtype::RW, Mtype::CC, Mtype::WB, Mtype::UC}) {
+    for (bool through_l1 : {false, true}) {
+      SCOPED_TRACE(static_cast<int>(mtype));
+      SCOPED_TRACE(through_l1);
+      GpuMemory memory("memory");
+      L2Cache l2("l2");
+      l2.set_backing_memory(&memory);
+      L1VectorCache l1(&l2);
+      std::array<uint64_t, kLanes> addrs{};
+      std::array<uint32_t, kLanes> values{};
+      std::array<uint32_t, kLanes> actual{};
+      for (uint32_t lane = 0; lane < kLanes; ++lane)
+        addrs[lane] = kAddr + lane * sizeof(uint32_t);
+
+      for (uint32_t iteration = 0; iteration < 2; ++iteration) {
+        for (uint32_t lane = 0; lane < kLanes; ++lane)
+          values[lane] = 0x12340000 + iteration * kLanes + lane;
+        const auto *bytes = reinterpret_cast<const uint8_t *>(values.data());
+        const uint64_t reads_before = l2.backing_read_transactions();
+        if (through_l1)
+          l1.store(addrs.data(), /*lane_mask=*/kLaneMask, sizeof(uint32_t), /*num_elems=*/1, bytes,
+                   mtype, /*non_temporal=*/false, /*wf_size=*/kLanes);
+        else
+          l2.write(kAddr, bytes, sizeof(values), mtype);
+        EXPECT_EQ(l2.backing_read_transactions(), reads_before);
+        memory.read_block(
+            kAddr, std::span<uint8_t>(reinterpret_cast<uint8_t *>(actual.data()), sizeof(actual)));
+        EXPECT_EQ(actual, values);
+        if (through_l1)
+          l1.load(addrs.data(), /*lane_mask=*/kLaneMask, sizeof(uint32_t), /*num_elems=*/1,
+                  reinterpret_cast<uint8_t *>(actual.data()), mtype,
+                  /*non_temporal=*/false, /*request_l1_bypass=*/false, /*wf_size=*/kLanes);
+        else
+          l2.read(kAddr, reinterpret_cast<uint8_t *>(actual.data()), sizeof(actual), mtype);
+        EXPECT_EQ(actual, values);
+      }
+    }
+  }
+}
+
+TEST(L2CacheTest, FullLineStorePublishesDirtyEviction) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  constexpr uint64_t kAddr = 0x180000;
+  constexpr uint64_t kSetStride = L2Cache::LINE_SIZE * L2Cache::NUM_SETS;
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> replacement{};
+  dirty.fill(0x55);
+  replacement.fill(0xaa);
+  for (uint32_t way = 0; way < L2Cache::ASSOCIATIVITY; ++way)
+    l2.writeback_line(kAddr + way * kSetStride, dirty.data());
+
+  const uint64_t destination = kAddr + L2Cache::ASSOCIATIVITY * kSetStride;
+  const uint64_t reads_before = l2.backing_read_transactions();
+  l2.write(destination, replacement.data(), replacement.size());
+  EXPECT_EQ(l2.backing_read_transactions(), reads_before);
+  std::array<uint8_t, L2Cache::LINE_SIZE> actual{};
+  memory.read_block(kAddr, actual);
+  EXPECT_EQ(actual, dirty);
+  memory.read_block(destination, actual);
+  EXPECT_EQ(actual, replacement);
+}
+
+TEST(L2CacheTest, FullLineStoreEvictsDirtyLineUnderItsOwningVmid) {
+  constexpr uint32_t kVmidA = 7;
+  constexpr uint32_t kVmidB = 11;
+  constexpr uint64_t kAddr = 0x180000;
+  constexpr uint64_t kSetStride = L2Cache::LINE_SIZE * L2Cache::NUM_SETS;
+  std::array<std::array<uint8_t, GpuMemory::PAGE_SIZE>, L2Cache::ASSOCIATIVITY> pages_a{};
+  std::array<uint8_t, GpuMemory::PAGE_SIZE> page_b{};
+  rocjitsu::KfdProcess process_a(kVmidA), process_b(kVmidB);
+  GpuMemory memory("memory");
+  for (uint32_t way = 0; way < pages_a.size(); ++way)
+    process_a.map_pages(kAddr + way * kSetStride, pages_a[way].data(), pages_a[way].size());
+  process_b.map_pages(kAddr, page_b.data(), page_b.size());
+  for (auto *process : {&process_a, &process_b})
+    memory.register_process(process == &process_a ? kVmidA : kVmidB, &process->page_table_,
+                            &process->page_table_mutex_, process->page_table_generation(),
+                            process->page_table_request_mutex());
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{}, replacement{}, actual{};
+  dirty.fill(0x55);
+  replacement.fill(0xaa);
+  for (uint32_t way = 0; way < pages_a.size(); ++way)
+    l2.writeback_line(kAddr + way * kSetStride, dirty.data(), Mtype::RW, kVmidA);
+  EXPECT_EQ(pages_a[0][0], 0u);
+  const uint64_t reads_before = l2.backing_read_transactions();
+  // The same GPU VA misses because the store belongs to a different process.
+  l2.write(kAddr, replacement.data(), replacement.size(), Mtype::RW, kVmidB);
+  EXPECT_EQ(l2.backing_read_transactions(), reads_before);
+  memory.read_block(kAddr, actual, kVmidA);
+  EXPECT_EQ(actual, dirty);
+  memory.read_block(kAddr, actual, kVmidB);
+  EXPECT_EQ(actual, replacement);
+  l2.read(kAddr, actual.data(), actual.size(), Mtype::RW, kVmidB);
+  EXPECT_EQ(actual, replacement);
+  l2.read(kAddr, actual.data(), actual.size(), Mtype::RW, kVmidA);
+  EXPECT_EQ(actual, dirty);
+}
+
+TEST(L2CacheTest, FullLineStoreReplacesResidentDirtyBytes) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  constexpr uint64_t kAddr = 0x180000;
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{}, replacement{}, external{}, actual{};
+  dirty.fill(0x55);
+  replacement.fill(0xaa);
+  external.fill(0x33);
+  l2.writeback_line(kAddr, dirty.data());
+  const uint64_t reads_before = l2.backing_read_transactions();
+  l2.write(kAddr, replacement.data(), replacement.size());
+  EXPECT_EQ(l2.backing_read_transactions(), reads_before);
+  l2.read(kAddr, actual.data(), actual.size());
+  EXPECT_EQ(actual, replacement);
+  memory.read_block(kAddr, actual);
+  EXPECT_EQ(actual, replacement);
+  // A subsequent flush must not publish stale dirty bytes over a host update.
+  memory.write_block(kAddr, external);
+  l2.flush_line(kAddr);
+  memory.read_block(kAddr, actual);
+  EXPECT_EQ(actual, external);
+}
+
+TEST(L2CacheTest, UnalignedVectorStoreFetchesOnlyPartialLines) {
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  L1VectorCache l1(&l2);
+  constexpr uint64_t kAddr = 0x180000;
+  std::array<uint8_t, 3 * L2Cache::LINE_SIZE> initial{};
+  initial.fill(0xa5);
+  memory.write_block(kAddr, initial);
+  std::array<uint8_t, 2 * L2Cache::LINE_SIZE> values{};
+  for (uint32_t i = 0; i < values.size(); ++i)
+    values[i] = static_cast<uint8_t>(i);
+  std::array<uint8_t, 3 * L2Cache::LINE_SIZE> expected = initial;
+  std::copy(values.begin(), values.end(), expected.begin() + sizeof(uint32_t));
+  const uint64_t addrs[] = {kAddr + sizeof(uint32_t)};
+  l1.store(addrs, /*lane_mask=*/1, sizeof(uint32_t), values.size() / sizeof(uint32_t),
+           values.data(), Mtype::RW,
+           /*non_temporal=*/false, /*wf_size=*/1);
+  EXPECT_EQ(l2.backing_read_transactions(), 2u);
+  std::array<uint8_t, initial.size()> actual{};
+  memory.read_block(kAddr, actual);
+  EXPECT_EQ(actual, expected);
+}
 
 TEST(L2CacheThreadingTest, ConcurrentDifferentSetWritesArePreserved) {
   GpuMemory memory("memory");

@@ -48,10 +48,7 @@ env:
   # TODO(jrmadsen): replace LD_RUNPATH_FLAG, GPU_TARGETS, etc. with internal handling in cmake
   ROCM_PATH: "/opt/rocm"
   PYTHON_VENV_PATH: ".venv-rocprofiler-sdk"
-  # Held at 3.25 rather than develop's 4.x: this branch's external submodules
-  # (json, pybind11, sqlite, yaml-cpp) still declare cmake_minimum_required
-  # below 3.5, which CMake 4 rejects outright.
-  CMAKE_VERSION_DEB: "3.25.0"
+  CMAKE_VERSION_DEB: "4.4.3"
   GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
   SUBMODULE_PATHS: "projects/rocprofiler-sdk projects/aqlprofile projects/rocprofiler-register projects/rocr-runtime projects/clr projects/hip"

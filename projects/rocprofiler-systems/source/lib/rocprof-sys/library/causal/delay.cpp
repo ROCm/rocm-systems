@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/causal/delay.hpp"
-#include "common/units.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/components/causal_gotcha.hpp"
@@ -24,6 +23,7 @@
 #include <atomic>
 #include <chrono>
 #include <random>
+#include <ratio>
 
 namespace rocprofsys
 {
@@ -44,17 +44,17 @@ std::int64_t
 compute_sleep_for_overhead()
 {
     using random_engine_t = std::mt19937_64;
-    auto   _engine        = random_engine_t{ std::random_device{}() };
-    auto   _dist          = std::uniform_int_distribution<std::int64_t>{ 0, 5 };
-    size_t _ntot          = 250;
-    size_t _nwarm         = 50;
-    auto   _stats         = tim::statistics<double>{};
+    auto         _engine  = random_engine_t{ std::random_device{}() };
+    auto         _dist    = std::uniform_int_distribution<std::int64_t>{ 0, 5 };
+    const size_t _ntot    = 250;
+    const size_t _nwarm   = 50;
+    auto         _stats   = tim::statistics<double>{};
     for(size_t i = 0; i < _ntot; ++i)
     {
-        auto         _val = _dist(_engine);
-        std::int64_t _beg = tracing::now();
+        auto               _val = _dist(_engine);
+        const std::int64_t _beg = tracing::now();
         std::this_thread::sleep_for(std::chrono::nanoseconds{ _val });
-        std::int64_t _end = tracing::now();
+        const std::int64_t _end = tracing::now();
         if(i < _nwarm) continue;
         auto _diff = (_end - _beg);
         if(_diff < _val)
@@ -65,9 +65,12 @@ compute_sleep_for_overhead()
         _stats += (_diff - _val);
     }
 
+    using nsec_d = std::chrono::duration<double, std::nano>;
+    using usec_d = std::chrono::duration<double, std::micro>;
     LOG_TRACE("[causal] overhead of std::this_thread::sleep_for(...) "
               "invocation = {} usec +/- {} usec",
-              _stats.get_mean() / units::usec, _stats.get_stddev() / units::usec);
+              usec_d{ nsec_d{ _stats.get_mean() } }.count(),
+              usec_d{ nsec_d{ _stats.get_stddev() } }.count());
 
     tim::manager::instance()->add_metadata([_stats](auto& ar) {
         ar(tim::cereal::make_nvp("causal thread sleep overhead [nsec]", _stats));

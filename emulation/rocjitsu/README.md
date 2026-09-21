@@ -14,19 +14,21 @@ real hardware. Supports three execution strategies:
 
 ## Supported architectures
 
-| Architecture | GFX Target | ISA Family | Simulation | DBT | DBI |
-|---|---|---|---|---|---|
-| CDNA1&trade; | gfx908 | GFX9 | Experimental | Experimental | Planned |
-| CDNA2&trade; | gfx90a | GFX9 | Experimental | Experimental | Planned |
-| CDNA3&trade; | gfx94x | GFX9 | Experimental | Experimental | Planned |
-| CDNA4&trade; | gfx950 | GFX9 | Beta | Experimental | Planned |
-| RDNA1&trade; | gfx1010 | GFX10 | Experimental | Experimental | Planned |
-| RDNA2&trade; | gfx1030 | GFX10 | Experimental | Experimental | Planned |
-| RDNA3&trade; | gfx1100 | GFX11 | Experimental | Experimental | Planned |
-| RDNA3.5&trade; | gfx1150 | GFX11 | Experimental | Experimental | Planned |
-| RDNA4&trade; | gfx1200 | GFX12 | Experimental | Experimental | Planned |
-| gfx1250      | gfx1250 | GFX12 | Experimental | Experimental | Planned |
-| RISC-V | RV64I | RV | Experimental | &mdash; | &mdash; |
+| Architecture | GFX Target | ISA Family | Simulation |
+|---|---|---|---|
+| CDNA1&trade; | gfx908 | GFX9 | Experimental |
+| CDNA2&trade; | gfx90a | GFX9 | Experimental |
+| CDNA3&trade; | gfx94x | GFX9 | Beta |
+| CDNA4&trade; | gfx950 | GFX9 | Beta |
+| CDNA5&trade; | gfx1250 | GFX12.5 | Beta |
+| RDNA1&trade; | gfx1010 | GFX10 | Experimental |
+| RDNA2&trade; | gfx1030 | GFX10 | Experimental |
+| RDNA3&trade; | gfx110x | GFX11 | Beta |
+| RDNA3.5&trade; | gfx1151 | GFX11.5 | Experimental |
+| RDNA4&trade; | gfx120x | GFX12 | Beta |
+| RISC-V | RV64I | RV | Experimental |
+
+CDNA4&trade; to CDNA3&trade; dynamic binary translation is experimental.
 
 <!-- \NPI new GPU: add a row to the supported-architectures table above. -->
 
@@ -44,7 +46,7 @@ lib/
       code/             Code object loader, basic block analysis
       code/dbt/         Dynamic binary translator
       code/patch/       Code object patcher, spill manager
-      analysis/         Register liveness and def-use analysis
+      code/analysis/    Register liveness and def-use analysis
       config/           JSON/FlatBuffers configuration
   util/                 Shared utilities
   python/amdisa/        ISA codegen pipeline
@@ -79,10 +81,10 @@ not found.
 
 ```bash
 # Local mode (in-process simulation)
-rocjitsu --config configs/gfx950_cdna4_kmd.json -- ./my_hip_app
+rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./my_hip_app
 
 # Daemon mode (separate daemon process)
-rocjitsu --daemon --config configs/gfx950_cdna4_kmd.json -- ./my_hip_app
+rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- ./my_hip_app
 ```
 
 See [docs/rocjitsu-cli.md](docs/rocjitsu-cli.md) for all CLI modes.
@@ -104,7 +106,7 @@ See
 ## Running PyTorch
 
 ```bash
-rocjitsu --daemon --config configs/gfx950_cdna4_kmd.json -- \
+rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- \
   python3 -c "import torch; x = torch.randn(4, 4, device='cuda'); print(x @ x)"
 ```
 
@@ -117,9 +119,11 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | Document | Description |
 |---|---|
 | [Building](docs/building.md) | Build options, sanitizers, container setup |
+| [Benchmarking](docs/benchmarking.md) | Reproducible performance and memory measurement protocol |
 | [Configuration](docs/configuration.md) | JSON config format and topology |
 | [CLI & Transport](docs/rocjitsu-cli.md) | CLI modes, daemon RPC protocol |
 | [Race Detector](docs/race-detector.md) | Race detection tutorial and internals |
+| [Debugging with ROCgdb](docs/rocgdb-debugging.md) | Debug emulated GPU kernels with ROCgdb: breakpoints, watchpoints, faults, multi-wave |
 
 ### Design
 

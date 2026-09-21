@@ -6,6 +6,9 @@
 # Architecture-agnostic ceilings for CI regression detection.
 
 import os
+
+# Optional[...] rather than the PEP 604 "float | None": these annotations are evaluated when the
+# module is imported, and the CI runners include distros whose system Python predates 3.10.
 from typing import Optional
 
 # Per-dispatch counter instrumentation allowance (ms).

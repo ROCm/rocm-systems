@@ -12,7 +12,8 @@ table ComputeUnitConfig {
   sgprs_per_wf: uint32;   // Scalar GPRs per wavefront.
   vgprs_per_wf: uint32;   // Vector GPRs per wavefront.
   lds_size_kb: uint32;    // Local Data Share size in kilobytes.
-  functional_quantum: uint32;  // Max instructions per advance() in FUNCTIONAL mode (0 = unbounded).
+  // Maximum CU step() iterations per functional dispatch quantum (0 = unbounded).
+  functional_quantum: uint32;
 }
 
 /// Configuration for a command processor.
@@ -67,19 +68,19 @@ table KfdDeviceInfo {
 
   // Compute organization (from kfd_topology.c kfd_fill_gpu_properties)
   simd_count: uint32;             // Total SIMD units (CUs * SIMDs/CU).
-  max_waves_per_simd: uint32 = 10;
-  num_shader_engines: uint32;    // Shader engines per XCC, matching the SoC's se[] count.
+  max_waves_per_simd: uint32 = null;
+  num_shader_engines: uint32 = null; // Shader engines per XCC, matching the SoC's se[] count.
                                  // KFD array_count is derived (times arrays/SE, and times
                                  // num_xcc for the sysfs node property).
-  num_shader_arrays_per_engine: uint32 = 1;
-  num_cu_per_sh: uint32;
+  num_shader_arrays_per_engine: uint32 = null;
+  num_cu_per_sh: uint32 = null;
   simd_per_cu: uint32 = 4;       // 4 for CDNA, 2 for RDNA.
-  wave_front_size: uint32 = 64;  // 64 for CDNA, 32 for RDNA.
-  max_slots_scratch_cu: uint32 = 32;
+  wave_front_size: uint32 = null; // 64 for CDNA, 32 for RDNA.
+  max_slots_scratch_cu: uint32 = null;
 
   // Memory (from kfd_topology.c and amdgpu_amdkfd.c)
   local_mem_size: uint64;         // VRAM size in bytes.
-  lds_size_kb: uint32 = 64;      // 64 for CDNA1/2, 128 for CDNA3/4 and RDNA2+.
+  lds_size_kb: uint32 = null;    // 64 for CDNA1/2, 128 for CDNA3/4 and RDNA2+.
   mem_width: uint32 = 4096;      // HBM interface width in bits.
   mem_clk_max: uint32 = 1200;    // Max memory clock (MHz).
 
@@ -108,6 +109,34 @@ table KfdDeviceInfo {
   capability: uint32 = 0;
   capability2: uint32 = 0;
   debug_prop: uint64 = 0;
+
+  // Appended to preserve existing field IDs. Required to be nonzero when
+  // num_sdma_engines is nonzero.
+  num_sdma_queues_per_engine: uint32;
+}
+
+/// How the GPU presents itself on a PCI bus, for front ends that attach it to a
+/// VMM rather than interposing the KFD ioctls.
+///
+/// Identity fields not repeated here come from KfdDeviceInfo: the vendor, device
+/// and revision a driver reads are the same values KFD reports. What is here is
+/// the bus shape, which nothing else in the simulation describes.
+///
+/// The class code is what a guest driver's PCI table matches on: amdgpu binds
+/// any AMD device presenting 0x120000 (processing accelerator) or a display
+/// class, and then asks the device what it is through IP discovery.
+table PciDeviceInfo {
+  class_code: uint32 = 0x120000;   // 24-bit PCI class, subclass and programming interface.
+  subsystem_vendor_id: uint32 = 0; // 0 = same as the vendor ID.
+  subsystem_id: uint32 = 0;        // 0 = same as the device ID.
+
+  // Aperture sizes. The register aperture must be large enough to reach every
+  // register the driver reads before IP discovery, the furthest of which sits
+  // at byte 0x5a800; a smaller one pushes those reads onto the indirect window.
+  // Every aperture size must be a power of two, as PCI requires of a BAR.
+  vram_aperture_bytes: uint64 = 0; // 0 = an implementation-chosen window, <= 256 MiB.
+  doorbell_aperture_bytes: uint64 = 2097152;
+  register_aperture_bytes: uint64 = 524288;
 }
 
 /// Top-level AMDGPU configuration.
@@ -118,6 +147,10 @@ table AmdgpuConfig {
   memory: GpuMemoryConfig;
   device: KfdDeviceInfo;         // KFD device identity for sysfs topology.
   num_gpus: uint32 = 1;          // Number of simulated GPU instances.
+  // Appended, not inserted: FlatBuffers assigns field IDs by declaration order,
+  // so placing this before num_gpus would renumber it and change how existing
+  // buffers read.
+  pci: PciDeviceInfo;            // Bus shape for PCI-attached front ends.
 }
 
 enum DbtExecutionBackend: byte {
@@ -177,6 +210,7 @@ table VirtualMachineConfig {
   arch: string;                // ISA architecture identifier (e.g., "cdna3", "rv64i").
   gpu: AmdgpuConfig;           // AMDGPU hardware configuration.
   programs: [ProgramConfig];   // Programs to load and dispatch.
+  target: string;              // Concrete GPU target (e.g., "gfx1250"); defaults by arch.
 }
 
 // ---------------------------------------------------------------------------
@@ -233,14 +267,39 @@ table TopologyDef {
 // Top-level simulation configuration.
 // ---------------------------------------------------------------------------
 
+/// Preferred host execution allocation. D includes the submitting caller;
+/// cost across G GPUs is E + G * (D - 1) + H.
+table ExecutionThreadChoice {
+  num_threads: uint32 = 1;
+  cpu_dispatch_threads: uint32 = 1;
+  async_helper_threads: uint32;
+}
+
 /// Top-level simulation configuration.
 table SimulationConfig {
   max_ticks: uint64;             // Maximum simulation ticks before halting.
-  num_threads: uint32;           // Number of simulation engine partitions (one per XCD when partitioned).
+  num_threads: uint32;           // Engine partitions. 0/omitted selects the execution-budget policy.
   exec_mode: string;             // Execution mode: "functional" (default) or "clocked".
   vm: VirtualMachineConfig;      // Virtual machine hardware model. Omit for dbt_guest-only configs.
   topology: TopologyDef;         // Declarative topology. Omit for dbt_guest-only configs.
   dbt_guest: DbtGuestConfig;     // Optional guest-GPU DBT interposition mode.
+  // Functional CU-dispatch width, including the calling command-processor thread.
+  // 0 or omission in JSON selects the execution-budget policy; a nonzero value
+  // applies per SoC. Each effective SoC width is capped at its largest per-CP CU
+  // count. This is host acceleration,
+  // not a modeled GPU resource: changing the width must preserve the observable
+  // result of race-free workloads.
+  cpu_dispatch_threads: uint32 = 1;
+  // Total engine + retained dispatch-worker + shared async-helper budget.
+  // 0/omitted uses affinity, keeping engine/dispatch cost at most 32.
+  // Preset helpers are additive, up to 48 total. Nonzero overrides the budget.
+  cpu_thread_budget: uint32;
+  // Ordered preferred allocations. Select the largest fitting effective cost.
+  // Omission falls back to serial execution; explicit knobs still apply.
+  thread_allocations: [ExecutionThreadChoice];
+  // Shared async helpers across this VM. -1 selects the table; zero disables.
+  // Append after thread_allocations to preserve existing checkpoint field IDs.
+  async_helper_threads: int32 = -1;
 }
 
 root_type SimulationConfig;

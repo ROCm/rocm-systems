@@ -9,8 +9,8 @@
 // Perfetto/database/AMD-SMI dependencies.
 //
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
-#include <spdlog/fmt/fmt.h>
 
 #include <array>
 #include <cstdint>
@@ -234,7 +234,7 @@ TEST_F(xcp_output_test, JpegBusyXcpMetricNaming)
     EXPECT_EQ(entries.size(), MAX_NUM_XCP * MAX_NUM_JPEG);
 
     // xcp1, engine 0 → index 1 * JPEG_COUNT + 0
-    size_t idx = 1 * MAX_NUM_JPEG;
+    const size_t idx = 1 * MAX_NUM_JPEG;
     EXPECT_EQ(entries[idx].pmc_name, "device_jpeg_activity_xcp1[0]");
     EXPECT_DOUBLE_EQ(entries[idx].value, 42.0);
 }
@@ -284,8 +284,8 @@ TEST_F(xcp_output_test, AllXcpPartitionsWritten)
     {
         for(size_t eng = 0; eng < MAX_NUM_VCN; ++eng)
         {
-            size_t idx           = xcp * MAX_NUM_VCN + eng;
-            auto   expected_name = "device_vcn_activity_xcp" + std::to_string(xcp) + "[" +
+            const size_t idx   = xcp * MAX_NUM_VCN + eng;
+            auto expected_name = "device_vcn_activity_xcp" + std::to_string(xcp) + "[" +
                                  std::to_string(eng) + "]";
             EXPECT_EQ(entries[idx].pmc_name, expected_name)
                 << "Mismatch at xcp=" << xcp << " eng=" << eng;
@@ -320,7 +320,7 @@ TEST_F(xcp_output_test, DeviceLevelVcnActivitySeparateFromXcp)
 // Track names follow "GPU [{id}] VCN Busy XCP_{xcp}: [{eng:02}] (S)"
 TEST_F(xcp_output_test, PerfettoXcpTrackNameFormat)
 {
-    std::uint32_t device_id = 0;
+    const std::uint32_t device_id = 0;
 
     auto vcn_name = format_perfetto_xcp_track(device_id, "VCN Busy", 3, 2);
     EXPECT_EQ(vcn_name, "GPU [0] VCN Busy XCP_3: [02] (S)");
@@ -361,7 +361,7 @@ TEST_F(xcp_output_test, PerfettoTrackKeyUniqueness)
 TEST_F(xcp_output_test, SentinelValuesSkipped)
 {
     std::vector<std::pair<std::string, double>> emitted;
-    std::uint32_t                               device_id = 0;
+    const std::uint32_t                         device_id = 0;
 
     // All sentinel by default from make_sentinel_metrics()
     for(size_t xcp = 0; xcp < m.xcp_stats.size(); ++xcp)

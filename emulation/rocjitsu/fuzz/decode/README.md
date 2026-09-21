@@ -77,7 +77,7 @@ ninja -C build-decode-afl rj_decode_fuzz
   build-decode-afl/fuzz/decode/rj_decode_fuzz --afl --target gfx1250
 ```
 
-`InvalidInst` is an ordinary rejection. Other exceptions, signals, sanitizer
+Decoder failure is an ordinary rejection. Exceptions from unrelated failures, signals, sanitizer
 findings, and decoder invariant failures remain crashes for AFL++ to retain.
 
 ## Offline LLVM comparison

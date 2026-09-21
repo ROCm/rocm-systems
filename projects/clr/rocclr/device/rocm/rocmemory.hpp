@@ -129,6 +129,9 @@ class Memory : public device::Memory {
   //! Validates allocated memory for possible workarounds
   virtual bool ValidateMemory() { return true; }
 
+  //! Returns the reconstructed-SRD interop image descriptor (may be null).
+  hsa_amd_image_descriptor_t* getAmdImageDesc() const { return amdImageDesc_; }
+
  protected:
   bool allocateMapMemory(size_t allocationSize);
 
@@ -149,6 +152,15 @@ class Memory : public device::Memory {
   hsa_status_t interopMapBuffer(hsa_handle_t fdn,
                                 hsa_interop_map_flag_t flags = HSA_INTEROP_MAP_FLAG_NONE,
                                 size_t size_hint = 0);
+
+  // Allocate a zeroed interop image descriptor (amdImageDesc_) with version/deviceID set, so
+  // interopMapBuffer can stash imported-surface swizzle metadata for later SRD reconstruction.
+  // Returns true on success (or if already allocated). Windows-only use.
+  bool allocateInteropImageDescriptor();
+
+  // Free amdImageDesc_ (if any) and null it. Views borrow their owner's descriptor and must not
+  // call this; Buffer::destroy / Image::destroy skip views before reaching it.
+  void freeInteropImageDescriptor();
 
   // Place interop object into HSA's flat address space
   bool createInteropBuffer(GLenum targetType, int miplevel);
@@ -208,7 +220,8 @@ class Buffer : public roc::Memory {
 
   virtual bool ExportHandle(void* handle) const final;
 
-  virtual bool GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle) final;
+  virtual bool GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle,
+                                 unsigned long long flags) final;
 
   // Recreate the device memory using new size and alignment.
   bool recreate(size_t newSize, size_t newAlignment, bool forceSystem);

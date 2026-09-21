@@ -42,6 +42,6 @@ endif()
 hip_add_exe_to_target(NAME synchronizationTests
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
-                      COMPILE_OPTIONS -std=c++14)
+                      COMPILE_OPTIONS -std=c++17)
 
 add_dependencies(synchronizationTests memcpyInt_hsaco)

@@ -128,6 +128,7 @@ ncclResult_t wrap_ibv_symbols(void) {
 NCCL_PARAM(IbMQpRetryAll, "IB_MQP_RETRY_ALL", 0);
 NCCL_PARAM(IbMQpRetryCnt, "IB_MQP_RETRY_CNT", 34);
 NCCL_PARAM(IbMQpRetryTimeout, "IB_MQP_RETRY_SLEEP_MSEC", 100); // in milliseconds
+NCCL_PARAM(IbQueryPortSpeed, "IB_QUERY_PORT_SPEED", 1);
 
 #define IBV_ERR_EQ(e, code) (e == code || e == (-code))
 #define IBV_MQP_RETRY_ERRNO(e) (IBV_ERR_EQ(e, ETIMEDOUT))
@@ -229,6 +230,11 @@ ncclResult_t wrap_ibv_query_port(struct ibv_context* context, uint8_t port_num, 
 ncclResult_t wrap_ibv_query_gid(struct ibv_context* context, uint8_t port_num, int index, union ibv_gid* gid) {
   IBV_INT_CHECK_RET_ERRNO(ibvSymbols, ibv_internal_query_gid, ibv_internal_query_gid(context, port_num, index, gid), 0,
                           "ibv_query_gid");
+}
+
+ncclResult_t wrap_ibv_query_pkey(struct ibv_context* context, uint8_t port_num, int index, uint16_t* pkey) {
+  IBV_INT_CHECK_RET_ERRNO(ibvSymbols, ibv_internal_query_pkey, ibv_internal_query_pkey(context, port_num, index, pkey),
+                          0, "ibv_query_pkey");
 }
 
 ncclResult_t wrap_ibv_query_qp(struct ibv_qp* qp, struct ibv_qp_attr* attr, int attr_mask,
@@ -426,6 +432,25 @@ print:
   return;
 }
 
+static void printIbModifyQpHint(int status) {
+  switch (status) {
+  case ETIMEDOUT:
+    INFO(NCCL_NET, "HINT: In many cases this error indicates that the NICs are not cross-rail connected.");
+    INFO(NCCL_NET, "HINT: To confirm, set NCCL_CROSS_NIC=0 to disable cross-rail communication (see "
+                   "https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-cross-nic).");
+    return;
+  case EINVAL:
+    INFO(NCCL_NET, "HINT: In many cases this error indicates that an incorrect GID index is forced by "
+                   "NCCL_IB_GID_INDEX, or that a NIC's GID changed mid-run.");
+    INFO(NCCL_NET, "HINT: To confirm, set NCCL_IB_GID_INDEX=-1 to enable automatic detection and check "
+                   "'dmesg | grep -i gid' for GID changes (see "
+                   "https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html#nccl-ib-gid-index).");
+    return;
+  default:
+    break;
+  }
+}
+
 ncclResult_t wrap_ibv_modify_qp(struct ibv_qp* qp, struct ibv_qp_attr* attr, int attr_mask) {
   char qpMsg[1024];
   int ret = 0, attempts = 0;
@@ -447,6 +472,7 @@ ncclResult_t wrap_ibv_modify_qp(struct ibv_qp* qp, struct ibv_qp_attr* attr, int
   if (ret != 0) {
     ibvModifyQpLog(qp, attr->qp_state, attr, attr_mask, qpMsg, sizeof(qpMsg));
     WARN("Call to ibv_modify_qp failed with %d %s, %s", ret, strerror(ret), qpMsg);
+    printIbModifyQpHint(ret);
     return ncclSystemError;
   }
   return ncclSuccess;
@@ -464,6 +490,14 @@ ncclResult_t wrap_ibv_set_ece(
   int* supported) { /*returns 0 on success, or the value of errno on failure (which indicates the failure reason)*/
   IBV_INT_CHECK_RET_ERRNO_OPTIONAL(ibvSymbols, ibv_internal_set_ece, ibv_internal_set_ece(qp, ece), 0, "ibv_set_ece",
                                    supported);
+}
+
+ncclResult_t wrap_ibv_query_port_speed(struct ibv_context* context, uint8_t port_num, uint64_t* speed) {
+  if (!ncclParamIbQueryPortSpeed() || ibvSymbols.ibv_internal_query_port_speed == NULL) {
+    return ncclSystemError;
+  }
+  IBV_INT_CHECK_RET_ERRNO(ibvSymbols, ibv_internal_query_port_speed,
+                          ibv_internal_query_port_speed(context, port_num, speed), 0, "ibv_query_port_speed");
 }
 
 ncclResult_t wrap_ibv_event_type_str(char** ret, enum ibv_event_type event) {

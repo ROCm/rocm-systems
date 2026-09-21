@@ -19,7 +19,7 @@ Panel Config:
 
   - metric_table:
       id: 1601
-      title: "UTCL1 Metrics"
+      title: UTCL1 Metrics
       header:
         metric: Metric
         avg: Avg
@@ -28,44 +28,44 @@ Panel Config:
         unit: Unit
       metric:
         Total Requests from UTCL0:
-          avg: AVG(UTCL1_REQS_sum / $denom)
+          avg: SUM(UTCL1_REQS_sum) / SUM($denom)
           min: MIN(UTCL1_REQS_sum / $denom)
           max: MAX(UTCL1_REQS_sum / $denom)
           unit: (Count + $normUnit)
         Total Returns to UTCL0:
-          avg: AVG(UTCL1_RTNS_sum / $denom)
+          avg: SUM(UTCL1_RTNS_sum) / SUM($denom)
           min: MIN(UTCL1_RTNS_sum / $denom)
           max: MAX(UTCL1_RTNS_sum / $denom)
           unit: (Count + $normUnit)
         UTCL1 Lookup Hit Rate:
-          avg: AVG((100 * UTCL1_HITS_sum / UTCL1_REQS_sum) if (UTCL1_REQS_sum != 0) else None)
-          min: MIN((100 * UTCL1_HITS_sum / UTCL1_REQS_sum) if (UTCL1_REQS_sum != 0) else None)
-          max: MAX((100 * UTCL1_HITS_sum / UTCL1_REQS_sum) if (UTCL1_REQS_sum != 0) else None)
+          avg: 100 * SUM(UTCL1_HITS_sum) / SUM(UTCL1_REQS_sum)
+          min: 100 * MIN(UTCL1_HITS_sum / UTCL1_REQS_sum)
+          max: 100 * MAX(UTCL1_HITS_sum / UTCL1_REQS_sum)
           unit: Percent
         UTCL1-UTCL2 Requests:
-          avg: AVG(UTCL1_UTCL2_REQS_sum / $denom)
+          avg: SUM(UTCL1_UTCL2_REQS_sum) / SUM($denom)
           min: MIN(UTCL1_UTCL2_REQS_sum / $denom)
           max: MAX(UTCL1_UTCL2_REQS_sum / $denom)
           unit: (Count + $normUnit)
         UTCL1-UTCL2 Returns:
-          avg: AVG(UTCL1_UTCL2_RET_CNT_sum / $denom)
+          avg: SUM(UTCL1_UTCL2_RET_CNT_sum) / SUM($denom)
           min: MIN(UTCL1_UTCL2_RET_CNT_sum / $denom)
           max: MAX(UTCL1_UTCL2_RET_CNT_sum / $denom)
           unit: (Count + $normUnit)
         UTCL1-UTCL2 Request Latency:
-          avg: AVG((UTCL1_UTCL2_REQS_OUTSTANDING_ACCUM_sum / UTCL1_UTCL2_REQS_sum) if (UTCL1_UTCL2_REQS_sum != 0) else None)
-          min: MIN((UTCL1_UTCL2_REQS_OUTSTANDING_ACCUM_sum / UTCL1_UTCL2_REQS_sum) if (UTCL1_UTCL2_REQS_sum != 0) else None)
-          max: MAX((UTCL1_UTCL2_REQS_OUTSTANDING_ACCUM_sum / UTCL1_UTCL2_REQS_sum) if (UTCL1_UTCL2_REQS_sum != 0) else None)
+          avg: SUM(UTCL1_UTCL2_REQS_OUTSTANDING_sum) / SUM(UTCL1_UTCL2_REQS_sum)
+          min: MIN(UTCL1_UTCL2_REQS_OUTSTANDING_sum / UTCL1_UTCL2_REQS_sum)
+          max: MAX(UTCL1_UTCL2_REQS_OUTSTANDING_sum / UTCL1_UTCL2_REQS_sum)
           unit: Cycles
         UTCL1-UTCL2 Request Stall Rate:
-          avg: AVG((100 * UTCL1_STALL_UTCL2_CREDITS_sum / UTCL1_XLAT_REQ_BUSY_sum) if (UTCL1_XLAT_REQ_BUSY_sum != 0) else None)
-          min: MIN((100 * UTCL1_STALL_UTCL2_CREDITS_sum / UTCL1_XLAT_REQ_BUSY_sum) if (UTCL1_XLAT_REQ_BUSY_sum != 0) else None)
-          max: MAX((100 * UTCL1_STALL_UTCL2_CREDITS_sum / UTCL1_XLAT_REQ_BUSY_sum) if (UTCL1_XLAT_REQ_BUSY_sum != 0) else None)
+          avg: 100 * SUM(UTCL1_STALL_UTCL2_CREDITS_sum) / SUM(UTCL1_XLAT_REQ_BUSY_sum)
+          min: 100 * MIN(UTCL1_STALL_UTCL2_CREDITS_sum / UTCL1_XLAT_REQ_BUSY_sum)
+          max: 100 * MAX(UTCL1_STALL_UTCL2_CREDITS_sum / UTCL1_XLAT_REQ_BUSY_sum)
           unit: Percent
         UTCL1 Miss Handler FIFO Full Rate:
-          avg: AVG((100 * UTCL1_STALL_MH_FULL_sum / UTCL1_XLAT_REQ_BUSY_sum) if (UTCL1_XLAT_REQ_BUSY_sum != 0) else None)
-          min: MIN((100 * UTCL1_STALL_MH_FULL_sum / UTCL1_XLAT_REQ_BUSY_sum) if (UTCL1_XLAT_REQ_BUSY_sum != 0) else None)
-          max: MAX((100 * UTCL1_STALL_MH_FULL_sum / UTCL1_XLAT_REQ_BUSY_sum) if (UTCL1_XLAT_REQ_BUSY_sum != 0) else None)
+          avg: 100 * SUM(UTCL1_STALL_MH_FULL_sum) / SUM(UTCL1_XLAT_REQ_BUSY_sum)
+          min: 100 * MIN(UTCL1_STALL_MH_FULL_sum / UTCL1_XLAT_REQ_BUSY_sum)
+          max: 100 * MAX(UTCL1_STALL_MH_FULL_sum / UTCL1_XLAT_REQ_BUSY_sum)
           unit: Percent
 
   metrics_description:

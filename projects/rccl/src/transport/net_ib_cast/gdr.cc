@@ -32,10 +32,10 @@ static void ibGdrSupportInitOnce() {
     if (ncclIbScanDefaultPeerMemClients()) IbCastGdrModuleLoaded = 1;
 
     char strValue[MAX_STR_LEN];
-    ncclTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue);
+    ncclOsTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue, sizeof(strValue));
     if (strncmp("Hyper-V UEFI Release", strValue, 20) == 0) {
       int roMode = ncclParamIbCastPciRelaxedOrdering();
-      ncclTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue);
+      ncclOsTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue, sizeof(strValue));
       if (strcmp(strValue, "1") == 0 && roMode == 0) IbCastGdrModuleLoaded = 0;
     }
   }
