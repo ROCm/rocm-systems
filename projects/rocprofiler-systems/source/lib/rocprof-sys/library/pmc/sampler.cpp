@@ -65,10 +65,10 @@
 namespace rocprofsys::pmc
 {
 
-std::atomic<State>&
+std::atomic<state::process::State>&
 get_state()
 {
-    static std::atomic<State> _v{ State::PreInit };
+    static std::atomic<state::process::State> _v{ state::process::PreInit };
     return _v;
 }
 
@@ -117,7 +117,7 @@ using gpu_collector_t =
 
 #if ROCPROFILER_VERSION >= 600
 using gpu_perf_counter_provider_t = device_providers::rocprofiler_sdk::provider<
-    backends::rocprofiler_sdk::backend_factory<::rocprofsys::rocprofiler_sdk::backend>>;
+    backends::rocprofiler_sdk::backend_factory<::rocprofsys::rocprofiler_sdk::wrapper>>;
 using gpu_perf_counter_collector_t =
     collectors::gpu_perf_counter::collector<gpu_perf_counter_provider_t>;
 #endif
@@ -150,6 +150,26 @@ std::unique_ptr<cpu_collector_t> g_cpu_collector;
 std::vector<collectors::collector_slice> g_collector_slices;
 
 std::atomic<bool> g_reinit_pending{ false };
+
+// Timestamp of a pause whose zero-valued sample could not be written because the
+// sampling thread held the AMD SMI lock. Zero means nothing is outstanding.
+std::atomic<std::int64_t> g_pending_pause_ts{ 0 };
+
+// Requires type_mutex<category::amd_smi> to be held.
+void
+write_pause_samples(std::int64_t timestamp)
+{
+    for(auto& slice : g_collector_slices)
+    {
+        slice.pause(timestamp);
+    }
+#if ROCPROFILER_VERSION >= 600
+    if(g_gpu_perf_counter_collector)
+    {
+        g_gpu_perf_counter_collector->pause(timestamp);
+    }
+#endif
+}
 
 // Tears down the AMD SMI collector slices and marks the sampler uninitialized.
 // This is the only teardown performed on the post-fork reinit path: that reinit
@@ -214,7 +234,7 @@ reinit_if_pending()
 }  // namespace
 
 void
-set_state(State _v)
+set_state(state::process::State _v)
 {
     pmc::get_state().store(_v);
 }
@@ -227,7 +247,7 @@ config()
         slice.config();
     }
     LOG_DEBUG("Setting PMC sampler state to active...");
-    pmc::set_state(State::Active);
+    pmc::set_state(state::process::Active);
 }
 
 void
@@ -237,7 +257,7 @@ sample()
 
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
-    if(pmc::get_state() != State::Active)
+    if(pmc::get_state() != state::process::Active)
     {
         return;
     }
@@ -330,30 +350,53 @@ post_process()
 void
 pause()
 {
-    auto_lock_t _lk{ type_mutex<category::amd_smi>() };
+    const auto timestamp =
+        static_cast<std::int64_t>(tim::get_clock_real_now<size_t, std::nano>());
 
-    if(pmc::get_state() != State::Active || !is_initialized())
+    // sample() holds this lock for a whole AMD SMI sweep, and the caller is an
+    // application thread leaving a traced region. Hand the timestamp to the
+    // sampling thread rather than waiting for the sweep to finish.
+    const std::unique_lock pause_lock{ type_mutex<category::amd_smi>(),
+                                       std::try_to_lock };
+
+    if(!pause_lock.owns_lock())
+    {
+        g_pending_pause_ts.store(timestamp, std::memory_order_release);
+        return;
+    }
+
+    if(pmc::get_state() != state::process::Active || !is_initialized())
     {
         return;
     }
 
-    auto timestamp =
-        static_cast<std::int64_t>(tim::get_clock_real_now<size_t, std::nano>());
+    write_pause_samples(timestamp);
+}
 
-    for(auto& slice : g_collector_slices)
+void
+flush_pending_pause()
+{
+    const auto timestamp = g_pending_pause_ts.exchange(0, std::memory_order_acq_rel);
+    if(timestamp == 0)
     {
-        slice.pause(timestamp);
+        return;
     }
-#if ROCPROFILER_VERSION >= 600
-    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->pause(timestamp);
-#endif
+
+    auto_lock_t pause_lock{ type_mutex<category::amd_smi>() };
+
+    if(pmc::get_state() != state::process::Active || !is_initialized())
+    {
+        return;
+    }
+
+    write_pause_samples(timestamp);
 }
 
 void
 postfork_child_cleanup()
 {
     LOG_DEBUG("Disabling PMC sampling in child process after fork.");
-    pmc::get_state().store(State::Finalized);
+    pmc::get_state().store(state::process::Finalized);
     for(auto& slice : g_collector_slices)
     {
         slice.shutdown();

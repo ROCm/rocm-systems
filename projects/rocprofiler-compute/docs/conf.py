@@ -18,9 +18,9 @@ with open("../VERSION", encoding="utf-8") as f:
     version_number = match[1]
 
 # project info
-project = "ROCm Compute Profiler"
+project = "ROCm Compute Profiler (rocprofiler-compute)"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
 
@@ -31,12 +31,21 @@ extensions = [
     "sphinx_jinja",
 ]
 html_theme = "rocm_docs_theme"
-html_theme_options = {"flavor": "rocm"}
-html_title = f"{project} {version_number} documentation"
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-systems",
+    "path_to_docs": "projects/rocprofiler-compute/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}
+html_title = f"{project} {version_number}"
 exclude_patterns = ["archive", "*/includes"]
 
 html_static_path = ["sphinx/static/css"]
 html_css_files = ["o_custom.css"]
+# Generate llms.txt and llms-full.txt (requires the rocm-docs-core[llms] extra).
+rocm_docs_generate_llms = True
 
 # Load per-arch CDNA metrics YAMLs
 arch_metrics = {}
@@ -210,5 +219,5 @@ extlinks = {
     ),
 }
 
-# Uncomment if facing rate limit exceed issue with local build
-external_projects_remote_repository = ""
+# Uncomment if you encounter rate limits when building locally
+# external_projects_remote_repository = ""

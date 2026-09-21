@@ -4,9 +4,9 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_RDNA4_ISA_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_RDNA4_ISA_H_
 
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/decoder.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/decoder.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "util/bitfield.h"

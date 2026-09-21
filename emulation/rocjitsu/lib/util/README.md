@@ -1,8 +1,8 @@
 # Shared Utilities
 
 The `util` library provides low-level building blocks shared across
-rocjitsu and simdojo. It is a header-heavy library with minimal
-compiled sources.
+rocjitsu and simdojo. It is header-only: the CMake target is an
+INTERFACE library that contributes an include path and nothing to link.
 
 ## Headers
 
@@ -34,12 +34,15 @@ compiled sources.
 | `arena_alloc.h` | Fixed-size block pool allocator with free-list. `ArenaAlloc<BlockSize, NumBlocks, BlockAlign>` provides O(1) alloc/dealloc with global-allocator fallback. |
 | `spinlock.h` | TTAS spinlock optimized for sub-microsecond critical sections. Uses C++20 `atomic::wait()` with ThreadSanitizer annotations. |
 | `intrusive_list.h` | Bidirectional intrusive linked list with optional parent-pointer tracking. `IntrusiveList<T>` and `IListNode<T>` with O(1) insert/erase. |
+| `unique_handle.h` | Move-only RAII ownership for POSIX file descriptors, Win32 handles, and custom handle traits. |
 
 ### Diagnostics
 
 | File | Description |
 |------|-------------|
 | `log.h` | Compile-time and runtime configurable logging with named groups (VM, CP). Thread-safe, supports lazy evaluation via lambda forms. Use `Logger::print<GroupId>()` for group-filtered output. |
+| `result.h` | No-throw `Result` and `FailureOr<T>` return types for expected failures. |
+| `diagnostic.h` | Non-owning diagnostic sinks and stream-style error construction for result-returning APIs. |
 | `except.h` | Exception hierarchy: `Exception` (base), `InvalidInst`, `UnimplementedInst`, `ConfigError`. All derive from `std::exception`. |
 
 ### Miscellaneous
@@ -58,5 +61,5 @@ All headers are under `lib/util/include/util/` and can be included as:
 #include "util/bit.h"
 ```
 
-The library links as `util` in CMake. Both `rocjitsu` and `simdojo`
-depend on it.
+`util` is header-only: consumers link the `util` INTERFACE target in CMake,
+which contributes the include path and nothing else.

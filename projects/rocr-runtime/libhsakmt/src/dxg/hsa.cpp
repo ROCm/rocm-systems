@@ -16,53 +16,58 @@ static hsa_status_t (*fn_hsa_ven_amd_loader_query_host_address)(
 static std::mutex* lock_ = new std::mutex();
 
 #if defined(__linux__)
-#define _HSAKMT_LOOKUP_SYMS(_sym)                                              \
-if (fn_##_sym == nullptr) {                                                    \
-    std::lock_guard<std::mutex> gard(*lock_);                                  \
-    if (fn_##_sym == nullptr) {                                                \
-      fn_##_sym =                                                              \
-        reinterpret_cast<decltype(fn_##_sym)>(dlsym(RTLD_DEFAULT, #_sym));     \
-      if (!fn_##_sym) {                                                        \
-        pr_err("%s not found - %s\n", #_sym, dlerror());                       \
-      }                                                                        \
-    }                                                                          \
-}
+static hsa_signal_value_t (*fn_hsa_signal_load_relaxed)(hsa_signal_t signal);
+static hsa_signal_value_t (*fn_hsa_signal_wait_relaxed)(
+    hsa_signal_t signal, hsa_signal_condition_t condition,
+    hsa_signal_value_t compare_value, uint64_t timeout_hint,
+    hsa_wait_state_t wait_state_hint);
+static void (*fn_hsa_signal_store_screlease)(hsa_signal_t hsa_signal,
+                                             hsa_signal_value_t value);
 
-#define _HSAKMT_EXEC_API(_sym, ...) \
-do { \
-    if (fn_##_sym != nullptr) {    \
-        return fn_##_sym(__VA_ARGS__);   \
-    } \
-} while(0);
-
+// Resolves libhsa-runtime64 entry points. Called once via std::call_once on
+// the first queue create, before any queue's PM4 thread reads the pointers.
 bool hsakmt_hsa_loader_init() {
-  // If libhsa-runtime64 is already loaded in the process (e.g. rocminfo
-  // links against it), promote it to RTLD_GLOBAL so dlsym(RTLD_DEFAULT,...)
-  // can resolve its symbols without a filesystem lookup.
+  // At queue-create time librocdxg is already resident as a dependency of
+  // libhsa-runtime64, so only look it up in the current address space
+  // (RTLD_NOLOAD) — never pull a fresh copy from disk. RTLD_GLOBAL promotes its
+  // symbols in case the app dlopen'd it lazily/locally, which would otherwise
+  // leave these symbols unresolvable.
   void *handle = dlopen("libhsa-runtime64.so.1", RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
-  if (handle) {
-    // Library was already resident; drop our temporary reference — the caller
-    // holds its own so the library stays loaded.
-    dlclose(handle);
-    return true;
-  }
-  // Fallback: full load for callers that don't pre-link libhsa-runtime64.
-  // Do not dlclose — the library must remain resident for subsequent
-  // dlsym(RTLD_DEFAULT, ...) calls in the hsakmt_hsa_* wrappers to work.
-  handle = dlopen("libhsa-runtime64.so.1", RTLD_NOW | RTLD_GLOBAL);
   if (!handle) {
-    pr_err("dlopen libhsa-runtime64.so.1 failed - %s\n", dlerror());
+    pr_err("libhsa-runtime64.so.1 not resident - %s\n", dlerror());
     return false;
   }
-  return true;
+
+  fn_hsa_signal_load_relaxed = reinterpret_cast<decltype(fn_hsa_signal_load_relaxed)>(
+      dlsym(handle, "hsa_signal_load_relaxed"));
+  fn_hsa_signal_wait_relaxed = reinterpret_cast<decltype(fn_hsa_signal_wait_relaxed)>(
+      dlsym(handle, "hsa_signal_wait_relaxed"));
+  fn_hsa_signal_store_screlease = reinterpret_cast<decltype(fn_hsa_signal_store_screlease)>(
+      dlsym(handle, "hsa_signal_store_screlease"));
+
+  auto fn_hsa_system_get_extension_table =
+      reinterpret_cast<hsa_status_t (*)(uint16_t, uint16_t, uint16_t, void *)>(
+          dlsym(handle, "hsa_system_get_extension_table"));
+  if (fn_hsa_system_get_extension_table) {
+    hsa_ven_amd_loader_1_03_pfn_t table;
+    fn_hsa_system_get_extension_table(HSA_EXTENSION_AMD_LOADER, 1, 3, &table);
+    fn_hsa_ven_amd_loader_query_host_address = table.hsa_ven_amd_loader_query_host_address;
+  }
+
+  // Function pointers captured; drop our reference. The library stays resident
+  // via libhsa-runtime64's own reference.
+  dlclose(handle);
+
+  bool ok = fn_hsa_signal_load_relaxed && fn_hsa_signal_wait_relaxed &&
+            fn_hsa_signal_store_screlease && fn_hsa_ven_amd_loader_query_host_address;
+  if (!ok)
+    pr_err("failed to resolve libhsa-runtime64 symbols\n");
+  return ok;
 }
 
 hsa_signal_value_t hsakmt_hsa_signal_load_relaxed(hsa_signal_t signal) {
-  static hsa_signal_value_t (*fn_hsa_signal_load_relaxed)(hsa_signal_t signal) = nullptr;
-
-  _HSAKMT_LOOKUP_SYMS(hsa_signal_load_relaxed);
-  _HSAKMT_EXEC_API(hsa_signal_load_relaxed, signal);
-
+  if (fn_hsa_signal_load_relaxed)
+    return fn_hsa_signal_load_relaxed(signal);
   return 0;
 }
 
@@ -70,52 +75,22 @@ hsa_signal_value_t hsakmt_hsa_signal_wait_relaxed(
     hsa_signal_t signal, hsa_signal_condition_t condition,
     hsa_signal_value_t compare_value, uint64_t timeout_hint,
     hsa_wait_state_t wait_state_hint) {
-static hsa_signal_value_t (*fn_hsa_signal_wait_relaxed)(
-    hsa_signal_t signal, hsa_signal_condition_t condition,
-    hsa_signal_value_t compare_value, uint64_t timeout_hint,
-    hsa_wait_state_t wait_state_hint) = nullptr;
-
-  _HSAKMT_LOOKUP_SYMS(hsa_signal_wait_relaxed);
-  _HSAKMT_EXEC_API(hsa_signal_wait_relaxed, signal, condition, compare_value,
-                   timeout_hint, wait_state_hint);
-
+  if (fn_hsa_signal_wait_relaxed)
+    return fn_hsa_signal_wait_relaxed(signal, condition, compare_value,
+                                      timeout_hint, wait_state_hint);
   return 0;
 }
 
 void hsakmt_hsa_signal_store_screlease(hsa_signal_t hsa_signal,
-                                      hsa_signal_value_t value){
-static void (*fn_hsa_signal_store_screlease)(hsa_signal_t hsa_signal,
-                                      hsa_signal_value_t value) = nullptr;
-
-  _HSAKMT_LOOKUP_SYMS(hsa_signal_store_screlease);
-  _HSAKMT_EXEC_API(hsa_signal_store_screlease, hsa_signal, value);
+                                       hsa_signal_value_t value) {
+  if (fn_hsa_signal_store_screlease)
+    fn_hsa_signal_store_screlease(hsa_signal, value);
 }
 
 hsa_status_t hsakmt_hsa_ven_amd_loader_query_host_address(
     const void *device_address, const void **host_address) {
-  static hsa_status_t (*fn_hsa_ven_amd_loader_query_host_address)(
-    const void *device_address, const void **host_address) = nullptr;
-
-  if (fn_hsa_ven_amd_loader_query_host_address == nullptr) {
-    std::lock_guard<std::mutex> gard(*lock_);
-    if (fn_hsa_ven_amd_loader_query_host_address == nullptr) {
-      hsa_status_t (*fn_hsa_system_get_extension_table)(
-      uint16_t extension, uint16_t version_major, uint16_t version_minor, void *table);
-      fn_hsa_system_get_extension_table =
-        reinterpret_cast<decltype(fn_hsa_system_get_extension_table)>(dlsym(RTLD_DEFAULT, "hsa_system_get_extension_table"));
-      if (fn_hsa_system_get_extension_table == nullptr) {
-        pr_err("%s not found - %s\n", "hsa_system_get_extension_table", dlerror());
-        return HSA_STATUS_ERROR;
-      }
-
-      hsa_ven_amd_loader_1_03_pfn_t table;
-      fn_hsa_system_get_extension_table(HSA_EXTENSION_AMD_LOADER, 1, 3, &table);
-      fn_hsa_ven_amd_loader_query_host_address =
-          table.hsa_ven_amd_loader_query_host_address;
-    }
-  }
-
-  _HSAKMT_EXEC_API(hsa_ven_amd_loader_query_host_address, device_address, host_address);
+  if (fn_hsa_ven_amd_loader_query_host_address)
+    return fn_hsa_ven_amd_loader_query_host_address(device_address, host_address);
   return HSA_STATUS_ERROR;
 }
 

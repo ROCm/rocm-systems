@@ -22,6 +22,7 @@
 */
 #include <vector>
 #include <thread>
+#include <atomic>
 #include <chrono>
 #ifdef _WIN32
 #include <Windows.h>
@@ -42,7 +43,7 @@ using namespace cooperative_groups;
 #endif
 
 
-static bool IfTestPassed = false;
+static std::atomic<bool> IfTestPassed{false};
 // kernel
 __global__ void StreamPerThrd(int* Ad, int* Ad1, size_t n, int Pk_Clk, int Wait, int WaitEvnt = 0) {
   size_t index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -195,30 +196,30 @@ static void HIPRT_CB CallBackFunctn(hipStream_t strm, hipError_t err, void* ChkV
 static void EventSync() {
   int *Ad = nullptr, *Ah = nullptr, NumElms = 4096, CONST_NUM = 123;
   int blockSize = 32, peak_clk;
-  HIP_CHECK(hipMalloc(&Ad, NumElms * sizeof(int)));
+  HIP_CHECK_THREAD(hipMalloc(&Ad, NumElms * sizeof(int)));
   Ah = new int[NumElms];
   for (int i = 0; i < NumElms; ++i) {
     Ah[i] = CONST_NUM;
   }
   // creating event objects
   hipEvent_t start, end;
-  HIP_CHECK(hipEventCreate(&start));
-  HIP_CHECK(hipEventCreate(&end));
-  HIP_CHECK(hipMemcpy(Ad, Ah, NumElms * sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK_THREAD(hipEventCreate(&start));
+  HIP_CHECK_THREAD(hipEventCreate(&end));
+  HIP_CHECK_THREAD(hipMemcpy(Ad, Ah, NumElms * sizeof(int), hipMemcpyHostToDevice));
   dim3 dimBlock(blockSize, 1, 1);
   dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
-  HIP_CHECK(hipEventRecord(start, hipStreamPerThread));
+  HIP_CHECK_THREAD(hipEventRecord(start, hipStreamPerThread));
   if (IsGfx11()) {
-    HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeWallClockRate, 0));
+    HIP_CHECK_THREAD(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeWallClockRate, 0));
     StreamPerThrd_gfx11<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Ad, NULL, NumElms, peak_clk,
                                                                       0);
   } else {
-    HIP_CHECK(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeClockRate, 0));
+    HIP_CHECK_THREAD(hipDeviceGetAttribute(&peak_clk, hipDeviceAttributeClockRate, 0));
     StreamPerThrd<<<dimGrid, dimBlock, 0, hipStreamPerThread>>>(Ad, NULL, NumElms, peak_clk, 0);
   }
-  HIP_CHECK(hipEventRecord(end, hipStreamPerThread));
-  HIP_CHECK(hipEventSynchronize(end));
-  HIP_CHECK(hipMemcpy(Ah, Ad, NumElms * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK_THREAD(hipEventRecord(end, hipStreamPerThread));
+  HIP_CHECK_THREAD(hipEventSynchronize(end));
+  HIP_CHECK_THREAD(hipMemcpy(Ah, Ad, NumElms * sizeof(int), hipMemcpyDeviceToHost));
   int MisMatch = 0;
   for (int i = 0; i < NumElms; ++i) {
     if (Ah[i] != (CONST_NUM + 10)) {
@@ -226,16 +227,15 @@ static void EventSync() {
     }
   }
   delete[] Ah;
-  HIP_CHECK(hipFree(Ad));
+  HIP_CHECK_THREAD(hipFree(Ad));
   if (MisMatch) {
-    WARN("Data Mismatch observed!!\n");
+    // WARN is a thread-unsafe Catch2 macro; use printf from the worker thread.
+    printf("Data Mismatch observed!!\n");
     IfTestPassed = false;
-  } else {
-    IfTestPassed = true;
   }
 
-  HIP_CHECK(hipEventDestroy(start));
-  HIP_CHECK(hipEventDestroy(end));
+  HIP_CHECK_THREAD(hipEventDestroy(start));
+  HIP_CHECK_THREAD(hipEventDestroy(end));
 }
 
 /* Launch a kernel in hipStreamPerThread, while it is in flight check for
@@ -390,6 +390,7 @@ HIP_TEST_CASE(Unit_hipStreamPerThread_EvtRcrdMThrd) {
   for (auto& th : threads) {
     th.join();
   }
+  HIP_CHECK_THREAD_FINALIZE();
   REQUIRE(IfTestPassed);
 }
 

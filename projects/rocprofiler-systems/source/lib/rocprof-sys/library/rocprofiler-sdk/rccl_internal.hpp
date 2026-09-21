@@ -3,6 +3,16 @@
 
 #pragma once
 
+// Defines RCCL_API_TRACE_VERSION_PATCH. Must precede api_args.h, where this
+// macro gates the newer RCCL arg union members (e.g. ncclAlltoAll). api_args.h
+// from the SDK headers does not define it itself, so without this include the
+// macro defaults to 0 and those members silently disappear.
+//
+// This header (not rccl.hpp) is the one the unit tests include.
+// Keeping the include here makes the header self-contained so the test TU sees
+// the same api_args.h layout as production and avoids an ODR mismatch.
+#include <rocprofiler-sdk/rccl/details/api_trace.h>
+
 #include <rocprofiler-sdk/rccl/api_args.h>
 
 #include <cstddef>
@@ -106,7 +116,7 @@ public:
      * @param rccl_device_idx The GPU device index
      * @note Calls PMC registrar if one was provided
      */
-    inline void register_gpu(std::uint32_t rccl_device_idx)
+    void register_gpu(std::uint32_t rccl_device_idx)
     {
         bool newly_registered = false;
         {
@@ -130,8 +140,7 @@ public:
      * @param bytes Number of bytes to add
      * @return The new cumulative byte count for the device
      */
-    [[nodiscard]] inline std::uint64_t add_bytes(std::uint32_t rccl_device_idx,
-                                                 size_t        bytes)
+    [[nodiscard]] std::uint64_t add_bytes(std::uint32_t rccl_device_idx, size_t bytes)
     {
         std::unique_lock<std::mutex> _lk{ m_cumulative_mutex };
         auto& device_bytes = m_cumulative_bytes_per_device[rccl_device_idx];
@@ -144,7 +153,7 @@ public:
      * @param rccl_device_idx The GPU device index
      * @return True if registered
      */
-    [[nodiscard]] inline bool is_registered(std::uint32_t rccl_device_idx) const
+    [[nodiscard]] bool is_registered(std::uint32_t rccl_device_idx) const
     {
         std::unique_lock<std::mutex> _lk{ m_registered_gpus_mutex };
         return m_registered_gpus.count(rccl_device_idx) > 0;
@@ -155,7 +164,7 @@ public:
      * @param rccl_device_idx The GPU device index
      * @return Cumulative bytes (0 if not tracked)
      */
-    [[nodiscard]] inline std::uint64_t get_bytes(std::uint32_t rccl_device_idx) const
+    [[nodiscard]] std::uint64_t get_bytes(std::uint32_t rccl_device_idx) const
     {
         std::unique_lock<std::mutex> _lk{ m_cumulative_mutex };
         auto it = m_cumulative_bytes_per_device.find(rccl_device_idx);
@@ -165,7 +174,7 @@ public:
     /**
      * @brief Reset all tracking state (for testing)
      */
-    inline void reset()
+    void reset()
     {
         {
             std::unique_lock<std::mutex> _lk{ m_registered_gpus_mutex };

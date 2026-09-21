@@ -44,6 +44,9 @@ on:
         required: false
         default: "develop"
 
+permissions:
+  contents: read
+
 jobs:
   import:
     runs-on: ubuntu-24.04

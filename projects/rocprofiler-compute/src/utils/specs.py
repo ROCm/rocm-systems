@@ -93,12 +93,11 @@ def get_rocm_ver() -> str:
         )
         return rocm_ver_user
 
-    console_warning("Unable to detect a complete local ROCm installation.")
-    console_warning(
-        f"The expected {rocm_base_path}/.info/ versioning directory is missing."
+    console_error(
+        "Unable to detect a complete local ROCm installation. "
+        f"The expected {rocm_base_path}/.info/ versioning directory is missing. "
+        "Ensure you have a valid ROCm installation, or set ROCM_VER to override."
     )
-    console_error("Ensure you have valid ROCm installation.", exit=False)
-    return ""
 
 
 def total_sqc(archname: str, num_compute_units: str, num_shader_engines: str) -> int:
@@ -413,6 +412,7 @@ def _extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
         "num_compute_units": None,
         "gpu_cache_info": None,
         "vram_bit_width": None,
+        "perf_level": None,
     }
 
     with amdsmi_interface.amdsmi_ctx():
@@ -427,6 +427,8 @@ def _extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
         result["num_compute_units"] = amdsmi_interface.get_gpu_num_compute_units()
         result["gpu_cache_info"] = amdsmi_interface.get_gpu_cache_info() or {}
         result["vram_bit_width"] = amdsmi_interface.get_gpu_vram_bit_width()
+        if spec_family_for_arch(gpu_arch) is MachineSpecsRDNA35:
+            result["perf_level"] = amdsmi_interface.get_gpu_perf_level()
 
     if is_partition_supported:
         if result["compute_partition"] == "N/A" or not result["compute_partition"]:
@@ -436,6 +438,13 @@ def _extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
 
         if result["memory_partition"] == "N/A" or not result["memory_partition"]:
             console_warning("Cannot detect memory partition from amd-smi.")
+            if (
+                gpu_arch
+                and MIGPUSpecs.get_gpu_series(gpu_arch.lower().strip()).lower()
+                == "gfx1250_series"
+            ):
+                console_warning("Applying default memory partition: NPS1")
+                result["memory_partition"] = "NPS1"
 
     console_debug(
         f"vbios is {result['vbios']}, compute partition is "
@@ -1008,16 +1017,19 @@ class MachineSpecsCDNA(MachineSpecs):
     )
 
     def _get_hbm_channels(self) -> Optional[str]:
-        """HBM channel count, adjusted for the MI300 NPS memory partition."""
-        partition = self.memory_partition or ""
-        if partition.lower().startswith("nps"):
-            channels = 128
-            if partition.lower() == "nps4":
-                channels //= 4
-            elif partition.lower() == "nps8":
-                channels //= 8
-            return str(channels)
-        return self.total_l2_chan
+        """HBM channel count, adjusted for the MI300 NPS memory partition.
+
+        Uses the whole-chip (SPX) XCD count rather than ``total_l2_chan``: HBM
+        stays interleaved across XCDs, so it does not follow compute partitions.
+        """
+        partition = (self.memory_partition or "").lower()
+        if not partition.startswith("nps"):
+            return self.total_l2_chan
+        whole_chip_xcds = mi_gpu_specs.get_num_xcds(
+            self.gpu_arch, self.gpu_model or None, "SPX"
+        )
+        divisor = {"nps2": 2, "nps4": 4, "nps8": 8}.get(partition, 1)
+        return str(int(self.l2_banks) * whole_chip_xcds // divisor)
 
     def finalize_soc_fields(self, gpu_info: dict[str, Any]) -> None:
         self.compute_partition = gpu_info["compute_partition"]
@@ -1048,11 +1060,26 @@ class MachineSpecsRDNA35(MachineSpecs):
         },
     )
 
+    perf_level: Optional[str] = field(
+        default=None,
+        metadata={
+            "doc": (
+                "The PowerPlay performance level the GPU was profiling at. "
+                "AUTO can gate the perfmon clock on this family and zero "
+                "counters such as TCP_REQ."
+            ),
+            "name": "Performance Level",
+            "show_in_table": False,
+        },
+    )
+
     def finalize_soc_fields(self, gpu_info: dict[str, Any]) -> None:
         if self.se_per_gpu is None or self.sa_per_se is None:
             self.num_gl1c = None
         else:
             self.num_gl1c = str(int(self.se_per_gpu) * int(self.sa_per_se))
+
+        self.perf_level = gpu_info.get("perf_level")
 
         super().finalize_soc_fields(gpu_info)
 

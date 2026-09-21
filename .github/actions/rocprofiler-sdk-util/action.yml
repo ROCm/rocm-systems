@@ -6,6 +6,10 @@ inputs:
     description: 'Path to ROCm installation'
     required: false
     default: '/opt/rocm'
+  python-venv-path:
+    description: 'Python virtual environment with the pinned cmake, relative to the workspace'
+    required: false
+    default: ''
   gpu-target:
     description: 'GPU target (e.g., gfx94X, gfx110X, gfx120X)'
     required: true
@@ -35,6 +39,10 @@ inputs:
     default: 'false'
   enable-rocjpeg-build:
     description: 'Enable ROCJPEG build'
+    required: false
+    default: 'false'
+  enable-hipfile-build:
+    description: 'Enable hipFILE build'
     required: false
     default: 'false'
   enable-rocprof-trace-decoder-build:
@@ -70,13 +78,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Setup environment variables
-      shell: bash
-      run: |
-        echo "PKG_CONFIG_PATH=/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}" >> $GITHUB_ENV
-        echo "LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib64:${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
-        echo "PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:$HOME/.local/bin:${PATH}" >> $GITHUB_ENV
-
     - name: Setup ccache
       if: ${{ inputs.enable-ccache == 'true' }}
       uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
@@ -97,6 +98,16 @@ runs:
         else
           echo "Warning: Compiler launcher ${{ inputs.compiler-launcher }} not found or not executable"
         fi
+
+    - name: Setup environment variables
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.python-venv-path }}" ]; then
+          echo "${GITHUB_WORKSPACE}/${{ inputs.python-venv-path }}/bin" >> $GITHUB_PATH
+        fi
+        echo "PKG_CONFIG_PATH=/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib64:${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+        echo "PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:$HOME/.local/bin:${PATH}" >> $GITHUB_ENV
 
     - name: Build and Install ROCR-Runtime
       if: ${{ inputs.enable-rocr-build == 'true' }}
@@ -149,7 +160,7 @@ runs:
       shell: bash
       working-directory: projects/rocprofiler-register
       run: |
-        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
+        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:${PATH}:/usr/local/bin
         echo "Install ROCProfiler-Register"
         cmake -B build-rocprofiler-register \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -162,6 +173,40 @@ runs:
         cmake --build build-rocprofiler-register --target all --parallel ${{ inputs.build-jobs }}
         cmake --build build-rocprofiler-register --target install
         echo "✅ ROCProfiler-Register Installation complete!"
+
+    - name: Build and Install hipFILE
+      if: ${{ inputs.enable-hipfile-build == 'true' }}
+      shell: bash
+      working-directory: projects/hipfile
+      run: |
+        export ROCM_PATH=${{ inputs.rocm-path }}
+        export HIP_PLATFORM=amd
+        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/lib/rocm_sysdeps/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:${PATH}:/usr/local/bin
+        # Temporary workaround until hipFILE adds the ROCm sysdeps include path for libmount.
+        if [ -f "${ROCM_PATH}/lib/rocm_sysdeps/include/libmount/libmount.h" ]; then
+          install -D -m 0644 \
+            "${ROCM_PATH}/lib/rocm_sysdeps/include/libmount/libmount.h" \
+            "${ROCM_PATH}/include/libmount/libmount.h"
+        fi
+        echo "Install hipFILE..."
+        cmake -B build-hipfile \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/llvm/bin/amdclang++ \
+          -DCMAKE_HIP_PLATFORM=amd \
+          -DCMAKE_PREFIX_PATH='${{ inputs.rocm-path }};${{ inputs.rocm-path }}/llvm;${{ inputs.rocm-path }}/lib/rocm_sysdeps' \
+          -DCMAKE_LIBRARY_PATH=${{ inputs.rocm-path }}/lib/rocm_sysdeps/lib \
+          -DCMAKE_INCLUDE_PATH=${{ inputs.rocm-path }}/lib/rocm_sysdeps/include \
+          -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
+          -DBUILD_TESTING=OFF \
+          -DAIS_INSTALL_EXAMPLES=OFF \
+          -DAIS_INSTALL_TOOLS=OFF \
+          .
+        cmake --build build-hipfile --target hipfile --parallel ${{ inputs.build-jobs }}
+        cmake --build build-hipfile --target install
+        echo "✅ hipFILE Installation complete!"
 
     - name: Build and Install Aqlprofile
       if: ${{ inputs.enable-aqlprofile-build == 'true' }}

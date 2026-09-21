@@ -24,7 +24,7 @@
  */
 
 #include "libhsakmt.h"
-#include "hsakmt/linux/kfd_ioctl.h"
+#include "kfd_ioctl.h"
 #include "fmm.h"
 
 #ifndef MAX_RW_COUNT
@@ -62,8 +62,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(void *MemoryAddress,
 		pr_err("Address/size out of range: %p/%lu\n", MemoryAddress, transfer_size);
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 	}
-
-	transfer_size = MIN(transfer_size, size_offset);
 
 	args.in.handle = handle;
 	args.in.fd = fd;

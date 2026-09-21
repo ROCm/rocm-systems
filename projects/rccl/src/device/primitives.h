@@ -27,10 +27,10 @@
       if (wid == 0) { \
         (BARRIER_NEXT) += (NWORKERS) / WARP_SIZE; \
         __THREAD_FENCE; \
-        __hip_atomic_fetch_add((BARRIERS_PTR), 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP); \
+        __scoped_atomic_fetch_add((BARRIERS_PTR), 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_WRKGRP); \
         int spins = 0; \
         int rate_limit = 50; \
-        while (__hip_atomic_load((BARRIERS_PTR), __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) < (BARRIER_NEXT)) { \
+        while (__scoped_atomic_load_n((BARRIERS_PTR), __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) < (BARRIER_NEXT)) { \
           spins++; \
           if (spins == NCCL_SPINS_BEFORE_CHECK_ABORT) { \
             if (__atomic_load_n(ncclShmem.comm.abortFlag, __ATOMIC_SEQ_CST)) { \
@@ -42,7 +42,7 @@
           if (spins == 0 && rate_limit > 0) { \
             rate_limit--; \
             traceData(__LINE__, threadIdx.x, \
-                      __hip_atomic_load((BARRIERS_PTR), __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP), \
+                      __scoped_atomic_load_n((BARRIERS_PTR), __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP), \
                       (BARRIER_NEXT)); \
           } \
           __builtin_amdgcn_s_sleep(1); \
@@ -150,8 +150,16 @@ struct FanSymmetric {
 };
 
 // The primitives class. Specialized per protocol in the other headers.
+// UserRegMode selects how the LL128 direct user-buffer accesses decide between
+// the system-scope cache-bypass path and the register-friendly plain/non-temporal
+// path at compile time:
+//   0 = runtime  (read the per-op userRegUsed member; keeps a dual code path)
+//   1 = forced registered     (always system-scope cache-bypass, single path)
+//   2 = forced non-registered (always plain/non-temporal, single path)
+// Defaulting to 0 preserves the behavior of every existing instantiation; only
+// the collectives that opt into 1/2 get the specialized single-path kernels.
 template <typename T, typename RedOp, typename Fan, int Direct, typename Proto, int P2p, bool isNetOffload = false,
-          int Metadata = RCCL_METADATA_EMPTY, int Pipeline = 0, int useAcc = 0>
+          int Metadata = RCCL_METADATA_EMPTY, int Pipeline = 0, int useAcc = 0, int UserRegMode = 0>
 class Primitives;
 
 // Used by LL & LL128 to implement direct members in the naive way.

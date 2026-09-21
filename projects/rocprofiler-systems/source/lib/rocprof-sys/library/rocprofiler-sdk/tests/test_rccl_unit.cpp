@@ -138,7 +138,7 @@ TEST_F(rccl_test, rccl_type_size_returns_zero_for_max_int_datatype)
 
 TEST_F(rccl_test, tracking_state_default_constructor_creates_empty_state)
 {
-    rccl_gpu_tracking_state_mock state(nullptr);
+    const rccl_gpu_tracking_state_mock state(nullptr);
 
     EXPECT_FALSE(state.is_registered(0));
     EXPECT_FALSE(state.is_registered(1));
@@ -404,7 +404,7 @@ TEST_F(rccl_test, tracking_state_usable_after_reset)
 
 TEST_F(rccl_test, rccl_event_info_default_initialized)
 {
-    rccl_event_info info{};
+    const rccl_event_info info{};
     EXPECT_EQ(info.size, 0u);
     EXPECT_FALSE(info.is_send);
     EXPECT_EQ(info.comm, nullptr);

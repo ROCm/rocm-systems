@@ -87,7 +87,8 @@ def collection_period_data(request):
 @pytest.fixture
 def pftrace_data(request):
     filename = request.config.getoption("--pftrace-input")
-    return PerfettoReader(filename).read()[0]
+    with PerfettoReader(filename) as reader:
+        return reader.read()[0]
 
 
 @pytest.fixture

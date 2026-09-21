@@ -328,7 +328,7 @@ __host__ void rocshmem_buffer_unregister_all();
  * rocshmem_buffer_unregister_symmetric().
  *
  * @note This routine is currently restricted to memory allocated through the
- *       HIP Virtual Memory Management (VMM) APIs (ROCm 7.0 or newer). Passing
+ *       HIP Virtual Memory Management (VMM) APIs (ROCm 7.2 or newer). Passing
  *       a non-VMM pointer returns nullptr.
  *
  * @param[in] addr   Pointer to previously allocated VMM memory.
@@ -468,10 +468,10 @@ __host__ int rocshmem_team_my_pe(rocshmem_team_t team);
  *
  * @return Zero on success; non-zero on failure.
  */
-__host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, const 
-                                    rocshmem_team_config_t *xaxis_config, long xaxis_mask, 
-                                    rocshmem_team_t *xaxis_team, 
-                                    const rocshmem_team_config_t *yaxis_config, long yaxis_mask, 
+__host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange,
+                                    const rocshmem_team_config_t *xaxis_config, long xaxis_mask,
+                                    rocshmem_team_t *xaxis_team,
+                                    const rocshmem_team_config_t *yaxis_config, long yaxis_mask,
                                     rocshmem_team_t *yaxis_team);
 
 

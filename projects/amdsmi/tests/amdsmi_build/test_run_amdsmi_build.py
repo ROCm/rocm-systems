@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the pure helpers in run_amdsmi_build.py.
 
 These tests deliberately avoid anything that requires root, a build env, or
@@ -23,6 +26,9 @@ def _load_module():
         "run_amdsmi_build", here / "run_amdsmi_build.py"
     )
     mod = importlib.util.module_from_spec(spec)
+    # Register before exec: @dataclass resolves its module via sys.modules on
+    # Python 3.12+, so a module loaded outside sys.modules fails to import.
+    sys.modules[spec.name] = mod
     # Bootstrap is a no-op on Python 3.7+ which the test env always satisfies.
     spec.loader.exec_module(mod)
     return mod
@@ -58,21 +64,20 @@ class DetectOsProfileTests(unittest.TestCase):
         self.assertEqual(prof["package_manager"], "apt")
         self.assertEqual(prof["package_format"], "deb")
         self.assertEqual(prof["os_label"], "Ubuntu22")
-        self.assertFalse(prof["debian10_sources"])
         self.assertFalse(prof["qa_rpaths"])
 
-    def test_debian10_sets_archive_sources(self):
+    def test_debian13(self):
         osr = _make_osr(
             self.tmp,
             """
             ID=debian
-            VERSION_ID="10"
+            VERSION_ID="13"
             """,
         )
         prof = rab.detect_os_profile(osr)
-        self.assertEqual(prof["os_label"], "Debian10")
-        self.assertTrue(prof["debian10_sources"])
+        self.assertEqual(prof["os_label"], "Debian13")
         self.assertEqual(prof["package_manager"], "apt")
+        self.assertEqual(prof["package_format"], "deb")
 
     def test_rhel10_sets_qa_rpaths(self):
         osr = _make_osr(

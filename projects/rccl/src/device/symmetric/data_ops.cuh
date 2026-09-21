@@ -5,22 +5,27 @@
 #endif
 
 struct SMemTag {}; // Shared memory
-struct GMemTag {}; // Global memory
+struct GMemTag {}; // Streaming global memory
+struct GMemTemporalTag {}; // Cached global memory with expected temporal reuse
 struct GenMemTag {}; // Generic memory (either global or shared)
 
-// Like CUDA's __ldcs() except works for all types T and handles smem so long as
-// it is tagged accurately.
+// Memory-space aware load. GMemTag uses streaming cache policy; GMemTemporalTag
+// uses the compiler's default cached global load.
 template <typename T>
-static __device__ __forceinline__ T ldcs(GenMemTag, T* p) {
+static __device__ __forceinline__ T loadMem(GenMemTag, T* p) {
   return *p;
 }
 template <typename T>
-static __device__ __forceinline__ T ldcs(SMemTag, T* p) {
+static __device__ __forceinline__ T loadMem(SMemTag, T* p) {
   __builtin_assume(__isShared(p));
   return *p;
 }
 template <typename T>
-static __device__ __forceinline__ T ldcs(GMemTag, T* p) {
+static __device__ __forceinline__ T loadMem(GMemTemporalTag, T* p) {
+  return *p;
+}
+template <typename T>
+static __device__ __forceinline__ T loadMem(GMemTag, T* p) {
   union {
     T x;
     uint8_t u8[sizeof(T)];
@@ -66,19 +71,23 @@ static __device__ __forceinline__ T ldcs(GMemTag, T* p) {
   return x;
 }
 
-// Like CUDA's __stcs() except works for all types T and handles smem so long as
-// it is tagged accurately.
+// Memory-space aware store. GMemTag uses streaming cache policy; GMemTemporalTag
+// uses the compiler's default global store.
 template <typename T>
-static __device__ __forceinline__ void stcs(GenMemTag, T* p, T val) {
+static __device__ __forceinline__ void storeMem(GenMemTag, T* p, T val) {
   *p = val;
 }
 template <typename T>
-static __device__ __forceinline__ void stcs(SMemTag, T* p, T val) {
+static __device__ __forceinline__ void storeMem(SMemTag, T* p, T val) {
   __builtin_assume(__isShared(p));
   *p = val;
 }
 template <typename T>
-static __device__ __forceinline__ void stcs(GMemTag, T* p, T val) {
+static __device__ __forceinline__ void storeMem(GMemTemporalTag, T* p, T val) {
+  *p = val;
+}
+template <typename T>
+static __device__ __forceinline__ void storeMem(GMemTag, T* p, T val) {
   union {
     T x;
     uint8_t u8[sizeof(T)];
@@ -142,30 +151,30 @@ static __device__ __forceinline__ void loadPacks(
   constexpr int nEltPerPack = sizeof(Pack) / sizeof(Elt);
   bool eltsAligned = sizeof(Pack) - 1 <= eltsAlignMin - 1 || reinterpret_cast<uintptr_t>(elts) % sizeof(Pack) == 0;
   if (__builtin_expect(padElts == 0 && eltsAligned, true)) {
-#pragma unroll nPacks
+    NVCC_PRAGMA_UNROLL(nPacks)
     for (int p = 0; p < nPacks; p++) {
       if (p < nPacks - 1 || !lastEmpty) {
-        packs[p] = ldcs(mem, (Pack*)elts + packIx + p * stride);
+        packs[p] = loadMem(mem, (Pack*)elts + packIx + p * stride);
       }
     }
   } else {
     Pack stage[nPacks];
-#pragma unroll 16 / nEltPerPack
+    NVCC_PRAGMA_UNROLL(16 / nEltPerPack)
     for (int p = 0; p < nPacks; p++) {
       union {
         Pack tmp;
         Elt elt[nEltPerPack];
       };
       tmp = {};
-#pragma unroll 8
+      NVCC_PRAGMA_UNROLL(8)
       for (int pe = 0; pe < nEltPerPack; pe++) {
         int e = -padElts + (packIx + p * stride) * nEltPerPack + pe;
         // if (0 <= e && e < nElts)
-        if (unsigned(e) < unsigned(nElts)) elt[pe] = ldcs(mem, elts + e);
+        if (unsigned(e) < unsigned(nElts)) elt[pe] = loadMem(mem, elts + e);
       }
       stage[p] = tmp;
     }
-#pragma unroll
+    NVCC_PRAGMA_UNROLL_AUTO
     for (int p = 0; p < nPacks; p++) packs[p] = stage[p];
   }
 }
@@ -178,28 +187,28 @@ static __device__ __forceinline__ void storePacks(Pack (&packs)[nPacks], MemTag 
   constexpr int nEltPerPack = sizeof(Pack) / sizeof(Elt);
   bool eltsAligned = sizeof(Pack) - 1 <= eltsAlignMin - 1 || reinterpret_cast<uintptr_t>(elts) % sizeof(Pack) == 0;
   if (__builtin_expect(padElts == 0 && eltsAligned, true)) {
-#pragma unroll nPacks
+    NVCC_PRAGMA_UNROLL(nPacks)
     for (int p = 0; p < nPacks; p++) {
       if (p < nPacks - 1 || !lastEmpty) {
-        stcs(mem, (Pack*)elts + packIx + p * stride, packs[p]);
+        storeMem(mem, (Pack*)elts + packIx + p * stride, packs[p]);
       }
     }
   } else {
     Pack stage[nPacks];
-#pragma unroll
+    NVCC_PRAGMA_UNROLL_AUTO
     for (int p = 0; p < nPacks; p++) stage[p] = packs[p];
-#pragma unroll 16 / nEltPerPack
+    NVCC_PRAGMA_UNROLL(16 / nEltPerPack)
     for (int p = 0; p < nPacks; p++) {
       union {
         Pack tmp;
         Elt elt[nEltPerPack];
       };
       tmp = stage[p];
-#pragma unroll 8
+      NVCC_PRAGMA_UNROLL(8)
       for (int pe = 0; pe < nEltPerPack; pe++) {
         int e = -padElts + (packIx + p * stride) * nEltPerPack + pe;
         // if (0 <= e && e < nElts)
-        if (unsigned(e) < unsigned(nElts)) stcs(mem, elts + e, elt[pe]);
+        if (unsigned(e) < unsigned(nElts)) storeMem(mem, elts + e, elt[pe]);
       }
     }
   }
@@ -214,22 +223,22 @@ static __device__ __forceinline__ void accumulateLoads(Red<Acc> red, bool inPlac
   constexpr int UnrollSrcs = 4 * 16 < sizeof(AccPack) * UnrollData ? 2 : 1 * 16 <= sizeof(AccPack) * UnrollData ? 4 : 8;
   int srcIx = 0;
   bool accValid = inPlace;
-#pragma unroll 1
+  NVCC_PRAGMA_UNROLL_DISABLED
   while (srcIx + UnrollSrcs <= nSrcs) {
     EltPack tmp[UnrollSrcs][UnrollData] = {};
-#pragma unroll UnrollSrcs
+    NVCC_PRAGMA_UNROLL(UnrollSrcs)
     for (int su = 0; su < UnrollSrcs; su++) {
       EltPack* srcPtr = getSrc(srcIx + su);
-#pragma unroll UnrollData
+      NVCC_PRAGMA_UNROLL(UnrollData)
       for (int du = 0; du < UnrollData; du++) {
         if (du != UnrollData - 1 || !lastPackEmpty) {
-          tmp[su][du] = ldcs(GMemTag(), srcPtr + du * stride);
+          tmp[su][du] = loadMem(GMemTag(), srcPtr + du * stride);
         }
       }
     }
-#pragma unroll UnrollSrcs
+    NVCC_PRAGMA_UNROLL(UnrollSrcs)
     for (int su = 0; su < UnrollSrcs; su++) {
-#pragma unroll UnrollData
+      NVCC_PRAGMA_UNROLL(UnrollData)
       for (int du = 0; du < UnrollData; du++) {
         if (du != UnrollData - 1 || !lastPackEmpty) {
           AccPack a = fromPack<AccPack>(applyCast<Elt, Acc>(tmp[su][du]));
@@ -243,22 +252,22 @@ static __device__ __forceinline__ void accumulateLoads(Red<Acc> red, bool inPlac
 
   if (srcIx < nSrcs) {
     EltPack tmp[UnrollSrcs - 1 ? UnrollSrcs - 1 : 1][UnrollData] = {};
-#pragma unroll(UnrollSrcs - 1 ? UnrollSrcs - 1 : 1)
+    NVCC_PRAGMA_UNROLL((UnrollSrcs - 1 ? UnrollSrcs - 1 : 1))
     for (int su = 0; su < UnrollSrcs - 1; su++) {
       EltPack* srcPtr = getSrc(srcIx + su);
       if (!(su != 0 && nSrcs <= srcIx + su)) {
-#pragma unroll UnrollData
+        NVCC_PRAGMA_UNROLL(UnrollData)
         for (int du = 0; du < UnrollData; du++) {
           if (du != UnrollData - 1 || !lastPackEmpty) {
-            tmp[su][du] = ldcs(GMemTag(), srcPtr + du * stride);
+            tmp[su][du] = loadMem(GMemTag(), srcPtr + du * stride);
           }
         }
       }
     }
-#pragma unroll(UnrollSrcs - 1 ? UnrollSrcs - 1 : 1)
+    NVCC_PRAGMA_UNROLL((UnrollSrcs - 1 ? UnrollSrcs - 1 : 1))
     for (int su = 0; su < UnrollSrcs - 1; su++) {
       if (su != 0 && nSrcs <= srcIx + su) break;
-#pragma unroll UnrollData
+      NVCC_PRAGMA_UNROLL(UnrollData)
       for (int du = 0; du < UnrollData; du++) {
         if (du != UnrollData - 1 || !lastPackEmpty) {
           AccPack a = fromPack<AccPack>(applyCast<Elt, Acc>(tmp[su][du]));
@@ -307,10 +316,10 @@ __device__ void reduceBatch(Coop coop, bool inPlace, int nBatch, int nElts, DstS
       (sizeof(SrcT) == sizeof(SrcPack) || (/*1*/ sizeof(SrcPack) - 1 <= srcPtrCommonMask &&
                                            /*2*/ tn * (int)sizeof(SrcPack) <= nBatch * nElts * (int)sizeof(SrcT)))) {
     int nPacks = getWorstPackCount(nElts, nEltPerPack);
-    constexpr int UnrollData = 4;
+    constexpr int UnrollData = 8;
     constexpr int nPackPerBlob = UnrollData * 32; // A blob is a whole warp's worth of unrolled packs
     int nBlobs = unsigned(nPacks) / nPackPerBlob;
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (int row = unsigned(t) / 32; row < nBatch * nBlobs; row += unsigned(tn) / 32) {
       int batchIx = unsigned(row) / unsigned(nBlobs);
       int blobIx = unsigned(row) % unsigned(nBlobs);
@@ -324,7 +333,7 @@ __device__ void reduceBatch(Coop coop, bool inPlace, int nBatch, int nElts, DstS
       if (inPlace) {
         DstPack dstVal[UnrollData];
         loadPacks(dstVal, dstMem, dstAlignMin, dstPtr, nElts, padElts, packIx, 32, lastPackEmpty);
-#pragma unroll
+        NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < UnrollData; u++) acc[u] = applyCast<DstT, Acc>(dstVal[u]);
       }
       accumulateLoads<SrcT>(red, inPlace, acc, /*stride=*/32, lastPackEmpty, nSrcs,
@@ -332,12 +341,12 @@ __device__ void reduceBatch(Coop coop, bool inPlace, int nBatch, int nElts, DstS
                               return (SrcPack*)(getSrc(batchIx, srcIx) - padElts) + packIx;
                             });
       DstPack dstVal[UnrollData];
-#pragma unroll
+      NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < UnrollData; u++) dstVal[u] = applyCast<Acc, DstT>(acc[u]);
       storePacks(dstVal, dstMem, dstAlignMin, dstPtr, nElts, padElts, packIx, 32, lastPackEmpty);
     }
     int nRemPacks = nPacks - nBlobs * nPackPerBlob;
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (int row = t; row < nBatch * nRemPacks; row += tn) {
       int batchIx = unsigned(row) / unsigned(nRemPacks);
       int packIx = nBlobs * nPackPerBlob + unsigned(row) % unsigned(nRemPacks);
@@ -362,16 +371,16 @@ __device__ void reduceBatch(Coop coop, bool inPlace, int nBatch, int nElts, DstS
       }
     }
   } else {
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (int row = t; row < nBatch * nElts; row += tn) {
       int batchIx = unsigned(row) / unsigned(nElts);
       int eltIx = unsigned(row) % unsigned(nElts);
       DstT* dstPtr = getDst(batchIx);
       Acc acc[1];
-      if (inPlace) acc[0] = (Acc)ldcs(dstMem, dstPtr + eltIx);
+      if (inPlace) acc[0] = (Acc)loadMem(dstMem, dstPtr + eltIx);
       accumulateLoads<SrcT>(red, inPlace, acc, /*stride(no data unroll)=*/0, /*lastPackEmpty=*/false, nSrcs,
                             [&] __device__(int srcIx) -> SrcT* { return getSrc(batchIx, srcIx) + eltIx; });
-      stcs(dstMem, dstPtr + eltIx, (DstT)acc[0]);
+      storeMem(dstMem, dstPtr + eltIx, (DstT)acc[0]);
     }
   }
 }
@@ -407,10 +416,10 @@ __device__ void reduceMultimemBatch(Coop coop, int nBatch, int nElts, DstSpace d
   // Handle source elements as packs if there is enough for every thread to have one.
   if (sizeof(SrcT) == sizeof(SrcPack) || tn * (int)sizeof(SrcPack) <= nBatch * nElts * (int)sizeof(SrcT)) {
     int nPacks = getWorstPackCount(nElts, nEltPerPack);
-    constexpr int UnrollData = 4;
+    constexpr int UnrollData = 8;
     constexpr int nPackPerBlob = UnrollData * 32; // A blob is a whole warp's worth of unrolled packs
     int nBlobs = unsigned(nPacks) / nPackPerBlob;
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (int row = unsigned(t) / 32; row < nBatch * nBlobs; row += unsigned(tn) / 32) {
       int batchIx = unsigned(row) / unsigned(nBlobs);
       int blobIx = unsigned(row) % unsigned(nBlobs);
@@ -423,7 +432,7 @@ __device__ void reduceMultimemBatch(Coop coop, int nBatch, int nElts, DstSpace d
       bool lastPackEmpty = padElts + nElts <= (packIx + (UnrollData - 1) * 32) * nEltPerPack;
       SrcPack* srcPackPtr = (SrcPack*)(srcPtr - padElts) + packIx;
       SrcPack srcVal[UnrollData] = {};
-#pragma unroll
+      NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < UnrollData; u++) {
         if (u < UnrollData - 1 || !lastPackEmpty) {
           srcVal[u] =
@@ -431,12 +440,12 @@ __device__ void reduceMultimemBatch(Coop coop, int nBatch, int nElts, DstSpace d
         }
       }
       DstPack dstVal[UnrollData];
-#pragma unroll
+      NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < UnrollData; u++) dstVal[u] = applyCast<SrcT, DstT>(srcVal[u]);
       storePacks(dstVal, dstMem, dstAlignMin, dstPtr, nElts, padElts, packIx, 32, lastPackEmpty);
     }
     int nRemPacks = nPacks - nBlobs * nPackPerBlob;
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (int row = t; row < nBatch * nRemPacks; row += tn) {
       int batchIx = unsigned(row) / unsigned(nRemPacks);
       int packIx = nBlobs * nPackPerBlob + unsigned(row) % unsigned(nRemPacks);
@@ -454,32 +463,32 @@ __device__ void reduceMultimemBatch(Coop coop, int nBatch, int nElts, DstSpace d
       }
     }
   } else {
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (int row = t; row < nBatch * nElts;) {
       int batchIx = unsigned(row) / unsigned(nElts);
       int eltIx = unsigned(row) % unsigned(nElts);
       DstT* dstPtr = getDst(batchIx) + eltIx;
       SrcT* srcPtr = getSrc(batchIx) + eltIx;
-      constexpr int UnrollData = 4;
+      constexpr int UnrollData = 8;
       // Test if the whole warp can be unrolled within the same run of elts
       // by testing if both lane 0 and 31 are in our run.
       int lane = unsigned(t) % 32;
       if ((0 <= eltIx - lane) && (eltIx - lane + 31 + 1 + (UnrollData - 1) * tn <= nElts)) {
         SrcT srcVal[UnrollData] = {};
-#pragma unroll
+        NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < UnrollData; u++) {
           srcVal[u] = fromPack<SrcT>(
             applyLoadMultimem<Red<SrcT>, sizeof(SrcT)>(srcRed, reinterpret_cast<uintptr_t>(srcPtr + u * tn)));
         }
-#pragma unroll
+        NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < UnrollData; u++) {
-          stcs(dstMem, dstPtr + u * tn, (DstT)srcVal[u]);
+          storeMem(dstMem, dstPtr + u * tn, (DstT)srcVal[u]);
         }
         row += UnrollData * tn;
       } else {
         SrcT srcVal =
           fromPack<SrcT>(applyLoadMultimem<Red<SrcT>, sizeof(SrcT)>(srcRed, reinterpret_cast<uintptr_t>(srcPtr)));
-        stcs(dstMem, dstPtr, (DstT)srcVal);
+        storeMem(dstMem, dstPtr, (DstT)srcVal);
         row += tn;
       }
     }
@@ -537,6 +546,36 @@ static __device__ void reduceLsa(Coop coop, int nElts, DstSpace dstMem, unsigned
     /*getSrcOffset=*/[=] __device__(int) -> int { return 0; }, comm, multimemTag);
 }
 
+template <typename Coop, typename DstT, typename SrcSpace, typename SrcT, typename Transform>
+static __device__ void copy(Coop coop, int nElts, GMemTag dstMem, DstT* dst, SrcSpace srcMem, SrcT* src,
+                            Transform transformFn) {
+  static_assert(sizeof(DstT) <= sizeof(SrcT), "Required");
+  int tn = coop.size();
+  int t = coop.thread_rank();
+
+  NVCC_PRAGMA_UNROLL_DISABLED
+  for (int e = t; e < nElts;) {
+    constexpr int UnrollData = 8;
+    int lane = unsigned(t) % 32;
+    if ((0 <= e - lane) && (e - lane + 31 + 1 + (UnrollData - 1) * tn <= nElts)) {
+      SrcT tmp[UnrollData];
+      NVCC_PRAGMA_UNROLL_AUTO
+      for (int u = 0; u < UnrollData; u++) {
+        tmp[u] = loadMem(srcMem, src + e + u * tn);
+      }
+      NVCC_PRAGMA_UNROLL_AUTO
+      for (int u = 0; u < UnrollData; u++) {
+        storeMem(dstMem, dst + e + u * tn, (DstT)transformFn(tmp[u]));
+      }
+      e += UnrollData * tn;
+    } else {
+      SrcT srcVal = loadMem(srcMem, src + e);
+      storeMem(dstMem, dst + e, (DstT)transformFn(srcVal));
+      e += tn;
+    }
+  }
+}
+
 template <typename Coop, typename DstT, typename SrcT, typename Transform>
 static __device__ void copy(Coop coop, int nElts, GMemTag dstMem, DstT* dst, SMemTag srcMem, SrcT* src,
                             Transform transformFn) {
@@ -554,16 +593,16 @@ static __device__ void copy(Coop coop, int nElts, GMemTag dstMem, DstT* dst, SMe
   unsigned srcAlign16 = reinterpret_cast<uintptr_t>(src + nPreElts) % 16;
 
   if (srcAlign16 == 0) {
-// TODO: When SrcT==DstT we can replace loop with single `cp.async.bulk`
-#pragma unroll 1
+    // TODO: When SrcT==DstT we can replace loop with single `cp.async.bulk`
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (int p = t; p < nPacks; p += tn) {
       SrcPack srcPack = ((SrcPack*)(src + nPreElts))[p];
-      stcs(GMemTag(), (DstPack*)(dst + nPreElts) + p, applyCast<SrcT, DstT>(transformFn(srcPack)));
+      storeMem(GMemTag(), (DstPack*)(dst + nPreElts) + p, applyCast<SrcT, DstT>(transformFn(srcPack)));
     }
   } else {
     unsigned srcAlign4 = srcAlign16 % 4;
     uint32_t* srcWords = reinterpret_cast<uint32_t*>(reinterpret_cast<uintptr_t>(src + nPreElts) & -uintptr_t(4));
-#pragma unroll 1
+    NVCC_PRAGMA_UNROLL_DISABLED
     for (int p = t; p < nPacks; p += tn) {
       constexpr int nWordPerPack = sizeof(SrcPack) / 4;
       union {
@@ -571,20 +610,20 @@ static __device__ void copy(Coop coop, int nElts, GMemTag dstMem, DstT* dst, SMe
         uint32_t w[nWordPerPack + 1];
       };
       int i;
-#pragma unroll
+      NVCC_PRAGMA_UNROLL_AUTO
       for (i = 0; i < nWordPerPack; i++) w[i] = (srcWords + p * nWordPerPack)[i];
       if (srcAlign4 != 0) {
         w[i] = srcWords[i];
-#pragma unroll
+        NVCC_PRAGMA_UNROLL_AUTO
         for (i = 0; i < nWordPerPack; i++) w[i] = __funnelshift_r(w[i], w[i + 1], 8 * srcAlign4);
       }
-      stcs(GMemTag(), (DstPack*)(dst + nPreElts) + p, applyCast<SrcT, DstT>(transformFn(srcPack)));
+      storeMem(GMemTag(), (DstPack*)(dst + nPreElts) + p, applyCast<SrcT, DstT>(transformFn(srcPack)));
     }
   }
 
-#pragma unroll 1
+  NVCC_PRAGMA_UNROLL_DISABLED
   for (int i = t; i < nPreElts + nSufElts; i += tn) {
     int e = i < nPreElts ? i : nElts - nSufElts + (i - nPreElts);
-    stcs(GMemTag(), dst + e, (DstT)(transformFn((src[e]))));
+    storeMem(GMemTag(), dst + e, (DstT)(transformFn((src[e]))));
   }
 }

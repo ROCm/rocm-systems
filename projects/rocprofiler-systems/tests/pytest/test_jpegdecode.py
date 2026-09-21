@@ -53,6 +53,22 @@ def get_run_args(rocprof_config) -> list[str]:
     return ["-i", str(rocprof_config.rocprofsys_examples_dir / "images"), "-b", "32"]
 
 
+@pytest.fixture
+def require_jpeg_data(rocprof_config) -> None:
+    """Skip the test at runtime when the sample image data is not available.
+
+    The jpegdecode example is always built when rocJPEG is present, but the
+    sample images are only shipped by test builds of ROCm. When they are missing
+    there is nothing to decode, so skip instead of failing.
+    """
+    images_dir = rocprof_config.rocprofsys_examples_dir / "images"
+    if not (images_dir.is_dir() and any(images_dir.iterdir())):
+        pytest.skip(
+            f"No rocJPEG sample images found in {images_dir}; "
+            "possibly built against a non-test build which doesn't have those files."
+        )
+
+
 # =============================================================================
 # JPEG decode tests
 # =============================================================================
@@ -68,7 +84,15 @@ def get_run_args(rocprof_config) -> list[str]:
 )
 @pytest.mark.class_name("jpeg-decode")
 class TestJPEGDecode(RocprofsysTest):
-    def test(self, mode, jpeg_decode_env, jpeg_decode_rules, get_run_args, gpu_info):
+    def test(
+        self,
+        mode,
+        jpeg_decode_env,
+        jpeg_decode_rules,
+        get_run_args,
+        gpu_info,
+        require_jpeg_data,
+    ):
         result = self.run_test(
             mode,
             "jpegdecode",

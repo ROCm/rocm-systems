@@ -10,10 +10,11 @@
 /// which have access to the encoding's inst_ member. These populate the
 /// VectorMemState with computed addresses.
 
-#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -24,7 +25,7 @@ struct VectorMemState;
 namespace cdna4 {
 
 /// @brief Compute scalar address for SMEM encoding.
-uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf);
+std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf);
 
 /// @brief Compute per-lane addresses for FLAT/GLOBAL/SCRATCH encoding.
 void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf,

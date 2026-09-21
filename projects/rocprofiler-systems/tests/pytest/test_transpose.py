@@ -33,6 +33,7 @@ pytestmark = [
 from rocprofsys import (
     GPUInfo,
 )
+from rocprofsys.gpu import UNSUPPORTED_PERF_COUNTER_GFX
 
 # =============================================================================
 # Transpose fixtures
@@ -88,6 +89,17 @@ def rocprofiler_rules(validation_rules_dir: Path) -> list[Path]:
         validation_rules_dir / "default-rules.json",
         rules_dir / "hw-counter-rules.json",
     ]
+
+
+@pytest.fixture
+def trace_delay_rules(validation_rules_dir: Path) -> list[Path]:
+    """Get validation rules asserting zero kernels were captured.
+
+    Deliberately does NOT include default-rules.json/transpose_rules: those
+    require at least one kernel row, which is the opposite of what this
+    rule set checks.
+    """
+    return [validation_rules_dir / "transpose" / "trace-delay-rules.json"]
 
 
 # ============================================================================
@@ -202,23 +214,74 @@ class TestTranspose(RocprofsysTest):
         )
         self.assert_regex(result)
 
+    _LOCK_MODE_REGRESSIONS = {
+        "mutex-locks": "hung rocprof-sys-run indefinitely "
+        "(self-deadlock on buffer_storage's m_mutex)",
+        "rw-locks": "aborted rocprof-sys-run with SIGABRT "
+        "(self-deadlock on synchronized<>'s rwlock)",
+    }
+
+    @pytest.mark.timeout(120)
+    @pytest.mark.rocpd("transpose_env")
+    @pytest.mark.parametrize("mode", ["binary_rewrite"])
+    def test_trace_delay_gates_gpu_contexts(self, mode, transpose_env, trace_delay_rules):
+        """
+        Regression test: ROCPROFSYS_TRACE_DELAY must gate the actual startup of
+        the "main" rocprofiler-sdk contexts (primary_ctx, counter_ctx), not just
+        suppress downstream category emission. Before the fix, tool_init()
+        unconditionally started every context whenever no roctx marker/trace
+        region client existed - the common case for plain GPU tracing with just
+        TRACE_DELAY set - so a configured delay never produced a real gap in
+        cached GPU/RocPD data.
+
+        transpose with TWO_KERNELS_RUN_ARGS (1 thread, 2 iterations, sync every
+        2) completes in well under a second end-to-end. A 60s TRACE_DELAY is
+        two orders of magnitude larger than that, so the delay window is
+        guaranteed to never close before the process exits: if the fix works,
+        the GPU contexts never start and zero kernels are ever captured.
+        """
+        env = transpose_env.copy()
+        env["ROCPROFSYS_TRACE_DELAY"] = "60"
+        result = self.run_test(
+            mode,
+            "transpose",
+            env=env,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
+            run_args=self.TWO_KERNELS_RUN_ARGS,
+            check_target_arch=True,
+        )
+        self.assert_regex(result)
+        self.assert_rocpd(
+            result,
+            subtest_name="ROCpd TRACE_DELAY GPU context gating validation",
+            rules_files=trace_delay_rules,
+        )
+
     @pytest.mark.locks
     @pytest.mark.timeout(60)
-    def test_mutex_locks(self, transpose_env):
+    @pytest.mark.parametrize(
+        "lock_mode",
+        [
+            pytest.param("mutex-locks", id="mutex-locks"),
+            pytest.param("rw-locks", id="rw-locks"),
+        ],
+    )
+    def test_locks(self, lock_mode, transpose_env):
         """
-        Regression test for a self-deadlock: pthread_mutex_gotcha used to
-        intercept the trace cache's own internal lock (buffer_storage's
-        m_mutex), recursively re-entering it on the same thread while
-        recording the trace event for the lock acquisition itself. This
-        hung rocprof-sys-run indefinitely with -I mutex-locks enabled.
+        Regression test: pthread_mutex_gotcha used to intercept rocprof-sys's
+        own internal locks, recursively re-entering them on the same thread
+        while recording the trace event for the lock acquisition itself.
+        See _LOCK_MODE_REGRESSIONS for the per-mode failure signature.
         """
         result = self.run_test(
             "sys_run",
             "transpose",
             env=transpose_env,
-            sys_run_args=["-I", "mutex-locks"],
+            sys_run_args=["-I", lock_mode],
             run_args=["2", "50", "10"],
             check_target_arch=True,
+            fail_message=f"Regression: {self._LOCK_MODE_REGRESSIONS[lock_mode]}",
         )
         self.assert_regex(result)
 
@@ -347,6 +410,8 @@ class TestTransposeROCProfiler(RocprofsysTest):
 @pytest.mark.rocprofiler
 @pytest.mark.class_name("transpose-gpu-perf-counters")
 @pytest.mark.timeout(120)
+@pytest.mark.cap_perfmon
+@pytest.mark.disable_archs(UNSUPPORTED_PERF_COUNTER_GFX)
 class TestTransposeGPUPerfCounters(RocprofsysTest):
     @pytest.mark.rocpd("gpu_perf_counter_env")
     def test(
@@ -355,9 +420,6 @@ class TestTransposeGPUPerfCounters(RocprofsysTest):
         gpu_info,
         validation_rules_dir,
     ):
-        if "gfx1151" in gpu_info.architectures:
-            pytest.skip("transpose GPU perf counter test skipped on gfx1151")
-
         result = self.run_test(
             "sampling",
             "transpose",

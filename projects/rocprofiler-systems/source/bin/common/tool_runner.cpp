@@ -13,7 +13,7 @@
 #include "core/mproc.hpp"
 #include "core/timemory.hpp"
 
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ranges.h>
 
 #include <timemory/log/macros.hpp>
 #include <timemory/signals/signal_handlers.hpp>
@@ -79,13 +79,6 @@ reset_color()
                                                              : ANSI_RESET;
 }
 
-std::string_view
-basename_of(std::string_view path)
-{
-    const auto slash = path.rfind('/');
-    return (slash == std::string_view::npos) ? path : path.substr(slash + 1);
-}
-
 int
 terminal_columns()
 {
@@ -134,7 +127,7 @@ make_run_config()
     cfg.workflow         = R"(INSTRUMENTATION WORKFLOW:
   1. Instrument: rocprof-sys-instrument -o app.inst -- ./app
   2. Run:        rocprof-sys-run --preset=balanced -- ./app.inst
-  3. Analyze:    cat rocprof-sys-output/wall_clock.txt)";
+  3. Analyze:    query rocprof-sys-output/rocpd.db with sqlite3 or rocpd tools)";
     cfg.output_prefix    = "ROCPROFSYS: ";
     cfg.enable_fork      = true;
     cfg.enable_launcher  = true;
@@ -153,8 +146,7 @@ make_sample_config()
                          "instrumentation.";
     cfg.workflow       = R"(PROFILING WORKFLOW:
   1. Profile:   rocprof-sys-sample --preset=balanced -- ./app
-  2. Analyze:   cat rocprof-sys-output/wall_clock.txt
-  3. Visualize: Open rocprof-sys-output/perfetto-trace.proto in ui.perfetto.dev)";
+  2. Analyze:   query rocprof-sys-output/rocpd.db with sqlite3 or rocpd tools)";
     cfg.force_sampling = true;
     cfg.disable_cputime_on_realtime_only = true;
     cfg.deprecated_flags                 = {
@@ -210,13 +202,13 @@ needs_full_parse(int argc, char** argv)
         auto arg = std::string_view{ argv[arg_idx] };
         if(arg == "--" || arg == "-?" || arg == "-h" || arg == "--help" ||
            arg == "--version" || arg == "--export-config" ||
-           arg.find("--export-config=") == 0 || arg == "--list-presets" ||
-           arg == "--explain" || arg.find("--explain=") == 0)
+           arg.starts_with("--export-config=") || arg == "--list-presets" ||
+           arg == "--explain" || arg.starts_with("--explain="))
         {
             return true;
         }
     }
-    return argc > 1 && argv[1] != nullptr && std::string_view{ argv[1] }.find('-') == 0;
+    return argc > 1 && argv[1] != nullptr && std::string_view{ argv[1] }.starts_with('-');
 }
 
 bool
@@ -269,10 +261,11 @@ tool_runner::build_description() const
         R"(
 @SUMMARY@
 QUICK REFERENCE:
-  Presets:  --preset=balanced (default), --preset=profile-only, --preset=trace-hpc, --preset=workload-trace
-  Domains:  --gpu, --rocm, --cpu, --parallel (composable with presets)
-  Output:   Results saved to rocprof-sys-output/ directory
-  Visualize: Open perfetto-trace.proto in https://ui.perfetto.dev
+  Presets:   --preset=balanced (default), --preset=profile-only, --preset=trace-hpc, --preset=workload-trace
+  Domains:   --gpu, --rocm, --cpu, --parallel (composable with presets)
+  Output:    Results saved to rocprof-sys-output/ directory
+  Default:   rocpd.db (SQLite database)
+  View with: ROCm Optiq, sqlite3
 EXAMPLES:
   Quick Start:
     @CMD@ --preset=balanced -- ./myapp
@@ -332,7 +325,7 @@ tool_runner::get_initial_environment()
     if(auto llvm_dir = rocprofsys::common::discover_llvm_libdir_for_ompt();
        !llvm_dir.empty())
     {
-        data.env.set("LD_LIBRARY_PATH", llvm_dir, update_mode::APPEND);
+        data.env.set("LD_LIBRARY_PATH", llvm_dir, update_mode::append);
         // Also mutate the live process env: any dlopen() that happens before
         // execvpe (e.g. OMPT runtime discovery) reads the real environ, not
         // data.env.current.
@@ -361,8 +354,7 @@ tool_runner::prepare_command(const char* exe)
     new_argv.reserve(data.out.command.size() + LAUNCHER_INJECT_SLOTS);
     for(const auto& arg : data.out.command)
     {
-        if(!injected &&
-           basename_of(arg).find(data.out.launcher) != std::string_view::npos)
+        if(!injected && path::filename(arg).find(data.out.launcher) != std::string::npos)
         {
             new_argv.emplace_back(exe);
             new_argv.emplace_back("--");
@@ -492,7 +484,7 @@ tool_runner::do_full_parse()
     rocprofsys::argparse::init_parser(data);
     signals::disable_signal_detection(signals::signal_settings::get_enabled());
 
-    auto parser = parser_t{ std::string{ basename_of(argv[0]) }, build_description() };
+    auto parser = parser_t{ path::filename(argv[0]), build_description() };
 
     configure_parser(parser);
 

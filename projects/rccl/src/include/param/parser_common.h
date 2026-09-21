@@ -9,10 +9,12 @@
 #define PARAM_PARSER_COMMON_H_INCLUDED
 
 #include "nccl.h"
+#include "debug.h"
 
 #include <string>
 #include <memory>
 #include <array>
+#include <cstring>
 
 // ncclParamParser: Runtime parser interface ncclParam depends on
 template <typename T>
@@ -82,6 +84,18 @@ struct ncclOptionSet {
   }
 };
 
+// assert no two options share the same name.
+template <typename T, size_t N>
+inline void ncclOptionSetAssertUnique(const ncclOptionSet<T, N>& opts) {
+  for (size_t i = 0; i < N - 1; i++) {
+    for (size_t j = i + 1; j < N; j++) {
+      if (std::strcmp(opts.options[i].name, opts.options[j].name) == 0) {
+        WARN("PARAM: Duplicate option name \"%s\"", opts.options[i].name);
+      }
+    }
+  }
+}
+
 // makeOption: Create an option (2-arg: no description)
 template <typename T>
 ncclOption<T> makeOption(const char* name, T value) {
@@ -97,7 +111,9 @@ ncclOption<T> makeOption(const char* name, T value, const char* desc) {
 // makeOptions: Create a fixed-size option set from variadic arguments
 template <typename T, typename... Args>
 auto makeOptions(ncclOption<T> first, Args... rest) -> ncclOptionSet<T, 1 + sizeof...(Args)> {
-  return ncclOptionSet<T, 1 + sizeof...(Args)>{{{first, rest...}}};
+  ncclOptionSet<T, 1 + sizeof...(Args)> opts{{{first, rest...}}};
+  ncclOptionSetAssertUnique(opts);
+  return opts;
 }
 
 #endif /* PARAM_PARSER_COMMON_H_INCLUDED */

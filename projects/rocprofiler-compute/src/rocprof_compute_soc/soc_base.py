@@ -7,7 +7,6 @@ import argparse
 import functools
 import os
 import shutil
-import sys
 from abc import abstractmethod
 from collections.abc import Iterator
 from pathlib import Path
@@ -15,7 +14,7 @@ from typing import Any, Optional
 
 import config
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
-from utils import amdsmi_interface
+from utils import amdsmi_interface, rocprofv3_avail_interface
 from utils.logger import (
     console_debug,
     console_error,
@@ -26,6 +25,7 @@ from utils.logger import (
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs
 from utils.utils_common import (
+    INVALID_BLOCK_HINT,
     METRIC_ID_RE,
     add_counter_extra_config_input_yaml,
     canonical_config_arch,
@@ -35,7 +35,6 @@ from utils.utils_common import (
     is_only_pc_sampling,
     is_tcc_channel_counter,
     parse_sets_yaml,
-    resolve_rocm_library_path,
     validate_roofline_csv,
 )
 from utils.utils_counter_defs import (
@@ -303,7 +302,7 @@ class OmniSoC_Base:
             alias = block_id
             panel_alias_dict = get_arch_alias_to_panel_id(self._mspec.gpu_arch)
             if alias not in panel_alias_dict:
-                raise KeyError(f"Unknown panel alias: {alias!r}")
+                console_error(f"Invalid --block value {alias!r}.{INVALID_BLOCK_HINT}")
             block_id = str(panel_alias_dict[alias])
             console_log(f"alias: {alias}, block id: {block_id}")
 
@@ -352,12 +351,15 @@ class OmniSoC_Base:
         """Metric ids whose PMCs get tier-0 priority in the greedy coalescing pass.
 
         Loaded from profiling_counter_grouping_policy.yaml for the current arch.
-        Returns an empty tuple when the arch has no grouping policy.
+        gfx115x parts share one policy block, so look the arch up by its
+        canonical config name. Returns an empty tuple when the arch has no
+        grouping policy.
         """
         arch = self.__arch
         if not arch:
             return ()
-        return _load_same_bucket_priority_policy_map().get(arch, ())
+        policy_arch = canonical_config_arch(arch)
+        return _load_same_bucket_priority_policy_map().get(policy_arch, ())
 
     def _metric_aware_coalesce_pass(
         self,
@@ -369,16 +371,16 @@ class OmniSoC_Base:
         pmc_perf bucket, else open a new one. Overflow stays for first-fit.
 
         Accepts:
-            work_set        — counters still to be placed (not modified)
-            output_files    — existing CounterFile buckets (not modified)
-            file_count      — current bucket sequence number
+            work_set        counters still to be placed (not modified)
+            output_files    existing CounterFile buckets (not modified)
+            file_count      current bucket sequence number
         Returns:
             (remaining_counters, updated_files, file_count)
         """
         if not work_set:
             return work_set, list(output_files), file_count
 
-        # Work on copies so the caller’s originals are untouched.
+        # Work on copies so the caller's originals are untouched.
         remaining = set(work_set)
         files = list(output_files)
 
@@ -402,8 +404,10 @@ class OmniSoC_Base:
             metric_name,
             metric_yaml,
         ) in self._iter_arch_analysis_yaml_metrics():
-            hw, _ = extract_counters_and_variables(metric_yaml, self._mspec.gpu_series)
-            hw = self._expand_tcc_template_counters(hw)
+            formula_hw, _ = extract_counters_and_variables(
+                metric_yaml, self._mspec.gpu_series, include_supported_denom=False
+            )
+            hw = self._expand_tcc_template_counters(formula_hw)
             counters = frozenset(hw & remaining)
             if not counters:
                 continue
@@ -423,8 +427,6 @@ class OmniSoC_Base:
                 continue
             placed = False
             for bucket_idx, bucket in enumerate(files):
-                if bucket.name.endswith("_ACCUM"):
-                    continue
                 trial = _trial_counter_file_with_extra(bucket, cfg, need_sorted)
                 if trial is not None:
                     files[bucket_idx] = trial
@@ -603,11 +605,11 @@ class OmniSoC_Base:
         """Iterate analysis_configs/<arch> YAML metric_table rows.
 
         Yields:
-            stem_id     — YAML filename prefix (e.g. "2" from "2_SQ.yaml")
-            panel_id    — metric_table "id" field (may be None)
-            metric_idx  — zero-based index of the metric within its table
-            metric_name — metric key string
-            metric_yaml — metric body serialised as YAML text
+            stem_id     YAML filename prefix (e.g. "2" from "2_SQ.yaml")
+            panel_id    metric_table "id" field (may be None)
+            metric_idx  zero-based index of the metric within its table
+            metric_name metric key string
+            metric_yaml metric body serialised as YAML text
         """
         args = self.get_args()
         arch = self.__arch
@@ -674,46 +676,9 @@ class OmniSoC_Base:
             sdk_config
         )
 
-        # Backward compatibility support for sdk avail module moved from
-        # <rocm_path>/bin/rocprofv3_avail_module/avail.py to
-        # <rocm_path>/lib/python3/site-packages/rocprofv3/avail.py
-        new_path = str(
-            Path(args.rocprofiler_sdk_tool_path).parents[1] / "python3/site-packages"
+        counters = rocprofv3_avail_interface.get_counters(
+            args.rocprofiler_sdk_tool_path
         )
-        old_path = str(Path(args.rocprofiler_sdk_tool_path).parents[2] / "bin")
-        try:
-            sys.path.append(new_path)
-            from rocprofv3 import avail
-        except ImportError:
-            console_debug(
-                f"Could not import rocprofiler-sdk avail module from {new_path}, "
-                f"trying {old_path}"
-            )
-            try:
-                sys.path.remove(new_path)
-                sys.path.append(old_path)
-                from rocprofv3_avail_module import avail
-            except ImportError:
-                console_error("Failed to import rocprofiler-sdk avail module.")
-
-        # librocprofv3-list-avail.so location varies by ROCm version:
-        #   ROCm >= 7.1: <rocm_path>/lib/rocprofiler-sdk/
-        #   ROCm 7.0.x:  <rocm_path>/libexec/rocprofiler-sdk/
-        avail_lib_name = "librocprofv3-list-avail.so"
-        avail_lib_path = resolve_rocm_library_path(
-            str(Path(args.rocprofiler_sdk_tool_path).parent / avail_lib_name)
-        )
-        if not Path(avail_lib_path).exists():
-            avail_lib_path = resolve_rocm_library_path(
-                str(
-                    Path(args.rocprofiler_sdk_tool_path).parents[2]
-                    / "libexec"
-                    / "rocprofiler-sdk"
-                    / avail_lib_name
-                )
-            )
-        avail.loadLibrary.libname = avail_lib_path
-        counters = avail.get_counters()
         rocprof_counters = {
             counter.name
             for counter in counters[list(counters.keys())[0]]
@@ -825,7 +790,6 @@ class OmniSoC_Base:
         console_debug("profiling", f"perform SoC post processing for {self.__arch}")
         # Roofline can be skipped via --no-roof
         # Roofline not supported on MI 100
-        # Roofline not supported on Strix Halo
         # If --filter-blocks is provided, roofline block (block 4) should be mentioned
         if (
             self.get_args().no_roof
@@ -929,6 +893,11 @@ def _trial_counter_file_with_extra(
     for ctr in flat_counters_in_perfmon_file(basis):
         if not trial.add(ctr):
             msg = f"clone replay failed for {ctr!r} in bucket {basis.name!r}"
+            raise RuntimeError(msg)
+    for block, basis_set in basis.blocks.items():
+        reservation = trial.blocks[block].avail - basis_set.avail
+        if reservation < 0 or not trial.blocks[block].reserve(reservation):
+            msg = f"clone reservation failed for block {block!r} in {basis.name!r}"
             raise RuntimeError(msg)
     for ctr in extra_counters_sorted:
         if not trial.add(ctr):

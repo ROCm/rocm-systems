@@ -317,6 +317,32 @@ def test_occupancy_event_tracing_fields(att_occupancy_event_trace_out_dir_path):
     assert found_dispatch, "No dispatch records found in occupancy.json"
 
 
+def test_att_no_detail(att_no_detail_out_dir_path):
+    occupancy_files = find_occupancy_files(att_no_detail_out_dir_path)
+    assert (
+        occupancy_files
+    ), f"No occupancy.json files found under {att_no_detail_out_dir_path}"
+
+    for occupancy_file in occupancy_files:
+        with open(occupancy_file, "r", encoding="utf-8") as f:
+            validate_occupancy_rows(json.load(f), occupancy_file)
+
+    wave_files = sorted(
+        Path(att_no_detail_out_dir_path).glob("ui_output_*/se*_sm*_sl*_wv*.json")
+    )
+    for wave_file in wave_files:
+        with open(wave_file, "r", encoding="utf-8") as f:
+            wave_data = json.load(f)
+
+        instructions = wave_data.get("wave", {}).get("instructions") or []
+        assert len(instructions) <= 2, (
+            f"Received a wave record with {len(instructions)} instructions "
+            f"in {wave_file}"
+        )
+        assert wave_data.get("num_insts") <= 2
+        assert wave_data.get("num_stitched") <= 2
+
+
 def test_realtime_clock(output_path):
 
     def verify_sorted(timestamps):
@@ -736,6 +762,30 @@ def test_att_no_intercept_target_kernel(att_no_intercept_out_dir_path):
         f"Expected '{expected}' to be in ATT no-intercept trace. "
         f"Traced kernels: {traced_kernel_names}"
     )
+
+
+def test_counter_collection_with_att(att_pmc_json_data):
+    data = att_pmc_json_data["rocprofiler-sdk-tool"]
+    assert data["strings"]["att_filenames"]
+    counter_names = {
+        counter["id"]["handle"]: counter["name"] for counter in data["counters"]
+    }
+    callbacks = data["callback_records"]["counter_collection"]
+    assert callbacks
+
+    found_positive_value = False
+    for entry in callbacks:
+        dispatch = entry["dispatch_data"]
+        assert (
+            dispatch["dispatch_info"]["dispatch_id"] >= 1
+        ), f"Expected dispatch_id >= 1, got {dispatch['dispatch_info']['dispatch_id']}"
+        assert dispatch["end_timestamp"] >= dispatch["start_timestamp"]
+        assert entry["records"]
+        for record in entry["records"]:
+            assert counter_names[record["counter_id"]["handle"]] == "SQ_WAVES"
+            assert record["value"] >= 0
+            found_positive_value = found_positive_value or record["value"] > 0
+    assert found_positive_value
 
 
 if __name__ == "__main__":

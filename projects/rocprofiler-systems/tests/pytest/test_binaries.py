@@ -87,7 +87,7 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_USE_OMPT": "domains.parallel.runtimes.openmp",
     "ROCPROFSYS_USE_KOKKOSP": "domains.parallel.runtimes.kokkos",
     "ROCPROFSYS_USE_RCCLP": "domains.parallel.runtimes.rccl",
-    "ROCPROFSYS_USE_SHMEM": "domains.parallel.runtimes.shmem",
+    "ROCPROFSYS_USE_OPENSHMEM": "domains.parallel.runtimes.shmem",
     "ROCPROFSYS_USE_UCX": "domains.parallel.runtimes.ucx",
     # --- Output ---
     "ROCPROFSYS_OUTPUT_PATH": "output.path",
@@ -258,9 +258,11 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
 
     @pytest.mark.timeout(120)
     def test_simulate_lib(self, rocprof_config):
-        user_lib = rocprof_config.rocprofsys_lib_dir / "librocprof-sys-user.so"
-        if not user_lib.exists():
-            pytest.fail("librocprof-sys-user.so not found")
+        causal_api_lib = (
+            rocprof_config.rocprofsys_lib_dir / "librocprof-sys-causal-api.so"
+        )
+        if not causal_api_lib.exists():
+            pytest.fail("librocprof-sys-causal-api.so not found")
 
         pass_regex = [
             r"\[rocprof-sys\]\[exe\] Runtime instrumentation is not possible![\s\S]*"
@@ -270,7 +272,14 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
         result = self.run_test(
             "baseline",
             target=self.target,
-            run_args=["--print-available", "functions", "-v", "2", "--", str(user_lib)],
+            run_args=[
+                "--print-available",
+                "functions",
+                "-v",
+                "2",
+                "--",
+                str(causal_api_lib),
+            ],
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
@@ -285,9 +294,9 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
         binary rewrite tests with "unable to reinstrument previously instrumented
         binary" errors.
         """
-        lib_basename = "librocprof-sys-user.so"
-        user_lib = rocprof_config.rocprofsys_lib_dir / lib_basename
-        if not user_lib.exists():
+        lib_basename = "librocprof-sys-causal-api.so"
+        causal_api_lib = rocprof_config.rocprofsys_lib_dir / lib_basename
+        if not causal_api_lib.exists():
             pytest.skip(f"{lib_basename} not built")
 
         tmp_dir = test_output_dir / "tmp"
@@ -1026,7 +1035,7 @@ class TestRocprofilerSystemsRun(RocprofsysTest):
             empty_cfg=empty_cfg,
             output_dir=test_output_dir,
             output_subdir="run-args-output/",
-            trace_file="perfetto-run-args-trace.proto",
+            trace_file="perfetto-run-args-trace.pftrace",
             tmpdir=tmpdir,
             sleep_cmd=sleep_cmd,
             run_only=True,
@@ -1067,7 +1076,7 @@ class TestRocprofilerSystemsSample(RocprofsysTest):
             empty_cfg=empty_cfg,
             output_dir=test_output_dir,
             output_subdir="sample-args-output/",
-            trace_file="perfetto-sample-args-trace.proto",
+            trace_file="perfetto-sample-args-trace.pftrace",
             tmpdir=tmpdir,
             sleep_cmd=sleep_cmd,
         )

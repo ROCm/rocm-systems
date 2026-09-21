@@ -3,7 +3,7 @@
 
 #include "logger.hpp"
 
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 
 #include <string>
 #include <string_view>
@@ -18,10 +18,10 @@ include_process_id_in_filename(std::string_view filename)
 {
     if(filename.empty()) return std::string{};
 
-    auto last_sep       = filename.find_last_of('/');
-    auto filename_start = (last_sep == std::string_view::npos) ? 0 : last_sep + 1;
-    auto dot_pos        = filename.find_last_of('.');
-    bool has_extension =
+    auto       last_sep       = filename.find_last_of('/');
+    auto       filename_start = (last_sep == std::string_view::npos) ? 0 : last_sep + 1;
+    auto       dot_pos        = filename.find_last_of('.');
+    const bool has_extension =
         (dot_pos != std::string_view::npos) && (dot_pos > filename_start);
 
     if(!has_extension) return fmt::format("{}_{}", filename, getpid());

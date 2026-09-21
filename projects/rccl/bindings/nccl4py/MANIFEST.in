@@ -10,5 +10,6 @@ exclude Makefile
 exclude uv.lock
 global-exclude .gitignore .gitattributes
 
-# Exclude compiled/generated files
-global-exclude *.so *.cpp *.c
+# Exclude generated Cython build outputs in nccl/bindings/
+recursive-exclude nccl/bindings *.so
+global-exclude *.cpp *.c
