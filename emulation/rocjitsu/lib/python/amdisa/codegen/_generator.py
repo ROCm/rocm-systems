@@ -356,6 +356,7 @@ class CodeGenerator:
         'ds_write': 'local',
         'ds_write2': 'local',
         'ds_atomic': 'local',
+        'ds_stack': 'local',
         'ds_atomic2': 'local',
         'ds_mskor': 'local',
         'ds_append_consume': 'local',
@@ -1097,6 +1098,7 @@ class CodeGenerator:
         store_classes = frozenset(
             {
                 'buffer_store',
+                'tbuffer_store',
                 'buffer_store_format_d16',
                 'flat_store',
                 'global_store_addtid',
@@ -1108,6 +1110,7 @@ class CodeGenerator:
         load_classes = frozenset(
             {
                 'buffer_load',
+                'tbuffer_load',
                 'buffer_load_format_d16',
                 'dcache_inv',
                 'flat_load',
@@ -4707,8 +4710,8 @@ class CodeGenerator:
     # class gate is what restricts the partial-def treatment to loads.
     # global/scratch loads use the 'flat_load' class. Byte/short buffer D16 loads
     # (e.g. buffer_load_ubyte_d16) use 'buffer_load'/'tbuffer_load' and execute
-    # correctly; packed D16 FORMAT loads use the non-executable
-    # 'buffer_load_format_d16' class (metadata-only, see semantics._derive_buffer_data).
+    # correctly; packed D16 FORMAT loads use the dedicated
+    # 'buffer_load_format_d16' class (see semantics._derive_buffer_data).
     _D16_LOAD_CLASSES = frozenset(
         {
             'flat_load',
@@ -4827,6 +4830,9 @@ class CodeGenerator:
 
         sem = self.semantics.instructions.get(inst.name) if self.semantics else None
         name = inst.name.upper()
+
+        if opnd.name == 'addr' and sem is not None and sem.semantic_class == 'ds_stack':
+            return True
 
         if opnd.name in ('vdata', 'sdata') and (
             (sem is not None and sem.semantic_class == 'buffer_atomic')
@@ -7373,6 +7379,21 @@ class CodeGenerator:
         if cls == 'global_store_addtid':
             return self._gen_global_store_addtid(dst_ops, src_ops, sem)
 
+        if (
+            self.isa_spec.arch_name != 'cdna5'
+            and cls
+            in (
+                'buffer_load',
+                'tbuffer_load',
+                'buffer_store',
+                'tbuffer_store',
+                'buffer_load_format_d16',
+                'buffer_store_format_d16',
+            )
+            and 'FORMAT' in inst.name.upper()
+        ):
+            return self._gen_formatted_buffer(sem, cls, inst)
+
         if cls in ('buffer_load', 'tbuffer_load'):
             return self._gen_buffer_load(dst_ops, src_ops, sem, cls, inst)
 
@@ -7380,9 +7401,8 @@ class CodeGenerator:
             return self._gen_buffer_store(dst_ops, src_ops, sem, cls)
 
         if cls in ('buffer_load_format_d16', 'buffer_store_format_d16'):
-            # Packed D16 FORMAT execution (two 16-bit components per VGPR) is not
-            # modeled by the memory pipeline; the class is metadata-only so the
-            # partial-def liveness of D16 FORMAT loads is still emitted.
+            # A profile without formatted memory instructions must not acquire
+            # executable format operations from metadata alone.
             return (
                 '  (void)wf;\n'
                 '  throw util::UnimplementedInst(mnemonic()); '
@@ -7461,6 +7481,28 @@ class CodeGenerator:
 
         if cls == 'buffer_atomic':
             return self._gen_buffer_atomic(dst_ops, src_ops, sem)
+
+        if cls == 'ds_stack':
+            modern = self.isa_spec.arch_name == 'rdna4'
+            push = 8 if 'PUSH8' in inst.name.upper() else 4
+            size = (
+                '(inst_.offset0 & 31u)'
+                if modern
+                else '(8u << ((inst_.offset1 >> 4) & 3u))'
+            )
+            flags = '(1u | ((inst_.offset1 & 3u) << 1))' if modern else '0u'
+            if not modern:
+                L.append('  if (inst_.gds) throw util::UnimplementedInst(mnemonic());')
+            L.append(
+                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            )
+            self._append_wait_counter_type(L, sem, cls)
+            L.append(
+                f'  amdgpu::prepare_lds_stack(wf, *d, inst_.addr, inst_.data0, inst_.data1, '
+                f'inst_.vdst, {push}, {sem.num_elems}, {size}, {flags});'
+            )
+            L.append('  set_data(std::move(d));')
+            return '\n'.join(L)
 
         if cls in ('ds_atomic', 'ds_atomic2'):
             gds_guard = ''
@@ -7613,6 +7655,23 @@ class CodeGenerator:
             L.append('  (void)wf;')
             return '\n'.join(L)
 
+        if cls == 'image_query' and inst.name.upper() == 'IMAGE_GET_RESINFO':
+            resource = (
+                'inst_.rsrc'
+                if self.isa_spec.arch_name == 'rdna4'
+                else 'inst_.srsrc * 4'
+            )
+            lod = (
+                'inst_.vaddr0' if self.isa_spec.arch_name == 'rdna4' else 'inst_.vaddr'
+            )
+            r128 = (
+                'false' if self.isa_spec.arch_name.startswith('cdna') else 'inst_.r128'
+            )
+            return (
+                f'  amdgpu::execute_image_resource_info(wf, {resource}, {lod}, '
+                f"{self._vgpr_base_expr('vdata')}, inst_.dmask, {r128}, inst_.a16);"
+            )
+
         if cls in ('image_atomic', 'image_sample', 'image_query', 'image_bvh'):
             L.append('  (void)wf; // Image pipeline not yet implemented.')
             return '\n'.join(L)
@@ -7649,9 +7708,9 @@ class CodeGenerator:
         self._append_wait_counter_type(L, sem, 'smem_load')
         L.append(f'  d->mtype = {self._mtype_expr(is_smem=True)};')
         if self.isa_spec.profile.smem_address_uses_access_size:
-            addr_args = 'inst_, wf, d->elem_size * d->num_dwords'
+            addr_args = 'inst_, wf, d->elem_size * d->num_dwords, d.get()'
         else:
-            addr_args = 'inst_, wf'
+            addr_args = 'inst_, wf, d.get()'
         L.append(f'  auto address = smem_calculate_address({addr_args});')
         L.append('  if (!address) return;')
         L.append('  d->addr = *address;')
@@ -8343,6 +8402,7 @@ class CodeGenerator:
         'sub': 'amdgpu::AtomicOp::SUB',
         'sub_clamp': 'amdgpu::AtomicOp::SUB_CLAMP',
         'cond_sub': 'amdgpu::AtomicOp::COND_SUB',
+        'wrap': 'amdgpu::AtomicOp::WRAP',
         'rsub': 'amdgpu::AtomicOp::RSUB',
         'smin': 'amdgpu::AtomicOp::SMIN',
         'umin': 'amdgpu::AtomicOp::UMIN',
@@ -8497,6 +8557,7 @@ class CodeGenerator:
 
         L = []
         is_cmpswap = sem.operation in ('cmpswap', 'fcmpswap')
+        has_data1 = is_cmpswap or sem.operation == 'wrap'
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
@@ -8524,7 +8585,7 @@ class CodeGenerator:
         L.append(
             f"  uint32_t data_base = {self._vgpr_base_expr('data0', role='Src1')};"
         )
-        if is_cmpswap:
+        if has_data1:
             L.append(
                 f"  uint32_t data1_base = {self._vgpr_base_expr('data1', role='Src2')};"
             )
@@ -8537,7 +8598,7 @@ class CodeGenerator:
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         half = data_dwords // 2
         for i in range(data_dwords):
-            if is_cmpswap and i >= half:
+            if has_data1 and i >= half:
                 data_source = f'data1_base + {i - half}'
             else:
                 data_source = f'data_base + {i}'
@@ -8745,6 +8806,50 @@ class CodeGenerator:
             L.append('    std::memcpy(&d->store_data[lane * 8], &lo, 4);')
             L.append('    std::memcpy(&d->store_data[lane * 8 + 4], &hi, 4);')
             L.append('  }')
+        L.append('  set_data(std::move(d));')
+        return '\n'.join(L)
+
+    def _gen_formatted_buffer(
+        self, sem: InstructionSemantics, cls: str, inst: Instruction
+    ) -> str:
+        is_load = 'load' in cls
+        typed = inst.name.upper().startswith('TBUFFER')
+        resource = (
+            'inst_.rsrc' if self.isa_spec.arch_name == 'rdna4' else 'inst_.srsrc * 4'
+        )
+        if typed and self.isa_spec.arch_name in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+            fmt = 'inst_.dfmt | (inst_.nfmt << 4)'
+        else:
+            fmt = 'inst_.format' if typed else '-1'
+        addr_fn = (
+            'mtbuf_calculate_addresses'
+            if typed and self.isa_spec.arch_name != 'rdna4'
+            else 'mubuf_calculate_addresses'
+        )
+        L = [
+            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
+            f'  d->is_load = {str(is_load).lower()};',
+            f'  d->mtype = {self._mtype_expr()};',
+            f'  d->non_temporal = {self._coherency_exprs()[2]};',
+        ]
+        self._append_wait_counter_type(L, sem, cls)
+        encoding = self.isa_spec.encoding_map.get(inst.enc_name)
+        if is_load and encoding and any(f.name == 'lds' for f in encoding.ucode_fields):
+            L.append('  d->lds_dst = inst_.lds;')
+            L.append('  d->lds_base = wf.m0() + inst_.offset + wf.lds_base();')
+        if sem.elem_size == 2:
+            L.append('  d->buffer_d16 = true;')
+            L.append(f'  d->d16_hi = {str(sem.d16_hi).lower()};')
+        if is_load:
+            L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdata')};")
+        L.append(
+            f'  if (amdgpu::prepare_buffer_format(wf, *d, {resource}, {fmt}, {sem.num_elems}))'
+        )
+        L.append(f'    {addr_fn}(inst_, wf, *d);')
+        if not is_load:
+            L.append(
+                f"  amdgpu::capture_buffer_format_store(wf, *d, {self._vgpr_base_expr('vdata')});"
+            )
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -12671,6 +12776,18 @@ class CodeGenerator:
                             ('memory', True),
                         ]
                     )
+                if self.isa_spec.arch_name != 'cdna5' and enc.enc_name.upper() in (
+                    'ENC_MUBUF',
+                    'ENC_MTBUF',
+                    'ENC_VBUFFER',
+                ):
+                    cpp_includes.append(('rocjitsu/vm/amdgpu/buffer_format.h', False))
+                if any(i.name.upper().startswith('DS_BVH_STACK') for i in all_insts):
+                    cpp_includes.append(('rocjitsu/vm/amdgpu/lds_stack.h', False))
+                if any(i.name.upper() == 'IMAGE_GET_RESINFO' for i in all_insts):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/image_resource.h', False)
+                    )
                 has_matrix_exec = any(
                     self.semantics
                     and (s := self.semantics.instructions.get(i.name))
@@ -16171,6 +16288,15 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                             )
                         )
                     else:
+                        opcode_expr = 'op.op'
+                        fields = {field.name: field for field in dte.enc.ucode_fields}
+                        if 'opm' in fields and dte.enc.enc_name in (
+                            'ENC_MUBUF',
+                            'ENC_MTBUF',
+                        ):
+                            # GFX10 buffer encodings split the high opcode bit
+                            # into OPM (in word 1 for MTBUF).
+                            opcode_expr += f' | (op.opm << {fields["op"].bit_cnt})'
                         decode_table_funcs.append(
                             cgen.FunctionBody(
                                 func_decl,
@@ -16181,7 +16307,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                             'op = *reinterpret_cast<const decltype(op) *>(opcode)',
                                         ),
                                         cgen.Statement(
-                                            f'return {dte.sub_decode_table}[op.op](opcode, emit_error)'
+                                            f'return {dte.sub_decode_table}[{opcode_expr}](opcode, emit_error)'
                                         ),
                                     ]
                                 ),
