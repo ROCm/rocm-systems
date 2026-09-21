@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - "develop"
-      - "users/ianwood2/rocjitsu-benchmark-corpus"
   workflow_dispatch:
 
 # Each job grants only the access it needs.
@@ -15,13 +14,9 @@ defaults:
     shell: bash
 
 env:
-  CORPUS_SHA: 3da65dc7bb249bac25c5d8f32c4af08dcba355a0
-  DASHBOARD_SHA: c53572277a6f160e92f360e23f5af7ce2de904a7
+  CORPUS_SHA: 896ebb017d5c6be5d2dca7d9b99fada5347207cf # rocjitsu-test-corpus#43
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
   CORPUS_SOURCE_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
-  ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
-  ROCJITSU_VENV: ${{ github.workspace }}/benchmark-venv
-  ROCJITSU_RESULT_DIR: ${{ github.workspace }}/benchmark-results
   RESULTS_BRANCH: shared/rocjitsu-benchmark-results
   RESULTS_ARTIFACT: rocjitsu-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
 
@@ -42,6 +37,15 @@ jobs:
         DEBIAN_FRONTEND: noninteractive
 
     steps:
+      - name: Set benchmark paths
+        run: |
+          BENCHMARK_DIR="${RUNNER_TEMP}/rocjitsu-benchmark-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          {
+            echo "ROCJITSU_BUILD_DIR=${BENCHMARK_DIR}/build"
+            echo "ROCJITSU_VENV=${BENCHMARK_DIR}/venv"
+            echo "ROCJITSU_RESULT_DIR=${BENCHMARK_DIR}/results"
+          } >> "${GITHUB_ENV}"
+
       - name: Install base dependencies
         run: |
           apt-get update
@@ -152,16 +156,6 @@ jobs:
           path: rocjitsu-test-corpus
           persist-credentials: false
 
-      # Until the dashboard PR lands, validate against its immutable revision.
-      - name: Checkout dashboard validator
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          repository: ROCm/rocm-systems
-          ref: ${{ env.DASHBOARD_SHA }}
-          path: dashboard
-          persist-credentials: false
-          sparse-checkout: emulation/rocjitsu/website
-
       - name: Checkout repository for publication
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -227,9 +221,6 @@ jobs:
                 --source-ref "${GITHUB_REF_NAME}" \
                 --is-beta
             )
-
-            node "${GITHUB_WORKSPACE}/dashboard/emulation/rocjitsu/website/scripts/validate-dashboard-data.mjs" \
-              "${GITHUB_WORKSPACE}/publication/data"
 
             git add data
             if git diff --cached --quiet; then

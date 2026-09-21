@@ -68,18 +68,9 @@ Use `--list` to inspect cases without building or installing GPU dependencies.
 `.github/workflows/rocjitsu-benchmarks.yml` runs the nightly suite
 against an immutable corpus revision and records that revision in results.
 The publisher checks out the same corpus commit and validates clean, matching
-rocjitsu and corpus provenance before publication. It also runs the dashboard’s
-validator against the complete staged dataset before every publication attempt.
-Until the dashboard PR lands, its validator comes from the immutable
-`DASHBOARD_SHA` revision; it runs directly with Node.js without npm dependencies.
-
-Pushes to `users/ianwood2/rocjitsu-benchmark-corpus` run the workflow before it
-lands. This temporary trigger can be removed after the hosted run. The repository
-receiving the push must have Actions enabled and access to a runner labeled
-`rocjitsu-benchmark`; a fork does not automatically inherit upstream’s runners.
-Branch runs upload diagnostics and skip the publication job. Check that all
-56 nightly cells complete and inspect the uploaded `run.json` and case logs.
-This tests the build and benchmarks, but not remote publication permissions.
+rocjitsu and corpus provenance before publication. Each run attempt uses separate
+build, Python environment, and result directories under the runner's temporary
+directory, so repeated jobs do not reuse benchmark output or build state.
 
 Pushes and manual dispatches on `develop` publish to
 `shared/rocjitsu-benchmark-results`. Manual dispatches on other branches run the
@@ -93,13 +84,15 @@ only by a PR cannot be manually dispatched until it exists on the default branch
 Finalized partial runs remain publishable while the benchmark job reports
 failure. Diagnostics are uploaded for failed runs. The publisher writes
 `data/metadata.json`, `data/index.json`, immutable catalogs under
-`data/test-catalogs/`, and target-grouped executions under `data/runs/`, matching
-the [dashboard contract](https://github.com/ROCm/rocm-systems/blob/c53572277a6f160e92f360e23f5af7ce2de904a7/emulation/rocjitsu/website/docs/website-data-contract.md).
+`data/test-catalogs/`, and target-grouped executions under `data/runs/`. See the
+[pinned corpus's result format](https://github.com/ROCm/rocjitsu-test-corpus/blob/896ebb017d5c6be5d2dca7d9b99fada5347207cf/benchmarks/README.md#results-and-plugins)
+for the publication rules.
 The benchmark job targets the `rocjitsu-benchmark` runner label; publication
 runs separately on `ubuntu-24.04`. The site metadata enables the Beta label,
 and results record the benchmark runner's machine ID.
 
 Publication starts a fresh dataset; the old dashboard format is not migrated.
-Website build and deployment remain separate from data publication. A fresh
-dataset needs a valid Vanilla run, which can contain failed or timed-out results.
-Every run in the dataset must use the same benchmark machine.
+Website integration and deployment remain separate from data publication. The
+merged corpus publishes `exitCode` in each result; the pending dashboard PR
+[rejects that field](https://github.com/ROCm/rocm-systems/pull/11610). Align the
+publisher and dashboard contracts before deploying these results to that site.
