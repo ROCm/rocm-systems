@@ -6522,6 +6522,7 @@ TEST_F(P2pProxyDeregisterMicrotest, ProxyDeregister_CuMemSameProcessRecord_Relea
     reqInfo.legacyIpcCap = false;
     reqInfo.numSegments  = 1;
 
+    g_freeCalls.clear();
     int  done = 0;
     auto r = p2pTransport.send.proxyDeregister(&conn_, &state_, &reqInfo,
                                                sizeof(ncclIpcImpInfo), &done);
@@ -6529,6 +6530,9 @@ TEST_F(P2pProxyDeregisterMicrotest, ProxyDeregister_CuMemSameProcessRecord_Relea
     EXPECT_EQ(r, ncclSuccess);
     EXPECT_EQ(done, 1);
     EXPECT_EQ(QueueHead(conn_), nullptr);        // record removed
+    // Same-process selects the ncclCuMemFreeAddr arm on (rmtRegAddr - offset).
+    EXPECT_EQ(g_freeCalls, (std::vector<FreeCall>{
+        {FreeKind::CuMemFreeAddr, reinterpret_cast<void*>(0x50000)}}));
 }
 
 TEST_F(P2pProxyDeregisterMicrotest, ProxyDeregister_CuMemCrossProcessRecord_ReleasesAndRemoves)
@@ -6546,6 +6550,7 @@ TEST_F(P2pProxyDeregisterMicrotest, ProxyDeregister_CuMemCrossProcessRecord_Rele
     reqInfo.legacyIpcCap = false;
     reqInfo.numSegments  = 1;
 
+    g_freeCalls.clear();
     int  done = 0;
     auto r = p2pTransport.send.proxyDeregister(&conn_, &state_, &reqInfo,
                                                sizeof(ncclIpcImpInfo), &done);
@@ -6553,6 +6558,9 @@ TEST_F(P2pProxyDeregisterMicrotest, ProxyDeregister_CuMemCrossProcessRecord_Rele
     EXPECT_EQ(r, ncclSuccess);
     EXPECT_EQ(done, 1);
     EXPECT_EQ(QueueHead(conn_), nullptr);
+    // Cross-process selects the ncclCudaFree arm on (rmtRegAddr - offset).
+    EXPECT_EQ(g_freeCalls, (std::vector<FreeCall>{
+        {FreeKind::CudaFree, reinterpret_cast<void*>(0x60000)}}));
 }
 
 #endif  // ROCM_VERSION >= 70000
