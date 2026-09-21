@@ -971,19 +971,19 @@ public:
   // ISA-specific resolver/backend.
   [[nodiscard]] uint32_t read_scalar(const Operand &op) const {
     const Wavefront &wf = wavefront();
-    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
+    if (auto base = op.simd_vgpr_base(wf); base && !cu_->validate_vgpr_access(wf, *base, 1))
       return 0;
     return op.read_scalar(wf);
   }
   [[nodiscard]] uint64_t read_scalar64(const Operand &op) const {
     const Wavefront &wf = wavefront();
-    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 2))
+    if (auto base = op.simd_vgpr_base(wf); base && !cu_->validate_vgpr_access(wf, *base, 2))
       return 0;
     return op.read_scalar64(wf);
   }
   [[nodiscard]] uint32_t read_lane(const Operand &op, uint32_t lane) const {
     const Wavefront &wf = wavefront();
-    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
+    if (auto base = op.simd_vgpr_base(wf); base && !cu_->validate_vgpr_access(wf, *base, 1))
       return 0;
     return op.read_lane(wf, lane);
   }
@@ -997,13 +997,13 @@ public:
     auto physical_reg = op.simd_vgpr_base(wf);
     if (!physical_reg)
       throw std::logic_error("scalar lane read requires a VGPR source");
-    if (!cu_->owns_vgpr_range(wf, *physical_reg, 1))
+    if (!cu_->validate_vgpr_access(wf, *physical_reg, 1))
       return 0;
     return read_vgpr(*physical_reg, lane);
   }
   [[nodiscard]] uint64_t read_lane64(const Operand &op, uint32_t lane) const {
     const Wavefront &wf = wavefront();
-    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 2))
+    if (auto base = op.simd_vgpr_base(wf); base && !cu_->validate_vgpr_access(wf, *base, 2))
       return 0;
     return op.read_lane64(wf, lane);
   }
@@ -1043,19 +1043,22 @@ public:
   }
   void write_scalar(const Operand &op, uint32_t value) const {
     Wavefront &wf = mutable_wavefront();
-    if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
+    if (auto base = op.simd_vgpr_base_mut(wf);
+        base && !mutable_cu().validate_vgpr_access(wf, *base, 1))
       return;
     op.write_scalar(wf, value);
   }
   void write_scalar64(const Operand &op, uint64_t value) const {
     Wavefront &wf = mutable_wavefront();
-    if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 2))
+    if (auto base = op.simd_vgpr_base_mut(wf);
+        base && !mutable_cu().validate_vgpr_access(wf, *base, 2))
       return;
     op.write_scalar64(wf, value);
   }
   void write_lane(const Operand &op, uint32_t lane, uint32_t value) const {
     Wavefront &wf = mutable_wavefront();
-    if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
+    if (auto base = op.simd_vgpr_base_mut(wf);
+        base && !mutable_cu().validate_vgpr_access(wf, *base, 1))
       return;
     if (op.simd_vgpr_storage_mut(wf) && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
       return;
@@ -1074,7 +1077,7 @@ public:
     auto physical_reg = op.simd_vgpr_base_mut(wf);
     if (!physical_reg)
       throw std::logic_error("scalar lane write requires a VGPR destination");
-    if (!mutable_cu().owns_vgpr_range(wf, *physical_reg, 1))
+    if (!mutable_cu().validate_vgpr_access(wf, *physical_reg, 1))
       return;
     VgprStorage storage = op.simd_vgpr_storage_mut(wf);
     if (!storage)
@@ -1093,7 +1096,7 @@ public:
     auto physical_reg = op.simd_vgpr_base_mut(wf);
     if (!physical_reg)
       throw std::logic_error("partial-byte operand write requires a VGPR destination");
-    if (!mutable_cu().owns_vgpr_range(wf, *physical_reg, 1))
+    if (!mutable_cu().validate_vgpr_access(wf, *physical_reg, 1))
       return;
     VgprStorage storage = op.simd_vgpr_storage_mut(wf);
     if (!storage)
@@ -1110,7 +1113,8 @@ public:
 
   void write_lane64(const Operand &op, uint32_t lane, uint64_t value) const {
     Wavefront &wf = mutable_wavefront();
-    if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 2))
+    if (auto base = op.simd_vgpr_base_mut(wf);
+        base && !mutable_cu().validate_vgpr_access(wf, *base, 2))
       return;
     if (op.simd_vgpr_storage64_mut(wf).lo && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
       return;
@@ -1119,7 +1123,7 @@ public:
 
   void read_chunk(const Operand &op, uint32_t lane_base, uint32_t count, uint32_t *out) const {
     const Wavefront &wf = wavefront();
-    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1)) {
+    if (auto base = op.simd_vgpr_base(wf); base && !cu_->validate_vgpr_access(wf, *base, 1)) {
       std::fill_n(out, count, 0u);
       return;
     }
@@ -1131,7 +1135,7 @@ public:
     uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(count));
     if (op.simd_capable()) {
       auto base = op.simd_vgpr_base_mut(wf);
-      if (base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
+      if (base && !mutable_cu().validate_vgpr_access(wf, *base, 1))
         return;
       if (op.simd_vgpr_storage_mut(wf))
         lane_mask &= wf.vgpr_write_mask() >> lane_base;
@@ -1151,7 +1155,7 @@ public:
                                              uint8_t byte_mask = 0xF) const {
     const Wavefront &wf = wavefront();
     auto base = op.simd_vgpr_base(wf);
-    const bool valid = !base || cu_->owns_vgpr_range(wf, *base, 1);
+    const bool valid = !base || cu_->validate_vgpr_access(wf, *base, 1);
     ConstVgprStorage storage = valid ? op.simd_vgpr_storage(wf) : ConstVgprStorage{};
     if (storage)
       op.simd_notify_read(wf, lane_mask, byte_mask);
@@ -1162,7 +1166,7 @@ public:
                                                  uint8_t byte_mask = 0xF) const {
     const Wavefront &wf = wavefront();
     auto base = op.simd_vgpr_base(wf);
-    const bool valid = !base || cu_->owns_vgpr_range(wf, *base, 2);
+    const bool valid = !base || cu_->validate_vgpr_access(wf, *base, 2);
     ConstVgprStoragePair64 storage = valid ? op.simd_vgpr_storage64(wf) : ConstVgprStoragePair64{};
     if (storage.lo)
       op.simd_notify_read64(wf, lane_mask, byte_mask);
@@ -1179,7 +1183,7 @@ public:
                                                           uint8_t byte_mask = 0xF) const {
     const Wavefront &wf = wavefront();
     auto base = op.simd_vgpr_base(wf);
-    const bool valid = !base || cu_->owns_vgpr_range(wf, *base, 2);
+    const bool valid = !base || cu_->validate_vgpr_access(wf, *base, 2);
     ConstVgprStoragePair64 storage = valid ? op.simd_vgpr_storage64(wf) : ConstVgprStoragePair64{};
     if (storage.lo)
       op.simd_notify_read64(wf, lane_mask, byte_mask);
@@ -1191,7 +1195,7 @@ public:
                 uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
     Wavefront &wf = mutable_wavefront();
     auto base = op.simd_vgpr_base_mut(wf);
-    const bool valid = !base || mutable_cu().owns_vgpr_range(wf, *base, 1);
+    const bool valid = !base || mutable_cu().validate_vgpr_access(wf, *base, 1);
     VgprStorage storage = valid ? op.simd_vgpr_storage_mut(wf) : VgprStorage{};
     const uint64_t permitted_write_lane_mask =
         storage ? lane_mask & wf.vgpr_write_mask() : lane_mask;
@@ -1203,7 +1207,7 @@ public:
   [[nodiscard]] OperandWrite64View write_operand64(const Operand &op, uint64_t lane_mask) const {
     Wavefront &wf = mutable_wavefront();
     auto base = op.simd_vgpr_base_mut(wf);
-    const bool valid = !base || mutable_cu().owns_vgpr_range(wf, *base, 2);
+    const bool valid = !base || mutable_cu().validate_vgpr_access(wf, *base, 2);
     VgprStoragePair64 storage = valid ? op.simd_vgpr_storage64_mut(wf) : VgprStoragePair64{};
     const uint64_t permitted_write_lane_mask =
         storage.lo ? lane_mask & wf.vgpr_write_mask() : lane_mask;
@@ -1217,7 +1221,7 @@ public:
                                                             uint64_t lane_mask) const {
     Wavefront &wf = mutable_wavefront();
     auto base = op.simd_vgpr_base_mut(wf);
-    const bool valid = !base || mutable_cu().owns_vgpr_range(wf, *base, 2);
+    const bool valid = !base || mutable_cu().validate_vgpr_access(wf, *base, 2);
     VgprStoragePair64 storage = valid ? op.simd_vgpr_storage64_mut(wf) : VgprStoragePair64{};
     const uint64_t permitted_write_lane_mask =
         storage.lo ? lane_mask & wf.vgpr_write_mask() : lane_mask;
@@ -1232,7 +1236,7 @@ public:
                     uint8_t write_byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
     Wavefront &wf = mutable_wavefront();
     auto base = op.simd_vgpr_base_mut(wf);
-    const bool valid = !base || mutable_cu().owns_vgpr_range(wf, *base, 1);
+    const bool valid = !base || mutable_cu().validate_vgpr_access(wf, *base, 1);
     VgprStorage storage = valid ? op.simd_vgpr_storage_mut(wf) : VgprStorage{};
     const uint64_t permitted_write_lane_mask =
         storage ? lane_mask & wf.vgpr_write_mask() : lane_mask;
@@ -1248,7 +1252,7 @@ public:
                                                            uint8_t byte_mask = 0xF) const {
     Wavefront &wf = mutable_wavefront();
     auto base = op.simd_vgpr_base_mut(wf);
-    const bool valid = !base || mutable_cu().owns_vgpr_range(wf, *base, 2);
+    const bool valid = !base || mutable_cu().validate_vgpr_access(wf, *base, 2);
     VgprStoragePair64 storage = valid ? op.simd_vgpr_storage64_mut(wf) : VgprStoragePair64{};
     const uint64_t permitted_write_lane_mask =
         storage.lo ? lane_mask & wf.vgpr_write_mask() : lane_mask;
@@ -1363,6 +1367,11 @@ public:
     return vgpr_owner_for_range(physical_base, physical_count) != nullptr;
   }
 
+  /// @brief Check an instruction's entire VGPR operand before any access.
+  [[nodiscard]] bool validate_vgpr_access(uint32_t physical_base, uint32_t physical_count) const {
+    return vgpr_access_owner(physical_base, physical_count) != nullptr;
+  }
+
   [[nodiscard]] SgprReadRegion read_sgpr_region(uint32_t physical_base, uint32_t reg_count) const {
     const Wavefront *owner = sgpr_owner_for_range(physical_base, reg_count);
     if (!owner)
@@ -1413,7 +1422,7 @@ public:
   [[nodiscard]] VgprReadRegion read_vgpr_region(uint32_t physical_base, uint32_t reg_count,
                                                 uint64_t lane_mask, uint8_t byte_mask = 0xF) const {
     const uint32_t wave_size = vgpr_region_wave_size(physical_base, reg_count);
-    const Wavefront *owner = vgpr_owner_for_range(physical_base, reg_count);
+    const Wavefront *owner = vgpr_access_owner(physical_base, reg_count);
     if (!owner)
       return VgprReadRegion(*cu_, physical_base, reg_count, wave_size, byte_mask, false, false);
     if (lane_mask == 0)
@@ -1428,7 +1437,7 @@ public:
     if (mutable_wf_)
       lane_mask &= mutable_wf_->vgpr_write_mask();
     const uint32_t wave_size = vgpr_region_wave_size(physical_base, reg_count);
-    const Wavefront *owner = vgpr_owner_for_range(physical_base, reg_count);
+    const Wavefront *owner = vgpr_access_owner(physical_base, reg_count);
     if (!owner || lane_mask == 0 || byte_mask == 0)
       return VgprWriteRegion(mutable_cu(), physical_base, reg_count, wave_size, lane_mask,
                              byte_mask, false);
@@ -1484,6 +1493,12 @@ private:
     if (wf_)
       return cu_->owns_vgpr_range(*wf_, physical_base, reg_count) ? wf_ : nullptr;
     return cu_->vgpr_owner_for_range(physical_base, reg_count);
+  }
+
+  [[nodiscard]] const Wavefront *vgpr_access_owner(uint32_t physical_base,
+                                                   uint32_t reg_count) const {
+    const Wavefront *owner = wf_ ? wf_ : cu_->vgpr_owner(physical_base);
+    return owner && cu_->validate_vgpr_access(*owner, physical_base, reg_count) ? owner : nullptr;
   }
 
   [[nodiscard]] const Wavefront *sgpr_owner_for_range(uint32_t physical_base,

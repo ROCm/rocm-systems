@@ -24,6 +24,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -223,8 +224,11 @@ struct VmFixture {
   /// Used by tests that drive individual instructions and then read the register
   /// file directly — the wave stays resident (its resources are not freed) until
   /// the fixture is destroyed.
-  amdgpu::Wavefront *dispatch_scratch_wf(uint32_t num_sgprs = 104, uint32_t num_vgprs = 256) {
-    return cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1040, num_sgprs, num_vgprs);
+  amdgpu::Wavefront *dispatch_scratch_wf(uint32_t num_sgprs = 104, uint32_t num_vgprs = 256,
+                                         uint32_t accumulator_vgprs = 0) {
+    return cu()->dispatch_wf(
+        /*wg_id=*/0, /*pc=*/0x1040, num_sgprs,
+        amdgpu::WaveVgprAllocation{num_vgprs, num_vgprs - accumulator_vgprs, accumulator_vgprs});
   }
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_;
@@ -236,7 +240,7 @@ struct VmFixture {
                         uint32_t vgprs = 256, uint32_t user_sgprs = 2,
                         uint32_t group_segment_fixed_size = 0, bool wgp_mode = false,
                         uint32_t enable_vgpr_workitem_id = 0, uint32_t extra_compute_pgm_rsrc1 = 0,
-                        bool wave32 = true) {
+                        bool wave32 = true, uint32_t accum_vgpr_base = 192) {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
@@ -251,6 +255,16 @@ struct VmFixture {
                     ((vgprs / vgpr_granule) - 1));
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                     ((sgprs / 8) - 1));
+    if (cu()->arch() == ROCJITSU_CODE_ARCH_CDNA2 || cu()->arch() == ROCJITSU_CODE_ARCH_CDNA3 ||
+        cu()->arch() == ROCJITSU_CODE_ARCH_CDNA4) {
+      // CDNA2-4 split the unified RSRC1 count at ACCUM_OFFSET. Keep both halves
+      // available by default because this fixture exercises ordinary and
+      // accumulator instructions; small allocations remain entirely ordinary.
+      const uint32_t ordinary_vgprs = std::min(vgprs, accum_vgpr_base);
+      assert(ordinary_vgprs >= 4 && ordinary_vgprs % 4 == 0);
+      AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                      (ordinary_vgprs / 4 - 1));
+    }
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgprs);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, (wgp_mode ? 1u : 0u));
     kd.group_segment_fixed_size = group_segment_fixed_size;
@@ -383,6 +397,147 @@ uint64_t write_test_kernel(amdgpu::GpuMemory *memory, uint64_t addr,
   memory->load_image(reinterpret_cast<const uint8_t *>(code.data()), code.size_bytes(),
                      addr + sizeof(descriptor));
   return addr;
+}
+
+TEST(PhysicalRegisterResourceTest, ExplicitAccumulatorAllocationMustMatchUnifiedCharge) {
+  for (std::string_view arch : {"cdna2", "cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    VmFixture f(arch, 1, 4, 64, 104, 512);
+    auto *cu = f.cu();
+    auto *wave = cu->dispatch_wf(0, 0x1000, 16, 8);
+    ASSERT_NE(wave, nullptr);
+    EXPECT_EQ(wave->num_accvgprs(), 0u);
+    EXPECT_FALSE(cu->owns_vgpr_range(*wave, wave->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET, 1));
+    EXPECT_EQ(cu->register_allocation_violation_count(), 0u);
+    wave->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);
+    wave = cu->dispatch_wf_at(0, 0, 0x1000, 16, 8);
+    ASSERT_NE(wave, nullptr);
+    EXPECT_EQ(wave->num_accvgprs(), 0u);
+    wave->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);
+    for (amdgpu::WaveVgprAllocation invalid :
+         {amdgpu::WaveVgprAllocation{8, 8, 1}, {8, 4, 0}, {8, 9, 0}, {8, 4, UINT32_MAX}})
+      EXPECT_EQ(cu->dispatch_wf(0, 0x1000, 16, invalid), nullptr);
+    wave = cu->dispatch_wf(0, 0x1000, 16, amdgpu::WaveVgprAllocation{8, 4, 4});
+    ASSERT_NE(wave, nullptr);
+    EXPECT_TRUE(cu->owns_vgpr_range(*wave, wave->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET, 4));
+    EXPECT_FALSE(cu->owns_vgpr_range(*wave, wave->vgpr_alloc().base + 4, 1));
+  }
+}
+
+TEST(PhysicalRegisterResourceTest, OwnershipQueriesDoNotReportExecutedAccesses) {
+  VmFixture f("rdna4", 1, 4, 64, 128, 256);
+  auto *cu = f.cu();
+  auto *wave = cu->dispatch_wf(0, 0x1000, 16, 8, 32);
+  ASSERT_NE(wave, nullptr);
+  const uint32_t invalid = wave->vgpr_alloc().base + 8;
+  auto regs = amdgpu::RegisterAccess(*wave);
+  EXPECT_FALSE(cu->owns_vgpr_range(*wave, invalid, 1));
+  EXPECT_FALSE(regs.owns_vgpr_range(invalid, 1));
+  EXPECT_EQ(cu->vgpr_owner(invalid), wave);
+  EXPECT_EQ(cu->register_allocation_violation_count(), 0u);
+  regs.write_vgpr(invalid, 0, 123);
+  EXPECT_EQ(cu->register_allocation_violation_count(), 1u);
+}
+
+TEST(PhysicalRegisterResourceTest, Rdna4Wave64VgprPressureAndReclamation) {
+  VmFixture f("rdna4", 1, 32, 64, 128, 256);
+  auto *cu = f.cu();
+  EXPECT_TRUE(cu->can_accept_workgroup(4, 128, 256, 64));
+  EXPECT_FALSE(cu->can_accept_workgroup(5, 128, 256, 64));
+  std::vector<amdgpu::Wavefront *> waves;
+  for (uint32_t i = 0; i < 4; ++i) {
+    auto *wave = cu->dispatch_wf(i, 0x1000, 128, 256, 64);
+    ASSERT_NE(wave, nullptr);
+    waves.push_back(wave);
+  }
+  EXPECT_EQ(cu->dispatch_wf(4, 0x1000, 128, 256, 64), nullptr);
+  waves.front()->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);
+  EXPECT_NE(cu->dispatch_wf(4, 0x1000, 128, 256, 64), nullptr);
+}
+
+TEST(PhysicalRegisterResourceTest, TrapHandlerSgprReserveLimitsResidency) {
+  for (bool trap : {false, true}) {
+    SCOPED_TRACE(trap);
+    VmFixture f("cdna3", 1, 32, 64, 104, 512);
+    auto *cu = f.cu();
+    const uint32_t limit = trap ? 24 : 28;
+    EXPECT_TRUE(cu->can_accept_workgroup(limit, 104, 8, 64, 0, trap));
+    EXPECT_FALSE(cu->can_accept_workgroup(limit + 1, 104, 8, 64, 0, trap));
+    amdgpu::Wavefront *first = nullptr;
+    for (uint32_t i = 0; i < limit; ++i) {
+      auto *wave = cu->dispatch_wf(i, 0x1000, 104, 8, 64, trap);
+      ASSERT_NE(wave, nullptr);
+      if (!first)
+        first = wave;
+    }
+    EXPECT_EQ(cu->dispatch_wf(limit, 0x1000, 104, 8, 64, trap), nullptr);
+    first->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);
+    EXPECT_NE(cu->dispatch_wf(limit, 0x1000, 104, 8, 64, trap), nullptr);
+  }
+}
+
+TEST(PhysicalRegisterResourceTest, Rdna4VgprPressureLimitsResidencyAndReclaimsCapacity) {
+  VmFixture f("rdna4", 1, /*num_wf_slots=*/32, /*lds_size_kb=*/64,
+              /*sgprs_per_wf=*/128, /*vgprs_per_wf=*/256);
+  auto *cu = f.cu();
+
+  // RDNA4 has 1536 Wave32 VGPRs per SIMD, allocated in 24-VGPR
+  // granules. A 256-VGPR wave consumes 264 entries, so each of the two
+  // SIMDs admits five waves.
+  EXPECT_TRUE(cu->can_accept_workgroup(/*num_wfs=*/10, /*num_sgprs=*/128,
+                                       /*num_vgprs=*/256, /*wave_size=*/32));
+  EXPECT_FALSE(cu->can_accept_workgroup(/*num_wfs=*/11, /*num_sgprs=*/128,
+                                        /*num_vgprs=*/256, /*wave_size=*/32));
+
+  std::vector<amdgpu::Wavefront *> waves;
+  for (uint32_t wave = 0; wave < 10; ++wave) {
+    auto *dispatched = cu->dispatch_wf(/*wg_id=*/wave, /*pc=*/0x1040, /*num_sgprs=*/128,
+                                       /*num_vgprs=*/256, /*wave_size=*/32);
+    ASSERT_NE(dispatched, nullptr) << "wave " << wave;
+    waves.push_back(dispatched);
+  }
+  EXPECT_EQ(cu->dispatch_wf(/*wg_id=*/10, /*pc=*/0x1040, /*num_sgprs=*/128,
+                            /*num_vgprs=*/256, /*wave_size=*/32),
+            nullptr);
+
+  waves.front()->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);
+  EXPECT_NE(cu->dispatch_wf(/*wg_id=*/10, /*pc=*/0x1040, /*num_sgprs=*/128,
+                            /*num_vgprs=*/256, /*wave_size=*/32),
+            nullptr);
+}
+
+TEST(PhysicalRegisterResourceTest, Cdna5VgprPressureLimitsResidencyAndReclaimsCapacity) {
+  VmFixture f("cdna5", 1, /*num_wf_slots=*/32, /*lds_size_kb=*/64,
+              /*sgprs_per_wf=*/128, /*vgprs_per_wf=*/256);
+  auto *cu = f.cu();
+
+  // GFX1250 has 1024 Wave32 VGPRs per SIMD in 16-register granules.
+  // Each of the four SIMDs admits four waves with 256 VGPRs apiece.
+  EXPECT_TRUE(cu->can_accept_workgroup(16, 128, 256, 32));
+  EXPECT_FALSE(cu->can_accept_workgroup(17, 128, 256, 32));
+  amdgpu::Wavefront *first = nullptr;
+  for (uint32_t i = 0; i < 16; ++i) {
+    auto *wave = cu->dispatch_wf(i, 0x1000, 128, 256, 32);
+    ASSERT_NE(wave, nullptr) << "wave " << i;
+    if (!first)
+      first = wave;
+  }
+  EXPECT_EQ(cu->dispatch_wf(16, 0x1000, 128, 256, 32), nullptr);
+  first->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);
+  EXPECT_NE(cu->dispatch_wf(16, 0x1000, 128, 256, 32), nullptr);
+}
+
+TEST(PhysicalRegisterResourceTest, Cdna3SgprPressureLimitsResidency) {
+  VmFixture f("cdna3", 1, /*num_wf_slots=*/32, /*lds_size_kb=*/64,
+              /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/512);
+  auto *cu = f.cu();
+
+  // GFX942 has 800 SGPRs per SIMD with 16-SGPR allocation granularity.
+  // 104 SGPRs round to 112, admitting seven waves on each of four SIMDs.
+  EXPECT_TRUE(cu->can_accept_workgroup(/*num_wfs=*/28, /*num_sgprs=*/104,
+                                       /*num_vgprs=*/8, /*wave_size=*/64));
+  EXPECT_FALSE(cu->can_accept_workgroup(/*num_wfs=*/29, /*num_sgprs=*/104,
+                                        /*num_vgprs=*/8, /*wave_size=*/64));
 }
 
 // Drive the engine until the listed CUs have no resident wavefronts. A wavefront
@@ -4301,6 +4456,7 @@ constexpr uint32_t vop1(uint32_t op, uint32_t vdst, uint32_t src0) {
   return (0x3Fu << 25) | (vdst << 17) | (op << 9) | src0;
 }
 constexpr uint32_t v_mov_b32(uint32_t vdst, uint32_t src0) { return vop1(1, vdst, src0); }
+constexpr uint32_t v_mov_b16(uint32_t vdst, uint32_t src0) { return vop1(28, vdst, src0); }
 
 constexpr std::array<uint32_t, 2> vop3_cdna(uint32_t op, uint32_t vdst, uint32_t src0,
                                             uint32_t src1, uint32_t src2 = 0, uint32_t opsel = 0) {
@@ -4386,6 +4542,163 @@ constexpr uint32_t S_WAITCNT_0 = sopp(12, 0);
 constexpr uint32_t S_ENDPGM = sopp(1, 0);
 
 } // namespace enc
+
+TEST(AqlDispatchTest, ExecutedVgprOutsideDescriptorAllocationFails) {
+  VmFixture f("rdna4", 1, /*num_wf_slots=*/4, /*lds_size_kb=*/64,
+              /*sgprs_per_wf=*/128, /*vgprs_per_wf=*/256);
+  const uint32_t code[] = {
+      enc::v_mov_b32(/*vdst=*/24, enc::INLINE_CONST(1)),
+      enc::S_ENDPGM,
+  };
+  const uint64_t kernel_object =
+      f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/128, /*vgprs=*/8);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(kernel_object, /*workgroup_size=*/32, /*grid_size=*/32);
+
+  const simdojo::ExitStatus status = f.engine->run();
+  EXPECT_EQ(status.code, 1);
+  EXPECT_NE(status.message.find("VGPR access exceeds descriptor allocation"), std::string::npos);
+  EXPECT_EQ(f.cu()->register_allocation_violation_count(), 1u);
+}
+
+TEST(AqlDispatchTest, True16DescriptorBoundary) {
+  for (std::string_view arch : {"rdna3", "rdna3_5", "rdna4"}) {
+    for (bool invalid : {false, true}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(invalid);
+      VmFixture f(arch, 1, 4, 64, 128, 256);
+      const uint32_t code[] = {enc::v_mov_b16(invalid ? 8 : 128 + 7, enc::INLINE_CONST(1)),
+                               enc::S_ENDPGM};
+      const auto kernel = f.write_kernel(0x1000, code, sizeof(code), 104, 8);
+      test::AqlQueue queue(f.mem(), f.cp());
+      queue.dispatch(kernel, 32, 32);
+      const auto status = f.engine->run();
+      EXPECT_EQ(status.code, invalid ? 1 : 0) << status.message;
+      EXPECT_EQ(f.cu()->register_allocation_violation_count() != 0, invalid);
+    }
+  }
+}
+
+TEST(AqlDispatchTest, RejectsUnsupportedRegisterAllocationModes) {
+  using namespace rocr::llvm::amdhsa;
+  for (std::string_view arch : {"rdna1", "rdna2", "rdna3", "rdna3_5", "rdna4", "cdna5"}) {
+    for (bool enabled : {false, true}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(enabled);
+      VmFixture f(arch, 1, 4, 64, 128, 256);
+      const uint32_t code[] = {enc::sopp(2, 0xffff)};
+      const auto kernel = f.write_kernel(0x1000, code, sizeof(code), 104, 32);
+      if (enabled) {
+        const auto offset = arch == "rdna4" ? offsetof(kernel_descriptor_t, compute_pgm_rsrc2)
+                                            : offsetof(kernel_descriptor_t, compute_pgm_rsrc3);
+        const uint32_t bit = arch == "rdna4" ? 1u << 6 : arch == "cdna5" ? 1u << 17 : 1u;
+        f.mem()->write32(kernel + offset, f.mem()->read32(kernel + offset) | bit);
+      }
+      test::AqlQueue queue(f.mem(), f.cp());
+      queue.dispatch(kernel, 32, 32);
+      if (enabled) {
+        try {
+          f.engine->step();
+          FAIL() << "unsupported allocation accepted";
+        } catch (const std::runtime_error &error) {
+          EXPECT_NE(std::string(error.what()).find("VGPR allocation is not supported"),
+                    std::string::npos);
+        }
+        EXPECT_EQ(f.cu()->num_wfs(), 0u);
+      } else {
+        EXPECT_NO_THROW(f.engine->step());
+        EXPECT_GT(f.cu()->num_wfs(), 0u);
+      }
+    }
+  }
+}
+
+TEST(AqlDispatchTest, TrapHandlerDescriptorChangesSgprAdmission) {
+  using namespace rocr::llvm::amdhsa;
+  for (bool trap : {false, true}) {
+    SCOPED_TRACE(trap);
+    VmFixture f("cdna3", 1, 32, 64, 104, 512);
+    const uint32_t code[] = {enc::sopp(2, 0xffff)};
+    const auto kernel = f.write_kernel(0x1000, code, sizeof(code), 104, 8);
+    if (trap) {
+      const auto addr = kernel + offsetof(kernel_descriptor_t, compute_pgm_rsrc2);
+      f.mem()->write32(addr, f.mem()->read32(addr) | COMPUTE_PGM_RSRC2_ENABLE_TRAP_HANDLER);
+    }
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(kernel, 25 * 64, 25 * 64);
+    if (trap) {
+      EXPECT_THROW(f.engine->step(), std::runtime_error);
+      EXPECT_EQ(f.cu()->num_wfs(), 0u);
+    } else {
+      EXPECT_NO_THROW(f.engine->step());
+      EXPECT_EQ(f.cu()->num_wfs(), 25u);
+    }
+  }
+}
+
+TEST(AqlDispatchTest, True16HighHalfUsesUnderlyingVgprAllocation) {
+  for (std::string_view arch : {"rdna3", "rdna3_5", "rdna4", "cdna5"}) {
+    SCOPED_TRACE(arch);
+    VmFixture f(arch, 1, /*num_wf_slots=*/4, /*lds_size_kb=*/64,
+                /*sgprs_per_wf=*/128, /*vgprs_per_wf=*/256);
+    auto *snapshots = f.capture_halts();
+    const uint32_t code[] = {
+        // A true16 destination selector 128 + N names the high half of vN.
+        // It must not be validated as an access to the unrelated v(128 + N).
+        enc::v_mov_b16(/*vdst=*/128 + 6, enc::INLINE_CONST(1)),
+        // A true16 source selector 256 + 128 + N likewise names the high half
+        // of vN, rather than the unrelated v(128 + N).
+        enc::v_mov_b16(/*vdst=*/7, /*src0=*/256 + 128 + 6),
+        enc::S_ENDPGM,
+    };
+    const uint64_t kernel_object =
+        f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/104, /*vgprs=*/48);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(kernel_object, /*workgroup_size=*/32, /*grid_size=*/32);
+
+    const simdojo::ExitStatus status = f.engine->run();
+    EXPECT_EQ(status.code, 0) << status.message;
+    EXPECT_EQ(f.cu()->register_allocation_violation_count(), 0u);
+    ASSERT_EQ(snapshots->snapshots().size(), 1u);
+    EXPECT_EQ(snapshots->snapshots().front().vgpr(6, 0), 0x00010000u);
+    EXPECT_EQ(snapshots->snapshots().front().vgpr(7, 0), 0x00000001u);
+  }
+}
+
+TEST(AqlDispatchTest, CdnaUnifiedAllocationRejectsOrdinaryVgprInAccumulatorWindow) {
+  for (std::string_view arch : {"cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    VmFixture f(arch, 1, /*num_wf_slots=*/4, /*lds_size_kb=*/64,
+                /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/512);
+    const uint32_t code[] = {
+        enc::sopp(/*s_branch=*/2, /*simm16=-1=*/0xFFFF),
+    };
+    const uint64_t kernel_object =
+        f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/104,
+                       /*vgprs=*/128, /*user_sgprs=*/2,
+                       /*group_segment_fixed_size=*/0, /*wgp_mode=*/false,
+                       /*enable_vgpr_workitem_id=*/0, /*extra_compute_pgm_rsrc1=*/0,
+                       /*wave32=*/false, /*accum_vgpr_base=*/80);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.dispatch(kernel_object, /*workgroup_size=*/64, /*grid_size=*/64);
+
+    for (uint32_t step = 0; step < 10 && f.cu()->num_wfs() == 0; ++step)
+      ASSERT_TRUE(f.engine->step());
+    auto *wave = f.cu()->wf(0);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_FALSE(wave->is_halted());
+    EXPECT_EQ(wave->num_vgprs(), 128u);
+    EXPECT_EQ(wave->num_ordinary_vgprs(), 80u);
+    EXPECT_EQ(wave->num_accvgprs(), 48u);
+
+    const uint32_t ordinary_v100 = wave->vgpr_alloc().base + 100;
+    EXPECT_EQ(amdgpu::RegisterAccess(*wave).read_vgpr(ordinary_v100, /*lane=*/0), 0u);
+    EXPECT_EQ(f.cu()->register_allocation_violation_count(), 1u);
+    const simdojo::ExitStatus status = f.engine->run();
+    EXPECT_EQ(status.code, 1);
+    EXPECT_NE(status.message.find("VGPR access exceeds descriptor allocation"), std::string::npos);
+  }
+}
 
 TEST(AqlDispatchTest, Fp16OvflDescriptorControlsFp8ConversionResult) {
   using namespace rocr::llvm::amdhsa;
@@ -5148,7 +5461,7 @@ TEST_P(IsaTest, MfmaF16Accumulation) {
   // Resident scratch wave: this test drives MFMA directly and reads the VGPR file,
   // so the wave must stay allocated (not run to s_endpgm, which would free it).
   auto *cu = f.cu();
-  auto *wf = f.dispatch_scratch_wf();
+  auto *wf = f.dispatch_scratch_wf(104, 256, /*accumulator_vgprs=*/128);
   ASSERT_NE(wf, nullptr);
   uint32_t vb = wf->vgpr_alloc().base;
 
@@ -5205,7 +5518,7 @@ TEST_P(IsaTest, MfmaF16AccumulationPatterned) {
 
   // Resident scratch wave (see MfmaF16Accumulation): driven directly, not to endpgm.
   auto *cu = f.cu();
-  auto *wf = f.dispatch_scratch_wf();
+  auto *wf = f.dispatch_scratch_wf(104, 256, /*accumulator_vgprs=*/128);
   ASSERT_NE(wf, nullptr);
   uint32_t vb = wf->vgpr_alloc().base;
 
@@ -5291,7 +5604,7 @@ void expect_mfma_f64_neg_modifier(const std::string &arch) {
 
   // Resident scratch wave (see MfmaF16Accumulation): driven directly, not to endpgm.
   auto *cu = f.cu();
-  auto *wf = f.dispatch_scratch_wf();
+  auto *wf = f.dispatch_scratch_wf(104, 256, /*accumulator_vgprs=*/128);
   ASSERT_NE(wf, nullptr);
   uint32_t vb = wf->vgpr_alloc().base;
   uint32_t dst = vb + amdgpu::ACC_VGPR_OFFSET;
@@ -5323,7 +5636,7 @@ TEST(MfmaF64Cdna4Test, GeneratedInstructionUsesBlgpNegModifier) {
 
   // Resident scratch wave (see MfmaF16Accumulation): driven directly, not to endpgm.
   auto *cu = f.cu();
-  auto *wf = f.dispatch_scratch_wf();
+  auto *wf = f.dispatch_scratch_wf(104, 256, /*accumulator_vgprs=*/128);
   ASSERT_NE(wf, nullptr);
   uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t kSrc0 = 10;

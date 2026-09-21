@@ -183,8 +183,10 @@ bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_l
       uint64_t reserved_lds = static_cast<uint64_t>(lds_bytes_per_wg) * reserved_wgs;
       if (reserved_wfs > kU32Max || reserved_lds > kU32Max)
         continue;
-      if (!cu->can_accept_workgroup(static_cast<uint32_t>(reserved_wfs),
-                                    static_cast<uint32_t>(reserved_lds)))
+      if (!cu->can_accept_workgroup(static_cast<uint32_t>(reserved_wfs), entry.sgprs_per_wf,
+                                    entry.vgprs_per_wf, entry.kernel_wave_size,
+                                    static_cast<uint32_t>(reserved_lds),
+                                    entry.trap_handler_enabled))
         continue;
 
       plan.push_back({local_wg_id, local_wg_id + entry.workgroup_id_offset, cu});
@@ -1725,8 +1727,11 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       cu->maybe_reset_lds_alloc();
     };
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
-      Wavefront *wf = cu->dispatch_wf(global_wg_id, entry.kernel_entry_pc, entry.sgprs_per_wf,
-                                      entry.vgprs_per_wf, entry.kernel_wave_size);
+      Wavefront *wf =
+          cu->dispatch_wf(global_wg_id, entry.kernel_entry_pc, entry.sgprs_per_wf,
+                          WaveVgprAllocation{entry.vgprs_per_wf, entry.ordinary_vgprs_per_wf,
+                                             entry.accvgprs_per_wf},
+                          entry.kernel_wave_size, entry.trap_handler_enabled);
       if (!wf) {
         assert(false && "dispatch_wf failed after placement was reserved");
         free_reserved();
@@ -1852,8 +1857,10 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
         size_t cu_idx = (next_cu_ + attempt) % cus_.size();
         if (!entry.allows_cu(cus_[cu_idx]))
           continue;
-        if (cus_[cu_idx]->can_accept_workgroup(entry.wfs_per_workgroup,
-                                               entry.group_segment_fixed_size)) {
+        if (cus_[cu_idx]->can_accept_workgroup(entry.wfs_per_workgroup, entry.sgprs_per_wf,
+                                               entry.vgprs_per_wf, entry.kernel_wave_size,
+                                               entry.group_segment_fixed_size,
+                                               entry.trap_handler_enabled)) {
           auto *cu = cus_[cu_idx];
           placement = ShaderProcessorInput::WorkgroupPlacement{
               cu, &cu->lds(), cu->allocate_lds(entry.group_segment_fixed_size)};
@@ -2131,6 +2138,19 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   uint32_t sgpr_gran =
       AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
   rj_code_arch_t arch = cus_.empty() ? ROCJITSU_CODE_ARCH_CDNA1 : cus_[0]->config().arch;
+  // These modes change allocation and occupancy; reject until the CU models them.
+  const bool dynamic_vgprs =
+      (arch == ROCJITSU_CODE_ARCH_RDNA4 && (kd.compute_pgm_rsrc2 & (1u << 6))) ||
+      (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+       AMDHSA_BITS_GET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX125_ENABLE_DYNAMIC_VGPR));
+  if (dynamic_vgprs)
+    throw std::runtime_error("dynamic VGPR allocation is not supported by the emulator");
+  const bool supports_shared_field =
+      arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
+      arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+  if (supports_shared_field &&
+      AMDHSA_BITS_GET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX10_PLUS_SHARED_VGPR_COUNT))
+    throw std::runtime_error("shared VGPR allocation is not supported by the emulator");
   const uint32_t wave_size = kernel_wavefront_size(arch, kd);
   const auto vgpr_granularity = descriptor_vgpr_count_granule_for_wavefront(arch, wave_size);
   if (!vgpr_granularity)
@@ -2173,8 +2193,25 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   uint32_t required_sgprs = sgprs > 0 ? sgprs : sgpr_limit;
   if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
     required_sgprs = std::max(required_sgprs, 34u); // s32 stack pointer, s33 frame pointer
-  dp.sgprs_per_wf = std::min(required_sgprs, sgpr_limit);
-  dp.vgprs_per_wf = std::min(vgprs > 0 ? vgprs : vgpr_limit, vgpr_limit);
+  // Preserve the descriptor's request. Dispatch admission rejects a request
+  // that exceeds either the per-wave addressable span or physical SIMD
+  // capacity; clipping here would silently turn an invalid kernel into a
+  // different, apparently runnable one.
+  dp.trap_handler_enabled =
+      physical_register_properties(arch).sgpr_occupancy_limited &&
+      AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_TRAP_HANDLER);
+  dp.sgprs_per_wf = required_sgprs;
+  dp.vgprs_per_wf = vgprs > 0 ? vgprs : vgpr_limit;
+  dp.ordinary_vgprs_per_wf = dp.vgprs_per_wf;
+  dp.accvgprs_per_wf = 0;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+      arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    const uint32_t accum_offset =
+        AMDHSA_BITS_GET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
+    const uint32_t accumulator_base = (accum_offset + 1) * 4;
+    dp.ordinary_vgprs_per_wf = std::min(dp.vgprs_per_wf, accumulator_base);
+    dp.accvgprs_per_wf = dp.vgprs_per_wf - dp.ordinary_vgprs_per_wf;
+  }
   dp.kernarg_addr = reinterpret_cast<uint64_t>(pkt.kernarg_address);
   dp.kernarg_size = kd.kernarg_size;
   dp.num_user_sgprs = user_sgprs;
