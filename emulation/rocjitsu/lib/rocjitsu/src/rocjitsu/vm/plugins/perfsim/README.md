@@ -20,18 +20,22 @@ backend requires glibc >= 2.34 (and often `GLIBCXX_3.4.29` /
 glibc needed to *load* the backend — on any host, VM, chroot, or container —
 in which case `dlopen` fails with a message such as
 `version 'GLIBC_2.33' not found`. The loader names the first unsatisfied
-symbol version, which can be below the backend's actual floor. Confirm with:
+symbol version, which can be below the backend's actual floor. Confirm the
+backend's floors for all three families, then the host's glibc and libstdc++:
 
 ```bash
-objdump -T /absolute/path/to/libgpucsim_ffm_plugin.so | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1
+objdump -T /absolute/path/to/libgpucsim_ffm_plugin.so \
+  | grep -oE '(GLIBC|GLIBCXX|CXXABI)_[0-9.]+' | sort -Vu
 ldd --version
+strings "$(gcc --print-file-name=libstdc++.so.6)" \
+  | grep -oE '(GLIBCXX|CXXABI)_[0-9.]+' | sort -Vu | tail -5
 ```
 
 Run `PerfsimPluginTest.RealBackendMatchesDirectFfmForCanonicalStream` (set
 `ROCJITSU_PERFSIM_REAL_BACKEND`) and any Perfsim-enabled workload only where
-the host glibc meets that floor. The test skips when the loader reports a
-`GLIBC` / `GLIBCXX` / `CXXABI` version error; a genuine ABI rejection still
-fails.
+the host C and C++ runtimes meet those floors. The test skips when the loader
+reports an unsatisfied `GLIBC_` / `GLIBCXX_` / `CXXABI_` symbol version
+(`version '...' not found`); a genuine ABI rejection still fails.
 
 From the repository root, build and install RocJITsu with the adapter enabled:
 
