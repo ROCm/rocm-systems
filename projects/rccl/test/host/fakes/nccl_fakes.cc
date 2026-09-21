@@ -239,7 +239,8 @@ ncclResult_t ncclShmIpcClose(ncclShmIpcDesc_t* /*desc*/)
 // hop, no cuda-p2p, and success. Tests exercising p2pCanConnect's topology
 // branches install a hook to report p2p-capable / an intermediate rank / etc.
 static ncclResult_t DefaultTopoCheckP2p(int /*rank1*/, int /*rank2*/, int* p2p,
-                                 int* read, int* intermediateRank, int* cudaP2p)
+                                 int* read, int* intermediateRank, int* cudaP2p,
+                                 int* /*isCrossClique*/)
 {
     if (p2p)              *p2p              = 0;
     if (read)             *read             = 0;
@@ -247,7 +248,7 @@ static ncclResult_t DefaultTopoCheckP2p(int /*rank1*/, int /*rank2*/, int* p2p,
     if (cudaP2p)          *cudaP2p          = 0;
     return ncclSuccess;
 }
-std::function<ncclResult_t(int, int, int*, int*, int*, int*)>
+std::function<ncclResult_t(int, int, int*, int*, int*, int*, int*)>
     g_ncclTopoCheckP2p = DefaultTopoCheckP2p;
 
 ncclResult_t ncclTopoCheckP2p(struct ncclComm*       /*comm*/,
@@ -260,8 +261,11 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm*       /*comm*/,
                               int*                   cudaP2p,
                               int*                   isCrossClique)
 {
+    // Default the cross-clique flag to 0 before the hook runs, so hooks that do
+    // not care leave it 0 (production reads an otherwise-uninitialised local);
+    // a hook that drives the cross-clique arm overwrites it.
     if (isCrossClique) *isCrossClique = 0;
-    return g_ncclTopoCheckP2p(rank1, rank2, p2p, read, intermediateRank, cudaP2p);
+    return g_ncclTopoCheckP2p(rank1, rank2, p2p, read, intermediateRank, cudaP2p, isCrossClique);
 }
 
 // --- Controllable seam: ncclTopoCheckNet ----------------------------------

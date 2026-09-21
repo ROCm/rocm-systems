@@ -116,11 +116,14 @@ extern std::function<ncclResult_t(int /*cudaDev1*/, int /*cudaDev2*/, bool* /*is
 extern int g_ncclTopoGetLinkTypeCalls;
 
 // Controllable seams for the topology eligibility checks p2pCanConnect drives.
-// (rank1, rank2, p2p, read, intermediateRank, cudaP2p) -- the topo system
-// pointer and comm are dropped; only the rank pair and out-params matter.
+// (rank1, rank2, p2p, read, intermediateRank, cudaP2p, isCrossClique) -- the
+// topo system pointer and comm are dropped; only the rank pair and out-params
+// matter. isCrossClique is defaulted to 0 by the wrapper before the hook runs,
+// so a hook that ignores it keeps the common case; a hook that sets it drives
+// the cross-clique arm that skips the ncclTopoCheckNet block (p2p.cc).
 extern std::function<ncclResult_t(int /*rank1*/, int /*rank2*/, int* /*p2p*/,
                                   int* /*read*/, int* /*intermediateRank*/,
-                                  int* /*cudaP2p*/)>
+                                  int* /*cudaP2p*/, int* /*isCrossClique*/)>
     g_ncclTopoCheckP2p;
 extern std::function<ncclResult_t(int /*rank1*/, int /*rank2*/, int* /*net*/)>
     g_ncclTopoCheckNet;

@@ -573,7 +573,7 @@ auto ForceLegacyIpcCapable()
 // need an intermediate hop (inter != -1) keep their own inline hook.
 auto TopoDirectP2p()
 {
-    return [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
+    return [](int, int, int* p2p, int*, int* inter, int*, int*) -> ncclResult_t {
         if (p2p) *p2p = 1;
         if (inter) *inter = -1;
         return ncclSuccess;
@@ -3129,7 +3129,7 @@ TEST_F(P2pCanConnectMicrotest, FirstPeerLacksFineGrain_ReturnsCannotConnect)
 {
     info1_.hasFineGrain = false;
     ScopedHook topo(g_ncclTopoCheckP2p,
-                    [](int, int, int*, int*, int*, int*) -> ncclResult_t {
+                    [](int, int, int*, int*, int*, int*, int*) -> ncclResult_t {
                         ADD_FAILURE() << "topo check reached despite missing fine-grain";
                         return ncclSuccess;
                     });
@@ -3141,7 +3141,7 @@ TEST_F(P2pCanConnectMicrotest, PeerLacksFineGrain_ReturnsCannotConnect)
     info2_.hasFineGrain = false;
     // No topo seam should even be consulted -- the fine-grain gate is first.
     ScopedHook topo(g_ncclTopoCheckP2p,
-                    [](int, int, int*, int*, int*, int*) -> ncclResult_t {
+                    [](int, int, int*, int*, int*, int*, int*) -> ncclResult_t {
                         ADD_FAILURE() << "topo check reached despite missing fine-grain";
                         return ncclSuccess;
                     });
@@ -3170,13 +3170,34 @@ TEST_F(P2pCanConnectMicrotest, NetIsBetter_ReturnsCannotConnect)
     EXPECT_EQ(Call(), 0);
 }
 
+TEST_F(P2pCanConnectMicrotest, CrossClique_SkipsNetCheckAndStaysEligible)
+{
+    // Cross-clique MNNVL: the peer is absent from this rank's topology, so the
+    // NET comparison is deliberately skipped. Even a NET-is-better verdict must
+    // not flip the result to cannot-connect (contrast NetIsBetter above, which
+    // is the same topology minus the cross-clique flag). This pins the
+    // `if (!isCrossClique)` gate that guards the whole ncclTopoCheckNet block.
+    ScopedHook topo(g_ncclTopoCheckP2p,
+                    [](int, int, int* p2p, int*, int* inter, int*, int* isCrossClique) -> ncclResult_t {
+                        if (p2p)   *p2p   = 1;
+                        if (inter) *inter = -1;
+                        if (isCrossClique) *isCrossClique = 1;
+                        return ncclSuccess;
+                    });
+    ScopedHook net(g_ncclTopoCheckNet, [](int, int, int*) -> ncclResult_t {
+        ADD_FAILURE() << "NET check reached despite cross-clique short-circuit";
+        return ncclSuccess;
+    });
+    EXPECT_EQ(Call(), 1);
+}
+
 TEST_F(P2pCanConnectMicrotest, IntermediateRankNoMemcpy_ReportsEligible)
 {
     // topo reports p2p-capable via an intermediate hop; with useMemcpy == 0
     // (this process's latched value) the intermediate arm leaves the verdict
     // untouched and returns before the NET/device checks.
     ScopedHook topo(g_ncclTopoCheckP2p,
-                    [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
+                    [](int, int, int* p2p, int*, int* inter, int*, int*) -> ncclResult_t {
                         if (p2p) *p2p = 1;
                         if (inter) *inter = 3;  // != -1
                         return ncclSuccess;
@@ -3305,7 +3326,7 @@ TEST_F(P2pCanConnectMicrotestIsolated, IntermediateRankWithMemcpy_ReturnsCannotC
     RUN_ISOLATED_TEST("P2p_CanConnect_IntermediateRankWithMemcpy_ReturnsCannotConnect", []() {
         ScopedHook loadParam(g_loadParam, ForceP2pUseCudaMemcpy());
         ScopedHook topo(g_ncclTopoCheckP2p,
-                        [](int, int, int* p2p, int*, int* inter, int*) -> ncclResult_t {
+                        [](int, int, int* p2p, int*, int* inter, int*, int*) -> ncclResult_t {
                             if (p2p) *p2p = 1;
                             if (inter) *inter = 3;  // != -1
                             return ncclSuccess;
@@ -3440,7 +3461,7 @@ protected:
     // Topology hook: p2p-capable, no intermediate hop, read flag = `read`.
     void InstallTopo(int read) {
         topo_.emplace(g_ncclTopoCheckP2p,
-            [read](int, int, int* p2p, int* rd, int* inter, int*) -> ncclResult_t {
+            [read](int, int, int* p2p, int* rd, int* inter, int*, int*) -> ncclResult_t {
                 if (p2p)   *p2p   = 1;
                 if (rd)    *rd    = read;
                 if (inter) *inter = -1;
@@ -3453,7 +3474,7 @@ protected:
     // rank, selecting the P2P_INTERMEDIATE resource type.
     void InstallTopoIntermediate(int inter) {
         topo_.emplace(g_ncclTopoCheckP2p,
-            [inter](int, int, int* p2p, int* rd, int* i, int*) -> ncclResult_t {
+            [inter](int, int, int* p2p, int* rd, int* i, int*, int*) -> ncclResult_t {
                 if (p2p) *p2p = 1;
                 if (rd)  *rd  = 0;
                 if (i)   *i   = inter;
@@ -3476,7 +3497,7 @@ protected:
     std::optional<ScopedHook<ncclResult_t(struct ncclComm*, int, int, int, struct ncclProxyConnector*)>> connect_;
     std::optional<ScopedHook<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*, int, void*, int, void*, int)>> proxy_;
     std::optional<ScopedHook<ncclResult_t(int, int, bool*, int)>> link_;
-    std::optional<ScopedHook<ncclResult_t(int, int, int*, int*, int*, int*)>> topo_;
+    std::optional<ScopedHook<ncclResult_t(int, int, int*, int*, int*, int*, int*)>> topo_;
 };
 
 TEST_F(P2pSetupMicrotest, SendSetup_SameProcessPeer_SelectsDirectAndFillsConnectInfo)
@@ -3903,7 +3924,7 @@ TEST_F(P2pSetupMicrotest, SendSetup_TopologyQueryFails_Propagates)
     InstallXgmiLink();
     InstallHappyProxy();
     topo_.emplace(g_ncclTopoCheckP2p,
-        [](int, int, int*, int*, int*, int*) -> ncclResult_t {
+        [](int, int, int*, int*, int*, int*, int*) -> ncclResult_t {
             return ncclSystemError;
         });
 
@@ -3970,7 +3991,7 @@ TEST_F(P2pSetupMicrotest, RecvSetup_TopologyQueryFails_Propagates)
 {
     InstallHappyProxy();
     topo_.emplace(g_ncclTopoCheckP2p,
-        [](int, int, int*, int*, int*, int*) -> ncclResult_t {
+        [](int, int, int*, int*, int*, int*, int*) -> ncclResult_t {
             return ncclSystemError;
         });
 
