@@ -1082,8 +1082,8 @@ SIMD_VOP3_CNDMASK_B16: set[str] = {
     'v_cndmask_b16_vop3',
 }
 
-# VOP3 div_fmas: fma(src0, src1, src2) followed by a VCC-bit-gated
-# ldexp(result, 32) (f32) or ldexp(result, 64) (f64). Fixed-op / functorless.
+# VOP3 div_fmas: fused FMA and VCC-controlled scaling, rounded once using
+# the guest mode. Fixed-op / functorless.
 SIMD_VOP3_DIV_FMAS_FP32: set[str] = {
     'v_div_fmas_f32_vop3',
 }
@@ -1262,15 +1262,15 @@ SIMD_VOP3P_PK_BINARY_FP16: dict[str, str] = {
 SIMD_VOP3P_PK_TERNARY_FP16: dict[str, str] = {}
 
 # VOP3P packed-f32 binary. Each operand is a 64-bit consecutive-VGPR pair of two
-# f32 (lo/hi). Glue extracts each f32 half (narrow32 width), applies neg/neg_hi
-# (sign-bit toggle), runs the per-half functor, repacks. No clamp on any pk_f32
-# scalar body. Default packing only (op_sel = 0, op_sel_hi = 3).
+# f32 (lo/hi). Glue selects each source half at native width, including broadcasts,
+# applies neg/neg_hi (sign-bit toggle), and runs the per-half functor. Rounding,
+# denormal and clamp policies match the scalar helper.
 SIMD_VOP3P_PK_BINARY_F32: dict[str, str] = {
     'v_pk_add_f32_vop3p': '[](auto a, auto b) { return a + b; }',
     'v_pk_mul_f32_vop3p': '[](auto a, auto b) { return a * b; }',
 }
 
-# pk_fma_f32 — 3-source FMA per half. op_sel_hi_2 == 1 gate (src2-hi select).
+# pk_fma_f32 — 3-source FMA per half, with independent source-half selection.
 # NaN-input payload divergence accepted.
 SIMD_VOP3P_PK_TERNARY_F32: dict[str, str] = {
     'v_pk_fma_f32_vop3p': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
@@ -2130,13 +2130,10 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     'v_cubema_f32_vop3': '[](auto x, auto y, auto z) { return 2.0f * util::stdx::fmax(util::stdx::abs(x), util::stdx::fmax(util::stdx::abs(y), util::stdx::abs(z))); }',
     'v_cubesc_f32_vop3': '[](auto x, auto y, auto z) { return util::cube_sc_f32_simd(x, y, z); }',
     'v_cubetc_f32_vop3': '[](auto x, auto y, auto z) { return util::cube_tc_f32_simd(x, y, z); }',
-    # v_div_fixup_f32: per-AMD-spec `else if` cascade selecting the result
-    # among NaN/Inf/zero copysign cases. Lives as a helper in simd_glue.h
-    # (div_fixup_f32_simd) — bit-exact match to the scalar body's predicate
-    # tree applied lowest-priority-first so higher-priority `where` blends
-    # overwrite. Omod/clamp DO apply (scalar applies them at end).
+    # Share the bit-level fixup and guest MODE policy with the scalar executor.
+    # FIXUP rounds OMOD explicitly; operand glue still applies CLAMP.
     'v_div_fixup_f32_vop3': (
-        '[](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); }'
+        '[&inst, &wf](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_simd(p, b, c, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), ::rocjitsu::amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst.inst_.omod)); }, false'
     ),
 }
 
@@ -2164,10 +2161,10 @@ SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
     'v_maximumminimum_f16_vop3': '[](auto a, auto b, auto c) { return util::ieee_minimum_simd(util::ieee_maximum_simd(a, b), c); }',
     'v_minimummaximum_f16_vop3': '[](auto a, auto b, auto c) { return util::ieee_maximum_simd(util::ieee_minimum_simd(a, b), c); }',
     'v_div_fixup_f16_vop3': (
-        '[](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); }'
+        '[](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f16_promoted_simd(p, b, c); }'
     ),
     'v_div_fixup_legacy_f16_vop3': (
-        '[](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); }'
+        '[](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f16_promoted_simd(p, b, c); }'
     ),
 }
 
@@ -2176,10 +2173,9 @@ SIMD_VOP3_FMA_MODE_FP64 = {'v_fma_f64_vop3'}
 
 # f64 ternary FMA.
 SIMD_VOP3_TERNARY_FP64: dict[str, str] = {
-    # v_div_fixup_f64: 64-bit-lane div_fixup cascade (same shape as f32, see
-    # SIMD_VOP3_TERNARY_FP32 above).
+    # v_div_fixup_f64 shares the bit-level helper and explicit guest MODE policy.
     'v_div_fixup_f64_vop3': (
-        '[](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f64_simd(p, b, c); }'
+        '[&inst, &wf](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_simd(p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), ::rocjitsu::amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst.inst_.omod)); }, false'
     ),
 }
 

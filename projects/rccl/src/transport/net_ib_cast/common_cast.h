@@ -505,6 +505,7 @@ struct alignas(32) ncclIbNetCommBase {
 
   uint64_t fifoHead;
   int nqps;
+  int isP2p;
   int splitDataOnQps;
   struct ncclSocket sock;
   int ready;

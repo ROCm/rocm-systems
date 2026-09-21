@@ -75,7 +75,7 @@ struct rocprofsys_call_expr
         return _ret;
     }
 
-    inline call_expr_pointer_t get(procedure_t* func)
+    call_expr_pointer_t get(procedure_t* func)
     {
         return call_expr_pointer_t((func) ? new call_expr_t(*func, get_params())
                                           : nullptr);
@@ -135,7 +135,7 @@ rocprofsys_get_is_executable(const std::string& _cmd, bool _default_v)
         }
 
         Dyninst::SymtabAPI::Symtab* _symtab = nullptr;
-        if(Dyninst::SymtabAPI::Symtab::openFile(_symtab, _cmd.data()))
+        if(Dyninst::SymtabAPI::Symtab::openFile(_symtab, _cmd))
         {
             _is_executable = _symtab->isExecutable() && _symtab->isExec();
             Dyninst::SymtabAPI::Symtab::closeSymtab(_symtab);

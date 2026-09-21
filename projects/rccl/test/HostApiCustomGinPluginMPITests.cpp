@@ -60,7 +60,7 @@ std::string ginExamplePluginPath()
 {
     if(!kGinExamplePluginDir || kGinExamplePluginDir[0] == '\0')
         return {};
-    return std::string(kGinExamplePluginDir) + "/libnccl-gin-example.so";
+    return std::string(kGinExamplePluginDir) + "/librccl-gin-example.so";
 }
 
 bool fileExists(const std::string& path)
@@ -107,7 +107,7 @@ protected:
         const std::string pluginPath = ginExamplePluginPath();
         if(pluginPath.empty() || !fileExists(pluginPath))
         {
-            GTEST_SKIP() << "libnccl-gin-example.so not built; rebuild tests with ENABLE_HOST_API_TESTS=ON";
+            GTEST_SKIP() << "librccl-gin-example.so not built; rebuild tests with ENABLE_HOST_API_TESTS=ON";
         }
 
         configureCustomGinPluginEnv();
