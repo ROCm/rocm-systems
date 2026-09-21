@@ -139,6 +139,66 @@ struct buffered_callback_dispatcher
     }
 };
 
+template <typename SdkBackend>
+using tracing_phase_cb_t = void (*)(typename SdkBackend::callback_tracing_record_t,
+                                    typename SdkBackend::user_data_t*, void*);
+
+// Indirects the null-check through a function parameter so GCC's -Waddress
+// heuristic (which pattern-matches "function-name != nullptr" and assumes a
+// missing call) does not misfire on a non-type template parameter that is
+// legitimately nullptr for other instantiations. Deliberately not constexpr:
+// a function (template)'s address is not guaranteed to be usable in a
+// constant expression until it is instantiated, so evaluating this at
+// compile time (e.g. via "if constexpr") can fail with "not a constant
+// expression" on some toolchains/flags (observed with the sanitizer build).
+// Callers must use a plain runtime "if", not "if constexpr".
+template <typename CallbackT>
+inline bool
+is_callback_set(CallbackT callback)
+{
+    return callback != nullptr;
+}
+
+template <typename SdkBackend, tracing_phase_cb_t<SdkBackend> OnEnter = nullptr,
+          tracing_phase_cb_t<SdkBackend> OnExit = nullptr,
+          tracing_phase_cb_t<SdkBackend> OnNone = nullptr>
+struct tracing_callback_dispatcher
+{
+    // NOLINTNEXTLINE (readability-function-size)
+    static void callback(SdkBackend::callback_tracing_record_t record,
+                         SdkBackend::user_data_t* user_data, void* callback_data)
+    {
+        switch(record.phase)
+        {
+            case SdkBackend::CALLBACK_PHASE_ENTER:
+            {
+                if(is_callback_set(OnEnter))
+                {
+                    OnEnter(record, user_data, callback_data);
+                }
+                break;
+            }
+            case SdkBackend::CALLBACK_PHASE_EXIT:
+            {
+                if(is_callback_set(OnExit))
+                {
+                    OnExit(record, user_data, callback_data);
+                }
+                break;
+            }
+            case SdkBackend::CALLBACK_PHASE_NONE:
+            {
+                if(is_callback_set(OnNone))
+                {
+                    OnNone(record, user_data, callback_data);
+                }
+                break;
+            }
+            default: break;
+        }
+    }
+};
+
 }  // namespace rocprofsys::domains
 
 template <>
