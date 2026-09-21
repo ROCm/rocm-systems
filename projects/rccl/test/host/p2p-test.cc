@@ -4625,11 +4625,14 @@ TEST_F(P2pShareableBufferMicrotest,
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
     ScopedHook gran(g_hipMemGetAllocationGranularity, GranularitySucceeds());
     int getFdCalls = 0;
+    int dupedFd    = -1;
     ScopedHook getFd(g_ncclProxyClientGetFdBlocking,
         [&](struct ncclComm*, int, void*, int* fd) -> ncclResult_t {
             ++getFdCalls;
-            // Hand back a real, closable fd so the SYSCHECK(close(fd)) succeeds.
-            if (fd) *fd = dup(STDERR_FILENO);
+            // Hand back a real, closable fd so the SYSCHECK(close(fd)) succeeds,
+            // and remember it so we can prove production closed it.
+            dupedFd = dup(STDERR_FILENO);
+            if (fd) *fd = dupedFd;
             return ncclSuccess;
         });
     int importCalls = 0;
@@ -4665,6 +4668,11 @@ TEST_F(P2pShareableBufferMicrotest,
     EXPECT_EQ(getFdCalls, 1);     // the POSIX_FD conversion fired
     EXPECT_EQ(importCalls, 1);
     EXPECT_EQ(devMem_, kReserved);
+    // Production closed the converted fd (SYSCHECK(close(fd))): a second close
+    // of the same descriptor must fail with EBADF.
+    ASSERT_GE(dupedFd, 0);
+    EXPECT_EQ(::close(dupedFd), -1);
+    EXPECT_EQ(errno, EBADF);
 }
 
 // cuMem arm, import failure: hipMemImportFromShareableHandle's error is
@@ -6207,6 +6215,12 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CrossProcessPosixFd_ImportsFromF
     EXPECT_EQ(mapCalls, kNumSegments);
     EXPECT_EQ(done, 1);
     ASSERT_NE(QueueHead(conn_), nullptr);
+    // Production closed each imported fd (SYSCHECK(close)): a second close of
+    // each descriptor must fail with EBADF.
+    for (const auto& seg : req) {
+        EXPECT_EQ(::close(seg.impFd), -1);
+        EXPECT_EQ(errno, EBADF);
+    }
 }
 
 // Cross-process cuMem register with a non-POSIX (fabric) handle type imports
