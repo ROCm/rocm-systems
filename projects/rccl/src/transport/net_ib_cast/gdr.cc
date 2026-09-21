@@ -53,8 +53,7 @@ static void ibGdrSupportInitOnce() {
 #endif
 }
 
-// Returns ncclSuccess if a peermem module is loaded, or a runtime probe on
-// device 0 confirms GPU registration works without one (e.g. bnxt_re).
+// Returns ncclSuccess if a peermem module is loaded, or a device-0 runtime probe confirms GPU registration works without one.
 ncclResult_t IbCastGdrSupport() {
   static std::once_flag once;
   std::call_once(once, ibGdrSupportInitOnce);

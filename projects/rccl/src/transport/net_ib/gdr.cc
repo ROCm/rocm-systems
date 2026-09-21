@@ -57,10 +57,7 @@ static void ibGdrSupportInitOnce() {
 #endif
 }
 
-// Returns ncclSuccess if a peermem module is loaded, or a runtime probe on
-// device 0 confirms GPU registration works without one (e.g. HMM-capable
-// kernels, bnxt_re). Global, not per-device -- see gin.cc's ncclIbDmaBufSupport(0)
-// for the same convention.
+// Returns ncclSuccess if a peermem module is loaded, or a device-0 runtime probe confirms GPU registration works without one.
 ncclResult_t ncclIbGdrSupport() {
   static std::once_flag once;
   std::call_once(once, ibGdrSupportInitOnce);
