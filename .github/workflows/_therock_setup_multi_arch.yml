@@ -120,7 +120,7 @@ permissions:
 
 jobs:
   call:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@01fbbddcbb337df52f09dd2ff2ffaa7b32828c06 # 2026-09-18T07:13:59Z
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@90fea14c0765a04ecfc8016960bce99f5758b388 # 2026-09-21T04:06:35Z
     with:
       build_variant: ${{ inputs.build_variant }}
       release_type: ${{ inputs.release_type }}
@@ -145,4 +145,4 @@ jobs:
       changed_projects: ${{ inputs.changed_projects }}
       quartz_tracking_id: ${{ inputs.quartz_tracking_id }}
       repository: ROCm/TheRock
-      ref: 01fbbddcbb337df52f09dd2ff2ffaa7b32828c06 # 2026-09-18T07:13:59Z
+      ref: 90fea14c0765a04ecfc8016960bce99f5758b388 # 2026-09-21T04:06:35Z
