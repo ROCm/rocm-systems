@@ -27,7 +27,7 @@ class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
             "F6F4": 131072,  # Mixed precision F6 x F4
             "MXF8": 131072,  # microscaling FP8 format
             "F8": 32768,
-            "F16": 32768,
+            "F16": 16384,
             "F32": 4096,
             "BF16": 32768,
             "I8": 65536,
@@ -77,13 +77,13 @@ class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
             + """
         extern "C" __global__ void mfma_f16(int iter, float *dummy)
         {
-            vec16<float> result = {0};
+            vec4<float> result = {0};
             vec8<__fp16> a;
             a[7] = a[6] = a[5] = a[4] = a[3] = a[2] = a[1] = a[0] = threadIdx.x;
 
             for(int i = 0; i < iter; ++i)
             {
-                result = __builtin_amdgcn_mfma_f32_32x32x16_f16(a, a, result, 0, 0, 0);
+                result = __builtin_amdgcn_mfma_f32_16x16x32_f16(a, a, result, 0, 0, 0);
             }
 
             if (result[0] != 2*result[0])
@@ -100,12 +100,12 @@ class Bench_gfx950(benchmark_gfx9_base.Bench_gfx9):
         extern "C" __global__ void mfma_bf16(int iter, float *dummy)
         {
             vec16<float> result = {0};
-            vec8<short> a;
+            vec8<__fp16> a;
             a[7] = a[6] = a[5] = a[4] = a[3] = a[2] = a[1] = a[0] = threadIdx.x;
 
             for(int i = 0; i < iter; ++i)
             {
-                result = __builtin_amdgcn_mfma_f32_32x32x16_bf16(a, a, result, 0, 0, 0);
+                result = __builtin_amdgcn_mfma_f32_32x32x16_f16(a, a, result, 0, 0, 0);
             }
 
             if (result[0] != 2*result[0])

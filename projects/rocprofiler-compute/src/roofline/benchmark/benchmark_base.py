@@ -43,7 +43,9 @@ Stats = namedtuple("Stats", ["mean", "stdev", "confidence"])
 PerfMetrics = namedtuple("PerfMetrics", ["mean", "low", "high"])
 
 DEFAULT_WORKGROUP_SIZE = 256
-DEFAULT_NUM_EXPERIMENTS = 100
+DEFAULT_WORKGROUPS = 8192
+DEFAULT_THREADS = DEFAULT_WORKGROUP_SIZE * DEFAULT_WORKGROUPS
+DEFAULT_NUM_EXPERIMENTS = 10
 DEFAULT_NUM_ITERS = 10
 
 # Number of FMA operations per thread iteration in VALU benchmark.
@@ -69,6 +71,8 @@ class Bench_base(ABC):
         self.csv_cols_map: dict[str, str]
         self.WAVEFRONT_SIZE: int
         self.MATRIX_OPS_TYPE: str
+        self.event_start = hip.hipEventCreate()
+        self.event_stop = hip.hipEventCreate()
 
         self.cache_sizes = cache_sizes
 
@@ -168,6 +172,7 @@ class Bench_base(ABC):
     def calc_stats(self, samples: list) -> Stats:
         """Returns a named tuple with the mean, std deviation and confidence."""
         mean = sum(samples) / len(samples)
+        m = max(samples)
 
         stdev = 0.0
 
@@ -176,7 +181,7 @@ class Bench_base(ABC):
 
         stdev = math.sqrt(stdev / len(samples))
 
-        return Stats(mean, stdev, 1.96 * stdev / math.sqrt(len(samples)))
+        return Stats(m, stdev, 1.96 * stdev / math.sqrt(len(samples)))
 
     class Program:
         """Helper class for loading and compiling kernels."""
