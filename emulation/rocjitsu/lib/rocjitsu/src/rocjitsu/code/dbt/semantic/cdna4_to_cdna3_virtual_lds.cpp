@@ -566,7 +566,7 @@ void emit_virtual_lds_copy_temp_to_acc_range(std::vector<uint32_t> &words,
 [[nodiscard]] std::optional<VirtualLdsBaseSgprReservation>
 reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBlockScope blocks,
                                          const KdTranslation &translation, rj_code_arch_t arch) {
-  if (!arch_is_cdna(arch))
+  if (!arch_is_cdna_4_or_lower(arch))
     return std::nullopt;
 
   auto note_sgpr_ref = [](uint32_t &count, RegisterRef ref) {

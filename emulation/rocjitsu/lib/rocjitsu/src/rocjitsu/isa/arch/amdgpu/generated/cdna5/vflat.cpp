@@ -7,7 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vflat.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna5 {
@@ -37,8 +37,22 @@ FlatLoadU8Vflat::FlatLoadU8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatLoadU8Vflat(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_load_u8", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatLoadU8Vflat>(opcode);
+}
+} // namespace detail
 
 FlatLoadI8Vflat::FlatLoadI8Vflat(const MachineInst *inst)
     : Vflat("flat_load_i8", reinterpret_cast<const OpEncoding *>(inst),
@@ -58,8 +72,22 @@ FlatLoadI8Vflat::FlatLoadI8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatLoadI8Vflat(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_load_i8", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatLoadI8Vflat>(opcode);
+}
+} // namespace detail
 
 FlatLoadU16Vflat::FlatLoadU16Vflat(const MachineInst *inst)
     : Vflat("flat_load_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -79,8 +107,22 @@ FlatLoadU16Vflat::FlatLoadU16Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatLoadU16Vflat(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_load_u16", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatLoadU16Vflat>(opcode);
+}
+} // namespace detail
 
 FlatLoadI16Vflat::FlatLoadI16Vflat(const MachineInst *inst)
     : Vflat("flat_load_i16", reinterpret_cast<const OpEncoding *>(inst),
@@ -100,8 +142,22 @@ FlatLoadI16Vflat::FlatLoadI16Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatLoadI16Vflat(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_load_i16", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatLoadI16Vflat>(opcode);
+}
+} // namespace detail
 
 FlatLoadB32Vflat::FlatLoadB32Vflat(const MachineInst *inst)
     : Vflat("flat_load_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -121,8 +177,22 @@ FlatLoadB32Vflat::FlatLoadB32Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatLoadB32Vflat(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_load_b32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatLoadB32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatLoadB64Vflat::FlatLoadB64Vflat(const MachineInst *inst)
     : Vflat("flat_load_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -142,8 +212,22 @@ FlatLoadB64Vflat::FlatLoadB64Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatLoadB64Vflat(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_load_b64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatLoadB64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatLoadB96Vflat::FlatLoadB96Vflat(const MachineInst *inst)
     : Vflat("flat_load_b96", reinterpret_cast<const OpEncoding *>(inst),
@@ -163,8 +247,22 @@ FlatLoadB96Vflat::FlatLoadB96Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatLoadB96Vflat(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_load_b96", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatLoadB96Vflat>(opcode);
+}
+} // namespace detail
 
 FlatLoadB128Vflat::FlatLoadB128Vflat(const MachineInst *inst)
     : Vflat("flat_load_b128", reinterpret_cast<const OpEncoding *>(inst),
@@ -184,8 +282,22 @@ FlatLoadB128Vflat::FlatLoadB128Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatLoadB128Vflat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_load_b128", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatLoadB128Vflat>(opcode);
+}
+} // namespace detail
 
 FlatStoreB8Vflat::FlatStoreB8Vflat(const MachineInst *inst)
     : Vflat("flat_store_b8", reinterpret_cast<const OpEncoding *>(inst),
@@ -205,8 +317,22 @@ FlatStoreB8Vflat::FlatStoreB8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatStoreB8Vflat(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_store_b8", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatStoreB8Vflat>(opcode);
+}
+} // namespace detail
 
 FlatStoreB16Vflat::FlatStoreB16Vflat(const MachineInst *inst)
     : Vflat("flat_store_b16", reinterpret_cast<const OpEncoding *>(inst),
@@ -226,8 +352,22 @@ FlatStoreB16Vflat::FlatStoreB16Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatStoreB16Vflat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_store_b16", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatStoreB16Vflat>(opcode);
+}
+} // namespace detail
 
 FlatStoreB32Vflat::FlatStoreB32Vflat(const MachineInst *inst)
     : Vflat("flat_store_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -247,8 +387,22 @@ FlatStoreB32Vflat::FlatStoreB32Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatStoreB32Vflat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_store_b32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatStoreB32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatStoreB64Vflat::FlatStoreB64Vflat(const MachineInst *inst)
     : Vflat("flat_store_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -268,8 +422,22 @@ FlatStoreB64Vflat::FlatStoreB64Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatStoreB64Vflat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_store_b64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatStoreB64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatStoreB96Vflat::FlatStoreB96Vflat(const MachineInst *inst)
     : Vflat("flat_store_b96", reinterpret_cast<const OpEncoding *>(inst),
@@ -289,8 +457,22 @@ FlatStoreB96Vflat::FlatStoreB96Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatStoreB96Vflat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_store_b96", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatStoreB96Vflat>(opcode);
+}
+} // namespace detail
 
 FlatStoreB128Vflat::FlatStoreB128Vflat(const MachineInst *inst)
     : Vflat("flat_store_b128", reinterpret_cast<const OpEncoding *>(inst),
@@ -310,8 +492,22 @@ FlatStoreB128Vflat::FlatStoreB128Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatStoreB128Vflat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_store_b128", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatStoreB128Vflat>(opcode);
+}
+} // namespace detail
 
 FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
@@ -331,21 +527,22 @@ FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
-void FlatLoadD16U8Vflat::implicit_uses(RegisterSet &uses) const {
-  Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+namespace detail {
+DecodeResult decodeFlatLoadD16U8Vflat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_load_d16_u8", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatLoadD16U8Vflat>(opcode);
 }
-
-void FlatLoadD16U8Vflat::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vflat::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
+} // namespace detail
 
 FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
@@ -365,21 +562,22 @@ FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
-void FlatLoadD16I8Vflat::implicit_uses(RegisterSet &uses) const {
-  Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+namespace detail {
+DecodeResult decodeFlatLoadD16I8Vflat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_load_d16_i8", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatLoadD16I8Vflat>(opcode);
 }
-
-void FlatLoadD16I8Vflat::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vflat::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
+} // namespace detail
 
 FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
@@ -399,21 +597,22 @@ FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
-void FlatLoadD16B16Vflat::implicit_uses(RegisterSet &uses) const {
-  Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+namespace detail {
+DecodeResult decodeFlatLoadD16B16Vflat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_load_d16_b16", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatLoadD16B16Vflat>(opcode);
 }
-
-void FlatLoadD16B16Vflat::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vflat::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
+} // namespace detail
 
 FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
@@ -433,21 +632,22 @@ FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
-void FlatLoadD16HiU8Vflat::implicit_uses(RegisterSet &uses) const {
-  Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+namespace detail {
+DecodeResult decodeFlatLoadD16HiU8Vflat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_load_d16_hi_u8", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatLoadD16HiU8Vflat>(opcode);
 }
-
-void FlatLoadD16HiU8Vflat::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vflat::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
+} // namespace detail
 
 FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
@@ -467,21 +667,22 @@ FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
-void FlatLoadD16HiI8Vflat::implicit_uses(RegisterSet &uses) const {
-  Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+namespace detail {
+DecodeResult decodeFlatLoadD16HiI8Vflat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_load_d16_hi_i8", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatLoadD16HiI8Vflat>(opcode);
 }
-
-void FlatLoadD16HiI8Vflat::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vflat::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
+} // namespace detail
 
 FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
@@ -501,21 +702,22 @@ FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
 
-void FlatLoadD16HiB16Vflat::implicit_uses(RegisterSet &uses) const {
-  Vflat::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+namespace detail {
+DecodeResult decodeFlatLoadD16HiB16Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_load_d16_hi_b16", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatLoadD16HiB16Vflat>(opcode);
 }
-
-void FlatLoadD16HiB16Vflat::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vflat::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
+} // namespace detail
 
 FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
     : Vflat("flat_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
@@ -535,8 +737,22 @@ FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatStoreD16HiB8Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_store_d16_hi_b8", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatStoreD16HiB8Vflat>(opcode);
+}
+} // namespace detail
 
 FlatStoreD16HiB16Vflat::FlatStoreD16HiB16Vflat(const MachineInst *inst)
     : Vflat("flat_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
@@ -556,8 +772,22 @@ FlatStoreD16HiB16Vflat::FlatStoreD16HiB16Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatStoreD16HiB16Vflat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_store_d16_hi_b16", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatStoreD16HiB16Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicSwapB32Vflat::FlatAtomicSwapB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -583,8 +813,24 @@ FlatAtomicSwapB32Vflat::FlatAtomicSwapB32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicSwapB32Vflat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_swap_b32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicSwapB32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicCmpswapB32Vflat::FlatAtomicCmpswapB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -610,8 +856,24 @@ FlatAtomicCmpswapB32Vflat::FlatAtomicCmpswapB32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicCmpswapB32Vflat(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_cmpswap_b32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicCmpswapB32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicAddU32Vflat::FlatAtomicAddU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -637,8 +899,24 @@ FlatAtomicAddU32Vflat::FlatAtomicAddU32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicAddU32Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_add_u32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicAddU32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicSubU32Vflat::FlatAtomicSubU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -664,8 +942,24 @@ FlatAtomicSubU32Vflat::FlatAtomicSubU32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicSubU32Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_sub_u32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicSubU32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicSubClampU32Vflat::FlatAtomicSubClampU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -691,8 +985,24 @@ FlatAtomicSubClampU32Vflat::FlatAtomicSubClampU32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicSubClampU32Vflat(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_sub_clamp_u32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicSubClampU32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicMinI32Vflat::FlatAtomicMinI32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -718,8 +1028,24 @@ FlatAtomicMinI32Vflat::FlatAtomicMinI32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicMinI32Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_min_i32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicMinI32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicMinU32Vflat::FlatAtomicMinU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -745,8 +1071,24 @@ FlatAtomicMinU32Vflat::FlatAtomicMinU32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicMinU32Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_min_u32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicMinU32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicMaxI32Vflat::FlatAtomicMaxI32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -772,8 +1114,24 @@ FlatAtomicMaxI32Vflat::FlatAtomicMaxI32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicMaxI32Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_max_i32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicMaxI32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicMaxU32Vflat::FlatAtomicMaxU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -799,8 +1157,24 @@ FlatAtomicMaxU32Vflat::FlatAtomicMaxU32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicMaxU32Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_max_u32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicMaxU32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicAndB32Vflat::FlatAtomicAndB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -826,8 +1200,24 @@ FlatAtomicAndB32Vflat::FlatAtomicAndB32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicAndB32Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_and_b32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicAndB32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicOrB32Vflat::FlatAtomicOrB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -853,8 +1243,24 @@ FlatAtomicOrB32Vflat::FlatAtomicOrB32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicOrB32Vflat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_or_b32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicOrB32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicXorB32Vflat::FlatAtomicXorB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -880,8 +1286,24 @@ FlatAtomicXorB32Vflat::FlatAtomicXorB32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicXorB32Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_xor_b32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicXorB32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicIncU32Vflat::FlatAtomicIncU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -907,8 +1329,24 @@ FlatAtomicIncU32Vflat::FlatAtomicIncU32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicIncU32Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_inc_u32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicIncU32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicDecU32Vflat::FlatAtomicDecU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -934,8 +1372,24 @@ FlatAtomicDecU32Vflat::FlatAtomicDecU32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicDecU32Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_dec_u32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicDecU32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicSwapB64Vflat::FlatAtomicSwapB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -961,8 +1415,24 @@ FlatAtomicSwapB64Vflat::FlatAtomicSwapB64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicSwapB64Vflat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_swap_b64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicSwapB64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicCmpswapB64Vflat::FlatAtomicCmpswapB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -988,8 +1458,24 @@ FlatAtomicCmpswapB64Vflat::FlatAtomicCmpswapB64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicCmpswapB64Vflat(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_cmpswap_b64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicCmpswapB64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicAddU64Vflat::FlatAtomicAddU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1015,8 +1501,24 @@ FlatAtomicAddU64Vflat::FlatAtomicAddU64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicAddU64Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_add_u64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicAddU64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicSubU64Vflat::FlatAtomicSubU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1042,8 +1544,24 @@ FlatAtomicSubU64Vflat::FlatAtomicSubU64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicSubU64Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_sub_u64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicSubU64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicMinI64Vflat::FlatAtomicMinI64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1069,8 +1587,24 @@ FlatAtomicMinI64Vflat::FlatAtomicMinI64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicMinI64Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_min_i64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicMinI64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicMinU64Vflat::FlatAtomicMinU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1096,8 +1630,24 @@ FlatAtomicMinU64Vflat::FlatAtomicMinU64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicMinU64Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_min_u64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicMinU64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicMaxI64Vflat::FlatAtomicMaxI64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1123,8 +1673,24 @@ FlatAtomicMaxI64Vflat::FlatAtomicMaxI64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicMaxI64Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_max_i64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicMaxI64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicMaxU64Vflat::FlatAtomicMaxU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1150,8 +1716,24 @@ FlatAtomicMaxU64Vflat::FlatAtomicMaxU64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicMaxU64Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_max_u64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicMaxU64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicAndB64Vflat::FlatAtomicAndB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1177,8 +1759,24 @@ FlatAtomicAndB64Vflat::FlatAtomicAndB64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicAndB64Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_and_b64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicAndB64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicOrB64Vflat::FlatAtomicOrB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1204,8 +1802,24 @@ FlatAtomicOrB64Vflat::FlatAtomicOrB64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicOrB64Vflat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_or_b64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicOrB64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicXorB64Vflat::FlatAtomicXorB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1231,8 +1845,24 @@ FlatAtomicXorB64Vflat::FlatAtomicXorB64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicXorB64Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_xor_b64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicXorB64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicIncU64Vflat::FlatAtomicIncU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1258,8 +1888,24 @@ FlatAtomicIncU64Vflat::FlatAtomicIncU64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicIncU64Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_inc_u64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicIncU64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicDecU64Vflat::FlatAtomicDecU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1285,8 +1931,24 @@ FlatAtomicDecU64Vflat::FlatAtomicDecU64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicDecU64Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_dec_u64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicDecU64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicCondSubU32Vflat::FlatAtomicCondSubU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1312,8 +1974,24 @@ FlatAtomicCondSubU32Vflat::FlatAtomicCondSubU32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicCondSubU32Vflat(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_cond_sub_u32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicCondSubU32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicMinNumF32Vflat::FlatAtomicMinNumF32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1339,8 +2017,24 @@ FlatAtomicMinNumF32Vflat::FlatAtomicMinNumF32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicMinNumF32Vflat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_min_num_f32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicMinNumF32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicMaxNumF32Vflat::FlatAtomicMaxNumF32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1366,8 +2060,24 @@ FlatAtomicMaxNumF32Vflat::FlatAtomicMaxNumF32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicMaxNumF32Vflat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_max_num_f32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicMaxNumF32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicAddF64Vflat::FlatAtomicAddF64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_add_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1393,8 +2103,24 @@ FlatAtomicAddF64Vflat::FlatAtomicAddF64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicAddF64Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_add_f64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicAddF64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicAddF32Vflat::FlatAtomicAddF32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1420,8 +2146,24 @@ FlatAtomicAddF32Vflat::FlatAtomicAddF32Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicAddF32Vflat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_add_f32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicAddF32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicPkAddF16Vflat::FlatAtomicPkAddF16Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1447,8 +2189,24 @@ FlatAtomicPkAddF16Vflat::FlatAtomicPkAddF16Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicPkAddF16Vflat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_pk_add_f16", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicPkAddF16Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicPkAddBf16Vflat::FlatAtomicPkAddBf16Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1474,8 +2232,24 @@ FlatAtomicPkAddBf16Vflat::FlatAtomicPkAddBf16Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicPkAddBf16Vflat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_pk_add_bf16", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicPkAddBf16Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicMinNumF64Vflat::FlatAtomicMinNumF64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_num_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1501,8 +2275,24 @@ FlatAtomicMinNumF64Vflat::FlatAtomicMinNumF64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicMinNumF64Vflat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_min_num_f64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicMinNumF64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicMaxNumF64Vflat::FlatAtomicMaxNumF64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_num_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1528,8 +2318,24 @@ FlatAtomicMaxNumF64Vflat::FlatAtomicMaxNumF64Vflat(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{(amdgpu::gfx12_atomic_returns(inst_.th)
+                                                              ? amdgpu::WaitCounterType::LOADCNT
+                                                              : amdgpu::WaitCounterType::STORECNT),
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatAtomicMaxNumF64Vflat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_atomic_max_num_f64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatAtomicMaxNumF64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatPrefetchB8Vflat::FlatPrefetchB8Vflat(const MachineInst *inst)
     : Vflat("flat_prefetch_b8", reinterpret_cast<const OpEncoding *>(inst),
@@ -1547,6 +2353,17 @@ FlatPrefetchB8Vflat::FlatPrefetchB8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+DecodeResult decodeFlatPrefetchB8Vflat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_prefetch_b8", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatPrefetchB8Vflat>(opcode);
+}
+} // namespace detail
 
 FlatLoadMonitorB32Vflat::FlatLoadMonitorB32Vflat(const MachineInst *inst)
     : Vflat("flat_load_monitor_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1566,8 +2383,22 @@ FlatLoadMonitorB32Vflat::FlatLoadMonitorB32Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatLoadMonitorB32Vflat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_load_monitor_b32", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatLoadMonitorB32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatLoadMonitorB64Vflat::FlatLoadMonitorB64Vflat(const MachineInst *inst)
     : Vflat("flat_load_monitor_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1587,8 +2418,22 @@ FlatLoadMonitorB64Vflat::FlatLoadMonitorB64Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatLoadMonitorB64Vflat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_load_monitor_b64", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatLoadMonitorB64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatLoadMonitorB128Vflat::FlatLoadMonitorB128Vflat(const MachineInst *inst)
     : Vflat("flat_load_monitor_b128", reinterpret_cast<const OpEncoding *>(inst),
@@ -1608,8 +2453,22 @@ FlatLoadMonitorB128Vflat::FlatLoadMonitorB128Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM},
+                         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                                         amdgpu::MemoryCompletionClass::LDS}});
 }
+
+namespace detail {
+DecodeResult decodeFlatLoadMonitorB128Vflat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Vflat::validate_encoding(
+      "flat_load_monitor_b128", reinterpret_cast<const Vflat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<FlatLoadMonitorB128Vflat>(opcode);
+}
+} // namespace detail
 
 } // namespace cdna5
 } // namespace rocjitsu

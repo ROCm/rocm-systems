@@ -2,7 +2,7 @@
 # attachment-test application for testing rocprof_attach
 #
 
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 if(NOT CMAKE_HIP_COMPILER)
     find_program(
@@ -42,8 +42,8 @@ find_package(rocprofiler-sdk-roctx REQUIRED)
 set_source_files_properties(attachment_test.cpp PROPERTIES LANGUAGE HIP)
 add_executable(attachment-test)
 target_sources(attachment-test PRIVATE attachment_test.cpp)
-target_compile_options(attachment-test PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow
-                                               -Werror)
+target_compile_options(attachment-test PRIVATE -Wpedantic)
 
 target_link_libraries(
-    attachment-test PRIVATE Threads::Threads rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+    attachment-test PRIVATE Threads::Threads rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
+                            rocprofiler-sdk::tests-build-flags)

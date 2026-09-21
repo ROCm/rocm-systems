@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """ROCm_SMI_LIB CLI Tool - AMD-SMI Backend
 
 This tool acts as a command line interface for manipulating
@@ -754,19 +757,8 @@ def get_compute_partition(processor):
     try:
         import amdsmi
 
-        partition = amdsmi.amdsmi_get_gpu_compute_partition(processor)
-        # partition is already a string like 'SPX', 'DPX', etc.
-        if isinstance(partition, str):
-            return partition
-        # If it's an enum, convert it
-        partition_names = {
-            amdsmi.AmdSmiComputePartitionType.SPX: "SPX",
-            amdsmi.AmdSmiComputePartitionType.DPX: "DPX",
-            amdsmi.AmdSmiComputePartitionType.TPX: "TPX",
-            amdsmi.AmdSmiComputePartitionType.QPX: "QPX",
-            amdsmi.AmdSmiComputePartitionType.CPX: "CPX",
-        }
-        return partition_names.get(partition, str(partition))
+        partition_profile_dict = amdsmi.amdsmi_get_gpu_accelerator_partition_profile(processor)
+        return partition_profile_dict["partition_profile"]["profile_type"]
     except:
         return "N/A"
 

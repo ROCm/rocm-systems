@@ -1,7 +1,7 @@
 UV ?= uv
 # Ensure only UV-managed Python versions are used
 export UV_PYTHON_PREFERENCE := only-managed
-export UV_PYTHON := 3.13
+export UV_PYTHON ?= 3.13.13
 
 # Root Makefile passes BUILDDIR; default to ../../build if not set
 MKFILE_DIR           := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))

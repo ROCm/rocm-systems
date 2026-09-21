@@ -28,13 +28,13 @@ use std::path::{Path, PathBuf};
 use mirage_core::config::OptionDef;
 use mirage_core::discovery::{self, LibSearch};
 use mirage_core::emulator::{
-    EmulatorBackend, EmulatorBackendDef, EmulatorDescription, SupportStatus,
+    EmulatorBackend, EmulatorBackendDef, EmulatorDescription, RuntimeStatus, SupportStatus,
 };
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
 use mirage_core::plugin::PluginsDef;
 use mirage_core::profile::{FileMount, ProfileDef};
-use mirage_core::session::{SessionHealth, SessionId};
+use mirage_core::session::{SessionContext, SessionHealth};
 
 /// The HIP intercept library HotSwap ships. It is the artifact mirage
 /// anchors discovery on (its directory is the HotSwap lib dir) and the
@@ -71,7 +71,7 @@ pub const DEFAULT_ADAPTER_POLICY: &str = "compile";
 
 /// The recognised HotSwap adapter policies, mirroring env_contract.py's
 /// `ADAPTER_POLICIES`. Each maps to a set of backend adapters via
-/// [`adapter_backends_for_policy`].
+/// `adapter_backends_for_policy`.
 pub const ADAPTER_POLICIES: &[&str] = &["none", "env", "native_build", "triton", "compile", "full"];
 
 /// The physical GPU architectures HotSwap can retarget code *onto*,
@@ -88,6 +88,7 @@ pub const SUPPORTED_GPUS: &[(u32, &str)] = &[(90402, "gfx942"), (90500, "gfx950"
 /// and the `HSA_HOTSWAP_*` variables select the source target and policy.
 /// Stateless; a single shared instance is registered in the emulator
 /// registry.
+#[derive(Debug)]
 pub struct Hotswap;
 
 impl EmulatorBackend for Hotswap {
@@ -103,22 +104,39 @@ impl EmulatorBackend for Hotswap {
         Vec::new()
     }
 
-    fn shutdown(&self, _session: &SessionId) {}
+    fn shutdown(&self, _ctx: &SessionContext) {}
 
     fn validate_profile(&self, _def: &ProfileDef) -> std::result::Result<(), String> {
         // HotSwap is not bundled or built by mirage; it must be
         // installed separately. Surface actionable guidance now, at
         // profile-creation time, rather than only when a session is
-        // later started.
-        if is_installed() {
-            Ok(())
-        } else {
-            Err(install_guidance())
-        }
+        // later started — and say which of its parts is missing, since
+        // a half-staged tree is the likelier mistake than none at all.
+        installed_lib_dir().map(|_| ())
     }
 
-    fn installed(&self) -> bool {
-        is_installed()
+    fn runtime(&self) -> RuntimeStatus {
+        // Finding the intercept is not the same as being installed here:
+        // HotSwap is three co-located libraries, and a tree missing one
+        // of them cannot emulate. Both answers come out of this one
+        // search, so `mirage emulators` still stats the candidates once.
+        //
+        // Which is also why the trait's default `installed` is left in
+        // place rather than overridden with [`is_installed`]. The two
+        // are the same walk — locate the intercept, take its directory,
+        // insist the directory is complete — and the reason this backend
+        // is the one worth checking is that the walk has a second half
+        // an override could quietly lose. It did once: `installed` was
+        // "the intercept is here" while the injection demanded the whole
+        // tree, so a half-staged install was reported missing, injected
+        // anyway, and ran on the host GPU unemulated. `is_installed`
+        // stays because callers outside the trait use it.
+        let location = discovery::locate_emulator_lib(&lib_search());
+        let installed = location
+            .path()
+            .and_then(Path::parent)
+            .is_some_and(|dir| complete_tree(dir.to_path_buf()).is_ok());
+        RuntimeStatus::new(installed, location)
     }
 
     fn supported(&self) -> SupportStatus {
@@ -129,41 +147,78 @@ impl EmulatorBackend for Hotswap {
         Vec::new()
     }
 
-    fn health(&self, _session: &SessionId) -> SessionHealth {
+    fn health(&self, _ctx: &SessionContext) -> SessionHealth {
         let support = support_status();
-        let installed = is_installed();
-        let healthy = installed && support.supported;
+        let install = installed_lib_dir();
+        let healthy = install.is_ok() && support.supported;
         SessionHealth {
             healthy,
             state: Some(if healthy { "ready" } else { "error" }.to_string()),
             terminal: false,
-            message: if healthy {
-                None
-            } else if !installed {
-                Some(format!("{LIB_NAME} not found"))
-            } else {
-                Some(support.reason)
+            // The install problem comes first when there is one: it is
+            // the one the user can fix without changing machines, and it
+            // names exactly which part of the tree is absent.
+            message: match install {
+                Err(problem) => Some(problem),
+                Ok(_) if !support.supported => Some(support.reason),
+                Ok(_) => None,
             },
             ..Default::default()
         }
     }
 
-    fn injection_def(&self, session: &SessionId) -> Result<InjectionDef> {
-        // The trait hands us only the session id, so recover the profile
-        // it was started with to learn whether it is containerised.
-        let profile = mirage_core::session::resolve_profile(session)?;
-        // Refuse to run unemulated: without the HotSwap tree the
-        // workload would silently run on real hardware, so fail loudly
-        // with guidance instead.
-        let dir = lib_dir().ok_or_else(|| {
+    fn injection_def(&self, ctx: &SessionContext) -> Result<InjectionDef> {
+        self.injection_def_for(ctx, installed_lib_dir(), physical_target_gfx())
+    }
+}
+
+impl Hotswap {
+    /// [`EmulatorBackend::injection_def`] against an explicit view of
+    /// the machine: the HotSwap install to wire in (as
+    /// `installed_lib_dir` reports it) and the GPU to retarget onto.
+    ///
+    /// Both are threaded in for the reason `mirage_rocjitsu::dbt` threads
+    /// its environment lookup: they come from `$HOTSWAP_HOME` and the
+    /// host's own GPUs, and a test can change neither — Rust 2024 makes
+    /// `set_var` unsafe, and the GPU is whatever the machine has — so a
+    /// test that could not supply them could only ever assert about the
+    /// host it happened to run on.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the HotSwap install is unusable or the host
+    /// has no GPU to retarget onto. Either way the workload would run
+    /// unemulated, so neither is allowed to pass quietly.
+    pub fn injection_def_for(
+        &self,
+        ctx: &SessionContext,
+        install: std::result::Result<PathBuf, String>,
+        target_gfx: Option<String>,
+    ) -> Result<InjectionDef> {
+        // Refuse to run unemulated. Anything short of a complete HotSwap
+        // tree means the workload runs on the host GPU untouched and
+        // exits 0, which is the worst outcome available: a green result
+        // that never went near the emulator. This is the same predicate
+        // `installed()` reports, so what mirage says about the backend
+        // and what it will actually do cannot disagree.
+        let dir = install.map_err(MirageError::Other)?;
+
+        // Likewise for the hardware: HotSwap rewrites device code to run
+        // on a real, compatible GPU, so without one there is nothing to
+        // retarget onto.
+        let target_gfx = target_gfx.ok_or_else(|| {
             MirageError::Other(format!(
-                "hotswap: {LIB_NAME} not found; workload cannot be emulated.\n{}",
-                install_guidance()
+                "hotswap: {}. {DISPLAY_NAME} rewrites device code to run on a real \
+                 GPU, so there is nothing here to retarget onto and the workload \
+                 would run unemulated. Run this on a supported card, or set \
+                 HSA_HOTSWAP_ISA_OVERRIDE to the gfx name to target if you know \
+                 this host can run it.",
+                support_status().reason
             ))
         })?;
 
-        let containerized = profile.containerize.is_some();
-        let (ld_preload, env, mounts) = build_hotswap_env(&dir, containerized);
+        let containerized = ctx.profile.containerize.is_some();
+        let (ld_preload, env, mounts) = build_hotswap_env(&dir, containerized, &target_gfx);
 
         // HotSwap retargets device code onto a *physical* GPU, so the
         // workload always needs host GPU access. The container engine
@@ -204,17 +259,33 @@ fn source_arch_of(source_target: &str) -> &str {
     source_target.split(':').next().unwrap_or(source_target)
 }
 
-/// The physical GPU HotSwap retargets code *onto*: the first present
-/// [`SUPPORTED_GPUS`] entry, else the first supported arch as a
-/// fallback. Drives `HSA_HOTSWAP_ISA_OVERRIDE`.
-fn physical_target_gfx() -> String {
-    let present = mirage_core::hardware::gpu_gfx_versions();
+/// The physical GPU HotSwap retargets code *onto*, as
+/// `HSA_HOTSWAP_ISA_OVERRIDE`: a caller's explicit `override_env`, else
+/// the first [`SUPPORTED_GPUS`] entry this host actually has.
+///
+/// `None` when neither applies. It used to fall back to the first
+/// *supported* arch instead, which names a card that is not in the
+/// machine: HotSwap would then rewrite every kernel for a gfx942 that
+/// nothing here can run, and the honest diagnosis — that this host has
+/// no GPU HotSwap can target, which `mirage emulators` already reports —
+/// would be buried under whatever the transpiler or ROCr failed with
+/// several steps later.
+fn target_gfx_for(present: &[u32], override_env: Option<String>) -> Option<String> {
+    if let Some(value) = override_env.filter(|v| !v.is_empty()) {
+        return Some(value);
+    }
     SUPPORTED_GPUS
         .iter()
         .find(|(version, _)| present.contains(version))
-        .or_else(|| SUPPORTED_GPUS.first())
         .map(|(_, name)| (*name).to_string())
-        .unwrap_or_default()
+}
+
+/// [`target_gfx_for`] against this host and process environment.
+fn physical_target_gfx() -> Option<String> {
+    target_gfx_for(
+        &mirage_core::hardware::gpu_gfx_versions(),
+        std::env::var("HSA_HOTSWAP_ISA_OVERRIDE").ok(),
+    )
 }
 
 /// Build the HotSwap env contract for a workload, mirroring
@@ -226,6 +297,7 @@ fn physical_target_gfx() -> String {
 fn build_hotswap_env(
     dir: &Path,
     containerized: bool,
+    target_gfx: &str,
 ) -> (String, BTreeMap<String, String>, Vec<FileMount>) {
     // Canonicalize to an absolute path: `dir` may be discovered via a
     // relative probe (e.g. `../../build/hotswap/lib`), and the workload
@@ -242,7 +314,6 @@ fn build_hotswap_env(
         .unwrap_or_else(|| DEFAULT_ADAPTER_POLICY.to_string());
     let backends = adapter_backends_for_policy(&policy);
     let source_arch = source_arch_of(&source_target).to_string();
-    let target_gfx = physical_target_gfx();
 
     // Establish host→workload path mappings. For a containerised session
     // every host tree HotSwap relies on is bind-mounted under
@@ -281,7 +352,7 @@ fn build_hotswap_env(
 
     let mut env: BTreeMap<String, String> = BTreeMap::new();
     env.insert("HSA_HOTSWAP_CACHE_DEBUG".into(), "1".into());
-    env.insert("HSA_HOTSWAP_ISA_OVERRIDE".into(), target_gfx);
+    env.insert("HSA_HOTSWAP_ISA_OVERRIDE".into(), target_gfx.to_string());
     env.insert("HSA_HOTSWAP_IR_RAISER".into(), "1".into());
     env.insert("HSA_HOTSWAP_STRICT".into(), "1".into());
     env.insert("HSA_HOTSWAP_SOURCE_TARGET".into(), source_target.clone());
@@ -293,16 +364,18 @@ fn build_hotswap_env(
     env.insert("TRITON_ALWAYS_COMPILE".into(), "1".into());
 
     // The patched ROCR + COMGR shadow the system copies via the loader
-    // search path. The host launcher inherits a minimal env (no
-    // LD_LIBRARY_PATH), so set it explicitly to the HotSwap lib dir; an
-    // exec-level override still wins (applied afterwards).
+    // search path, so name the HotSwap lib dir explicitly. A workload
+    // inherits the caller's environment, and the supervisor treats
+    // `LD_LIBRARY_PATH` as a search list: this entry is prepended to
+    // whatever the caller exported rather than replacing it, so the
+    // patched libraries win the search without deleting the user's.
     env.insert("LD_LIBRARY_PATH".into(), dir.display().to_string());
     // Expose the install root so the workload/runtime can resolve the
     // sibling `llvm-tools/` and `runtime/hotswap_py/` trees.
     if let Some(home) = dir.parent() {
         env.insert("HOTSWAP_HOME".into(), home.display().to_string());
     }
-    if let Some(py) = py_dir() {
+    if let Some(py) = py_dir_in(&host_dir) {
         // `sitecustomize.py` lives at the root of the python runtime, so
         // putting it on PYTHONPATH auto-activates the adapter layer.
         env.insert("PYTHONPATH".into(), remap(&py).display().to_string());
@@ -445,13 +518,71 @@ pub fn py_dir() -> Option<PathBuf> {
         .filter(|p| p.is_dir())
 }
 
+/// The python adapter runtime directory belonging to `lib_dir`, if
+/// present.
+///
+/// The env contract derives it from the lib dir it is wiring in rather
+/// than from [`py_dir`], so every path it emits comes from one install:
+/// the two differ for a containerised session, where the lib dir has
+/// been canonicalized in order to be remapped onto the bind mount and a
+/// separately-resolved python directory would not match the mapping and
+/// would leak a host path into the container.
+fn py_dir_in(lib_dir: &Path) -> Option<PathBuf> {
+    lib_dir
+        .parent()
+        .map(|root| root.join("runtime/hotswap_py"))
+        .filter(|p| p.is_dir())
+}
+
 /// Returns `true` if a usable HotSwap install is present on this
 /// machine (the intercept, patched ROCR, and COMGR all co-located).
 pub fn is_installed() -> bool {
-    match lib_dir() {
-        Some(dir) => dir.join(ROCR_LIB).is_file() && dir.join(COMGR_LIB).is_file(),
-        None => false,
+    installed_lib_dir().is_ok()
+}
+
+/// The lib dir of a *complete* HotSwap install, or a message explaining
+/// what is missing.
+///
+/// This is the single answer to "can this machine emulate?", used both
+/// to report the backend as installed and to build the injection. They
+/// were once two different predicates — the injection needed only the
+/// intercept — and a half-staged tree passed one and failed the other:
+/// mirage said HotSwap was not installed, built the injection anyway,
+/// and the workload ran on the host GPU unemulated and exited 0.
+fn installed_lib_dir() -> std::result::Result<PathBuf, String> {
+    let Some(dir) = lib_dir() else {
+        return Err(format!(
+            "{DISPLAY_NAME} is not installed: {LIB_NAME} was not found, so the \
+             workload cannot be emulated.\n{}",
+            install_guidance()
+        ));
+    };
+    complete_tree(dir)
+}
+
+/// `dir` when it holds every library HotSwap needs, else a message
+/// naming the ones it does not. Split out from `installed_lib_dir` so
+/// the check can be made against a staged tree rather than whatever this
+/// machine happens to have installed.
+fn complete_tree(dir: PathBuf) -> std::result::Result<PathBuf, String> {
+    let missing: Vec<&str> = [ROCR_LIB, COMGR_LIB]
+        .into_iter()
+        .filter(|lib| !dir.join(lib).is_file())
+        .collect();
+    if missing.is_empty() {
+        return Ok(dir);
     }
+    Err(format!(
+        "{DISPLAY_NAME} is installed at {dir} but the tree is incomplete: {missing} \
+         {verb} missing next to {LIB_NAME}. {DISPLAY_NAME} is not one library — the \
+         intercept rewrites device code, the patched ROCR runtime loads it and COMGR \
+         transpiles it — so all three must sit in the same directory; without them \
+         the workload would run on the host GPU unemulated. Stage the full install \
+         and point $HOTSWAP_HOME at its root.",
+        dir = dir.display(),
+        missing = missing.join(" and "),
+        verb = if missing.len() == 1 { "is" } else { "are" },
+    ))
 }
 
 /// Multi-line, user-facing guidance describing where mirage looked for
@@ -462,7 +593,28 @@ pub fn install_guidance() -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
     use super::*;
+
+    #[test]
+    fn the_installed_flag_accounts_for_the_whole_tree() {
+        // The backend worth checking, because HotSwap's install is three
+        // co-located libraries and "is it here?" is not "was the
+        // intercept found". The override that used to sit on `installed`
+        // called `is_installed()`, which walks the same three steps
+        // — locate the intercept, take its directory, insist the
+        // directory is complete — and agreeing was the most it could do.
+        // The trait's default now reads the flag `runtime` computed, so
+        // a tree missing its ROCR or COMGR cannot be reported installed
+        // by one path and missing by the other.
+        let backend = Hotswap;
+        assert_eq!(backend.installed(), backend.runtime().installed);
+        assert_eq!(backend.installed(), is_installed());
+        // And the location came with the verdict, whichever way it went.
+        let status = backend.runtime();
+        assert_eq!(status.location.is_found(), status.location.path().is_some());
+    }
 
     #[test]
     fn search_targets_the_intercept_lib() {
@@ -498,6 +650,160 @@ mod tests {
         assert_eq!(adapter_backends_for_policy("bogus"), &compile);
         // Every named policy is recognised (no fallthrough surprises).
         assert!(ADAPTER_POLICIES.contains(&DEFAULT_ADAPTER_POLICY));
+    }
+
+    /// A directory under the system temp directory, removed on drop.
+    ///
+    /// These tests need a HotSwap tree on disk to stage half-installed
+    /// and fully-installed shapes into, and staging one is the whole of
+    /// what a temp-directory crate would do for them; this crate has no
+    /// dev-dependencies to pull one in with.
+    #[derive(Debug)]
+    struct StagedTree(PathBuf);
+
+    impl StagedTree {
+        /// An empty directory named after `tag` and this process, so
+        /// concurrent test binaries cannot collide.
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "mirage-hotswap-{tag}-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).expect("stage a HotSwap tree");
+            Self(dir)
+        }
+
+        /// Place an empty stand-in for library `name`. Discovery only
+        /// ever asks whether the file is there.
+        fn with(self, name: &str) -> Self {
+            std::fs::write(self.0.join(name), b"").expect("stage a library");
+            self
+        }
+
+        fn path(&self) -> PathBuf {
+            self.0.clone()
+        }
+    }
+
+    impl Drop for StagedTree {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn session_ctx() -> SessionContext {
+        SessionContext {
+            id: mirage_core::session::SessionId::new("hotswap-test").unwrap(),
+            profile: ProfileDef {
+                name: "hotswap-test".to_string(),
+                description: None,
+                emulator: mirage_core::emulator::EmulatorDef {
+                    emulator: "hotswap".to_string(),
+                    plugins: Default::default(),
+                    exec_mode: mirage_core::emulator::ExecMode::Functional,
+                    options: Default::default(),
+                    topology: mirage_core::common::MaybeRef::Ref("unused".to_string()),
+                },
+                containerize: None,
+            },
+            runtime_dir: std::env::temp_dir(),
+            daemon: false,
+        }
+    }
+
+    /// A tree with the intercept but not the runtime it needs cannot
+    /// emulate anything, and must not produce an injection. Left to run,
+    /// the workload goes to the host GPU untouched and exits 0 — a green
+    /// result that never met the emulator.
+    #[test]
+    fn a_partial_install_is_refused_and_says_what_is_missing() {
+        let tree = StagedTree::new("partial").with(LIB_NAME);
+
+        let err = complete_tree(tree.path()).unwrap_err();
+        assert!(err.contains(ROCR_LIB), "{err}");
+        assert!(err.contains(COMGR_LIB), "{err}");
+        assert!(err.contains(&tree.path().display().to_string()), "{err}");
+
+        // And the injection refuses on exactly that verdict rather than
+        // building one anyway.
+        let injection = Hotswap.injection_def_for(
+            &session_ctx(),
+            complete_tree(tree.path()),
+            Some("gfx942".to_string()),
+        );
+        assert_eq!(injection.unwrap_err().to_string(), err);
+    }
+
+    /// One missing library is still a partial install, and the message
+    /// names the one that is missing rather than the pair.
+    #[test]
+    fn a_tree_missing_only_comgr_is_still_refused() {
+        let tree = StagedTree::new("no-comgr").with(LIB_NAME).with(ROCR_LIB);
+
+        let err = complete_tree(tree.path()).unwrap_err();
+        assert!(err.contains(COMGR_LIB), "{err}");
+        assert!(!err.contains(ROCR_LIB), "{err}");
+    }
+
+    /// The complete tree is what the two predicates agree on: it passes
+    /// the install check and yields an injection preloading both the
+    /// patched ROCR and the intercept out of that directory.
+    #[test]
+    fn a_complete_install_yields_an_injection() {
+        let tree = StagedTree::new("complete")
+            .with(LIB_NAME)
+            .with(ROCR_LIB)
+            .with(COMGR_LIB);
+
+        let dir = complete_tree(tree.path()).expect("a complete tree is installed");
+        let injection = Hotswap
+            .injection_def_for(&session_ctx(), Ok(dir), Some("gfx950".to_string()))
+            .expect("a complete install with a target GPU can be injected");
+
+        let preload = injection
+            .ld_preload
+            .expect("HotSwap preloads two libraries");
+        assert!(preload.contains(ROCR_LIB), "{preload}");
+        assert!(preload.contains(LIB_NAME), "{preload}");
+        assert_eq!(
+            injection
+                .env
+                .get("HSA_HOTSWAP_ISA_OVERRIDE")
+                .map(String::as_str),
+            Some("gfx950")
+        );
+    }
+
+    /// Without a GPU HotSwap can retarget onto, the injection must fail
+    /// rather than name one that is not in the machine.
+    #[test]
+    fn no_compatible_gpu_is_refused_rather_than_fabricated() {
+        let tree = StagedTree::new("no-gpu")
+            .with(LIB_NAME)
+            .with(ROCR_LIB)
+            .with(COMGR_LIB);
+
+        // Nothing present, and no override: there is no honest value for
+        // HSA_HOTSWAP_ISA_OVERRIDE, so there must be no injection.
+        assert_eq!(target_gfx_for(&[], None), None);
+        let err = Hotswap
+            .injection_def_for(&session_ctx(), complete_tree(tree.path()), None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("gfx942") && err.contains("gfx950"), "{err}");
+        assert!(err.contains("HSA_HOTSWAP_ISA_OVERRIDE"), "{err}");
+
+        // A GPU that *is* present is named, and an explicit override
+        // wins over detection — the escape hatch the error points at.
+        assert_eq!(target_gfx_for(&[90402], None).as_deref(), Some("gfx942"));
+        assert_eq!(
+            target_gfx_for(&[], Some("gfx1201".to_string())).as_deref(),
+            Some("gfx1201")
+        );
+        // An empty override reads as unset, not as an empty ISA name.
+        assert_eq!(target_gfx_for(&[], Some(String::new())), None);
     }
 
     #[test]

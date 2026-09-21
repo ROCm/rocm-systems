@@ -19,7 +19,8 @@ classifiers = [
     "Programming Language :: Python :: 3"
 ]
 [project.urls]
-"Homepage" = "https://github.com/RadeonOpenCompute/amdsmi"
+"Homepage" = "https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi"
+"Documentation" = "https://rocm.docs.amd.com/projects/amdsmi/en/latest/"
 
 [tool.setuptools]
 packages = ["amdsmi"]

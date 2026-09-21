@@ -63,6 +63,24 @@ struct InstructionTranslationReport {
   uint64_t target_offset = 0;
   std::vector<uint32_t> target_words;
   std::vector<std::string> target_instructions;
+
+  /// @brief What actually happened to this instruction, as one value.
+  ///
+  /// @details The label and the action counters must agree, and reconstructing
+  /// the rules for that at each consumer is how they drift apart. The one case
+  /// that is not simply `action` is a semantic rule carrying an instruction with
+  /// no legalization entry naming it: that is an expansion, and reporting it as
+  /// a re-encode would hide the rule that rewrote the instruction.
+  ///
+  /// @returns The effective legalization action, or nullopt when the instruction
+  ///          was copied verbatim or re-encoded without a rule.
+  [[nodiscard]] std::optional<Action> effective_action() const {
+    if (copied_original)
+      return std::nullopt;
+    if (!has_legalization)
+      return semantic_lowering ? std::optional<Action>(Action::Expand) : std::nullopt;
+    return action;
+  }
 };
 
 struct TranslateOptions {
@@ -83,6 +101,8 @@ struct TranslateOptions {
   bool skip_failed_kernels = false;
   /// @brief Rerun a same-architecture translation and require identical ELF bytes.
   bool verify_idempotence = false;
+  /// @brief Require every audited semantic rewrite to be discharged in final output.
+  bool verify_rewrite_discharge = false;
   DisassemblyMode disassembly = DisassemblyMode::None;
 };
 
@@ -108,6 +128,10 @@ struct TranslateOutput {
   bool idempotence_checked = false;
   /// @brief True when the requested second translation matched the first output.
   bool idempotence_verified = false;
+  /// @brief True when the requested final-output applicability scan was attempted.
+  bool rewrite_discharge_checked = false;
+  /// @brief True when no registered rewrite remained actionable.
+  bool rewrite_discharge_verified = false;
 
   /// @brief True if translation produced no error diagnostics.
   [[nodiscard]] bool ok() const { return !has_error_diagnostic(diagnostics); }

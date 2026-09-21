@@ -83,6 +83,7 @@
 #include "suites/functional/reference_count.h"
 #include "suites/functional/signal_concurrent.h"
 #include "suites/functional/signal_allocation_validation.h"
+#include "suites/functional/signal_wait_multi.h"
 #include "suites/functional/metadata_prefetch.h"
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
@@ -90,6 +91,7 @@
 #include "suites/functional/filter_devices.h"
 #include "suites/functional/fp_exception_shutdown.h"
 #include "suites/functional/gpu_coredump.h"
+#include "suites/functional/gpu_discovery_deprecated.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
@@ -274,6 +276,27 @@ TEST(rocrtstFunc, Signal_Allocation_Validation) {
   RunCustomTestEpilog(&sav);
 }
 
+TEST(rocrtstFunc, Signal_Wait_Any_Nonzero_Index) {
+  SignalWaitMultiTest swm;
+  if (!RunCustomTestProlog(&swm)) return;
+  swm.TestWaitAnyNonzeroSatisfyingIndex();
+  RunCustomTestEpilog(&swm);
+}
+
+TEST(rocrtstFunc, Signal_Wait_Any_Compacted_Conds_Values) {
+  SignalWaitMultiTest swm;
+  if (!RunCustomTestProlog(&swm)) return;
+  swm.TestWaitAnyCompactsConditionsAndValues();
+  RunCustomTestEpilog(&swm);
+}
+
+TEST(rocrtstFunc, Signal_Wait_All_Satisfying_Values) {
+  SignalWaitMultiTest swm;
+  if (!RunCustomTestProlog(&swm)) return;
+  swm.TestWaitAllReportsSatisfyingValues();
+  RunCustomTestEpilog(&swm);
+}
+
 /* Temporary: Disable CU Masking until it is fixed */
 TEST(rocrtstFunc, DISABLED_CU_Masking) {
   CU_Masking sd;
@@ -336,6 +359,7 @@ TEST(rocrtstFunc, Memory_Max_Mem) {
 }
 
 TEST(rocrtstFunc, Memory_Available) {
+    if (rocrtst::SkipOnWsl("MEMORY_AVAIL uses WDDM adapter-wide dynamic accounting on WSL/DXG")) return;
     MemoryTest mt;
 
     if (!RunCustomTestProlog(&mt)) return;
@@ -358,6 +382,7 @@ TEST(rocrtstFunc, BarrierPkt_TimeStamp) {
 }
 
 TEST(rocrtstFunc, GpuCoreDump_DefaultPattern) {
+    if (rocrtst::SkipOnWsl("GPU coredump-on-exception unavailable on WSL/DXG")) return;
     GpuCoreDumpTest gcd;
     if (!RunCustomTestProlog(&gcd)) return;
     gcd.TestDefaultPattern();
@@ -365,6 +390,7 @@ TEST(rocrtstFunc, GpuCoreDump_DefaultPattern) {
 }
 
 TEST(rocrtstFunc, GpuCoreDump_CustomPattern) {
+    if (rocrtst::SkipOnWsl("GPU coredump-on-exception unavailable on WSL/DXG")) return;
     GpuCoreDumpTest gcd;
     if (!RunCustomTestProlog(&gcd)) return;
     gcd.TestCustomPattern();
@@ -372,6 +398,7 @@ TEST(rocrtstFunc, GpuCoreDump_CustomPattern) {
 }
 
 TEST(rocrtstFunc, GpuCoreDump_DisableFlag) {
+    if (rocrtst::SkipOnWsl("GPU coredump-on-exception unavailable on WSL/DXG")) return;
     GpuCoreDumpTest gcd;
     if (!RunCustomTestProlog(&gcd)) return;
     gcd.TestDisableFlag();
@@ -379,6 +406,7 @@ TEST(rocrtstFunc, GpuCoreDump_DisableFlag) {
 }
 
 TEST(rocrtstFunc, GpuCoreDump_PatternSubstitution) {
+    if (rocrtst::SkipOnWsl("GPU coredump-on-exception unavailable on WSL/DXG")) return;
     GpuCoreDumpTest gcd;
     if (!RunCustomTestProlog(&gcd)) return;
     gcd.TestPatternSubstitution();
@@ -386,6 +414,7 @@ TEST(rocrtstFunc, GpuCoreDump_PatternSubstitution) {
 }
 
 TEST(rocrtstFunc, GpuCoreDump_InvalidPath) {
+    if (rocrtst::SkipOnWsl("GPU coredump-on-exception unavailable on WSL/DXG")) return;
     GpuCoreDumpTest gcd;
     if (!RunCustomTestProlog(&gcd)) return;
     gcd.TestInvalidPath();
@@ -393,6 +422,7 @@ TEST(rocrtstFunc, GpuCoreDump_InvalidPath) {
 }
 
 TEST(rocrtstFunc, GpuCoreDump_ContentIntegrity) {
+    if (rocrtst::SkipOnWsl("GPU coredump-on-exception unavailable on WSL/DXG")) return;
     GpuCoreDumpTest gcd;
     if (!RunCustomTestProlog(&gcd)) return;
     gcd.TestCoreDumpContentIntegrity();
@@ -400,6 +430,7 @@ TEST(rocrtstFunc, GpuCoreDump_ContentIntegrity) {
 }
 
 TEST(rocrtstFunc, GpuCoreDump_PipePattern) {
+    if (rocrtst::SkipOnWsl("GPU coredump-on-exception unavailable on WSL/DXG")) return;
     GpuCoreDumpTest gcd;
     if (!RunCustomTestProlog(&gcd)) return;
     gcd.TestPipePattern();
@@ -493,7 +524,6 @@ TEST(rocrtstFunc, DISABLED_DebugBasicTests) {
 
 // Trap Handler Tests (SWDEV-209233)
 // Tests s_trap instruction handling and queue error callbacks.
-// Working tests: NoTrap, Abort, Generic (validated on MI300X gfx942)
 
 TEST(rocrtstFunc, TrapHandler_NoTrap) {
     TrapHandlerTest th;
@@ -503,6 +533,7 @@ TEST(rocrtstFunc, TrapHandler_NoTrap) {
 }
 
 TEST(rocrtstFunc, TrapHandler_Abort) {
+    if (rocrtst::SkipOnWsl("GPU trap exceptions not delivered to runtime on WSL/DXG")) return;
     TrapHandlerTest th;
     if (!RunCustomTestProlog(&th)) return;
     th.TestTrapAbort();
@@ -510,6 +541,7 @@ TEST(rocrtstFunc, TrapHandler_Abort) {
 }
 
 TEST(rocrtstFunc, TrapHandler_Generic) {
+    if (rocrtst::SkipOnWsl("GPU trap exceptions not delivered to runtime on WSL/DXG")) return;
     TrapHandlerTest th;
     if (!RunCustomTestProlog(&th)) return;
     th.TestTrapGeneric();
@@ -581,6 +613,17 @@ TEST(rocrtstFunc, AgentPropertiesTests) {
     RunCustomTestEpilog(&propTest);
 }
 
+TEST(rocrtstFunc, GpuDiscoveryDeprecatedDoorbellTest) {
+  if (rocrtst::SkipOnWsl("KFD topology sysfs (/sys/.../kfd/topology/nodes) unavailable on WSL/DXG")) return;
+  // Verifies hsa_init() succeeds when deprecated GPUs (DoorbellType != 2) are
+  // present. Regression test for: a single pre-Vega GPU (e.g. Polaris/gfx803)
+  // would abort HSA initialization for ALL devices in the system.
+  GpuDiscoveryDeprecatedTest gdt;
+  RunCustomTestProlog(&gdt);
+  gdt.Run();
+  RunCustomTestEpilog(&gdt);
+}
+
 TEST(rocrtstFunc, SvmMemory_Basic_Test) {
     SvmMemoryTestBasic smt;
 
@@ -605,6 +648,20 @@ TEST(rocrtstFunc, SvmMemory_AccessedBy_All_Devices_Test) {
     RunCustomTestEpilog(&smt);
 }
 
+TEST(rocrtstFunc, SvmMemory_DiscardAndPrefetchBatch_Test) {
+    SvmMemoryTestBasic smt;
+    if (!RunCustomTestProlog(&smt)) return;
+    smt.TestSVMDiscardAndPrefetchBatch();
+    RunCustomTestEpilog(&smt);
+}
+
+TEST(rocrtstFunc, SvmMemory_DiscardAndPrefetchBatch_Perf_Test) {
+    SvmMemoryTestBasic smt;
+    if (!RunCustomTestProlog(&smt)) return;
+    smt.TestSVMDiscardAndPrefetchBatchPerf();
+    RunCustomTestEpilog(&smt);
+}
+
 TEST(rocrtstFunc, VirtMemory_Basic_Test) {
     VirtMemoryTestBasic vmt;
 
@@ -623,10 +680,12 @@ TEST(rocrtstFunc, VirtMemory_Access_Test) {
     vmt.GPUAccessToCPUMemoryTest();
     vmt.GPUAccessToGPUMemoryTest();
     vmt.ImportedShareableHandleSetAccessAfterFdClose();
+    vmt.ExportShareableHandlePcieMapping();
     RunCustomTestEpilog(&vmt);
 }
 
 TEST(rocrtstFunc, VirtMemory_Accounting_Test) {
+    if (rocrtst::SkipOnWsl("vmem MEMORY_AVAIL accounting unavailable on WSL/DXG")) return;
     VirtMemoryTestBasic vmt;
 
     if (!RunCustomTestProlog(&vmt)) return;
@@ -643,6 +702,7 @@ TEST(rocrtstFunc, VirtMemory_Aliasing_Test) {
 }
 
 TEST(rocrtstFunc, VirtMemory_NonContiguousChunks_Test) {
+  if (rocrtst::SkipOnWsl("CPU-agent vmem set_access unavailable on WSL/DXG")) return;
   VirtMemoryTestBasic vmt;
 
   if (!RunCustomTestProlog(&vmt)) return;
@@ -651,6 +711,7 @@ TEST(rocrtstFunc, VirtMemory_NonContiguousChunks_Test) {
 }
 
 TEST(rocrtstFunc, VirtMemory_GPUtoHostAccess_Test) {
+  if (rocrtst::SkipOnWsl("CPU-agent vmem set_access unavailable on WSL/DXG")) return;
   VirtMemoryTestBasic vmt;
 
   if (!RunCustomTestProlog(&vmt)) return;
@@ -665,6 +726,7 @@ TEST(rocrtstFunc, VirtMemory_Interprocess_DevicePool_Test) {
 }
 
 TEST(rocrtstFunc, VirtMemory_Interprocess_HostPool_Test) {
+    if (rocrtst::SkipOnWsl("host-pool cross-process VMM (dma-buf) unavailable on WSL/DXG")) return;
     VirtMemoryTestInterProcess vmt(PoolType::kCpuPool);
     if (!RunCustomTestProlog(&vmt)) return;
     RunCustomTestEpilog(&vmt);
@@ -674,6 +736,13 @@ TEST(rocrtstFunc, VirtMemory_FabricExport_Readiness_Test) {
   VirtMemoryTestBasic vmt;
   if (!RunCustomTestProlog(&vmt)) return;
   vmt.TestFabricExportAcceleratorReadiness();
+  RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_Imported_Handle_Pointer_Info_Test) {
+  VirtMemoryTestBasic vmt;
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.TestImportedHandlePointerInfo();
   RunCustomTestEpilog(&vmt);
 }
 

@@ -10,15 +10,25 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <string>
 
+#include "archinfo.h"
+#include "ce_coll.h"
 #include "comm.h"
 #include "common/ErrCode.hpp"
+#include "common/MockComm.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "debug.h"
+#include "device.h"
+#include "enqueue.h"
+#include "graph.h"
 #include "graph/topo.h"
 #include "net.h"
+#include "plugin/nccl_tuner.h"
 #include "rccl_common.h"
 #include "rocmwrap.h"
+
+#include <algorithm>
 
 namespace RcclUnitTesting
 {
@@ -88,55 +98,8 @@ ncclResult_t testStaticExposeCheck()
     return ncclSuccess;
 }
 
-// Helper function to create and initialize mock communicator
-static void CreateMockComm(
-    ncclComm_t&            mockComm,
-    struct ncclTopoSystem& mockTopo,
-    struct ncclTopoNode&   mockGpuNode,
-    const char*            arch,
-    int                    nRanks
-)
-{
-    // Allocate memory for the communicator
-    mockComm = new ncclComm();
-    memset(mockComm, 0, sizeof(ncclComm));
-
-    // Initialize basic communicator fields
-    mockComm->nRanks = nRanks;
-    mockComm->nNodes = 1; // Default to single node for P2P tests
-    mockComm->rank   = 0; // Default rank
-
-    mockComm->pxnDisable      = RCCL_VALUE_UNSET;
-    mockComm->p2pNetChunkSize = RCCL_VALUE_UNSET;
-
-    // Initialize topology
-    memset(&mockTopo, 0, sizeof(mockTopo));
-    mockComm->topo = &mockTopo;
-
-    // Initialize GPU node
-    mockTopo.nodes[GPU].count = 1;
-    memset(&mockGpuNode, 0, sizeof(mockGpuNode));
-
-    // Set GPU architecture
-    strncpy(mockGpuNode.gpu.gcn, arch, sizeof(mockGpuNode.gpu.gcn) - 1);
-    mockGpuNode.gpu.gcn[sizeof(mockGpuNode.gpu.gcn) - 1] = '\0';
-
-    // Copy the node into the topology array
-    mockTopo.nodes[GPU].nodes[0] = mockGpuNode;
-
-    // Initialize other required fields for tests
-    memset(mockComm->minMaxLLRange, 0, sizeof(mockComm->minMaxLLRange));
-}
-
-// Helper function to cleanup mock communicator
-static void CleanupMockComm(ncclComm_t& mockComm)
-{
-    if(mockComm)
-    {
-        delete mockComm;
-        mockComm = nullptr;
-    }
-}
+// CreateMockComm / CleanupMockComm moved to common/MockComm.hpp so other fixtures
+// can reuse them.
 
 // Helper function to determine if rcclSetPipelining test should be skipped
 static bool ShouldSkipRcclSetPipeliningTests()
@@ -188,6 +151,16 @@ static bool isAlgoStrValid(const char* envStr)
     return false; // No match found
 }
 
+// CreateMockComm on the caller's topo, which must outlive comm, then the
+// protocol-test defaults nNodes = 2 and topo->ll128Enabled.
+static void InitProtocolMockComm(ncclComm_t& comm, ncclTopoSystem& topo)
+{
+    struct ncclTopoNode gpu{};
+    CreateMockComm(comm, topo, gpu, "gfx942", /*nRanks=*/1);
+    comm->nNodes             = 2; // triggers inter-node logic
+    comm->topo->ll128Enabled = true;
+}
+
 TEST(Rcclwrap, RcclFuncMaxSendRecvCount)
 {
     ncclResult_t staticCheckResult = testStaticExposeCheck();
@@ -208,21 +181,9 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_UsesLL128WhenInRange)
     setenv("NCCL_PROTO", "", 1); // Trigger auto selection mode
     unsetenv("NCCL_PROTO");
 
-    ncclComm_t comm = new ncclComm();
-    // Manually populate minimal fields for comm
-    comm->nRanks                    = 1;
-    comm->nNodes                    = 2; // triggers inter-node logic
-    comm->rank                      = 0;
-    comm->topo                      = new ncclTopoSystem();
-    *comm->topo                     = {};
-    comm->topo->ll128Enabled        = true;
-    comm->topo->nodes[GPU].nodes[0] = {};
-    comm->topo->nodes[GPU].count    = 1;
-    strncpy(
-        comm->topo->nodes[GPU].nodes[0].gpu.gcn,
-        "gfx942",
-        sizeof(comm->topo->nodes[GPU].nodes[0].gpu.gcn)
-    );
+    ncclComm_t comm = nullptr;
+    auto       topo = std::make_unique<ncclTopoSystem>();
+    InitProtocolMockComm(comm, *topo);
 
     int idx = rcclGetTunableIndex(ncclFuncAllReduce);
     comm->minMaxLLRange[idx][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX]       = 512;
@@ -241,8 +202,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_UsesLL128WhenInRange)
     rcclUpdateCollectiveProtocol(comm, nBytes, &info);
     EXPECT_TRUE(info.protocol == NCCL_PROTO_LL128 || info.protocol == NCCL_PROTO_LL);
 
-    delete comm->topo;
-    delete comm;
+    CleanupMockComm(comm);
 }
 
 TEST(Rcclwrap, RcclUpdateCollectiveProtocol_WarnsOnGfx942Arch)
@@ -250,19 +210,9 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_WarnsOnGfx942Arch)
     setenv("NCCL_PROTO", "", 1);
     unsetenv("NCCL_PROTO");
 
-    ncclComm_t comm = new ncclComm();
-    // Manually populate minimal fields for comm
-    comm->nRanks                    = 1;
-    comm->nNodes                    = 2; // triggers inter-node logic
-    comm->rank                      = 0;
-    comm->topo                      = new ncclTopoSystem();
-    comm->topo->ll128Enabled        = true;
-    comm->topo->nodes[GPU].nodes[0] = {};
-    strncpy(
-        comm->topo->nodes[GPU].nodes[0].gpu.gcn,
-        "gfx942",
-        sizeof(comm->topo->nodes[GPU].nodes[0].gpu.gcn)
-    );
+    ncclComm_t comm = nullptr;
+    auto       topo = std::make_unique<ncclTopoSystem>();
+    InitProtocolMockComm(comm, *topo);
 
     int idx = rcclGetTunableIndex(ncclFuncAllReduce);
     comm->minMaxLLRange[idx][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX]       = RCCL_LL_LIMITS_UNDEFINED;
@@ -280,8 +230,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_WarnsOnGfx942Arch)
     rcclUpdateCollectiveProtocol(comm, nBytes, &info);
     EXPECT_EQ(info.protocol, NCCL_PROTO_UNDEF);
 
-    delete comm->topo;
-    delete comm;
+    CleanupMockComm(comm);
 }
 
 TEST(Rcclwrap, RcclUpdateCollectiveProtocol_HonorsUserProtocolEnv)
@@ -291,21 +240,9 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_HonorsUserProtocolEnv)
                                   // block
     setenv("NCCL_PROTO", "1", 1); // Simulate manual override
 
-    ncclComm_t comm = new ncclComm();
-    // Manually populate minimal fields for comm
-    comm->nRanks = 1;
-    comm->nNodes = 2; // triggers inter-node logic
-    comm->rank   = 0;
-    comm->topo   = new ncclTopoSystem(); //(struct ncclTopoSystem*)calloc(1,
-                                         // sizeof(struct ncclTopoSystem));
-    *comm->topo                     = {};
-    comm->topo->ll128Enabled        = true;
-    comm->topo->nodes[GPU].nodes[0] = {};
-    strncpy(
-        comm->topo->nodes[GPU].nodes[0].gpu.gcn,
-        "gfx942",
-        sizeof(comm->topo->nodes[GPU].nodes[0].gpu.gcn)
-    );
+    ncclComm_t comm = nullptr;
+    auto       topo = std::make_unique<ncclTopoSystem>();
+    InitProtocolMockComm(comm, *topo);
 
     ncclTaskColl info = {};
     // Manually populate minimal fields for info
@@ -316,8 +253,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_HonorsUserProtocolEnv)
     rcclUpdateCollectiveProtocol(comm, nBytes, &info);
     EXPECT_EQ(info.protocol, NCCL_PROTO_UNDEF);
 
-    delete comm->topo;
-    delete comm;
+    CleanupMockComm(comm);
 }
 
 TEST(Rcclwrap, RcclUpdateCollectiveProtocol_SimpleFallbackWhenNoRanges)
@@ -325,22 +261,9 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_SimpleFallbackWhenNoRanges)
     setenv("NCCL_PROTO", "", 1); // Trigger auto selection mode
     unsetenv("NCCL_PROTO");
 
-    ncclComm_t comm = new ncclComm();
-    // Manually populate minimal fields for comm
-    comm->nRanks = 1;
-    comm->nNodes = 2; // triggers inter-node logic
-    comm->rank   = 0;
-    comm->topo   = new ncclTopoSystem(); //(struct ncclTopoSystem*)calloc(1,
-                                         // sizeof(struct ncclTopoSystem));
-    *comm->topo                     = {};
-    comm->topo->ll128Enabled        = true;
-    comm->topo->nodes[GPU].nodes[0] = {};
-    comm->topo->nodes[GPU].count    = 1;
-    strncpy(
-        comm->topo->nodes[GPU].nodes[0].gpu.gcn,
-        "gfx942",
-        sizeof(comm->topo->nodes[GPU].nodes[0].gpu.gcn)
-    );
+    ncclComm_t comm = nullptr;
+    auto       topo = std::make_unique<ncclTopoSystem>();
+    InitProtocolMockComm(comm, *topo);
 
     int idx = rcclGetTunableIndex(ncclFuncAllReduce);
     comm->minMaxLLRange[idx][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX] = 512;
@@ -355,8 +278,7 @@ TEST(Rcclwrap, RcclUpdateCollectiveProtocol_SimpleFallbackWhenNoRanges)
     rcclUpdateCollectiveProtocol(comm, nBytes, &info);
     EXPECT_EQ(info.protocol, NCCL_PROTO_SIMPLE);
 
-    delete comm->topo;
-    delete comm;
+    CleanupMockComm(comm);
 }
 
 TEST(Rcclwrap, validHsaScratchEnvSettingTest)
@@ -596,9 +518,9 @@ TEST(Rcclwrap, RcclSetPipelining_Invalid_DType)
     // Pipeline should not be set for non-bf16 datatypes, unless
     // rcclParamPipelineAllDTypes() returns true
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx950", 8);
+    CreateMockComm(comm, *topo, gpu, "gfx950", 8);
     comm->nNodes = 2; // Multi node
 
     ncclTaskColl info = {};
@@ -625,9 +547,9 @@ TEST(Rcclwrap, RcclSetPipelining_GFX950_SingleNode_Disable)
 
     // For single-node, pipeline remains 0
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx950", 8);
+    CreateMockComm(comm, *topo, gpu, "gfx950", 8);
     comm->nNodes = 1; // Single node
 
     ncclTaskColl info = {};
@@ -657,9 +579,9 @@ TEST(Rcclwrap, RcclSetPipelining_GFX942_SingleNode_AllReduce_Enable)
 
     // For single-node, pipeline is set to 1 for AllReduce with bf16
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx942", 8);
+    CreateMockComm(comm, *topo, gpu, "gfx942", 8);
     comm->nNodes = 1; // Single node
 
     ncclTaskColl info = {};
@@ -688,9 +610,9 @@ TEST(Rcclwrap, RcclSetPipelining_GFX942_MultiNode_AllReduce_Enable)
     // nBytes <= 512MB * 2^(log2(nNodes)-1)
     // Testing with nNodes = 4  => threshold = 512MB * 2^(2-1) = 1GB
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx942", 8);
+    CreateMockComm(comm, *topo, gpu, "gfx942", 8);
     comm->nNodes = 4;
 
     ncclTaskColl info = {};
@@ -717,9 +639,9 @@ TEST(Rcclwrap, RcclSetPipelining_GFX942_MultiNode_AllReduce_Disable)
 
     // When nBytes is just above the threshold, pipelining should be disabled
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx942", 8);
+    CreateMockComm(comm, *topo, gpu, "gfx942", 8);
     comm->nNodes = 4;
 
     ncclTaskColl info = {};
@@ -747,9 +669,9 @@ TEST(Rcclwrap, RcclSetPipelining_GFX942_Enable)
 
     // ReduceScatter & Reduce should enable pipelining regardless of no. of nodes
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx942", 8);
+    CreateMockComm(comm, *topo, gpu, "gfx942", 8);
     comm->nNodes = 8;
 
     ncclTaskColl info = {};
@@ -1149,9 +1071,9 @@ TEST(Rcclwrap, AllrcclSetP2pNetChunkSizeTests)
                 [tc]()
                 {
                     ncclComm_t            mockComm = nullptr;
-                    struct ncclTopoSystem mockTopo;
+                    auto                  mockTopo = std::make_unique<ncclTopoSystem>();
                     struct ncclTopoNode   mockGpuNode;
-                    CreateMockComm(mockComm, mockTopo, mockGpuNode, tc.arch.c_str(), tc.ranks);
+                    CreateMockComm(mockComm, *mockTopo, mockGpuNode, tc.arch.c_str(), tc.ranks);
 
                     int chunkSize = RCCL_VALUE_UNSET;
                     rcclSetP2pNetChunkSize(mockComm, chunkSize);
@@ -1271,9 +1193,9 @@ TEST(Rcclwrap, AllPxnTests)
                     );
 
                     ncclComm_t            mockComm = nullptr;
-                    struct ncclTopoSystem mockTopo;
+                    auto                  mockTopo = std::make_unique<ncclTopoSystem>();
                     struct ncclTopoNode   mockGpuNode;
-                    CreateMockComm(mockComm, mockTopo, mockGpuNode, tc.arch.c_str(), tc.ranks);
+                    CreateMockComm(mockComm, *mockTopo, mockGpuNode, tc.arch.c_str(), tc.ranks);
 
                     int pxnDisable = RCCL_VALUE_UNSET;
                     rcclSetPxn(mockComm, pxnDisable);
@@ -1417,9 +1339,9 @@ TEST(Rcclwrap, RcclUseAllGatherDirectNodeCountTests)
                     }
 
                     ncclComm_t            mockComm = nullptr;
-                    struct ncclTopoSystem mockTopo;
+                    auto                  mockTopo = std::make_unique<ncclTopoSystem>();
                     struct ncclTopoNode   mockGpuNode;
-                    CreateMockComm(mockComm, mockTopo, mockGpuNode, tc.arch.c_str(), tc.nRanks);
+                    CreateMockComm(mockComm, *mockTopo, mockGpuNode, tc.arch.c_str(), tc.nRanks);
                     mockComm->nNodes = tc.nNodes;
 
                     // Use a message size that passes the threshold check so only
@@ -1514,10 +1436,10 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
                 [tc]()
                 {
                     ncclComm_t            mockComm = nullptr;
-                    struct ncclTopoSystem mockTopo;
+                    auto                  mockTopo = std::make_unique<ncclTopoSystem>();
                     struct ncclTopoNode   mockGpu;
                     CreateMockComm(mockComm,
-                                   mockTopo,
+                                   *mockTopo,
                                    mockGpu,
                                    "gfx942",
                                    /*nRanks=*/8 * tc.nNodes);
@@ -1593,6 +1515,8 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
         {"Enabled_8Nodes_AtHalf",     8,  true,  HALF,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 16 nodes, initialized, below threshold --> enabled
         {"Enabled_16Nodes_BelowFull", 16, true,  1ULL << 20, true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // 16 nodes, above the 8-node half ceiling, still under the 16-node 128MB cap
+        {"Enabled_16Nodes_AboveHalf", 16, true,  HALF + 1,   true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 16 nodes, exactly at threshold --> enabled
         {"Enabled_16Nodes_AtFull",    16, true,  FULL,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
     };
@@ -1611,10 +1535,10 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
                 [tc]()
                 {
                     ncclComm_t            mockComm = nullptr;
-                    struct ncclTopoSystem mockTopo;
+                    auto                  mockTopo = std::make_unique<ncclTopoSystem>();
                     struct ncclTopoNode   mockGpu;
                     CreateMockComm(mockComm,
-                                   mockTopo,
+                                   *mockTopo,
                                    mockGpu,
                                    "gfx942",
                                    /*nRanks=*/8 * tc.nNodes);
@@ -1653,6 +1577,51 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
         << "One or more rcclUseHierarchicalReduceScatter tests failed";
 
     TEST_INFO("=== Process-Isolated rcclUseHierarchicalReduceScatter Tests Completed ===");
+}
+
+// Direct ReduceScatter reduces the gathered peer slices with PreOpSrcs=0 and
+// postOp=false, an unscaled sum. ncclAvg is rewritten to PreMulSum, so selecting that
+// backend for it returns the sum instead of the mean. The selector must keep avg (and
+// user-defined PreMulSum) on the ring kernel even when the arch/node/size window is
+// satisfied, and must still choose the direct path for the unscaled ops.
+TEST(Rcclwrap, ReduceScatterSelectionKeepsDirectPathOffScaledOps)
+{
+    ncclComm_t          mockComm = nullptr;
+    // ncclTopoSystem is ~13 MiB, so a stack local overflows the default 8 MiB stack.
+    auto*               mockTopo = static_cast<ncclTopoSystem*>(std::calloc(1, sizeof(ncclTopoSystem)));
+    struct ncclTopoNode mockGpu;
+    CreateMockComm(mockComm, *mockTopo, mockGpu, "gfx950", /*nRanks=*/16);
+    SetMockNodes(mockComm, /*nNodes=*/2, /*topoNRanks=*/16);
+    // CreateMockComm leaves archName null, which the DDA gate dereferences.
+    mockComm->archName = const_cast<char*>("gfx950");
+    // The direct path needs PXN; seed the per-comm cache so this does not depend on
+    // NCCL_PXN_DISABLE or on the rank-count auto-detect heuristic.
+    mockComm->pxnDisable = 0;
+
+    // rcclSelectReduceScatter compares nRanks * recvcount * typeSize against the
+    // window, so this lands at 256 KiB, inside the 2-node 128 KiB .. 2 MiB range.
+    const size_t recvcount = (256 * 1024) / (16 * sizeof(float));
+    // Only inspected to look up symmetric windows, which a mock comm never has, so
+    // these are never dereferenced.
+    char sendbuff = 0;
+    char recvbuff = 0;
+
+    auto selectedAlgo = [&](ncclRedOp_t op) {
+        struct rcclCollDecision decision = {};
+        EXPECT_EQ(rcclSelectReduceScatter(mockComm, &sendbuff, &recvbuff, recvcount, ncclFloat32, op,
+                                          /*query=*/false, &decision),
+                  ncclSuccess);
+        return decision.algo;
+    };
+
+    ASSERT_EQ(selectedAlgo(ncclSum), static_cast<int>(RCCL_DIRECT_REDUCESCATTER))
+        << "mock comm must be direct-eligible for the redop expectations below to mean anything";
+    EXPECT_EQ(selectedAlgo(ncclMin), static_cast<int>(RCCL_DIRECT_REDUCESCATTER));
+    EXPECT_NE(selectedAlgo(ncclAvg), static_cast<int>(RCCL_DIRECT_REDUCESCATTER));
+    EXPECT_NE(selectedAlgo(static_cast<ncclRedOp_t>(ncclNumOps)), static_cast<int>(RCCL_DIRECT_REDUCESCATTER));
+
+    CleanupMockComm(mockComm);
+    std::free(mockTopo);
 }
 
 TEST(Rcclwrap, RcclHierarchicalTempBufferSizeTests)
@@ -1761,6 +1730,174 @@ TEST(Rcclwrap, RcclHierarchicalAlgoInfoTests)
 }
 
 // ===========================================================================
+// Direct ReduceScatter getAlgoInfo host-side guard (AICOMRCCL-1819).
+// When enableDirectReduceScatter is set, getAlgoInfo must force Ring/Simple
+// even if the tuner or RCCL_OVERRIDE_* env picks LL.
+// ===========================================================================
+
+namespace
+{
+
+constexpr uint64_t kDirectRsTestCount = 65536;
+
+ncclResult_t mockRingLlTunerGetCollInfo(void* /*context*/, ncclFunc_t /*collType*/, size_t /*nBytes*/,
+                                        int /*numPipeOps*/, float** collCostTable, int numAlgo, int numProto,
+                                        int /*regBuff*/, int* nChannels)
+{
+    float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
+    for(int a = 0; a < numAlgo; ++a)
+    {
+        for(int p = 0; p < numProto; ++p)
+        {
+            table[a][p] = NCCL_ALGO_PROTO_IGNORE;
+        }
+    }
+    table[NCCL_ALGO_RING][NCCL_PROTO_LL] = 0.0;
+    if(nChannels)
+    {
+        *nChannels = 0;
+    }
+    return ncclSuccess;
+}
+
+ncclTuner_t g_mockRingLlTuner = {
+  .name         = "MockRingLlTuner",
+  .init         = nullptr,
+  .getCollInfo  = mockRingLlTunerGetCollInfo,
+  .finalize     = nullptr,
+  .getChunkSize = nullptr,
+};
+
+void InitGetAlgoInfoMockComm(ncclComm_t&           comm,
+                             struct ncclTopoSystem& topo,
+                             const char*            arch,
+                             int                    nRanks,
+                             int                    nNodes)
+{
+    struct ncclTopoNode gpuNode{};
+    CreateMockComm(comm, topo, gpuNode, arch, nRanks);
+    comm->nNodes        = nNodes;
+    comm->nChannels     = 4;
+    comm->collChannels  = 4;
+    comm->nvlsChannels  = 4;
+    comm->WarpSize      = 64;
+    comm->maxLocalRanks = std::max(1, nRanks / std::max(1, nNodes));
+    comm->topo->tuning  = rcclGetTuningIndexForArch(arch);
+    comm->topo->type |= RCCL_TOPO_XGMI_ALL;
+
+    for(int a = 0; a < NCCL_NUM_ALGORITHMS; ++a)
+    {
+        for(int p = 0; p < NCCL_NUM_PROTOCOLS; ++p)
+        {
+            comm->maxThreads[a][p]                      = 256;
+            comm->threadThresholds[a][p]                 = 8192;
+            comm->bandwidths[ncclFuncReduceScatter][a][p] = 100.0f;
+            comm->latencies[ncclFuncReduceScatter][a][p]  = 1.0f;
+        }
+    }
+}
+
+ncclTaskColl MakeReduceScatterTask(uint64_t count = kDirectRsTestCount, ncclDataType_t dt = ncclFloat32)
+{
+    ncclTaskColl task{};
+    task.func     = ncclFuncReduceScatter;
+    task.count    = count;
+    task.datatype = dt;
+    return task;
+}
+
+void ExpectGetAlgoInfoSelection(ncclComm_t comm, ncclTaskColl& task, int algo, int proto)
+{
+    ASSERT_EQ(ncclGetAlgoInfo(comm, &task, 0, 0, 1, nullptr), ncclSuccess);
+    EXPECT_EQ(task.algorithm, algo);
+    EXPECT_EQ(task.protocol, proto);
+}
+
+} // namespace
+
+// Tuner picks Ring+LL; Direct RS host guard must override to Ring/Simple.
+TEST(Rcclwrap, GetAlgoInfo_DirectRsOverridesMockTunerRingLl)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "GetAlgoInfo_DirectRsOverridesMockTunerRingLl",
+        []()
+        {
+            ncclComm_t          comm = nullptr;
+            auto                topo = std::make_unique<ncclTopoSystem>();
+            InitGetAlgoInfoMockComm(comm, *topo, "gfx950", 8, 2);
+            comm->enableDirectReduceScatter = true;
+            comm->tuner                     = &g_mockRingLlTuner;
+
+            ncclTaskColl task = MakeReduceScatterTask();
+            ExpectGetAlgoInfoSelection(comm, task, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+            CleanupMockComm(comm);
+        },
+        {}
+    );
+}
+
+// Same tuner pick without Direct RS: selection must stay Ring+LL.
+TEST(Rcclwrap, GetAlgoInfo_MockTunerRingLlPreservedWithoutDirectRs)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "GetAlgoInfo_MockTunerRingLlPreservedWithoutDirectRs",
+        []()
+        {
+            ncclComm_t          comm = nullptr;
+            auto                topo = std::make_unique<ncclTopoSystem>();
+            InitGetAlgoInfoMockComm(comm, *topo, "gfx950", 8, 2);
+            comm->enableDirectReduceScatter = false;
+            comm->tuner                     = &g_mockRingLlTuner;
+
+            ncclTaskColl task = MakeReduceScatterTask();
+            ExpectGetAlgoInfoSelection(comm, task, NCCL_ALGO_RING, NCCL_PROTO_LL);
+            CleanupMockComm(comm);
+        },
+        {}
+    );
+}
+
+// RCCL_OVERRIDE_PROTO=LL forces LL; Direct RS host guard must still pick Ring/Simple.
+TEST(Rcclwrap, GetAlgoInfo_DirectRsForcesSimpleDespiteLlOverride)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "GetAlgoInfo_DirectRsForcesSimpleDespiteLlOverride",
+        []()
+        {
+            ncclComm_t          comm = nullptr;
+            auto                topo = std::make_unique<ncclTopoSystem>();
+            InitGetAlgoInfoMockComm(comm, *topo, "gfx950", 8, 2);
+            comm->enableDirectReduceScatter = true;
+
+            ncclTaskColl task = MakeReduceScatterTask();
+            ExpectGetAlgoInfoSelection(comm, task, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+            CleanupMockComm(comm);
+        },
+        {{"RCCL_OVERRIDE_PROTO", "LL"}, {"RCCL_OVERRIDE_ALGO", "Ring"}}
+    );
+}
+
+// Same env override without Direct RS: selection must stay Ring+LL.
+TEST(Rcclwrap, GetAlgoInfo_LlOverridePreservedWithoutDirectRs)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "GetAlgoInfo_LlOverridePreservedWithoutDirectRs",
+        []()
+        {
+            ncclComm_t          comm = nullptr;
+            auto                topo = std::make_unique<ncclTopoSystem>();
+            InitGetAlgoInfoMockComm(comm, *topo, "gfx950", 8, 2);
+            comm->enableDirectReduceScatter = false;
+
+            ncclTaskColl task = MakeReduceScatterTask();
+            ExpectGetAlgoInfoSelection(comm, task, NCCL_ALGO_RING, NCCL_PROTO_LL);
+            CleanupMockComm(comm);
+        },
+        {{"RCCL_OVERRIDE_PROTO", "LL"}, {"RCCL_OVERRIDE_ALGO", "Ring"}}
+    );
+}
+
+// ===========================================================================
 // CE AllReduce graph latch state machine (rccl_wrap.cc). Regression coverage
 // for the capture-vs-eager ordering bug: the latch must stay set for the
 // entire lifetime of a captured plan and must never clear mid-capture.
@@ -1862,11 +1999,76 @@ TEST(RcclCeGraphLatch, NeverLatchedAllowsCeAllReduceByDefault)
 // WarpSpeed enablement / channel-math helpers (rccl_wrap.cc)
 //
 // These exercise the pure decision/tuning helpers that gate WarpSpeed:
+//   - rcclWarpSpeedSupported      (plan-wide collective eligibility)
 //   - rcclCanUseWarpSpeedAuto     (arch/node/env eligibility)
 //   - rcclGetMaxWarpsPerBlock     (warps-per-block multiplier)
 //   - rcclWarpSpeedComputeNChannels (connect.cc channel math)
 //   - rcclWarpSpeedAdjustChannels   (enqueue.cc per-collective channel adj.)
 // ---------------------------------------------------------------------------
+
+TEST(Rcclwrap, WarpSpeedSupported_AllEligible)
+{
+    ncclComm comm{};
+    auto topo = std::make_unique<ncclTopoSystem>();
+    ncclKernelPlan plan{};
+    comm.topo = topo.get();
+    topo->warpSpeedEnabled = true;
+    ncclIntruQueueConstruct(&plan.p2pTaskQueue);
+    ncclIntruQueueConstruct(&plan.bcastTaskQueue);
+
+    ncclTaskColl first{};
+    ncclTaskColl second{};
+    first.algorithm     = NCCL_ALGO_RING;
+    first.useWarpSpeed  = true;
+    first.next          = &second;
+    second.algorithm    = NCCL_ALGO_RING;
+    second.useWarpSpeed = true;
+
+    EXPECT_TRUE(rcclWarpSpeedSupported(&comm, &plan, &first, /*nCollTasks=*/2));
+}
+
+TEST(Rcclwrap, WarpSpeedSupported_RejectsIneligibleTask)
+{
+    ncclComm comm{};
+    auto topo = std::make_unique<ncclTopoSystem>();
+    ncclKernelPlan plan{};
+    comm.topo = topo.get();
+    topo->warpSpeedEnabled = true;
+    ncclIntruQueueConstruct(&plan.p2pTaskQueue);
+    ncclIntruQueueConstruct(&plan.bcastTaskQueue);
+
+    ncclTaskColl first{};
+    ncclTaskColl second{};
+    first.algorithm     = NCCL_ALGO_RING;
+    first.useWarpSpeed  = true;
+    first.next          = &second;
+    second.algorithm    = NCCL_ALGO_RING;
+    second.useWarpSpeed = false;
+
+    EXPECT_FALSE(rcclWarpSpeedSupported(&comm, &plan, &first, /*nCollTasks=*/2));
+}
+
+TEST(Rcclwrap, WarpSpeedSupported_OnlyChecksBudgetedPrefix)
+{
+    ncclComm comm{};
+    auto topo = std::make_unique<ncclTopoSystem>();
+    ncclKernelPlan plan{};
+    comm.topo = topo.get();
+    topo->warpSpeedEnabled = true;
+    ncclIntruQueueConstruct(&plan.p2pTaskQueue);
+    ncclIntruQueueConstruct(&plan.bcastTaskQueue);
+
+    ncclTaskColl first{};
+    ncclTaskColl excluded{};
+    first.algorithm      = NCCL_ALGO_RING;
+    first.useWarpSpeed   = true;
+    first.next           = &excluded;
+    excluded.algorithm   = NCCL_ALGO_RING;
+    excluded.useWarpSpeed = false;
+
+    EXPECT_TRUE(rcclWarpSpeedSupported(&comm, &plan, &first, /*nCollTasks=*/1));
+    EXPECT_FALSE(rcclWarpSpeedSupported(&comm, &plan, &first, /*nCollTasks=*/-1));
+}
 
 // rcclCanUseWarpSpeedAuto: gfx950 single-node with auto mode on -> eligible.
 TEST(Rcclwrap, CanUseWarpSpeedAuto_Gfx950SingleNode_True)
@@ -1879,9 +2081,9 @@ TEST(Rcclwrap, CanUseWarpSpeedAuto_Gfx950SingleNode_True)
     }
 
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/8);
     comm->cuCount = 256; // SPX mode (256 CU on gfx950); auto mode requires cuCount > 128
 
     EXPECT_TRUE(rcclCanUseWarpSpeedAuto(comm, /*nNodes=*/1));
@@ -1897,9 +2099,9 @@ TEST(Rcclwrap, CanUseWarpSpeedAuto_Gfx950SingleNode_True)
 TEST(Rcclwrap, CanUseWarpSpeedAuto_NonGfx950_False)
 {
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx942", /*nRanks=*/8);
+    CreateMockComm(comm, *topo, gpu, "gfx942", /*nRanks=*/8);
 
     EXPECT_FALSE(rcclCanUseWarpSpeedAuto(comm, /*nNodes=*/1));
 
@@ -1910,9 +2112,9 @@ TEST(Rcclwrap, CanUseWarpSpeedAuto_NonGfx950_False)
 TEST(Rcclwrap, CanUseWarpSpeedAuto_MultiNode_False)
 {
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/16);
+    CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/16);
 
     EXPECT_FALSE(rcclCanUseWarpSpeedAuto(comm, /*nNodes=*/2));
 
@@ -1928,9 +2130,9 @@ TEST(Rcclwrap, CanUseWarpSpeedAuto_AutoModeDisabled_False)
         []()
         {
             ncclComm_t            comm = nullptr;
-            struct ncclTopoSystem topo;
+            auto                  topo = std::make_unique<ncclTopoSystem>();
             struct ncclTopoNode   gpu;
-            CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+            CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/8);
             comm->cuCount = 256; // ensure only RCCL_WARP_SPEED_AUTO=0 makes this ineligible
 
             EXPECT_FALSE(rcclCanUseWarpSpeedAuto(comm, /*nNodes=*/1));
@@ -1945,9 +2147,9 @@ TEST(Rcclwrap, CanUseWarpSpeedAuto_AutoModeDisabled_False)
 TEST(Rcclwrap, GetMaxWarpsPerBlock_SingleNode)
 {
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/8);
     comm->nNodes   = 1;
     comm->WarpSize = 64;
 
@@ -1960,9 +2162,9 @@ TEST(Rcclwrap, GetMaxWarpsPerBlock_SingleNode)
 TEST(Rcclwrap, GetMaxWarpsPerBlock_MultiNodeGfx950)
 {
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/16);
+    CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/16);
     comm->nNodes   = 2;
     comm->WarpSize = 64;
 
@@ -1975,9 +2177,9 @@ TEST(Rcclwrap, GetMaxWarpsPerBlock_MultiNodeGfx950)
 TEST(Rcclwrap, GetMaxWarpsPerBlock_MultiNodeOtherArch)
 {
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx942", /*nRanks=*/16);
+    CreateMockComm(comm, *topo, gpu, "gfx942", /*nRanks=*/16);
     comm->nNodes   = 2;
     comm->WarpSize = 64;
 
@@ -1995,9 +2197,9 @@ TEST(Rcclwrap, GetMaxWarpsPerBlock_MultiNodeOtherArch)
 TEST(Rcclwrap, GetMaxWarpsPerBlock_BranchesCurrentlyEquivalent)
 {
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/8);
     comm->WarpSize = 64;
 
     comm->nNodes    = 1;
@@ -2017,9 +2219,9 @@ TEST(Rcclwrap, GetMaxWarpsPerBlock_BranchesCurrentlyEquivalent)
 TEST(Rcclwrap, ComputeNChannels_SingleNode_Gfx950_8Ranks_Halved)
 {
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/8);
     comm->nNodes    = 1;
     comm->nChannels = 2;
 
@@ -2037,9 +2239,9 @@ TEST(Rcclwrap, ComputeNChannels_SingleNode_Gfx950_8Ranks_Halved)
 TEST(Rcclwrap, ComputeNChannels_SingleNode_4Ranks_NoHalving)
 {
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/4);
+    CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/4);
     comm->nNodes    = 1;
     comm->nChannels = 2;
 
@@ -2056,9 +2258,9 @@ TEST(Rcclwrap, ComputeNChannels_SingleNode_4Ranks_NoHalving)
 TEST(Rcclwrap, ComputeNChannels_MultiNode_CappedByMaxChannels)
 {
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/8);
     comm->nNodes    = 2;
     comm->nChannels = 2;
 
@@ -2076,9 +2278,9 @@ TEST(Rcclwrap, ComputeNChannels_MultiNode_CappedByMaxChannels)
 TEST(Rcclwrap, ComputeNChannels_UserOverride_NoClamp)
 {
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/8);
     comm->nNodes    = 1;
     comm->nChannels = 2;
 
@@ -2095,9 +2297,9 @@ TEST(Rcclwrap, ComputeNChannels_UserOverride_NoClamp)
 TEST(Rcclwrap, ComputeNChannels_UserOverride_ClampedToMaxChannels)
 {
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/8);
     comm->nNodes    = 1;
     comm->nChannels = 2;
 
@@ -2114,9 +2316,9 @@ TEST(Rcclwrap, ComputeNChannels_UserOverride_ClampedToMaxChannels)
 TEST(Rcclwrap, AdjustChannels_Disabled_NoChange)
 {
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+    CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/8);
     comm->topo->warpSpeedEnabled     = false;
     comm->warpSpeedChannelMultiplier = 4;
 
@@ -2133,9 +2335,9 @@ TEST(Rcclwrap, AdjustChannels_Disabled_NoChange)
 TEST(Rcclwrap, AdjustChannels_Enabled_DividesByMultiplier)
 {
     ncclComm_t            comm = nullptr;
-    struct ncclTopoSystem topo;
+    auto                  topo = std::make_unique<ncclTopoSystem>();
     struct ncclTopoNode   gpu;
-    CreateMockComm(comm, topo, gpu, "gfx942", /*nRanks=*/8);
+    CreateMockComm(comm, *topo, gpu, "gfx942", /*nRanks=*/8);
     comm->topo->warpSpeedEnabled     = true;
     comm->warpSpeedChannelMultiplier = 4;
 
@@ -2158,9 +2360,9 @@ TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_NonMainColl_Doubles)
         []()
         {
             ncclComm_t            comm = nullptr;
-            struct ncclTopoSystem topo;
+            auto                  topo = std::make_unique<ncclTopoSystem>();
             struct ncclTopoNode   gpu;
-            CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+            CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/8);
             comm->nNodes                     = 1;
             comm->topo->warpSpeedEnabled     = true;
             comm->warpSpeedChannelMultiplier = 4;
@@ -2185,9 +2387,9 @@ TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MainColl_NoDouble)
         []()
         {
             ncclComm_t            comm = nullptr;
-            struct ncclTopoSystem topo;
+            auto                  topo = std::make_unique<ncclTopoSystem>();
             struct ncclTopoNode   gpu;
-            CreateMockComm(comm, topo, gpu, "gfx950", /*nRanks=*/8);
+            CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/8);
             comm->nNodes                     = 1;
             comm->topo->warpSpeedEnabled     = true;
             comm->warpSpeedChannelMultiplier = 4;
@@ -2204,6 +2406,76 @@ TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MainColl_NoDouble)
 }
 
 #endif // ENABLE_WARP_SPEED
+
+// Builds a mock comm that satisfies every CE AllReduce eligibility rule except
+// the one under test, so a single field or argument decides the outcome.
+static void CreateCeAllReduceEligibleComm(
+    ncclComm_t&            mockComm,
+    struct ncclTopoSystem& mockTopo,
+    struct ncclTopoNode&   mockGpuNode,
+    int                    nRanks
+)
+{
+    CreateMockComm(mockComm, mockTopo, mockGpuNode, "gfx950", nRanks);
+    mockComm->nNodes             = 1;
+    mockComm->symmetricSupport   = 1;
+    mockComm->config.CTAPolicy   = NCCL_CTA_POLICY_ZERO;
+}
+
+// A count of float32 divisible by the 8 mock ranks; well within NCCL_CE_AR_MAX_MSG_BYTES.
+static constexpr size_t kCeAllReduceCount = 4096;
+
+// rcclUseCeAllReduce gates the Copy Engine AllReduce path. The CE kernels never
+// read the bias buffer, so an eligible-looking ncclAllReduceWithBias call must
+// still be refused; taking CE there silently drops the bias from the result.
+TEST(Rcclwrap, RcclUseCeAllReduce_BiasBuffer)
+{
+    RUN_ISOLATED_TESTS(
+        ProcessIsolatedTestRunner::TestConfig(
+            "RcclUseCeAllReduce_BiasBufferRejected",
+            []()
+            {
+                ncclComm_t            comm = nullptr;
+                auto                  topo = std::make_unique<ncclTopoSystem>();
+                struct ncclTopoNode   gpu;
+                CreateCeAllReduceEligibleComm(comm, *topo, gpu, /*nRanks=*/8);
+
+                int biasBuffer = 0;
+                EXPECT_FALSE(rcclUseCeAllReduce(comm,
+                                                kCeAllReduceCount,
+                                                ncclFloat32,
+                                                ncclSum,
+                                                /*acc=*/&biasBuffer))
+                    << "CE AllReduce must be refused when a bias buffer is present";
+
+                CleanupMockComm(comm);
+            })
+            .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"}}),
+
+        // Control case: identical arguments with no bias must still select CE,
+        // proving the rejection above is caused by the bias and not by an
+        // unrelated ineligibility in the mock comm.
+        ProcessIsolatedTestRunner::TestConfig(
+            "RcclUseCeAllReduce_NoBiasAccepted",
+            []()
+            {
+                ncclComm_t            comm = nullptr;
+                auto                  topo = std::make_unique<ncclTopoSystem>();
+                struct ncclTopoNode   gpu;
+                CreateCeAllReduceEligibleComm(comm, *topo, gpu, /*nRanks=*/8);
+
+                EXPECT_TRUE(rcclUseCeAllReduce(comm,
+                                               kCeAllReduceCount,
+                                               ncclFloat32,
+                                               ncclSum,
+                                               /*acc=*/nullptr))
+                    << "CE AllReduce should be selected when no bias buffer is present";
+
+                CleanupMockComm(comm);
+            })
+            .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"}})
+    );
+}
 
 // ---------------------------------------------------------------------------
 // rcclAllReduceShouldTakeDdaPath: the AllReduce DDA-vs-CE dispatch decision.
@@ -2365,6 +2637,55 @@ TEST(RcclAllReduceDdaDecision, UnsupportedArch_NoDda)
                                                 /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
 }
 
+// ---------------------------------------------------------------------------
+// rcclAlltoAllShouldTakeDdaPath: AlltoAll has no symmetric kernel, so DDA used
+// to early-return on gfx1250 even when NCCL_CTA_POLICY_ZERO would take CE.
+// When ceAlltoAllAllowed is true, DDA must yield. Default (CE not allowed)
+// AlltoAll DDA on gfx1250 is unchanged. The window/CTA/graph probe itself is
+// CeAlltoAllEligibilityTest; these cases only lock the helper's boolean.
+TEST(Rcclwrap, AlltoAllDdaDecision_Gfx1250_CeNotAllowed_TakesDda)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx1250", 4, 1, /*symmetricSupport=*/true);
+    // CeMPI_AlltoAll.FourRanks: 4 ranks * 65536 float32 * 4 B = 1 MiB (< 4 MiB cap).
+    size_t totalBytes = 4ull * 65536 * sizeof(float);
+    EXPECT_TRUE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/false));
+}
+
+TEST(Rcclwrap, AlltoAllDdaDecision_Gfx1250_CeAllowed_YieldsToCe)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx1250", 4, 1, /*symmetricSupport=*/true);
+    size_t totalBytes = 4ull * 65536 * sizeof(float);
+    EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/true));
+}
+
+TEST(Rcclwrap, AlltoAllDdaDecision_Gfx1250_TwoRankLlSize_CeAllowed_YieldsToCe)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx1250", 2, 1, /*symmetricSupport=*/true);
+    // CeMPI_AlltoAll.TwoRanks: 2 * 4096 * 4 B = 32 KiB, DDA LL lane.
+    size_t totalBytes = 2ull * 4096 * sizeof(float);
+    EXPECT_TRUE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/false));
+    EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/true));
+}
+
+TEST(Rcclwrap, AlltoAllDdaDecision_Gfx1250_AboveThreshold_NoDda)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx1250", 4, 1, /*symmetricSupport=*/true);
+    size_t totalBytes = kDdaAlltoAllGfx1250ThresholdBytes + 1;
+    EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/false));
+}
+
+TEST(Rcclwrap, AlltoAllDdaDecision_Gfx950_TooFewRanks_NoDda)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx950", 4, 1, /*symmetricSupport=*/true);
+    size_t totalBytes = 1024ull * 1024;
+    EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/false));
+}
+
 // gfx942/gfx950 DDA requires the full 8-GPU node; fewer ranks disables it.
 TEST(RcclAllReduceDdaDecision, Gfx950_TooFewRanks_NoDda)
 {
@@ -2384,6 +2705,162 @@ TEST(RcclAllReduceDdaDecision, SymEligible_YieldsToSymmetricKernel)
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
     EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
                                                 /*symEligible=*/true, /*ceAllReduceAllowed=*/true));
+}
+
+// ---------------------------------------------------------------------------
+// Tests for skipPresetTopoMatching: gfx1250 skips Rome model matching.
+// Runs on real GPU, initializes a communicator, and checks internal state.
+// ---------------------------------------------------------------------------
+
+TEST(SkipPresetTopoMatching, Gfx1250_SkipsRomeModelMatching)
+{
+    RUN_ISOLATED_TEST("Gfx1250_SkipsRomeModelMatching", []()
+    {
+        int numDevices = 0;
+        ASSERT_EQ(hipGetDeviceCount(&numDevices), hipSuccess);
+        if (numDevices < 1) {
+            GTEST_SKIP() << "No devices available.";
+        }
+
+        // Check if this is gfx1250
+        hipDeviceProp_t prop{};
+        ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
+        bool isGfx1250 = (strncmp(prop.gcnArchName, "gfx1250", 7) == 0);
+        if (!isGfx1250) {
+            GTEST_SKIP() << "Test only applicable on gfx1250 hardware.";
+        }
+
+        ncclComm_t commHandle{};
+        ncclUniqueId id{};
+        ASSERT_EQ(ncclGetUniqueId(&id), ncclSuccess);
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+        ASSERT_EQ(ncclCommInitRank(&commHandle, 1, id, 0), ncclSuccess);
+
+        // Cast to internal struct to access topo
+        ncclComm* comm = commHandle;
+
+        // gfx1250 should skip preset topo matching
+        EXPECT_TRUE(comm->topo->skipPresetTopoMatching);
+        // Rome model index should be NONE (no preset matched)
+        EXPECT_EQ(comm->topo->romeTopoModelIdx, RCCL_ROME_TOPO_PRESET_MODEL_IDX_NONE);
+
+        ASSERT_EQ(ncclCommDestroy(commHandle), ncclSuccess);
+    });
+}
+
+// ---------------------------------------------------------------------------
+// commSetUnrollFactor: RCCL_UNROLL_FACTOR validation against the running arch.
+//
+// Unroll factor 32 is compiled for gfx1250 only (see unroll_arch_requirement in
+// src/device/generate.py). Requesting it on any other GPU used to be accepted and
+// then dispatched into a device function table whose entries are all nullptr,
+// which faults on the device.
+//
+// These assert the return code rather than which rejection branch ran, so they
+// hold for a multi-arch build (where the factor is generated but arch-locked)
+// and for a local-arch build (where it is not generated at all).
+//
+// commSetUnrollFactor reads only archName, nNodes and cuCount, so no GPU is
+// needed. RCCL_PARAM caches RCCL_UNROLL_FACTOR in a function-local static,
+// which is what the process isolation is for.
+//
+// They belong to the Rcclwrap suite because the fixtures-debug CI selection
+// enumerates suite prefixes with no catch-all (test_categories_fixtures_debug
+// .yaml and the unit_tests_fixtures_debug blocks under tools/scripts/
+// test_runner/configs), and Rcclwrap.* is the only listed pattern this file
+// matches. A suite of their own would never be run.
+// ---------------------------------------------------------------------------
+// Which unroll factors are arch-pinned is a build property, not a constant:
+// BUILD_ALL_UNROLLS compiles every one for the targeted archs and pins none. Ask
+// the table for a pinned factor rather than hardcoding 32.
+constexpr char kOtherArch[] = "gfx1200";
+
+TEST(Rcclwrap, UnrollFactor_RejectsArchRestrictedUnrollOnOtherArch)
+{
+    int pinned = -1;
+    for(int u = NCCL_UNROLL_1; u < NCCL_NUM_UNROLLS; ++u)
+    {
+        const char* requiredArch = ncclDevFuncUnrollArch[u];
+        if(requiredArch == nullptr || IsArchMatch(kOtherArch, requiredArch)) continue;
+        pinned = u;
+        break;
+    }
+    if(pinned < 0)
+    {
+        GTEST_SKIP() << "no unroll factor in this build is pinned away from " << kOtherArch;
+    }
+
+    RUN_ISOLATED_TEST_WITH_ENV("UnrollFactor_RejectsArchRestrictedUnrollOnOtherArch",
+      [pinned]() {
+        ncclComm comm{};
+        comm.archName = const_cast<char*>(kOtherArch);
+        comm.nNodes   = 1;
+        comm.cuCount  = 32;
+
+        EXPECT_EQ(ncclInvalidArgument, commSetUnrollFactor(&comm))
+          << "an unroll factor pinned to another arch must be refused on " << kOtherArch
+          << ": its device function table has no entries for this arch";
+      },
+      {{"RCCL_UNROLL_FACTOR", std::to_string(pinned)}}
+    );
+}
+
+TEST(Rcclwrap, UnrollFactor_RejectsOutOfRangeUnroll)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("UnrollFactor_RejectsOutOfRangeUnroll",
+      []() {
+        ncclComm comm{};
+        comm.archName = const_cast<char*>("gfx942");
+        comm.nNodes   = 1;
+        comm.cuCount  = 304;
+
+        EXPECT_EQ(ncclInvalidArgument, commSetUnrollFactor(&comm))
+          << "RCCL_UNROLL_FACTOR=99 is outside the unroll enum and must be refused";
+      },
+      {{"RCCL_UNROLL_FACTOR", "99"}}
+    );
+}
+
+// At file scope so the isolated lambda below can name it without a capture.
+constexpr char kUsableUnrollArch[] = "gfx942";
+
+// The counterpart to the two rejections above: a validation that refused every
+// value would satisfy them both. The factor cannot be hardcoded, because which
+// unrolls exist depends on the build -- a local-arch build narrows the set to
+// one or two (generate.py's calc_unroll_and_pipeline_for_local_arch), and none
+// of them is common to every arch. So ask the tables which factor is usable
+// here and assert that commSetUnrollFactor honors exactly that one.
+TEST(Rcclwrap, UnrollFactor_AcceptsUsableUnroll)
+{
+    int usable = -1;
+    for(int u = NCCL_UNROLL_1; u < NCCL_NUM_UNROLLS; ++u)
+    {
+        if(!ncclDevFuncUnrollGenerated[u]) continue;
+        const char* requiredArch = ncclDevFuncUnrollArch[u];
+        if(requiredArch != nullptr && !IsArchMatch(kUsableUnrollArch, requiredArch)) continue;
+        usable = u;
+        break;
+    }
+    if(usable < 0)
+    {
+        GTEST_SKIP() << "no unroll factor in this build is usable on " << kUsableUnrollArch;
+    }
+
+    RUN_ISOLATED_TEST_WITH_ENV("UnrollFactor_AcceptsUsableUnroll",
+      [usable]() {
+        ncclComm comm{};
+        comm.archName = const_cast<char*>(kUsableUnrollArch);
+        comm.nNodes   = 1;
+        comm.cuCount  = 304;
+
+        EXPECT_EQ(ncclSuccess, commSetUnrollFactor(&comm))
+          << "unroll " << usable << " is generated and carries no arch restriction "
+             "conflicting with " << kUsableUnrollArch << ", so it must be accepted";
+        EXPECT_EQ(usable, comm.unroll)
+          << "an accepted RCCL_UNROLL_FACTOR must be the factor actually installed";
+      },
+      {{"RCCL_UNROLL_FACTOR", std::to_string(usable)}}
+    );
 }
 
 } // namespace RcclUnitTesting

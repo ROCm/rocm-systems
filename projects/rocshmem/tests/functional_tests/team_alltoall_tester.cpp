@@ -169,7 +169,7 @@ template <typename T1>
 void TeamAlltoallTester<T1>::resetBuffers(size_t size) {
 
   int num_elems = size / sizeof(T1);
-  int buff_size = num_elems * sizeof(T1) * args.num_wgs * n_pes;
+  size_t buff_size = num_elems * sizeof(T1) * args.num_wgs * n_pes;
   int idx = 0;
 
   for(unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {

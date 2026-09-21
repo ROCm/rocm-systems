@@ -26,6 +26,7 @@ test_categories:
       - "ShmMPITest.*"
       - "NetTransportMPITest.*"
       - "NetIbMPITest.*"
+      - "InspectorPromP2pMPITest.*"
       - "ImplicitLaunchOrderMPITest.MultiCommunicatorChain"
       - "UBR_AllReduce.OutOfPlace_MultiNode"
       - "UBR_AllGather.OutOfPlace_MultiNode"
@@ -39,6 +40,8 @@ test_categories:
       - "UBR_ConcurrentRegHang.*SHOULD_WORK"
       - "GraphCapture_AllToAll.MultiNode"
       - "GraphCapture_AllReduce.MultiNode"
+      - "PatLazyInitMPITest.*"
+      - "PatSharedConnectionMPITest.*"
     exclude_windows: &mpi_exclude_windows
       - "*"
     labels:
@@ -72,6 +75,26 @@ test_categories:
       - "NCCL_CUMEM_ENABLE=1"
       - "NCCL_LOCAL_REGISTER=0"
       - "RCCL_CE_ALLREDUCE=1"
+  quick_env_ce_alltoall:
+    description: "CE AlltoAll MPI smoke under CE dispatch env. DDA is disabled because
+      ncclAlltoAll_impl takes the DDA IPC path before CE is considered, so CE never
+      dispatches for messages under the DDA AlltoAll threshold."
+    test_patterns:
+      - "CeMPI_AlltoAll.*"
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "mpi"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_DEBUG_SUBSYS=ALL"
+      - "NCCL_CTA_POLICY=2"
+      - "NCCL_CUMEM_ENABLE=1"
+      - "NCCL_LOCAL_REGISTER=0"
+      - "RCCL_DDA_ENABLE=0"
   quick_env_shm_ce_memcpy_send:
     description: "Shared-memory CE memcpy on send side (mode 1, locality 1)."
     test_patterns:
@@ -179,6 +202,18 @@ test_categories:
       - "NCCL_LAUNCH_MODE=GROUP"
       - "NCCL_DMABUF_ENABLE=1"
       - "RCCL_MPI_LOG_ALL_RANKS=1"
+  quick_env_pat_shared_qps_off:
+    description: "PAT shared-QP kill switch. RCCL_PARAM caches the flag for the process lifetime, so SeparateConnectionsWhenSharingDisabled only runs when RCCL_PAT_SHARED_QPS=0 is set before launch."
+    test_patterns:
+      - "PatSharedConnectionMPITest.SeparateConnectionsWhenSharingDisabled"
+      - "PatSharedConnectionMPITest.AlternatingReduceScatterAndAllGatherOnOneCommunicator"
+      - "PatSharedConnectionMPITest.GroupedReduceScatterAndAllGatherOnOneCommunicator"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_LAUNCH_MODE=GROUP"
+      - "RCCL_PAT_SHARED_QPS=0"
   standard:
     description: "MPI regression — all transport / IB / implicit-launch / UBR / graph-capture suites (same patterns as comprehensive; lighter env)."
     test_patterns: &mpi_all_patterns
@@ -197,6 +232,11 @@ test_categories:
       - "UBR_ConcurrentRegHang.*SHOULD_WORK"
       - "GraphCapture_AllToAll.*"
       - "GraphCapture_AllReduce.*"
+      - "PatLazyInitMPITest.*"
+      - "PatSharedConnectionMPITest.*"
+      - "DdaFabricSimple.*"
+      - "DdaFabricBlockCap.*"
+      - "DdaFabricBarrierStress.*"
     exclude_windows: *mpi_exclude_windows
     labels:
       - "rccl"
@@ -374,6 +414,7 @@ execution_settings:
   category_timeouts:
     quick: 1200
     quick_env_ce_allreduce: 1200
+    quick_env_ce_alltoall: 1200
     quick_env_shm_ce_memcpy_send: 1200
     quick_env_shm_ce_memcpy_recv: 1200
     quick_env_shm_ce_memcpy_both_simple: 1200
@@ -382,6 +423,7 @@ execution_settings:
     quick_env_net_graph_register: 1200
     quick_env_netib_xfer_trace: 1200
     quick_env_netib_xfer_log_ranks: 1200
+    quick_env_pat_shared_qps_off: 1200
     standard: 1200
     comprehensive: 1200
     comprehensive_disable_env: 1200

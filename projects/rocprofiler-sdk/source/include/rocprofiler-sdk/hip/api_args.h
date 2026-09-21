@@ -3624,6 +3624,22 @@ typedef union rocprofiler_hip_api_args_t
         hipMemAllocationType type;
     } hipMemGetDefaultMemPool;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 32
+    struct
+    {
+        char*         luid;
+        unsigned int* deviceNodeMask;
+        hipDevice_t   device;
+    } hipDeviceGetLuid;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 33
+    struct
+    {
+        int          device;
+        unsigned int deviceFlags;
+        unsigned int flags;
+    } hipInitDevice;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

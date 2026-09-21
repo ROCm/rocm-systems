@@ -33,6 +33,7 @@
 /// different payloads (accepted divergence, mirroring the existing VOP3
 /// ternary tests).
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -296,7 +297,7 @@ template <uint32_t WF_SIZE, int ArchTag> struct Fixture {
   std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint32_t rot, bool widen0, bool widen1,
                                     bool widen2, uint64_t exec, uint32_t dst_seed) {
     seed_vgprs(rot, widen0, widen1, widen2, exec, dst_seed);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -351,7 +352,7 @@ void check_combo(uint32_t opcode, const ModCombo &mc, uint64_t exec, uint32_t ds
       vop3p_encode_cdna4(opcode, kDstVgpr, /*neg_hi=*/mc.abs, mc.op_sel, mc.op_sel_hi_2, mc.clamp,
                          /*src0=*/256, /*src1=*/257, /*src2=*/258, mc.op_sel_hi, mc.neg, words);
     }
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << label << " decode failed";
     auto out = fx.run(inst, rot, widen0, widen1, widen2, exec, dst_seed);
     delete inst;

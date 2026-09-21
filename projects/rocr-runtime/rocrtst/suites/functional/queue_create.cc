@@ -285,6 +285,9 @@ void QueueCreateTest::SdmaQueueCreateDestroyTest() {
   ASSERT_SUCCESS(rocrtst::SetDefaultAgents(this));
   ASSERT_SUCCESS(rocrtst::SetPoolsTypical(this));
 
+  // HSA_AMD_QUEUE_INFO_READ_POINTER / _WRITE_POINTER are HSA enum constants added
+  // in hsa_ext_amd.h interface 1.31.
+#if HSA_AMD_INTERFACE_VERSION_MINOR >= 31
   auto create_and_destroy = [&](uint16_t flags, const char* label) {
     hsa_amd_queue_create_desc_t desc = {};
     desc.version = HSA_AMD_QUEUE_CREATE_DESC_VERSION;
@@ -345,6 +348,12 @@ void QueueCreateTest::SdmaQueueCreateDestroyTest() {
   create_and_destroy(HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF |
                          HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR,
                      "device ring buffer and descriptor");
+#else
+  // The gtest vendored under rocrtst/ predates GTEST_SKIP(); use the standard
+  // [ SKIPPED ] marker instead.
+  fprintf(stdout, "[ SKIPPED ] SdmaQueueCreateDestroyTest: HSA headers predate "
+                  "queue read/write pointer queries\n");
+#endif
 }
 
 void QueueCreateTest::InvalidArgsTest() {

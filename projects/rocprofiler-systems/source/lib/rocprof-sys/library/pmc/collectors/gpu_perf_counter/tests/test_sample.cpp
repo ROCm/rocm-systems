@@ -24,7 +24,7 @@ protected:
 
 TEST_F(SdkPmcSampleTest, EmptySampleRoundTrip)
 {
-    sample original{ 0, 1000, {} };
+    const sample original{ 0, 1000, {} };
 
     serialize(buffer.data(), original);
 
@@ -38,7 +38,7 @@ TEST_F(SdkPmcSampleTest, EmptySampleRoundTrip)
 
 TEST_F(SdkPmcSampleTest, SingleEntryRoundTrip)
 {
-    sample original{ 2, 5000, { counter_value{ 10, 42.0 } } };
+    const sample original{ 2, 5000, { counter_value{ 10, 42.0 } } };
 
     serialize(buffer.data(), original);
 
@@ -54,10 +54,10 @@ TEST_F(SdkPmcSampleTest, SingleEntryRoundTrip)
 
 TEST_F(SdkPmcSampleTest, MultiEntryRoundTrip)
 {
-    sample original{ 1,
-                     99000,
-                     { counter_value{ 100, 10.0 }, counter_value{ 101, 20.0 },
-                       counter_value{ 102, 30.0 } } };
+    const sample original{ 1,
+                           99000,
+                           { counter_value{ 100, 10.0 }, counter_value{ 101, 20.0 },
+                             counter_value{ 102, 30.0 } } };
 
     serialize(buffer.data(), original);
 
@@ -80,44 +80,46 @@ TEST_F(SdkPmcSampleTest, MultiEntryRoundTrip)
 
 TEST_F(SdkPmcSampleTest, GetSizeEmpty)
 {
-    sample test_sample{ 0, 0, {} };
+    const sample test_sample{ 0, 0, {} };
 
     // device_id(4) + timestamp(8) + num_entries(4) = 16
-    size_t expected =
+    const size_t expected =
         sizeof(std::uint32_t) + sizeof(std::uint64_t) + sizeof(std::uint32_t);
     EXPECT_EQ(get_size(test_sample), expected);
 }
 
 TEST_F(SdkPmcSampleTest, GetSizeSingleEntry)
 {
-    sample test_sample{ 0, 0, { counter_value{ 10, 1.0 } } };
+    const sample test_sample{ 0, 0, { counter_value{ 10, 1.0 } } };
 
     // header: 4 + 8 + 4 = 16
     // entry: counter_id(8) + double(8) = 16
-    size_t expected = 16 + sizeof(counter_id_t) + sizeof(double);
+    const size_t expected = 16 + sizeof(counter_id_t) + sizeof(double);
     EXPECT_EQ(get_size(test_sample), expected);
 }
 
 TEST_F(SdkPmcSampleTest, GetSizeMatchesSerializedBytes)
 {
-    sample original{ 3, 42000, { counter_value{ 1, 1.0 }, counter_value{ 2, 99.5 } } };
+    const sample original{ 3,
+                           42000,
+                           { counter_value{ 1, 1.0 }, counter_value{ 2, 99.5 } } };
 
-    size_t computed_size = get_size(original);
+    const size_t computed_size = get_size(original);
     serialize(buffer.data(), original);
 
     std::uint8_t* ptr = buffer.data();
     deserialize<sample>(ptr);
-    size_t bytes_consumed = static_cast<size_t>(ptr - buffer.data());
+    const size_t bytes_consumed = static_cast<size_t>(ptr - buffer.data());
 
     EXPECT_EQ(bytes_consumed, computed_size);
 }
 
 TEST_F(SdkPmcSampleTest, DeserializePreservesBufferPointerAdvancement)
 {
-    sample first{ 0, 1000, { counter_value{ 1, 1.0 } } };
-    sample second{ 1, 2000, { counter_value{ 2, 2.0 }, counter_value{ 3, 3.0 } } };
+    const sample first{ 0, 1000, { counter_value{ 1, 1.0 } } };
+    const sample second{ 1, 2000, { counter_value{ 2, 2.0 }, counter_value{ 3, 3.0 } } };
 
-    size_t first_size = get_size(first);
+    const size_t first_size = get_size(first);
     serialize(buffer.data(), first);
     serialize(buffer.data() + first_size, second);
 

@@ -2315,6 +2315,7 @@ void BlitSdma<useGCR, scopeFields>::BuildMulticastWaitSignalCopyCommand(
 
     if (do_wait) {
       pkt.WAIT_FUNCTION_UNION.wait_function = 0x3;  // Equal
+      pkt.WAIT_FUNCTION_UNION.wait_scope = SDMA_MEMORY_SCOPE_SYS;
       void* wait_addr = const_cast<core::Signal*>(wait_signal)->ValueLocation();
       pkt.WAIT_ADDR_LO_UNION.wait_addr_31_3 = ptrlow32(wait_addr) >> 3;
       pkt.WAIT_ADDR_HI_UNION.wait_addr_63_32 = ptrhigh32(wait_addr);
@@ -2746,6 +2747,7 @@ void BlitSdma<useGCR, scopeFields>::BuildWaitSignalCopyCommand(
 
     if (do_wait) {
       pkt.WAIT_FUNCTION_UNION.wait_function = 0x3;  // Equal
+      pkt.WAIT_FUNCTION_UNION.wait_scope = SDMA_MEMORY_SCOPE_SYS;
       void* wait_addr = const_cast<core::Signal*>(wait_signal)->ValueLocation();
       pkt.WAIT_ADDR_LO_UNION.wait_addr_31_3 = ptrlow32(wait_addr) >> 3;
       pkt.WAIT_ADDR_HI_UNION.wait_addr_63_32 = ptrhigh32(wait_addr);
@@ -2817,6 +2819,7 @@ void BlitSdma<useGCR, scopeFields>::BuildWaitSignalIndirectCopyCommand(
 
   if (do_wait) {
     pkt.WAIT_FUNCTION_UNION.wait_function = 0x3;  // Equal
+    pkt.WAIT_FUNCTION_UNION.wait_scope = SDMA_MEMORY_SCOPE_SYS;
     void* wait_addr = const_cast<core::Signal*>(wait_signal)->ValueLocation();
     pkt.WAIT_ADDR_LO_UNION.wait_addr_31_3 = ptrlow32(wait_addr) >> 3;
     pkt.WAIT_ADDR_HI_UNION.wait_addr_63_32 = ptrhigh32(wait_addr);
@@ -2894,6 +2897,7 @@ void BlitSdma<useGCR, scopeFields>::BuildWaitSignalSwapCommand(
 
     if (do_wait) {
       pkt.WAIT_FUNCTION_UNION.wait_function  = 0x3;  // Equal
+      pkt.WAIT_FUNCTION_UNION.wait_scope     = SDMA_MEMORY_SCOPE_SYS;
       void* wa = const_cast<core::Signal*>(wait_signal)->ValueLocation();
       pkt.WAIT_ADDR_LO_UNION.wait_addr_31_3  = ptrlow32(wa) >> 3;
       pkt.WAIT_ADDR_HI_UNION.wait_addr_63_32 = ptrhigh32(wa);

@@ -35,6 +35,7 @@ from vendored import yaml
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
+PROFILE_OUTPUT_FORMAT = "rocpd"
 
 # Shared suffix for the invalid --block error in the profile and analyze paths.
 INVALID_BLOCK_HINT = (
@@ -43,13 +44,18 @@ INVALID_BLOCK_HINT = (
 
 
 def is_gfx9(gpu_arch: Optional[str]) -> bool:
-    """Return True if gpu_arch is a gfx9 (CDNA) architecture."""
+    """Return True if gpu_arch is a gfx9xx (CDNA) architecture."""
     return bool(gpu_arch and gpu_arch.startswith("gfx9"))
 
 
 def is_gfx115x(gpu_arch: Optional[str]) -> bool:
     """Return True if gpu_arch is a gfx115x (RDNA 3.5 APU) architecture."""
     return bool(gpu_arch and gpu_arch.startswith("gfx115"))
+
+
+def is_gfx1250(gpu_arch: Optional[str]) -> bool:
+    """Return True if gpu_arch is a gfx1250 architecture."""
+    return gpu_arch == "gfx1250"
 
 
 def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
@@ -82,7 +88,6 @@ SUPPORTED_FIELD: list[str] = [
     "Expression",
     "Percent of Peak",
     # Special keywords for L2 channel
-    "Channel",
     "L2 Cache Hit Rate",
     "Requests",
     "L2 Read",
@@ -1151,6 +1156,17 @@ def reconfigure_stdio_utf8() -> None:
             pass
 
 
+def _workload_base_dir(workload_dir: Union[str, list, None]) -> Optional[str]:
+    """Extract the base workload directory from the (possibly nested) value."""
+    if isinstance(workload_dir, list):
+        return (
+            workload_dir[0][0]
+            if isinstance(workload_dir[0], (list, tuple))
+            else workload_dir[0]
+        )
+    return workload_dir
+
+
 def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, str]:
     """
     Validate roofline.csv exists and has consistent structure.
@@ -1160,14 +1176,9 @@ def validate_roofline_csv(workload_dir: Union[str, Path, list]) -> tuple[bool, s
                is_valid=True if CSV is valid, False otherwise
                error_message contains description if invalid
     """
-    if isinstance(workload_dir, list):
-        base_dir = (
-            workload_dir[0][0]
-            if isinstance(workload_dir[0], (list, tuple))
-            else workload_dir[0]
-        )
-    else:
-        base_dir = workload_dir
+    base_dir = _workload_base_dir(workload_dir)
+    if base_dir is None:
+        return False, "Workload directory is not set"
 
     benchmark_results = Path(base_dir) / "roofline.csv"
 
