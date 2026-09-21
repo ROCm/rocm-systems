@@ -4404,7 +4404,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchAcceptsExactCapacity) 
         // nRanks(1) * sendcount(16) * sizeof(float32)(4) == 64 bytes.
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, 16, ncclFloat32, /*stream=*/nullptr, true,
                                                    false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
