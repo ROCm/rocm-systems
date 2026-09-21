@@ -18,6 +18,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_kmd
     rocjitsu_vm
     rocjitsu_vm_amdgpu
+    rocjitsu_plugin_data_hazard
     rocjitsu_plugin_logging
     rocjitsu_plugin_race_detector
     rocjitsu_plugin_throughput
@@ -583,6 +584,10 @@ add_executable(
     race-detector/interval_set_tests.cpp
     race-detector/race_log_expectation_test.cpp
     big_int_test.cpp
+    data-hazard/hazard_engine_tests.cpp
+    data-hazard/hazard_helpers_tests.cpp
+    data-hazard/data_hazard_adapter_tests.cpp
+    data-hazard/tensor_lds_range_tests.cpp
     data_types_test.cpp
     drm_info_layout_test.cpp
     pci/bar_access_trace_test.cpp
@@ -3476,6 +3481,7 @@ if(RJ_ENABLE_HIP_TESTS)
         )
 
         add_subdirectory(race-detector)
+        add_subdirectory(data-hazard)
     else()
         message(
             STATUS

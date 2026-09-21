@@ -439,7 +439,9 @@ bool ComputeUnitCore::barrier_signal(Wavefront &wf, int32_t barrier_id, uint32_t
 
   barrier->signal_count = 0;
   auto members = complete_barrier(wf.dispatch_id(), wf.wg_id(), completion_bit, named_id);
-  notify_barrier_complete(members);
+  notify_barrier_complete(members, completion_bit == kNamedBarrierBit
+                                       ? AmdgpuBarrierScope::Named
+                                       : AmdgpuBarrierScope::Workgroup);
   return is_first;
 }
 
@@ -467,9 +469,10 @@ std::vector<Wavefront *> ComputeUnitCore::complete_barrier(uint32_t dispatch_id,
   return members;
 }
 
-void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members) {
+void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members,
+                                              AmdgpuBarrierScope scope) {
   if (!members.empty())
-    plugin_group_->onAmdgpuBarrierResolved(members);
+    plugin_group_->onAmdgpuBarrierResolved(members, scope);
 }
 
 uint32_t ComputeUnitCore::barrier_state(const Wavefront &wf, int32_t barrier_id) const {
@@ -549,7 +552,7 @@ bool ComputeUnitCore::named_barrier_leave(Wavefront &wf) {
   if (barrier.signal_count >= barrier.member_count) {
     barrier.signal_count = 0;
     auto members = complete_barrier(wf.dispatch_id(), wf.wg_id(), kNamedBarrierBit, id);
-    notify_barrier_complete(members);
+    notify_barrier_complete(members, AmdgpuBarrierScope::Named);
   }
   return barrier.member_count == 0;
 }
@@ -568,7 +571,9 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
         return;
       barrier.signal_count = 0;
       auto members = complete_barrier(dispatch_id, wg_id, completion_bit, joined_id);
-      notify_barrier_complete(members);
+      notify_barrier_complete(members, completion_bit == kNamedBarrierBit
+                                           ? AmdgpuBarrierScope::Named
+                                           : AmdgpuBarrierScope::Workgroup);
     };
 
     retire_member(group->second.workgroup[0], kWorkgroupBarrierBit);
@@ -882,7 +887,8 @@ void ComputeUnitCore::update_wf_states() {
         if (w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() == WfState::BARRIER &&
             w2->waiting_barrier_bit_ == Wavefront::kNoBarrierWait)
           barrier_wfs.push_back(w2.get());
-      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(barrier_wfs));
+      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(barrier_wfs),
+                                             AmdgpuBarrierScope::Workgroup);
       for (auto *bwf : barrier_wfs) {
         bwf->set_state(WfState::RUNNING);
         bwf->set_ready_cycle(cycle_counter_);
