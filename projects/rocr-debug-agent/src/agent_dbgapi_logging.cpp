@@ -1,7 +1,7 @@
 /* The University of Illinois/NCSA
    Open Source License (NCSA)
 
-   Copyright (c) 2020, Advanced Micro Devices, Inc. All rights reserved.
+   Copyright (c) 2020-2026, Advanced Micro Devices, Inc. All rights reserved.
 
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to
@@ -30,45 +30,33 @@
 
 #include "logging.h"
 
-#include <cstdio>
-#include <stdarg.h>
-
-#include <string>
+#include <amd-dbgapi/amd-dbgapi.h>
 
 namespace amd::debug_agent
 {
 
-log_level_t log_level = log_level_t::warning;
-
-std::ofstream agent_out;
-
-namespace detail
-{
-
 void
-log (log_level_t level, const char *format, ...)
+set_log_level (log_level_t level)
 {
-  va_list va;
-
-  agent_out << "rocm-debug-agent: ";
-
-  if (level == log_level_t::error)
-    agent_out << "error: ";
-  else if (level == log_level_t::warning)
-    agent_out << "warning: ";
-
-  va_start (va, format);
-  size_t size = vsnprintf (NULL, 0, format, va);
-  va_end (va);
-
-  va_start (va, format);
-  std::string str (size, '\0');
-  vsprintf (&str[0], format, va);
-  va_end (va);
-
-  agent_out << str << std::endl;
+  log_level = level;
+  switch (level)
+    {
+    case log_level_t::none:
+      amd_dbgapi_set_log_level (AMD_DBGAPI_LOG_LEVEL_NONE);
+      break;
+    case log_level_t::verbose:
+      amd_dbgapi_set_log_level (AMD_DBGAPI_LOG_LEVEL_VERBOSE);
+      break;
+    case log_level_t::info:
+      amd_dbgapi_set_log_level (AMD_DBGAPI_LOG_LEVEL_INFO);
+      break;
+    case log_level_t::warning:
+      amd_dbgapi_set_log_level (AMD_DBGAPI_LOG_LEVEL_WARNING);
+      break;
+    case log_level_t::error:
+      amd_dbgapi_set_log_level (AMD_DBGAPI_LOG_LEVEL_FATAL_ERROR);
+      break;
+    }
 }
-
-} /* namespace detail */
 
 } /* namespace amd::debug_agent */

@@ -65,7 +65,7 @@ add_library(rocm-debug-agent SHARED)
 target_sources(
     rocm-debug-agent
     PRIVATE src/agent_config.cpp src/agent_utils.cpp src/code_object.cpp
-            src/debug_agent.cpp src/logging.cpp
+            src/debug_agent.cpp src/logging.cpp src/agent_dbgapi_logging.cpp
 )
 
 set_target_properties(
