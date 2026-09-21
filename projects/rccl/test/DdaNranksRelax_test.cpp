@@ -18,10 +18,11 @@
 // this binary with RCCL_DDA_NRANKS_RELAX=1 pre-set (the value must be in the
 // environment before any param read) and asserts every count in
 // [2, kDdaNranks] becomes eligible while counts outside that range do not.
-// No test_runner config currently sets RCCL_DDA_NRANKS_RELAX as an environment
-// variable, so end-to-end engagement via the rccl-tests AllReduce sweep is not
-// yet exercised in CI; the isolated-process test above is what actually covers
-// the relaxed dispatch today.
+// End-to-end engagement is covered too: the dda_nranks_relax_4rank suite in
+// mi455_ainic_roce.json runs the rccl-tests sweep at 4 ranks with
+// RCCL_DDA_NRANKS_RELAX=1 set in the environment. The isolated-process tests here
+// remain the tighter check -- they call the DDA entry points directly, so no
+// threshold or backend choice can route around the kernel under test.
 
 #include "common/DdaIpcTestHelpers.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
@@ -40,8 +41,11 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "algorithms/dda/dda_init_detail.h"
+#include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "gtest/gtest.h"
 
 namespace RcclUnitTesting
@@ -524,6 +528,80 @@ int ddaInitRunAllReduceCheck(int rank, int nranks, ncclComm* comm)
     return kDdaInitChildOk;
 }
 
+// The three non-AllReduce DDA IPC collectives, on the same live communicator.
+//
+// Each has its own <T, 0> runtime-rank instantiation, and each is dispatched by
+// the same NRANKS == 0 fallback the AllReduce check above covers -- but they are
+// separate kernels, so covering AllReduce alone leaves these three free to
+// regress. Like that check these call the ncclXxxDdaIpc() entry points directly
+// rather than the public collectives, so no size threshold or backend choice can
+// route around the kernel under test.
+//
+// Every payload below encodes the contributing rank, not a constant: a kernel
+// that folds in the wrong participant set (peer slots 4..7 are null/zeroed at 4
+// ranks) produces a wrong value rather than a crash, and only a checked result
+// catches that.
+//
+// sendcount is a multiple of 4 so sendcount * sizeof(float) is 16-byte aligned,
+// which the AllGather and AllToAll eligibility predicates both require.
+constexpr size_t kDdaInitCollectiveCount = 65536;
+
+// AllGather: rank r contributes r+1, so chunk j of the gathered result must hold
+// j+1. A wrong peer set leaves some chunk at its memset zero instead.
+int ddaInitRunAllGatherCheck(int rank, int nranks, ncclComm* comm)
+{
+    hipStream_t stream = nullptr;
+    DDA_INIT_CHILD_HC(hipStreamCreate(&stream));
+
+    const size_t sendcount = kDdaInitCollectiveCount;
+    const size_t sendBytes = sendcount * sizeof(float);
+    const size_t recvBytes = sendBytes * static_cast<size_t>(nranks);
+
+    void* sendbuff = nullptr;
+    void* recvbuff = nullptr;
+    DDA_INIT_CHILD_HC(hipMalloc(&sendbuff, sendBytes));
+    DDA_INIT_CHILD_HC(hipMalloc(&recvbuff, recvBytes));
+
+    std::vector<float> host(sendcount, static_cast<float>(rank + 1));
+    DDA_INIT_CHILD_HC(hipMemcpy(sendbuff, host.data(), sendBytes, hipMemcpyHostToDevice));
+    DDA_INIT_CHILD_HC(hipMemset(recvbuff, 0, recvBytes));
+
+    const ncclResult_t ag =
+        ncclAllGatherDdaIpc(sendbuff, recvbuff, sendcount, ncclFloat32, comm, stream);
+    if (ag != ncclSuccess)
+    {
+        printf("[rank %d] ncclAllGatherDdaIpc(sendcount=%zu) failed: %d (%s)\n", rank, sendcount, ag,
+               ncclGetErrorString(ag));
+        return kDdaInitChildFail;
+    }
+    DDA_INIT_CHILD_HC(hipStreamSynchronize(stream));
+
+    std::vector<float> out(sendcount * static_cast<size_t>(nranks), 0.0f);
+    DDA_INIT_CHILD_HC(hipMemcpy(out.data(), recvbuff, recvBytes, hipMemcpyDeviceToHost));
+
+    for (int j = 0; j < nranks; ++j)
+    {
+        const float expected = static_cast<float>(j + 1);
+        for (size_t k = 0; k < sendcount; ++k)
+        {
+            const size_t i = static_cast<size_t>(j) * sendcount + k;
+            if (out[i] != expected)
+            {
+                printf("[rank %d] allgather chunk %d element %zu: expected %.1f, got %.1f\n", rank, j,
+                       k, expected, out[i]);
+                return kDdaInitChildFail;
+            }
+        }
+    }
+
+    DDA_INIT_CHILD_HC(hipFree(sendbuff));
+    DDA_INIT_CHILD_HC(hipFree(recvbuff));
+    DDA_INIT_CHILD_HC(hipStreamDestroy(stream));
+    return kDdaInitChildOk;
+}
+
+
+
 // Runs entirely inside a forked child: the first HIP/RCCL call happens here.
 int ddaInitRunRank(int rank, int nranks, DdaInitShared* shared, bool expectResources)
 {
@@ -591,6 +669,10 @@ int ddaInitRunRank(int rank, int nranks, DdaInitShared* shared, bool expectResou
     if (rc == kDdaInitChildOk && expectResources)
     {
         rc = ddaInitRunAllReduceCheck(rank, nranks, c);
+    }
+    if (rc == kDdaInitChildOk && expectResources)
+    {
+        rc = ddaInitRunAllGatherCheck(rank, nranks, c);
     }
 
     DDA_INIT_CHILD_NC(ncclCommDestroy(commHandle));
