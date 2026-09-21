@@ -37,11 +37,14 @@ DISCOVERED_GFX9_ARCHITECTURES = tuple(
 
 GFX94X_ARCHITECTURES = frozenset({"gfx940", "gfx941", "gfx942"})
 
+# Cross-architecture metric contract: expected YAML differences relative to
+# gfx908 (baseline). Update these when intentionally adding or removing
+# arch-specific metrics in a YAML config.
 GFX94X_MISSING_METRIC_KEYS = frozenset()
 
 GFX94X_EXTRA_METRIC_KEYS = frozenset({
-    "HBM Read BW",
-    "HBM Write and Atomic BW",
+    "Estimated HBM Read BW",
+    "Estimated HBM Write and Atomic BW",
 })
 
 GFX950_EXTRA_METRIC_KEYS = frozenset({

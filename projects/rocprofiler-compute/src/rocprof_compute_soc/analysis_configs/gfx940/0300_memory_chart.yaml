@@ -74,10 +74,10 @@ Panel Config:
         L2-Fabric Write and Atomic BW:
           value: SUM(TCC_EA0_WRREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
-        HBM Read BW:
+        Estimated HBM Read BW:
           value: 64 * SUM(TCC_EA0_RDREQ_DRAM_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
-        HBM Write and Atomic BW:
+        Estimated HBM Write and Atomic BW:
           value: 64 * SUM(TCC_EA0_WRREQ_DRAM_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
       comparable: false
@@ -144,9 +144,9 @@ Panel Config:
       interface per unit time.
     L2-Fabric Write and Atomic BW: The number of bytes sent by the L2 over the Infinity
       Fabric interface by write and atomic operations per unit time.
-    HBM Read BW: Estimated bandwidth of read requests from the Data Fabric
-      to HBM (DRAM), assuming 64 bytes per request. Upper-bound estimate
+    Estimated HBM Read BW: Estimated bandwidth of read requests from the Data
+      Fabric to HBM (DRAM), assuming 64 bytes per request. Upper-bound estimate
       because some requests may be 32 bytes.
-    HBM Write and Atomic BW: Estimated bandwidth of write and atomic requests
-      from the Data Fabric to HBM (DRAM), assuming 64 bytes per request.
+    Estimated HBM Write and Atomic BW: Estimated bandwidth of write and atomic
+      requests from the Data Fabric to HBM (DRAM), assuming 64 bytes per request.
       Upper-bound estimate because some requests may be 32 bytes.
