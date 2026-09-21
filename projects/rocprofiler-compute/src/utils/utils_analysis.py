@@ -903,18 +903,22 @@ def _find_ml_api_trace_csv_pairs(workload_dir: Path) -> list[tuple[Path, Path]]:
     return pairs
 
 
-def _rename_correlation_id_column(frame: pd.DataFrame) -> pd.DataFrame:
-    """Normalize Correlation_Id to Correlation_ID when that alias is present."""
-    if "Correlation_Id" in frame.columns and "Correlation_ID" not in frame.columns:
-        return frame.rename(columns={"Correlation_Id": "Correlation_ID"})
-    if "Correlation_Id" in frame.columns:
-        return frame.drop(columns=["Correlation_Id"])
+def _rename_column_alias(
+    frame: pd.DataFrame, canonical_name: str, alias_name: str
+) -> pd.DataFrame:
+    """Rename alias_name to canonical_name, or drop the alias when both exist."""
+    if alias_name in frame.columns and canonical_name not in frame.columns:
+        return frame.rename(columns={alias_name: canonical_name})
+    if alias_name in frame.columns:
+        return frame.drop(columns=[alias_name])
     return frame
 
 
 def _load_marker_trace_dataframe(marker_path: Path) -> pd.DataFrame:
     """Load one marker CSV and keep the columns used by later analyze steps."""
-    marker_df = _rename_correlation_id_column(pd.read_csv(marker_path))
+    marker_df = _rename_column_alias(
+        pd.read_csv(marker_path), "Correlation_ID", "Correlation_Id"
+    )
     missing_columns = [
         column for column in _REQUIRED_MARKER_COLUMNS if column not in marker_df.columns
     ]
@@ -935,6 +939,13 @@ def _load_marker_trace_dataframe(marker_path: Path) -> pd.DataFrame:
     return marker_df[kept_columns].copy()
 
 
+_REQUIRED_COUNTER_COLUMNS = (
+    "Correlation_ID",
+    "Dispatch_ID",
+    "Kernel_Name",
+    "Start_Timestamp",
+    "End_Timestamp",
+)
 _DISPATCH_KEEP_COLUMNS = (
     "Kernel_Name",
     "Start_Timestamp",
@@ -945,28 +956,33 @@ _DISPATCH_KEEP_COLUMNS = (
 )
 
 
-def _collapse_counter_dispatches(counter_df: pd.DataFrame) -> pd.DataFrame:
+def _collapse_counter_dispatches(
+    counter_df: pd.DataFrame, counter_path: Path
+) -> pd.DataFrame:
     """Collapse long counter rows to one row per GPU dispatch."""
-    required_columns = (
-        "Correlation_ID",
-        "Kernel_Name",
-        "Start_Timestamp",
-        "End_Timestamp",
-    )
     missing_columns = [
-        column for column in required_columns if column not in counter_df.columns
+        column
+        for column in _REQUIRED_COUNTER_COLUMNS
+        if column not in counter_df.columns
     ]
     if missing_columns:
         console_error(
             "analysis",
-            f"Counter CSV is missing required columns {missing_columns}",
+            f"Counter CSV {counter_path} is missing required columns {missing_columns}",
         )
-    if "Dispatch_ID" in counter_df.columns:
-        group_keys = ["Dispatch_ID"]
-        if "GUID" in counter_df.columns:
-            group_keys.append("GUID")
-    else:
-        group_keys = ["Kernel_Name", "Start_Timestamp", "End_Timestamp"]
+    null_columns = [
+        column
+        for column in _REQUIRED_COUNTER_COLUMNS
+        if counter_df[column].isna().any()
+    ]
+    if null_columns:
+        console_error(
+            "analysis",
+            f"Counter CSV {counter_path} has null values in {null_columns}",
+        )
+    group_keys = ["Dispatch_ID"]
+    if "GUID" in counter_df.columns:
+        group_keys.append("GUID")
     keep_columns = [
         column for column in _DISPATCH_KEEP_COLUMNS if column in counter_df.columns
     ]
@@ -1015,8 +1031,11 @@ def _outer_join_dispatches_and_markers(
 
 def _join_pass_marker_and_counter(pair: schema.MlApiTracePair) -> pd.DataFrame:
     """Load one counter CSV, collapse dispatches, and outer-join markers."""
-    counter_df = _rename_correlation_id_column(pd.read_csv(pair.counter_path))
-    dispatch_df = _collapse_counter_dispatches(counter_df)
+    counter_df = _rename_column_alias(
+        pd.read_csv(pair.counter_path), "Correlation_ID", "Correlation_Id"
+    )
+    counter_df = _rename_column_alias(counter_df, "Dispatch_ID", "Dispatch_Id")
+    dispatch_df = _collapse_counter_dispatches(counter_df, pair.counter_path)
     return _outer_join_dispatches_and_markers(dispatch_df, pair.marker_df)
 
 
