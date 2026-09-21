@@ -32,11 +32,13 @@ namespace config {
 /// @param thread_allocations Preferred allocations to re-evaluate when restoring.
 /// @param legacy_auto_dispatch Preserve an old automatic-dispatch checkpoint's
 /// absent allocation vector when saving it again; false for new configurations.
+/// @param async_helper_threads Original helper request; -1 selects the table.
+/// Zero preserves disabled-helper behavior for existing save callers.
 void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
                      const simdojo::SimulationEngine::Config &engine_config,
                      uint32_t cpu_dispatch_threads, uint32_t cpu_thread_budget = 0,
                      std::span<const ExecutionThreadChoice> thread_allocations = {},
-                     bool legacy_auto_dispatch = false);
+                     bool legacy_auto_dispatch = false, int32_t async_helper_threads = 0);
 
 /// @brief Restore simulation state from a binary FlatBuffer checkpoint.
 ///
