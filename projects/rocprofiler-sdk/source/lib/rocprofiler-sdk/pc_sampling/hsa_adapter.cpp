@@ -132,15 +132,13 @@ amd_intercept_marker_handler_callback(const struct amd_aql_intercept_marker_s* p
  */
 void
 kernel_completion_cb(const rocprofiler_agent_t* rocp_agent,
-                     rocprofiler::hsa::rocprofiler_packet& /*kernel_pkt*/,
+                     const rocprofiler::hsa::rocprofiler_packet& /*kernel_pkt*/,
                      const rocprofiler::hsa::queue_info_session_t& session)
 {
     // No internal correlation IDs, meaning there is no need to call CID manager.
     if(!session.correlation_id) return;
 
-    // Check if the PC sampling service is configured on this agent.
-    if(!is_pc_sample_service_configured(rocp_agent->id)) return;
-
+    // signal_completion_hook verifies that the service is configured before forwarding here.
     auto* agent_session = get_agent_session(rocp_agent->id);
     ROCP_FATAL_IF(agent_session == nullptr)
         << "No PC sampling sessions configured for the agent where kernel completion "
@@ -355,7 +353,7 @@ pc_sampling_service_finish_configuration(context::pc_sampling_service* service)
     // controller. Kernel completion is delivered explicitly via
     // pc_sampling::signal_completion_hook, called from the HSA async signal
     // handler (see hsa/queue.cpp). The marker packet is still injected directly
-    // in the write interceptor, gated by pc_sampling::is_configured_on_agent.
+    // in the write interceptor, gated by is_pc_sample_service_configured.
 }
 
 rocprofiler_status_t

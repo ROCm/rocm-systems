@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -17,8 +17,8 @@
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 // AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-// THE SOFTWARE.
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 #include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 
@@ -36,5 +36,23 @@ TEST(pc_sampling_queue_hooks, is_configured_on_agent_unconfigured)
     rocprofiler_agent_id_t agent_id;
     agent_id.handle = 123456;
     EXPECT_FALSE(rocprofiler::pc_sampling::is_configured_on_agent(agent_id));
+}
+
+TEST(pc_sampling_queue_hooks, signal_completion_hook_null_session_is_noop)
+{
+    rocprofiler::hsa::rocprofiler_packet                    kern_pkt{};
+    std::shared_ptr<rocprofiler::hsa::queue_info_session_t> null_session;
+    rocprofiler::hsa::packet_data_t                         packet{};
+    rocprofiler::hsa::inst_pkt_t                            inst_pkt{};
+
+    rocprofiler::pc_sampling::signal_completion_hook(
+        nullptr,
+        kern_pkt,
+        null_session,
+        packet,
+        inst_pkt,
+        rocprofiler::kernel_dispatch::profiling_time{});
+
+    SUCCEED();
 }
 }  // namespace
