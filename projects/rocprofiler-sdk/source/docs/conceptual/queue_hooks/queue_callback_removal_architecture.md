@@ -107,10 +107,9 @@ keeps a plain name. Each remaining service mirrors this trio in its own `queue_h
 
 `client_ids.hpp` replaces the registry's auto-incrementing `ClientID` with fixed producer tags, so
 the id attached to an instrumentation packet no longer depends on the order in which services
-happened to register. The tags numerically overlap the registry's `ClientID`, which also starts at 1
-and remains in use by services that have not migrated yet. That is inert only because no consumer
-dispatches on the tag — each service identifies its own packets by pointer lookup or `dynamic_cast`
-— and `client_ids.hpp` records what has to change before anything routes on these values.
+register. The tags are negative, keeping them disjoint from the positive ClientIDs still used by
+services that have not migrated yet. Each migrated service identifies its own packets by its tag,
+so any tag added here must remain negative and unique.
 
 ## 3. Enqueue and completion use different context sets
 
