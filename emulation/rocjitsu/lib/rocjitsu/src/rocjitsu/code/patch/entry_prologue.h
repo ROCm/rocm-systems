@@ -105,4 +105,36 @@ struct DbiEntryPrologue {
 build_dbi_entry_prologue(const rocr::llvm::amdhsa::kernel_descriptor_t &desc, rj_code_arch_t arch,
                          DbiEntryStorage storage, std::string *error_out = nullptr);
 
+/// @brief Everything a caller needs to splice a prologue into one kernel: the
+///        registers it owns and the words that fill them.
+struct DbiEntryProloguePlan {
+  DbiEntryStorage storage;
+  DbiEntryPrologue prologue;
+};
+
+/// @brief Decide whether @p desc's kernel can carry an entry prologue, and plan
+///        one if it can.
+///
+/// @details Composes @ref plan_dbi_entry_storage and @ref build_dbi_entry_prologue
+/// behind the one gate neither of them owns: kernarg preloading. Decides nothing
+/// about placement, which needs the text rather than the descriptor.
+///
+/// @param blocks Every block reachable from the kernel entry.
+/// @param desc The kernel's descriptor.
+/// @param arch ISA to plan and encode for.
+/// @param kernel_sgpr_count The kernel's SGPR allocation, which bounds the run.
+/// @param reserved Registers the storage must avoid, such as the probe-call link
+///        pairs and the probe bodies' own clobbers.
+/// @param error_out Optional; filled with the reason on failure.
+/// @returns nullopt when the kernel preloads kernargs, or for any reason the two
+///          composed steps report.
+///
+/// @throws util::UnimplementedInst for a non-AMDGPU architecture, from the
+///         builders @ref build_dbi_entry_prologue emits through.
+[[nodiscard]] std::optional<DbiEntryProloguePlan>
+plan_dbi_entry_prologue(KernelBlockScope blocks,
+                        const rocr::llvm::amdhsa::kernel_descriptor_t &desc, rj_code_arch_t arch,
+                        uint32_t kernel_sgpr_count, const RegisterSet &reserved,
+                        std::string *error_out = nullptr);
+
 } // namespace rocjitsu
