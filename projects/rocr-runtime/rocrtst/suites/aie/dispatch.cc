@@ -2337,6 +2337,57 @@ TEST_F(DispatchTest, PdiCacheRolledBackOnFailedBatch) {
   EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
 }
 
+// A kernel argument's declared size is not inert bookkeeping: the runtime clflushes
+// [ptr, ptr + size) before the dispatch and again when the packet retires. A size larger than the
+// argument's allocation would walk that flush off the end of the mapping and fault the host
+// process, so the packet has to be refused while the batch is being built -- before either flush.
+//
+// Shared by both dispatch paths (AddKernargBOs), so the PDI path is enough to cover it and this
+// test needs no Peano toolchain.
+TEST_F(DispatchTest, KernargSizeExceedsBufferRejected) {
+  dispatch_error err;
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
+            HSA_STATUS_SUCCESS);
+
+  kernel_artifacts add;
+  ASSERT_TRUE(add.load_add(dev_pool));
+
+  pool_buffer input, output, kernargs;
+  ASSERT_EQ(input.allocate(data_pool, aie_vector_scalar_kernel::element_bytes), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(output.allocate(data_pool, aie_vector_scalar_kernel::element_bytes),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(kernargs.allocate(kernarg_pool, aie_vector_scalar_kernel::kernarg_bytes),
+            HSA_STATUS_SUCCESS);
+  auto* in = input.as<std::uint32_t>();
+  auto* out = output.as<std::uint32_t>();
+  auto* args = kernargs.as<std::uint64_t>();
+  std::iota(in, in + aie_vector_scalar_kernel::element_count, 0);
+
+  // The rejected dispatch must not write, so the output keeps the sentinel.
+  constexpr std::uint32_t sentinel = 0xD0D0D0D0;
+  std::fill_n(out, aie_vector_scalar_kernel::element_count, sentinel);
+
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
+      add.pdi.get(), add.insts.get(), add.insts_size, in, out, args, signal, queue);
+
+  // dispatch_packet fills the sizes, so overstate one of them afterwards. A gigabyte is far past
+  // any rounding the pool may apply to the element_bytes request, so the rejection cannot be an
+  // artifact of the allocation being larger than asked for.
+  args[aie_vector_scalar_kernel::num_kernargs] = 1ULL << 30;
+
+  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+  ExpectRejected(err, queue, signal, 1);
+  for (std::size_t i = 0; i < aie_vector_scalar_kernel::element_count; ++i) {
+    ASSERT_EQ(out[i], sentinel) << "rejected dispatch wrote output at index " << i;
+  }
+
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
 // The ceiling DispatchTest.PdiCacheHoldsThirtyTwo walks up to, seen from the other side. A
 // 33rd distinct PDI has no compute-unit slot left -- the CU mask is 32 bits -- so the runtime
 // refuses the packet rather than dispatching it against a context that cannot select it.

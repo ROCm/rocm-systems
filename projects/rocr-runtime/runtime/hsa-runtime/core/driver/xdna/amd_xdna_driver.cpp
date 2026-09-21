@@ -546,11 +546,8 @@ static hsa_status_t AddKernargBOs(const hsa_amd_aie_kernel_dispatch_packet_t* pk
   if (pkt->num_kernargs == 0) return HSA_STATUS_SUCCESS;
   if (pkt->kernarg_address == nullptr) return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
 
-  // The packet promises 2 * num_kernargs entries, the addresses followed by their sizes, and
-  // this function and FlushArguments between them read every one. num_kernargs comes straight off
-  // the packet, so it has to be shown to fit before either of them touches the buffer: a packet
-  // claiming the uint16 maximum would otherwise walk half a megabyte past the caller's
-  // allocation. Resolving the buffer is a runtime lookup, not an ioctl.
+  // The packet promises 2 * num_kernargs entries, the addresses followed by their sizes.
+  // num_kernargs comes straight off the packet.
   uint32_t kernarg_bo = AMDXDNA_INVALID_BO_HANDLE;
   void* kernarg_base = nullptr;
   size_t kernarg_alloc_size = 0;
@@ -572,11 +569,22 @@ static hsa_status_t AddKernargBOs(const hsa_amd_aie_kernel_dispatch_packet_t* pk
   for (uint32_t kernarg_idx = 0; kernarg_idx < pkt->num_kernargs; ++kernarg_idx) {
     void* ptr = reinterpret_cast<void*>(kernarg_address[kernarg_idx]);
     uint32_t arg_handle = AMDXDNA_INVALID_BO_HANDLE;
-    const hsa_status_t err = ResolveBOHandle(ptr, agent, &arg_handle, nullptr, nullptr);
+    void* arg_base = nullptr;
+    size_t arg_alloc_size = 0;
+    const hsa_status_t err = ResolveBOHandle(ptr, agent, &arg_handle, &arg_base, &arg_alloc_size);
     if (err != HSA_STATUS_SUCCESS) {
       log_warning_n(10, "AIE: a kernel argument is not a buffer registered with the driver.\n");
       return err;
     }
+
+    // Check the size of the arguments to avoid faults in case of incorrect values.
+    const size_t arg_offset = static_cast<uint8_t*>(ptr) - static_cast<uint8_t*>(arg_base);
+    const size_t arg_avail = (arg_offset <= arg_alloc_size) ? arg_alloc_size - arg_offset : 0;
+    if (kernarg_address[kernarg_idx + pkt->num_kernargs] > arg_avail) {
+      log_warning_n(10, "AIE: a kernel argument declares more bytes than its buffer holds.\n");
+      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+    }
+
     bo_handles->push_back(arg_handle);
   }
   return HSA_STATUS_SUCCESS;
