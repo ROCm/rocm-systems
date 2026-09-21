@@ -36,7 +36,7 @@ TEST_F(TestPcSamplingFeature, OnCodeObjectLoad_ForwardsToCollector)
     EXPECT_EQ(m_collector->load_count, 1);
 }
 
-TEST_F(TestPcSamplingFeature, Finalize_WritesCollectorAndSnapshotsCollectorSourcePaths)
+TEST_F(TestPcSamplingFeature, Write_WritesCollectorAndSnapshotsCollectorSourcePaths)
 {
     const std::set<std::filesystem::path> source_paths = {
         "/tmp/project/header.h",
@@ -46,7 +46,7 @@ TEST_F(TestPcSamplingFeature, Finalize_WritesCollectorAndSnapshotsCollectorSourc
     m_collector->set_has_code_objects(true);
     auto feature = create_feature();
 
-    feature.finalize();
+    feature.write(m_tool_data);
 
     EXPECT_EQ(m_collector->finalize_count, 1);
     const auto& flush_calls = m_writer->get_flush_calls();
@@ -59,11 +59,11 @@ TEST_F(TestPcSamplingFeature, Finalize_WritesCollectorAndSnapshotsCollectorSourc
     EXPECT_EQ(snapshot_calls[0].destination_root, m_source_snapshot_path);
 }
 
-TEST_F(TestPcSamplingFeature, Finalize_WithNoCodeObjects_DoesNotWriteFileOrSnapshotSources)
+TEST_F(TestPcSamplingFeature, Write_WithNoCodeObjects_DoesNotWriteFileOrSnapshotSources)
 {
     auto feature = create_feature();
 
-    feature.finalize();
+    feature.write(m_tool_data);
 
     EXPECT_EQ(m_collector->finalize_count, 1);
     EXPECT_TRUE(m_writer->get_flush_calls().empty());
