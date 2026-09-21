@@ -5706,13 +5706,18 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdCrossProcess_ExportsFdsAndStoresImp
     // Each export hands back a real, closeable fd (production close()s the
     // exported fd once the batch query has consumed it).
     int exportCalls = 0;
+    std::vector<int> exportedFds;
     ScopedHook xport(g_hipMemExportToShareableHandle,
-        [&exportCalls](void* shareableHandle, hipMemGenericAllocationHandle_t,
-                       hipMemAllocationHandleType type,
-                       unsigned long long) -> hipError_t {
+        [&](void* shareableHandle, hipMemGenericAllocationHandle_t,
+            hipMemAllocationHandleType type,
+            unsigned long long) -> hipError_t {
             ++exportCalls;
             EXPECT_EQ(type, hipMemHandleTypePosixFileDescriptor);
-            if (shareableHandle) *static_cast<int*>(shareableHandle) = ::dup(0);
+            if (shareableHandle) {
+                int fd = ::dup(0);
+                *static_cast<int*>(shareableHandle) = fd;
+                exportedFds.push_back(fd);
+            }
             return hipSuccess;
         });
 
@@ -5751,6 +5756,13 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdCrossProcess_ExportsFdsAndStoresImp
     }
     EXPECT_EQ(seg.retainCalls, kNumSegments);
     EXPECT_EQ(seg.releaseCalls, kNumSegments);
+    // Production close()s each exported fd once the batch query has consumed it
+    // (p2p.cc); a second close of each must fail with EBADF.
+    EXPECT_EQ(static_cast<int>(exportedFds.size()), kNumSegments);
+    for (int fd : exportedFds) {
+        EXPECT_EQ(::close(fd), -1);
+        EXPECT_EQ(errno, EBADF);
+    }
 
     std::free(ipcInfos);
 }
@@ -5823,10 +5835,15 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdBatchQueryFails_ClosesFdsAndRelease
     constexpr int         kNumSegments = 3;
     SegmentRangeEmulator seg(kSegSize);
 
+    std::vector<int> exportedFds;
     ScopedHook xport(g_hipMemExportToShareableHandle,
-        [](void* shareableHandle, hipMemGenericAllocationHandle_t,
-           hipMemAllocationHandleType, unsigned long long) -> hipError_t {
-            if (shareableHandle) *static_cast<int*>(shareableHandle) = ::dup(0);
+        [&](void* shareableHandle, hipMemGenericAllocationHandle_t,
+            hipMemAllocationHandleType, unsigned long long) -> hipError_t {
+            if (shareableHandle) {
+                int fd = ::dup(0);
+                *static_cast<int*>(shareableHandle) = fd;
+                exportedFds.push_back(fd);
+            }
             return hipSuccess;
         });
     ScopedHook batch(g_proxyClientBatchQueryFdBlocking,
@@ -5852,6 +5869,13 @@ TEST_F(P2pMultiSegmentMicrotest, Walk_PosixFdBatchQueryFails_ClosesFdsAndRelease
     EXPECT_EQ(numSegments, kNumSegments);
     EXPECT_EQ(seg.releaseCalls, seg.retainCalls);
     EXPECT_EQ(seg.retainCalls, kNumSegments);
+    // The cleanup path close()s each exported fd (p2p.cc); a second close of
+    // each must fail with EBADF.
+    EXPECT_EQ(static_cast<int>(exportedFds.size()), kNumSegments);
+    for (int fd : exportedFds) {
+        EXPECT_EQ(::close(fd), -1);
+        EXPECT_EQ(errno, EBADF);
+    }
 }
 
 // The very first bookkeeping allocation (the ipcInfos array) failing aborts
