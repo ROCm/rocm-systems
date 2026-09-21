@@ -1,5 +1,8 @@
-// Copyright (c) 2026 Advanced Micro Devices, Inc.
-// SPDX-License-Identifier: MIT
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #ifndef AMDF_QUEUE_H_
 #define AMDF_QUEUE_H_
@@ -305,7 +308,8 @@ typedef struct amdf_user_queue_status_t {
   /// reserved or when commands are release-published. It is the value sampled
   /// from the mapping's write index and uses that format's index units.
   uint64_t producer_index;
-  /// Greatest index completely consumed by the native queue.
+  /// Greatest index completely consumed by the native queue, expanded into
+  /// the producer frontier's monotonic domain when native counters wrap.
   uint64_t consumed_index;
   /// Sticky terminal failure, or `AMDF_STATUS_OK` while active.
   amdf_status_t terminal_status;
