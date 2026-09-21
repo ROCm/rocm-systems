@@ -24,12 +24,13 @@ namespace process_sampler
 {
 struct instance
 {
-    std::function<void()> setup        = []() {};
-    std::function<void()> shutdown     = []() {};
-    std::function<void()> config       = []() {};
-    std::function<void()> sample       = []() {};
-    std::function<void()> post_process = []() {};
-    std::function<void()> pause        = []() {};
+    std::function<void()> setup               = []() {};
+    std::function<void()> shutdown            = []() {};
+    std::function<void()> config              = []() {};
+    std::function<void()> sample              = []() {};
+    std::function<void()> post_process        = []() {};
+    std::function<void()> pause               = []() {};
+    std::function<void()> flush_pending_pause = []() {};
 };
 //
 struct sampler

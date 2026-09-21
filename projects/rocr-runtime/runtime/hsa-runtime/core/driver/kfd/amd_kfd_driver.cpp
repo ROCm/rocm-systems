@@ -279,6 +279,8 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     handle->handle = reinterpret_cast<uint64_t>(mem);
     handle->vaddr = mem;
     handle->size = size;
+    handle->owner = this;
+    handle->owns_allocation = true;
   };
 
   kmt_alloc_flags.ui32.ExecuteAccess =
@@ -614,6 +616,16 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     }
     handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
     handle->size = res.alloc_size;
+    handle->owner = this;
+    // hsaKmtHandleImport creates a distinct object per import, so this handle owns it.
+    handle->owns_allocation = true;
+
+    if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(gpu_agent.libThunkDev(), res.buf_handle,
+                                           &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
+      DestroyMemoryHandle(handle);
+      return HSA_STATUS_ERROR;
+    }
+
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareType::FABRIC_HANDLE: {
@@ -638,6 +650,9 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
     if (rocr::os::DmaBufClose(&res.dmabuf_fd) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
     handle->size = res.alloc_size;
+    handle->owner = this;
+    // hsaKmtHandleImport creates a distinct object per import, so this handle owns it.
+    handle->owns_allocation = true;
     return HSA_STATUS_SUCCESS;
   }
   default:
@@ -709,12 +724,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
     return ret;
   assert(targetHandle.size == size);
 
-  const auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
-  const auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(targetHandle.handle);
-  if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
-    DestroyMemoryHandle(&targetHandle);
-    return HSA_STATUS_ERROR;
-  }
+  handle->mmap_offset = targetHandle.mmap_offset;
 
   // handle->handle is replaced by the imported BO; handle->size carries over from allocation.
   handle->handle = targetHandle.handle;

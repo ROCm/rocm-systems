@@ -32,6 +32,12 @@ else()
 endif()
 
 find_package(rocprofiler-sdk REQUIRED)
+if(BUILD_TESTING)
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        find_package(rocprofiler_sdk_pytest QUIET)
+    endif()
+endif()
 
 add_library(counter-collection-buffer-client SHARED)
 target_sources(counter-collection-buffer-client PRIVATE buffered_client.cpp client.hpp)
@@ -191,10 +197,19 @@ target_link_libraries(counter-collection-device-profiling
 rocprofiler_samples_get_preload_env(PRELOAD_ENV
                                     counter-collection-device-profiling-client)
 
-set(counter-collection-functional-counter-env "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}")
+set(counter-collection-device-profiling-output
+    "${CMAKE_CURRENT_BINARY_DIR}/counter-collection-device-profiling-async.log")
+set(counter-collection-device-profiling-env
+    "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}"
+    "ROCPROFILER_SAMPLE_OUTPUT_FILE=${counter-collection-device-profiling-output}"
+    "ROCR_VISIBLE_DEVICES=0" "HIP_VISIBLE_DEVICES=0")
 
+# The sample configures the first visible agent, so a single visible device keeps that
+# agent and the workload's device the same one. The sampler thread runs on a fixed
+# interval, so the iteration count must keep the run long enough to clear the validator's
+# minimum sample count.
 add_test(NAME counter-collection-device-profiling
-         COMMAND $<TARGET_FILE:counter-collection-device-profiling>)
+         COMMAND $<TARGET_FILE:counter-collection-device-profiling> 50000 50 1)
 
 set_tests_properties(
     counter-collection-device-profiling
@@ -203,9 +218,15 @@ set_tests_properties(
                LABELS
                "samples"
                ENVIRONMENT
-               "${counter-collection-functional-counter-env}"
+               "${counter-collection-device-profiling-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_SETUP
+               "counter-collection-device-profiling-async"
+               RESOURCE_LOCK
+               "rocprofiler_device_counting_pmc"
+               ATTACHED_FILES_ON_FAIL
+               "${counter-collection-device-profiling-output}"
                DISABLED
                "${IS_THREAD_SANITIZER}")
 
@@ -226,10 +247,19 @@ target_link_libraries(
 rocprofiler_samples_get_preload_env(PRELOAD_ENV
                                     counter-collection-device-profiling-sync-client)
 
-set(counter-collection-functional-counter-env "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}")
+set(counter-collection-device-profiling-sync-output
+    "${CMAKE_CURRENT_BINARY_DIR}/counter-collection-device-profiling-sync.log")
+set(counter-collection-device-profiling-sync-env
+    "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}"
+    "ROCPROFILER_SAMPLE_OUTPUT_FILE=${counter-collection-device-profiling-sync-output}"
+    "ROCR_VISIBLE_DEVICES=0" "HIP_VISIBLE_DEVICES=0")
 
+# The sample configures the first visible agent, so a single visible device keeps that
+# agent and the workload's device the same one. The sampler thread runs on a fixed
+# interval, so the iteration count must keep the run long enough to clear the validator's
+# minimum sample count.
 add_test(NAME counter-collection-device-profiling-sync
-         COMMAND $<TARGET_FILE:counter-collection-device-profiling-sync>)
+         COMMAND $<TARGET_FILE:counter-collection-device-profiling-sync> 50000 50 1)
 
 set_tests_properties(
     counter-collection-device-profiling-sync
@@ -238,8 +268,55 @@ set_tests_properties(
                LABELS
                "samples"
                ENVIRONMENT
-               "${counter-collection-functional-counter-env}"
+               "${counter-collection-device-profiling-sync-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_SETUP
+               "counter-collection-device-profiling-sync"
+               RESOURCE_LOCK
+               "rocprofiler_device_counting_pmc"
+               ATTACHED_FILES_ON_FAIL
+               "${counter-collection-device-profiling-sync-output}"
                DISABLED
                "${IS_THREAD_SANITIZER}")
+
+if(BUILD_TESTING AND Python3_Interpreter_FOUND)
+    configure_file(test_device_counting.py test_device_counting.py COPYONLY)
+
+    if(rocprofiler_sdk_pytest_FOUND)
+        set(counter-collection-device-profiling-validator
+            "${ROCPSDK_PYTEST_EXECUTABLE}" -x -v -rs
+            "${CMAKE_CURRENT_BINARY_DIR}/test_device_counting.py")
+    else()
+        set(counter-collection-device-profiling-validator
+            "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_BINARY_DIR}/test_device_counting.py")
+    endif()
+
+    add_test(NAME counter-collection-device-profiling-validate
+             COMMAND ${counter-collection-device-profiling-validator})
+
+    set_tests_properties(
+        counter-collection-device-profiling-validate
+        PROPERTIES
+            TIMEOUT
+            120
+            LABELS
+            "samples;validation"
+            WORKING_DIRECTORY
+            "${CMAKE_CURRENT_BINARY_DIR}"
+            ENVIRONMENT
+            "ROCPROFILER_SAMPLE_ASYNC_OUTPUT_FILE=${counter-collection-device-profiling-output};ROCPROFILER_SAMPLE_SYNC_OUTPUT_FILE=${counter-collection-device-profiling-sync-output}"
+            FIXTURES_REQUIRED
+            "counter-collection-device-profiling-async;counter-collection-device-profiling-sync"
+            FAIL_REGULAR_EXPRESSION
+            "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+            ATTACHED_FILES_ON_FAIL
+            "${counter-collection-device-profiling-output};${counter-collection-device-profiling-sync-output}"
+            DISABLED
+            "${IS_THREAD_SANITIZER}")
+elseif(BUILD_TESTING)
+    message(
+        WARNING
+            "Python3 interpreter not found; counter-collection device-profiling validation will not be registered"
+        )
+endif()

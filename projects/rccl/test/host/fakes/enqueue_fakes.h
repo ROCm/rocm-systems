@@ -13,10 +13,6 @@
 // chains their per-TU resets. See test/host/MICROTEST_README.md for the
 // production-TU-to-fakes-file map.
 //
-// LINK FLOOR ONLY: a seam marked `// UNDRIVEN` in one of those headers is
-// declared so the binary links and so an accidental call is visible, NOT because
-// its path is covered. The marker travels with the declaration.
-
 #ifndef RCCL_TEST_HOST_ENQUEUE_FAKES_H_
 #define RCCL_TEST_HOST_ENQUEUE_FAKES_H_
 
@@ -26,9 +22,11 @@
 #include "env_fakes.h"           // src/misc/param.cc + getenv interposition
 #include "hip_fakes.h"           // HIP runtime seams
 #include "nccl_fakes.h"          // reusable nccl* seams
+#include "nccl_stubs.h"          // core/lifecycle functors; nccl_stubs.cc is linked into this binary too
 #include "proxy_fakes.h"         // src/proxy.cc
 #include "rccl_wrap_fakes.h"     // src/rccl_wrap.cc
 #include "recorder_fakes.h"      // src/recorder.cc
+#include "register_stubs.h"      // src/register/coll_reg.cc (hookable entry only)
 #include "sym_kernels_fakes.h"   // src/sym_kernels.cc
 #include "transport_stubs.h"     // src/transport/net.cc (rcclUseAinic)
 #include "tuning_fakes.h"        // src/graph/tuning.cc

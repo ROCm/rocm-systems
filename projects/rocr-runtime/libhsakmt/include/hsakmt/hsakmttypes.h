@@ -232,7 +232,8 @@ typedef union
     {
         unsigned int PerSDMAQueueResetSupported : 1;  // Indicates per-sdma queue reset supported
         unsigned int AqlEmulationPm4_ : 1;            // Indicates device uses AQL emulation via PM4 packets
-        unsigned int Reserved : 30; // Reserved
+        unsigned int StallOnRetryFault : 1;           // Node runs in recoverable-fault mode
+        unsigned int Reserved : 29; // Reserved
     } ui32;
 } HSA_CAPABILITY2;
 

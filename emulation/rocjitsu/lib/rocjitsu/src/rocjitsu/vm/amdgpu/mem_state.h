@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_MEM_STATE_H_
-#define ROCJITSU_VM_AMDGPU_MEM_STATE_H_
+#pragma once
 
 /// @file Dynamic pipeline state for AMDGPU memory instructions.
 ///
@@ -13,6 +12,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/atomic_op.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 
@@ -20,6 +21,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -41,36 +43,37 @@ enum MemPipelineTag : uint8_t {
   SCALAR_MEM = 1,
   GLOBAL_MEM = 2,
   LOCAL_MEM = 3,
+  TENSOR_DMA = 4,
 };
 
-/// @brief Atomic read-modify-write operation type.
-enum class AtomicOp : uint8_t {
-  NONE = 0,       ///< Not an atomic operation.
-  SWAP,           ///< Exchange.
-  CMPSWAP,        ///< Compare-and-swap (data[0] = src, data[1] = cmp).
-  MSKOR,          ///< Masked OR (data[0] = mask, data[1] = src).
-  ADD,            ///< Atomic add.
-  SUB,            ///< Atomic subtract (mem - data).
-  RSUB,           ///< Atomic reverse subtract (data - mem).
-  SMIN,           ///< Signed minimum.
-  UMIN,           ///< Unsigned minimum.
-  SMAX,           ///< Signed maximum.
-  UMAX,           ///< Unsigned maximum.
-  AND,            ///< Bitwise AND.
-  OR,             ///< Bitwise OR.
-  XOR,            ///< Bitwise XOR.
-  INC,            ///< Increment (wrapping).
-  DEC,            ///< Decrement (wrapping).
-  FADD,           ///< Floating-point add.
-  FMIN,           ///< Floating-point minimum.
-  FMAX,           ///< Floating-point maximum.
-  APPEND,         ///< LDS append counter.
-  CONSUME,        ///< LDS consume counter.
-  BARRIER_ARRIVE, ///< LDS barrier-arrive state update.
+/// @brief One physical-transfer request prepared from a vector memory operation.
+struct TranslatedMemoryRequest {
+  uint64_t address = 0;
+  uint32_t data_offset = 0;
+  uint32_t size = 0;
+};
+
+/// @brief Retry state retained by a prepared translated memory instruction.
+///
+/// @details The operation-scoped VM snapshot prevents a root replacement from
+/// splitting one instruction across translation epochs. Request and byte cursors
+/// advance only after completed backing operations, so retrying Unavailable does
+/// not replay stores or already-completed lanes of a vector atomic.
+class TranslatedMemoryProgress {
+public:
+  std::optional<GpuVmAccess> access;
+  std::vector<TranslatedMemoryRequest> requests;
+  std::size_t request_index = 0;
+  std::size_t completed_bytes = 0;
+  uint32_t atomic_lane = 0;
+  uint64_t atomic_loaded_value = 0;
+  bool initialized = false;
+  bool atomic_loaded = false;
 };
 
 /// @brief Dynamic pipeline state for scalar memory instructions (SMEM).
-struct ScalarMemState : DynamicInstState {
+class ScalarMemState : public DynamicInstState {
+public:
   ScalarMemState() { tag_ = SCALAR_MEM; }
   uint64_t addr = 0;
   /// Architectural destination resolved and range-checked at issue time.
@@ -83,6 +86,7 @@ struct ScalarMemState : DynamicInstState {
   WaitCounterType wait_counter_type = WaitCounterType::LGKMCNT;
   uint32_t response_data[16] = {};
   uint32_t store_data[16] = {};
+  TranslatedMemoryProgress translated;
 };
 
 /// @brief Per-element vector-memory lane masks with inline storage for the
@@ -139,7 +143,8 @@ private:
 
 /// @brief Dynamic pipeline state for vector memory instructions
 /// (FLAT, MUBUF, MTBUF, DS).
-struct VectorMemState : DynamicInstState {
+class VectorMemState : public DynamicInstState {
+public:
   VectorMemState(MemPipelineTag pipeline) {
     tag_ = pipeline;
     wait_counter_type = (pipeline == LOCAL_MEM) ? WaitCounterType::LGKMCNT : WaitCounterType::VMCNT;
@@ -168,11 +173,12 @@ struct VectorMemState : DynamicInstState {
   // cacheability and response policy used by the downstream memory path.
   bool request_force_l1_bypass = false;
   bool sign_extend = false;
-  // Scratch (private) accesses store data in the hardware dword-interleaved
-  // ("swizzled") layout that rocm-dbgapi reads: consecutive dwords of a lane's
-  // private space are lane_count*4 bytes apart, not contiguous. When
-  // scratch_swizzle is set, per_lane_addr holds the swizzled address of element
-  // 0 and scratch_addr_stride (= lane_count * sizeof(uint32_t)) is the per-element
+  // Some accesses store data in a hardware dword-interleaved ("swizzled")
+  // layout: consecutive dwords of a lane are separated rather than contiguous.
+  // Private scratch uses this layout so it matches what rocm-dbgapi reads, but
+  // GFX9 buffer descriptors can independently request a similar layout for
+  // ordinary global memory. When scratch_swizzle is set, per_lane_addr holds
+  // the swizzled address of element 0 and scratch_addr_stride is the per-element
   // destination-address stride; the register/LDS buffer indexing is unchanged.
   // See rocm-dbgapi memory.cpp private_swizzled conversion.
   // FLAT routing is per lane: one wave can mix private-aperture lanes with
@@ -181,6 +187,10 @@ struct VectorMemState : DynamicInstState {
   // For dedicated SCRATCH ops every active lane is private and this equals
   // lane_mask.
   bool scratch_swizzle = false;
+  // True only when the swizzled addresses were derived from the wave's private
+  // scratch backing. Layout alone does not imply scratch address-space
+  // provenance: buffer SRD swizzling still addresses the SRD's global base.
+  bool requires_scratch_backing = false;
   uint64_t scratch_lane_mask = 0;
   uint32_t scratch_addr_stride = 0;
   // Low bits of the uniform address contribution applied after swizzling. The
@@ -190,7 +200,19 @@ struct VectorMemState : DynamicInstState {
   bool d16_hi = false; ///< D16_HI load: write upper 16 bits; preserve or zero lower per SRAM ECC.
   bool d16_lo = false; ///< D16 load: write lower 16 bits; preserve or zero upper per SRAM ECC.
   AtomicOp atomic_op = AtomicOp::NONE; ///< Atomic RMW operation (NONE for regular loads/stores).
-  bool lds_dst = false;                ///< Buffer load with LDS bit: write to LDS, not VGPRs.
+  // DS packed atomics capture MODE.FP_DENORM16_64 at issue (CDNA5 ISA 12.2).
+  // Rounding is fixed RNE; VALU FP16_OVFL does not apply. Preserve denormals
+  // by default, including FLAT atomics routed to LDS through the shared
+  // aperture (RDNA4 ISA MODE.FP_DENORM). Direct DS execution overrides this.
+  uint32_t packed_denorm_mode = 3;
+  /// Scalar atomic policies are captured at issue, before MODE can change.
+  /// Separate LDS and L2 modes cover FLAT requests routed to either pipeline.
+  uint32_t atomic_denorm_mode = 3;
+  uint32_t atomic_lds_denorm_mode = 3;
+  /// Older MIN/MAX compare flushed inputs but return the original selected bits.
+  /// They also propagate signaling NaNs instead of treating them as missing numbers.
+  bool atomic_legacy_minmax = true;
+  bool lds_dst = false; ///< Buffer load with LDS bit: write to LDS, not VGPRs.
   /// Reference LDS address for LDS-destination loads. For ordinary LDS-dst
   /// paths this may include the lane-0 destination offset. For cluster
   /// multicast this must be exactly Wavefront::lds_base(), the source WG
@@ -222,6 +244,7 @@ struct VectorMemState : DynamicInstState {
   uint32_t ds2_dst_reg_base = 0;
   std::vector<uint8_t> ds2_store_data;
   std::vector<uint8_t> ds2_response_data;
+  TranslatedMemoryProgress translated;
 };
 
 /// @brief Reject a vector-memory instruction before it reaches a memory pipeline.
@@ -235,5 +258,3 @@ inline void reject_vector_memory_access(VectorMemState &state) {
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_MEM_STATE_H_
