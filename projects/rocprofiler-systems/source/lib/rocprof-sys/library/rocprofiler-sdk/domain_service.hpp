@@ -305,13 +305,14 @@ private:
     {
         std::vector<domains::operation_id_t> resolved;
 
+        // No explicit operation filter requested: leave `resolved` empty so the SDK
+        // is configured with (nullptr, 0), meaning "trace all operations". Some
+        // buffer-tracing kinds (e.g. MEMORY_ALLOCATION on rocprofiler-sdk v1.4.1)
+        // silently deliver zero records when given an explicit operations array
+        // that enumerates every known operation id, even though the configure call
+        // itself reports success.
         if(!requested.has_value())
         {
-            resolved.reserve(domain.operations.size());
-            for(const auto& operation : domain.operations)
-            {
-                resolved.push_back(operation.id);
-            }
             return resolved;
         }
 

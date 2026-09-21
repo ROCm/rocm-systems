@@ -29,9 +29,13 @@ public:
         const auto kind =
             static_cast<SdkBackend::callback_tracing_kind_t>(m_definition.meta.id);
 
+        // An empty operations list means "no explicit filter was requested" -- pass
+        // (nullptr, 0) so the SDK traces all operations for this kind, matching
+        // buffered_domain::configure()'s handling of the same case.
+        auto*      ops_data  = m_operations.empty() ? nullptr : m_operations.data();
+        const auto ops_count = m_operations.size();
         SdkBackend::configure_callback_tracing_service(
-            m_context, kind, m_operations.data(), m_operations.size(),
-            m_definition.on_record, nullptr);
+            m_context, kind, ops_data, ops_count, m_definition.on_record, nullptr);
     }
 
     [[nodiscard]] std::string_view name() const noexcept
