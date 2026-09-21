@@ -86,7 +86,7 @@ get_default_max_library_functions()
 /// every other copy of the pipe's write end first, or this blocks forever. On a read
 /// error, the bytes received so far are returned.
 std::string
-read_until_eof(int read_fd)
+read_fd_until_eof(int read_fd)
 {
     constexpr size_t k_read_buffer_size = 4096;
 
@@ -161,7 +161,7 @@ read_dynamic_dependencies(const std::string& exe_path)
 
     ::close(write_fd);  // the parent's copy must go, or the read below never sees EOF
 
-    const auto trace_output = read_until_eof(read_fd);
+    const auto trace_output = read_fd_until_eof(read_fd);
     ::close(read_fd);
 
     auto status = 0;
