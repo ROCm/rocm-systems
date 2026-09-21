@@ -4,6 +4,8 @@
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
 #include "checkpoint_generated.h"
@@ -88,7 +90,9 @@ void restore_vgpr_block_into_zeroed_storage(amdgpu::ComputeUnitCore &cu, uint32_
 flatbuffers::Offset<fb::SimulationConfig>
 serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
                  const simdojo::SimulationEngine::Config &engine_config,
-                 uint32_t cpu_dispatch_threads) {
+                 uint32_t cpu_dispatch_threads, uint32_t cpu_thread_budget,
+                 std::span<const ExecutionThreadChoice> thread_allocations,
+                 bool legacy_auto_dispatch, int32_t async_helper_threads) {
   auto arch_str = builder.CreateString(arch_to_string(soc.arch()));
   auto exec_mode_str = builder.CreateString(
       soc.exec_mode() == simdojo::ExecMode::CLOCKED ? "clocked" : "functional");
@@ -125,8 +129,22 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
   auto fb_gpu = fb::CreateAmdgpuConfig(builder, num_xcds, num_iods, fb_xcd);
   auto fb_vm = fb::CreateVirtualMachineConfig(builder, arch_str, fb_gpu);
 
-  return fb::CreateSimulationConfig(builder, engine_config.max_ticks, engine_config.num_threads,
-                                    exec_mode_str, fb_vm, 0, 0, cpu_dispatch_threads);
+  std::vector<flatbuffers::Offset<fb::ExecutionThreadChoice>> choices;
+  for (const auto &choice : thread_allocations)
+    choices.push_back(
+        fb::CreateExecutionThreadChoice(builder, choice.engines, choice.dispatch, choice.helpers));
+  flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<fb::ExecutionThreadChoice>>>
+      fb_choices;
+  if (!legacy_auto_dispatch)
+    fb_choices = builder.CreateVector(choices);
+  // Preserve automatic requests, including zero engines/budget.
+  // Field absence continues to identify legacy serial-dispatch checkpoints.
+  builder.ForceDefaults(true);
+  auto result = fb::CreateSimulationConfig(
+      builder, engine_config.max_ticks, engine_config.num_threads, exec_mode_str, fb_vm, 0, 0,
+      cpu_dispatch_threads, cpu_thread_budget, fb_choices, async_helper_threads);
+  builder.ForceDefaults(false);
+  return result;
 }
 
 /// @brief Reconstruct a VirtualMachine::Config from a stored FlatBuffer config.
@@ -182,7 +200,9 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
 
 void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
                      const simdojo::SimulationEngine::Config &engine_config,
-                     uint32_t cpu_dispatch_threads) {
+                     uint32_t cpu_dispatch_threads, uint32_t cpu_thread_budget,
+                     std::span<const ExecutionThreadChoice> thread_allocations,
+                     bool legacy_auto_dispatch, int32_t async_helper_threads) {
   flatbuffers::FlatBufferBuilder builder(1024 * 1024);
 
   // Serialize compute unit states across all XCDs and their shader engines.
@@ -274,7 +294,11 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
   auto cu_vec = builder.CreateVector(cu_offsets);
   auto pages_vec = builder.CreateVector(page_offsets);
   auto mem_state = fb::CreateGpuMemoryState(builder, pages_vec);
-  auto config_offset = serialize_config(builder, soc, engine_config, cpu_dispatch_threads);
+  auto config_offset = serialize_config(builder, soc, engine_config, cpu_dispatch_threads,
+                                        cpu_thread_budget, thread_allocations,
+                                        legacy_auto_dispatch && cpu_dispatch_threads == 0 &&
+                                            cpu_thread_budget == 0 && thread_allocations.empty(),
+                                        async_helper_threads);
 
   auto checkpoint =
       fb::CreateSimulationCheckpoint(builder, tick, config_offset, cu_vec, cp_offset, mem_state);
@@ -314,6 +338,46 @@ LoadedConfig restore_checkpoint(const std::string &path) {
   simdojo::SimulationEngine::Config engine_config{};
   engine_config.max_ticks = fb_config->max_ticks();
   engine_config.num_threads = fb_config->num_threads();
+
+  LoadedConfig result;
+  result.exec_mode = vm_config.soc.exec_mode;
+  result.requested_engine_threads = engine_config.num_threads;
+  result.cpu_dispatch_threads =
+      flatbuffers::IsFieldPresent(fb_config, fb::SimulationConfig::VT_CPU_DISPATCH_THREADS)
+          ? fb_config->cpu_dispatch_threads()
+          : 1u;
+  result.cpu_thread_budget = fb_config->cpu_thread_budget();
+  result.async_helper_threads =
+      flatbuffers::IsFieldPresent(fb_config, fb::SimulationConfig::VT_ASYNC_HELPER_THREADS)
+          ? fb_config->async_helper_threads()
+          : 0;
+  result.legacy_auto_dispatch =
+      !fb_config->thread_allocations() && result.cpu_dispatch_threads == 0;
+  if (fb_config->thread_allocations())
+    for (const auto *choice : *fb_config->thread_allocations())
+      result.thread_allocations.push_back(
+          {choice->num_threads(), choice->cpu_dispatch_threads(), choice->async_helper_threads()});
+  const auto &xcd = vm_config.soc.xcd;
+  const uint32_t capacity = xcd.num_shader_engines * xcd.shader_engine.num_compute_units;
+  const uint32_t host_threads = amdgpu::available_host_threads();
+  result.execution_threads = resolve_execution_threads(
+      {result.cpu_thread_budget, result.requested_engine_threads, result.cpu_dispatch_threads,
+       result.async_helper_threads},
+      host_threads, vm_config.soc.num_xcds, std::span(&capacity, 1),
+      configured_async_mma_supported(vm_config.soc.arch), result.thread_allocations,
+      result.exec_mode == simdojo::ExecMode::CLOCKED);
+  // Before allocation tables, explicit zero selected a dispatch-only host
+  // budget. An absent vector identifies that policy; a present empty vector
+  // intentionally selects the new serial fallback.
+  if (result.legacy_auto_dispatch && result.exec_mode == simdojo::ExecMode::FUNCTIONAL) {
+    auto budgets = resolve_cpu_dispatch_thread_budgets(0, host_threads, 1);
+    result.execution_threads.dispatch = {std::min(budgets.front(), std::max(capacity, 1u))};
+  }
+  if (!engine_config.num_threads)
+    engine_config.num_threads = result.execution_threads.engines;
+
+  result.async_resources = make_async_execution_resources(result.execution_threads.helpers);
+  vm_config.soc.xcd.shader_engine.compute_unit.async_resources = result.async_resources;
 
   // Rebuild the SoC root expected by LoadedConfig and create_from_loaded().
   auto soc = std::make_unique<SoC>("gpu_soc", vm_config.soc);
@@ -421,15 +485,7 @@ LoadedConfig restore_checkpoint(const std::string &path) {
   }
 
   // Return the same root shape as the JSON configuration loader.
-  LoadedConfig result;
   result.engine_config = engine_config;
-  result.exec_mode = vm_config.soc.exec_mode;
-  // This field did not exist in legacy checkpoints, whose dispatch was serial.
-  // A present zero is a new checkpoint's explicit request for automatic sizing.
-  result.cpu_dispatch_threads =
-      flatbuffers::IsFieldPresent(fb_config, fb::SimulationConfig::VT_CPU_DISPATCH_THREADS)
-          ? fb_config->cpu_dispatch_threads()
-          : 1u;
   result.build_result.root = std::move(soc);
   result.build_result.memory = mem_ptr;
   return result;
