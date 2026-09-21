@@ -15,6 +15,7 @@
 namespace rocjitsu::amdgpu {
 class Wavefront;
 struct VectorMemState;
+struct ScalarMemState;
 } // namespace rocjitsu::amdgpu
 
 namespace rocjitsu::cdna5 {
@@ -37,7 +38,8 @@ BufferResource decode_buffer_resource(uint32_t srd0, uint32_t srd1, uint32_t srd
 inline int32_t signed_ioffset(uint32_t ioffset) { return static_cast<int32_t>(ioffset << 8) >> 8; }
 
 std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
-                                               uint32_t access_size_bytes);
+                                               uint32_t access_size_bytes,
+                                               amdgpu::ScalarMemState *state = nullptr);
 
 void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d);

@@ -20,12 +20,14 @@ namespace rocjitsu {
 namespace amdgpu {
 class Wavefront;
 struct VectorMemState;
+struct ScalarMemState;
 } // namespace amdgpu
 
 namespace cdna4 {
 
 /// @brief Compute scalar address for SMEM encoding.
-std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf);
+std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
+                                               amdgpu::ScalarMemState *state = nullptr);
 
 /// @brief Compute per-lane addresses for FLAT/GLOBAL/SCRATCH encoding.
 void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf,

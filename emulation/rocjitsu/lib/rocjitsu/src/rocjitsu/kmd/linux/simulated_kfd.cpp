@@ -95,7 +95,10 @@ bool SimulatedKfd::gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint
   auto proc = find_process(local_process_id_);
   if (!proc)
     return false;
-  map_to_gpu(*proc, gpu_va, host_ptr, size, pte_mtype_for_flags(alloc_flags));
+  // GEM_VA uses the interposer's private read-write dmabuf mapping, whose
+  // lifetime is tied to the GEM entry. It is not the application's CPU alias.
+  map_to_gpu(*proc, gpu_va, host_ptr, size, pte_mtype_for_flags(alloc_flags),
+             KfdProcess::HostExtentOwner::Driver);
   return true;
 }
 

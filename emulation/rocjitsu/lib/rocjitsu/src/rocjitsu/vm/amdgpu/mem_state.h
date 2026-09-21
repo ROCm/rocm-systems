@@ -14,6 +14,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
+#include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 
@@ -56,6 +57,7 @@ struct ScalarMemState : DynamicInstState {
   bool is_load = true;
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::LGKMCNT;
+  uint16_t load_dword_mask = 0xffff;
   uint32_t response_data[16] = {};
   uint32_t store_data[16] = {};
 };
@@ -143,6 +145,14 @@ struct VectorMemState : DynamicInstState {
   // cacheability and response policy used by the downstream memory path.
   bool request_force_l1_bypass = false;
   bool sign_extend = false;
+  // Formatted buffer transfers use elem_size bytes in memory and one full
+  // VGPR per component, or packed halves for D16. Zero components selects
+  // the ordinary memory path.
+  uint32_t buffer_format = 0;
+  BufferFormatEncoding buffer_format_encoding = BufferFormatEncoding::Gfx11;
+  uint32_t buffer_selectors = 0;
+  uint32_t buffer_components = 0;
+  bool buffer_d16 = false;
   // Scratch (private) accesses store data in the hardware dword-interleaved
   // ("swizzled") layout that rocm-dbgapi reads: consecutive dwords of a lane's
   // private space are lane_count*4 bytes apart, not contiguous. When
@@ -204,6 +214,9 @@ struct VectorMemState : DynamicInstState {
   /// atomics, ds2_dst_reg_base is the VGPR base for the second result and the
   /// two response vectors preserve each access independently. For stores and
   /// atomics, ds2_store_data contains the second access payload.
+  // LDS stack inputs are snapshotted in store_data; the second-result slot returns
+  // the stack pointer. Flags: bit 0 = RDNA4, bit 1 = triangle pairs, bit 2 = primitive ranges.
+  uint8_t lds_stack_inputs = 0, lds_stack_size = 0, lds_stack_flags = 0;
   bool ds2_active = false;
   std::array<uint64_t, 64> ds2_per_lane_addr = {};
   uint32_t ds2_dst_reg_base = 0;
