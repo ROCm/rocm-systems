@@ -285,8 +285,9 @@ in the following table.
     * - | ``NCCL_IB_QUERY_PORT_SPEED``
         | Controls whether RCCL queries the extended port speed
           (``ibv_query_port`` active speed extension) for bandwidth reporting.
-          This affects only the reported/logged link speed granularity, not
-          the data path.
+          Disabling it falls back to the legacy ``active_speed``/
+          ``active_width`` computation and disables runtime speed-change
+          detection.
       - | ``1``: Query the extended speed (default).
         | ``0``: Use the legacy speed field only.
 
