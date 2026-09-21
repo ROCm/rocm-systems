@@ -11,13 +11,6 @@
 #include "nccl.h"
 #include "rma_multiseg.h"
 
-// After a prefix post, keep the request and return success so Test() drains.
-// Callers NCCLCHECK the complete helper and never reach test() on error.
-static inline ncclResult_t ncclRmaPostedRequestStatus(ncclResult_t postRet, int posted) {
-  if (postRet != ncclSuccess && posted > 0) return ncclSuccess;
-  return postRet;
-}
-
 // Keep-or-free after ibv_post_send. posted==0 and error: free the slot.
 // Otherwise keep *request so Test() drains; mark FAILED if the signaled tail
 // was lost. gin.cc applies the IB side effects from these flags.
