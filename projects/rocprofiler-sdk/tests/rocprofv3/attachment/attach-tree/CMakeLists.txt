@@ -1,7 +1,7 @@
 #
 # rocprofv3 attachment tree test
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(
     rocprofiler-sdk-tests-rocprofv3-attachment-attach-tree
@@ -42,7 +42,8 @@ rocprofiler_add_integration_execute_test(
     DISABLED ${IS_DISABLED}
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${attachment-env}"
-    FAIL_REGULAR_EXPRESSION "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FAIL_REGULAR_EXPRESSION
+        "ERROR|FATAL|Skipping output generation|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     SKIP_REGULAR_EXPRESSION "This test is skipped."
     FIXTURES_SETUP rocprofv3-test-attachment-attach-tree)
 

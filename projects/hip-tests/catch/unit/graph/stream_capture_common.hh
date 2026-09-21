@@ -16,24 +16,32 @@ inline constexpr size_t kLaunchIters = 10;
 }  // anonymous namespace
 
 template <typename T> void captureSequenceSimple(T* hostMem1, T* devMem1, T* hostMem2, size_t N,
-                                                 hipStream_t captureStream) {
+                                                 hipStream_t captureStream,
+                                                 bool threadSafe = false) {
   size_t Nbytes = N * sizeof(T);
 
-  HIP_CHECK(hipMemsetAsync(devMem1, 0, Nbytes, captureStream));
-  HIP_CHECK(hipMemcpyAsync(devMem1, hostMem1, Nbytes, hipMemcpyHostToDevice, captureStream));
-  HIP_CHECK(hipMemcpyAsync(hostMem2, devMem1, Nbytes, hipMemcpyDeviceToHost, captureStream));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipMemsetAsync(devMem1, 0, Nbytes, captureStream));
+  HIP_CHECK_OPT_THREAD(threadSafe,
+                       hipMemcpyAsync(devMem1, hostMem1, Nbytes, hipMemcpyHostToDevice,
+                                      captureStream));
+  HIP_CHECK_OPT_THREAD(threadSafe,
+                       hipMemcpyAsync(hostMem2, devMem1, Nbytes, hipMemcpyDeviceToHost,
+                                      captureStream));
 }
 
 template <typename T> void captureSequenceLinear(T* hostMem1, T* devMem1, T* hostMem2, T* devMem2,
-                                                 size_t N, hipStream_t captureStream) {
+                                                 size_t N, hipStream_t captureStream,
+                                                 bool threadSafe = false) {
   {
     (void)(hostMem2);
   }  // unused hostMem2
   size_t Nbytes = N * sizeof(T);
 
-  HIP_CHECK(hipMemcpyAsync(devMem1, hostMem1, Nbytes, hipMemcpyHostToDevice, captureStream));
+  HIP_CHECK_OPT_THREAD(threadSafe,
+                       hipMemcpyAsync(devMem1, hostMem1, Nbytes, hipMemcpyHostToDevice,
+                                      captureStream));
 
-  HIP_CHECK(hipMemsetAsync(devMem2, 0, Nbytes, captureStream));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipMemsetAsync(devMem2, 0, Nbytes, captureStream));
 }
 
 template <typename T> void captureSequenceBranched(T* hostMem1, T* devMem1, T* hostMem2, T* devMem2,
@@ -58,7 +66,8 @@ template <typename T> void captureSequenceBranched(T* hostMem1, T* devMem1, T* h
 }
 
 template <typename T>
-void captureSequenceCompute(T* devMem1, T* hostMem2, T* devMem2, size_t N, hipStream_t stream) {
+void captureSequenceCompute(T* devMem1, T* hostMem2, T* devMem2, size_t N, hipStream_t stream,
+                            bool threadSafe = false) {
   size_t Nbytes = N * sizeof(T);
   constexpr unsigned threadsPerBlock = 256;
   const unsigned blocks =
@@ -67,5 +76,6 @@ void captureSequenceCompute(T* devMem1, T* hostMem2, T* devMem2, size_t N, hipSt
   hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, stream,
                      devMem1, devMem2, N);
 
-  HIP_CHECK(hipMemcpyAsync(hostMem2, devMem2, Nbytes, hipMemcpyDeviceToHost, stream));
+  HIP_CHECK_OPT_THREAD(threadSafe,
+                       hipMemcpyAsync(hostMem2, devMem2, Nbytes, hipMemcpyDeviceToHost, stream));
 }

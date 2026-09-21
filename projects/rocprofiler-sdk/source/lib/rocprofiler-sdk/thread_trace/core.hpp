@@ -119,8 +119,7 @@ public:
     std::unique_ptr<aql::ThreadTraceAQLPacketFactory> factory{nullptr};
 
     /// Start the trace and spawn helper threads when triple buffering is used.
-    std::shared_ptr<hsa_signal_t> start_thread_trace(
-        std::shared_ptr<std::atomic<int>> running_flag);
+    signal_ptr_t start_thread_trace(std::shared_ptr<std::atomic<int>> running_flag);
     /// Stop the trace and flush the outstanding hardware packets.
     signal_ptr_t stop_thread_trace();
 
@@ -175,11 +174,12 @@ public:
     const auto& get_agents() const { return agents; }
 
 private:
-    std::unordered_map<hsa_agent_t, std::unique_ptr<ThreadTracerAgent>>     agents{};
-    std::unordered_map<rocprofiler_agent_id_t, thread_trace_parameter_pack> params{};
+    std::unordered_map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerAgent>> agents{};
+    std::unordered_map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
 
     std::shared_mutex agents_map_mut{};
     std::atomic<int>  post_move_data{0};
+    std::atomic<bool> enabled{false};
 };
 
 class DeviceThreadTracer
@@ -214,8 +214,6 @@ public:
 
     const auto& get_agents() const { return agents; }
 
-    friend void flush_and_stop();
-
 private:
     std::map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerAgent>> agents{};
     std::map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
@@ -224,18 +222,20 @@ private:
     std::shared_ptr<std::atomic<int>> worker_flag{nullptr};
 };
 
-/// Install the thread trace service for newly created contexts.
+/// Install the thread trace service for newly created contexts (builds per-agent
+/// resources; does not program hardware).
 void
 initialize(HsaApiTable* table);
+
+/// Replay start_context() for device thread trace contexts requested before
+/// hsa_init(). Must be called after the HSA queue infrastructure is initialized
+/// (see registration.cpp), not from initialize().
+void
+start_active_contexts();
 
 /// Tear down shared resources when the runtime shuts down.
 void
 finalize();
-
-/// Stop and join all active producer/consumer threads, flushing any pending
-/// data.  Safe to call before hsa_shut_down; prevents new traces from starting.
-void
-flush_and_stop();
 
 }  // namespace thread_trace
 }  // namespace rocprofiler

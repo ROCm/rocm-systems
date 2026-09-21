@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.16.8)
+cmake_minimum_required(VERSION 3.27)
 project(clr)
 
 ##########
@@ -17,13 +17,14 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
     endif()
     string(REPLACE "/GR" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     string(REPLACE "/W3" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        add_compile_options(/MTd)
-        add_compile_options(-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH)
+    if (AMD_COMPUTE_WIN)
+        # shared prebuilt libs are release, allows hip to be debug
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
+        add_compile_options("$<$<CONFIG:Debug>:-D_ITERATOR_DEBUG_LEVEL=0>")
+        add_compile_options("$<$<CONFIG:Debug>:-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH>")
     else()
-        if (AMD_COMPUTE_WIN)
-            add_compile_options(/MT)
-        endif()
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        add_compile_options("$<$<CONFIG:Debug>:-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH>")
     endif()
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         # Unlike when targeting MSFT's MSVC, when targeting clang-cl,
@@ -40,11 +41,15 @@ endif()
 
 option(CLR_BUILD_HIP "Build HIP" OFF)
 option(CLR_BUILD_OCL "Build OCL" OFF)
+option(USE_NEW_HOSTCALL_IMPL
+  "Use the new phase/occupancy-based hostcall implementation" OFF)
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")
 endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/CLRHardening.cmake")
 
 #############
 # Build steps

@@ -61,12 +61,12 @@ Panel Config:
           peak: $max_sclk * $cu_per_gpu * 0.128
           pct_of_peak: true
         vL1D Cache BW:
-          value: SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 128) / SUM(End_Timestamp - Start_Timestamp)
+          value: 128 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $max_sclk / 1000 * 128 * $cu_per_gpu
           pct_of_peak: true
         L2 Cache BW:
-          value: SUM(TCC_REQ_sum * 128) / SUM(End_Timestamp - Start_Timestamp)
+          value: 128 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $max_sclk / 1000 * 128 * TO_INT($total_l2_chan)
           pct_of_peak: true
@@ -93,7 +93,7 @@ Panel Config:
           peak: N/A
           pct_of_peak: false
         SIMD Utilization:
-          value: SUM(100 * SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: 100 * SUM(SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
           peak: 100
           pct_of_peak: false

@@ -84,7 +84,7 @@ execution of wavefronts in a kernel:
    * The kernel cycles/timings are measured using a counter that is
    impacted by scheduling overhead, this is particularly noticeable for
    short-running kernels (less than 1ms) where scheduling overhead forms a
-   significant portion of the overall kernel runtime. 
+   significant portion of the overall kernel runtime.
    * The wave cycles metric is incremented per-wavefront scheduled to a SIMD every cycle whereas
    the kernel cycles counter is incremented only once per-cycle when any
    wavefront is scheduled.
@@ -365,7 +365,7 @@ not. For more details on how operations are counted, see :ref:`FLOP counting con
 
    The metrics in this section do not
    take into account the execution mask of the operation, and will report the
-   same value even if EXEC is identically zero. For more details, see :ref:`instruction-mix`. 
+   same value even if EXEC is identically zero. For more details, see :ref:`instruction-mix`.
 
 .. tab-set::
 

@@ -20,14 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #include <rocprofiler-register/rocprofiler-register.h>
 #include <amdhip/amdhip.hpp>
-#include <hsa-runtime/hsa-runtime.hpp>
 #include <hipfile/hipfile.hpp>
+#include <hsa-runtime/hsa-runtime.hpp>
 #include <rccl/rccl.hpp>
 #include <rocdecode/rocdecode.hpp>
 #include <rocjpeg/rocjpeg.hpp>
+#include <rocshmem/rocshmem.hpp>
 #include <roctx/roctx.hpp>
 
 #include <dlfcn.h>
@@ -83,6 +83,13 @@ rocJpegStreamCreate(RocJpegStreamHandle* jpeg_stream_handle)
 
 hipFileError_t
 hipFileGetVersion(unsigned*, unsigned*, unsigned*)
+{
+    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
+    return {};
+}
+
+rocshmem_status_t
+rocshmem_init_mock()
 {
     printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
     return {};
@@ -189,6 +196,7 @@ rocprofiler_set_api_table(const char* name,
     using rocdecode_table_t = rocdecode::rocdecodeApiFuncTable;
     using rocjpeg_table_t   = rocjpeg::rocjpegApiFuncTable;
     using hipfile_table_t   = hipFile::hipFileDispatchTable;
+    using rocshmem_table_t  = rocshmem::rocshmemApiFuncTable;
 
     auto* _wrap_v = std::getenv("ROCP_REG_TEST_WRAP");
     bool  _wrap   = (_wrap_v != nullptr && std::stoi(_wrap_v) != 0);
@@ -235,8 +243,13 @@ rocprofiler_set_api_table(const char* name,
         }
         else if(std::string_view{ name } == "hipFile")
         {
-            hipfile_table_t* _table          = static_cast<hipfile_table_t*>(tables[0]);
+            hipfile_table_t* _table         = static_cast<hipfile_table_t*>(tables[0]);
             _table->pfn_hipfile_get_version = &rocprofiler::hipFileGetVersion;
+        }
+        else if(std::string_view{ name } == "rocshmem")
+        {
+            rocshmem_table_t* _table = static_cast<rocshmem_table_t*>(tables[0]);
+            _table->rocshmem_init_fn = &::rocprofiler::rocshmem_init_mock;
         }
     }
 

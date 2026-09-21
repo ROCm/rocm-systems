@@ -23,7 +23,7 @@ output_file_registry::make_entry(std::string path, output_format format,
                      "Open in https://ui.perfetto.dev" };
         case output_format::rocpd:
             return { "RocPD database", std::move(path),
-                     "sqlite3, AMD Visualizer (OPTIQ), or rocprofiler-sdk provided rocpd "
+                     "sqlite3, ROCm Optiq, or rocprofiler-sdk provided rocpd "
                      "Python module for conversion to other formats" };
         case output_format::json:
             return { component_name.empty() ? "JSON output"
@@ -44,7 +44,7 @@ output_file_registry::make_entry(std::string path, output_format format,
 void
 output_file_registry::register_file(std::string path, output_format format)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    const std::lock_guard<std::mutex> lock(m_mutex);
     m_files.push_back(make_entry(std::move(path), format));
 }
 
@@ -52,14 +52,14 @@ void
 output_file_registry::register_file(std::string path, output_format format,
                                     std::string component_name)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    const std::lock_guard<std::mutex> lock(m_mutex);
     m_files.push_back(make_entry(std::move(path), format, component_name));
 }
 
 void
 output_file_registry::print_summary() const
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    const std::lock_guard<std::mutex> lock(m_mutex);
     if(m_files.empty()) return;
 
     constexpr std::string_view header =
@@ -74,7 +74,7 @@ output_file_registry::print_summary() const
     while(it != m_files.end())
     {
         auto        next    = std::next(it);
-        bool        is_last = (next == m_files.end());
+        const bool  is_last = (next == m_files.end());
         const auto* branch  = is_last ? "└─" : "├─";
         const auto* cont    = is_last ? "  " : "│ ";
 
@@ -92,7 +92,7 @@ output_file_registry::print_summary() const
 void
 output_file_registry::clear()
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    const std::lock_guard<std::mutex> lock(m_mutex);
     m_files.clear();
 }
 

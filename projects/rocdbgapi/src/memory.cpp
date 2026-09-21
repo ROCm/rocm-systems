@@ -1451,6 +1451,10 @@ xfer_memory (amd_dbgapi_process_id_t process_id, amd_dbgapi_wave_id_t wave_id,
             ? address_space->lower (wave->agent (), segment_address)
             : std::make_pair (std::cref (*address_space), segment_address);
 
+      /* Exit early if accessing a nullptr.  */
+      if (lowered_address == lowered_address_space.null_address ())
+        throw memory_access_error_t (lowered_address_space, lowered_address);
+
       switch (lowered_address_space.address_dependency (lowered_address))
         {
         case AMD_DBGAPI_SEGMENT_ADDRESS_DEPENDENCE_PROCESS:

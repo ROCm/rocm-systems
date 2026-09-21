@@ -1,0 +1,91 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+/// @file partitioning.h
+/// @brief Deterministic AMDGPU simulator topology partitioning helpers.
+
+#ifndef ROCJITSU_VM_AMDGPU_PARTITIONING_H_
+#define ROCJITSU_VM_AMDGPU_PARTITIONING_H_
+
+#include "rocjitsu/vm/soc.h"
+
+#include "simdojo/sim/topology.h"
+
+#include <cstdint>
+#include <span>
+
+namespace rocjitsu {
+namespace amdgpu {
+
+/// @brief Host threads this process may actually run on.
+///
+/// @details The CPU affinity mask size, falling back to
+/// std::thread::hardware_concurrency() where the mask is unavailable. Affinity
+/// is the right measure because hardware_concurrency() reports the machine's
+/// total, which overshoots inside a cgroup, a container, or under taskset: a
+/// one-CPU job would otherwise be told it has every core on the box.
+/// @returns The usable host thread count, or 0 if it is indeterminate.
+[[nodiscard]] uint32_t available_host_threads();
+
+/// @brief Default partition count for a set of SoCs.
+///
+/// @details min(available host threads, total XCDs), floored at 1. This is what
+/// a config resolves to when it leaves `num_threads` unset (or sets it to 0):
+/// one engine partition per XCD, capped so the simulation never asks for more
+/// worker threads than the process can actually run concurrently. The
+/// conservative PDES barrier makes oversubscription markedly worse than a
+/// smaller partition count.
+/// @returns The default partition count, always at least 1.
+[[nodiscard]] uint32_t default_xcd_partition_count(std::span<SoC *> socs);
+
+/// @brief Convenience overload for a single SoC.
+[[nodiscard]] uint32_t default_xcd_partition_count(SoC *soc);
+
+/// @brief Default partition count against an explicit host width.
+///
+/// @details Same rule as the overloads above -- min(@p host_threads, total
+/// XCDs), floored at 1 -- but with the host width supplied instead of measured.
+/// The measuring overloads call @ref available_host_threads, which makes a test
+/// that derives its own expectation from that helper pass no matter what the
+/// rule is; passing a width states the expected mapping outright, and lets a
+/// one-CPU runner still exercise the wide-host behavior.
+/// @param host_threads Host width to resolve against; 0 means indeterminate and
+/// yields 1, matching what @ref available_host_threads reports when it cannot
+/// tell.
+/// @returns The default partition count, always at least 1.
+[[nodiscard]] uint32_t default_xcd_partition_count(std::span<SoC *> socs, uint32_t host_threads);
+
+/// @brief Convenience overload for a single SoC.
+[[nodiscard]] uint32_t default_xcd_partition_count(SoC *soc, uint32_t host_threads);
+
+/// @brief Clamp a requested partition count to the visible XCD count.
+///
+/// @details Counts XCDs across all non-null SoCs and clamps
+/// @p requested_partitions to the inclusive range [1, max(total XCDs, 1)].
+/// @returns The usable partition count.
+[[nodiscard]] uint32_t clamp_xcd_partition_count(std::span<SoC *> socs,
+                                                 uint32_t requested_partitions);
+
+/// @brief Convenience overload for a single SoC.
+[[nodiscard]] uint32_t clamp_xcd_partition_count(SoC *soc, uint32_t requested_partitions);
+
+/// @brief Partition an AMDGPU topology by whole XCD subtrees.
+///
+/// @details If @p num_partitions is nonzero and at least one XCD is present,
+/// this installs a manual topology partition where each XCD subtree is
+/// assigned to global_xcd_index % num_partitions. Components outside XCD
+/// subtrees stay in partition 0.
+/// @returns true when a manual partition was installed; false when
+/// @p num_partitions is zero, no XCDs are present, or any supplied XCD is not
+/// a member of @p topology. Failure leaves existing partition state unchanged.
+[[nodiscard]] bool partition_topology_by_xcds(simdojo::Topology &topology, std::span<SoC *> socs,
+                                              uint32_t num_partitions);
+
+/// @brief Convenience overload for a single SoC.
+[[nodiscard]] bool partition_topology_by_xcds(simdojo::Topology &topology, SoC *soc,
+                                              uint32_t num_partitions);
+
+} // namespace amdgpu
+} // namespace rocjitsu
+
+#endif // ROCJITSU_VM_AMDGPU_PARTITIONING_H_

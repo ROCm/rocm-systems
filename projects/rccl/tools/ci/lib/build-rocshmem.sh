@@ -19,7 +19,7 @@ set -euxo pipefail
 GPU_TARGETS="${GPU_TARGETS:-gfx950}"
 build_jobs="${RCCL_BUILD_JOBS:-$(nproc)}"
 
-: "${ROCM_PATH:?build-rocshmem.sh: ROCM_PATH must be set (run fetch-rocm.sh first)}"
+: "${ROCM_PATH:?build-rocshmem.sh: ROCM_PATH must be set (source .ci-out/rocm.env first)}"
 : "${MPI_HOME:?build-rocshmem.sh: MPI_HOME must be set (run build-ompi.sh first)}"
 
 WORKDIR="${RCCL_DEVICE_API_WORKDIR:-${WORKDIR:-}}"
@@ -41,28 +41,11 @@ export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${MPI_HOME}/bin:${PATH}"
 rm -rf "${build_dir}" "${install_dir}"
 mkdir -p "${build_dir}"
 
-# Workaround for a ROCm hsakmt packaging bug (nightly 7.14.0a*): hsakmt's config
-# references the numa::numa imported target without defining it, breaking
-# find_package(hsakmt). Define it via CMAKE_PROJECT_INCLUDE_BEFORE (runs before
-# rocSHMEM's find_package). No-op on a fixed ROCm; remove this block then.
-numa_shim="${WORKDIR}/.ci-out/numa-target-shim.cmake"
-cat > "${numa_shim}" <<'EOF'
-if(NOT TARGET numa::numa)
-  find_library(_NUMA_LIB NAMES numa)
-  if(_NUMA_LIB)
-    add_library(numa::numa UNKNOWN IMPORTED)
-    set_target_properties(numa::numa PROPERTIES IMPORTED_LOCATION "${_NUMA_LIB}")
-    message(STATUS "numa-target-shim: defined numa::numa -> ${_NUMA_LIB}")
-  endif()
-endif()
-EOF
-
 (
   cd "${build_dir}"
   INSTALL_PREFIX="${install_dir}" \
   BUILD_TYPE=Release \
   "${src_dir}/scripts/build_configs/all_backends" \
-      -DCMAKE_PROJECT_INCLUDE_BEFORE="${numa_shim}" \
       -DMPI_ROOT="${MPI_HOME}" \
       -DUSE_EXTERNAL_MPI=OFF \
       -DGPU_TARGETS="${GPU_TARGETS}" \

@@ -49,36 +49,43 @@ static int netRefCount;
 
 ncclResult_t ncclNetSocketInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config, ncclDebugLogger_t logFunction,
                                ncclProfilerCallback_t profFunction) {
-  if (netRefCount++) return ncclSuccess;
+  std::lock_guard<std::mutex> lock(ncclNetSocketMutex);
+  ncclResult_t ret = ncclSuccess;
+  if (netRefCount) {
+    netRefCount++;
+    return ncclSuccess;
+  }
   ncclProfilerFunction = profFunction;
   if (ncclNetIfs == -1) {
-    std::lock_guard<std::mutex> lock(ncclNetSocketMutex);
-    if (ncclNetIfs == -1) {
-      char names[MAX_IF_NAME_SIZE * MAX_IFS];
-      union ncclSocketAddress addrs[MAX_IFS];
-      NCCLCHECK(ncclFindInterfaces(names, addrs, MAX_IF_NAME_SIZE, MAX_IFS, &ncclNetIfs));
-      if (ncclNetIfs <= 0) {
-        WARN("NET/Socket : no interface found");
-        return ncclInternalError;
-      } else {
+    char names[MAX_IF_NAME_SIZE * MAX_IFS];
+    union ncclSocketAddress addrs[MAX_IFS];
+    NCCLCHECKGOTO(ncclFindInterfaces(names, addrs, MAX_IF_NAME_SIZE, MAX_IFS, &ncclNetIfs), ret, fail);
+    if (ncclNetIfs <= 0) {
+      WARN("NET/Socket : no interface found");
+      ret = ncclInternalError;
+      goto fail;
+    } else {
 #define MAX_LINE_LEN (2047)
-        char line[MAX_LINE_LEN + 1];
-        char addrline[SOCKET_NAME_MAXLEN + 1];
-        line[0] = '\0';
-        addrline[SOCKET_NAME_MAXLEN] = '\0';
-        for (int i = 0; i < ncclNetIfs; i++) {
-          strcpy(ncclNetSocketDevs[i].devName, names + i * MAX_IF_NAME_SIZE);
-          memcpy(&ncclNetSocketDevs[i].addr, addrs + i, sizeof(union ncclSocketAddress));
-          NCCLCHECK(ncclNetSocketGetPciPath(ncclNetSocketDevs[i].devName, &ncclNetSocketDevs[i].pciPath));
-          snprintf(line + strlen(line), MAX_LINE_LEN - strlen(line), " [%d]%s:%s", i, names + i * MAX_IF_NAME_SIZE,
-                   ncclSocketToString(&addrs[i], addrline));
-        }
-        line[MAX_LINE_LEN] = '\0';
-        INFO(NCCL_INIT | NCCL_NET, "NET/Socket : Using%s", line);
+      char line[MAX_LINE_LEN + 1];
+      char addrline[SOCKET_NAME_MAXLEN + 1];
+      line[0] = '\0';
+      addrline[SOCKET_NAME_MAXLEN] = '\0';
+      for (int i = 0; i < ncclNetIfs; i++) {
+        strcpy(ncclNetSocketDevs[i].devName, names + i * MAX_IF_NAME_SIZE);
+        memcpy(&ncclNetSocketDevs[i].addr, addrs + i, sizeof(union ncclSocketAddress));
+        NCCLCHECKGOTO(ncclNetSocketGetPciPath(ncclNetSocketDevs[i].devName, &ncclNetSocketDevs[i].pciPath), ret, fail);
+        snprintf(line + strlen(line), MAX_LINE_LEN - strlen(line), " [%d]%s:%s", i, names + i * MAX_IF_NAME_SIZE,
+                 ncclSocketToString(&addrs[i], addrline));
       }
+      line[MAX_LINE_LEN] = '\0';
+      INFO(NCCL_INIT | NCCL_NET, "NET/Socket : Using%s", line);
     }
   }
+  netRefCount++;
   return ncclSuccess;
+fail:
+  ncclNetIfs = -1;
+  return ret;
 }
 
 ncclResult_t ncclNetSocketDevices(int* ndev) {
@@ -374,10 +381,12 @@ ncclResult_t ncclNetSocketGetNsockNthread(int dev, int* ns, int* nt) {
     char vendor[7];
     strncpy(vendor, "0x0000", 7);
     SYSCHECKGOTO(read(fd, vendor, 6), "read", ret, fail);
-    if (strcmp(vendor, "0x1d0f") == 0) { // AWS
+    if (strcmp(vendor, "0x1d0f") == 0) {
+      // AWS
       autoNt = 2;
       autoNs = 8;
-    } else if (strcmp(vendor, "0x1ae0") == 0) { // GCP
+    } else if (strcmp(vendor, "0x1ae0") == 0) {
+      // GCP
       autoNt = 4;
       autoNs = 1;
     }
@@ -404,7 +413,8 @@ fail:
 }
 
 ncclResult_t ncclNetSocketListen(void* ctx, int dev, void* opaqueHandle, void** listenComm) {
-  if (dev < 0 || dev >= ncclNetIfs) { // data transfer socket is based on specified dev
+  if (dev < 0 || dev >= ncclNetIfs) {
+    // data transfer socket is based on specified dev
     WARN("NET/Socket : ncclNetSocketListen dev=%d ncclNetIfs=%d", dev, ncclNetIfs);
     return ncclInternalError;
   }
@@ -414,7 +424,7 @@ ncclResult_t ncclNetSocketListen(void* ctx, int dev, void* opaqueHandle, void** 
   static_assert(sizeof(struct ncclNetSocketHandle) <= NCCL_NET_HANDLE_MAXSIZE, "ncclNetSocketHandle size too large");
   struct ncclNetSocketListenComm* comm;
   NCCLCHECK(ncclCalloc(&comm, 1));
-  handle->magic = NCCL_SOCKET_MAGIC;
+  handle->magic = ncclSocketDefaultMagic();
   NCCLCHECKGOTO(ncclSocketInit(&comm->sock, &ncclNetSocketDevs[dev].addr, handle->magic, ncclSocketTypeNetSocket, NULL,
                                1),
                 ret, fail);
@@ -639,7 +649,8 @@ ncclResult_t ncclNetSocketTest(void* request, int* done, int* size) {
       // copy to the data buffer if we have received some inline data already
       int receivedInline = sizeOffset - SOCKET_CTRL_SIZE;
       if (receivedInline > 0) memcpy(r->data, msg + SOCKET_CTRL_SIZE, receivedInline);
-      // from the actual size, extract the remaining inline size to be received and redirect the msg buffer to the user data
+      // from the actual size, extract the remaining inline size to be received and redirect the msg buffer to the
+      // user data
       r->size = senderSize;
       msgSize = ncclNetSocketInlineSize(r->size) - receivedInline;
       msg = (uint8_t*)r->data + receivedInline;
@@ -665,7 +676,8 @@ ncclResult_t ncclNetSocketTest(void* request, int* done, int* size) {
     }
     r->nSubs = i;
   }
-  if (r->used == 2) { // already exchanged size
+  if (r->used == 2) {
+    // already exchanged size
     if (r->nSubs > 0) {
       int nCompleted = 0;
       for (int i = 0; i < r->nSubs; i++) {
@@ -682,7 +694,8 @@ ncclResult_t ncclNetSocketTest(void* request, int* done, int* size) {
           sub->used = 0;
         }
       }
-    } else { // progress request using main thread
+    } else {
+      // progress request using main thread
 #ifdef NCCL_ENABLE_NET_PROFILING
       if (!r->pInfo.eHandle) {
         ncclProfilerNetSockDescr_v1_t data;
@@ -789,6 +802,11 @@ ncclResult_t ncclNetSocketClose(void* opaqueComm) {
 }
 
 ncclResult_t ncclNetSocketFinalize(void* ctx) {
+  std::lock_guard<std::mutex> lock(ncclNetSocketMutex);
+  if (netRefCount == 0) {
+    WARN("NET/Socket : finalize called with zero reference count");
+    return ncclInternalError;
+  }
   netRefCount--;
   return ncclSuccess;
 }

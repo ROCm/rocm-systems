@@ -15,10 +15,11 @@
 /// split lo/hi VGPR-pair read path. Inputs seed NaN/±Inf/±0/denorm (floats) and
 /// signed/extreme boundaries (ints); float compares are bit-exact in both modes.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -125,7 +126,7 @@ struct Fixture {
 
   uint64_t run(Instruction *inst, Kind k, uint64_t exec, uint64_t vcc_in) {
     seed_inputs(k, exec, vcc_in);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     return wf->vcc();
   }
 };
@@ -180,7 +181,7 @@ void check_all(uint64_t exec) {
     uint32_t vsrc1 = is_64bit(c.kind) ? 2u : 1u;
     uint32_t enc = vopc_encode(c.opcode, /*src0=*/256, vsrc1);
     uint32_t words[4] = {enc, 0u, 0u, 0u};
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "VOPC opcode " << c.opcode << " decode failed";
     uint64_t vcc = fx.run(inst, c.kind, exec, vcc_in);
     delete inst;

@@ -96,9 +96,17 @@ typedef struct { char internal[NCCL_UNIQUE_ID_BYTES]; /*!< Opaque array>*/} nccl
     @details    Structure that allows for customizing Communicator behavior via ncclCommInitRankConfig
     @{ */
 
+/*! @brief      Host-side collective fault tolerance mode */
+typedef enum {
+  ncclHostCftDefault = NCCL_CONFIG_UNDEF_INT, /*!< Use the library default */
+  ncclHostCftEnable = 1,                      /*!< Enable host CFT */
+  ncclHostCftDisable = 2,                     /*!< Disable host CFT */
+  ncclHostCftFallback = 3                     /*!< Enable host CFT with fallback */
+} ncclHostCftMode_t;
+
 /*! @brief      Communicator configuration
     @details    Users can assign value to attributes to specify the behavior of a communicator */
-typedef struct ncclConfig_v22800 {
+typedef struct ncclConfig_v23100 {
   /* attributes that users should never touch. */
   size_t size;                 /*!< Should not be touched */
   unsigned int magic;          /*!< Should not be touched */
@@ -121,31 +129,110 @@ typedef struct ncclConfig_v22800 {
   int graphUsageMode;          /*!< CUDA Graph usage mode hint*/
   int numRmaCtx;               /*!< Number of RMA contexts*/
   int maxP2pPeers;             /*!< Maximum number of P2P peers*/
+  int graphStreamOrdering;     /*!< CUDA Graph stream ordering mode*/
+  int launchOrderImplicit;     /*!< Implicit launch order between communicators*/
+  int numRmaSig;               /*!< Number of RMA signals*/
+  int rmaEagerInit;            /*!< Eagerly initialize RMA resources*/
+  int hostCftMode;             /*!< Host collective fault tolerance mode, see ncclHostCftMode_t*/
 } ncclConfig_t;
 
 /* Config initializer must be assigned to initialize config structure when it is created.
- * Not initialized config will result in an error. */
-#define NCCL_CONFIG_INITIALIZER {                                               \
-  sizeof(ncclConfig_t),                             /* size */                  \
-  NCCL_API_MAGIC,                                   /* magic */                 \
-  NCCL_VERSION(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH), /* version */               \
-  NCCL_CONFIG_UNDEF_INT,                            /* blocking */              \
-  NCCL_CONFIG_UNDEF_INT,                            /* cgaClusterSize */        \
-  NCCL_CONFIG_UNDEF_INT,                            /* minCTAs */               \
-  NCCL_CONFIG_UNDEF_INT,                            /* maxCTAs */               \
-  NCCL_CONFIG_UNDEF_PTR,                            /* netName */               \
-  NCCL_CONFIG_UNDEF_INT,                            /* splitShare */            \
-  NCCL_CONFIG_UNDEF_INT,                            /* trafficClass */          \
-  NCCL_CONFIG_UNDEF_PTR,                            /* commName */              \
-  NCCL_CONFIG_UNDEF_INT,                            /* collnetEnable */         \
-  NCCL_CONFIG_UNDEF_INT,                            /* CTAPolicy */             \
-  NCCL_CONFIG_UNDEF_INT,                            /* shrinkShare */           \
-  NCCL_CONFIG_UNDEF_INT,                            /* nvlsCTAs */              \
-  NCCL_CONFIG_UNDEF_INT,                            /* nChannelsPerNetPeer */   \
-  NCCL_CONFIG_UNDEF_INT,                            /* nvlinkCentricSched */    \
-  NCCL_CONFIG_UNDEF_INT,                            /* graphUsageMode */        \
-  NCCL_CONFIG_UNDEF_INT,                            /* numRmaCtx */             \
-  NCCL_CONFIG_UNDEF_INT,                            /* maxP2pPeers */           \
+ * Not initialized config will result in NCCL error. */
+#define NCCL_CONFIG_INITIALIZER {                                       \
+  sizeof(ncclConfig_t),                     /* size */                  \
+  NCCL_API_MAGIC,                           /* magic */                 \
+  NCCL_VERSION_CODE,                        /* version */               \
+  NCCL_CONFIG_UNDEF_INT,                    /* blocking */              \
+  NCCL_CONFIG_UNDEF_INT,                    /* cgaClusterSize */        \
+  NCCL_CONFIG_UNDEF_INT,                    /* minCTAs */               \
+  NCCL_CONFIG_UNDEF_INT,                    /* maxCTAs */               \
+  NCCL_CONFIG_UNDEF_PTR,                    /* netName */               \
+  NCCL_CONFIG_UNDEF_INT,                    /* splitShare */            \
+  NCCL_CONFIG_UNDEF_INT,                    /* trafficClass */          \
+  NCCL_CONFIG_UNDEF_PTR,                    /* commName */              \
+  NCCL_CONFIG_UNDEF_INT,                    /* collnetEnable */         \
+  NCCL_CONFIG_UNDEF_INT,                    /* CTAPolicy */             \
+  NCCL_CONFIG_UNDEF_INT,                    /* shrinkShare */           \
+  NCCL_CONFIG_UNDEF_INT,                    /* nvlsCTAs */              \
+  NCCL_CONFIG_UNDEF_INT,                    /* nChannelsPerNetPeer */   \
+  NCCL_CONFIG_UNDEF_INT,                    /* nvlinkCentricSched */    \
+  NCCL_CONFIG_UNDEF_INT,                    /* graphUsageMode */        \
+  NCCL_CONFIG_UNDEF_INT,                    /* numRmaCtx */             \
+  NCCL_CONFIG_UNDEF_INT,                    /* maxP2pPeers */           \
+  NCCL_CONFIG_UNDEF_INT,                    /* graphStreamOrdering */   \
+  NCCL_CONFIG_UNDEF_INT,                    /* launchOrderImplicit */   \
+  NCCL_CONFIG_UNDEF_INT,                    /* numRmaSig */             \
+  NCCL_CONFIG_UNDEF_INT,                    /* rmaEagerInit */          \
+  NCCL_CONFIG_UNDEF_INT,                    /* hostCftMode */          \
+}
+
+/* A single vendor-specific option expressed as a key-value pair. Multiple options can be
+ * chained into a non-circular linked list through the next pointer and attached to a ncclCollConfig_t
+ * via its ext member. The official NCCL library ignores every extension; a vendor library
+ * should assign a unique value to key.vendorId to avoid collision among vendor libraries.
+ * It can usually be done by picking a random number.
+ * Vendors should choose a non-zero vendorId (less than 2^24) that is unlikely to collide
+ * with other vendor libraries. The list is unordered and must not contain duplicate keys. */
+typedef struct ncclConfigExt {
+  struct ncclConfigExt* next;       /* next option in the list, or NULL to terminate */
+  struct {
+    int vendorId;                   /* vendor choose their own unique value as vendorId */
+    int optionId;                   /* vendor-defined id distinguishing options within a vendor */
+  } key;
+  union {
+    int i;                          /* integer value */
+    const char* s;                  /* C-style string value */
+    void* raw;                      /* opaque pointer-sized value */
+  } val;
+} ncclConfigExt_t;
+
+/* Per-collective configuration. Users assign values to attributes to customize an
+ * individual collective call issued through one of the nccl*Config() entry points.
+ * Like ncclConfig_t, this is a versioned, append-only struct: in the future, any new
+ * members will be added at the end, and existing members will never be removed or
+ * reordered. The user owns the storage and must keep the struct (and any linked ncclConfigExt_t)
+ * valid for the duration of every call that uses it. The same configuration must be
+ * set on every rank; NCCL validates it only locally. */
+typedef struct ncclCollConfig_v23100 {
+  /* attributes that users should never touch. */
+  size_t size;
+  unsigned int magic;
+  unsigned int version;
+  /* non-circular linked list of vendor-specific extension options, or NULL. */
+  ncclConfigExt_t* ext;
+  /* resource tuning (NCCL_CONFIG_UNDEF_INT == unset; NCCL picks). */
+  int minCTAs;          /* lower bound on channels/CTAs */
+  int maxCTAs;          /* upper bound on channels/CTAs, must be <= comm->maxCTAs */
+  int nvlsCTAs;         /* NVLS-pool-specific channel cap */
+  int cgaClusterSize;   /* CUDA thread-block-cluster size (Hopper+), should be the same for all
+                           collectives in the same Group. Inconsistent cgaClusterSize in a Group
+                           is undefined behavior. */
+  /* algorithm selection: filter which algorithm(s) this call may use. */
+  const char* algSelection;   /* selection string; NULL/UNDEF/"" == automatic */
+  int forceAlgSelection;      /* default 1 (true): unsatisfiable selection is an error */
+  int CTAPolicy;              /* NCCL_CTA_POLICY_* bitmask; UNDEF == inherit comm-level CTAPolicy */
+  /* user-provided profiler tag: an opaque value delivered verbatim to profiler plugins with this
+   * call's profiler events. Default to 0 as untagged. It does not affect execution. NCCL reserves
+   * profiler-tag values with the most-significant bit set (>= 0x8000000000000000) for possible future
+   * predefined tags; applications should use values with the MSB clear. */
+  uint64_t userProfilerTag;
+} ncclCollConfig_t;
+
+/* NCCL_COLLCONFIG_INITIALIZER must be used to initialize a ncclCollConfig_t when it is
+ * created. An uninitialized config will result in a NCCL error. */
+#define NCCL_COLLCONFIG_INITIALIZER {                                 \
+  sizeof(ncclCollConfig_t),                 /* size */                \
+  NCCL_API_MAGIC,                           /* magic */               \
+  NCCL_VERSION_CODE,                        /* version */             \
+  NCCL_CONFIG_UNDEF_PTR,                    /* ext */                 \
+  NCCL_CONFIG_UNDEF_INT,                    /* minCTAs */             \
+  NCCL_CONFIG_UNDEF_INT,                    /* maxCTAs */             \
+  NCCL_CONFIG_UNDEF_INT,                    /* nvlsCTAs */            \
+  NCCL_CONFIG_UNDEF_INT,                    /* cgaClusterSize */      \
+  NCCL_CONFIG_UNDEF_PTR,                    /* algSelection */        \
+  1,                                        /* forceAlgSelection */   \
+  NCCL_CONFIG_UNDEF_INT,                    /* CTAPolicy */           \
+  0,                                        /* userProfilerTag */     \
 }
 /*! @} */
 
@@ -514,7 +601,8 @@ ncclResult_t pncclCommDeregister(const ncclComm_t comm, void* handle);
 
 /*! @brief      Suspend communicator operations to free resources.
     @details    Releases the resources selected by @p flags. The communicator
-                cannot be used until @ref ncclCommResume is called.
+                cannot be used until @ref ncclCommResume is called; a collective
+                issued in the meantime returns ncclInvalidUsage.
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  comm          Communicator to suspend
@@ -973,6 +1061,50 @@ ncclResult_t pncclAllToAllv(const void *sendbuff, const size_t sendcounts[],
     const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
 /*! @endcond */
 
+/* nccl*Config: per-collective-config variant of every collective. It takes a trailing
+ * ncclCollConfig_t describing per-call customization. Initialize the config with
+ * NCCL_COLLCONFIG_INITIALIZER and set it identically on every rank. config == NULL is
+ * equivalent to the plain API. */
+ncclResult_t  ncclAllReduceConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+    ncclRedOp_t op, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+ncclResult_t pncclAllReduceConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+    ncclRedOp_t op, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+
+ncclResult_t  ncclBroadcastConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+    int root, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+ncclResult_t pncclBroadcastConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+    int root, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+
+ncclResult_t  ncclReduceConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+    ncclRedOp_t op, int root, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+ncclResult_t pncclReduceConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+    ncclRedOp_t op, int root, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+
+ncclResult_t  ncclAllGatherConfig(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
+    ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+ncclResult_t pncclAllGatherConfig(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
+    ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+
+ncclResult_t  ncclReduceScatterConfig(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
+    ncclRedOp_t op, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+ncclResult_t pncclReduceScatterConfig(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
+    ncclRedOp_t op, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+
+ncclResult_t  ncclAlltoAllConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+    ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+ncclResult_t pncclAlltoAllConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+    ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+
+ncclResult_t  ncclGatherConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+    int root, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+ncclResult_t pncclGatherConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+    int root, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+
+ncclResult_t  ncclScatterConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+    int root, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+ncclResult_t pncclScatterConfig(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+    int root, ncclComm_t comm, hipStream_t stream, const ncclCollConfig_t* config);
+
 /*! @brief      Send
     @details    Send data from *sendbuff* to rank *peer*.
                 Rank *peer* needs to call ncclRecv with the same *datatype* and the same *count*
@@ -1197,60 +1329,60 @@ ncclResult_t pncclGroupSimulateEnd(ncclSimInfo_t* simInfo);
  *
  * Handles represents parameters and are opaque (internal details hidden).
  */
-typedef struct ncclParamHandle ncclParamHandle_t;
+typedef struct ncclParamHandle* ncclParamHandle_t;
 
 /*
  * Look up the parameter identified by key and store a handle to it in
  * out. The returned handle is owned by the parameter system and must not
  * be freed by the caller.
  */
-ncclResult_t ncclParamBind(ncclParamHandle_t** out, const char* key);
-ncclResult_t pncclParamBind(ncclParamHandle_t** out, const char* key);
+ncclResult_t ncclParamBind(ncclParamHandle_t* out, const char* key);
+ncclResult_t pncclParamBind(ncclParamHandle_t* out, const char* key);
 
 /*
  * Read the value of the parameter bound to h as the type of out.
  * Function names are suffixed with I/U and 8/16/32/64 for 8-, 16-, 32- and 64-bit
  * signed and unsigned integers.
  */
-ncclResult_t ncclParamGetI8(ncclParamHandle_t* h, int8_t* out);
-ncclResult_t pncclParamGetI8(ncclParamHandle_t* h, int8_t* out);
+ncclResult_t ncclParamGetI8(ncclParamHandle_t h, int8_t* out);
+ncclResult_t pncclParamGetI8(ncclParamHandle_t h, int8_t* out);
 
-ncclResult_t ncclParamGetI16(ncclParamHandle_t* h, int16_t* out);
-ncclResult_t pncclParamGetI16(ncclParamHandle_t* h, int16_t* out);
+ncclResult_t ncclParamGetI16(ncclParamHandle_t h, int16_t* out);
+ncclResult_t pncclParamGetI16(ncclParamHandle_t h, int16_t* out);
 
-ncclResult_t ncclParamGetI32(ncclParamHandle_t* h, int32_t* out);
-ncclResult_t pncclParamGetI32(ncclParamHandle_t* h, int32_t* out);
+ncclResult_t ncclParamGetI32(ncclParamHandle_t h, int32_t* out);
+ncclResult_t pncclParamGetI32(ncclParamHandle_t h, int32_t* out);
 
-ncclResult_t ncclParamGetI64(ncclParamHandle_t* h, int64_t* out);
-ncclResult_t pncclParamGetI64(ncclParamHandle_t* h, int64_t* out);
+ncclResult_t ncclParamGetI64(ncclParamHandle_t h, int64_t* out);
+ncclResult_t pncclParamGetI64(ncclParamHandle_t h, int64_t* out);
 
-ncclResult_t ncclParamGetU8(ncclParamHandle_t* h, uint8_t* out);
-ncclResult_t pncclParamGetU8(ncclParamHandle_t* h, uint8_t* out);
+ncclResult_t ncclParamGetU8(ncclParamHandle_t h, uint8_t* out);
+ncclResult_t pncclParamGetU8(ncclParamHandle_t h, uint8_t* out);
 
-ncclResult_t ncclParamGetU16(ncclParamHandle_t* h, uint16_t* out);
-ncclResult_t pncclParamGetU16(ncclParamHandle_t* h, uint16_t* out);
+ncclResult_t ncclParamGetU16(ncclParamHandle_t h, uint16_t* out);
+ncclResult_t pncclParamGetU16(ncclParamHandle_t h, uint16_t* out);
 
-ncclResult_t ncclParamGetU32(ncclParamHandle_t* h, uint32_t* out);
-ncclResult_t pncclParamGetU32(ncclParamHandle_t* h, uint32_t* out);
+ncclResult_t ncclParamGetU32(ncclParamHandle_t h, uint32_t* out);
+ncclResult_t pncclParamGetU32(ncclParamHandle_t h, uint32_t* out);
 
-ncclResult_t ncclParamGetU64(ncclParamHandle_t* h, uint64_t* out);
-ncclResult_t pncclParamGetU64(ncclParamHandle_t* h, uint64_t* out);
+ncclResult_t ncclParamGetU64(ncclParamHandle_t h, uint64_t* out);
+ncclResult_t pncclParamGetU64(ncclParamHandle_t h, uint64_t* out);
 
 /*
  * Read the value of the parameter bound to h as a string.
  * Returned pointer is owned by the parameter system and is valid until the
  * next ncclParamGetStr() call on the same thread.
  */
-ncclResult_t ncclParamGetStr(ncclParamHandle_t* h, const char** out);
-ncclResult_t pncclParamGetStr(ncclParamHandle_t* h, const char** out);
+ncclResult_t ncclParamGetStr(ncclParamHandle_t h, const char** out);
+ncclResult_t pncclParamGetStr(ncclParamHandle_t h, const char** out);
 
 /*
  * Read the value of the parameter bound to h as raw binary data.
  * The user needs to allocate a buffer for the result and the parameter value is copied
  * into user buffer as bytes.
  */
-ncclResult_t ncclParamGet(ncclParamHandle_t* h, void* out, int maxLen, int* len);
-ncclResult_t pncclParamGet(ncclParamHandle_t* h, void* out, int maxLen, int* len);
+ncclResult_t ncclParamGet(ncclParamHandle_t h, void* out, int maxLen, int* len);
+ncclResult_t pncclParamGet(ncclParamHandle_t h, void* out, int maxLen, int* len);
 
 /*
  * Key-based API (no handle required, typeless access, return value as string)

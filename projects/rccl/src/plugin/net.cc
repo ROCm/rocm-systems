@@ -10,6 +10,7 @@
 #include "checks.h"
 #include "plugin.h"
 #include "nccl_net.h"
+#include "net_telemetry.h"
 
 #include <string.h>
 #include <errno.h>
@@ -146,21 +147,22 @@ ncclResult_t ncclNetCheckDeviceVersion(struct ncclComm* comm, ncclNet_t* net, in
 
   NCCLCHECK(net->getProperties(dev, &props));
   ncclNetDeviceType type = props.netDeviceType;
-  if (type) switch (type) {
-    case NCCL_NET_DEVICE_UNPACK:
-      if (props.netDeviceVersion == NCCL_NET_DEVICE_UNPACK_VERSION) {
-        INFO(NCCL_INIT, "Using NCCL_NET_DEVICE_UNPACK net plugin version %d", props.netDeviceVersion);
-        return ncclSuccess;
-      } else {
-        WARN(
-          "NCCL_DEVICE_UNPACK plugin has incompatible version %d, this NCCL build is compatible with %d, not using it",
-          props.netDeviceVersion, NCCL_NET_DEVICE_UNPACK_VERSION);
-        return ncclInternalError;
-      }
-    default:
-      WARN("Unknown device code index %d", type);
+  switch (type) {
+  case NCCL_NET_DEVICE_HOST:
+    break;
+  case NCCL_NET_DEVICE_UNPACK:
+    if (props.netDeviceVersion == NCCL_NET_DEVICE_UNPACK_VERSION) {
+      INFO(NCCL_INIT, "Using NCCL_NET_DEVICE_UNPACK net plugin version %d", props.netDeviceVersion);
+      return ncclSuccess;
+    } else {
+      WARN("NCCL_DEVICE_UNPACK plugin has incompatible version %d, this NCCL build is compatible with %d, not using it",
+           props.netDeviceVersion, NCCL_NET_DEVICE_UNPACK_VERSION);
       return ncclInternalError;
     }
+  default:
+    WARN("Unknown device code index %d", type);
+    return ncclInternalError;
+  }
 
   return ncclSuccess;
 }
@@ -259,12 +261,15 @@ static void initPluginLibsOnceFunc() {
   char* envNetPluginList = nullptr;
   char* savePtr = nullptr;
   int pluginCounter = 0;
+  // "none" and an empty value only opt out of external plugins; they must not disable the internal AINIC path
+  bool extNetPluginRequested = false;
 
   memset(netPluginLibs, 0, NCCL_NET_MAX_PLUGINS * sizeof(netPluginLib_t));
   envNetPlugin = ncclGetEnv("NCCL_NET_PLUGIN");
   if (envNetPlugin) {
     INFO(NCCL_ENV | NCCL_NET, "NCCL_NET_PLUGIN set by environment to %s", envNetPlugin);
     if (strcasecmp(envNetPlugin, "none") == 0) envNetPlugin = "";
+    extNetPluginRequested = (envNetPlugin[0] != '\0');
     envNetPluginList = strdup(envNetPlugin);
     // Iterate over list until the list is empty
     netPluginName = strtok_r(envNetPluginList, ",", &savePtr);
@@ -304,8 +309,8 @@ static void initPluginLibsOnceFunc() {
     if (envNet && (strcasecmp(envNet, "ROCM-IB") == 0)) {
       envNet = "IB-CAST";
     }
-    if ((envNet && strcasecmp(envNet, "IB-CAST") == 0 && !(envNetPlugin)) ||
-        (!envNet && rcclUseAinic() && !(envNetPlugin))) {
+    if ((envNet && strcasecmp(envNet, "IB-CAST") == 0 && !extNetPluginRequested) ||
+        (!envNet && rcclUseAinic() && !extNetPluginRequested)) {
       netPluginLibs[pluginCounter].ncclNet = &netIbCast;
       netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
     } else {
@@ -335,6 +340,10 @@ static ncclResult_t ncclNetPluginFinalize(struct ncclComm* comm, int pluginIndex
 }
 
 ncclResult_t ncclNetInit(struct ncclComm* comm) {
+  // Not NCCLCHECKed: telemetry reports its own failures. See net_telemetry.h.
+  if (rcclTelemetryInit() != 0) {
+    INFO(NCCL_NET, "Telemetry was requested but could not start; continuing without it");
+  }
   bool ncclNetPluginInitialized = false;
   std::call_once(initPluginLibsOnceFlag, initPluginLibsOnceFunc);
   std::lock_guard<std::mutex> lock(netPluginMutex);
@@ -400,7 +409,7 @@ ncclResult_t ncclNetGetDevCount(int netPluginIndex, int* nPhysDevs, int* nVirtDe
   *nVirtDevs = netPluginLibs[netPluginIndex].netVirtDevs;
   return ncclSuccess;
 fail:
-  WARN("%s: trying to access the number of devices of an uninitialized netPlugin[%d]", __func__, netPluginIndex);
+  WARN("trying to access the number of devices of an uninitialized netPlugin[%d]", netPluginIndex);
   return ncclInternalError;
 }
 
@@ -413,7 +422,7 @@ ncclResult_t ncclCollNetGetDevCount(int netPluginIndex, int* nPhysDevs, int* nVi
   *nVirtDevs = netPluginLibs[netPluginIndex].collNetVirtDevs;
   return ncclSuccess;
 fail:
-  WARN("%s: trying to access the number of devices of an uninitialized netPlugin[%d]", __func__, netPluginIndex);
+  WARN("trying to access the number of devices of an uninitialized netPlugin[%d]", netPluginIndex);
   return ncclInternalError;
 }
 

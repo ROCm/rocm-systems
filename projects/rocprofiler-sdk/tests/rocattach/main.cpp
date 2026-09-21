@@ -88,6 +88,26 @@ main(int argc, char** argv)
         return 1;
     }
 
+    bool send_signal                 = false;
+    bool poison_register_library_env = false;
+    for(int i = 3; i < argc; ++i)
+    {
+        std::string arg{argv[i]};
+        if(arg == "--send-signal")
+        {
+            send_signal = true;
+        }
+        else if(arg == "--stale-register-library")
+        {
+            poison_register_library_env = true;
+        }
+        else
+        {
+            std::cout << "error: unknown argument " << arg << "\n";
+            return 1;
+        }
+    }
+
     pid_t pid1 = fork();
     if(pid1 < 0)
     {
@@ -111,6 +131,13 @@ main(int argc, char** argv)
     if(pid1 == 0 || pid2 == 0)
     {
         // Child process
+        if(poison_register_library_env)
+        {
+            // These values should reach the target only through rocattach's injected
+            // environment buffer, not through normal fork/exec inheritance.
+            unsetenv("ROCPROFILER_REGISTER_LIBRARY");
+            unsetenv("ROCPROFILER_TEST_FORWARDING");
+        }
         std::cout << "child executing " << argv[1] << std::endl;
         int ret = execl(argv[1], argv[1], nullptr);
         if(ret == -1)
@@ -141,6 +168,15 @@ main(int argc, char** argv)
         }
 
         setenv("ROCPROF_ATTACH_TOOL_LIBRARY", argv[2], true);
+        if(poison_register_library_env)
+        {
+            // Model a stale host SDK path in the attaching process. The sentinel verifies
+            // that other ROCPROFILER_* variables are still forwarded to the target.
+            setenv("ROCPROFILER_REGISTER_LIBRARY",
+                   "/tmp/rocattach-missing-librocprofiler-sdk.so.999.999.999",
+                   true);
+            setenv("ROCPROFILER_TEST_FORWARDING", "preserved", true);
+        }
 
         {
             std::cout << "starting call to rocattach_attach(pid1)" << std::endl;
@@ -168,21 +204,17 @@ main(int argc, char** argv)
         }
 
         // Send signal to child processes after attaching
-        if(argc >= 4)
+        if(send_signal)
         {
-            std::string signal_arg{argv[3]};
-            if(signal_arg == "--send-signal")
+            std::cout << "Sending SIGWINCH to PID " << pid1 << "\n";
+            if(kill(pid1, SIGWINCH) == -1)
             {
-                std::cout << "Sending SIGWINCH to PID " << pid1 << "\n";
-                if(kill(pid1, SIGWINCH) == -1)
-                {
-                    std::cout << "error: Failed to send SIGWINCH signal to pid1\n";
-                }
-                std::cout << "Sending SIGWINCH to PID " << pid2 << "\n";
-                if(kill(pid2, SIGWINCH) == -1)
-                {
-                    std::cout << "error: Failed to send SIGWINCH signal to pid2\n";
-                }
+                std::cout << "error: Failed to send SIGWINCH signal to pid1\n";
+            }
+            std::cout << "Sending SIGWINCH to PID " << pid2 << "\n";
+            if(kill(pid2, SIGWINCH) == -1)
+            {
+                std::cout << "error: Failed to send SIGWINCH signal to pid2\n";
             }
         }
 

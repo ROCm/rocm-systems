@@ -53,8 +53,6 @@ subtrees:
       title: Understanding the output
     - file: how-to/using-preset-profiles.rst
       title: Use the preset profiles
-    - file: how-to/using-rocprof-sys-api.rst
-      title: Use the ROCm Systems Profiler API
 
   - caption: Conceptual
     entries:

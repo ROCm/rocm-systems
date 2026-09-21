@@ -37,7 +37,8 @@ namespace rocprofiler
 namespace context
 {
 struct context;
-}
+struct correlation_id;
+}  // namespace context
 
 namespace kernel_dispatch
 {
@@ -53,5 +54,16 @@ get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_dat
 
 void
 dispatch_complete(queue_info_session_t& session, packet_data_t& packet_data, profiling_time);
+
+// Emit the KERNEL_DISPATCH_COMPLETE callback and buffered record from value data
+// alone. Shared by dispatch_complete() (signal path) and the no-signal finalizer,
+// which has no queue session -- its payload deliberately holds no `Queue&`.
+void
+emit_kernel_dispatch_record(tracing::tracing_data&                               tracing_data,
+                            rocprofiler_callback_tracing_kernel_dispatch_data_t& callback_record,
+                            context::correlation_id*                             correlation_id,
+                            rocprofiler_thread_id_t                              tid,
+                            uint64_t                                             start_timestamp,
+                            uint64_t                                             end_timestamp);
 }  // namespace kernel_dispatch
 }  // namespace rocprofiler
