@@ -41,7 +41,9 @@ approval. Do NOT create the PR without confirmation.
 
 **Title rules:**
 
-- Prefix with the project name: `[rocprofiler-compute]`
+- Prefix with `<type>(rocprofiler-compute): `, the conventional-commit form the
+  PR quality bot enforces. `<type>` is one of `feat`, `fix`, `docs`, `test`,
+  `refactor`, `chore`, or `ci`.
 - Keep under 72 characters
 - Use imperative mood ("Add X" not "Added X")
 

@@ -15,7 +15,7 @@ This example implements a causal profiling workload that runs slow and fast func
 
 - CMake 3.25+
 - C++17 compiler
-- rocprofiler-systems user library (`rocprofiler-systems::rocprofiler-systems-user-library`)
+- rocprofiler-systems causal API library (`rocprofiler-systems::rocprofiler-systems-causal-api-library`)
 
 ## Building
 

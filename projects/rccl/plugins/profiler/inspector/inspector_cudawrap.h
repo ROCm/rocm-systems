@@ -8,8 +8,7 @@
 #ifndef INSPECTOR_CUDAWRAP_H_
 #define INSPECTOR_CUDAWRAP_H_
 
-#include <cuda.h>
-#include <cuda_runtime.h>
+#include "inspector_gpu_compat.h"
 
 // Inspector-specific CUDA wrapper for standalone compilation
 

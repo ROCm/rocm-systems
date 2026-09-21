@@ -13,6 +13,7 @@ set(TEST_SRC
   hipCGThreadBlockTileTypeShfl_old.cc
   hipCGCoalescedGroups_old.cc
   hipLaunchCooperativeKernel_old.cc
+  coop_launch_queue_reclaim.cc
   coalesced_groups_shfl_down_old.cc
   coalesced_groups_shfl_up_old.cc
   coalesced_group.cc

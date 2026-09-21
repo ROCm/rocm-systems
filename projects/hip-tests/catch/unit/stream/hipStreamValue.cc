@@ -759,7 +759,7 @@ void testIncrementDecrementMultiStreamMultiDevice(uint32_t operationFlag) {
     }
   }
 
-  TestType expected_value;
+  TestType expected_value{};
   switch (operationFlag) {
     case hipExtStreamWriteValueIncrement: {
       expected_value =

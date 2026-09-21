@@ -611,9 +611,22 @@ public:
     {
         uint32_t sq_thread_trace_token_mask{0};
         sq_thread_trace_token_mask =
-            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_INCLUDE, 0x8) |
-            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, INST_EXCLUDE, 0x3) |
-            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, TOKEN_EXCLUDE, 0x7FF);
+            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_DETAIL_ALL, 1) |
+            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK,
+                               REG_INCLUDE,
+                               (SQ_TT_TOKEN_MASK_SQDEC_BIT | SQ_TT_TOKEN_MASK_SHDEC_BIT |
+                                SQ_TT_TOKEN_MASK_GFXUDEC_BIT | SQ_TT_TOKEN_MASK_CONTEXT_BIT |
+                                SQ_TT_TOKEN_MASK_COMP_BIT)) |
+            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK,
+                               TOKEN_EXCLUDE,
+                               ((1 << SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_WAVERDY_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_INST_SHIFT) |
+                                (1 << SQ_TT_TOKEN_EXCLUDE_UTILCTR_SHIFT))) |
+            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, INST_EXCLUDE, 0x3);
         return sq_thread_trace_token_mask;
     }
 

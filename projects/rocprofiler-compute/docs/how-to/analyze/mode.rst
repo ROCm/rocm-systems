@@ -14,13 +14,16 @@ choose.
 
 .. note::
 
-   Analyze mode requires Python 3.9 or newer; its dependencies (numpy, pandas,
-   dash, textual) drop support for older versions. Profile mode runs on Python
-   3.8+. See the Python version support table in :doc:`/install/quickstart`.
+   Analyze mode needs a Python version and a set of third-party packages that
+   profile mode does not. Install them in their own virtual environment. See
+   the Python version support table in :doc:`/install/quickstart`.
 
 .. note::
 
-   Analyze mode merges separate counter collection files (pmc_perf_*.csv or results_*.csv) into a unified pmc_perf.csv for analysis.
+   Analyze mode concatenates the per-pass ``results_*.csv.gz`` files written by
+   ``rocpd`` profiling into a unified ``pmc_perf.csv.gz`` for analysis. If the
+   workload directory already contains a ``pmc_perf.csv.gz``, that file is used
+   as-is.
 
 .. note::
 

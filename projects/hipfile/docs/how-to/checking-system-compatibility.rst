@@ -29,7 +29,7 @@ When run with the verbose option, a list of discovered HIP runtime libraries is 
 
 The mounted volumes table indicates whether a hipFile can use fastpath with each mount point. Each row in the table describes one block-backed mount. Pseudo file systems are omitted. Only mount points with "yes" in the``HIPFILE`` column are eligible for fastpath.
 
-For example, this table indicates that only ``/`` and ``/home`` are eligible for fastpath:
+For example, this table indicates that ``/``, ``/home``, and ``/data`` are eligible for fastpath, while ``/mnt/raid`` is not:
 
 .. code-block:: shell-session
 
@@ -37,14 +37,21 @@ For example, this table indicates that only ``/`` and ``/home`` are eligible for
    MOUNTPOINT  FSTYPE          DEVICE  BACKING  O_DIRECT  HIPFILE
    /           ext4 (ordered)  nvme0n1  nvme     yes       yes
    /home       xfs             nvme1n1  nvme     yes       yes
-   /data       ext4 (ordered)  dm-0     lvm      yes       no
+   /data       ext4 (ordered)  dm-0     lvm      yes       yes
+   /mnt/raid   xfs             md0      md       yes       no
 
 | ``MOUNTPOINT``: Location where the file system is mounted.
 | ``FSTYPE``: The file system type. hipFile's fastpath accepts only ``xfs`` or ``ext4`` with ``data=ordered`` journaling. When ext4 uses the default mode, ``ais-check`` labels it ``ext4 (ordered)``.
 | ``DEVICE``: The underlying block device.
-| ``BACKING``: The type of block device that backs the mount. For example ``nvme``, ``lvm``, ``md``, or ``mpath``. Direct local NVMe backing is required.
+| ``BACKING``: The type of block device that backs the mount. For example ``nvme``, ``lvm``, ``md``, or ``mpath``. Direct local NVMe backing is required, either raw or through an LVM logical volume whose physical volumes are all local NVMe.
 | ``O_DIRECT``: Whether an ``O_DIRECT`` open succeeded on the volume.
-| ``HIPFILE``: Will be "yes" when the file system qualifies, the backing is direct local NVMe, and ``O_DIRECT`` works. Will be "no" otherwise.
+| ``HIPFILE``: Will be "yes" when the file system qualifies, the backing is direct local NVMe (raw or LVM on local NVMe), and ``O_DIRECT`` works. Will be "no" otherwise.
+
+.. note::
+
+   For ``lvm`` backing, ``ais-check`` follows the device-mapper stack and reports
+   the volume as capable only when every layer is an LVM target and all of the
+   underlying physical volumes are local NVMe.
 
 The ``AIS support in`` table at the end of the report is a final pass or fail summary. It shows whether the four parts of the fastpath stack are
 present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, and at least one qualifying mounted volume. Each line reads ``True`` or
@@ -58,8 +65,19 @@ present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, 
            amdgpu                  : True
            hipFile-capable volume  : True
 
-| ``Kernel P2PDMA support``: Peer-to-peer DMA between the GPU and storage is available. 
+| ``Kernel P2PDMA support``: Peer-to-peer DMA between the GPU and storage is available.
 | ``HIP runtime``: A discovered HIP runtime library exports  ``hipAmdFileRead()`` and ``hipAmdFileWrite()``.
 | ``amdgpu``: The loaded amdgpu kernel driver exposes ``kfd_ais_rw_file`` in ``/proc/kallsyms``.
 | ``hipFile-capable volume``: At least one row in the mounted volumes table has ``HIPFILE`` set to ``yes``.
+
+
+.. note::
+
+   hipFile's fastpath is only supported on GPU physical functions (PFs). When a
+   GPU is an SR-IOV virtual function (VF), the fastpath is disabled and I/O falls
+   back to the compatibility path. ``ais-check`` uses ``amd-smi`` to detect VFs.
+   If ``amd-smi`` is not installed, the check is skipped. If a VF is present,
+   ``amd-smi`` will print a warning to stderr. This warning won't affect the exit
+   code. VFs can be identified by a device name that ends in ``VF``, such as
+   ``AMD Instinct MI300X VF``.
 

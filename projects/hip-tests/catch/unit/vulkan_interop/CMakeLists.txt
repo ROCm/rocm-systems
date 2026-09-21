@@ -4,28 +4,25 @@
 
 set(COMMON_SHARED_SRC vulkan_test.cc)
 
-set(TEST_SRC
-    hipExternalMemoryGetMappedBuffer.cc
-    hipExternalMemoryGetMappedMipmappedArray.cc
-    hipImportExternalMemory.cc
-    hipDestroyExternalMemory.cc
-    hipWaitExternalSemaphoresAsync.cc
-    hipSignalExternalSemaphoresAsync.cc
-    hipImportExternalSemaphore.cc
-    hipDestroyExternalSemaphore.cc
-   )
-
-if(UNIX)
-    set(TEST_SRC ${TEST_SRC}
-      hipGraphAddExternalSemaphoresSignalNode.cc
-      hipGraphAddExternalSemaphoresWaitNode.cc
-      hipGraphExternalSemaphoresSignalNodeGetParams.cc
-      hipGraphExternalSemaphoresSignalNodeSetParams.cc
-      hipGraphExecExternalSemaphoresSignalNodeSetParams.cc
-      hipGraphExternalSemaphoresWaitNodeSetParams.cc
-      hipGraphExternalSemaphoresWaitNodeGetParams.cc
-      hipGraphExecExternalSemaphoresWaitNodeSetParams.cc
-    )
+if(WIN32)
+    set(TEST_SRC
+        hipExternalMemoryGetMappedBuffer.cc
+        hipExternalMemoryGetMappedMipmappedArray.cc
+        hipImportExternalMemory.cc
+        hipDestroyExternalMemory.cc
+        hipWaitExternalSemaphoresAsync.cc
+        hipSignalExternalSemaphoresAsync.cc
+        hipImportExternalSemaphore.cc
+        hipDestroyExternalSemaphore.cc
+        hipVulkanImageDataVerification.cc
+       )
+else()
+    # On Linux only the image data verification test is supported for now. The other Vulkan
+    # interop tests (external memory/semaphore, graph nodes) are buggy or not implemented on
+    # Linux and need further investigation later.
+    set(TEST_SRC
+        hipVulkanImageDataVerification.cc
+       )
 endif()
 
 if(WIN32)
@@ -35,8 +32,7 @@ else()
   # aren't supported in Linux, thus test will fail at VulkanTest::CreateInstance()
   # with VK_ERROR_EXTENSION_NOT_PRESENT(-7).
   # Now temperally ignore it in Linux
-  message(STATUS "Ignore vulkan_interop test in Linux")
-  return()
+  message(STATUS "Run vulkan_interop test in Linux")
 endif()
 find_package(Vulkan)
 message(STATUS "Vulkan_FOUND: ${Vulkan_FOUND}")

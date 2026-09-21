@@ -34,8 +34,8 @@
 
 #include "logger/debug.hpp"
 
-#include <spdlog/fmt/ostr.h>
-#include <spdlog/fmt/ranges.h>
+#include <fmt/ostream.h>
+#include <fmt/ranges.h>
 
 #include <string>
 #include <string_view>
@@ -386,8 +386,8 @@ struct category_region
 
     void cache_stop(const char* name, std::string_view category)
     {
-        entry_key key{ name, std::string{ category } };
-        auto      x = map_name_to_args.find(key);
+        const entry_key key{ name, std::string{ category } };
+        auto            x = map_name_to_args.find(key);
         if(x != map_name_to_args.end() && !x->second.empty())
         {
             auto entry = std::move(x->second.back());
@@ -781,7 +781,7 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
                                   Args&&... _args)
 {
-    start<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
+    start<OptsT...>(_data.tool_id, [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
         {
             std::int64_t _n = 0;
@@ -794,7 +794,7 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
 
     if constexpr(sizeof...(Args) > 0)
     {
-        append_cache_args(_data.tool_id.c_str(),
+        append_cache_args(_data.tool_id,
                           region_cache::serialize_annotation_args(_args...));
     }
 }
@@ -807,11 +807,10 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::outgoing,
 {
     if constexpr(sizeof...(Args) > 0)
     {
-        append_cache_args(_data.tool_id.c_str(),
-                          region_cache::serialize_return_arg(_args...));
+        append_cache_args(_data.tool_id, region_cache::serialize_return_arg(_args...));
     }
 
-    stop<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
+    stop<OptsT...>(_data.tool_id, [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
             tracing::add_perfetto_annotation(
                 ctx, "return",

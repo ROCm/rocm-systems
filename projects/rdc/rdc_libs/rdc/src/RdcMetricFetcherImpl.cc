@@ -300,7 +300,8 @@ void RdcMetricFetcherImpl::get_ecc_total(uint32_t gpu_index, rdc_field_t field_i
   if (!value) {
     return;
   }
-  for (uint32_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
+  // amdsmi_gpu_block_t is a 64-bit flag enum; a 32-bit counter wraps to 0 and never exits.
+  for (uint64_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
     err =
         amdsmi_get_gpu_ecc_status(processor_handle, static_cast<amdsmi_gpu_block_t>(b), &err_state);
     if (err != AMDSMI_STATUS_SUCCESS) {
@@ -412,7 +413,8 @@ void RdcMetricFetcherImpl::get_ecc_deferred_total(uint32_t gpu_index, rdc_field_
   amdsmi_status_t err = get_processor_handle_from_id(gpu_index, &processor_handle);
 
   uint64_t deferred_count = 0;
-  for (uint32_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
+  // amdsmi_gpu_block_t is a 64-bit flag enum; a 32-bit counter wraps to 0 and never exits.
+  for (uint64_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
     amdsmi_ras_err_state_t err_state = AMDSMI_RAS_ERR_STATE_INVALID;
     err =
         amdsmi_get_gpu_ecc_status(processor_handle, static_cast<amdsmi_gpu_block_t>(b), &err_state);
@@ -774,19 +776,60 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       break;
     }
     case RDC_FI_GPU_MEMORY_CUR_BANDWIDTH: {
-      amdsmi_engine_usage_t engine_usage;
+      amdsmi_gpu_metrics_t gpu_metrics;
       amdsmi_vram_info_t vram_info;
-
-      value->status = amdsmi_get_gpu_activity(processor_handle, &engine_usage);
       value->type = INTEGER;
-      if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = static_cast<int64_t>(engine_usage.umc_activity);
+
+      // A single PMFW metrics snapshot provides both the instantaneous UMC
+      // activity and the accumulator; amdsmi_get_gpu_activity() would fetch the
+      // same snapshot internally, so query it once here.
+      const amdsmi_status_t metrics_status =
+          amdsmi_get_gpu_metrics_info(processor_handle, &gpu_metrics);
+
+      // In gpu_metrics the max value of the type means "not supported".
+      const uint16_t kU16NotSupported = std::numeric_limits<uint16_t>::max();
+      const uint64_t kU64NotSupported = std::numeric_limits<uint64_t>::max();
+
+      // Instantaneous UMC controller activity. On some ASICs this only reflects
+      // compute-shader memory traffic and reads zero under DMA/copy traffic.
+      double activity_pct = 0.0;
+      if (metrics_status == AMDSMI_STATUS_SUCCESS &&
+          gpu_metrics.average_umc_activity != kU16NotSupported) {
+        activity_pct = static_cast<double>(gpu_metrics.average_umc_activity);
       }
 
-      value->status = amdsmi_get_gpu_vram_info(processor_handle, &vram_info);
-      if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = value->value.l_int * vram_info.vram_max_bandwidth / 100;
+      // Prefer the memory-activity accumulator when available: unlike the
+      // instantaneous reading it also captures DMA/copy traffic. Track the
+      // previous sample per GPU and derive a percentage from the accumulator
+      // delta over firmware time (see derive_mem_activity_percent()).
+      if (metrics_status == AMDSMI_STATUS_SUCCESS && gpu_metrics.firmware_timestamp != 0 &&
+          gpu_metrics.firmware_timestamp != kU64NotSupported &&
+          gpu_metrics.mem_activity_acc != kU64NotSupported) {
+        std::lock_guard<std::mutex> lock(mem_activity_mutex_);
+        auto prev = mem_activity_cache_.find(gpu_index);
+        const bool have_prev = prev != mem_activity_cache_.end();
+        activity_pct = derive_mem_activity_percent(
+            activity_pct, have_prev, have_prev ? prev->second.mem_activity_acc : 0,
+            have_prev ? prev->second.firmware_timestamp : 0, gpu_metrics.mem_activity_acc,
+            gpu_metrics.firmware_timestamp);
+        // Only advance the cache with a newer firmware sample: the metrics read
+        // happens before the lock, so concurrent fetches can take the lock out of
+        // firmware-timestamp order and would otherwise cache an older sample last.
+        if (!have_prev || gpu_metrics.firmware_timestamp > prev->second.firmware_timestamp) {
+          mem_activity_cache_[gpu_index] = {gpu_metrics.mem_activity_acc,
+                                            gpu_metrics.firmware_timestamp};
+        }
       }
+
+      const amdsmi_status_t vram_status = amdsmi_get_gpu_vram_info(processor_handle, &vram_info);
+      // Report a bandwidth only when both reads succeeded; otherwise leave a zero
+      // value (not a bare activity percentage) and surface the failing status.
+      value->value.l_int =
+          (vram_status == AMDSMI_STATUS_SUCCESS)
+              ? static_cast<int64_t>(activity_pct * vram_info.vram_max_bandwidth / 100.0)
+              : 0;
+      // Don't mask a metrics-fetch failure with vram-info success.
+      value->status = (metrics_status != AMDSMI_STATUS_SUCCESS) ? metrics_status : vram_status;
       break;
     }
     case RDC_FI_GPU_MEMORY_FREE: {
@@ -1599,6 +1642,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index
   }
 }
 
+#ifdef ENABLE_ESMI_LIB
 rdc_status_t RdcMetricFetcherImpl::fetch_cpu_field_(uint32_t gpu_index, rdc_field_t field_id,
                                                     rdc_field_value* value) {
   amdsmi_processor_handle processor_handle = {};
@@ -1800,6 +1844,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_cpu_field_(uint32_t gpu_index, rdc_fiel
 
   return Smi2RdcError(static_cast<amdsmi_status_t>(value->status));
 }
+#endif  // ENABLE_ESMI_LIB
 
 rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field_t field_id,
                                                    rdc_field_value* value) {
@@ -1860,8 +1905,12 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
   value->field_id = field_id;
   value->status = AMDSMI_STATUS_NOT_SUPPORTED;
   if (info.device_type == RDC_DEVICE_TYPE_CPU) {
-    // don't care about partition for CPUs
+// don't care about partition for CPUs
+#ifdef ENABLE_ESMI_LIB
     status = fetch_cpu_field_(gpu_index, field_id, value);
+#else
+    status = RDC_ST_NOT_SUPPORTED;
+#endif
   } else if (info.entity_role == RDC_DEVICE_ROLE_PARTITION_INSTANCE) {
     status = fetch_gpu_partition_field_(gpu_index, field_id, value);
   } else if (info.device_type == RDC_DEVICE_TYPE_GPU) {
