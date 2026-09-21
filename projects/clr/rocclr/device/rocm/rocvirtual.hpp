@@ -291,9 +291,8 @@ class VirtualGPU : public device::VirtualDevice {
     void SetActiveEngine(HwQueueEngine engine = HwQueueEngine::Compute) { engine_ = engine; }
     HwQueueEngine GetActiveEngine() const { return engine_; }
 
-    //! Returns the last submitted signals for a wait.  aql_barrier_dep says the caller will
-    //! put the result straight into an AQL packet executed by this queue's own command
-    //! processor; only such a caller is offered a device resident ordering edge.
+    //! Returns the last submitted signals for a wait.  aql_barrier_dep says the result goes
+    //! straight into an AQL packet on this queue; only then may a device resident edge appear.
     std::vector<hsa_signal_t>& WaitingSignal(HwQueueEngine engine = HwQueueEngine::Compute,
                                              bool aql_barrier_dep = false);
 
@@ -559,9 +558,6 @@ class VirtualGPU : public device::VirtualDevice {
   void submitNativeFn(amd::NativeFnCommand& cmd);
   void submitMarker(amd::Marker& cmd);
 
-  //! Appends a barrier packet whose completion signal is a device resident ordering edge,
-  //! naming a twin of the current command's completion signal.  Eligibility is tested by
-  //! the caller; see the call sites.
   void PublishOrderingEdge();
   void submitAccumulate(amd::AccumulateCommand& cmd);
   void submitAcquireExtObjects(amd::AcquireExtObjectsCommand& cmd);

@@ -996,10 +996,7 @@ typedef enum hsa_amd_agent_info_s {
   /**
    * Can this agent be named as the single consumer of a signal created with
    * ::hsa_amd_signal_create_v2 and
-   * ::HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD?  True iff the agent is a GPU
-   * that exposes a device local memory region a signal's ABI block can be
-   * placed in.  This is the same test the allocator performs, so a true answer
-   * here and a failure to allocate cannot disagree.  The caller side conditions
+   * ::HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD?  The caller side conditions
    * (exactly one consumer, no IPC) are not properties of the agent and are not
    * reflected here.  The type of this attribute is bool.
    *
@@ -1416,12 +1413,8 @@ hsa_status_t HSA_API hsa_amd_signal_create(hsa_signal_value_t initial_value, uin
 #define HSA_AMD_SIGNAL_CREATE_DESC_VERSION 1
 
 /**
- * @brief Signal creation attributes.
- *
- * Selects where the signal's value word - the word an agent polls when it
- * waits on the signal - is placed.  The default (0) is the placement every
- * signal has always had, so a zero-initialised descriptor requests exactly
- * what ::hsa_amd_signal_create would have produced.
+ * @brief Placement of a signal's value word - the word an agent polls when it
+ * waits on the signal.
  */
 typedef enum {
   /**
@@ -1444,18 +1437,7 @@ typedef enum {
  *
  * A zero-initialised descriptor with @c version set requests a signal
  * identical to one from ::hsa_amd_signal_create with @c num_consumers 0 and
- * no attributes, because ::HSA_AMD_SIGNAL_CREATE_SYSTEM_MEM is 0.  This keeps
- * the descriptor backward compatible with callers that only want an ordinary
- * signal.
- *
- * On success the runtime writes the created signal into the @c signal field.
- * On failure that field is left with a zero handle, so a caller can find which
- * elements of a batch failed without tracking indices itself.
- *
- * The @c version field must be set to ::HSA_AMD_SIGNAL_CREATE_DESC_VERSION.
- * All @c reserved fields must be zero.  Undefined bits of @c flags are also
- * rejected, which is stricter than the other flag and attribute words this
- * header defines: see the note on ::hsa_amd_signal_create_v2.
+ * no attributes, because ::HSA_AMD_SIGNAL_CREATE_SYSTEM_MEM is 0.
  */
 typedef struct hsa_amd_signal_create_desc_s {
   /** Struct version. Must be HSA_AMD_SIGNAL_CREATE_DESC_VERSION. */
@@ -1471,9 +1453,7 @@ typedef struct hsa_amd_signal_create_desc_s {
    *  rejected.  With ::HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD,
    *  ::HSA_AMD_SIGNAL_IPC is rejected and ::HSA_AMD_SIGNAL_AMD_GPU_ONLY is
    *  accepted and inert: that placement always creates a busy-wait signal
-   *  with no event mailbox, whether or not the bit is set.  The bit is
-   *  accepted so that a caller can pass one attribute set to either create
-   *  entry point. */
+   *  with no event mailbox, whether or not the bit is set. */
   uint64_t attributes;
   /** Size of @c consumers. 0 indicates that any agent might wait on the
    *  signal. Must be 1 when
@@ -1502,36 +1482,25 @@ typedef struct hsa_amd_signal_create_desc_s {
  * use as a cross queue ordering edge.
  *
  * A barrier-AND packet whose dependency signal is not yet satisfied makes the
- * consuming GPU's command processor poll the value word.  When the word is in
- * host memory, as it is for every signal created by ::hsa_amd_signal_create,
- * each poll is a read across the host bus.  With the device memory flag the
- * word lives in @c consumers[0]'s local memory, so the poll is local.
+ * consuming GPU's command processor poll the value word.  In host memory, as
+ * for every signal from ::hsa_amd_signal_create, each poll is a read across the
+ * host bus; with the device memory flag the poll is local to @c consumers[0].
  *
- * @c version is validated strictly: a runtime that does not recognise the value
- * rejects the descriptor with ::HSA_STATUS_ERROR_INVALID_ARGUMENT rather than
- * silently ignoring what it does not understand.  Undefined bits of @c flags and
- * of @c attributes are likewise rejected, so a caller that sets a flag this
- * runtime predates receives an error instead of a signal that quietly lacks the
- * requested property.
+ * An unrecognised @c version and undefined bits of @c flags or @c attributes
+ * are rejected, not ignored.
  *
  * A signal created with ::HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD is
- * restricted, and the restrictions are enforced:
+ * restricted:
  * - the host must not perform an atomic read-modify-write on the value word.
- *   Such an operation is not atomic with respect to the consuming GPU: it is
- *   issued as separate bus transactions and loses the command processor's
- *   concurrent updates.  This is the same constraint this header already
- *   documents for ::HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR.  The
- *   ::hsa_signal_and_relaxed family and the other read-modify-write entry
- *   points return void, so the runtime has no channel in which to report
- *   this: it prints a diagnostic and terminates the process.  Loads and plain
- *   stores are supported, and are what this object is for.  Waits are
- *   supported but always spin; see the wait restriction below before relying
- *   on ::HSA_WAIT_STATE_BLOCKED.
+ *   Such an operation is issued as separate bus transactions and loses the
+ *   command processor's concurrent updates.  The ::hsa_signal_and_relaxed
+ *   family and the other read-modify-write entry points return void, so the
+ *   runtime prints a diagnostic and terminates the process.  Loads and plain
+ *   stores are supported.
  * - it may not be the completion signal of any asynchronous copy, prefetch or
  *   discard entry point, nor the subject of ::hsa_amd_signal_value_pointer or
- *   ::hsa_amd_signal_async_handler.  Which of those entry points exist depends
- *   on the runtime; each one that does returns
- *   ::HSA_STATUS_ERROR_INVALID_SIGNAL on this object.
+ *   ::hsa_amd_signal_async_handler.  Each such entry point this runtime
+ *   provides returns ::HSA_STATUS_ERROR_INVALID_SIGNAL on this object.
  * - it may be named in a dependency list - an AQL packet's dep_signal[], or an
  *   entry point's dep_signals[] - only by the agent given as @c consumers[0].
  *   The runtime does not check this.  The value word is mapped into that
@@ -1539,8 +1508,8 @@ typedef struct hsa_amd_signal_create_desc_s {
  *   violation rather than a wait.
  * - a dependency handed to an asynchronous copy, prefetch or discard entry
  *   point is polled by the runtime on the host rather than by an engine, which
- *   reinstates exactly the host bus traffic this object exists to remove.  On
- *   gfx90x parts carrying the SDMA poll workaround that is true of every SDMA
+ *   reinstates the host bus traffic this object exists to remove.  On gfx90x
+ *   parts carrying the SDMA poll workaround that is true of every SDMA
  *   dependency.  Prefer an AQL dep_signal[].
  * - ::hsa_signal_wait_* on this signal spins.  There is no interrupt backed
  *   form of this object, so ::HSA_WAIT_STATE_BLOCKED does not sleep, and the
@@ -1550,10 +1519,7 @@ typedef struct hsa_amd_signal_create_desc_s {
  *
  * This call does not fall back.  If the machine cannot support the placement
  * the descriptor fails; query ::HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED
- * on the intended consumer first.  On a runtime that predates this feature
- * that query returns ::HSA_STATUS_ERROR_INVALID_ARGUMENT, which is
- * distinguishable from a machine that is merely unsuitable.  Callers must check
- * the returned status and the per descriptor @c signal handle.
+ * on the intended consumer first.
  *
  * On partial failure, signals that were successfully created remain valid and
  * are the caller's to destroy.  The caller should inspect each

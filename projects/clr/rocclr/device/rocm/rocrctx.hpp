@@ -110,9 +110,6 @@ struct RocrEntryPoints {
   decltype(hsa_amd_ipc_signal_create)* hsa_amd_ipc_signal_create_;
   decltype(hsa_amd_ipc_signal_attach)* hsa_amd_ipc_signal_attach_;
   decltype(hsa_amd_signal_create)* hsa_amd_signal_create_;
-  //! Optional: absent on a runtime that predates the descriptor based signal create.  Loaded
-  //! with GET_ROCR_OPTIONAL_SYMBOL and reached only through amd_signal_create_v2(), which
-  //! null checks it, so an older ROCr simply keeps today's host resident dependencies.
   hsa_amd_signal_create_v2_fn* hsa_amd_signal_create_v2_;
   decltype(hsa_amd_register_system_event_handler)* hsa_amd_register_system_event_handler_;
   decltype(hsa_amd_queue_set_priority)* hsa_amd_queue_set_priority_;

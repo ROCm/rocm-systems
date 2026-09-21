@@ -281,9 +281,8 @@ Device::~Device() {
 
   delete[] p2p_agents_list_;
 
-  // After every hardware queue above, so no command processor can still be polling a slot.
-  // No wait: a slot still armed here means a ProfilingSignal outlived its device, which is a
-  // defect elsewhere, and spinning on an uncached word during teardown would hide it.
+  // After every hardware queue destroyed above, so no command processor can still be polling
+  // a slot.  A slot still armed here means a ProfilingSignal outlived its device.
   for (auto& signal : edge_signals_) {
     if (Hsa::signal_load_relaxed(signal) != 0) {
       LogWarning("Ordering edge signal still armed at device teardown");
@@ -779,10 +778,6 @@ bool Device::create() {
     return false;
   }
 
-  // Can this agent hold the value word of a cross queue ordering edge?  Only symbol-present
-  // AND SUCCESS-and-true enables the path: an older runtime lacks the entry point, and an
-  // agent can answer that it cannot host the word.  Both negatives keep today's behaviour.
-  // The three ways of being unavailable need different fixes, so name which one this is.
   const char* edge_state = "unavailable: runtime has no hsa_amd_signal_create_v2";
   if (Hsa::amd_signal_create_v2_available()) {
     bool supported = false;
@@ -804,24 +799,19 @@ bool Device::create() {
     edge_state = "enabled";
   }
 
-  // A fixed pool of device resident signals for use as cross queue ordering edges, created
-  // once per device and recycled.  These never enter a queue's signal_list_ and never become
-  // a command's HwEvent; their only role is an AQL barrier packet's dep_signal[] on this same
-  // device.  The pool never grows and nothing else creates one: a slot costs a GPUVM mapping
-  // and hsa_amd_signal_create_v2 must not be driven at dispatch rate.  On partial failure
-  // ROCr leaves a zero handle, and a short pool is not fatal - the events it cannot cover
-  // keep today's host resident dependency.
+  // These never enter a queue's signal_list_ and never become a command's HwEvent; their only
+  // role is an AQL barrier packet's dep_signal[] on this same device.  On partial failure ROCr
+  // leaves a zero handle in the descriptors it refused.
   if (ordering_edge_signals_ && (ROC_EDGE_SIGNAL_POOL_SIZE > 0)) {
     hsa_agent_t agent = bkendDevice_;
-    // Value initialised by the vector, which is what zeroes version's reserved neighbours -
-    // the descriptor rejects a non zero reserved field rather than ignoring it.
+    // The vector value initialises: the descriptor rejects a non zero reserved field rather
+    // than ignoring it.
     std::vector<hsa_amd_signal_create_desc_t> descs(ROC_EDGE_SIGNAL_POOL_SIZE);
     for (auto& desc : descs) {
       desc.version = HSA_AMD_SIGNAL_CREATE_DESC_VERSION;
       desc.flags = static_cast<uint16_t>(HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD);
       desc.initial_value = 0;
-      // Accepted and inert on this placement, but it is the attribute clr sets on every
-      // other GPU only signal it creates.
+      // Accepted and inert on this placement.
       desc.attributes = HSA_AMD_SIGNAL_AMD_GPU_ONLY;
       desc.num_consumers = 1;
       desc.consumers = &agent;
@@ -839,8 +829,6 @@ bool Device::create() {
       LogWarning("Ordering edge signal creation failed; the pool will be short");
     }
   }
-  // The slot count rather than the capability bit: a process where every create failed has
-  // the feature on and doing nothing, and a boolean cannot say that.
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Ordering edge signals: %s, %zu of %u slots created",
           edge_state, edge_signals_.size(), ROC_EDGE_SIGNAL_POOL_SIZE);
 
@@ -4121,11 +4109,9 @@ void Device::RetainGlobalSignal(void* signal) const {
 bool Device::CreateHwEvents(int count, std::vector<void*>& hw_events) const {
   hw_events.resize(count, nullptr);
 
-  // A segmented graph's cross stream dependency gets the same device resident placement as
-  // the eager path's, at creation: one ProfilingSignal serves as both the producer's
-  // completion signal and the consumer's dependency, and splitting the roles would need a
-  // second signal and a packet to decrement it.  Safe because the completion role's host
-  // accesses are loads and plain stores; the read-modify-writes are on tracker signals.
+  // One ProfilingSignal serves as both the producer's completion signal and the consumer's
+  // dependency.  Safe because the completion role's host accesses are loads and plain stores;
+  // the read-modify-writes are on tracker signals.
   std::vector<hsa_signal_t> edges;
   if (ordering_edge_signals_ && (count > 0)) {
     hsa_agent_t agent = bkendDevice_;
@@ -4140,8 +4126,6 @@ bool Device::CreateHwEvents(int count, std::vector<void*>& hw_events) const {
       desc.consumers = &agent;
     }
     Hsa::amd_signal_create_v2(descs.data(), static_cast<uint32_t>(descs.size()));
-    // On partial failure ROCr leaves a zero handle in the descriptors it refused; those slots
-    // fall back to the host resident create below.
     edges.reserve(descs.size());
     size_t created = 0;
     for (const auto& desc : descs) {
@@ -4517,9 +4501,8 @@ hsa_signal_t Device::AcquireOrderingEdge(uint32_t* slot) const {
   }
   const uint32_t idx = edge_free_.back();
   // The edge barrier sits one packet behind the signal that published it, so confirm the
-  // decrement landed before re-arming.  Never waits: a slot that is not ready is left on the
-  // list and the caller falls back.  This read and the arming store are uncached device
-  // accesses and are what publishing an edge costs the producer - do not add a third.
+  // decrement landed before re-arming.  This read and the arming store are uncached device
+  // accesses, and are what publishing an edge costs the producer.
   if (Hsa::signal_load_relaxed(edge_signals_[idx]) != 0) {
     return hsa_signal_t{};
   }

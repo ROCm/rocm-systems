@@ -750,11 +750,9 @@ class Runtime {
     }
   };
 
-  /// @brief Block pool for AsyncEventItem.  Host-only bookkeeping -- a signal
-  /// handle, a condition, a value and two host pointers -- so ordinary host
-  /// memory rather than BaseShared's pinned, GPU-mapped kernarg allocator.
-  /// Blocks that do not belong to an agent's memory region also need not be
-  /// freed before the agents are.
+  /// @brief Block pool for AsyncEventItem.  Host-only bookkeeping, so ordinary
+  /// host memory: these blocks belong to no agent's memory region and so need
+  /// not be freed before the agents are.
   class AsyncEventsPool {
    public:
     AsyncEventsPool() : block_size_(preallocblocks_ * minblock_) {}

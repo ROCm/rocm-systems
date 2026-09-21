@@ -81,17 +81,15 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
 
   Flags flags_;
 
-  //! Handle of a device resident twin of signal_, published by the producing command so
-  //! another queue can name it in barrier_packet_.dep_signal[] instead of signal_; zero when
-  //! none was published.  Read without this object's lock: the release store in
-  //! VirtualGPU::PublishOrderingEdge() publishes edge_owner_ and edge_slot_ with it.
+  //! Handle of a device resident twin of signal_, or zero when none was published.  Read
+  //! without this object's lock: the release store in VirtualGPU::PublishOrderingEdge()
+  //! publishes edge_owner_ and edge_slot_ with it.
   std::atomic<uint64_t> edge_handle_{0};
   const Device* edge_owner_ = nullptr;  //!< Device whose pool owns edge_slot_
   uint32_t edge_slot_ = 0;              //!< Index of that slot inside the pool
 
-  //! Returns a published edge slot to its owner's free list.  Called only where clr already
-  //! knows no command holds this object - the destructor, and the re-arm in ActiveSignal() -
-  //! which is the property slot reuse needs.
+  //! Returns a published edge slot to its owner's free list.  Callable only where no command
+  //! still holds this object - the destructor, and the re-arm in ActiveSignal().
   void ReleaseOrderingEdge();
 
   //! Cached timing data - populated when signal completes, avoids repeated HSA calls
@@ -679,16 +677,12 @@ class Device : public NullDevice {
   //! Init hidden heap for device memory allocations
   void HiddenHeapInit(const VirtualGPU& gpu);
 
-  //! True if this agent can host the value word of an ordering edge signal.  Answered once,
-  //! at create() time, by HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED.
   bool orderingEdgeSignals() const { return ordering_edge_signals_; }
 
   //! Takes a free ordering edge slot, arms it and returns its handle, or {0} if none is
-  //! available.  Never blocks, never allocates and never grows the pool: a caller that
-  //! cannot get a slot keeps today's host resident dependency for that one event.
+  //! available.  Never blocks, never allocates and never grows the pool.
   hsa_signal_t AcquireOrderingEdge(uint32_t* slot) const;
 
-  //! Returns a slot taken by AcquireOrderingEdge() to the free list.
   void ReleaseOrderingEdge(uint32_t slot) const;
   bool isXgmi() const override { return isXgmi_; }
 
@@ -854,9 +848,8 @@ class Device : public NullDevice {
   bool isXgmi_;  //!< Flag to indicate if there is XGMI between CPU<->GPU
   bool isAPU_ = false;  //!< Flag to indicate the agent shares physical memory with the CPU
   bool ordering_edge_signals_ = false;  //!< Agent can host an ordering edge signal value word
-  //! Device resident ordering edge signals.  Owned by the device, not by a queue, so that
-  //! they outlive every command processor that can name one and so that their number does
-  //! not scale with the number of streams an application creates.
+  //! Owned by the device, not by a queue, so that they outlive every command processor that
+  //! can name one.
   std::vector<hsa_signal_t> edge_signals_;
   mutable std::vector<uint32_t> edge_free_;  //!< Indices of the slots nobody holds
   mutable amd::Monitor edge_pool_lock_;      //!< Serialises the two lines above

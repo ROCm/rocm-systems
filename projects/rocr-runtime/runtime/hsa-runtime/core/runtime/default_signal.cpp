@@ -62,8 +62,6 @@ BusyWaitSignal::BusyWaitSignal(SharedSignal* abi_block, bool enableIPC, bool dev
 void BusyWaitSignal::RejectHostAtomicRmw() const {
   if (!IsDeviceResidentValue()) return;
 
-  // These entry points have no status return and completing the operation would
-  // corrupt the value word, so stop.
   fprintf(stderr,
           "HSA: read-modify-write on a device resident signal value word is "
           "not supported.\n");
@@ -86,7 +84,7 @@ void BusyWaitSignal::DrainDeviceResidentStore() const {
   // A write combining store can linger in a WC buffer after a later store to a
   // different aperture - a doorbell - is already visible, so the drain has to
   // follow the store rather than precede it.  Not PcieWcFlush(): its readback is
-  // the host bus read this placement exists to remove.
+  // a host bus read.
   atomic::Fence(std::memory_order_release);
 }
 
@@ -131,8 +129,7 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
     timer::CheckAbortTimeout(start_time, signal_abort_timeout);
 
     // MONITORX is not guaranteed to arm on a write combining line, so the park
-    // would degenerate into a timed sleep the awaited write does not end.  Spin
-    // instead; the loop re-reads the word and re-tests the condition anyway.
+    // would degenerate into a timed sleep the awaited write does not end.
     if (g_use_mwaitx && !IsDeviceResidentValue()) {
       // Use timer-enabled mwaitx for busy waiting
       timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value, 60000, true);

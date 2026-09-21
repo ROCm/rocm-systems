@@ -471,29 +471,21 @@ class GpuAgent : public GpuAgentInt {
   /// did not request a specific engine, rotating round-robin across all engines.
   uint32_t NextSdmaUserQueueEngineId();
 
-  /// @brief Can a signal's ABI block be placed in this agent's local memory?
-  /// The agent side of hsa_amd_signal_create_v2()'s gate; the caller side clauses
-  /// are not agent properties and are checked at the entry point.
   bool SupportsOrderingEdgeSignal() const { return OrderingEdgeSignalRegion() != nullptr; }
 
   /// @brief The device local memory region an ordering edge signal's ABI block
-  /// is allocated from, or nullptr if this agent has none.  Do not add a second
-  /// expression of this test: one that is not the allocator's own can report
-  /// support where the allocation fails, and refuse where it would work.
+  /// is allocated from, or nullptr if this agent has none.
   const core::MemoryRegion* OrderingEdgeSignalRegion() const;
 
   // ---- Ordering edge signal slab -------------------------------------------
-  // One device allocation per (process x device), carved into fixed stride slots
-  // addressed by index.
 
   /// @brief Size of one slab block.  Not a tuning constant: KFD charges VRAM
   /// availability in 2 MiB units per device local allocation whatever the size,
   /// so a smaller block reserves exactly as much and holds less.
   static constexpr size_t kOrderingEdgeBlockSize = 2 * 1024 * 1024;
 
-  /// @brief Slot stride in bytes.  128 == sizeof(SharedSignal), so a block packs
-  /// 16,384 slots with no padding; signal.cpp asserts the conditions any other
-  /// value must satisfy.  Nothing else in this runtime changes with it.
+  /// @brief Slot stride in bytes.  128 == sizeof(SharedSignal); signal.cpp
+  /// static_asserts the constraints any other value must satisfy.
   static constexpr size_t kOrderingEdgeDefaultStride = 128;
 
   /// @brief Take one ordering edge signal slot -- storage for one SharedSignal
@@ -501,15 +493,12 @@ class GpuAgent : public GpuAgentInt {
   /// HSA_STATUS_ERROR_INVALID_AGENT through @p why when this agent has no region
   /// such a block can live in and HSA_STATUS_ERROR_OUT_OF_RESOURCES when the
   /// allocation failed.  The storage is NOT constructed; the caller placement
-  /// news into it, so slots are written only as they are handed out.
-  /// core::SharedSignalPool_t is structurally this object but is process global
-  /// and host allocated, so it is deliberately not reused.
+  /// news into it.
   void* AcquireOrderingEdgeSlot(hsa_status_t* why);
 
-  /// @brief Return a slot taken by AcquireOrderingEdgeSlot() to the free list.
-  /// The storage stays mapped while the agent lives, so a command processor still
-  /// polling a retired value word reads a mapped page.  The cost is that a stale
-  /// handle aliases a live slot instead of faulting.
+  /// @brief Return a slot to the free list.  The storage stays mapped while the
+  /// agent lives, so a command processor still polling a retired value word reads
+  /// a mapped page; a stale handle aliases a live slot instead of faulting.
   void ReleaseOrderingEdgeSlot(void* slot);
 
   /// @brief Force a WC flush on PCIe devices by doing a write and then read-back
@@ -808,8 +797,6 @@ class GpuAgent : public GpuAgentInt {
 
  private:
   // ---- Ordering edge signal slab -------------------------------------------
-  // A fixed stride array with a free index list, not a general purpose heap.
-  // Invariant: every index in free_slots names a slot inside blocks.
   struct OrderingEdgeSlab {
     std::mutex lock;
     std::vector<char*> blocks;
@@ -818,11 +805,11 @@ class GpuAgent : public GpuAgentInt {
   OrderingEdgeSlab edge_slab_;
 
   // @brief Add one block to the slab and push its slots onto the free list.
-  // Caller holds edge_slab_.lock.  Returns INVALID_AGENT for "not this agent"
-  // and OUT_OF_RESOURCES for a failed allocation.
+  // Caller holds edge_slab_.lock.  Returns INVALID_AGENT when this agent has no
+  // region such a block can live in, OUT_OF_RESOURCES when the allocation failed.
   hsa_status_t GrowOrderingEdgeSlab();
 
-  // @brief Free every slab block.  Called from ~GpuAgent only, before this
+  // @brief Free every slab block.  Called from ~GpuAgent only, and before this
   // agent's memory regions are torn down.
   void DestroyOrderingEdgeSlab();
 

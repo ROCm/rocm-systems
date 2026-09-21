@@ -303,7 +303,7 @@ bool Event::notifyCmdQueue(bool cpu_wait, bool cross_queue) {
       }
       // This marker stands in for an event whose own command has no hardware event, so it is
       // the producer of any dependency taken on that event.  Decided by the first waiter and
-      // not revisited: a later cross queue waiter reuses the marker cached in notify_event_.
+      // not revisited: a later waiter reuses the marker cached in notify_event_.
       command->setCrossStreamProducer(cross_queue);
       command->enqueue();
       // Save notification, associated with the current event

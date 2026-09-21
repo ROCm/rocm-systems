@@ -159,12 +159,10 @@ class BusyWaitSignal : public Signal {
 
   /// @brief Guard on every host read-modify-write of the value word.  A
   /// lock-prefixed RMW against a device memory aperture is not promoted to a bus
-  /// atomic and can silently lose a concurrent device update.  These entry points
-  /// have no status return, so this fails hard, unconditionally, NDEBUG or not.
+  /// atomic and can silently lose a concurrent device update.  The guarded entry
+  /// points have no status return, so this aborts, NDEBUG or not.
   void RejectHostAtomicRmw() const;
 
-  /// @brief Drain the write combining buffers after a host store, when the
-  /// value word is device resident.  No-op otherwise.
   void DrainDeviceResidentStore() const;
 
  private:
@@ -187,10 +185,6 @@ class DefaultSignal : private LocalSignal, public BusyWaitSignal {
   explicit DefaultSignal(hsa_signal_value_t initial_value, bool enableIPC = false)
       : LocalSignal(initial_value, enableIPC), BusyWaitSignal(signal(), enableIPC) {}
 
-  /// @brief Same signal, with the ABI block - and so the value word - placed in
-  /// device_agent's local memory.  See LocalSignal's matching constructor and
-  /// hsa_amd_signal_create_v2() with
-  /// HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD.
   DefaultSignal(hsa_signal_value_t initial_value, core::Agent& device_agent)
       : LocalSignal(initial_value, device_agent), BusyWaitSignal(signal(), false, true) {}
 
