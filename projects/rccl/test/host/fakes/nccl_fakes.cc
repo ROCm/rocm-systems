@@ -28,6 +28,8 @@
 #include "strongstream.h" // ncclStrongStream*
 #include "mem_manager.h"  // ncclMemTrack / ncclMemUntrack / ncclDynMemMarkExportToPeer
 
+#include <functional>
+
 #include "nccl_fakes.h"   // controllable seam hooks
 
 #include <type_traits>
@@ -165,13 +167,22 @@ ncclResult_t ncclProxyCallBlocking(struct ncclComm*           comm,
                                respBuff, respSize);
 }
 
-ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* /*comm*/,
-                                          int              /*rank*/,
-                                          void*            /*handle*/,
-                                          int*             /*convertedFd*/)
+// A seam rather than a fixed return: the dev_runtime suite's symmetric-memory
+// export path needs a real fd to hand on. The default is the previous fixed
+// ncclSystemError, so nothing that relied on it failing changed.
+static ncclResult_t DefaultNcclProxyClientGetFdBlocking(struct ncclComm*, int, void*, int*)
 {
     return ncclSystemError;
 }
+std::function<ncclResult_t(struct ncclComm*, int, void*, int*)>
+    g_ncclProxyClientGetFdBlocking = DefaultNcclProxyClientGetFdBlocking;
+
+ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* comm, int rank, void* handle,
+                                          int* convertedFd)
+{
+    return g_ncclProxyClientGetFdBlocking(comm, rank, handle, convertedFd);
+}
+
 
 ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm*           comm,
                                             struct ncclProxyConnector* proxyConn,
@@ -213,12 +224,14 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm*       /*comm*/,
                               int*                   p2p,
                               int*                   read,
                               int*                   intermediateRank,
-                              int*                   cudaP2p)
+                              int*                   cudaP2p,
+                              int*                   isCrossClique)
 {
     if (p2p)              *p2p              = 0;
     if (read)             *read             = 0;
     if (intermediateRank) *intermediateRank = -1;
     if (cudaP2p)          *cudaP2p          = 0;
+    if (isCrossClique)    *isCrossClique    = 0;
     return ncclSuccess;
 }
 
@@ -297,16 +310,24 @@ ncclResult_t ncclStreamWaitStream(hipStream_t /*a*/,
     return ncclSuccess;
 }
 
-ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* /*system*/,
-                                 int                    /*cudaDev1*/,
-                                 int                    /*cudaDev2*/,
-                                 bool*                  isXGMI,
-                                 int                    /*maxInter*/,
-                                 int                    /*nInter*/,
-                                 int*                   /*inter*/)
+ncclResult_t DefaultTopoGetLinkType(int, int, bool* isXGMI, int)
 {
     if (isXGMI) *isXGMI = false;
     return ncclSuccess;
+}
+std::function<ncclResult_t(int, int, bool*, int)> g_ncclTopoGetLinkType = DefaultTopoGetLinkType;
+int g_ncclTopoGetLinkTypeCalls = 0;
+
+ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* /*system*/,
+                                 int                    cudaDev1,
+                                 int                    cudaDev2,
+                                 bool*                  isXGMI,
+                                 int                    maxInter,
+                                 int                    /*nInter*/,
+                                 int*                   /*inter*/)
+{
+    g_ncclTopoGetLinkTypeCalls++;
+    return g_ncclTopoGetLinkType(cudaDev1, cudaDev2, isXGMI, maxInter);
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +370,25 @@ ncclResult_t ncclMemUntrack(struct ncclMemManager* /*manager*/,
     return ncclSuccess;
 }
 
+ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager* /*manager*/,
+                                   void*                  /*ptr*/,
+                                   struct ncclMemUntrackInfo* info)
+{
+    if (info) {
+        info->memType = ncclMemPersist;
+        info->dynMemState = ncclDynMemStateActive;
+        info->dynMemSize = 0;
+    }
+    return ncclSuccess;
+}
+
+ncclResult_t ncclMemUntrackPersist(struct ncclMemManager* /*manager*/,
+                                   void*                  /*ptr*/,
+                                   size_t                 /*size*/)
+{
+    return ncclSuccess;
+}
+
 ncclResult_t ncclDynMemMarkExportToPeer(struct ncclMemManager* /*manager*/,
                                         void*                  /*ptr*/,
                                         int                    /*peerRank*/)
@@ -379,10 +419,13 @@ int64_t ncclParamMultiSegmentRegister() { return 0; }
 
 void ResetNcclFakes()
 {
+    g_ncclProxyClientGetFdBlocking = DefaultNcclProxyClientGetFdBlocking;
     g_strongStreamAcquire          = DefaultStrongStreamAcquire;
     g_proxyConnect                 = DefaultProxyConnect;
     g_proxyCallBlocking            = DefaultProxyCallBlocking;
     g_loadParam                    = DefaultLoadParam;
     g_cuMemEnable                  = DefaultCuMemEnable;
     g_proxyClientQueryFdBlocking   = DefaultProxyClientQueryFdBlocking;
+    g_ncclTopoGetLinkType          = DefaultTopoGetLinkType;
+    g_ncclTopoGetLinkTypeCalls     = 0;
 }

@@ -71,7 +71,9 @@ public:
         std::unique_ptr<hsa_barrier> barrier;
     };
 
-    void kernel_completion_signal(const Queue&);
+    // Notify the serializer that an intercepted dispatch completed. Non-serialized dispatches
+    // still advance transition barriers but do not participate in queue token handoff.
+    void kernel_completion_signal(const Queue&, bool is_serialized);
     // Signal a kernel dispatch is taking place, generates packets needed to be
     // inserted to support kernel dispatch
     common::container::small_vector<hsa::rocprofiler_packet, 3> kernel_dispatch(const Queue&) const;

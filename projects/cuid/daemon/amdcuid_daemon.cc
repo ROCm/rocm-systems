@@ -1,34 +1,38 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "include/amd_cuid.h"
-#include "src/hmac.h"
-#include "src/ipc_protocol.h"
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/un.h>
+#include <unistd.h>
+
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
-#include <fcntl.h>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <sstream>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <sys/un.h>
 #include <thread>
-#include <unistd.h>
 #include <vector>
 
+#include "include/amd_cuid.h"
+#include "src/hmac.h"
+#include "src/ipc_protocol.h"
+
+namespace {
+
 // static hmac instance for daemon
-static cuid_hmac daemon_hmac = cuid_hmac();
+cuid_hmac daemon_hmac = cuid_hmac();
 
 // Global log file stream
-static std::unique_ptr<std::ofstream> g_log_file;
-static bool g_logging_to_file = false;
+std::unique_ptr<std::ofstream> g_log_file;
+bool g_logging_to_file = false;
 
-static std::ostream &log_out() {
+std::ostream& log_out() {
   if (g_logging_to_file && g_log_file && g_log_file->is_open()) {
     *g_log_file << "timestamp: " << time(nullptr) << ": ";
     return *g_log_file;
@@ -37,7 +41,7 @@ static std::ostream &log_out() {
   return std::cout;
 }
 
-static std::ostream &log_err() {
+std::ostream& log_err() {
   if (g_logging_to_file && g_log_file && g_log_file->is_open()) {
     *g_log_file << "timestamp: " << time(nullptr) << ": ";
     return *g_log_file;
@@ -46,28 +50,39 @@ static std::ostream &log_err() {
   return std::cerr;
 }
 
-static void init_logging(bool enabled) {
+void init_logging(bool enabled) {
   if (enabled) {
-    g_log_file =
-        std::make_unique<std::ofstream>("/var/log/amdcuid.log", std::ios::app);
+    g_log_file = std::make_unique<std::ofstream>("/var/log/amdcuid.log", std::ios::app);
     if (g_log_file->is_open()) {
       g_logging_to_file = true;
-      // Add timestamp to log entry
+      // ctime() formats into a static buffer shared across threads; the accept
+      // thread and the main thread both log, so use the reentrant form.
       time_t now = time(nullptr);
-      *g_log_file << "\n=== Log started at " << ctime(&now);
+      struct tm tm_buf{};
+      char stamp[64] = "unknown time";
+      if (localtime_r(&now, &tm_buf) != nullptr) {
+        if (strftime(stamp, sizeof(stamp), "%a %b %e %H:%M:%S %Y", &tm_buf) == 0) {
+          // Fixed 12-character literal into a 64-byte buffer.
+          // NOLINTNEXTLINE(cert-err33-c)
+          std::snprintf(stamp, sizeof(stamp), "unknown time");
+        }
+      }
+      *g_log_file << "\n=== Log started at " << stamp << "\n";
     }
   }
 }
 
+}  // namespace
+
 // Daemon Server
 class CuidDaemonServer {
-public:
+ public:
   CuidDaemonServer() : is_running_(false), server_fd_(-1) {}
   ~CuidDaemonServer() { stop(); }
 
   amdcuid_status_t start() {
     if (is_running_) {
-      return AMDCUID_STATUS_SUCCESS; // Already running
+      return AMDCUID_STATUS_SUCCESS;  // Already running
     }
 
     server_fd_ = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -75,17 +90,18 @@ public:
       return AMDCUID_STATUS_IPC_ERROR;
     }
 
-    unlink(AMDCUID_SOCKET_PATH); // Remove existing socket file
+    unlink(AMDCUID_SOCKET_PATH);  // Remove existing socket file
 
     // bind to socket path
     struct sockaddr_un server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sun_family = AF_UNIX;
-    strncpy(server_addr.sun_path, AMDCUID_SOCKET_PATH,
-            sizeof(server_addr.sun_path) - 1);
+    constexpr size_t kSocketPathLen = sizeof(AMDCUID_SOCKET_PATH) - 1;
+    static_assert(kSocketPathLen < sizeof(server_addr.sun_path),
+                  "AMDCUID_SOCKET_PATH does not fit in sockaddr_un::sun_path");
+    memcpy(server_addr.sun_path, AMDCUID_SOCKET_PATH, kSocketPathLen);
 
-    if (bind(server_fd_, (struct sockaddr *)&server_addr, sizeof(server_addr)) <
-        0) {
+    if (bind(server_fd_, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
       close(server_fd_);
       return AMDCUID_STATUS_IPC_ERROR;
     }
@@ -120,7 +136,7 @@ public:
     unlink(AMDCUID_SOCKET_PATH);
   }
 
-private:
+ private:
   std::atomic<bool> is_running_;
   int server_fd_;
   std::thread server_thread_;
@@ -138,9 +154,17 @@ private:
   }
 
   void handle_client(int client_fd) {
-    IpcRequest request;
-    if (recv(client_fd, &request, sizeof(request), 0) != sizeof(request)) {
-      return;
+    // recv() on a SOCK_STREAM socket may return a short read, so loop until the
+    // whole fixed-size request has arrived. Anything less is a malformed peer.
+    IpcRequest request{};
+    auto* buf = reinterpret_cast<uint8_t*>(&request);
+    size_t got = 0;
+    while (got < sizeof(request)) {
+      ssize_t n = recv(client_fd, buf + got, sizeof(request) - got, 0);
+      if (n <= 0) {
+        return;
+      }
+      got += static_cast<size_t>(n);
     }
 
     IpcResponse response;
@@ -148,26 +172,29 @@ private:
 
     // Handle different request types
     switch (request.type) {
-    case IpcMessageType::ADD_DEVICE:
-      response.status = handle_add_device(request, response.device_handle);
-      break;
-    case IpcMessageType::REFRESH_DEVICES:
-      response.status = amdcuid_refresh();
-      break;
-    default:
-      response.status = AMDCUID_STATUS_INVALID_ARGUMENT;
-      break;
+      case IpcMessageType::ADD_DEVICE:
+        response.status = handle_add_device(request, response.device_handle);
+        break;
+      case IpcMessageType::REFRESH_DEVICES:
+        response.status = amdcuid_refresh();
+        break;
+      default:
+        response.status = AMDCUID_STATUS_INVALID_ARGUMENT;
+        break;
     }
 
     send(client_fd, &response, sizeof(response), 0);
   }
 
-  amdcuid_status_t handle_add_device(const IpcRequest &request,
-                                     amdcuid_id_t &device_handle) {
-    std::string dev_path(request.device_path);
+  amdcuid_status_t handle_add_device(const IpcRequest& request, amdcuid_id_t& device_handle) {
+    // Never trust the wire buffer to be NUL-terminated.
+    const std::string dev_path = ipc_get_device_path(request);
+    if (dev_path.empty()) {
+      return AMDCUID_STATUS_INVALID_ARGUMENT;
+    }
     amdcuid_device_type_t device_type = request.device_type;
-    amdcuid_status_t status = amdcuid_get_handle_by_dev_path(
-        dev_path.c_str(), device_type, &device_handle);
+    amdcuid_status_t status =
+        amdcuid_get_handle_by_dev_path(dev_path.c_str(), device_type, &device_handle);
 
     return status;
   }
@@ -207,9 +234,8 @@ int main() {
     bool stat_ok = (fstat(fd, &key_stat) == 0);
     close(fd);
     if (!stat_ok || key_stat.st_size != key_length) {
-      log_err() << "Error: HMAC key file has unexpected size ("
-                << (stat_ok ? key_stat.st_size : -1) << " bytes, expected "
-                << key_length << "). Key file may be corrupt; "
+      log_err() << "Error: HMAC key file has unexpected size (" << (stat_ok ? key_stat.st_size : -1)
+                << " bytes, expected " << key_length << "). Key file may be corrupt; "
                 << "remove it to allow regeneration." << std::endl;
       return 1;
     }
@@ -263,8 +289,7 @@ int main() {
                 << amdcuid_status_to_string(status) << ")" << std::endl;
       return 1;
     }
-    log_out() << "Daemon server started, listening for device events..."
-              << std::endl;
+    log_out() << "Daemon server started, listening for device events..." << std::endl;
 
     // Keep the main thread alive while the server is running
     while (true) {
@@ -272,15 +297,11 @@ int main() {
     }
 
     // On shutdown (not reachable in current code)
-    log_out()
-        << "Daemon server stopping, no longer listening for device events."
-        << std::endl;
+    log_out() << "Daemon server stopping, no longer listening for device events." << std::endl;
     server.stop();
   } else {
-    log_out()
-        << "Running in non-daemon mode, generating/updating CUID files once..."
-        << std::endl;
-    // non-daemon mode discovers devices on bootup and updates their CUIDs once
+    log_out() << "Running in non-daemon mode, generating/updating CUID files once..." << std::endl;
+    // non-daemon mode discovers devices at boot and updates their CUIDs once
     // discover devices by refreshing
     amdcuid_status_t status = amdcuid_refresh();
     if (status != AMDCUID_STATUS_SUCCESS) {
@@ -294,7 +315,7 @@ int main() {
     // get handle count for logging
     uint32_t count = 0;
     amdcuid_id_t dummy[1] = {};
-    status = amdcuid_get_all_handles(dummy, &count);
+    amdcuid_get_all_handles(dummy, &count);
 
     log_out() << "Total devices with CUIDs: " << count << std::endl;
   }

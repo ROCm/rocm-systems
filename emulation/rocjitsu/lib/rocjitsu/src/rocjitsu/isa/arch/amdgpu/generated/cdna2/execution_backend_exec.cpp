@@ -1416,6 +1416,8 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<FlatAtomicXorX2Flat>,
     &execute_with_backend<FlatAtomicIncX2Flat>,
     &execute_with_backend<FlatAtomicDecX2Flat>,
+    &execute_with_backend<GlobalAtomicAddF32Flat>,
+    &execute_with_backend<GlobalAtomicPkAddF16Flat>,
 }};
 
 } // namespace

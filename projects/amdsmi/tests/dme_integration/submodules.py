@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# Copyright (C) Advanced Micro Devices. All rights reserved.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Clone Device Metrics Exporter and prepare its submodules.
 
 Replaces the inline bash in ``amdsmi-dme-ci.yml`` Phase 2:

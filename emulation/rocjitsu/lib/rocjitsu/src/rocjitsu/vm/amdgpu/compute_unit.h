@@ -28,6 +28,7 @@
 #include "simdojo/components/vector_reg.h"
 #include "util/bit.h"
 #include "util/log.h"
+#include "util/result.h"
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
@@ -36,10 +37,12 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -52,9 +55,19 @@
 #include <vector>
 
 namespace rocjitsu {
+namespace test {
+class ComputeUnitTestAccess;
+}
 namespace amdgpu {
 
 class CommandProcessor;
+class AsyncInstructionWindow;
+class MmaAdmissionCache;
+struct AsyncInstructionWindowStorage;
+namespace matrix_coexecution {
+class ExecutionResources;
+class SharedPool;
+} // namespace matrix_coexecution
 
 inline constexpr int32_t kWorkgroupBarrierId = -1;
 inline constexpr int32_t kWorkgroupTrapBarrierId = -2;
@@ -66,6 +79,18 @@ inline constexpr uint8_t kWorkgroupBarrierBit = 1;
 inline constexpr uint8_t kWorkgroupTrapBarrierBit = 2;
 inline constexpr uint8_t kClusterBarrierBit = 3;
 inline constexpr uint8_t kClusterTrapBarrierBit = 4;
+
+struct FunctionalQuantumResult {
+  bool ran = false;
+  bool yielded = false;
+  uint64_t iterations = 0;
+
+  void merge(const FunctionalQuantumResult &other) {
+    ran |= other.ran;
+    yielded |= other.yielded;
+    iterations = std::max(iterations, other.iterations);
+  }
+};
 
 /// @brief Base AMDGPU compute unit that owns wavefront slots and register files.
 ///
@@ -88,6 +113,8 @@ inline constexpr uint8_t kClusterTrapBarrierBit = 4;
 /// implemented by IsaExecComputeUnit<Mode, Isa>. Use the create() factory
 /// to construct.
 class ComputeUnitCore : public simdojo::CompositeComponent {
+  friend class AsyncInstructionWindow;
+
 public:
   static constexpr uint32_t kFunctionalQuantum = 1024;
   static constexpr uint32_t kDebugFunctionalQuantum = 64;
@@ -95,11 +122,17 @@ public:
 
   /// @brief Configuration for a compute unit.
   struct Config {
-    rj_code_arch_t arch;   ///< ISA architecture (determines wave size, decoder).
+    rj_code_arch_t arch; ///< ISA architecture (determines wave size, decoder).
+    rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID; ///< Concrete GPU target.
     uint32_t num_wf_slots; ///< Number of hardware wavefront slots (contexts).
     uint32_t sgprs_per_wf; ///< Scalar GPRs per wavefront (allocation granularity).
     uint32_t vgprs_per_wf; ///< Vector GPRs per wavefront (allocation granularity).
     uint32_t lds_size_kb;  ///< Local Data Share size in kilobytes.
+    /// Maximum CU step() iterations per functional slice. One step can issue
+    /// one instruction for every runnable wavefront resident on the CU.
+    uint32_t functional_quantum = kFunctionalQuantum;
+    /// Shared VM resources; null preserves direct-construction environment controls.
+    std::shared_ptr<matrix_coexecution::ExecutionResources> async_resources = nullptr;
   };
 
   ~ComputeUnitCore() override = default;
@@ -175,10 +208,50 @@ public:
   /// components can publish the state on which the wavefront is polling.
   void request_functional_yield() { functional_yield_requested_ = true; }
 
+  uint32_t functional_quantum() const {
+    return config_.functional_quantum == 0 ? UINT32_MAX : config_.functional_quantum;
+  }
+
+  /// @brief Restore the raw configured functional quantum (0 = unbounded).
+  void set_functional_quantum(uint32_t quantum) { config_.functional_quantum = quantum; }
+
+  /// @brief Select whether the CP continuation event owns functional execution.
+  void set_pool_driven(bool value) { pool_driven_ = value; }
+  bool pool_driven() const { return pool_driven_; }
+
+  /// @brief Execute up to one functional quantum of step() iterations on this CU.
+  /// @returns Whether wavefronts ran and whether one requested an event-loop yield.
+  FunctionalQuantumResult run_quantum() {
+    // A request left by direct step() execution must not shorten this quantum.
+    functional_yield_requested_ = false;
+    FunctionalQuantumResult result;
+    const uint32_t quantum = debug_active() ? kDebugFunctionalQuantum : functional_quantum();
+    for (uint32_t i = 0; i < quantum; ++i) {
+      if (!has_active_wfs())
+        break;
+      result.ran = true;
+      if (!step())
+        break;
+      ++result.iterations;
+      if (std::exchange(functional_yield_requested_, false)) {
+        result.yielded = true;
+        break;
+      }
+    }
+    return result;
+  }
+
   /// @brief Schedule the tick event if the CU is not already executing.
   /// Called from dispatch_wf(), the cpl_ port handler, and single-threaded VM
   /// initialization after engine creation but before simulation workers start.
   virtual void schedule_work() = 0;
+
+  /// @brief Schedule the serial CU driver at an absolute simulation tick.
+  virtual void schedule_work_at(simdojo::Tick tick) = 0;
+
+  /// @brief Retire the serial CU driver and return its next due tick.
+  /// @returns TICK_MAX when no serial driver was scheduled.
+  virtual simdojo::Tick suspend_scheduled_work() = 0;
 
   /// @brief Thread-safe scheduling for debugger resume from an ioctl thread.
   virtual void schedule_work_async() = 0;
@@ -195,6 +268,9 @@ public:
   /// The command processor uses this to detect when all CUs are done.
   /// @param cb Callback to invoke when idle.
   void set_on_idle(std::function<void()> cb) { on_idle_ = std::move(cb); }
+
+  /// @brief Register the CP wakeup used when a pool-driven CU becomes runnable.
+  void set_on_pool_ready(std::function<void()> cb) { on_pool_ready_ = std::move(cb); }
 
   struct TrapHandlerConfig {
     uint64_t tba = 0;
@@ -317,11 +393,14 @@ public:
 
   /// @brief Set the execution plugin group (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
-    plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
+    plugin_group_ = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
+    observes_sgpr_reads_ = plugin_group_->observes_sgpr_reads();
+    observes_memory_routing_ = plugin_group_->observes_memory_routing();
   }
 
   /// @brief Return the execution plugin group.
   ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
+  const ExecutionPluginGroup &plugin_group() const { return *plugin_group_; }
 
   /// @brief Return the number of resident (not-yet-halted) wavefront slots.
   /// @details A wave frees its resources and its slot at s_endpgm, so halted
@@ -332,6 +411,20 @@ public:
   /// @brief Return the total number of wavefront slots.
   /// @returns Total hardware wavefront slot count.
   uint32_t num_wf_slots() const { return config_.num_wf_slots; }
+
+  /// @brief Record this CU's physical location within its XCC.
+  /// @param shader_engine_id Zero-based shader-engine index within the XCC.
+  /// @param cu_index Zero-based CU index within the shader engine.
+  void set_shader_engine_location(uint32_t shader_engine_id, uint32_t cu_index) {
+    shader_engine_id_ = shader_engine_id;
+    scratch_scoreboard_base_ = cu_index * config_.num_wf_slots;
+  }
+
+  /// @brief Return this CU's physical shader-engine index.
+  uint32_t shader_engine_id() const { return shader_engine_id_; }
+
+  /// @brief Return the first scratch scoreboard slot owned by this CU.
+  uint32_t scratch_scoreboard_base() const { return scratch_scoreboard_base_; }
 
   /// @brief Access a wavefront slot by index (always non-null).
   /// @param idx Zero-based wavefront slot index.
@@ -346,6 +439,8 @@ public:
   /// @brief Return the CU configuration.
   /// @returns Const reference to the CU configuration.
   const Config &config() const { return config_; }
+  /// @brief Lazily acquire and cache the VM helper pool.
+  matrix_coexecution::SharedPool &async_pool();
 
   /// @brief Return the shared GPU memory.
   /// @returns Pointer to the GPU memory.
@@ -374,7 +469,9 @@ public:
   uint32_t allocate_lds(uint32_t size_bytes) {
     uint32_t base = next_lds_alloc_;
     uint32_t aligned = util::align_up(size_bytes, 256u);
-    lds_.zero_range(base, aligned);
+    // Reusing a physical LDS region does not initialize its contents. Keep the
+    // bytes written by prior workgroups until another instruction overwrites them.
+    lds_.materialize_range(base, aligned);
     next_lds_alloc_ += aligned;
     return base;
   }
@@ -524,31 +621,124 @@ public:
   /// @returns Index of the next wavefront slot to schedule.
   uint64_t cycle_count() const { return cycle_counter_; }
 
-  /// @brief Read a scalar register from the physical SGPR file.
-  /// @details This is the VM-level scalar register accessor. It notifies the
-  /// plugin group of an SGPR read when the physical register is currently owned
-  /// by a wavefront. Instruction operand implementations use this to implement
-  /// scalar operand semantics. VGPR reads from instruction emulators should not
-  /// use the analogous CU physical VGPR accessors directly; use Operand or
-  /// RegisterAccess APIs instead.
-  /// @param reg_idx Physical register index.
-  /// @returns Register value.
-  // TODO(newling) consider cmake flag to build without plugins, this call
-  // overhead might be non-negligible.
-  uint32_t read_sgpr(uint32_t reg_idx) const {
-    if (auto *wf = sgpr_to_wave_[reg_idx]) {
-      plugin_group_->onAmdgpuReadSgpr(wf, reg_idx);
-    }
+  /// @brief Return the physical SGPR allocation block size per wavefront.
+  uint32_t sgpr_allocation_block_size() const { return config_.sgprs_per_wf; }
+
+  /// @brief Test whether a physical SGPR range is contained in a wavefront's
+  /// fixed simulator storage block.
+  /// @details This is an isolation boundary, not the descriptor-derived
+  /// architectural allocation extent recorded in `wf.sgpr_alloc().count`.
+  [[nodiscard]] bool owns_sgpr_range(const Wavefront &wf, uint32_t physical_base,
+                                     uint32_t physical_count) const {
+    return &wf.raw_cu() == this && wf.sgpr_alloc().count != 0 &&
+           RegAllocation{wf.sgpr_alloc().base, sgpr_allocation_block_size()}.contains(
+               physical_base, physical_count);
+  }
+
+  /// @brief Test whether a physical VGPR range is contained in a wavefront's
+  /// fixed simulator storage block.
+  /// @details This is an isolation boundary, not the descriptor-derived
+  /// architectural allocation extent recorded in `wf.vgpr_alloc().count`.
+  [[nodiscard]] bool owns_vgpr_range(const Wavefront &wf, uint32_t physical_base,
+                                     uint32_t physical_count) const {
+    return &wf.raw_cu() == this && wf.vgpr_alloc().count != 0 &&
+           RegAllocation{wf.vgpr_alloc().base, vgpr_allocation_block_size()}.contains(
+               physical_base, physical_count);
+  }
+
+private:
+  // RegisterAccess is the instruction-facing register boundary. These
+  // ownership and SGPR access helpers validate the complete operation, fire
+  // callbacks, and only then expose or modify storage.
+  friend class RegisterAccess;
+
+  /// @brief Resolve one owner for a complete physical SGPR range.
+  /// @details Returns null for empty, unallocated, out-of-file, or mixed-owner
+  /// ranges. CU-bound RegisterAccess uses this compatibility path; wave-bound
+  /// access keeps its explicit owner instead.
+  [[nodiscard]] const Wavefront *sgpr_owner_for_range(uint32_t physical_base,
+                                                      uint32_t physical_count) const {
+    if (physical_count == 0 || physical_base >= sgpr_file_.total_regs() ||
+        physical_count > sgpr_file_.total_regs() - physical_base)
+      return nullptr;
+    const Wavefront *owner = sgpr_owner(physical_base);
+    if (!owner || !owns_sgpr_range(*owner, physical_base, physical_count))
+      return nullptr;
+    return owner;
+  }
+
+  /// @brief Resolve one owner for a complete physical VGPR range.
+  /// @details Returns null for empty, unallocated, out-of-file, or mixed-owner
+  /// ranges. Implemented by the concrete CU that owns the typed VGPR file.
+  [[nodiscard]] virtual const Wavefront *vgpr_owner_for_range(uint32_t physical_base,
+                                                              uint32_t physical_count) const = 0;
+
+  [[nodiscard]] uint32_t read_sgpr(const Wavefront &wf, uint32_t reg_idx) const {
+    if (!owns_sgpr_range(wf, reg_idx, 1))
+      return 0;
+    notify_scalar_register_read(
+        wf, RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg_idx - wf.sgpr_alloc().base), 1});
     return sgpr_file_[reg_idx];
   }
 
+  void write_sgpr(const Wavefront &wf, uint32_t reg_idx, uint32_t val) {
+    if (!owns_sgpr_range(wf, reg_idx, 1))
+      return;
+    plugin_group_->onAmdgpuWriteScalarRegister(
+        &wf, RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg_idx - wf.sgpr_alloc().base), 1});
+    sgpr_file_[reg_idx] = val;
+  }
+
+  void write_sgpr64(const Wavefront &wf, uint32_t reg_idx, uint64_t val) {
+    if (!owns_sgpr_range(wf, reg_idx, 2))
+      return;
+    plugin_group_->onAmdgpuWriteScalarRegister(
+        &wf, RegisterRef{RegClass::SGPR, static_cast<uint16_t>(reg_idx - wf.sgpr_alloc().base), 2});
+    sgpr_file_[reg_idx] = static_cast<uint32_t>(val);
+    sgpr_file_[reg_idx + 1] = static_cast<uint32_t>(val >> 32);
+  }
+
+  void notify_scalar_register_read(const Wavefront &wf, RegisterRef reg) const {
+    if (observes_sgpr_reads_)
+      plugin_group_->onAmdgpuReadScalarRegister(&wf, reg);
+  }
+
+  void notify_scalar_register_write(const Wavefront &wf, RegisterRef reg) const {
+    plugin_group_->onAmdgpuWriteScalarRegister(&wf, reg);
+  }
+
+public:
+  /// @brief Read a scalar register from the physical SGPR file.
+  /// @details VM/diagnostic compatibility accessor. It notifies the plugin
+  /// group when the physical register is currently owned by a wavefront.
+  /// Instruction code should use Operand or RegisterAccess so complete-range
+  /// ownership and the explicit executing wave are preserved.
+  /// @param reg_idx Physical register index.
+  /// @returns Register value.
+  uint32_t read_sgpr(uint32_t reg_idx) const {
+    if (reg_idx >= sgpr_file_.total_regs())
+      return 0;
+    if (observes_sgpr_reads_)
+      if (auto *wf = sgpr_owner(reg_idx))
+        return read_sgpr(*wf, reg_idx);
+    return sgpr_file_[reg_idx];
+  }
+
+  /// @brief Read raw SGPR storage without producing an observation callback.
+  uint32_t read_sgpr_storage(uint32_t reg_idx) const {
+    return reg_idx < sgpr_file_.total_regs() ? sgpr_file_[reg_idx] : 0;
+  }
+
   /// @brief Write a scalar register in the physical SGPR file.
-  /// @details VM-level scalar register write used for scalar operand
-  /// destinations and dispatch/runtime state setup. This does not imply a VGPR
-  /// read and does not participate in VGPR read observation.
+  /// @details Raw VM-level write used for memory completion and dispatch/runtime
+  /// state setup. It deliberately does not fire an instruction callback.
+  /// Instruction code must use wave-bound RegisterAccess.
   /// @param reg_idx Physical register index.
   /// @param val Value to write.
-  void write_sgpr(uint32_t reg_idx, uint32_t val) { sgpr_file_[reg_idx] = val; }
+  void write_sgpr(uint32_t reg_idx, uint32_t val) {
+    if (reg_idx < sgpr_file_.total_regs())
+      sgpr_file_[reg_idx] = val;
+  }
 
   /// @brief Notify plugins that a wavefront read lanes of a physical VGPR.
   /// @details Low-level notification primitive used by RegisterAccess and the
@@ -557,7 +747,7 @@ public:
   /// storage access with this hook.
   void notify_vgpr_read(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
                         uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
-    if (wf && lane_mask != 0)
+    if (wf && lane_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1))
       plugin_group_->onAmdgpuReadVgprLanes(wf, reg_idx, lane_mask, byte_mask);
   }
 
@@ -568,7 +758,7 @@ public:
                          uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
     if (wf)
       lane_mask &= wf->vgpr_write_mask();
-    if (wf && lane_mask != 0 && byte_mask != 0)
+    if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1))
       plugin_group_->onAmdgpuWriteVgprLanes(wf, reg_idx, lane_mask, byte_mask);
   }
 
@@ -578,22 +768,22 @@ public:
   void notify_scalar_lane_vgpr_write(
       const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
-    if (wf && lane_mask != 0 && byte_mask != 0)
+    if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1))
       plugin_group_->onAmdgpuWriteVgprLanes(wf, reg_idx, lane_mask, byte_mask);
   }
 
   /// @brief Notify plugins that lanes of a physical VGPR were read.
   /// @details Resolves the owning wavefront from the physical register index.
-  /// Intended for RegisterAccess and CU internals, not as a direct instruction
-  /// emulator API.
+  /// Transitional single-register compatibility path for CU internals.
+  /// Instruction helpers should retain their explicit wave in RegisterAccess.
   virtual void
   notify_vgpr_read_by_reg(uint32_t reg_idx, uint64_t lane_mask,
                           uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const = 0;
 
   /// @brief Notify plugins that lanes of a physical VGPR were written.
   /// @details Resolves the owning wavefront from the physical register index.
-  /// Intended for RegisterAccess and CU internals, not as a direct instruction
-  /// emulator API.
+  /// Transitional single-register compatibility path for CU internals.
+  /// Instruction helpers should retain their explicit wave in RegisterAccess.
   virtual void
   notify_vgpr_write_by_reg(uint32_t reg_idx, uint64_t lane_mask,
                            uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const = 0;
@@ -724,6 +914,19 @@ public:
   /// @returns Const pointer to the ISA decoder.
   const Decoder *decoder() const { return decoder_.get(); }
 
+  /// @brief Replace the concrete decoder in scheduler-level tests.
+  /// @details Some concrete targets intentionally remain unavailable to full
+  /// simulator configuration while individual instructions acquire execution
+  /// support. This seam lets a production-topology test exercise fetch, decode,
+  /// issue, and completion for such an instruction without weakening target
+  /// capability validation. The CU must be idle when its decoder is replaced.
+  void replace_decoder_for_test(std::unique_ptr<Decoder> decoder) {
+    assert(decoder != nullptr);
+    assert(!has_active_wfs());
+    decoder->enable_pool();
+    decoder_ = std::move(decoder);
+  }
+
   /// @brief Return the completer port (receives dispatch requests from CP).
   /// @returns Pointer to the completer port.
   simdojo::Port *cpl_port() { return cpl_; }
@@ -738,7 +941,17 @@ public:
   /// thread or from single-threaded test contexts only.
   /// @param inst The decoded instruction.
   /// @param wf The wavefront executing the instruction.
-  virtual void execute_instruction(Instruction *inst, Wavefront &wf) = 0;
+  /// @returns Failure for an unimplemented instruction stub or a reported operand
+  /// failure. The wavefront retains the reason for caller-owned diagnostics.
+  /// Each call clears the previous error; a failed call does not halt the wavefront.
+  /// Validation inside implemented instructions can still raise exceptions.
+  util::Result execute_instruction(Instruction *inst, Wavefront &wf) {
+    assert(inst->execute && "instruction execution backend is not linked");
+    wf.clear_instruction_execution_error();
+    // The decoded instruction already selects its ISA execution callback.
+    inst->execute(*inst, &wf);
+    return wf.instruction_execution_failed() ? util::Result::failure() : util::Result::success();
+  }
 
 protected:
   ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory, L2Cache *l2,
@@ -765,6 +978,21 @@ protected:
 
   /// @brief Fetch, decode, execute one instruction from the given wavefront.
   void issue_instruction(Wavefront *wf);
+  /// @brief Try the diagnostic adjacent-MMA batch modes before ordinary issue.
+  /// @brief Issue a bounded MMA window and drain it before returning to scheduling.
+  void issue_async_instruction(Wavefront *wf, MmaAdmissionCache *admission, uint32_t wave_size,
+                               bool has_accvgprs);
+  struct NoAsyncWindow {};
+  /// @brief Share ordinary instruction execution with the optional scoreboard adapter.
+  template <bool EnableAsync>
+  void issue_instruction_impl(
+      Wavefront *wf,
+      std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window = {},
+      std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage = {});
+  /// @brief Advance CU scheduling with compile-time selection of the issue adapter.
+  template <bool EnableAsync>
+  bool step_impl(MmaAdmissionCache *admission = nullptr, uint32_t async_wave_size = 0,
+                 bool has_accvgprs = false);
 
   /// @brief Apply any I$ invalidation a debug attach or detach published.
   /// @details Runs on this CU's own thread, which is the I$'s sole accessor.
@@ -785,15 +1013,38 @@ protected:
   /// @param wf The issuing wavefront.
   void route_memory_inst(Instruction *inst, Wavefront &wf);
 
+  /// @brief Tell the plugin group what the memory system is about to be asked
+  ///        for, once routing has settled.
+  /// @param inst The routed instruction.
+  /// @param wf The issuing wavefront.
+  /// @param route_tag The pipeline tag the instruction ended up with.
+  /// @param decoded_route_tag The pipeline tag before routing changed it.
+  /// @param normalized_to_local Whether a FLAT access was rewritten into LDS.
+  /// @param pre_routing_addresses Original addresses when routing rewrote them.
+  /// @param flat_local_lane_mask Requesting FLAT lanes in the LDS aperture half.
+  /// @param flat_dds_lane_mask Requesting FLAT lanes in the DDS aperture half.
+  void report_routed_access(const Instruction &inst, const Wavefront &wf, uint8_t route_tag,
+                            uint8_t decoded_route_tag, bool normalized_to_local,
+                            std::span<const uint64_t> pre_routing_addresses,
+                            uint64_t flat_local_lane_mask, uint64_t flat_dds_lane_mask);
+
   /// @brief Fire the on_idle callback if registered.
   void notify_idle() {
     if (on_idle_)
       on_idle_();
   }
 
+  void notify_pool_ready() {
+    if (on_pool_ready_)
+      on_pool_ready_();
+  }
+
   Config config_;
+  matrix_coexecution::SharedPool *async_pool_ = nullptr;
   GpuMemory *memory_;
   uint32_t wf_size_ = 0;
+  uint32_t shader_engine_id_ = 0;
+  uint32_t scratch_scoreboard_base_ = 0;
   bool sram_ecc_ = false;
   std::unique_ptr<Decoder> decoder_;
   simdojo::RegisterFile<uint32_t> sgpr_file_{"sgpr"};
@@ -844,6 +1095,7 @@ protected:
   L1ScalarCache l1_scalar_;
   L1VectorCache l1_vector_;
   InstructionCache inst_cache_;
+  GpuMemory::FetchabilityCache fetchability_cache_;
   /// @brief Debug attach/detach transitions seen by set_debug_active().
   std::atomic<uint64_t> inst_cache_debug_epoch_{0};
   /// @brief The epoch this CU's thread has already invalidated the I$ for.
@@ -861,7 +1113,8 @@ protected:
   ScalarMemPipeline scalar_mem_pipeline_;
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
-  std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
+  std::function<void()> on_idle_;       ///< Callback invoked when CU becomes idle.
+  std::function<void()> on_pool_ready_; ///< Callback that wakes the CP-owned pool driver.
   TrapHandlerResolver trap_handler_resolver_;
   SendmsgHandler sendmsg_handler_;
   TrapCompletionHandler trap_completion_handler_;
@@ -895,18 +1148,42 @@ protected:
   uint64_t private_aperture_limit_ = 0;
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
+  bool observes_sgpr_reads_ = false;
+  bool pool_driven_ = false;
+  bool observes_memory_routing_ = false;
 
-  /// Reverse lookup: physical SGPR index -> owning wavefront (for race detection).
-  /// Populated at dispatch_wf time. Null entries mean "not allocated".
-  std::vector<Wavefront *> sgpr_to_wave_;
-  /// Populated by the ISA-specific subclass (which owns the VGPR file).
-  virtual void fill_vgpr_to_wave(uint32_t /*base*/, uint32_t /*count*/, Wavefront * /*wf*/) {}
+  /// @brief Resolve the owner of a physical SGPR from its allocation block.
+  /// @details Power-of-two block sizes use a shift on the instruction read path;
+  /// other target configurations retain exact division semantics.
+  Wavefront *sgpr_owner(uint32_t reg_idx) const {
+    const uint32_t block = sgpr_block_shift_ != kVariableSgprBlockShift
+                               ? reg_idx >> sgpr_block_shift_
+                               : reg_idx / config_.sgprs_per_wf;
+    const auto &allocation = sgpr_block_owners_[block];
+    return reg_idx < allocation.end ? allocation.owner : nullptr;
+  }
+
+  static constexpr uint32_t kVariableSgprBlockShift = std::numeric_limits<uint32_t>::max();
+  struct SgprBlockOwner {
+    Wavefront *owner = nullptr;
+    uint32_t end = 0;
+  };
+  /// Reverse lookup: SGPR allocation block -> owning wavefront for instruction
+  /// observation. One entry per hardware wave slot replaces one pointer per
+  /// physical SGPR, while end preserves the physical allocation-block boundary.
+  std::vector<SgprBlockOwner> sgpr_block_owners_;
+  uint32_t sgpr_block_shift_ = kVariableSgprBlockShift;
+  /// Record or clear the owner of one VGPR allocation block.
+  /// @param base Allocation-block-aligned physical VGPR base.
+  /// @param wf Owning wavefront, or nullptr when the block is freed.
+  virtual void set_vgpr_block_owner(uint32_t base, Wavefront *wf) = 0;
   simdojo::Port *cpl_ = nullptr; ///< Completer port: dispatch activation from CP.
   simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
   uint64_t step_count_ = 0;
   bool functional_yield_requested_ = false;
 
   friend class CommandProcessor;
+  friend class ::rocjitsu::test::ComputeUnitTestAccess;
 };
 
 inline InstructionCache &InstructionComputeUnitView::instruction_cache() {
@@ -939,11 +1216,12 @@ inline bool InstructionComputeUnitView::handle_sendmsg(Wavefront &wf, uint32_t m
 inline void InstructionComputeUnitView::notify_trap_complete(Wavefront &wf) {
   raw_cu().notify_trap_complete(wf);
 }
-inline uint32_t InstructionComputeUnitView::read_sgpr(uint32_t reg_idx) const {
-  return raw_cu().read_sgpr(reg_idx);
+inline bool InstructionComputeUnitView::observes_tensor_dma_memory_access() const {
+  return raw_cu().plugin_group().observes_tensor_dma_memory_access();
 }
-inline void InstructionComputeUnitView::write_sgpr(uint32_t reg_idx, uint32_t value) {
-  raw_cu().write_sgpr(reg_idx, value);
+inline void InstructionComputeUnitView::report_tensor_dma_memory_access(
+    const TensorDmaMemoryAccessObservation &access) {
+  raw_cu().plugin_group().onAmdgpuTensorDmaMemoryAccess(access);
 }
 
 /// @brief Execution-mode-aware compute unit shell.
@@ -962,16 +1240,14 @@ public:
 
   /// @brief Execute work up to the quantum limit, then yield.
   bool execute_quantum() override {
+    // A CP continuation event owns pool-driven execution. If the policy changed
+    // while a CU tick was already queued, retire that stale driver here.
+    if (this->pool_driven()) {
+      executing_ = false;
+      return false;
+    }
     if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
-      // A request left by direct step() execution must not shorten this quantum.
-      functional_yield_requested_ = false;
-      last_quantum_executed_ = 0;
-      const uint32_t quantum = debug_active() ? kDebugFunctionalQuantum : kFunctionalQuantum;
-      for (uint32_t i = 0; i < quantum && step(); ++i) {
-        ++last_quantum_executed_;
-        if (std::exchange(functional_yield_requested_, false))
-          break;
-      }
+      last_quantum_executed_ = this->run_quantum().iterations;
     } else {
       /// @todo: Support CLOCKED pipeline cycle.
     }
@@ -1003,11 +1279,29 @@ public:
     // resident on this CU, so scheduling work for it would spin the engine
     // against a wave that cannot retire an instruction until the debugger
     // resumes it.
-    if (executing_ || !this->engine() || !this->has_runnable_wfs())
+    if (!this->engine())
+      return;
+    if (this->pool_driven()) {
+      this->notify_pool_ready();
+      return;
+    }
+    auto now = this->engine()->context(this->partition_id()).current_tick();
+    schedule_work_at(now + 1);
+  }
+
+  void schedule_work_at(simdojo::Tick tick) override {
+    if (this->pool_driven() || executing_ || !this->engine() || !this->has_runnable_wfs())
       return;
     executing_ = true;
-    auto now = this->engine()->context(this->partition_id()).current_tick();
-    this->schedule_event(&tick_event_, now + 1);
+    schedule_next_tick(tick);
+  }
+
+  simdojo::Tick suspend_scheduled_work() override {
+    const simdojo::Tick tick = scheduled_tick_;
+    scheduled_tick_ = simdojo::TICK_MAX;
+    ++driver_generation_;
+    executing_ = false;
+    return tick;
   }
 
   void schedule_work_async() override {
@@ -1016,6 +1310,13 @@ public:
   }
 
 private:
+  void schedule_next_tick(simdojo::Tick tick) {
+    scheduled_tick_ = tick;
+    const uintptr_t generation = ++driver_generation_;
+    this->schedule_event(&tick_event_, tick,
+                         std::make_unique<simdojo::Message>(simdojo::MessageHeader{}, generation));
+  }
+
   // Reschedule by the number of quantum loop iterations taken, not a fixed
   // kFunctionalQuantum: a wavefront that requests a yield after k<kFunctionalQuantum
   // iterations (e.g. s_sleep, vendor-dep retry) resumes at now+k so a peer
@@ -1024,16 +1325,27 @@ private:
   // step() advances even when every wave is WAITCNT/BARRIER-stalled — so a fully
   // stalled CU still advances by the full quantum. max(1,...) keeps the event
   // strictly in the future so re-entries never collapse onto one tick.
-  simdojo::Event tick_event_{
-      this, simdojo::EventType::TIMER_CALLBACK, [this](simdojo::Tick now, simdojo::Message *) {
-        if (execute_quantum())
-          this->schedule_event(&tick_event_, now + std::max<uint64_t>(1, last_quantum_executed_));
-      }};
+  simdojo::Event tick_event_{this, simdojo::EventType::TIMER_CALLBACK,
+                             [this](simdojo::Tick now, simdojo::Message *message) {
+                               if (!message || message->payload() != driver_generation_)
+                                 return;
+                               scheduled_tick_ = simdojo::TICK_MAX;
+                               if (execute_quantum())
+                                 schedule_next_tick(now +
+                                                    std::max<uint64_t>(1, last_quantum_executed_));
+                             }};
   // Cross-thread debugger resumes first enter this event. Its handler runs on
-  // the CU partition and can safely update executing_ through schedule_work().
+  // the CU/CP partition and wakes whichever driver currently owns execution.
   simdojo::Event resume_event_{this, simdojo::EventType::TIMER_CALLBACK,
-                               [this](simdojo::Tick, simdojo::Message *) { schedule_work(); }};
+                               [this](simdojo::Tick, simdojo::Message *) {
+                                 if (this->pool_driven())
+                                   this->notify_pool_ready();
+                                 else
+                                   schedule_work();
+                               }};
   uint64_t last_quantum_executed_ = 0;
+  simdojo::Tick scheduled_tick_ = simdojo::TICK_MAX;
+  uintptr_t driver_generation_ = 0;
   bool executing_ = false;
 };
 
@@ -1048,6 +1360,9 @@ private:
 template <simdojo::ExecMode Mode, GpuIsa Isa>
 class IsaExecComputeUnit : public ExecComputeUnit<Mode> {
 public:
+  static constexpr bool supports_async_execution =
+      Mode == simdojo::ExecMode::FUNCTIONAL && HasAsyncMma<Isa>;
+
   static_assert(Isa::WF_SIZE_MAX <= 64, "AMDGPU VGPR storage supports at most Wave64");
   using Vgpr = simdojo::VectorReg<Isa::WF_SIZE_MAX, uint32_t>;
   static constexpr uint32_t MAX_ACCVGPR_PHYSICAL_LIMIT =
@@ -1076,7 +1391,6 @@ public:
         Isa::MAX_ACC_VGPRS_PER_WF == 0 ? 0 : accvgpr_physical_base + Isa::MAX_ACC_VGPRS_PER_WF;
     vgprs_per_block_ = std::max(config.vgprs_per_wf, accvgpr_physical_limit);
     vgpr_file_.init(config.num_wf_slots * vgprs_per_block_, vgprs_per_block_);
-    vgpr_to_wave_.resize(config.num_wf_slots * vgprs_per_block_, nullptr);
     for (uint32_t i = 0; i < config.num_wf_slots; ++i)
       this->wfs_[i] = std::make_unique<IsaWavefront<Isa>>(*this, i);
     this->sram_ecc_ = Isa::SRAM_ECC;
@@ -1084,6 +1398,8 @@ public:
 
   /// @returns Lane value from the VGPR file.
   uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const override {
+    if (reg_idx >= vgpr_file_.total_regs() || lane >= Isa::WF_SIZE_MAX)
+      return 0;
     notify_vgpr_read_by_reg(reg_idx, uint64_t{1} << lane);
     return vgpr_file_[reg_idx][lane];
   }
@@ -1091,28 +1407,46 @@ public:
   void notify_vgpr_read_by_reg(
       uint32_t reg_idx, uint64_t lane_mask,
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const override {
-    if (auto *wf = vgpr_to_wave_[reg_idx])
+    if (auto *wf = vgpr_owner(reg_idx))
       this->notify_vgpr_read(wf, reg_idx, lane_mask, byte_mask);
   }
 
   void notify_vgpr_write_by_reg(
       uint32_t reg_idx, uint64_t lane_mask,
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const override {
-    if (auto *wf = vgpr_to_wave_[reg_idx])
+    if (auto *wf = vgpr_owner(reg_idx))
       this->notify_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
   }
 
   const Wavefront *vgpr_owner(uint32_t reg_idx) const override {
-    return reg_idx < vgpr_to_wave_.size() ? vgpr_to_wave_[reg_idx] : nullptr;
+    if (vgprs_per_block_ == 0)
+      return nullptr;
+    const size_t block = reg_idx / vgprs_per_block_;
+    return block < this->config_.num_wf_slots ? vgpr_block_owners_[block] : nullptr;
   }
 
-  void fill_vgpr_to_wave(uint32_t base, uint32_t count, Wavefront *wf) override {
-    std::fill(vgpr_to_wave_.begin() + base, vgpr_to_wave_.begin() + base + count, wf);
+private:
+  const Wavefront *vgpr_owner_for_range(uint32_t physical_base,
+                                        uint32_t physical_count) const override {
+    if (physical_count == 0 || physical_base >= vgpr_file_.total_regs() ||
+        physical_count > vgpr_file_.total_regs() - physical_base)
+      return nullptr;
+    const Wavefront *owner = vgpr_owner(physical_base);
+    return owner && this->owns_vgpr_range(*owner, physical_base, physical_count) ? owner : nullptr;
+  }
+
+public:
+  void set_vgpr_block_owner(uint32_t base, Wavefront *wf) override {
+    assert(vgprs_per_block_ != 0 && base % vgprs_per_block_ == 0);
+    const size_t block = base / vgprs_per_block_;
+    assert(block < this->config_.num_wf_slots);
+    vgpr_block_owners_[block] = wf;
   }
 
   /// @brief Write a value to the VGPR file.
   void write_vgpr(uint32_t reg_idx, uint32_t lane, uint32_t val) override {
-    vgpr_file_[reg_idx][lane] = val;
+    if (reg_idx < vgpr_file_.total_regs() && lane < Isa::WF_SIZE_MAX)
+      vgpr_file_[reg_idx][lane] = val;
   }
 
   /// @returns Const pointer to one VGPR's raw lane data.
@@ -1150,7 +1484,7 @@ protected:
   /// @brief Return allocated VGPRs to the free pool.
   void free_vgprs(uint32_t base) override {
     vgpr_file_.free(base);
-    fill_vgpr_to_wave(base, vgprs_per_block_, nullptr);
+    set_vgpr_block_owner(base, nullptr);
   }
 
   uint32_t free_vgpr_blocks() const override { return vgpr_file_.free_block_count(); }
@@ -1169,18 +1503,13 @@ public:
   uint32_t vgpr_allocation_block_size() const override { return vgprs_per_block_; }
   uint32_t vgpr_storage_lane_count() const override { return Isa::WF_SIZE_MAX; }
 
-protected:
-  /// @brief Execute one instruction on the given wavefront.
-  ///
-  /// @brief Execute one instruction on the given wavefront via direct dispatch.
-  void execute_instruction(Instruction *inst, Wavefront &wf) override {
-    assert(inst->execute && "instruction execution backend is not linked");
-    inst->execute(*inst, &wf);
-  }
-
 private:
   VgprFile vgpr_file_{"vgpr"};
-  std::vector<Wavefront *> vgpr_to_wave_; ///< Physical VGPR → owning wavefront.
+  /// One owner per register-file allocation block. Every VGPR in a block has
+  /// the same owner, so a per-register reverse map would duplicate each pointer
+  /// @c vgprs_per_block_ times. The array is sized by wave slots because the
+  /// register file currently contains exactly one allocation block per slot.
+  std::array<Wavefront *, Isa::MAX_WF_SLOTS> vgpr_block_owners_{};
   uint32_t vgprs_per_block_ = 0;
 };
 
