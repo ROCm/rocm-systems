@@ -2006,8 +2006,12 @@ static int bind_mem_to_numa(uint32_t numa_node_id, void *mem,
 
 	num_node = numa_max_node() + 1;
 
+	/* Single NUMA node: bind is a no-op; don't fail NoSubstitute (udmabuf). */
+	if (num_node <= 1)
+		return 0;
+
 	/* Ignore binding requests to invalid nodes IDs */
-	if (numa_node_id >= (unsigned)num_node || numa_node_id == INVALID_NODEID || num_node <= 1) {
+	if (numa_node_id >= (unsigned)num_node || numa_node_id == INVALID_NODEID) {
 		pr_warn("numa_node_id is out range: numa_node_id %d, num_node %d\n", numa_node_id, num_node);
 		if (mflags.ui32.NoSubstitute)
 			return -EFAULT;
