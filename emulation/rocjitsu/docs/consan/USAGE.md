@@ -32,14 +32,15 @@ Without it, profiler registration in frameworks such as PyTorch can take
 precedence and prevent the hook from loading at all.
 
 A zero exit status alone does not mean ConSan checked the workload. After a run,
-require an applicable, complete verdict before interpreting its diagnostics:
+require an applicable, complete verdict before treating it as a completed check:
 
 ```sh
 grep -q 'ConSan analysis verdict applicable=true analysis_complete=true ' consan.log
 ```
 
 Run this check only after the application succeeds. A missing verdict means no
-analysis was reported; an incomplete verdict is not a clean result. Sampling
+analysis was reported; an incomplete verdict is not a clean result, although
+diagnostics from the covered portion can still be useful. Sampling
 still permits false negatives even with a complete verdict.
 Rejected configurations print an explicit unchecked-run warning; under
 `RJ_CONSAN_POLICY=strict` they terminate with exit code 92.
@@ -202,6 +203,7 @@ non-trapping mismatch marker; no expert controls are needed to start.
 
 | Situation | Next action |
 | --- | --- |
+| The application exits 0 with no ConSan output | Set `RJ_CONSAN_LOG=1` and `HSA_TOOLS_DISABLE_REGISTER=1`; check for a rejected configuration and require an applicable verdict. |
 | Startup is expensive or transformation uses too much memory | Generate an allowlist to avoid transforming unrelated code. |
 | Recording overhead is too high | Try `low` in the default mode, accepting reduced coverage. |
 | A small known-racy repro gives no diagnostic | Confirm instrumentation and dispatch, then try `higher` and `max`. Use `high` for larger grids. |
