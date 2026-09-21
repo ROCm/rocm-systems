@@ -127,7 +127,7 @@ DEFAULT_SAMPLE_METRICS: dict[str, Union[int, float]] = dict(_MEM_CHART_DEFAULT_R
 # ---------------------------------------------------------------------------
 _CONSOLE_WIDTH = 220
 
-_KERNEL_W = 14
+_KERNEL_W = 19
 _TCP_W = 27
 _SQC_W = 27
 _GL1_W = 15
@@ -470,7 +470,7 @@ def create_mem_chart_diagram(
         + "[dim]Shader Core[/dim]\n"
         + "[dim]Wave[/dim]\n"
         + "[dim]Execution[/dim]",
-        title=(f"[bold {COLORS['kernel']}]Kernel[/bold {COLORS['kernel']}]"),
+        title=(f"[bold {COLORS['kernel']}]Compute Units[/bold {COLORS['kernel']}]"),
         border_style=COLORS["kernel"],
         width=_KERNEL_W,
         height=_KERNEL_H,
