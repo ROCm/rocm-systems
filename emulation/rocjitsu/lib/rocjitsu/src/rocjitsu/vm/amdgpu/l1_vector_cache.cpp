@@ -78,16 +78,19 @@ void L1VectorCache::set_memory(GpuMemory *mem) {
   memory_ = mem;
 }
 
-void L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid) {
+void L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss) {
   if (cache_.lookup(addr, nullptr, vmid))
     return;
 
   uint64_t line_addr = CacheStore::line_address(addr);
   simdojo::CacheTag evicted;
-  uint8_t evicted_data[LINE_SIZE];
-  cache_.allocate(addr, vmid, &evicted, evicted_data);
+  cache_.allocate(addr, vmid, &evicted, nullptr);
 
   assert(!evicted.dirty && "L1 V$ is write-through; lines should never be dirty");
+
+  // A full-line store supplies every byte; fetching the old contents is unnecessary.
+  if (!fetch_on_miss)
+    return;
 
   uint8_t line_buf[LINE_SIZE];
   l2_->fetch_line(line_addr, line_buf, vmid);
@@ -177,7 +180,7 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
       continue;
     }
 
-    ensure_line(ea, vmid);
+    ensure_line(ea, vmid, /*fetch_on_miss=*/chunk != LINE_SIZE);
     cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
 
     // Write through to L2 for all cacheable stores. This ensures partial writes

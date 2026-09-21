@@ -15,6 +15,7 @@ test_categories:
       - "Alloc.*"
       - "ParamTests.*"
       - "ParameterApiTests.*"
+      - "ParameterApiTypedTests*"
       - "EnvPluginTests.*"
       - "EnqueueTests.*"
       - "ProxyTests.*"
@@ -42,6 +43,7 @@ test_categories:
       - "TopoTest.*"
       - "TopoNicFusionTests.*"
       - "P2pMaxNchannels.*"
+      - "ChannelDefaults.*"
     exclude_windows:
       - "*"
     labels:
