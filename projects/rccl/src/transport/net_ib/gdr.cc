@@ -15,8 +15,7 @@
 // ncclSystemError : no module or module loaded but not supported by GPU
 #define KNL_MODULE_LOADED(a) ((access(a, F_OK) == -1) ? 0 : 1)
 static int ncclIbGdrModuleLoaded = 0; // 1 = true, 0 = false
-// Set by a platform-specific safety override (e.g. Hyper-V below) that
-// deliberately disables GDR despite a present peermem client.
+// Set when a platform-specific override (e.g. Hyper-V below) forces GDR off despite a present peermem client.
 static int ncclIbGdrBlacklisted = 0; // 1 = true, 0 = false
 
 // Introduce RCCL_FORCE_ENABLE_GDRDMA to force load GPU-NIC RDMA module
