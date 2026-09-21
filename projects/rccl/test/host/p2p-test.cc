@@ -596,6 +596,15 @@ auto ForceP2pUseCudaMemcpy()
     };
 }
 
+auto GranularitySucceeds()
+{
+    return [](std::size_t* g, const hipMemAllocationProp*,
+              hipMemAllocationGranularity_flags) -> hipError_t {
+        if (g) *g = 4096;
+        return hipSuccess;
+    };
+}
+
 // CannedRmtRegAddr -- the ncclProxyCallBlocking lambda that every fresh-reg
 // happy path needs: writes a fixed rmtRegAddr into the response buffer so
 // the post-loop bookkeeping fires. It performs no request-struct assertions
@@ -4530,12 +4539,7 @@ TEST_F(P2pShareableBufferMicrotest,
     void* const kReserved = reinterpret_cast<void*>(0xC0000);
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
-    ScopedHook gran(g_hipMemGetAllocationGranularity,
-        [](std::size_t* g, const hipMemAllocationProp*,
-           hipMemAllocationGranularity_flags) -> hipError_t {
-            if (g) *g = 4096;
-            return hipSuccess;
-        });
+    ScopedHook gran(g_hipMemGetAllocationGranularity, GranularitySucceeds());
     int importCalls = 0, mapCalls = 0, accessCalls = 0, trackCalls = 0;
     ScopedHook import(g_hipMemImportFromShareableHandle,
         [&](hipMemGenericAllocationHandle_t* h, void*,
@@ -4594,12 +4598,7 @@ TEST_F(P2pShareableBufferMicrotest,
     void* const kReserved = reinterpret_cast<void*>(0xD0000);
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
-    ScopedHook gran(g_hipMemGetAllocationGranularity,
-        [](std::size_t* g, const hipMemAllocationProp*,
-           hipMemAllocationGranularity_flags) -> hipError_t {
-            if (g) *g = 4096;
-            return hipSuccess;
-        });
+    ScopedHook gran(g_hipMemGetAllocationGranularity, GranularitySucceeds());
     int getFdCalls = 0;
     ScopedHook getFd(g_ncclProxyClientGetFdBlocking,
         [&](struct ncclComm*, int, void*, int* fd) -> ncclResult_t {
@@ -4658,6 +4657,7 @@ TEST_F(P2pShareableBufferMicrotest,
     ScopedCuMemHandleType handleType(hipMemHandleTypeWin32);
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook gran(g_hipMemGetAllocationGranularity, GranularitySucceeds());
     ScopedHook import(g_hipMemImportFromShareableHandle,
         [](hipMemGenericAllocationHandle_t*, void*,
            hipMemAllocationHandleType) -> hipError_t {
@@ -4723,6 +4723,7 @@ TEST_F(P2pShareableBufferMicrotest,
     ScopedCuMemHandleType handleType(hipMemHandleTypePosixFileDescriptor);
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook gran(g_hipMemGetAllocationGranularity, GranularitySucceeds());
     ScopedHook getFd(g_ncclProxyClientGetFdBlocking,
         [](struct ncclComm*, int, void*, int*) -> ncclResult_t {
             return ncclSystemError;
@@ -4755,6 +4756,7 @@ TEST_F(P2pShareableBufferMicrotest,
     ScopedCuMemHandleType handleType(hipMemHandleTypePosixFileDescriptor);
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook gran(g_hipMemGetAllocationGranularity, GranularitySucceeds());
     ScopedHook getFd(g_ncclProxyClientGetFdBlocking,
         [](struct ncclComm*, int, void*, int* fd) -> ncclResult_t {
             if (fd) *fd = dup(STDERR_FILENO);   // a real, closable fd
@@ -4787,6 +4789,7 @@ TEST_F(P2pShareableBufferMicrotest,
     ScopedCuMemHandleType handleType(hipMemHandleTypePosixFileDescriptor);
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook gran(g_hipMemGetAllocationGranularity, GranularitySucceeds());
     ScopedHook getFd(g_ncclProxyClientGetFdBlocking,
         [](struct ncclComm*, int, void*, int* fd) -> ncclResult_t {
             // Hand back a definitely-invalid fd so close() fails with EBADF.
@@ -4834,6 +4837,7 @@ TEST_P(P2pImportMapStageFails, CuMem_MappingStageRefuses_Propagates)
     const auto stage = GetParam();
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook gran(g_hipMemGetAllocationGranularity, GranularitySucceeds());
     ScopedHook import(g_hipMemImportFromShareableHandle,
         [](hipMemGenericAllocationHandle_t* h, void*,
            hipMemAllocationHandleType) -> hipError_t {
@@ -4893,12 +4897,7 @@ TEST_F(P2pShareableBufferMicrotest,
     ScopedCuMemHandleType handleType(hipMemHandleTypeWin32);
 
     ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
-    ScopedHook gran(g_hipMemGetAllocationGranularity,
-        [](std::size_t* g, const hipMemAllocationProp*,
-           hipMemAllocationGranularity_flags) -> hipError_t {
-            if (g) *g = 4096;
-            return hipSuccess;
-        });
+    ScopedHook gran(g_hipMemGetAllocationGranularity, GranularitySucceeds());
     ScopedHook import(g_hipMemImportFromShareableHandle,
         [](hipMemGenericAllocationHandle_t* h, void*,
            hipMemAllocationHandleType) -> hipError_t {
