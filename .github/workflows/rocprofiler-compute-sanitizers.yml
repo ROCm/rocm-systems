@@ -128,7 +128,7 @@ jobs:
           "${ROCM_VENV}/bin/pip" install --upgrade pip
 
           # cmake 3.21 finds the ROCm root only via hipcc. Drop once the nightly image has this.
-          "${ROCM_VENV}/bin/pip" install 'cmake==3.28'
+          "${ROCM_VENV}/bin/pip" install 'cmake==3.28.*'
 
           # No torch here. Sanitizing a stock libtorch build is out of scope, so
           # the trace collector stays unbuilt in these jobs.
