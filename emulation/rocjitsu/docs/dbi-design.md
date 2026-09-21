@@ -77,7 +77,7 @@ InstrumentedCodeObject      -- patched ELF + diagnostics
 - `probe_obj` + `probe_symbol` are **consumed**: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.
 - `filter_flags` is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. `force_full_exec` is consumed (see [Mask policy](#mask-policy)); it is rejected only on an inline-nop site, which has no call envelope whose mask could be widened.
 - Probe calls require the probe body to read no register its ABI does not supply (`analyze_probe_live_ins`, see [Probe live-ins](#probe-live-ins)). Under `AmdGpuFuncReturnS30S31` that is the link pair plus the declared argument VGPRs; any other input is fatal.
-- Probe calls may pass 32-bit arguments via `InstrumentationPoint::probe_args`, delivered in VGPRs from `v0`. Each names a `ProbeArgSource`: a build-time constant, or a dword of the anchor `EXEC` mask. The count and the sources are declared by the caller and verified against the body; see [Probe arguments](#probe-arguments).
+- Probe calls may pass 32-bit arguments via `InstrumentationPoint::probe_args`, delivered in VGPRs from `v0`. Each names a `ProbeArgSource`: a build-time constant, a dword of the anchor `EXEC` mask, or a dword of the framework's entry storage. The count and the sources are declared by the caller and verified against the body; see [Probe arguments](#probe-arguments).
 - Probe calls require the probe's link pair (`s[30:31]` for `rj_nop_probe`) and any chosen scratch/special-state temps to be within the kernel's SGPR allocation (bounded by `kernel_sgpr_count`); auto-growing the SGPR count is not yet implemented (see [Probe-call register requirement](#instrumentation-flow-probe-call)).
 - Register spilling is enabled for `spill_set = live_at_anchor ∩ (probe_clobbers ∪ builder_clobbers)`. The orchestrator scans the kernel descriptor (`scan_kernel_descriptors`), builds one `SpillManager` from its `private_segment_fixed_size`, splits the spill set by class, and calls `plan_vgpr_spills` / `plan_sgpr_spills` / `plan_acc_spills`. Spilling is gated per-arch by `max_scratch_offset_bytes()` (returns 0 ⇒ arch has no scratch emitter ⇒ unsupported) and by those fail-closed helpers; there is no `SpillPolicy` enum. A kernel with zero scratch, more than one kernel, an over-offset-cap slot, a probe that clobbers FLAT_SCRATCH, or (for SGPR spills) no dead bridge VGPR within the kernel's VGPR allocation fails closed.
 
@@ -362,6 +362,7 @@ The trampoline envelope wraps the relocated original:
     [spill prologue]                    <-- VGPR/acc direct stores; SGPR writelane + store; store wait
     v_mov_b32    v[arg_base + i], <lit> <-- one per immediate probe_args entry, all lanes
     v_mov_b32    v[arg_base + i], <exec_temp{,+1}> <-- one per AnchorExecLo/Hi entry
+    v_mov_b32    v[arg_base + i], <entry_storage{,+1}> <-- one per LogBufferPtrLo/Hi entry
     s_mov_b64    exec, <exec_temp>      <-- restore anchor mask (absent under force_full_exec)
     s_cselect_b32 <scc_temp>, 1, 0      <-- SCC save (preserve_scc)
     s_getpc_b64  s[target_pair]
@@ -395,11 +396,13 @@ This is for a *uniform* probe, whose work does not depend on which lanes were ac
 
 ### Probe arguments
 
-A point may carry `probe_args`, a list of 32-bit values handed to the probe, each naming where the framework sources it (`ProbeArgSource`: a build-time constant, or one of the two dwords of the anchor `EXEC` mask). They arrive in consecutive VGPRs from `ProbeAbi::arg_vgpr_base` (`v0` today), one dword per register, in order — the AMDGPU function calling convention's placement for explicit scalar arguments.
+A point may carry `probe_args`, a list of 32-bit values handed to the probe, each naming where the framework sources it (`ProbeArgSource`: a build-time constant, one of the two dwords of the anchor `EXEC` mask, or one of the two dwords of the framework's entry storage). They arrive in consecutive VGPRs from `ProbeAbi::arg_vgpr_base` (`v0` today), one dword per register, in order — the AMDGPU function calling convention's placement for explicit scalar arguments.
 
 **The count is declared, not inferred.** Nothing in a compiled body distinguishes "reads `v0` as its first argument" from "reads `v0` uninitialized", so the caller states how many dwords it is passing and `derive_probe_abi(cc, num_arg_dwords)` builds the ABI from the pair. `is_valid_probe_abi()` re-derives from an ABI's own count and compares, so a hand-built ABI whose argument window its convention would not choose is rejected.
 
 **Verification is the live-in analysis, unchanged.** `supplied_registers()` widens to cover the argument VGPRs, and the existing "residual live-in set must be empty" rule then does the work: a declared argument the body reads subtracts away; one it reads but the caller did not declare survives and fails the site by name. Acceptance is "nothing left over" rather than "reads exactly what was declared", so a probe that ignores an argument it was handed is not rejected — wasteful, not unsafe. There is no argument-specific code in the analysis.
+
+**The framework's entry storage can be passed as a value.** `ProbeArgSource::LogBufferPtrLo` / `LogBufferPtrHi` name argument slots filled from `TrampolinePlan::entry_storage_base`, the persistent SGPR pair the kernel-entry prologue loaded the DBI payload pointer into. Unlike the `EXEC` sources, these read a pair that is live across the whole kernel rather than one the envelope just saved, so `plan_probe_call` keeps every dead-register choice off it — at every site of such a kernel, not only the ones passing the pointer on. Liveness cannot supply that exclusion: the prologue's write lives in the cave, which leaves the pair reading dead at every anchor. Two things fail the site closed: a plan naming no pair, and a probe body that writes the pair (nothing saves and restores it, so the value would be gone for every later site).
 
 `kMaxProbeArgVgprs` is 16, an arbitrary cap. The convention fills `v0` upward through `v30` (`v31` is the packed workitem id), so 31 dwords is the most that arrive in registers; the cap sits well inside that because the free-register search would refuse an argument block near 31 long before the convention did, and only single-dword integer arguments have been measured.
 
