@@ -6250,7 +6250,8 @@ typedef uint64_t amd_dbgapi_segment_address_t;
  *
  * \param[out] destination_contiguous_bytes The number of contiguous bytes for
  * which the converted \p destination_segment_address continues to correspond
- * to the \p source_segment_address.
+ * to the \p source_segment_address.  The number of continuous bytes is 0 if
+ * \p destination_segment_address is the NULL address.
  *
  * \retval ::AMD_DBGAPI_STATUS_SUCCESS The function has been executed
  * successfully and the result is stored in \p destination_segment_address and
