@@ -2039,21 +2039,6 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     }
                 }
             }
-#if (ROCPROFILER_VERSION >= 600)
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)
-            {
-                auto* record =
-                    static_cast<rocprofiler_buffer_tracing_memory_allocation_record_t*>(
-                        header->payload);
-
-                const std::uint64_t _stream_id = get_stream_id(record).handle;
-                {
-                    cache_category<category::rocm_memory_allocate>();
-                    cache_add_thread_info(record->thread_id);
-                    cache_memory_allocation(record, _stream_id);
-                }
-            }
-#endif
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
                     header->kind == ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API)
             {
@@ -2519,27 +2504,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             _data->scratch_memory_buffer));
     }
 
-#if (ROCPROFILER_VERSION >= 600)
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION) > 0)
-    {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, g_tool_data,
-            &_data->memory_alloc_buffer));
-
-        if(_data->memory_alloc_buffer.handle == 0UL)
-        {
-            LOG_CRITICAL("Failed to create memory allocation buffer");
-            ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
-            ::std::abort();
-        }
-
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION, nullptr, 0,
-            _data->memory_alloc_buffer));
-    }
-#endif
-
     g_domain_service =
         std::make_shared<domain_service<production_backend, external_dependencies>>();
 
@@ -2558,6 +2522,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         selection.name = "memory_copy";
         domain_selection_list.push_back(selection);
     }
+
+#if (ROCPROFILER_VERSION >= 600)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION))
+    {
+        domain_selection selection;
+        selection.name = "memory_allocation";
+        domain_selection_list.push_back(selection);
+    }
+#endif
 
 #if (ROCPROFILER_VERSION >= 10202)
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT))

@@ -61,8 +61,14 @@ public:
         const auto kind =
             static_cast<SdkBackend::buffer_tracing_kind_t>(m_definition.meta.id);
 
-        SdkBackend::configure_buffer_tracing_service(m_context, kind, m_operations.data(),
-                                                     m_operations.size(), m_buffer);
+        // An empty operations list means "no explicit filter was requested" -- pass
+        // (nullptr, 0) so the SDK traces all operations for this kind. Passing a
+        // non-null array that enumerates every operation id is not equivalent for
+        // all buffer-tracing kinds (e.g. MEMORY_ALLOCATION silently drops records).
+        auto*      ops_data  = m_operations.empty() ? nullptr : m_operations.data();
+        const auto ops_count = m_operations.size();
+        SdkBackend::configure_buffer_tracing_service(m_context, kind, ops_data, ops_count,
+                                                     m_buffer);
 
         typename SdkBackend::callback_thread_id_t thread{};
         SdkBackend::create_callback_thread(&thread);

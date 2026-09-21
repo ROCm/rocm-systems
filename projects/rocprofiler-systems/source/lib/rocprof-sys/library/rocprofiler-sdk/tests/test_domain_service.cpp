@@ -31,6 +31,7 @@ using ::testing::DoAll;
 using ::testing::ElementsAre;
 using ::testing::Eq;
 using ::testing::InSequence;
+using ::testing::IsEmpty;
 using ::testing::NotNull;
 using ::testing::Return;
 using ::testing::SetArgPointee;
@@ -220,10 +221,15 @@ TEST_F(domain_service_test,
     expect_configure_buffered(
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
-        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, { 0, 1 });
+        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
     expect_start_context(context);
 
+    // No explicit .operations filter: resolve_operations() must resolve to an empty
+    // list rather than enumerating every known operation id, so that
+    // buffered_domain::configure() forwards (nullptr, 0) to the SDK -- some
+    // buffer-tracing kinds silently drop all records when given a non-null array that
+    // enumerates every operation id, even though the configure call reports success.
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = "kfd_queue", .group = std::nullopt, .operations = std::nullopt } });
 
@@ -231,7 +237,7 @@ TEST_F(domain_service_test,
     ASSERT_EQ(configuration.size(), 1u);
     EXPECT_EQ(configuration[0].key.mode, domains::collection_mode::buffered);
     EXPECT_EQ(configuration[0].key.value, mock_sdk::BUFFER_TRACING_KFD_QUEUE);
-    EXPECT_THAT(configuration[0].operations, ElementsAre(0u, 1u));
+    EXPECT_THAT(configuration[0].operations, IsEmpty());
 
     expect_destroy_buffer(buffer);
 }
@@ -254,16 +260,19 @@ TEST_F(domain_service_test,
         context,
         static_cast<mock_sdk::callback_tracing_kind_t>(
             mock_sdk::CALLBACK_TRACING_CODE_OBJECT),
-        domains::callback::k_code_object<mock_sdk, externals>.on_record, { 0 });
+        domains::callback::k_code_object<mock_sdk, externals>.on_record, {});
     expect_start_context(context);
 
+    // No explicit .operations filter: resolve_operations() must resolve to an empty
+    // list so callback_domain::configure() forwards (nullptr, 0) to the SDK instead of
+    // enumerating every known operation id.
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = "code_object", .group = std::nullopt, .operations = std::nullopt } });
 
     const auto configuration = service.configuration();
     ASSERT_EQ(configuration.size(), 1u);
     EXPECT_EQ(configuration[0].key.mode, domains::collection_mode::callback);
-    EXPECT_THAT(configuration[0].operations, ElementsAre(0u));
+    EXPECT_THAT(configuration[0].operations, IsEmpty());
 }
 
 TEST_F(domain_service_test, configure_throws_runtime_error_for_unknown_domain_name)
@@ -386,7 +395,7 @@ TEST_F(domain_service_test, flush_calls_flush_on_each_configured_buffered_domain
     expect_configure_buffered(
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
-        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
     expect_start_context(context);
 
@@ -418,7 +427,7 @@ TEST_F(domain_service_test, configure_calls_on_configure_when_domain_defines_it)
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(
             mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
-        domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_page_fault_category_name);
     expect_start_context(context);
 
@@ -447,8 +456,7 @@ TEST_F(domain_service_test, configure_calls_on_configure_for_event_domain_that_d
         context, buffer, thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(
             mock_sdk::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT),
-        domains::buffered::kfd::k_event_page_fault<mock_sdk, externals>.on_records,
-        { 0 });
+        domains::buffered::kfd::k_event_page_fault<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_event_page_fault_category_name);
     expect_start_context(context);
 
@@ -520,13 +528,13 @@ TEST_F(domain_service_test,
     expect_configure_buffered(
         context, queue_buffer, queue_thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
-        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
     expect_configure_buffered(
         context, page_fault_buffer, page_fault_thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(
             mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
-        domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_page_fault_category_name);
     expect_start_context(context);
 
@@ -566,13 +574,13 @@ TEST_F(domain_service_test,
     expect_configure_buffered(
         context, queue_buffer, queue_thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(mock_sdk::BUFFER_TRACING_KFD_QUEUE),
-        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
     expect_configure_buffered(
         context, page_fault_buffer, page_fault_thread,
         static_cast<mock_sdk::buffer_tracing_kind_t>(
             mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
-        domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, { 0 });
+        domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_page_fault_category_name);
     expect_start_context(context);
 

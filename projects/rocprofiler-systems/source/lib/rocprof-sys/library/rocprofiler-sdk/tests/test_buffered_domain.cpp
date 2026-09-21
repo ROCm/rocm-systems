@@ -139,6 +139,48 @@ TEST_F(buffered_domain_test,
     EXPECT_CALL(*g_mock, destroy_buffer(Eq(buffer))).Times(1).WillOnce(Return(0));
 }
 
+// Regression test: rocprofiler-sdk v1.4.1 silently delivers zero records for
+// BUFFER_TRACING_MEMORY_ALLOCATION when configure_buffer_tracing_service() is given a
+// non-null operations array that enumerates every known operation id (including id 0 =
+// NONE), even though the configure call itself reports ROCPROFILER_STATUS_SUCCESS. An
+// empty operations vector means "no explicit filter was requested" and must be
+// forwarded to the SDK as (nullptr, 0) -- not as a non-null pointer to an empty range
+// -- to match the "trace all operations" semantics every other working domain relies
+// on. See buffered_domain::configure().
+TEST_F(buffered_domain_test,
+       configure_passes_null_operations_pointer_when_operations_list_is_empty)
+{
+    const context_id_t         context{ 7 };
+    const buffer_id_t          buffer{ 99 };
+    const callback_thread_id_t thread{ 5 };
+
+    sut_t domain{ make_definition(), context, std::vector<tracing_operation_t>{} };
+
+    expect_configure(context, buffer, thread, /*ops_ptr=*/nullptr, /*ops_size=*/0);
+    domain.configure();
+
+    EXPECT_CALL(*g_mock, destroy_buffer(Eq(buffer))).Times(1).WillOnce(Return(0));
+}
+
+TEST_F(buffered_domain_test,
+       configure_passes_non_null_operations_pointer_when_operations_list_is_non_empty)
+{
+    const context_id_t         context{ 7 };
+    const buffer_id_t          buffer{ 99 };
+    const callback_thread_id_t thread{ 5 };
+
+    std::vector<tracing_operation_t> operations{ 1, 2 };
+    auto* const                      ops_ptr  = operations.data();
+    const auto                       ops_size = operations.size();
+
+    sut_t domain{ make_definition(), context, std::move(operations) };
+
+    expect_configure(context, buffer, thread, ops_ptr, ops_size);
+    domain.configure();
+
+    EXPECT_CALL(*g_mock, destroy_buffer(Eq(buffer))).Times(1).WillOnce(Return(0));
+}
+
 TEST_F(buffered_domain_test, flush_does_not_call_flush_buffer_when_never_configured)
 {
     const sut_t domain{ make_definition(), context_id_t{ k_test_context_id }, {} };
