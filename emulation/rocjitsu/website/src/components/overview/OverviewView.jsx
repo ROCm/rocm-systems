@@ -5,7 +5,14 @@ import MetricsGrid from './MetricsGrid';
 import RecentRuns from './RecentRuns';
 import ResultsTable from './ResultsTable';
 
-export default function OverviewView({ viewModel, data, state, onCompareRun, onExploreRun }) {
+export default function OverviewView({
+  viewModel,
+  data,
+  state,
+  onCompareRun,
+  onExploreRun,
+  onOpenBenchmarks,
+}) {
   return (
     <Stack sx={{ gap: 1.75 }}>
       <MetricsGrid metrics={viewModel.metrics} />
@@ -14,6 +21,8 @@ export default function OverviewView({ viewModel, data, state, onCompareRun, onE
           history={viewModel.history}
           range={state.historyRange}
           onRangeChange={state.setHistoryRange}
+          onOpenBenchmarks={onOpenBenchmarks}
+          showNormalizationNote={viewModel.history.normalized || viewModel.metrics.estimatedBaseline}
         />
         <LargestChanges
           changes={viewModel.changes}

@@ -106,7 +106,7 @@ function SummaryCard({ summary, baseline, target }) {
       </Typography>
       <Typography variant="caption" sx={{ color: 'text.secondary' }}>
         {baseline
-          ? 'Uninstrumented reference'
+          ? run.plugin.id === 'vanilla' ? 'Uninstrumented reference' : 'Selected baseline'
           : summary.estimated
             ? `Estimated for all ${summary.total} tests from ${summary.comparable} passed pairs`
             : Number.isFinite(summary.overhead)

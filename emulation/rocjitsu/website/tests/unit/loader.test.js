@@ -13,6 +13,7 @@ function jsonResponse(body) {
     ok: true,
     status: 200,
     statusText: 'OK',
+    text: async () => JSON.stringify(body),
     json: async () => structuredClone(body),
   };
 }
@@ -166,6 +167,29 @@ test('retries transient HTTP failures before failing the load', async () => {
   expect(state.urls.filter((url) => url === dataset.indexUrl)).toHaveLength(3);
 });
 
+test('retries transient response-body failures before failing the load', async () => {
+  let remainingFailures = 1;
+  const { fetchImpl, state } = createFetchDouble({
+    behavior: (url) => {
+      if (url !== dataset.indexUrl || remainingFailures === 0) return null;
+      remainingFailures -= 1;
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => {
+          throw new TypeError('The connection closed while reading the body');
+        },
+      });
+    },
+  });
+
+  const { data } = await loadSynthetic(fetchImpl, { retryDelaysMs: [0] });
+
+  expect(data.runs).toHaveLength(dataset.runCount);
+  expect(state.urls.filter((url) => url === dataset.indexUrl)).toHaveLength(2);
+});
+
 test('honors Retry-After without applying jitter', async () => {
   let failIndex = true;
   const random = vi.fn(() => {
@@ -237,7 +261,7 @@ test('keeps the request timeout active while reading a response body', async () 
         status: 200,
         statusText: 'OK',
         headers: { get: () => 'application/json' },
-        json: () => new Promise((_, reject) => {
+        text: () => new Promise((_, reject) => {
           options.signal.addEventListener('abort', () => {
             const error = new Error('body read aborted');
             error.name = 'AbortError';
@@ -305,7 +329,7 @@ test('keeps the whole-load deadline active while reading response bodies', async
         status: 200,
         statusText: 'OK',
         headers: { get: () => 'application/json' },
-        json: () => new Promise((_, reject) => {
+        text: () => new Promise((_, reject) => {
           options.signal.addEventListener('abort', () => {
             const error = new Error('body read aborted');
             error.name = 'AbortError';
@@ -336,7 +360,7 @@ test('does not retry missing or malformed immutable resources', async () => {
           ok: true,
           status: 200,
           statusText: 'OK',
-          json: async () => { throw new SyntaxError('Unexpected token <'); },
+          text: async () => '{ invalid json',
         });
       }
       return null;
@@ -347,7 +371,7 @@ test('does not retry missing or malformed immutable resources', async () => {
 
   expect(error.message).toContain(`Unable to load run file ${missingUrl} (404 Not Found)`);
   expect(error.message).toContain(
-    `Unable to parse run file ${unparsableUrl} as JSON: Unexpected token <`,
+    `Unable to parse run file ${unparsableUrl} as JSON:`,
   );
   expect(state.urls.filter((url) => url === missingUrl)).toHaveLength(1);
   expect(state.urls.filter((url) => url === unparsableUrl)).toHaveLength(1);

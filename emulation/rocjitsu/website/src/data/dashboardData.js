@@ -172,8 +172,34 @@ async function fetchJsonResource(url, {
         `Unable to parse ${resourceType} ${url} as JSON: received ${contentType}`,
       );
     }
+    let body;
     try {
-      return await response.json();
+      body = await response.text();
+    } catch (bodyError) {
+      if (signal?.aborted) {
+        cleanup();
+        throw new LoadCancelledError();
+      }
+      const failure = timedOut
+        ? new Error(
+          `Timed out after ${timeoutMs} ms loading ${resourceType} ${url}`,
+          { cause: bodyError },
+        )
+        : bodyError;
+      if (attempt >= retryDelaysMs.length) {
+        cleanup();
+        throw dashboardDataError(
+          'unavailable',
+          `Unable to reach ${resourceType} ${url}: ${failure.message}`,
+          failure,
+        );
+      }
+      cleanup();
+      await waitForRetry(retryDelayMs(retryDelaysMs[attempt], null, random), signal);
+      continue;
+    }
+    try {
+      return JSON.parse(body);
     } catch (parseError) {
       if (signal?.aborted) throw new LoadCancelledError();
       if (timedOut) {

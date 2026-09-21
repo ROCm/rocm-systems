@@ -380,6 +380,7 @@ export function selectOverview(data, filters, range = 'ALL') {
     : baselineIsCandidate ? null : normalizedDurationAt(firstHistoryIndex);
   const oldestCompletedRun = sortRunsByCommit(completedRuns)[0] ?? null;
   const metricsBaseline = latestCompletedRunForCommit(completedRuns, oldestCompletedRun);
+  let metricsBaselineEstimated = false;
   const metricsBaselineDuration = metricsBaseline
     ? filters.targets.reduce((total, target) => {
       if (total == null) return null;
@@ -393,6 +394,7 @@ export function selectOverview(data, filters, range = 'ALL') {
         candidate?.catalogId,
         anchors,
       );
+      metricsBaselineEstimated ||= normalized.estimated;
       return normalized.value == null ? null : total + normalized.value;
     }, 0)
     : null;
@@ -449,6 +451,7 @@ export function selectOverview(data, filters, range = 'ALL') {
       total: totalTestCount,
       failed,
       completeness: totalTestCount ? (completedTests.length / totalTestCount) * 100 : 0,
+      estimatedBaseline: Number.isFinite(metricsBaselineDuration) && metricsBaselineEstimated,
     },
     metricsBaseline,
   };

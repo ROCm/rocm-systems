@@ -12,7 +12,7 @@ test('loads the data-driven overview without browser errors', async ({ page }) =
   await expect(page.getByText('Beta', { exact: true })).toBeVisible();
   await expect(page.getByText('Demo', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Rocjitsu Simulation Performance' })).toBeVisible();
-  await expect(page.getByText('Performance Trend')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Performance Trend' })).toBeVisible();
   await expect(page.getByText('Run coverage', { exact: true })).toBeVisible();
   await expect(page.getByText('Recent Runs')).toBeVisible();
   await expect(page.getByText('Rocjitsu Commit Activity')).toHaveCount(0);
@@ -94,6 +94,27 @@ test('offers an explicit full data reload', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Download JSON' })).toBeEnabled();
   expect(runGenerations.length).toBeGreaterThan(0);
   expect(runGenerations.every((generation) => generation === savedGeneration)).toBe(true);
+});
+
+test('keeps loaded data when cache generation persistence fails', async ({ page }) => {
+  await page.addInitScript(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function setItem(key, value) {
+      if (key === 'rocjitsu-data-cache-generation') {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      }
+      return originalSetItem.call(this, key, value);
+    };
+  });
+
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Download JSON' })).toBeEnabled();
+
+  await page.getByRole('button', { name: 'Reload all data' }).click();
+
+  await expect(page.getByTestId('dashboard-data-error')).toHaveCount(0);
+  await expect(page.getByTestId('dashboard-navigation')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download JSON' })).toBeEnabled();
 });
 
 test('fails closed when an indexed run is invalid', async ({ page }) => {

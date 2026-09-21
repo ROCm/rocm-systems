@@ -123,6 +123,7 @@ function FilterOverrideAlert({ benchmarks, available, onReturn }) {
 export default function BenchmarksView({
   data,
   filters,
+  initialMode = 'single',
   selectedRunIds,
   onSelectRun,
   onClearSelectedRuns,
@@ -132,7 +133,7 @@ export default function BenchmarksView({
   const defaultGridIds = (catalog.available.length > 0 ? catalog.available : catalog.all)
     .slice(0, 2)
     .map((test) => test.id);
-  const [mode, setMode] = useState(selectedRunIds.length > 0 ? 'aggregate' : 'single');
+  const [mode, setMode] = useState(selectedRunIds.length > 0 ? 'aggregate' : initialMode);
   const [selectedId, setSelectedId] = useState(initialId);
   const [gridIds, setGridIds] = useState(defaultGridIds);
   const [showAll, setShowAll] = useState(false);

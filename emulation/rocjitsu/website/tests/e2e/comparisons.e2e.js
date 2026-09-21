@@ -52,6 +52,8 @@ test('compares controlled plugins for every target without a target picker', asy
   await view.getByRole('combobox', { name: 'Baseline plugin' }).click();
   await page.getByRole('option', { name: 'AddressSanitizer' }).click();
   await expect(view.getByRole('combobox', { name: 'Baseline plugin' })).toHaveText('AddressSanitizer');
+  await expect(gfx1250.getByTestId('plugin-summary-gfx1250-asan')).toContainText('Selected baseline');
+  await expect(gfx1250.getByTestId('plugin-summary-gfx1250-asan')).not.toContainText('Uninstrumented reference');
   expect(await seriesColors()).toEqual({
     Vanilla: '#16A34A',
     ThreadSanitizer: '#8B5CF6',

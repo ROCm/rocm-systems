@@ -239,7 +239,7 @@ test('1D baseline keeps catalog-imputed estimation across the previous day', () 
     },
   ];
   const data = loadDashboardData(rawData);
-  const { history } = selectOverview(data, gfx1250Filters, '1D');
+  const { history, metrics } = selectOverview(data, gfx1250Filters, '1D');
   const measuredPrevious = previousRun.tests
     .filter((test) => test.target === 'gfx1250' && gfx1250Filters.suites.includes(test.suite))
     .reduce((total, test) => total + test.durationSeconds, 0);
@@ -247,6 +247,7 @@ test('1D baseline keeps catalog-imputed estimation across the previous day', () 
   expect(history.normalized).toBe(true);
   expect(history.series[0].baseline).toBeGreaterThan(measuredPrevious);
   expect(history.durationDelta).toBeTypeOf('number');
+  expect(metrics.estimatedBaseline).toBe(true);
 });
 
 test('weekly history keeps multiple commits per day inside one band per calendar day', () => {

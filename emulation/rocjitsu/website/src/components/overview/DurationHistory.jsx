@@ -2,6 +2,7 @@ import {
   Alert,
   Box,
   Chip,
+  Link,
   Stack,
   ToggleButton,
   ToggleButtonGroup,
@@ -55,7 +56,13 @@ function rangePeriodLabel(range) {
   }[range] ?? 'Selected period';
 }
 
-export default function DurationHistory({ history, range, onRangeChange }) {
+export default function DurationHistory({
+  history,
+  range,
+  onRangeChange,
+  onOpenBenchmarks,
+  showNormalizationNote,
+}) {
   const theme = useTheme();
   const axisColor = theme.palette.text.secondary;
   const gridColor = theme.palette.divider;
@@ -332,15 +339,43 @@ export default function DurationHistory({ history, range, onRangeChange }) {
           <Chart option={option} height="100%" ariaLabel={`Performance trend for ${range}`} />
         </Box>
       )}
-      {history.normalized && (
+      {showNormalizationNote && (
         <Alert
           data-testid="performance-trend-normalization-note"
           severity="info"
           variant="outlined"
-          sx={{ mt: 1, py: 0, '& .MuiAlert-message': { py: 0.5 } }}
+          sx={{
+            mt: 1,
+            py: 0,
+            alignItems: 'center',
+            '& .MuiAlert-message': {
+              py: 0.75,
+              display: 'flex',
+              alignItems: 'center',
+              lineHeight: 1.5,
+            },
+          }}
         >
-          Results in this trend are normalized to the latest test catalog; values for tests
-          absent from older catalogs are estimated.
+          <Box component="span">
+            Performance trend values are normalized to the latest test catalog. Original total
+            duration for each run is available in the{' '}
+            <Link
+              component="button"
+              type="button"
+              onClick={onOpenBenchmarks}
+              underline="hover"
+              sx={{
+                p: 0,
+                border: 0,
+                font: 'inherit',
+                verticalAlign: 'baseline',
+                cursor: 'pointer',
+              }}
+            >
+              Benchmarks
+            </Link>
+            {' '}tab.
+          </Box>
         </Alert>
       )}
     </SectionCard>

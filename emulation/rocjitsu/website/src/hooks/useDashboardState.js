@@ -6,6 +6,7 @@ export function useDashboardState(data) {
   const [suites, setSuites] = useState(data.suites);
   const [historyRange, setHistoryRange] = useState('ALL');
   const [tab, setTab] = useState('overview');
+  const [benchmarkMode, setBenchmarkMode] = useState('single');
   const [search, setSearch] = useState('');
   const [comparisonBaselineId, setComparisonBaselineId] = useState(null);
   const [comparisonCandidateId, setComparisonCandidateId] = useState(null);
@@ -19,6 +20,7 @@ export function useDashboardState(data) {
     suites,
     historyRange,
     tab,
+    benchmarkMode,
     search,
     comparisonBaselineId,
     comparisonCandidateId,
@@ -27,6 +29,7 @@ export function useDashboardState(data) {
     setSuites,
     setHistoryRange,
     setTab,
+    setBenchmarkMode,
     setSearch,
     setComparisonBaselineId,
     setComparisonCandidateId,

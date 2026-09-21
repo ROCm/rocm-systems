@@ -31,8 +31,19 @@ test('performance trend fills the row beside largest changes', async ({ page }) 
   await expect(trend.getByText('Range change', { exact: true })).toBeVisible();
   await expect(trend.getByText('Latest selected total', { exact: true })).toBeVisible();
   await expect(trend.getByTestId('performance-trend-normalization-note')).toContainText(
-    'Results in this trend are normalized to the latest test catalog',
+    'Performance trend values are normalized to the latest test catalog',
   );
+  const normalizationNote = trend.getByTestId('performance-trend-normalization-note');
+  const noteText = normalizationNote.locator('.MuiAlert-message > span');
+  const [noteBox, textBox] = await Promise.all([
+    normalizationNote.boundingBox(),
+    noteText.boundingBox(),
+  ]);
+  expect(noteBox).not.toBeNull();
+  expect(textBox).not.toBeNull();
+  expect(Math.abs(
+    (textBox.y + textBox.height / 2) - (noteBox.y + noteBox.height / 2),
+  )).toBeLessThanOrEqual(1);
   const boxes = await Promise.all([
     trend.boundingBox(),
     changes.boundingBox(),
@@ -65,6 +76,18 @@ test('performance trend fills the row beside largest changes', async ({ page }) 
   expect(markers.series.every((series) => Number(series.smooth) > 0)).toBe(true);
   expect(markers.series.every((series) => series.latestMarkers === 1)).toBe(true);
   expect(markers.series.every((series) => !series.baselineLabel?.includes('est.'))).toBe(true);
+});
+
+test('opens the Benchmarks tab from the normalization note', async ({ page }) => {
+  await page.goto('/');
+
+  await page.getByTestId('performance-trend-normalization-note')
+    .getByRole('button', { name: 'Benchmarks' })
+    .click();
+
+  await expect(page.getByRole('tab', { name: 'Benchmarks' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByText('Benchmark Explorer')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Aggregate' })).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('failures count stays fully inside the navigation bar', async ({ page }) => {

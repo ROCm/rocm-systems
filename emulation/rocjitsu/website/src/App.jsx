@@ -36,6 +36,22 @@ import { formatFullDate, shortSha } from './utils/formatters';
 const { metadataUrl: dataMetadataUrl, indexUrl: dataIndexUrl } = resolvePublishedDataUrls();
 const DATA_CACHE_GENERATION_STORAGE_KEY = 'rocjitsu-data-cache-generation';
 
+function readCacheGeneration() {
+  try {
+    return window.localStorage.getItem(DATA_CACHE_GENERATION_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveCacheGeneration(cacheGeneration) {
+  try {
+    window.localStorage.setItem(DATA_CACHE_GENERATION_STORAGE_KEY, cacheGeneration);
+  } catch {
+    // Cache persistence is optional; a storage failure must not discard loaded data.
+  }
+}
+
 function LoadingDataState({ progress }) {
   const determinate = progress.total > 0;
   return (
@@ -195,6 +211,13 @@ function Dashboard({ data, dataError = null, onRetry = null }) {
   };
   const openRunInExplorer = (runId) => {
     state.setExplorerRunIds([runId]);
+    state.setBenchmarkMode('aggregate');
+    state.setTab('benchmarks');
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0 }));
+  };
+  const openBenchmarks = () => {
+    state.setExplorerRunIds([]);
+    state.setBenchmarkMode('aggregate');
     state.setTab('benchmarks');
     window.requestAnimationFrame(() => window.scrollTo({ top: 0 }));
   };
@@ -236,7 +259,10 @@ function Dashboard({ data, dataError = null, onRetry = null }) {
             <Tabs
               value={state.tab}
               onChange={(_, value) => {
-                if (value === 'benchmarks') state.setExplorerRunIds([]);
+                if (value === 'benchmarks') {
+                  state.setExplorerRunIds([]);
+                  state.setBenchmarkMode('single');
+                }
                 state.setTab(value);
               }}
               variant="scrollable"
@@ -263,12 +289,14 @@ function Dashboard({ data, dataError = null, onRetry = null }) {
               state={state}
               onCompareRun={openRunComparison}
               onExploreRun={openRunInExplorer}
+              onOpenBenchmarks={openBenchmarks}
             />
           )}
           {state.tab === 'benchmarks' && (
             <BenchmarksView
               data={data}
               filters={state.filters}
+              initialMode={state.benchmarkMode}
               selectedRunIds={state.explorerRunIds}
               onSelectRun={selectExplorerRun}
               onClearSelectedRuns={() => state.setExplorerRunIds([])}
@@ -315,7 +343,7 @@ export default function App() {
   const [loadRequest, setLoadRequest] = useState(() => ({
     attempt: 0,
     reloadAll: false,
-    cacheGeneration: window.localStorage.getItem(DATA_CACHE_GENERATION_STORAGE_KEY),
+    cacheGeneration: readCacheGeneration(),
   }));
   const theme = useMemo(() => createDashboardTheme(mode), [mode]);
 
@@ -336,7 +364,7 @@ export default function App() {
     })
       .then(({ data, sourceData, cacheGeneration }) => {
         if (loadRequest.reloadAll && cacheGeneration) {
-          window.localStorage.setItem(DATA_CACHE_GENERATION_STORAGE_KEY, cacheGeneration);
+          saveCacheGeneration(cacheGeneration);
         }
         setDataState({ data, manifest: data, sourceData, error: null });
       })
