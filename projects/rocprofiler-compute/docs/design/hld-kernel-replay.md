@@ -32,7 +32,7 @@ Counter collection never runs alone. Every counter collection invocation must pr
 | Counter collection | Native tool, shared with code-object tracing | Yes | one bucket per pass. |
 | Code-object tracing | Native tool, shared with counter collection | No | Unaffected. |
 | Kernel dispatch tracing | `rocprofiler-sdk-tool` | Yes | *N* records for one logical dispatch. |
-| Marker / ROCTx tracing | `rocprofiler-sdk-tool` | Host-side, spans all passes | Region duration absorbs replay overhead. |
+| Marker / ROCTx tracing | `rocprofiler-sdk-tool` | Host-side, spans all passes | Marker trace is used as emitted. |
 | PC sampling | `rocprofiler-sdk-tool`, separate workload invocation | Agent-wide | A separate pass. |
 
 ### Prerequisites
@@ -375,7 +375,6 @@ flowchart TD
 | **FR-8** | All passes of one logical dispatch retain the SDK-provided dispatch ID and form one `Dispatch_ID` group holding the complete counter set. |
 | **FR-9** | Start and end timestamps follow the same cross-pass normalization semantics used for application-replay results. |
 | **FR-10** | Exactly one kernel dispatch record reaches the result per logical dispatch, from pass 0. |
-| **FR-11** | Marker region durations are corrected by subtracting the kernel replay overhead. |
 
 #### Composition and filtering
 
@@ -579,7 +578,7 @@ its `CONFIG` exit precedes execution and no `PASS` callbacks occur.
 | Kernel dispatch tracing | One dispatch record per logical dispatch, from pass 0 | The native tool owns the trace context and stops it at pass 1 enter. It stays stopped for the rest of the loop. |
 | Top Stats and dispatch information | One logical counter dispatch and its pass-0 duration | These outputs consume the consolidated dispatch data. |
 | Code-object tracing | Unchanged | Load-time only. Replay never multiplies it. |
-| Marker / ROCTx | Emitted once, spans all passes; durations corrected | Replay overhead is subtracted from any region enclosing a replayed dispatch. |
+| Marker / ROCTx | Emitted once, spans all passes; used as emitted | Marker trace is consumed without duration adjustment. |
 | PC sampling | One extra pass, appended after the counter passes | Runs counter-disabled on its own context. |
 | Roofline | Unchanged | |
 
@@ -587,18 +586,6 @@ its `CONFIG` exit precedes execution and no `PASS` callbacks occur.
 
 Native-tool ownership of kernel dispatch tracing is a [prerequisite](#prerequisites). It has one consequence beyond the pass loop: the native tool produces the
 dispatch records too with exactly one dispatch record per logical dispatch.
-
-#### Marker region durations
-
-A marker region is emitted once by the host but encloses every pass, so its duration subsumes the
-replay overhead. That overhead is subtracted rather than tolerated.
-
-- The native tool measures the interval from pass 0's exit to the final pass's exit, covering
-  intervening restores and additional executions.
-- Post-processing subtracts that overhead from any marker region enclosing the dispatch, so reported
-  region durations approximate an unreplayed run.
-- **Residual limitation.** Initial draining and snapshot capture precede pass 0 and have no separate
-  replay callbacks. Their overhead, and any other unattributable overhead, is not subtracted.
 
 ### Mode and option compatibility
 
@@ -653,7 +640,7 @@ any dispatch admitted for profiling, not by this callback count.
 | --- | --- | --- |
 | **1. Mode selection and validation** | The experimental `--replay-mode {application,kernel}` surface and rejections with their error diagnostics. Replay execution stays disabled. | Mode selection and correct rejection. Existing application-replay output does not change. |
 | **2. Native-tool kernel replay** | Coalesced counter groups; fixed pass-count policy with continuation unset; kernel and dispatch filtering; ordinary one-bucket counting; and callback-based completion checks with profile-mismatch diagnostics (FR-2 through FR-6, FR-13, FR-14, FR-17 through FR-20). | Every required bucket is collected in one run or the profile fails. Zero-bucket requests retain the existing bypass. Application replay keeps working throughout. |
-| **3. Consolidated output and dispatch ID** | Per-pass context positioning, counter completeness checks, grouping by SDK dispatch identity, timestamp normalization, and marker duration correction (FR-7 through FR-11, NFR-2). | Analysis consumes one consolidated counter result with the existing naming convention; Top Stats, dispatch information and marker regions report non-multiplied values. |
+| **3. Consolidated output and dispatch ID** | Per-pass context positioning, counter completeness checks, grouping by SDK dispatch identity, and timestamp normalization (FR-7 through FR-10, NFR-2). | Analysis consumes one consolidated counter result with the existing naming convention; Top Stats and dispatch information report non-multiplied values, while marker traces remain as emitted. |
 
 ## Validation, security and debuggability
 
@@ -670,9 +657,8 @@ any dispatch admitted for profiling, not by this callback count.
 | 7 | **Compatibility** | Every accepted option behaves as expected — PC sampling, roofline selection, a kernel-replay-specific multi-rank diagnostic that names the collective kernel risk, and default-off — and every rejected combination is rejected: iteration multiplexing, live attach-detach. |
 | 8 | **Configuration rejection** | Each unmet condition on its own — no native tool, unsupported ROCm version, unresolvable library, fails before profiling starts, with a diagnostic naming that specific condition. |
 | 9 | **Failure paths** | Fault-injection and integration checks reject an unsupported SDK, missing profiles, snapshot decline, short replay, and restore/drain aborts (FR-16 through FR-19). Snapshot decline fails even if the SDK fallback exits successfully or warning text changes. Zero-bucket bypass and deliberate opt-out are not failures. |
-| 10 | **Marker correction** | A marker region enclosing a replayed dispatch reports a duration close to the duration without kernel replay. |
-| 11 | **Replay callback contract** | SDK unit/sample coverage verifies fixed counts, early exit, terminating indefinite replay, zero without continuation, per-pass overrides, user-data copies, and local-toggle errors. Compute integration verifies fixed counts with continuation unset and completion state surviving through `CONFIG` exit (FR-5, FR-17). |
-| 12 | **Memory and queue isolation** | SDK snapshot and replay integration coverage checks supported allocations and module variables, unchanged inputs between passes, retained final outputs, sibling-queue draining, and independent agents. Unsupported memory and external mutation remain outside the equivalence guarantee (NFR-1). |
+| 10 | **Replay callback contract** | SDK unit/sample coverage verifies fixed counts, early exit, terminating indefinite replay, zero without continuation, per-pass overrides, user-data copies, and local-toggle errors. Compute integration verifies fixed counts with continuation unset and completion state surviving through `CONFIG` exit (FR-5, FR-17). |
+| 11 | **Memory and queue isolation** | SDK snapshot and replay integration coverage checks supported allocations and module variables, unchanged inputs between passes, retained final outputs, sibling-queue draining, and independent agents. Unsupported memory and external mutation remain outside the equivalence guarantee (NFR-1). |
 
 ### Security
 
