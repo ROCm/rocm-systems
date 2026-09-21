@@ -74,7 +74,7 @@ using buffer_tracing_kind_t   = std::size_t;
 using callback_tracing_kind_t = std::size_t;
 using buffer_policy_t         = int;
 using on_records_cb_t         = void (*)(context_id_t, buffer_id_t, record_header_t**,
-                                 std::size_t, void*, std::uint64_t);
+                                         std::size_t, void*, std::uint64_t);
 using on_record_cb_t          = void (*)(callback_tracing_record_t, user_data_t*, void*);
 
 struct agent_id_t
@@ -155,6 +155,38 @@ struct kfd_page_migrate_record
     std::uint64_t end_timestamp   = 0;
 };
 struct kfd_queue_record
+{
+    std::uint32_t operation = 0;
+    std::int32_t  pid       = 0;
+    agent_id_t    agent_id{};
+    std::uint64_t start_timestamp = 0;
+    std::uint64_t end_timestamp   = 0;
+};
+struct kernel_dispatch_record_t
+{
+    std::uint32_t operation = 0;
+    std::int32_t  pid       = 0;
+    agent_id_t    agent_id{};
+    std::uint64_t start_timestamp = 0;
+    std::uint64_t end_timestamp   = 0;
+};
+struct memory_copy_record_t
+{
+    std::uint32_t operation = 0;
+    std::int32_t  pid       = 0;
+    agent_id_t    agent_id{};
+    std::uint64_t start_timestamp = 0;
+    std::uint64_t end_timestamp   = 0;
+};
+struct memory_allocation_record_t
+{
+    std::uint32_t operation = 0;
+    std::int32_t  pid       = 0;
+    agent_id_t    agent_id{};
+    std::uint64_t start_timestamp = 0;
+    std::uint64_t end_timestamp   = 0;
+};
+struct scratch_memory_record_t
 {
     std::uint32_t operation = 0;
     std::int32_t  pid       = 0;
@@ -287,6 +319,10 @@ struct mock_sdk
     static constexpr callback_phase_t CALLBACK_PHASE_ENTER                    = 0;
     static constexpr callback_phase_t CALLBACK_PHASE_EXIT                     = 1;
     static constexpr callback_phase_t CALLBACK_PHASE_NONE                     = 2;
+    static constexpr std::size_t      BUFFER_TRACING_KERNEL_DISPATCH          = 28;
+    static constexpr std::size_t      BUFFER_TRACING_MEMORY_COPY              = 29;
+    static constexpr std::size_t      BUFFER_TRACING_MEMORY_ALLOCATION        = 30;
+    static constexpr std::size_t      BUFFER_TRACING_SCRATCH_MEMORY           = 31;
     // NOLINTEND(readability-identifier-naming)
 
     using kfd_event_dropped_record      = test_support::kfd_event_dropped_record;
@@ -297,6 +333,10 @@ struct mock_sdk
     using kfd_page_fault_record         = test_support::kfd_page_fault_record;
     using kfd_page_migrate_record       = test_support::kfd_page_migrate_record;
     using kfd_queue_record              = test_support::kfd_queue_record;
+    using kernel_dispatch_record_t      = test_support::kernel_dispatch_record_t;
+    using memory_copy_record_t          = test_support::memory_copy_record_t;
+    using memory_allocation_record_t    = test_support::memory_allocation_record_t;
+    using scratch_memory_record_t       = test_support::scratch_memory_record_t;
 
     static void create_context(context_id_t* context) { g_mock->create_context(context); }
     static void start_context(context_id_t context) { g_mock->start_context(context); }
