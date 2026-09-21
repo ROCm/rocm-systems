@@ -293,9 +293,17 @@ protected:
     comm_->devrState.winSortedCount = comm_->devrState.winSortedCapacity = 0;
     comm_->devrState.lsaRankList = nullptr;   // borrowed, not malloc'd
     ResetCeFakes();
-    ResetHipFakes();
+    // Order matters: ResetDevRuntimeMicroFakes installs the VMM emulator, so the
+    // HIP reset has to land after it. Otherwise this fixture hands the next
+    // suite working HIP memory, and the suites that rely on the fail-loud
+    // defaults -- p2p's unregistered-pointer arms among them -- stop failing.
     ResetDevRuntimeMicroFakes();
+    ResetHipFakes();
   }
+
+  // Belt and braces for the same hazard: a fixture that overrides TearDown
+  // without chaining would otherwise leak the emulator into the next suite.
+  ~RmaCeInitTest() override { ResetHipFakes(); }
 
   // True once every configured context has finished its allocations, which is
   // where the CE stream and event are created.
@@ -1267,6 +1275,25 @@ TEST_F(RmaCePersistTest, Persist_DataBatchFails_Propagates) {
   EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSystemError);
 }
 
+// The graph path selects its context per task too. The ack handshake reads the
+// named context's ack flags, so pointing it at context 0 would wait on the wrong
+// buffer.
+TEST_F(RmaCePersistTest, Persist_TaskNamesSecondContext_UsesThatContextsAckFlags) {
+  ASSERT_EQ(ncclRmaCeFinalize(comm_.get()), ncclSuccess);
+  comm_->config.numRmaCtx = 2;
+  ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
+  constexpr int kPeer = 1;
+  PushTask(kPeer, 32, /*signal=*/true, /*winOffset=*/0, /*signalIdx=*/0,
+           ncclUint8, /*ctx=*/1);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  ASSERT_EQ(log_.size(), 3u);
+  ASSERT_EQ(log_[0].memOps.size(), 2u);
+  EXPECT_EQ(log_[0].memOps[0].address, &Ctx(1)->graphAckDev[SignalSlot(0, kPeer)]);
+  EXPECT_NE(log_[0].memOps[0].address, &Ctx(0)->graphAckDev[SignalSlot(0, kPeer)]);
+}
+
 // ---------------------------------------------------------------------------
 // ncclRmaCeWaitLaunch
 // ---------------------------------------------------------------------------
@@ -1284,14 +1311,14 @@ protected:
   // how many signals to expect from each, and which signal index each uses.
   // signalIdxs defaults to index 0 for every peer.
   void PushWaitTask(std::vector<int> peers, std::vector<int> nsignals,
-                    std::vector<int> signalIdxs = {}) {
+                    std::vector<int> signalIdxs = {}, int ctx = 0) {
     peers_ = std::move(peers);
     nsignals_ = std::move(nsignals);
     signalIdxs_ = signalIdxs.empty() ? std::vector<int>(peers_.size(), 0)
                                      : std::move(signalIdxs);
     auto* t = ncclMemoryPoolAlloc<ncclTaskRma>(&comm_->memPool_ncclTaskRma, &comm_->memPermanent);
     t->func = ncclFuncWaitSignal;
-    t->ctx = 0;
+    t->ctx = ctx;
     t->signalMode = NCCL_SIGNAL;
     t->npeers = static_cast<int>(peers_.size());
     t->peers = peers_.data();
@@ -1520,6 +1547,25 @@ TEST_F(RmaCeWaitLaunchTest, WaitLaunch_PersistentAckCopyFails_Propagates) {
   EXPECT_EQ(ncclRmaCeWaitLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSystemError);
   ASSERT_EQ(log_.size(), 1u);              // the wait pair went out first
   EXPECT_EQ(log_[0].kind, Submission::kMemOps);
+}
+
+// And the wait path: the running total it waits on lives on the named context,
+// so resolving to context 0 would wait on a threshold nobody is raising.
+TEST_F(RmaCeWaitLaunchTest, WaitLaunch_TaskNamesSecondContext_WaitsOnThatContext) {
+  ASSERT_EQ(ncclRmaCeFinalize(comm_.get()), ncclSuccess);
+  comm_->config.numRmaCtx = 2;
+  ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
+  constexpr int kPeer = 1;
+  PushWaitTask({kPeer}, {2}, /*signalIdxs=*/{0}, /*ctx=*/1);
+
+  ASSERT_EQ(ncclRmaCeWaitLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  ASSERT_EQ(log_.size(), 1u);
+  ASSERT_EQ(log_[0].memOps.size(), 1u);
+  EXPECT_EQ(log_[0].memOps[0].address, &Ctx(1)->signalsDev[SignalSlot(0, kPeer)]);
+  // The threshold is recorded on context 1; context 0 never moves.
+  EXPECT_EQ(Ctx(1)->signalsHost[SignalSlot(0, kPeer)], 2u);
+  EXPECT_EQ(Ctx(0)->signalsHost[SignalSlot(0, kPeer)], 0u);
 }
 
 }  // namespace
