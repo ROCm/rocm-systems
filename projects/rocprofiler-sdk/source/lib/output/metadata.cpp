@@ -371,6 +371,17 @@ metadata::get_code_object(uint64_t code_obj_id) const
     });
 }
 
+std::optional<rocprofiler_agent_id_t>
+metadata::get_code_object_agent(uint64_t code_obj_id) const
+{
+    return code_objects.rlock(
+        [code_obj_id](const auto& _data) -> std::optional<rocprofiler_agent_id_t> {
+            auto itr = _data.find(code_obj_id);
+            if(itr == _data.end()) return std::nullopt;
+            return itr->second.agent_id;
+        });
+}
+
 code_object_load_info_vec_t
 metadata::get_code_object_load_info() const
 {

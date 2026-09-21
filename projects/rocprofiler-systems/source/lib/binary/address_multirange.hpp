@@ -6,8 +6,6 @@
 #include "core/binary/address_range.hpp"
 #include "core/binary/fwd.hpp"
 
-#include <timemory/utility/macros.hpp>
-
 #include <cstdint>
 #include <utility>
 

@@ -191,7 +191,7 @@ mode:
 cd /workspace
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-rocjitsu --daemon --config configs/amdgpu_cdna4_kmd.json -- \
+rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- \
   python3 -c "import torch; print(torch.randn(4,4,device='cuda'))"
 ```
 

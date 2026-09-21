@@ -45,6 +45,27 @@ THE SOFTWARE.
 #include "rocdecode/rocdecode.h"
 #include "rocdecode/rocparser.h"
 
+// Select the output surface format for a chroma format + bit depth. Monochrome
+// selects the same format as 4:2:0 (NV12/P016). Unrecognized chroma formats
+// return rocDecVideoSurfaceFormat_Native (the "decoder chooses" sentinel), which
+// callers must not use as a bit position (see rocdecode.h).
+inline rocDecVideoSurfaceFormat SelectSurfaceFormat(rocDecVideoChromaFormat chroma_format, uint8_t bitdepth_minus_8) {
+    switch (chroma_format) {
+    case rocDecVideoChromaFormat_420:
+    case rocDecVideoChromaFormat_Monochrome:
+        return bitdepth_minus_8 ? rocDecVideoSurfaceFormat_P016
+                                : rocDecVideoSurfaceFormat_NV12;
+    case rocDecVideoChromaFormat_444:
+        return bitdepth_minus_8 ? rocDecVideoSurfaceFormat_YUV444_16Bit
+                                : rocDecVideoSurfaceFormat_YUV444;
+    case rocDecVideoChromaFormat_422:
+        return bitdepth_minus_8 ? rocDecVideoSurfaceFormat_YUV422_16Bit
+                                : rocDecVideoSurfaceFormat_YUV422;
+    default:
+        return rocDecVideoSurfaceFormat_Native;  // unrecognized chroma format
+    }
+}
+
 #define ROCVIDEODEC_TOSTR(X) std::to_string(X)
 #define ROCVIDEODEC_STR(X) std::string(X)
 
@@ -221,6 +242,11 @@ typedef struct ReconfigParams_t {
     uint32_t reconfig_flush_mode;
 } ReconfigParams;
 
+/**
+ * \ingroup group_amd_roc_video_dec
+ * \brief High-level video decoder utility class that wraps the rocDecode core APIs to
+ * create, control, and destroy the hardware decoder, and to decode and retrieve frames on the GPU.
+ */
 class RocVideoDecoder {
     public:
         /**

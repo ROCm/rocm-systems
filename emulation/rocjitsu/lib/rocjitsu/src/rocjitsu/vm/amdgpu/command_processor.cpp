@@ -175,6 +175,8 @@ bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_l
     for (size_t attempt = 0; attempt < cus.size(); ++attempt) {
       size_t cu_idx = (next_cu + rank + attempt) % cus.size();
       auto *cu = cus[cu_idx];
+      if (!entry.allows_cu(cu))
+        continue;
 
       uint32_t reserved_wgs = planned_per_cu[cu_idx] + 1;
       uint64_t reserved_wfs = static_cast<uint64_t>(entry.wfs_per_workgroup) * reserved_wgs;
@@ -590,7 +592,7 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     }
     uint64_t wave_scratch = scratch_pool + scratch_slot * per_wave_size;
 
-    if (memory_ && memory_->resolve_host_ptr(wave_scratch, pkt.process_id) == nullptr &&
+    if (memory_ && !memory_->has_host_backing(wave_scratch, pkt.process_id, per_wave_size) &&
         scratch_allocator_) {
       // Size against the whole grid, not this XCD's share: every XCD of a
       // fanned-out dispatch shares the allocation. CDNA5 uses the complete
@@ -620,10 +622,10 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     util::Logger::cp([&](auto &os) {
       os << std::format(
           "SCRATCH wf{} pool={:#x} wave_scratch={:#x} per_wave={} priv_size={} "
-          "backing_addr={:#x} mapped={}",
+          "backing_addr={:#x} host_backed={}",
           wf->wf_id(), scratch_pool, wave_scratch, per_wave_size, pkt.private_segment_fixed_size,
           pkt.scratch_backing_addr,
-          memory_ ? (memory_->resolve_host_ptr(wave_scratch, pkt.process_id) != nullptr) : false);
+          memory_ ? memory_->has_host_backing(wave_scratch, pkt.process_id, per_wave_size) : false);
     });
 
     if (flat_scratch_init_sgpr >= 0) {
@@ -761,12 +763,41 @@ void CommandProcessor::fan_out_dispatch(DispatchEntry &dp) {
   if (num_xcds <= 1)
     return;
 
+  // A masked queue may have no usable CU on its owning XCD. Only eligible
+  // XCDs receive work; the owner still tracks whole-grid completion.
+  std::vector<uint32_t> participants;
+  if (dp.enabled_cus) {
+    for (uint32_t rank = 0; rank < num_xcds; ++rank) {
+      if (std::ranges::any_of(xcd_peers_[rank]->cus_,
+                              [&](const auto *cu) { return dp.allows_cu(cu); }))
+        participants.push_back(rank);
+    }
+  }
+  const uint32_t participant_count =
+      dp.enabled_cus ? static_cast<uint32_t>(participants.size()) : num_xcds;
+  assert(participant_count != 0);
+
   const uint32_t grid_wgs = dp.total_wgs;
   auto grid = std::make_shared<GridCompletion>();
   grid->grid_wgs = grid_wgs;
 
-  for (uint32_t rank = 0; rank < num_xcds; ++rank) {
-    if (rank == xcd_rank_)
+  const auto apply_share = [&](DispatchEntry &entry, uint32_t physical_rank) {
+    if (!entry.enabled_cus) {
+      entry.apply_shard(XcdShard(physical_rank, num_xcds));
+      return;
+    }
+    const auto participant = std::ranges::find(participants, physical_rank);
+    if (participant == participants.end())
+      entry.total_wgs = 0;
+    else
+      entry.apply_shard(
+          XcdShard(static_cast<uint32_t>(participant - participants.begin()), participant_count));
+  };
+
+  // Excluded XCDs need empty shares too: a later CU-mask change can route work
+  // to them, and barriers must still wait for the same predecessors everywhere.
+  for (uint32_t physical_rank = 0; physical_rank < num_xcds; ++physical_rank) {
+    if (physical_rank == xcd_rank_)
       continue;
     DispatchEntry shard = dp;
     shard.grid_completion = grid;
@@ -774,12 +805,12 @@ void CommandProcessor::fan_out_dispatch(DispatchEntry &dp) {
     // The peer must not fire the dispatch's completion signal; the owning XCD
     // does that once the grid counter shows every share retired.
     shard.completion_signal = 0;
-    shard.apply_shard(XcdShard(rank, num_xcds));
-    xcd_peers_[rank]->accept_fanout_shard(std::move(shard));
+    apply_share(shard, physical_rank);
+    xcd_peers_[physical_rank]->accept_fanout_shard(std::move(shard));
   }
 
   dp.grid_completion = std::move(grid);
-  dp.apply_shard(XcdShard(xcd_rank_, num_xcds));
+  apply_share(dp, xcd_rank_);
 }
 
 void CommandProcessor::replicate_non_kernel_entry(const DispatchEntry &dp) {
@@ -976,6 +1007,19 @@ void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) 
   stop_doorbell_monitor_if_idle();
 }
 
+void CommandProcessor::set_queue_cu_selection(uint32_t queue_id, uint32_t process_id,
+                                              const QueueCuSelection &enabled_cus) {
+  {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    for (auto &queue : hw_queues_) {
+      if (queue.queue_id == queue_id && queue.process_id == process_id)
+        queue.enabled_cus = enabled_cus;
+    }
+  }
+  if (engine())
+    engine()->schedule_event_now(doorbell_event());
+}
+
 void CommandProcessor::update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
                                     uint32_t ring_size, uint32_t queue_percentage) {
   const bool suspended = queue_percentage == 0;
@@ -1149,6 +1193,25 @@ amdgpu::AccessOutcome CommandProcessor::write_gpu_block(uint64_t va, const void 
                               vmid);
 }
 
+CopyOutcome CommandProcessor::read_doorbell(const HwQueue &queue, uint64_t &value) const {
+  value = 0;
+  if (queue.host_accessible) {
+    if (!queue.doorbell_base)
+      return CopyOutcome::Faulted;
+    auto *address = static_cast<char *>(queue.doorbell_base) + queue.doorbell_offset;
+    if (reinterpret_cast<uintptr_t>(address) % alignof(uint64_t) != 0)
+      return CopyOutcome::Faulted;
+    value = std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(address))
+                .load(std::memory_order_acquire);
+    return CopyOutcome::Complete;
+  }
+  if (!memory_ || queue.doorbell_va == 0 || queue.doorbell_va % alignof(uint64_t) != 0)
+    return CopyOutcome::Faulted;
+  // A publication cursor must be one acquire load, including on passthrough
+  // mappings. The byte-wise fallback in read_gpu_u64 can tear.
+  return memory_->atomic_load(queue.doorbell_va, sizeof(value), value, queue.process_id);
+}
+
 /// @brief Scan all HW queues for doorbell changes; return true if any changed.
 /// Caller must NOT hold hw_queue_mutex_.
 bool CommandProcessor::scan_doorbells() {
@@ -1159,26 +1222,18 @@ bool CommandProcessor::scan_doorbells() {
     // consume them, or every XCD would dispatch the whole grid.
     if (q.fanout_replica)
       continue;
-    uint64_t val;
-    if (q.host_accessible) {
-      if (!q.doorbell_base)
-        continue;
-      val = std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(
-                                          static_cast<char *>(q.doorbell_base) + q.doorbell_offset))
-                .load(std::memory_order_acquire);
-    } else {
-      if (q.doorbell_va == 0)
-        continue;
-      val = read_gpu_u64(q.doorbell_va, q.process_id);
-    }
-    if (val != q.last_doorbell) {
+    uint64_t doorbell_value;
+    if (read_doorbell(q, doorbell_value) != CopyOutcome::Complete)
+      continue;
+    if (doorbell_value != q.last_doorbell) {
       util::Logger::cp([&](auto &os) {
         os << std::format("{}: DOORBELL_CHANGE pid={} qid={} sdma={} old={:#x} new={:#x} "
                           "db_base={} db_off={}",
-                          name(), q.process_id, q.queue_id, q.is_sdma, q.last_doorbell, val,
-                          reinterpret_cast<uintptr_t>(q.doorbell_base), q.doorbell_offset);
+                          name(), q.process_id, q.queue_id, q.is_sdma, q.last_doorbell,
+                          doorbell_value, reinterpret_cast<uintptr_t>(q.doorbell_base),
+                          q.doorbell_offset);
       });
-      q.last_doorbell = val;
+      q.last_doorbell = doorbell_value;
       found = true;
     }
   }
@@ -1251,15 +1306,9 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
     if (poll_count % 5000 == 1) {
       std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
       for (auto &q : hw_queues_) {
-        uint64_t current = q.last_doorbell;
-        if (q.host_accessible && q.doorbell_base) {
-          current = std::atomic_ref<uint64_t>(
-                        *reinterpret_cast<uint64_t *>(static_cast<char *>(q.doorbell_base) +
-                                                      q.doorbell_offset))
-                        .load(std::memory_order_acquire);
-        } else if (!q.host_accessible && q.doorbell_va != 0) {
-          current = read_gpu_u64(q.doorbell_va, q.process_id);
-        }
+        uint64_t current;
+        if (read_doorbell(q, current) != CopyOutcome::Complete)
+          current = q.last_doorbell;
         util::Logger::cp([&](auto &os) {
           os << std::format("{}: DOORBELL_POLL pid={} qid={} current={:#x} last={:#x} "
                             "monitor_base={} db_off={} polls={}",
@@ -1626,11 +1675,14 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     // dispatch, not per XCD. This cannot be pinned to the XCD that read the
     // packet: when the grid is smaller than the XCD count that XCD's share may be
     // empty, so it never places anything. Let whichever XCD places the grid's
-    // first workgroup claim the report.
+    // first workgroup claim the report. The shared claim must run under the
+    // plugin-group callback lock: otherwise the winner can be descheduled after
+    // claiming while a peer publishes this dispatch's first wave callback.
     if (!entry.execution_begun) {
       entry.execution_begun = true;
-      if (!entry.grid_completion || entry.grid_completion->claim_execution_begin())
-        plugin_group_->onAmdgpuDispatchExecutionBegin(entry.dispatch_id);
+      plugin_group_->onAmdgpuDispatchExecutionBeginOnce(entry.dispatch_id, [&]() {
+        return !entry.grid_completion || entry.grid_completion->claim_execution_begin();
+      });
     }
     ComputeUnitCore *cu = placement.cu;
     uint32_t lds_base = placement.lds_base;
@@ -1798,6 +1850,8 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     } else if (!entry.wgp_mode) {
       for (size_t attempt = 0; attempt < cus_.size(); ++attempt) {
         size_t cu_idx = (next_cu_ + attempt) % cus_.size();
+        if (!entry.allows_cu(cus_[cu_idx]))
+          continue;
         if (cus_[cu_idx]->can_accept_workgroup(entry.wfs_per_workgroup,
                                                entry.group_segment_fixed_size)) {
           auto *cu = cus_[cu_idx];
@@ -1925,8 +1979,11 @@ void CommandProcessor::on_cu_pool_ready(ComputeUnitCore *cu) {
 
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
   const simdojo::Tick now = engine()->context(partition_id()).current_tick();
-  pooled_due_ticks_[cu] = now + 1;
-  arm_dispatch_continuation(now + 1);
+  // schedule_work() also runs when a new wave joins an already-active CU. Keep
+  // that CU's established due tick, just as the serial driver keeps its queued
+  // tick while executing_, rather than pulling resident work forward.
+  auto due = pooled_due_ticks_.try_emplace(cu, now + 1).first;
+  arm_dispatch_continuation(due->second);
 }
 
 bool CommandProcessor::step() {
@@ -2101,6 +2158,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.dispatch_id = allocate_dispatch_id();
   dp.profiling_start_timestamp = hsa_system_timestamp();
   dp.queue_id = queue.queue_id;
+  dp.enabled_cus = queue.enabled_cus;
   dp.queue_packet_id = queue_packet_id;
   dp.process_id = queue.process_id;
   dp.aql_packet_id = static_cast<uint32_t>(aql_packet_id);
@@ -2299,12 +2357,19 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dispatch_info.entry_pc = entry_pc;
   dispatch_info.kernel_symbol = kernel_symbol;
   dispatch_info.kernel_name = kernel_name;
+  dispatch_info.lds_size_bytes = dp.group_segment_fixed_size;
+  dispatch_info.wave_size = wave_size;
+  dispatch_info.code_target =
+      cus_.empty() ? ROCJITSU_CODE_TARGET_INVALID : cus_[0]->config().target;
   dispatch_info.grid_size_x = pkt.grid_size_x;
   dispatch_info.grid_size_y = pkt.grid_size_y;
   dispatch_info.grid_size_z = pkt.grid_size_z;
   dispatch_info.workgroup_size_x = pkt.workgroup_size_x;
   dispatch_info.workgroup_size_y = pkt.workgroup_size_y;
   dispatch_info.workgroup_size_z = pkt.workgroup_size_z;
+  dispatch_info.cluster_size_x = dp.cluster_size_x;
+  dispatch_info.cluster_size_y = dp.cluster_size_y;
+  dispatch_info.cluster_size_z = dp.cluster_size_z;
   dispatch_info.workgroup_count = total_wgs;
   dispatch_info.wfs_per_workgroup = wfs_per_wg;
   dispatch_info.sgprs_per_wf = dp.sgprs_per_wf;
@@ -2410,14 +2475,63 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
   // suspension flags are the owner's copy rather than state this CP maintains.
   if (queue.fanout_replica)
     return;
+  // The SDMA doorbell bounds the published byte range. The producer pointer may
+  // already describe a later submission, so it must not extend this range.
+  if (queue.is_sdma) {
+    uint64_t published_bytes;
+    const CopyOutcome doorbell_outcome = read_doorbell(queue, published_bytes);
+    if (doorbell_outcome != CopyOutcome::Complete) {
+      if (doorbell_outcome == CopyOutcome::Unavailable)
+        arm_stall_recheck(now);
+      return;
+    }
+    if (published_bytes == std::numeric_limits<uint64_t>::max())
+      return;
+    const uint64_t read_idx = read_gpu_u64(queue.read_ptr_va, queue.process_id);
+    if (queue.debug_suspended || queue.runtime_suspended) {
+      // Resume must revisit published packets even if the producer writeback
+      // has not advanced. Both suspension reasons share this deferral.
+      queue.debug_work_deferred |= read_idx < published_bytes;
+      return;
+    }
+    util::Logger::cp([&](auto &os) {
+      os << std::format("{}: SDMA_FETCH pid={} qid={} read={} published={} delta={}", name(),
+                        queue.process_id, queue.queue_id, read_idx, published_bytes,
+                        published_bytes - read_idx);
+    });
+    if (read_idx >= published_bytes)
+      return;
+    // ROCr's direct SdmaQueue release-stores its canonical write pointer and
+    // places a release fence before its volatile MMIO doorbell store. Acquire
+    // that write pointer after observing the doorbell to synchronize packet
+    // reads with this producer.
+    // Other producers release-store the doorbell itself and need no writeback.
+    // In either case, only the doorbell determines how many bytes we consume.
+    if (queue.write_ptr_va != 0) {
+      if (queue.write_ptr_va % alignof(uint64_t) != 0)
+        return;
+      uint64_t write_pointer;
+      const CopyOutcome write_pointer_outcome = memory_->atomic_load(
+          queue.write_ptr_va, sizeof(write_pointer), write_pointer, queue.process_id);
+      if (write_pointer_outcome != CopyOutcome::Complete) {
+        if (write_pointer_outcome == CopyOutcome::Unavailable)
+          arm_stall_recheck(now);
+        return;
+      }
+    }
+    process_sdma_ring(queue, read_idx, published_bytes, now);
+    return;
+  }
+
   if (queue.debug_suspended || queue.runtime_suspended) {
     // A command-processor event can race a debugger suspension even when this
     // queue has no new packets. Do not turn that stale event into an endless
     // resume/event chain: request a resume pass only when packet fetch really
-    // was deferred. Compute queues count packets; SDMA queues count bytes.
+    // was deferred. The fetch cursor stays ahead of the read pointer when
+    // the debugger holds that pointer at a trapped dispatch.
     const uint64_t write_idx = read_gpu_u64(queue.write_ptr_va, queue.process_id);
     const uint64_t read_idx = read_gpu_u64(queue.read_ptr_va, queue.process_id);
-    const uint64_t fetch_idx = queue.is_sdma ? read_idx : std::max(read_idx, queue.fetch_cursor);
+    const uint64_t fetch_idx = std::max(read_idx, queue.fetch_cursor);
     queue.debug_work_deferred |= fetch_idx < write_idx;
     return;
   }
@@ -2434,28 +2548,6 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
       os << std::format("FETCH q={} w={} r={} delta={} sdma={}", queue.queue_id, write_idx,
                         read_idx, write_idx - read_idx, queue.is_sdma);
   });
-
-  // SDMA queues use byte-granularity pointers and have their own doorbell
-  // semantics — skip the AQL doorbell clamping that assumes packet indices.
-  if (queue.is_sdma) {
-    if (queue.doorbell_base) {
-      uint64_t db_val = std::atomic_ref<uint64_t>(
-                            *reinterpret_cast<uint64_t *>(static_cast<char *>(queue.doorbell_base) +
-                                                          queue.doorbell_offset))
-                            .load(std::memory_order_acquire);
-      if (db_val != std::numeric_limits<uint64_t>::max() && db_val > write_idx)
-        write_idx = db_val;
-    }
-    util::Logger::cp([&](auto &os) {
-      os << std::format("{}: SDMA_FETCH pid={} qid={} read={} write={} delta={}", name(),
-                        queue.process_id, queue.queue_id, read_idx, write_idx,
-                        write_idx - read_idx);
-    });
-    if (read_idx >= write_idx)
-      return;
-    process_sdma_ring(queue, read_idx, write_idx, now);
-    return;
-  }
 
   // AQL doorbell clamping (compute queues only).
   // Use the CP-private fetch cursor as the authoritative next-packet index. It
@@ -2533,6 +2625,12 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
     }
 
     if (pkt_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
+      // Leave shader packets in the ring until a CU is enabled. The mask does
+      // not prevent the CP from processing barriers or PM4 IB packets.
+      if (queue.enabled_cus && queue.enabled_cus->empty()) {
+        process_limit = read_idx;
+        break;
+      }
       process_aql_packet(pkt, queue, pkt_addr, slot, qs, read_idx);
     } else if (pkt_type == HSA_PACKET_TYPE_BARRIER_AND || pkt_type == HSA_PACKET_TYPE_BARRIER_OR) {
       constexpr uint32_t DEP_OFF = 8;
@@ -2663,6 +2761,10 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
           replicate_non_kernel_entry(dp);
         qs.push_entry(std::move(dp));
       } else if (ext.amd_format == kHsaAmdPacketTypeExtKernelDispatch) {
+        if (queue.enabled_cus && queue.enabled_cus->empty()) {
+          process_limit = read_idx;
+          break;
+        }
         if (ext.dep_signal.handle != 0) {
           constexpr uint32_t SIG_VAL_OFF = 8;
           auto v = static_cast<int64_t>(
@@ -2770,7 +2872,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
   for (auto &qs : new_queue_states_)
     entries_before += qs.entries.size();
 
-  // Fetch packets (uses last_doorbell values set by the poll thread).
+  // Fetch packets: AQL uses the poll snapshot; SDMA reads its live byte cursor.
   for (size_t i = 0; i < hw_queues_.size(); ++i)
     fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
 
@@ -2957,13 +3059,9 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
     // (e.g., barrier packets queued after a kernel dispatch). Process them
     // immediately so host signal waits see completed barriers before returning.
     //
-    // SDMA queues are re-fetched only on the first pass. The compute (AQL) re-fetch
-    // is clamped to last_doorbell so repeating it is safe, but the SDMA path reads
-    // the live doorbell value and would read ahead of an observed doorbell —
-    // re-polling the ring across rescan iterations races with the host's
-    // concurrent ring writes (torn packet -> bad copy). Late *kernel* packets,
-    // which is all the rescan needs, only arrive on the compute queue anyway;
-    // SDMA packets are picked up by their own doorbell-driven passes.
+    // Re-fetch SDMA only on the first pass to bound its work during this
+    // compute rescan. SDMA fetches stay within the doorbell-published byte range;
+    // later submissions are picked up by their own doorbell-driven passes.
     const uint32_t dispatch_id_before_refetch = next_dispatch_id_;
     for (size_t i = 0; i < hw_queues_.size(); ++i) {
       if (hw_queues_[i].is_sdma && !first_pass)
