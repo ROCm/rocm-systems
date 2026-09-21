@@ -146,7 +146,7 @@ void L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo:
   req_port_->send(std::move(msg));
 }
 
-void L2Cache::ensure_line(uint64_t addr, uint32_t vmid) {
+void L2Cache::ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss) {
   if (cache_.lookup(addr, nullptr, vmid))
     return;
 
@@ -169,6 +169,11 @@ void L2Cache::ensure_line(uint64_t addr, uint32_t vmid) {
     // same GPU VA in different ways of the same set.
     publish_dirty_bytes(evicted_addr, evicted_data, evicted.vmid);
   }
+
+  // A full-line store supplies every byte, so skip the backing read.
+  // Dirty victims are still published before the caller overwrites the line.
+  if (!fetch_on_miss)
+    return;
 
   uint8_t line_buf[LINE_SIZE];
   send_backing(line_addr, line_buf, LINE_SIZE, simdojo::MessageOp::READ, vmid);
@@ -236,7 +241,7 @@ void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtyp
     const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
     std::lock_guard set_lock(set_mutex(ea));
 
-    ensure_line(ea, vmid);
+    ensure_line(ea, vmid, /*fetch_on_miss=*/chunk != LINE_SIZE);
     cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
 
     simdojo::CacheTag *tag = nullptr;

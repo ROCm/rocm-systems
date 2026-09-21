@@ -45,7 +45,8 @@ objects for the virtual machine and the topology.
 | `num_threads` | int | Simdojo engine partitions, clamped to the aggregate XCD count. |
 | `cpu_dispatch_threads` | int | Inclusive dispatch width per SoC; omitted/0 selects from preferred allocations, 1 forces serial. |
 | `cpu_thread_budget` | int | Selection ceiling; omitted/0 uses affinity capped at 32, positive values override it. |
-| `thread_allocations` | array | Preferred E/D allocations for this target. Largest fitting effective allocation wins. |
+| `async_helper_threads` | int | Shared MMA helpers: -1 selects the table, 0 disables, 1–128 overrides. |
+| `thread_allocations` | array | Preferred engine, dispatch and helper allocations for this target. Largest fitting effective allocation wins. |
 | `exec_mode` | string | Execution mode: `"functional"` or `"clocked"`. |
 | `vm.arch` | string | Target architecture, such as `cdna3`, `cdna4`, or `rdna4`. |
 
@@ -55,7 +56,7 @@ single XCD is never split between engine partitions. In functional mode,
 `cpu_dispatch_threads` controls the host parallelism used to execute accepted
 CU work. Its pool is shared by all command processors in a SoC, and each width
 is clamped to per-CP CU capacity. The selection counts engines, all retained
-dispatch workers: E + sum(D - 1). Explicit knobs
+dispatch workers and shared helpers: E + sum(D - 1) + H. Explicit knobs
 override the selected allocation; configs without a table use serial defaults.
 Clocked mode always uses serial dispatch. See the source
 [configuration guide](../../configuration.md)
