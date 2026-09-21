@@ -178,7 +178,7 @@ namespace impl {
                          isPrimitiveType && kNumOfPermutes == 1, permuteType,
                          permuteType[kNumOfPermutes]>::type;
     static constexpr int alignment = alignof(Val) <= 4? 4 : alignof(Val);
-    alignas(alignment) ResultType result;
+    alignas(alignment) ResultType result = {};
     alignas(alignment) ResultType permuteResult;
 
     if constexpr (isPrimitiveType && kNumOfPermutes == 1) {
