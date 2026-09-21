@@ -29,17 +29,9 @@ if(NOT PROFILER_HUB_FETCH_DEPENDENCIES)
         INTERFACE SQLite::SQLite3 ${CMAKE_DL_LIBS}
     )
 else()
-    # ------------------------------------------------------------------------ #
-    #
-    # SQLite3 - cloned from upstream and built from the amalgamation
-    #
-    # Mirrors the pattern used by sibling rocprofiler-systems
-    # (projects/rocprofiler-systems/cmake/SQLite3.cmake): fetch the upstream
-    # git repository at a pinned tag, then build locally. Avoids vendoring
-    # any binary blobs in the source tree.
-    #
-    # ------------------------------------------------------------------------ #
-
+    # SQLite3 is not vendored into this tree. rocprofiler-sdk takes the same
+    # position for its own SQLite3, sourcing it from upstream as a git submodule
+    # (projects/rocprofiler-sdk/external/).
     set(SQLITE3_GIT_URL
         "https://github.com/sqlite/sqlite.git"
         CACHE STRING

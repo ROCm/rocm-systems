@@ -48,8 +48,7 @@ jobs:
             profilers/profiler-hub
             .github/workflows
 
-      # No cmake package: jammy's is 3.22, below the project's 3.25 floor, and it
-      # would sit at /usr/bin behind the runner image's own newer cmake anyway.
+      # No cmake package: jammy's is 3.22, below the project's 3.25 floor.
       - name: Install dependencies
         run: |
           sudo apt-get update

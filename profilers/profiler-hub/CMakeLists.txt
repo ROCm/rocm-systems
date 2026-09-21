@@ -201,12 +201,9 @@ add_library(profiler-hub SHARED $<TARGET_OBJECTS:profiler-hub-objects>)
 add_library(profiler-hub-static STATIC $<TARGET_OBJECTS:profiler-hub-objects>)
 set_target_properties(profiler-hub-static PROPERTIES OUTPUT_NAME profiler-hub)
 
-# profiler-hub-sqlite3-static is created only by the fetch arm of
-# cmake/sqlite3.cmake. The find arm links an external SQLite3 whose objects are
-# never archived into libprofiler-hub.so, so there is nothing for --exclude-libs
-# to seal there. Guarded on the target rather than on
-# PROFILER_HUB_FETCH_DEPENDENCIES so the condition tracks the actual precondition
-# (the archive exists) rather than a proxy for it.
+# Guarded on the target rather than on PROFILER_HUB_FETCH_DEPENDENCIES: what
+# --exclude-libs needs is the static archive, and the flag is only a proxy for
+# whether one exists.
 if(TARGET profiler-hub-sqlite3-static)
     target_link_options(
         profiler-hub
@@ -262,13 +259,9 @@ endforeach()
 # object library), so consumers of the *installed* static package would
 # otherwise get no transitive link requirements at all. Explicitly restore
 # the ones that are genuinely resolvable by real consumers; queries and
-# profiler-hub-objects itself are always in-tree-only and never belong
-# here. sqlite3 is in-tree-only only in the fetch arm of cmake/sqlite3.cmake:
-# in the find arm it resolves to an external SQLite::SQLite3, which a consumer
-# of the installed static package would have to supply itself. It is still
-# omitted from this list, unchanged from before, because the list has never
-# carried it and adding it is a separate change to the installed static
-# contract. nlohmann_json is deliberately excluded too: it is a
+# profiler-hub-objects itself are always in-tree-only and never belong here.
+# sqlite3 is omitted, as it has always been: listing it would change the
+# installed static contract. nlohmann_json is deliberately excluded too: it is a
 # PRIVATE, header-only dependency of profiler-hub-objects that never appears
 # in the installed public headers, so it carries no link symbols a static
 # consumer needs. profiler-hub (SHARED) needs no such list: its dependencies
