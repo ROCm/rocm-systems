@@ -14,6 +14,24 @@ RocJITsu; obtain or build the backend's `libgpucsim_ffm_plugin.so` shared
 library separately. The backend must support an observer ABI version from 8
 through 13; versions outside that range are rejected during initialization. Its
 Linux runtime dependencies must also be compatible with the launch environment.
+That check is independent of observer ABI negotiation. A typical Perfsim
+backend requires glibc >= 2.34 (and often `GLIBCXX_3.4.29` /
+`CXXABI_1.3.11`). The glibc used to *build* rocJITsu can be older than the
+glibc needed to *load* the backend — on any host, VM, chroot, or container —
+in which case `dlopen` fails with a message such as
+`version 'GLIBC_2.33' not found`. The loader names the first unsatisfied
+symbol version, which can be below the backend's actual floor. Confirm with:
+
+```bash
+objdump -T /absolute/path/to/libgpucsim_ffm_plugin.so | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1
+ldd --version
+```
+
+Run `PerfsimPluginTest.RealBackendMatchesDirectFfmForCanonicalStream` (set
+`ROCJITSU_PERFSIM_REAL_BACKEND`) and any Perfsim-enabled workload only where
+the host glibc meets that floor. The test skips when the loader reports a
+`GLIBC` / `GLIBCXX` / `CXXABI` version error; a genuine ABI rejection still
+fails.
 
 From the repository root, build and install RocJITsu with the adapter enabled:
 
