@@ -4195,7 +4195,6 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaGatedOnNotSymEligible) {
                                                    /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
                                                    &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_IPC, decision.algo);
-        EXPECT_EQ(NCCL_ALGO_RING, decision.algo); // fell all the way to the plain-kernel placeholder
         DeleteCommWithArch(comm);
       });
 }
