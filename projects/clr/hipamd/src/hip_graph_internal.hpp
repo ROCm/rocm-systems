@@ -1030,7 +1030,6 @@ class Graph {
 
     // Most urgent declared priority across this segment's nodes.
     int declared_priority = hip::Stream::Priority::Normal;
-    bool priority_set = false;
   };
 
   //! Segment information for batch scheduling
@@ -1970,22 +1969,12 @@ class GraphKernelNode : public GraphNode {
     return true;
   }
 
-  // True when hipLaunchAttributePriority was set on this node.
-  bool HasDeclaredPriority() const { return priority_ != hip::Stream::Priority::Normal; }
 
   int GetDeclaredPriority() const { return priority_; }
 
-  // Copy the stream's priority into this node, as CUDA specifies stream capture to do.
   void SetCapturedPriority(int priority) {
-    priority_ = std::min(std::max(priority, static_cast<int>(hip::Stream::Priority::High)),
-                         static_cast<int>(hip::Stream::Priority::Low));
-    // Logged only for a non-default priority, so an ordinary capture adds no log
-    // output at all and stays byte-comparable against an unpatched runtime.
-    if (priority_ != hip::Stream::Priority::Normal) {
-      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-              "[hipGraph] capture copied stream priority %d into kernel node %d", priority_,
-              GetID());
-    }
+    priority_ = std::clamp(priority, static_cast<int>(hip::Stream::Priority::High),
+                           static_cast<int>(hip::Stream::Priority::Low));
   }
 
   // Copy stream priority into node at capture time. Called from the interceptor,
@@ -2112,7 +2101,6 @@ class GraphKernelNode : public GraphNode {
       accessPolicyWindow_.hitRatio = params->accessPolicyWindow.hitRatio;
       accessPolicyWindow_.missProp = params->accessPolicyWindow.missProp;
       accessPolicyWindow_.num_bytes = params->accessPolicyWindow.num_bytes;
-
     } else if (attr == hipKernelNodeAttributeCooperative) {
       cooperative_ = params->cooperative;
     } else if (attr == hipLaunchAttributePriority) {
@@ -2168,7 +2156,6 @@ class GraphKernelNode : public GraphNode {
   hipError_t CopyAttr(const GraphKernelNode* srcNode) {
     clusterDim_ = srcNode->clusterDim_;
     accessPolicyWindow_ = srcNode->accessPolicyWindow_;
-
     cooperative_ = srcNode->cooperative_;
     priority_ = srcNode->priority_;
     return hipSuccess;

@@ -937,26 +937,18 @@ hipError_t Graph::CreateSegmentsFromPaths(
       int node_priority = hip::Stream::Priority::Normal;
       if (node->GetType() == hipGraphNodeTypeKernel) {
         const auto* kn = static_cast<const GraphKernelNode*>(node);
-        if (!kn->HasDeclaredPriority()) continue;
         node_priority = kn->GetDeclaredPriority();
+        if (node_priority == hip::Stream::Priority::Normal) continue;
       } else if (node->GetType() == hipGraphNodeTypeGraph) {
         Graph* child = node->GetChildGraph();
         if (child == nullptr) continue;
-        bool child_priority_found = false;
-        for (const auto& child_seg : child->segments_) {
-          if (!child_seg.priority_set) continue;
-          node_priority = child_priority_found
-              ? std::min(node_priority, child_seg.declared_priority)
-              : child_seg.declared_priority;
-          child_priority_found = true;
-        }
-        if (!child_priority_found) continue;
+        for (const auto& child_seg : child->segments_)
+          node_priority = std::min(node_priority, child_seg.declared_priority);
+        if (node_priority == hip::Stream::Priority::Normal) continue;
       } else {
         continue;
       }
-      segment.declared_priority = segment.priority_set
-          ? std::min(segment.declared_priority, node_priority) : node_priority;
-      segment.priority_set = true;
+      segment.declared_priority = std::min(segment.declared_priority, node_priority);
     }
 
     segments_.push_back(segment);
