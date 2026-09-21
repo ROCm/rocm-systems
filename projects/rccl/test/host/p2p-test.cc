@@ -6409,6 +6409,13 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_RecordAllocFails_Propagates)
 
     EXPECT_NE(r, ncclSuccess);
     EXPECT_EQ(QueueHead(conn_), nullptr);    // no record enqueued
+    // Latent bug: on this bookkeeping-alloc-failure path the bare
+    // NCCLCHECK(ncclCalloc(...)) returns before *done is latched, unlike the
+    // fail: path which nulls regAddr and reaches *done = 1. done therefore
+    // stays 0, which would leave the requesting rank blocked in
+    // ncclProxyCallBlocking. Pin the current contract; latching done on this
+    // path is a production follow-up.
+    EXPECT_EQ(done, 0);
 }
 
 // The impInfo payload allocation (the second ncclCalloc in the bookkeeping
@@ -6439,6 +6446,9 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_ImpInfoAllocFails_Propagates)
 
     EXPECT_NE(r, ncclSuccess);
     EXPECT_EQ(QueueHead(conn_), nullptr);
+    // See ProxyRegister_RecordAllocFails_Propagates: done is left unlatched on
+    // this alloc-failure path, so it stays 0 (a latent peer-blocking bug).
+    EXPECT_EQ(done, 0);
 }
 
 class P2pProxyDeregisterMicrotest : public P2pProxyRegisterMicrotest {};
