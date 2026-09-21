@@ -3596,7 +3596,7 @@ TEST_F(P2pSetupMicrotest, SendSetup_ReadEnableParamOverridesTopology_ForcesReadF
     InstallHappyProxy();
     ScopedHook readEnable(g_loadParam,
         [](const char* env, int64_t def) -> int64_t {
-            if (env && std::string(env) == "P2P_READ_ENABLE") return 1;
+            if (env && std::strcmp(env, "P2P_READ_ENABLE") == 0) return 1;
             return def;
         });
 
@@ -3621,7 +3621,7 @@ TEST_F(P2pSetupMicrotest, SendSetup_DirectDisableParam_SelectsIpcForSameProcessP
     InstallHappyProxy();
     ScopedHook directDisable(g_loadParam,
         [](const char* env, int64_t def) -> int64_t {
-            if (env && std::string(env) == "P2P_DIRECT_DISABLE") return 1;
+            if (env && std::strcmp(env, "P2P_DIRECT_DISABLE") == 0) return 1;
             return def;
         });
 
