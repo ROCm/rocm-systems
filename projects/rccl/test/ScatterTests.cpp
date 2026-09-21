@@ -4,6 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #include "TestBed.hpp"
+#include "SingleProcMemRegTestUtils.hpp"
+#include "StandaloneUtils.hpp"
 
 namespace RcclUnitTesting
 {
@@ -139,5 +141,38 @@ namespace RcclUnitTesting
     testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
                            inPlaceList, managedMemList, useHipGraphList);
     testBed.Finalize();
+  }
+
+  TEST(Scatter, SingleProcMemReg)
+  {
+    SingleProcMemRegTestConfig config;
+    config.mode = SingleProcMemRegMode::Enabled;
+    config.funcTypes = {ncclCollScatter};
+    config.dataTypes = {ncclUint8, ncclBfloat16, ncclUint32, ncclUint64};
+    config.redOps = {ncclSum};
+    config.roots = {0};
+    config.numElements = {1, 4096};
+    config.inPlaceList = {true, false};
+    config.useHipGraphList = {false};
+    RunSingleProcMemRegTest(config);
+  }
+
+  TEST(Scatter, SingleProcMemRegGraph)
+  {
+    SingleProcMemRegTestConfig config;
+    config.mode = SingleProcMemRegMode::Enabled;
+    config.funcTypes = {ncclCollScatter};
+    config.dataTypes = {ncclUint8, ncclBfloat16, ncclUint32, ncclUint64};
+    config.redOps = {ncclSum};
+    config.roots = {0};
+    config.numElements = {1, 4096};
+    config.inPlaceList = {true, false};
+    config.useHipGraphList = {true};
+    RunSingleProcMemRegTest(config);
+  }
+
+  TEST(Scatter, SingleProcMemRegDisabledSmoke)
+  {
+    RunSingleProcMemRegDisabledSmoke(ncclCollScatter, ncclUint32, true);
   }
 }
