@@ -21,6 +21,7 @@ void ResetEnqueueFakes() {
   ResetRcclWrapFakes();
   ResetRecorderFakes();
   ResetRegisterStubs();
+  ResetStrongStreamStubs();
   ResetSymKernelsFakes();
   ResetTransportStubs();
   ResetTuningFakes();

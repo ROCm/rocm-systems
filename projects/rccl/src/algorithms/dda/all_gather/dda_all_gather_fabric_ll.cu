@@ -15,6 +15,7 @@
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -77,22 +78,23 @@ static ncclResult_t ncclAllGatherDdaFabricLLTyped(
   INFO(NCCL_COLL, "DDA fabric AllGather LL: nRanks=%d perRankBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%u)",
        nRanks, perRankBytes, grid.x, grid.y, block.x, blocksPerPeer);
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
   switch (nRanks) {
   case 4:
-    dda::common::ddaAllGatherFabricLL<T, 4><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
-                                                                        static_cast<const T*>(sendbuff), perRankBytes,
-                                                                        comm->rank, nRanks, epochDev, epochLen, bankSize);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, bankSize);
     break;
   case 8:
-    dda::common::ddaAllGatherFabricLL<T, 8><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
-                                                                        static_cast<const T*>(sendbuff), perRankBytes,
-                                                                        comm->rank, nRanks, epochDev, epochLen, bankSize);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, bankSize);
     break;
   default:
-    dda::common::ddaAllGatherFabricLL<T, 0><<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff),
-                                                                        static_cast<const T*>(sendbuff), perRankBytes,
-                                                                        comm->rank, nRanks, epochDev, epochLen, bankSize);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, bankSize);
     break;
   }
 

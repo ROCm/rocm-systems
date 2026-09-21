@@ -107,6 +107,15 @@ struct HipMemcpyAsyncRecord {
     size_t      bytes;
 };
 extern std::vector<HipMemcpyAsyncRecord> g_hipMemcpyAsyncArgs;
+// Which event was recorded on which stream, which is what tells one record apart from another.
+// Every call is recorded, including one that g_hipEventRecordResult then fails, so a call a test
+// did not expect is visible rather than merely turned into an error return.
+extern hipError_t g_hipEventRecordResult;
+struct HipEventRecordCall {
+    hipEvent_t  event;
+    hipStream_t stream;
+};
+extern std::vector<HipEventRecordCall> g_hipEventRecordArgs;
 
 // --- VMM / IPC / stream seams -------------------------------------------
 // The driver-level surface dev_runtime.cc builds symmetric memory on, plus the

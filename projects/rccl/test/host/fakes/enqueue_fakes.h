@@ -27,6 +27,7 @@
 #include "rccl_wrap_fakes.h"     // src/rccl_wrap.cc
 #include "recorder_fakes.h"      // src/recorder.cc
 #include "register_stubs.h"      // src/register/coll_reg.cc (hookable entry only)
+#include "strongstream_stubs.h"  // src/misc/strongstream.cc
 #include "sym_kernels_fakes.h"   // src/sym_kernels.cc
 #include "transport_stubs.h"     // src/transport/net.cc (rcclUseAinic)
 #include "tuning_fakes.h"        // src/graph/tuning.cc
