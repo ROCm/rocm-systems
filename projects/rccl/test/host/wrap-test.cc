@@ -6509,3 +6509,33 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaNranksRelaxOpensFourRankFloor) {
       });
 }
 
+TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaNranksRelaxOpensFourRankFloor) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_DdaNranksRelaxOpensFourRankFloor",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return false; });
+        ScopedHook ipcEligible(g_reduceScatterDdaIpcEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nRanks = 4;
+        comm->nNodes = 1;
+
+        g_ddaNranksRelaxEnabled = false;
+        rcclCollDecision off{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32, ncclSum,
+                                                       /*query=*/false, &off));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_IPC, off.algo)
+            << "4 ranks must stay below the stock 8-rank DDA floor";
+
+        g_ddaNranksRelaxEnabled = true;
+        rcclCollDecision on{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32, ncclSum,
+                                                       /*query=*/false, &on));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, on.algo)
+            << "RCCL_DDA_NRANKS_RELAX must lower the floor to 2 and admit 4 ranks";
+
+        g_ddaNranksRelaxEnabled = false;
+        DeleteCommWithArch(comm);
+      });
+}
