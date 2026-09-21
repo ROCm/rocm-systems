@@ -57,16 +57,20 @@ namespace RcclUnitTesting
   template <> __host__ __device__ inline bool Matches<uint32_t>(uint32_t a,uint32_t b){ return a == b; }
   template <> __host__ __device__ inline bool Matches<int64_t> (int64_t a, int64_t b) { return a == b; }
   template <> __host__ __device__ inline bool Matches<uint64_t>(uint64_t a,uint64_t b){ return a == b; }
-  // Tolerances use the SAME double literals as the host IsEqual (PtrUnion.cpp), not
-  // float literals: 9e-2/1e-5 aren't exactly representable, so a float-literal bound
+  // FP8 reduction validation supplies two exact references: one that rounds
+  // after every FP8 reduction step and one that accumulates in FP32 and rounds
+  // once on store. Do not use a magnitude-scaled tolerance here: at eight ranks
+  // it can accept results with several missing contributions.
+  // Non-FP8 tolerances use the SAME double literals as the host IsEqual (PtrUnion.cpp),
+  // not float literals: 9e-2/1e-5 aren't exactly representable, so a float-literal bound
   // differs from the host's double bound by ~1e-9 and could flip a verdict at the
   // tolerance boundary. Keeping them identical guarantees host==device verdicts.
   template <> __host__ __device__ inline bool Matches<float>   (float a,  float b)  { return fabs((double)(a - b)) < 1e-5; }
   template <> __host__ __device__ inline bool Matches<double>  (double a, double b)  { return fabs(a - b) < 1e-12; }
   template <> __host__ __device__ inline bool Matches<__half>       (__half a, __half b)             { return fabs((double)(__half2float(a) - __half2float(b))) < 9e-2; }
   template <> __host__ __device__ inline bool Matches<hip_bfloat16> (hip_bfloat16 a, hip_bfloat16 b) { return fabs((double)((float)a - (float)b)) < 9e-2; }
-  template <> __host__ __device__ inline bool Matches<rccl_float8>  (rccl_float8 a, rccl_float8 b)   { return fabs((double)((float)a - (float)b)) < 9e-2; }
-  template <> __host__ __device__ inline bool Matches<rccl_bfloat8> (rccl_bfloat8 a, rccl_bfloat8 b) { return fabs((double)((float)a - (float)b)) < 9e-2; }
+  template <> __host__ __device__ inline bool Matches<rccl_float8>  (rccl_float8 a, rccl_float8 b)   { return (float)a == (float)b; }
+  template <> __host__ __device__ inline bool Matches<rccl_bfloat8> (rccl_bfloat8 a, rccl_bfloat8 b) { return (float)a == (float)b; }
 
   // ---- per-type -> double (for the first-mismatch diagnostic) -----------------
   // Test-pattern values are small (mod 256, reduced over a handful of ranks), so a
@@ -187,15 +191,36 @@ namespace RcclUnitTesting
     else        { rccl_float8  v = MakeVal<rccl_float8> (vi, vf); p[j] = *reinterpret_cast<uint8_t*>(&v); }
   }
 
-  __global__ void MismatchReduceFp8(const uint8_t* a, const uint8_t* b, size_t n,
+  __global__ void MismatchReduceFp8(const uint8_t* a, const uint8_t* b,
+                                    const uint8_t* alternative, size_t n,
                                     unsigned long long* mismatches, unsigned long long* firstIdx,
                                     bool isE5m2)
   {
     size_t j = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (j >= n) return;
     bool m;
-    if (isE5m2) { rccl_bfloat8 av = *reinterpret_cast<const rccl_bfloat8*>(a + j), bv = *reinterpret_cast<const rccl_bfloat8*>(b + j); m = Matches<rccl_bfloat8>(av, bv); }
-    else        { rccl_float8  av = *reinterpret_cast<const rccl_float8*> (a + j), bv = *reinterpret_cast<const rccl_float8*> (b + j); m = Matches<rccl_float8>(av, bv); }
+    if (isE5m2)
+    {
+      rccl_bfloat8 av = *reinterpret_cast<const rccl_bfloat8*>(a + j);
+      rccl_bfloat8 bv = *reinterpret_cast<const rccl_bfloat8*>(b + j);
+      m = Matches<rccl_bfloat8>(av, bv);
+      if (!m && alternative != nullptr)
+      {
+        rccl_bfloat8 cv = *reinterpret_cast<const rccl_bfloat8*>(alternative + j);
+        m = Matches<rccl_bfloat8>(av, cv);
+      }
+    }
+    else
+    {
+      rccl_float8 av = *reinterpret_cast<const rccl_float8*>(a + j);
+      rccl_float8 bv = *reinterpret_cast<const rccl_float8*>(b + j);
+      m = Matches<rccl_float8>(av, bv);
+      if (!m && alternative != nullptr)
+      {
+        rccl_float8 cv = *reinterpret_cast<const rccl_float8*>(alternative + j);
+        m = Matches<rccl_float8>(av, cv);
+      }
+    }
     if (!m)
     {
       atomicAdd(mismatches, 1ULL);
@@ -203,7 +228,8 @@ namespace RcclUnitTesting
     }
   }
 
-  __global__ void CaptureElemFp8(const uint8_t* actual, const uint8_t* expected, size_t idx,
+  __global__ void CaptureElemFp8(const uint8_t* actual, const uint8_t* expected,
+                                 const uint8_t* alternative, size_t idx,
                                  double* out, bool isE5m2)
   {
     if (blockIdx.x == 0 && threadIdx.x == 0)
@@ -212,16 +238,22 @@ namespace RcclUnitTesting
       {
         out[0] = ToDoubleVal<rccl_bfloat8>(*reinterpret_cast<const rccl_bfloat8*>(expected + idx));
         out[1] = ToDoubleVal<rccl_bfloat8>(*reinterpret_cast<const rccl_bfloat8*>(actual   + idx));
+        if (alternative != nullptr)
+          out[2] = ToDoubleVal<rccl_bfloat8>(*reinterpret_cast<const rccl_bfloat8*>(alternative + idx));
       }
       else
       {
         out[0] = ToDoubleVal<rccl_float8>(*reinterpret_cast<const rccl_float8*>(expected + idx));
         out[1] = ToDoubleVal<rccl_float8>(*reinterpret_cast<const rccl_float8*>(actual   + idx));
+        if (alternative != nullptr)
+          out[2] = ToDoubleVal<rccl_float8>(*reinterpret_cast<const rccl_float8*>(alternative + idx));
       }
     }
   }
 
-  __global__ void ExpectedReduceFp8(uint8_t* out, size_t n, int totalRanks, int op, bool isAvg, bool isE5m2, size_t startIdx)
+  __global__ void ExpectedReduceFp8(uint8_t* out, uint8_t* alternative, size_t n,
+                                    int totalRanks, int op, bool isAvg,
+                                    bool isE5m2, size_t startIdx)
   {
     size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n) return;
@@ -229,17 +261,45 @@ namespace RcclUnitTesting
     int vi = PatternValueI(true, 0, gidx);
     if (isE5m2)
     {
-      rccl_bfloat8 acc = MakeVal<rccl_bfloat8>(vi, PatternValueF(vi));
-      for (int r = 1; r < totalRanks; ++r) { int v = PatternValueI(true, r, gidx); acc = AccStep<rccl_bfloat8>(op, acc, MakeVal<rccl_bfloat8>(v, PatternValueF(v))); }
-      if (isAvg) acc = DivStep<rccl_bfloat8>(acc, totalRanks);
+      rccl_bfloat8 input = MakeVal<rccl_bfloat8>(vi, PatternValueF(vi));
+      rccl_bfloat8 acc = input;
+      float wide = (float)input;
+      for (int r = 1; r < totalRanks; ++r)
+      {
+        int v = PatternValueI(true, r, gidx);
+        input = MakeVal<rccl_bfloat8>(v, PatternValueF(v));
+        acc = AccStep<rccl_bfloat8>(op, acc, input);
+        wide = DevReduceF(op, wide, (float)input);
+      }
+      if (isAvg)
+      {
+        acc = DivStep<rccl_bfloat8>(acc, totalRanks);
+        wide /= totalRanks;
+      }
       out[idx] = *reinterpret_cast<uint8_t*>(&acc);
+      rccl_bfloat8 wideRounded = rccl_bfloat8(wide);
+      alternative[idx] = *reinterpret_cast<uint8_t*>(&wideRounded);
     }
     else
     {
-      rccl_float8 acc = MakeVal<rccl_float8>(vi, PatternValueF(vi));
-      for (int r = 1; r < totalRanks; ++r) { int v = PatternValueI(true, r, gidx); acc = AccStep<rccl_float8>(op, acc, MakeVal<rccl_float8>(v, PatternValueF(v))); }
-      if (isAvg) acc = DivStep<rccl_float8>(acc, totalRanks);
+      rccl_float8 input = MakeVal<rccl_float8>(vi, PatternValueF(vi));
+      rccl_float8 acc = input;
+      float wide = (float)input;
+      for (int r = 1; r < totalRanks; ++r)
+      {
+        int v = PatternValueI(true, r, gidx);
+        input = MakeVal<rccl_float8>(v, PatternValueF(v));
+        acc = AccStep<rccl_float8>(op, acc, input);
+        wide = DevReduceF(op, wide, (float)input);
+      }
+      if (isAvg)
+      {
+        acc = DivStep<rccl_float8>(acc, totalRanks);
+        wide /= totalRanks;
+      }
       out[idx] = *reinterpret_cast<uint8_t*>(&acc);
+      rccl_float8 wideRounded = rccl_float8(wide);
+      alternative[idx] = *reinterpret_cast<uint8_t*>(&wideRounded);
     }
   }
 }

@@ -13,6 +13,78 @@
 
 namespace RcclUnitTesting
 {
+  // FP8 reductions can round after every operation or accumulate in FP32 and round once on store.
+  // Verify both modeled results are accepted exactly, while values admitted only by the high tolerance are rejected.
+  TEST(Fp8Validation, AcceptsOnlyModeledAccumulationResults)
+  {
+    auto matchesEither = [](ncclDataType_t const dataType, float const actualValue,
+                            float const stepwiseValue, float const fp32Value)
+    {
+      uint8_t actualStorage = 0;
+      uint8_t stepwiseStorage = 0;
+      uint8_t fp32Storage = 0;
+      PtrUnion actual;
+      PtrUnion stepwise;
+      PtrUnion fp32;
+      EXPECT_EQ(actual.Attach(&actualStorage), TEST_SUCCESS);
+      EXPECT_EQ(stepwise.Attach(&stepwiseStorage), TEST_SUCCESS);
+      EXPECT_EQ(fp32.Attach(&fp32Storage), TEST_SUCCESS);
+      EXPECT_EQ(actual.Set(dataType, 0, 0, actualValue), TEST_SUCCESS);
+      EXPECT_EQ(stepwise.Set(dataType, 0, 0, stepwiseValue), TEST_SUCCESS);
+      EXPECT_EQ(fp32.Set(dataType, 0, 0, fp32Value), TEST_SUCCESS);
+
+      bool isMatch = false;
+      EXPECT_EQ(actual.IsEqual(dataType, 1, stepwise, &fp32, false, isMatch), TEST_SUCCESS);
+      return isMatch;
+    };
+
+    // Both accumulation models are valid.
+    EXPECT_TRUE(matchesEither(ncclFloat8e4m3, 1.75f, 1.75f, 1.625f));
+    EXPECT_TRUE(matchesEither(ncclFloat8e4m3, 1.625f, 1.75f, 1.625f));
+    EXPECT_TRUE(matchesEither(ncclFloat8e5m2, 1.75f, 1.75f, 1.5f));
+    EXPECT_TRUE(matchesEither(ncclFloat8e5m2, 1.5f, 1.75f, 1.5f));
+
+    // The former relative bounds accepted these missing-rank examples.
+    EXPECT_FALSE(matchesEither(ncclFloat8e4m3, 6.0f, 8.0f, 8.0f));
+    EXPECT_FALSE(matchesEither(ncclFloat8e5m2, 4.0f, 8.0f, 8.0f));
+  }
+
+  // GPU validation compares output against stepwise-FP8 and FP32-accumulation references.
+  // Verify one intact reference is accepted, but corrupting both produces a mismatch.
+  TEST(Fp8Validation, DeviceCorruptionMustAffectBothReferences)
+  {
+    for (ncclDataType_t const dataType : {ncclFloat8e4m3, ncclFloat8e5m2})
+    {
+      PtrUnion actual;
+      PtrUnion stepwise;
+      PtrUnion fp32;
+      ASSERT_EQ(actual.AllocateGpuMem(1), TEST_SUCCESS);
+      ASSERT_EQ(stepwise.AllocateGpuMem(1), TEST_SUCCESS);
+      ASSERT_EQ(fp32.AllocateGpuMem(1), TEST_SUCCESS);
+      ASSERT_EQ(actual.ClearGpuMem(1), TEST_SUCCESS);
+      ASSERT_EQ(fp32.ClearGpuMem(1), TEST_SUCCESS);
+      ASSERT_EQ(hipMemset(stepwise.ptr, 0xFF, 1), hipSuccess);
+
+      // A damaged primary reference must not reject a valid alternative.
+      size_t mismatches = 0;
+      ASSERT_EQ(PtrUnion::IsEqualDevice(dataType, 1, actual.ptr, stepwise.ptr,
+                                        fp32.ptr, mismatches, false),
+                TEST_SUCCESS);
+      EXPECT_EQ(mismatches, 0);
+
+      // UT_DEVICE_DATA_FAULT corrupts both references, so neither can mask the fault.
+      ASSERT_EQ(hipMemset(fp32.ptr, 0xFF, 1), hipSuccess);
+      ASSERT_EQ(PtrUnion::IsEqualDevice(dataType, 1, actual.ptr, stepwise.ptr,
+                                        fp32.ptr, mismatches, false),
+                TEST_SUCCESS);
+      EXPECT_EQ(mismatches, 1);
+
+      EXPECT_EQ(actual.FreeGpuMem(), TEST_SUCCESS);
+      EXPECT_EQ(stepwise.FreeGpuMem(), TEST_SUCCESS);
+      EXPECT_EQ(fp32.FreeGpuMem(), TEST_SUCCESS);
+    }
+  }
+
   /**
    * \brief Verify that each device is assigned to the right rank using ncclCommSplit API.
    * ******************************************************************************************/
