@@ -97,25 +97,12 @@ FfmMemoryAccess make_memory_access(EntityId instruction_id, FfmWaveInfo wave_inf
 }
 
 // ld.so reports an unsatisfied ELF symbol version as
-// `version `GLIBC_2.33' not found (required by ...)`. Require those quote
-// delimiters so a missing path that contains the same words still fails.
+// `version `GLIBC_2.33' not found (required by ...)`. The opening quote keeps a
+// path that merely contains the same words from being mistaken for it.
 bool is_loader_symbol_version_error(std::string_view error) {
-  constexpr std::string_view kOpen = "version `";
-  constexpr std::string_view kClose = "' not found";
-  const auto open = error.find(kOpen);
-  if (open == std::string_view::npos)
-    return false;
-  const auto token_begin = open + kOpen.size();
-  const auto close = error.find(kClose, token_begin);
-  if (close == std::string_view::npos)
-    return false;
-  const std::string_view token = error.substr(token_begin, close - token_begin);
-  constexpr std::string_view kFamilies[] = {"GLIBC_", "GLIBCXX_", "CXXABI_"};
-  for (const std::string_view family : kFamilies) {
-    if (token.size() > family.size() && token.substr(0, family.size()) == family)
-      return true;
-  }
-  return false;
+  return error.find("version `GLIBC_") != std::string_view::npos ||
+         error.find("version `GLIBCXX_") != std::string_view::npos ||
+         error.find("version `CXXABI_") != std::string_view::npos;
 }
 
 class SyntheticInstruction final : public Instruction {
