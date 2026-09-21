@@ -26,6 +26,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:lib-components-tests>
     $<TARGET_OBJECTS:rocprofiler-sdk-components-unit-tests>
     $<TARGET_OBJECTS:buffered-domains-unit-tests>
+    $<TARGET_OBJECTS:buffered-domains-root-unit-tests>
     $<TARGET_OBJECTS:callback-domains-unit-tests>
     $<$<TARGET_EXISTS:rccl-unit-tests>:$<TARGET_OBJECTS:rccl-unit-tests>>
     $<$<TARGET_EXISTS:bin-common-tests>:$<TARGET_OBJECTS:bin-common-tests>>
