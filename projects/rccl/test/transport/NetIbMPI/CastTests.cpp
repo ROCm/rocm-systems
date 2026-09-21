@@ -1478,9 +1478,8 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
 // does not repopulate ah_attr on ibv_query_qp.
 // =============================================================================
 TEST_F(NetIbMPITest, CastGrhSetOnRoceQp) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -1563,16 +1562,16 @@ TEST_F(NetIbMPITest, CastGrhSetOnRoceQp) {
 // not this test). On single-subnet hardware, enabling the param drives
 // IbCastFindDevBySubnet down its "default device's PFs all match the peer's
 // subnet -> keep it" fast path (connect.cc IbCastFindDevBySubnet, called from
-// IbCastListen and Connect/Accept) on every real connection setup. This does
+// Connect and Accept; IbCastListen only embeds the local GIDs in the handle)
+// on every real connection setup. This does
 // not exercise cross-subnet device switching or the IB GRH+FLID path -- those
 // require a multi-subnet/IB-router fabric this suite does not have. The goal
 // here is only to prove the routing param does not regress normal
 // same-subnet connectivity on production topology.
 // =============================================================================
 TEST_F(NetIbMPITest, CastSubnetAwareRoutingSameSubnet) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
