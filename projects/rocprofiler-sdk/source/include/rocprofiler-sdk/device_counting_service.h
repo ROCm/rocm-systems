@@ -93,14 +93,12 @@ typedef void (*rocprofiler_device_counting_service_cb_t)(
  *                                                     profiling configured for agent_id.
  * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if successfully configured
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_configure_device_counting_service(rocprofiler_context_id_t                 context_id,
                                               rocprofiler_buffer_id_t                  buffer_id,
                                               rocprofiler_agent_id_t                   agent_id,
                                               rocprofiler_device_counting_service_cb_t cb,
-                                              void*                                    user_data)
-    ROCPROFILER_NONNULL(4) ROCPROFILER_API;
+                                              void* user_data) ROCPROFILER_NONNULL(4);
 
 /**
  * @brief (experimental) Trigger a read of the counter data for the agent profile. The counter data
@@ -127,13 +125,12 @@ rocprofiler_configure_device_counting_service(rocprofiler_context_id_t          
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT Returned If ASYNC is being used while
  * output_records is not null.
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_sample_device_counting_service(rocprofiler_context_id_t      context_id,
                                            rocprofiler_user_data_t       user_data,
                                            rocprofiler_counter_flag_t    flags,
                                            rocprofiler_counter_record_t* output_records,
-                                           size_t*                       rec_count) ROCPROFILER_API;
+                                           size_t*                       rec_count);
 
 #if defined(ROCPROFILER_SDK_BETA_COMPAT) && ROCPROFILER_SDK_BETA_COMPAT > 0
 

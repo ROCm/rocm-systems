@@ -25,11 +25,13 @@
 #include <amd_comgr/amd_comgr.h>
 #include <hsa/amd_hsa_elf.h>
 
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
+#if !defined(_WIN32)
+#    include <fcntl.h>
+#    include <sys/mman.h>
+#    include <sys/stat.h>
+#    include <sys/types.h>
+#    include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <cstring>

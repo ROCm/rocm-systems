@@ -24,7 +24,26 @@
 
 #include "lib/common/logging.hpp"
 
-#include <unistd.h>
+#if !defined(_WIN32)
+#    include <unistd.h>
+#else
+#    include <stdlib.h>
+namespace rocprofiler_win32_shims
+{
+inline int
+setenv(const char* name, const char* value, int /*overwrite*/)
+{
+    return _putenv_s(name, value);
+}
+inline int
+unsetenv(const char* name)
+{
+    return _putenv_s(name, "");
+}
+}  // namespace rocprofiler_win32_shims
+using rocprofiler_win32_shims::setenv;
+using rocprofiler_win32_shims::unsetenv;
+#endif
 #include <optional>
 #include <string>
 #include <string_view>

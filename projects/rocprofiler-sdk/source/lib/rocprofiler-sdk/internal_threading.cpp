@@ -32,7 +32,9 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/internal_threading.h>
 
-#include <pthread.h>
+#if !defined(_WIN32)
+#    include <pthread.h>
+#endif
 
 #include <atomic>
 #include <chrono>
@@ -157,7 +159,10 @@ TaskGroup::join(bool async_only)
 namespace
 {
 template <rocprofiler_runtime_library_t... Idx>
-using library_sequence_t     = std::integer_sequence<rocprofiler_runtime_library_t, Idx...>;
+struct library_sequence_t
+{
+    static constexpr size_t size() noexcept { return sizeof...(Idx); }
+};
 using creation_notifier_cb_t = void (*)(rocprofiler_runtime_library_t, void*);
 
 // this is used to loop over the different libraries
@@ -230,8 +235,7 @@ update_creation_notifiers(creation_notifier_cb_t pre,
 // invokes creation notifiers
 template <notifier_stage StageT, rocprofiler_runtime_library_t... Idx>
 void
-execute_creation_notifiers(rocprofiler_runtime_library_t libs,
-                           std::integer_sequence<rocprofiler_runtime_library_t, Idx...>)
+execute_creation_notifiers(rocprofiler_runtime_library_t libs, library_sequence_t<Idx...>)
 {
     auto execute = [libs](auto& notifier) {
         if(((libs & notifier.value) == notifier.value))
@@ -305,8 +309,10 @@ initialize()
         // will be destroyed before finalize is invoked.
         create_callback_thread();
         ::atexit(&registration::finalize);
+#if !defined(_WIN32)
         // ensure the callback threads are created on the forked process
         ::pthread_atfork(nullptr, nullptr, create_forked_callback_threads);
+#endif
     });
 }
 

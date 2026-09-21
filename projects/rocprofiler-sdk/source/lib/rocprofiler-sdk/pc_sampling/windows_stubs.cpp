@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,31 +20,33 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lib/rocprofiler-sdk/registration.hpp"
+// Windows stand-in for service.cpp. PC sampling delivers its samples through the KFD
+// ioctl interface, which Windows reaches via D3DKMT instead; there is no session to
+// start, stop, or flush.
 
-#include <rocprofiler-sdk/defines.h>
+#include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+
 #include <rocprofiler-sdk/fwd.h>
 
-ROCPROFILER_EXTERN_C_INIT
-
-ROCPROFILER_API rocprofiler_status_t
-rocprofiler_attach(void);
-
-ROCPROFILER_API rocprofiler_status_t
-rocprofiler_detach(void);
-
-rocprofiler_status_t
-rocprofiler_attach(void)
+namespace rocprofiler
 {
-    rocprofiler::registration::attach();
-    return ROCPROFILER_STATUS_SUCCESS;
+namespace pc_sampling
+{
+rocprofiler_status_t
+start_service(const context::context*)
+{
+    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 }
 
 rocprofiler_status_t
-rocprofiler_detach(void)
+stop_service(const context::context*)
 {
-    rocprofiler::registration::detach();
-    return ROCPROFILER_STATUS_SUCCESS;
+    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 }
 
-ROCPROFILER_EXTERN_C_FINI
+rocprofiler_status_t flush_internal_agent_buffers(rocprofiler_buffer_id_t)
+{
+    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+}
+}  // namespace pc_sampling
+}  // namespace rocprofiler

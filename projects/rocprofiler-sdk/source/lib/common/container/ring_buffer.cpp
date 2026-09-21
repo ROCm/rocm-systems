@@ -26,7 +26,11 @@
 
 #include <fmt/format.h>
 
-#include <sys/mman.h>
+#if !defined(_WIN32)
+#    include <sys/mman.h>
+#else
+#    include <windows.h>
+#endif
 #include <atomic>
 #include <cerrno>
 #include <cstddef>
@@ -96,6 +100,7 @@ ring_buffer::init(size_t _size)
     m_read_count  = 0;
     m_write_count = 0;
 
+#if !defined(_WIN32)
     // Map twice the buffer size.
     if((m_ptr =
             mmap(nullptr, m_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) ==
@@ -105,6 +110,14 @@ ring_buffer::init(size_t _size)
         auto _err = errno;
         ROCP_FATAL << fmt::format("mmap failed with errno {} :: {}", _err, strerror(_err));
     }
+#else
+    m_ptr = ::VirtualAlloc(nullptr, m_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if(m_ptr == nullptr)
+    {
+        destroy();
+        ROCP_FATAL << fmt::format("VirtualAlloc failed with error {}", ::GetLastError());
+    }
+#endif
 }
 
 void
@@ -112,9 +125,13 @@ ring_buffer::destroy()
 {
     if(m_ptr && m_init)
     {
+#if !defined(_WIN32)
         // Unmap the mapped virtual memory.
         auto ret = munmap(m_ptr, m_size);
         if(ret != 0) perror("ring_buffer: munmap failed");
+#else
+        ::VirtualFree(m_ptr, 0, MEM_RELEASE);
+#endif
     }
     m_init        = false;
     m_size        = 0;

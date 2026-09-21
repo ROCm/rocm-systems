@@ -1,15 +1,21 @@
 #
 #
-set(ROCPROFILER_LIB_KFD_EVENT_SOURCES
-    abi.cpp
-    dlog_abi.cpp
-    kfd.cpp
-    doorbell_map.cpp
-    kfd_correlation.cpp
-    kfd_profiler.cpp
-    kfd_reader.cpp
-    signal_less.cpp
-    resource.cpp)
+if(WIN32)
+    # The AMD kernel-mode driver is reached through D3DKMT on Windows rather than /dev/kfd
+    # ioctls; windows_stubs.cpp supplies the stand-in symbols.
+    set(ROCPROFILER_LIB_KFD_EVENT_SOURCES windows_stubs.cpp)
+else()
+    set(ROCPROFILER_LIB_KFD_EVENT_SOURCES
+        abi.cpp
+        dlog_abi.cpp
+        kfd.cpp
+        doorbell_map.cpp
+        kfd_correlation.cpp
+        kfd_profiler.cpp
+        kfd_reader.cpp
+        signal_less.cpp
+        resource.cpp)
+endif()
 set(ROCPROFILER_LIB_KFD_EVENT_HEADERS
     capabilities.hpp
     defines.hpp

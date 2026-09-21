@@ -22,7 +22,9 @@
 
 #pragma once
 
-#include <cxxabi.h>
+#if !defined(_WIN32)
+#    include <cxxabi.h>
+#endif
 #include <algorithm>
 #include <cstdarg>
 #include <cstdio>
@@ -37,7 +39,11 @@ namespace rocprofiler
 namespace common
 {
 [[nodiscard]] std::string
-cxa_demangle(std::string_view _mangled_name, int* _status) __attribute__((nonnull(2)));
+cxa_demangle(std::string_view _mangled_name, int* _status)
+#if !defined(_WIN32)
+    __attribute__((nonnull(2)))
+#endif
+    ;
 
 // C++ symbol demangle
 std::string

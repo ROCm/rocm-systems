@@ -23,7 +23,9 @@
 #include "lib/common/demangle.hpp"
 #include "lib/common/logging.hpp"
 
-#include <cxxabi.h>
+#if !defined(_WIN32)
+#    include <cxxabi.h>
+#endif
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -50,6 +52,7 @@ cxa_demangle(std::string_view _mangled_name, int* _status)
 
     auto _demangled_name = std::string{_mangled_name};
 
+#if !defined(_WIN32)
     // PARAMETERS to __cxa_demangle
     //  mangled_name:
     //      A NULL-terminated character string containing the name to be demangled.
@@ -96,6 +99,10 @@ cxa_demangle(std::string_view _mangled_name, int* _status)
 
     // free allocated buffer
     ::free(_demang);
+#else
+    // On Windows/MSVC there is no __cxa_demangle; return the name as-is
+    *_status = -2;
+#endif
     return _demangled_name;
 }
 

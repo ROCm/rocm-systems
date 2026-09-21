@@ -20,7 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#define _GNU_SOURCE 1
+#if !defined(_WIN32)
+#    define _GNU_SOURCE 1
+#endif
 
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
@@ -29,7 +31,16 @@
 
 #include <rocprofiler-sdk/cxx/utility.hpp>
 
-#include <dlfcn.h>
+#if !defined(_WIN32)
+#    include <dlfcn.h>
+#else
+#    ifndef WIN32_LEAN_AND_MEAN
+#        define WIN32_LEAN_AND_MEAN
+#    endif
+#    include <windows.h>
+// psapi.h depends on the types windows.h declares, so it has to follow it.
+#    include <psapi.h>
+#endif
 #include <iostream>
 
 namespace rocprofiler
@@ -66,6 +77,7 @@ struct library_info
 
 library_info::library_info(std::string_view sym_name, void* sym)
 {
+#if !defined(_WIN32)
     auto _info = Dl_info{};
     auto _ec   = ::dladdr(sym, &_info);
     if(_ec != 0 && _info.dli_fbase != nullptr)
@@ -88,6 +100,32 @@ library_info::library_info(std::string_view sym_name, void* sym)
             sdk::utility::as_hex(_info.dli_fbase),
             sdk::utility::as_hex(_info.dli_saddr));
     }
+#else
+    HMODULE hmod = nullptr;
+    if(GetModuleHandleExW(
+           GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+           reinterpret_cast<LPCWSTR>(sym),
+           &hmod) &&
+       hmod != nullptr)
+    {
+        wchar_t wbuf[4096] = {};
+        if(GetModuleFileNameW(hmod, wbuf, static_cast<DWORD>(std::size(wbuf))) > 0)
+        {
+            // convert UTF-16 path to narrow string
+            int len = WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, nullptr, 0, nullptr, nullptr);
+            fname.resize(static_cast<size_t>(len > 0 ? len - 1 : 0));
+            WideCharToMultiByte(CP_UTF8, 0, wbuf, -1, fname.data(), len, nullptr, nullptr);
+        }
+        load_address = reinterpret_cast<void*>(hmod);
+    }
+    else
+    {
+        ROCP_WARNING << fmt::format(
+            "Failed to resolve rocprofiler-sdk shared library path to symbol '{}' ({})",
+            sym_name,
+            sdk::utility::as_hex(sym));
+    }
+#endif
 }
 
 std::string
@@ -113,7 +151,26 @@ get_this_library_info()
 auto
 get_global_library_info()
 {
+#if !defined(_WIN32)
     void* _global_addr = dlsym(RTLD_DEFAULT, "rocprofiler_set_api_table");
+#else
+    void* _global_addr = reinterpret_cast<void*>(
+        GetProcAddress(GetModuleHandleW(nullptr), "rocprofiler_set_api_table"));
+    if(!_global_addr)
+    {
+        // Also search all loaded modules (equivalent of RTLD_DEFAULT scanning all DLLs)
+        HANDLE  hProc      = GetCurrentProcess();
+        HMODULE mods[1024] = {};
+        DWORD   needed     = 0;
+        if(EnumProcessModules(hProc, mods, sizeof(mods), &needed))
+        {
+            DWORD count = needed / sizeof(HMODULE);
+            for(DWORD i = 0; i < count && !_global_addr; ++i)
+                _global_addr =
+                    reinterpret_cast<void*>(GetProcAddress(mods[i], "rocprofiler_set_api_table"));
+        }
+    }
+#endif
     if(!_global_addr)
     {
         ROCP_WARNING << "Failed to resolve global symbol 'rocprofiler_set_api_table'";
@@ -178,6 +235,7 @@ get_lifetime()
 
 auto rocprofiler_sdk_shlib_lifetime = shared_library::get_lifetime();
 
+#if !defined(_WIN32)
 void
 rocprofiler_sdk_shlib_ctor() ROCPROFILER_ATTRIBUTE(constructor(101));
 
@@ -186,4 +244,5 @@ rocprofiler_sdk_shlib_ctor()
 {
     (void) shared_library::get_lifetime();
 }
+#endif
 }  // namespace rocprofiler

@@ -30,8 +30,10 @@
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/aql/helpers.hpp"
-#include "lib/rocprofiler-sdk/spm/interface.hpp"
+#if !defined(_WIN32)
+#    include "lib/rocprofiler-sdk/aql/helpers.hpp"
+#    include "lib/rocprofiler-sdk/spm/interface.hpp"
+#endif
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
@@ -46,7 +48,9 @@
 #include "yaml-cpp/node/parse.h"
 #include "yaml-cpp/parser.h"
 
-#include <dlfcn.h>  // for dladdr
+#if !defined(_WIN32)
+#    include <dlfcn.h>  // for dladdr
+#endif
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
@@ -259,6 +263,7 @@ findViaInstallPath(const std::string& filename)
 {
     namespace fs = common::filesystem;
 
+#if !defined(_WIN32)
     Dl_info dl_info = {};
     ROCP_INFO << filename << " is being looked up via install path";
     if(dladdr(reinterpret_cast<const void*>(rocprofiler_query_available_agents), &dl_info) != 0 &&
@@ -276,6 +281,7 @@ findViaInstallPath(const std::string& filename)
         return lib_path.parent_path().parent_path() /
                fmt::format("share/rocprofiler-sdk/{}", filename);
     }
+#endif
     return filename;
 }
 
@@ -477,6 +483,7 @@ has_spm_support(const Metric& metric, rocprofiler_agent_id_t agent_id)
         if(it != data.end()) return it->second;
 
         bool supported = false;
+#if !defined(_WIN32)
         if(!metric.event().empty())
         {
             if(const auto* sym = rocprofiler::spm::construct_spm_interface())
@@ -491,6 +498,7 @@ has_spm_support(const Metric& metric, rocprofiler_agent_id_t agent_id)
                 supported = sym->spm_is_event_supported(aql_agent, pmc_event);
             }
         }
+#endif
         data.emplace(key, supported);
         return supported;
     });

@@ -113,14 +113,13 @@ get_background_thread()
 
 ROCPROFILER_EXTERN_C_INIT
 
-int
+ROCPROFILER_PUBLIC_API int
 rocprofiler_attach_set_api_table(const char* name,
                                  uint64_t /*lib_version*/,
                                  uint64_t /*lib_instance*/,
                                  void**                                        tables,
                                  uint64_t                                      num_tables,
-                                 rocprofiler_register_library_api_table_func_t register_functor)
-    ROCPROFILER_PUBLIC_API;
+                                 rocprofiler_register_library_api_table_func_t register_functor);
 
 int
 rocprofiler_attach_set_api_table(const char* name,

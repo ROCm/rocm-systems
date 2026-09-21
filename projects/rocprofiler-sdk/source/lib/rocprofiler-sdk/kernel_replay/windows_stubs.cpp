@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,31 +20,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lib/rocprofiler-sdk/registration.hpp"
+// Windows stand-in for local_context.cpp. Kernel replay requires AQL dispatch-packet
+// rewriting, which the ETW tracing path cannot do, so no replay loop is ever active and
+// per-dispatch consumers always fall back to global context state.
 
-#include <rocprofiler-sdk/defines.h>
+#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
+
 #include <rocprofiler-sdk/fwd.h>
 
-ROCPROFILER_EXTERN_C_INIT
+#include <optional>
 
-ROCPROFILER_API rocprofiler_status_t
-rocprofiler_attach(void);
-
-ROCPROFILER_API rocprofiler_status_t
-rocprofiler_detach(void);
-
-rocprofiler_status_t
-rocprofiler_attach(void)
+namespace rocprofiler
 {
-    rocprofiler::registration::attach();
-    return ROCPROFILER_STATUS_SUCCESS;
-}
-
-rocprofiler_status_t
-rocprofiler_detach(void)
+namespace kernel_replay
 {
-    rocprofiler::registration::detach();
-    return ROCPROFILER_STATUS_SUCCESS;
-}
-
-ROCPROFILER_EXTERN_C_FINI
+std::optional<bool> local_context_override(rocprofiler_context_id_t) { return std::nullopt; }
+}  // namespace kernel_replay
+}  // namespace rocprofiler

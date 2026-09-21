@@ -130,13 +130,12 @@ typedef void (*rocprofiler_dispatch_counting_record_cb_t)(
  * @param [in] callback_data_args callback data
  * @return ::rocprofiler_status_t
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_configure_buffer_dispatch_counting_service(
     rocprofiler_context_id_t                   context_id,
     rocprofiler_buffer_id_t                    buffer_id,
     rocprofiler_dispatch_counting_service_cb_t callback,
-    void*                                      callback_data_args) ROCPROFILER_API;
+    void*                                      callback_data_args);
 
 /**
  * @brief (experimental) Configure buffered dispatch profile Counting Service.
@@ -150,14 +149,13 @@ rocprofiler_configure_buffer_dispatch_counting_service(
  * @param [in] record_callback_args Callback args for record callback
  * @return ::rocprofiler_status_t
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_configure_callback_dispatch_counting_service(
     rocprofiler_context_id_t                   context_id,
     rocprofiler_dispatch_counting_service_cb_t dispatch_callback,
     void*                                      dispatch_callback_args,
     rocprofiler_dispatch_counting_record_cb_t  record_callback,
-    void*                                      record_callback_args) ROCPROFILER_API;
+    void*                                      record_callback_args);
 
 /** @} */
 

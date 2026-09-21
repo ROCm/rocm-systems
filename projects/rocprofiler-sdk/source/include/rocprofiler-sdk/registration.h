@@ -111,8 +111,8 @@ typedef struct rocprofiler_tool_configure_result_t
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Returned unconditionally
  */
-rocprofiler_status_t
-rocprofiler_is_initialized(int* status) ROCPROFILER_API ROCPROFILER_NONNULL(1);
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_is_initialized(int* status) ROCPROFILER_NONNULL(1);
 
 /**
  * @brief Query rocprofiler finalization status.
@@ -122,8 +122,8 @@ rocprofiler_is_initialized(int* status) ROCPROFILER_API ROCPROFILER_NONNULL(1);
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Returned unconditionally
  */
-rocprofiler_status_t
-rocprofiler_is_finalized(int* status) ROCPROFILER_API ROCPROFILER_NONNULL(1);
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_is_finalized(int* status) ROCPROFILER_NONNULL(1);
 
 /**
  * @brief This is the special function that tools define to enable rocprofiler support. The tool
@@ -218,11 +218,12 @@ rocprofiler_is_finalized(int* status) ROCPROFILER_API ROCPROFILER_NONNULL(1);
  * }
  * @endcode
  */
+ROCPROFILER_PUBLIC_API
 rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t                 version,
                       const char*              runtime_version,
                       uint32_t                 priority,
-                      rocprofiler_client_id_t* client_id) ROCPROFILER_PUBLIC_API;
+                      rocprofiler_client_id_t* client_id);
 
 // NOTE: we use ROCPROFILER_PUBLIC_API above instead of ROCPROFILER_API because we always
 // want the symbol to be visible when the user includes the header for the prototype
@@ -251,8 +252,8 @@ typedef rocprofiler_tool_configure_result_t* (*rocprofiler_configure_func_t)(
  * @retval ::ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED Returned if rocprofiler has already been
  * configured, or is currently being configured
  */
-rocprofiler_status_t
-rocprofiler_force_configure(rocprofiler_configure_func_t configure_func) ROCPROFILER_API;
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_force_configure(rocprofiler_configure_func_t configure_func);
 
 /** @} */
 

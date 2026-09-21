@@ -26,7 +26,9 @@
 #include "rocprofiler-sdk-roctx/types.h"
 #include "rocprofiler-sdk-roctx/version.h"
 
-#include <sched.h>
+#if !defined(_WIN32)
+#    include <sched.h>
+#endif
 #include <stddef.h>
 #include <stdint.h>
 

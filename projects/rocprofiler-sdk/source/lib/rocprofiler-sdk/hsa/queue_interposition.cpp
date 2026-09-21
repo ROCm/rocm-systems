@@ -60,7 +60,9 @@
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
-#include <pthread.h>
+#if !defined(_WIN32)
+#    include <pthread.h>
+#endif
 
 #include <array>
 #include <atomic>

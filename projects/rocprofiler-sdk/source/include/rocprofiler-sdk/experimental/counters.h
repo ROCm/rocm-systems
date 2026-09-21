@@ -40,10 +40,9 @@ ROCPROFILER_EXTERN_C_INIT
  * @retval ROCPROFILER_STATUS_SUCCESS if counter definition applied
  * @retval ROCPROFILER_STATUS_ERROR if counter definition already loaded
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_load_counter_definition(const char*                yaml,
                                     size_t                     size,
-                                    rocprofiler_counter_flag_t flags) ROCPROFILER_API;
+                                    rocprofiler_counter_flag_t flags);
 
 ROCPROFILER_EXTERN_C_FINI

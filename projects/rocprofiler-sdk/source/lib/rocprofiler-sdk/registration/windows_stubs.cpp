@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,31 +20,25 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lib/rocprofiler-sdk/registration.hpp"
+// Windows stand-in for late.cpp. Late-start profiling replays API tables that runtimes
+// handed to rocprofiler-register; Windows tracing consumes ETW events instead, so there
+// is no registry to replay and rocprofiler-register is not in the path.
 
-#include <rocprofiler-sdk/defines.h>
+#include "lib/rocprofiler-sdk/registration/late.hpp"
+
 #include <rocprofiler-sdk/fwd.h>
 
-ROCPROFILER_EXTERN_C_INIT
-
-ROCPROFILER_API rocprofiler_status_t
-rocprofiler_attach(void);
-
-ROCPROFILER_API rocprofiler_status_t
-rocprofiler_detach(void);
-
-rocprofiler_status_t
-rocprofiler_attach(void)
+namespace rocprofiler
 {
-    rocprofiler::registration::attach();
-    return ROCPROFILER_STATUS_SUCCESS;
-}
-
-rocprofiler_status_t
-rocprofiler_detach(void)
+namespace registration
 {
-    rocprofiler::registration::detach();
-    return ROCPROFILER_STATUS_SUCCESS;
+namespace late
+{
+rocprofiler_status_t
+invoke_register_propagation()
+{
+    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 }
-
-ROCPROFILER_EXTERN_C_FINI
+}  // namespace late
+}  // namespace registration
+}  // namespace rocprofiler

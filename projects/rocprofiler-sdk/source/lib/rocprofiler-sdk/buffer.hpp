@@ -31,7 +31,9 @@
 
 #include <fmt/format.h>
 
-#include <sys/types.h>
+#if !defined(_WIN32)
+#    include <sys/types.h>
+#endif
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -48,17 +50,21 @@ struct instance
     static constexpr auto size           = 2;  // double buffering
     static constexpr auto sync_wait_usec = std::chrono::microseconds{10};
 
-    mutable std::array<buffer_t, size>         buffers       = {};
-    mutable std::array<std::atomic_flag, size> syncer        = {false, false};  // r/w lock
-    mutable std::atomic<uint32_t>              buffer_idx    = {};              // array index
-    mutable std::atomic<uint64_t>              drop_count    = {};
-    uint64_t                                   watermark     = 0;
-    uint64_t                                   context_id    = 0;  // rocprofiler_context_id_t value
-    uint64_t                                   buffer_id     = 0;  // rocprofiler_buffer_id_t value
-    uint64_t                                   task_group_id = 0;  // thread-pool assignment
-    rocprofiler_buffer_tracing_cb_t            callback      = nullptr;
-    void*                                      callback_data = nullptr;
-    rocprofiler_buffer_policy_t                policy        = ROCPROFILER_BUFFER_POLICY_NONE;
+    mutable std::array<buffer_t, size> buffers = {};
+#if defined(_WIN32)
+    mutable std::array<std::atomic_flag, size> syncer = {};  // r/w lock
+#else
+    mutable std::array<std::atomic_flag, size> syncer = {false, false};  // r/w lock
+#endif
+    mutable std::atomic<uint32_t>   buffer_idx    = {};  // array index
+    mutable std::atomic<uint64_t>   drop_count    = {};
+    uint64_t                        watermark     = 0;
+    uint64_t                        context_id    = 0;  // rocprofiler_context_id_t value
+    uint64_t                        buffer_id     = 0;  // rocprofiler_buffer_id_t value
+    uint64_t                        task_group_id = 0;  // thread-pool assignment
+    rocprofiler_buffer_tracing_cb_t callback      = nullptr;
+    void*                           callback_data = nullptr;
+    rocprofiler_buffer_policy_t     policy        = ROCPROFILER_BUFFER_POLICY_NONE;
 
     template <typename Tp>
     bool emplace(uint32_t, uint32_t, Tp&);

@@ -22,7 +22,9 @@
 
 #pragma once
 
-#include "include/rocprofiler-sdk/cxx/codeobj/code_printing.hpp"
+#if !defined(_WIN32)
+#    include "include/rocprofiler-sdk/cxx/codeobj/code_printing.hpp"
+#endif
 #include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/translation.hpp"
 

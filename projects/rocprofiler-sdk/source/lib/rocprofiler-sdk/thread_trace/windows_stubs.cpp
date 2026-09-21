@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,31 +20,39 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lib/rocprofiler-sdk/registration.hpp"
+// Windows stand-ins for the thread trace sources excluded from this build. ATT needs
+// aqlprofile to build the trace control packets and the trace decoder shared library to
+// read them back; neither is available to the ETW tracing path.
 
-#include <rocprofiler-sdk/defines.h>
-#include <rocprofiler-sdk/fwd.h>
+#include "lib/rocprofiler-sdk/thread_trace/core.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
 
-ROCPROFILER_EXTERN_C_INIT
-
-ROCPROFILER_API rocprofiler_status_t
-rocprofiler_attach(void);
-
-ROCPROFILER_API rocprofiler_status_t
-rocprofiler_detach(void);
-
-rocprofiler_status_t
-rocprofiler_attach(void)
+namespace rocprofiler
 {
-    rocprofiler::registration::attach();
-    return ROCPROFILER_STATUS_SUCCESS;
-}
-
-rocprofiler_status_t
-rocprofiler_detach(void)
+namespace thread_trace
 {
-    rocprofiler::registration::detach();
-    return ROCPROFILER_STATUS_SUCCESS;
-}
+// stands in for core.cpp
+void
+DispatchThreadTracer::start_context()
+{}
 
-ROCPROFILER_EXTERN_C_FINI
+void
+DispatchThreadTracer::stop_context()
+{}
+
+void
+DeviceThreadTracer::start_context()
+{}
+
+void
+DeviceThreadTracer::stop_context()
+{}
+
+// stands in for dl.cpp
+AQLProfileDL*
+get_aqlprofile_dl()
+{
+    return nullptr;
+}
+}  // namespace thread_trace
+}  // namespace rocprofiler

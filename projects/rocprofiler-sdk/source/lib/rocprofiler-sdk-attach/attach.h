@@ -26,7 +26,7 @@
 
 ROCPROFILER_EXTERN_C_INIT
 
-int
-rocprofiler_attach_get_version() ROCPROFILER_API;
+ROCPROFILER_API int
+rocprofiler_attach_get_version();
 
 ROCPROFILER_EXTERN_C_FINI

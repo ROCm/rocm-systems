@@ -27,7 +27,9 @@
 #include "lib/common/sha256.hpp"
 
 #include <fmt/format.h>
-#include <unistd.h>
+#if !defined(_WIN32)
+#    include <unistd.h>
+#endif
 #include <array>
 #include <cstdint>
 #include <cstring>

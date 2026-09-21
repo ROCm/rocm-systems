@@ -83,7 +83,7 @@ typedef rocprofiler_thread_trace_control_flags_t (*rocprofiler_thread_trace_disp
  * rocprofiler_thread_trace_parameter_t
  * @retval ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED if already configured
  */
-rocprofiler_status_t
+ROCPROFILER_API rocprofiler_status_t
 rocprofiler_configure_dispatch_thread_trace_service(
     rocprofiler_context_id_t                        context_id,
     rocprofiler_agent_id_t                          agent_id,
@@ -91,7 +91,7 @@ rocprofiler_configure_dispatch_thread_trace_service(
     size_t                                          num_parameters,
     rocprofiler_thread_trace_dispatch_callback_t    dispatch_callback,
     rocprofiler_thread_trace_shader_data_callback_t shader_callback,
-    void*                                           callback_userdata) ROCPROFILER_API;
+    void*                                           callback_userdata);
 
 /** @} */
 

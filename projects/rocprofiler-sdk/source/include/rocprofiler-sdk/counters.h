@@ -152,10 +152,9 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_counter_info_v1_t
  * @return ::rocprofiler_status_t
  * @retval ROCPROFILER_STATUS_SUCCESS if id decoded
  */
-ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_query_record_counter_id(rocprofiler_counter_instance_id_t id,
-                                    rocprofiler_counter_id_t*         counter_id) ROCPROFILER_API
-    ROCPROFILER_NONNULL(2);
+                                    rocprofiler_counter_id_t* counter_id) ROCPROFILER_NONNULL(2);
 
 /**
  * @brief (experimental) Query dimension position from record_id. If the dimension does not exist
@@ -168,10 +167,10 @@ rocprofiler_query_record_counter_id(rocprofiler_counter_instance_id_t id,
  * @return ::rocprofiler_status_t
  * @retval ROCPROFILER_STATUS_SUCCESS if dimension decoded
  */
-ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_query_record_dimension_position(rocprofiler_counter_instance_id_t  id,
                                             rocprofiler_counter_dimension_id_t dim,
-                                            size_t* pos) ROCPROFILER_API ROCPROFILER_NONNULL(3);
+                                            size_t* pos) ROCPROFILER_NONNULL(3);
 
 /**
  * @brief (experimental) Query Counter info such as name or description.
@@ -185,10 +184,10 @@ rocprofiler_query_record_dimension_position(rocprofiler_counter_instance_id_t  i
  * @retval ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND if counter not found
  * @retval ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI Version is not supported
  */
-ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
                                rocprofiler_counter_info_version_id_t version,
-                               void* info) ROCPROFILER_API ROCPROFILER_NONNULL(3);
+                               void*                                 info) ROCPROFILER_NONNULL(3);
 
 /**
  * @brief (experimental) Callback that gives a list of counters available on an agent. The
@@ -217,11 +216,10 @@ ROCPROFILER_SDK_EXPERIMENTAL typedef rocprofiler_status_t (*rocprofiler_availabl
  * @retval ROCPROFILER_STATUS_SUCCESS if counters found for agent
  * @retval ROCPROFILER_STATUS_ERROR if no counters found for agent
  */
-ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_iterate_agent_supported_counters(rocprofiler_agent_id_t              agent_id,
                                              rocprofiler_available_counters_cb_t cb,
-                                             void* user_data) ROCPROFILER_API
-    ROCPROFILER_NONNULL(2);
+                                             void* user_data) ROCPROFILER_NONNULL(2);
 
 /**
  * @brief (experimental) Creates a new counter based on a derived metric provided. The counter will

@@ -24,19 +24,39 @@
 
 #include <rocprofiler-sdk/defines.h>
 
-#define ROCPROFILER_VISIBILITY(MODE)  ROCPROFILER_ATTRIBUTE(visibility(MODE))
-#define ROCPROFILER_INTERNAL_API      ROCPROFILER_VISIBILITY("internal")
-#define ROCPROFILER_INLINE            ROCPROFILER_ATTRIBUTE(always_inline) inline
-#define ROCPROFILER_NOINLINE          ROCPROFILER_ATTRIBUTE(noinline)
-#define ROCPROFILER_HOT               ROCPROFILER_ATTRIBUTE(hot)
-#define ROCPROFILER_COLD              ROCPROFILER_ATTRIBUTE(cold)
-#define ROCPROFILER_CONST             ROCPROFILER_ATTRIBUTE(const)
-#define ROCPROFILER_PURE              ROCPROFILER_ATTRIBUTE(pure)
-#define ROCPROFILER_WEAK              ROCPROFILER_ATTRIBUTE(weak)
-#define ROCPROFILER_PACKED            ROCPROFILER_ATTRIBUTE(__packed__)
-#define ROCPROFILER_PACKED_ALIGN(VAL) ROCPROFILER_PACKED ROCPROFILER_ATTRIBUTE(__aligned__(VAL))
-#define ROCPROFILER_LIKELY(...)       __builtin_expect((__VA_ARGS__), 1)
-#define ROCPROFILER_UNLIKELY(...)     __builtin_expect((__VA_ARGS__), 0)
+#if !defined(_WIN32)
+#    define ROCPROFILER_VISIBILITY(MODE)  ROCPROFILER_ATTRIBUTE(visibility(MODE))
+#    define ROCPROFILER_INTERNAL_API      ROCPROFILER_VISIBILITY("internal")
+#    define ROCPROFILER_INLINE            ROCPROFILER_ATTRIBUTE(always_inline) inline
+#    define ROCPROFILER_NOINLINE          ROCPROFILER_ATTRIBUTE(noinline)
+#    define ROCPROFILER_HOT               ROCPROFILER_ATTRIBUTE(hot)
+#    define ROCPROFILER_COLD              ROCPROFILER_ATTRIBUTE(cold)
+#    define ROCPROFILER_CONST             ROCPROFILER_ATTRIBUTE(const)
+#    define ROCPROFILER_PURE              ROCPROFILER_ATTRIBUTE(pure)
+#    define ROCPROFILER_WEAK              ROCPROFILER_ATTRIBUTE(weak)
+#    define ROCPROFILER_PACKED            ROCPROFILER_ATTRIBUTE(__packed__)
+#    define ROCPROFILER_PACKED_ALIGN(VAL) ROCPROFILER_PACKED ROCPROFILER_ATTRIBUTE(__aligned__(VAL))
+#else
+// On MSVC, GCC-specific attributes (visibility, weak, always_inline, packed) have no equivalent.
+#    define ROCPROFILER_VISIBILITY(MODE)
+#    define ROCPROFILER_INTERNAL_API
+#    define ROCPROFILER_INLINE   __forceinline
+#    define ROCPROFILER_NOINLINE __declspec(noinline)
+#    define ROCPROFILER_HOT
+#    define ROCPROFILER_COLD
+#    define ROCPROFILER_CONST
+#    define ROCPROFILER_PURE
+#    define ROCPROFILER_WEAK
+#    define ROCPROFILER_PACKED            __pragma(pack(push, 1))
+#    define ROCPROFILER_PACKED_ALIGN(VAL) __declspec(align(VAL))
+#endif
+#if !defined(_WIN32)
+#    define ROCPROFILER_LIKELY(...)   __builtin_expect((__VA_ARGS__), 1)
+#    define ROCPROFILER_UNLIKELY(...) __builtin_expect((__VA_ARGS__), 0)
+#else
+#    define ROCPROFILER_LIKELY(...)   (__VA_ARGS__)
+#    define ROCPROFILER_UNLIKELY(...) (__VA_ARGS__)
+#endif
 
 #if defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0
 #    if defined(NDEBUG)

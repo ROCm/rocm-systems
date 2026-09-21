@@ -503,8 +503,11 @@ pncclGetLastError(ncclComm_t comm);
 /*! @endcond */
 
 /* Reload environment variables that determine logging. */
+#if !defined(_WIN32)
 __attribute__((deprecated("ncclResetDebugInit is not supported as part of the NCCL API and will be "
-                          "removed in the future"))) void
+                          "removed in the future")))
+#endif
+void
 ncclResetDebugInit();
 /*! @cond       include_hidden */
 void
@@ -1198,8 +1201,11 @@ ncclAllToAll(const void*    sendbuff,
              ncclDataType_t datatype,
              ncclComm_t     comm,
              hipStream_t    stream)
-    __attribute__((deprecated(
-        "ncclAllToAll is replaced with ncclAlltoAll and will be removed in the future")));
+#if !defined(_WIN32)
+    __attribute__((
+        deprecated("ncclAllToAll is replaced with ncclAlltoAll and will be removed in the future")))
+#endif
+    ;
 /*! @cond       include_hidden */
 ncclResult_t
 pncclAllToAll(const void*    sendbuff,
@@ -1240,8 +1246,11 @@ ncclAllToAllv(const void*    sendbuff,
               ncclDataType_t datatype,
               ncclComm_t     comm,
               hipStream_t    stream)
+#if !defined(_WIN32)
     __attribute__((deprecated(
-        "ncclAllToAllv is replaced with ncclAlltoAllv and will be removed in the future")));
+        "ncclAllToAllv is replaced with ncclAlltoAllv and will be removed in the future")))
+#endif
+    ;
 /*! @cond       include_hidden */
 ncclResult_t
 pncclAllToAllv(const void*    sendbuff,

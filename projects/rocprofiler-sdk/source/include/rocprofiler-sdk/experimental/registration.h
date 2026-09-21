@@ -121,11 +121,12 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_tool_configure_attach_re
  * @return rocprofiler_tool_configure_attach_result_t*
  */
 ROCPROFILER_SDK_EXPERIMENTAL
+ROCPROFILER_PUBLIC_API
 rocprofiler_tool_configure_attach_result_t*
 rocprofiler_configure_attach(uint32_t                 version,
                              const char*              runtime_version,
                              uint32_t                 priority,
-                             rocprofiler_client_id_t* client_id) ROCPROFILER_PUBLIC_API;
+                             rocprofiler_client_id_t* client_id);
 
 /**
  * @brief Function pointer typedef for ::rocprofiler_configure_attach function
@@ -153,11 +154,9 @@ typedef rocprofiler_tool_configure_attach_result_t* (*rocprofiler_configure_atta
  * @retval ::ROCPROFILER_STATUS_SUCCESS if iteration completes successfully
  * @retval other ::rocprofiler_status_t values if an error occurs
  */
-ROCPROFILER_SDK_EXPERIMENTAL
-rocprofiler_status_t
+ROCPROFILER_API ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_iterate_runtime_registration_info(rocprofiler_runtime_registration_info_cb_t callback,
-                                              void*                                      data)
-    ROCPROFILER_ATTRIBUTE(nonnull(1)) ROCPROFILER_API;
+                                              void* data) ROCPROFILER_ATTRIBUTE(nonnull(1));
 
 /** @} */
 

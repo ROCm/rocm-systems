@@ -25,9 +25,20 @@
 #include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
 
-#include <sys/syscall.h>
-#include <sys/utsname.h>
-#include <unistd.h>
+#if !defined(_WIN32)
+#    include <sys/syscall.h>
+#    include <sys/utsname.h>
+#    include <unistd.h>
+#else
+#    include <process.h>
+#    include <windows.h>
+// Windows shims for POSIX clock/pid types
+using pid_t     = int;
+using clockid_t = int;
+#    define CLOCK_BOOTTIME  6
+#    define CLOCK_MONOTONIC 1
+#    define CLOCK_REALTIME  0
+#endif
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -56,6 +67,7 @@ consume_args(Tp&&...)
 uint64_t
 get_clock_period_ns_impl(clockid_t _clk_id);
 
+#if !defined(_WIN32)
 inline uint64_t
 get_tid()
 {
@@ -79,6 +91,26 @@ get_ticks(clockid_t clk_id_v) noexcept
 
     return (static_cast<uint64_t>(ts.tv_sec) * nanosec) + static_cast<uint64_t>(ts.tv_nsec);
 }
+#else
+inline uint64_t
+get_tid()
+{
+    static thread_local uint64_t _v = static_cast<uint64_t>(::GetCurrentThreadId());
+    return _v;
+}
+
+inline uint64_t get_ticks(clockid_t /*clk_id_v*/) noexcept
+{
+    // Use QPC for high-resolution monotonic timestamps on Windows
+    LARGE_INTEGER freq{};
+    LARGE_INTEGER count{};
+    ::QueryPerformanceFrequency(&freq);
+    ::QueryPerformanceCounter(&count);
+    // convert to nanoseconds
+    constexpr uint64_t nanosec = std::nano::den;
+    return static_cast<uint64_t>(count.QuadPart) * nanosec / static_cast<uint64_t>(freq.QuadPart);
+}
+#endif
 
 static constexpr int default_clock_id = CLOCK_BOOTTIME;
 

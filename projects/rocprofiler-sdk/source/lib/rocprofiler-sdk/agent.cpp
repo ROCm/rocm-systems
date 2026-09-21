@@ -21,14 +21,16 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
-#include "lib/common/scope_destructor.hpp"
-#include "lib/common/static_object.hpp"
-#include "lib/common/string_entry.hpp"
-#include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#if !defined(_WIN32)
+#    include "lib/aqlprofile/aqlprofile.hpp"
+#    include "lib/common/scope_destructor.hpp"
+#    include "lib/common/static_object.hpp"
+#    include "lib/common/string_entry.hpp"
+#    include "lib/common/utility.hpp"
+#    include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#endif
 #include "lib/rocprofiler-sdk/platform/agent.hpp"
 #ifdef _WIN32
 #    include "lib/rocprofiler-sdk/platform/windows/agent.hpp"
@@ -42,27 +44,40 @@
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
 #include <fmt/format.h>
-#include <fmt/ranges.h>
-#include <hsa/hsa.h>
-#include <hsa/hsa_api_trace.h>
-#include <libdrm/amdgpu.h>
-#include <xf86drm.h>
+#if !defined(_WIN32)
+#    include <fmt/ranges.h>
+#    include <hsa/hsa_api_trace.h>
+#    include <libdrm/amdgpu.h>
+#    include <xf86drm.h>
 // amdgpu_drm.h provides AMDGPU_INFO_DEV_INFO / drm_amdgpu_info_device for the
 // V2 cu_bitmap path below; only needed in internal-aqlprofile builds.
-#if !ROCPROFILER_EXTERNAL_AQLPROFILE
-#    include <libdrm/amdgpu_drm.h>
+#    if !ROCPROFILER_EXTERNAL_AQLPROFILE
+#        include <libdrm/amdgpu_drm.h>
+#    endif
 #endif
+#include <hsa/hsa.h>
 
-#include <iomanip>
-#include <limits>
-#include <set>
-#include <shared_mutex>
-#include <stdexcept>
+#include <optional>
 #include <string>
 #include <string_view>
-#include <type_traits>
-#include <unordered_map>
+#include <unordered_set>
 #include <vector>
+#if !defined(_WIN32)
+#    include <iomanip>
+#    include <limits>
+#    include <set>
+#    include <shared_mutex>
+#    include <stdexcept>
+#    include <type_traits>
+#    include <unordered_map>
+#endif
+
+// On Windows, all function definitions in this TU trigger MSVC C1001 (ICE at
+// msc1.cpp) because the combination of fmt/abseil/hsa includes exceeds the
+// compiler's internal template-instantiation stack.  The Windows build provides
+// every public symbol via agent_windows.cpp (which uses a smaller include set)
+// and this TU compiles to an empty object on Windows.
+#if !defined(_WIN32)
 
 namespace rocprofiler
 {
@@ -295,30 +310,27 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
 namespace
 {
 using unique_agent_t = ::rocprofiler::platform::unique_agent_t;
+}  // namespace
 
+// All functions below that call common::static_object<T>::construct() or use
+// aqlprofile/DRM types are excluded from Windows builds to avoid MSVC ICE C1001
+// (msc1.cpp:1589 — triggered by the template instantiation depth of static_object).
+// Windows equivalents live in agent_windows.cpp.
+#    ifndef _WIN32
+namespace
+{
 // Selects the platform enumerator at runtime.
 //
 // Linux builds compile only gnulinux/ and wsl/ (the WIN32 branch of
 // platform/CMakeLists.txt swaps in windows/), so only the enumerators built
 // into this binary are candidates here.
-//
-// Precedence on Linux:
-//   1. ROCPROFILER_FORCE_PLATFORM={gnulinux|wsl} overrides autodetect.
-//      Values not built into this binary are logged and ignored.
-//   2. gnulinux::is_available() (KFD sysfs present) - the common bare-metal
-//      Linux case, kept first to preserve existing behaviour byte-for-byte.
-//   3. wsl::is_available() (/dev/dxg + libdxcore.so) - WSL guest with the
-//      DXCore driver shimmed in.
-//   4. Fallback: gnulinux enumerator (will log and return an empty vector).
-//
-// Windows builds collapse to a single candidate (platform::windows).
 std::vector<unique_agent_t>
 enumerate_platform_agents()
 {
     const auto forced = common::get_env("ROCPROFILER_FORCE_PLATFORM", std::string{});
+
     if(!forced.empty())
     {
-#ifndef _WIN32
         if(forced == "gnulinux")
         {
             ROCP_INFO << "agent topology: forced gnulinux via ROCPROFILER_FORCE_PLATFORM";
@@ -329,21 +341,11 @@ enumerate_platform_agents()
             ROCP_INFO << "agent topology: forced wsl via ROCPROFILER_FORCE_PLATFORM";
             return platform::wsl::enumerate();
         }
-#endif
-#ifdef _WIN32
-        if(forced == "windows")
-        {
-            ROCP_INFO << "agent topology: forced windows via ROCPROFILER_FORCE_PLATFORM";
-            return platform::windows::enumerate();
-        }
-#endif
         ROCP_WARNING << fmt::format(
             "agent topology: ROCPROFILER_FORCE_PLATFORM='{}' is not built into this binary "
-            "(expected gnulinux|wsl on Linux, windows on Windows); falling back to autodetect",
+            "(expected gnulinux|wsl on Linux); falling back to autodetect",
             forced);
     }
-
-#ifndef _WIN32
     if(platform::gnulinux::is_available())
     {
         ROCP_INFO << "agent topology: selected " << platform::gnulinux::name << " (sysfs present)";
@@ -358,16 +360,6 @@ enumerate_platform_agents()
     ROCP_WARNING << "agent topology: no platform matched; falling back to "
                  << platform::gnulinux::name << " (will return empty)";
     return platform::gnulinux::enumerate();
-#else
-    if(platform::windows::is_available())
-    {
-        ROCP_INFO << "agent topology: selected " << platform::windows::name;
-        return platform::windows::enumerate();
-    }
-    ROCP_WARNING << "agent topology: no platform matched; falling back to "
-                 << platform::windows::name << " (will return empty)";
-    return platform::windows::enumerate();
-#endif
 }
 
 auto&
@@ -429,7 +421,7 @@ get_bdf_info(const rocprofiler_agent_t* agent)
 // libhsa-amd-aqlprofile64.so which neither exposes aqlprofile_register_agent_info
 // nor the AQLPROFILE_AGENT_VERSION_V2 enum value, so this function is omitted
 // there and the caller's #if branch takes the legacy aqlprofile_register_agent path.
-#if !ROCPROFILER_EXTERNAL_AQLPROFILE
+#        if !ROCPROFILER_EXTERNAL_AQLPROFILE && !defined(_WIN32)
 bool
 try_register_agent_v2(const rocprofiler_agent_t* agent, aqlprofile_agent_handle_t* handle)
 {
@@ -475,7 +467,7 @@ try_register_agent_v2(const rocprofiler_agent_t* agent, aqlprofile_agent_handle_
     drmClose(drm_fd);
     return success;
 }
-#endif  // !ROCPROFILER_EXTERNAL_AQLPROFILE
+#        endif  // !ROCPROFILER_EXTERNAL_AQLPROFILE && !_WIN32
 
 const std::vector<aqlprofile_agent_handle_t>&
 get_aql_handles()
@@ -486,12 +478,12 @@ get_aql_handles()
 
             for(auto& agent : get_agents())
             {
-                aqlprofile_agent_handle_t handle = {.handle = 0};
+                aqlprofile_agent_handle_t handle = aqlprofile_agent_handle_t{};
 
                 const auto bdf = get_bdf_info(agent);
                 common::consume_args(bdf);
 
-#if ROCPROFILER_EXTERNAL_AQLPROFILE
+#        if ROCPROFILER_EXTERNAL_AQLPROFILE
                 ROCP_TRACE << fmt::format(
                     "Registering agent {} with external aqlprofile (libhsa-amd-aqlprofile64.so)",
                     agent->name);
@@ -507,7 +499,7 @@ get_aql_handles()
                 {
                     ROCP_WARNING << "Failed to register agent " << agent->name;
                 }
-#else
+#        else
 
                 ROCP_TRACE << fmt::format(
                     "Registering agent {:04x}:{:02x}:{:02x}.{:x} :: {} with IP discovery",
@@ -517,6 +509,7 @@ get_aql_handles()
                     bdf.function,
                     agent->name);
 
+#            if !defined(_WIN32)
                 // Try V2 registration with cu_bitmap from DRM for WGP harvesting support.
                 bool registered_v2 = false;
                 if(agent->type == ROCPROFILER_AGENT_TYPE_GPU && agent->drm_render_minor > 0)
@@ -549,7 +542,8 @@ get_aql_handles()
                             agent->name);
                     }
                 }
-#endif
+#            endif  // !_WIN32
+#        endif
                 agent_handles.push_back(handle);
             }
             return agent_handles;
@@ -558,7 +552,9 @@ get_aql_handles()
     return *CHECK_NOTNULL(_v);
 }
 }  // namespace
+#    endif  // !_WIN32
 
+#    ifndef _WIN32
 std::vector<const rocprofiler_agent_t*>
 get_agents()
 {
@@ -589,7 +585,9 @@ get_agent_info(rocprofiler_agent_id_t id)
         if(itr && itr->public_info.id.handle == id.handle) return itr.get();
     return nullptr;
 }
+#    endif  // !_WIN32
 
+#    ifndef _WIN32
 const aqlprofile_agent_handle_t*
 get_aql_agent(rocprofiler_agent_id_t id)
 {
@@ -604,7 +602,9 @@ get_aql_agent(rocprofiler_agent_id_t id)
     }
     return nullptr;
 }
+#    endif
 
+#    ifndef _WIN32
 void
 construct_agent_cache(::HsaApiTable* table)
 {
@@ -753,12 +753,12 @@ construct_agent_cache(::HsaApiTable* table)
         << " rocprofiler agents to HSA agents, expected " << hsa_agents.size();
 
 // For Pre-ROCm 6.0 releases
-#if ROCPROFILER_HSA_RUNTIME_VERSION <= 100900
-#    define HSA_AMD_AGENT_INFO_NEAREST_CPU 0xA113
-#endif
+#        if ROCPROFILER_HSA_RUNTIME_VERSION <= 100900
+#            define HSA_AMD_AGENT_INFO_NEAREST_CPU 0xA113
+#        endif
 
     auto find_nearest_hsa_cpu_agent = [&table, &agent_map](uint32_t node_id) {
-        auto _nearest_cpu = hsa_agent_t{.handle = 0};
+        auto _nearest_cpu = hsa_agent_t{};
         auto _hsa_agent   = std::get<1>(agent_map.at(node_id));
         if(table->core_->hsa_agent_get_info_fn(
                _hsa_agent,
@@ -834,7 +834,9 @@ construct_agent_cache(::HsaApiTable* table)
         }
     }
 }
+#    endif  // !_WIN32
 
+#    ifndef _WIN32
 std::optional<hsa_agent_t>
 get_hsa_agent(const rocprofiler_agent_t* agent)
 {
@@ -885,6 +887,7 @@ get_agent_cache(hsa_agent_t agent)
 
     return std::nullopt;
 }
+#    endif  // !_WIN32
 
 std::unordered_set<std::string>&
 get_agent_available_properties()
@@ -896,8 +899,10 @@ get_agent_available_properties()
 void
 internal_refresh_topology()
 {
+#    ifndef _WIN32
     auto _updated_topology = enumerate_platform_agents();
     std::swap(get_agent_topology(), _updated_topology);
+#    endif
 }
 }  // namespace agent
 }  // namespace rocprofiler
@@ -936,3 +941,5 @@ rocprofiler_query_available_agents(rocprofiler_agent_version_t             versi
     return callback(version, v_pointers.data(), pointers.size(), user_data);
 }
 }
+
+#endif  // !_WIN32

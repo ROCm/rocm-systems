@@ -101,7 +101,11 @@
 
 #if !defined(ROCPROFILER_ATTRIBUTE)
 #    if defined(_MSC_VER)
-#        define ROCPROFILER_ATTRIBUTE(...) __declspec(__VA_ARGS__)
+// On MSVC, GCC __attribute__((...)) has no direct equivalent. Specific attributes that matter
+// (dllexport, noinline, etc.) are handled individually via the ROCPROFILER_* macros in
+// source/lib/common/defines.hpp. Catch-all __declspec expansion causes C2485 for unknown
+// identifiers (pure, weak, hot, cold, ...) so suppress the whole thing here.
+#        define ROCPROFILER_ATTRIBUTE(...)
 #    else
 #        define ROCPROFILER_ATTRIBUTE(...) __attribute__((__VA_ARGS__))
 #    endif
@@ -109,7 +113,7 @@
 
 #if !defined(ROCPROFILER_PUBLIC_API)
 #    if defined(_MSC_VER)
-#        define ROCPROFILER_PUBLIC_API ROCPROFILER_ATTRIBUTE(dllexport)
+#        define ROCPROFILER_PUBLIC_API __declspec(dllexport)
 #    else
 #        define ROCPROFILER_PUBLIC_API ROCPROFILER_ATTRIBUTE(visibility("default"))
 #    endif
@@ -129,7 +133,7 @@
 
 #if !defined(ROCPROFILER_IMPORT_DECORATOR)
 #    if defined(_MSC_VER)
-#        define ROCPROFILER_IMPORT_DECORATOR ROCPROFILER_ATTRIBUTE(dllimport)
+#        define ROCPROFILER_IMPORT_DECORATOR __declspec(dllimport)
 #    else
 #        define ROCPROFILER_IMPORT_DECORATOR
 #    endif

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,38 +20,48 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
+// Windows stand-ins for the KFD sources excluded from this build. The AMD kernel-mode
+// driver is reached through D3DKMT on Windows rather than /dev/kfd ioctls, so none of
+// the pool, copy queue, or dispatch log machinery exists here. These entry points are
+// only reachable once an agent has been enumerated with a KFD handle, which cannot
+// happen in this build.
 
+#include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
+#include "lib/rocprofiler-sdk/kfd/resource.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
+
+#include <cstddef>
 #include <cstdint>
-#include <optional>
-#include <string>
-#include <string_view>
-#include <vector>
-
-#if !defined(_WIN32)
-#    include <dlfcn.h>
-#    include <sys/types.h>
-#    include <unistd.h>
-#endif
 
 namespace rocprofiler
 {
-namespace common
+namespace kfd
 {
-namespace dl
+// stands in for resource.cpp
+void* kfd_memory_pool_t::allocate(size_t, kfd_memory_kind_t, size_t) { return nullptr; }
+
+void
+kfd_memory_pool_t::deallocate(void*)
+{}
+
+bool
+kfd_memory_pool_t::is_device_pointer(const void*) const
 {
-using open_modes_vec_t = std::vector<int>;
+    return false;
+}
 
-// helper function for translating generic lib name to resolved path
-std::optional<std::string>
-get_linked_path(std::string_view, open_modes_vec_t&& = {});
+bool
+kfd_copy_queue_t::copy(void*, const void*, size_t)
+{
+    return false;
+}
 
-// helper function for translating symbol name to resolved library path
-std::optional<std::string>
-get_symbol_path(const std::vector<std::string>& _lib_names,
-                std::string_view                _sym_name,
-                const void*                     _addr         = nullptr,
-                bool                            _canonicalize = false);
-}  // namespace dl
-}  // namespace common
+// stands in for signal_less.cpp
+bool signal_less_id_is_leaked(uint64_t) { return false; }
+
+// stands in for kfd_profiler.cpp
+void
+arm_dispatch_log_sessions()
+{}
+}  // namespace kfd
 }  // namespace rocprofiler

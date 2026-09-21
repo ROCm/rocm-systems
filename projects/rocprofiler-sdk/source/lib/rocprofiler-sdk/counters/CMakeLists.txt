@@ -1,28 +1,51 @@
-set(ROCPROFILER_LIB_COUNTERS_SOURCES
-    metrics.cpp
-    dimensions.cpp
-    evaluate_ast.cpp
-    core.cpp
-    id_decode.cpp
-    dispatch_handlers.cpp
-    sample_processing.cpp
-    controller.cpp
-    device_counting.cpp
-    ioctl.cpp
-    firmware_restrictions.cpp)
-set(ROCPROFILER_LIB_COUNTERS_HEADERS
-    metrics.hpp
-    dimensions.hpp
-    evaluate_ast.hpp
-    core.hpp
-    id_decode.hpp
-    dispatch_handlers.hpp
-    sample_processing.hpp
-    controller.hpp
-    device_counting.hpp
-    sample_consumer.hpp
-    ioctl.hpp
-    firmware_restrictions.hpp)
+if(WIN32)
+    set(ROCPROFILER_LIB_COUNTERS_SOURCES
+        metrics.cpp
+        dimensions.cpp
+        evaluate_ast.cpp
+        core.cpp
+        id_decode.cpp
+        dispatch_handlers.cpp
+        sample_processing.cpp
+        controller.cpp
+        windows_stubs.cpp)
+    set(ROCPROFILER_LIB_COUNTERS_HEADERS
+        metrics.hpp
+        dimensions.hpp
+        evaluate_ast.hpp
+        core.hpp
+        id_decode.hpp
+        dispatch_handlers.hpp
+        sample_processing.hpp
+        controller.hpp
+        sample_consumer.hpp)
+else()
+    set(ROCPROFILER_LIB_COUNTERS_SOURCES
+        metrics.cpp
+        dimensions.cpp
+        evaluate_ast.cpp
+        core.cpp
+        id_decode.cpp
+        dispatch_handlers.cpp
+        sample_processing.cpp
+        controller.cpp
+        device_counting.cpp
+        ioctl.cpp
+        firmware_restrictions.cpp)
+    set(ROCPROFILER_LIB_COUNTERS_HEADERS
+        metrics.hpp
+        dimensions.hpp
+        evaluate_ast.hpp
+        core.hpp
+        id_decode.hpp
+        dispatch_handlers.hpp
+        sample_processing.hpp
+        controller.hpp
+        device_counting.hpp
+        sample_consumer.hpp
+        ioctl.hpp
+        firmware_restrictions.hpp)
+endif()
 target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_COUNTERS_SOURCES}
                                                       ${ROCPROFILER_LIB_COUNTERS_HEADERS})
 add_subdirectory(parser)

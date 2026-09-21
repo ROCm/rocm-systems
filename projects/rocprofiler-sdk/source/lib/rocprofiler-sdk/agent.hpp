@@ -24,12 +24,15 @@
 
 #include <rocprofiler-sdk/agent.h>
 
-#include "lib/aqlprofile/aqlprofile.hpp"
+#if !defined(_WIN32)
+#    include "lib/aqlprofile/aqlprofile.hpp"
+#endif
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 
 #include <hsa/hsa_api_trace.h>
 
 #include <optional>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -123,8 +126,10 @@ get_agent_cache(hsa_agent_t agent);
 std::unordered_set<std::string>&
 get_agent_available_properties();
 
+#if !defined(_WIN32)
 const aqlprofile_agent_handle_t*
 get_aql_agent(rocprofiler_agent_id_t id);
+#endif
 
 void
 construct_agent_cache(::HsaApiTable* table);

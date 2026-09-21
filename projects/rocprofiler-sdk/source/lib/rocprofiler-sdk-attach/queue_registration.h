@@ -51,19 +51,16 @@ typedef void (*rocprofiler_attach_queue_cb_t)(hsa_queue_t*,
                                               rocprofiler_attach_queue_phase_t,
                                               void*);
 
-int
-rocprofiler_attach_iterate_all_queues(rocprof_attach_queue_iterator_t func,
-                                      void*                           data) ROCPROFILER_API;
+ROCPROFILER_API int
+rocprofiler_attach_iterate_all_queues(rocprof_attach_queue_iterator_t func, void* data);
 
-int
-rocprofiler_attach_set_write_interceptor(hsa_queue_t*        queue,
-                                         write_interceptor_t func,
-                                         void*               data) ROCPROFILER_API;
+ROCPROFILER_API int
+rocprofiler_attach_set_write_interceptor(hsa_queue_t* queue, write_interceptor_t func, void* data);
 
-int
-rocprofiler_attach_add_queue_cb(rocprofiler_attach_queue_cb_t cb, void* data) ROCPROFILER_API;
+ROCPROFILER_API int
+rocprofiler_attach_add_queue_cb(rocprofiler_attach_queue_cb_t cb, void* data);
 
-int
-rocprofiler_attach_remove_queue_cb(rocprofiler_attach_queue_cb_t cb) ROCPROFILER_API;
+ROCPROFILER_API int
+rocprofiler_attach_remove_queue_cb(rocprofiler_attach_queue_cb_t cb);
 
 ROCPROFILER_EXTERN_C_FINI
