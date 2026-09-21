@@ -2820,7 +2820,7 @@ __device__ void test_tdm_operations(int* global_src, [[maybe_unused]] int* globa
 
 #if defined(__gfx1250__)
     // gfx1250: FULL TDM support
-    // Reference: tdm_basic_load_store.cc
+    // Reference: test_amd_gfx1250_TDM.cc
 
     const int SIZE_X = 10;
     const int SIZE_Y = 10;
