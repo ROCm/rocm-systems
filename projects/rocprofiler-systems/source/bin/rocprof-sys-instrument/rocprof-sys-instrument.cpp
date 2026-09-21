@@ -100,7 +100,7 @@ read_until_eof(int read_fd)
         {
             out.append(buf.data(), static_cast<std::size_t>(bytes_read));
         }
-        else if(bytes_read == 0 || errno != EINTR)  // EOF, or a real error
+        else if(bytes_read == 0 || errno != EINTR)
         {
             break;
         }
