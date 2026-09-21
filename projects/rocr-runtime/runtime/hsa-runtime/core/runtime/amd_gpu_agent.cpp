@@ -2500,7 +2500,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
         }
       }
       // Fallback for when KFD is returning zero.
-      *((uint32_t*)value) = 64;
+      *((uint32_t*)value) = 256;
       break;
     case HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT:
       *((uint32_t*)value) =
