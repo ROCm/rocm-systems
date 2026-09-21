@@ -188,13 +188,15 @@ TEST(counters_queue_hooks, exit_hook_skips_when_inst_pkt_has_no_counter_client_i
     inst_pkt.emplace_back(std::make_pair(std::make_unique<rocprofiler::hsa::EmptyAQLPacket>(),
                                          rocprofiler::hsa::queue_hooks::THREAD_TRACE_CLIENT_ID));
 
-    auto sess = std::make_shared<hsa::queue_info_session_t>(hsa::queue_info_session_t{.queue = fq});
+    // The hook returns before it dereferences the session, so a null one keeps this test free of
+    // any HSA runtime: queue_info_session_t holds a Queue& and cannot be default constructed.
+    auto sess   = std::shared_ptr<rocprofiler::hsa::queue_info_session_t>{};
     auto packet = rocprofiler::hsa::packet_data_t{};
     auto fq_pkt = rocprofiler::hsa::rocprofiler_packet{};
 
     // Must return without touching registered counter contexts.
     rocprofiler::counters::kernel_dispatch_phase_exit_hook(
-        fq, fq_pkt, sess, packet, inst_pkt, rocprofiler::kernel_dispatch::profiling_time{});
+        nullptr, fq_pkt, sess, packet, inst_pkt, rocprofiler::kernel_dispatch::profiling_time{});
     SUCCEED();
 }
 
@@ -353,7 +355,7 @@ TEST(counters_queue_hooks, stop_context_in_flight_completion_routes_via_hook_pat
         inst_pkt.emplace_back(std::move(in_flight[i]), hsa::queue_hooks::COUNTERS_CLIENT_ID);
 
         rocprofiler::counters::kernel_dispatch_phase_exit_hook(
-            fq, pkt, sess, packet_data, inst_pkt, rocprofiler::kernel_dispatch::profiling_time{});
+            &fq, pkt, sess, packet_data, inst_pkt, rocprofiler::kernel_dispatch::profiling_time{});
 
         size_t remaining = num_dispatches;
         cb_info->packet_return_map.rlock([&](const auto& data) { remaining = data.size(); });

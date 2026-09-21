@@ -84,7 +84,7 @@ kernel_dispatch_phase_enter_hook(
 }
 
 void
-kernel_dispatch_phase_exit_hook(const hsa::Queue& /*queue*/,
+kernel_dispatch_phase_exit_hook(const hsa::Queue* /*queue*/,
                                 const hsa::rocprofiler_packet& /*kernel_packet*/,
                                 std::shared_ptr<hsa::queue_info_session_t>& session,
                                 hsa::packet_data_t&                         packet,
@@ -107,9 +107,17 @@ kernel_dispatch_phase_exit_hook(const hsa::Queue& /*queue*/,
     // context from the active list. This is what guarantees a completion that arrives is delivered;
     // the drain in stop_context is what bounds when completions arrive. Kernel replay needs the
     // same property, since each pass completes separately.
-    auto contexts = context::get_registered_contexts(counter_contexts_filter());
+    //
+    // Read through a snapshot rather than the registry itself. This runs on the HSA async signal
+    // handler, so it cannot take get_contexts_mutex() -- stop_context() waits on the drain that
+    // this completion is part of -- and the registry is not safe to walk unlocked while
+    // allocate_context() appends to it. Holding the snapshot also keeps every context it names
+    // alive for the duration of the loop.
+    auto contexts = context::get_registered_contexts_snapshot();
     for(const auto* ctx : contexts)
     {
+        if(!counter_contexts_filter()(ctx)) continue;
+
         for(auto& cb : ctx->dispatch_counter_collection->callbacks)
         {
             completed_cb(ctx, cb, session, packet, inst_pkt, dispatch_time);

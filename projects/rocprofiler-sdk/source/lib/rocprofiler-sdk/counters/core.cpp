@@ -226,6 +226,12 @@ set_dispatch_agents(rocprofiler_context_id_t      context_id,
     // set for serialization) and then race with the unordered-set assignment below while
     // dispatch hooks read it.
     auto _lk = std::unique_lock<std::mutex>{context::get_contexts_mutex()};
+
+    // A context that is mid-stop is still in the active array while its GPU drain runs, and that
+    // drain happens with the mutex released, so the lock alone does not exclude it. Without this
+    // the scan below would read a context that is on its way out as a running one.
+    context::wait_for_stopping_contexts(_lk);
+
     for(const auto* itr : context::get_active_contexts())
     {
         if(itr && itr->context_idx == ctx_p->context_idx)
