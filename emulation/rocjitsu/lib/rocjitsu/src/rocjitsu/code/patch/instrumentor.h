@@ -39,6 +39,7 @@
 
 #pragma once
 
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/spill_manager.h"
@@ -277,6 +278,27 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 [[nodiscard]] RegisterSet compute_instrumentation_clobbers(const ProbeClobberSummary &probe_summary,
                                                            const RegisterSet &builder_clobbers);
 
+/// @brief Registers a probe call overwrites independently of any per-site
+///        choice: every probe body's ordinary clobbers, plus the link pair each
+///        one returns through.
+///
+/// @details The set framework storage that must outlive a probe call has to
+/// avoid. The envelope's own temps are absent because they are picked per site,
+/// after this set has already constrained such storage.
+///
+/// Unioned over *every* probe in the patch rather than the ones a given site
+/// calls: storage written at kernel entry and read at a later site has to
+/// survive each probe call in between, whichever probe that is.
+///
+/// @param probes    The patch's probe registry.
+/// @param summaries One clobber summary per entry of @p probes, in the same
+///                  order. A size mismatch is a caller error and fails closed.
+/// @param out       Filled with the union on success; untouched on failure.
+[[nodiscard]] bool compute_probe_reserved_registers(std::span<const ProbeCallable> probes,
+                                                    std::span<const ProbeClobberSummary> summaries,
+                                                    RegisterSet &out,
+                                                    std::string *error_out = nullptr);
+
 /// @brief spill_set = live_at_anchor & instrumentation_clobbers.
 [[nodiscard]] RegisterSet compute_spill_set(const RegisterSet &live_at_anchor,
                                             const RegisterSet &instrumentation_clobbers);
@@ -454,6 +476,26 @@ private:
   // is reported instead of crashing in BasicBlock::build.
   [[nodiscard]] bool ensure_blocks_built(std::string *error_out = nullptr);
   [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset) const;
+
+  // A synthesized site at the kernel entry carrying the DBI entry prologue. Not
+  // one of the caller's points: it exists because a probe asked for the
+  // framework's entry storage, and it is what defines that storage.
+  struct EntryProloguePatch {
+    uint64_t anchor_offset = 0;
+    uint32_t original_size = 0;
+    uint16_t storage_base = 0; ///< Persistent pair every later site reads.
+    TrampolineBytes bytes;
+  };
+
+  // Gate the kernel, choose the storage, and build the entry trampoline at
+  // @p trampoline_offset. Fails closed with a diagnostic rather than patching a
+  // kernel whose entry the prologue could not cover.
+  [[nodiscard]] std::optional<EntryProloguePatch> plan_entry_prologue(
+      const std::vector<KernelDescriptorInfo> &kernels, std::optional<uint32_t> kernel_sgpr_count,
+      const std::vector<BasicBlock *> &scope, const std::vector<ProbeCallable> &probes,
+      const std::vector<ProbeClobberSummary> &summaries,
+      const std::vector<ResolvedInstrumentationSite> &user_sites, uint64_t trampoline_offset,
+      std::string *error_out);
 
   // Everything one resolution pass produces.
   struct ResolvedPoints {
