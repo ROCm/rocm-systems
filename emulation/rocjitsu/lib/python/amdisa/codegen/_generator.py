@@ -10537,6 +10537,76 @@ class CodeGenerator:
                             f'<< "{inst.name} requires its GLOBAL segment";'
                         )
 
+                    # Public LLVM defines gfx1251's F64 WMMA as a wave32
+                    # v16x16 destination/accumulator tuple and v4 A/B tuples.
+                    # The low OPSEL bits and NEG_HI A/B bits are reserved for
+                    # this profile; OPSEL[2]/OPSEL_HI_2 are the only matrix
+                    # reuse hints. VISrc_512_f64 admits the standard integer
+                    # and FP64 inline-selector ranges.
+                    if inst.name == 'V_WMMA_F64_16X16X4_F64':
+                        raw_inst = (
+                            f'reinterpret_cast<const {factory_op_encoding}*>(inst)'
+                        )
+                        factory_validation_parts.append(
+                            f'if (({raw_inst}->opsel & 0x3u) != 0u || '
+                            f'{raw_inst}->opsel_hi != 3u) '
+                            f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                            'F64 WMMA element layout";'
+                        )
+                        factory_validation_parts.append(
+                            f'if ({raw_inst}->clamp != 0u || '
+                            f'({raw_inst}->neg_hi & 0x3u) != 0u) '
+                            f'[[unlikely]] return emit_error.emit() << "{inst.name} has unsupported '
+                            'modifier bits";'
+                        )
+                        factory_validation_parts.append(
+                            f'if ({raw_inst}->vdst > 240u) '
+                            f'[[unlikely]] return emit_error.emit() << "{inst.name} has a vdst '
+                            'register tuple that exceeds the selector range";'
+                        )
+                        factory_validation_parts.append(
+                            f'if (({raw_inst}->vdst & 1u) != 0u) '
+                            f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                            'vdst register tuple alignment";'
+                        )
+                        for src_name in ('src0', 'src1'):
+                            # Keep the src0 DPP markers alive until the common
+                            # DPP validation below so malformed extension forms
+                            # receive the intended diagnostic. Every other A/B
+                            # operand must be a four-register VGPR tuple.
+                            dpp_exclusion = ''
+                            if src_name == 'src0':
+                                dpp_exclusion = (
+                                    f'!({raw_inst}->src0 == amdgpu::SRC_DPP || '
+                                    f'amdgpu::dpp::is_src_dpp8({raw_inst}->src0)) && '
+                                )
+                            factory_validation_parts.append(
+                                f'if ({dpp_exclusion}({raw_inst}->{src_name} < 256u || '
+                                f'{raw_inst}->{src_name} > 508u)) '
+                                f'[[unlikely]] return emit_error.emit() << "{inst.name} has a '
+                                f'{src_name} register tuple outside the selector range";'
+                            )
+                            factory_validation_parts.append(
+                                f'if ({dpp_exclusion}({raw_inst}->{src_name} & 1u) != 0u) '
+                                f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                                f'{src_name} register tuple alignment";'
+                            )
+                        valid_inline = (
+                            f'({raw_inst}->src2 >= 128u && {raw_inst}->src2 <= 208u) || '
+                            f'({raw_inst}->src2 >= 240u && {raw_inst}->src2 <= 248u)'
+                        )
+                        factory_validation_parts.append(
+                            f'if (!({valid_inline}) && '
+                            f'({raw_inst}->src2 < 256u || {raw_inst}->src2 > 496u)) '
+                            f'[[unlikely]] return emit_error.emit() << "{inst.name} requires a '
+                            'legal inline accumulator or 16-register VGPR tuple";'
+                        )
+                        factory_validation_parts.append(
+                            f'if (!({valid_inline}) && ({raw_inst}->src2 & 1u) != 0u) '
+                            f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                            'src2 register tuple alignment";'
+                        )
+
                     # LLVM's public gfx1251 profiles define the packed U64 and
                     # F64 arithmetic operations without op_sel.  The profile and
                     # corresponding MC vectors are permanently linked here:
