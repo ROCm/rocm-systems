@@ -118,5 +118,15 @@ is_any_active()
 {
     return !context::get_active_contexts(spm_contexts_filter()).empty();
 }
+
+bool
+is_active_on_agent(rocprofiler_agent_id_t agent_id)
+{
+    for(const auto* ctx : context::get_active_contexts(spm_contexts_filter()))
+    {
+        if(ctx->dispatch_spm->collects_on(agent_id)) return true;
+    }
+    return false;
+}
 }  // namespace spm
 }  // namespace rocprofiler

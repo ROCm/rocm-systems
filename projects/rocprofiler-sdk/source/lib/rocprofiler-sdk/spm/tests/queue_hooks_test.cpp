@@ -37,6 +37,15 @@ TEST(spm_queue_hooks, is_any_active_false_when_no_context_active)
     EXPECT_FALSE(rocprofiler::spm::is_any_active());
 }
 
+// The write interceptor gates on the agent-scoped variant so that an SPM context restricted to
+// one GPU does not pull the other GPUs' queues off the fast path. With no context active it must
+// report inactive for any agent, including ones that were never registered.
+TEST(spm_queue_hooks, is_active_on_agent_false_when_no_context_active)
+{
+    EXPECT_FALSE(rocprofiler::spm::is_active_on_agent(rocprofiler_agent_id_t{.handle = 0}));
+    EXPECT_FALSE(rocprofiler::spm::is_active_on_agent(rocprofiler_agent_id_t{.handle = 1}));
+}
+
 TEST(spm_queue_hooks, exit_hook_skips_when_inst_pkt_has_no_spm_client_id)
 {
     rocprofiler::hsa::inst_pkt_t inst_pkt;

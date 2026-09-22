@@ -68,5 +68,11 @@ signal_completion_hook(const hsa::Queue*                           queue,
 // True if any context currently has dispatch SPM active.
 bool
 is_any_active();
+
+// True if a context with dispatch SPM active collects on `agent_id`. Callers on a per-queue
+// path should prefer this over is_any_active(): an SPM context scoped to one GPU via
+// set_agents() must not pull queues on the other GPUs off the write interceptor's fast path.
+bool
+is_active_on_agent(rocprofiler_agent_id_t agent_id);
 }  // namespace spm
 }  // namespace rocprofiler
