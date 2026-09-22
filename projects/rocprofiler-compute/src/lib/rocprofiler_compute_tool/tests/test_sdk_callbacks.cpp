@@ -152,6 +152,28 @@ TEST_F(TestSdkCallbacks, ProvidedCounterRecord_RecordCbReturnsCorrectData)
     EXPECT_EQ(m_tool_data->counter_records[0].counter_value, counter_value);
 }
 
+TEST_F(TestSdkCallbacks, ProvidedCounterRecord_RecordCbCapturesOneDispatchRecord)
+{
+    invoke_record_callback(10, "counter10", 11.);
+
+    ASSERT_EQ(m_tool_data->dispatch_records.size(), 1);
+    const auto& dispatch = m_tool_data->dispatch_records[0];
+    EXPECT_EQ(dispatch.dispatch_id, 100);
+    EXPECT_EQ(dispatch.agent_id, 200);
+    EXPECT_EQ(dispatch.kernel_id, 300);
+    EXPECT_EQ(dispatch.lds_per_workgroup, 400);
+}
+
+TEST_F(TestSdkCallbacks, ProvidedKernelSymbol_ToolTracingCbDemanglesAndDropsTheKdSuffix)
+{
+    invoke_tool_tracing_callback(10, "_Z7vecCopyPdS_S_i.kd");
+
+    ASSERT_EQ(m_tool_data->kernel_symbols.count(10), 1);
+    const auto& symbol = m_tool_data->kernel_symbols.at(10);
+    EXPECT_EQ(symbol.kernel_name, "vecCopy(double*, double*, double*, int)");
+    EXPECT_EQ(symbol.kernel_short_name, "vecCopy");
+}
+
 TEST_F(TestSdkCallbacks, ProvidedTracingRecord_ToolTracingCbReturnsKernelIdsFromIt)
 {
     constexpr uint64_t kernel_id_0 = 10;

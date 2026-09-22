@@ -313,6 +313,23 @@ void SdkCallbacksImpl::record_callback(rocprofiler_dispatch_counting_service_dat
             tool->counter_records.push_back(std::move(record));
         }
     }
+
+    const auto&       info = dispatch_data.dispatch_info;
+    dispatch_record_t dispatch{info.dispatch_id,
+                               info.agent_id.handle,
+                               info.kernel_id,
+                               uint64_t{info.grid_size.x} * info.grid_size.y * info.grid_size.z,
+                               uint64_t{info.workgroup_size.x} * info.workgroup_size.y *
+                                   info.workgroup_size.z,
+                               info.group_segment_size,
+                               info.private_segment_size,
+                               dispatch_data.start_timestamp,
+                               dispatch_data.end_timestamp,
+                               dispatch_data.correlation_id.internal};
+    {
+        std::lock_guard<std::mutex> lock(tool->mut);
+        tool->dispatch_records.push_back(std::move(dispatch));
+    }
 }
 
 void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
@@ -337,17 +354,24 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
     else if (record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
     {
         auto* data = static_cast<kernel_symbol_data_t*>(record.payload);
+
+        auto symbol              = kernel_symbol_record_t{};
+        symbol.kernel_name       = format_kernel_name(data->kernel_name);
+        symbol.kernel_short_name = truncate_name(symbol.kernel_name);
+        symbol.arch_vgpr_count   = data->arch_vgpr_count;
+        symbol.accum_vgpr_count  = data->accum_vgpr_count;
+        symbol.sgpr_count        = data->sgpr_count;
+
         // check if regex can be found in kernel name matches regex from tool data,
         // if matches store kernel id
         // Lock before modifying target_kernel_ids
         std::lock_guard<std::mutex> lock(tool->mut);
+        tool->kernel_symbols[data->kernel_id] = std::move(symbol);
         if (!tool->kernel_filter_include_regex.empty())
         {
             try
             {
-                int  demangle_status = 0;
-                auto kernel_name     = cxa_demangle(data->kernel_name, &demangle_status);
-                kernel_name          = truncate_name(kernel_name);
+                const auto& kernel_name = tool->kernel_symbols[data->kernel_id].kernel_short_name;
 
                 std::regex re(tool->kernel_filter_include_regex);
                 if (!kernel_name.empty() && std::regex_search(kernel_name, re))
@@ -422,6 +446,26 @@ std::string SdkCallbacksImpl::truncate_name(std::string_view name)
     while ((rit != rend) && (*rit != ' ') && (*rit != ':'))
         rit++;
     return std::string{name.substr(rend - rit, rit - rbeg)};
+}
+
+std::string SdkCallbacksImpl::format_kernel_name(const char* mangled_name)
+{
+    if (mangled_name == nullptr)
+        return std::string{};
+
+    auto name = std::string{mangled_name};
+    // Kernel descriptor symbols carry a ".kd" suffix that does not demangle.
+    constexpr std::string_view kKernelDescriptorSuffix = ".kd";
+    if (name.size() > kKernelDescriptorSuffix.size() &&
+        name.compare(name.size() - kKernelDescriptorSuffix.size(),
+                     kKernelDescriptorSuffix.size(),
+                     kKernelDescriptorSuffix) == 0)
+    {
+        name.erase(name.size() - kKernelDescriptorSuffix.size());
+    }
+
+    int demangle_status = 0;
+    return cxa_demangle(name, &demangle_status);
 }
 
 std::string SdkCallbacksImpl::cxa_demangle(const std::string& mangled_name, int* status)
