@@ -3,6 +3,7 @@ find_library(ROCM_SMI_LIB rocm_smi64 HINTS ${ROCM_PATH}/lib)
 if(ROCM_SMI_LIB)
     set(CMAKE_INSTALL_TESTDIR test/${PROJECT_NAME})
     find_package(hip CONFIG REQUIRED PATHS "${ROCM_PATH}")
+    set(CMAKE_HIP_ARCHITECTURES OFF)
     enable_language(HIP)
 
     set(TEST_DIR ${PROJECT_SOURCE_DIR}/tests-v2/microbenchmarks)

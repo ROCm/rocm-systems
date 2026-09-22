@@ -17,6 +17,7 @@ get_filename_component(HSA_RUNTIME_INC_PATH ${HSA_H} DIRECTORY)
 include_directories(${HSA_RUNTIME_INC_PATH})
 
 find_package(hip CONFIG REQUIRED PATHS "${ROCM_PATH}")
+set(CMAKE_HIP_ARCHITECTURES OFF)
 enable_language(HIP)
 
 find_package(
