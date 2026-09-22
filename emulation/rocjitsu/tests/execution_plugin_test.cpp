@@ -233,8 +233,9 @@ public:
   WaitCounters counters_at_access{};
 
 protected:
-  void initiate_access(Instruction &, Wavefront &wf) override {
+  VmAccessOutcome initiate_access(Instruction &, Wavefront &wf) override {
     counters_at_access = wf.wait_counters();
+    return VmAccessOutcome::Complete;
   }
 
   MemoryAccessCompletion complete_access(Instruction &, Wavefront &,
@@ -4710,6 +4711,74 @@ TEST(RaceDetectorPluginTest, Rdna4PartialLoadWaitRetiresOnlyOldestOrderedEvent) 
   TestWaitcntInstruction wait("s_wait_loadcnt");
   f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
 
+  f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base, /*lane_mask=*/1);
+  EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
+  f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + 1, /*lane_mask=*/1);
+  EXPECT_NE(sink.str().find("RACE "), std::string::npos);
+}
+
+TEST(RaceDetectorPluginTest, Rdna4GenericFlatPartialWaitRetiresOldestEvent) {
+  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                  /*sgprs_per_wf=*/128);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  auto *plugin_ptr = plugin.get();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/128, /*vgprs=*/256, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(
+      /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/256,
+      /*physical_sgpr_count=*/128, waves);
+
+  constexpr uint32_t kAddressVgpr = 4;
+  cu->write_vgpr(wf->vgpr_alloc().base + kAddressVgpr, /*lane=*/0, 0);
+  cu->write_vgpr(wf->vgpr_alloc().base + kAddressVgpr + 1, /*lane=*/0, 0);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  for (uint32_t dst : {0u, 1u}) {
+    const auto words =
+        rdna4::build_vflat(rdna4::kFlatLoadB32Vflat, {.saddr = amdgpu::kModernNullSelector,
+                                                      .vdst = static_cast<uint8_t>(dst),
+                                                      .vaddr = kAddressVgpr});
+    std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
+    ASSERT_NE(load, nullptr);
+    const auto *issue = load->amdgpu_memory_issue_info();
+    ASSERT_NE(issue, nullptr);
+    const auto obligations = issue->counter_obligations();
+    ASSERT_EQ(obligations.size(), 2u);
+    EXPECT_EQ(obligations[0].wait_counter_type(), WaitCounterType::LOADCNT);
+    EXPECT_EQ(obligations[0].completion_class(), MemoryCompletionClass::VMEM);
+    EXPECT_EQ(obligations[1].wait_counter_type(), WaitCounterType::DSCNT);
+    EXPECT_EQ(obligations[1].completion_class(), MemoryCompletionClass::LDS);
+
+    EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
+    f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load, *wf);
+  }
+
+  auto *plugin_state =
+      static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
+  ASSERT_NE(plugin_state, nullptr);
+  ASSERT_NE(plugin_state->race_state, nullptr);
+  const auto &events = plugin_state->race_state->getDetector()->events();
+  ASSERT_EQ(events.totalAllocated(), 2);
+  EXPECT_EQ(events.memoryOrder(EventId{0}), MemoryOrderClass::UNORDERED);
+  EXPECT_EQ(events.memoryOrder(EventId{1}), MemoryOrderClass::UNORDERED);
+
+  wf->set_wait_target_loadcnt_dscnt(/*loadcnt=*/1, /*dscnt=*/1);
+  TestWaitcntInstruction wait("s_wait_loadcnt_dscnt");
+  f.plugin_group_->onAmdgpuAfterExecuteInstruction(/*pc=*/4, wait, *wf);
+
+  // Both ordered counter domains prove the oldest mixed-order event complete.
+  EXPECT_EQ(events.status(EventId{0}), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(events.status(EventId{1}), EventStatus::ACTIVE);
   f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base, /*lane_mask=*/1);
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
   f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + 1, /*lane_mask=*/1);

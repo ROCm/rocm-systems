@@ -6,6 +6,7 @@
 
 #include <cassert>
 #include <ostream>
+#include <span>
 #include <sstream>
 #include <string>
 
@@ -38,6 +39,22 @@ enum class MemoryEventType {
 
 /// Race-detector name for the decoded hardware completion-order classification.
 using MemoryOrderClass = amdgpu::MemoryCompletionClass;
+
+/// Derive the ordering usable for whole-event hazards such as destination WAW.
+/// Per-counter ordering remains useful for partial waits, but an event spanning
+/// different completion classes is not ordered as a whole.
+inline MemoryOrderClass
+memoryOrderForObligations(std::span<const amdgpu::MemoryCounterObligation> obligations) {
+  if (obligations.empty())
+    return MemoryOrderClass::UNORDERED;
+
+  const MemoryOrderClass order = obligations.front().completion_class();
+  for (const auto obligation : obligations) {
+    if (obligation.completion_class() != order)
+      return MemoryOrderClass::UNORDERED;
+  }
+  return order;
+}
 
 /// Event direction helpers: "to VGPR" means a load writing into a VGPR,
 /// "from VGPR" means a store reading out of a VGPR.

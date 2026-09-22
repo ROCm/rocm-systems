@@ -14,7 +14,6 @@
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
-#include <algorithm>
 #include <cassert>
 #include <format>
 #include <mutex>
@@ -52,14 +51,7 @@ MemoryOrderClass memory_order_for(const Instruction &inst) {
   assert(info && "memory instruction reached the race detector without completion metadata");
   if (!info || info->empty())
     return MemoryOrderClass::UNORDERED;
-
-  const auto obligations = info->counter_obligations();
-  const MemoryOrderClass order = obligations.front().completion_class();
-  return std::all_of(
-             obligations.begin(), obligations.end(),
-             [order](const auto obligation) { return obligation.completion_class() == order; })
-             ? order
-             : MemoryOrderClass::UNORDERED;
+  return memoryOrderForObligations(info->counter_obligations());
 }
 
 std::optional<std::vector<uint32_t>>

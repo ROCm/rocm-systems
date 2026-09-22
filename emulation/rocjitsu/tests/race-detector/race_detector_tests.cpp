@@ -25,10 +25,23 @@
 //   DualOffset_*    — dual-offset LDS events
 
 #include "race_test_builder.h"
+#include <array>
 #include <gtest/gtest.h>
 
 using namespace rocjitsu::plugins::race_detector;
 namespace amdgpu = rocjitsu::amdgpu;
+
+namespace {
+
+constexpr std::array kCdna1To4GenericFlatLoadObligations{
+    amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::UNORDERED},
+    amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::UNORDERED}};
+
+constexpr std::array kMixedOrderGenericFlatLoadObligations{
+    amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT, MemoryOrderClass::VMEM},
+    amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS}};
+
+} // namespace
 
 TEST(RaceDetectorDefaults, CoversEveryMemoryEventType) {
   EXPECT_EQ(defaultWaitCounterType(MemoryEventType::GLOBAL_TO_VGPR),
@@ -88,7 +101,7 @@ TEST(RaceDetector, Vgpr_WaitcntClearsRace) {
 
 TEST(RaceDetector, FlatGlobalLoadRequiresBothCounterWaits) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  b.flatGlobalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1);
+  b.flatGlobalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1, kCdna1To4GenericFlatLoadObligations);
 
   b.waitcnt(/*wave=*/0, /*vmcnt=*/0);
   b.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
@@ -162,22 +175,9 @@ TEST(RaceDetector, CompletedFlatLdsStoreIsSafeForSameWaveLdsRead) {
 
 TEST(RaceDetector, FlatLoadCombinedZeroWaitClearsBothCounters) {
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  b.flatGlobalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1);
+  b.flatGlobalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1, kCdna1To4GenericFlatLoadObligations);
 
   b.waitcnt(/*wave=*/0, /*vmcnt=*/0, /*lgkmcnt=*/0);
-  b.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
-  EXPECT_FALSE(b.hasRace());
-}
-
-TEST(RaceDetector, FlatLoadCombinedPartialWaitRetiresOldest) {
-  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  b.flatGlobalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1);
-  b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
-  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/3);
-
-  // Each counter domain decrements in issue order. Once both domains prove the
-  // oldest FLAT obligation complete, the combined event is complete too.
-  b.waitcnt(/*wave=*/0, /*vmcnt=*/1, /*lgkmcnt=*/1);
   b.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
   EXPECT_FALSE(b.hasRace());
 }
@@ -706,6 +706,24 @@ TEST(RaceDetector, VgprWaw_DifferentCompletionClassesAreUnordered) {
   b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
   b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1, /*exec=*/0,
                /*byteMask=*/0xF, MemoryOrderClass::UNORDERED);
+
+  EXPECT_TRUE(b.hasVgprRace(2));
+}
+
+TEST(RaceDetector, VgprWaw_MixedOrderFlatLoadThenGlobalLoadRace) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.flatGlobalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1,
+                   kMixedOrderGenericFlatLoadObligations);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
+
+  EXPECT_TRUE(b.hasVgprRace(2));
+}
+
+TEST(RaceDetector, VgprWaw_GlobalLoadThenMixedOrderFlatLoadRace) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
+  b.flatGlobalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1,
+                   kMixedOrderGenericFlatLoadObligations);
 
   EXPECT_TRUE(b.hasVgprRace(2));
 }

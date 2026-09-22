@@ -11,11 +11,11 @@
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
-#include <array>
 #include <cassert>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -52,19 +52,21 @@ public:
   }
 
   /// Register a generic FLAT load whose active lanes resolve uniformly to
-  /// global memory. Generic FLAT retains both architectural counter
-  /// obligations even though its memory route is known here.
-  void flatGlobalLoad(int wave, int vgprBase, int numRegs, uint64_t exec = 0) {
+  /// global memory. The caller supplies architecture-specific counter
+  /// obligations because their domains and ordering vary by target.
+  void flatGlobalLoad(int wave, int vgprBase, int numRegs,
+                      std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                      uint64_t exec = 0) {
     if (!exec)
       exec = defaultExec_;
-    const std::array obligations{
-        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::VMEM},
-        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::LDS}};
+    const MemoryOrderClass memoryOrder = memoryOrderForObligations(counterObligations);
     std::vector<uint32_t> registers(numRegs);
-    for (int i = 0; i < numRegs; ++i)
+    for (int i = 0; i < numRegs; ++i) {
       registers[i] = vgprBase + i;
+      waves_[wave]->checkVgprWrite(vgprBase + i, exec, /*byteMask=*/0xF, memoryOrder);
+    }
     waves_[wave]->registerEvent(pc_++, MemoryEventType::GLOBAL_TO_VGPR, std::move(registers), exec,
-                                /*byteMask=*/0xF, obligations, MemoryOrderClass::VMEM);
+                                /*byteMask=*/0xF, counterObligations, memoryOrder);
   }
 
   /// Register a Direct-to-LDS global load (tracked by vmcnt).
@@ -149,15 +151,15 @@ public:
                                    memoryOrder, additionalWaitCounterType);
   }
 
-  /// Register a generic FLAT load whose active lanes resolve uniformly to LDS.
-  /// The primary VMCNT and additional LGKMCNT obligations are independent of
+  /// Register a CDNA1-4 generic FLAT load whose active lanes resolve uniformly
+  /// to LDS. Its unordered VMCNT and LGKMCNT obligations are independent of
   /// that resolved memory route.
   void flatLdsLoad(int wave, int lane, int addr, int bytes, int vgprDst) {
     ldsRead(wave, lane, addr, bytes, vgprDst, /*byteMask=*/0xF, amdgpu::WaitCounterType::VMCNT,
             MemoryOrderClass::UNORDERED, amdgpu::WaitCounterType::LGKMCNT);
   }
 
-  /// Register a generic FLAT store whose active lane resolves to LDS.
+  /// Register a CDNA1-4 generic FLAT store whose active lane resolves to LDS.
   void flatLdsStore(int wave, int lane, int addr, int bytes) {
     ldsWrite(wave, lane, addr, bytes, MemoryOrderClass::UNORDERED, amdgpu::WaitCounterType::VMCNT,
              amdgpu::WaitCounterType::LGKMCNT);
