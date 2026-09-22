@@ -193,7 +193,7 @@ TEST_F(GroupEndInternalTest, BlockingGroupWithPendingJob_RunsSynchronouslyAndRet
 // Multi-rank symmetric task preparation must be deferred until every local
 // communicator has enqueued its job. Running the first communicator inline can
 // block in bootstrap consensus before its sibling communicators enter it.
-TEST(PrepareTasksAndCollPreconnectTest, MultiRankSymmetricCommEnqueuesAsyncJob) {
+TEST_F(GroupEndInternalTest, MultiRankSymmetricCommEnqueuesAsyncJob) {
   auto comm = std::make_unique<ncclComm>();  // value-initialised => zeroed
   comm->intraRanks = 2;
   comm->symmetricSupport = 1;
