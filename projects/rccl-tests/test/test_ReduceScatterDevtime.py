@@ -91,12 +91,16 @@ pytestmark = pytest.mark.skipif(
 
 
 def _assert_datacheck_clean(out):
-    if "#wrong=0" in out:
-        return
-    if "Out of bounds values : 0 OK" in out:
-        return
+    # A nonzero verdict wins over any clean row printed alongside it, so test
+    # that first. Absence of all three patterns is itself a failure: the run
+    # died before printing a verdict, and returning here would pass the test on
+    # no evidence.
     if re.search(r"#wrong=\s*[1-9]", out):
         pytest.fail("datacheck reported wrong elements:\n{}".format(out[-2000:]))
+    if "#wrong=0" in out or "Out of bounds values : 0 OK" in out:
+        return
+    pytest.fail("no datacheck verdict in output; expected a #wrong column or an "
+                "'Out of bounds values' line:\n{}".format(out[-2000:]))
 
 
 def _run_devtime(request, device_timing_mode, devtime_check=False):
