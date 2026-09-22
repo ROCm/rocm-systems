@@ -68,6 +68,10 @@ struct CeAlltoAllvMockComm
         comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         comm.config.numRmaCtx = 1;
         comm.maxLocalRanks    = localRanks;
+        // Init only builds hierarchical sub-comms (and sets this flag) at
+        // nNodes >= 8. ncclHierCeAvailable bails without it, so the mock has
+        // to claim the sub-comms exist or every hier-eligible case stays false.
+        comm.hierarchicalCommsInitialized = true;
         comm.devrState.bigSize = 1;
         comm.devrState.lsaSize = localRanks;
         comm.devrState.lsaSelf = 0;
