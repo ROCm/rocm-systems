@@ -67,7 +67,9 @@ def counter_row(dispatch_id, counter_name, counter_value, kernel_id=7):
     }
 
 
-def dispatch_row(dispatch_id, kernel_id=7, start=1000, end=2000):
+def dispatch_row(dispatch_id, kernel_id=7, start=1000, end=2000, correlation_id=None):
+    # A dispatch carries its own correlation id, which is not its dispatch id.
+    # They are only equal by accident, so the default keeps them apart.
     return {
         "dispatch_id": dispatch_id,
         "gpu_id": 2,
@@ -78,7 +80,9 @@ def dispatch_row(dispatch_id, kernel_id=7, start=1000, end=2000):
         "scratch_per_workitem": 0,
         "start_timestamp": start,
         "end_timestamp": end,
-        "correlation_id": dispatch_id,
+        "correlation_id": dispatch_id + 500
+        if correlation_id is None
+        else correlation_id,
     }
 
 
@@ -236,6 +240,9 @@ def test_dispatch_and_symbol_columns_reach_the_output(workload_dir):
     native_data.write_counter_frame(workload_dir, output)
 
     row = read_rows(output)[0]
+    # The correlation id is the dispatch's own, not the reassigned dispatch id.
+    assert row["Correlation_Id"] == "501"
+    assert row["Dispatch_ID"] == "1"
     assert row["Grid_Size"] == "1048576"
     assert row["Workgroup_Size"] == "256"
     assert row["Kernel_Name"] == "vecCopy(double*, int)"
