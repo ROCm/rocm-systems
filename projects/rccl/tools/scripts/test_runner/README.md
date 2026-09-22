@@ -454,7 +454,7 @@ Optional:
   --suite-name GLOB[:GLOB…] Run only suites matching any glob pattern; ':' = OR, '*' = wildcard, '-' prefix = exclude, case-sensitive (e.g. 'P2P*' = all P2P suites; '*:-NET*' = all except NET)
   --no-build                Skip build step and use existing build
   --skip-tests              Skip test execution (useful with --coverage-report)
-  --coverage-report         Generate code coverage report (HTML + text)
+  --coverage-report         Generate coverage; device coverage on ROCm 7.15+, host-only otherwise
   --build-dir PATH          Custom build directory path (default: <workdir>/build/debug or build/release)
   --rerun-failed            Rerun failed tests with additional environment variables
   --skip-mpi-check          Skip MPI: removes --enable-mpi-tests from build, skips MPI check, skips tests with num_ranks > 1
@@ -462,7 +462,6 @@ Optional:
   --system NAME             Select system-specific MPI args profile from config (e.g. 'ainic', 'thor2')
   --mpi-args "ARGS"         Extra mpirun arguments appended after the config's base/suite/test mpi_args (MPI tests only). Also reads RCCL_TEST_MPI_ARGS env var.
   --mpich                   Use MPICH syntax (-env) instead of OpenMPI (-x) for passing env vars to mpirun
-  --overwrite               Overwrite previous workspace directories
   --report-suffix SUFFIX    Suffix for report directory (default: blank)
   --emit-results            Emit structured results (JSON/JSONL + tarball) for the dashboard
   --results-dir DIR         Directory for emitted results + tarballs (default: <workspace>/results)
@@ -484,29 +483,30 @@ The test runner integrates with LLVM tools to generate comprehensive code covera
 ### Generating Coverage
 
 ```bash
-# Build and test with coverage (recommended)
+# Build and test with coverage
 python test_runner.py --config test_config_sample.json --coverage-report --verbose
 
-# Generate report from existing profraw files
-python test_runner.py --config test_config_sample.json --no-build --skip-tests --coverage-report
+# Regenerate a report from an existing coverage workspace
+python test_runner.py --config test_config_sample.json --no-build --skip-tests \
+  --coverage-report --output /path/to/rccl_test_artifacts_<timestamp>
 ```
 
 ### Coverage Output
 
-When `--coverage-report` is specified, the runner generates:
+`--coverage-report` always instruments host code and requests `ENABLE_FULL_COVERAGE=AUTO`. CMake adds device instrumentation when the device linker, ROCm version, compiler, and profile runtime support it; otherwise AUTO falls back to host-only coverage. Direct builds can use the strict `./install.sh --debug --enable-full-coverage` option, which stops with an error instead of falling back when device coverage is unavailable. The runner generates:
 
-1. **HTML Report**: Visual coverage report in `reports/` directory
-   - View with: `firefox reports/index.html`
+1. **HTML Report**: Visual coverage report in `<workspace>/report/`
+   - View with: `firefox <workspace>/report/index.html`
    - Shows line-by-line coverage with syntax highlighting
 
 2. **Text Report**: Function-level coverage summary
-   - Location: `reports/function_coverage_report.txt`
+   - Location: `<workspace>/report/function_coverage_report.txt`
    - Includes per-function and per-file statistics
 
 ### Coverage Implementation Details
 
 - Uses LLVM instrumentation (`-fprofile-instr-generate -fcoverage-mapping`)
-- Collects `.profraw` files during test execution
+- Writes `.profraw` files to `<workspace>/logs/rawfiles/` using hostname, PID, and module identifiers; multi-node runs require the workspace path to be shared by every host
 - Merges profiles with `llvm-profdata`
 - Generates reports with `llvm-cov show` and `llvm-cov report`
 - Filters out irrelevant files (test/, gtest, external dependencies)
@@ -618,8 +618,10 @@ python test_runner.py --config adhoc_test_config.json --coverage-report --verbos
 ### Generate Coverage from Existing Build
 
 ```bash
-# Skip build, use existing profraw files
-python test_runner.py --config adhoc_test_config.json --no-build --skip-tests --coverage-report
+# Skip build/run, reuse an existing workspace's profraw files. --output must
+# point at the previous run's workspace or there are no profraws to report on.
+python test_runner.py --config adhoc_test_config.json --no-build --skip-tests \
+    --coverage-report --output /path/to/previous/workspace
 ```
 
 ### Custom Output Directory
@@ -1514,3 +1516,15 @@ When the same configuration can be specified in multiple places, the priority is
 
 **Example**: If `ROCM_PATH` is set as an environment variable, it overrides the `rocm_path` value in the JSON configuration file.
 
+## Unit Tests
+
+The runner ships with unit tests under `tools/scripts/test_runner/tests/` covering coverage build-flag selection, config env-var expansion, workspace/profraw handling, the device-coverage CMake probe, and the `rccl-device-compile` link driver. They use only the Python standard library (`unittest`), so no extra dependencies are required.
+
+Run them from the `test_runner` directory. This `unittest discover` invocation is the canonical, supported entry point:
+
+```bash
+cd projects/rccl/tools/scripts/test_runner
+python3 -m unittest discover -s tests -t . -v
+```
+
+`pytest` also discovers them via `pytest.ini` (`pytest tests/`) if you prefer, but the `unittest discover` command above is the one contributors and CI should use so the two entry points never diverge.

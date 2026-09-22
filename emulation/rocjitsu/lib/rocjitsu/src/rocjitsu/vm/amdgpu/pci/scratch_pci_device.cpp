@@ -60,11 +60,15 @@ int64_t ScratchPciDevice::bar_access(int bar, std::span<std::byte> buf, uint64_t
   return static_cast<int64_t>(buf.size());
 }
 
-void ScratchPciDevice::dma_map(const simdojo::DmaRegion & /*region*/) { ++mapped_regions_; }
+void ScratchPciDevice::dma_map(const simdojo::DmaRegion & /*region*/) {
+  mapped_regions_.fetch_add(1, std::memory_order_relaxed);
+}
 
 void ScratchPciDevice::dma_unmap(const simdojo::DmaRegion & /*region*/) {
-  if (mapped_regions_ != 0) {
-    --mapped_regions_;
+  std::size_t mapped_regions = mapped_regions_.load(std::memory_order_relaxed);
+  while (mapped_regions != 0 &&
+         !mapped_regions_.compare_exchange_weak(mapped_regions, mapped_regions - 1,
+                                                std::memory_order_relaxed)) {
   }
 }
 

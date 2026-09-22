@@ -1,12 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""ROCTX marker coverage test for ``inject_roctx``.
+"""ROCTX marker coverage for ``--torch-trace``.
 
-Samples a random subset of ATen operators plus structural entry points,
-runs ``torch.profiler`` as ground truth, runs ``rocprof-compute
---torch-trace``, and compares marker output per operator. Sampling is
-controlled by ``--coverage-seed`` and ``--coverage-n``. Requires GPU.
+``--coverage-n`` is the sample budget (default 20). Structural operators
+are always included; remaining slots are random ATen ops. Compares
+``torch.profiler`` to ``rocprof-compute --torch-trace`` markers. Use
+``--coverage-n 100`` for a nightly run. Requires a GPU.
 """
 
 import json
@@ -70,7 +70,7 @@ def test_random_operator_kernel_coverage(
         parse_roctx_markers,
         print_torch_trace_coverage_session_header,
         run_ground_truth_torch_profiler_subprocess,
-        unique_get_output_param_id,
+        unique_output_param_id,
         write_coverage_workload_artifacts,
     )
 
@@ -87,11 +87,11 @@ def test_random_operator_kernel_coverage(
     aten_ops, structural_ops, excluded_aten_ops = discover_operators()
 
     # The budget caps the ATen sample only; structural entries are always included.
-    n_aten = min(
+    aten_sample_count = min(
         max(0, sample_budget - len(structural_ops)),
         len(aten_ops),
     )
-    sampled = rng.sample(aten_ops, n_aten) + structural_ops
+    sampled = rng.sample(aten_ops, aten_sample_count) + structural_ops
 
     print_torch_trace_coverage_session_header(
         seed,
@@ -102,22 +102,22 @@ def test_random_operator_kernel_coverage(
         len(excluded_aten_ops),
     )
 
-    gt_work_dir = common.get_output_dir(
-        param_id=unique_get_output_param_id("torch_trace_gt"),
+    ground_truth_dir = common.get_output_dir(
+        param_id=unique_output_param_id("torch_trace_gt"),
         suffix="_tmp",
         clean_existing=True,
     )
     workload_dir = common.get_output_dir(
-        param_id=unique_get_output_param_id("random_op_coverage"),
+        param_id=unique_output_param_id("random_op_coverage"),
         clean_existing=True,
     )
-    Path(gt_work_dir).mkdir(parents=True, exist_ok=True)
+    Path(ground_truth_dir).mkdir(parents=True, exist_ok=True)
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
 
-    ground_truth_path = str(Path(gt_work_dir) / "ground_truth.json")
-    workload_script_path = str(Path(gt_work_dir) / "coverage_workload.py")
+    ground_truth_path = str(Path(ground_truth_dir) / "ground_truth.json")
+    workload_script_path = str(Path(ground_truth_dir) / "coverage_workload.py")
     ground_truth_runner_script_path = str(
-        Path(gt_work_dir) / "coverage_ground_truth_runner.py"
+        Path(ground_truth_dir) / "coverage_ground_truth_runner.py"
     )
 
     try:
@@ -249,7 +249,7 @@ def test_random_operator_kernel_coverage(
         )
         common.clean_output_dir(
             COVERAGE_TEST_CONFIG["cleanup"],
-            gt_work_dir,
+            ground_truth_dir,
         )
 
 

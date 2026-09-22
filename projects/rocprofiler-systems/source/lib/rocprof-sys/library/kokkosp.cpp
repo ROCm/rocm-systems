@@ -129,7 +129,7 @@ violates_name_rules(Arg&& _arg, Args&&... _args)
 {
     // for causal profiling we only consider callbacks which are explicitly named
     if(rocprofsys::config::get_use_causal() &&
-       (std::string_view{ _arg }.find("Kokkos::") == 0 ||
+       (std::string_view{ _arg }.starts_with("Kokkos::") ||
         std::string_view{ _arg }.find("Space::") != std::string_view::npos))
         return true;
 
@@ -182,8 +182,8 @@ cache_kokkos_event(const char* name, const char* event_type, const char* target,
         rocprofsys::trace_cache::in_time_sample{
             static_cast<size_t>(rocprofsys::category_enum_id<category::kokkos>::value),
             rocprofsys::trait::name<category::kokkos>::value, timestamp_ns,
-            event_metadata.dump().c_str(), stack_id, parent_stack_id, correlation_id,
-            call_stack, line_info });
+            event_metadata.dump(), stack_id, parent_stack_id, correlation_id, call_stack,
+            line_info });
 }
 
 }  // namespace
@@ -271,13 +271,12 @@ extern "C"
         if(_version > 0) _settings->requires_global_fencing = false;
     }
 
-    void kokkosp_init_library([[maybe_unused]] const int           loadSeq,
-                              [[maybe_unused]] const std::uint64_t interfaceVer,
-                              const std::uint32_t devInfoCount, void* deviceInfo)
+    void kokkosp_init_library(const int loadSeq, const std::uint64_t interfaceVer,
+                              [[maybe_unused]] const std::uint32_t devInfoCount,
+                              [[maybe_unused]] void*               deviceInfo)
     {
         auto _thread_state_guard =
             rocprofsys::state::thread::scoped(rocprofsys::state::thread::Internal);
-        tim::consume_parameters(devInfoCount, deviceInfo);
 
         LOG_DEBUG(
             "Initializing rocprof-sys kokkos connector (sequence {}, version: {})...",

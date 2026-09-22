@@ -46,6 +46,11 @@ ncclResult_t IbCastPortRecoveryQpsRestoreAinic(struct ncclIbPortRecoveryContext*
     createAttr.isDataQp = localQp->isDataQp;
     // isCtsEnabled and ctsQpSlot are left at 0 (from memset in IbCastBuildDataQpCreateAttr).
     // CTS offload is disabled when resiliency features are enabled (init.cc).
+    // TODO - QP sharing:
+    //        as of now QP sharing disabled during recovery restore.
+    //        to analyze and set sharing accordingly for this QP during recovery restore.
+    //        identify if it is primary or secondary comm and set sharing attributes accordingly.
+    IbCastQpCreateAttrInitSharing(&createAttr);
     NCCLCHECK(IbCastQpCreate(localQp, &createAttr));
     localQp->telQpStats = telQpStats;
 
@@ -78,6 +83,11 @@ ncclResult_t IbCastPortRecoveryQpsRestoreAinic(struct ncclIbPortRecoveryContext*
         flushCreateAttr.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
         flushCreateAttr.channelId = flushQp->channelId;
         flushCreateAttr.isDataQp = flushQp->isDataQp;
+        // Loopback flush QP carries no classification, as at connect time.
+        flushCreateAttr.isP2p = 0;
+        // TODO - QP sharing:
+        //        disabled for flush QP
+        IbCastQpCreateAttrInitSharing(&flushCreateAttr);
         NCCLCHECK(IbCastQpCreate(flushQp, &flushCreateAttr));
         INFO(NCCL_NET, "NET/IB: %s: Recreated Flush QP on device %d (comm=%p, new_qp_num=%u)", __func__, i,
              recoveryContext->resCtx->baseComm, flushQp->qp->qp_num);

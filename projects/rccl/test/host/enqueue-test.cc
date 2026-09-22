@@ -8,8 +8,9 @@
 // helpers are directly callable.
 //
 // LINE-NUMBER BASE: every `enqueue.cc:NNNN` citation in these tests refers to
-// src/enqueue.cc as committed, NOT to the hipified copy this TU compiles. Hipify
-// inserts one line near the top, so add 1 when navigating build/hipify/src/enqueue.cc.
+// src/enqueue/enqueue.cc as committed, NOT to the hipified copy this TU compiles.
+// Hipify inserts one line near the top, so add 1 when navigating
+// build/hipify/src/enqueue/enqueue.cc.
 
 #include <gtest/gtest.h>
 
@@ -24,6 +25,7 @@
 #include <vector>
 
 #include "../common/LogCapture.hpp"
+#include "ScopedHook.h"
 #include "fakes/enqueue_fakes.h"
 
 // alloc.h first, so its macros are visible to be #undef'd before enqueue.cc's
@@ -78,8 +80,8 @@ void ncclDevKernel_Generic_8(ncclDevKernelArgsDefaultStorage) {}
 void ncclDevKernel_Generic_16(ncclDevKernelArgsDefaultStorage) {}
 void ncclDevKernel_Generic_32(ncclDevKernelArgsDefaultStorage) {}
 
-// ENQUEUE_CC_PATH is ${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc -- enqueue.cc is
-// basename-unique in the tree, so hipify keeps its name (no _tmp suffix).
+// ENQUEUE_CC_PATH is ${PROJECT_BINARY_DIR}/hipify/src/enqueue/enqueue.cc -- hipify
+// keeps the src/enqueue/ directory layout.
 #include ENQUEUE_CC_PATH
 
 class EnqueueMicrotest : public ::testing::Test {
@@ -1952,14 +1954,14 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeGfx950_IsEnabled) {
 }
 
 TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_Gfx950WithAinic_IsDisabled) {
-  // The `!rcclUseAinic()` conjunct -- the reason g_rcclUseAinic is a seam in
+  // The `!rcclUseAinic()` conjunct -- the reason g_rcclUseAinicValue is a seam in
   // fakes/transport_stubs.cc rather than the fail-loud stub it used to be.
   // Without it the flag stays false in every test and dropping the conjunct
   // survives. Differential with MultiNodeGfx950_IsEnabled, which is identical
   // but for the AINIC flag.
   BatchComm bc(/*nNodes=*/2, "gfx950");
   SetBatchParam(-1);
-  g_rcclUseAinic = true;
+  g_rcclUseAinicValue = true;
   EXPECT_EQ(0, rcclEffectiveP2pBatchEnable(bc.get()))
       << "gfx950 with AINIC must not enable p2p batching";
 }
@@ -1974,37 +1976,53 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeOtherArch_IsDisabled) 
 }
 
 // ===========================================================================
-// getImplicitOrder (enqueue.cc:1996)
-// On AMD the CUDA driver-version arm is #if'd out entirely, so only two arms
-// are reachable: param-on -> Serial, param-off -> None. Pinning that the AMD
+// getImplicitOrder (enqueue.cc:2091)
+// Reads comm->config.launchOrderImplicit (env is applied at init). On AMD the
+// CUDA driver-version arm is #if'd out, so only two arms are reachable:
+// config==1 -> Serial, anything else (0 / UNDEF) -> None. Pinning that the AMD
 // build cannot return ncclImplicitOrderLaunch is the useful assertion.
+// ncclComm is too large for the stack (see BatchPlanComm).
 // ===========================================================================
 
+namespace {
+std::unique_ptr<ncclComm> MakeLaunchOrderComm(int launchOrderImplicit) {
+  auto comm = std::unique_ptr<ncclComm>(new ncclComm{});
+  comm->config.launchOrderImplicit = launchOrderImplicit;
+  return comm;
+}
+}  // namespace
+
 TEST_F(EnqueueMicrotest, GetImplicitOrder_ParamDisabled_IsNone) {
-  SetParam("LAUNCH_ORDER_IMPLICIT", 0);
+  auto comm = MakeLaunchOrderComm(0);
   auto mode = ncclImplicitOrderLaunch;  // poison
-  ASSERT_EQ(ncclSuccess, getImplicitOrder(&mode, /*capturing=*/false));
+  ASSERT_EQ(ncclSuccess, getImplicitOrder(&mode, comm.get(), /*capturing=*/false));
+  EXPECT_EQ(ncclImplicitOrderNone, mode);
+}
+
+TEST_F(EnqueueMicrotest, GetImplicitOrder_UndefDefault_IsNone) {
+  auto comm = MakeLaunchOrderComm(NCCL_CONFIG_UNDEF_INT);
+  auto mode = ncclImplicitOrderLaunch;  // poison
+  ASSERT_EQ(ncclSuccess, getImplicitOrder(&mode, comm.get(), /*capturing=*/false));
   EXPECT_EQ(ncclImplicitOrderNone, mode);
 }
 
 TEST_F(EnqueueMicrotest, GetImplicitOrder_ParamEnabled_IsSerialOnAmd) {
-  SetParam("LAUNCH_ORDER_IMPLICIT", 1);
+  auto comm = MakeLaunchOrderComm(1);
   auto mode = ncclImplicitOrderNone;  // poison
-  ASSERT_EQ(ncclSuccess, getImplicitOrder(&mode, /*capturing=*/false));
+  ASSERT_EQ(ncclSuccess, getImplicitOrder(&mode, comm.get(), /*capturing=*/false));
   EXPECT_EQ(ncclImplicitOrderSerial, mode);
 }
 
 TEST_F(EnqueueMicrotest, GetImplicitOrder_CapturingIsIrrelevantOnAmd) {
   // HONEST SCOPE: this pins that `capturing` does not change the answer; it does
   // NOT prove the AMD arm is what produced it. Under the seam's driver 12000 the
-  // CUDA arm returns Serial for both values too (:2002 12000 < 12090; :2006
-  // 12030 <= min(CUDART, 12000) is false), so an #if change would not fail here.
-  // getImplicitOrder's third parameter (driver, :1996) is what separates the arms.
-  SetParam("LAUNCH_ORDER_IMPLICIT", 1);
+  // CUDA arm returns Serial for both values too, so an #if change would not fail
+  // here. The optional driver argument is what separates the CUDA arms.
+  auto comm = MakeLaunchOrderComm(1);
   auto a = ncclImplicitOrderNone;
   auto b = ncclImplicitOrderNone;
-  ASSERT_EQ(ncclSuccess, getImplicitOrder(&a, /*capturing=*/true));
-  ASSERT_EQ(ncclSuccess, getImplicitOrder(&b, /*capturing=*/false));
+  ASSERT_EQ(ncclSuccess, getImplicitOrder(&a, comm.get(), /*capturing=*/true));
+  ASSERT_EQ(ncclSuccess, getImplicitOrder(&b, comm.get(), /*capturing=*/false));
   EXPECT_EQ(a, b);
   EXPECT_EQ(ncclImplicitOrderSerial, a);
 }
@@ -2349,6 +2367,32 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_EveryItemLandsInExactlyOneBatch) {
   EXPECT_EQ(kItems, bits) << "every call must set exactly one slot bit";
   EXPECT_EQ(bp.queueLength(), bp.p()->nWorkBatches)
       << "plan->nWorkBatches must track the queue length";
+}
+
+// ===========================================================================
+// ncclTasksRegAndEnqueue (enqueue.cc:414)
+// ===========================================================================
+
+TEST_F(EnqueueMicrotest, TasksRegAndEnqueue_UnresolvableRegVariantId_IsInvalidUsage) {
+  // nccl_stubs.cc leaves ncclDevFuncNameToId empty, so the reg-variant arm's
+  // ncclDevFuncId returns -1 by construction. Unchecked it would dispatch as a funcId.
+  BatchPlanComm bp;
+  ScopedHook reg(g_ncclRegisterCollBuffers,
+                 [](struct ncclComm*, struct ncclTaskColl*, void**, void**,
+                    struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>*,
+                    bool* needConnect) {
+                   if (needConnect) *needConnect = false;
+                   return ncclSuccess;
+                 });
+
+  ncclTaskColl task = {};
+  task.func = ncclFuncAllReduce;      // in ll128_reg_variant_colls
+  task.protocol = NCCL_PROTO_LL128;   // ...and LL128, so the reg-variant arm runs
+  task.algorithm = NCCL_ALGO_RING;    // not NVLS: those skip the arm entirely
+  ncclIntruQueueEnqueue(&bp.c()->planner.collTaskQueue, &task);
+
+  EXPECT_EQ(ncclInvalidUsage, ncclTasksRegAndEnqueue(bp.c()));
+  EXPECT_EQ(1, reg.calls);
 }
 
 // ===========================================================================
@@ -3185,6 +3229,34 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_MinNchannelsIsAFloorOnTheShrink) {
       << "NCCL_MIN_NCHANNELS must floor the shrink; unclamped was " << unclamped;
 }
 
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_PatMaxNchannelsClampsTheChannelCount) {
+  AlgoInfoComm cc;
+  cc.get()->nChannels = 8;
+  auto task = CostTask(ncclFuncAllGather);
+  CostTable tbl;
+  tbl.t[NCCL_ALGO_PAT][NCCL_PROTO_SIMPLE] = 0.5f;
+  g_paramMaxNchannels = 3;
+
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, /*nBytes=*/2 << 20, tbl.ptr(),
+                                         /*simInfo=*/nullptr));
+  EXPECT_EQ(NCCL_ALGO_PAT, task.algorithm);
+  EXPECT_EQ(3, task.nMaxChannels) << "positive NCCL_MAX_NCHANNELS must clamp PAT's channel count";
+}
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_PatUnsetMaxNchannelsDoesNotClamp) {
+  AlgoInfoComm cc;
+  cc.get()->nChannels = 8;
+  auto task = CostTask(ncclFuncAllGather);
+  CostTable tbl;
+  tbl.t[NCCL_ALGO_PAT][NCCL_PROTO_SIMPLE] = 0.5f;
+  g_paramMaxNchannels = -2;
+
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, /*nBytes=*/2 << 20, tbl.ptr(),
+                                         /*simInfo=*/nullptr));
+  EXPECT_EQ(NCCL_ALGO_PAT, task.algorithm);
+  EXPECT_EQ(8, task.nMaxChannels) << "the production -2 sentinel must leave PAT's channel count alone";
+}
+
 // Guards the fix for the &tablePtr defect: topoGetAlgoInfo must read the cost
 // table it was handed. updateCollCostTable is driven first because it owns the
 // only ncclTopoGetAlgoTime call site (:2539), so it is what makes the scripted
@@ -3248,4 +3320,77 @@ TEST_F(EnqueueMicrotest, RedOpCreate_RecorderFailure_Propagates) {
   EXPECT_EQ(ncclInternalError,
             ncclRedOpCreatePreMulSum_impl(&op, &s, ncclFloat32,
                                           ncclScalarHostImmediate, rc.get()));
+}
+// ===========================================================================
+// collTaskAppend -- symkExtract tag (enqueue.cc:3508-3511)
+//
+// collTaskAppend is static inside enqueue.cc and in scope here via the
+// ENQUEUE_CC_PATH textual include. The two cases below pin that a
+// non-symmetric decision writes RCCL_SYMK_EXTRACT_DENY and RCCL_SYMMETRIC
+// writes RCCL_SYMK_EXTRACT_ALLOW. A third case pins decisionValid=false →
+// RCCL_SYMK_EXTRACT_NONE. The consumer (ncclMakeSymmetricTaskList) is a
+// fail-loud stub in test/host/fakes/sched_stubs.cc and is not reachable here;
+// only the tag written onto the task is checked.
+// ===========================================================================
+
+// Minimal comm that satisfies collTaskAppend without entering the Broadcast /
+// AllGatherV branch and without GPU allocation.
+struct CollTaskComm {
+  std::unique_ptr<ncclComm> storage{new ncclComm{}};
+  CollTaskComm() { storage->nRanks = 4; }
+  ncclComm* get() { return storage.get(); }
+};
+
+static ncclInfo MakeCollInfo(ncclComm* comm, bool decisionValid, int algo) {
+  ncclInfo info{};
+  info.comm          = comm;
+  info.coll          = ncclFuncAllReduce;
+  info.op            = ncclSum;
+  info.datatype      = ncclFloat32;
+  info.count         = static_cast<size_t>(comm->nRanks);
+  info.chunkSteps    = 1;
+  info.sliceSteps    = 1;
+  info.decisionValid = decisionValid;
+  info.decision.algo = algo;
+  return info;
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_NonSymmetricDecision_WritesDeny) {
+  // decisionValid=true, algo != RCCL_SYMMETRIC → symkExtract must be DENY so
+  // ncclMakeSymmetricTaskList does not extract the task even when buffers are
+  // registered.
+  CollTaskComm cc;
+  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/true, NCCL_ALGO_RING);
+  ncclDevRedOpFull opDev{};
+  ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
+  ASSERT_EQ(1, cc.get()->planner.nTasksColl);
+  const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
+  ASSERT_NE(nullptr, t);
+  EXPECT_EQ(RCCL_SYMK_EXTRACT_DENY, t->symkExtract);
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_SymmetricDecision_WritesAllow) {
+  // decisionValid=true, algo == RCCL_SYMMETRIC → symkExtract must be ALLOW so
+  // ncclMakeSymmetricTaskList can extract the task.
+  CollTaskComm cc;
+  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/true, RCCL_SYMMETRIC);
+  ncclDevRedOpFull opDev{};
+  ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
+  ASSERT_EQ(1, cc.get()->planner.nTasksColl);
+  const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
+  ASSERT_NE(nullptr, t);
+  EXPECT_EQ(RCCL_SYMK_EXTRACT_ALLOW, t->symkExtract);
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_NoDecision_WritesNone) {
+  // decisionValid=false → symkExtract must stay NONE so the extractor uses
+  // window inspection rather than a stale/absent selector result.
+  CollTaskComm cc;
+  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/false, NCCL_ALGO_RING);
+  ncclDevRedOpFull opDev{};
+  ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
+  ASSERT_EQ(1, cc.get()->planner.nTasksColl);
+  const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
+  ASSERT_NE(nullptr, t);
+  EXPECT_EQ(RCCL_SYMK_EXTRACT_NONE, t->symkExtract);
 }

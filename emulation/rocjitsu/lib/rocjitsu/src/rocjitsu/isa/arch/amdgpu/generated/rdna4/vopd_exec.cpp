@@ -62,21 +62,19 @@ uint32_t Vopd::apply_neg(uint32_t value, uint8_t neg_bits, uint8_t src_idx) {
 }
 
 uint32_t Vopd::bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table) {
-  uint32_t result = 0;
-  for (uint32_t bit = 0; bit < 32; ++bit) {
-    uint32_t idx = (((src0 >> bit) & 1u) << 2) | (((src1 >> bit) & 1u) << 1);
-    result |= ((truth_table >> idx) & 1u) << bit;
-  }
-  return result;
+  return amdgpu::bitop3_words(src0, src1, uint32_t{0}, static_cast<uint8_t>(truth_table));
 }
 
 uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t lane) {
   uint32_t src0 = amdgpu::RegisterAccess(wf).read_lane(*slot.src0, lane);
+  if (uses_src_neg_modifier(slot.op))
+    src0 = apply_neg(src0, slot.neg, 0);
+  if (slot.op == kVopdMovB32)
+    return src0;
   uint32_t src1 = amdgpu::RegisterAccess(wf).read_lane(*slot.src1, lane);
   uint32_t src2 = slot.has_src2_operand ? amdgpu::RegisterAccess(wf).read_lane(*slot.src2, lane)
                                         : slot.src2_imm;
   if (uses_src_neg_modifier(slot.op)) {
-    src0 = apply_neg(src0, slot.neg, 0);
     src1 = apply_neg(src1, slot.neg, 1);
     src2 = apply_neg(src2, slot.neg, 2);
   }
@@ -149,6 +147,11 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
 void Vopd::execute_impl(amdgpu::Wavefront &wf) {
   if (wf.wf_size() != 32)
     throw util::UnimplementedInst("VOPD requires Wave32");
+  if (amdgpu::try_execute_vopd_integer_pair_simd<kVopdMovB32, kVopdAddNcU32, kVopdLshlrevB32>(
+          wf, x_, y_))
+    return;
+  if (amdgpu::try_execute_vopd_simd<false>(x_, y_, wf))
+    return;
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))

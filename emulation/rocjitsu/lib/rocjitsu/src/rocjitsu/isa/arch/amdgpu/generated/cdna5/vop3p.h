@@ -935,6 +935,7 @@ public:
 class VPkFmaF64Vop3p : public Vop3p {
 public:
   VPkFmaF64Vop3p(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -944,6 +945,7 @@ public:
 class VPkMulF64Vop3p : public Vop3p {
 public:
   VPkMulF64Vop3p(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -952,6 +954,7 @@ public:
 class VPkAddF64Vop3p : public Vop3p {
 public:
   VPkAddF64Vop3p(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -960,6 +963,7 @@ public:
 class VPkAddNcU64Vop3p : public Vop3p {
 public:
   VPkAddNcU64Vop3p(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -968,6 +972,7 @@ public:
 class VPkSubNcU64Vop3p : public Vop3p {
 public:
   VPkSubNcU64Vop3p(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -976,6 +981,7 @@ public:
 class VPkMaxNumF64Vop3p : public Vop3p {
 public:
   VPkMaxNumF64Vop3p(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -984,6 +990,7 @@ public:
 class VPkMinNumF64Vop3p : public Vop3p {
 public:
   VPkMinNumF64Vop3p(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -1002,6 +1009,7 @@ public:
 class VWmmaF6416x16x4F64Vop3p : public Vop3p {
 public:
   VWmmaF6416x16x4F64Vop3p(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;

@@ -7,6 +7,7 @@ split pipeline.
 """
 
 import hashlib
+import json
 import os
 import shutil
 import stat
@@ -15,7 +16,13 @@ from pathlib import Path
 
 import pytest
 
+from rocm_bootstrap.targets import lookup_target
+from rocm_bootstrap.tests.conftest import FakePlatform
+from rocm_bootstrap.variant_provider import AMDVariantPlugin
+
+from rocm_kpack.binutils import Toolchain
 from rocm_kpack.wheel_splitter import (
+    DatabaseFileRef,
     FatBinaryInfo,
     InvalidWheelError,
     NoFatBinariesError,
@@ -386,6 +393,132 @@ class TestBundleKeyToDistName:
             ), f"Failed for {bundle_key}"
 
 
+class TestCreateDeviceWheel:
+    """Device payload merging, independent of ZIP serialization."""
+
+    @pytest.fixture
+    def identity(self) -> WheelIdentity:
+        return WheelIdentity(
+            name="torch",
+            version="2.10.0+rocm7.1",
+            python_tag="cp313",
+            abi_tag="cp313",
+            platform_tag="manylinux_2_28_x86_64",
+            dist_info_name="torch-2.10.0+rocm7.1.dist-info",
+        )
+
+    @pytest.fixture
+    def splitter(self) -> WheelSplitter:
+        return WheelSplitter(
+            device_package_prefix="amd-torch-device",
+            overlay_root="torch/",
+            toolchain=Toolchain(),
+        )
+
+    @pytest.fixture
+    def database_refs(self, tmp_path: Path) -> list[DatabaseFileRef]:
+        refs = []
+        for target in ("gfx1250", "gfx1250-strict"):
+            path = tmp_path / f"{target}.db"
+            path.write_bytes(b"shared")
+            refs.append(DatabaseFileRef(path, "lib/shared.db", target, "test"))
+        return refs
+
+    @pytest.mark.parametrize(
+        "owner,targets",
+        [
+            ("gfx942", ("gfx942",)),
+            ("gfx1250", ("gfx1250",)),
+            ("gfx1250", ("gfx1250-strict",)),
+            ("gfx1250", ("gfx1250", "gfx1250-strict")),
+        ],
+    )
+    def test_owner_wheel_retains_all_supplied_archives(
+        self,
+        tmp_path: Path,
+        owner: str,
+        targets: tuple[str, ...],
+        identity: WheelIdentity,
+        splitter: WheelSplitter,
+    ):
+        archives = []
+        for target in targets:
+            path = tmp_path / f"{target}.kpack"
+            path.write_bytes(target.encode())
+            archives.append((target, path))
+        output = tmp_path / "output"
+        output.mkdir()
+        wheel = splitter._create_device_wheel(
+            owner, identity, "torch", archives, [], output, "directory"
+        )
+        assert wheel.name.startswith(f"amd_torch_device_{owner}-")
+        payload_dir = wheel / "torch" / ".kpack"
+        assert {path.name for path in payload_dir.iterdir()} == {
+            f"torch_{target}.kpack" for target in targets
+        }
+        for target in targets:
+            assert (
+                payload_dir / f"torch_{target}.kpack"
+            ).read_bytes() == target.encode()
+
+    def test_identical_database_files_are_deduplicated(
+        self,
+        tmp_path: Path,
+        identity: WheelIdentity,
+        splitter: WheelSplitter,
+        database_refs: list[DatabaseFileRef],
+    ):
+        output = tmp_path / "output"
+        output.mkdir()
+        wheel = splitter._create_device_wheel(
+            "gfx1250", identity, "torch", [], database_refs, output, "directory"
+        )
+        assert list((wheel / "torch" / "lib").iterdir()) == [
+            wheel / "torch/lib/shared.db"
+        ]
+        assert (wheel / "torch/lib/shared.db").read_bytes() == b"shared"
+
+    def test_conflicting_database_contents_are_rejected(
+        self,
+        tmp_path: Path,
+        identity: WheelIdentity,
+        splitter: WheelSplitter,
+        database_refs: list[DatabaseFileRef],
+    ):
+        database_refs[1].absolute_path.write_bytes(b"different")
+        output = tmp_path / "output"
+        output.mkdir()
+        with pytest.raises(WheelSplitError, match="Conflicting device path"):
+            splitter._create_device_wheel(
+                "gfx1250", identity, "torch", [], database_refs, output, "directory"
+            )
+        assert not list(output.rglob("shared.db"))
+
+    def test_file_directory_overlap_is_rejected(
+        self,
+        tmp_path: Path,
+        identity: WheelIdentity,
+        splitter: WheelSplitter,
+        database_refs: list[DatabaseFileRef],
+    ):
+        refs = [
+            database_refs[0],
+            DatabaseFileRef(
+                database_refs[1].absolute_path,
+                "lib/shared.db/child.db",
+                "gfx1250-strict",
+                "test",
+            ),
+        ]
+        output = tmp_path / "output"
+        output.mkdir()
+        with pytest.raises(WheelSplitError, match="Conflicting device entry types"):
+            splitter._create_device_wheel(
+                "gfx1250", identity, "torch", [], refs, output, "directory"
+            )
+        assert not list(output.rglob("shared.db"))
+
+
 class TestRewriteHostMetadata:
     """Test _rewrite_host_metadata via WheelSplitter."""
 
@@ -420,6 +553,31 @@ class TestRewriteHostMetadata:
             device_package_prefix="amd-torch-device",
             overlay_root="torch/",
             toolchain=Toolchain(),
+        )
+
+    @pytest.mark.parametrize(
+        "targets",
+        [
+            {"gfx1250"},
+            {"gfx1250-strict"},
+            {"gfx1250", "gfx1250-strict"},
+            {"gfx1250-strict:xnack+"},
+        ],
+    )
+    def test_shared_owner_metadata(self, tmp_path: Path, targets: set[str]):
+        staging, identity = self._make_host_staging(tmp_path)
+        splitter = self._make_splitter()
+        owners = {_arch_to_bundle_key(target) for target in targets}
+        assert owners == {"gfx1250"}
+        splitter._rewrite_host_metadata(
+            staging, identity, owners, include_variant_markers=True
+        )
+        metadata = (staging / identity.dist_info_name / "METADATA").read_text()
+        assert metadata.count("Provides-Extra: device-gfx1250\n") == 1
+        assert "amd-torch-device-gfx1250-strict" not in metadata
+        assert metadata.count('"amd :: gfx_arch :: gfx1250" in variant_properties') == 1
+        assert (
+            '"amd :: gfx_arch :: gfx1250-strict" in variant_properties' not in metadata
         )
 
     def test_rocm_bootstrap_dep(self, tmp_path: Path):
@@ -561,7 +719,9 @@ class TestRewriteHostMetadata:
 class TestVariantWheel:
     """Tests for PEP 817 variant wheel generation."""
 
-    def _make_host_staging(self, tmp_path: Path) -> tuple[Path, WheelIdentity]:
+    def _make_host_staging(
+        self, tmp_path: Path, target: str = "gfx942"
+    ) -> tuple[Path, WheelIdentity]:
         staging = tmp_path / "host_staging"
         staging.mkdir()
         dist_info = staging / "torch-2.10.0+rocm7.1.dist-info"
@@ -572,10 +732,10 @@ class TestVariantWheel:
             "Name: torch\n"
             "Version: 2.10.0+rocm7.1\n"
             "Requires-Dist: rocm-bootstrap\n"
-            "Provides-Extra: device-gfx942\n"
-            'Requires-Dist: amd-torch-device-gfx942 == 2.10.0+rocm7.1; extra == "device-gfx942"\n'
+            f"Provides-Extra: device-{target}\n"
+            f'Requires-Dist: amd-torch-device-{target} == 2.10.0+rocm7.1; extra == "device-{target}"\n'
             "Provides-Extra: device-all\n"
-            'Requires-Dist: amd-torch-device-gfx942 == 2.10.0+rocm7.1; extra == "device-all"\n'
+            f'Requires-Dist: amd-torch-device-{target} == 2.10.0+rocm7.1; extra == "device-all"\n'
             "\n"
             "Description body.\n"
         )
@@ -606,24 +766,27 @@ class TestVariantWheel:
             generate_variant_wheel=True,
         )
 
-    def test_add_variant_markers(self, tmp_path: Path):
-        staging, identity = self._make_host_staging(tmp_path)
+    @pytest.mark.parametrize("target", ["gfx942", "gfx1250"])
+    def test_add_variant_markers(self, tmp_path: Path, target: str):
+        staging, identity = self._make_host_staging(tmp_path, target)
         splitter = self._make_splitter()
-        splitter._add_variant_markers_to_metadata(staging, identity, {"gfx942"})
+        splitter._add_variant_markers_to_metadata(staging, identity, {target})
 
         metadata = (staging / identity.dist_info_name / "METADATA").read_text()
         # Should have the extras line AND the variant marker line
-        assert 'extra == "device-gfx942"' in metadata
-        assert ('"amd :: gfx_arch :: gfx942" in variant_properties') in metadata
+        assert f'extra == "device-{target}"' in metadata
+        assert (
+            metadata.count(f'"amd :: gfx_arch :: {target}" in variant_properties') == 1
+        )
+        assert '"amd :: gfx_arch :: gfx1250-strict"' not in metadata
         # "device-all" extra should NOT get variant markers
         assert '"amd :: gfx_arch :: all"' not in metadata
 
-    def test_variant_json(self, tmp_path: Path):
-        import json
-
-        staging, identity = self._make_host_staging(tmp_path)
+    @pytest.mark.parametrize("target", ["gfx942", "gfx1250"])
+    def test_variant_json(self, tmp_path: Path, target: str):
+        staging, identity = self._make_host_staging(tmp_path, target)
         splitter = self._make_splitter()
-        splitter._write_variant_json(staging, identity, {"gfx942", "gfx11"})
+        splitter._write_variant_json(staging, identity, {target, "gfx11"})
 
         variant_path = staging / identity.dist_info_name / "variant.json"
         assert variant_path.exists()
@@ -631,13 +794,32 @@ class TestVariantWheel:
         assert "providers" in data
         assert "amd" in data["providers"]
         assert "variants" in data
-        # gfx942 is a target, gfx11 is a family — only targets get variants
-        assert "gfx942" in data["variants"]
-        assert "gfx11" not in data["variants"]
+        # Family bundles do not produce variant entries.
+        assert data["variants"] == {target: {"amd": {"gfx_arch": [target]}}}
+
+    def test_numeric_provider_matches_gfx1250_strict_metadata(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        platform = FakePlatform()
+        platform.add_gpu_node(1, lookup_target("gfx1250"))
+        platform.apply(monkeypatch)
+        owner = _arch_to_bundle_key("gfx1250-strict")
+        staging, identity = self._make_host_staging(tmp_path, owner)
+        splitter = self._make_splitter()
+        splitter._add_variant_markers_to_metadata(staging, identity, {owner})
+        splitter._write_variant_json(staging, identity, {owner})
+
+        values = AMDVariantPlugin.get_supported_configs()[0].values
+        assert values == ["gfx1250"]
+        dist_info = staging / identity.dist_info_name
+        variants = json.loads((dist_info / "variant.json").read_text())
+        assert variants["variants"] == {"gfx1250": {"amd": {"gfx_arch": values}}}
+        assert (
+            f'"amd :: gfx_arch :: {values[0]}" in variant_properties'
+            in (dist_info / "METADATA").read_text()
+        )
 
     def test_create_variant_wheel_directory(self, tmp_path: Path):
-        import json
-
         staging, identity = self._make_host_staging(tmp_path)
         splitter = self._make_splitter()
         output_dir = tmp_path / "output"

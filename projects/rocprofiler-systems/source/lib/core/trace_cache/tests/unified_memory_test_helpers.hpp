@@ -7,7 +7,10 @@
 #include "core/trace_cache/sample_type.hpp"
 
 #include <cstdint>
+#include <deque>
 #include <string>
+#include <string_view>
+#include <utility>
 
 namespace rocprofsys
 {
@@ -16,11 +19,27 @@ namespace trace_cache
 namespace test
 {
 
+namespace detail
+{
+// kfd_sample stores non-owning string_view fields (mirrors production's
+// buffer-backed samples). These test helpers build samples with dynamically
+// formatted strings that must outlive the returned sample, so intern them in
+// a process-lifetime pool rather than letting them dangle when the
+// constructing function returns.
+[[nodiscard]] inline std::string_view
+intern(std::string value)
+{
+    static thread_local std::deque<std::string> s_pool;
+    s_pool.push_back(std::move(value));
+    return s_pool.back();
+}
+}  // namespace detail
+
 [[nodiscard]] inline agent
 make_cpu_agent(std::uint32_t node_id, std::string name = "AMD CPU")
 {
     agent a{};
-    a.type      = agent_type::CPU;
+    a.type      = agent_type::cpu;
     a.node_id   = node_id;
     a.name      = std::move(name);
     a.device_id = node_id;
@@ -31,7 +50,7 @@ make_cpu_agent(std::uint32_t node_id, std::string name = "AMD CPU")
 make_gpu_agent(std::uint32_t node_id, std::string name = "gfx950")
 {
     agent a{};
-    a.type      = agent_type::GPU;
+    a.type      = agent_type::gpu;
     a.node_id   = node_id;
     a.name      = std::move(name);
     a.device_id = node_id;
@@ -46,13 +65,13 @@ make_kfd_page_migrate_sample_raw_args(
 {
     kfd_sample s;
     s.thread_id       = 1;
-    s.name            = std::move(trigger_name);
+    s.name            = detail::intern(std::move(trigger_name));
     s.start_timestamp = 0;
     s.end_timestamp   = 100;
-    s.args_str        = std::move(args_str);
+    s.args_str        = detail::intern(std::move(args_str));
     s.category        = "rocm_kfd_page_migrate";
     s.device_id       = 0;
-    s.device_type     = static_cast<std::uint8_t>(agent_type::CPU);
+    s.device_type     = static_cast<std::uint8_t>(agent_type::cpu);
     s.value           = kDefaultMigrateSizeBytes;
     return s;
 }
@@ -61,7 +80,7 @@ make_kfd_page_migrate_sample_raw_args(
 make_kfd_page_migrate_sample(std::uint32_t src_node, std::uint32_t dst_node,
                              std::uint64_t size_bytes, std::uint64_t duration_ns,
                              std::uint32_t device_id,
-                             agent_type    device_type  = agent_type::CPU,
+                             agent_type    device_type  = agent_type::cpu,
                              std::string   trigger_name = "PAGE_MIGRATE_PAGEFAULT_GPU")
 {
     auto args = "0;;std::uint64_t;;start_address;;0x0;;"
@@ -82,7 +101,7 @@ make_kfd_page_migrate_sample(std::uint32_t src_node, std::uint32_t dst_node,
 
 [[nodiscard]] inline kfd_sample
 make_kfd_page_fault_sample(std::uint32_t agent_id, bool is_read,
-                           agent_type device_type = agent_type::GPU)
+                           agent_type device_type = agent_type::gpu)
 {
     kfd_sample s;
     s.thread_id       = 1;
