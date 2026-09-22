@@ -38,7 +38,8 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
     // Normalize relocated registers into the GFX12 slots used below. Read the
     // original snapshot because several source and destination slots overlap.
     const auto &ctx = state.context_registers;
-    for (const auto [dst, src] : {std::pair{0x1c, 0x200},
+    for (const auto [dst, src] : {std::pair{0x1b, 0x203},
+                                  {0x1c, 0x200},
                                   {0x190, 0x1b6},
                                   {0x195, 0x1c5},
                                   {0x198, 0x1b4},
@@ -260,6 +261,13 @@ DispatchEntry GraphicsDraw::fragment_dispatch() const {
 
 void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
   const bool gfx12 = arch_ == ROCJITSU_CODE_ARCH_RDNA4;
+  const uint32_t clip_control = context_[0x204];
+  if (clip_control & (1u << 22)) // DX_RASTERIZATION_KILL
+    return;
+  if (clip_control & (0x3fu | (1u << 28)))
+    throw std::runtime_error("graphics user clip planes are not implemented");
+  if (context_[0x1b] & (1u << 6)) // DB_SHADER_CONTROL.KILL_ENABLE
+    throw std::runtime_error("graphics fragment discard is not implemented");
   if (context_[0x2f9] != 0x2d)
     throw std::runtime_error("unsupported graphics pixel center or subpixel rounding");
   const uint32_t info = context_[0x3b0];
@@ -352,6 +360,7 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
       double x, y, w, z;
     };
     std::array<Point, 3> v{}, screen{};
+    uint32_t outside_near = 0, outside_far = 0;
     for (uint32_t k = 0; k < 3; ++k) {
       const uint32_t index_bits = gfx12 ? 9 : 10;
       indices[k] = (primitives_[p] >> (index_bits * k)) & ((1u << index_bits) - 1);
@@ -364,7 +373,15 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
       if (!std::isfinite(w) || w <= 0 || !std::isfinite(x) || !std::isfinite(y)) {
         throw std::runtime_error("graphics homogeneous clipping is not implemented");
       }
-      screen[k] = {x / w * sx + ox, y / w * sy + oy, w, std::bit_cast<float>(position[2]) / w};
+      const float z = std::bit_cast<float>(position[2]);
+      if (!std::isfinite(z))
+        throw std::runtime_error("graphics nonfinite depth is not implemented");
+      if (!(clip_control & (1u << 16))) {
+        const float near = (clip_control & (1u << 19)) ? 0.0f : -w;
+        outside_near += !(clip_control & (1u << 26)) && z < near;
+        outside_far += !(clip_control & (1u << 27)) && z > w;
+      }
+      screen[k] = {x / w * sx + ox, y / w * sy + oy, w, z / w};
       v[k] = {raster::round_subpixel(screen[k].x), raster::round_subpixel(screen[k].y), screen[k].w,
               screen[k].z};
       screen[k] = v[k];
@@ -372,6 +389,10 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
           std::abs(v[k].y) > (1 << 20))
         throw std::runtime_error("graphics vertex exceeds supported raster coordinates");
     }
+    if (outside_near == 3 || outside_far == 3)
+      continue;
+    if (outside_near || outside_far)
+      throw std::runtime_error("graphics near/far clipping is not implemented");
     const auto edge = [](Point a, Point b, double x, double y) {
       return (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x);
     };
@@ -469,7 +490,10 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
                 std::bit_cast<float>(context_[0x114]);
           bool inside = true;
           if (rectangle) {
-            inside = px >= min_x && px < max_x && py >= min_y && py < max_y;
+            inside = px >= std::min({v[0].x, v[1].x, v[2].x}) &&
+                     px < std::max({v[0].x, v[1].x, v[2].x}) &&
+                     py >= std::min({v[0].y, v[1].y, v[2].y}) &&
+                     py < std::max({v[0].y, v[1].y, v[2].y});
           } else {
             for (uint32_t k = 0; k < 3; ++k) {
               Point a = v[k], b = v[(k + 1) % 3];

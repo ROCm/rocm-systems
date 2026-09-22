@@ -202,62 +202,92 @@ TEST_P(GraphicsExportTest, ParameterLoadUsesQuadMaskAndPrimitiveOffsets) {
 
 TEST_P(GraphicsExportTest, RectangleRunsFragmentWavesAndWritesOnlyCoveredPixels) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
-  amdgpu::Pm4QueueState state;
-  state.num_instances = 1;
-  state.uconfig_registers[0x242] = 0x11;
-  state.context_registers[0x3b0] = 10;
-  state.context_registers[0x31e] = (3 << 16) | 3;
-  state.context_registers[0x31f] = 3 << 15;
-  state.context_registers[0x318] = 0x1000;
-  state.context_registers[0x214] = 15;
-  state.context_registers[0x195] = 4;
-  state.context_registers[0x198] = 2;
-  state.context_registers[0x2f9] = 0x2d;
-  state.context_registers[0x205] = 0x43f;
-  state.context_registers[0x10f] = state.context_registers[0x110] = state.context_registers[0x111] =
-      state.context_registers[0x112] = std::bit_cast<uint32_t>(2.0f);
-  state.context_registers[0x90] = 1 | (1 << 16);
-  state.context_registers[0x91] = 3 | (3 << 16);
-  if (!gfx12) {
-    state.context_registers[0x31c] = 10;
-    state.context_registers[0x3b0] = 3 | (3 << 14);
-    state.context_registers[0x3b8] = 26 << 14;
-    state.context_registers[0x31e] = 0;
-    state.context_registers[0x8e] = 15;
-    state.context_registers[0x1c5] = 4;
-    state.context_registers[0x1b4] = 2;
-    state.context_registers[0x206] = 0x43f;
-    state.context_registers[0x205] = 0;
-  }
-  auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
-  for (uint32_t i = 0; i < 3; ++i) {
-    const std::array<uint32_t, 4> position{std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
-                                           std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f), 0,
-                                           std::bit_cast<uint32_t>(1.0f)};
-    draw->export_lane(*wave_, i, 12, 15, position);
-  }
-  draw->export_lane(*wave_, 0, 20, 1,
-                    {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
-  const auto dispatch = draw->advance(memory_, 0);
-  ASSERT_TRUE(dispatch);
-  ASSERT_EQ(dispatch->total_wgs, 1);
-  wave_->set_wg_coord(0, 0, 0);
-  wave_->set_graphics_stage(draw);
-  draw->initialize(*wave_, 0, 0);
-  EXPECT_EQ(std::popcount(wave_->exec()), 4);
-  // Include helper lanes in exports; only the four covered fragments may write.
-  for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
-    draw->export_lane(*wave_, lane, 0, 3, {0x00003c00, 0x3c000000, 0, 0});
-  EXPECT_FALSE(draw->advance(memory_, 0));
-  for (uint32_t y = 0; y < 4; ++y)
-    for (uint32_t x = 0; x < 4; ++x) {
-      const auto address = gfx12 ? amdgpu::gfx12_image_offset(x, y, 4, 4, 3)
-                                 : amdgpu::gfx11_image_offset(x, y, 4, 4, 26);
-      ASSERT_TRUE(address);
-      EXPECT_EQ(memory_.read32(0x100000 + *address),
-                x >= 1 && x < 3 && y >= 1 && y < 3 ? 0xff0000ffu : 0u)
-          << x << "," << y;
+  for (uint32_t scenario = 0; scenario < 6; ++scenario) {
+    SCOPED_TRACE(scenario);
+    for (uint32_t y = 0; y < 4; ++y)
+      for (uint32_t x = 0; x < 4; ++x) {
+        const auto address = gfx12 ? amdgpu::gfx12_image_offset(x, y, 4, 4, 3)
+                                   : amdgpu::gfx11_image_offset(x, y, 4, 4, 26);
+        memory_.write32(0x100000 + *address, 0);
+      }
+    amdgpu::Pm4QueueState state;
+    state.num_instances = 1;
+    state.uconfig_registers[0x242] = 0x11;
+    state.context_registers[0x3b0] = 10;
+    state.context_registers[0x31e] = (3 << 16) | 3;
+    state.context_registers[0x31f] = 3 << 15;
+    state.context_registers[0x318] = 0x1000;
+    state.context_registers[0x214] = 15;
+    state.context_registers[0x195] = 4;
+    state.context_registers[0x198] = 2;
+    state.context_registers[0x2f9] = 0x2d;
+    state.context_registers[0x205] = 0x43f;
+    state.context_registers[0x10f] = state.context_registers[0x110] =
+        state.context_registers[0x111] = state.context_registers[0x112] =
+            std::bit_cast<uint32_t>(2.0f);
+    state.context_registers[0x90] = 1 | (1 << 16);
+    state.context_registers[0x91] = 3 | (3 << 16);
+    if (!gfx12) {
+      state.context_registers[0x31c] = 10;
+      state.context_registers[0x3b0] = 3 | (3 << 14);
+      state.context_registers[0x3b8] = 26 << 14;
+      state.context_registers[0x31e] = 0;
+      state.context_registers[0x8e] = 15;
+      state.context_registers[0x1c5] = 4;
+      state.context_registers[0x1b4] = 2;
+      state.context_registers[0x206] = 0x43f;
+      state.context_registers[0x205] = 0;
     }
+    if (scenario == 1) {
+      state.context_registers[0x90] = 0;
+      state.context_registers[0x91] = 4 | (4 << 16);
+    }
+    if (scenario == 2)
+      state.context_registers[0x204] = 1u << 22;
+    if (scenario == 3)
+      state.context_registers[gfx12 ? 0x1b : 0x203] = 1u << 6;
+    const float extent = scenario == 1 ? 0.625f : 1.0f;
+    auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
+    for (uint32_t i = 0; i < 3; ++i) {
+      const std::array<uint32_t, 4> position{
+          std::bit_cast<uint32_t>(i == 2 ? extent : -extent),
+          std::bit_cast<uint32_t>(i == 1 ? extent : -extent),
+          std::bit_cast<uint32_t>(scenario == 4 || (scenario == 5 && i == 0) ? 2.0f : 0.0f),
+          std::bit_cast<uint32_t>(1.0f)};
+      draw->export_lane(*wave_, i, 12, 15, position);
+    }
+    draw->export_lane(*wave_, 0, 20, 1,
+                      {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
+    if (scenario == 3 || scenario == 5) {
+      EXPECT_THROW(draw->advance(memory_, 0), std::runtime_error);
+      continue;
+    }
+    if (scenario == 2 || scenario == 4) {
+      EXPECT_FALSE(draw->advance(memory_, 0));
+      EXPECT_EQ(memory_.read32(0x100000), 0);
+      continue;
+    }
+    const auto dispatch = draw->advance(memory_, 0);
+    ASSERT_TRUE(dispatch);
+    ASSERT_EQ(dispatch->total_wgs, 1);
+    wave_->set_wg_coord(0, 0, 0);
+    wave_->set_graphics_stage(draw);
+    draw->initialize(*wave_, 0, 0);
+    EXPECT_EQ(std::popcount(wave_->exec()), 4);
+    // Include helper lanes in exports; only the four covered fragments may write.
+    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+      draw->export_lane(*wave_, lane, 0, 3, {0x00003c00, 0x3c000000, 0, 0});
+    EXPECT_FALSE(draw->advance(memory_, 0));
+    for (uint32_t y = 0; y < 4; ++y)
+      for (uint32_t x = 0; x < 4; ++x) {
+        const auto address = gfx12 ? amdgpu::gfx12_image_offset(x, y, 4, 4, 3)
+                                   : amdgpu::gfx11_image_offset(x, y, 4, 4, 26);
+        ASSERT_TRUE(address);
+        EXPECT_EQ(memory_.read32(0x100000 + *address),
+                  x >= 1 && x < 3 && y >= 1 && y < 3 ? 0xff0000ffu : 0u)
+            << x << "," << y;
+      }
+  }
 }
 
 TEST_P(GraphicsExportTest, IndexedDrawPreservesVertexIndicesAndLocalConnectivity) {
