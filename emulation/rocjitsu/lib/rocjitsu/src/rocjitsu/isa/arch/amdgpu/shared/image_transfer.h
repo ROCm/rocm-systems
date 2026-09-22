@@ -11,8 +11,11 @@
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
+#include <cstdint>
 
 namespace rocjitsu::amdgpu {
 

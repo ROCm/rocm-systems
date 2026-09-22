@@ -122,8 +122,8 @@ enum class SdmaPacketDialect {
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.
 ///
 /// @details Distributes AQL dispatch packets across the registered compute units in
-/// round-robin order, activating pre-allocated wavefront slots. PM4 compute queues
-/// build the same dispatch entries from shader registers and dispatch packets.
+/// round-robin order, activating pre-allocated wavefront slots. PM4 queues build
+/// compute dispatches and graphics draws from registers and command packets.
 ///
 /// Event-driven: the CP monitors registered hardware queue doorbells via a
 /// polling thread. When new AQL packets are detected, it fetches them from the

@@ -12,6 +12,7 @@
 #include "util/data_types.h"
 #include "util/log.h"
 
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <stdexcept>
@@ -43,6 +44,8 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
                                   {0x190, 0x1b6},
                                   {0x195, 0x1c5},
                                   {0x198, 0x1b4},
+                                  {0x115, 0xb4},
+                                  {0x116, 0xb5},
                                   {0x205, 0x206},
                                   {0x207, 0x205},
                                   {0x214, 0x8e},
@@ -52,6 +55,7 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
                                   {0x31f, 0x3b8},
                                   {0x3b0, 0x31c}})
       context_[dst] = ctx[src];
+    context_[0x19] = (ctx[3] >> 16) & 1; // DISABLE_VIEWPORT_CLAMP
     context_[0x31a] = 0;
     if ((ctx[0x8e] && (ctx[0x31e] & (1u << 22))) || ((ctx[0x200] & 2) && (ctx[0x10] & (1u << 29))))
       throw std::runtime_error("GFX11 compressed attachments require RADV_DEBUG=nodcc,nohiz");
@@ -541,6 +545,12 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
 void GraphicsDraw::write_outputs(GpuMemory &memory, uint32_t process_id) {
   const auto image_address =
       arch_ == ROCJITSU_CODE_ARCH_RDNA4 ? gfx12_image_address : gfx11_image_address;
+  const bool clamp_depth = !(context_[0x19] & 1);
+  const float depth_min = std::bit_cast<float>(context_[0x115]);
+  const float depth_max = std::bit_cast<float>(context_[0x116]);
+  if ((depth_control_ & 2) && clamp_depth &&
+      (!std::isfinite(depth_min) || !std::isfinite(depth_max) || depth_min > depth_max))
+    throw std::runtime_error("unsupported graphics viewport depth range");
   for (const auto &batch : fragments_) {
     for (uint32_t lane = 0; lane < fragment_wave_size_; ++lane) {
       const auto &f = batch.lanes[lane];
@@ -554,7 +564,8 @@ void GraphicsDraw::write_outputs(GpuMemory &memory, uint32_t process_id) {
                             *address, {reinterpret_cast<uint8_t *>(&previous_bits), depth_bytes_},
                             process_id) != AccessOutcome::Complete)
           throw std::runtime_error("graphics depth read failed");
-        uint32_t next_bits = std::bit_cast<uint32_t>(f.z);
+        const float clamped_depth = clamp_depth ? std::clamp(f.z, depth_min, depth_max) : f.z;
+        uint32_t next_bits = std::bit_cast<uint32_t>(clamped_depth);
         if (depth_bytes_ == 2) {
           const std::array<uint32_t, 1> component{next_bits};
           pack_buffer_format(7, 4, component, {reinterpret_cast<uint8_t *>(&next_bits), 2});
@@ -562,7 +573,7 @@ void GraphicsDraw::write_outputs(GpuMemory &memory, uint32_t process_id) {
         }
         const float previous =
             depth_bytes_ == 2 ? previous_bits / 65535.0f : std::bit_cast<float>(previous_bits);
-        const float depth = depth_bytes_ == 2 ? next_bits / 65535.0f : f.z;
+        const float depth = depth_bytes_ == 2 ? next_bits / 65535.0f : clamped_depth;
         bool pass = false;
         switch ((depth_control_ >> 4) & 7) {
         case 0:

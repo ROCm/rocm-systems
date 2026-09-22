@@ -26,8 +26,8 @@ namespace rocjitsu {
 namespace rdna4 {
 
 void ImageMsaaLoadVsample::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -192,7 +192,8 @@ void ImageGather4CLzOVsample::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageGetLodVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleDG16Vsample::execute_impl(amdgpu::Wavefront &wf) {

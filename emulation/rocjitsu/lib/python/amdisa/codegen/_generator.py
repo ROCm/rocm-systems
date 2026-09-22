@@ -7606,7 +7606,7 @@ class CodeGenerator:
             L.append(f'  }}')
             return '\n'.join(L)
 
-        # ── Image pipeline stubs ──────────────────────────────────────────
+        # ── Image transfers and resource queries ──────────────────────────────────────────
         # NOTE for image execution: the image ADDRESS is carried as the
         # fieldless ``vaddr`` operand (OPR_VGPR), currently emitted as an
         # inert placeholder. The real gfx12 address is NSA -- up to
@@ -7663,18 +7663,6 @@ class CodeGenerator:
                 ]
             )
 
-        if cls == 'image_load':
-            # Minimal image load: treat as a flat read from the image resource base address.
-            # Full image addressing (texture coordinates, dimensions) not yet implemented.
-            L.append('  // Minimal image load stub — not yet implemented.')
-            L.append('  (void)wf;')
-            return '\n'.join(L)
-
-        if cls == 'image_store':
-            L.append('  // Minimal image store stub — not yet implemented.')
-            L.append('  (void)wf;')
-            return '\n'.join(L)
-
         if cls == 'image_query' and inst.name.upper() == 'IMAGE_GET_RESINFO':
             resource = (
                 'inst_.rsrc'
@@ -7692,15 +7680,18 @@ class CodeGenerator:
                 f"{self._vgpr_base_expr('vdata')}, inst_.dmask, {r128}, inst_.a16);"
             )
 
-        if cls == 'image_sample':
+        if cls in (
+            'image_load',
+            'image_store',
+            'image_atomic',
+            'image_sample',
+            'image_query',
+            'image_bvh',
+        ):
             return (
                 '  wf.report_instruction_execution_error('
                 'amdgpu::InstructionExecutionError::UnimplementedInstruction);'
             )
-
-        if cls in ('image_atomic', 'image_query', 'image_bvh'):
-            L.append('  (void)wf; // Image pipeline not yet implemented.')
-            return '\n'.join(L)
 
         # ── Graphics-only stubs (no-ops in compute simulation) ───────────
         if cls == 'export':

@@ -273,7 +273,10 @@ inline void execute_ds_swizzle_b32_vds([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_image_bvh_intersect_ray_mimg([[maybe_unused]] Inst &inst,
-                                                 [[maybe_unused]] Wavefront &wf) {}
+                                                 [[maybe_unused]] Wavefront &wf) {
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+}
 
 template <typename Inst>
 inline void execute_lds_direct_load_ldsdir([[maybe_unused]] Inst &inst,

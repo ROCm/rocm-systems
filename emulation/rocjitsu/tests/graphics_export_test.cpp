@@ -503,15 +503,16 @@ TEST_P(GraphicsExportTest, HardwareImageLoadReadsTiledUintChannelsAndPacksD16) {
 TEST_P(GraphicsExportTest, LinearImageLoadsRespectDefaultPitchAndArrayDescriptorFields) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   struct Case {
+    const char *name;
     uint32_t width, word4, type, dim, offset;
   };
-  const Case cases[] = {{2, 0, 9, 1, gfx12 ? 132u : 260u},
-                        {2, 127, 9, 1, 516},
-                        {128, 1, 13, 5, 516},
-                        {128, 0, 13, 5, 516}};
+  const Case cases[] = {{"default pitch", 2, 0, 9, 1, gfx12 ? 132u : 260u},
+                        {"custom pitch", 2, 127, 9, 1, 516},
+                        {"two array layers", 128, 1, 13, 5, 516},
+                        {"one array layer", 128, 0, 13, 5, 516}};
   for (uint32_t i = 0; i < std::size(cases); ++i) {
-    SCOPED_TRACE(i);
     const auto &c = cases[i];
+    SCOPED_TRACE(c.name);
     const uint32_t base = 0x100000 + i * 0x10000;
     const std::array<uint32_t, 8> descriptor{base >> 8,
                                              (46u << (gfx12 ? 17 : 20)) |
@@ -552,8 +553,8 @@ TEST_P(GraphicsExportTest, LinearImageLoadsRespectDefaultPitchAndArrayDescriptor
     EXPECT_EQ(instruction->data_as<amdgpu::VectorMemState>()->per_lane_addr[0], base + c.offset);
     amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
     pipeline.issue(instruction.release(), *wave_);
-    for (uint32_t c = 0; c < 4; ++c)
-      EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), 0x11u * (c + 1));
+    for (uint32_t component = 0; component < 4; ++component)
+      EXPECT_EQ(wave_->debug_read_vgpr(8 + component, 0), 0x11u * (component + 1));
   }
 }
 
@@ -565,6 +566,20 @@ TEST_P(GraphicsExportTest, UnsupportedComparisonSamplingReportsAnExecutionError)
   } else {
     const auto sample = rdna3::build_mimg(32, {.dmask = 1}); // IMAGE_SAMPLE_C
     std::copy(sample.begin(), sample.end(), words.begin());
+  }
+  run(words);
+  EXPECT_EQ(wave_->instruction_execution_error(),
+            amdgpu::InstructionExecutionError::UnimplementedInstruction);
+}
+
+TEST_P(GraphicsExportTest, UnsupportedMipImageLoadReportsAnExecutionError) {
+  std::array<uint32_t, 4> words{};
+  if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
+    const auto load = rdna4::build_vimage(1, {.dmask = 1}); // IMAGE_LOAD_MIP
+    std::copy(load.begin(), load.end(), words.begin());
+  } else {
+    const auto load = rdna3::build_mimg(1, {.dmask = 1}); // IMAGE_LOAD_MIP
+    std::copy(load.begin(), load.end(), words.begin());
   }
   run(words);
   EXPECT_EQ(wave_->instruction_execution_error(),
@@ -661,68 +676,97 @@ TEST_P(GraphicsExportTest, HardwareSampleClampsCoordinatesAndConvertsSrgb) {
 
 TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
-  for (uint32_t bytes : {2u, 4u}) {
-    for (uint32_t comparison = 0; comparison < 8; ++comparison) {
-      amdgpu::Pm4QueueState state;
-      state.num_instances = 1;
-      state.uconfig_registers[0x242] = 17;
-      state.context_registers[5] = (3 << 16) | 3;
-      state.context_registers[6] = (bytes == 2 ? 1 : 3) | (3 << 4);
-      state.context_registers[8] = state.context_registers[10] = 0x2000;
-      state.context_registers[0x1c] = 6 | (comparison << 4);
-      state.context_registers[0x198] = 2;
-      state.context_registers[0x2f9] = 0x2d;
-      state.context_registers[0x205] = 0x43f;
-      state.context_registers[0x10f] = state.context_registers[0x110] =
-          state.context_registers[0x111] = state.context_registers[0x112] =
-              std::bit_cast<uint32_t>(2.0f);
-      state.context_registers[0x113] = std::bit_cast<uint32_t>(1.0f);
-      state.context_registers[0x90] = 1 | (1 << 16);
-      state.context_registers[0x91] = 3 | (3 << 16);
-      if (!gfx12) {
-        state.context_registers[7] = (3 << 16) | 3;
-        state.context_registers[0x10] = (bytes == 2 ? 1 : 3) | (24 << 4);
-        state.context_registers[0x12] = state.context_registers[0x14] = 0x2000;
-        state.context_registers[0x200] = 6 | (comparison << 4);
-        state.context_registers[0x1c] = 0;
-        state.context_registers[0x1b4] = 2;
-        state.context_registers[0x206] = 0x43f;
-        state.context_registers[0x205] = 0;
+  struct Case {
+    const char *name;
+    float vertex_z, scale, offset, minimum, maximum;
+    bool disable_clamp;
+    float expected;
+    uint16_t expected_d16;
+  };
+  constexpr Case cases[] = {
+      {"zero depth", 0, 1, 0, 0, 1, false, 0, 0},
+      {"far depth clamped", 2, 0.5f, 0.25f, 0.25f, 0.75f, false, 0.75f, 49151},
+      {"far depth unclamped", 2, 0.5f, 0.25f, 0.25f, 0.75f, true, 1.25f, 65535},
+      {"near depth clamped", -2, 0.5f, 0.25f, 0.25f, 0.75f, false, 0.25f, 16384},
+      {"near depth unclamped", -2, 0.5f, 0.25f, 0.25f, 0.75f, true, -0.75f, 0},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.name);
+    for (uint32_t bytes : {2u, 4u}) {
+      for (uint32_t comparison = 0; comparison < 8; ++comparison) {
+        amdgpu::Pm4QueueState state;
+        state.num_instances = 1;
+        state.uconfig_registers[0x242] = 17;
+        state.context_registers[5] = (3 << 16) | 3;
+        state.context_registers[6] = (bytes == 2 ? 1 : 3) | (3 << 4);
+        state.context_registers[8] = state.context_registers[10] = 0x2000;
+        state.context_registers[0x1c] = 6 | (comparison << 4);
+        state.context_registers[0x198] = 2;
+        state.context_registers[0x2f9] = 0x2d;
+        state.context_registers[0x205] = 0x43f;
+        state.context_registers[0x10f] = state.context_registers[0x110] =
+            state.context_registers[0x111] = state.context_registers[0x112] =
+                std::bit_cast<uint32_t>(2.0f);
+        state.context_registers[0x113] = std::bit_cast<uint32_t>(test.scale);
+        state.context_registers[0x114] = std::bit_cast<uint32_t>(test.offset);
+        state.context_registers[gfx12 ? 0x115 : 0xb4] = std::bit_cast<uint32_t>(test.minimum);
+        state.context_registers[gfx12 ? 0x116 : 0xb5] = std::bit_cast<uint32_t>(test.maximum);
+        state.context_registers[gfx12 ? 0x19 : 3] =
+            test.disable_clamp ? (gfx12 ? 1u : 1u << 16) : 0;
+        state.context_registers[0x204] = (1u << 26) | (1u << 27);
+        state.context_registers[0x90] = 1 | (1 << 16);
+        state.context_registers[0x91] = 3 | (3 << 16);
+        if (!gfx12) {
+          state.context_registers[7] = (3 << 16) | 3;
+          state.context_registers[0x10] = (bytes == 2 ? 1 : 3) | (24 << 4);
+          state.context_registers[0x12] = state.context_registers[0x14] = 0x2000;
+          state.context_registers[0x200] = 6 | (comparison << 4);
+          state.context_registers[0x1c] = 0;
+          state.context_registers[0x1b4] = 2;
+          state.context_registers[0x206] = 0x43f;
+          state.context_registers[0x205] = 0;
+        }
+        for (uint32_t y = 0; y < 4; ++y)
+          for (uint32_t x = 0; x < 4; ++x) {
+            const auto address = gfx12 ? amdgpu::gfx12_image_address(0x200000, x, y, 4, bytes, 3)
+                                       : amdgpu::gfx11_image_address(0x200000, x, y, 4, bytes, 24);
+            ASSERT_TRUE(address);
+            const uint32_t value = bytes == 2 ? 65535 : std::bit_cast<uint32_t>(1.0f);
+            memory_.write_block(*address, {reinterpret_cast<const uint8_t *>(&value), bytes}, 0);
+          }
+        auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
+        for (uint32_t i = 0; i < 3; ++i)
+          draw->export_lane(*wave_, i, 12, 15,
+                            {std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
+                             std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f),
+                             std::bit_cast<uint32_t>(test.vertex_z),
+                             std::bit_cast<uint32_t>(1.0f)});
+        draw->export_lane(*wave_, 0, 20, 1,
+                          {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
+        ASSERT_TRUE(draw->advance(memory_, 0));
+        // Depth-only clears have no fragment exports; fixed-function Z still writes.
+        EXPECT_FALSE(draw->advance(memory_, 0));
+        const float expected = bytes == 2 ? test.expected_d16 / 65535.0f : test.expected;
+        const bool comparisons[] = {false,        expected < 1,  expected == 1, expected <= 1,
+                                    expected > 1, expected != 1, expected >= 1, true};
+        const bool pass = comparisons[comparison];
+        const uint32_t expected_bits =
+            bytes == 2 ? test.expected_d16 : std::bit_cast<uint32_t>(expected);
+        for (uint32_t y = 0; y < 4; ++y)
+          for (uint32_t x = 0; x < 4; ++x) {
+            const auto address = gfx12 ? amdgpu::gfx12_image_address(0x200000, x, y, 4, bytes, 3)
+                                       : amdgpu::gfx11_image_address(0x200000, x, y, 4, bytes, 24);
+            uint32_t actual = 0;
+            ASSERT_EQ(memory_.read_block_exact(*address,
+                                               {reinterpret_cast<uint8_t *>(&actual), bytes}, 0),
+                      amdgpu::AccessOutcome::Complete);
+            const bool changed = pass && x >= 1 && x < 3 && y >= 1 && y < 3;
+            EXPECT_EQ(actual, changed      ? expected_bits
+                              : bytes == 2 ? 65535
+                                           : std::bit_cast<uint32_t>(1.0f))
+                << bytes << "," << comparison << "," << x << "," << y;
+          }
       }
-      for (uint32_t y = 0; y < 4; ++y)
-        for (uint32_t x = 0; x < 4; ++x) {
-          const auto address = gfx12 ? amdgpu::gfx12_image_address(0x200000, x, y, 4, bytes, 3)
-                                     : amdgpu::gfx11_image_address(0x200000, x, y, 4, bytes, 24);
-          ASSERT_TRUE(address);
-          const uint32_t value = bytes == 2 ? 65535 : std::bit_cast<uint32_t>(1.0f);
-          memory_.write_block(*address, {reinterpret_cast<const uint8_t *>(&value), bytes}, 0);
-        }
-      auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
-      for (uint32_t i = 0; i < 3; ++i)
-        draw->export_lane(*wave_, i, 12, 15,
-                          {std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
-                           std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f), 0,
-                           std::bit_cast<uint32_t>(1.0f)});
-      draw->export_lane(*wave_, 0, 20, 1,
-                        {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
-      ASSERT_TRUE(draw->advance(memory_, 0));
-      // Depth-only clears have no fragment exports; fixed-function Z still writes.
-      EXPECT_FALSE(draw->advance(memory_, 0));
-      const bool pass = comparison == 1 || comparison == 3 || comparison == 5 || comparison == 7;
-      for (uint32_t y = 0; y < 4; ++y)
-        for (uint32_t x = 0; x < 4; ++x) {
-          const auto address = gfx12 ? amdgpu::gfx12_image_address(0x200000, x, y, 4, bytes, 3)
-                                     : amdgpu::gfx11_image_address(0x200000, x, y, 4, bytes, 24);
-          uint32_t actual = 0;
-          ASSERT_EQ(
-              memory_.read_block_exact(*address, {reinterpret_cast<uint8_t *>(&actual), bytes}, 0),
-              amdgpu::AccessOutcome::Complete);
-          const bool changed = pass && x >= 1 && x < 3 && y >= 1 && y < 3;
-          EXPECT_EQ(actual, changed      ? 0
-                            : bytes == 2 ? 65535
-                                         : std::bit_cast<uint32_t>(1.0f))
-              << bytes << "," << comparison << "," << x << "," << y;
-        }
     }
   }
 }
