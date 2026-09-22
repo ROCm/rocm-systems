@@ -237,6 +237,18 @@ TEST_F(NetIbMPITest, QpShareDataAllConnsTransfer) {
         std::vector<std::vector<char>> sendBufs(established, std::vector<char>(kMaxSz));
         std::vector<std::vector<char>> recvBufs(established, std::vector<char>(kMaxSz));
         std::vector<void*> mhandles(established, nullptr);
+        // Deregister whatever succeeded before sendBufs/recvBufs free their
+        // backing memory on scope exit -- otherwise an early ASSERT_TRUE return
+        // below (this rank's own failure, or the peer's) leaves live MRs
+        // pointing at freed host memory.
+        SCOPE_EXIT(
+            for (int c = 0; c < established; c++) {
+                if (mhandles[c]) {
+                    EXPECT_EQ(DeregisterMemory(mine[c], mhandles[c]), ncclSuccess);
+                    mhandles[c] = nullptr;
+                }
+            }
+        );
         bool regOk = true;
         for (int c = 0; c < established && regOk; c++) {
             char* regBuf = (rank == 0) ? recvBufs[c].data() : sendBufs[c].data();
@@ -258,9 +270,6 @@ TEST_F(NetIbMPITest, QpShareDataAllConnsTransfer) {
                            /*patternSeed=*/static_cast<int>(i) * 31 + c);
             }
         }
-
-        for (int c = 0; c < established; c++)
-            EXPECT_EQ(DeregisterMemory(mine[c], mhandles[c]), ncclSuccess);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -318,6 +327,18 @@ TEST_F(NetIbMPITest, QpShareDataUnsharedGroups) {
         std::vector<std::vector<char>> sendBufs(established, std::vector<char>(kMsgSz));
         std::vector<std::vector<char>> recvBufs(established, std::vector<char>(kMsgSz));
         std::vector<void*> mhandles(established, nullptr);
+        // Deregister whatever succeeded before sendBufs/recvBufs free their
+        // backing memory on scope exit -- otherwise an early ASSERT_TRUE return
+        // below (this rank's own failure, or the peer's) leaves live MRs
+        // pointing at freed host memory.
+        SCOPE_EXIT(
+            for (int c = 0; c < established; c++) {
+                if (mhandles[c]) {
+                    EXPECT_EQ(DeregisterMemory(mine[c], mhandles[c]), ncclSuccess);
+                    mhandles[c] = nullptr;
+                }
+            }
+        );
         bool regOk = true;
         for (int c = 0; c < established && regOk; c++) {
             char* regBuf = (rank == 0) ? recvBufs[c].data() : sendBufs[c].data();
@@ -333,8 +354,6 @@ TEST_F(NetIbMPITest, QpShareDataUnsharedGroups) {
                        kMsgSz, kTagBase + c, mhandles[c], mhandles[c],
                        /*patternSeed=*/c + 11);
         }
-        for (int c = 0; c < established; c++)
-            EXPECT_EQ(DeregisterMemory(mine[c], mhandles[c]), ncclSuccess);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -344,8 +363,11 @@ TEST_F(NetIbMPITest, QpShareDataUnsharedGroups) {
 // =============================================================================
 // Test: QpShareDataFlushRouting  (category: data path)
 //
-// GDR flush completion routing across a shared CQ. A flush QP is per-comm and
-// is not itself shared, but its completion still lands on the group's shared CQ.
+// GDR flush completion routing across a shared CQ. Like the data QPs, a
+// SECONDARY's flush QP is itself shared -- it borrows the PRIMARY's flush QP
+// and refcounts it (connect.cc) -- and its completions land on the group's
+// shared CQ, so they must be routed back to the right comm by commId rather
+// than by which QP or request the completion happens to arrive on.
 // =============================================================================
 TEST_F(NetIbMPITest, QpShareDataFlushRouting) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
@@ -463,29 +485,39 @@ TEST_F(NetIbMPITest, QpShareDataFlushRouting) {
         MPI_Barrier(MPI_COMM_WORLD);
 
         if (rank == 0 && havePair) {
-            void* fReqP = nullptr; void* fReqS = nullptr;
-            int fszP = static_cast<int>(kSz), fszS = static_cast<int>(kSz);
-            EXPECT_EQ(FlushRecv(cs[primaryIdx].recv, 1, &devBufs[primaryIdx], &fszP,
-                                &mhandles[primaryIdx], &fReqP), ncclSuccess);
+            // One flush in flight at a time, SECONDARY first: with only one
+            // outstanding request there is nothing else its completion could be
+            // satisfied by, so a commId-routing bug shows up as this specific
+            // wait timing out rather than as a data mismatch. Posting both
+            // before waiting either (as this used to do) can't tell a correct
+            // router from one that just completes requests in post order --
+            // and either way, PRIMARY and SECONDARY's flush WRs land on the
+            // same shared physical flush QP, so per-QP completion ordering
+            // means the data is already fenced correctly regardless of which
+            // request object software attributes the completion to.
+            int wS = 0;
+            void* fReqS = nullptr;
+            int fszS = static_cast<int>(kSz);
             EXPECT_EQ(FlushRecv(cs[secondaryIdx].recv, 1, &devBufs[secondaryIdx], &fszS,
                                 &mhandles[secondaryIdx], &fReqS), ncclSuccess);
-            EXPECT_NE(fReqP, nullptr);
             EXPECT_NE(fReqS, nullptr);
-
-            // Wait SECONDARY first: completions must be routed by commId, not by
-            // the order the requests were posted or polled.
-            int wS = 0, wP = 0;
             EXPECT_EQ(WaitForCompletion(fReqS, &wS, kLargeTransferTimeoutMs), ncclSuccess)
                 << "SECONDARY (conn " << secondaryIdx << ") flush completion misrouted or lost";
-            EXPECT_EQ(WaitForCompletion(fReqP, &wP, kLargeTransferTimeoutMs), ncclSuccess)
-                << "PRIMARY (conn " << primaryIdx << ") flush completion misrouted or lost";
-
-            EXPECT_TRUE(verifyBufferData<uint8_t>(devBufs[primaryIdx], kSz,
-                                                  makeBytePattern(primaryIdx + 700)))
-                << "PRIMARY conn " << primaryIdx << " data wrong after flush -- cross-comm misroute";
             EXPECT_TRUE(verifyBufferData<uint8_t>(devBufs[secondaryIdx], kSz,
                                                   makeBytePattern(secondaryIdx + 700)))
-                << "SECONDARY conn " << secondaryIdx << " data wrong after flush -- cross-comm misroute";
+                << "SECONDARY conn " << secondaryIdx << " data wrong after flush";
+
+            int wP = 0;
+            void* fReqP = nullptr;
+            int fszP = static_cast<int>(kSz);
+            EXPECT_EQ(FlushRecv(cs[primaryIdx].recv, 1, &devBufs[primaryIdx], &fszP,
+                                &mhandles[primaryIdx], &fReqP), ncclSuccess);
+            EXPECT_NE(fReqP, nullptr);
+            EXPECT_EQ(WaitForCompletion(fReqP, &wP, kLargeTransferTimeoutMs), ncclSuccess)
+                << "PRIMARY (conn " << primaryIdx << ") flush completion misrouted or lost";
+            EXPECT_TRUE(verifyBufferData<uint8_t>(devBufs[primaryIdx], kSz,
+                                                  makeBytePattern(primaryIdx + 700)))
+                << "PRIMARY conn " << primaryIdx << " data wrong after flush";
         }
 
         // Unshared baseline: flush on a solo group must behave exactly like the
@@ -559,6 +591,18 @@ TEST_F(NetIbMPITest, QpShareStressManyConns) {
         }
 
         std::vector<void*> mhandles(established, nullptr);
+        // Deregister whatever succeeded before sendBufs/recvBufs free their
+        // backing memory on scope exit -- otherwise an early ASSERT_TRUE return
+        // below (this rank's own failure, or the peer's) leaves live MRs
+        // pointing at freed host memory.
+        SCOPE_EXIT(
+            for (int c = 0; c < established; c++) {
+                if (mhandles[c]) {
+                    EXPECT_EQ(DeregisterMemory(mine[c], mhandles[c]), ncclSuccess);
+                    mhandles[c] = nullptr;
+                }
+            }
+        );
         bool regOk = true;
         for (int c = 0; c < established && regOk; c++) {
             char* regBuf = (rank == 0) ? recvBufs[c].data() : sendBufs[c].data();
@@ -583,8 +627,6 @@ TEST_F(NetIbMPITest, QpShareStressManyConns) {
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
-        for (int c = 0; c < established; c++)
-            EXPECT_EQ(DeregisterMemory(mine[c], mhandles[c]), ncclSuccess);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -629,6 +671,18 @@ TEST_F(NetIbMPITest, QpShareStressSharedRqSaturation) {
         std::vector<std::vector<char>> sendBufs(established, std::vector<char>(kMsgSz));
         std::vector<std::vector<char>> recvBufs(established, std::vector<char>(kMsgSz));
         std::vector<void*> mhandles(established, nullptr);
+        // Deregister whatever succeeded before sendBufs/recvBufs free their
+        // backing memory on scope exit -- otherwise an early ASSERT_TRUE return
+        // below (this rank's own failure, or the peer's) leaves live MRs
+        // pointing at freed host memory.
+        SCOPE_EXIT(
+            for (int c = 0; c < established; c++) {
+                if (mhandles[c]) {
+                    EXPECT_EQ(DeregisterMemory(mine[c], mhandles[c]), ncclSuccess);
+                    mhandles[c] = nullptr;
+                }
+            }
+        );
         bool regOk = true;
         for (int c = 0; c < established && regOk; c++) {
             char* regBuf = (rank == 0) ? recvBufs[c].data() : sendBufs[c].data();
@@ -685,8 +739,6 @@ TEST_F(NetIbMPITest, QpShareStressSharedRqSaturation) {
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
-        for (int c = 0; c < established; c++)
-            EXPECT_EQ(DeregisterMemory(mine[c], mhandles[c]), ncclSuccess);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);

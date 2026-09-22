@@ -2690,16 +2690,21 @@ protected:
     // Deregister mhandle, close comms rank-conditionally, barrier.
     // rank 0 closes recvComm + listenComm; rank 1 closes sendComm.
     // Call after any pre-teardown MPI_Barrier the test needs.
+    //
+    // Non-fatal checks throughout: a fatal ASSERT_EQ here could return before
+    // the trailing barrier on a one-rank-only failure, and the other rank would
+    // then block on that barrier forever. Report the failure but keep going so
+    // both ranks always reach it.
     void TeardownConnection(void* recvComm, void* listenComm,
                             void* sendComm, void* mhandle) {
         const int rank = MPIEnvironment::world_rank;
         void* comm = (rank == 0) ? recvComm : sendComm;
-        ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+        EXPECT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
         if (rank == 0) {
-            ASSERT_EQ(CloseRecvComm(recvComm), ncclSuccess);
-            ASSERT_EQ(CloseListenComm(listenComm), ncclSuccess);
+            EXPECT_EQ(CloseRecvComm(recvComm), ncclSuccess);
+            EXPECT_EQ(CloseListenComm(listenComm), ncclSuccess);
         } else {
-            ASSERT_EQ(CloseSendComm(sendComm), ncclSuccess);
+            EXPECT_EQ(CloseSendComm(sendComm), ncclSuccess);
         }
         MPI_Barrier(MPI_COMM_WORLD);
     }
