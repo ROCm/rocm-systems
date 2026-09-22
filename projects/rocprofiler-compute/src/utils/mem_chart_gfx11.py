@@ -34,6 +34,7 @@ from utils.mem_chart_common import (
     pad_to,
     progress_bar,
     render_chart_to_string,
+    safe_float,
     safe_float_sum,
     stack_metrics,
 )
@@ -46,6 +47,13 @@ from utils.mem_chart_common import (
 # ``analysis_configs/gfx115x/0300_memory_chart.yaml`` (tables 301–309), in panel order.
 # Commented-out YAML metrics (e.g. TCP Atomic) are omitted.
 _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
+    # Compute Units
+    ("Wavefront Occupancy", 8),
+    ("VGPR", 64),
+    ("SGPR", 32),
+    ("LDS Allocation", 32768),
+    ("Scratch Allocation", 0),
+    ("Workgroups", 256),
     # Table 301: Instruction Cache
     ("ICache Requests", 450),
     ("ICache Hit Rate", 98.5),
@@ -152,6 +160,14 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     """Map YAML metric names to short internal keys."""
     metrics: dict[str, Any] = {}
 
+    # Compute Units
+    metrics["wave_occ"] = metric_dict.get("Wavefront Occupancy")
+    metrics["vgpr"] = metric_dict.get("VGPR")
+    metrics["sgpr"] = metric_dict.get("SGPR")
+    metrics["scratch_alloc"] = metric_dict.get("Scratch Allocation")
+    metrics["lds_alloc"] = metric_dict.get("LDS Allocation")
+    metrics["workgroups"] = metric_dict.get("Workgroups")
+
     metrics["icache_req"] = metric_dict.get("ICache Requests")
     metrics["icache_hit"] = metric_dict.get("ICache Hit Rate")
     metrics["icache_gl1_bw"] = metric_dict.get("ICache-GL1 Read Bandwidth")
@@ -211,7 +227,19 @@ def _build_kernel_and_l0(
     color_read = COLORS["read"]
     color_write = COLORS["write"]
 
-    kernel_panel = build_cu_panel(height=_TOTAL_H, padding_lines=11)
+    scratch_bytes = safe_float(metrics["scratch_alloc"])
+    scratch_kb = scratch_bytes / 1024 if scratch_bytes is not None else None
+    lds_bytes = safe_float(metrics["lds_alloc"])
+    lds_alloc_kb = lds_bytes / 1024 if lds_bytes is not None else None
+    cu_stats = [
+        ("Wave Occ", metrics["wave_occ"], " waves/CU"),
+        ("vGPRs", metrics["vgpr"], ""),
+        ("sGPRs", metrics["sgpr"], ""),
+        ("Scratch", scratch_kb, " KB"),
+        ("LDS Alloc", lds_alloc_kb, " KB"),
+        ("Workgroups", metrics["workgroups"], ""),
+    ]
+    kernel_panel = build_cu_panel(_TOTAL_H, stats=cu_stats)
 
     kernel_arrow_left = kernel_arrows["left"]
     kernel_arrow_right = kernel_arrows["right"]

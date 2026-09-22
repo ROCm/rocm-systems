@@ -44,6 +44,18 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
+        Wavefront Occupancy:
+          value: ROUND(SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_avr), 0)
+        VGPR:
+          value: ROUND(AVG(Arch_VGPR), 0)
+        SGPR:
+          value: ROUND(AVG(SGPR), 0)
+        LDS Allocation:
+          value: ROUND(AVG(LDS_Per_Workgroup), 0)
+        Scratch Allocation:
+          value: ROUND(AVG(Scratch_Per_Workitem), 0)
+        Workgroups:
+          value: ROUND(AVG(Grid_Size / Workgroup_Size), 0)
         ICache Requests:
           value: SUM(SQC_ICACHE_REQ_sum) / SUM($denom)
           unit: (Requests + $normUnit)
@@ -254,6 +266,20 @@ Panel Config:
           unit: Bytes/s
 
   metrics_description:
+    Wavefront Occupancy: Wavefronts per active CU.
+    VGPR: >-
+      The number of architected vector general-purpose registers allocated
+      for the kernel. Note: this may not exactly match the number of VGPRs
+      requested by the compiler due to allocation granularity.
+    SGPR: >-
+      The number of scalar general-purpose registers allocated for the kernel.
+      Note: this may not exactly match the number of SGPRs requested by
+      the compiler due to allocation granularity.
+    LDS Allocation: >-
+      The number of bytes of LDS memory allocated for this kernel.
+    Scratch Allocation: >-
+      The number of bytes of scratch memory requested per work-item for this kernel.
+    Workgroups: The total number of workgroups forming this kernel launch.
     ICache Hit Rate: >-
       Percentage of instruction cache accesses that are serviced from cache without fetching
       from the GL1 cache. High hit rates indicate good instruction locality. Low hit rates

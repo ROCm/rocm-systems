@@ -108,6 +108,18 @@ System Speed-of-Light:
     rst: Average latency to fetch instruction from GL1 to Instruction Cache.
     unit: Cycles
 Memory chart - Instruction Cache:
+  Wavefront Occupancy:
+    rst: Wavefronts per active CU.
+  VGPR:
+    rst: 'The number of architected vector general-purpose registers allocated for the kernel. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
+  SGPR:
+    rst: 'The number of scalar general-purpose registers allocated for the kernel. Note: this may not exactly match the number of SGPRs requested by the compiler due to allocation granularity.'
+  LDS Allocation:
+    rst: The number of bytes of LDS memory allocated for this kernel.
+  Scratch Allocation:
+    rst: The number of bytes of scratch memory requested per work-item for this kernel.
+  Workgroups:
+    rst: The total number of workgroups forming this kernel launch.
   ICache Requests:
     rst: Total Instruction Cache fetch requests.
     unit: Requests per Normalization Unit
