@@ -1073,6 +1073,9 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
           devWork->connIndex = NCCL_CONN_IDX_P2P_NET;
         }
       }
+      int runtimeConnIndex =
+        rcclRuntimeCollectiveConnIndex(comm, task, nBytes);
+      if (runtimeConnIndex >= 0) devWork->connIndex = runtimeConnIndex;
 
       uint32_t chunkSize, directFlags = 0;
       size_t grainSize = rcclProtoGrainSize(task->protocol, comm);
@@ -1155,12 +1158,7 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
         }
         proxyOp->eActivationMask = task->eActivationMask;
         proxyOp->nChannels = nChannels;
-        proxyOp->connIndex = 0;
-        if (task->protocol == NCCL_PROTO_SIMPLE && task->algorithm == NCCL_ALGO_RING) {
-          if (comm->useIntraNet && nBytes > rcclParamIntraNetThreshold()) {
-            proxyOp->connIndex = NCCL_CONN_IDX_P2P_NET;
-          }
-        }
+        proxyOp->connIndex = devWork->connIndex;
         addWorkBatchToPlan(comm, plan, c, workNode->workType, task->devFuncId, plan->workBytes);
         // Coverity reports "proxyOp->connection" as being possibly uninitialized.  It's hard to
         // determine if that's actually true but it's also not clear if that would be an issue.
@@ -1336,15 +1334,6 @@ static bool rcclInfoBuffersOverlap(const struct ncclInfo* info, ncclFunc_t collA
   return rcclBuffersOverlap(info->sendbuff, sendBytes, info->recvbuff, recvBytes);
 }
 
-static bool rcclExecutionPolicyForP2pTask(struct ncclComm* comm, struct ncclTaskP2p* task,
-                                          bool p2pDisabled, struct rcclCollectiveExecutionPolicy* policy) {
-  if (task == nullptr || comm->nRanks <= 0) return false;
-  size_t aggregateBytes =
-    task->bytes > SIZE_MAX / comm->nRanks ? SIZE_MAX : task->bytes * static_cast<size_t>(comm->nRanks);
-  return rcclGetCollectiveExecutionPolicy(comm, RCCL_EXECUTION_SCOPE_P2P, task->collAPI, aggregateBytes,
-                                          p2pDisabled, task->inPlace, policy);
-}
-
 static void rcclResolveP2pExecutionPolicies(struct ncclComm* comm, struct ncclTaskP2p* const p2pTasks[2],
                                             bool p2pDisabled,
                                             struct rcclCollectiveExecutionPolicy executionPolicies[2],
@@ -1476,7 +1465,21 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   }
   if (!selfSend) {
     for (int dir = 0; dir <= 1; dir++) {
-      if (executionPolicies[dir].transferMode == RCCL_P2P_TRANSFER_AUTO || p2pTasks[dir] == nullptr) continue;
+      if (p2pTasks[dir] == nullptr || !policyMatches[dir] ||
+          executionPolicies[dir].transport ==
+            RCCL_EXECUTION_TRANSPORT_UNKNOWN)
+        continue;
+      int runtimeConnIndex =
+        rcclRuntimeP2pConnIndex(comm, executionPolicies[dir].transport);
+      if (runtimeConnIndex >= 0) connIndex[dir] = runtimeConnIndex;
+    }
+  }
+  if (!selfSend) {
+    for (int dir = 0; dir <= 1; dir++) {
+      if (connIndex[dir] == RCCL_CONN_IDX_P2P_SHM ||
+          executionPolicies[dir].transferMode == RCCL_P2P_TRANSFER_AUTO ||
+          p2pTasks[dir] == nullptr)
+        continue;
       int channelId = ncclP2pChannelForPart(activeP2pChannels, base, 0, activeP2pChannelsPerPeer, comm->nNodes,
                                             comm->p2pChannelShiftSize);
       int peerRank = dir ? sendRank : recvRank;
@@ -1634,7 +1637,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
           }
           netRegistered[dir] = regFlag ? true : false;
         }
-      } else if (bytes[dir] > 0 && addrs[dir] && protocol[dir] == NCCL_PROTO_SIMPLE && !selfSend) {
+      } else if (bytes[dir] > 0 && addrs[dir] &&
+                 protocol[dir] == NCCL_PROTO_SIMPLE && !selfSend &&
+                 connIndex[dir] != RCCL_CONN_IDX_P2P_SHM) {
         int peerRank = dir ? sendRank : recvRank;
         int regFlag = 0;
         int channelId = ncclP2pChannelForPart(activeP2pChannels, base, 0, activeP2pChannelsPerPeer, comm->nNodes,
@@ -2930,35 +2935,6 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
 extern int64_t ncclParamMinNchannels();
 extern int64_t ncclParamMaxNchannels();
 
-static bool rcclApplyCollectiveExecutionPolicy(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes,
-                                               float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS],
-                                               int* policyChannels) {
-  struct rcclCollectiveExecutionPolicy policy;
-  if (!rcclGetCollectiveExecutionPolicy(comm, RCCL_EXECUTION_SCOPE_COLLECTIVE, info->func, nBytes,
-                                        ncclParamP2pDisable(), /*inPlace=*/false, &policy))
-    return false;
-
-  int algorithm = policy.algorithm >= 0 ? policy.algorithm : info->algorithm;
-  int protocol = policy.protocol >= 0 ? policy.protocol : info->protocol;
-  bool shapeAvailable = algorithm >= 0 && algorithm < NCCL_NUM_ALGORITHMS && protocol >= 0 &&
-                        protocol < NCCL_NUM_PROTOCOLS && table[algorithm][protocol] >= 0.0f;
-  if ((policy.algorithm >= 0 || policy.protocol >= 0) && shapeAvailable) {
-    info->algorithm = algorithm;
-    info->protocol = protocol;
-  } else if (policy.algorithm >= 0 || policy.protocol >= 0) {
-    INFO(NCCL_TUNING,
-         "RCCL collective execution policy requested unavailable shape: coll=%d bytes=%zu algorithm=%d protocol=%d; "
-         "preserving defaults",
-         (int)info->func, nBytes, algorithm, protocol);
-  }
-
-  *policyChannels = policy.nChannels;
-  INFO(NCCL_TUNING,
-       "RCCL collective execution policy: arch=%s coll=%d bytes=%zu channels=%d algorithm=%d protocol=%d",
-       comm->archName, (int)info->func, nBytes, policy.nChannels, policy.algorithm, policy.protocol);
-  return true;
-}
-
 static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes,
                                     float** collCostTable, ncclSimInfo_t* simInfo) {
   float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
@@ -3772,6 +3748,10 @@ static void rcclP2pMarkPreconnectChannels(struct ncclComm* comm, int peer, bool 
       isSendNotRecv ? &comm->channels[channelId].peers[peer]->send[connIndex]
                     : &comm->channels[channelId].peers[peer]->recv[connIndex];
     if (conn->hasSeen == 0) {
+      if (connIndex == RCCL_CONN_IDX_P2P_SHM && conn->connected) {
+        conn->hasSeen = 1;
+        continue;
+      }
       // P2P uses only one connector. hasSeen also prevents duplicate setup
       // when split shared communicators enqueue the same connection.
       conn->hasSeen = 1;
@@ -3849,17 +3829,27 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
       }
       // The operation-local namespace maps every peer to physical channels 0/1.
       // Mark it on demand even when the peer was connected by an earlier task.
+      bool useShm =
+        hasExecutionPolicy &&
+        executionPolicy.transport == RCCL_EXECUTION_TRANSPORT_SHM;
       if (hasExecutionPolicy &&
-          (executionPolicy.nChannels > 0 || executionPolicy.transferMode != RCCL_P2P_TRANSFER_AUTO)) {
+          (executionPolicy.nChannels > 0 ||
+           executionPolicy.transferMode != RCCL_P2P_TRANSFER_AUTO ||
+           useShm)) {
         int policyChannels = executionPolicy.nChannels > 0
                                ? std::min(comm->p2pnChannels, executionPolicy.nChannels)
                                : comm->p2pnChannels;
         int policyChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, policyChannels);
-        rcclP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, policyChannels, policyChannelsPerPeer,
-                                      /*default P2P connIndex=*/1);
-        if (executionPolicy.transferMode != RCCL_P2P_TRANSFER_AUTO && !comm->p2pNet) {
+        if (useShm) {
           rcclP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, policyChannels, policyChannelsPerPeer,
-                                        RCCL_CONN_IDX_P2P_ALT);
+                                        RCCL_CONN_IDX_P2P_SHM);
+        } else {
+          rcclP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, policyChannels, policyChannelsPerPeer,
+                                        /*default P2P connIndex=*/1);
+          if (executionPolicy.transferMode != RCCL_P2P_TRANSFER_AUTO && !comm->p2pNet) {
+            rcclP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, policyChannels,
+                                          policyChannelsPerPeer, RCCL_CONN_IDX_P2P_ALT);
+          }
         }
       }
     }

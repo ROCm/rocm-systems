@@ -8,6 +8,7 @@
 #include "comm.h"
 #include "transport.h"
 #include "bootstrap.h"
+#include "rccl_common.h"
 
 NCCL_PARAM(MultiSegmentRegister, "MULTI_SEGMENT_REGISTER", 1);
 
@@ -26,6 +27,22 @@ ncclResult_t ncclTransportRingConnect(struct ncclComm* comm) {
       NCCLCHECKGOTO(ncclTransportP2pConnect(comm, c, 1, &channel->ring.prev, 1, &channel->ring.next, 0), ret, fail);
     }
     NCCLCHECKGOTO(ncclTransportP2pSetup(comm, &comm->graphs[NCCL_ALGO_RING], 0), ret, fail);
+    if (rcclRuntimeTransportToggleEligible(comm)) {
+      for (int c = 0; c < comm->nChannels; c++) {
+        struct ncclChannel* channel = comm->channels + c;
+        NCCLCHECKGOTO(ncclTransportP2pConnect(
+                        comm, c, 1, &channel->ring.prev, 1,
+                        &channel->ring.next, RCCL_CONN_IDX_COLL_SHM),
+                      ret, fail);
+      }
+      NCCLCHECKGOTO(ncclTransportP2pSetupSpecific(
+                      comm, &comm->graphs[NCCL_ALGO_RING],
+                      RCCL_CONN_IDX_COLL_SHM, nullptr, TRANSPORT_SHM),
+                    ret, fail);
+      INFO(NCCL_INIT,
+           "Provisioned alternate SHM Ring connectors at index %d",
+           RCCL_CONN_IDX_COLL_SHM);
+    }
     if (ncclParamLocalRegister() || ncclParamGraphRegister()) {
       NCCLCHECK(ncclCalloc(&ringInfo, comm->nRanks));
       ringInfo[comm->rank].useGdr = comm->useGdr;

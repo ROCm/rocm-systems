@@ -70,6 +70,10 @@ ncclResult_t ncclOsSetAffinity(const ncclAffinity&) { ::abort(); }
 
 // transport.h -- only the connect/setup entry points group.cc references.
 ncclResult_t ncclTransportP2pSetup(struct ncclComm*, struct ncclTopoGraph*, int, bool*) { ::abort(); }
+ncclResult_t ncclTransportP2pSetupSpecific(
+  struct ncclComm*, struct ncclTopoGraph*, int, bool*, int) {
+  ::abort();
+}
 ncclResult_t ncclTransportRingConnect(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclTransportTreeConnect(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclTransportPatConnect(struct ncclComm*) { ::abort(); }

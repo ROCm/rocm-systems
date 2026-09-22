@@ -351,6 +351,9 @@ struct ncclDirect {
 
 #define NCCL_CONN_IDX_P2P_NET 2
 #define RCCL_CONN_IDX_P2P_ALT NCCL_CONN_IDX_P2P_NET
+#define RCCL_CONN_IDX_RUNTIME_SHM 3
+#define RCCL_CONN_IDX_COLL_SHM RCCL_CONN_IDX_RUNTIME_SHM
+#define RCCL_CONN_IDX_P2P_SHM RCCL_CONN_IDX_RUNTIME_SHM
 #define NCCL_MAX_NVLS_ARITY 32
 #define NCCL_MAX_NVLS_TREE_ARITY 3
 struct ncclNvls {
@@ -369,7 +372,7 @@ struct ncclNvls {
 #define NCCL_MAX_ARITY NCCL_MAX_DIRECT_ARITY
 #endif
 
-#define NCCL_MAX_CONNS 3
+#define NCCL_MAX_CONNS 4
 struct ncclChannelPeer {
   struct ncclConnector send[NCCL_MAX_CONNS];
   struct ncclConnector recv[NCCL_MAX_CONNS];

@@ -118,6 +118,10 @@ ncclResult_t ncclTransportP2pConnect(struct ncclComm*, int, int, int*, int, int*
 #ifndef RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
 ncclResult_t ncclTransportP2pSetup(struct ncclComm*, struct ncclTopoGraph*, int, bool*) { ::abort(); }
 #endif
+__attribute__((weak)) ncclResult_t ncclTransportP2pSetupSpecific(
+  struct ncclComm*, struct ncclTopoGraph*, int, bool*, int) {
+  ::abort();
+}
 
 // ppc64le TOC references survive --gc-sections, so netTransport must have
 // a definition even though the code path that uses it is dead.
