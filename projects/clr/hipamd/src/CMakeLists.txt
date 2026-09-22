@@ -243,6 +243,22 @@ add_subdirectory(hiprtc)
 # HRR in-tree capture layer
 add_subdirectory(hrr)
 
+# HIP API trace backend. "tracelogging" emits ETW events consumed out-of-process by
+# rocprofiler-sdk; it has no non-Windows implementation.
+set(HIP_TRACE_BACKEND
+    "none"
+    CACHE STRING "HIP API trace backend (none|tracelogging)")
+set_property(CACHE HIP_TRACE_BACKEND PROPERTY STRINGS "none" "tracelogging")
+
+if(NOT WIN32 AND NOT HIP_TRACE_BACKEND STREQUAL "none")
+  message(STATUS "HIP_TRACE_BACKEND=${HIP_TRACE_BACKEND} is Windows-only; forcing to none")
+  set(HIP_TRACE_BACKEND
+      "none"
+      CACHE STRING "HIP API trace backend (none|tracelogging)" FORCE)
+endif()
+
+add_subdirectory(trace)
+
 #############################
 # Profiling API support
 #############################
