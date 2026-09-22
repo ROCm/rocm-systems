@@ -44,6 +44,18 @@ PROXYTRACE_SO = _first_existing(
     os.path.join(_PROXYTRACE_SRC, "librccl-profiler-proxytrace.so"),
 )
 
+# The RMA example builds in place via its Makefile, or to test/unit/plugins via CMake.
+_RMA_SRC = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "plugins", "rma", "example")
+)
+RMA_DIR = f"{RCCL_INSTALL_DIR}/plugins/rma/example"
+RMA_SO = _first_existing(
+    os.path.join(RMA_DIR, "librccl-rma-example.so"),
+    os.path.join(RCCL_INSTALL_DIR, "build", "release", "test", "unit", "plugins", "librccl-rma-example.so"),
+    os.path.join(RCCL_INSTALL_DIR, "build", "debug", "test", "unit", "plugins", "librccl-rma-example.so"),
+    os.path.join(_RMA_SRC, "librccl-rma-example.so"),
+)
+
 # CSV Configs 
 VALID_CONFIG_WITH_WILDCARDS = os.path.join(WORKDIR, "assets/csv_confs/valid_config_with_wildcards.conf")
 VALID_CONFIG_WITHOUT_WILDCARDS = os.path.join(WORKDIR, "assets/csv_confs/valid_config_without_wildcards.conf")
@@ -245,6 +257,8 @@ def paths():
         INSPECTOR_SO=INSPECTOR_SO,
         PROXYTRACE_DIR=PROXYTRACE_DIR,
         PROXYTRACE_SO=PROXYTRACE_SO,
+        RMA_DIR=RMA_DIR,
+        RMA_SO=RMA_SO,
         # CSV Configs
         VALID_CONFIG_WITH_WILDCARDS=VALID_CONFIG_WITH_WILDCARDS,
         VALID_CONFIG_WITHOUT_WILDCARDS=VALID_CONFIG_WITHOUT_WILDCARDS,
@@ -290,6 +304,11 @@ def pytest_runtest_setup(item):
     if item.get_closest_marker("ext_inspector"):
         if not os.path.exists(INSPECTOR_SO):
             pytest.skip(f"Inspector plugin library not found at: {INSPECTOR_SO}")
+
+    # Check for ext_rma marker
+    if item.get_closest_marker("ext_rma"):
+        if not os.path.exists(RMA_SO):
+            pytest.skip(f"RMA plugin library not found at: {RMA_SO}")
 
 @pytest.fixture(scope="session", autouse=True)
 def clear_profiler_dump(request):

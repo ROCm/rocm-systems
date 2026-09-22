@@ -58,9 +58,9 @@ typedef struct {
 } ncclNetProperties_v12_t;
 
 /* RMA plugin versioned interfaces */
-#include "rma_v14.h"
+#include "rma_v15.h"
 
-typedef ncclRma_v14_t ncclRma_t;
-typedef ncclRmaConfig_v14_t ncclRmaConfig_t;
+typedef ncclRma_v15_t ncclRma_t;
+typedef ncclRmaConfig_v15_t ncclRmaConfig_t;
 
 #endif // end include guard

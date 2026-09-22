@@ -429,6 +429,14 @@ in the following table.
       - | Remapping specification string
         | Used with Rome 4P2H topology
 
+    * - | ``NCCL_RMA_PLUGIN``
+        | Selects external one-sided RMA plugins, which are also the backend
+          the built-in GIN proxy forwards to.
+      - | Comma-separated list of paths or short names
+        | A short name is resolved against the ``librccl-rma`` prefix, so
+          ``example`` loads ``librccl-rma-example.so``
+        | See :ref:`using-rccl-rma-plugin`
+
 Development and testing (advanced)
 ==================================
 
@@ -607,3 +615,78 @@ variables are collected in the following table.
         | disabled, events are dropped once a pool is exhausted.
       - | ``0``: Fixed-size pools.
         | ``1``: Pools grow on demand (default).
+
+    * - | ``NCCL_INSPECTOR_OTEL_EXPORT``
+        | Exports metrics over OTLP/HTTP instead of writing them to files. The
+        | Inspector emits one format only, and this setting takes precedence
+        | over ``NCCL_INSPECTOR_PROM_DUMP``.
+      - | ``0``: Disabled, so JSON or Prometheus files are written (default).
+        | ``1``: Enabled, posting OTLP/JSON to the endpoint below.
+
+    * - | ``NCCL_INSPECTOR_OTEL_VERBOSE``
+        | Selects per-collective metric points instead of aggregated ones. The
+        | per-collective form additionally reports
+        | ``nccl_collective_algobw_gbs``.
+      - | ``0``: Aggregated (default).
+        | ``1``: Per collective.
+
+    * - | ``OTEL_EXPORTER_OTLP_METRICS_ENDPOINT``
+        | Destination for the OTLP metric export. Also accepts
+        | ``OTEL_EXPORTER_OTLP_ENDPOINT``, to which ``/v1/metrics`` is appended.
+      - | Plaintext ``http://`` URL. ``https://`` is unsupported and disables
+          export, so use a local collector when the telemetry is sensitive.
+        | Default: ``http://localhost:4318/v1/metrics``
+
+Profiler plugin
+===============
+
+An external profiler plugin loaded through ``NCCL_PROFILER_PLUGIN`` receives the
+event types selected by ``NCCL_PROFILE_EVENT_MASK``. RCCL 2.31 raises the plugin
+interface to v7, which adds two things a plugin can consume:
+
+* **Per-kernel barrier phases.** Enabling ``ncclProfileKernelPhase`` reports an
+  ``initial_sync``, ``compute`` and ``final_sync`` span per kernel channel, each
+  timed by the GPU globaltimer. A phase is a child of a kernel-channel event, so
+  RCCL enables ``ncclProfileKernelCh`` implicitly whenever the phase bit is set.
+* **Symmetric-kernel variant metadata.** Collective events carry the symmetric
+  kernel variant that ran and a flag marking whether the collective was served
+  symmetrically. The in-tree example surfaces these as the ``KernelVariant`` and
+  ``IsSymColl`` arguments of its ``COLL`` trace events.
+
+Both are v7-only: the v5 and v6 compatibility layers clear the phase bit, so a
+plugin must export ``ncclProfiler_v7`` to receive them.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Environment variable**
+      - **Values**
+
+    * - | ``NCCL_PROFILER_PLUGIN``
+        | Selects an external profiler plugin.
+      - | Path or short name
+        | A short name is resolved against the ``librccl-profiler`` prefix, so
+          ``example`` loads ``librccl-profiler-example.so``
+
+    * - | ``NCCL_PROFILE_EVENT_MASK``
+        | Bitmask of the event types the plugin is offered.
+      - | ``1``: Group
+        | ``2``: Collective
+        | ``4``: Point-to-point
+        | ``8``: Proxy op
+        | ``16``: Proxy step
+        | ``32``: Proxy control
+        | ``64``: Kernel channel
+        | ``128``: Net plugin
+        | ``256``: Group API
+        | ``512``: Collective API
+        | ``1024``: Point-to-point API
+        | ``2048``: Kernel launch
+        | ``4096``: CE collective
+        | ``8192``: CE synchronization
+        | ``16384``: CE batch
+        | ``32768``: Kernel phase (v7; implies kernel channel)
+        | ``65536``: RCCL proxy diagnostics
+        | Combine by adding, so ``32771`` selects group, collective and kernel
+          phase. Default: ``0``
