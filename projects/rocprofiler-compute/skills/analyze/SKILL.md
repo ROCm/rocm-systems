@@ -9,6 +9,23 @@ Follow this skill when a user wants to understand profiler data and where
 the GPU bottleneck is. If no workload directory exists, collect one first
 with `skills/profile/SKILL.md`.
 
+**Use this skill for:** Linux workload directories collected by
+rocprofiler-compute when the user needs kernel selection, metric
+interpretation, ROCTX attribution, comparison, or machine-readable reports.
+
+**Do not use this skill for:** system-wide CPU/network tracing, CUDA tools,
+Windows, GUI/IDE workflows, offline setup, non-public NPI data, or generating
+kernel source. Use ROCm Systems Profiler for system/MPI timeline bottlenecks
+before handing identified GPU kernels to this skill.
+
+**Recommended path:** validate the workload, find the hottest kernel, run the
+System Speed-of-Light, Memory Chart, and roofline analysis, then inspect only
+the detailed block indicated by those results.
+
+**Fallback — focused available panels:** when the full profile was not
+collected, list available metrics and analyze only present panels. Clearly
+state which conclusions cannot be made without re-profiling.
+
 ## 1. Understand the analysis system
 
 | Mode | What it measures | When to use |
@@ -16,20 +33,18 @@ with `skills/profile/SKILL.md`.
 | Perfmon counter analysis | Architecture-level counters (memory BW, occupancy, MFMA, stall types) | Overall kernel efficiency; memory vs compute |
 | PC sampling analysis | Stochastic / host-trap samples with stall reasons at ISA offsets | After perfmon, which instructions stall and why |
 
-Primary workflow is CLI (stdout, or txt/csv/db files). Interactive GUI:
-Optiq. Do not invent flags; use `rocprof-compute analyze --help`.
+Primary workflow is CLI (stdout, or txt/csv/db files). Do not invent flags;
+use `rocprof-compute analyze --help`.
 
 Profile mode always captures via **rocpd**. Analyze `--output-format csv`
 and `db` require a rocpd-collected workload (current default).
+For support/dependencies, known issues, and detailed interpretation, load
+`references/interpretation-and-support.md`.
 
 ## 2. Prerequisites
 
 ```bash
-ls -lh ./workloads/<workload_name>/
-# Expect profiling_config.yaml and pmc_perf.csv (possibly under a GPU-model
-# subdirectory). Optional retained rocpd *.db if profile used
-# --retain-rocpd-output.
-
+skills/analyze/scripts/inspect-workload.sh ./workloads/<workload_name>
 rocprof-compute analyze --help
 ```
 
@@ -139,9 +154,9 @@ isolated without a separate ROCTX analyze flag.
 # Hottest kernel
 rocprof-compute analyze --path ./workloads/<workload_name> --list-stats
 
-# Speed-of-Light / Memory Chart — confirm ids with --list-available-metrics
-rocprof-compute analyze --path ./workloads/<workload_name> -k 0 -b 0
-rocprof-compute analyze --path ./workloads/<workload_name> -k 0 -b 1
+# Stable aliases avoid architecture-specific numeric block IDs
+rocprof-compute analyze --path ./workloads/<workload_name> -k 0 -b sol
+rocprof-compute analyze --path ./workloads/<workload_name> -k 0 -b memchart
 
 # Roofline HTML from profile (if not --no-roof):
 # ./workloads/<workload_name>/<gpu>/empirRoof_gpu-0_FP32.html
@@ -197,75 +212,12 @@ analysis database.
 
 ## 4. Interpret key metric blocks
 
-Ground every recommendation in numbers from the report. Do not guess.
+Ground every recommendation in observed metrics; do not guess or treat triage
+thresholds as universal pass/fail values. Load
+`references/interpretation-and-support.md` only after the top-down workflow
+identifies memory, occupancy, compute, or scheduler behavior to investigate.
 
-### 4a. Roofline
-
-Achieved FLOPS vs arithmetic intensity against peak compute and peak HBM.
-
-- Left of ridge → **memory-bound**: reuse, tiling, LDS, less global traffic.
-- Right of ridge → **compute-bound**: instruction mix, MFMA, less divergence, ILP.
-- Far below both ceilings → occupancy or scheduling problem.
-
-### 4b. Memory bandwidth
-
-| Metric | Good | Warning | Action |
-|---|---|---|---|
-| HBM BW utilization | > 70% of peak | < 30% | Increase reuse / tile size |
-| L2 hit rate | > 80% | < 50% | Spatial/temporal locality |
-| L1 (vL1D) hit rate | > 90% | < 70% | Shrink working set, use LDS |
-| LDS bank conflicts | 0 | > 0 | Pad arrays; change access pattern |
-
-### 4c. Occupancy
-
-| Metric | Meaning | If low |
-|---|---|---|
-| Active waves / CU | In-flight wavefronts per CU | Reduce VGPR/SGPR or LDS per workgroup |
-| Theoretical occupancy | Max waves from register/LDS alloc | Same |
-| Wave64 utilization | Full 64-lane waves | Check launch bounds |
-
-VGPRs are the usual occupancy limiter.
-
-### 4d. Compute stalls
-
-| Stall | Meaning | Fix |
-|---|---|---|
-| VMEM | Waiting on global/scratch | Prefetch; raise arithmetic intensity |
-| LDS | Waiting on LDS | Fewer bank conflicts; pipeline accesses |
-| Barrier | Waiting at `s_barrier` | Less sync; reorder work |
-| SALU | Scalar/branch bottleneck | Less divergence |
-| VALU idle | Vector ALUs underused | More work per thread; wider vectors |
-
-### 4e. MFMA
-
-For GEMM/convolutions, MFMA utilization should be high (rule of thumb:
-> 80% for a tuned GEMM). Low MFMA + high VMEM → data-starved, not
-compute-bound.
-
-## 5. Bottleneck decision tree
-
-```
-START
-  ├─ HBM BW utilization > 80%?
-  │     YES → Memory-bound (HBM). Raise AI; LDS tiling; consider lower precision.
-  ├─ L2 hit rate < 50%?
-  │     YES → Poor reuse. Layout (AoS→SoA); smaller working set; explicit LDS.
-  ├─ Occupancy (active waves/CU) < 50% of theoretical?
-  │     YES → Occupancy-limited. Cut VGPR/LDS; avoid scratch spills.
-  ├─ MFMA utilization < 60% (GEMM)?
-  │     YES → Data-starved MFMA. Double-buffer; larger tiles.
-  ├─ VMEM stall > 40% of cycles?
-  │     YES → Memory-latency bound. Prefetch; more independent loads.
-  └─ All utilization < 30%?
-        → Launch config or serialization. Check grid/block size; atomics; sync.
-```
-
-## 6. Visual post-analysis with Optiq
-
-Optiq reads the workload directory:
-https://rocm.docs.amd.com/projects/optiq/
-
-## 7. Compare two workloads
+## 5. Compare two workloads
 
 ```bash
 rocprof-compute profile --name baseline -- ./app_v1
@@ -282,7 +234,7 @@ rocprof-compute analyze \
     --output-name comparison
 ```
 
-## 8. Common analysis issues
+## 6. Common analysis issues
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
@@ -293,7 +245,11 @@ rocprof-compute analyze \
 | csv/db refused | Workload not rocpd | Re-profile with current profile mode |
 | No kernel IDs | No dispatches | Verify the app actually launched kernels |
 
-## 9. Verified commands
+For architecture-specific block IDs, normalization safeguards, PC-sampling
+limitations, multi-process handling, and support boundaries, load the
+reference instead of inferring behavior.
+
+## 7. Verified commands
 
 ```bash
 rocprof-compute analyze --path ./workloads/<name> --list-stats
@@ -309,6 +265,6 @@ rocprof-compute analyze --path ./workloads/baseline --path ./workloads/opt
 rocprof-compute analyze --help
 ```
 
-## 10. Related skill
+## 8. Related skill
 
 - `skills/profile/SKILL.md` — collect counters via rocpd, ROCTX, PC sampling

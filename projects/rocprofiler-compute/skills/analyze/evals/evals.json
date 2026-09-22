@@ -56,6 +56,21 @@
       ]
     },
     {
+      "id": "partial-profile-fallback",
+      "skill_should_trigger": true,
+      "prompt": "analyze this rocprof-compute workload even though only a focused metric set was collected",
+      "expected_behavior": [
+        "uses the named focused available panels fallback",
+        "lists available metrics before analysis",
+        "states which conclusions require re-profiling"
+      ]
+    },
+    {
+      "id": "system-trace-handoff",
+      "skill_should_trigger": false,
+      "prompt": "find CPU scheduling and MPI network bottlenecks across my whole application"
+    },
+    {
       "id": "install-rocm",
       "skill_should_trigger": false,
       "prompt": "how do I install ROCm on Ubuntu?"
@@ -64,6 +79,11 @@
       "id": "vague-gpu-improvement",
       "skill_should_trigger": false,
       "prompt": "how could i improve this gpu program?"
+    },
+    {
+      "id": "generate-kernel-code",
+      "skill_should_trigger": false,
+      "prompt": "write a replacement HIP kernel for my application"
     }
   ]
 }
