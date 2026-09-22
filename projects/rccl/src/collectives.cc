@@ -662,9 +662,17 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
   NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
   bool ceCapturing = ncclCudaGraphValid(ceGraph);
 
-  // CE AlltoAllv is single-node only (ncclCeAlltoAllvEligible requires nNodes==1).
-  // Multi-node jobs (e.g. 18x4) use the send/recv fallback below for cross-node traffic.
-  if (ncclCeAlltoAllvEligible(comm, datatype, winRegType, hasSysmemSegment, ceCapturing)) {
+  // CE / hierarchical CE AlltoAllv: gather size metadata, then enqueue CE plan.
+  // Single-node -> ncclCeAlltoAllv; multi-node hier -> ncclHierCeAlltoAllv at launch.
+  const bool ceElig =
+    ncclCeAlltoAllvEligible(comm, datatype, winRegType, hasSysmemSegment, ceCapturing);
+  const bool hierElig =
+    ncclHierCeAlltoAllvEligible(comm, datatype, winRegType, sendWin, recvWin, hasSysmemSegment, ceCapturing);
+  if (ceElig || hierElig) {
+    if (comm->localSizes == nullptr || comm->gatheredSizes == nullptr) {
+      WARN("CE AlltoAllv: size staging buffers not allocated (need CTA_POLICY_ZERO at init)");
+      return ncclInvalidUsage;
+    }
     const size_t nLocal = 4 * (size_t)nRanks;
     const size_t nGather = nLocal * (size_t)nRanks;
 

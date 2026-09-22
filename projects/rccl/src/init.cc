@@ -3017,7 +3017,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   // update communicator state
   comm->initState = ncclSuccess;
 
-  if (comm->nNodes == 1 && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
+  // AlltoAllv size-matrix staging (CE single-node and hierarchical multi-node).
+  if (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) {
     const size_t nLocal = 4 * (size_t)comm->nRanks;
     const size_t nGather = nLocal * (size_t)comm->nRanks;
 
