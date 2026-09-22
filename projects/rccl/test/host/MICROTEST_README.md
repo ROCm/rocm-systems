@@ -49,6 +49,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `dev_runtime.cc` (`DEV_RUNTIME_CC_PATH`, from `dev-runtime-test.cc`);
     suites `Alloc*`, `Comm*`, `Compute*`, `DeepCopy*`, `Dev*`, `Gin*`, `Nccl*`,
     `Sym*`, and `Win*`.
+  - the generated `sym_kernels_host.cc` (`SYM_KERNELS_HOST_CC_PATH`, from
+    `sym-kernels-index-test.cc`); suites `SymKernelIndex*`,
+    `SymAllEmittedCombinations/*`, `SymUnhandledCombinations/*` (covered by the
+    `Sym*` CTest pattern). Each kernel `__global__` is neutered to an ordinary
+    host stub (see the file's own header comment) so the 84 generated function
+    pointers link without the HIP runtime.
   - `rccl_wrap.cc` (`WRAP_CC_PATH`, from `wrap-test.cc`); suites
     `WrapMicrotest.*`, `WrapMicrotestIsolated.*`. Shared dependency seams live
     in their production-TU owners (`ce_fakes.cc`, `sym_kernels_fakes.cc`,
@@ -96,6 +102,17 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   entries are omitted for this target via `RCCL_STUBS_OMIT_<symbol>` macros
   because `enqueue.cc` defines them itself. See
   `test_categories_micro_enqueue.yaml`.
+- **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
+  `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
+  GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
+  `SymKernelMaskTest.*`, `SymAllChunkEltsCases/*` (covered by the `Sym*` CTest
+  pattern). Its own binary, not shared with `rccl-UnitTestsMicro`:
+  `fakes/sym_kernels_fakes.cc` (needed there by other units) fakes the exact
+  symbols the real file also defines, which would duplicate-symbol together;
+  this binary simply does not link that file, so no guard is needed.
+  `getRequirements_gin`'s large tuning/GIN dependency surface is never called
+  by these tests, so `-ffunction-sections`/`--gc-sections` drop it before any
+  fake would be needed.
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**, **`-faultinj`**) — `init.cc` (via
   `INIT_CC_PATH`);
   suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
@@ -592,10 +609,10 @@ make -j $(nproc) rccl-UnitTestsMicro
 `test/host/CMakeLists.txt` is dual-mode. Alongside the in-RCCL-build target
 above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
-`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroInit[-uncached|-faultinj]` and
-`rccl-UnitTestsMicroEnqueue[-devlinker]` — **without configuring/building all of
-librccl**. It compiles just the tests + fakes + the hipified unit-under-test
-sources.
+`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroInit[-uncached|-faultinj]`,
+`rccl-UnitTestsMicroEnqueue[-devlinker]` and `rccl-UnitTestsMicroSymKernels` —
+**without configuring/building all of librccl**. It compiles just the tests +
+fakes + the hipified unit-under-test sources.
 
 Three of those names are preprocessor variants, not duplicates. `init.cc` gates
 part of its allocation path on `HIP_*_UNCACHED_MEMORY` and its fault-mask blocks
@@ -628,6 +645,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroInit-faultinj      # same, ENABLE_FAULT_INJECTION arm
 ./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
+./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-HostUnitTests
 ```
 

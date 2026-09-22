@@ -18,6 +18,7 @@
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
+#include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
@@ -232,6 +233,71 @@ TEST(ConfigLoaderTest, LoadsThePciSectionThroughBothEntryPoints) {
       << "the two entry points disagree about the same file";
 }
 
+TEST(ConfigLoaderTest, ResolvesGenerationTopologyThroughBothFileEntryPoints) {
+  const auto file = write_temp_config(R"({
+    "max_ticks": 1,
+    "num_threads": 1,
+    "vm": {
+      "arch": "cdna5",
+      "target": "gfx1250",
+      "gpu": {"device": {"gfx_target_version": 120500, "num_sdma_engines": 0}}
+    },
+    "topology": {
+      "root": {"name": "soc", "type": "soc", "children": [
+        {"name": "vram", "type": "gpu_memory"},
+        {"name": "xcd0", "type": "xcd", "children": [
+          {"name": "l2", "type": "l2_cache"},
+          {"name": "cp", "type": "command_processor"},
+          {"name": "se0", "type": "shader_engine", "children": [
+            {"name": "cu0", "type": "compute_unit"}
+          ]}
+        ]}
+      ]},
+      "links": []
+    }
+  })");
+
+  const auto identity = config::load_device_identity(file.path(), rocjitsu::kEmbeddedSchema);
+  const auto loaded = config::load_config(file.path(), rocjitsu::kEmbeddedSchema);
+  const auto identity_spec = gpu_pci_spec_from_config(identity.device, identity.pci);
+  const auto loaded_spec = gpu_pci_spec_from_config(loaded.device, loaded.pci);
+
+  for (const auto *device : {&identity.device, &loaded.device}) {
+    EXPECT_EQ(device->num_shader_engines, 2u);
+    EXPECT_EQ(device->num_shader_arrays_per_engine, 2u);
+    EXPECT_EQ(device->num_cu_per_sh, 8u);
+    EXPECT_EQ(device->wave_front_size, 32u);
+    EXPECT_EQ(device->max_waves_per_simd, 16u);
+    EXPECT_EQ(device->max_slots_scratch_cu, 32u);
+    EXPECT_EQ(device->lds_size_kb, 320u);
+  }
+  EXPECT_EQ(identity_spec.discovery.graphics.shader_engines, identity.device.num_shader_engines);
+  EXPECT_EQ(identity_spec.discovery.graphics.wavefront_size, identity.device.wave_front_size);
+  EXPECT_EQ(identity_spec.discovery.graphics.lds_size_kb, identity.device.lds_size_kb);
+  EXPECT_EQ(loaded_spec.discovery.graphics.shader_engines, loaded.device.num_shader_engines);
+  EXPECT_EQ(loaded_spec.discovery.graphics.wavefront_size, loaded.device.wave_front_size);
+  EXPECT_EQ(loaded_spec.discovery.graphics.lds_size_kb, loaded.device.lds_size_kb);
+}
+
+TEST(ConfigLoaderTest, ResolvesGenerationTopologyThroughDbtGuestFileEntryPoint) {
+  const auto file = write_temp_config(R"({
+    "dbt_guest": {
+      "guest_device": {"gfx_target_version": 120500, "num_sdma_engines": 0}
+    }
+  })");
+
+  const auto dbt = config::load_dbt_guest_config_from_file(file.path());
+
+  ASSERT_TRUE(dbt.guest_device.present);
+  EXPECT_EQ(dbt.guest_device.num_shader_engines, 2u);
+  EXPECT_EQ(dbt.guest_device.num_shader_arrays_per_engine, 2u);
+  EXPECT_EQ(dbt.guest_device.num_cu_per_sh, 8u);
+  EXPECT_EQ(dbt.guest_device.wave_front_size, 32u);
+  EXPECT_EQ(dbt.guest_device.max_waves_per_simd, 16u);
+  EXPECT_EQ(dbt.guest_device.max_slots_scratch_cu, 32u);
+  EXPECT_EQ(dbt.guest_device.lds_size_kb, 320u);
+}
+
 // A config with no bus section still has to yield a usable one, because most
 // parts do not describe a bus at all.
 TEST(ConfigLoaderTest, DefaultsThePciSectionWhenTheFileOmitsIt) {
@@ -360,7 +426,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna4.soc()->xcd(0)->num_shader_engines(), 4u);
   EXPECT_EQ(rdna4.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
   EXPECT_TRUE(rdna4.soc()->xcd(0)->command_processor()->packed_tid());
-  EXPECT_EQ(rdna4.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
+  EXPECT_EQ(rdna4.soc()->sdma_queue_scheduler().packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
 
   auto rdna3 =
@@ -396,7 +462,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna3.soc()->xcd(0)->num_shader_engines(), 6u);
   EXPECT_EQ(rdna3.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
   EXPECT_TRUE(rdna3.soc()->xcd(0)->command_processor()->packed_tid());
-  EXPECT_EQ(rdna3.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
+  EXPECT_EQ(rdna3.soc()->sdma_queue_scheduler().packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
 
   auto rdna35 = config::load_config(CONFIG_DIR_PATH + "/gfx1151.json", rocjitsu::kEmbeddedSchema);
@@ -431,7 +497,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna35.soc()->xcd(0)->num_shader_engines(), 2u);
   EXPECT_EQ(rdna35.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
   EXPECT_TRUE(rdna35.soc()->xcd(0)->command_processor()->packed_tid());
-  EXPECT_EQ(rdna35.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
+  EXPECT_EQ(rdna35.soc()->sdma_queue_scheduler().packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
 }
 
@@ -772,7 +838,7 @@ TEST(ConfigLoaderTest, AllowsZeroSdmaQueuesWithoutRegularEngines) {
   EXPECT_EQ(dbt.guest_device.num_sdma_queues_per_engine, 0u);
 }
 
-TEST(ConfigLoaderTest, DefaultKfdDeviceHasNoRegularSdmaEngines) {
+TEST(ConfigLoaderTest, DefaultKfdDeviceHasNoRegularSdmaQueueSchedulers) {
   const config::KfdDeviceConfig device;
 
   EXPECT_EQ(device.num_sdma_engines, 0u);
@@ -1901,7 +1967,8 @@ TEST(CheckpointTest, SaveAndRestoreRdnaWave64State) {
   ASSERT_NE(restored_soc, nullptr);
   auto *restored_cp = restored_soc->xcd(0)->command_processor();
   ASSERT_NE(restored_cp, nullptr);
-  EXPECT_EQ(restored_cp->sdma_packet_dialect(), amdgpu::SdmaPacketDialect::Gfx11Plus);
+  EXPECT_EQ(restored_soc->sdma_queue_scheduler().packet_dialect(),
+            amdgpu::SdmaPacketDialect::Gfx11Plus);
   auto *restored_cu = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(restored_cu, nullptr);
   auto *restored_wf = restored_cu->wf(0);
