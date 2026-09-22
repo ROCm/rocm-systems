@@ -116,7 +116,6 @@ struct LaunchParams {
   NDRange8 cluster_;         //!< Cluster dims (matches AQL cluster_size, max 255)
   NDRange32 grid_;           //!< Total number of workgroups in grid in N-dims
   uint32_t sharedMemBytes_;  //!< Shared Memory bytes
-  LaunchDeviceLimits limits_;  //!< Device limits needed for launch-config validation
   bool hipParams_;           //!< If this is launched through hipParams_
   uint16_t violations_;      //!< Bitmask of LaunchViolation bits detected for this config.
 
@@ -132,17 +131,13 @@ struct LaunchParams {
                  static_cast<uint8_t>(clusterZ)),
         grid_(gridX, gridY, gridZ),
         sharedMemBytes_(static_cast<uint32_t>(sharedMemBytes)),
-        limits_(limits),
         hipParams_(hipParams),
         violations_(kLaunchOk) {
-    // Device-dependent checks computed up front (before the early-return block below) so they
-    // are set regardless of the !hipParams_ zero-block early return; they depend only on local_,
-    // sharedMemBytes_ and limits_, all fully initialised by the member-init list above.
-    if (local_.product() > limits_.maxWorkGroupSize) {
+    if (local_.product() > limits.maxWorkGroupSize) {
       violations_ |= kBlockExceedsMaxWG;
     }
     // Truncated member — mirrors Layer 2's check against launch_params.sharedMemBytes_.
-    if (sharedMemBytes_ > limits_.localMemSizePerCU) {
+    if (sharedMemBytes_ > limits.localMemSizePerCU) {
       violations_ |= kSharedMemExceedsMax;
     }
     // Raw size_t parameter, pre-truncation — mirrors the call-site checks that run before the
