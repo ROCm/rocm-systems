@@ -113,7 +113,9 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
     // The two signed bias fields must be sign-extended separately.
     lod_bias = (int32_t((s[2] & 0x3fff) ^ 0x2000) - 0x2000) / 256.0 +
                (int32_t(((s[2] >> 14) & 0x3f) ^ 0x20) - 0x20) / 16.0;
-    if (min_lod > max_lod || ((min_filter || mag_filter || mip_filter == 2) && format != 42))
+    // RGBA8 UNORM/sRGB and one-, two- or four-component FP16 filtering.
+    const bool filterable = format == 42 || format == 13 || format == 29 || format == 57;
+    if (min_lod > max_lod || ((min_filter || mag_filter || mip_filter == 2) && !filterable))
       return unsupported();
     coordinate_offset = sample_mode == ImageSampleMode::Bias          ? 1
                         : sample_mode == ImageSampleMode::Derivatives ? 4
@@ -282,8 +284,14 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
                                max_level + 1, std::min(level + mip_index, last_level));
           if (!selected)
             return unsupported();
-          const double px = u * (normalized ? selected->width : 1) - (linear ? 0.5 : 0);
-          const double py = v * (normalized ? selected->height : 1) - (linear ? 0.5 : 0);
+          double px = u * (normalized ? selected->width : 1) - (linear ? 0.5 : 0);
+          double py = v * (normalized ? selected->height : 1) - (linear ? 0.5 : 0);
+          // Clamp to texel centers before generating weights. This preserves
+          // exact edge texels, including signed zero in a 1x1 mip level.
+          if (linear && (wrap_x == 2 || wrap_x == 3))
+            px = std::clamp(px, 0.0, double(selected->width - 1));
+          if (linear && (wrap_y == 2 || wrap_y == 3))
+            py = std::clamp(py, 0.0, double(selected->height - 1));
           const double x0 = std::floor(px), y0 = std::floor(py);
           access.fractions[lane][mip_index] =
               linear ? std::array{fraction(px - x0), fraction(py - y0)} : std::array{0.0f, 0.0f};

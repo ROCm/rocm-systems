@@ -67,7 +67,7 @@ private:
   bool fragment_stage_ = false;
   uint32_t fragment_wave_size_ = 0;
   struct ColorAttachment {
-    uint32_t export_index = 0, export_format = 0, memory_format = 0, bytes = 0;
+    uint32_t export_index = 0, export_format = 0, memory_format = 0, bytes = 0, components = 0;
     uint32_t width = 0, height = 0, swizzle = 0;
     uint64_t base = 0, slice_size = 0;
     uint32_t first_layer = 0, last_layer = 0;

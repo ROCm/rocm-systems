@@ -19,6 +19,9 @@ enum class BufferFormatEncoding : uint8_t { Gfx9, Rdna1, Rdna2, Gfx11 };
 /// The memory footprint is independent of the instruction's VGPR count.
 uint32_t buffer_format_bytes(uint32_t format,
                              BufferFormatEncoding encoding = BufferFormatEncoding::Gfx11);
+/// Count stored channels, including channels in packed formats.
+uint32_t buffer_format_components(uint32_t format,
+                                  BufferFormatEncoding encoding = BufferFormatEncoding::Gfx11);
 std::array<uint32_t, 4>
 unpack_buffer_format(uint32_t format, uint32_t selectors, std::span<const uint8_t> bytes,
                      BufferFormatEncoding encoding = BufferFormatEncoding::Gfx11);

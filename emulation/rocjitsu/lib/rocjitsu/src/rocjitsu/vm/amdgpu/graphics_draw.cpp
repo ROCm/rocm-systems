@@ -33,10 +33,12 @@ constexpr uint32_t kBlendAdd = 0, kBlendSubtract = 1, kBlendMin = 2, kBlendMax =
 constexpr uint32_t kBlendSeparateAlpha = 1u << 29, kBlendEnable = 1u << 30;
 constexpr uint32_t kNumberUnorm = 0, kNumberUint = 4, kNumberSint = 5, kNumberSrgb = 6,
                    kNumberFloat = 7;
-constexpr uint32_t kBufRgba8Unorm = 42, kBufRgba16Unorm = 51, kBufRgba32Uint = 61;
+constexpr uint32_t kBufR32Uint = 20, kBufRgba8Unorm = 42, kBufRg32Uint = 48, kBufRgba16Unorm = 51,
+                   kBufRgba32Uint = 61;
 
-constexpr uint32_t kExportFp16Abgr = 4, kExportUnorm16Abgr = 5, kExportSnorm16Abgr = 6,
-                   kExportUint16Abgr = 7, kExportSint16Abgr = 8, kExport32Abgr = 9;
+constexpr uint32_t kExport32R = 1, kExport32Gr = 2, kExportFp16Abgr = 4, kExportUnorm16Abgr = 5,
+                   kExportSnorm16Abgr = 6, kExportUint16Abgr = 7, kExportSint16Abgr = 8,
+                   kExport32Abgr = 9;
 
 // CB color formats use separate data and number fields; pack_buffer_format uses
 // the combined GFX11 buffer format table.
@@ -54,14 +56,38 @@ uint32_t color_buffer_format(uint32_t data_format, uint32_t number_format) {
       // FLOAT follows SINT in the buffer table, skipping NUMBER_SRGB.
       return kBufRgba16Unorm + (number_format == kNumberFloat ? kNumberSint + 1 : number_format);
     break;
+  case 4:  // COLOR_32
+  case 11: // COLOR_32_32
   case 14: // COLOR_32_32_32_32
     if (number_format == kNumberUint || number_format == kNumberSint ||
-        number_format == kNumberFloat)
-      return kBufRgba32Uint + (number_format == kNumberFloat ? kNumberSint - kNumberUint + 1
-                                                             : number_format - kNumberUint);
+        number_format == kNumberFloat) {
+      const uint32_t base = data_format == 4    ? kBufR32Uint
+                            : data_format == 11 ? kBufRg32Uint
+                                                : kBufRgba32Uint;
+      return base + (number_format == kNumberFloat ? kNumberSint - kNumberUint + 1
+                                                   : number_format - kNumberUint);
+    }
     break;
   }
   return 0;
+}
+
+bool supported_export_format(uint32_t format, uint32_t components) {
+  switch (format) {
+  case kExport32R:
+    return components == 1;
+  case kExport32Gr:
+    return components == 2;
+  case kExportFp16Abgr:
+  case kExportUnorm16Abgr:
+  case kExportSnorm16Abgr:
+  case kExportUint16Abgr:
+  case kExportSint16Abgr:
+  case kExport32Abgr:
+    return true;
+  default:
+    return false;
+  }
 }
 
 bool supported_blend(uint32_t control) {
@@ -508,20 +534,23 @@ void GraphicsDraw::prepare_colors() {
     color.srgb = number_format == kNumberSrgb;
     color.memory_format = color_buffer_format(data_format, number_format);
     color.bytes = buffer_format_bytes(color.memory_format);
+    color.components = buffer_format_components(color.memory_format);
+    color.blend = context_[0x1e0 + target];
+    uint32_t allowed_attrib = gfx12 ? 0u : 0x30u;
+    // FORCE_DST_ALPHA_1 has no effect on these non-blended targets without alpha.
+    if (color.components < 4 && !(color.blend & kBlendEnable))
+      allowed_attrib |= 1u << 2;
     const uint32_t layer_bits = gfx12 ? 14 : 13, layer_mask = (1u << layer_bits) - 1;
     const uint32_t view = context_[block + 1];
     color.first_layer = view & layer_mask;
     color.last_layer = (view >> layer_bits) & layer_mask;
     if (!color.memory_format || (color.srgb && color.export_format != kExportFp16Abgr) ||
-        (info & (3u << 11)) || (attrib & (gfx12 ? ~0u : ~0x30u)) || ((attrib3 >> 24) & 3) > 1 ||
+        (info & (3u << 11)) || (attrib & ~allowed_attrib) || ((attrib3 >> 24) & 3) > 1 ||
         (attrib3 & (1u << layer_bits)) || (context_[block + 2] & ~31u) ||
         color.first_layer > color.last_layer || color.last_layer > (attrib3 & layer_mask) ||
         (view & (gfx12 ? 0xf0000000u : 0xc0000000u)) ||
-        (color.export_format != kExportFp16Abgr && color.export_format != kExportUnorm16Abgr &&
-         color.export_format != kExportSnorm16Abgr && color.export_format != kExportUint16Abgr &&
-         color.export_format != kExportSint16Abgr && color.export_format != kExport32Abgr))
+        !supported_export_format(color.export_format, color.components))
       throw std::runtime_error("unsupported graphics color state");
-    color.blend = context_[0x1e0 + target];
     if ((color.blend & kBlendEnable) &&
         (color.srgb || color.memory_format != kBufRgba8Unorm || !supported_blend(color.blend) ||
          ((color.blend & kBlendSeparateAlpha) && !supported_blend(color.blend >> 16))))
@@ -1004,8 +1033,12 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
             else
               components[c] = std::bit_cast<uint32_t>(util::f16_to_f32(half));
           }
-        } else if (exported.mask != 15) {
-          throw std::runtime_error("unsupported graphics color export mask");
+        } else {
+          const uint32_t export_mask = color.export_format == kExport32R    ? 1u
+                                       : color.export_format == kExport32Gr ? 3u
+                                                                            : 15u;
+          if (exported.mask != export_mask)
+            throw std::runtime_error("unsupported graphics color export mask");
         }
         const uint64_t layer_base =
             image_layer_base(arch_ == ROCJITSU_CODE_ARCH_RDNA4, color.base, color.slice_size,
@@ -1016,7 +1049,8 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
           throw std::runtime_error("graphics color address is unsupported");
         std::array<uint8_t, 16> previous{}, bytes{};
         const uint32_t blend = color.blend, write_mask = color.write_mask;
-        if (((blend & kBlendEnable) || write_mask != 15) &&
+        const uint32_t full_mask = (1u << color.components) - 1;
+        if (((blend & kBlendEnable) || (write_mask & full_mask) != full_mask) &&
             memory.read(*address, std::as_writable_bytes(std::span{previous}.first(color.bytes))) !=
                 VmAccessOutcome::Complete)
           throw std::runtime_error("graphics color read failed");
@@ -1043,9 +1077,9 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
         if (color.srgb)
           for (uint32_t c = 0; c < 3; ++c)
             bytes[c] = srgb_color_byte(std::bit_cast<float>(components[c]));
-        // Accepted color formats have four equally sized components.
-        const uint32_t component_bytes = color.bytes / 4;
-        for (uint32_t c = 0; c < 4; ++c)
+        // Accepted color formats have equally sized components.
+        const uint32_t component_bytes = color.bytes / color.components;
+        for (uint32_t c = 0; c < color.components; ++c)
           if (!(write_mask & (1u << c)))
             std::copy_n(previous.begin() + c * component_bytes, component_bytes,
                         bytes.begin() + c * component_bytes);

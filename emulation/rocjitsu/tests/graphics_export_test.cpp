@@ -1375,13 +1375,63 @@ TEST_P(GraphicsExportTest, ColorBlendingPreservesMasksAndUsesSeparateAlpha) {
   }
 }
 
-TEST_P(GraphicsExportTest, WideColorAttachmentsWriteFullTexelsAndPreserveMaskedChannels) {
+TEST_P(GraphicsExportTest, ColorAttachmentsWriteFullTexelsAndPreserveMaskedChannels) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   struct Case {
-    uint32_t data_format, number_format, export_format, bytes, mask;
+    uint32_t data_format, number_format, export_format, bytes, components = 4, mask;
     std::array<uint32_t, 4> exported, expected;
   };
   const Case cases[] = {
+      // Full-width float and integer values for R32/RG32 attachments.
+      {.data_format = 4,
+       .number_format = 7,
+       .export_format = 1,
+       .bytes = 4,
+       .components = 1,
+       .mask = 1,
+       .exported = {0xbf812345, 0x3eabcdef},
+       .expected = {0xbf812345, 0x3eabcdef}},
+      {.data_format = 4,
+       .number_format = 4,
+       .export_format = 1,
+       .bytes = 4,
+       .components = 1,
+       .mask = 1,
+       .exported = {0x87654321, 0xfedcba98},
+       .expected = {0x87654321, 0xfedcba98}},
+      {.data_format = 4,
+       .number_format = 5,
+       .export_format = 1,
+       .bytes = 4,
+       .components = 1,
+       .mask = 1,
+       .exported = {0x80000001, 0x7ffffffe},
+       .expected = {0x80000001, 0x7ffffffe}},
+      {.data_format = 11,
+       .number_format = 7,
+       .export_format = 2,
+       .bytes = 8,
+       .components = 2,
+       .mask = 3,
+       .exported = {0xbf812345, 0x3eabcdef},
+       .expected = {0xbf812345, 0x3eabcdef}},
+      {.data_format = 11,
+       .number_format = 4,
+       .export_format = 2,
+       .bytes = 8,
+       .components = 2,
+       .mask = 3,
+       .exported = {0x87654321, 0xfedcba98},
+       .expected = {0x87654321, 0xfedcba98}},
+      {.data_format = 11,
+       .number_format = 5,
+       .export_format = 2,
+       .bytes = 8,
+       .components = 2,
+       .mask = 3,
+       .exported = {0x80000001, 0x7ffffffe},
+       .expected = {0x80000001, 0x7ffffffe}},
+
       // FP16 sRGB exports captured on both physical RDNA3 and RDNA4.
       {.data_format = 10,
        .number_format = 6,
@@ -1534,7 +1584,7 @@ TEST_P(GraphicsExportTest, WideColorAttachmentsWriteFullTexelsAndPreserveMaskedC
        .expected = {0x12345678, 0x87654321, 0x0fedcba9, 0x9abcdef0}},
   };
   for (const auto &test : cases) {
-    for (uint32_t write_mask : {5u, 15u}) {
+    for (uint32_t write_mask : {1u, 2u, 5u, 15u}) {
       SCOPED_TRACE(test.data_format);
       SCOPED_TRACE(test.number_format);
       SCOPED_TRACE(write_mask);
@@ -1546,6 +1596,7 @@ TEST_P(GraphicsExportTest, WideColorAttachmentsWriteFullTexelsAndPreserveMaskedC
       context[gfx12 ? 0x31e : 0x3b0] = gfx12 ? 3 | (3 << 16) : 3 | (3 << 14);
       // Linear targets cover the RGBA32F linear-image clear CTS regression.
       context[gfx12 ? 0x31f : 0x3b8] = 0;
+      context[gfx12 ? 0x31b : 0x31d] = test.components < 4 ? 1u << 2 : 0; // FORCE_DST_ALPHA_1
       context[0x318] = 0x1000;
       context[gfx12 ? 0x214 : 0x8e] = write_mask;
       context[gfx12 ? 0x215 : 0x8f] = 15;
@@ -1577,7 +1628,7 @@ TEST_P(GraphicsExportTest, WideColorAttachmentsWriteFullTexelsAndPreserveMaskedC
         draw->export_lane(*wave_, lane, 0, test.mask, test.exported);
       EXPECT_FALSE(draw->advance(*access_));
       for (uint32_t byte = 0; byte < test.bytes; ++byte) {
-        const uint32_t component = byte / (test.bytes / 4);
+        const uint32_t component = byte / (test.bytes / test.components);
         const uint8_t expected =
             write_mask & (1u << component) ? test.expected[byte / 4] >> (8 * (byte % 4)) : 0xcc;
         uint8_t actual = 0;
@@ -1994,6 +2045,214 @@ TEST_P(GraphicsExportTest, HardwareSampleFiltersAndAddressesRgba8) {
     EXPECT_EQ(wave_->debug_read_vgpr(9, 1), std::bit_cast<uint32_t>(test.v));
     EXPECT_EQ(wave_->debug_read_vgpr(10, 1), 0xdeadbeefu);
     EXPECT_EQ(wave_->debug_read_vgpr(11, 1), 0xdeadbeefu);
+  }
+}
+
+TEST_P(GraphicsExportTest, HardwareSampleFiltersFp16AndMipLevels) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  struct Case {
+    const char *name;
+    std::array<std::array<uint16_t, 4>, 4> texels;
+    std::array<uint16_t, 4> mip;
+    std::array<std::array<uint32_t, 4>, 6> expected;
+  };
+  // Raw outputs from the same 2x2 texture and 1x1 mip on physical gfx1100/gfx1201.
+  const Case cases[] = {
+      {.name = "positive finite",
+       .texels = {{{0x0000, 0x3801, 0x3c01, 0x0001},
+                   {0x3c00, 0x2001, 0x5bff, 0x03ff},
+                   {0x3bff, 0x1001, 0x7bff, 0x0400},
+                   {0x3401, 0x2c01, 0x4c10, 0x0801}}},
+       .mip = {0x2c01, 0xbc01, 0x7801, 0x1001},
+       .expected = {{{0x00000000, 0x3f002000, 0x3f802000, 0x33800000},
+                     {0x3e7fe000, 0x3ec04000, 0x467fe000, 0x37806000},
+                     {0x3ec7f400, 0x3e92f000, 0x4640a000, 0x38002000},
+                     {0x3d002000, 0xbe802000, 0x46802100, 0x39802400},
+                     {0x3e67fc00, 0xbeb6c800, 0x46b04800, 0x39882200},
+                     {0x3d802000, 0xbf802000, 0x47002000, 0x3a002000}}}},
+      {.name = "signed finite",
+       .texels = {{{0x0000, 0xb801, 0x3c01, 0x8001},
+                   {0xbc00, 0x2001, 0xdbff, 0x03ff},
+                   {0xbbff, 0x1001, 0xfbff, 0x0400},
+                   {0x3401, 0xac01, 0x4c10, 0x8801}}},
+       .mip = {0x2c01, 0xbc01, 0x7801, 0x1001},
+       .expected = {{{0x00000000, 0xbf002000, 0x3f802000, 0xb3800000},
+                     {0xbe7fe000, 0xbec02000, 0xc67fe000, 0x377f4000},
+                     {0xbeb7f400, 0xbe915800, 0xc6409800, 0x377f2000},
+                     {0x3d002000, 0xbf403000, 0x46802100, 0x39801c00},
+                     {0xbe17ec00, 0xbf247600, 0x461ff400, 0x39841c80},
+                     {0x3d802000, 0xbf802000, 0x47002000, 0x3a002000}}}},
+      {.name = "NaN and infinity",
+       .texels = {{{0x7c00, 0xfc00, 0x7c01, 0x7e01},
+                   {0x3c00, 0x3c00, 0x3c00, 0x3c00},
+                   {0x4000, 0xfc00, 0x7c00, 0x0000},
+                   {0x7c00, 0x7c00, 0xfc00, 0xfc01}}},
+       .mip = {0xfc00, 0x7c00, 0x7e00, 0x3c00},
+       .expected = {{{0x7f800000, 0xff800000, 0xffc00000, 0xffc00000},
+                     {0x7f800000, 0xff800000, 0xffc00000, 0xffc00000},
+                     {0x7f800000, 0xffc00000, 0xffc00000, 0xffc00000},
+                     {0xffc00000, 0xffc00000, 0xffc00000, 0xffc00000},
+                     {0xffc00000, 0xffc00000, 0xffc00000, 0xffc00000},
+                     {0xff800000, 0x7f800000, 0xffc00000, 0x3f800000}}}},
+      {.name = "mixed signed zeros",
+       .texels = {{{0x0000, 0x8000, 0x0000, 0x8000},
+                   {0x8000, 0x8000, 0x0000, 0x0000},
+                   {0x0000, 0x0000, 0x0000, 0x8000},
+                   {0x8000, 0x0000, 0x0000, 0x8000}}},
+       .mip = {0x2c01, 0xbc01, 0x7801, 0x1001},
+       .expected = {{{0x00000000, 0x80000000, 0x00000000, 0x80000000},
+                     {0x00000000, 0x00000000, 0x00000000, 0x00000000},
+                     {0x00000000, 0x00000000, 0x00000000, 0x00000000},
+                     {0x3d002000, 0xbf002000, 0x46802000, 0x39802000},
+                     {0x3d002000, 0xbf002000, 0x46802000, 0x39802000},
+                     {0x3d802000, 0xbf802000, 0x47002000, 0x3a002000}}}},
+      {.name = "subnormals",
+       .texels = {{{0x0001, 0x0002, 0x0003, 0x03ff},
+                   {0x0003, 0x003f, 0x0081, 0x0101},
+                   {0x0011, 0x0012, 0x0103, 0x0201},
+                   {0x0201, 0x0245, 0x0000, 0x8001}}},
+       .mip = {0x2c01, 0xbc01, 0x7801, 0x1001},
+       .expected = {{{0x33800000, 0x34000000, 0x34400000, 0x387fc000},
+                     {0x34a00000, 0x34c00000, 0x36860000, 0x385fe000},
+                     {0x36118000, 0x36528000, 0x3694e000, 0x3833f000},
+                     {0x3d002008, 0xbf001fff, 0x46802000, 0x39901c00},
+                     {0x3d002123, 0xbf001fe6, 0x46802000, 0x398b5f00},
+                     {0x3d802000, 0xbf802000, 0x47002000, 0x3a002000}}}},
+      {.name = "large cancellation",
+       .texels = {{{0x7bff, 0xfbff, 0x7bff, 0x7001},
+                   {0xfbff, 0x7bff, 0x03ff, 0xf001},
+                   {0x0001, 0x4000, 0xfbff, 0x4001},
+                   {0x4000, 0xc001, 0x3c01, 0xc001}}},
+       .mip = {0x2c01, 0xbc01, 0x7801, 0x1001},
+       .expected = {{{0x477fe000, 0xc77fe000, 0x477fe000, 0x46002000},
+                     {0x473fe800, 0xc73fe800, 0x46ffe000, 0x45c03000},
+                     {0x46bfe800, 0xc6bfe800, 0x46bfe800, 0x45403000},
+                     {0x46ffe010, 0xc6ffe100, 0x47400000, 0x45802000},
+                     {0x463fe820, 0xc63fea00, 0x46e01400, 0x44c03002},
+                     {0x3d802000, 0xbf802000, 0x47002000, 0x3a002000}}}},
+      {.name = "negative zeros",
+       .texels = {{{0x8000, 0x8000, 0x8000, 0x8000},
+                   {0x8000, 0x8000, 0x8000, 0x8000},
+                   {0x8000, 0x8000, 0x8000, 0x8000},
+                   {0x8000, 0x8000, 0x8000, 0x8000}}},
+       .mip = {0x8000, 0x8000, 0x8000, 0x8000},
+       .expected = {{{0x80000000, 0x80000000, 0x80000000, 0x80000000},
+                     {0x00000000, 0x00000000, 0x00000000, 0x00000000},
+                     {0x00000000, 0x00000000, 0x00000000, 0x00000000},
+                     {0x00000000, 0x00000000, 0x00000000, 0x00000000},
+                     {0x00000000, 0x00000000, 0x00000000, 0x00000000},
+                     {0x80000000, 0x80000000, 0x80000000, 0x80000000}}}},
+      {.name = "zero-weight NaN and infinity",
+       .texels = {{{0x3c00, 0x8000, 0x3c00, 0x8000},
+                   {0x7e01, 0x8000, 0x7c00, 0x8000},
+                   {0x4200, 0x8000, 0x4200, 0x8000},
+                   {0x7c00, 0x8000, 0xfc00, 0x8000}}},
+       .mip = {0x2c01, 0xbc01, 0x7801, 0x1001},
+       .expected = {{{0x3f800000, 0x80000000, 0x3f800000, 0x80000000},
+                     {0x3fc00000, 0x00000000, 0x3fc00000, 0x00000000},
+                     {0xffc00000, 0x00000000, 0xffc00000, 0x00000000},
+                     {0x3f080200, 0xbf002000, 0x46802100, 0x39802000},
+                     {0xffc00000, 0xbf002000, 0xffc00000, 0x39802000},
+                     {0x3d802000, 0xbf802000, 0x47002000, 0x3a002000}}}},
+  };
+  constexpr struct Sample {
+    const char *name;
+    uint32_t index;
+  } samples[] = {{"texel center", 0},
+                 {"two contributing texels", 4},
+                 {"four contributing texels", 5},
+                 {"mip blend at texel centers", 32768},
+                 {"mip and bilinear blend", 32773},
+                 {"clamped mip endpoint", 65520}};
+  for (uint32_t components : {1u, 2u, 4u}) {
+    for (uint32_t pattern = 0; pattern < std::size(cases); ++pattern) {
+      SCOPED_TRACE(components);
+      const auto &test = cases[pattern];
+      SCOPED_TRACE(test.name);
+      const uint64_t base = 0x100000 + components * 0x100000 + pattern * 0x10000;
+      const uint32_t bytes = components * 2;
+      for (uint32_t level = 0; level < 2; ++level) {
+        const auto mip = amdgpu::image_mip_layout(gfx12, 0, bytes, 2, 2, 2, level);
+        ASSERT_TRUE(mip);
+        for (uint32_t y = 0; y < mip->height; ++y)
+          for (uint32_t x = 0; x < mip->width; ++x) {
+            const auto address =
+                gfx12 ? amdgpu::gfx12_image_address(base + mip->offset, x, y, mip->pitch, bytes, 0)
+                      : amdgpu::gfx11_image_address(base + mip->offset, x, y, mip->pitch, bytes, 0);
+            ASSERT_TRUE(address);
+            const auto &texel = level ? test.mip : test.texels[y * 2 + x];
+            ASSERT_EQ(access_->write(*address, std::as_bytes(std::span(texel).first(components))),
+                      amdgpu::VmAccessOutcome::Complete);
+          }
+      }
+      const uint32_t format = components == 1 ? 13 : components == 2 ? 29 : 57;
+      // Missing Vulkan components are supplied by the descriptor selectors.
+      const uint32_t selectors = components == 1 ? 0x204 : components == 2 ? 0x22c : 0xfac;
+      const std::array<uint32_t, 8> descriptor{uint32_t(base >> 8),
+                                               (format << (gfx12 ? 17 : 20)) | (1u << 30) |
+                                                   (1u << (gfx12 ? 12 : 16)),
+                                               1u << 14,
+                                               (9u << 28) | selectors | (1u << (gfx12 ? 15 : 16)),
+                                               0,
+                                               0,
+                                               0,
+                                               0};
+      for (uint32_t r = 0; r < descriptor.size(); ++r)
+        wave_->debug_write_sgpr(8 + r, descriptor[r]);
+      wave_->debug_write_sgpr(4, 2 | (2 << 3) | (2 << 6));
+      wave_->debug_write_sgpr(5, 256u << (gfx12 ? 13 : 12));
+      wave_->debug_write_sgpr(6, (1 << 20) | (1 << 22) | (2 << 26));
+      wave_->debug_write_sgpr(7, 0);
+      wave_->set_exec(5);
+      for (uint32_t sample = 0; sample < std::size(samples); ++sample) {
+        SCOPED_TRACE(samples[sample].name);
+        const uint32_t index = samples[sample].index;
+        const float u = 0.25f + (index & 3u) / 8.0f;
+        const float v = 0.25f + ((index >> 2) & 3u) / 8.0f;
+        const float lod = (index >> 4) / 4096.0f;
+        for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
+          wave_->debug_write_vgpr(6, lane, std::bit_cast<uint32_t>(u));
+          wave_->debug_write_vgpr(0, lane, std::bit_cast<uint32_t>(v));
+          wave_->debug_write_vgpr(4, lane, std::bit_cast<uint32_t>(lod));
+          for (uint32_t c = 0; c < 4; ++c)
+            wave_->debug_write_vgpr(8 + c, lane, 0xdeadbeef);
+        }
+        std::array<uint32_t, 4> words{};
+        if (gfx12) {
+          const auto encoded = rdna4::build_vsample(29, {.dim = 1,
+                                                         .dmask = 15,
+                                                         .vdata = 8,
+                                                         .rsrc = 8,
+                                                         .samp = 4,
+                                                         .vaddr0 = 6,
+                                                         .vaddr1 = 0,
+                                                         .vaddr2 = 4});
+          std::copy(encoded.begin(), encoded.end(), words.begin());
+        } else {
+          const auto encoded = rdna3::build_mimg(
+              29,
+              {.nsa = 1, .dim = 1, .dmask = 15, .vaddr = 6, .vdata = 8, .srsrc = 2, .ssamp = 1});
+          std::copy(encoded.begin(), encoded.end(), words.begin());
+          words[2] = 4 << 8;
+        }
+        auto decoded = decoder_->decode(words.data());
+        ASSERT_FALSE(decoded.failed());
+        auto instruction = std::move(decoded).value();
+        ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
+        ASSERT_FALSE(wave_->instruction_execution_failed());
+        ASSERT_NE(instruction->data(), nullptr);
+        amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
+        pipeline.issue(instruction.release(), *wave_);
+        for (uint32_t c = 0; c < 4; ++c) {
+          const uint32_t expected = c < components ? test.expected[sample][c]
+                                    : c == 3       ? 0x3f800000u
+                                                   : 0;
+          for (uint32_t lane : {0u, 2u})
+            EXPECT_EQ(wave_->debug_read_vgpr(8 + c, lane), expected) << c;
+          EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 1), 0xdeadbeefu);
+        }
+      }
+    }
   }
 }
 

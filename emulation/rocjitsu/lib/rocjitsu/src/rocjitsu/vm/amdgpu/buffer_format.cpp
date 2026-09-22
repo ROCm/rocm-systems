@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace rocjitsu::amdgpu {
@@ -111,6 +112,46 @@ double round_even(double value) {
   return lo + (fraction > 0.5 || (fraction == 0.5 && std::fmod(lo, 2.0) != 0));
 }
 
+constexpr float kFilterNan = std::bit_cast<float>(0xffc00000u);
+
+double filter_float_texels(std::array<double, 4> channels, const std::array<double, 4> &weights) {
+  double maximum = 0;
+  uint32_t active = 0, selected = 0;
+  bool positive_inf = false, negative_inf = false;
+  for (uint32_t tap = 0; tap < channels.size(); ++tap) {
+    // Zero-weight texels do not contribute even when their value is NaN or infinity.
+    if (weights[tap] == 0) {
+      channels[tap] = 0;
+      continue;
+    }
+    ++active;
+    selected = tap;
+    const double value = channels[tap];
+    if (std::isnan(value))
+      return kFilterNan;
+    positive_inf |= value == std::numeric_limits<double>::infinity();
+    negative_inf |= value == -std::numeric_limits<double>::infinity();
+    maximum = std::max(maximum, std::abs(value));
+  }
+  if (positive_inf && negative_inf)
+    return kFilterNan;
+  if (positive_inf || negative_inf)
+    return negative_inf ? -std::numeric_limits<double>::infinity()
+                        : std::numeric_limits<double>::infinity();
+  if (active == 1)
+    return channels[selected]; // Preserve signed zero at an exact texel center.
+
+  // RDNA3/4 sRGB and FP16 filters align contributing texels to a shared
+  // exponent with twelve significant bits, truncating toward zero.
+  const int exponent = maximum > 0 ? std::ilogb(maximum) : 0;
+  const double scale = std::ldexp(1.0, 11 - exponent);
+  for (auto &channel : channels)
+    channel = std::trunc(channel * scale) / scale;
+  // Weighted zero sums are positive, including sums of only negative zeros.
+  return 0.0 + channels[0] * weights[0] + channels[1] * weights[1] + channels[2] * weights[2] +
+         channels[3] * weights[3];
+}
+
 uint32_t read_bits(std::span<const uint8_t> bytes, uint32_t offset, uint32_t width) {
   uint64_t value = 0;
   for (uint32_t i = offset / 8; i < (offset + width + 7) / 8; ++i)
@@ -203,6 +244,11 @@ uint32_t buffer_format_bytes(uint32_t format, BufferFormatEncoding encoding) {
   for (auto width : f.widths)
     bits += width;
   return bits / 8;
+}
+
+uint32_t buffer_format_components(uint32_t format, BufferFormatEncoding encoding) {
+  const auto f = decode(format, encoding);
+  return std::count_if(f.widths.begin(), f.widths.end(), [](uint32_t width) { return width != 0; });
 }
 
 std::array<uint32_t, 4> unpack_buffer_format(uint32_t format, uint32_t selectors,
@@ -355,7 +401,8 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
         texels[tap] = texel(tap);
       for (uint32_t c = 0; c < d.buffer_components; ++c) {
         const uint32_t selector = (d.buffer_selectors >> (3 * c)) & 7;
-        const bool unorm8 = !d.image_srgb || selector == 7;
+        const bool unorm8 = format.number == Number::Unorm && format.widths[0] == 8 &&
+                            (!d.image_srgb || selector == 7);
         const auto filter_level = [&](uint32_t level) {
           const double x = d.image_sample->fractions[lane][level][0];
           const double y = d.image_sample->fractions[lane][level][1];
@@ -366,18 +413,8 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
               channels[tap] = round_even(channels[tap] * 255);
           }
           const std::array weights{(1 - x) * (1 - y), x * (1 - y), (1 - x) * y, x * y};
-          if (!unorm8) {
-            double maximum = 0;
-            for (uint32_t tap = 0; tap < 4; ++tap)
-              if (weights[tap] != 0)
-                maximum = std::max(maximum, channels[tap]);
-            // The sRGB filter aligns contributing texels to a shared exponent
-            // with twelve significant bits before multiplying by the weights.
-            const int exponent = maximum > 0 ? std::ilogb(maximum) : 0;
-            const double scale = std::ldexp(1.0, 11 - exponent);
-            for (auto &channel : channels)
-              channel = std::floor(channel * scale) / scale;
-          }
+          if (!unorm8)
+            return filter_float_texels(channels, weights);
           return channels[0] * weights[0] + channels[1] * weights[1] + channels[2] * weights[2] +
                  channels[3] * weights[3];
         };
@@ -391,7 +428,14 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
                         round_even(std::ldexp(filter_level(1) * fraction, 19))) /
                        std::ldexp(1.0, 19);
           } else {
-            filtered = filtered * (1 - fraction) + filter_level(1) * fraction;
+            // Do not multiply an unused mip's NaN/infinity by zero, or lose
+            // signed zero at an exact mip level.
+            if (fraction == 1)
+              filtered = filter_level(1);
+            else if (fraction != 0)
+              filtered = 0.0 + filtered * (1 - fraction) + filter_level(1) * fraction;
+            if (std::isnan(filtered))
+              filtered = kFilterNan;
           }
         }
         if (unorm8) {
@@ -406,11 +450,11 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
           if (shift)
             normalized = (normalized + (uint64_t{1} << (shift - 1))) >> shift;
           filtered = std::ldexp(static_cast<double>(normalized), static_cast<int>(shift) - 34);
-        } else if (filtered > 0) {
-          // The sRGB filter rounds its normalized result to 29 significant
+        } else if (std::isfinite(filtered) && filtered != 0) {
+          // The floating-point filter rounds its result to 29 significant
           // bits before conversion to FP32. This intermediate rounding can
           // turn a value on either side of an FP32 midpoint into an exact tie.
-          const double scale = std::ldexp(1.0, 28 - std::ilogb(filtered));
+          const double scale = std::ldexp(1.0, 28 - std::ilogb(std::abs(filtered)));
           filtered = round_even(filtered * scale) / scale;
         }
         values[c] = std::bit_cast<uint32_t>(static_cast<float>(filtered));
