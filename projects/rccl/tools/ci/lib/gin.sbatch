@@ -135,14 +135,45 @@ if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.s
   ls -la "${rccl_prefix}/lib" 2>/dev/null >&2 || true
   exit 1
 fi
-librccl="${rccl_prefix}/lib/librccl.so"
-[[ -f "${librccl}" ]] || librccl="${rccl_prefix}/lib/librccl.so.1"
+# CMake's namelink (librccl.so) may be a GNU ld script, not an ELF.
+# The shipped library that carries .hip_fatbin is librccl.so.1 / .so.1.0.
+# Prefer a real ELF so readelf/objcopy see the fatbin section (GIN CI on
+# d913f3f7c4 failed this pin on the namelink after device-link produced a
+# 27.7 MiB .hip_fatbin in the build-tree library).
+rccl_readelf() {
+  if command -v llvm-readelf >/dev/null 2>&1; then
+    llvm-readelf "$@"
+  else
+    readelf "$@"
+  fi
+}
+resolve_librccl_elf() {
+  local prefix="$1"
+  local cand
+  for cand in \
+      "${prefix}/lib/librccl.so.1.0" \
+      "${prefix}/lib/librccl.so.1" \
+      "${prefix}/lib/librccl.so"; do
+    if [[ -e "${cand}" ]] && rccl_readelf -h "${cand}" >/dev/null 2>&1; then
+      printf '%s\n' "${cand}"
+      return 0
+    fi
+  done
+  return 1
+}
+librccl="$(resolve_librccl_elf "${rccl_prefix}")" || {
+  echo "ERROR: no ELF librccl under ${rccl_prefix}/lib" >&2
+  ls -la "${rccl_prefix}/lib"/librccl.so* 2>/dev/null >&2 || true
+  file "${rccl_prefix}/lib"/librccl.so* 2>/dev/null >&2 || true
+  exit 1
+}
 # The #10930 regression was an unlinked conn-check fatbin. Pin the two kernel
 # names in the shipped .hip_fatbin section, not host stubs / registration text.
 assert_conn_check_kernels_in_fatbin() {
   local lib="$1"
-  if ! readelf -S "${lib}" 2>/dev/null | grep -q '\.hip_fatbin'; then
+  if ! rccl_readelf -S "${lib}" 2>/dev/null | grep -q '\.hip_fatbin'; then
     echo "ERROR: ${lib} has no .hip_fatbin section" >&2
+    rccl_readelf -S "${lib}" >&2 || true
     exit 1
   fi
   local fatbin
