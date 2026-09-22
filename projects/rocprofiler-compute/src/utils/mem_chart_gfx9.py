@@ -164,12 +164,16 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
     metrics["l2_fabric_wr_at_bw"] = metric_dict.get("L2-Fabric Write and Atomic BW")
 
     # Fabric→MALL→HBM BW (gfx940-942 use "Estimated …"; gfx950 uses exact)
-    metrics["hbm_read_bw"] = metric_dict.get("HBM Read BW") or metric_dict.get(
-        "Estimated HBM Read BW"
+    _exact_rd = metric_dict.get("HBM Read BW")
+    metrics["hbm_read_bw"] = (
+        _exact_rd if _exact_rd is not None else metric_dict.get("Estimated HBM Read BW")
     )
-    metrics["hbm_wr_at_bw"] = metric_dict.get(
-        "HBM Write and Atomic BW"
-    ) or metric_dict.get("Estimated HBM Write and Atomic BW")
+    _exact_wr = metric_dict.get("HBM Write and Atomic BW")
+    metrics["hbm_wr_at_bw"] = (
+        _exact_wr
+        if _exact_wr is not None
+        else metric_dict.get("Estimated HBM Write and Atomic BW")
+    )
     metrics["hbm_write_bw"] = metric_dict.get("HBM Write BW")
     metrics["hbm_atomic_bw"] = metric_dict.get("HBM Atomic BW")
 
