@@ -3005,11 +3005,17 @@ def amdsmi_get_power_cap_info(
     )
 
     return {
-        "power_cap": power_cap_info.power_cap,
-        "default_power_cap": power_cap_info.default_power_cap,
-        "dpm_cap": power_cap_info.dpm_cap,
-        "min_power_cap": power_cap_info.min_power_cap,
-        "max_power_cap": power_cap_info.max_power_cap,
+        "power_cap": _validate_if_max_uint(power_cap_info.power_cap, MaxUIntegerTypes.UINT64_T),
+        "default_power_cap": _validate_if_max_uint(
+            power_cap_info.default_power_cap, MaxUIntegerTypes.UINT64_T
+        ),
+        "dpm_cap": _validate_if_max_uint(power_cap_info.dpm_cap, MaxUIntegerTypes.UINT64_T),
+        "min_power_cap": _validate_if_max_uint(
+            power_cap_info.min_power_cap, MaxUIntegerTypes.UINT64_T
+        ),
+        "max_power_cap": _validate_if_max_uint(
+            power_cap_info.max_power_cap, MaxUIntegerTypes.UINT64_T
+        ),
     }
 
 
@@ -3193,8 +3199,7 @@ def amdsmi_get_gpu_activity(processor_handle: processor_handle_t) -> Dict[str, A
     }
 
     for key, value in activity_dict.items():
-        if value == 0xFFFF:
-            activity_dict[key] = "N/A"
+        activity_dict[key] = _validate_if_max_uint(value, MaxUIntegerTypes.UINT16_T, isActivity=True)
 
     return activity_dict
 
@@ -5022,7 +5027,7 @@ def amdsmi_get_gpu_pci_replay_counter(processor_handle: processor_handle_t):
         amdsmi_wrapper.amdsmi_get_gpu_pci_replay_counter(processor_handle, ctypes.byref(counter))
     )
 
-    return counter.value
+    return _validate_if_max_uint(counter.value, MaxUIntegerTypes.UINT64_T)
 
 
 def amdsmi_get_gpu_topo_numa_affinity(processor_handle: processor_handle_t):
@@ -7181,7 +7186,9 @@ def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_busy_percent(processor_handle, ctypes.byref(gpu_busy_percent))
     )
-    return gpu_busy_percent.value
+    return _validate_if_max_uint(
+        gpu_busy_percent.value, MaxUIntegerTypes.UINT32_T, isActivity=True
+    )
 
 
 def amdsmi_get_vcn_busy_percent(processor_handle: processor_handle_t):
