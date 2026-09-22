@@ -56,6 +56,9 @@ TEST(VersionGateTests, CuMemHostVersionSupported)
     EXPECT_TRUE (NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_0_3_0 - 1));
     EXPECT_FALSE(NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_0_2_2 - 1));
     EXPECT_FALSE(NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_0_3_0));
+
+    // The gap between the backport upper bound and the native min is unsupported.
+    EXPECT_FALSE(NCCL_CUMEM_HOST_VERSION_SUPPORTED(ROCM_VER_7_12_0));
 }
 
 // The DMA-BUF export gate is a conjunction: the CMake symbol probe alone must not
