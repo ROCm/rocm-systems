@@ -133,6 +133,19 @@ public:
         vmid_));
   }
 
+  [[nodiscard]] bool try_read_contiguous(VmMemoryDomain domain, uint64_t address,
+                                         std::span<std::byte> bytes) override {
+    return domain == VmMemoryDomain::Compatibility &&
+           address_space_->try_copy_contiguous(address, bytes.data(), bytes.size(), vmid_, false);
+  }
+
+  [[nodiscard]] bool try_write_contiguous(VmMemoryDomain domain, uint64_t address,
+                                          std::span<const std::byte> bytes) override {
+    return domain == VmMemoryDomain::Compatibility &&
+           address_space_->try_copy_contiguous(address, const_cast<std::byte *>(bytes.data()),
+                                               bytes.size(), vmid_, true);
+  }
+
   [[nodiscard]] AtomicLoadResult atomic_load(VmMemoryDomain domain, uint64_t address,
                                              uint32_t width) override {
     if (domain != VmMemoryDomain::Compatibility)
@@ -271,8 +284,9 @@ LegacyGpuVmAdapter::register_address_space(uint32_t vmid,
 }
 
 AddressSpaceHandle LegacyGpuVmAdapter::register_address_space(
-    uint32_t vmid, LegacyPageTable *page_table, std::shared_mutex *page_table_mutex,
-    const uint64_t *page_table_generation, std::shared_ptr<std::shared_mutex> request_mutex,
+    uint32_t vmid, LegacyPageTable *page_table, util::DistributedSharedMutex *page_table_mutex,
+    const uint64_t *page_table_generation,
+    std::shared_ptr<util::DistributedSharedMutex> request_mutex,
     std::shared_ptr<void> frontend_lifetime) {
   return register_address_space(vmid,
                                 {.page_table = page_table,
