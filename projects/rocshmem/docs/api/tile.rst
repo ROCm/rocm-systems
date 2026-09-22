@@ -10,8 +10,13 @@ Tile routines
 
 .. note::
 
-   The tile API is currently only supported with the **IPC backend**. Attempting to
-   use these routines with other backends results in an error.
+   The tile API is supported with the **IPC** and **GDA** backends. Attempting to
+   use these routines with the **reverse-offload (RO) backend** results in an error.
+
+.. note::
+
+   Only **1-D and 2-D tiles** are supported. Tensors with rank greater than 2 are
+   not supported and will result in an error.
 
 The tile API provides tensor-aware data movement and collective operations that
 operate on multi-dimensional sub-regions (tiles) of symmetric-heap tensors.
@@ -132,4 +137,78 @@ ROCSHMEM_TILE_BROADCAST
 Broadcasts the tile region ``[start_coord, boundary)`` from the root PE's ``src``
 tensor to all other PEs' ``dst`` tensors in the team.
 
+-------------------------------
+Reduction routines
+-------------------------------
 
+ROCSHMEM_TILE_SUM_REDUCE
+-------------------------
+
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_tile_sum_reduce(rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_tile_sum_reduce_wave(rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_tile_sum_reduce_wg(rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_ctx_tile_sum_reduce(rocshmem_ctx_t ctx, rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_ctx_tile_sum_reduce_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_ctx_tile_sum_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+
+  :param ctx:         Context with which to perform this operation.
+  :param team:        The team participating in the collective.
+  :param dst:         Destination tensor. Must reside on the symmetric heap.
+  :param src:         Source tensor. Must reside on the symmetric heap.
+  :param start_coord: Starting coordinates of the tile.
+  :param boundary:    Boundary coordinates of the tile (exclusive upper bound per dimension).
+  :param root:        Root PE (relative to team) that holds the reduction result.
+  :param flags:       Operation flags (reserved, pass 0).
+  :returns:           Zero on success, nonzero on failure.
+
+**Description:**
+Performs an element-wise sum reduction over the tile region ``[start_coord, boundary)``
+across all PEs in the team. The result is written to ``dst`` on every PE.
+
+ROCSHMEM_TILE_MAX_REDUCE
+-------------------------
+
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_tile_max_reduce(rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_tile_max_reduce_wave(rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_tile_max_reduce_wg(rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_ctx_tile_max_reduce(rocshmem_ctx_t ctx, rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_ctx_tile_max_reduce_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_ctx_tile_max_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+
+  :param ctx:         Context with which to perform this operation.
+  :param team:        The team participating in the collective.
+  :param dst:         Destination tensor. Must reside on the symmetric heap.
+  :param src:         Source tensor. Must reside on the symmetric heap.
+  :param start_coord: Starting coordinates of the tile.
+  :param boundary:    Boundary coordinates of the tile (exclusive upper bound per dimension).
+  :param root:        Root PE (relative to team) that holds the reduction result.
+  :param flags:       Operation flags (reserved, pass 0).
+  :returns:           Zero on success, nonzero on failure.
+
+**Description:**
+Performs an element-wise maximum reduction over the tile region ``[start_coord, boundary)``
+across all PEs in the team. The result is written to ``dst`` on every PE.
+
+ROCSHMEM_TILE_MIN_REDUCE
+-------------------------
+
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_tile_min_reduce(rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_tile_min_reduce_wave(rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_tile_min_reduce_wg(rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_ctx_tile_min_reduce(rocshmem_ctx_t ctx, rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_ctx_tile_min_reduce_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+.. cpp:function:: template<typename dst_tensor_t, typename src_tensor_t, typename tuple_t> __device__ int rocshmem_ctx_tile_min_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, dst_tensor_t dst, const src_tensor_t src, tuple_t start_coord, tuple_t boundary, int root, uint64_t flags)
+
+  :param ctx:         Context with which to perform this operation.
+  :param team:        The team participating in the collective.
+  :param dst:         Destination tensor. Must reside on the symmetric heap.
+  :param src:         Source tensor. Must reside on the symmetric heap.
+  :param start_coord: Starting coordinates of the tile.
+  :param boundary:    Boundary coordinates of the tile (exclusive upper bound per dimension).
+  :param root:        Root PE (relative to team) that holds the reduction result.
+  :param flags:       Operation flags (reserved, pass 0).
+  :returns:           Zero on success, nonzero on failure.
+
+**Description:**
+Performs an element-wise minimum reduction over the tile region ``[start_coord, boundary)``
+across all PEs in the team. The result is written to ``dst`` on every PE.
