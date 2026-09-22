@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "profiler-hub/reader_types.hpp"
+#include "profiler-hub/cpp/reader_types.hpp"
 
 #include "data_storage/read_statements.hpp"
 
