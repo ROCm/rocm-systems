@@ -114,7 +114,13 @@ needed.
 ## Known issues and safeguards
 
 - `--device` chooses a GPU only for standalone roofline microbenchmarks. Use
-  `HIP_VISIBLE_DEVICES` to constrain an application profile.
+  `HIP_VISIBLE_DEVICES` to constrain an application profile. When Slurm sets
+  both `ROCR_VISIBLE_DEVICES` and `SLURM_STEP_GPUS`, set
+  `HIP_VISIBLE_DEVICES` from `ROCR_VISIBLE_DEVICES`. Those two values are not
+  the same index.
+- On ROCm 7 and newer, profiling builds a native counter library with `cmake`
+  when that library is not already installed. If `cmake` is unavailable,
+  rerun the same profile with `--no-native-tool`.
 - Do not use removed options such as profile `--path`, `--kernel-names`,
   `--list-devices`, `--timeout`, or `--format-rocprof-output`.
 - Multi-pass profiling replays the application. Avoid it for nondeterministic
