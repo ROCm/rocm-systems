@@ -1,7 +1,7 @@
 #pragma once
 
 #include "profiler-hub/c/profiler_hub_types.h"
-#include "profiler-hub/reader.hpp"
+#include "profiler-hub/cpp/reader.hpp"
 #include <cstdint>
 #include <memory>
 #include <string_view>

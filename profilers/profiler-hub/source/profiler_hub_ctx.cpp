@@ -1,5 +1,5 @@
 #include "profiler_hub_ctx.hpp"
-#include "profiler-hub/storage.hpp"
+#include "profiler-hub/cpp/storage.hpp"
 
 ph_ctx::ph_ctx(std::string_view trace_path)
 : m_file_path{ trace_path }
