@@ -14,6 +14,7 @@
 #include "topo.h"
 #include "bootstrap.h"
 #include "rccl_graph_gen.h"
+#include "collective_execution_policy.h"
 
 #include <stdio.h>      // For NULL and
 #include <stdlib.h>     // For malloc(), calloc(), and free()
@@ -992,6 +993,7 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   int shared = parent && parent->nvlsSupport && parent->shareResources;
   int maxChannels;
   int minNchannels, maxNchannels;
+  int policyChannels;
   int duplicateCount = 1;
   int channelMultiplier = 1;
 #ifdef ENABLE_WARP_SPEED
@@ -1207,6 +1209,12 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   }
 
   minNchannels = ncclMinNchannels();
+  policyChannels = rcclGetCollectiveExecutionPolicyRequiredChannels(comm, ncclParamP2pDisable());
+  if (policyChannels > 0) {
+    policyChannels = std::min(policyChannels, ncclMaxNchannels());
+    minNchannels = std::max(minNchannels, policyChannels);
+    INFO(NCCL_TUNING, "RCCL collective execution policy requires %d provisioned channels", policyChannels);
+  }
   if (comm->nNodes > 1 && !comm->MNNVL) {
     // Was hard-capped at 64; lift to MAXCHANNELS so multi-node runs can opt
     // into the extended channel range via NCCL_MIN_NCHANNELS.

@@ -517,6 +517,8 @@ if(BUILD_TESTS)
   # --error-limit=0 (lld stops at 20 errors otherwise), and run it.
   set(TEST_MICRO_ENQUEUE_SOURCE_FILES
     enqueue-test.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/tuning/collective_execution_policy.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/tuning/collective_execution_policy_rules.cc
     fakes/enqueue_test_deps.cc           # ResetEnqueueTestDeps chain only
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
@@ -556,6 +558,10 @@ if(BUILD_TESTS)
     ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc
     ${PROJECT_BINARY_DIR}/hipify/src/misc/archinfo.cc
     ${PROJECT_BINARY_DIR}/hipify/src/misc/utils.cc
+    PROPERTIES GENERATED TRUE)
+  set_source_files_properties(
+    ${PROJECT_BINARY_DIR}/hipify/src/tuning/collective_execution_policy.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/tuning/collective_execution_policy_rules.cc
     PROPERTIES GENERATED TRUE)
 
   add_executable(rccl-UnitTestsMicroEnqueue ${TEST_MICRO_ENQUEUE_SOURCE_FILES})
@@ -1270,6 +1276,8 @@ endforeach()
 # Same --gc-sections coupling as the in-build list; see the comment there.
 set(TEST_MICRO_ENQUEUE_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/enqueue-test.cc
+  ${RCCL_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
+  ${RCCL_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_test_deps.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
@@ -1299,6 +1307,11 @@ set(TEST_MICRO_ENQUEUE_SOURCE_FILES
   ${RCCL_HIPIFY_DIR}/src/misc/utils.cc
   ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
 )
+
+set_source_files_properties(
+  ${RCCL_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
+  ${RCCL_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
+  PROPERTIES GENERATED TRUE)
 
 # Two binaries, for the same reason the init pair above exists: enqueue.cc gates
 # rcclShmemDynamicSize (:72-88) at the PREPROCESSOR on RCCL_DEVICE_LINKER, so each

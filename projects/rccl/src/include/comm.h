@@ -332,6 +332,7 @@ struct ncclTaskP2p {
   size_t bytes;
   uint64_t opCount;
   bool allowUB;
+  bool inPlace;
 
   // Profiler plugin
   int eActivationMask;

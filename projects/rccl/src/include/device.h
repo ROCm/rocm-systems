@@ -350,6 +350,7 @@ struct ncclDirect {
 };
 
 #define NCCL_CONN_IDX_P2P_NET 2
+#define RCCL_CONN_IDX_P2P_ALT NCCL_CONN_IDX_P2P_NET
 #define NCCL_MAX_NVLS_ARITY 32
 #define NCCL_MAX_NVLS_TREE_ARITY 3
 struct ncclNvls {
@@ -387,7 +388,7 @@ struct alignas(16) ncclDevWorkP2p {
   uint64_t sendOpCount, recvOpCount;
   // From the part index, nP2pChannels, and channelBase the device code can
   // calculate which part of the transfer a channel is responsible for.
-  uint8_t nP2pChannels; // Always equal to comm->p2pnChannels
+  uint8_t nP2pChannels; // Operation-local channel-pool size.
   uint8_t channelBase; // Channel owning first part.
   // Zero channels indicates no work in that direction.
   uint8_t nSendChannels, nRecvChannels;
@@ -405,6 +406,7 @@ struct alignas(16) ncclDevWorkP2p {
 
   uint8_t sendConnIndex:2, recvConnIndex:2;
 };
+static_assert(sizeof(ncclDevWorkP2p) == 64, "ncclDevWorkP2p must retain its packed work-FIFO ABI");
 
 // Compute the subset of the data transfer corresponding to the given part index.
 inline __host__ __device__ void ncclP2pPartBounds(int nParts, int part, size_t bytes, size_t* partBeg,

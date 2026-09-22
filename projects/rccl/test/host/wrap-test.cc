@@ -180,8 +180,8 @@ TEST(WrapMicrotest, GetProtoForGfx120x_BroadcastCutoffBoundary) {
 }
 
 TEST(WrapMicrotest, GetProtoForGfx120x_AllReduceCutoffBoundary) {
-  EXPECT_EQ(NCCL_PROTO_LL, rcclGetProtoForGfx120x(ncclFuncAllReduce, 16384));
-  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx120x(ncclFuncAllReduce, 16385));
+  EXPECT_EQ(NCCL_PROTO_LL, rcclGetProtoForGfx120x(ncclFuncAllReduce, 32768));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx120x(ncclFuncAllReduce, 32769));
 }
 
 // The three tests around this one probe rows 0 (Broadcast), 4 (AllReduce) and

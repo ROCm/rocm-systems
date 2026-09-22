@@ -19,7 +19,8 @@ ncclResult_t ncclTaskPrepare(struct ncclComm* comm, ncclSimInfo_t* simInfo) {
   for (; tInfo != nullptr; tInfo = tInfo->next) {
     // need tuning to support all functions.
     if (tInfo->raw->kind == ncclTaskKindColl && tInfo->tuningIn.func != ncclFuncAlltoAll &&
-        tInfo->tuningIn.func != ncclFuncScatter && tInfo->tuningIn.func != ncclFuncGather &&
+        tInfo->tuningIn.func != ncclFuncAlltoAllv && tInfo->tuningIn.func != ncclFuncScatter &&
+        tInfo->tuningIn.func != ncclFuncGather &&
         tInfo->tuningIn.func != ncclFuncAllGatherV) {
       NCCLCHECK(ncclTuningCompute(&tInfo->tuningIn, &tInfo->tuningOut));
     }

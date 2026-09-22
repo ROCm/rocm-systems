@@ -411,6 +411,10 @@ static ncclResult_t p2pGetInfo(struct ncclComm* comm, struct ncclPeerInfo* info1
   return ncclSuccess;
 }
 
+static int p2pReadModeForConnIndex(int defaultRead, int connIndex, bool p2pNet) {
+  return connIndex == RCCL_CONN_IDX_P2P_ALT && !p2pNet ? !defaultRead : defaultRead;
+}
+
 static ncclResult_t p2pMap(struct ncclComm* comm, struct ncclProxyConnector* proxyConn, struct ncclPeerInfo* myInfo,
                            struct ncclPeerInfo* peerInfo, struct ncclP2pBuff* p2pBuff, void** devMem, void** ipcPtr) {
   if (P2P_SAME_PID(myInfo, peerInfo)) {
@@ -466,6 +470,7 @@ ncclResult_t p2pSendSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, st
   send->transportResources = resources;
   int useRead, intermediateRank;
   NCCLCHECK(p2pGetInfo(comm, myInfo, peerInfo, &useRead, &intermediateRank));
+  useRead = p2pReadModeForConnIndex(useRead, connIndex, comm->p2pNet);
   if (useMemcpy) useRead = 0;
 
   resources->next_hdp_reg = 0;
@@ -566,6 +571,7 @@ ncclResult_t p2pRecvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, st
   recv->transportResources = resources;
   int useRead, intermediateRank;
   NCCLCHECK(p2pGetInfo(comm, myInfo, peerInfo, &useRead, &intermediateRank));
+  useRead = p2pReadModeForConnIndex(useRead, connIndex, comm->p2pNet);
 
   static_assert(sizeof(struct p2pConnectInfo) <= sizeof(struct ncclConnect), "p2p Connect Info is too big");
   struct p2pConnectInfo* info = (struct p2pConnectInfo*)connectInfo;
@@ -1261,9 +1267,16 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
           INFO(NCCL_REG,
                "rank %d - IPC registering buffer %p size %zu (baseAddr %p totalSize %zu numSegments %d) to peer %d",
                comm->rank, userbuff, buffSize, (void*)regRecord->begAddr, totalMappedSize, numSegments, peerRank);
-          NCCLCHECKGOTO(ncclProxyCallBlocking(comm, proxyConn, ncclProxyMsgRegister, ipcInfo,
-                                              sizeof(p2pIpcExpInfo) * numSegments, &rmtRegAddr, sizeof(void*)),
-                        ret, fail);
+          if (proxyConn->sameProcess) {
+            // P2P setup has already enabled peer access. In a shared address
+            // space the registered allocation's UVA is directly usable by
+            // every rank, so avoid a redundant IPC/VMM import and mapping.
+            rmtRegAddr = reinterpret_cast<void*>(regRecord->begAddr);
+          } else {
+            NCCLCHECKGOTO(ncclProxyCallBlocking(comm, proxyConn, ncclProxyMsgRegister, ipcInfo,
+                                                sizeof(p2pIpcExpInfo) * numSegments, &rmtRegAddr, sizeof(void*)),
+                          ret, fail);
+          }
         }
         if (rmtRegAddr) {
           NCCLCHECKGOTO(ncclCalloc(&newInfo, 1), ret, fail);
@@ -1275,6 +1288,7 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
           regRecord->state |= IPC_REG_COMPLETE;
           newInfo->peerRank = peerRank;
           newInfo->baseAddr = baseAddr;
+          newInfo->direct = proxyConn->sameProcess;
           newInfo->impInfo.rmtRegAddr = rmtRegAddr;
           newInfo->impInfo.offset = ipcInfo->offset;
           newInfo->impInfo.legacyIpcCap = ipcInfo->legacyIpcCap;
@@ -1436,8 +1450,10 @@ fail:
 }
 
 ncclResult_t ncclIpcDeregBuffer(struct ncclComm* comm, struct ncclIpcRegInfo* regInfo) {
-  NCCLCHECK(ncclProxyCallBlocking(comm, regInfo->ipcProxyconn, ncclProxyMsgDeregister, &regInfo->impInfo,
-                                  sizeof(struct ncclIpcImpInfo), NULL, 0));
+  if (!regInfo->direct) {
+    NCCLCHECK(ncclProxyCallBlocking(comm, regInfo->ipcProxyconn, ncclProxyMsgDeregister, &regInfo->impInfo,
+                                    sizeof(struct ncclIpcImpInfo), NULL, 0));
+  }
   INFO(NCCL_REG, "rank %d - IPC deregistered buffer %p peer %d ipc remote buffer %p", comm->rank, regInfo->baseAddr,
        regInfo->peerRank, regInfo->impInfo.rmtRegAddr);
   return ncclSuccess;

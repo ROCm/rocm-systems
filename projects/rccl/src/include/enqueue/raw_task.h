@@ -35,6 +35,8 @@ struct ncclRawTaskColl {
   struct ncclDevRedOpFull opDev;
   cudaStream_t stream;
   ncclCollConfig_t collConfig;
+  size_t* sizes;
+  size_t sizesCount;
 };
 
 // AllGatherV inputs built by merging broadcast raw tasks during pre-tuning.
@@ -61,6 +63,7 @@ struct ncclRawTaskSendRecv {
   int peer;
   size_t bytes;
   cudaStream_t stream;
+  bool inPlace;
 };
 
 // ncclPutSignal API inputs captured at enqueue time.
