@@ -61,8 +61,11 @@
 - Put everything in one file, `.ai/rules/cpp-style.md`, with a table of contents
   and one section per ported skill.
 - Apply the edits listed above while copying.
-- Add `CPP_CODING_STYLE.md` at the project root. Keep it short. Each entry links
-  to its section in `.ai/rules/cpp-style.md`.
+- Add `CPP_CODING_STYLE.md` at the project root.
+  - Keep it short. Each entry links to its section in `.ai/rules/cpp-style.md`.
+  - It is the shim a person reads. Short enough to skim and to keep current.
+  - `.ai/rules/cpp-style.md` is the detailed version.
+  - An agent reads it in full every session. A person would not.
 - Add a "C++ Code Style" section to `AGENTS.md`. Every AI tool shim routes
   through it.
 - Add a Cursor rule beside the Python one, scoped to C++ globs.
