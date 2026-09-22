@@ -17,6 +17,19 @@ inline float truncate_float(double value) {
   return result;
 }
 
+// Physical RDNA3/4 perspective interpolation rounds the product using the
+// input exponents, then normalizes it with truncation. A carry into another
+// exponent therefore discards a bit after rounding. Midpoints round away
+// from zero, unlike an IEEE float multiplication.
+inline float multiply_perspective(float a, float b) {
+  if (a == 0 || b == 0 || !std::isfinite(a) || !std::isfinite(b))
+    return a * b;
+  const double product = double(a) * b;
+  const double unit = std::ldexp(1.0, std::ilogb(a) + std::ilogb(b) - 23);
+  const double rounded = std::floor(std::abs(product) / unit + 0.5) * unit;
+  return truncate_float(std::copysign(rounded, product));
+}
+
 // Rasterizer quad offsets use a shared exponent and discard shifted-out bits
 // before addition. This differs from rounding an IEEE addition toward zero.
 inline float add_quad_offsets(float center, float dx, float dy) {

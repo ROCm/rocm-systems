@@ -496,8 +496,8 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
           const double b2 = plane_j.at_quad(x + 0.5 - screen[0].x, y + 0.5 - screen[0].y, q);
           const double dx = x + 0.5 - screen[0].x, dy = y + 0.5 - screen[0].y;
           const float w = 1.0f / plane_rw.at_quad(dx, dy, q);
-          f.i = plane_iw.at_quad(dx, dy, q) * w;
-          f.j = plane_jw.at_quad(dx, dy, q) * w;
+          f.i = raster::multiply_perspective(plane_iw.at_quad(dx, dy, q), w);
+          f.j = raster::multiply_perspective(plane_jw.at_quad(dx, dy, q), w);
           f.z = ((1 - b1 - b2) * v[0].z + b1 * v[1].z + b2 * v[2].z) *
                     std::bit_cast<float>(context_[0x113]) +
                 std::bit_cast<float>(context_[0x114]);

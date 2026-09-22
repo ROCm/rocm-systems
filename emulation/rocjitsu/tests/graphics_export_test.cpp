@@ -172,6 +172,21 @@ TEST(GraphicsRasterMathTest, SubpixelQuantizationRoundsMidpointsToEven) {
   }
 }
 
+TEST(GraphicsRasterMathTest, PerspectiveProductsMatchPhysicalRdna3AndRdna4) {
+  // Raw barycentric captures with power-of-two plane gradients isolate the
+  // interpolation multiplier from triangle setup and parameter interpolation.
+  constexpr std::array<std::array<uint32_t, 3>, 4> cases{{
+      {0x3d900000, 0x3f8b7034, 0x3d9cde3b},
+      {0x3e580000, 0x3fa4a9cf, 0x3e8aef46},
+      {0x3e600000, 0x3fa655c4, 0x3e918b0b},
+      {0x3e400000, 0x3fa237c3, 0x3e7353a5},
+  }};
+  for (const auto &test : cases)
+    EXPECT_EQ(std::bit_cast<uint32_t>(amdgpu::raster::multiply_perspective(
+                  std::bit_cast<float>(test[0]), std::bit_cast<float>(test[1]))),
+              test[2]);
+}
+
 TEST_P(GraphicsExportTest, ParameterLoadUsesQuadMaskAndPrimitiveOffsets) {
   // Quad two starts a second primitive; attribute one follows both records of attr0.
   wave_->set_m0(128 | (1u << 17));
