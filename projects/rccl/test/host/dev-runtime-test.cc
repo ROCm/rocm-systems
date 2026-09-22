@@ -3195,6 +3195,7 @@ protected:
     hipIpcMemHandle_t handle;
     uint64_t hostHash;
     uint64_t pidHash;
+    uintptr_t allocBase;
     size_t userOffset;
     size_t userSize;
   };
@@ -3222,6 +3223,7 @@ protected:
       for (int r = 0; r < size; r++) {
         e[r].hostHash = (r == self || r == sameProcRank) ? peers[0].hostHash : 500 + r;
         e[r].pidHash = (r == self || r == sameProcRank) ? peers[0].pidHash : 600 + r;
+        e[r].allocBase = 0xa00000 + 0x10000 * r;
         e[r].userOffset = 64 * r;
         e[r].userSize = 4096;
       }
@@ -3251,9 +3253,9 @@ TEST_F(WindowRegisterNonSymIpcTest, MapsPeersAndReusesSelf) {
   EXPECT_EQ(win->ipcPeerPtrs[2], static_cast<char*>(reinterpret_cast<void*>(0x900000)) + 128);
 }
 
-// Branch: a peer in our own process is left unmapped -- opening an IPC handle
-// against the same address space is not supported here.
-TEST_F(WindowRegisterNonSymIpcTest, SameProcessPeer_IsLeftUnmapped) {
+// Branch: a peer in our own process uses its exchanged direct pointer rather
+// than opening an IPC handle against the same address space.
+TEST_F(WindowRegisterNonSymIpcTest, SameProcessPeer_UsesDirectPointer) {
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers(/*sameProcRank=*/1));
   ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
     *ptr = reinterpret_cast<void*>(0x900000);
@@ -3265,7 +3267,7 @@ TEST_F(WindowRegisterNonSymIpcTest, SameProcessPeer_IsLeftUnmapped) {
   EXPECT_EQ(open.calls, 1);  // only rank 2
 
   ncclDevrWindow* win = comm->devrState.winSorted[0].win;
-  EXPECT_EQ(win->ipcPeerPtrs[1], nullptr);
+  EXPECT_EQ(win->ipcPeerPtrs[1], reinterpret_cast<void*>(0xa10040));
   EXPECT_EQ(win->ipcPeerPtrsAllocBase[1], nullptr);
 }
 

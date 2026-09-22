@@ -51,6 +51,7 @@
 #include "../common/ProcessIsolatedTestRunner.hpp"  // RUN_ISOLATED_TEST
 #include "ScopedHook.h"                              // RAII install/restore for g_loadParam et al.
 #include "fakes/env_fakes.h"                         // SetMicroEnv/SetMicroEnvAbsent/ClearMicroEnv
+#include "fakes/tuning_fakes.h"                      // g_paramShmDisable
 #include "fakes/wrap_fakes.h"                        // rccl_wrap.cc's dependency seams
 #include "graph/topo.h"                              // ncclTopoSystem/ncclTopoNode (MakeCommWithArch)
 
@@ -2717,6 +2718,62 @@ TEST(WrapMicrotest, CommSetP2pShiftSize_BelowLog2UsesExactValue) {
   EXPECT_EQ(ncclSuccess, rcclCommSetP2pShiftSize(comm));
   EXPECT_EQ(1, comm->p2pChannelShiftSize);
   DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, RuntimeTransportToggle_RoutesPolicySelectedTransport) {
+  ScopedHook loadParam(
+    g_loadParam, [](const char* env, int64_t defaultValue) {
+      if (std::strcmp(env, "RCCL_RUNTIME_TRANSPORT_TOGGLE") == 0)
+        return int64_t{1};
+      return defaultValue;
+    });
+  const int64_t savedShmDisable = g_paramShmDisable;
+  g_paramShmDisable = 0;
+  SetMicroEnvAbsent("NCCL_P2P_DISABLE");
+
+  ncclComm* comm = MakeCommWithArch("gfx1201");
+  comm->nRanks = 8;
+  ncclTaskColl task{};
+  task.algorithm = NCCL_ALGO_RING;
+  task.protocol = NCCL_PROTO_SIMPLE;
+
+  EXPECT_TRUE(rcclRuntimeTransportToggleEligible(comm));
+  task.executionTransport = RCCL_EXECUTION_TRANSPORT_IPC;
+  EXPECT_EQ(0, rcclRuntimeCollectiveConnIndex(comm, &task, 32 << 20));
+  task.executionTransport = RCCL_EXECUTION_TRANSPORT_SHM;
+  EXPECT_EQ(RCCL_CONN_IDX_COLL_SHM,
+            rcclRuntimeCollectiveConnIndex(comm, &task, 32 << 20));
+  task.executionTransport = RCCL_EXECUTION_TRANSPORT_NET;
+  EXPECT_EQ(-1, rcclRuntimeCollectiveConnIndex(comm, &task, 32 << 20));
+
+  EXPECT_EQ(1, rcclRuntimeP2pConnIndex(
+                 comm, RCCL_EXECUTION_TRANSPORT_IPC));
+  EXPECT_EQ(1, rcclRuntimeP2pConnIndex(
+                 comm, RCCL_EXECUTION_TRANSPORT_UNKNOWN));
+  EXPECT_EQ(RCCL_CONN_IDX_P2P_SHM,
+            rcclRuntimeP2pConnIndex(
+              comm, RCCL_EXECUTION_TRANSPORT_SHM));
+  EXPECT_EQ(-1, rcclRuntimeP2pConnIndex(
+                  comm, RCCL_EXECUTION_TRANSPORT_NET));
+
+  task.executionTransport = RCCL_EXECUTION_TRANSPORT_SHM;
+  task.protocol = NCCL_PROTO_LL;
+  EXPECT_EQ(-1, rcclRuntimeCollectiveConnIndex(comm, &task, 32 << 20));
+  task.protocol = NCCL_PROTO_SIMPLE;
+  task.regBufType = NCCL_IPC_REG_BUFFER;
+  EXPECT_EQ(-1, rcclRuntimeCollectiveConnIndex(comm, &task, 32 << 20));
+
+  SetMicroEnv("NCCL_P2P_DISABLE", "0");
+  EXPECT_FALSE(rcclRuntimeTransportToggleEligible(comm));
+  SetMicroEnvAbsent("NCCL_P2P_DISABLE");
+  {
+    ScopedHook p2pDisable(g_paramP2pDisable, []() { return int64_t{1}; });
+    EXPECT_FALSE(rcclRuntimeTransportToggleEligible(comm));
+  }
+
+  DeleteCommWithArch(comm);
+  g_paramShmDisable = savedShmDisable;
+  ClearMicroEnv();
 }
 
 // ===========================================================================

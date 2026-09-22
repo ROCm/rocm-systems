@@ -247,6 +247,7 @@ struct ncclTaskColl {
   uint32_t isCollnet:1, isNvls:1, isSymLast:1;
   uint32_t devFuncId:29;
   int regBufType;
+  int executionTransport; // rcclExecutionTransport selected by execution policy.
   uint64_t opCount;
   // number of elements in planner->ipcMemQueue associated with this collective
   int nCleanupQueueElts;

@@ -22,7 +22,8 @@ struct ncclTransport* ncclTransports[NTRANSPORTS] = {
 
 template <int type>
 static ncclResult_t selectTransport(struct ncclComm* comm, struct ncclTopoGraph* graph, struct ncclConnect* connect,
-                                    int channelId, int peer, int connIndex, int* transportType, bool* needsProxy) {
+                                    int channelId, int peer, int connIndex, int* transportType, bool* needsProxy,
+                                    int requestedTransport) {
   struct ncclPeerInfo* myInfo = comm->peerInfo + comm->rank;
   struct ncclPeerInfo* peerInfo = comm->peerInfo + peer;
   struct ncclConnector* connector = (type == 1) ? comm->channels[channelId].peers[peer]->send + connIndex :
@@ -37,6 +38,7 @@ static ncclResult_t selectTransport(struct ncclComm* comm, struct ncclTopoGraph*
   NCCLCHECK(ncclTopoGetLinkType(comm->topo, myInfo->cudaDev, peerInfo->cudaDev, &xgmi));
 
   for (int t = 0; t < NTRANSPORTS; t++) {
+    if (requestedTransport != TRANSPORT_UNDEFINED && t != requestedTransport) continue;
     if (graph == NULL && connIndex == NCCL_CONN_IDX_P2P_NET && comm->p2pNet &&
         (t == TRANSPORT_SHM || (!xgmi && t == TRANSPORT_P2P)))
       continue;
@@ -141,8 +143,18 @@ ncclResult_t ncclTransportCheckP2pType(struct ncclComm* comm, bool* isAllDirectP
 
 ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, int connIndex,
                                    bool* needsProxy /*=NULL*/) {
+  return ncclTransportP2pSetupSpecific(comm, graph, connIndex, needsProxy,
+                                       TRANSPORT_UNDEFINED);
+}
+
+ncclResult_t ncclTransportP2pSetupSpecific(struct ncclComm* comm,
+                                           struct ncclTopoGraph* graph,
+                                           int connIndex, bool* needsProxy,
+                                           int requestedTransport) {
   // Stream used during transport setup; need for P2P pre-connect + CUDA Graph
   ncclResult_t ret = ncclSuccess;
+  if (requestedTransport < TRANSPORT_UNDEFINED || requestedTransport >= NTRANSPORTS)
+    return ncclInvalidArgument;
   bool needsProxyResult = false;
   struct ncclConnect** data; // Store intermediate send/recvData structs for connect
   struct ncclConnect** recvData = NULL; // Points to entries inside data for given recv connection within a channel
@@ -214,7 +226,7 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
       // if (recvMask & (1UL<<c)) {
       if (recvMask.masks[c / 64] & (1UL << (c % 64))) {
         NCCLCHECKGOTO(selectTransport<0>(comm, graph, recvData[p] + recvChannels++, c, recvPeer, connIndex, &type,
-                                         &proxy),
+                                         &proxy, requestedTransport),
                       ret, fail);
       }
     }
@@ -225,7 +237,7 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
       // if (sendMask & (1UL<<c)) {
       if (sendMask.masks[c / 64] & (1UL << (c % 64))) {
         NCCLCHECKGOTO(selectTransport<1>(comm, graph, sendData[p] + sendChannels++, c, sendPeer, connIndex, &type,
-                                         &proxy),
+                                         &proxy, requestedTransport),
                       ret, fail);
         needsProxyResult |= proxy;
       }

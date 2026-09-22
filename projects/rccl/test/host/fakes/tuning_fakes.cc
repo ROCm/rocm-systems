@@ -8,6 +8,7 @@
 
 #include "tuning_fakes.h"
 
+#include "collective_execution_policy.h"
 #include "comm.h"
 #include "device.h"
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM default this stands in for
@@ -47,9 +48,25 @@ ncclResult_t ncclTuningFinalize(struct ncclComm* comm) {
 int64_t g_paramMinNchannels = -2;
 int64_t g_paramMaxNchannels = -2;
 int64_t g_tuningParamP2pDisable = 0;
+int64_t g_paramShmDisable = 0;
+int64_t g_paramP2pReadEnable = -2;
+bool g_runtimeTransportToggleEligible = false;
 int64_t ncclParamMinNchannels() { return g_paramMinNchannels; }
 int64_t ncclParamMaxNchannels() { return g_paramMaxNchannels; }
 __attribute__((weak)) int64_t ncclParamP2pDisable() { return g_tuningParamP2pDisable; }
+__attribute__((weak)) int64_t ncclParamShmDisable() { return g_paramShmDisable; }
+__attribute__((weak)) int64_t ncclParamP2pReadEnable() { return g_paramP2pReadEnable; }
+__attribute__((weak)) bool rcclRuntimeTransportToggleEligible(const struct ncclComm*) {
+  return g_runtimeTransportToggleEligible;
+}
+__attribute__((weak)) int rcclRuntimeP2pConnIndex(const struct ncclComm*, int transport) {
+  if (!g_runtimeTransportToggleEligible) return -1;
+  if (transport == RCCL_EXECUTION_TRANSPORT_SHM) return RCCL_CONN_IDX_P2P_SHM;
+  if (transport == RCCL_EXECUTION_TRANSPORT_IPC ||
+      transport == RCCL_EXECUTION_TRANSPORT_UNKNOWN)
+    return 1;
+  return -1;
+}
 // Referenced by init.cc but not declared inside it, so the redirected NCCL_PARAM does not cover it.
 int64_t ncclParamPatEnable() { return g_loadParam("PAT_ENABLE", 0); }  // graph/tuning.cc:1105
 
@@ -75,6 +92,9 @@ void ResetTuningFakes() {
   g_paramMinNchannels = -2;
   g_paramMaxNchannels = -2;
   g_tuningParamP2pDisable = 0;
+  g_paramShmDisable = 0;
+  g_paramP2pReadEnable = -2;
+  g_runtimeTransportToggleEligible = false;
   g_tuningIndexValue = 0;
   g_tuningIndexLastArch.clear();
   g_tuningCompute = DefaultTuningCompute;

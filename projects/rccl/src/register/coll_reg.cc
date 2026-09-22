@@ -6,6 +6,7 @@
  ************************************************************************/
 
 #include "register.h"
+#include "collective_execution_policy.h"
 #include "transport.h"
 #include "enqueue.h"
 #include "register_inline.h"
@@ -142,6 +143,9 @@ ncclResult_t ncclRegisterCollBuffers(
 
   info->regBufType = NCCL_REGULAR_BUFFER;
   *regNeedConnect = true;
+  // IPC registration bypasses proxy connectors and is incompatible with the
+  // policy-selected SHM path. Keep this task on its provisioned SHM connector.
+  if (info->executionTransport == RCCL_EXECUTION_TRANSPORT_SHM) goto exit;
   if (!(ncclParamLocalRegister() || (comm->planner.persistent && ncclParamGraphRegister()))) goto exit;
 #if CUDART_VERSION >= 11030 || defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (info->algorithm == NCCL_ALGO_NVLS || info->algorithm == NCCL_ALGO_NVLS_TREE) {
