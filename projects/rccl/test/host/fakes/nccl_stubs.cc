@@ -69,6 +69,15 @@ ncclResult_t ncclDdaFabricCommFini(struct ncclComm* comm) { return ncclSuccess; 
 ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm) { ::abort(); }
+// Controllable (was hardcoded false). The real function takes no arguments, so this
+// is the only way a test can make init.cc:2011's marshalling read anything other
+// than the default -- without it, an assertion on the marshalled value cannot tell
+// "the real read ran and returned false" apart from "the read was skipped entirely".
+bool g_ncclDdaNranksRelaxEnabled = false;
+bool ncclDdaNranksRelaxEnabled() { return g_ncclDdaNranksRelaxEnabled; }
+// Mirrors the real gate with relax off: only the full kDdaNranks clique is supported.
+bool ncclDdaIpcNranksSupported(int nRanks) { return nRanks == 8; }
+bool ncclDdaNranksRelaxConsensusMatters(int nRanks) { return nRanks >= 2 && nRanks < 8; }
 bool ncclDdaUseFabricPath(struct ncclComm* comm) { return false; }
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { return ncclSuccess; }
 bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }
@@ -224,6 +233,7 @@ ncclResult_t ncclMemFree(void* ptr) { return g_ncclMemFree(ptr); }
 }
 
 void ResetNcclStubs() {
+  g_ncclDdaNranksRelaxEnabled = false;
 #ifndef RCCL_STUBS_OMIT_ncclInitKernelsForDevice
   g_ncclInitKernelsForDevice = DefaultNcclInitKernelsForDevice;
 #endif

@@ -476,6 +476,36 @@ intended for debugging and development purposes.
         | ``ALL``: disable caching for every parameter except
           ``NCCL_NO_CACHE``.
 
+    * - | ``RCCL_DDA_NRANKS_RELAX``
+        | Relaxes the DDA (direct data access) IPC AllReduce eligibility so that
+          any single-node communicator of 2 to 8 ranks can use the low-latency DDA
+          IPC path, which is otherwise restricted to the full 8-rank clique.
+          Only affects ``gfx942``/``gfx950``; the default (``0``) remains
+          bit-identical to prior behavior. Benefits latency-bound low-rank
+          AllReduce (largest gains at odd/non-power-of-two rank counts, where the
+          ring is least efficient) and is neutral at 8 ranks.
+        | Enabling this at 2 to 7 ranks also has a side effect beyond AllReduce:
+          the DDA IPC scratch buffer it allocates is reused by ``RCCL_FORCE_CE``'s
+          generic CE-collective fast path (default on) for AllGather, AlltoAll,
+          AlltoAllv, Scatter, and Gather, which previously did not engage below
+          the full 8-rank clique on ``gfx942``/``gfx950`` because that buffer did
+          not exist yet at those counts on this path (the separate DDA fabric
+          path can populate it at low rank counts on other architectures).
+        | Must be set to the same value on every rank of a communicator. The
+          variable is read per process, so RCCL checks agreement across ranks
+          during communicator initialization and fails communicator creation
+          with an error naming the disagreeing ranks and hosts if it does not
+          match, rather than allowing ranks to diverge into and out of the DDA
+          IPC path and hang waiting for each other.
+        | With the knob enabled at 2 to 7 ranks, results are **not** bit-identical
+          to the ring path: the DDA IPC kernels reduce in strict rank order rather
+          than the ring's chunk-rotated order, and floating-point addition is not
+          associative, so low-order-bit differences are expected. Every
+          participating communicator also allocates the full DDA IPC scratch
+          buffer, which previously only 8-rank communicators did.
+      - | ``0``: 8-rank-only DDA (default).
+        | ``1``: allow 2..8-rank DDA IPC AllReduce.
+
 Multi-communicator ordering
 ===========================
 

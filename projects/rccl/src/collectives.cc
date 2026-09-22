@@ -16,6 +16,7 @@
 #include "nvtx_payload_schemas.h"
 #include "device/hierarchical_shuffle.h"
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
@@ -240,7 +241,10 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
   // gfx950 with symmetricSupport off) with no DDA and no CE, falling back to the generic ring/tree
   // kernel across the whole 4 MiB+ range that DDA still wins.
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  return !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) && rcclDdaEnabled(comm, msgBytes, 8388608);
+  // Relaxed DDA rank floor; see rcclDdaEnabled() in rccl_common.h.
+  const int ddaMinRanks = ncclDdaNranksRelaxEnabled() ? 2 : nccl_dda_detail::kDdaNranks;
+  return !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) &&
+         rcclDdaEnabled(comm, msgBytes, 8388608, /*gfx950Default=*/0, /*gfx1250Default=*/0, ddaMinRanks);
 }
 
 bool rcclAlltoAllShouldTakeDdaPath(const ncclComm* comm, size_t totalBytes, bool ceAlltoAllAllowed) {

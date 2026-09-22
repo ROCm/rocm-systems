@@ -225,6 +225,7 @@ set(SRC_FILES
   include/ionic/ionicdvcore.h
   include/ionic/ionicdvsymbols.h
   include/ionic/ionicdvwrap.h
+  algorithms/dda/ipc/dda_nranks_relax_consensus.h
   algorithms/dda/ipc/ipc_gpu_barrier.h
   algorithms/dda/ipc/ipc_init.h
   algorithms/dda/ipc/ipc_mem_handler.h
@@ -426,6 +427,7 @@ set(SRC_FILES
   include/utils.h
   init.cc
   init_nvtx.cc
+  algorithms/dda/ipc/dda_nranks_relax_consensus.cc
   algorithms/dda/ipc/ipc_gpu_barrier.cu
   algorithms/dda/ipc/ipc_init.cu
   algorithms/dda/ipc/ipc_mem_handler.cc

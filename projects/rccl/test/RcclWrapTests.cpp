@@ -25,6 +25,7 @@
 #include "graph/topo.h"
 #include "net.h"
 #include "plugin/nccl_tuner.h"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "rccl_common.h"
 #include "rocmwrap.h"
 
@@ -2694,6 +2695,42 @@ TEST(RcclAllReduceDdaDecision, Gfx950_TooFewRanks_NoDda)
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
     EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
                                                 /*symEligible=*/false, /*ceAllReduceAllowed=*/false));
+}
+
+// The minRanks floor itself. Nothing else passes rcclDdaEnabled() a sixth argument,
+// so without this, deleting the parameter and hard-coding `comm->nRanks < 8` would
+// still pass every other test. Env-independent: the floor is supplied directly.
+TEST(RcclAllReduceDdaDecision, Gfx950_MinRanksFloorIsHonoured)
+{
+    ncclComm comm{};
+    InitDdaDecisionComm(comm, "gfx950", 4, 1, /*symmetricSupport=*/false);
+    const size_t totalBytes = 2ull * 1024 * 1024;
+
+    EXPECT_TRUE(rcclDdaEnabled(&comm, totalBytes, 8388608, /*gfx950Default=*/0,
+                               /*gfx1250Default=*/0, /*minRanks=*/2));
+    EXPECT_FALSE(rcclDdaEnabled(&comm, totalBytes, 8388608, /*gfx950Default=*/0,
+                                /*gfx1250Default=*/0, /*minRanks=*/8));
+}
+
+// End-to-end wiring of the relaxed floor: with RCCL_DDA_NRANKS_RELAX=1 a 4-rank
+// comm reaches the DDA AllReduce path, where Gfx950_TooFewRanks_NoDda above shows
+// it does not by default. RCCL_PARAM caches per process, so the value has to be in
+// the environment before any param read -- hence the re-exec'd child.
+TEST(RcclAllReduceDdaDecision, Gfx950_FourRanks_RelaxOn_TakesDda)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "Gfx950_FourRanks_RelaxOn_TakesDda",
+        []()
+        {
+            ncclComm comm{};
+            InitDdaDecisionComm(comm, "gfx950", 4, 1, /*symmetricSupport=*/false);
+            size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
+            EXPECT_TRUE(ncclDdaNranksRelaxEnabled());
+            EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
+                                                       /*symEligible=*/false,
+                                                       /*ceAllReduceAllowed=*/false));
+        },
+        {{"RCCL_DDA_NRANKS_RELAX", "1"}});
 }
 
 // Symmetric-kernel eligible buffers win outright: the DDA guard yields (returns false)
