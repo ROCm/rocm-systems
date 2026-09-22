@@ -1,0 +1,67 @@
+# Minimal clang-tidy configuration for RCCL — complexity pilot (Phase 0).
+#
+# Scope: intentionally narrow. This config exists only to surface functions
+# with high cyclomatic or cognitive complexity, so the team can see where the
+# nested-branch hot-spots actually are before committing to a wider ruleset.
+# It is advisory: it does not turn warnings into errors and enables nothing
+# beyond the two complexity checks.
+#
+# Run locally against the host compilation database, e.g.:
+#   clang-tidy -p build/ $(git ls-files 'src/*.cc') --quiet
+#
+# The two checks:
+#   * readability-function-cognitive-complexity
+#       Google/SonarSource cognitive-complexity metric. Penalises nesting and
+#       hard-to-follow control flow (the primary concern in the proposal).
+#   * readability-function-size
+#       Reports cyclomatic complexity (branch count) alongside line/nesting
+#       counts, giving a second, classic view of the same hot-spots.
+
+Checks: >
+  -*,
+  readability-function-cognitive-complexity,
+  readability-function-size
+
+# Advisory only: nothing is promoted to an error during the pilot.
+WarningsAsErrors: ''
+
+# Analyse RCCL's own host sources; skip generated and third-party headers.
+# RCCL host sources are hipified into build/<type>/hipify/src before
+# compilation, so the compilation database (and thus the analysed paths) live
+# under .../hipify/src rather than the original projects/rccl/src tree.
+HeaderFilterRegex: '.*/hipify/src/.*'
+
+FormatStyle: none
+
+CheckOptions:
+  # Cognitive complexity: 25 is a common "needs attention" threshold
+  # (SonarSource default is 15; we start lax to keep pilot noise down and
+  # tighten later).
+  - key: readability-function-cognitive-complexity.Threshold
+    value: '25'
+  # Ignore macro bodies. RCCL inherits NCCL's pervasive control-flow macros
+  # (NCCLCHECK, INFO, ...); counting each expansion inflates scores into the
+  # thousands and drowns out the real nested-branch hot-spots. Ignoring macros
+  # keeps the metric focused on the hand-written control flow.
+  - key: readability-function-cognitive-complexity.IgnoreMacros
+    value: 'true'
+  - key: readability-function-cognitive-complexity.DescribeBasicIncrements
+    value: 'true'
+
+  # Function-size / cyclomatic-complexity reporting. Only the thresholds that
+  # matter for complexity are set tight; the rest are left effectively off so
+  # this check reports cyclomatic complexity without doubling as a style gate.
+  - key: readability-function-size.CyclomaticComplexityThreshold
+    value: '15'
+  - key: readability-function-size.NestingThreshold
+    value: '5'
+  - key: readability-function-size.LineThreshold
+    value: '4294967295'
+  - key: readability-function-size.StatementThreshold
+    value: '4294967295'
+  - key: readability-function-size.BranchThreshold
+    value: '4294967295'
+  - key: readability-function-size.ParameterThreshold
+    value: '4294967295'
+  - key: readability-function-size.VariableThreshold
+    value: '4294967295'
