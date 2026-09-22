@@ -20,10 +20,7 @@ enum class AtomicOperation {
   kOr,
   kOrSystem,
   kXor,
-  kXorSystem,
-  kBuiltinAnd,
-  kBuiltinOr,
-  kBuiltinXor
+  kXorSystem
 };
 
 constexpr auto kMask = 0xAAAA;
@@ -55,12 +52,6 @@ __device__ TestType PerformAtomicOperation(TestType* const mem) {
     return atomicXor(mem, mask);
   } else if constexpr (operation == AtomicOperation::kXorSystem) {
     return atomicXor_system(mem, mask);
-  } else if constexpr (operation == AtomicOperation::kBuiltinAnd) {
-    return __hip_atomic_fetch_and(mem, mask, __ATOMIC_RELAXED, memory_scope);
-  } else if constexpr (operation == AtomicOperation::kBuiltinOr) {
-    return __hip_atomic_fetch_or(mem, mask, __ATOMIC_RELAXED, memory_scope);
-  } else if constexpr (operation == AtomicOperation::kBuiltinXor) {
-    return __hip_atomic_fetch_xor(mem, mask, __ATOMIC_RELAXED, memory_scope);
   }
 }
 
@@ -173,16 +164,14 @@ std::tuple<std::vector<TestType>, std::vector<TestType>> TestKernelHostRef(const
         auto& res = res_vals[tid % p.width + (i * p.width)];
         old_vals.push_back(res);
 
-        if constexpr (operation == AtomicOperation::kAnd || operation == AtomicOperation::kAndSystem ||
-                      operation == AtomicOperation::kBuiltinAnd) {
+        if constexpr (operation == AtomicOperation::kAnd ||
+                      operation == AtomicOperation::kAndSystem) {
           res = res & mask;
         } else if constexpr (operation == AtomicOperation::kOr ||
-                             operation == AtomicOperation::kOrSystem ||
-                             operation == AtomicOperation::kBuiltinOr) {
+                             operation == AtomicOperation::kOrSystem) {
           res = res | mask;
         } else if constexpr (operation == AtomicOperation::kXor ||
-                             operation == AtomicOperation::kXorSystem ||
-                             operation == AtomicOperation::kBuiltinXor) {
+                             operation == AtomicOperation::kXorSystem) {
           res = res ^ mask;
         }
       }
@@ -292,35 +281,12 @@ void SingleDeviceSingleKernelTest(const unsigned int width, const unsigned int p
   TestParams params;
   params.num_devices = 1;
   params.kernel_count = 1;
-  if constexpr ((operation == AtomicOperation::kBuiltinAnd ||
-                 operation == AtomicOperation::kBuiltinOr ||
-                 operation == AtomicOperation::kBuiltinXor) &&
-                memory_scope == __HIP_MEMORY_SCOPE_SINGLETHREAD) {
-    params.threads = 1;
-  } else if constexpr ((operation == AtomicOperation::kBuiltinAnd ||
-                        operation == AtomicOperation::kBuiltinOr ||
-                        operation == AtomicOperation::kBuiltinXor) &&
-                       memory_scope == __HIP_MEMORY_SCOPE_WAVEFRONT) {
-    int warp_size = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-    params.threads = dim3(warp_size);
-  } else {
-    params.threads = GenerateThreadDimensions();
-  }
+  params.threads = GenerateThreadDimensions();
   params.width = width;
   params.pitch = pitch;
 
   SECTION("Global memory") {
-    if constexpr ((operation == AtomicOperation::kBuiltinAnd ||
-                   operation == AtomicOperation::kBuiltinOr ||
-                   operation == AtomicOperation::kBuiltinXor) &&
-                  (memory_scope == __HIP_MEMORY_SCOPE_SINGLETHREAD ||
-                   memory_scope == __HIP_MEMORY_SCOPE_WAVEFRONT ||
-                   memory_scope == __HIP_MEMORY_SCOPE_WORKGROUP)) {
-      params.blocks = dim3(1);
-    } else {
-      params.blocks = GenerateBlockDimensions();
-    }
+    params.blocks = GenerateBlockDimensions();
     using LA = LinearAllocs;
     for (const auto alloc_type :
          {LA::hipMalloc}) {

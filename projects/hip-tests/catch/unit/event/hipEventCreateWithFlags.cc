@@ -20,7 +20,7 @@ template <typename T> __global__ void vector_square_system_scope_atomic(const T*
   if (i < N_ELMTS) {
 #if HT_AMD
     T result = A_d[i] * A_d[i];
-    __hip_atomic_store(&C_d[i], result, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    atomicExch_system(&C_d[i], result);
 #else
     C_d[i] = A_d[i] * A_d[i];
 #endif

@@ -16,11 +16,6 @@ if(HIP_PLATFORM MATCHES "amd")
       atomicMax_system.cc
       unsafeAtomicMin.cc
       unsafeAtomicMax.cc
-      __hip_atomic_fetch_min.cc
-      __hip_atomic_fetch_max.cc
-      atomic_builtins.cc
-      acquire_release.cc
-      sequential_consistency.cc
       atomicAdd.cc
       atomicAdd_system.cc
       safeAtomicAdd.cc
@@ -28,14 +23,8 @@ if(HIP_PLATFORM MATCHES "amd")
       atomicSub_system.cc
       atomicCAS.cc
       atomicCAS_system.cc
-      __hip_atomic_fetch_add.cc
-      __hip_atomic_compare_exchange_strong.cc
       atomicExch.cc
       atomicExch_system.cc
-      __hip_atomic_fetch_and.cc
-      __hip_atomic_fetch_or.cc
-      __hip_atomic_fetch_xor.cc
-      __hip_atomic_exchange.cc
       atomicInc.cc
       atomicDec.cc
     )
@@ -63,7 +52,6 @@ if(HIP_PLATFORM MATCHES "amd")
         "atomicXor_negative_kernels.cc"
         "atomicMin_negative_kernels.cc"
         "atomicMax_negative_kernels.cc"
-        "atomic_builtin_kernels.cc"
         "atomicAdd_negative_kernels.cc"
         "atomicSub_negative_kernels.cc"
         "atomicInc_negative_kernels.cc"

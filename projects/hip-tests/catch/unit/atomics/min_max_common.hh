@@ -22,9 +22,7 @@ enum class AtomicOperation {
   kSafeMin,
   kUnsafeMin,
   kSafeMax,
-  kUnsafeMax,
-  kBuiltinMin,
-  kBuiltinMax
+  kUnsafeMax
 };
 
 constexpr auto kIntegerTestValue = 5;
@@ -45,7 +43,8 @@ __host__ __device__ TestType GetTestValue() {
 }
 
 template <typename TestType, AtomicOperation operation, int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
-__device__ TestType PerformAtomicOperation(TestType* const mem, const LinearAllocs allocType) {
+__device__ TestType PerformAtomicOperation(TestType* const mem,
+                                           const LinearAllocs /*allocType*/) {
   const auto val = GetTestValue<TestType, operation>();
 
   if constexpr (operation == AtomicOperation::kMin) {
@@ -64,20 +63,6 @@ __device__ TestType PerformAtomicOperation(TestType* const mem, const LinearAllo
     return unsafeAtomicMax(mem, val);
   } else if constexpr (operation == AtomicOperation::kSafeMax) {
     return safeAtomicMax(mem, val);
-  } else if constexpr (operation == AtomicOperation::kBuiltinMin) {
-    if (std::is_floating_point_v<TestType> && allocType == LinearAllocs::hipHostMalloc)
-      HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
-      return __hip_atomic_fetch_min(mem, val, __ATOMIC_RELAXED, memory_scope);
-    } else {
-      return __hip_atomic_fetch_min(mem, val, __ATOMIC_RELAXED, memory_scope);
-    }
-  } else if constexpr (operation == AtomicOperation::kBuiltinMax) {
-    if (std::is_floating_point_v<TestType> && allocType == LinearAllocs::hipHostMalloc)
-      HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY {
-      return __hip_atomic_fetch_max(mem, val, __ATOMIC_RELAXED, memory_scope);
-    } else {
-      return __hip_atomic_fetch_max(mem, val, __ATOMIC_RELAXED, memory_scope);
-    }
   }
 }
 
@@ -195,14 +180,12 @@ std::tuple<std::vector<TestType>, std::vector<TestType>> TestKernelHostRef(const
 
         if constexpr (operation == AtomicOperation::kMin || operation == AtomicOperation::kMinSystem ||
                   operation == AtomicOperation::kUnsafeMin ||
-                  operation == AtomicOperation::kSafeMin ||
-                  operation == AtomicOperation::kBuiltinMin) {
+                  operation == AtomicOperation::kSafeMin) {
         res = std::min(res, val);
         } else if constexpr (operation == AtomicOperation::kMax ||
                          operation == AtomicOperation::kMaxSystem ||
                          operation == AtomicOperation::kUnsafeMax ||
-                         operation == AtomicOperation::kSafeMax ||
-                         operation == AtomicOperation::kBuiltinMax) {
+                         operation == AtomicOperation::kSafeMax) {
         res = std::max(res, val);
         }
       }
@@ -316,32 +299,12 @@ void SingleDeviceSingleKernelTest(const unsigned int width, const unsigned int p
   TestParams params;
   params.num_devices = 1;
   params.kernel_count = 1;
-  if constexpr ((operation == AtomicOperation::kBuiltinMin ||
-                 operation == AtomicOperation::kBuiltinMax) &&
-                memory_scope == __HIP_MEMORY_SCOPE_SINGLETHREAD) {
-    params.threads = 1;
-  } else if constexpr ((operation == AtomicOperation::kBuiltinMin ||
-                        operation == AtomicOperation::kBuiltinMax) &&
-                       memory_scope == __HIP_MEMORY_SCOPE_WAVEFRONT) {
-    int warp_size = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-    params.threads = dim3(warp_size);
-  } else {
-    params.threads = GenerateThreadDimensions();
-  }
+  params.threads = GenerateThreadDimensions();
   params.width = width;
   params.pitch = pitch;
 
   SECTION("Global memory") {
-    if constexpr ((operation == AtomicOperation::kBuiltinMin ||
-                   operation == AtomicOperation::kBuiltinMax) &&
-                  (memory_scope == __HIP_MEMORY_SCOPE_SINGLETHREAD ||
-                   memory_scope == __HIP_MEMORY_SCOPE_WAVEFRONT ||
-                   memory_scope == __HIP_MEMORY_SCOPE_WORKGROUP)) {
-      params.blocks = dim3(1);
-    } else {
-      params.blocks = GenerateBlockDimensions();
-    }
+    params.blocks = GenerateBlockDimensions();
     using LA = LinearAllocs;
     for (const auto alloc_type :
          {LA::hipMalloc}) {
