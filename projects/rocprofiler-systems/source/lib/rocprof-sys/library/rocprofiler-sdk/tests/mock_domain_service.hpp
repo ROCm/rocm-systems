@@ -623,19 +623,13 @@ struct pmc_info_data_t
     std::string   extdata;
 };
 
-// Every production on_configure() body calls exactly these members
-// unconditionally-or-conditionally; mocked so tests can verify they ran correctly
-// instead of just not crashing.
-//
-// The members below add_pmc_info are only touched by on_tracing_api_enter/exit
-// (library/rocprofiler-sdk/callback/common_tracing_callbacks.hpp) and its
-// externals_with_tracing wrapper further down this file -- no on_configure() test
-// exercises them, so extending this struct is safe for every existing StrictMock user.
+// Category-registration and PMC-info calls (add_string, add_pmc_info) are mocked on
+// gmock_metadata_registry instead of here, since production code now reaches them
+// through Externals::get_metadata_registry(). This struct keeps the members that stay
+// direct on Externals: agent lookup, timemory/backtrace toggles, and pid/ppid.
 struct gmock_externals
 {
-    MOCK_METHOD(void, add_string, (std::string_view value));
     MOCK_METHOD(std::vector<std::shared_ptr<agent_t>>, get_agents_by_type, (int type));
-    MOCK_METHOD(void, add_pmc_info, (const pmc_info_data_t& info));
 
     MOCK_METHOD(bool, is_active, ());
     MOCK_METHOD(bool, get_use_timemory, ());
@@ -644,18 +638,8 @@ struct gmock_externals
     MOCK_METHOD(bool, check_backtrace_operations,
                 (std::uint64_t kind, std::uint32_t operation));
     MOCK_METHOD(std::optional<int>, get_backtrace_data, (bool are_operations_available));
-    MOCK_METHOD(void, metadata_add_string, (std::string_view value));
-    MOCK_METHOD(void, metadata_add_thread_info,
-                (std::int32_t parent_process_id, std::int32_t process_id,
-                 std::uint64_t thread_id));
     MOCK_METHOD(std::int32_t, get_pid, ());
     MOCK_METHOD(std::int32_t, get_ppid, ());
-    // NOLINTNEXTLINE(readability-function-size)
-    MOCK_METHOD(void, region_sample_buffer_storage_store,
-                (std::uint64_t thread_id, std::string region_name,
-                 std::uint64_t correlation_id, std::uint64_t parent_stack_id,
-                 std::uint64_t begin_timestamp, std::uint64_t end_timestamp,
-                 std::string args_str, std::string category));
 };
 
 inline std::unique_ptr<::testing::StrictMock<gmock_externals>> g_externals_mock;
@@ -780,6 +764,7 @@ struct gmock_metadata_registry
     MOCK_METHOD(void, add_string, (std::string_view value));
     MOCK_METHOD(void, add_thread_info, (const thread_info_data_t& info));
     MOCK_METHOD(void, add_track, (const track_data_t& info));
+    MOCK_METHOD(void, add_pmc_info, (const pmc_info_data_t& info));
     MOCK_METHOD(void, add_queue, (std::uint64_t queue_handle));
     MOCK_METHOD(void, add_stream, (std::uint64_t stream_handle));
 };
@@ -797,13 +782,21 @@ struct gmock_buffer_storage
     MOCK_METHOD(bool, get_use_timemory, ());
     MOCK_METHOD(void, write_timemory_bundle,
                 (std::string_view name, std::uint64_t tid, std::uint64_t elapsed_ns));
+    // NOLINTNEXTLINE(readability-function-size)
+    MOCK_METHOD(void, store_region_sample,
+                (std::uint64_t thread_id, std::string region_name,
+                 std::uint64_t correlation_id, std::uint64_t parent_stack_id,
+                 std::uint64_t begin_timestamp, std::uint64_t end_timestamp,
+                 std::string args_str, std::string category));
 };
 
 inline std::unique_ptr<::testing::StrictMock<gmock_buffer_storage>> g_buffer_storage_mock;
 
 // Externals mirrors the real ExternalDeps policy surface used by every on_kfd_* and
-// on_kfd_*_configure, plus domain_service<>/registry<>. The on_records-only members
-// (add_thread_info/add_track/buffer_storage_store) stay plain no-ops -- only
+// on_kfd_*_configure, plus domain_service<>/registry<>. add_string/add_thread_info/
+// add_track/add_pmc_info/buffer_storage_store reach production code exclusively
+// through get_metadata_registry()/get_buffer_storage() below; on_records-only calls
+// (add_thread_info/add_track/kfd_sample_t storage) stay plain no-ops there -- only
 // add_string/get_agents_by_type/add_pmc_info, which on_configure() exercises, are
 // mocked. Category name/description constants for every kfd_* domain are carried
 // here since policies::domain_service::externals requires the full set regardless of
@@ -907,18 +900,6 @@ struct externals
         return s_manager;
     }
 
-    static void add_string(std::string_view value)
-    {
-        g_externals_mock->add_string(value);
-    }
-    static void add_thread_info(const thread_info_t& /*info*/) {}
-    static void add_track(const track_t& /*info*/) {}
-    static void add_pmc_info(const pmc_info_t& info)
-    {
-        g_externals_mock->add_pmc_info(info);
-    }
-    static void buffer_storage_store(kfd_sample_t&& /*sample*/) {}
-
     // ─── Members required by domains::callback::hip::{runtime,compiler}_api ────────
     struct rocm_hip_api_category
     {};
@@ -992,11 +973,6 @@ struct externals
     template <typename CategoryT>
     static void tracing_pop_timemory(CategoryT, std::string_view /*name*/)
     {}
-
-    static void metadata_add_string(std::string_view /*value*/) {}
-    static void metadata_add_thread_info(const thread_info_t& /*info*/) {}
-
-    static void buffer_storage_store(region_sample&& /*sample*/) {}
 
     static bool check_backtrace_operations(std::uint64_t /*kind*/,
                                            std::uint32_t /*operation*/)
@@ -1076,25 +1052,54 @@ struct externals
 
     // Forward to gmock_metadata_registry/gmock_buffer_storage (defined at namespace
     // scope above, alongside gmock_externals) so tests can EXPECT_CALL every member
-    // on_kernel_dispatch() touches, instead of only asserting it doesn't crash.
+    // on_kernel_dispatch()/on_kfd_*()/on_tracing_api_enter/exit touches, instead of
+    // only asserting it doesn't crash. Guarded by a null check since not every test
+    // that reaches these calls (e.g. kfd on_record tests) sets up
+    // g_metadata_registry_mock -- those calls are simply untested no-ops there, matching
+    // this type's behavior before the externals/get_metadata_registry() unification.
     struct metadata_registry_t
     {
         void add_string(std::string_view value)
         {
-            g_metadata_registry_mock->add_string(value);
+            if(g_metadata_registry_mock)
+            {
+                g_metadata_registry_mock->add_string(value);
+            }
         }
         void add_thread_info(const thread_info_t& info)
         {
-            g_metadata_registry_mock->add_thread_info(info);
+            if(g_metadata_registry_mock)
+            {
+                g_metadata_registry_mock->add_thread_info(info);
+            }
         }
-        void add_track(const track_t& info) { g_metadata_registry_mock->add_track(info); }
+        void add_track(const track_t& info)
+        {
+            if(g_metadata_registry_mock)
+            {
+                g_metadata_registry_mock->add_track(info);
+            }
+        }
+        void add_pmc_info(const pmc_info_t& info)
+        {
+            if(g_metadata_registry_mock)
+            {
+                g_metadata_registry_mock->add_pmc_info(info);
+            }
+        }
         void add_queue(std::uint64_t queue_handle)
         {
-            g_metadata_registry_mock->add_queue(queue_handle);
+            if(g_metadata_registry_mock)
+            {
+                g_metadata_registry_mock->add_queue(queue_handle);
+            }
         }
         void add_stream(std::uint64_t stream_handle)
         {
-            g_metadata_registry_mock->add_stream(stream_handle);
+            if(g_metadata_registry_mock)
+            {
+                g_metadata_registry_mock->add_stream(stream_handle);
+            }
         }
     };
 
@@ -1102,19 +1107,45 @@ struct externals
     {
         void store(kernel_dispatch_sample_t&& sample)
         {
-            g_buffer_storage_mock->store(sample);
+            if(g_buffer_storage_mock)
+            {
+                g_buffer_storage_mock->store(sample);
+            }
         }
         void store(memory_copy_sample_t&& sample)
         {
-            g_buffer_storage_mock->store_memory_copy(sample);
+            if(g_buffer_storage_mock)
+            {
+                g_buffer_storage_mock->store_memory_copy(sample);
+            }
         }
         void store(memory_allocation_sample_t&& sample)
         {
-            g_buffer_storage_mock->store_memory_allocation(sample);
+            if(g_buffer_storage_mock)
+            {
+                g_buffer_storage_mock->store_memory_allocation(sample);
+            }
         }
         void store(scratch_memory_sample_t&& sample)
         {
-            g_buffer_storage_mock->store_scratch_memory(sample);
+            if(g_buffer_storage_mock)
+            {
+                g_buffer_storage_mock->store_scratch_memory(sample);
+            }
+        }
+        // kfd_sample_t storage is not verified by any current test -- plain no-op,
+        // matching this domain family's behavior before the unification onto
+        // get_buffer_storage().
+        void store(kfd_sample_t&& /*sample*/) {}
+        void store(region_sample&& sample)
+        {
+            if(g_buffer_storage_mock)
+            {
+                g_buffer_storage_mock->store_region_sample(
+                    sample.thread_id, std::string{ sample.name }, sample.correlation_id,
+                    sample.parent_stack_id, sample.start_timestamp, sample.end_timestamp,
+                    std::string{ sample.args_str }, std::string{ sample.category });
+            }
         }
     };
 
@@ -1207,12 +1238,6 @@ struct mock_sdk_with_tracing : mock_sdk
 // StrictMock<gmock_externals> instance on_configure() tests already use).
 struct externals_with_tracing : externals
 {
-    // externals also overloads buffer_storage_store() for kfd_sample_t; pull that
-    // overload back in since declaring the region_sample overload below would
-    // otherwise hide it, breaking policies::domain_service::externals for
-    // Externals::buffer_storage_store(std::move(kfd_sample_t{})).
-    using externals::buffer_storage_store;
-
     static bool is_active() { return g_externals_mock->is_active(); }
     static bool get_use_timemory() { return g_externals_mock->get_use_timemory(); }
 
@@ -1238,35 +1263,17 @@ struct externals_with_tracing : externals
         return g_externals_mock->get_backtrace_data(are_operations_available);
     }
 
-    static void metadata_add_string(std::string_view value)
-    {
-        g_externals_mock->metadata_add_string(value);
-    }
-
-    static void metadata_add_thread_info(const thread_info_t& info)
-    {
-        g_externals_mock->metadata_add_thread_info(info.parent_process_id,
-                                                   info.process_id, info.thread_id);
-    }
-
     static std::int32_t get_pid() { return g_externals_mock->get_pid(); }
     static std::int32_t get_ppid() { return g_externals_mock->get_ppid(); }
-
-    static void buffer_storage_store(region_sample&& sample)
-    {
-        g_externals_mock->region_sample_buffer_storage_store(
-            sample.thread_id, std::string{ sample.name }, sample.correlation_id,
-            sample.parent_stack_id, sample.start_timestamp, sample.end_timestamp,
-            std::string{ sample.args_str }, std::string{ sample.category });
-    }
 };
 
 // Drives a hip/hsa callback domain's k_domain.on_record() through one ENTER phase and
 // one EXIT phase (against mock_sdk_with_tracing/externals_with_tracing), and asserts
 // the given category name is exactly what reaches every SdkBackend/Externals call that
-// surfaces it as a string: metadata_add_string and the category field of
-// region_sample_buffer_storage_store. (tracing_push_timemory/tracing_pop_timemory are
-// NOT checked against the category name here: their std::string_view argument is the
+// surfaces it as a string: get_metadata_registry().add_string and the category field
+// of get_buffer_storage().store(region_sample). (tracing_push_timemory/
+// tracing_pop_timemory are NOT checked against the category name here: their
+// std::string_view argument is the
 // per-call *operation* name from get_callback_tracing_names() -- always "operation" in
 // this mock -- the category itself is conveyed only through their first argument's
 // *type*, Category<Externals>::type, which externals_with_tracing's templated
@@ -1300,8 +1307,10 @@ expect_domain_uses_category(const Domain& domain, std::string_view expected_cate
     enter_record.phase = mock_sdk_with_tracing::CALLBACK_PHASE_ENTER;
     domain.on_record(enter_record, &user_data, nullptr);
 
-    g_tracing_backend_mock = std::make_unique<StrictMock<gmock_tracing_backend>>();
-    g_externals_mock       = std::make_unique<StrictMock<gmock_externals>>();
+    g_tracing_backend_mock   = std::make_unique<StrictMock<gmock_tracing_backend>>();
+    g_externals_mock         = std::make_unique<StrictMock<gmock_externals>>();
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
+    g_buffer_storage_mock    = std::make_unique<StrictMock<gmock_buffer_storage>>();
 
     EXPECT_CALL(*g_tracing_backend_mock, get_timestamp())
         .WillOnce(Return(std::uint64_t{ 2 }));
@@ -1315,15 +1324,15 @@ expect_domain_uses_category(const Domain& domain, std::string_view expected_cate
     EXPECT_CALL(*g_externals_mock, get_use_timemory()).WillOnce(Return(true));
     EXPECT_CALL(*g_externals_mock, tracing_pop_timemory("operation"));
     EXPECT_CALL(*g_tracing_backend_mock, iterate_args(_, _, _, _));
-    EXPECT_CALL(*g_externals_mock, metadata_add_string(expected_category_name));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(expected_category_name));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_externals_mock, metadata_add_thread_info(_, _, _));
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
     EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_))
         .WillOnce(Return(std::uint64_t{ 0 }));
-    EXPECT_CALL(*g_externals_mock,
-                region_sample_buffer_storage_store(
-                    _, _, _, _, _, _, _, std::string{ expected_category_name }));
+    EXPECT_CALL(
+        *g_buffer_storage_mock,
+        store_region_sample(_, _, _, _, _, _, _, std::string{ expected_category_name }));
 
     auto exit_record  = mock_sdk_with_tracing::callback_tracing_record_t{};
     exit_record.phase = mock_sdk_with_tracing::CALLBACK_PHASE_EXIT;
@@ -1331,6 +1340,8 @@ expect_domain_uses_category(const Domain& domain, std::string_view expected_cate
 
     g_tracing_backend_mock.reset();
     g_externals_mock.reset();
+    g_metadata_registry_mock.reset();
+    g_buffer_storage_mock.reset();
 
     // Every domain wires tracing_callback_dispatcher with only OnEnter/OnExit (no
     // OnNone), so CALLBACK_PHASE_NONE must reach neither SdkBackend nor Externals.

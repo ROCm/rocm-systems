@@ -29,7 +29,9 @@ using ::testing::StrictMock;
 using test_support::agent_t;
 using test_support::externals;
 using test_support::g_externals_mock;
+using test_support::g_metadata_registry_mock;
 using test_support::gmock_externals;
+using test_support::gmock_metadata_registry;
 using test_support::mock_sdk;
 using test_support::pmc_info_data_t;
 
@@ -70,9 +72,10 @@ TEST(kfd_event_page_migrate_test,
 TEST(kfd_event_page_migrate_test,
      on_configure_registers_category_string_and_skips_pmc_info_without_agents)
 {
-    g_externals_mock = std::make_unique<StrictMock<gmock_externals>>();
+    g_externals_mock         = std::make_unique<StrictMock<gmock_externals>>();
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
 
-    EXPECT_CALL(*g_externals_mock,
+    EXPECT_CALL(*g_metadata_registry_mock,
                 add_string(Eq(externals::k_kfd_event_page_migrate_category_name)))
         .Times(1);
     EXPECT_CALL(*g_externals_mock, get_agents_by_type(Eq(externals::k_agent_type_gpu)))
@@ -85,12 +88,14 @@ TEST(kfd_event_page_migrate_test,
     on_kfd_event_page_migrate_configure<externals>();
 
     g_externals_mock.reset();
+    g_metadata_registry_mock.reset();
 }
 
 TEST(kfd_event_page_migrate_test,
      on_configure_registers_pmc_info_for_each_gpu_and_cpu_agent)
 {
-    g_externals_mock = std::make_unique<StrictMock<gmock_externals>>();
+    g_externals_mock         = std::make_unique<StrictMock<gmock_externals>>();
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
 
     auto gpu_agent               = std::make_shared<agent_t>();
     gpu_agent->type              = externals::k_agent_type_gpu;
@@ -99,7 +104,7 @@ TEST(kfd_event_page_migrate_test,
     cpu_agent->type              = externals::k_agent_type_cpu;
     cpu_agent->device_type_index = 0;
 
-    EXPECT_CALL(*g_externals_mock,
+    EXPECT_CALL(*g_metadata_registry_mock,
                 add_string(Eq(externals::k_kfd_event_page_migrate_category_name)))
         .Times(1);
     EXPECT_CALL(*g_externals_mock, get_agents_by_type(Eq(externals::k_agent_type_gpu)))
@@ -109,7 +114,7 @@ TEST(kfd_event_page_migrate_test,
         .Times(1)
         .WillOnce(Return(std::vector<std::shared_ptr<agent_t>>{ cpu_agent }));
     EXPECT_CALL(
-        *g_externals_mock,
+        *g_metadata_registry_mock,
         add_pmc_info(AllOf(
             Field(&pmc_info_data_t::type, Eq(externals::k_agent_type_gpu)),
             Field(&pmc_info_data_t::agent_type_index, Eq(std::size_t{ 1 })),
@@ -123,7 +128,7 @@ TEST(kfd_event_page_migrate_test,
                       externals::k_kfd_event_page_migrate_category_description })))))
         .Times(1);
     EXPECT_CALL(
-        *g_externals_mock,
+        *g_metadata_registry_mock,
         add_pmc_info(AllOf(
             Field(&pmc_info_data_t::type, Eq(externals::k_agent_type_cpu)),
             Field(&pmc_info_data_t::agent_type_index, Eq(std::size_t{ 0 })),
@@ -140,6 +145,7 @@ TEST(kfd_event_page_migrate_test,
     on_kfd_event_page_migrate_configure<externals>();
 
     g_externals_mock.reset();
+    g_metadata_registry_mock.reset();
 }
 
 }  // namespace kfd

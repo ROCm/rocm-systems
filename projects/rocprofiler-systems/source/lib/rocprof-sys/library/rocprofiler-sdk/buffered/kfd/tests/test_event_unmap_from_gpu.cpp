@@ -29,7 +29,9 @@ using ::testing::StrictMock;
 using test_support::agent_t;
 using test_support::externals;
 using test_support::g_externals_mock;
+using test_support::g_metadata_registry_mock;
 using test_support::gmock_externals;
+using test_support::gmock_metadata_registry;
 using test_support::mock_sdk;
 using test_support::pmc_info_data_t;
 
@@ -70,9 +72,10 @@ TEST(kfd_event_unmap_from_gpu_test,
 TEST(kfd_event_unmap_from_gpu_test,
      on_configure_registers_category_string_and_skips_pmc_info_without_gpu_agents)
 {
-    g_externals_mock = std::make_unique<StrictMock<gmock_externals>>();
+    g_externals_mock         = std::make_unique<StrictMock<gmock_externals>>();
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
 
-    EXPECT_CALL(*g_externals_mock,
+    EXPECT_CALL(*g_metadata_registry_mock,
                 add_string(Eq(externals::k_kfd_event_unmap_from_gpu_category_name)))
         .Times(1);
     EXPECT_CALL(*g_externals_mock, get_agents_by_type(Eq(externals::k_agent_type_gpu)))
@@ -82,24 +85,26 @@ TEST(kfd_event_unmap_from_gpu_test,
     on_kfd_event_unmap_from_gpu_configure<externals>();
 
     g_externals_mock.reset();
+    g_metadata_registry_mock.reset();
 }
 
 TEST(kfd_event_unmap_from_gpu_test, on_configure_registers_pmc_info_for_each_gpu_agent)
 {
-    g_externals_mock = std::make_unique<StrictMock<gmock_externals>>();
+    g_externals_mock         = std::make_unique<StrictMock<gmock_externals>>();
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
 
     auto gpu_agent               = std::make_shared<agent_t>();
     gpu_agent->type              = externals::k_agent_type_gpu;
     gpu_agent->device_type_index = 4;
 
-    EXPECT_CALL(*g_externals_mock,
+    EXPECT_CALL(*g_metadata_registry_mock,
                 add_string(Eq(externals::k_kfd_event_unmap_from_gpu_category_name)))
         .Times(1);
     EXPECT_CALL(*g_externals_mock, get_agents_by_type(Eq(externals::k_agent_type_gpu)))
         .Times(1)
         .WillOnce(Return(std::vector<std::shared_ptr<agent_t>>{ gpu_agent }));
     EXPECT_CALL(
-        *g_externals_mock,
+        *g_metadata_registry_mock,
         add_pmc_info(AllOf(
             Field(&pmc_info_data_t::type, Eq(externals::k_agent_type_gpu)),
             Field(&pmc_info_data_t::agent_type_index, Eq(std::size_t{ 4 })),
@@ -116,6 +121,7 @@ TEST(kfd_event_unmap_from_gpu_test, on_configure_registers_pmc_info_for_each_gpu
     on_kfd_event_unmap_from_gpu_configure<externals>();
 
     g_externals_mock.reset();
+    g_metadata_registry_mock.reset();
 }
 
 }  // namespace kfd

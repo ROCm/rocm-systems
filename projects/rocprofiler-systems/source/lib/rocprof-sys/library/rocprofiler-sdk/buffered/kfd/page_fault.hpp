@@ -24,7 +24,8 @@ template <policies::domain_service::externals Externals>
 inline void
 on_kfd_page_fault_configure()
 {
-    Externals::add_string(Externals::k_kfd_page_fault_category_name);
+    Externals::get_metadata_registry().add_string(
+        Externals::k_kfd_page_fault_category_name);
 
     auto& agent_mgr  = Externals::get_agent_manager();
     auto  gpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_gpu);
@@ -42,7 +43,7 @@ on_kfd_page_fault_configure()
         constexpr auto*       k_expression  = "";
         const std::string     value_type_absolute{ Externals::k_pmc_value_type_absolute };
 
-        Externals::add_pmc_info(typename Externals::pmc_info_t{
+        Externals::get_metadata_registry().add_pmc_info(typename Externals::pmc_info_t{
             .type             = Externals::k_agent_type_gpu,
             .agent_type_index = dev_idx,
             .target_arch      = "GPU",
@@ -91,7 +92,7 @@ on_kfd_page_fault(typename SdkBackend::kfd_page_fault_record* record, void* data
                   e.what());
     }
 
-    Externals::add_thread_info(typename Externals::thread_info_t{
+    Externals::get_metadata_registry().add_thread_info(typename Externals::thread_info_t{
         Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
 
     auto agent_label = [](const auto* agent_ptr) {
@@ -107,7 +108,8 @@ on_kfd_page_fault(typename SdkBackend::kfd_page_fault_record* record, void* data
     constexpr auto k_empty_event_metadata = "{}";
 
     auto track_name = fmt::format("KFD Page Fault [{}]", agent_label(agent));
-    Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
+    Externals::get_metadata_registry().add_track(
+        typename Externals::track_t{ track_name, tid, "{}" });
 
     const auto agent_node_id =
         agent ? std::to_string(agent->node_id) : std::string{ "null" };
@@ -117,7 +119,7 @@ on_kfd_page_fault(typename SdkBackend::kfd_page_fault_record* record, void* data
     });
 
     const auto pmc_value = static_cast<double>(record->address.value);
-    Externals::buffer_storage_store(typename Externals::kfd_sample_t{
+    Externals::get_buffer_storage().store(typename Externals::kfd_sample_t{
         tid, name, record->start_timestamp, record->end_timestamp, args_str,
         std::string{ Externals::k_kfd_page_fault_category_name }, std::move(track_name),
         k_empty_event_metadata,

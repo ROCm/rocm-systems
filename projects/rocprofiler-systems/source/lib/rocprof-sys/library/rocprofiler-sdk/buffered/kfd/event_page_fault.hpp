@@ -23,7 +23,8 @@ template <policies::domain_service::externals Externals>
 inline void
 on_kfd_event_page_fault_configure()
 {
-    Externals::add_string(Externals::k_kfd_event_page_fault_category_name);
+    Externals::get_metadata_registry().add_string(
+        Externals::k_kfd_event_page_fault_category_name);
 
     auto& agent_mgr  = Externals::get_agent_manager();
     auto  gpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_gpu);
@@ -41,7 +42,7 @@ on_kfd_event_page_fault_configure()
         constexpr auto*       k_expression  = "";
         const std::string     value_type_absolute{ Externals::k_pmc_value_type_absolute };
 
-        Externals::add_pmc_info(typename Externals::pmc_info_t{
+        Externals::get_metadata_registry().add_pmc_info(typename Externals::pmc_info_t{
             .type             = Externals::k_agent_type_gpu,
             .agent_type_index = dev_idx,
             .target_arch      = "GPU",
@@ -91,7 +92,7 @@ on_kfd_event_page_fault(typename SdkBackend::kfd_event_page_fault_record* record
                   e.what());
     }
 
-    Externals::add_thread_info(typename Externals::thread_info_t{
+    Externals::get_metadata_registry().add_thread_info(typename Externals::thread_info_t{
         Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
 
     auto agent_label = [](const auto* agent_ptr) {
@@ -105,13 +106,14 @@ on_kfd_event_page_fault(typename SdkBackend::kfd_event_page_fault_record* record
     };
 
     auto track_name = fmt::format("KFD Event Page Fault [{}]", agent_label(agent));
-    Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
+    Externals::get_metadata_registry().add_track(
+        typename Externals::track_t{ track_name, tid, "{}" });
 
     constexpr auto k_empty_args = "";
 
     const auto pmc_value      = static_cast<double>(record->address.value);
     auto       event_metadata = fmt::format(R"({{"address":{}}})", record->address.value);
-    Externals::buffer_storage_store(typename Externals::kfd_sample_t{
+    Externals::get_buffer_storage().store(typename Externals::kfd_sample_t{
         tid, name, record->timestamp, record->timestamp, k_empty_args,
         std::string{ Externals::k_kfd_event_page_fault_category_name },
         std::move(track_name), std::move(event_metadata),

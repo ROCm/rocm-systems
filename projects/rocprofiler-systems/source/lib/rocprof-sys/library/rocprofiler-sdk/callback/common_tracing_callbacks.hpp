@@ -109,14 +109,14 @@ on_tracing_api_exit(typename SdkBackend::callback_tracing_record_t record,
 
     auto call_stack = Externals::get_backtrace_json(backtrace_data);
 
-    Externals::metadata_add_string(Category<Externals>::k_name);
+    Externals::get_metadata_registry().add_string(Category<Externals>::k_name);
 
-    Externals::metadata_add_thread_info(
+    Externals::get_metadata_registry().add_thread_info(
         { Externals::get_ppid(), Externals::get_pid(), record.thread_id, 0, 0, "{}" });
 
     const std::string args_str = get_args_string(args);
 
-    Externals::buffer_storage_store(typename Externals::region_sample{
+    Externals::get_buffer_storage().store(typename Externals::region_sample{
         record.thread_id, name, record.correlation_id.internal,
         SdkBackend::get_parent_stack_id(record.correlation_id), begin_timestamp,
         end_timestamp, call_stack.dump(), args_str, Category<Externals>::k_name });
