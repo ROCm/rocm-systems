@@ -1,4 +1,5 @@
 """Unit tests for the Ruby ACCL-profiler CI driver."""
+
 import json
 import os
 import subprocess
@@ -6,7 +7,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ci", "scripts"))
 from test_accl_profiler import (  # noqa: E402
@@ -19,9 +19,7 @@ from test_accl_profiler import (  # noqa: E402
 )
 
 
-def _artifact_paths(
-    tmp_path: Path, kpack_names: tuple[str, ...] = ()
-) -> ArtifactPaths:
+def _artifact_paths(tmp_path: Path, kpack_names: tuple[str, ...] = ()) -> ArtifactPaths:
     files = {
         "rccl_library": tmp_path / "librccl.so",
         "profiler_plugin": tmp_path / "librccl-profiler-accl.so",
@@ -29,6 +27,10 @@ def _artifact_paths(
     }
     for path in files.values():
         path.write_text("fixture", encoding="utf-8")
+    mpi_launcher = tmp_path / "bin" / "mpirun"
+    mpi_launcher.parent.mkdir()
+    mpi_launcher.write_text("fixture", encoding="utf-8")
+    mpi_launcher.chmod(0o755)
     binaries = {}
     for binary in COLLECTIVES:
         path = tmp_path / binary
@@ -44,6 +46,7 @@ def _artifact_paths(
     return ArtifactPaths(
         root=tmp_path,
         rccl_library=files["rccl_library"],
+        mpi_launcher=mpi_launcher,
         profiler_plugin=files["profiler_plugin"],
         report_script=files["report_script"],
         binaries=binaries,
@@ -73,9 +76,7 @@ def _record(rank: int, size: int, coll: str = "AllReduce") -> dict:
                 "n_recv_ops": 4,
             },
         },
-        "event_trace_ts": {
-            "kernel_events": [{"channel_id": 0, "duration_us": 2}]
-        },
+        "event_trace_ts": {"kernel_events": [{"channel_id": 0, "duration_us": 2}]},
     }
 
 
@@ -89,14 +90,16 @@ def _write_rank_file(
     objects = []
     for size in (1024, 2048):
         objects.extend(_record(rank, size, coll) for _ in range(3))
-    objects.append({
-        "summary": {
-            "dropped_collectives": 0 if complete else 1,
-            "leaked_collectives": 0,
-            "pool_size": 256,
-            "complete": complete,
+    objects.append(
+        {
+            "summary": {
+                "dropped_collectives": 0 if complete else 1,
+                "leaked_collectives": 0,
+                "pool_size": 256,
+                "complete": complete,
+            }
         }
-    })
+    )
     path = output_dir / f"rank{rank}.jsonl"
     path.write_text(
         "\n".join(json.dumps(obj) for obj in objects) + "\n", encoding="utf-8"
@@ -109,8 +112,28 @@ def test_slurm_script_runs_only_five_supported_collectives(tmp_path):
     for binary in COLLECTIVES:
         assert binary in script
     assert "alltoall_perf" not in script
-    assert "--nodes=2 --ntasks=16 --ntasks-per-node=8" in script
+    assert "srun --nodes=2 --ntasks=2 --ntasks-per-node=1" in script
+    assert "--ntasks=16" not in script
+    assert f"{tmp_path}/bin/mpirun --prefix {tmp_path} -np 16" in script
+    assert '--host "$ACCL_MPI_HOSTS"' in script
+    assert "--mca pml ob1 --mca btl '^openib'" in script
+    assert "ssh -p 2224" in script
+    assert "ulimit -l unlimited" in script
     assert "NCCL_PROFILER_PLUGIN" in script
+
+
+def test_slurm_script_validates_mpi_rank_placement(tmp_path):
+    script = render_slurm_script(
+        _artifact_paths(tmp_path), tmp_path / "work", RunConfig(nodes=2)
+    )
+
+    assert 'scontrol show hostnames "$SLURM_JOB_NODELIST"' in script
+    assert "${host}:${ACCL_GPUS_PER_NODE}" in script
+    assert '"${OMPI_COMM_WORLD_SIZE:-}" = "$ACCL_EXPECT_RANKS"' in script
+    assert '"${OMPI_COMM_WORLD_LOCAL_SIZE:-}" = "$ACCL_GPUS_PER_NODE"' in script
+    assert "-x NCCL_PROFILER_PLUGIN" in script
+    assert "-x ACCL_PROFILER_OUTPUT_DIR" in script
+    assert "NCCL_IGNORE_CPU_AFFINITY" in script
 
 
 def test_rendered_slurm_script_has_valid_bash_syntax(tmp_path):
