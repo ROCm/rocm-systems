@@ -797,10 +797,18 @@ class Runtime {
     void* base;
     size_t size;
     uint32_t node_id;
+    bool is_cpu;
     int remaining_deps;
     hsa_signal_t completion;
     std::vector<hsa_signal_t> dep_signals;
     prefetch_map_t::iterator prefetch_map_entry;
+  };
+
+  // Interval of address space whose most recent completed SVM prefetch targeted a CPU
+  // NUMA node. [base, end) maps to the destination CPU node_id.
+  struct CpuPrefetchRange {
+    uintptr_t end;
+    uint32_t node_id;
   };
 
   struct PrefetchRange {
@@ -871,6 +879,18 @@ class Runtime {
   /// @brief Get most recently issued SVM prefetch agent for the range in question.
   Agent* GetSVMPrefetchAgent(void* ptr, size_t size);
 
+  /// @brief Record (or clear) the CPU NUMA node targeted by the most recent completed
+  /// SVM prefetch for [base, base+size). KFD collapses every host prefetch target to a
+  /// single SYSMEM location and cannot preserve the CPU NUMA node, so ROCr tracks it here
+  /// to honor the documented HSA_AMD_SVM_ATTRIB_PREFETCH_LOCATION contract. When is_cpu is
+  /// false the interval is cleared because a GPU prefetch supersedes any prior CPU record
+  /// and KFD reports the GPU location directly. Acquires prefetch_lock_.
+  void SetCpuPrefetchNode(void* base, size_t size, bool is_cpu, uint32_t node_id);
+
+  /// @brief Return the CPU node uniformly recorded for [base, end), or -1 if the range is
+  /// not fully and uniformly covered. Caller must hold prefetch_lock_.
+  int32_t LookupCpuPrefetchNode(uintptr_t base, uintptr_t end);
+
   /// @brief Get the highest used node id.
   uint32_t max_node_id() const { return agents_by_node_.rbegin()->first; }
 
@@ -932,6 +952,10 @@ class Runtime {
   // Pending prefetch containers.
   std::mutex prefetch_lock_;
   prefetch_map_t prefetch_map_;
+
+  // Persistent record of the CPU NUMA node of the most recent completed SVM prefetch,
+  // keyed by interval base address. Guarded by prefetch_lock_. See SetCpuPrefetchNode.
+  std::map<uintptr_t, CpuPrefetchRange> cpu_prefetch_map_;
 
   // Allocator using ::system_region_
   std::function<void*(size_t size, size_t align, MemoryRegion::AllocateFlags flags,

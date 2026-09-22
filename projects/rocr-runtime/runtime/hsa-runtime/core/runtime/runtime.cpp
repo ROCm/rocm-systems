@@ -3597,6 +3597,7 @@ hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
 
   Agent* dest = Agent::Convert(agent);
   op->node_id = dest->node_id();
+  op->is_cpu = (dest->device_type() == Agent::kAmdCpuDevice);
 
   op->base = reinterpret_cast<void*>(base);
   op->size = len;
@@ -3699,6 +3700,12 @@ hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
     assert(error == HSAKMT_STATUS_SUCCESS && "KFD Prefetch failed.");
     (void)error;
 
+    // Persist the CPU destination (or clear it for a GPU destination) so that a later
+    // PREFETCH_LOCATION query reports the specific CPU NUMA node, which KFD's SYSMEM
+    // representation cannot preserve.
+    Runtime::runtime_singleton_->SetCpuPrefetchNode(op->base, op->size, op->is_cpu,
+                                                    op->node_id);
+
     removePrefetchRanges(op);
 
     if (op->completion.handle != 0) Signal::Convert(op->completion)->SubRelaxed(1);
@@ -3772,13 +3779,82 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
     (void)error;
 
     if (attrib.value == -1) return nullptr;
-    if (prefetch_node == -2) prefetch_node = attrib.value;
-    if (prefetch_node != attrib.value) return nullptr;
+
+    // KFD reports every host prefetch target as a single SYSMEM location (node 0). If
+    // ROCr recorded a specific CPU NUMA node for this range, report that node instead so
+    // the query returns the destination agent of the most recent prefetch as documented.
+    uint32_t resolved = attrib.value;
+    if (attrib.value == 0) {
+      int32_t cpu_node = LookupCpuPrefetchNode(range.first, range.first + range.second);
+      if (cpu_node >= 0) resolved = static_cast<uint32_t>(cpu_node);
+    }
+
+    if (prefetch_node == -2) prefetch_node = resolved;
+    if (prefetch_node != resolved) return nullptr;
   }
 
   assert(prefetch_node != -2 && "prefetch_node was not updated.");
   assert(prefetch_node != -1 && "Should have already returned.");
   return agents_by_node_[prefetch_node][0];
+}
+
+void Runtime::SetCpuPrefetchNode(void* base_ptr, size_t size, bool is_cpu, uint32_t node_id) {
+  const size_t pageSize = os::PageSize();
+  uintptr_t b = reinterpret_cast<uintptr_t>(AlignDown(base_ptr, pageSize));
+  uintptr_t e = AlignUp(reinterpret_cast<uintptr_t>(base_ptr) + size, pageSize);
+  if (b >= e) return;
+
+  std::lock_guard<std::mutex> lock(prefetch_lock_);
+
+  // Fast path: a GPU-target prefetch only needs to clear a prior CPU record. When no CPU
+  // prefetch has ever been recorded there is nothing to do, so skip the interval work that
+  // would otherwise run on every prefetch completion in a CPU-prefetch-free workload.
+  if (!is_cpu && cpu_prefetch_map_.empty()) return;
+
+  // Collect entries overlapping [b, e) first to avoid mutating the map mid-walk.
+  std::vector<std::pair<uintptr_t, CpuPrefetchRange>> overlaps;
+  auto it = cpu_prefetch_map_.upper_bound(b);
+  if (it != cpu_prefetch_map_.begin()) --it;
+  for (; it != cpu_prefetch_map_.end() && it->first < e; ++it) {
+    if (it->second.end > b) overlaps.push_back(*it);
+  }
+
+  // Trim/split overlapping intervals so [b, e) is free, preserving non-overlapping ends.
+  for (auto& ov : overlaps) {
+    uintptr_t k = ov.first;
+    uintptr_t ke = ov.second.end;
+    uint32_t on = ov.second.node_id;
+    cpu_prefetch_map_.erase(k);
+    if (k < b) cpu_prefetch_map_[k] = CpuPrefetchRange{b, on};
+    if (ke > e) cpu_prefetch_map_[e] = CpuPrefetchRange{ke, on};
+  }
+
+  // A CPU prefetch records the node; a GPU prefetch leaves the interval cleared so that
+  // KFD's (correct) GPU location is reported and no stale CPU record shadows it.
+  if (is_cpu) cpu_prefetch_map_[b] = CpuPrefetchRange{e, node_id};
+}
+
+int32_t Runtime::LookupCpuPrefetchNode(uintptr_t base, uintptr_t end) {
+  if (base >= end) return -1;
+
+  auto it = cpu_prefetch_map_.upper_bound(base);
+  if (it != cpu_prefetch_map_.begin()) --it;
+
+  uintptr_t cur = base;
+  int32_t node = -1;
+  for (; it != cpu_prefetch_map_.end() && it->first < end; ++it) {
+    uintptr_t k = it->first;
+    uintptr_t ke = it->second.end;
+    if (ke <= cur) continue;
+    if (k > cur) return -1;  // gap: range not fully covered
+    if (node == -1)
+      node = static_cast<int32_t>(it->second.node_id);
+    else if (static_cast<uint32_t>(node) != it->second.node_id)
+      return -1;  // non-uniform coverage
+    cur = ke;
+    if (cur >= end) break;
+  }
+  return (cur >= end) ? node : -1;
 }
 
 hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count,
@@ -3886,6 +3962,10 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
         if (err != HSAKMT_STATUS_SUCCESS) {
           debug_warning(false && "hsaKmtSVMSetAttr prefetch failed in SvmBatchDiscard");
         }
+
+        // Persist the CPU destination so a later PREFETCH_LOCATION query reports the
+        // specific CPU NUMA node, which KFD's SYSMEM representation cannot preserve.
+        Runtime::runtime_singleton_->SetCpuPrefetchNode(base, size, true, target_cpu);
       }
 
       int res = madvise(base, size, MADV_FREE);
