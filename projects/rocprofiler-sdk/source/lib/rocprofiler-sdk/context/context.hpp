@@ -42,6 +42,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
@@ -212,6 +213,40 @@ stop_context(rocprofiler_context_id_t id);
 using context_array_t    = common::container::small_vector<const context*>;
 using context_id_array_t = common::container::small_vector<rocprofiler_context_id_t>;
 
+// defined in context.cpp
+struct registered_context_storage;
+
+/// \brief An immutable view of the registered contexts, taken at the point of construction.
+///
+/// The registry itself may only be walked with get_contexts_mutex() held: allocate_context()
+/// appends to it while dispatch and completion paths read it. The completion path cannot take
+/// that mutex, because stop_context() waits on the GPU drain and the drain waits on completions,
+/// so it reads a snapshot instead. A snapshot also owns the contexts it names, which is what makes
+/// it safe against deregister_client_contexts() destroying a context mid-iteration.
+class registered_contexts_snapshot
+{
+public:
+    registered_contexts_snapshot() = default;
+
+    const context* const* begin() const { return m_begin; }
+    const context* const* end() const { return m_end; }
+    size_t                size() const { return m_end - m_begin; }
+    bool                  empty() const { return m_begin == m_end; }
+
+private:
+    friend registered_contexts_snapshot get_registered_contexts_snapshot();
+
+    explicit registered_contexts_snapshot(std::shared_ptr<const registered_context_storage>&&);
+
+    std::shared_ptr<const registered_context_storage> m_data  = {};
+    const context* const*                             m_begin = nullptr;
+    const context* const*                             m_end   = nullptr;
+};
+
+/// \brief Returns the currently published snapshot of the registered contexts.
+registered_contexts_snapshot
+get_registered_contexts_snapshot();
+
 context*
 get_mutable_registered_context(rocprofiler_context_id_t id);
 
@@ -223,6 +258,11 @@ using context_filter_t = bool (*)(const context*);
 inline bool
 default_context_filter(const context* val);
 
+// These read the published snapshot and then drop it, so the pointers they return outlive it. The
+// contexts themselves stay alive regardless: deregister_client_contexts() retires a context out of
+// the registry without destroying it, so a pointer obtained here stays dereferenceable until
+// static teardown. Which contexts are reachable is still a snapshot-in-time answer, so a caller
+// that needs a stable set across a long operation should hold a registered_contexts_snapshot.
 context_array_t&
 get_registered_contexts(context_array_t& data, context_filter_t filter = default_context_filter);
 
@@ -257,6 +297,20 @@ deactivate_client_contexts(rocprofiler_client_id_t id);
 // should only be called if the client failed to initialize
 void
 deregister_client_contexts(rocprofiler_client_id_t id);
+
+// The mutex that serialises start_context / stop_context and any mutation that must be
+// atomic with activation state (e.g. setting the agent restriction on a context).
+std::mutex&
+get_contexts_mutex();
+
+// Blocks until no context stop is in progress. stop_context() releases get_contexts_mutex()
+// across the GPU drain, so holding the mutex alone is not enough to exclude a stop: for that
+// window the context is still in the active array with nothing held. Anything that reads
+// activation state to decide whether a context is running has to wait here first.
+//
+// _lk must own get_contexts_mutex(); it is released while waiting and re-acquired on return.
+void
+wait_for_stopping_contexts(std::unique_lock<std::mutex>& _lk);
 
 inline bool
 default_context_filter(const context* val)
