@@ -122,9 +122,7 @@ static ncclResult_t IbCastMultiSendSegmented(struct ncclIbSendComm* comm, int sl
   // byte_len is not the logical request size. Publish completion sizes for
   // every segmented request, including a single receive.
   bool needSizesWr = true;
-  bool arExtra =
-    (!(comm->base.remOooRq && comm->base.localOooRq) && comm->ar && reqs[0]->send.size > IbCastArThreshold);
-  bool extraImmWr = !useWriteOp && (needSizesWr || arExtra);
+  bool extraImmWr = !useWriteOp && needSizesWr;
 
   uint32_t sendOffsets[NCCL_NET_IB_MAX_RECVS] = {0};
 #ifdef NCCL_ENABLE_NET_PROFILING

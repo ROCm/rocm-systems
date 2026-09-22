@@ -58,6 +58,7 @@
 
 #include "ibvwrap.h"
 #include "mlx5/mlx5dvwrap.h"
+#include "net_ib/multiseg.h"
 
 #define MAXSUFFIXSIZE 16
 #define MAXNAMESIZE (64 + MAXSUFFIXSIZE)
@@ -84,7 +85,6 @@ struct ncclIbMrCache {
 
 extern int IbCastNMergedDevs;
 #define NCCL_IB_MAX_DEVS_PER_NIC NCCL_NET_MAX_DEVS_PER_NIC
-#include "net_ib/multiseg.h"
 #define MAX_MERGED_DEV_NAME (MAXNAMESIZE * NCCL_IB_MAX_DEVS_PER_NIC) + NCCL_IB_MAX_DEVS_PER_NIC
 struct alignas(64) ncclIbMergedDev {
   ncclNetVDeviceProps_t vProps;
@@ -522,14 +522,6 @@ struct ncclIbMrHandle {
   size_t segLen[NCCL_IB_MAX_SEGMENTS];
   ibv_mr* segMrs[NCCL_IB_MAX_SEGMENTS][NCCL_IB_MAX_DEVS_PER_NIC];
 };
-
-// Select the MR covering [addr, addr+len) for device devIndex.
-static inline ibv_mr* ibCastMrForRange(const struct ncclIbMrHandle* h, uintptr_t addr, size_t len, int devIndex) {
-  if (h == NULL) return NULL;
-  if (h->nSegments <= 1) return h->mrs[devIndex];
-  int s = ncclIbSegmentIndexForRange(h->nSegments, h->segStart, h->segLen, addr, len);
-  return (s < 0) ? NULL : h->segMrs[s][devIndex];
-}
 
 // Forward declaration
 struct ncclIbResiliency;
