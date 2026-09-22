@@ -6481,7 +6481,11 @@ def test_gfx1250_generated_fp8_vop3_byte_select_uses_local_inst_member(
     assert 'amdgpu::vop3_fp8_decode_e5m3(*this)' in body
     assert 'util::fp8_e5m3_to_f32' in body
     assert 'util::fp8_e4m3_to_f32' in body
-    assert 'amdgpu::vop3_opsel(inst.inst_)' not in body
+    # The local SIMD probe binds an instruction alias; scalar execution still
+    # reads the encoding member directly.
+    assert 'auto &inst = *this;' in body
+    assert 'amdgpu::try_execute_words_simd<1, false, false, 0>' in body
+    assert 'amdgpu::vop3_opsel(inst.inst_)' in body
     assert 'amdgpu::vop3_fp8_decode_e5m3(inst_)' not in body
 
     body = _generated_method_body(gfx1250_vop3_cvt, 'VCvtF16Fp8Vop3', 'VCvtF16Bf8Vop3')
