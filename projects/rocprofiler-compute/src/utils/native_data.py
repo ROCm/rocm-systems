@@ -62,41 +62,6 @@ class NativeArtifacts:
     kernel_symbols: Path
 
 
-def find_native_artifacts(workload_dir: Path) -> list[NativeArtifacts]:
-    """Return the complete per-pid artifact sets in workload_dir.
-
-    Sorted by counter set then pid: the ids handed out below follow read order.
-    An incomplete set cannot be joined, so it is skipped with a warning.
-    """
-    found: dict[tuple[str, int], dict[str, Path]] = {}
-    for path in workload_dir.glob(f"*.csv{csv_compression.GZIP_SUFFIX}"):
-        match = _ARTIFACT_RE.match(path.name)
-        if match is None:
-            continue
-        key = (match["fbase"], int(match["pid"]))
-        found.setdefault(key, {})[match["kind"]] = path
-
-    artifacts = []
-    for (fbase, pid), paths in sorted(found.items()):
-        missing = {COUNTERS_PREFIX, DISPATCH_PREFIX, KERNEL_SYMBOLS_PREFIX} - set(paths)
-        if missing:
-            console_warning(
-                f"Incomplete native profiling data for pid {pid} of {fbase}: "
-                f"missing {', '.join(sorted(missing))}. Skipping this process."
-            )
-            continue
-        artifacts.append(
-            NativeArtifacts(
-                fbase=fbase,
-                pid=pid,
-                counters=paths[COUNTERS_PREFIX],
-                dispatch=paths[DISPATCH_PREFIX],
-                kernel_symbols=paths[KERNEL_SYMBOLS_PREFIX],
-            )
-        )
-    return artifacts
-
-
 def _read_keyed_rows(path: Path, key_column: str) -> dict[str, dict[str, str]]:
     """Read a small CSV into a dict keyed by one column."""
     with csv_compression.open_gzip_csv_read(path) as infile:
@@ -152,6 +117,41 @@ def _join_process(artifacts: NativeArtifacts) -> Iterator[dict]:
             "Counter_Value": counter_value,
             "PID": artifacts.pid,
         }
+
+
+def find_native_artifacts(workload_dir: Path) -> list[NativeArtifacts]:
+    """Return the complete per-pid artifact sets in workload_dir.
+
+    Sorted by counter set then pid: the ids handed out below follow read order.
+    An incomplete set cannot be joined, so it is skipped with a warning.
+    """
+    found: dict[tuple[str, int], dict[str, Path]] = {}
+    for path in workload_dir.glob(f"*.csv{csv_compression.GZIP_SUFFIX}"):
+        match = _ARTIFACT_RE.match(path.name)
+        if match is None:
+            continue
+        key = (match["fbase"], int(match["pid"]))
+        found.setdefault(key, {})[match["kind"]] = path
+
+    artifacts = []
+    for (fbase, pid), paths in sorted(found.items()):
+        missing = {COUNTERS_PREFIX, DISPATCH_PREFIX, KERNEL_SYMBOLS_PREFIX} - set(paths)
+        if missing:
+            console_warning(
+                f"Incomplete native profiling data for pid {pid} of {fbase}: "
+                f"missing {', '.join(sorted(missing))}. Skipping this process."
+            )
+            continue
+        artifacts.append(
+            NativeArtifacts(
+                fbase=fbase,
+                pid=pid,
+                counters=paths[COUNTERS_PREFIX],
+                dispatch=paths[DISPATCH_PREFIX],
+                kernel_symbols=paths[KERNEL_SYMBOLS_PREFIX],
+            )
+        )
+    return artifacts
 
 
 def write_counter_frame(workload_dir: Path, output_path: Path) -> int:
