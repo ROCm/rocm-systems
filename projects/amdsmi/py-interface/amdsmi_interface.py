@@ -3199,7 +3199,9 @@ def amdsmi_get_gpu_activity(processor_handle: processor_handle_t) -> Dict[str, A
     }
 
     for key, value in activity_dict.items():
-        activity_dict[key] = _validate_if_max_uint(value, MaxUIntegerTypes.UINT16_T, isActivity=True)
+        activity_dict[key] = _validate_if_max_uint(
+            value, MaxUIntegerTypes.UINT16_T, isActivity=True
+        )
 
     return activity_dict
 
@@ -7186,9 +7188,7 @@ def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_busy_percent(processor_handle, ctypes.byref(gpu_busy_percent))
     )
-    return _validate_if_max_uint(
-        gpu_busy_percent.value, MaxUIntegerTypes.UINT32_T, isActivity=True
-    )
+    return _validate_if_max_uint(gpu_busy_percent.value, MaxUIntegerTypes.UINT32_T, isActivity=True)
 
 
 def amdsmi_get_vcn_busy_percent(processor_handle: processor_handle_t):
