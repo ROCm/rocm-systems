@@ -18,26 +18,30 @@ NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 RCCL_PARAM(SymModel, "SYM_MODEL", 0)
 
-enum rcclSymkColl {
-  rcclSymkColl_AllReduce = 0,
-  rcclSymkColl_AllGather = 1,
-  rcclSymkColl_ReduceScatter = 2,
-  rcclSymkColl_Count = 3
+enum struct rcclSymkColl : int {
+  AllReduce = 0,
+  AllGather = 1,
+  ReduceScatter = 2,
+  Count = 3
 };
-enum rcclSymkProto {
-  rcclSymkProto_LL = 0,
-  rcclSymkProto_Simple = 1,
-  rcclSymkProto_Count = 2
+enum struct rcclSymkProto : int {
+  LL = 0,
+  Simple = 1,
+  Count = 2
 };
+
+constexpr int rcclSymkCollCount = static_cast<int>(rcclSymkColl::Count);
+constexpr int rcclSymkProtoCount = static_cast<int>(rcclSymkProto::Count);
 
 struct rcclSymkTuningModel {
-  double baseLat[rcclSymkColl_Count][rcclSymkProto_Count];
-  double smBw[rcclSymkColl_Count][rcclSymkProto_Count];
-  double peakBw[rcclSymkColl_Count];
-  double llBusFactor[rcclSymkColl_Count];
-  double withinPeakFactor[rcclSymkColl_Count][rcclSymkProto_Count];
+  double baseLat[rcclSymkCollCount][rcclSymkProtoCount];
+  double smBw[rcclSymkCollCount][rcclSymkProtoCount];
+  double peakBw[rcclSymkCollCount];
+  double llBusFactor[rcclSymkCollCount];
+  double withinPeakFactor[rcclSymkCollCount][rcclSymkProtoCount];
 };
 
+// rccl_sym_model_0: default for every architecture, selected unless RCCL_SYM_MODEL says otherwise.
 static constexpr struct rcclSymkTuningModel rcclSymkTuningModel_0 = {
   .baseLat = {
              //         LL     Simple
@@ -53,6 +57,8 @@ static constexpr struct rcclSymkTuningModel rcclSymkTuningModel_0 = {
   .withinPeakFactor = {{1.100, 1.005}, {1.015, 1.015}, {1.025, 1.005}}
 };
 
+// rccl_sym_model_1: selected only by RCCL_SYM_MODEL=1. Differs from model 0 in four ReduceScatter
+// scalars: Simple baseLat, LL smBw, llBusFactor, and LL withinPeakFactor.
 static constexpr struct rcclSymkTuningModel rcclSymkTuningModel_1 = {
   .baseLat = {
              //         LL     Simple
@@ -340,8 +346,10 @@ static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
   double withinPeakFactor = 1.025;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   {
-    int c = isAR ? rcclSymkColl_AllReduce : isAG ? rcclSymkColl_AllGather : rcclSymkColl_ReduceScatter;
-    int p = isLL ? rcclSymkProto_LL : rcclSymkProto_Simple;
+    int c = static_cast<int>(isAR ? rcclSymkColl::AllReduce
+                                  : isAG ? rcclSymkColl::AllGather
+                                         : rcclSymkColl::ReduceScatter);
+    int p = static_cast<int>(isLL ? rcclSymkProto::LL : rcclSymkProto::Simple);
     const struct rcclSymkTuningModel& m = rcclSymkTuningModels[rcclSymkTuningModelIndex()];
     baseLat = m.baseLat[c][p];
     smBw = m.smBw[c][p] * GBps;

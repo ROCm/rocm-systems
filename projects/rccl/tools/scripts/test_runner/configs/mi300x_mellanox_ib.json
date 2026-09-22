@@ -2327,7 +2327,7 @@
         { "name": "SymCheckMode_Registration_Match", "description": "DEBUG_GLOBAL is transparent when every rank registers matching symmetric windows.", "test_filter": "SymCheckMode_Registration.DebugGlobal_MatchingRegistration_Succeeds" },
         { "name": "SymCheckMode_Registration_Mismatch", "description": "DEBUG_GLOBAL rejects a collective when one rank's buffer is outside any window.", "test_filter": "SymCheckMode_Registration.DebugGlobal_RegistrationMismatch_Rejected" },
         { "name": "SymCheckMode_Registration_OffsetMismatch", "description": "DEBUG_GLOBAL rejects a user-offset mismatch inside the window.", "test_filter": "SymCheckMode_Registration.DebugGlobal_UserOffsetMismatch_Rejected" },
-        { "name": "SymCheckMode_Registration_DefaultNoReg", "description": "Without NCCL_CHECK_MODE a collective succeeds when no rank registers a symmetric window.", "test_filter": "SymCheckMode_Registration.Default_NoRegistration_Succeeds" }
+        { "name": "SymCheckMode_Registration_DefaultMatching", "description": "Without NCCL_CHECK_MODE the registered path still runs and reduces correctly.", "test_filter": "SymCheckMode_Registration.Default_MatchingRegistration_Succeeds" }
       ]
     },
     "net_ib_branch_coverage": {

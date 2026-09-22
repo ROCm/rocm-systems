@@ -114,7 +114,7 @@ std::vector<ncclTaskBcast*> ScheduleBcastTasksToPlan_CollectBcastTaskQueue(struc
   return items;
 }
 
-// Minimal ncclComm scaffold for ncclMakeSymmetricTaskList; nRanks=1 skips the bootstrap-consensus block by default.
+// Minimal ncclComm scaffold for ncclMakeSymmetricTaskList.
 class MakeSymmetricTaskList_Scene {
  public:
   MakeSymmetricTaskList_Scene() : comm(new ncclComm{}) {
@@ -1108,16 +1108,19 @@ TEST_F(SchedulerMicrotest,
   EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
 }
 
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_WindowRejection_DefaultRegType_GoesToRemainder) {
-  MakeSymmetricTaskList_Scene scene;
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_UnregisteredRegType_StillEntersSymmetricBucket) {
+  MakeSymmetricTaskList_Scene scene;  // g_symRegType defaults to ncclSymSendNonregRecvNonreg
+  scene.comm->planner.nTasksColl = 5;
   ncclTaskColl task{};
   task.func = ncclFuncBroadcast;
-  // All defaults reach the window-rejection arm untouched: symAvailable/cfgAllowsSymk true, regType=reject.
   struct ncclTaskColl* remainTasksHead = nullptr;
 
-  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
-  EXPECT_EQ(remainTasksHead, &task);
+  // Unregistered buffers no longer divert to the remainder here. The symmetric fallback ladder in
+  // ncclTuningCompute owns that decision, so the task reaches the args-size guard instead.
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
+  EXPECT_EQ(remainTasksHead, nullptr);
   EXPECT_EQ(task.next, nullptr);
+  EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_GetSymRegTypeFails_PropagatesError) {
@@ -1147,7 +1150,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_AllReduceNotForcedOutWhenSymKer
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_AllLocalChecksPass_NRanksOne_GoesToSymmetricBucket) {
-  MakeSymmetricTaskList_Scene scene;  // nRanks=1: bootstrap-consensus block skipped by construction
+  MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
   ncclTaskColl task{};
   task.func = ncclFuncBroadcast;
@@ -1262,99 +1265,6 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TwoTasksSameOpAndDatatypeDiffer
   EXPECT_EQ(task1.next, nullptr);  // singleton in its own bucket
   EXPECT_EQ(task2.next, nullptr);  // singleton in its own (different) bucket, NOT chained to task1
   EXPECT_EQ(scene.comm->planner.nTasksColl, 3);
-}
-
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_NRanksTwoBootstrapNull_SkipsConsensusBlock) {
-  MakeSymmetricTaskList_Scene scene;
-  scene.comm->nRanks = 2;
-  scene.comm->bootstrap = nullptr;  // half of the guard: consensus block must not run without this
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  ScopedHook symkHook(g_symkAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return false; });
-  ScopedHook bootstrapHook(g_bootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
-  struct ncclTaskColl* remainTasksHead = nullptr;
-
-  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
-  EXPECT_EQ(bootstrapHook.calls, 0);  // direct proof the consensus block's bootstrapAllGather never ran
-  EXPECT_EQ(remainTasksHead, &task);
-}
-
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_NRanksOneBootstrapNonNull_SkipsConsensusBlock) {
-  MakeSymmetricTaskList_Scene scene;  // nRanks=1: the other half of the guard
-  scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  ScopedHook symkHook(g_symkAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return false; });
-  ScopedHook bootstrapHook(g_bootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
-  struct ncclTaskColl* remainTasksHead = nullptr;
-
-  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
-  EXPECT_EQ(bootstrapHook.calls, 0);
-  EXPECT_EQ(remainTasksHead, &task);
-}
-
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ConsensusBootstrapAllGatherFails_PropagatesError) {
-  MakeSymmetricTaskList_Scene scene;
-  scene.comm->nRanks = 2;
-  scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-  ScopedHook bootstrapHook(g_bootstrapAllGather, [](void*, void*, int) { return ncclSystemError; });
-  struct ncclTaskColl* remainTasksHead = nullptr;
-
-  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSystemError);
-  EXPECT_EQ(bootstrapHook.calls, 1);
-}
-
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ConsensusAllAgree_WantSymStaysTrue_GoesToSymmetricBucket) {
-  MakeSymmetricTaskList_Scene scene;
-  scene.comm->nRanks = 3;
-  scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
-  scene.comm->planner.nTasksColl = 5;
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-
-  uint8_t preGatherOwnFlag = 0xFF;
-  ScopedHook bootstrapHook(g_bootstrapAllGather, [&](void*, void* allData, int) {
-    uint8_t* buf = reinterpret_cast<uint8_t*>(allData);
-    preGatherOwnFlag = buf[0];  // this rank's own wantSym flag, written before the call
-    buf[0] = 1;
-    buf[1] = 1;
-    buf[2] = 1;  // every rank agrees
-    return ncclSuccess;
-  });
-  struct ncclTaskColl* remainTasksHead = nullptr;
-
-  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
-  EXPECT_EQ(bootstrapHook.calls, 1);
-  EXPECT_EQ(preGatherOwnFlag, 1);  // proves flags[comm->rank] = wantSym?1:0 ran before bootstrapAllGather
-  EXPECT_EQ(remainTasksHead, nullptr);
-  EXPECT_EQ(task.next, nullptr);
-  EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
-}
-
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ConsensusOneDisagrees_WantSymFlipsFalse_GoesToRemainder) {
-  MakeSymmetricTaskList_Scene scene;
-  scene.comm->nRanks = 3;
-  scene.comm->bootstrap = reinterpret_cast<void*>(0x1);
-  g_symRegType = ncclSymSendRegRecvReg;
-  ncclTaskColl task{};
-  task.func = ncclFuncBroadcast;
-
-  ScopedHook bootstrapHook(g_bootstrapAllGather, [&](void*, void* allData, int) {
-    uint8_t* buf = reinterpret_cast<uint8_t*>(allData);
-    buf[0] = 1;
-    buf[1] = 0;  // rank 1 disagrees
-    buf[2] = 1;
-    return ncclSuccess;
-  });
-  struct ncclTaskColl* remainTasksHead = nullptr;
-
-  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
-  EXPECT_EQ(bootstrapHook.calls, 1);
-  EXPECT_EQ(remainTasksHead, &task);
-  EXPECT_EQ(task.next, nullptr);
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ArgsSizeGuard_TooSmall_ReturnsInternalErrorWithWarnLog) {
@@ -1863,9 +1773,9 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_KernelIdCount
 }
 
 // task->winRegType is always ncclSymSendRegRecvReg here (the classification loop's wantSym gate is its only writer).
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_LLKernelInit_NeverCalled_BecauseWinRegTypeIsAlwaysRegRecvReg) {
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_LLKernelInit_NotCalledWhenBuffersRegistered) {
   MakeSymmetricTaskList_Scene scene;
-  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);  // sets g_symRegType = ncclSymSendRegRecvReg
   ScopedHook llMaskHook(g_symkLLKernelMask, []() { return ~0; });  // every bit set: isolates the regType operand
   ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(1, 1));
   ScopedHook initOnceHook(g_symkInitOnce, [](struct ncclComm*) { return ncclSuccess; });
@@ -1873,6 +1783,19 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_LLKernelInit_NeverCalled_Becaus
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
   EXPECT_EQ(initOnceHook.calls, 0);
+}
+
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_LLKernelInit_CalledWhenBuffersUnregistered) {
+  MakeSymmetricTaskList_Scene scene;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
+  g_symRegType = ncclSymSendNonregRecvNonreg;  // the arm the window gate used to make unreachable
+  ScopedHook llMaskHook(g_symkLLKernelMask, []() { return ~0; });
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningFindsKernel(1, 1));
+  ScopedHook initOnceHook(g_symkInitOnce, [](struct ncclComm*) { return ncclSuccess; });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(initOnceHook.calls, 1);
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_SingleTask_SetsFieldsAndEnqueues) {

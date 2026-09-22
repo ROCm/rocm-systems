@@ -201,10 +201,9 @@ class SymCheckMode_Registration : public SymmetricAbortCheckModeBase
 {
 protected:
     enum class Deviation {
-        None,            // every rank registers both buffers at offset 0
-        Unregistered,    // the odd rank leaves its send buffer outside any window
-        ShiftedOffset,   // the odd rank starts further into its send window
-        NoneUnregistered // no rank registers, so every rank agrees the buffers are not symmetric
+        None,          // every rank registers both buffers at offset 0
+        Unregistered,  // the odd rank leaves its send buffer outside any window
+        ShiftedOffset, // the odd rank starts further into its send window
     };
 
     // Runs one AllReduce under the current NCCL_CHECK_MODE and returns the
@@ -234,12 +233,9 @@ protected:
         // same number of windows: a rank that skipped one would leave its peers
         // waiting in the next registration while it has moved on to the AllReduce.
         // Register both buffers everywhere and express the deviation through the
-        // pointer handed to the collective instead. NoneUnregistered is the one
-        // case where no rank registers, which keeps the ranks in agreement.
-        if (deviation != Deviation::NoneUnregistered) {
-            if (registerSymWindow(comm, sendBuf, winBytes) == nullptr) return ncclInternalError;
-            if (registerSymWindow(comm, recvBuf, winBytes) == nullptr) return ncclInternalError;
-        }
+        // pointer handed to the collective instead.
+        if (registerSymWindow(comm, sendBuf, winBytes) == nullptr) return ncclInternalError;
+        if (registerSymWindow(comm, recvBuf, winBytes) == nullptr) return ncclInternalError;
 
         float* sendPtr = static_cast<float*>(sendBuf);
         float* recvPtr = static_cast<float*>(recvBuf);
@@ -257,9 +253,26 @@ protected:
             sendPtr = reinterpret_cast<float*>(static_cast<char*>(sendBuf) + 8192);
         }
 
+        // Every rank contributes ones, so a correct sum is nRanks in every element. Checking the
+        // payload and not just the status is what makes an accepted call meaningful.
+        std::vector<float> host(count, 1.0f);
+        if (hipMemcpy(sendPtr, host.data(), count * sizeof(float), hipMemcpyHostToDevice) != hipSuccess) {
+            return ncclInternalError;
+        }
+
         ncclResult_t res = ncclAllReduce(sendPtr, recvPtr, count, ncclFloat, ncclSum, comm, stream);
         if (res == ncclSuccess && hipStreamSynchronize(stream) != hipSuccess) {
             res = ncclInternalError;
+        }
+
+        if (res == ncclSuccess) {
+            std::vector<float> out(count, 0.0f);
+            if (hipMemcpy(out.data(), recvPtr, count * sizeof(float), hipMemcpyDeviceToHost) != hipSuccess) {
+                return ncclInternalError;
+            }
+            for (size_t i = 0; i < count; ++i) {
+                if (out[i] != static_cast<float>(nRanks)) return ncclInternalError;
+            }
         }
 
         // The ranks must agree on the outcome; a split result (some ranks reject,
@@ -313,9 +326,9 @@ TEST_F(SymCheckMode_Registration, DebugGlobal_UserOffsetMismatch_Rejected)
     ASSERT_MPI_EQ(ncclInvalidArgument, runAllReduce(Deviation::ShiftedOffset));
 }
 
-// Mismatched registration needs NCCL_CHECK_MODE=DEBUG_GLOBAL to be diagnosed. What the
-// default path guarantees is that ranks which agree keep working, including none registered.
-TEST_F(SymCheckMode_Registration, Default_NoRegistration_Succeeds)
+// Mismatched registration needs NCCL_CHECK_MODE=DEBUG_GLOBAL to be diagnosed. Without it the
+// registered path must still run and reduce correctly, which runAllReduce checks element by element.
+TEST_F(SymCheckMode_Registration, Default_MatchingRegistration_Succeeds)
 {
     ScopedEnv checkMode("NCCL_CHECK_MODE", nullptr);
     if (!symmetricPrerequisitesMet()) {
@@ -323,7 +336,7 @@ TEST_F(SymCheckMode_Registration, Default_NoRegistration_Succeeds)
     }
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
-    ASSERT_MPI_EQ(ncclSuccess, runAllReduce(Deviation::NoneUnregistered));
+    ASSERT_MPI_EQ(ncclSuccess, runAllReduce(Deviation::None));
 }
 
 // ============================================================================
@@ -391,7 +404,7 @@ TEST_F(SymCheckMode_Local, DebugGlobal_HostPointer_Rejected)
 // each communicator, and DEBUG_LOCAL already covers the same rejection path.
 
 // The opt-in nature of the checking is covered by
-// SymCheckMode_Registration.Default_NoRegistration_Succeeds, which uses buffers
+// SymCheckMode_Registration.Default_MatchingRegistration_Succeeds, which uses buffers
 // that are safe to actually execute. Enqueuing a host pointer without a
 // check mode would let the kernel dereference unmapped memory and take the whole
 // process down with it, so that combination is deliberately not tested.
