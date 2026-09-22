@@ -46,6 +46,7 @@
 
 #include "logger/debug.hpp"
 
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
 
@@ -146,19 +147,29 @@ struct config_value_validation
 // ROCPROFSYS_TRACE_DURATION=abc -> 0.0. If timemory callbacks become
 // unconditional and available before constructor parsing, the explicit env and
 // config-file validation paths can be removed.
-const auto strict_config_value_validations = std::array<config_value_validation, 5>{ {
-    { env_vars::MODE, config_value_rule::choice, "one of the registered choices" },
-    { env_vars::PERFETTO_BACKEND, config_value_rule::choice,
-      "one of the registered choices" },
-    { env_vars::TRACE, config_value_rule::boolean,
-      "a boolean value (0, non-zero integer, true, false, on, off, yes, no, "
-      "y, n, t, f)" },
-    { env_vars::TRACE_DURATION, config_value_rule::floating_point,
-      "a finite floating-point value" },
+const auto k_strict_config_value_validations = std::array<config_value_validation, 6>{ {
+    { .name        = env_vars::MODE,
+      .rule        = config_value_rule::choice,
+      .expectation = "one of the registered choices" },
+    { .name        = env_vars::PERFETTO_BACKEND,
+      .rule        = config_value_rule::choice,
+      .expectation = "one of the registered choices" },
+    { .name = env_vars::TRACE,
+      .rule = config_value_rule::boolean,
+      .expectation =
+          "a boolean value (0, non-zero integer, true, false, on, off, yes, no, "
+          "y, n, t, f)" },
+    { .name        = env_vars::TRACE_DURATION,
+      .rule        = config_value_rule::floating_point,
+      .expectation = "a finite floating-point value" },
     // Only validate positive ranges for settings without sentinel values.
     // CPUTIME/REALTIME sampling frequencies intentionally default to -1.0.
-    { env_vars::SAMPLING_FREQ, config_value_rule::positive_floating_point,
-      "a positive finite floating-point value" },
+    { .name        = env_vars::SAMPLING_FREQ,
+      .rule        = config_value_rule::positive_floating_point,
+      .expectation = "a positive finite floating-point value" },
+    { .name        = env_vars::TRACE_PERIOD_CLOCK_ID,
+      .rule        = config_value_rule::choice,
+      .expectation = "one of the registered choices" },
 } };
 
 [[nodiscard]] bool
@@ -236,10 +247,10 @@ get_setting_choices(const std::shared_ptr<settings>& _config, std::string_view n
 [[nodiscard]] const config_value_validation*
 find_config_value_validation(std::string_view name)
 {
-    auto itr = std::find_if(
-        strict_config_value_validations.begin(), strict_config_value_validations.end(),
+    auto itr = std::ranges::find_if(
+        k_strict_config_value_validations,
         [name](const auto& validation) { return validation.name == name; });
-    return (itr != strict_config_value_validations.end()) ? &*itr : nullptr;
+    return (itr != k_strict_config_value_validations.end()) ? &*itr : nullptr;
 }
 
 void
@@ -293,7 +304,7 @@ validate_config_setting_value(std::string_view name, std::string_view raw_value,
 void
 validate_environment_config_values(const std::shared_ptr<settings>& _config)
 {
-    for(const auto& validation : strict_config_value_validations)
+    for(const auto& validation : k_strict_config_value_validations)
     {
         if(auto* raw_value = std::getenv(std::string{ validation.name }.c_str()))
             validate_config_setting_value(validation.name, raw_value,
@@ -361,7 +372,7 @@ validate_config_file_values(const std::string& config_file, const std::string& t
 void
 install_strict_config_value_callbacks(const std::shared_ptr<settings>& _config)
 {
-    for(const auto& validation : strict_config_value_validations)
+    for(const auto& validation : k_strict_config_value_validations)
     {
         auto itr = _config->find(std::string{ validation.name });
         if(itr == _config->end() || !itr->second) continue;
@@ -1147,7 +1158,7 @@ configure_settings(bool _init)
                               "perfetto", "io", "filename", "deprecated", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::PERFETTO_FILE, "Perfetto filename",
-                              std::string{ "perfetto-trace.proto" }, "perfetto", "io",
+                              std::string{ "perfetto-trace.pftrace" }, "perfetto", "io",
                               "filename", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(
@@ -2747,13 +2758,13 @@ get_perfetto_output_filename()
     {
         LOG_ERROR("Error! ROCPROFSYS_PERFETTO_FILE not found. Please check your "
                   "environment configuration.");
-        return fmt::format("{}/perfetto-trace-{}.proto", pwd, getpid());
+        return fmt::format("{}/perfetto-trace-{}.pftrace", pwd, getpid());
     }
 
     auto basename = dynamic_cast<tim::tsettings<std::string>&>(*setting->second).get();
 
     auto dir = std::string{};
-    auto ext = std::string{ "proto" };
+    auto ext = std::string{ "pftrace" };
 
     if(const auto pos_dir = basename.find_last_of('/'); pos_dir != std::string::npos)
     {
@@ -3114,68 +3125,81 @@ get_output_absolute_path(std::string_view basename, std::string_view extension,
     return result;
 }
 
+/**
+ * Get the Perfetto output filename with a suffix.
+ *
+ * @param suffix The suffix to add to the Perfetto output filename.
+ * @return The Perfetto output filename with the suffix.
+ */
 std::string
 get_perfetto_output_filename_with_suffix(std::string_view suffix)
 {
-    static auto _v   = get_config()->find(std::string{ env_vars::PERFETTO_FILE });
-    auto        _val = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+    static auto s_setting = get_config()->find(std::string{ env_vars::PERFETTO_FILE });
+    auto        val = static_cast<tim::tsettings<std::string>&>(*s_setting->second).get();
 
-    LOG_DEBUG("Initial ROCPROFSYS_PERFETTO_FILE='{}', suffix='{}'", _val, suffix);
+    LOG_DEBUG("Initial ROCPROFSYS_PERFETTO_FILE='{}', suffix='{}'", val, suffix);
 
     // If absolute path is provided, return it as-is
-    if(!_val.empty() && _val.at(0) == '/')
+    if(!val.empty() && val.at(0) == '/')
     {
-        LOG_DEBUG("Absolute path, returning: '{}'", _val);
-        return _val;
+        LOG_DEBUG("Absolute path, returning: '{}'", val);
+        return val;
     }
 
-    auto _pos_dir = _val.find_last_of('/');
-    auto _dir     = std::string{};
-    auto _ext     = std::string{ "proto" };
+    // Parse the filename into directory, basename, and extension
+    auto pos_dir = val.find_last_of('/');
+    auto dir     = std::string{};
+    auto ext     = std::string{ "pftrace" };
 
-    if(_pos_dir != std::string::npos)
+    // If the filename contains a directory, extract it
+    if(pos_dir != std::string::npos)
     {
-        _dir = _val.substr(0, _pos_dir + 1);
-        _val = _val.substr(_pos_dir + 1);
+        dir = val.substr(0, pos_dir + 1);
+        val = val.substr(pos_dir + 1);
     }
 
-    auto _pos_ext = _val.find_last_of('.');
-    if(_pos_ext + 1 < _val.length())
+    // Extract the extension
+    auto pos_ext = val.find_last_of('.');
+    if(pos_ext != std::string::npos && pos_ext + 1 < val.length())
     {
-        _ext = _val.substr(_pos_ext + 1);
-        _val = _val.substr(0, _pos_ext);
+        ext = val.substr(pos_ext + 1);
+        val = val.substr(0, pos_ext);
     }
 
     // Check if explicitly set via environment OR config file
     // If explicitly set, don't add suffix; otherwise use provided suffix
-    bool _explicitly_set =
-        (_v->second->get_environ_updated() || _v->second->get_config_updated());
+    bool explicitly_set = (s_setting->second->get_environ_updated() ||
+                           s_setting->second->get_config_updated());
 
-    LOG_DEBUG("Parsed: dir='{}', basename='{}', ext='{}', explicitly_set={}", _dir, _val,
-              _ext, _explicitly_set);
+    LOG_DEBUG("Parsed: dir='{}', basename='{}', ext='{}', explicitly_set={}", dir, val,
+              ext, explicitly_set);
     LOG_DEBUG("settings::output_path()='{}'", settings::output_path());
 
-    auto _cfg = settings::compose_filename_config{
-        !_explicitly_set && !suffix.empty(),  // use_suffix only if not explicitly set
-        suffix,                               // suffix value
-        false,                                // make_dir
-        _dir                                  // explicit_path
+    auto cfg = settings::compose_filename_config{
+        !explicitly_set && !suffix.empty(),  // use_suffix only if not explicitly set
+        suffix,                              // suffix value
+        false,                               // make_dir
+        dir                                  // explicit_path
     };
 
-    _val = settings::compose_output_filename(_val, _ext, _cfg);
+    val = settings::compose_output_filename(val, ext, cfg);
 
-    LOG_DEBUG("After compose_output_filename: '{}'", _val);
+    LOG_DEBUG("After compose_output_filename: '{}'", val);
 
-    if(!_val.empty() && _val.at(0) != '/')
+    // If the path is relative, prepend the current working directory
+    if(!val.empty() && val.at(0) != '/')
     {
-        auto _result = settings::format(fmt::format("{}/{}", getenv("PWD"), _val),
-                                        get_config()->get_tag());
-        LOG_DEBUG("Path is relative, prepending PWD: '{}'", _result);
-        return _result;
+        const auto* pwd    = getenv("PWD");
+        auto        result = settings::format(
+            fmt::format("{}/{}", (pwd != nullptr && pwd[0] != '\0') ? pwd : ".", val),
+            get_config()->get_tag());
+        LOG_DEBUG("Path is relative, prepending PWD: '{}'", result);
+        return result;
     }
 
-    LOG_DEBUG("Path is absolute, returning: '{}'", _val);
-    return _val;
+    // If the path is absolute, return it as-is
+    LOG_DEBUG("Path is absolute, returning: '{}'", val);
+    return val;
 }
 
 std::string

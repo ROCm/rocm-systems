@@ -528,6 +528,20 @@ TEST_F(backend_test, iterate_callback_tracing_kind_operation_args_throws_on_erro
         std::runtime_error);
 }
 
+// Some callback-tracing kinds (e.g. ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API)
+// declare a kind but do not implement argument iteration for it. Argument
+// iteration only supplies best-effort debug-annotation data, so this must not
+// be fatal.
+TEST_F(backend_test, iterate_callback_tracing_kind_operation_args_ignores_not_implemented)
+{
+    EXPECT_CALL(*g_mock_sdk,
+                iterate_callback_tracing_kind_operation_args(gm::_, gm::_, gm::_, gm::_))
+        .WillOnce(gm::Return(mock_sdk::STATUS_ERROR_NOT_IMPLEMENTED));
+
+    EXPECT_NO_THROW(
+        sut::iterate_callback_tracing_kind_operation_args({}, nullptr, 0, nullptr));
+}
+
 TEST_F(backend_test, iterate_counter_dimensions_succeeds)
 {
     const counter_id cid{ 5 };

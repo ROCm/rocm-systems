@@ -234,6 +234,15 @@ protected:
     g_devrBuildGinSegmentInfos = RealDevrBuildGinSegmentInfos;
   }
 
+  // Move nRanks, not lsaSize: lsaSize indexes the fixture's two-element
+  // lsaRankList, so growing it reads off the end.
+  static void RmaProxyTerms(ncclComm* c, bool enabled) {
+    c->nRanks = enabled ? 4 : 2;
+    c->devrState.lsaSize = 2;  // == nRanks when disabled, so one LSA team
+    c->config.numRmaCtx = enabled ? 1 : 0;
+    c->globalRmaProxySupport = enabled;
+  }
+
   void SetUp() override {
     ResetDevRuntimeMicroFakes();
     InstallRealSegmentHelpers();
@@ -2259,11 +2268,11 @@ TEST_F(SymMemoryObtainRegisterTest, GinDisabled_DefaultsToOneSegment) {
 }
 
 // Branch: the proxy is available and the layout is single segment, so RMA
-// registration runs. 2.31 asks rma.cc's ncclRmaProxyEnabled rather than
-// deriving the conditions here, so that answer is what the test supplies --
-// the conditions themselves belong to rma.cc, which this binary does not build.
+// registration runs. 2.31 asks rma.cc's ncclRmaProxyEnabled, which this binary
+// now compiles in (see rma-test.cc), so the test drives that predicate's terms
+// rather than stubbing its answer.
 TEST_F(SymMemoryObtainRegisterTest, RmaProxyAvailable_RegistersWithRma) {
-  ScopedHook proxyEnabled(g_devrRmaProxyEnabled, [](ncclComm*) { return true; });
+  RmaProxyTerms(comm, true);
   ScopedHook gather(g_devrBootstrapAllGather, agreeing);
   ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
 
@@ -2274,7 +2283,7 @@ TEST_F(SymMemoryObtainRegisterTest, RmaProxyAvailable_RegistersWithRma) {
 
 // Branch: the proxy is unavailable, so the whole arm is skipped.
 TEST_F(SymMemoryObtainRegisterTest, RmaProxyUnavailable_LeavesRmaProxyDisabled) {
-  ScopedHook proxyEnabled(g_devrRmaProxyEnabled, [](ncclComm*) { return false; });
+  RmaProxyTerms(comm, false);
   ScopedHook gather(g_devrBootstrapAllGather, agreeing);
   ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
 
@@ -2286,7 +2295,7 @@ TEST_F(SymMemoryObtainRegisterTest, RmaProxyUnavailable_LeavesRmaProxyDisabled) 
 // Branch: the proxy is enabled but the layout is multi-segment, which RMA does
 // not handle -- so the flag is set while registration is skipped.
 TEST_F(SymMemoryObtainRegisterTest, RmaEnabledButMultiSegment_SkipsRegistration) {
-  ScopedHook proxyEnabled(g_devrRmaProxyEnabled, [](ncclComm*) { return true; });
+  RmaProxyTerms(comm, true);
   ScopedHook gather(g_devrBootstrapAllGather,
                     GatherReporting({{1, false, 4096}, {2, false, 4096}, {1, false, 4096}, {1, false, 4096}}));
   ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
@@ -2399,7 +2408,7 @@ TEST_F(SymMemoryObtainRollbackTest, GinRegisterFails_UnbindsTeamsAndReturnsSpace
 // Same label, reached from the RMA branch instead.
 TEST_F(SymMemoryObtainRollbackTest, RmaRegisterFails_ReturnsSpaceWithoutLinking) {
   PushTeam();
-  ScopedHook proxyEnabled(g_devrRmaProxyEnabled, [](ncclComm*) { return true; });
+  RmaProxyTerms(comm, true);
   ScopedHook gather(g_devrBootstrapAllGather, agreeing);
   ScopedHook alloc(g_devrSpaceAlloc, AllocAt(0));
   ScopedHook spaceFree(g_devrSpaceFree, [](ncclSpace*, int64_t, int64_t) { return ncclSuccess; });

@@ -11,7 +11,7 @@ wavefront dispatches, memory instructions, register reads, barriers, etc.
 | `RaceDetectorPlugin` | `race_detector/` | Hooks memory instructions, register reads, barriers, and `s_waitcnt` to detect data races. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
 | `KernelLoggingPlugin` | `logging/` | Logs kernel dispatches and detects MMA instruction usage. |
 | `ThroughputPlugin` | `throughput/` | Reports per-dispatch and aggregate wave-instruction MIPS with an exclusive instruction-family breakdown. |
-| `PerfsimPlugin` | `perfsim/` | Adapts gfx1250 execution observations to an external Perfsim FFM-v8 backend. Built only when explicitly enabled. See the [Perfsim adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md). |
+| `PerfsimPlugin` | `perfsim/` | Adapts gfx1250 execution observations to an external Perfsim backend implementing FFM observer APIs v8 through v13. Built only when explicitly enabled. See the [Perfsim adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md). |
 
 The race detector plugin contains both the core detection algorithm
 (`race_detector/core/`) and the rocjitsu adapter (`race_detector/plugin.h`).
@@ -19,12 +19,15 @@ The race detector plugin contains both the core detection algorithm
 ### Throughput Plugin
 
 The throughput plugin counts one instruction whenever a wavefront reaches the
-before-execute hook. Counts are therefore executed **wave instructions**, not
+synchronous before-execute or asynchronous issue hook. Counts are **wave instructions**, not
 active-lane operations. It reports one JSON object per completed dispatch and
 one aggregate object at shutdown using the `rocjitsu.throughput.v2` JSONL
 schema. Each object contains wall time, total wave instructions, MIPS, and an
 exclusive breakdown into `scalar`, `vector`, `matrix`, `lds`, `global`,
 `control`, and `other`; the family counts always sum to the total. Each family
+reports `untimed_instructions` and `execution_timing_valid`. A family containing
+untimed async work sets validity to `false` and emits null `execution_seconds`
+and `execution_mips`; counts and `dispatch_mips` remain valid. Otherwise it
 reports `execution_seconds` measured between this plugin's before- and
 after-execute callbacks, `execution_mips` using only that family-local time, and
 `dispatch_mips` using the complete dispatch time. Scheduler gaps, dispatch
@@ -259,7 +262,9 @@ public:
 ```
 
 The sink is assigned by the `ExecutionPluginGroup` when the plugin is
-added. If no group configures a sink, the default is stderr.
+added. Writes through sinks assigned by one group are serialized at the
+group's fanout boundary, including writes from asynchronous plugin workers.
+If no group configures a sink, the default is stderr.
 
 `KernelDispatchInfo` reports the effective LDS allocation in
 `lds_size_bytes`, the descriptor-selected `wave_size`, the configured
@@ -317,7 +322,13 @@ group divides hooks by frequency and synchronization cost:
   register-access callbacks are high-frequency and run concurrently with both
   other high-frequency callbacks and infrequent callbacks by default. Each
   callback is scoped to a wavefront below the simulation's shader-engine
-  partition granularity.
+  partition granularity. During the before-instruction callback, a memory
+  instruction exposes its decoded wait-counter obligations and completion-order
+  metadata through `amdgpu_memory_issue_info()`, before address or store-data
+  operands are read. This metadata describes operations
+  routed through the scalar, vector, and local memory pipelines; it is not a
+  complete inventory of non-memory events, such as messages and timestamp
+  queries, that hardware wait counters may also track.
 
 A plugin whose high-frequency callbacks reach shared mutable state may override
 `requires_serial_hot_hooks()` to return `true`. The group samples that stable
@@ -402,3 +413,27 @@ concurrently.
    `observes_tensor_dma_memory_access()`.
 7. Enable it by adding `"myname": { ... }` to the `plugins` section of
    the config file.
+8. Return `true` from `supports_async_instructions()` only when the plugin accepts
+   issuer-thread issue notifications and concurrent same-wave helper register
+   hooks. Keep the default `false` for ordered event state or complete
+   architectural snapshots. One non-opted-in plugin disables async execution
+   for the entire group.
+
+## Asynchronous arithmetic
+
+Plugins default to synchronous execution. `supports_async_instructions()` opts
+into `onAmdgpuAsyncInstructionIssued`, replacing the ordinary before/after
+pair for offloaded instructions. The group samples this capability on `add()`;
+all contained plugins must opt in.
+
+The notification runs on the issuer after a helper accepts the instruction;
+helper register hooks may already have run. Issue callbacks may read metadata,
+not register values: even a source can alias a destination being written.
+Callbacks must not retain instruction or wave references. There is no completion
+notification. Holding the callback mutex does not provide a complete
+architectural snapshot.
+
+Throughput and kernel logging support this contract. ConSan keeps synchronous
+execution until its dependency-event access and diagnostic context support
+concurrent register hooks within one wave. Plugins and the host must be rebuilt
+together, as for other execution-plugin interface changes.

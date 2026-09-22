@@ -2,6 +2,8 @@
 
 import pytest
 
+from rocm_bootstrap.detect import detect_gfx_targets
+from rocm_bootstrap.package_metadata import package_owner
 from rocm_bootstrap.targets import ALL_TARGETS, lookup_target
 from rocm_bootstrap.tests.conftest import FakePlatform
 from rocm_bootstrap.variant_provider import AMDVariantPlugin, VariantFeatureConfig
@@ -30,12 +32,14 @@ class TestGetAllConfigs:
         values = set(configs[0].values)
         for target in ALL_TARGETS:
             assert (
-                target.name in values
+                package_owner(target.name) in values
             ), f"Target {target.name} missing from get_all_configs()"
 
-    def test_value_count_matches_target_count(self):
+    def test_shared_owner_is_reported_once(self):
         configs = AMDVariantPlugin.get_all_configs()
-        assert len(configs[0].values) == len(ALL_TARGETS)
+        assert configs[0].values.count("gfx1250") == 1
+        assert "gfx1250-strict" not in configs[0].values
+        assert len(configs[0].values) == len(set(configs[0].values))
 
     def test_constant_regardless_of_platform(self, fake_platform: FakePlatform):
         """get_all_configs is static — same result with or without GPUs."""
@@ -45,10 +49,18 @@ class TestGetAllConfigs:
 
         # get_all_configs doesn't use detection, so clearing doesn't matter
         assert len(configs_with_gpu) == 1
-        assert len(configs_with_gpu[0].values) == len(ALL_TARGETS)
+        assert configs_with_gpu == AMDVariantPlugin.get_all_configs()
 
 
 class TestGetSupportedConfigs:
+    @pytest.mark.parametrize(
+        "forced", ["gfx1250", "gfx1250-strict", "gfx1250,gfx1250-strict"]
+    )
+    def test_shared_owner_preserves_detected_targets(self, fake_platform, forced):
+        fake_platform.set_env("ROCM_BOOTSTRAP_FORCE_GFX_ARCH", forced)
+        assert [target.name for target in detect_gfx_targets()] == forced.split(",")
+        assert AMDVariantPlugin.get_supported_configs()[0].values == ["gfx1250"]
+
     def test_empty_when_no_gpus(self, fake_platform: FakePlatform):
         configs = AMDVariantPlugin.get_supported_configs()
         assert configs == []
@@ -57,17 +69,18 @@ class TestGetSupportedConfigs:
         gfx1100 = lookup_target("gfx1100")
         fake_platform.add_gpu_node(1, gfx1100)
         fake_platform.set_env("ROCM_BOOTSTRAP_DISABLE_DETECTION", "1")
+        fake_platform.set_env("ROCM_BOOTSTRAP_FORCE_GFX_ARCH", "gfx1250-strict")
         configs = AMDVariantPlugin.get_supported_configs()
         assert configs == []
 
-    def test_single_gpu(self, fake_platform: FakePlatform):
-        gfx942 = lookup_target("gfx942")
+    @pytest.mark.parametrize("target", ["gfx942", "gfx1250"])
+    def test_single_gpu(self, fake_platform: FakePlatform, target: str):
         fake_platform.add_cpu_node(0)
-        fake_platform.add_gpu_node(1, gfx942)
+        fake_platform.add_gpu_node(1, lookup_target(target))
         configs = AMDVariantPlugin.get_supported_configs()
         assert len(configs) == 1
         assert configs[0].name == "gfx_arch"
-        assert configs[0].values == ["gfx942"]
+        assert configs[0].values == [target]
         assert configs[0].multi_value is True
 
     def test_multiple_gpus(self, fake_platform: FakePlatform):

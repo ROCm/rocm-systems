@@ -1047,6 +1047,13 @@ TEST_F(Gfx950RaceTest, dual_offset_lds_race) {
 
 __global__ void scratch_vmcnt_safe_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  // Inline scratch instructions do not contribute to the compiler's private
+  // frame size. Materialize a small dynamic private access so the kernel
+  // descriptor requests real scratch backing, then drain that setup access
+  // before establishing the vmcnt sequence this test measures.
+  volatile unsigned char scratch_anchor[4];
+  scratch_anchor[tid & 3] = static_cast<unsigned char>(tid);
+  asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
   float val;
   float tmp1 = 1.0f, tmp2 = 2.0f;
   asm volatile(
@@ -1068,6 +1075,11 @@ static constexpr RaceExpectation kScratchVmcntRaceExpectation{
 
 __global__ void scratch_vmcnt_race_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  // Keep this kernel's scratch provisioning identical to the safe case so the
+  // only difference observed by the race detector is the wait threshold below.
+  volatile unsigned char scratch_anchor[4];
+  scratch_anchor[tid & 3] = static_cast<unsigned char>(tid);
+  asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
   float val;
   float tmp1 = 1.0f;
   asm volatile(
