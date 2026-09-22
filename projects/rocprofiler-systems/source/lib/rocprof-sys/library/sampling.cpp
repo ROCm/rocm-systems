@@ -300,9 +300,9 @@ cache_sampling_data(std::int64_t                               _tid,
             trace_cache::get_buffer_storage().store(trace_cache::backtrace_region_sample{
                 static_cast<std::uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING),
                 static_cast<std::uint64_t>(_thread_info->index_data->system_value),
-                _track_name.c_str(), _name.c_str(), itr.m_beg, itr.m_end,
-                trait::name<category::timer_sampling>::value, _call_stack.c_str(),
-                _line_info.c_str(), "{}" });
+                _track_name, _name, itr.m_beg, itr.m_end,
+                trait::name<category::timer_sampling>::value, _call_stack, _line_info,
+                "{}" });
         }
     }
 
@@ -333,9 +333,9 @@ cache_sampling_data(std::int64_t                               _tid,
             trace_cache::get_buffer_storage().store(trace_cache::backtrace_region_sample{
                 static_cast<std::uint32_t>(ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING),
                 static_cast<std::uint64_t>(_thread_info->index_data->system_value),
-                _track_name.c_str(), _name.c_str(), itr.m_beg, itr.m_end,
-                trait::name<category::overflow_sampling>::value, _call_stack.c_str(),
-                _line_info.c_str(), "{}" });
+                _track_name, _name, itr.m_beg, itr.m_end,
+                trait::name<category::overflow_sampling>::value, _call_stack, _line_info,
+                "{}" });
         }
     }
 }
