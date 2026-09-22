@@ -65,6 +65,7 @@ struct HybridVmmBuffer
 struct HybridVmmRuntimeSupport
 {
     bool importedHostCpuAccess = false;
+    bool importedHostReexport  = false;
 };
 
 inline HybridVmmRuntimeSupport ProbeHybridVmmRuntimeSupport(int dev)
@@ -75,6 +76,7 @@ inline HybridVmmRuntimeSupport ProbeHybridVmmRuntimeSupport(int dev)
     hipDeviceptr_t va = 0;
     size_t bytes = 0;
     int fd = -1;
+    int reexportFd = -1;
     bool mapped = false;
     hipMemAccessDesc access = {};
 
@@ -115,9 +117,16 @@ inline HybridVmmRuntimeSupport ProbeHybridVmmRuntimeSupport(int dev)
     support.importedHostCpuAccess =
         hipMemSetAccess(va, bytes, &access, 1) == hipSuccess;
 
+    // Elastic windows re-export an imported handle to reach the NIC, which is a
+    // separate runtime capability from mapping and accessing that import.
+    support.importedHostReexport =
+        hipMemExportToShareableHandle(
+            &reexportFd, imported, hipMemHandleTypePosixFileDescriptor, 0) == hipSuccess;
+
 cleanup:
     if (mapped) (void)hipMemUnmap(va, bytes);
     if (va != 0) (void)hipMemAddressFree(va, bytes);
+    if (reexportFd >= 0) (void)close(reexportFd);
     if (imported != 0) (void)hipMemRelease(imported);
     if (fd >= 0) (void)close(fd);
     if (original != 0) (void)hipMemRelease(original);
@@ -130,11 +139,18 @@ inline bool CheckHybridVmmRuntimeSupport(int dev, std::string* reason = nullptr)
 {
     HybridVmmRuntimeSupport local = ProbeHybridVmmRuntimeSupport(dev);
     bool cpuAccessSupported = MPIHelpers::allRanksTrue(local.importedHostCpuAccess);
+    bool reexportSupported  = MPIHelpers::allRanksTrue(local.importedHostReexport);
 
     // TODO(ROCM-29812): Remove this skip gate when imported host VMM CPU access is fixed.
     if (!cpuAccessSupported)
     {
         if (reason) *reason = "ROCM-29812: imported host VMM CPU access is unsupported";
+        return false;
+    }
+    // TODO(ROCM-29815): Remove this skip gate when imported POSIX VMM re-export is fixed.
+    if (!reexportSupported)
+    {
+        if (reason) *reason = "ROCM-29815: imported POSIX VMM re-export is unsupported";
         return false;
     }
     return true;
