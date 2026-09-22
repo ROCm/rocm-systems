@@ -325,8 +325,20 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
     const auto bytes = d.lane_mask & (1ULL << lane)
                            ? std::span(d.response_data).subspan(lane * d.elem_size, d.elem_size)
                            : std::span<const uint8_t>{};
-    const auto values =
+    auto values =
         unpack_buffer_format(d.buffer_format, d.buffer_selectors, bytes, d.buffer_format_encoding);
+    if (d.image_srgb) {
+      for (uint32_t i = 0; i < d.buffer_components; ++i) {
+        const uint32_t selector = (d.buffer_selectors >> (3 * i)) & 7;
+        if (selector >= 4 && selector <= 6) {
+          const float value = std::bit_cast<float>(values[i]);
+          const float linear =
+              value <= 0.04045f ? value / 12.92f : std::pow((value + 0.055f) / 1.055f, 2.4f);
+          // RDNA3/4 texture decoding rounds sRGB channels to BF16 precision.
+          values[i] = std::bit_cast<uint32_t>(util::bf16_to_f32(util::f32_to_bf16_rne(linear)));
+        }
+      }
+    }
     for (uint32_t reg = 0; reg < registers; ++reg) {
       if (!d.buffer_d16) {
         if (d.lds_dst)

@@ -11,6 +11,8 @@
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
+#include "rocjitsu/vm/amdgpu/image_metadata.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -998,6 +1000,48 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   const bool translated_address_space =
       d.translated.access && !d.translated.access->info().legacy_cache_compatible;
 
+  if (d.image_metadata) {
+    // Metadata transitions touch an entire compression block. Serialize them
+    // with other CUs and publish dirty cache contents before accessing backing
+    // memory, as for a device-wide atomic operation. The functional renderer
+    // always leaves the resulting block in the uncompressed encoding.
+    if (!l2_)
+      return VmAccessOutcome::Faulted;
+    auto boundary = l2_->coherence_domain()->acquire_atomic_boundary();
+    if (boundary.outcome() != VmAccessOutcome::Complete)
+      return boundary.outcome();
+    const auto &image = *d.image_metadata;
+    if (d.is_load)
+      d.response_data.assign(d.wf_size * d.elem_size, 0);
+    try {
+      const auto access = wf.snapshot_vm_access();
+      if (!access)
+        return VmAccessOutcome::Faulted;
+      const auto &memory = *access;
+      for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+        if (!(d.lane_mask & (uint64_t{1} << lane)))
+          continue;
+        const uint32_t x = image.coordinates[lane] & 0xffff;
+        const uint32_t y = image.coordinates[lane] >> 16;
+        if (image.depth)
+          materialize_gfx11_htile(memory, image.base, image.metadata, x, y, image.width,
+                                  image.height, d.elem_size, image.swizzle);
+        else
+          materialize_gfx11_dcc(memory, image.base, image.metadata, x, y, image.width, image.height,
+                                d.elem_size, image.swizzle, image.pipe_aligned);
+        if (d.is_load)
+          read_image_bytes(memory, d.per_lane_addr[lane],
+                           {d.response_data.data() + lane * d.elem_size, d.elem_size});
+        else
+          write_image_bytes(memory, d.per_lane_addr[lane],
+                            {d.store_data.data() + lane * d.elem_size, d.elem_size});
+      }
+    } catch (const std::runtime_error &) {
+      wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+      reject_vector_memory_access(d);
+    }
+    return VmAccessOutcome::Complete;
+  }
   if (d.atomic_op != AtomicOp::NONE) {
     if (translated_address_space)
       return execute_translated_atomic_rmw(d);

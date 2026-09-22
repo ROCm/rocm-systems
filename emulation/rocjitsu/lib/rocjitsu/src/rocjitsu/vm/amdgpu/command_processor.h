@@ -7,8 +7,8 @@
 /// @brief Command processor (CP) component.
 ///
 /// @details Models a CP that works with the ROCm runtime to fetch
-/// and process HSA AQL packets, or consume DRM PM4 compute submissions, and
-/// dispatch work to compute units.
+/// and process HSA AQL packets or DRM PM4 compute and graphics submissions,
+/// dispatching shader work to compute units.
 ///
 /// Architecture: the CP directly owns queue state and doorbell monitoring
 /// (CP hardware functions). Four sub-blocks handle distinct pipeline stages:
@@ -100,6 +100,7 @@ struct Pm4SubmitQueue {
 ///
 /// @details Distributes AQL dispatch packets across the registered compute units in
 /// round-robin order, materializing wavefronts in configured slots on first use.
+/// PM4 queues build compute dispatches and graphics draws from registers and packets.
 ///
 /// Event-driven: the CP monitors registered AQL queue doorbells via a
 /// polling thread. When new AQL packets are detected, it fetches them from the
@@ -564,6 +565,9 @@ private:
   [[nodiscard]] AqlAdmissionResult request_dynamic_scratch(AqlQueueRecord &queue,
                                                            const GpuVmAccess &transaction_access,
                                                            uint64_t packet_index, uint64_t status);
+  void draw_pm4(const Pm4SubmitQueue &queue, Pm4DispatchState &qs, uint32_t vertices,
+                std::vector<uint32_t> indices = {});
+  void dispatch_graphics_pm4(const Pm4SubmitQueue &queue, Pm4DispatchState &qs, DispatchEntry dp);
 
   /// @brief Advertise and maintain ROCr's amd_queue_v2_t scratch-reclaim contract.
   [[nodiscard]] VmAccessOutcome publish_async_scratch_capability(const AqlQueueRecord &queue) const;

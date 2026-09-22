@@ -4444,6 +4444,23 @@ def test_generated_rdna3_5_sendmsg_return_uses_symbolic_disassembly(
     assert 'return std::format("sendmsg({}, 0, 0)", value);' in sendmsg_return
 
 
+def test_gfx11_graphics_sources_use_vgpr_selectors():
+    for profile in (Rdna3Profile(), Rdna3_5Profile()):
+        for source in ('src0', 'src1', 'src2'):
+            assert (
+                profile.normalize_operand_type('ENC_VINTERP', source, 'OPR_VGPR')
+                == 'OPR_SRC_VGPR'
+            )
+        assert (
+            profile.normalize_operand_type('ENC_VINTERP', 'vdst', 'OPR_VGPR')
+            == 'OPR_VGPR'
+        )
+        assert (
+            profile.normalize_operand_type('ENC_DS', 'data0', 'OPR_VGPR') == 'OPR_VGPR'
+        )
+        assert profile.has_gfx11_image_address_extension
+
+
 def test_rdna3_5_disassembly_overrides_do_not_change_rdna3():
     rdna3 = Rdna3Profile()
     rdna3_5 = Rdna3_5Profile()

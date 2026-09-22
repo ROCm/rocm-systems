@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/graphics_instructions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
@@ -272,15 +273,24 @@ inline void execute_ds_swizzle_b32_vds([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_image_bvh_intersect_ray_mimg([[maybe_unused]] Inst &inst,
-                                                 [[maybe_unused]] Wavefront &wf) {}
+                                                 [[maybe_unused]] Wavefront &wf) {
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+}
 
 template <typename Inst>
 inline void execute_lds_direct_load_ldsdir([[maybe_unused]] Inst &inst,
-                                           [[maybe_unused]] Wavefront &wf) {}
+                                           [[maybe_unused]] Wavefront &wf) {
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+}
 
 template <typename Inst>
 inline void execute_lds_param_load_ldsdir([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {}
+                                          [[maybe_unused]] Wavefront &wf) {
+  amdgpu::execute_graphics_parameter_load(wf, inst.inst_.vdst, inst.inst_.attr,
+                                          inst.inst_.attr_chan);
+}
 
 template <typename Inst>
 inline void execute_s_abs_i32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
@@ -11721,7 +11731,8 @@ inline void execute_v_fma_mixhi_f16_vop3p([[maybe_unused]] Inst &inst,
     float result = a * b + c;
     if (inst.inst_.clamp)
       result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_f16_mode(result, wf.fp16_ovfl());
+    uint16_t h = amdgpu::pseudo_scalar::round_f16_result(result, wf.fp_round_mode_f16_f64(), 0,
+                                                         false, wf.fp16_ovfl(), false);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(inst.vdst, wf, lane, 0x8u, h);
   }
 }
@@ -11764,7 +11775,8 @@ inline void execute_v_fma_mixlo_f16_vop3p([[maybe_unused]] Inst &inst,
     float result = a * b + c;
     if (inst.inst_.clamp)
       result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_f16_mode(result, wf.fp16_ovfl());
+    uint16_t h = amdgpu::pseudo_scalar::round_f16_result(result, wf.fp_round_mode_f16_f64(), 0,
+                                                         false, wf.fp16_ovfl(), false);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(inst.vdst, wf, lane, 0u, h);
   }
 }
@@ -13681,7 +13693,8 @@ inline void execute_v_mad_mixhi_f16_vop3p([[maybe_unused]] Inst &inst,
     float result = a * b + c;
     if (inst.inst_.clamp)
       result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_f16_mode(result, wf.fp16_ovfl());
+    uint16_t h = amdgpu::pseudo_scalar::round_f16_result(result, wf.fp_round_mode_f16_f64(), 0,
+                                                         false, wf.fp16_ovfl(), false);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(inst.vdst, wf, lane, 0x8u, h);
   }
 }
@@ -13724,7 +13737,8 @@ inline void execute_v_mad_mixlo_f16_vop3p([[maybe_unused]] Inst &inst,
     float result = a * b + c;
     if (inst.inst_.clamp)
       result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_f16_mode(result, wf.fp16_ovfl());
+    uint16_t h = amdgpu::pseudo_scalar::round_f16_result(result, wf.fp_round_mode_f16_f64(), 0,
+                                                         false, wf.fp16_ovfl(), false);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(inst.vdst, wf, lane, 0u, h);
   }
 }
