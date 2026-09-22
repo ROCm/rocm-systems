@@ -2420,16 +2420,17 @@ TEST_F(DispatchTest, PdiCacheRolledBackOnFailedBatch) {
 // argument's allocation would walk that flush off the end of the mapping and fault the host
 // process, so the packet has to be refused while the batch is being built -- before either flush.
 //
-// Shared by both dispatch paths (AddKernargBOs), so the PDI path is enough to cover it and this
-// test needs no Peano toolchain.
+// Shared by both dispatch paths (AddKernargBOs), so the PDI path is enough to cover it.
 TEST_F(DispatchTest, KernargSizeExceedsBufferRejected) {
   dispatch_error err;
   hsa_queue_t* queue = nullptr;
   ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
             HSA_STATUS_SUCCESS);
 
-  kernel_artifacts add;
-  ASSERT_TRUE(add.load_add(dev_pool));
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+
+  const std::uint64_t kernel = LoadAddKernel();
+  ASSERT_NE(kernel, 0u);
 
   pool_buffer input, output, kernargs;
   ASSERT_EQ(input.allocate(data_pool, aie_vector_scalar_kernel::element_bytes), HSA_STATUS_SUCCESS);
@@ -2448,8 +2449,8 @@ TEST_F(DispatchTest, KernargSizeExceedsBufferRejected) {
 
   hsa_signal_t signal{};
   ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
-  const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-      add.pdi.get(), add.insts.get(), add.insts_size, in, out, args, signal, queue);
+  const auto wr_idx =
+      aie_vector_scalar_kernel::dispatch_packet(kernel, in, out, args, signal, queue);
 
   // dispatch_packet fills the sizes, so overstate one of them afterwards. A gigabyte is far past
   // any rounding the pool may apply to the element_bytes request, so the rejection cannot be an
