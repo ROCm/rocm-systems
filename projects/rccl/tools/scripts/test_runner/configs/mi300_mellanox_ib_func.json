@@ -190,6 +190,43 @@
         "NCCL_DMABUF_ENABLE": "1"
       }
     },
+    "net_ib_multithread_independent": {
+      "extends": "net_ib_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "tests": [
+        {
+          "name": "NetIB_MultiThread_IndependentSimpleSendRecv",
+          "description": "Concurrent workers each transfer on an independent NET/IB context and connection",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "NetIB_MultiThread_IndependentSequentialTransfers",
+          "description": "Concurrent workers each run repeated transfers on an independent connection",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        },
+        {
+          "name": "NetIB_MultiThread_MultipleSizes",
+          "description": "Concurrent workers sweep the size ladder into the shared per-device MR cache",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "NetIB_MultiThread_MemoryRegistrationStorm",
+          "description": "Concurrent register/deregister storms race the per-device MR cache",
+          "test_filter": "NetIbMPITest.MemoryRegistrationStorm"
+        },
+        {
+          "name": "NetIB_MultiThread_MrCacheRefCount",
+          "description": "All workers register the same address, contending on one cache entry's refcount",
+          "test_filter": "NetIbMPITest.MrCacheRefCount"
+        },
+        {
+          "name": "NetIB_MultiThread_LongRunningEndurance",
+          "description": "Sustained concurrent traffic with the RDMA leak check around the whole run",
+          "test_filter": "NetIbMPITest.LongRunningEndurance"
+        }
+      ]
+    },
     "net_ib_gdr_flush": {
       "extends": "net_ib_base",
       "timeout": 120,
@@ -199,7 +236,7 @@
       "tests": [
         {
           "name": "GdrFlush_CuMemDmaBuf_NoAsyncFatal",
-          "description": "Whitebox ncclIbIflush over a dma-buf (cuMem/UBR) RO=0 flush scratchpad - the exact path that used to raise the mlx5 'invalid request local work queue error'. The read-only flush (RDMA_READ fence, WRITE removed) must complete cleanly with correct data.",
+          "description": "Whitebox ncclIbIflush over a dma-buf (cuMem/UBR) RO=0 flush scratchpad - the exact path that used to raise the mlx5 'invalid request local work queue error'. The RO=0 write+read fence must complete cleanly with correct data.",
           "test_filter": "GdrFlushTest.CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal"
         },
         {
@@ -222,11 +259,6 @@
           "name": "GdrFlush_RepeatedFlushBurst",
           "description": "50-iteration GPU recv+flush burst over the dma-buf scratchpad; an intermittent QP async-fatal would surface as a non-success flush. The whole burst must stay clean.",
           "test_filter": "GdrFlushTest.RepeatedFlush_NoFaultBurst"
-        },
-        {
-          "name": "GdrFlush_ForcedScratchpadWrite_ReproducesFault",
-          "description": "Regression guard (ENABLE_FAULT_INJECTION debug builds only): forces the removed scratchpad RDMA_WRITE back on a dma-buf buffer and asserts the flush QP faults, proving the WRITE was the culprit. Absent/skipped when fault injection is not compiled in.",
-          "test_filter": "GdrFlushTest.ForcedScratchpadWrite_ReproducesFault"
         }
       ]
     },
@@ -248,7 +280,7 @@
       "tests": [
         {
           "name": "GdrFlush_CuMem_AllGatherUnregistered_MultiNode",
-          "description": "Cross-node AllGather over cuMem/DMA-BUF GDR with unregistered buffers (base GDR recv+flush path). The fix removes the redundant scratchpad RDMA_WRITE and keeps the RO=0 RDMA_READ fence, so the collective completes cleanly with correct data. Regression guard for the QP async-fatal 'invalid request local work queue error' that the pre-fix WRITE triggered on a dma-buf scratchpad.",
+          "description": "Cross-node AllGather over cuMem/DMA-BUF GDR with unregistered buffers (base GDR recv+flush path). The flush fences the relaxed-ordered data through the RO=0 scratchpad (RDMA_WRITE then RDMA_READ), so the collective completes cleanly with correct data. Regression guard for the QP async-fatal 'invalid request local work queue error' that the write raises when the flush QP lacks REMOTE_WRITE.",
           "test_filter": "GdrFlush_CuMem.AllGatherUnregistered_MultiNode"
         }
       ]
@@ -1191,7 +1223,12 @@
         {
           "name": "ParameterApiTests",
           "description": "Public ncclParam C API tests",
-          "test_filter": "ParameterApiTests.*"
+          "test_filter": "ParameterApiTests.*:ParameterApiTypedTests*"
+        },
+        {
+          "name": "CollConfigTests",
+          "description": "Per-collective ncclCollConfig_t validation tests",
+          "test_filter": "CollConfigTests.*:CollConfigTypedTests*"
         },
         {
           "name": "ArgCheck",
@@ -1242,6 +1279,31 @@
           "name": "DdaAlltoAllThresholdTest",
           "description": "DDA AlltoAll 4 MiB threshold and host staging-byte unit tests for gfx942/gfx950",
           "test_filter": "DdaAlltoAllThresholdTest.*:DdaAlltoAllThreshold.*"
+        },
+        {
+          "name": "CeAlltoAllEligibilityTest",
+          "description": "CE AlltoAll eligibility gating tests matching taskAppend (CTA_POLICY_ZERO, sysmem, capture, group depth)",
+          "test_filter": "CeAlltoAllEligibilityTest.*"
+        },
+        {
+          "name": "RcclAlltoAllDecision",
+          "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
+          "test_filter": "RcclAlltoAllDecision.*"
+        },
+        {
+          "name": "RcclCeAr2ShotMax",
+          "description": "CE AllReduce 2-shot arch threshold upper-bound tests",
+          "test_filter": "RcclCeAr2ShotMax.*"
+        },
+        {
+          "name": "RcclCeArGrownBuffer",
+          "description": "CE AllReduce grown-buffer (ceRegMax) eligibility tests",
+          "test_filter": "RcclCeArGrownBuffer.*"
+        },
+        {
+          "name": "SkipPresetTopoMatching",
+          "description": "SkipPreset arch topology matching and threshold lookup tests",
+          "test_filter": "SkipPresetTopoMatching.*"
         }
       ]
     },
@@ -2436,7 +2498,7 @@
         {
           "name": "CE_Internal_Init",
           "description": "ncclCeInit lifecycle: allocates sync window; ncclCeFinalize tears it down; double-fini is safe; independent state per comm",
-          "test_filter": "CeInternalMPITest.InitSetsWindowPointers:CeInternalMPITest.FiniNullsPointers:CeInternalMPITest.DoubleFiniIsSafe:CeInternalMPITest.IndependentCeStatePerComm:CeInternalMPITest.FiniAfterZeroCollectives"
+          "test_filter": "CeInternalMPITest.InitSetsWindowPointers:CeInternalMPITest.FiniNullsPointers:CeInternalMPITest.DoubleFiniIsSafe:CeInternalMPITest.IndependentCeStatePerComm:CeInternalMPITest.FiniAfterZeroCollectives:CeInternalMPITest.FreeBatchOpsParamsIsIdempotent"
         },
         {
           "name": "CE_Internal_Sync",
@@ -2752,14 +2814,20 @@
       "enabled": true
     },
     {
+      "name": "NET IB - Multithread Independent Connections (4)",
+      "description": "4 worker threads/rank, each on an independent NET/IB context and connection",
+      "config": "net_ib_multithread_independent",
+      "enabled": true
+    },
+    {
       "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank)",
-      "description": "Whitebox coverage of the NET/IB GDR flush fix: dma-buf and peermem RO=0 scratchpad reads, feature-disabled fallback, repeated-flush burst, and the fault-injection regression guard",
+      "description": "Whitebox coverage of the NET/IB GDR flush: dma-buf and peermem RO=0 scratchpad fence, feature-disabled fallback, and repeated-flush burst",
       "config": "net_ib_gdr_flush",
       "enabled": true
     },
     {
       "name": "GDR Flush - cuMem AllGather (Multi-Node)",
-      "description": "Cross-node AllGather over cuMem/DMA-BUF GDR exercising the base recv+flush path with the redundant scratchpad RDMA_WRITE removed",
+      "description": "Cross-node AllGather over cuMem/DMA-BUF GDR exercising the base recv+flush path with the RO=0 scratchpad write+read fence",
       "config": "gdr_flush_cumem_multinode",
       "enabled": true
     },

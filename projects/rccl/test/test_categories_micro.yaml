@@ -11,13 +11,34 @@
 test_categories:
   quick: &micro_quick
     description: "Smoke — host-only micro-tests, sub-second."
+    # A trailing '.*' anchors the end of the suite name. Dropping the dot widens instead
+    # ("Devcomm*" matches all five Devcomm suites).
     test_patterns:
       - "P2pMicrotest.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
+      - "RasMicrotest.*"
+      - "RasClientMicrotest.*"
       - "RmaProxyProgressTest.*"
+      - "RmaWaitSignalTest.*"
+      - "RmaPutTest.*"
+      - "RmaLaunchTest.*"
+      - "RmaScheduleTest.*"
+      - "RmaDebugLoggingTest.*"
+      - "RmaProxyGatingTest.*"
+      - "RmaProxyReadyTest.*"
       - "GroupEndInternalTest.*"
-      - "Devcomm*"
+      - "WrapMicrotest.*"
+      - "WrapMicrotestIsolated.*"
+      - "Alloc*"
+      - "Comm*"
+      - "Compute*"
+      - "DeepCopy*"
+      - "Dev*"
+      - "Gin*"
+      - "Nccl*"
+      - "Sym*"
+      - "Win*"
     exclude_windows:
       - "*"
     labels:

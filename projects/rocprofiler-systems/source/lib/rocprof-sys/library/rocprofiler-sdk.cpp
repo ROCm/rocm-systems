@@ -10,10 +10,13 @@
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
 #include "common/synchronized.hpp"
+#include "core/agent.hpp"
+#include "core/agent_manager.hpp"
 #include "core/common.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
 #include "core/containers/stable_vector.hpp"
+#include "core/control/session.hpp"
 #include "core/demangler.hpp"
 #include "core/gpu.hpp"
 #include "core/output_file_registry.hpp"
@@ -23,15 +26,16 @@
 #include "core/sdk/tracing-config.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk/counters.hpp"
+#include "library/rocprofiler-sdk/domain_selection.hpp"
+#include "library/rocprofiler-sdk/domain_service.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
-#include "library/rocprofiler-sdk/kfd_events.hpp"
 #include "library/rocprofiler-sdk/rccl.hpp"
-#include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "rocprofiler-sdk.hpp"
@@ -40,8 +44,19 @@
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/unwind/processed_entry.hpp>
+#include <timemory/utility/backtrace.hpp>
 #include <timemory/variadic/lightweight_tuple.hpp>
+
+#include <cstddef>
+#include <exception>
+#include <iterator>
+#include <optional>
+#include <string_view>
 #include <type_traits>
+#include <utility>
+
+#include <fmt/format.h>
+#include <nlohmann/json_fwd.hpp>
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -61,7 +76,6 @@
 #include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <timemory/defines.h>
 #include <timemory/process/threading.hpp>
 #include <timemory/utility/types.hpp>
 
@@ -72,6 +86,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <cctype>
 #include <cstdint>
 #include <iostream>
@@ -84,6 +99,7 @@
 #include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys
@@ -92,51 +108,309 @@ namespace rocprofiler_sdk
 {
 namespace
 {
-// Per-name imports (not a merged alias) for the production tracing_config<Wrapper,
-// Externals> instantiation used below: keeps both template arguments visible at each call
-// site instead of collapsing them behind an opaque name.
+
+auto
+get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& bt_data)
+{
+    auto backtrace = nlohmann::json::object();
+
+    if(bt_data && !bt_data->empty())
+    {
+        const std::string unk    = "??";
+        size_t            bt_cnt = 0;
+        for(const auto& itr : *bt_data)
+        {
+            auto        linfo        = itr.lineinfo.get();
+            const auto* func         = itr.name.empty() ? &unk : &itr.name;
+            const auto* fallback_loc = itr.location.empty() ? &unk : &itr.location;
+            const auto* loc =
+                (linfo && !linfo.location.empty()) ? &linfo.location : fallback_loc;
+            const auto fallback_line =
+                (itr.lineno == 0) ? std::string{ "?" } : fmt::format("{}", itr.lineno);
+            const auto line =
+                (linfo && linfo.line > 0) ? fmt::format("{}", linfo.line) : fallback_line;
+
+            auto entry = fmt::format("{} @ {}:{}", rocprofsys::utility::demangle(*func),
+                                     path::filename(*loc), line);
+            backtrace[fmt::format("frame#{}", bt_cnt++)] = entry;
+        }
+    }
+    return backtrace;
+}
+
+// NOLINTBEGIN(readability-function-size)
+// Implementation of rocprofiler_callback_tracing_operation_args_cb_t
+int
+save_args(rocprofiler_callback_tracing_kind_t /*kind*/, std::int32_t /*operation*/,
+          std::uint32_t /*arg_number*/, const void* const /*arg_value_addr*/,
+          std::int32_t /*arg_indirection_count*/, const char* /*arg_type*/,
+          const char* arg_name, const char*             arg_value_str,
+          std::int32_t /*arg_dereference_count*/, void* data)
+{
+    auto* argvec = static_cast<callback_arg_array_t*>(data);
+    argvec->emplace_back(arg_name, arg_value_str);
+    return 0;
+}
+
+// Additional implementation of rocprofiler_callback_tracing_operation_args_cb_t
+// for iterating through arguments in a callback for rocpd_arg table in database
+int
+iterate_args_callback(rocprofiler_callback_tracing_kind_t /*kind*/,
+                      std::int32_t /*operation*/, std::uint32_t arg_number,
+                      const void* const /*arg_value_addr*/,
+                      std::int32_t /*arg_indirection_count*/, const char* arg_type,
+                      const char* arg_name, const char*             arg_value_str,
+                      std::int32_t /*arg_dereference_count*/, void* data)
+{
+    auto* func_args = static_cast<function_args_t*>(data);
+    if(arg_type && arg_name && arg_value_str)
+    {
+        func_args->emplace_back(
+            argument_info{ .arg_number = arg_number,
+                           .arg_type   = rocprofsys::utility::demangle(arg_type),
+                           .arg_name   = arg_name,
+                           .arg_value  = arg_value_str });
+    }
+    return 0;
+}
+// NOLINTEND(readability-function-size)
+
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+client_data* g_tool_data = new client_data{};
+
 using rocprofiler_sdk::default_externals;
 using rocprofiler_sdk::tracing_config;
 using rocprofiler_sdk::wrapper;
 
-using tool_agent_vec_t                         = std::vector<tool_agent>;
-client_data*                    tool_data      = new client_data{};
-std::shared_ptr<roctx_client<>> g_roctx_client = {};
+using production_backend = backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>;
 
-std::shared_ptr<roctx_client<>>
-get_roctx_client()
+struct external_dependencies
 {
-    if(!g_roctx_client)
+    using agent_t         = ::rocprofsys::agent;
+    using agent_type_t    = ::rocprofsys::agent_type;
+    using agent_manager_t = ::rocprofsys::agent_manager;
+    using track_t         = trace_cache::info::track;
+    using thread_info_t   = trace_cache::info::thread;
+    using pmc_info_t      = trace_cache::info::pmc;
+    using kfd_sample_t    = trace_cache::kfd_sample;
+
+    static constexpr agent_type_t k_agent_type_gpu = agent_type_t::gpu;
+    static constexpr agent_type_t k_agent_type_cpu = agent_type_t::cpu;
+
+    static agent_manager_t& get_agent_manager()
     {
-        const auto _domains = rocprofsys::delimit(
-            config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
-                .value_or(std::string{}),
-            " ,;:\t\n");
-        const auto has_marker_domain =
-            (std::find(_domains.begin(), _domains.end(), "marker_api") !=
-                 _domains.end() ||
-             std::find(_domains.begin(), _domains.end(), "roctx") != _domains.end());
-        const auto roctx_traced_regions = config::get_trace_region();
-        const auto has_trace_regions    = !roctx_traced_regions.empty();
-
-        // Case 1: no marker domain and no trace regions — nothing to do
-        if(!has_marker_domain && !has_trace_regions)
-        {
-            return nullptr;
-        }
-
-        const auto roctx_config = roctx_client_config{
-            has_marker_domain,  // pause_resume_enabled
-            config::get_use_perfetto(),
-            config::get_use_timemory(),
-            config::get_perfetto_annotations(),
-            roctx_traced_regions,
-        };
-        g_roctx_client = std::make_shared<roctx_client<>>(roctx_config);
+        return ::rocprofsys::get_agent_manager_instance();
     }
 
-    return g_roctx_client;
-}
+    static void add_string(std::string_view value)
+    {
+        trace_cache::get_metadata_registry().add_string(value);
+    }
+
+    static void add_thread_info(const thread_info_t& info)
+    {
+        trace_cache::get_metadata_registry().add_thread_info(info);
+    }
+
+    static void add_track(const track_t& info)
+    {
+        trace_cache::get_metadata_registry().add_track(info);
+    }
+
+    static void add_pmc_info(const pmc_info_t& info)
+    {
+        trace_cache::get_metadata_registry().add_pmc_info(info);
+    }
+
+    static void buffer_storage_store(kfd_sample_t&& sample)
+    {
+        trace_cache::get_buffer_storage().store(sample);
+    }
+
+    static std::int32_t get_pid() { return static_cast<std::int32_t>(::getpid()); }
+    static std::int32_t get_ppid() { return static_cast<std::int32_t>(::getppid()); }
+
+    // ─── Members required by domains::callback::hip::{runtime,compiler}_api ────────
+    using rocm_hip_api_category = category::rocm_hip_api;
+    using region_sample         = trace_cache::region_sample;
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr std::string_view rocm_hip_api_category_name =
+        trait::name<category::rocm_hip_api>::value;
+
+    // ─── Members required by domains::callback::hsa::{core,amd_ext,image_ext,
+    // finalize_ext}_api ─────────────────────────────────────────────────────────
+    using rocm_hsa_api_category = category::rocm_hsa_api;
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr std::string_view rocm_hsa_api_category_name =
+        trait::name<category::rocm_hsa_api>::value;
+
+    // ─── Members required by domains::callback::{rocjpeg,rocdecode,rocshmem,
+    // hipfile}_api ──────────────────────────────────────────────────────────────
+    using rocm_rocjpeg_api_category = category::rocm_rocjpeg_api;
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr std::string_view rocm_rocjpeg_api_category_name =
+        trait::name<category::rocm_rocjpeg_api>::value;
+
+    using rocm_rocdecode_api_category = category::rocm_rocdecode_api;
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr std::string_view rocm_rocdecode_api_category_name =
+        trait::name<category::rocm_rocdecode_api>::value;
+
+    using rocm_rocshmem_api_category = category::rocm_rocshmem_api;
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr std::string_view rocm_rocshmem_api_category_name =
+        trait::name<category::rocm_rocshmem_api>::value;
+
+    using rocm_hipfile_api_category = category::rocm_hipfile_api;
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr std::string_view rocm_hipfile_api_category_name =
+        trait::name<category::rocm_hipfile_api>::value;
+
+    static bool is_active()
+    {
+        return ::rocprofsys::state::process::get() ==
+               ::rocprofsys::state::process::Active;
+    }
+
+    static bool get_use_timemory() { return ::rocprofsys::get_use_timemory(); }
+
+    template <typename CategoryT>
+    static void tracing_push_timemory(CategoryT, std::string_view name)
+    {
+        tracing::push_timemory(CategoryT{}, name);
+    }
+
+    template <typename CategoryT>
+    static void tracing_pop_timemory(CategoryT, std::string_view name)
+    {
+        tracing::pop_timemory(CategoryT{}, name);
+    }
+
+    static void metadata_add_string(std::string_view value)
+    {
+        trace_cache::get_metadata_registry().add_string(value);
+    }
+
+    static void metadata_add_thread_info(const thread_info_t& info)
+    {
+        trace_cache::get_metadata_registry().add_thread_info(info);
+    }
+
+    static void buffer_storage_store(region_sample&& sample)
+    {
+        trace_cache::get_buffer_storage().store(sample);
+    }
+
+    static bool check_backtrace_operations(rocprofiler_callback_tracing_kind_t kind,
+                                           rocprofiler_tracing_operation_t     operation)
+    {
+        return g_tool_data->backtrace_operations.at(kind).contains(operation);
+    }
+
+    static auto get_backtrace_data(bool are_operations_available)
+    {
+        constexpr size_t k_backtrace_stack_depth       = 16;
+        constexpr size_t k_backtrace_ignore_depth      = 3;
+        constexpr bool   k_backtrace_with_signal_frame = true;
+        auto             use_perfetto =
+            (config::get_use_perfetto() && config::get_perfetto_annotations());
+        auto use_rocpd = config::get_use_rocpd();
+
+        const auto should_we_generate_backtrace =
+            (use_perfetto || use_rocpd) && are_operations_available;
+
+        auto result = std::optional<std::vector<tim::unwind::processed_entry>>{};
+
+        if(!should_we_generate_backtrace)
+        {
+            return result;
+        }
+
+        auto backtrace_stack =
+            tim::get_unw_stack<k_backtrace_stack_depth, k_backtrace_ignore_depth,
+                               k_backtrace_with_signal_frame>();
+        result = std::vector<tim::unwind::processed_entry>{};
+        result->reserve(backtrace_stack.size());
+
+        for(const auto& itr : backtrace_stack)
+        {
+            if(!itr)
+            {
+                continue;
+            }
+
+            auto value = binary::lookup_ipaddr_entry<false>(itr->address());
+            if(!value)
+            {
+                continue;
+            }
+
+            result->emplace_back(std::move(*value));
+        }
+
+        return result;
+    }
+
+    static auto get_backtrace_json(
+        std::optional<std::vector<tim::unwind::processed_entry>>& bt_data)
+    {
+        return get_backtrace(bt_data);
+    }
+
+    // Single source of truth is core/trace_cache/cacheable.hpp's ABSOLUTE constant;
+    // kfd_events.hpp never includes that header, so the value is surfaced here.
+    static constexpr std::string_view k_pmc_value_type_absolute = trace_cache::ABSOLUTE;
+
+    // Single source of truth for these strings is core/categories.hpp's
+    // trait::name<category::X>; kfd_events.hpp itself never includes
+    // categories.hpp, so the values are surfaced here instead.
+    static constexpr std::string_view k_kfd_page_fault_category_name =
+        trait::name<category::rocm_kfd_page_fault>::value;
+    static constexpr std::string_view k_kfd_page_fault_category_description =
+        trait::name<category::rocm_kfd_page_fault>::description;
+    static constexpr std::string_view k_kfd_page_migrate_category_name =
+        trait::name<category::rocm_kfd_page_migrate>::value;
+    static constexpr std::string_view k_kfd_page_migrate_category_description =
+        trait::name<category::rocm_kfd_page_migrate>::description;
+    static constexpr std::string_view k_kfd_event_page_fault_category_name =
+        trait::name<category::rocm_kfd_event_page_fault>::value;
+    static constexpr std::string_view k_kfd_event_page_fault_category_description =
+        trait::name<category::rocm_kfd_event_page_fault>::description;
+    static constexpr std::string_view k_kfd_event_page_migrate_category_name =
+        trait::name<category::rocm_kfd_event_page_migrate>::value;
+    static constexpr std::string_view k_kfd_event_page_migrate_category_description =
+        trait::name<category::rocm_kfd_event_page_migrate>::description;
+    static constexpr std::string_view k_kfd_queue_category_name =
+        trait::name<category::rocm_kfd_queue>::value;
+    static constexpr std::string_view k_kfd_queue_category_description =
+        trait::name<category::rocm_kfd_queue>::description;
+    static constexpr std::string_view k_kfd_event_queue_category_name =
+        trait::name<category::rocm_kfd_event_queue>::value;
+    static constexpr std::string_view k_kfd_event_queue_category_description =
+        trait::name<category::rocm_kfd_event_queue>::description;
+    static constexpr std::string_view k_kfd_event_unmap_from_gpu_category_name =
+        trait::name<category::rocm_kfd_event_unmap_from_gpu>::value;
+    static constexpr std::string_view k_kfd_event_unmap_from_gpu_category_description =
+        trait::name<category::rocm_kfd_event_unmap_from_gpu>::description;
+    static constexpr std::string_view k_kfd_event_dropped_events_category_name =
+        trait::name<category::rocm_kfd_event_dropped_events>::value;
+    static constexpr std::string_view k_kfd_event_dropped_events_category_description =
+        trait::name<category::rocm_kfd_event_dropped_events>::description;
+};
+
+std::shared_ptr<domain_service<production_backend, external_dependencies>>
+    g_domain_service;
+
+using tool_agent_vec_t = std::vector<tool_agent>;
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+std::shared_ptr<roctx_client<>>   g_roctx_client = {};
+std::shared_ptr<control::session> g_session      = {};
 
 std::atomic<bool> tool_fini_done{ false };
 std::atomic<bool> tool_init_done{ false };
@@ -177,7 +451,7 @@ auto
 ompt_get_unified_name(const rocprofiler_callback_tracing_record_t& record)
 {
     std::string_view _name =
-        tool_data->callback_tracing_info.at(record.kind, record.operation);
+        g_tool_data->callback_tracing_info.at(record.kind, record.operation);
 
     // Forces omp_parallel begin and end to have same name, allowing track to connect
     if(record.operation == ROCPROFILER_OMPT_ID_parallel_begin ||
@@ -250,7 +524,7 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
                      //  const tool_agent_vec_t&         gpu_agents,
                      //  const agent_counter_info_map_t& counters_info,
                      //  agent_counter_profile_map_t&    data)
-                     client_data* data = tool_data)
+                     client_data* data = g_tool_data)
 {
     using counter_vec_t = std::vector<rocprofiler_counter_id_t>;
 
@@ -377,44 +651,13 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
 const kernel_symbol_data_t*
 get_kernel_symbol_info(std::uint64_t _kernel_id)
 {
-    return tool_data->get_kernel_symbol_info(_kernel_id);
+    return g_tool_data->get_kernel_symbol_info(_kernel_id);
 }
 
 const rocprofiler_callback_tracing_code_object_load_data_t*
 get_code_object_info(std::uint64_t _code_object_id)
 {
-    return tool_data->get_code_object_info(_code_object_id);
-}
-
-// Implementation of rocprofiler_callback_tracing_operation_args_cb_t
-int
-save_args(rocprofiler_callback_tracing_kind_t /*kind*/, std::int32_t /*operation*/,
-          std::uint32_t /*arg_number*/, const void* const /*arg_value_addr*/,
-          std::int32_t /*arg_indirection_count*/, const char* /*arg_type*/,
-          const char* arg_name, const char*             arg_value_str,
-          std::int32_t /*arg_dereference_count*/, void* data)
-{
-    auto* argvec = static_cast<callback_arg_array_t*>(data);
-    argvec->emplace_back(arg_name, arg_value_str);
-    return 0;
-}
-
-// Additional implementation of rocprofiler_callback_tracing_operation_args_cb_t
-// for iterating through arguments in a callback for rocpd_arg table in database
-int
-iterate_args_callback(rocprofiler_callback_tracing_kind_t /*kind*/,
-                      std::int32_t /*operation*/, std::uint32_t arg_number,
-                      const void* const /*arg_value_addr*/,
-                      std::int32_t /*arg_indirection_count*/, const char* arg_type,
-                      const char* arg_name, const char*             arg_value_str,
-                      std::int32_t /*arg_dereference_count*/, void* data)
-{
-    auto* _data = static_cast<function_args_t*>(data);
-    if(arg_type && arg_name && arg_value_str)
-        _data->emplace_back(argument_info{ arg_number,
-                                           rocprofsys::utility::demangle(arg_type),
-                                           arg_name, arg_value_str });
-    return 0;
+    return g_tool_data->get_code_object_info(_code_object_id);
 }
 
 template <typename Tp, typename... Args>
@@ -428,34 +671,6 @@ template <typename... Tp>
 void
 consume_args(Tp&&...)
 {}
-
-auto
-get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
-{
-    auto backtrace = nlohmann::json::object();
-
-    if(_bt_data && !_bt_data->empty())
-    {
-        const std::string _unk    = "??";
-        size_t            _bt_cnt = 0;
-        for(const auto& itr : *_bt_data)
-        {
-            auto        _linfo = itr.lineinfo.get();
-            const auto* _func  = (itr.name.empty()) ? &_unk : &itr.name;
-            const auto* _loc   = (_linfo && !_linfo.location.empty())
-                                     ? &_linfo.location
-                                     : ((itr.location.empty()) ? &_unk : &itr.location);
-            auto        _line  = (_linfo && _linfo.line > 0)
-                                     ? fmt::format("{}", _linfo.line)
-                                     : ((itr.lineno == 0) ? std::string{ "?" }
-                                                          : fmt::format("{}", itr.lineno));
-            auto _entry = fmt::format("{} @ {}:{}", rocprofsys::utility::demangle(*_func),
-                                      path::filename(*_loc), _line);
-            backtrace[fmt::format("frame#{}", _bt_cnt++)] = _entry;
-        }
-    }
-    return backtrace;
-}
 
 template <typename CorrelationIdType>
 std::uint64_t
@@ -624,9 +839,9 @@ cache_region(const rocprofiler_callback_tracing_record_t* record,
     }
 
     trace_cache::get_buffer_storage().store(trace_cache::region_sample{
-        record->thread_id, _name.c_str(), record->correlation_id.internal,
+        record->thread_id, _name, record->correlation_id.internal,
         get_parent_stack_id(record->correlation_id), start_timestamp, end_timestamp,
-        call_stack.c_str(), args_str.c_str(), category.c_str() });
+        call_stack, args_str, category });
 }
 
 void
@@ -702,11 +917,11 @@ tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t rec
                             rocprofiler_user_data_t* /*user_data*/,
                             rocprofiler_timestamp_t /*ts*/)
 {
-    auto _name = tool_data->callback_tracing_info.at(record.kind, record.operation);
+    auto name = g_tool_data->callback_tracing_info.at(record.kind, record.operation);
 
     if(get_use_timemory())
     {
-        tracing::push_timemory(CategoryT{}, _name);
+        tracing::push_timemory(CategoryT{}, name);
     }
 }
 
@@ -717,13 +932,13 @@ tool_tracing_callback_stop(
     rocprofiler_user_data_t* user_data, rocprofiler_timestamp_t ts,
     std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
 {
-    auto _name = tool_data->callback_tracing_info.at(record.kind, record.operation);
+    auto name = g_tool_data->callback_tracing_info.at(record.kind, record.operation);
 
     const std::uint64_t begin_ts = user_data->value;
 
     if(get_use_timemory())
     {
-        tracing::pop_timemory(CategoryT{}, _name);
+        tracing::pop_timemory(CategoryT{}, name);
     }
 
     if(get_use_perfetto())
@@ -740,7 +955,7 @@ tool_tracing_callback_stop(
         auto          stream_id = stream_id_top();
 
         tracing::push_perfetto_ts(
-            CategoryT{}, _name.data(), _beg_ts,
+            CategoryT{}, name.data(), _beg_ts,
             ::perfetto::Flow::ProcessScoped(record.correlation_id.internal),
             [&](::perfetto::EventContext ctx) {
                 if(config::get_perfetto_annotations())
@@ -792,7 +1007,7 @@ tool_tracing_callback_stop(
                 }
             });
         tracing::pop_perfetto_ts(
-            CategoryT{}, _name.data(), _end_ts, [&](::perfetto::EventContext ctx) {
+            CategoryT{}, name.data(), _end_ts, [&](::perfetto::EventContext ctx) {
                 if(config::get_perfetto_annotations())
                     tracing::add_perfetto_annotation(ctx, "end_ns", _end_ts);
             });
@@ -813,7 +1028,7 @@ tool_tracing_callback_stop(
         cache_add_thread_info(record.thread_id);
         const std::string args_str = get_args_string(args);
         cache_region(&record, _beg_ts, _end_ts, call_stack.dump(), args_str,
-                     trait::name<CategoryT>::value, _name);
+                     trait::name<CategoryT>::value, name);
     }
 }
 
@@ -833,17 +1048,18 @@ tool_code_object_callback(rocprofiler_callback_tracing_record_t record,
                 auto data_v =
                     *static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(
                         record.payload);
-                tool_data->code_object_records.wlock([ts, &record, &data_v](auto& _data) {
-                    _data.emplace_back(
-                        code_object_callback_record_t{ ts, record, data_v });
-                });
+                g_tool_data->code_object_records.wlock(
+                    [ts, &record, &data_v](auto& data) {
+                        data.emplace_back(code_object_callback_record_t{
+                            .timestamp = ts, .record = record, .payload = data_v });
+                    });
                 trace_cache::get_metadata_registry().add_code_object(data_v);
             }
             else if(record.operation ==
                     ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
             {
                 auto data_v = *static_cast<kernel_symbol_data_t*>(record.payload);
-                tool_data->kernel_symbol_records.wlock(
+                g_tool_data->kernel_symbol_records.wlock(
                     [ts, &record, &data_v](auto& _data) {
                         _data.emplace_back(
                             kernel_symbol_callback_record_t{ ts, record, data_v });
@@ -1313,7 +1529,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         auto use_rocpd = config::get_use_rocpd();
 
         if((use_perfetto || use_rocpd) &&
-           tool_data->backtrace_operations.at(record.kind).count(record.operation) > 0)
+           g_tool_data->backtrace_operations.at(record.kind).contains(record.operation))
         {
             auto _backtrace =
                 tim::get_unw_stack<backtrace_stack_depth, backtrace_ignore_depth,
@@ -1396,57 +1612,11 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         user_data->value = ts;
         switch(record.kind)
         {
-            case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
-            {
-                tool_tracing_callback_start(category::rocm_hsa_api{}, record, user_data,
-                                            ts);
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
-            case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
-            {
-                tool_tracing_callback_start(category::rocm_hip_api{}, record, user_data,
-                                            ts);
-                break;
-            }
 #if(ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
                 ompt_tracing_callback_start(record, user_data, ts);
                 ompt_push_standard_callback(record, ts);
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
-            {
-                tool_tracing_callback_start(category::rocm_rocdecode_api{}, record,
-                                            user_data, ts);
-                break;
-            }
-#endif
-#if(ROCPROFILER_VERSION >= 700)
-            case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
-            {
-                tool_tracing_callback_start(category::rocm_rocjpeg_api{}, record,
-                                            user_data, ts);
-                break;
-            }
-#endif
-#if(ROCPROFILER_VERSION >= 10304)
-            case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
-            {
-                tool_tracing_callback_start(category::rocm_rocshmem_api{}, record,
-                                            user_data, ts);
-                break;
-            }
-#endif
-#if(ROCPROFILER_VERSION >= 10305)
-            case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
-            {
-                tool_tracing_callback_start(category::rocm_hipfile_api{}, record,
-                                            user_data, ts);
                 break;
             }
 #endif
@@ -1501,57 +1671,11 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
         switch(record.kind)
         {
-            case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API:
-            case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
-            {
-                tool_tracing_callback_stop(category::rocm_hsa_api{}, record, user_data,
-                                           ts, _bt_data);
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
-            case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
-            {
-                tool_tracing_callback_stop(category::rocm_hip_api{}, record, user_data,
-                                           ts, _bt_data);
-                break;
-            }
 #if(ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
                 ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
                 ompt_pop_standard_callback(record, ts, _bt_data);
-                break;
-            }
-            case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
-            {
-                tool_tracing_callback_stop(category::rocm_rocdecode_api{}, record,
-                                           user_data, ts, _bt_data);
-                break;
-            }
-#endif
-#if(ROCPROFILER_VERSION >= 700)
-            case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
-            {
-                tool_tracing_callback_stop(category::rocm_rocjpeg_api{}, record,
-                                           user_data, ts, _bt_data);
-                break;
-            }
-#endif
-#if(ROCPROFILER_VERSION >= 10304)
-            case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
-            {
-                tool_tracing_callback_stop(category::rocm_rocshmem_api{}, record,
-                                           user_data, ts, _bt_data);
-                break;
-            }
-#endif
-#if(ROCPROFILER_VERSION >= 10305)
-            case ROCPROFILER_CALLBACK_TRACING_HIPFILE_API:
-            {
-                tool_tracing_callback_stop(category::rocm_hipfile_api{}, record,
-                                           user_data, ts, _bt_data);
                 break;
             }
 #endif
@@ -1749,12 +1873,12 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     get_kernel_symbol_info(record->dispatch_info.kernel_id);
 
                 auto _name = rocprofsys::utility::demangle(_kern_sym_data->kernel_name);
-                auto _stack_id     = record->correlation_id.internal;
-                auto _beg_ns       = record->start_timestamp;
-                auto _end_ns       = record->end_timestamp;
-                auto _agent_id     = record->dispatch_info.agent_id;
-                auto _queue_id     = record->dispatch_info.queue_id;
-                const auto* _agent = tool_data->get_gpu_tool_agent(_agent_id);
+                auto _stack_id    = record->correlation_id.internal;
+                auto _beg_ns      = record->start_timestamp;
+                auto _end_ns      = record->end_timestamp;
+                auto _agent_id    = record->dispatch_info.agent_id;
+                auto _queue_id    = record->dispatch_info.queue_id;
+                const auto* agent = g_tool_data->get_gpu_tool_agent(_agent_id);
 
                 std::uint64_t _stream_id = get_stream_id(record).handle;
                 if(_stream_id == 0)
@@ -1767,7 +1891,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     cache_category<category::rocm_kernel_dispatch>();
                     cache_add_thread_info(record->thread_id);
                     cache_add_track(fmt::format("GPU Kernel Dispatch [{}] Queue {}",
-                                                _agent->device_id, _queue_id.handle)
+                                                agent->device_id, _queue_id.handle)
                                         .c_str(),
                                     record->thread_id);
                     cache_kernel_dispatch(record, _stream_id);
@@ -1837,7 +1961,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 
                         const auto _track = tracing::get_perfetto_track(
                             category::rocm_kernel_dispatch{}, _track_desc,
-                            _agent->device_id, _queue_id.handle);
+                            agent->device_id, _queue_id.handle);
 
                         tracing::push_perfetto(category::rocm_kernel_dispatch{},
                                                _name.c_str(), _track, _beg_ns,
@@ -1870,7 +1994,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 
                 bool _group_by_queue = _default_group_by_queue;
 
-                const auto* agent     = tool_data->get_gpu_tool_agent(record->agent_id);
+                const auto* agent     = g_tool_data->get_gpu_tool_agent(record->agent_id);
                 auto        device_id = static_cast<std::uint32_t>(agent->device_id);
 
                 const auto& t_info = thread_info::get(record->thread_id, SystemTID);
@@ -1879,8 +2003,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 auto _corr_id = record->correlation_id.internal;
                 auto _beg_ns  = record->start_timestamp;
                 auto _end_ns  = record->end_timestamp;
-                auto _name =
-                    tool_data->buffered_tracing_info.at(record->kind, record->operation);
+                auto name     = g_tool_data->buffered_tracing_info.at(record->kind,
+                                                                      record->operation);
 
                 auto _stream_id = get_stream_id(record).handle;
                 if(_stream_id == 0)
@@ -1900,7 +2024,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 
                 if(get_use_timemory())
                 {
-                    auto _bundle = kernel_dispatch_bundle_t{ _name };
+                    auto _bundle = kernel_dispatch_bundle_t{ name };
 
                     _bundle.push(thread_id_sequent).start().stop();
                     _bundle.get([_beg_ns, _end_ns](tim::component::wall_clock* _wc) {
@@ -1955,7 +2079,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                             category::rocm_scratch_memory{}, track_name_events);
 
                         tracing::push_perfetto(category::rocm_scratch_memory{},
-                                               _name.data(), _track, _beg_ns,
+                                               name.data(), _track, _beg_ns,
                                                ::perfetto::Flow::ProcessScoped(_corr_id),
                                                add_perfetto_annotations);
 
@@ -1967,7 +2091,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                         const auto _track = tracing::get_perfetto_track(
                             category::rocm_hip_stream{}, _track_desc_stream, _stream_id);
 
-                        tracing::push_perfetto(category::rocm_hip_stream{}, _name.data(),
+                        tracing::push_perfetto(category::rocm_hip_stream{}, name.data(),
                                                _track, _beg_ns,
                                                ::perfetto::Flow::ProcessScoped(_corr_id),
                                                add_perfetto_annotations);
@@ -1990,10 +2114,10 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 auto        _end_ns       = record->end_timestamp;
                 auto        _dst_agent_id = record->dst_agent_id;
                 auto        _src_agent_id = record->src_agent_id;
-                const auto* _dst_agent    = tool_data->get_agent(_dst_agent_id);
-                const auto* _src_agent    = tool_data->get_agent(_src_agent_id);
-                auto        _name =
-                    tool_data->buffered_tracing_info.at(record->kind, record->operation);
+                const auto* dst_agent     = g_tool_data->get_agent(_dst_agent_id);
+                const auto* src_agent     = g_tool_data->get_agent(_src_agent_id);
+                auto        name = g_tool_data->buffered_tracing_info.at(record->kind,
+                                                                         record->operation);
 
                 std::uint64_t _stream_id = get_stream_id(record).handle;
                 if(_stream_id == 0)
@@ -2007,7 +2131,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     std::string track_name;
 
                     track_name = fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
-                                             _dst_agent->logical_node_id, thread_idx);
+                                             dst_agent->logical_node_id, thread_idx);
 
                     cache_category<category::rocm_memory_copy>();
                     cache_add_track(track_name.c_str(), record->thread_id);
@@ -2020,7 +2144,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     const auto& _tinfo = thread_info::get(record->thread_id, SystemTID);
                     auto        _tid   = _tinfo->index_data->sequent_value;
 
-                    auto _bundle = kernel_dispatch_bundle_t{ _name };
+                    auto _bundle = kernel_dispatch_bundle_t{ name };
 
                     _bundle.push(_tid).start().stop();
                     _bundle.get([_beg_ns, _end_ns](tim::component::wall_clock* _wc) {
@@ -2041,9 +2165,9 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                             tracing::add_perfetto_annotation(ctx, "stream_id",
                                                              _stream_id);
                             tracing::add_perfetto_annotation(ctx, "dst_agent",
-                                                             _dst_agent->logical_node_id);
+                                                             dst_agent->logical_node_id);
                             tracing::add_perfetto_annotation(ctx, "src_agent",
-                                                             _src_agent->logical_node_id);
+                                                             src_agent->logical_node_id);
                         }
                     };
 
@@ -2059,9 +2183,9 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 
                         const auto _track = tracing::get_perfetto_track(
                             category::rocm_memory_copy{}, _track_desc,
-                            _dst_agent->logical_node_id, record->thread_id);
+                            dst_agent->logical_node_id, record->thread_id);
 
-                        tracing::push_perfetto(category::rocm_memory_copy{}, _name.data(),
+                        tracing::push_perfetto(category::rocm_memory_copy{}, name.data(),
                                                _track, _beg_ns,
                                                ::perfetto::Flow::ProcessScoped(_stack_id),
                                                add_perfetto_annotations);
@@ -2074,7 +2198,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                         const auto _track = tracing::get_perfetto_track(
                             category::rocm_hip_stream{}, _track_desc_stream, _stream_id);
 
-                        tracing::push_perfetto(category::rocm_hip_stream{}, _name.data(),
+                        tracing::push_perfetto(category::rocm_hip_stream{}, name.data(),
                                                _track, _beg_ns,
                                                ::perfetto::Flow::ProcessScoped(_stack_id),
                                                add_perfetto_annotations);
@@ -2097,50 +2221,6 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     cache_add_thread_info(record->thread_id);
                     cache_memory_allocation(record, _stream_id);
                 }
-            }
-#endif
-#if(ROCPROFILER_VERSION >= 10202)
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
-            {
-                auto* record =
-                    static_cast<rocprofiler_buffer_tracing_kfd_page_fault_record_t*>(
-                        header->payload);
-                tool_kfd_page_fault_callback(tool_data, record);
-            }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE)
-            {
-                auto* record =
-                    static_cast<rocprofiler_buffer_tracing_kfd_page_migrate_record_t*>(
-                        header->payload);
-                tool_kfd_page_migrate_callback(tool_data, record);
-            }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
-            {
-                auto* record =
-                    static_cast<rocprofiler_buffer_tracing_kfd_queue_record_t*>(
-                        header->payload);
-                tool_kfd_queue_callback(tool_data, record);
-            }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE)
-            {
-                auto* record =
-                    static_cast<rocprofiler_buffer_tracing_kfd_event_queue_record_t*>(
-                        header->payload);
-                tool_kfd_event_queue_callback(tool_data, record);
-            }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU)
-            {
-                auto* record = static_cast<
-                    rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t*>(
-                    header->payload);
-                tool_kfd_event_unmap_from_gpu_callback(tool_data, record);
-            }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS)
-            {
-                auto* record = static_cast<
-                    rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t*>(
-                    header->payload);
-                tool_kfd_event_dropped_events_callback(tool_data, record);
             }
 #endif
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
@@ -2274,10 +2354,10 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
     {
         if(_agent_counter_storage->at(_agent_id).count(itr.first) == 0)
         {
-            const auto* _agent = tool_data->get_gpu_tool_agent(_agent_id);
-            const auto* _info  = tool_data->get_tool_counter_info(_agent_id, itr.first);
+            const auto* agent = g_tool_data->get_gpu_tool_agent(_agent_id);
+            const auto* info  = g_tool_data->get_tool_counter_info(_agent_id, itr.first);
 
-            if(!_agent)
+            if(!agent)
             {
                 LOG_CRITICAL("unable to find tool agent for agent (id={})",
                              _agent_id.handle);
@@ -2285,7 +2365,7 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
                     ::rocprofsys::state::process::Finalized);
                 ::std::abort();
             }
-            if(!_info)
+            if(!info)
             {
                 LOG_CRITICAL("unable to find counter info for counter (id={}) on "
                              "agent (id={})",
@@ -2295,7 +2375,7 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
                 ::std::abort();
             }
 
-            auto        _dev_id = static_cast<std::uint32_t>(_agent->device_id);
+            auto        _dev_id = static_cast<std::uint32_t>(agent->device_id);
             const auto& _agent_mgr_entry =
                 get_agent_manager_instance().get_agent_by_handle(_agent_id.handle);
             auto _dev_type_index =
@@ -2303,7 +2383,7 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
 
             _agent_counter_storage->at(_agent_id).emplace(
                 itr.first,
-                counter_storage{ tool_data, _dev_id, _dev_type_index, 0, _info->name });
+                counter_storage{ g_tool_data, _dev_id, _dev_type_index, 0, info->name });
         }
 
         auto _event = counter_event{ counter_dispatch_record{
@@ -2387,9 +2467,12 @@ stop_context(const client_data::context_id_vec_t& ctxs)
 void
 flush()
 {
-    if(!tool_data) return;
+    if(!g_tool_data)
+    {
+        return;
+    }
 
-    for(const auto& itr : tool_data->get_buffers())
+    for(const auto& itr : g_tool_data->get_buffers())
     {
         if(itr.handle > 0)
         {
@@ -2399,6 +2482,11 @@ flush()
                 ROCPROFILER_CALL(status);
             }
         }
+    }
+
+    if(g_domain_service)
+    {
+        g_domain_service->flush();
     }
 }
 
@@ -2469,6 +2557,15 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
 }
 #endif
 
+// True when tool_init must skip starting the main (primary/counter) contexts,
+// leaving them for the "rocm" subscriber's on_resume to start once the session
+// goes active.
+bool
+should_defer_main_contexts()
+{
+    return !g_session->is_active(control::scope::global);
+}
+
 int
 tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 {
@@ -2531,25 +2628,17 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     // MARKER_CORE_API is handled by roctx_client on control_ctx
     for(auto itr : {
-            ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
-            ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
-            ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
-            ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
-            ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
-            ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
+            // HSA_CORE_API/HSA_AMD_EXT_API/HSA_IMAGE_EXT_API/HSA_FINALIZE_EXT_API,
+            // HIP_RUNTIME_API/HIP_COMPILER_API, and ROCDECODE_API/ROCJPEG_API/
+            // ROCSHMEM_API/HIPFILE_API are configured via domain_service
+            // (domains::callback::hsa::k_core_api/k_amd_ext_api/k_image_ext_api/
+            // k_finalize_ext_api, domains::callback::hip::k_runtime_api/k_compiler_api,
+            // domains::callback::k_rocdecode_api/k_rocjpeg_api/k_rocshmem_api/
+            // k_hipfile_api) below, on their own context, to avoid double-registering
+            // these kinds on primary_ctx.
             ROCPROFILER_CALLBACK_TRACING_RCCL_API,
 #if(ROCPROFILER_VERSION >= 600)
             ROCPROFILER_CALLBACK_TRACING_OMPT,
-            ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,
-#endif
-#if(ROCPROFILER_VERSION >= 700)
-            ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,
-#endif
-#if(ROCPROFILER_VERSION >= 10304)
-            ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,
-#endif
-#if(ROCPROFILER_VERSION >= 10305)
-            ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,
 #endif
         })
     {
@@ -2591,7 +2680,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, g_tool_data,
             &_data->kernel_dispatch_buffer));
 
         ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
@@ -2604,7 +2693,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, g_tool_data,
             &_data->memory_copy_buffer));
 
         ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
@@ -2615,7 +2704,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, g_tool_data,
             &_data->scratch_memory_buffer));
 
         ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
@@ -2628,7 +2717,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
             _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, g_tool_data,
             &_data->memory_alloc_buffer));
 
         if(_data->memory_alloc_buffer.handle == 0UL)
@@ -2644,97 +2733,261 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
+    g_domain_service =
+        std::make_shared<domain_service<production_backend, external_dependencies>>();
+
+    std::vector<domain_selection> domain_selection_list;
+
 #if(ROCPROFILER_VERSION >= 10202)
-    // Initialize KFD event metadata
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0 ||
-       _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT))
     {
-        rocprofiler_sdk::kfd_event_metadata_initialize(tool_data);
+        domain_selection selection;
+        selection.name = "kfd_page_fault";
+        domain_selection_list.push_back(selection);
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE))
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_page_fault_buffer));
-
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT, nullptr, 0,
-            _data->kfd_page_fault_buffer));
+        domain_selection selection;
+        selection.name = "kfd_page_migrate";
+        domain_selection_list.push_back(selection);
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT))
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_page_migrate_buffer));
-
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE, nullptr, 0,
-            _data->kfd_page_migrate_buffer));
+        domain_selection selection;
+        selection.name = "kfd_event_page_fault";
+        domain_selection_list.push_back(selection);
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE))
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_queue_buffer));
-
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_QUEUE, nullptr, 0,
-            _data->kfd_queue_buffer));
+        domain_selection selection;
+        selection.name = "kfd_event_page_migrate";
+        domain_selection_list.push_back(selection);
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE))
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_event_queue_buffer));
-
-        // The only KFD_EVENT_QUEUE operation we want to process is RESTORE_RESCHEDULED.
-        // All others are captured within paired KFD_QUEUE operations
-        auto kfd_event_queue_ops = std::array<rocprofiler_tracing_operation_t, 1>{
-            ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED
-        };
-
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
-            kfd_event_queue_ops.data(), kfd_event_queue_ops.size(),
-            _data->kfd_event_queue_buffer));
+        domain_selection selection;
+        selection.name = "kfd_queue";
+        domain_selection_list.push_back(selection);
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE))
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_event_unmap_buffer));
+        domain_selection selection;
+        selection.name       = "kfd_event_queue";
+        selection.operations = { "ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED" };
 
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
-            nullptr, 0, _data->kfd_event_unmap_buffer));
+        domain_selection_list.push_back(selection);
     }
 
-    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS) > 0)
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU))
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(
-            _data->primary_ctx, buffer_size, watermark,
-            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-            &_data->kfd_event_dropped_buffer));
+        domain_selection selection;
+        selection.name = "kfd_event_unmap_from_gpu";
 
-        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
-            nullptr, 0, _data->kfd_event_dropped_buffer));
+        domain_selection_list.push_back(selection);
+    }
+
+    if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS))
+    {
+        domain_selection selection;
+        selection.name = "kfd_event_dropped_events";
+
+        domain_selection_list.push_back(selection);
     }
 #endif
+
+    // A std::nullopt tells domain_service::configure() to trace every operation of
+    // the domain, so only build an explicit name list when the resolved selection is
+    // narrower than the full operation set for the kind.
+    auto get_operation_names = [](sdk_backend_t::callback_tracing_kind_t kind)
+        -> std::optional<std::vector<std::string>> {
+        auto selected_operations = tracing_config_t::get_operations(kind);
+
+        std::size_t total_operations = 0;
+        for(const auto& entry : sdk_backend_t::get_callback_tracing_names())
+        {
+            if(static_cast<sdk_backend_t::callback_tracing_kind_t>(entry.value) == kind)
+            {
+                total_operations = std::ranges::size(entry.operations);
+                break;
+            }
+        }
+
+        if(selected_operations.size() == total_operations)
+        {
+            return std::nullopt;
+        }
+
+        std::vector<std::string> names;
+        names.reserve(selected_operations.size());
+        for(auto operation : selected_operations)
+        {
+            names.emplace_back(
+                sdk_backend_t::get_callback_tracing_names().at(kind, operation));
+        }
+        return names;
+    };
+
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API));
+
+        domain_selection selection;
+        selection.name = "hip_compiler_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API);
+        domain_selection_list.push_back(selection);
+    }
+
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API));
+
+        domain_selection selection;
+        selection.name = "hip_runtime_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API);
+        domain_selection_list.push_back(selection);
+    }
+
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API));
+
+        domain_selection selection;
+        selection.name = "hsa_core_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API);
+        domain_selection_list.push_back(selection);
+    }
+
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API));
+
+        domain_selection selection;
+        selection.name = "hsa_amd_ext_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API);
+        domain_selection_list.push_back(selection);
+    }
+
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API));
+
+        domain_selection selection;
+        selection.name = "hsa_image_ext_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API);
+        domain_selection_list.push_back(selection);
+    }
+
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API));
+
+        domain_selection selection;
+        selection.name = "hsa_finalize_ext_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API);
+        domain_selection_list.push_back(selection);
+    }
+
+#if(ROCPROFILER_VERSION >= 600)
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API));
+
+        domain_selection selection;
+        selection.name = "rocdecode_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API);
+        domain_selection_list.push_back(selection);
+    }
+#endif
+
+#if(ROCPROFILER_VERSION >= 700)
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API));
+
+        domain_selection selection;
+        selection.name = "rocjpeg_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API);
+        domain_selection_list.push_back(selection);
+    }
+#endif
+
+#if(ROCPROFILER_VERSION >= 10304)
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API));
+
+        domain_selection selection;
+        selection.name = "rocshmem_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API);
+        domain_selection_list.push_back(selection);
+    }
+#endif
+
+#if(ROCPROFILER_VERSION >= 10305)
+    if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API))
+    {
+        _data->backtrace_operations.emplace(
+            ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,
+            tracing_config_t::get_backtrace_operations(
+                ROCPROFILER_CALLBACK_TRACING_HIPFILE_API));
+
+        domain_selection selection;
+        selection.name = "hipfile_api";
+        selection.operations =
+            get_operation_names(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API);
+        domain_selection_list.push_back(selection);
+    }
+#endif
+
+    try
+    {
+        g_domain_service->configure(domain_selection_list);
+    } catch(const std::exception& e)
+    {
+        LOG_CRITICAL("domain_service::configure failed: {}", e.what());
+        throw;
+    }
 
     if(!_counter_events.empty())
     {
@@ -2767,7 +3020,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     if(!gpu_perf_counters_setting.empty() && !_data->gpu_agents.empty())
     {
         pmc::register_gpu_perf_counter_source(
-            get_agent_manager_instance().get_agents_by_type(agent_type::GPU));
+            get_agent_manager_instance().get_agents_by_type(agent_type::gpu));
     }
 #endif
 
@@ -2796,29 +3049,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         pmc::set_state(state::process::Active);
     }
 
-    // Setup roctx client (must happen within tool_init for rocprofiler-sdk context
-    // creation). Roctx client configures MARKER_CORE_API and MARKER_CONTROL_API
-    // on control_ctx. trace_control's pause/resume callbacks are routed through
-    // roctx_client (registered later in library.cpp).
-    auto roctx_client = get_roctx_client();
-    if(roctx_client)
-    {
-        roctx_client->configure_services(_data->get_control_context());
+    assert(g_session);
+    create_roctx_client();
 
-        const auto filtering_active =
-            roctx_client->get_controller()->region_filter_active();
-        if(!filtering_active)
-        {
-            start();
-        }
-        else
-        {
-            if(_data != nullptr)
-            {
-                start_context(_data->get_code_obj_context());
-                start_context(_data->get_control_context());
-            }
-        }
+    if(g_roctx_client) g_roctx_client->configure_services(_data->get_control_context());
+
+    if(should_defer_main_contexts())
+    {
+        start_context(_data->get_code_obj_context());
+        start_context(_data->get_control_context());
     }
     else
     {
@@ -2860,7 +3099,7 @@ tool_fini(void* callback_data)
     // deleting tool_data, which those callbacks may still be accessing.
     // rocprofiler_destroy_buffer returns BUFFER_BUSY if a flush is still
     // in progress, so retry until it succeeds or buffer is not found.
-    for(auto itr : tool_data->get_buffers())
+    for(auto itr : g_tool_data->get_buffers())
     {
         while(itr.handle > 0 &&
               rocprofiler_destroy_buffer(itr) == ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
@@ -2872,8 +3111,8 @@ tool_fini(void* callback_data)
     auto* _data        = as_client_data(callback_data);
     _data->client_id   = nullptr;
     _data->client_fini = nullptr;
-    delete tool_data;
-    tool_data = nullptr;
+    delete g_tool_data;
+    g_tool_data = nullptr;
 }
 
 void
@@ -2901,12 +3140,43 @@ flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp)
 
 }  // namespace
 
-std::shared_ptr<control::trace_control>
-get_trace_controller()
+void
+set_session(std::shared_ptr<control::session> sess)
 {
-    const auto roctx_client = get_roctx_client();
-    if(!roctx_client) return nullptr;
-    return roctx_client->get_controller();
+    g_session = std::move(sess);
+}
+
+void
+create_roctx_client()
+{
+    if(g_roctx_client || !g_session)
+    {
+        return;
+    }
+
+    const auto domains = rocprofsys::delimit(
+        config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
+            .value_or(std::string{}),
+        " ,;:\t\n");
+    const auto has_marker_domain =
+        (std::ranges::find(domains, "marker_api") != domains.end() ||
+         std::ranges::find(domains, "roctx") != domains.end());
+    const auto roctx_traced_regions = config::get_trace_region();
+    const auto has_trace_regions    = !roctx_traced_regions.empty();
+
+    if(!has_marker_domain && !has_trace_regions)
+    {
+        return;
+    }
+
+    const auto roctx_config = roctx_client_config{
+        .pause_resume_enabled   = has_marker_domain,
+        .use_perfetto           = config::get_use_perfetto(),
+        .use_timemory           = config::get_use_timemory(),
+        .perfetto_annotations   = config::get_perfetto_annotations(),
+        .selected_trace_regions = roctx_traced_regions,
+    };
+    g_roctx_client = std::make_shared<roctx_client<>>(g_session, roctx_config);
 }
 
 void
@@ -2923,16 +3193,12 @@ setup()
 void
 shutdown()
 {
-    auto roctx_client = get_roctx_client();
-    // Shutdown marker client (and trace_control) before rocprofiler-sdk finalization
-    if(roctx_client)
+    if(g_tool_data && g_tool_data->client_id && g_tool_data->client_fini)
     {
-        roctx_client->get_controller()->shutdown();
+        g_tool_data->client_fini(*g_tool_data->client_id);
     }
 
-    // shutdown
-    if(tool_data && tool_data->client_id && tool_data->client_fini)
-        tool_data->client_fini(*tool_data->client_id);
+    g_roctx_client.reset();
 }
 
 void
@@ -2950,17 +3216,23 @@ sample()
 void
 start()
 {
-    if(!tool_data) return;
+    if(!g_tool_data)
+    {
+        return;
+    }
 
-    start_context(tool_data->get_all_contexts());
+    start_context(g_tool_data->get_all_contexts());
 }
 
 void
 stop()
 {
-    if(!tool_data) return;
+    if(!g_tool_data)
+    {
+        return;
+    }
 
-    stop_context(tool_data->get_all_contexts());
+    stop_context(g_tool_data->get_all_contexts());
 }
 
 void
@@ -2968,15 +3240,21 @@ resume()
 {
     flush_counter_tracks_to_zero(0);
 
-    if(!tool_data) return;
-    start_context(tool_data->get_main_contexts());
+    if(!g_tool_data)
+    {
+        return;
+    }
+    start_context(g_tool_data->get_main_contexts());
 }
 
 void
 pause()
 {
-    if(!tool_data) return;
-    stop_context(tool_data->get_main_contexts());
+    if(!g_tool_data)
+    {
+        return;
+    }
+    stop_context(g_tool_data->get_main_contexts());
 
     flush_counter_tracks_to_zero(0);
 }
@@ -2984,16 +3262,19 @@ pause()
 std::vector<hardware_counter_info>
 get_rocm_events_info()
 {
-    if(!tool_data)
+    if(!g_tool_data)
     {
-        auto _tool_data_v = client_data{};
-        _tool_data_v.initialize_event_info();
-        return _tool_data_v.events_info;
+        auto tool_data_v = client_data{};
+        tool_data_v.initialize_event_info();
+        return tool_data_v.events_info;
     }
 
-    if(tool_data->events_info.empty()) tool_data->initialize_event_info();
+    if(g_tool_data->events_info.empty())
+    {
+        g_tool_data->initialize_event_info();
+    }
 
-    return tool_data->events_info;
+    return g_tool_data->events_info;
 }
 
 #if ROCPROFILER_VERSION >= 10200
@@ -3101,12 +3382,14 @@ sdk_tool_configure(std::uint32_t version, const char* runtime_version,
     // set the client name
     id->name = "rocprofsys";
 
-    if(!rocprofsys::rocprofiler_sdk::tool_data)
-        rocprofsys::rocprofiler_sdk::tool_data =
+    if(!rocprofsys::rocprofiler_sdk::g_tool_data)
+    {
+        rocprofsys::rocprofiler_sdk::g_tool_data =
             new rocprofsys::rocprofiler_sdk::client_data{};
+    }
 
     // store client info
-    rocprofsys::rocprofiler_sdk::tool_data->client_id = id;
+    rocprofsys::rocprofiler_sdk::g_tool_data->client_id = id;
 
     // compute major/minor/patch version info
     std::uint32_t major = version / 10000;
@@ -3149,7 +3432,7 @@ extern "C"
             sizeof(rocprofiler_tool_configure_result_t),
             &::rocprofsys::rocprofiler_sdk::tool_init,
             &::rocprofsys::rocprofiler_sdk::tool_fini,
-            rocprofsys::rocprofiler_sdk::tool_data
+            rocprofsys::rocprofiler_sdk::g_tool_data
         };
         return &cfg;
     }
@@ -3166,7 +3449,7 @@ extern "C"
             sizeof(rocprofiler_tool_configure_attach_result_t),
             &rocprofsys::rocprofiler_sdk::tool_attach_init,
             &rocprofsys::rocprofiler_sdk::tool_attach_fini,
-            rocprofsys::rocprofiler_sdk::tool_data
+            rocprofsys::rocprofiler_sdk::g_tool_data
         };
         return &cfg;
     }

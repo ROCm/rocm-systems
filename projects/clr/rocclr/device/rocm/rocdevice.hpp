@@ -835,6 +835,8 @@ class Device : public NullDevice {
   struct SdmaEngineAllocator {
     amd::Monitor lock_;  //!< Protects the allocation state
     std::unordered_map<VirtualGPU*, uint32_t> vgpu_to_engine_;  //!< VirtualGPU -> engine mask
+    //! Peer agent handle -> engines ROCr has reported as usable for P2P with that peer
+    std::unordered_map<uint64_t, uint32_t> peer_engine_mask_;
     std::atomic<uint32_t> next_rr_engine_{0};  //!< RR counter for sdma engine selection
     const Device& device_;  //!< Reference to parent device for accessing masks
 

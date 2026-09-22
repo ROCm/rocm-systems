@@ -38,14 +38,6 @@
 #define __HIP_DEVICE_COMPILE__ 1
 #endif
 
-#ifdef __GNUC__
-#define HIP_PUBLIC_API __attribute__((visibility("default")))
-#define HIP_INTERNAL_EXPORTED_API __attribute__((visibility("default")))
-#else
-#define HIP_PUBLIC_API
-#define HIP_INTERNAL_EXPORTED_API
-#endif
-
 #if __HIP_DEVICE_COMPILE__ == 0
 // 32-bit Atomics
 #define __HIP_ARCH_HAS_GLOBAL_INT32_ATOMICS__ (0)
@@ -79,6 +71,12 @@
 
 #if defined(__clang__)
 #pragma clang diagnostic pop
+#endif
+
+#define HIP_API_VERSION (HIP_VERSION_MAJOR * 100 + HIP_VERSION_MINOR)
+
+#ifndef HIP_FORCE_API_VERSION
+#  define HIP_FORCE_API_VERSION HIP_API_VERSION
 #endif
 
 #endif

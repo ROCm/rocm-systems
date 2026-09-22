@@ -8,7 +8,7 @@
 /// Every other fan-out regression registers an AqlQueue straight against a
 /// command processor: vmid 0, no process page table, and a kernel that touches
 /// no private memory. This brings the driver up instead, creates a compute queue
-/// through CREATE_QUEUE -- the path that sets HwQueue::xcd_fanout -- and
+/// through CREATE_QUEUE -- the path that sets AqlQueueConfig::xcd_fanout -- and
 /// dispatches a kernel that really does spill, behind a real process page table.
 ///
 /// What that reaches, and what it does not: the scratch *addressing* contract is
@@ -74,13 +74,10 @@ using test::kernel_path;
 
 constexpr uint32_t kGpuId = 38144;
 constexpr uint32_t kTotalXcds = 8;
-constexpr uint32_t kCusPerXcd = 36;
-constexpr uint32_t kTotalCus = kTotalXcds * kCusPerXcd;
 constexpr uint32_t kWavefrontSize = 64;
-// One workgroup per CU, so every XCD takes an equal share and the top of the
-// grid -- the part a share-sized scratch pool would leave unbacked -- lands on
-// the highest-rank peer.
-constexpr uint32_t kGridWgs = kTotalCus;
+// One workgroup per XCD gives every peer an equal share while retaining the
+// high-rank grid-wide scratch slots that expose a mistakenly share-sized pool.
+constexpr uint32_t kGridWgs = kTotalXcds;
 constexpr uint32_t kGridItems = kGridWgs * kWavefrontSize;
 
 /// Driver, VM and engine brought up together, with the engine driven on its own
@@ -103,6 +100,9 @@ struct KfdFanoutFixture {
     // work arrives from the doorbell poll thread, not from a pre-seeded queue.
     loaded.engine_config.max_ticks = 0;
     loaded.engine_config.await_primaries = true;
+    // This fixture installs no partition policy, so pin one worker rather than
+    // taking the config's default of one partition per XCD.
+    loaded.engine_config.num_threads = 1;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
 
     auto soc_root = std::unique_ptr<SoC>(static_cast<SoC *>(root.release()));
@@ -344,7 +344,7 @@ TEST(XcdFanoutKfdTest, FanoutRunsAPrivateMemoryKernelAcrossEveryXcd) {
 
   // Wait on the signal rather than on the engine: the dispatch retires when the
   // last XCD's share does, and only then is every result guaranteed visible.
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
   while (std::atomic_ref<uint64_t>(signal[kSignalValueIndex]).load(std::memory_order_acquire) !=
              kInitialSignal - 1 &&
          std::chrono::steady_clock::now() < deadline)

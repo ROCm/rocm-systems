@@ -37,6 +37,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -49,6 +50,10 @@ struct OperandPair32 {
   uint32_t lo;
   uint32_t hi;
 };
+
+/// Physical scalar-source width for a logical pair of 32-bit components.
+/// CDNA5 packed FP32 consumes one scalar word even though its operand is 64 bits.
+enum class ScalarPairMode { Preserve, Replicate32 };
 
 /// @brief Facade for instruction-visible register reads and writes.
 ///
@@ -138,9 +143,6 @@ class RegisterAccess {
   }
 
 public:
-  /// @brief Transform a merged destination dword using current architectural state.
-  using PostWriteTransform = uint32_t (*)(uint32_t, const Wavefront &);
-
   class OperandReadView {
   public:
     OperandReadView() = delete;
@@ -628,11 +630,11 @@ public:
     friend class RegisterAccess;
 
     OperandReadPair32View(const Operand &op, const Wavefront &wf, ConstVgprStoragePair64 storage,
-                          uint8_t byte_mask, bool denied)
+                          uint8_t byte_mask, bool denied, ScalarPairMode scalar_mode)
         : storage_(storage), byte_mask_(byte_mask) {
       if (!storage_.lo)
         scalar_fallback_.emplace(denied ? OperandPair32{}
-                                        : RegisterAccess(wf).read_lane_pair32(op, 0));
+                                        : RegisterAccess(wf).read_lane_pair32(op, 0, scalar_mode));
     }
 
     uint32_t scalar_fallback(bool high) const {
@@ -764,6 +766,33 @@ public:
       uint64_t lo = this->lane(relative_reg, lane);
       uint64_t hi = this->lane(relative_reg + 1, lane);
       return lo | (hi << 32);
+    }
+
+    /// @brief Snapshot dword registers into lane-major memory.
+    /// @details The region acquisition has already reported one plugin read per
+    /// register. This copies only selected lanes without repeating ownership
+    /// lookup and plugin dispatch for every individual lane. The destination
+    /// layout is @c destination[(lane*reg_count()+relative_reg)*sizeof(uint32_t)].
+    /// Bytes belonging to masked-off lanes are left untouched.
+    void copy_dwords_lane_major(std::span<uint8_t> destination, uint64_t lane_mask) const {
+      const size_t lane_stride = static_cast<size_t>(reg_count_) * sizeof(uint32_t);
+      const size_t required_size = static_cast<size_t>(wf_size_) * lane_stride;
+      if (destination.size() < required_size)
+        throw std::invalid_argument("VGPR snapshot destination is smaller than the wave region");
+      const uint64_t wave_lane_mask = wf_size_ >= 64 ? ~uint64_t{0} : (uint64_t{1} << wf_size_) - 1;
+      if (lane_mask & ~wave_lane_mask)
+        throw std::invalid_argument("VGPR snapshot lane mask exceeds the wave width");
+      for (uint32_t reg = 0; reg < reg_count_; ++reg) {
+        const auto values = lanes(reg);
+        uint64_t active_lanes = lane_mask;
+        while (active_lanes) {
+          const uint32_t lane = std::countr_zero(active_lanes);
+          active_lanes &= active_lanes - 1;
+          std::memcpy(destination.data() + static_cast<size_t>(lane) * lane_stride +
+                          static_cast<size_t>(reg) * sizeof(uint32_t),
+                      &values[lane], sizeof(uint32_t));
+        }
+      }
     }
 
   private:
@@ -983,7 +1012,11 @@ public:
   /// scalar sources are read as 32-bit values and splatted. Pair classification
   /// uses the same execution predicate as resolve_src_scalar64(), independently
   /// of the narrower analysis-liveness mapping in to_register_ref().
-  [[nodiscard]] OperandPair32 read_lane_pair32(const Operand &op, uint32_t lane) const {
+  /// Replicate32 instead reads one scalar word for instruction families whose
+  /// logical pair is formed by replication, including named scalar registers.
+  [[nodiscard]] OperandPair32
+  read_lane_pair32(const Operand &op, uint32_t lane,
+                   ScalarPairMode scalar_mode = ScalarPairMode::Preserve) const {
     if (const auto literal = op.literal64_value())
       return {static_cast<uint32_t>(*literal), static_cast<uint32_t>(*literal >> 32)};
 
@@ -995,7 +1028,8 @@ public:
     const Wavefront &wf = wavefront();
     const bool is_register_pair =
         op.size_bits() >= 64 &&
-        (op.simd_vgpr_base(wf).has_value() || is_src_scalar_register_pair(op.encoding_value()));
+        (op.simd_vgpr_base(wf).has_value() || (scalar_mode == ScalarPairMode::Preserve &&
+                                               is_src_scalar_register_pair(op.encoding_value())));
     if (is_register_pair) {
       const uint64_t pair = op.read_lane64(wf, lane);
       return {static_cast<uint32_t>(pair), static_cast<uint32_t>(pair >> 32)};
@@ -1047,11 +1081,10 @@ public:
   }
   /// @brief Write selected destination bytes in one VGPR lane.
   ///
-  /// `update_byte_mask` controls which stored bytes receive `value`.
-  /// `observed_byte_mask` reports the complete architectural write effect,
-  /// which may be wider when a transform uses the merged dword.
-  void write_lane_masked(const Operand &op, uint32_t lane, uint32_t value, uint8_t update_byte_mask,
-                         uint8_t observed_byte_mask, PostWriteTransform post_transform) const {
+  /// `byte_mask` selects both the stored bytes receiving `value` and the bytes
+  /// reported as architectural writes. Other bytes are preserved without a read notification.
+  void write_lane_masked(const Operand &op, uint32_t lane, uint32_t value,
+                         uint8_t byte_mask) const {
     Wavefront &wf = mutable_wavefront();
     auto physical_reg = op.simd_vgpr_base_mut(wf);
     if (!physical_reg)
@@ -1063,12 +1096,9 @@ public:
       throw std::logic_error("partial-byte operand write requires VGPR storage");
     if (!(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
       return;
-    mutable_cu().notify_vgpr_write(&wf, *physical_reg, uint64_t{1} << lane, observed_byte_mask);
-    const uint32_t bit_mask = byte_bit_mask(update_byte_mask);
-    uint32_t merged = (storage[lane] & ~bit_mask) | (value & bit_mask);
-    if (post_transform)
-      merged = post_transform(merged, wf);
-    storage[lane] = merged;
+    mutable_cu().notify_vgpr_write(&wf, *physical_reg, uint64_t{1} << lane, byte_mask);
+    const uint32_t bit_mask = byte_bit_mask(byte_mask);
+    storage[lane] = (storage[lane] & ~bit_mask) | (value & bit_mask);
   }
 
   void write_lane64(const Operand &op, uint32_t lane, uint64_t value) const {
@@ -1134,13 +1164,19 @@ public:
 
   [[nodiscard]] OperandReadPair32View read_operand_pair32(const Operand &op, uint64_t lane_mask,
                                                           uint8_t byte_mask = 0xF) const {
+    return read_operand_pair32(op, lane_mask, ScalarPairMode::Preserve, byte_mask);
+  }
+
+  [[nodiscard]] OperandReadPair32View read_operand_pair32(const Operand &op, uint64_t lane_mask,
+                                                          ScalarPairMode scalar_mode,
+                                                          uint8_t byte_mask = 0xF) const {
     const Wavefront &wf = wavefront();
     auto base = op.simd_vgpr_base(wf);
     const bool valid = !base || cu_->owns_vgpr_range(wf, *base, 2);
     ConstVgprStoragePair64 storage = valid ? op.simd_vgpr_storage64(wf) : ConstVgprStoragePair64{};
     if (storage.lo)
       op.simd_notify_read64(wf, lane_mask, byte_mask);
-    return OperandReadPair32View(op, wf, storage, byte_mask, base && !valid);
+    return OperandReadPair32View(op, wf, storage, byte_mask, base && !valid, scalar_mode);
   }
 
   [[nodiscard]] OperandWriteView

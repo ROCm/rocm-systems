@@ -123,7 +123,7 @@ struct Fixture {
   template <typename InputFn>
   std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint64_t exec, InputFn lane_input) {
     seed_inputs(exec, lane_input);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)

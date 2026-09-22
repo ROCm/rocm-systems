@@ -17,6 +17,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <ctime>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -175,6 +176,120 @@ public:
 
 private:
   Event timer_event_{this, EventType::TIMER_CALLBACK};
+};
+
+/// Injects a self-replenishing async stream from the first handler in a large
+/// same-tick batch. This models repeated host submissions arriving while
+/// already-scheduled CU quanta remain at that tick.
+class SameTickAsyncFairnessComponent : public Component {
+public:
+  SameTickAsyncFairnessComponent(std::string name, uint32_t batch_size, uint32_t async_count)
+      : Component(std::move(name)), batch_size_(batch_size), async_count_(async_count) {
+    inject_event_.set_handler(
+        [this](Tick, Message *) { engine()->schedule_event_now(&async_event_); });
+    batch_event_.set_handler([this](Tick, Message *) {
+      if (batch_events_processed_ == 0)
+        async_events_before_first_batch_event_ = async_events_processed_;
+      ++batch_events_processed_;
+    });
+    async_event_.set_handler([this](Tick tick, Message *) {
+      if (async_events_processed_ == 0) {
+        first_async_tick_ = tick;
+        batch_events_before_first_async_ = batch_events_processed_;
+      }
+      ++async_events_processed_;
+      if (async_events_processed_ < async_count_)
+        engine()->schedule_event_now(&async_event_);
+    });
+  }
+
+  void startup() override {
+    schedule_event(&inject_event_, 1);
+    for (uint32_t batch_index = 0; batch_index < batch_size_; ++batch_index)
+      schedule_event(&batch_event_, 1);
+  }
+
+  Tick first_async_tick() const { return first_async_tick_; }
+  uint32_t async_events_processed() const { return async_events_processed_; }
+  uint32_t batch_events_processed() const { return batch_events_processed_; }
+  uint32_t batch_events_before_first_async() const { return batch_events_before_first_async_; }
+  uint32_t async_events_before_first_batch_event() const {
+    return async_events_before_first_batch_event_;
+  }
+
+private:
+  uint32_t batch_size_ = 0;
+  uint32_t async_count_ = 0;
+  uint32_t async_events_processed_ = 0;
+  uint32_t batch_events_processed_ = 0;
+  uint32_t batch_events_before_first_async_ = 0;
+  uint32_t async_events_before_first_batch_event_ = 0;
+  Tick first_async_tick_ = TICK_MAX;
+  Event inject_event_{this, EventType::TIMER_CALLBACK};
+  Event batch_event_{this, EventType::TIMER_CALLBACK};
+  Event async_event_{this, EventType::TIMER_CALLBACK};
+};
+
+/// Models a level-triggered host poll that keeps requesting a retry while local
+/// device work is already scheduled for the following tick.
+class NextTickRetryFairnessComponent : public Component {
+public:
+  explicit NextTickRetryFairnessComponent(std::string name, uint32_t retry_count)
+      : Component(std::move(name)), retry_count_(retry_count) {
+    inject_event_.set_handler(
+        [this](Tick, Message *) { engine()->schedule_event_next_tick(&retry_event_); });
+    local_event_.set_handler([this](Tick tick, Message *) {
+      local_tick_ = tick;
+      retries_before_local_ = retries_processed_;
+    });
+    retry_event_.set_handler([this](Tick, Message *) {
+      ++retries_processed_;
+      if (retries_processed_ < retry_count_) {
+        engine()->schedule_event_next_tick(&retry_event_);
+      } else {
+        engine()->primary_release();
+      }
+    });
+  }
+
+  void startup() override {
+    engine()->register_as_primary();
+    schedule_event(&inject_event_, 1);
+    schedule_event(&local_event_, 2);
+  }
+
+  Tick local_tick() const { return local_tick_; }
+  uint32_t retries_processed() const { return retries_processed_; }
+  uint32_t retries_before_local() const { return retries_before_local_; }
+
+private:
+  uint32_t retry_count_ = 0;
+  uint32_t retries_processed_ = 0;
+  uint32_t retries_before_local_ = 0;
+  Tick local_tick_ = TICK_MAX;
+  Event inject_event_{this, EventType::TIMER_CALLBACK};
+  Event local_event_{this, EventType::TIMER_CALLBACK};
+  Event retry_event_{this, EventType::TIMER_CALLBACK};
+};
+
+/// Records the timestamp produced by a next-tick injection at the end of the
+/// representable simulation timeline.
+class NextTickSaturationComponent : public Component {
+public:
+  explicit NextTickSaturationComponent(std::string name) : Component(std::move(name)) {
+    inject_event_.set_handler(
+        [this](Tick, Message *) { engine()->schedule_event_next_tick(&observed_event_); });
+    observed_event_.set_handler([this](Tick tick, Message *) { observed_tick_ = tick; });
+  }
+
+  void startup() override { schedule_event(&inject_event_, TICK_MAX - 1); }
+
+  Tick observed_tick() const { return observed_tick_; }
+
+private:
+  Tick observed_tick_ = 0;
+  Event inject_event_{this, EventType::TIMER_CALLBACK};
+  Event observed_event_{this, EventType::TIMER_CALLBACK};
 };
 
 /// Component that counts initialize()/startup()/shutdown() calls. Used to verify
@@ -1049,6 +1164,148 @@ TEST(TerminationTest, RequestExitRacingShutdownIsSafe) {
   }
 }
 
+namespace {
+
+/// Waits for a peer partition by re-arming its own event every tick, the way the
+/// command processor re-checks a doorbell whose grid is still running on another
+/// XCD. It schedules nothing during startup: the engine has to come up fully
+/// quiescent so the first barrier publishes TICK_MAX, which is the state the
+/// stall has to survive.
+class PeerWaitComponent : public Component {
+public:
+  explicit PeerWaitComponent(std::string name) : Component(std::move(name)) {
+    in_ = add_port(std::make_unique<Port>("in", 0, this, PortDirection::IN, PortProtocol::UNTYPED));
+    out_ =
+        add_port(std::make_unique<Port>("out", 1, this, PortDirection::OUT, PortProtocol::UNTYPED));
+    in_->set_handler([this](Tick, Message *) { replied = true; });
+    recheck_.set_handler([this](Tick ts, Message *) {
+      ++rechecks;
+      if (replied) {
+        engine()->primary_release();
+        return;
+      }
+      if (!sent_) {
+        sent_ = true;
+        out_->send(make_test_msg(1));
+      }
+      // The reply can only be delivered by a later epoch's incoming drain, so a
+      // re-check that outlives the epoch it was armed in is the whole point.
+      schedule_event(&recheck_, ts + 1);
+    });
+  }
+
+  void startup() override { engine()->register_as_primary(); }
+
+  Port *in_port() { return in_; }
+  Port *out_port() { return out_; }
+  Event *recheck_event() { return &recheck_; }
+
+  bool replied = false;
+  uint64_t rechecks = 0;
+
+private:
+  bool sent_ = false;
+  Port *in_ = nullptr;
+  Port *out_ = nullptr;
+  Event recheck_{this, EventType::TIMER_CALLBACK};
+};
+
+} // namespace
+
+// Regression: a partition that re-arms its own event while waiting on a peer must
+// not be able to run the epoch loop by itself.
+//
+// An engine that comes up with nothing scheduled publishes TICK_MAX at its first
+// barrier. TICK_MAX is the absence of a horizon, not an infinite one, but the
+// epoch loop used to compare against it like any other bound -- so the first
+// partition to receive async work processed events, and everything those handlers
+// re-armed, without ever arriving at the next barrier. Its peers stayed parked in
+// that barrier, the reply this partition was waiting for was never drained, and
+// the run hung. Reproduces at any partition count; rocjitsu hit it on every
+// multi-XCD config whose partition count was not exactly the XCD count.
+TEST(TerminationTest, QuiescentEpochDoesNotStrandPeersAtTheBarrier) {
+  SimulationEngine engine({.num_threads = 2});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *waiter = static_cast<PeerWaitComponent *>(
+      root->add_child(std::make_unique<PeerWaitComponent>("waiter0")));
+  // target=2 so the responder replies to the message it receives instead of
+  // treating it as the last one; it is not a primary, so it never ends the run.
+  auto *responder = static_cast<PingPongComponent *>(root->add_child(
+      std::make_unique<PingPongComponent>("responder1", 2, false, /*register_primary=*/false)));
+  engine.topology().set_root(std::move(root));
+  engine.topology().add_link(waiter->out_port(), responder->in_port(), 1);
+  engine.topology().add_link(responder->out_port(), waiter->in_port(), 1);
+  engine.topology().partition_manual(2, partition_by_name_suffix);
+  ASSERT_EQ(waiter->partition_id(), 0u);
+  ASSERT_EQ(responder->partition_id(), 1u);
+  engine.create();
+
+  ExitStatus exit_status;
+  std::atomic<bool> finished{false};
+  std::thread runner([&]() {
+    exit_status = engine.run();
+    finished.store(true, std::memory_order_release);
+  });
+  ASSERT_TRUE(engine.wait_until_started());
+
+  // Let the engine settle into the quiescent state first. Nothing is scheduled,
+  // so the first barrier publishes TICK_MAX within microseconds of startup; the
+  // kick has to land after that, because an engine that never reaches a
+  // TICK_MAX barrier does not exercise this at all.
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  // Kick the waiter from a foreign thread, exactly as a doorbell write does.
+  engine.schedule_event_now(waiter->recheck_event());
+
+  // Bounded wait: a regression deadlocks the engine, and the test has to fail
+  // rather than hang the suite. request_exit() unwinds the workers either way.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (!finished.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  const bool finished_on_its_own = finished.load(std::memory_order_acquire);
+  if (!finished_on_its_own)
+    engine.request_exit("regression timeout");
+  runner.join();
+
+  EXPECT_TRUE(finished_on_its_own) << "engine did not terminate: the waiting partition never "
+                                      "reached the barrier, so its peer's reply was never drained";
+  EXPECT_EQ(exit_status.reason, ExitReason::COMPLETED);
+  EXPECT_TRUE(waiter->replied);
+  EXPECT_EQ(responder->recv_count, 1u);
+}
+
+// Regression: a quiescent multi-partition engine must idle, not spin.
+//
+// With no idle wait in the epoch loop, every partition of an idle engine burns a
+// host core going round the barrier. rocjitsu's own suite runs many emulators at
+// once under `ctest -j`, and those spinning partitions starved the guest process
+// that had to ring the next doorbell -- so an idle engine never became busy
+// again. Measured as CPU time, which is what starves a peer; wall time is not.
+TEST(TerminationTest, QuiescentEngineDoesNotSpinTheHost) {
+  SimulationEngine engine({.num_threads = 4});
+  auto root = std::make_unique<CompositeComponent>("root");
+  for (int i = 0; i < 4; ++i)
+    root->add_child(std::make_unique<PeerWaitComponent>("idle" + std::to_string(i)));
+  engine.topology().set_root(std::move(root));
+  engine.topology().partition_balanced(4);
+  engine.create();
+
+  std::thread runner([&]() { engine.run(); });
+  ASSERT_TRUE(engine.wait_until_started());
+
+  const auto cpu_before = std::clock();
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  const auto cpu_used =
+      static_cast<double>(std::clock() - cpu_before) / static_cast<double>(CLOCKS_PER_SEC);
+
+  engine.request_exit("test stop");
+  runner.join();
+
+  // Four spinning partitions burn ~0.8s of CPU over this window; four idle ones
+  // burn milliseconds. The threshold is one core's worth, well clear of both.
+  EXPECT_LT(cpu_used, 0.2) << "idle engine consumed " << cpu_used << "s of CPU in 0.2s";
+}
+
 TEST(TerminationTest, StepModeConsistency) {
   SimulationEngine engine({.num_threads = 1});
   auto root = std::make_unique<CompositeComponent>("root");
@@ -1200,6 +1457,87 @@ TEST(AsyncCausalityTest, ScheduleEventNowProducesReasonableTimestamp) {
   EXPECT_GE(injected_tick.load(), before);
 }
 
+TEST(AsyncCausalityTest, SustainedSameTickAsyncAndExistingBatchMakeBoundedProgress) {
+  constexpr uint32_t kBatchSize = 1024;
+  constexpr uint32_t kAsyncCount = 32;
+  SimulationEngine engine({.num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *component = static_cast<SameTickAsyncFairnessComponent *>(
+      root->add_child(std::make_unique<SameTickAsyncFairnessComponent>("same-tick-fairness",
+                                                                       kBatchSize, kAsyncCount)));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  ExitStatus exit = engine.run();
+
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_EQ(component->async_events_processed(), kAsyncCount);
+  EXPECT_EQ(component->batch_events_processed(), kBatchSize);
+  EXPECT_EQ(component->first_async_tick(), 1u)
+      << "schedule_event_now moved simulation time backward";
+  EXPECT_EQ(component->batch_events_before_first_async(), 0u)
+      << "an async event injected by the first handler waited behind the whole same-tick batch";
+  EXPECT_LE(component->async_events_before_first_batch_event(),
+            EventQueue::kMaxConsecutiveAsyncEvents)
+      << "a self-replenishing async stream starved pre-existing same-tick local work";
+}
+
+TEST(AsyncCausalityTest, StepUsesSameBoundedAsyncArbitration) {
+  constexpr uint32_t kBatchSize = 32;
+  constexpr uint32_t kAsyncCount = EventQueue::kMaxConsecutiveAsyncEvents + 1;
+  SimulationEngine engine({.num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *component = static_cast<SameTickAsyncFairnessComponent *>(root->add_child(
+      std::make_unique<SameTickAsyncFairnessComponent>("step-fairness", kBatchSize, kAsyncCount)));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  ASSERT_TRUE(engine.step());
+
+  EXPECT_EQ(component->async_events_processed(), kAsyncCount);
+  EXPECT_EQ(component->batch_events_processed(), kBatchSize);
+  EXPECT_EQ(component->batch_events_before_first_async(), 0u);
+  EXPECT_LE(component->async_events_before_first_batch_event(),
+            EventQueue::kMaxConsecutiveAsyncEvents);
+}
+
+TEST(AsyncCausalityTest, NextTickRetryDoesNotStarveScheduledDeviceWork) {
+  constexpr uint32_t kRetryCount = 32;
+  for (uint32_t num_threads : {1u, 2u}) {
+    SCOPED_TRACE(::testing::Message() << "num_threads=" << num_threads);
+    SimulationEngine engine({.num_threads = num_threads});
+    auto root = std::make_unique<CompositeComponent>("root");
+    auto *component = static_cast<NextTickRetryFairnessComponent *>(root->add_child(
+        std::make_unique<NextTickRetryFairnessComponent>("next-tick-retry", kRetryCount)));
+    engine.topology().set_root(std::move(root));
+    if (num_threads > 1)
+      engine.topology().partition_manual(num_threads, [](Component *) { return PartitionID{0}; });
+    engine.create();
+
+    ExitStatus exit = engine.run();
+
+    EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+    EXPECT_EQ(component->retries_processed(), kRetryCount);
+    EXPECT_EQ(component->local_tick(), 2u);
+    EXPECT_LE(component->retries_before_local(), EventQueue::kMaxConsecutiveAsyncEvents)
+        << "a level-triggered retry stream starved device work at the following tick";
+  }
+}
+
+TEST(AsyncCausalityTest, NextTickTimestampSaturatesAtTickMax) {
+  SimulationEngine engine({.num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *component = static_cast<NextTickSaturationComponent *>(
+      root->add_child(std::make_unique<NextTickSaturationComponent>("next-tick-saturation")));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  ExitStatus exit = engine.run();
+
+  EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
+  EXPECT_EQ(component->observed_tick(), TICK_MAX);
+}
+
 // ============================================================================
 // Area 7: Stress / Integration Tests
 // ============================================================================
@@ -1291,14 +1629,11 @@ TEST(StressTest, AsyncInjectionDuringActiveSimulation) {
 }
 
 // ============================================================================
-// Cache VMID-tagging invariants
+// Cache storage, LRU replacement, maintenance, and VMID invariants
 // ============================================================================
 //
-// The memory hierarchy tags every line by (vmid, addr) so two processes that
-// alias the same guest VA do not share a cached line. These tests exercise that
-// invariant directly on the header-only Cache: distinct data per VMID at the
-// same address, eviction reporting the evicted line's owner VMID, and per-VMID
-// invalidation.
+// Exercise storage lifetime, replacement order, maintenance behavior, and VMID isolation
+// directly on the header-only Cache.
 
 namespace {
 // 64B lines, 4 sets, 2-way. Small associativity makes eviction easy to force.
@@ -1318,7 +1653,190 @@ uint32_t read_line_word(TestCache &cache, uint64_t addr, uint32_t vmid) {
   cache.read_line(addr, reinterpret_cast<uint8_t *>(&word), 0, sizeof(word), vmid);
   return word;
 }
+
+template <uint32_t Ways> void check_lru_way_indices() {
+  LRUPolicy<2, Ways> policy;
+  for (uint32_t way = 0; way < Ways; ++way) {
+    EXPECT_EQ(policy.victim(0), way);
+    policy.access(0, way);
+    EXPECT_EQ(policy.victim(1), 0u);
+  }
+  // Copy a non-default order so a fresh policy cannot pass as a copied one.
+  policy.access(0, 0);
+  LRUPolicy<2, Ways> copied = policy;
+  for (uint32_t way = 0; way < Ways; ++way) {
+    const uint32_t victim = (way + 1) % Ways;
+    EXPECT_EQ(copied.victim(0), victim);
+    copied.access(0, victim);
+    EXPECT_EQ(policy.victim(0), Ways > 1 ? 1u : 0u);
+    EXPECT_EQ(policy.victim(1), 0u);
+    EXPECT_EQ(copied.victim(1), 0u);
+  }
+}
 } // namespace
+
+TEST(CacheLruTest, WayIndicesCoverByteBoundary) {
+  check_lru_way_indices<1>();
+  check_lru_way_indices<16>();
+  check_lru_way_indices<256>();
+  check_lru_way_indices<257>();
+}
+
+TEST(CacheStorageTest, InitialBytesAreZeroAndInvalidationRetainsData) {
+  TestCache cache;
+  for (uint32_t set = 0; set < 4; ++set) {
+    for (uint32_t way = 0; way < 2; ++way) {
+      const uint64_t addr = (set + way * 4) * TestCache::LINE_SIZE;
+      CacheTag evicted;
+      evicted.valid = true;
+      TestCache::Allocation allocation = cache.allocate_with_data(addr, /*vmid=*/0, &evicted);
+      EXPECT_FALSE(evicted.valid);
+      ASSERT_NE(allocation.data, nullptr);
+      for (uint32_t i = 0; i < TestCache::LINE_SIZE; ++i)
+        EXPECT_EQ(allocation.data[i], 0);
+      std::fill_n(allocation.data, TestCache::LINE_SIZE, 0xA5);
+    }
+  }
+  cache.invalidate_all();
+  TestCache invalid_copy(cache);
+  for (auto *retained : {&cache, &invalid_copy}) {
+    TestCache::Allocation allocation = retained->allocate_with_data(0);
+    for (uint32_t i = 0; i < TestCache::LINE_SIZE; ++i)
+      EXPECT_EQ(allocation.data[i], 0xA5);
+  }
+}
+
+TEST(CacheStorageTest, CopyIsIndependentAndMoveRetainsContents) {
+  TestCache original;
+  fill_line_word(original, 0x4000, 7, 0x12345678);
+  TestCache copied(original);
+  EXPECT_EQ(read_line_word(copied, 0x4000, 7), 0x12345678u);
+  const uint32_t replacement = 0x87654321;
+  copied.write_line(0x4000, reinterpret_cast<const uint8_t *>(&replacement), 0, sizeof(replacement),
+                    7);
+  EXPECT_EQ(read_line_word(original, 0x4000, 7), 0x12345678u);
+
+  TestCache assigned;
+  auto *assigned_bytes = assigned.allocate_with_data(0x4000, 7).data;
+  assigned = copied;
+  EXPECT_EQ(read_line_word(assigned, 0x4000, 7), replacement);
+  EXPECT_EQ(assigned.line_data_for_read(0x4000, 7), assigned_bytes);
+  TestCache moved(std::move(assigned));
+  EXPECT_EQ(read_line_word(moved, 0x4000, 7), replacement);
+  TestCache move_assigned;
+  move_assigned = std::move(moved);
+  EXPECT_EQ(read_line_word(move_assigned, 0x4000, 7), replacement);
+  // Assignment must also restore a moved-from cache to usable storage.
+  assigned = original;
+  EXPECT_EQ(read_line_word(assigned, 0x4000, 7), 0x12345678u);
+}
+
+TEST(CacheStorageTest, PartialLineTracksValidBytes) {
+  TestCache cache;
+  constexpr uint64_t kAddr = 0x5000;
+  constexpr uint32_t kOffset = 61;
+  constexpr std::array<uint8_t, 3> kBytes = {0x12, 0x34, 0x56};
+
+  CacheTag *tag = cache.allocate(kAddr, /*vmid=*/7);
+  TestCache::clear_valid_bytes(*tag);
+  EXPECT_FALSE(TestCache::bytes_valid(*tag, kOffset, kBytes.size()));
+
+  cache.write_line(kAddr, kBytes.data(), kOffset, kBytes.size(), /*vmid=*/7);
+  EXPECT_TRUE(TestCache::bytes_valid(*tag, kOffset, kBytes.size()));
+  EXPECT_FALSE(TestCache::bytes_valid(*tag, kOffset - 1, kBytes.size() + 1));
+
+  std::array<uint8_t, kBytes.size()> observed{};
+  cache.read_line(kAddr, observed.data(), kOffset, observed.size(), /*vmid=*/7);
+  EXPECT_EQ(observed, kBytes);
+}
+
+TEST(CacheMaintenanceTest, FullInvalidationClearsRetainedMetadataAfterRefill) {
+  TestCache cache;
+  for (uint32_t round = 0; round < 4; ++round) {
+    const uint64_t addr = round * TestCache::LINE_SIZE;
+    auto *tag = cache.allocate(addr, round + 1);
+    tag->dirty = true;
+    tag->coherence = CoherenceState::MODIFIED;
+    tag->coherence_epoch = 17;
+
+    cache.invalidate_all();
+    EXPECT_FALSE(cache.lookup(addr, nullptr, round + 1));
+    EXPECT_FALSE(tag->valid);
+    EXPECT_FALSE(tag->dirty);
+    EXPECT_EQ(tag->coherence, CoherenceState::INVALID);
+    EXPECT_EQ(tag->coherence_epoch, 0u);
+    cache.invalidate_all();
+  }
+}
+
+TEST(CacheMaintenanceTest, DirtyWalkPreservesOrderAcrossReplacementAndInvalidation) {
+  TestCache cache;
+  constexpr uint64_t kLineSize = TestCache::LINE_SIZE;
+  auto fill_dirty = [&](uint64_t addr, uint32_t vmid) {
+    fill_line_word(cache, addr, vmid, vmid);
+    CacheTag *tag = nullptr;
+    ASSERT_TRUE(cache.lookup(addr, &tag, vmid));
+    tag->dirty = true;
+  };
+  // Set three is visited after set one regardless of allocation order.
+  fill_dirty(3 * kLineSize, 3);
+  fill_dirty(kLineSize, 1);
+  fill_dirty(5 * kLineSize, 5);
+  // Replace set one's LRU way without allocating into an invalid way.
+  fill_dirty(9 * kLineSize, 9);
+
+  auto dirty_addresses = [&] {
+    std::vector<uint64_t> addresses;
+    cache.for_each_dirty([&](CacheTag &tag, uint64_t addr, uint8_t *data) {
+      addresses.push_back(addr);
+      uint32_t word = 0;
+      std::memcpy(&word, data, sizeof(word));
+      EXPECT_EQ(tag.vmid, word);
+    });
+    return addresses;
+  };
+  EXPECT_EQ(dirty_addresses(),
+            (std::vector<uint64_t>{9 * kLineSize, 5 * kLineSize, 3 * kLineSize}));
+  cache.invalidate(5 * kLineSize, 5);
+  EXPECT_EQ(dirty_addresses(), (std::vector<uint64_t>{9 * kLineSize, 3 * kLineSize}));
+  cache.invalidate_all();
+  EXPECT_TRUE(dirty_addresses().empty());
+  fill_dirty(kLineSize, 11);
+  EXPECT_EQ(dirty_addresses(), (std::vector<uint64_t>{kLineSize}));
+}
+
+TEST(CacheMaintenanceTest, CopiesAndMovesRetainDirtyAndInvalidationState) {
+  TestCache original;
+  auto allocation = original.allocate_with_data(2 * TestCache::LINE_SIZE, 7);
+  allocation.data[0] = 42;
+  allocation.tag->dirty = true;
+  TestCache copied(original);
+  TestCache assigned;
+  assigned.allocate(0)->dirty = true;
+  assigned = original;
+  TestCache moved(std::move(copied));
+  original.invalidate_all();
+
+  for (auto *cache : {&assigned, &moved}) {
+    uint32_t count = 0;
+    cache->for_each_dirty([&](CacheTag &tag, uint64_t addr, uint8_t *data) {
+      ++count;
+      EXPECT_EQ(addr, 2u * TestCache::LINE_SIZE);
+      EXPECT_EQ(tag.vmid, 7u);
+      EXPECT_EQ(data[0], 42);
+    });
+    EXPECT_EQ(count, 1u);
+    cache->invalidate_all();
+    EXPECT_FALSE(cache->lookup(2 * TestCache::LINE_SIZE, nullptr, 7));
+    cache->for_each_dirty([](CacheTag &, uint64_t, uint8_t *) { ADD_FAILURE(); });
+  }
+}
+
+// The memory hierarchy tags every line by (vmid, addr) so two processes that
+// alias the same guest VA do not share a cached line. These tests exercise that
+// invariant directly on the header-only Cache: distinct data per VMID at the
+// same address, eviction reporting the evicted line's owner VMID, and per-VMID
+// invalidation.
 
 TEST(CacheVmidTest, SameAddressUnderTwoVmidsStoresDistinctData) {
   TestCache cache;
