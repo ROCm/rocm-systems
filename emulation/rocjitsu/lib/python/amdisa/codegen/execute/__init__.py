@@ -293,6 +293,7 @@ def _register_handlers() -> None:
         ),
         dtype=c.dtype,
         is_vop3=c.is_vop3,
+        has_abs=c.has_abs,
         fp8_format_select=(
             'inst_.clamp'
             if c.cls == 'vector_cvt_pk'

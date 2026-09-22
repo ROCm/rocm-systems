@@ -11,7 +11,11 @@ import re
 import pytest
 
 from amdisa.codegen.execute.sema_lower import _INLINE_UNARY_OPS
-from amdisa.codegen.execute.simd_codegen import SIMD_VOP1_UNARY, simd_probe_line
+from amdisa.codegen.execute.simd_codegen import (
+    SIMD_VOP1_UNARY,
+    local_coverage_probe,
+    simd_probe_line,
+)
 from amdisa.codegen.execute.vector_alu import gen_vector_unary
 from amdisa.codegen.execute.vector_special import (
     _TRIG_PREOP_CHUNK_BITS,
@@ -564,3 +568,36 @@ def test_true16_special_vop3_simd_routes_use_true16_glue():
     div_fixup = simd_probe_line('v_div_fixup_f16_vop3')
     assert 'if (!wf.fp16_ovfl())' not in div_fixup
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in div_fixup
+
+
+@pytest.mark.parametrize(
+    'name', ['v_cvt_pkrtz_f16_f32_vop3', 'v_cvt_pk_rtz_f16_f32_vop3']
+)
+def test_packed_rtz_simd_requires_unmodified_sources(name):
+    probes = [simd_probe_line(name)]
+    local = local_coverage_probe(name)
+    if name == 'v_cvt_pkrtz_f16_f32_vop3':
+        assert local is not None
+        probes.append(local)
+    else:
+        assert local is None
+    for probe in probes:
+        assert probe.startswith('  if (!(inst.inst_.abs | inst.inst_.neg)) {')
+        assert 'f32_to_f16_rtz_simd' in probe
+    assert 'inst_.abs' not in simd_probe_line(name.replace('_vop3', '_vop2'))
+
+
+@pytest.mark.parametrize('has_abs', [False, True])
+def test_packed_rtz_vop3_modifiers_precede_conversion(has_abs):
+    cpp = gen_vector_cvt_pk(
+        ['vdst'],
+        ['src0', 'src1'],
+        'vector_cvt_pkrtz_f16_f32',
+        None,
+        is_vop3=True,
+        has_abs=has_abs,
+    )
+    assert ('std::fabs' in cpp) == has_abs
+    for source in (0, 1):
+        assert f'if (inst_.neg & (1u << {source})) s{source} = -s{source};' in cpp
+        assert cpp.index(f's{source} = -s{source}') < cpp.index('util::f32_to_f16_rtz')

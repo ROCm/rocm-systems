@@ -271,4 +271,110 @@ TEST_P(Vop3ConversionModifierTest, NearestRoundsTiesUpWithoutRoundingAdjacentInp
   }
 }
 
+TEST_P(Vop3ConversionModifierTest, PackedRtzPreservesIndependentSourceModifiers) {
+  struct Case {
+    uint32_t input;
+    uint16_t packed;
+  };
+  // Explicit RTZ results include discarded mantissa bits, signed zero,
+  // a half subnormal, and finite overflow. The conversion ignores MODE rounding.
+  constexpr Case cases[] = {{0xbf803fff, 0xbc01}, {0x40490fdb, 0x4248}, {0x80000000, 0x8000},
+                            {0x477fffff, 0x7bff}, {0xb3ffffff, 0x8001}, {0x3fffffff, 0x3fff},
+                            {0xc0200000, 0xc100}, {0x3f000000, 0x3800}};
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("packed_rtz_memory");
+    amdgpu::L2Cache l2("packed_rtz_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = gfx9() ? 102 : 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("packed_rtz", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+    ASSERT_NE(wf, nullptr);
+    const auto vb = wf->vgpr_alloc().base;
+    for (uint32_t abs_mask = 0; abs_mask < 4; ++abs_mask) {
+      for (uint32_t neg_mask = 0; neg_mask < 4; ++neg_mask) {
+        // GFX9 uses opcode 662; later encodings use opcode 303.
+        const std::array<uint32_t, 2> words{(gfx9() ? 0xd0000002u : 0xd4000002u) |
+                                                ((gfx9() ? 662u : 303u) << 16) | (abs_mask << 8),
+                                            256u | (257u << 9) | (neg_mask << 29)};
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        for (uint32_t mode : {0u, 0xfu}) {
+          wf->set_mode_raw(mode);
+          for (uint64_t exec : {wf->wf_size() == 64 ? ~0ull : 0xffffffffull, 0x55ull}) {
+            SCOPED_TRACE(testing::Message()
+                         << "scalar=" << force_scalar << " abs_mask=" << abs_mask
+                         << " neg_mask=" << neg_mask << " mode=" << mode << " exec=" << exec);
+            wf->set_exec(exec);
+            for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+              cu->write_vgpr(vb, lane, cases[lane % std::size(cases)].input);
+              cu->write_vgpr(vb + 1, lane, cases[(lane + 3) % std::size(cases)].input);
+              cu->write_vgpr(vb + 2, lane, 0xdeadbeef);
+            }
+            ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+            for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+              uint32_t expected = 0;
+              for (uint32_t src = 0; src < 2; ++src) {
+                uint32_t half = cases[(lane + 3 * src) % std::size(cases)].packed;
+                if (abs_mask & (1u << src))
+                  half &= 0x7fff;
+                if (neg_mask & (1u << src))
+                  half ^= 0x8000;
+                expected |= half << (16 * src);
+              }
+              EXPECT_EQ(cu->read_vgpr(vb + 2, lane), exec & (1ull << lane) ? expected : 0xdeadbeefu)
+                  << "lane=" << lane;
+            }
+          }
+        }
+      }
+    }
+    wf->halt();
+  }
+}
+
+TEST_P(Vop3ConversionModifierTest, PackedRtzDppPermutesBeforeSourceModifiers) {
+  if (gfx9() || GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2)
+    GTEST_SKIP() << "This DPP8 encoding is available on RDNA3/3.5/4 and CDNA5.";
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("packed_rtz_dpp_memory");
+    amdgpu::L2Cache l2("packed_rtz_dpp_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("packed_rtz_dpp", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+    ASSERT_NE(wf, nullptr);
+    const auto vb = wf->vgpr_alloc().base;
+    // LLVM gfx11_asm_vop3_dpp8_from_vop2.s encodes v5, |v1|, -v2
+    // with source-0 lanes reversed within each group of eight.
+    const uint32_t words[] = {0xd52f0105, 0x400204e9, 0x05397701};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+    ASSERT_NE(inst, nullptr);
+    wf->set_exec(wf->wf_size() == 64 ? ~0ull : 0xffffffffull);
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      cu->write_vgpr(vb + 1, lane, std::bit_cast<uint32_t>(-(1.0f + (lane % 8) / 8.0f)));
+      cu->write_vgpr(vb + 2, lane, std::bit_cast<uint32_t>(2.0f + (lane % 8) / 4.0f));
+    }
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      const uint32_t lo = 0x3c00 + (7 - lane % 8) * 128;
+      const uint32_t hi = 0xc000 + (lane % 8) * 128;
+      EXPECT_EQ(cu->read_vgpr(vb + 5, lane), lo | (hi << 16))
+          << "lane=" << lane << " scalar=" << force_scalar;
+    }
+    wf->halt();
+  }
+}
+
 } // namespace

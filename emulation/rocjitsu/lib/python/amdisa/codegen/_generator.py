@@ -7348,6 +7348,7 @@ class CodeGenerator:
                 opsel=opsel,
                 dtype=dtype,
                 is_vop3=is_vop3,
+                has_abs=has_abs,
                 fp8_format_select=fp8_format_select,
                 arch_name=self.isa_spec.arch_name,
             )

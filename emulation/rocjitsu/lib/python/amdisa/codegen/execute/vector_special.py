@@ -1390,6 +1390,7 @@ def gen_vector_cvt_pk(
     opsel: str = '0u',
     dtype: str | None = None,
     is_vop3: bool = False,
+    has_abs: bool = False,
     fp8_format_select: str | None = None,
     arch_name: str = '',
 ) -> str:
@@ -1468,6 +1469,9 @@ def gen_vector_cvt_pk(
         L.append(
             f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
         )
+        if is_vop3:
+            L.extend(vop3_src_mod('s0', 0, has_abs))
+            L.extend(vop3_src_mod('s1', 1, has_abs))
         L.append(f'    uint32_t lo = util::f32_to_f16_rtz(s0);')
         L.append(f'    uint32_t hi = util::f32_to_f16_rtz(s1);')
         L.append(

@@ -9874,17 +9874,27 @@ inline void execute_v_cvt_pk_rtz_f16_f32_vop2([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_pk_rtz_f16_f32_vop3([[maybe_unused]] Inst &inst,
                                               [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) {
-    auto lo = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(a));
-    auto hi = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(b));
-    return lo | (hi << 16);
-  });
+  if (!(inst.inst_.abs | inst.inst_.neg)) {
+    ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) {
+      auto lo = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(a));
+      auto hi = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(b));
+      return lo | (hi << 16);
+    });
+  }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
     float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
+    if (inst.inst_.abs & (1u << 0))
+      s0 = std::fabs(s0);
+    if (inst.inst_.neg & (1u << 0))
+      s0 = -s0;
+    if (inst.inst_.abs & (1u << 1))
+      s1 = std::fabs(s1);
+    if (inst.inst_.neg & (1u << 1))
+      s1 = -s1;
     uint32_t lo = util::f32_to_f16_rtz(s0);
     uint32_t hi = util::f32_to_f16_rtz(s1);
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::PK_F16>(inst, wf, inst.vdst, lane,
@@ -10033,17 +10043,27 @@ inline void execute_v_cvt_pkrtz_f16_f32_vop2([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_pkrtz_f16_f32_vop3([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) {
-    auto lo = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(a));
-    auto hi = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(b));
-    return lo | (hi << 16);
-  });
+  if (!(inst.inst_.abs | inst.inst_.neg)) {
+    ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) {
+      auto lo = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(a));
+      auto hi = util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(b));
+      return lo | (hi << 16);
+    });
+  }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
     float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
+    if (inst.inst_.abs & (1u << 0))
+      s0 = std::fabs(s0);
+    if (inst.inst_.neg & (1u << 0))
+      s0 = -s0;
+    if (inst.inst_.abs & (1u << 1))
+      s1 = std::fabs(s1);
+    if (inst.inst_.neg & (1u << 1))
+      s1 = -s1;
     uint32_t lo = util::f32_to_f16_rtz(s0);
     uint32_t hi = util::f32_to_f16_rtz(s1);
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::PK_F16>(inst, wf, inst.vdst, lane,

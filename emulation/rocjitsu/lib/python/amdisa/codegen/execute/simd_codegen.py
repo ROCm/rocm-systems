@@ -243,8 +243,8 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     ),
     # v_cvt_pkrtz_f16_f32 (both spellings): pack two f32 -> two f16 with
     # round-toward-zero narrowing; proven bit-identical to the scalar helper.
-    # Inputs arrive as raw u32 lanes, bit_cast to f32. The VOP3 twins carry no
-    # modifiers (verified) so they auto-route to VOP3_BINARY_INT with this functor.
+    # Inputs arrive as raw u32 lanes, bit_cast to f32. VOP3 source modifiers
+    # require a scalar fallback before using this raw-word functor.
     'v_cvt_pkrtz_f16_f32_vop2': (
         'uint32_t',
         '[](auto a, auto b) {'
@@ -2542,6 +2542,14 @@ def _indent_probe(probe: str) -> str:
     return '\n'.join(('  ' + line) if line else line for line in probe.splitlines())
 
 
+_PACKED_RTZ_VOP3 = ('v_cvt_pkrtz_f16_f32_vop3', 'v_cvt_pk_rtz_f16_f32_vop3')
+
+
+def _unmodified_vop3_src_probe(probe: str) -> str:
+    body = _indent_probe(probe)
+    return f'  if (!(inst.inst_.abs | inst.inst_.neg)) {{\n{body}\n  }}'
+
+
 def _mode_aware_f16_result_simd_probe(default_probe: str, ovfl_probe: str) -> str:
     default_body = _indent_probe(default_probe)
     ovfl_body = _indent_probe(ovfl_probe)
@@ -2927,6 +2935,12 @@ def simd_probe_line(
         spec2v3 = SIMD_VOP2_BINARY.get(base + '_vop2')
         if spec2v3 is not None:
             cpp_t, cpp_op = spec2v3
+            if template_name in _PACKED_RTZ_VOP3:
+                # Packed floating conversion uses raw-word glue, which cannot
+                # apply the source modifiers handled by its scalar body.
+                return _unmodified_vop3_src_probe(
+                    f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});'
+                )
             if cpp_t == 'float32_t':
                 return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP({cpp_t}, {cpp_op});'
             # f16 float binaries (v_add/sub/subrev/mul/max/min/ldexp_f16) are
@@ -3181,13 +3195,13 @@ def local_coverage_probe(
     ):
         if 'bf16' in template_name:
             convert = 'util::pack_bf16_simd({x}, wf.fp16_ovfl())'
-        elif 'pkrtz' in template_name:
+        elif template_name == 'v_cvt_pkrtz_f16_f32_vop3':
             convert = (
                 'util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>({x}))'
             )
         else:
             convert = 'util::f32_to_f16_mode_simd(std::bit_cast<util::native<float>>({x}), wf.fp16_ovfl())'
-        return call(
+        probe = call(
             2,
             False,
             0,
@@ -3197,6 +3211,9 @@ def local_coverage_probe(
             + convert.format(x='b')
             + ' << 16); }',
         )
+        if template_name == 'v_cvt_pkrtz_f16_f32_vop3':
+            return _unmodified_vop3_src_probe(probe)
+        return probe
     if template_name == 'v_cvt_f32_bf16_vop1':
         return call(
             1,

@@ -1006,7 +1006,10 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
           std::array<float, 4> source{}, destination{}, constant{};
           for (uint32_t c = 0; c < 4; ++c) {
             source[c] = std::clamp(std::bit_cast<float>(components[c]), 0.0f, 1.0f);
-            destination[c] = previous[c] / 255.0f;
+            // UNORM destinations round to twelve significant bits before blending.
+            const uint32_t normalized = std::bit_cast<uint32_t>(previous[c] / 255.0f);
+            destination[c] =
+                std::bit_cast<float>((normalized + 0x7ffu + ((normalized >> 12) & 1)) & ~0xfffu);
             constant[c] = std::clamp(std::bit_cast<float>(context_[0x105 + c]), 0.0f, 1.0f);
             // Color blending truncates constants to twelve significant bits.
             constant[c] = std::bit_cast<float>(std::bit_cast<uint32_t>(constant[c]) & ~0xfffu);

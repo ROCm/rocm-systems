@@ -1280,6 +1280,8 @@ TEST_P(GraphicsExportTest, ColorBlendingPreservesMasksAndUsesSeparateAlpha) {
     bool reject = false;
     bool constant_boundary = false;
     uint32_t number_format = 0, export_format = 9;
+    uint32_t initial = 0xff40bf80;
+    std::array<uint32_t, 4> exported{0x3f000000, 0x3e800000, 0x3e800000, 0x3f000000};
   };
   constexpr uint32_t enabled = 1u << 30, separate = 1u << 29;
   const Case cases[] = {
@@ -1305,7 +1307,20 @@ TEST_P(GraphicsExportTest, ColorBlendingPreservesMasksAndUsesSeparateAlpha) {
       {.blend = enabled | separate | 11 | (17 << 16),
        .mask = 15,
        .expected = 0x9f6a3500,
-       .constant_boundary = true},
+       .constant_boundary = true,
+       .exported = {0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000}},
+      // Physical RDNA3/RDNA4 witnesses distinguish twelve-bit destination
+      // normalization from both full FP32 and FP16 precision.
+      {.blend = enabled | separate | 4 | (5 << 8) | (1 << 16) | (1 << 24),
+       .mask = 15,
+       .expected = 0xc6c999a8,
+       .initial = 0x10c60035,
+       .exported = {0x3f57c000, 0x3f57c000, 0x3f4ac000, 0x3f36a000}},
+      {.blend = enabled | separate | 4 | (5 << 8) | (1 << 16) | (1 << 24),
+       .mask = 15,
+       .expected = 0x8d5c155a,
+       .initial = 0x20760005,
+       .exported = {0x3f4bc000, 0x3e40c000, 0x3e60e000, 0x3edac000}},
   };
   for (const auto &test : cases) {
     SCOPED_TRACE(test.blend);
@@ -1334,7 +1349,7 @@ TEST_P(GraphicsExportTest, ColorBlendingPreservesMasksAndUsesSeparateAlpha) {
         std::bit_cast<uint32_t>(2.0f);
     context[0x91] = gfx12 ? 0 : 1 | (1 << 16);
     context[0x30e] = context[0x30f] = 0xffffffff;
-    memory_.write32(0x100000, 0xff40bf80);
+    memory_.write32(0x100000, test.initial);
 
     auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
     for (uint32_t i = 0; i < 3; ++i)
@@ -1346,7 +1361,7 @@ TEST_P(GraphicsExportTest, ColorBlendingPreservesMasksAndUsesSeparateAlpha) {
                       {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
     if (test.reject) {
       EXPECT_THROW(draw->advance(*access_), std::runtime_error);
-      EXPECT_EQ(memory_.read32(0x100000), 0xff40bf80);
+      EXPECT_EQ(memory_.read32(0x100000), test.initial);
       continue;
     }
     ASSERT_TRUE(draw->advance(*access_));
@@ -1354,11 +1369,7 @@ TEST_P(GraphicsExportTest, ColorBlendingPreservesMasksAndUsesSeparateAlpha) {
     wave_->set_graphics_stage(draw);
     draw->initialize(*wave_, 0, 0);
     for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
-      draw->export_lane(
-          *wave_, lane, 0, 15,
-          test.constant_boundary
-              ? std::array<uint32_t, 4>{0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000}
-              : std::array<uint32_t, 4>{0x3f000000, 0x3e800000, 0x3e800000, 0x3f000000});
+      draw->export_lane(*wave_, lane, 0, 15, test.exported);
     EXPECT_FALSE(draw->advance(*access_));
     EXPECT_EQ(memory_.read32(0x100000), test.expected);
   }

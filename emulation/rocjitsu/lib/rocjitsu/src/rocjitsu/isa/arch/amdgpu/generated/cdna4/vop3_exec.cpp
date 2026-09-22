@@ -7568,17 +7568,27 @@ void VCvtPknormU16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 
 void VCvtPkrtzF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<2, false, false, 0>(inst, wf, [&](auto a, auto b) {
-        return util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(a)) |
-               (util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(b)) << 16);
-      }))
-    return;
+  if (!(inst.inst_.abs | inst.inst_.neg)) {
+    if (amdgpu::try_execute_words_simd<2, false, false, 0>(inst, wf, [&](auto a, auto b) {
+          return util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(a)) |
+                 (util::f32_to_f16_rtz_simd(std::bit_cast<util::native<float>>(b)) << 16);
+        }))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
     float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
+    if (inst_.abs & (1u << 0))
+      s0 = std::fabs(s0);
+    if (inst_.neg & (1u << 0))
+      s0 = -s0;
+    if (inst_.abs & (1u << 1))
+      s1 = std::fabs(s1);
+    if (inst_.neg & (1u << 1))
+      s1 = -s1;
     uint32_t lo = util::f32_to_f16_rtz(s0);
     uint32_t hi = util::f32_to_f16_rtz(s1);
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::PK_F16>(*this, wf, vdst, lane,
