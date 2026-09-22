@@ -129,7 +129,7 @@ def _probe_src(call):
         """)
 
 
-def _compile(src, *, poison, offload):
+def _compile(src, *, poison, offload, extra_args=()):
     """Return (returncode, combined stdout+stderr)."""
     cmd = [CXX, "-x", "hip", "-nogpulib", "-fsyntax-only"]
     if offload == "host":
@@ -138,6 +138,7 @@ def _compile(src, *, poison, offload):
         cmd += ["--offload-device-only", "--offload-arch=gfx942"]
     else:
         raise ValueError(offload)
+    cmd += list(extra_args)
     if poison:
         cmd += [f"--include={POISON_H}"]
     with tempfile.NamedTemporaryFile("w", suffix=".cpp", delete=False) as f:
@@ -197,6 +198,40 @@ class ToolchainTest(unittest.TestCase):
 
 @unittest.skipUnless(CXX, "amdclang++/hipcc not found (set ROCM_PATH or HIPCXX)")
 class PoisonHipAtomicsTest(unittest.TestCase):
+    def _anvil_template_src(self):
+        # Matches rocshmem atomic.hpp: the poisoned identifier sits in a
+        # template body and is only spelled when the template is instantiated
+        # after the force-included poison header.
+        return textwrap.dedent("""\
+            template <typename T>
+            __device__ T external_load(T* p) {
+              return __hip_atomic_load(
+                  p, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+            }
+            __global__ void k(unsigned int *p, unsigned int *out) {
+              *out = external_load(p);
+            }
+            """)
+
+    def test_opted_in_gin_sdma_tu_skips_poison(self):
+        rc, out = _compile(
+            self._anvil_template_src(),
+            poison=True,
+            offload="device",
+            extra_args=("-DNCCL_GIN_ANVIL_SDMA_ENABLE=1",),
+        )
+        self.assertEqual(rc, 0, msg=out)
+
+    def test_poison_still_rejects_template_without_opt_in(self):
+        rc, out = _compile(
+            self._anvil_template_src(),
+            poison=True,
+            offload="device",
+        )
+        self.assertNotEqual(rc, 0, msg=out)
+        self.assertIn("poisoned identifier", out, msg=out)
+        self.assertIn("__hip_atomic_load", out, msg=out)
+
     def test_hip_atomic_load_rejected_on_device(self):
         rc, out = _compile(
             _probe_src(_call_expr("__hip_atomic_load")),
