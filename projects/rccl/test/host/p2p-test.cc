@@ -3212,15 +3212,19 @@ TEST_F(P2pCanConnectMicrotest, IntermediateRankNoMemcpy_ReportsEligible)
 TEST_F(P2pCanConnectMicrotest, FirstPeerCrossHost_ShortCircuitsBeforeDeviceCheck)
 {
     // "My" host hash differs from info1's -> the first half of the host-mismatch
-    // test fires and the function returns before the device check.
+    // test fires and the function returns before the device check. The peers
+    // resolve to distinct devices that cannot access each other, so had the
+    // short-circuit not fired the device arm would report ineligible (0); the
+    // eligible verdict below can only come from the cross-host return.
     myInfo_[0].hostHash = 0x1234;
     info1_.hostHash = 0xABCD;
     info2_.hostHash = 0xABCD;
     ScopedHook topo(g_ncclTopoCheckP2p, TopoDirectP2p());
+    ScopedHook busid(g_hipDeviceGetPCIBusId, DeviceDistinctBusIds());
     ScopedHook canAccess(g_hipDeviceCanAccessPeer,
-                         [](int*, int, int) -> hipError_t {
-                             ADD_FAILURE() << "device access queried for a cross-host peer";
-                             return hipErrorInvalidValue;
+                         [](int* ok, int, int) -> hipError_t {
+                             if (ok) *ok = 0;  // peers cannot access each other
+                             return hipSuccess;
                          });
     EXPECT_EQ(Call(), 1);
 }
@@ -3228,24 +3232,41 @@ TEST_F(P2pCanConnectMicrotest, FirstPeerCrossHost_ShortCircuitsBeforeDeviceCheck
 TEST_F(P2pCanConnectMicrotest, CrossHostPeers_ShortCircuitsBeforeDeviceCheck)
 {
     // Peer on a different host: p2pCanConnect returns as soon as it sees the
-    // host mismatch, before any device-access query.
+    // host mismatch, before any device-access query. As above, the peers map to
+    // distinct devices that refuse peer access, so the eligible verdict is only
+    // reachable through the cross-host short-circuit.
     info2_.hostHash = 0xBEEF;
     ScopedHook topo(g_ncclTopoCheckP2p, TopoDirectP2p());
+    ScopedHook busid(g_hipDeviceGetPCIBusId, DeviceDistinctBusIds());
     ScopedHook canAccess(g_hipDeviceCanAccessPeer,
-                         [](int*, int, int) -> hipError_t {
-                             ADD_FAILURE() << "device access queried for a cross-host peer";
-                             return hipErrorInvalidValue;
+                         [](int* ok, int, int) -> hipError_t {
+                             if (ok) *ok = 0;  // peers cannot access each other
+                             return hipSuccess;
                          });
     EXPECT_EQ(Call(), 1);
 }
 
 TEST_F(P2pCanConnectMicrotest, BusIdUnresolved_ReportsEligibleOnHip)
 {
-    // hipDeviceGetPCIBusId fails -> busIdToCudaDev yields -1. On HIP the
-    // invisible-device arm returns success with the topo verdict intact.
+    // info1's bus id resolves to no device (cudaDev1 == -1) while info2 resolves
+    // to dev 0, so the two indices differ. On HIP the invisible-device arm
+    // returns eligible before the device check; the refusing peer-access hook
+    // below would drive the verdict to 0 were that arm ever bypassed, so the
+    // eligible verdict pins the invisible-device return specifically.
     ScopedHook topo(g_ncclTopoCheckP2p, TopoDirectP2p());
-    // Default g_hipDeviceGetPCIBusId returns error (g_hipDeviceGetPCIBusIdResult
-    // is hipErrorInvalidValue), so both busIds resolve to -1.
+    ScopedHook busid(g_hipDeviceGetPCIBusId,
+                     [](char* buf, int len, int device) -> hipError_t {
+                         if (device != 0) return hipErrorInvalidValue;  // only dev 0 resolvable
+                         if (buf && len > 0) BusStrForDev(device, buf, len);
+                         return hipSuccess;
+                     });
+    info1_.busId = BusIdForDev(5);   // no device reports this bus -> -1
+    info2_.busId = BusIdForDev(0);   // resolves to dev 0
+    ScopedHook canAccess(g_hipDeviceCanAccessPeer,
+                         [](int* ok, int, int) -> hipError_t {
+                             if (ok) *ok = 0;  // peers cannot access each other
+                             return hipSuccess;
+                         });
     EXPECT_EQ(Call(), 1);
 }
 
@@ -3426,6 +3447,13 @@ protected:
         peer_.hostHash = kHost;
         peer_.pidHash  = kPid;
 
+        // Non-zero LL/LL128 pool sizes so the write arm's SIMPLE buffer lands a
+        // fixed offset past the mapped region rather than coinciding with the
+        // read arm's buffer; without this the two arms are pointer-identical
+        // (every buffSizes[p] == 0) and a read/write mix-up is unobservable.
+        comm_.buffSizes[NCCL_PROTO_LL]    = 0x1000;
+        comm_.buffSizes[NCCL_PROTO_LL128] = 0x2000;
+
         backing_.assign(sizeof(ncclRecvMem) + 4096, 0);
     }
 
@@ -3502,6 +3530,12 @@ protected:
 
 TEST_F(P2pSetupMicrotest, SendSetup_SameProcessPeer_SelectsDirectAndFillsConnectInfo)
 {
+    // A non-zero rank so the connect-info rank assertion below distinguishes
+    // "wrote myInfo->rank" from a left-zeroed field. p2pSendSetup maps
+    // comm->peerInfo[info->rank], so slot 1 must also be "me" for the
+    // same-process direct path.
+    myInfo_.rank = 1;
+    peers_[1] = myInfo_;
     InstallTopo(/*read=*/0);
     InstallXgmiLink();
     InstallHappyProxy();
@@ -3586,6 +3620,11 @@ TEST_F(P2pSetupMicrotest, SendSetup_CrossProcessCuMemPeer_SelectsCumem)
 
 TEST_F(P2pSetupMicrotest, RecvSetup_SameProcessPeer_SelectsDirectAndFillsConnectInfo)
 {
+    // A non-zero rank so the connect-info rank assertion below distinguishes
+    // "wrote myInfo->rank" from a left-zeroed field. p2pRecvSetup maps
+    // comm->peerInfo[info->rank], so slot 1 must also be "me".
+    myInfo_.rank = 1;
+    peers_[1] = myInfo_;
     InstallTopo(/*read=*/0);
     InstallHappyProxy();
     // p2pRecvSetup has no non-XGMI HDP block, so no link hook is needed.
@@ -3659,10 +3698,14 @@ TEST_F(P2pSetupMicrotest, SendSetup_DirectDisableParam_SelectsIpcForSameProcessP
 
 TEST_F(P2pSetupMicrotest, SendSetup_IntermediateHop_SelectsIntermediateAndRoutesConnectRank)
 {
-    // The topology reports an intermediate rank, so setup selects the indirect
-    // P2P_INTERMEDIATE type and writes the intermediate rank (0 == me here)
-    // into the connect info rather than my own rank.
-    InstallTopoIntermediate(/*inter=*/0);
+    // The topology reports an intermediate rank distinct from both my own rank
+    // (0) and a zeroed field, so setup selects the indirect P2P_INTERMEDIATE
+    // type and the connect-info rank assertion can only hold if setup wrote the
+    // intermediate rank rather than my rank (or nothing).
+    // Slot 1 (the intermediate rank) must be "me" so setup's p2pMap of
+    // comm->peerInfo[info->rank] takes the same-process direct path.
+    peers_[1] = myInfo_;
+    InstallTopoIntermediate(/*inter=*/1);
     InstallXgmiLink();
     InstallHappyProxy();
 
@@ -3673,7 +3716,7 @@ TEST_F(P2pSetupMicrotest, SendSetup_IntermediateHop_SelectsIntermediateAndRoutes
     auto* res = static_cast<p2pResources*>(send_.transportResources);
     ASSERT_NE(res, nullptr);
     EXPECT_EQ(res->type, P2P_INTERMEDIATE);
-    EXPECT_EQ(AsConnectInfo(connect_info_)->rank, 0);
+    EXPECT_EQ(AsConnectInfo(connect_info_)->rank, 1);
 
     p2pTransport.send.free(&comm_, &send_);
 }
@@ -3734,7 +3777,10 @@ TEST_F(P2pSetupMicrotest, RecvSetup_CollNetScatterConn_ForcesWriteDespiteReadTop
 
 TEST_F(P2pSetupMicrotest, RecvSetup_IntermediateHop_SelectsIntermediateAndRoutesConnectRank)
 {
-    InstallTopoIntermediate(/*inter=*/0);
+    // Intermediate rank distinct from my own rank (0) and a zeroed field.
+    // Slot 1 must be "me" so setup's p2pMap takes the same-process path.
+    peers_[1] = myInfo_;
+    InstallTopoIntermediate(/*inter=*/1);
     InstallHappyProxy();
 
     ncclConnector recv{};
@@ -3745,7 +3791,7 @@ TEST_F(P2pSetupMicrotest, RecvSetup_IntermediateHop_SelectsIntermediateAndRoutes
     auto* res = static_cast<p2pResources*>(recv.transportResources);
     ASSERT_NE(res, nullptr);
     EXPECT_EQ(res->type, P2P_INTERMEDIATE);
-    EXPECT_EQ(AsConnectInfo(connect_info_)->rank, 0);
+    EXPECT_EQ(AsConnectInfo(connect_info_)->rank, 1);
 
     p2pTransport.recv.free(&comm_, &recv);
 }
@@ -5582,8 +5628,16 @@ TEST_F(P2pRegisterFamilyMicrotest, Deregister_ProxyMessageFails_Propagates)
 //   - the p2pIpcExpInfo array grows to hold every segment (the realloc arm);
 //   - each retained allocation handle is released again -- on the success
 //     path (final release loop) and on the cleanup path when the segment
-//     count exceeds NCCL_P2P_MAX_PHYSICAL_SEGMENTS, so retains and releases
-//     always balance.
+//     count exceeds NCCL_P2P_MAX_PHYSICAL_SEGMENTS.
+//
+// Coverage gap: the retain/release balance asserted below only holds while the
+// releases themselves succeed. If a cuMemRelease in the success loop
+// (p2p.cc:1081) fails, CUCHECKGOTO jumps to fail:, whose loop re-releases
+// segments 0..numSegments-1 -- double-releasing every handle the success loop
+// already released (the exported fds are guarded by an expFds[segment] = -1
+// reset, but the handles have no equivalent). SegmentRangeEmulator's release
+// hook never fails, so no test reaches that arm; the missing guard is a
+// production follow-up, not a property these tests pin.
 //
 // These drive the sameProcess + non-POSIX handle type combination so the
 // export / batch-fd-query sub-arms stay out of scope: each segment simply
