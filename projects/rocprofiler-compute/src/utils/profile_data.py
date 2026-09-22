@@ -36,6 +36,13 @@ def read_rocpd_pmc_csv(workload_dir: Path, verbose: int) -> pd.DataFrame:
             )
             continue
 
+        if frame.empty:
+            console_error(
+                "profiling",
+                f"No counter data in {result_file}. Profiling data could be corrupt.",
+            )
+            continue
+
         if not {"Counter_Name", "Counter_Value"}.issubset(frame.columns):
             console_error(
                 "analysis",

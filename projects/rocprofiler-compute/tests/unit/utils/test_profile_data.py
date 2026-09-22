@@ -38,3 +38,22 @@ def test_export_does_not_become_reader_input(tmp_path) -> None:
     export_pmc_data(tmp_path, pd.DataFrame({"Kernel_Name": ["kernel_a"]}))
 
     assert read_rocpd_pmc_csv(tmp_path, verbose=0).empty
+
+
+def test_reader_rejects_header_only_result_file(tmp_path, monkeypatch) -> None:
+    """A header-only result artifact must not be accepted as profiling data."""
+    result_file = tmp_path / "results_pmc_perf_0.csv.gz"
+    common.write_gzip_csv(result_file, "Counter_Name,Counter_Value\n")
+    errors: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "utils.profile_data.console_error",
+        lambda category, message: errors.append((category, message)),
+    )
+
+    assert read_rocpd_pmc_csv(tmp_path, verbose=0).empty
+    assert errors == [
+        (
+            "profiling",
+            f"No counter data in {result_file}. Profiling data could be corrupt.",
+        )
+    ]
