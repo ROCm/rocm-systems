@@ -24,6 +24,10 @@ namespace {
  * contract we assert rather than one the compiler checks for us, so the loader
  * refuses any reader whose reported ABI is not the one these declarations were
  * written against.
+ *
+ * The reader spells these types it_*; they are xtp_* here so nothing in RCCL
+ * carries an unexplained prefix. Only the names differ: the layouts are
+ * asserted below, and the symbol names passed to dlsym are unchanged.
  ************************************************************************/
 constexpr int kAbiMajor = 0;
 constexpr int kAbiMinor = 1;
@@ -33,10 +37,10 @@ constexpr int kAbiMinor = 1;
 // the only line to touch if the reader ships under a different name.
 constexpr const char* kReaderLibrary = "libintellitune.so";
 
-enum it_tag { IT_INT, IT_BOOL, IT_DOUBLE, IT_STR, IT_RANGE };
+enum xtp_tag { XTP_INT, XTP_BOOL, XTP_DOUBLE, XTP_STR, XTP_RANGE };
 
-struct it_value {
-  it_tag tag;
+struct xtp_value {
+  xtp_tag tag;
   union {
     int64_t i;
     bool b;
@@ -49,15 +53,15 @@ struct it_value {
   };
 };
 
-struct it_kv {
+struct xtp_kv {
   const char* key;
-  it_value value;
+  xtp_value value;
 };
 
 // Must match the reader's declaration exactly: filled here, read there, and
 // no compiler sees both. The static_asserts below turn a drifted copy into a
 // build failure instead of wrong fields at runtime.
-struct it_descriptor {
+struct xtp_descriptor {
   const char* arch;
   int32_t n_nodes;
   int32_t ranks_per_node;
@@ -69,43 +73,43 @@ struct it_descriptor {
   const char* hash;
 };
 
-static_assert(offsetof(it_descriptor, arch) == 0, "XTP descriptor: arch moved");
-static_assert(offsetof(it_descriptor, n_nodes) == 8, "XTP descriptor: n_nodes moved");
-static_assert(offsetof(it_descriptor, ranks_per_node) == 12, "XTP descriptor: ranks_per_node moved");
-static_assert(offsetof(it_descriptor, n_ranks) == 16, "XTP descriptor: n_ranks moved");
-static_assert(offsetof(it_descriptor, n_domains) == 20, "XTP descriptor: n_domains moved");
-static_assert(offsetof(it_descriptor, ranks_per_domain) == 24, "XTP descriptor: ranks_per_domain moved");
-static_assert(offsetof(it_descriptor, nic_type) == 32, "XTP descriptor: nic_type moved");
-static_assert(offsetof(it_descriptor, nic_count) == 40, "XTP descriptor: nic_count moved");
-static_assert(offsetof(it_descriptor, hash) == 48, "XTP descriptor: hash moved");
-static_assert(sizeof(it_descriptor) == 56, "XTP descriptor: size changed");
+static_assert(offsetof(xtp_descriptor, arch) == 0, "XTP descriptor: arch moved");
+static_assert(offsetof(xtp_descriptor, n_nodes) == 8, "XTP descriptor: n_nodes moved");
+static_assert(offsetof(xtp_descriptor, ranks_per_node) == 12, "XTP descriptor: ranks_per_node moved");
+static_assert(offsetof(xtp_descriptor, n_ranks) == 16, "XTP descriptor: n_ranks moved");
+static_assert(offsetof(xtp_descriptor, n_domains) == 20, "XTP descriptor: n_domains moved");
+static_assert(offsetof(xtp_descriptor, ranks_per_domain) == 24, "XTP descriptor: ranks_per_domain moved");
+static_assert(offsetof(xtp_descriptor, nic_type) == 32, "XTP descriptor: nic_type moved");
+static_assert(offsetof(xtp_descriptor, nic_count) == 40, "XTP descriptor: nic_count moved");
+static_assert(offsetof(xtp_descriptor, hash) == 48, "XTP descriptor: hash moved");
+static_assert(sizeof(xtp_descriptor) == 56, "XTP descriptor: size changed");
 
-struct it_ctx;
-struct it_comm;
-typedef bool (*it_resolver)(void* user, void* launch, const char* key, it_value* out);
+struct xtp_ctx;
+struct xtp_comm;
+typedef bool (*xtp_resolver)(void* user, void* launch, const char* key, xtp_value* out);
 
-constexpr int kItOk = 0;
+constexpr int kXtpOk = 0;
 
 struct XtpApi {
-  it_ctx* (*open)(const char* bundlePath, char** errReason);
-  void (*close)(it_ctx* ctx);
-  it_comm* (*bindComm)(it_ctx* ctx, const it_descriptor* desc, it_resolver resolver, void* user);
-  void (*unbindComm)(it_comm* comm);
-  int (*classA)(it_comm* comm, const it_kv** out, size_t* nOut);
+  xtp_ctx* (*open)(const char* bundlePath, char** errReason);
+  void (*close)(xtp_ctx* ctx);
+  xtp_comm* (*bindComm)(xtp_ctx* ctx, const xtp_descriptor* desc, xtp_resolver resolver, void* user);
+  void (*unbindComm)(xtp_comm* comm);
+  int (*classA)(xtp_comm* comm, const xtp_kv** out, size_t* nOut);
   const char* (*version)();
 };
 
 XtpApi api;
-it_ctx* itCtx = nullptr;
-std::mutex itLock;
+xtp_ctx* xtpCtx = nullptr;
+std::mutex xtpLock;
 
 // Kept with the descriptor it was built from, which is not stable across a
 // comm's init: see commHandle().
 struct Binding {
-  it_descriptor desc;
-  it_comm* comm; // null when no profile matched that descriptor
+  xtp_descriptor desc;
+  xtp_comm* comm; // null when no profile matched that descriptor
 };
-std::unordered_map<const ncclComm*, Binding> itComms;
+std::unordered_map<const ncclComm*, Binding> xtpComms;
 
 // Parse "ABI <major>.<minor>" out of the library's version string. Its exact
 // wording is not contractual, so a string we cannot read is treated the same
@@ -158,8 +162,8 @@ void loadOnce() {
     }
 
     char* err = nullptr;
-    itCtx = api.open(bundle, &err);
-    if (itCtx == nullptr) {
+    xtpCtx = api.open(bundle, &err);
+    if (xtpCtx == nullptr) {
       // Fail-closed: a bad bundle is not an init failure, it just leaves the
       // built-in tuning in charge.
       WARN("XTP: could not load bundle %s (%s); using built-in tuning", bundle, err ? err : "unknown");
@@ -175,11 +179,11 @@ void loadOnce() {
 // cross-rank host-hash exchange -- so it sees only arch and nRanks, while the
 // knobs read later see the full topology. Caching the first descriptor for the
 // comm's lifetime would pin the incomplete one and starve every later lookup.
-it_comm* commHandle(struct ncclComm* comm) {
+xtp_comm* commHandle(struct ncclComm* comm) {
   loadOnce();
-  if (itCtx == nullptr || comm == nullptr || comm->topo == nullptr) return nullptr;
+  if (xtpCtx == nullptr || comm == nullptr || comm->topo == nullptr) return nullptr;
 
-  it_descriptor desc = {};
+  xtp_descriptor desc = {};
   desc.arch = comm->topo->nodes[GPU].nodes[0].gpu.gcn;
   desc.n_nodes = comm->nNodes;
   desc.ranks_per_node = comm->localRanks;
@@ -187,20 +191,20 @@ it_comm* commHandle(struct ncclComm* comm) {
   // ncclCommInitRank, so it is set before any knob is read.
   desc.n_ranks = comm->nRanks;
 
-  std::lock_guard<std::mutex> guard(itLock);
-  auto found = itComms.find(comm);
-  if (found != itComms.end()) {
+  std::lock_guard<std::mutex> guard(xtpLock);
+  auto found = xtpComms.find(comm);
+  if (found != xtpComms.end()) {
     // Same facts as last time; a remembered non-match counts, so an uncovered
     // comm is asked once rather than on every lookup.
     if (memcmp(&found->second.desc, &desc, sizeof(desc)) == 0) return found->second.comm;
     if (found->second.comm != nullptr) api.unbindComm(found->second.comm);
-    itComms.erase(found);
+    xtpComms.erase(found);
   }
 
   // No resolver: Class A matches on topology alone. One is needed only once
   // Class B rules start carrying constraints.
-  it_comm* bound = api.bindComm(itCtx, &desc, nullptr, comm);
-  itComms[comm] = Binding{desc, bound};
+  xtp_comm* bound = api.bindComm(xtpCtx, &desc, nullptr, comm);
+  xtpComms[comm] = Binding{desc, bound};
   if (bound == nullptr) {
     INFO(NCCL_INIT, "XTP: no profile matches arch=%s nodes=%d ranks_per_node=%d nranks=%d; using built-in tuning",
          desc.arch, desc.n_nodes, desc.ranks_per_node, desc.n_ranks);
@@ -208,13 +212,13 @@ it_comm* commHandle(struct ncclComm* comm) {
   return bound;
 }
 
-const it_value* lookup(struct ncclComm* comm, const char* key) {
-  it_comm* bound = commHandle(comm);
+const xtp_value* lookup(struct ncclComm* comm, const char* key) {
+  xtp_comm* bound = commHandle(comm);
   if (bound == nullptr) return nullptr;
 
-  const it_kv* kvs = nullptr;
+  const xtp_kv* kvs = nullptr;
   size_t n = 0;
-  if (api.classA(bound, &kvs, &n) != kItOk || kvs == nullptr) return nullptr;
+  if (api.classA(bound, &kvs, &n) != kXtpOk || kvs == nullptr) return nullptr;
   for (size_t i = 0; i < n; i++) {
     if (strcmp(kvs[i].key, key) == 0) return &kvs[i].value;
   }
@@ -224,9 +228,9 @@ const it_value* lookup(struct ncclComm* comm, const char* key) {
 } // namespace
 
 bool rcclXtpClassAInt(struct ncclComm* comm, const char* key, int64_t* out) {
-  const it_value* value = lookup(comm, key);
+  const xtp_value* value = lookup(comm, key);
   if (value == nullptr) return false;
-  if (value->tag != IT_INT) {
+  if (value->tag != XTP_INT) {
     WARN("XTP: %s is not an integer in this profile; using built-in value", key);
     return false;
   }
@@ -235,9 +239,9 @@ bool rcclXtpClassAInt(struct ncclComm* comm, const char* key, int64_t* out) {
 }
 
 bool rcclXtpClassAStr(struct ncclComm* comm, const char* key, const char** out) {
-  const it_value* value = lookup(comm, key);
+  const xtp_value* value = lookup(comm, key);
   if (value == nullptr) return false;
-  if (value->tag != IT_STR) {
+  if (value->tag != XTP_STR) {
     WARN("XTP: %s is not a string in this profile; using built-in value", key);
     return false;
   }
@@ -247,10 +251,10 @@ bool rcclXtpClassAStr(struct ncclComm* comm, const char* key, const char** out) 
 }
 
 void rcclXtpCommFree(struct ncclComm* comm) {
-  if (itCtx == nullptr) return;
-  std::lock_guard<std::mutex> guard(itLock);
-  auto found = itComms.find(comm);
-  if (found == itComms.end()) return;
+  if (xtpCtx == nullptr) return;
+  std::lock_guard<std::mutex> guard(xtpLock);
+  auto found = xtpComms.find(comm);
+  if (found == xtpComms.end()) return;
   if (found->second.comm != nullptr) api.unbindComm(found->second.comm);
-  itComms.erase(found);
+  xtpComms.erase(found);
 }
