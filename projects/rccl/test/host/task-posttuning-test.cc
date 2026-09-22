@@ -2068,4 +2068,507 @@ TEST_F(TaskPostTuningMicrotest, P2pTasks_TunedToSimple_RegistersTheBufferForTheP
   EXPECT_EQ(kP2pPeer, ipcLog.peer);
 }
 
+constexpr int kNumRmaCtx = 4;
+constexpr int kNumRmaSig = 4;
+constexpr int kRmaCtx = 2;
+constexpr int kRmaSigIdx = 3;
+constexpr int kRmaPeer = 2;
+constexpr int kPreexistingRmaTasks = 5;
+constexpr int kNoSignalsConfigured = 0;
+constexpr int kSupportedDriverVersion = 12050;
+constexpr int kUnsupportedDriverVersion = 12049;
+constexpr unsigned int kRejectedRmaFlags = 1u;
+constexpr uintptr_t kRmaSrcWindowBase = 0x90000000ull;
+constexpr size_t kRmaSrcWindowSize = 1ull << 20;
+constexpr size_t kRmaSrcOffset = 0x400;
+constexpr size_t kRmaPeerWindowSize = 1ull << 21;
+constexpr size_t kRmaPeerWinOffset = 0x800;
+constexpr size_t kRmaCount = 64;
+constexpr int kRmaOpCount = 3;
+constexpr int kNoOperationsWaitedFor = 0;
+
+ncclWaitSignalDesc_t TaskPostTuning_WaitDesc(int peer, int sigIdx, int ctx) {
+  ncclWaitSignalDesc_t desc = {};
+  desc.opCnt = kRmaOpCount;
+  desc.peer = peer;
+  desc.sigIdx = sigIdx;
+  desc.ctx = ctx;
+  return desc;
+}
+
+// Every gate ahead of the func-specific checks is satisfied here, so a test only has to break one.
+class TaskPostTuning_RmaScene {
+ public:
+  TaskPostTuning_RmaScene() : rmaQueues_(kNumRmaCtx) {
+    struct ncclComm* comm = scene_.comm();
+    comm->hostRmaSupport = true;
+    comm->config.numRmaCtx = kNumRmaCtx;
+    comm->config.numRmaSig = kNumRmaSig;
+    comm->planner.nTasksRma = kPreexistingRmaTasks;
+    comm->planner.rmaTaskQueues = rmaQueues_.data();
+    for (int ctx = 0; ctx < kNumRmaCtx; ctx++) {
+      ncclIntruQueueConstruct(&rmaQueues_[ctx]);
+    }
+    ncclMemoryPoolConstruct(&comm->memPool_ncclTaskRma);
+    ncclCudaDriverVersionCache = kSupportedDriverVersion;
+    ncclProfilerEventMask = kProfilerEventMask;
+    peerShadow_.winHost = &peerWindow_;
+    peerWindow_.size = kRmaPeerWindowSize;
+    srcWindow_.userPtr = TaskPostTuning_Addr(kRmaSrcWindowBase);
+    srcWindow_.size = kRmaSrcWindowSize;
+    srcWindow_.winFlags = NCCL_WIN_COLL_SYMMETRIC;
+    g_shadowPoolToHost = [this](struct ncclShadowPool*, void* devObj, void** outHostObj) {
+      shadowRequest_ = devObj;
+      *outHostObj = &peerShadow_;
+      return ncclSuccess;
+    };
+    g_devrFindWindow = [this](struct ncclComm*, void const* ptr, struct ncclDevrWindow** window) {
+      findWindowRequest_ = ptr;
+      *window = &srcWindow_;
+      return ncclSuccess;
+    };
+    g_rmaInitialized = [](struct ncclComm*) { return true; };
+  }
+
+  struct ncclComm* comm() { return scene_.comm(); }
+  struct ncclDevrWindow* srcWindow() { return &srcWindow_; }
+  struct ncclDevrWindow* peerWindow() { return &peerWindow_; }
+  const void* shadowRequest() const { return shadowRequest_; }
+  const void* findWindowRequest() const { return findWindowRequest_; }
+
+  struct ncclRawTaskRma PutSignal() {
+    struct ncclRawTaskRma raw = {};
+    raw.func = ncclFuncPutSignal;
+    raw.rmaOp.putSignal.localbuff = TaskPostTuning_Addr(kRmaSrcWindowBase + kRmaSrcOffset);
+    raw.rmaOp.putSignal.count = kRmaCount;
+    raw.rmaOp.putSignal.datatype = ncclFloat32;
+    raw.rmaOp.putSignal.peer = kRmaPeer;
+    raw.rmaOp.putSignal.peerWin = &peerHandle_;
+    raw.rmaOp.putSignal.peerWinOffset = kRmaPeerWinOffset;
+    raw.rmaOp.putSignal.sigIdx = kRmaSigIdx;
+    raw.rmaOp.putSignal.ctx = kRmaCtx;
+    return raw;
+  }
+
+  struct ncclRawTaskRma Signal() {
+    struct ncclRawTaskRma raw = {};
+    raw.func = ncclFuncSignal;
+    raw.rmaOp.signal.peer = kRmaPeer;
+    raw.rmaOp.signal.sigIdx = kRmaSigIdx;
+    raw.rmaOp.signal.ctx = kRmaCtx;
+    return raw;
+  }
+
+  struct ncclRawTaskRma WaitSignal(std::vector<ncclWaitSignalDesc_t>* descs) {
+    struct ncclRawTaskRma raw = {};
+    raw.func = ncclFuncWaitSignal;
+    raw.rmaOp.waitSignal.nDesc = static_cast<int>(descs->size());
+    raw.rmaOp.waitSignal.signalDescs = descs->data();
+    return raw;
+  }
+
+  ncclResult_t Run(const struct ncclRawTaskRma& raw) { return postTuneRmaTaskAppend(comm(), &raw); }
+
+  std::vector<struct ncclTaskRma*> Tasks(int ctx) {
+    std::vector<struct ncclTaskRma*> tasks;
+    for (struct ncclTaskRma* task = ncclIntruQueueHead(&rmaQueues_[ctx]); task != nullptr; task = task->next) {
+      tasks.push_back(task);
+    }
+    return tasks;
+  }
+
+  TaskTuningInfoQueue* TuningQueue() { return &tuningQueue_; }
+
+  struct ncclTaskTuningInfo* EnqueueForDrain(const struct ncclRawTaskRma& raw) {
+    struct ncclRawTask* rawTask = scene_.NewRaw(ncclTaskKindRma);
+    rawTask->rma = raw;
+    struct ncclTaskTuningInfo* tInfo = scene_.NewTuningInfo(rawTask);
+    ncclIntruQueueEnqueue(&tuningQueue_, tInfo);
+    return tInfo;
+  }
+
+  int AppendedTaskCount() { return comm()->planner.nTasksRma - kPreexistingRmaTasks; }
+
+ private:
+  TaskPrepScene scene_;
+  std::vector<ncclIntruQueue<struct ncclTaskRma, &ncclTaskRma::next>> rmaQueues_;
+  TaskTuningInfoQueue tuningQueue_ = {};
+  struct ncclWindow_vidmem peerHandle_ = {};
+  struct ncclWindow_vidmem peerShadow_ = {};
+  struct ncclDevrWindow peerWindow_ = {};
+  struct ncclDevrWindow srcWindow_ = {};
+  const void* shadowRequest_ = nullptr;
+  const void* findWindowRequest_ = nullptr;
+};
+
+::testing::AssertionResult TaskPostTuning_NoRmaTasksAppended(TaskPostTuning_RmaScene* rma) {
+  if (rma->AppendedTaskCount() != 0) {
+    return ::testing::AssertionFailure() << "planner.nTasksRma moved by " << rma->AppendedTaskCount();
+  }
+  for (int ctx = 0; ctx < kNumRmaCtx; ctx++) {
+    if (!rma->Tasks(ctx).empty()) {
+      return ::testing::AssertionFailure() << "rmaTaskQueues[" << ctx << "] holds " << rma->Tasks(ctx).size();
+    }
+  }
+  return ::testing::AssertionSuccess();
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_FuncIsNotAnRmaOp_ReportsAnInternalErrorBeforeAnyCommCheck) {
+  TaskPostTuning_RmaScene rma;
+  rma.comm()->hostRmaSupport = false;
+  struct ncclRawTaskRma raw = rma.PutSignal();
+  raw.func = ncclFuncAllReduce;
+
+  EXPECT_EQ(ncclInternalError, rma.Run(raw));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_HostRmaUnsupported_RejectsEveryRmaFuncAndAppendsNothing) {
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, kRmaCtx)};
+  for (int func = 0; func < 3; func++) {
+    TaskPostTuning_RmaScene rma;
+    rma.comm()->hostRmaSupport = false;
+    const struct ncclRawTaskRma raw =
+      func == 0 ? rma.PutSignal() : (func == 1 ? rma.Signal() : rma.WaitSignal(&descs));
+
+    EXPECT_EQ(ncclInvalidArgument, rma.Run(raw)) << "func index " << func;
+    EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma)) << "func index " << func;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_DriverBelowTheRmaMinimum_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  ncclCudaDriverVersionCache = kUnsupportedDriverVersion;
+
+  EXPECT_EQ(ncclInvalidUsage, rma.Run(rma.PutSignal()));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_DriverAtTheRmaMinimum_IsAccepted) {
+  TaskPostTuning_RmaScene rma;
+  ncclCudaDriverVersionCache = kSupportedDriverVersion;
+
+  EXPECT_EQ(ncclSuccess, rma.Run(rma.PutSignal()));
+  EXPECT_EQ(1, rma.AppendedTaskCount());
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_HostRmaUnsupportedAndDriverTooOld_ReportsTheUnsupportedCommFirst) {
+  TaskPostTuning_RmaScene rma;
+  rma.comm()->hostRmaSupport = false;
+  ncclCudaDriverVersionCache = kUnsupportedDriverVersion;
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.PutSignal()));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_SignalIndexBelowZero_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.Signal();
+  raw.rmaOp.signal.sigIdx = -1;
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(raw));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_SignalIndexAtTheConfiguredCount_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.Signal();
+  raw.rmaOp.signal.sigIdx = kNumRmaSig;
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(raw));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_SignalIndexAtTheTopOfTheRange_IsAccepted) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.Signal();
+  raw.rmaOp.signal.sigIdx = kNumRmaSig - 1;
+
+  EXPECT_EQ(ncclSuccess, rma.Run(raw));
+  EXPECT_EQ(1, rma.AppendedTaskCount());
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_NoSignalsConfigured_RejectsWaitSignalOnItsImplicitIndex) {
+  TaskPostTuning_RmaScene rma;
+  rma.comm()->config.numRmaSig = kNoSignalsConfigured;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, 0, kRmaCtx)};
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalCarriesFlags_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.PutSignal();
+  raw.rmaOp.putSignal.flags = kRejectedRmaFlags;
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(raw));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_SignalCarriesFlags_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.Signal();
+  raw.rmaOp.signal.flags = kRejectedRmaFlags;
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(raw));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalOverlappingAFlagBearingUnion_IgnoresTheFlags) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, kRmaCtx)};
+  struct ncclRawTaskRma raw = rma.PutSignal();
+  raw.rmaOp.putSignal.flags = kRejectedRmaFlags;
+  raw.func = ncclFuncWaitSignal;
+  raw.rmaOp.waitSignal.nDesc = static_cast<int>(descs.size());
+  raw.rmaOp.waitSignal.signalDescs = descs.data();
+
+  EXPECT_EQ(ncclSuccess, rma.Run(raw));
+  EXPECT_EQ(1, rma.AppendedTaskCount());
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_SignalBeforeRmaInit_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  ScopedHook initialized(g_rmaInitialized, [](struct ncclComm*) { return false; });
+
+  EXPECT_EQ(ncclInvalidUsage, rma.Run(rma.Signal()));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalBeforeRmaInit_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, kRmaCtx)};
+  ScopedHook initialized(g_rmaInitialized, [](struct ncclComm*) { return false; });
+
+  EXPECT_EQ(ncclInvalidUsage, rma.Run(rma.WaitSignal(&descs)));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalBeforeRmaInit_IsAcceptedBecauseItsWindowTriggersInit) {
+  TaskPostTuning_RmaScene rma;
+  ScopedHook initialized(g_rmaInitialized, [](struct ncclComm*) { return false; });
+
+  EXPECT_EQ(ncclSuccess, rma.Run(rma.PutSignal()));
+  EXPECT_EQ(1, rma.AppendedTaskCount());
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_SignalAfterRmaInit_AsksThisCommWhetherRmaIsInitialized) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclComm* asked = nullptr;
+  ScopedHook initialized(g_rmaInitialized, [&](struct ncclComm* comm) {
+    asked = comm;
+    return true;
+  });
+
+  ASSERT_EQ(ncclSuccess, rma.Run(rma.Signal()));
+
+  EXPECT_EQ(1, initialized.calls);
+  EXPECT_EQ(rma.comm(), asked);
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalPeerWindowIsNull_RejectsItWithoutResolvingAShadow) {
+  TaskPostTuning_RmaScene rma;
+  ScopedHook shadow(g_shadowPoolToHost, [](struct ncclShadowPool*, void*, void**) { return ncclSuccess; });
+  struct ncclRawTaskRma raw = rma.PutSignal();
+  raw.rmaOp.putSignal.peerWin = nullptr;
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(raw));
+  EXPECT_EQ(0, shadow.calls);
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalShadowLookupFails_PropagatesTheFailure) {
+  TaskPostTuning_RmaScene rma;
+  ScopedHook shadow(g_shadowPoolToHost, [](struct ncclShadowPool*, void*, void**) { return ncclSystemError; });
+
+  EXPECT_EQ(ncclSystemError, rma.Run(rma.PutSignal()));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalSourceBufferIsNull_RejectsItWithoutSearchingForAWindow) {
+  TaskPostTuning_RmaScene rma;
+  ScopedHook find(g_devrFindWindow, [](struct ncclComm*, void const*, struct ncclDevrWindow** window) {
+    *window = nullptr;
+    return ncclSuccess;
+  });
+  struct ncclRawTaskRma raw = rma.PutSignal();
+  raw.rmaOp.putSignal.localbuff = nullptr;
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(raw));
+  EXPECT_EQ(0, find.calls);
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalWindowSearchFails_PropagatesTheFailure) {
+  TaskPostTuning_RmaScene rma;
+  ScopedHook find(g_devrFindWindow, [](struct ncclComm*, void const*, struct ncclDevrWindow** window) {
+    *window = nullptr;
+    return ncclSystemError;
+  });
+
+  EXPECT_EQ(ncclSystemError, rma.Run(rma.PutSignal()));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalSourceIsOutsideEveryWindow_RejectsTheTask) {
+  TaskPostTuning_RmaScene rma;
+  ScopedHook find(g_devrFindWindow, [](struct ncclComm*, void const*, struct ncclDevrWindow** window) {
+    *window = nullptr;
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.PutSignal()));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalAccepted_ResolvesThePeerHandleAndTheSourceBufferItWasGiven) {
+  TaskPostTuning_RmaScene rma;
+  const struct ncclRawTaskRma raw = rma.PutSignal();
+
+  ASSERT_EQ(ncclSuccess, rma.Run(raw));
+
+  EXPECT_EQ(raw.rmaOp.putSignal.peerWin, rma.shadowRequest());
+  EXPECT_EQ(raw.rmaOp.putSignal.localbuff, rma.findWindowRequest());
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalSourceWindowIsMultiSegment_RejectsTheTask) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclDevrWindow* src = rma.srcWindow();
+  ScopedHook multi(g_devrWindowIsMultiSegment,
+                   [src](struct ncclDevrWindow* window) { return window == src; });
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.PutSignal()));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalPeerWindowIsMultiSegment_RejectsTheTask) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclDevrWindow* peer = rma.peerWindow();
+  ScopedHook multi(g_devrWindowIsMultiSegment,
+                   [peer](struct ncclDevrWindow* window) { return window == peer; });
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.PutSignal()));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalSourceWindowHasAHostBackedSegment_RejectsTheTask) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclDevrWindow* src = rma.srcWindow();
+  ScopedHook sysmem(g_devrWindowHasSysmemSegment,
+                    [src](struct ncclDevrWindow* window) { return window == src; });
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.PutSignal()));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalPeerWindowHasAHostBackedSegment_RejectsTheTask) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclDevrWindow* peer = rma.peerWindow();
+  ScopedHook sysmem(g_devrWindowHasSysmemSegment,
+                    [peer](struct ncclDevrWindow* window) { return window == peer; });
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.PutSignal()));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalSourceWindowWithoutTheSymmetricFlag_CurrentlyRejectsIt) {
+  TaskPostTuning_RmaScene rma;
+  rma.comm()->symmetricSupport = 0;
+  rma.srcWindow()->winFlags = 0;
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.PutSignal()));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, DISABLED_RmaTaskAppend_PutSignalSourceWindowOnANonSymmetricComm_IgnoresTheFlag) {
+  TaskPostTuning_RmaScene rma;
+  rma.comm()->symmetricSupport = 0;
+  rma.srcWindow()->winFlags = 0;
+
+  EXPECT_EQ(ncclSuccess, rma.Run(rma.PutSignal()));
+  EXPECT_EQ(1, rma.AppendedTaskCount());
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalPeerOffsetPastTheWindowEnd_CurrentlyAppendsTheTaskAnyway) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.PutSignal();
+  raw.rmaOp.putSignal.peerWinOffset = kRmaPeerWindowSize;
+
+  EXPECT_EQ(ncclSuccess, rma.Run(raw));
+  ASSERT_EQ(1u, rma.Tasks(kRmaCtx).size());
+  EXPECT_EQ(kRmaPeerWindowSize, rma.Tasks(kRmaCtx)[0]->peerWinOffset);
+}
+
+TEST_F(TaskPostTuningMicrotest, DISABLED_RmaTaskAppend_PutSignalPeerOffsetPastTheWindowEnd_RejectsTheTask) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.PutSignal();
+  raw.rmaOp.putSignal.peerWinOffset = kRmaPeerWindowSize;
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(raw));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalWithoutADescriptorArray_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, kRmaCtx)};
+  struct ncclRawTaskRma raw = rma.WaitSignal(&descs);
+  raw.rmaOp.waitSignal.signalDescs = nullptr;
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(raw));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalWithZeroDescriptors_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, kRmaCtx)};
+  struct ncclRawTaskRma raw = rma.WaitSignal(&descs);
+  raw.rmaOp.waitSignal.nDesc = 0;
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(raw));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorWaitsForNoOperation_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, kRmaCtx)};
+  descs[0].opCnt = kNoOperationsWaitedFor;
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorWaitsForOneOperation_IsAccepted) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, kRmaCtx)};
+  descs[0].opCnt = 1;
+
+  EXPECT_EQ(ncclSuccess, rma.Run(rma.WaitSignal(&descs)));
+  EXPECT_EQ(1, rma.AppendedTaskCount());
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorSignalIndexBelowZero_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, -1, kRmaCtx)};
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorSignalIndexAtTheCount_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kNumRmaSig, kRmaCtx)};
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalLaterDescriptorIsInvalid_RejectsTheWholeTask) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, kRmaCtx),
+                                             TaskPostTuning_WaitDesc(kRmaPeer, kNumRmaSig, kRmaCtx)};
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
 }  // namespace

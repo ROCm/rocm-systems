@@ -24,6 +24,7 @@
 #include "comm.h"
 #include "enqueue.h"
 #include "enqueue/task_classify.h"
+#include "fakes/allocator_fakes.h"
 #include "fakes/ce_fakes.h"
 #include "fakes/comm_fakes.h"
 #include "fakes/dev_runtime_fakes.h"
@@ -260,6 +261,7 @@ class TaskPrepFakesFixture : public ::testing::Test {
     ResetHipFakes();
     ResetNcclFakes();
     ResetNcclStubs();
+    ResetAllocatorFakes();
     ResetCeFakes();
     ResetCommFakes();
     ResetDevRuntimeFakes();

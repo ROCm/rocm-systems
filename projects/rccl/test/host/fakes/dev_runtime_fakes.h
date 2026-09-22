@@ -19,8 +19,9 @@ struct ncclComm;
 struct ncclDevrWindow;
 
 extern std::function<ncclResult_t(struct ncclComm*, void const*, struct ncclDevrWindow**)> g_devrFindWindow;
+extern std::function<bool(struct ncclDevrWindow*)> g_devrWindowIsMultiSegment;
 extern std::function<bool(struct ncclDevrWindow*)> g_devrWindowHasSysmemSegment;
-extern bool g_devrWindowIsMultiSegment;
+extern bool g_devrWindowIsMultiSegmentValue;
 extern bool g_devrWindowHasSysmemSegmentValue;
 
 // src/dev_runtime.cc's ncclDevrInitOnce: generous default (ncclSuccess), matching a comm that
