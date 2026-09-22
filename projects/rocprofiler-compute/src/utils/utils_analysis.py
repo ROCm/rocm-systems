@@ -685,14 +685,16 @@ def fold_identical_sibling_subtrees(
     return folded
 
 
-def filter_forest_by_backend(
+def filter_forest_by_backends(
     forest: dict[str, list[CallTreeNode]],
-    backend: Optional[str],
+    backends: list[str],
 ) -> dict[str, list[CallTreeNode]]:
-    """Copy a forest, keeping ``backend`` nodes and their ancestors.
+    """Copy a forest, keeping ``backends`` nodes and their ancestors.
 
-    ``backend=None`` keeps every node, including ``user``.
+    ``backends=[]`` keeps every node, including ``user``.
     """
+    if not backends:
+        return forest
 
     def copy_matching_view(node: CallTreeNode) -> Optional[CallTreeNode]:
         kept_children: list[CallTreeNode] = []
@@ -700,7 +702,7 @@ def filter_forest_by_backend(
             copied_child = copy_matching_view(child)
             if copied_child is not None:
                 kept_children.append(copied_child)
-        if backend is not None and node.backend != backend and not kept_children:
+        if node.backend not in backends and not kept_children:
             return None
         copied_node = clone_call_tree_node(node)
         copied_node.children = kept_children

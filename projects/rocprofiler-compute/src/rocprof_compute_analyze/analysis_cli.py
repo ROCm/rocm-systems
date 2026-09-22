@@ -17,9 +17,10 @@ from utils.utils_analysis import (
     CallTreeNode,
     build_operator_summary,
     copy_matched_operator_subtree,
-    filter_forest_by_backend,
+    filter_forest_by_backends,
     get_matrix_ops_type,
     process_ml_api_trace_output,
+    rollup_node_stats,
 )
 from utils.utils_common import validate_roofline_csv
 
@@ -38,43 +39,51 @@ _ML_API_ANALYSIS_CLI_OPTIONS = {
 }
 
 
-def parse_operator_patterns(args: argparse.Namespace, attr: str) -> list[str]:
-    """Extract and flatten operator glob patterns from ``args.<attr>``.
+def parse_operator_patterns(
+    args: argparse.Namespace, backends: list[str]
+) -> dict[str, list[str]]:
+    """Parse operator glob patterns from ``args`` for each backend in ``backends``.
 
-    Returns ``["**"]`` when the flag is given with no arguments (match all),
-    and ``[]`` when the flag is absent.
+    Returns a ``{backend: patterns}`` dict, or ``None`` when no filter flag is
+    set for any backend. An empty flag value maps to ``["**"]``.
     """
-    raw = getattr(args, attr, None)
-    if raw is None:
-        return []
-    pattern_list: list[str] = []
-    for operator_arg in raw:
-        pattern_list.extend(
-            pattern.strip()
-            for pattern in str(operator_arg).split(",")
-            if pattern.strip()
+    framewise_patterns: dict[str, list[str]] = {}
+    for backend in backends:
+        raw = getattr(
+            args, _ML_API_ANALYSIS_CLI_OPTIONS[backend]["filter_attr"], None
         )
-    if not pattern_list:
-        pattern_list = ["**"]
-    return pattern_list
+        if raw is None:
+            continue
+        pattern_list: list[str] = []
+        for operator_arg in raw:
+            pattern_list.extend(
+                p.strip() for p in str(operator_arg).split(",") if p.strip()
+            )
+        if not pattern_list:
+            pattern_list = ["**"]
+        framewise_patterns[backend] = pattern_list
+    if not framewise_patterns:
+        return None
+    return framewise_patterns
 
 
 def _collect_glob_matched_nodes(
     forest: dict[str, list[CallTreeNode]],
-    patterns: list[str],
-    backend: str,
+    framewise_patterns: dict[str, list[str]],
 ) -> list[CallTreeNode]:
     """Return nodes whose backend matches and whose path or name glob-matches."""
-    matched_nodes: list[CallTreeNode] = []
+    matched_nodes: set[CallTreeNode] = set()
 
     def walk(node: CallTreeNode, ancestors: list[str]) -> None:
         path = "/".join(ancestors + [node.name])
-        if node.backend == backend and any(
-            parser.torch_operator_pattern_matches(pattern, path)
-            or parser.torch_operator_pattern_matches(pattern, node.name)
-            for pattern in patterns
-        ):
-            matched_nodes.append(node)
+        for backend, patterns in framewise_patterns.items():
+            if node.backend != backend:
+                continue
+            if any( parser.torch_operator_pattern_matches(pattern, path)
+                or parser.torch_operator_pattern_matches(pattern, node.name)
+                for pattern in patterns
+            ):
+                matched_nodes.add(node)
         for child in node.children:
             walk(child, ancestors + [node.name])
 
@@ -109,16 +118,6 @@ def _warn_ml_api_trace_errors(workload: schema.Workload) -> None:
         console_warning("analysis", str(exc))
 
 
-def _ml_api_operator_cli_requested(args: argparse.Namespace) -> bool:
-    """Return True when a list-operators or operator-filter flag is set."""
-    for cli in _ML_API_ANALYSIS_CLI_OPTIONS.values():
-        if getattr(args, cli["list_attr"], False):
-            return True
-        if getattr(args, cli["filter_attr"], None) is not None:
-            return True
-    return False
-
-
 class cli_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods
@@ -134,28 +133,24 @@ class cli_analysis(OmniAnalyze_Base):
             console_error("--gui flag is required to enable --random-port")
 
         active_operator_filters = [
-            cli["filter_attr"]
-            for cli in _ML_API_ANALYSIS_CLI_OPTIONS.values()
-            if getattr(args, cli["filter_attr"], None) is not None
+            framework_name
+            for framework_name, framework_flags in _ML_API_ANALYSIS_CLI_OPTIONS.items()
+            if getattr(args, framework_flags["filter_attr"], None) is not None
         ]
-        if len(active_operator_filters) > 1:
-            console_error(
-                "analysis",
-                "Only one operator filter may be used per analysis run. "
-                "Run the analysis separately for each framework.",
-            )
 
         active_operator_lists = [
-            cli["list_attr"]
-            for cli in _ML_API_ANALYSIS_CLI_OPTIONS.values()
-            if getattr(args, cli["list_attr"], False)
+            framework_name
+            for framework_name, framework_flags in _ML_API_ANALYSIS_CLI_OPTIONS.items()
+            if getattr(args, framework_flags["list_attr"], False)
         ]
-        if len(active_operator_lists) > 1:
-            console_error(
-                "analysis",
-                "Only one operator listing may be used per analysis run. "
-                "Run the analysis separately for each framework.",
+
+        if active_operator_filters and active_operator_lists:
+            console_warning(
+                "ml api trace",
+                "Both operator listing and filter flags are set. Defaulting to listing. "
+                "Use the filter flag to filter the operators instead.",
             )
+            active_operator_filters = []
 
         for path_info in args.path:
             workload = self._runs[path_info[0]]
@@ -199,18 +194,14 @@ class cli_analysis(OmniAnalyze_Base):
             workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
             workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
 
-            if _ml_api_operator_cli_requested(args):
+            if active_operator_lists or active_operator_filters:
                 process_ml_api_trace_output(workload, path_info[0])
-
-            for backend, cli in _ML_API_ANALYSIS_CLI_OPTIONS.items():
-                if getattr(args, cli["list_attr"], False):
-                    self.list_operators(path_info[0], kernel_top_df, backend)
+                if active_operator_lists:
+                    self.list_operators(path_info[0], kernel_top_df, active_operator_lists)
                     _warn_ml_api_trace_errors(workload)
                     sys.exit(0)
-
-            for backend, cli in _ML_API_ANALYSIS_CLI_OPTIONS.items():
-                if getattr(args, cli["filter_attr"], None) is not None:
-                    self.apply_operator_filter(args, workload, path_info[0], backend)
+                if active_operator_filters:
+                    self.apply_operator_filter(args, workload, path_info[0], active_operator_filters)
 
             # create the loaded table
             gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
@@ -238,14 +229,13 @@ class cli_analysis(OmniAnalyze_Base):
         gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
         arch_config = self._arch_configs[gpu_arch]
 
-        for backend, cli in _ML_API_ANALYSIS_CLI_OPTIONS.items():
-            if getattr(args, cli["filter_attr"], None) is not None:
-                self.handle_operator(args, workload, backend)
-        if any(
-            getattr(args, cli["filter_attr"], None) is not None
-            for cli in _ML_API_ANALYSIS_CLI_OPTIONS.values()
-        ):
-            _warn_ml_api_trace_errors(workload)
+        active_operator_filters = [
+            framework_name
+            for framework_name, framework_flags in _ML_API_ANALYSIS_CLI_OPTIONS.items()
+            if getattr(args, framework_flags["filter_attr"], None) is not None
+        ]
+        if active_operator_filters:
+            self.handle_operator(args, workload, active_operator_filters)
 
         if args.list_stats:
             tty.show_kernel_stats(
@@ -331,45 +321,56 @@ class cli_analysis(OmniAnalyze_Base):
                 self._profiling_config,
                 roof_plot=roof_plot,
             )
+        _warn_ml_api_trace_errors(workload)
 
     def list_operators(
         self,
         workload_path: str,
         kernel_top_df: pd.DataFrame,
-        backend: str,
+        backends: list[str],
     ) -> None:
-        """Render the operator call tree for a single backend."""
-        label = _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"]
-        forest_view = filter_forest_by_backend(
-            self._runs[workload_path].ml_api_call_trees, backend
+        """Render the operator call tree for the given backends."""
+        forest_view = filter_forest_by_backends(
+            self._runs[workload_path].ml_api_call_trees, backends
         )
-        tty.list_ml_operators(workload_path, forest_view, framework_label=label)
+        framework_labels = [
+            _ML_API_ANALYSIS_CLI_OPTIONS[b]["label"] for b in backends
+        ]
+        tty.list_ml_operators(
+            workload_path, forest_view, framework_labels=framework_labels
+        )
 
     def apply_operator_filter(
         self,
         args: argparse.Namespace,
         workload: schema.Workload,
         workload_path: str,
-        backend: str,
+        backends: list[str],
     ) -> None:
-        """Set workload.filter_kernel_ids from the backend's operator filter.
+        """Set workload.filter_kernel_ids from the given backends' operator filter.
 
         Operator matches are intersected with the -k/--kernel filter when set;
         matched nodes are stored in workload.ml_api_glob_matches.
         """
-        cli = _ML_API_ANALYSIS_CLI_OPTIONS[backend]
-        label = cli["label"]
-        pattern_list = parse_operator_patterns(args, cli["filter_attr"])
+        framewise_patterns = parse_operator_patterns(args, backends)
+        if framewise_patterns is None:
+            return
         matched_nodes = _collect_glob_matched_nodes(
-            workload.ml_api_call_trees, pattern_list, backend
+            workload.ml_api_call_trees, framewise_patterns
+        )
+        workload.ml_api_glob_matches = matched_nodes
+        labels = ", ".join(
+            _ML_API_ANALYSIS_CLI_OPTIONS[b]["label"] for b in backends
         )
         if not matched_nodes:
+            all_patterns = ", ".join(
+                p for ps in framewise_patterns.values() for p in ps
+            )
             console_warning(
                 "ml api trace",
-                f"No {label} operators matched the pattern(s): {pattern_list}",
+                f"No {labels} operators matched the pattern(s): {all_patterns}",
             )
-            _warn_ml_api_trace_errors(workload)
-            sys.exit(0)
+            return
 
         kernel_top_df = workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID]
         name_to_id: dict[str, int] = {
@@ -380,51 +381,48 @@ class cli_analysis(OmniAnalyze_Base):
         for node in matched_nodes:
             kernel_ids.update(_assign_kernel_ids_from_top(node, name_to_id))
         selected_ids = sorted(kernel_ids)
-        workload.ml_api_glob_matches = matched_nodes
-
         if workload.filter_kernel_ids:
             existing_ids = set(workload.filter_kernel_ids)
             selected_ids = [
                 kernel_id for kernel_id in selected_ids if kernel_id in existing_ids
             ]
+        if not selected_ids:
+            console_warning(
+                "ml api trace",
+                f"No {labels} operators matched the -k filter: {args.kernel}",
+            )
+            return
+        workload.filter_kernel_ids = selected_ids
 
-        if selected_ids:
-            workload.filter_kernel_ids = selected_ids
-            console_log(
-                "ml api trace",
-                f"{label} operator filter selected {len(selected_ids)} kernel(s) "
-                "for metric analysis.",
-            )
-        elif workload.filter_kernel_ids:
-            _warn_ml_api_trace_errors(workload)
-            console_error(
-                "ml api trace",
-                f"No {label}-operator kernels overlap with the -k filter "
-                f"{workload.filter_kernel_ids}. No kernels to analyze.",
-            )
-        else:
-            _warn_ml_api_trace_errors(workload)
-            console_error(
-                "ml api trace",
-                "No kernels found for matched operators. No kernels to analyze.",
-            )
+        console_log(
+            "ml api trace",
+            f"{labels} operator filter selected {len(selected_ids)} kernel(s)"
+            " for metric analysis.",
+        )
 
     def handle_operator(
-        self, args: argparse.Namespace, workload: schema.Workload, backend: str
+        self, args: argparse.Namespace, workload: schema.Workload, backends: list[str]
     ) -> None:
-        """Display the matched operator call tree for a single backend."""
+        """Display the matched operator call tree."""
         if not workload.ml_api_glob_matches:
             return
-        cli = _ML_API_ANALYSIS_CLI_OPTIONS[backend]
-        label = cli["label"]
-        pattern_list = parse_operator_patterns(args, cli["filter_attr"])
+        framewise_patterns = parse_operator_patterns(args, backends)
+        patterns_str = ", ".join(
+            p for ps in (framewise_patterns or {}).values() for p in ps
+        )
+        labels = ", ".join(
+            _ML_API_ANALYSIS_CLI_OPTIONS[b]["label"] for b in backends
+        )
         subtree = copy_matched_operator_subtree(
             workload.ml_api_call_trees, workload.ml_api_glob_matches
         )
         print(f"\n{'=' * 80}")
-        print(f"Matched {label} Operators: {', '.join(pattern_list)}")
+        print(f"Matched {labels} Operators: {patterns_str}")
         print("Sorted by total GPU kernel duration.")
         print(f"{'=' * 80}")
+        for roots in subtree.values():
+            for root in roots:
+                rollup_node_stats(root)
         tty.show_call_tree(subtree)
         tty.show_operator_summary(build_operator_summary(subtree))
         print(f"{'=' * 80}")
