@@ -127,7 +127,8 @@ void ImageAtomicDecMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageSampleMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 } // namespace cdna2

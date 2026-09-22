@@ -7692,7 +7692,13 @@ class CodeGenerator:
                 f"{self._vgpr_base_expr('vdata')}, inst_.dmask, {r128}, inst_.a16);"
             )
 
-        if cls in ('image_atomic', 'image_sample', 'image_query', 'image_bvh'):
+        if cls == 'image_sample':
+            return (
+                '  wf.report_instruction_execution_error('
+                'amdgpu::InstructionExecutionError::UnimplementedInstruction);'
+            )
+
+        if cls in ('image_atomic', 'image_query', 'image_bvh'):
             L.append('  (void)wf; // Image pipeline not yet implemented.')
             return '\n'.join(L)
 
