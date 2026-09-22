@@ -339,10 +339,10 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
   }
 
   static constexpr LaunchErrorRule kValidateRules[] = {
-      {amd::kZeroGlobal,          hipErrorInvalidConfiguration},
-      {amd::kZeroBlock,           hipErrorInvalidConfiguration},
-      {amd::kSharedMemExceedsMax, hipErrorInvalidValue},
-      {amd::kBlockExceedsMaxWG,   hipErrorInvalidConfiguration},
+      {amd::kZeroGlobal,                                    hipErrorInvalidConfiguration},
+      {amd::kZeroBlock,                                     hipErrorInvalidConfiguration},
+      {amd::kSharedMemExceedsMax | amd::kSharedMemOverflow, hipErrorInvalidValue},
+      {amd::kBlockExceedsMaxWG,                             hipErrorInvalidConfiguration},
   };
   hipError_t status = MapLaunchViolations(launch_params.violations_, kValidateRules);
   if (status != hipSuccess) {
