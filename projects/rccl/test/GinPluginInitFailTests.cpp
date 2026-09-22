@@ -63,6 +63,9 @@ int countLines(const std::string& path) {
   return count;
 }
 
+// Returns the reason this host cannot run the test, or "" when it can.
+// GTEST_SKIP() must be issued by the caller: it expands to a bare return and
+// would otherwise only leave this helper, letting the test body run on.
 std::string gpuSkipReason() {
   int deviceCount = 0;
   if (hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1)
@@ -79,12 +82,17 @@ void initAndDestroyComm() {
   ASSERT_EQ(ncclCommDestroy(comm), ncclSuccess);
 }
 
-void setGinStubEnv(const char* mode, const std::string& initPath, const std::string& finalizePath) {
+void setGinStubEnv(const char* mode, const std::string& initPath, const std::string& finalizePath,
+                   const std::string& propertiesPath) {
   ASSERT_EQ(setenv("RCCL_GIN_TEST_PLUGIN_MODE", mode, 1), 0);
   ASSERT_EQ(setenv("RCCL_GIN_TEST_INIT_FILE", initPath.c_str(), 1), 0);
   ASSERT_EQ(setenv("RCCL_GIN_TEST_FINALIZE_FILE", finalizePath.c_str(), 1), 0);
+  ASSERT_EQ(setenv("RCCL_GIN_TEST_PROPERTIES_FILE", propertiesPath.c_str(), 1), 0);
   ASSERT_EQ(setenv("NCCL_GIN_PLUGIN", "STATIC_PLUGIN", 1), 0);
   ASSERT_EQ(setenv("NCCL_GIN_ENABLE", "1", 1), 0);
+  // The isolated child inherits the parent env. If NCCL_RMA_PLUGIN=STATIC_PLUGIN,
+  // getNcclRma_v13 falls back to dlsym(ncclGinPlugin_v13) and stubInit runs twice.
+  ASSERT_EQ(unsetenv("NCCL_RMA_PLUGIN"), 0);
 }
 
 }  // namespace
@@ -96,16 +104,21 @@ TEST(GinPluginInitFail, FinalizesWhenDevicesFailsAfterInit) {
 
     ScopedTempFile initFile("/tmp/rccl_gin_dev_fail_init_XXXXXX");
     ScopedTempFile finalizeFile("/tmp/rccl_gin_dev_fail_fin_XXXXXX");
+    ScopedTempFile propertiesFile("/tmp/rccl_gin_dev_fail_props_XXXXXX");
     ASSERT_TRUE(initFile.valid());
     ASSERT_TRUE(finalizeFile.valid());
+    ASSERT_TRUE(propertiesFile.valid());
 
-    setGinStubEnv("devices_fail", initFile.path(), finalizeFile.path());
+    setGinStubEnv("devices_fail", initFile.path(), finalizeFile.path(), propertiesFile.path());
     initAndDestroyComm();
 
     EXPECT_EQ(countLines(initFile.path()), 1)
         << "external GIN plugin init must run before devices() is probed";
     EXPECT_EQ(countLines(finalizeFile.path()), 1)
         << "finalize() must release the context when devices() fails after a good init()";
+    EXPECT_EQ(countLines(propertiesFile.path()), 0)
+        << "getProperties() runs only on the default assign path; a mistyped mode "
+           "would still init+finalize once and leave this test green without this check";
   });
 }
 
@@ -116,16 +129,21 @@ TEST(GinPluginInitFail, FinalizesWhenDevicesReportsZero) {
 
     ScopedTempFile initFile("/tmp/rccl_gin_dev_zero_init_XXXXXX");
     ScopedTempFile finalizeFile("/tmp/rccl_gin_dev_zero_fin_XXXXXX");
+    ScopedTempFile propertiesFile("/tmp/rccl_gin_dev_zero_props_XXXXXX");
     ASSERT_TRUE(initFile.valid());
     ASSERT_TRUE(finalizeFile.valid());
+    ASSERT_TRUE(propertiesFile.valid());
 
-    setGinStubEnv("devices_zero", initFile.path(), finalizeFile.path());
+    setGinStubEnv("devices_zero", initFile.path(), finalizeFile.path(), propertiesFile.path());
     initAndDestroyComm();
 
     EXPECT_EQ(countLines(initFile.path()), 1)
         << "external GIN plugin init must run before devices() is probed";
     EXPECT_EQ(countLines(finalizeFile.path()), 1)
         << "finalize() must release the context when devices() reports ndev <= 0";
+    EXPECT_EQ(countLines(propertiesFile.path()), 0)
+        << "getProperties() runs only on the default assign path; a mistyped mode "
+           "would still init+finalize once and leave this test green without this check";
   });
 }
 
@@ -136,16 +154,20 @@ TEST(GinPluginInitFail, DoesNotFinalizeAfterFailedInit) {
 
     ScopedTempFile initFile("/tmp/rccl_gin_init_fail_init_XXXXXX");
     ScopedTempFile finalizeFile("/tmp/rccl_gin_init_fail_fin_XXXXXX");
+    ScopedTempFile propertiesFile("/tmp/rccl_gin_init_fail_props_XXXXXX");
     ASSERT_TRUE(initFile.valid());
     ASSERT_TRUE(finalizeFile.valid());
+    ASSERT_TRUE(propertiesFile.valid());
 
-    setGinStubEnv("init_fail", initFile.path(), finalizeFile.path());
+    setGinStubEnv("init_fail", initFile.path(), finalizeFile.path(), propertiesFile.path());
     initAndDestroyComm();
 
     EXPECT_EQ(countLines(initFile.path()), 1)
         << "external GIN plugin init must be attempted once";
     EXPECT_EQ(countLines(finalizeFile.path()), 0)
         << "finalize() must not run for an init() that failed";
+    EXPECT_EQ(countLines(propertiesFile.path()), 0)
+        << "getProperties() must not run for an init() that failed";
   });
 }
 

@@ -176,6 +176,7 @@ TEST_F(GinPluginInitTest, FinalizesWhenDevicesReportsZero) {
   EXPECT_EQ(fake_.devicesCalls, 1);
   EXPECT_EQ(fake_.finalizeCalls, 1);
   EXPECT_EQ(ctx_, nullptr);
+  EXPECT_EQ(fake_.lastCtx, nullptr);
 }
 
 // A failed init() never produced a context, so finalize() must not run.
@@ -193,7 +194,6 @@ TEST_F(GinPluginInitTest, DoesNotFinalizeAfterFailedInit) {
 TEST_F(GinPluginInitTest, DoesNotFinalizeWhenInitPointerIsNull) {
   fake_.initNullFn = true;
   gin_ = fake_.vtable();
-  pluginLib_.ncclGin = &gin_;
 
   ASSERT_EQ(runInit(), ncclSuccess);
   EXPECT_EQ(pluginLib_.state, ncclGinPluginStateDisabled);

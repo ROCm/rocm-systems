@@ -53,7 +53,10 @@
 //   devices_fail  - init() succeeds but devices() reports an error.
 //   devices_zero  - init() succeeds but devices() reports ndev = 0.
 // Both devices_* modes must still run finalize() (NVIDIA/nccl#2179).
-// Records via RCCL_GIN_TEST_{INIT,FINALIZE}_FILE.
+// Records via RCCL_GIN_TEST_{INIT,FINALIZE,PROPERTIES}_FILE. getProperties()
+// runs only after a successful devices() probe (the default assign path), so
+// GinPluginInitFail.* asserts that counter is 0 to distinguish those modes
+// from a mistyped RCCL_GIN_TEST_PLUGIN_MODE that falls through to default.
 //
 // Both plugins share the real RCCL plugin headers (nccl_net.h transitively
 // provides the v12 net ABI, net_device.h and the GIN proxy constants); this
@@ -245,12 +248,14 @@ __hidden ncclResult_t stubInit(void** ctx, uint64_t /*commId*/, ncclDebugLogger_
 }
 
 __hidden ncclResult_t stubDevices(int* ndev) {
-  if (ginTestMode() == kGinModeDevicesFail) return ncclSystemError;
-  if (ndev) *ndev = (ginTestMode() == kGinModeDevicesZero) ? 0 : 1;
+  const GinPluginTestMode mode = ginTestMode();
+  if (mode == kGinModeDevicesFail) return ncclSystemError;
+  if (ndev) *ndev = (mode == kGinModeDevicesZero) ? 0 : 1;
   return ncclSuccess;
 }
 
 __hidden ncclResult_t stubGetProperties(int dev, ncclNetProperties_v12_t* props) {
+  recordLine("RCCL_GIN_TEST_PROPERTIES_FILE");
   memset(props, 0, sizeof(*props));
   props->name = kRmaPluginName;
   props->pciPath = nullptr;
