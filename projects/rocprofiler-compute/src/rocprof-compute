@@ -159,6 +159,16 @@ def verify_deps() -> None:
                 )
             return
 
+    searched = [
+        str(Path(bindir).joinpath(location).resolve()) for location in deps_locations
+    ]
+    console_error(
+        "Cannot find requirements.txt at "
+        f"{', '.join(searched)}"
+        ", so the analyze dependencies could not be checked."
+        f"\n\n{_ANALYZE_DEPS_DOC}"
+    )
+
 
 def main() -> None:
     """Main function for rocprofiler-compute"""
