@@ -404,7 +404,7 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe) {
-    if (size >= constmem.ipc_sdma_threshold) {
+    if (size >= constmem.ipc_sdma_threshold * WF_SIZE) {
       sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_block()) {
         handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
@@ -418,7 +418,7 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe) {
-    if (size >= constmem.ipc_sdma_threshold) {
+    if (size >= constmem.ipc_sdma_threshold * WF_SIZE) {
       sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_wave()) {
         handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);

@@ -228,7 +228,7 @@ namespace envvar {
 
   namespace sdma {
     const var<bool> enabled("ENABLED", "Enable SDMA transport at runtime", false);
-    const var<size_t> threshold("THRESHOLD", "SDMA transfer size threshold in bytes", 256);
+    const var<size_t> threshold("THRESHOLD", "SDMA transfer size threshold in bytes (scaled by WF_SIZE for wave/wg ops)", 1024);
     const var<int32_t> num_channels("NUM_CHANNELS", "Number of SDMA channels per destination [1, 8]", 1);
     const var<bool> spread_channels("SPREAD_CHANNELS",
         "Apply wf_id round-robin channel offset for all contexts (default: only for default ctx)",
