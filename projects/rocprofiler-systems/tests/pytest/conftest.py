@@ -267,6 +267,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "shmem",
         "nic",
         "ainic_required",
+        "ainic_two_card",
     ]
 
     # Informational markers, only used for test labeling
@@ -521,6 +522,10 @@ def pytest_collection_modifyitems(config, items) -> None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
         if "ainic_required" in item.keywords:
             _msg = ainic_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "ainic_two_card" in item.keywords:
+            _msg = ainic_two_card_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
         if "rocprofiler_sdk_min_version" in item.keywords:
@@ -782,6 +787,63 @@ def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     """
     if not rocprof_config.capabilities.ai_nic_devices:
         return "No AI NIC devices found (amd-smi static reports no NETDEV entries)"
+    return None
+
+
+def ainic_two_card_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    """Check whether a two-card AI NIC RDMA test can run on this machine.
+
+    The test is skipped unless ALL of the following are true:
+
+    1. At least one AI NIC device is detected via ``amd-smi static``.
+    2. ``ROCPROFSYS_AINIC_REMOTE_IP`` is set — hostname/IP of the remote machine
+       where the ``ib_write_bw`` client will be started via SSH.
+    3. ``ROCPROFSYS_AINIC_LOCAL_IP`` is set — the IP address of this machine's AI
+       NIC, which the remote client will connect to.
+    4. ``ib_write_bw`` from the *perftest* package is on PATH.
+    5. The AI NIC IB port is PORT_ACTIVE (physical cable connected and link up).
+       The IB device name is taken from ``ROCPROFSYS_AINIC_IB_DEVICE`` (default:
+       ``ionic_0``).
+
+    To enable the test, export all required variables and run::
+
+        ROCPROFSYS_AINIC_REMOTE_IP=<remote-host> \
+        ROCPROFSYS_AINIC_LOCAL_IP=<local-nic-ip>  \
+        pytest -k test_rdma_two_card tests/pytest/test_ainic.py -v
+    """
+    if not rocprof_config.capabilities.ai_nic_devices:
+        return "No AI NIC devices found (amd-smi static reports no NETDEV entries)"
+    if not os.environ.get("ROCPROFSYS_AINIC_REMOTE_IP"):
+        return (
+            "ROCPROFSYS_AINIC_REMOTE_IP not set — "
+            "set to the hostname/IP of the remote machine to enable two-card RDMA test"
+        )
+    if not os.environ.get("ROCPROFSYS_AINIC_LOCAL_IP"):
+        return (
+            "ROCPROFSYS_AINIC_LOCAL_IP not set — "
+            "set to the IP address of the local AI NIC "
+            "(the remote client will connect to this address)"
+        )
+    if shutil.which("ib_write_bw") is None:
+        return "ib_write_bw not found on PATH — install the perftest package"
+    # Check port state via sysfs; requires the cable/switch to be connected.
+    ib_device = os.environ.get("ROCPROFSYS_AINIC_IB_DEVICE", "ionic_0")
+    port_state_path = f"/sys/class/infiniband/{ib_device}/ports/1/state"
+    try:
+        from pathlib import Path as _Path
+        state = _Path(port_state_path).read_text().strip()
+        if "ACTIVE" not in state:
+            return (
+                f"AI NIC port {ib_device}/ports/1 is not PORT_ACTIVE "
+                f"(current state: {state!r}) — "
+                "physical cable/switch required for two-card RDMA test"
+            )
+    except OSError:
+        return (
+            f"Cannot read port state from {port_state_path} — "
+            f"is {ib_device!r} the correct IB device name? "
+            "Override with ROCPROFSYS_AINIC_IB_DEVICE."
+        )
     return None
 
 

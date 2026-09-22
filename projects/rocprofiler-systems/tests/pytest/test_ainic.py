@@ -106,6 +106,30 @@ def ainic_rocpd_rules(validation_rules_dir) -> list[Path]:
     return [rules_dir / "ainic-rdma-rules.json"]
 
 
+@pytest.fixture
+def ainic_two_card_env() -> dict[str, str]:
+    """Environment variables for the two-card AI NIC RDMA test.
+
+    Identical to ``ainic_perf_env``; kept separate so it can evolve
+    independently (e.g., to tune sampling frequency for long RDMA bursts).
+    """
+    env = {
+        "ROCPROFSYS_USE_PID": "OFF",
+        "ROCPROFSYS_LOG_LEVEL": "trace",
+        "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
+        "ROCPROFSYS_SAMPLING_FREQ": "50",
+        "ROCPROFSYS_SAMPLING_CPUS": "none",
+        "ROCPROFSYS_USE_AMD_SMI": "ON",
+        "ROCPROFSYS_USE_AINIC": "ON",
+        "ROCPROFSYS_SAMPLING_AINICS": "all",
+        "ROCPROFSYS_SAMPLING_DELAY": "0.05",
+    }
+    sysfs_root = os.environ.get("SMI_NIC_SYSFS_ROOT", "")
+    if sysfs_root:
+        env["SMI_NIC_SYSFS_ROOT"] = sysfs_root
+    return env
+
+
 # =============================================================================
 # Tests
 # =============================================================================
@@ -206,5 +230,127 @@ class TestAINIC(RocprofsysTest):
         self.assert_rocpd(
             result,
             subtest_name="ROCpd AI NIC track validation",
+            rules_files=ainic_rocpd_rules,
+        )
+
+    @pytest.mark.ainic_required
+    @pytest.mark.ainic_two_card
+    @pytest.mark.network
+    @pytest.mark.rocpd("ainic_two_card_env")
+    @pytest.mark.timeout(180)
+    def test_rdma_two_card(
+        self,
+        ainic_two_card_env,
+        ainic_rocpd_rules,
+        test_output_dir,
+    ):
+        """Two-card RDMA test: strict validation of non-zero AI NIC metrics.
+
+        **Disabled by default.**  Enable by exporting the three required
+        environment variables before running pytest::
+
+            ROCPROFSYS_AINIC_REMOTE_IP=<remote-host>   # SSH target
+            ROCPROFSYS_AINIC_LOCAL_IP=<local-nic-ip>   # IP client connects to
+            ROCPROFSYS_AINIC_IB_DEVICE=ionic_0         # optional, default ionic_0
+
+        Hardware requirements:
+
+        * Two machines, each with a Pensando Pollara 400G AI NIC.
+        * Both NICs connected via a cable or an Ethernet switch.
+        * Both ports in PORT_ACTIVE state (``/sys/class/infiniband/ionic_0/ports/1/state``).
+        * ``ib_write_bw`` (from the *perftest* package) installed on **both** machines.
+        * Passwordless SSH from this machine to ``ROCPROFSYS_AINIC_REMOTE_IP``.
+
+        Test flow:
+
+        1. Start ``ib_write_bw`` **server** on this machine under
+           ``rocprof-sys-sample`` so AI NIC PMC counters are collected.
+        2. A background thread SSHes to the remote machine (after a 3-second
+           delay to let the server come up) and starts the ``ib_write_bw``
+           **client**, which writes 10 × 1 MB messages over RDMA.
+        3. The client exits when the transfer is complete; the server exits
+           immediately after.
+        4. Strict Perfetto validation (``counter_names_presence_only=False``)
+           asserts that TX/RX RDMA counter values are **non-zero**.
+        5. ROCpd database is validated for AI NIC track presence.
+        """
+        import time
+        import threading
+
+        remote_ip = os.environ["ROCPROFSYS_AINIC_REMOTE_IP"]
+        local_ip = os.environ["ROCPROFSYS_AINIC_LOCAL_IP"]
+        ib_device = os.environ.get("ROCPROFSYS_AINIC_IB_DEVICE", "ionic_0")
+
+        ib_write_bw = shutil.which("ib_write_bw")
+        if not ib_write_bw:
+            pytest.skip("ib_write_bw not found on PATH")
+
+        # ib_write_bw server args: use the IB device, run 10 iterations
+        server_args = ["-d", ib_device, "-n", "10"]
+
+        # Collect errors from the remote-client thread so they surface in the
+        # main test rather than being silently swallowed.
+        client_errors: list[str] = []
+
+        def _run_remote_client() -> None:
+            # Give the server a moment to open its listen socket.
+            time.sleep(3)
+            try:
+                proc = subprocess.run(
+                    [
+                        "ssh",
+                        "-o", "StrictHostKeyChecking=no",
+                        "-o", "ConnectTimeout=15",
+                        remote_ip,
+                        "ib_write_bw",
+                        local_ip,
+                        "-d", ib_device,
+                        "-n", "10",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                if proc.returncode != 0:
+                    client_errors.append(
+                        f"Remote ib_write_bw client exited with rc={proc.returncode}\n"
+                        f"stdout: {proc.stdout}\nstderr: {proc.stderr}"
+                    )
+            except subprocess.TimeoutExpired:
+                client_errors.append("Remote ib_write_bw client timed out (>120 s)")
+            except Exception as exc:  # noqa: BLE001
+                client_errors.append(f"Remote ib_write_bw client raised: {exc}")
+
+        client_thread = threading.Thread(target=_run_remote_client, daemon=True)
+        client_thread.start()
+
+        # Run the profiled server — blocks until the client finishes and the
+        # server exits.
+        result = self.run_test(
+            "sampling",
+            ib_write_bw,
+            run_args=server_args,
+            env=ainic_two_card_env,
+        )
+
+        client_thread.join(timeout=30)
+
+        if client_errors:
+            pytest.fail("Remote client side failed:\n" + client_errors[0])
+
+        self.assert_regex(result)
+
+        # Strict validation: real RDMA traffic MUST produce non-zero counter
+        # values.  counter_names_presence_only is intentionally False (default).
+        self.assert_perfetto(
+            result,
+            counter_names=AINIC_PERFETTO_COUNTER_NAMES,
+            pass_regex=self.PERFETTO_PASS_REGEX,
+            fail_regex=self.PERFETTO_FAIL_REGEX,
+        )
+
+        self.assert_rocpd(
+            result,
+            subtest_name="ROCpd AI NIC two-card RDMA validation",
             rules_files=ainic_rocpd_rules,
         )
