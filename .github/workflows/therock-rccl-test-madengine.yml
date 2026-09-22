@@ -76,12 +76,15 @@ jobs:
       # belongs to the CVS suite, which this job may neither traverse nor wipe.
       OUTPUT_ARTIFACTS_DIR: "./build"
       CLUSTER: "ruby"
+      # ruby's per-job private /tmp is invisible to the Docker daemon, so a -v
+      # bind mount of the workspace lands empty; /var/tmp is visible.
+      SLURM_TMPDIR: "/var/tmp"
     steps:
       - name: Checkout TheRock repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          ref: ec26b5e6128bcef52e1d36199f16042bee19cf36 # 2026-09-09 commit
+          ref: a4cdc81d1c7ad7f4f8c872ba728bbc0e3734ad05 # 2026-09-21
 
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
