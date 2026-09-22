@@ -19,7 +19,9 @@ from test_accl_profiler import (  # noqa: E402
 )
 
 
-def _artifact_paths(tmp_path: Path) -> ArtifactPaths:
+def _artifact_paths(
+    tmp_path: Path, kpack_names: tuple[str, ...] = ()
+) -> ArtifactPaths:
     files = {
         "rccl_library": tmp_path / "librccl.so",
         "profiler_plugin": tmp_path / "librccl-profiler-accl.so",
@@ -32,13 +34,20 @@ def _artifact_paths(tmp_path: Path) -> ArtifactPaths:
         path = tmp_path / binary
         path.write_text("fixture", encoding="utf-8")
         binaries[binary] = path
+    kpack_dir = tmp_path / ".kpack"
+    kpack_files = []
+    for name in kpack_names:
+        kpack_dir.mkdir(exist_ok=True)
+        path = kpack_dir / name
+        path.write_text("fixture", encoding="utf-8")
+        kpack_files.append(path)
     return ArtifactPaths(
         root=tmp_path,
         rccl_library=files["rccl_library"],
         profiler_plugin=files["profiler_plugin"],
         report_script=files["report_script"],
         binaries=binaries,
-        kpack_files=(),
+        kpack_files=tuple(kpack_files),
     )
 
 
@@ -134,9 +143,37 @@ def test_slurm_script_does_not_inherit_runner_python_paths(tmp_path, monkeypatch
     assert "_tool/Python" not in script
     assert f"export PATH={tmp_path}/bin:/usr/bin:/bin:/usr/sbin:/sbin" in script
     assert f"export LD_LIBRARY_PATH={tmp_path}" in script
-    assert "unset PYTHONHOME PYTHONPATH VIRTUAL_ENV" in script
+    assert (
+        "unset PYTHONHOME PYTHONPATH VIRTUAL_ENV "
+        "ROCM_KPACK_PATH ROCM_KPACK_PATH_PREFIX" in script
+    )
     assert '"$ROCM_PATH/bin/rocminfo"' in script
     assert '/usr/bin/python3 "$ROCM_PATH/bin/rocm_agent_enumerator"' in script
+
+
+def test_slurm_script_uses_embedded_kpack_references(tmp_path):
+    paths = _artifact_paths(
+        tmp_path,
+        ("rccl_lib_gfx950.kpack", "rccl_test_gfx950.kpack"),
+    )
+
+    script = render_slurm_script(paths, tmp_path / "work", RunConfig())
+
+    assert "export ROCM_KPACK_PATH=" not in script
+    assert "export ROCM_KPACK_PATH_PREFIX=" not in script
+    assert "rccl_lib_gfx950.kpack" in script
+    assert "rccl_test_gfx950.kpack" in script
+    assert 'readelf -SW "$ACCL_RCCL_LIB"' in script
+    assert 'readelf -SW "$binary"' in script
+    assert 'resolved_hip=$(ldd "$ACCL_PREFLIGHT_BINARY"' in script
+    assert '"$ROCM_PATH"/*' in script
+
+
+def test_slurm_script_rejects_incomplete_kpack_layout(tmp_path):
+    paths = _artifact_paths(tmp_path, ("rccl_lib_gfx950.kpack",))
+
+    with pytest.raises(FileNotFoundError, match="rccl_test_gfx950.kpack"):
+        render_slurm_script(paths, tmp_path / "work", RunConfig())
 
 
 def test_validate_collective_output_accepts_complete_rank_coverage(tmp_path):
