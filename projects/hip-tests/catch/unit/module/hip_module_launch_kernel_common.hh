@@ -141,24 +141,6 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
                     expectedErrorLaunchParam);
   }
 
-  SECTION("gridDimX > maxGridDimX") {
-    const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxGridDimX, 0) + 1u;
-    HIP_CHECK_ERROR(func(f, x, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorLaunchParam);
-  }
-
-  SECTION("gridDimY > maxGridDimY") {
-    const unsigned int y = GetDeviceAttribute(hipDeviceAttributeMaxGridDimY, 0) + 1u;
-    HIP_CHECK_ERROR(func(f, 1, y, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorLaunchParam);
-  }
-
-  SECTION("gridDimZ > maxGridDimZ") {
-    const unsigned int z = GetDeviceAttribute(hipDeviceAttributeMaxGridDimZ, 0) + 1u;
-    HIP_CHECK_ERROR(func(f, 1, 1, z, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorLaunchParam);
-  }
-
   SECTION("blockDimX > maxBlockDimX") {
     const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimX, 0) + 1u;
     HIP_CHECK_ERROR(func(f, 1, 1, 1, x, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
@@ -233,5 +215,41 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
     void* extra[0] = {};
     HIP_CHECK_ERROR(func(f, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, extra, nullptr, nullptr, 0u),
                     hipErrorInvalidValue);
+  }
+}
+
+// Split out of ModuleLaunchKernelNegativeParameters because these three sections fail on AMD
+// (AIRUNTIME-2631) while every other section there passes. Keeping them in the same test case
+// forced the whole case to stay disabled, leaving the launch-parameter validation paths with no
+// CI coverage at all.
+//
+// The runtime reports maxGridSize[i] = min(info.maxGridDim_[i], INT32_MAX) (hip_device.cpp:662),
+// so the advertised limit is 2^31-1, but the only grid check performed at launch is that the
+// computed global work size fits uint32_t. A gridDim of 2^31 with blockDim 1 therefore launches
+// successfully instead of being rejected. This must be fixed in the runtime -- either by
+// enforcing the advertised limit or by reporting the limit the runtime actually enforces.
+template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeMaxGridDim(
+                                                           bool extLaunch = false) {
+  auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
+  hipFunction_t f = GetKernel(mg.module(), "NOPKernel");
+  hipError_t expectedErrorLaunchParam = (extLaunch == true) ? hipErrorInvalidConfiguration
+                                                             : hipErrorInvalidValue;
+
+  SECTION("gridDimX > maxGridDimX") {
+    const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxGridDimX, 0) + 1u;
+    HIP_CHECK_ERROR(func(f, x, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
+                    expectedErrorLaunchParam);
+  }
+
+  SECTION("gridDimY > maxGridDimY") {
+    const unsigned int y = GetDeviceAttribute(hipDeviceAttributeMaxGridDimY, 0) + 1u;
+    HIP_CHECK_ERROR(func(f, 1, y, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
+                    expectedErrorLaunchParam);
+  }
+
+  SECTION("gridDimZ > maxGridDimZ") {
+    const unsigned int z = GetDeviceAttribute(hipDeviceAttributeMaxGridDimZ, 0) + 1u;
+    HIP_CHECK_ERROR(func(f, 1, 1, z, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
+                    expectedErrorLaunchParam);
   }
 }

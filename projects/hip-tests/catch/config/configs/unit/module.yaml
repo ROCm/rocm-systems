@@ -35,9 +35,14 @@ module:
     tags: [launch]
   Unit_hipModuleLaunchKernel_Negative_Parameters:
     <<: *level_default
-    disabled:
-      targets: [amd_windows, amd_linux, amd_wsl]
-      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1030 (amd_linux) FAILs 3/3 with a launch error-code mismatch (stale ModuleTest, correct cwd; was a PSDB failure); gfx1201 (amd_windows) FAILs (false -> false); gfx1201 (amd_wsl) FAILs localError == expectedErrorLaunchParam -> 0 == 1."
+    # amd_linux re-verified on gfx942; amd_windows/amd_wsl not re-verified
+    disabled: [amd_windows, amd_wsl]
+    tags: [launch]
+    reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1030 (amd_linux) FAILs 3/3 with a launch error-code mismatch (stale ModuleTest, correct cwd; was a PSDB failure); gfx1201 (amd_windows) FAILs (false -> false); gfx1201 (amd_wsl) FAILs localError == expectedErrorLaunchParam -> 0 == 1."
+  Unit_hipModuleLaunchKernel_Negative_MaxGridDim:
+    <<: *level_default
+    # AIRUNTIME-2631: runtime does not enforce the maxGridSize it advertises
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [launch]
   Unit_hipModuleLaunchKernel_Fntl:
     <<: *level_default
@@ -344,9 +349,14 @@ module:
     tags: [launch]
   Unit_hipExtModuleLaunchKernel_Negative_Parameters:
     <<: *level_default
-    disabled:
-      targets: [amd_windows, amd_linux, amd_wsl]
-      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1030 (amd_linux) FAILs 3/3 with a launch error-code mismatch (stale ModuleTest, correct cwd; was a PSDB failure); gfx1201 (amd_windows) FAILs (false -> false); gfx1201 (amd_wsl) FAILs localError == expectedErrorLaunchParam -> 0 == 9."
+    # amd_linux re-verified on gfx942; amd_windows/amd_wsl not re-verified
+    disabled: [amd_windows, amd_wsl]
+    tags: [launch]
+    reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1030 (amd_linux) FAILs 3/3 with a launch error-code mismatch (stale ModuleTest, correct cwd; was a PSDB failure); gfx1201 (amd_windows) FAILs (false -> false); gfx1201 (amd_wsl) FAILs localError == expectedErrorLaunchParam -> 0 == 9."
+  Unit_hipExtModuleLaunchKernel_Negative_MaxGridDim:
+    <<: *level_default
+    # AIRUNTIME-2631: runtime does not enforce the maxGridSize it advertises
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [launch]
   Unit_hipExtModuleLaunchKernel_Functional:
     <<: *level_default
