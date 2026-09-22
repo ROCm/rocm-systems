@@ -104,7 +104,9 @@ ncclResult_t ncclProfilerThreadDestroy(struct ncclComm* comm) { return ncclSucce
 // src/plugin/profiler.cc:871. Not fail-loud: ncclPrepareTasks:601 reaches this on
 // a happy path, and "no profiler plugin loaded" is the truth for a host-only
 // binary that links no plugin, not a steering choice.
-bool ncclProfilerPluginLoaded(void) { return false; }
+static bool DefaultProfilerPluginLoaded() { return false; }
+std::function<bool()> g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
+bool ncclProfilerPluginLoaded(void) { return g_profilerPluginLoaded(); }
 void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { }
 ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRunDiagnosticsPassive(struct ncclComm* comm) { return ncclSuccess; }
@@ -118,9 +120,7 @@ bool ncclRmaProxyEnabled(struct ncclComm* comm) { return false; }
 ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { return ncclSuccess; }
 // ncclStrongStreamDestruct and the rest of src/misc/strongstream.cc: strongstream_stubs.cc.
-static ncclResult_t DefaultNcclSymkFinalize(struct ncclComm*) { return ncclSuccess; }
-std::function<ncclResult_t(struct ncclComm*)> g_ncclSymkFinalize = DefaultNcclSymkFinalize;
-ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { return g_ncclSymkFinalize(comm); }
+// ncclSymkFinalize: fakes/sym_kernels_fakes.cc, alongside the rest of src/sym_kernels.cc's fakes.
 ncclResult_t ncclTunerPluginLoad(struct ncclComm* comm) { ::abort(); }
 // Recording the comm matters: commCleanup forwards its own argument, so passing anything else would be invisible.
 // TRAP: the recording must live here, not in the functor's default -- the default is reachable from the
@@ -229,7 +229,6 @@ void ResetNcclStubs() {
 #endif
   g_ncclAsyncLaunch = DefaultNcclAsyncLaunch;
   g_ncclMemFree = DefaultNcclMemFree;
-  g_ncclSymkFinalize = DefaultNcclSymkFinalize;
   g_ncclCommDestroy = DefaultNcclCommDestroy;
   g_collTraceDestroy = DefaultCollTraceDestroy;
   g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;
@@ -244,4 +243,6 @@ void ResetNcclStubs() {
   g_rocmVersionMajor = 0;
   g_rocmVersionMinor = 0;
   g_rocmVersionPatch = 0;
+  g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
+  ncclDevFuncNameToId.clear();
 }

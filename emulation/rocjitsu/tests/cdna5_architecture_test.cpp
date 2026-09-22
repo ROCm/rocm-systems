@@ -274,8 +274,7 @@ TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
   EXPECT_EQ(cu->config().lds_size_kb, kGfx1250LdsSizeKb);
   EXPECT_TRUE(cu->sram_ecc());
   EXPECT_EQ(cu->config().target, ROCJITSU_CODE_TARGET_GFX1250);
-  EXPECT_EQ(soc->xcd(0)->command_processor()->sdma_packet_dialect(),
-            amdgpu::SdmaPacketDialect::Gfx1250);
+  EXPECT_EQ(soc->sdma_queue_scheduler().packet_dialect(), amdgpu::SdmaPacketDialect::Gfx1250);
 }
 
 TEST(Gfx1250CodeObjectTest, MachineFlagMapsToTarget) {
