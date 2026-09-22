@@ -55,6 +55,7 @@ struct ncclInfo {
   // yet, and the AllReduce WithBias path).
   struct rcclCollDecision decision;
   bool decisionValid;
+  size_t sizesCount;
 };
 
 #endif

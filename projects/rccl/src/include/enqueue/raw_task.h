@@ -38,6 +38,8 @@ struct ncclRawTaskColl {
   // RCCL: ncclAllReduceWithBias accumulator and the op count, which the default path also records.
   void const* acc;
   uint64_t opCount;
+  size_t* sizes;
+  size_t sizesCount;
 };
 
 // AllGatherV inputs built by merging broadcast raw tasks during pre-tuning.
@@ -65,6 +67,7 @@ struct ncclRawTaskSendRecv {
   size_t bytes;
   cudaStream_t stream;
   cudaEvent_t launchCompletionEvent;
+  bool inPlace;
 };
 
 // ncclPutSignal API inputs captured at enqueue time.

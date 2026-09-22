@@ -64,6 +64,7 @@ struct ncclDevrNonSymExchangeEntry {
   int isCuMem;
   uint64_t hostHash;
   uint64_t pidHash;
+  uintptr_t allocBase;
   size_t userOffset; // userPtr - allocBase
   size_t userSize;
 };
