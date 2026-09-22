@@ -36,7 +36,7 @@ void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
           wf, *d, inst_.srsrc * 4, inst_.vdata,
           {inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u,
            inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u},
-          inst_.dim, inst_.dmask, inst_.d16, inst_.r128 || inst_.a16 || inst_.tfe))
+          inst_.dim, inst_.dmask, inst_.d16, inst_.r128 || inst_.tfe || inst_.a16))
     return;
   set_data(std::move(d));
 }
@@ -75,7 +75,7 @@ void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
           wf, *d, inst_.srsrc * 4, inst_.vdata,
           {inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u,
            inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u},
-          inst_.dim, inst_.dmask, inst_.d16, inst_.r128 || inst_.a16 || inst_.tfe))
+          inst_.dim, inst_.dmask, inst_.d16, inst_.r128 || inst_.tfe || inst_.a16))
     return;
   set_data(std::move(d));
 }
@@ -189,25 +189,58 @@ void ImageSampleMimg::execute_impl(amdgpu::Wavefront &wf) {
           wf, *d, inst_.srsrc * 4, inst_.vdata,
           {inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u,
            inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u},
-          inst_.dim, inst_.dmask, inst_.d16,
-          inst_.r128 || inst_.a16 || inst_.tfe || inst_.unorm || inst_.lwe, inst_.ssamp * 4))
+          inst_.dim, inst_.dmask, inst_.d16, inst_.r128 || inst_.tfe || inst_.unorm || inst_.lwe,
+          inst_.ssamp * 4, amdgpu::ImageSampleMode::Implicit, inst_.a16))
     return;
   set_data(std::move(d));
 }
 
 void ImageSampleDMimg::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.srsrc * 4, inst_.vdata,
+          {inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u,
+           inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u,
+           inst_.nsa ? (raw_words_[2] >> 16) & 255 : inst_.vaddr + 3u,
+           inst_.nsa ? raw_words_[2] >> 24 : inst_.vaddr + 4u,
+           inst_.nsa ? (raw_words_[2] >> 24) + 1u : inst_.vaddr + 5u},
+          inst_.dim, inst_.dmask, inst_.d16, inst_.r128 || inst_.tfe || inst_.unorm || inst_.lwe,
+          inst_.ssamp * 4, amdgpu::ImageSampleMode::Derivatives, inst_.a16))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleLMimg::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.srsrc * 4, inst_.vdata,
+          {inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u,
+           inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u},
+          inst_.dim, inst_.dmask, inst_.d16, inst_.r128 || inst_.tfe || inst_.unorm || inst_.lwe,
+          inst_.ssamp * 4, amdgpu::ImageSampleMode::Explicit, inst_.a16))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleBMimg::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.srsrc * 4, inst_.vdata,
+          {inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u,
+           inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u},
+          inst_.dim, inst_.dmask, inst_.d16, inst_.r128 || inst_.tfe || inst_.unorm || inst_.lwe,
+          inst_.ssamp * 4, amdgpu::ImageSampleMode::Bias, inst_.a16))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleLzMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -219,8 +252,8 @@ void ImageSampleLzMimg::execute_impl(amdgpu::Wavefront &wf) {
           wf, *d, inst_.srsrc * 4, inst_.vdata,
           {inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u,
            inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u},
-          inst_.dim, inst_.dmask, inst_.d16,
-          inst_.r128 || inst_.a16 || inst_.tfe || inst_.unorm || inst_.lwe, inst_.ssamp * 4))
+          inst_.dim, inst_.dmask, inst_.d16, inst_.r128 || inst_.tfe || inst_.unorm || inst_.lwe,
+          inst_.ssamp * 4, amdgpu::ImageSampleMode::Zero, inst_.a16))
     return;
   set_data(std::move(d));
 }

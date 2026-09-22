@@ -154,6 +154,23 @@ struct ImageMetadataAccess {
   std::array<uint32_t, 64> coordinates{};
 };
 
+/// @brief Texel requests and interpolation weights captured at sample issue time.
+struct ImageSampleAccess {
+  static constexpr size_t kMaxTaps = 8;
+  struct Tap {
+    std::array<uint64_t, 64> addresses{};
+    /// Per-lane x in bits 0-15 and y in bits 16-31.
+    std::array<uint32_t, 64> coordinates{};
+    uint64_t lane_mask = 0;
+  };
+  std::array<Tap, kMaxTaps> taps{};
+  /// XY interpolation fractions indexed by lane, mip, then axis.
+  std::array<std::array<std::array<float, 2>, 2>, 64> fractions{};
+  std::array<float, 64> mip_fractions{};
+  uint32_t tap_count = 1;
+  uint32_t border_color = 0;
+};
+
 /// @brief Dynamic pipeline state for vector memory instructions
 /// (FLAT, MUBUF, MTBUF, MIMG, DS).
 class VectorMemState : public DynamicInstState {
@@ -194,6 +211,7 @@ public:
   uint32_t buffer_selectors = 0;
   bool image_srgb = false;
   std::unique_ptr<ImageMetadataAccess> image_metadata;
+  std::unique_ptr<ImageSampleAccess> image_sample;
   uint32_t buffer_components = 0;
   bool buffer_d16 = false;
   // Some accesses store data in a hardware dword-interleaved ("swizzled")

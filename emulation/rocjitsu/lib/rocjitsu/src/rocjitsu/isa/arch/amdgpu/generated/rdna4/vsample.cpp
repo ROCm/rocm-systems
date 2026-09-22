@@ -80,6 +80,8 @@ ImageSampleDVsample::ImageSampleDVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -107,6 +109,8 @@ ImageSampleLVsample::ImageSampleLVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -134,6 +138,8 @@ ImageSampleBVsample::ImageSampleBVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {

@@ -310,6 +310,8 @@ struct CapturedAccess {
   std::vector<uint64_t> addresses;
   std::vector<uint64_t> pre_routing_addresses;
   std::vector<uint64_t> secondary_addresses;
+  std::vector<std::vector<uint64_t>> additional_addresses;
+  std::vector<uint64_t> additional_lane_masks;
 };
 
 /// @brief Records both memory hooks, so a test can compare what routing was
@@ -377,6 +379,10 @@ public:
                                           access.pre_routing_addresses.end());
     captured.secondary_addresses.assign(access.secondary_addresses.begin(),
                                         access.secondary_addresses.end());
+    for (const auto &set : access.additional_address_sets) {
+      captured.additional_addresses.emplace_back(set.addresses.begin(), set.addresses.end());
+      captured.additional_lane_masks.push_back(set.lane_mask);
+    }
     accesses.push_back(std::move(captured));
   }
 
@@ -6187,6 +6193,38 @@ TEST(RoutedMemoryObservationTest, PerElementBoundsAndCachePolicyAreCarried) {
   EXPECT_TRUE(access.lds_destination);
 }
 
+TEST(RoutedMemoryObservationTest, ImageFilterReportsEveryTapAndExcludesBorderRequests) {
+  PluginFixture fixture;
+  auto *plugin = fixture.attach_memory_observation_plugin();
+  auto *cu = fixture.cu();
+  auto *wave = cu->dispatch_wf(1, 0x790, 104, 256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(7);
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->wf_size = wave->wf_size();
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->exec_mask = state->lane_mask = 7;
+  state->image_sample = std::make_unique<ImageSampleAccess>();
+  auto &sample = *state->image_sample;
+  sample.tap_count = 4;
+  sample.taps[1].addresses[1] = 0xc040;
+  sample.taps[1].lane_mask = 2;
+  sample.taps[2].addresses[0] = 0xc080;
+  sample.taps[2].lane_mask = 1;
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
+                                                 *wave);
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  const auto &access = plugin->accesses.front();
+  EXPECT_EQ(access.active_lane_mask, 7u);
+  EXPECT_EQ(access.valid_lane_mask, 3u);
+  EXPECT_EQ(access.request_lane_mask, 0u);
+  ASSERT_EQ(access.additional_addresses.size(), 3u);
+  EXPECT_EQ(access.additional_lane_masks, (std::vector<uint64_t>{2, 1, 0}));
+  EXPECT_EQ(access.additional_addresses[0][1], 0xc040u);
+  EXPECT_EQ(access.additional_addresses[1][0], 0xc080u);
+}
+
 TEST(RoutedMemoryObservationTest, ASingleAccessCarriesNoSecondAddressSet) {
   // The counterpart to the DS dual-access case: an ordinary access must report
   // an empty second set rather than a stale array of zeroes, which a consumer
@@ -6211,6 +6249,7 @@ TEST(RoutedMemoryObservationTest, ASingleAccessCarriesNoSecondAddressSet) {
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   EXPECT_TRUE(plugin->accesses.front().secondary_addresses.empty());
+  EXPECT_TRUE(plugin->accesses.front().additional_addresses.empty());
   EXPECT_TRUE(plugin->accesses.front().element_lane_masks.empty());
 }
 

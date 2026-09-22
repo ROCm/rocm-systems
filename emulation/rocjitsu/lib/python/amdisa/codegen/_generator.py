@@ -7665,9 +7665,12 @@ class CodeGenerator:
             'IMAGE_STORE',
             'IMAGE_SAMPLE',
             'IMAGE_SAMPLE_LZ',
+            'IMAGE_SAMPLE_L',
+            'IMAGE_SAMPLE_B',
+            'IMAGE_SAMPLE_D',
         ):
             gfx12 = self.isa_spec.arch_name == 'rdna4'
-            sample = inst.name.upper() in ('IMAGE_SAMPLE', 'IMAGE_SAMPLE_LZ')
+            sample = inst.name.upper().startswith('IMAGE_SAMPLE')
             load = inst.name.upper() != 'IMAGE_STORE'
             counter = (
                 'SAMPLECNT' if sample and gfx12 else ('LOADCNT' if load else 'STORECNT')
@@ -7676,7 +7679,9 @@ class CodeGenerator:
             sampler = (
                 (', inst_.samp' if gfx12 else ', inst_.ssamp * 4') if sample else ''
             )
-            unsupported = 'inst_.r128 || inst_.a16 || inst_.tfe'
+            unsupported = 'inst_.r128 || inst_.tfe'
+            if not sample:
+                unsupported += ' || inst_.a16'
             if gfx12:
                 unsupported += ' || inst_.nv'
             if sample:
@@ -7687,6 +7692,26 @@ class CodeGenerator:
                 else '{inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u, '
                 'inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u}'
             )
+            if inst.name.upper() == 'IMAGE_SAMPLE_D':
+                coords = (
+                    '{inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, '
+                    'inst_.vaddr3 + 1u, inst_.vaddr3 + 2u}'
+                    if gfx12
+                    else '{inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u, '
+                    'inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u, '
+                    'inst_.nsa ? (raw_words_[2] >> 16) & 255 : inst_.vaddr + 3u, '
+                    'inst_.nsa ? raw_words_[2] >> 24 : inst_.vaddr + 4u, '
+                    'inst_.nsa ? (raw_words_[2] >> 24) + 1u : inst_.vaddr + 5u}'
+                )
+            if sample:
+                mode = {
+                    'IMAGE_SAMPLE': 'Implicit',
+                    'IMAGE_SAMPLE_LZ': 'Zero',
+                    'IMAGE_SAMPLE_L': 'Explicit',
+                    'IMAGE_SAMPLE_B': 'Bias',
+                    'IMAGE_SAMPLE_D': 'Derivatives',
+                }[inst.name.upper()]
+                sampler += f', amdgpu::ImageSampleMode::{mode}, inst_.a16'
             mtype = (
                 'amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th)'
                 if gfx12
@@ -8130,11 +8155,17 @@ class CodeGenerator:
         if self.isa_spec.arch_name == 'rdna4' and sem.name in (
             'IMAGE_SAMPLE',
             'IMAGE_SAMPLE_LZ',
+            'IMAGE_SAMPLE_L',
+            'IMAGE_SAMPLE_B',
+            'IMAGE_SAMPLE_D',
         ):
             return 'image_sample_2d'
         if self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4') and sem.name in (
             'IMAGE_SAMPLE',
             'IMAGE_SAMPLE_LZ',
+            'IMAGE_SAMPLE_L',
+            'IMAGE_SAMPLE_B',
+            'IMAGE_SAMPLE_D',
             'IMAGE_LOAD',
             'IMAGE_STORE',
         ):

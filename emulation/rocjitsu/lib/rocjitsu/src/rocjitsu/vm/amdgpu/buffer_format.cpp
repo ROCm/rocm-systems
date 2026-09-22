@@ -322,21 +322,74 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
     if (!(d.exec_mask & (1ULL << lane)))
       continue;
-    const auto bytes = d.lane_mask & (1ULL << lane)
-                           ? std::span(d.response_data).subspan(lane * d.elem_size, d.elem_size)
-                           : std::span<const uint8_t>{};
-    auto values =
-        unpack_buffer_format(d.buffer_format, d.buffer_selectors, bytes, d.buffer_format_encoding);
-    if (d.image_srgb) {
+    const auto texel = [&](uint32_t tap) {
+      const bool valid = d.lane_mask & (uint64_t{1} << lane);
+      const bool border =
+          d.image_sample && !(d.image_sample->taps[tap].lane_mask & (uint64_t{1} << lane));
+      const auto bytes = valid && !border
+                             ? std::span(d.response_data)
+                                   .subspan((tap * d.wf_size + lane) * d.elem_size, d.elem_size)
+                             : std::span<const uint8_t>{};
+      auto values = unpack_buffer_format(d.buffer_format, d.buffer_selectors, bytes,
+                                         d.buffer_format_encoding);
       for (uint32_t i = 0; i < d.buffer_components; ++i) {
         const uint32_t selector = (d.buffer_selectors >> (3 * i)) & 7;
-        if (selector >= 4 && selector <= 6) {
+        if (border && valid && selector >= 4) {
+          const uint32_t color = d.image_sample->border_color;
+          const bool one = color == 2 || (color == 1 && selector == 7);
+          values[i] = one ? (integer(format.number) ? 1u : 0x3f800000u) : 0;
+        } else if (d.image_srgb && selector >= 4 && selector <= 6) {
           const float value = std::bit_cast<float>(values[i]);
           const float linear =
               value <= 0.04045f ? value / 12.92f : std::pow((value + 0.055f) / 1.055f, 2.4f);
           // RDNA3/4 texture decoding rounds sRGB channels to BF16 precision.
           values[i] = std::bit_cast<uint32_t>(util::bf16_to_f32(util::f32_to_bf16_rne(linear)));
         }
+      }
+      return values;
+    };
+    auto values = texel(0);
+    if (d.image_sample && d.image_sample->tap_count >= 4) {
+      std::array<std::array<uint32_t, 4>, ImageSampleAccess::kMaxTaps> texels{};
+      for (uint32_t tap = 0; tap < d.image_sample->tap_count; ++tap)
+        texels[tap] = texel(tap);
+      for (uint32_t c = 0; c < d.buffer_components; ++c) {
+        const uint32_t selector = (d.buffer_selectors >> (3 * c)) & 7;
+        const bool unorm8 = !d.image_srgb || selector == 7;
+        const auto filter_level = [&](uint32_t level) {
+          const double x = d.image_sample->fractions[lane][level][0];
+          const double y = d.image_sample->fractions[lane][level][1];
+          std::array<double, 4> channels{};
+          for (uint32_t tap = 0; tap < 4; ++tap) {
+            channels[tap] = std::bit_cast<float>(texels[level * 4 + tap][c]);
+            if (unorm8)
+              channels[tap] = round_even(channels[tap] * 255);
+          }
+          const std::array weights{(1 - x) * (1 - y), x * (1 - y), (1 - x) * y, x * y};
+          if (!unorm8) {
+            double maximum = 0;
+            for (uint32_t tap = 0; tap < 4; ++tap)
+              if (weights[tap] != 0)
+                maximum = std::max(maximum, channels[tap]);
+            // The sRGB filter aligns contributing texels to a shared exponent
+            // with twelve significant bits before multiplying by the weights.
+            const int exponent = maximum > 0 ? std::ilogb(maximum) : 0;
+            const double scale = std::ldexp(1.0, 11 - exponent);
+            for (auto &channel : channels)
+              channel = std::floor(channel * scale) / scale;
+          }
+          return channels[0] * weights[0] + channels[1] * weights[1] + channels[2] * weights[2] +
+                 channels[3] * weights[3];
+        };
+        double filtered = filter_level(0);
+        if (d.image_sample->tap_count == 8) {
+          const double fraction = d.image_sample->mip_fractions[lane];
+          filtered = filtered * (1 - fraction) + filter_level(1) * fraction;
+        }
+        // RGBA8 filtering retains thirteen fractional texel-value bits.
+        if (unorm8)
+          filtered = round_even(filtered * 8192) / (8192 * 255);
+        values[c] = std::bit_cast<uint32_t>(static_cast<float>(filtered));
       }
     }
     for (uint32_t reg = 0; reg < registers; ++reg) {
