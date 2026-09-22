@@ -3,6 +3,7 @@
 #include "xtp_wrap.h"
 
 #include <dlfcn.h>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -53,6 +54,9 @@ struct it_kv {
   it_value value;
 };
 
+// Must match the reader's declaration exactly: filled here, read there, and
+// no compiler sees both. The static_asserts below turn a drifted copy into a
+// build failure instead of wrong fields at runtime.
 struct it_descriptor {
   const char* arch;
   int32_t n_nodes;
@@ -64,6 +68,17 @@ struct it_descriptor {
   int32_t nic_count;
   const char* hash;
 };
+
+static_assert(offsetof(it_descriptor, arch) == 0, "XTP descriptor: arch moved");
+static_assert(offsetof(it_descriptor, n_nodes) == 8, "XTP descriptor: n_nodes moved");
+static_assert(offsetof(it_descriptor, ranks_per_node) == 12, "XTP descriptor: ranks_per_node moved");
+static_assert(offsetof(it_descriptor, n_ranks) == 16, "XTP descriptor: n_ranks moved");
+static_assert(offsetof(it_descriptor, n_domains) == 20, "XTP descriptor: n_domains moved");
+static_assert(offsetof(it_descriptor, ranks_per_domain) == 24, "XTP descriptor: ranks_per_domain moved");
+static_assert(offsetof(it_descriptor, nic_type) == 32, "XTP descriptor: nic_type moved");
+static_assert(offsetof(it_descriptor, nic_count) == 40, "XTP descriptor: nic_count moved");
+static_assert(offsetof(it_descriptor, hash) == 48, "XTP descriptor: hash moved");
+static_assert(sizeof(it_descriptor) == 56, "XTP descriptor: size changed");
 
 struct it_ctx;
 struct it_comm;
@@ -83,7 +98,14 @@ struct XtpApi {
 XtpApi api;
 it_ctx* itCtx = nullptr;
 std::mutex itLock;
-std::unordered_map<const ncclComm*, it_comm*> itComms;
+
+// Kept with the descriptor it was built from, which is not stable across a
+// comm's init: see commHandle().
+struct Binding {
+  it_descriptor desc;
+  it_comm* comm; // null when no profile matched that descriptor
+};
+std::unordered_map<const ncclComm*, Binding> itComms;
 
 // Parse "ABI <major>.<minor>" out of the library's version string. Its exact
 // wording is not contractual, so a string we cannot read is treated the same
@@ -147,32 +169,41 @@ void loadOnce() {
   });
 }
 
-// Bind on first use so callers do not have to place an explicit bind in the
-// init sequence. Every fact below is already settled by the time the earliest
-// Class A consumer (PXN, during path computation) runs.
+// Bind on first use, and re-bind whenever the descriptor changes, because the
+// topology facts do not all arrive at once. PXN is consulted from
+// ncclTopoComputePaths -- before nNodes and localRanks are derived from the
+// cross-rank host-hash exchange -- so it sees only arch and nRanks, while the
+// knobs read later see the full topology. Caching the first descriptor for the
+// comm's lifetime would pin the incomplete one and starve every later lookup.
 it_comm* commHandle(struct ncclComm* comm) {
   loadOnce();
   if (itCtx == nullptr || comm == nullptr || comm->topo == nullptr) return nullptr;
-
-  std::lock_guard<std::mutex> guard(itLock);
-  auto found = itComms.find(comm);
-  if (found != itComms.end()) return found->second;
 
   it_descriptor desc = {};
   desc.arch = comm->topo->nodes[GPU].nodes[0].gpu.gcn;
   desc.n_nodes = comm->nNodes;
   desc.ranks_per_node = comm->localRanks;
-  // Carried explicitly because a comm need not be a uniform grid, and both PXN
-  // and P2P_NET_CHUNKSIZE switch on the true rank count.
+  // Always valid, unlike the two above: nRanks is an argument to
+  // ncclCommInitRank, so it is set before any knob is read.
   desc.n_ranks = comm->nRanks;
+
+  std::lock_guard<std::mutex> guard(itLock);
+  auto found = itComms.find(comm);
+  if (found != itComms.end()) {
+    // Same facts as last time; a remembered non-match counts, so an uncovered
+    // comm is asked once rather than on every lookup.
+    if (memcmp(&found->second.desc, &desc, sizeof(desc)) == 0) return found->second.comm;
+    if (found->second.comm != nullptr) api.unbindComm(found->second.comm);
+    itComms.erase(found);
+  }
 
   // No resolver: Class A matches on topology alone. One is needed only once
   // Class B rules start carrying constraints.
   it_comm* bound = api.bindComm(itCtx, &desc, nullptr, comm);
-  itComms[comm] = bound; // cache misses too, so an unmatched comm is asked once
+  itComms[comm] = Binding{desc, bound};
   if (bound == nullptr) {
-    INFO(NCCL_INIT, "XTP: no profile matches arch=%s nodes=%d ranks=%d; using built-in tuning", desc.arch,
-         desc.n_nodes, desc.n_ranks);
+    INFO(NCCL_INIT, "XTP: no profile matches arch=%s nodes=%d ranks_per_node=%d nranks=%d; using built-in tuning",
+         desc.arch, desc.n_nodes, desc.ranks_per_node, desc.n_ranks);
   }
   return bound;
 }
@@ -220,6 +251,6 @@ void rcclXtpCommFree(struct ncclComm* comm) {
   std::lock_guard<std::mutex> guard(itLock);
   auto found = itComms.find(comm);
   if (found == itComms.end()) return;
-  if (found->second != nullptr) api.unbindComm(found->second);
+  if (found->second.comm != nullptr) api.unbindComm(found->second.comm);
   itComms.erase(found);
 }
