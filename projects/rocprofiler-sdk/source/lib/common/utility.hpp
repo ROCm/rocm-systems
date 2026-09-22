@@ -99,16 +99,32 @@ get_tid()
     return _v;
 }
 
+inline uint64_t
+get_qpc_frequency() noexcept
+{
+    // fixed for the life of the system, so query it once
+    static const uint64_t _v = []() {
+        auto _freq = LARGE_INTEGER{};
+        ::QueryPerformanceFrequency(&_freq);
+        return static_cast<uint64_t>(_freq.QuadPart);
+    }();
+    return _v;
+}
+
 inline uint64_t get_ticks(clockid_t /*clk_id_v*/) noexcept
 {
     // Use QPC for high-resolution monotonic timestamps on Windows
-    LARGE_INTEGER freq{};
-    LARGE_INTEGER count{};
-    ::QueryPerformanceFrequency(&freq);
-    ::QueryPerformanceCounter(&count);
-    // convert to nanoseconds
+    auto _count = LARGE_INTEGER{};
+    ::QueryPerformanceCounter(&_count);
+
     constexpr uint64_t nanosec = std::nano::den;
-    return static_cast<uint64_t>(count.QuadPart) * nanosec / static_cast<uint64_t>(freq.QuadPart);
+
+    const auto _ticks = static_cast<uint64_t>(_count.QuadPart);
+    const auto _freq  = get_qpc_frequency();
+
+    // QPC counts from boot at ~1e7 Hz, so ticks * nanosec overflows uint64_t after roughly
+    // 31 minutes of uptime. Split into whole seconds plus remainder to keep the multiply small.
+    return ((_ticks / _freq) * nanosec) + (((_ticks % _freq) * nanosec) / _freq);
 }
 #endif
 
