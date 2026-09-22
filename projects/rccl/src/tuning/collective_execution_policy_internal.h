@@ -34,6 +34,11 @@ enum class BoolConstraint {
   True,
 };
 
+struct TransportConstraint {
+  bool any;
+  rcclExecutionTransport value;
+};
+
 enum class ChannelCount : int {};
 enum class Algorithm : int {};
 enum class Protocol : int {};
@@ -52,6 +57,7 @@ using AlgorithmOverride = Override<Algorithm>;
 using ProtocolOverride = Override<Protocol>;
 using PathOverride = Override<rcclP2pExecutionPath>;
 using TransferOverride = Override<rcclP2pTransferMode>;
+using TransportOverride = Override<rcclExecutionTransport>;
 
 // KEEP is convertible only to an output override. AUTO is intentionally
 // limited to fields whose automatic value is -1.
@@ -96,7 +102,7 @@ struct RuleMatch {
   IntRange nNodes;
   IntRange nRanks;
   IntRange nChannels;
-  BoolConstraint p2pEnabled;
+  TransportConstraint transport;
   BoolConstraint inPlace;
 };
 
@@ -106,6 +112,7 @@ struct RuleProfile {
   ProtocolOverride protocol;
   PathOverride path;
   TransferOverride transferMode;
+  TransportOverride transport;
 };
 
 struct RuleSpec {
@@ -115,7 +122,7 @@ struct RuleSpec {
 
 struct RuleRow {
   rcclExecutionPolicyCondition conditions[13];
-  rcclExecutionPolicyAssignment assignments[5];
+  rcclExecutionPolicyAssignment assignments[6];
   size_t conditionCount;
   size_t assignmentCount;
 };
@@ -143,6 +150,18 @@ constexpr ncclFunc_t REDUCE = ncclFuncReduce;
 constexpr ncclFunc_t REDUCE_SCATTER = ncclFuncReduceScatter;
 constexpr ncclFunc_t GATHER = ncclFuncGather;
 constexpr ncclFunc_t SCATTER = ncclFuncScatter;
+constexpr TransportConstraint ANY_TRANSPORT = {
+  true, RCCL_EXECUTION_TRANSPORT_UNKNOWN};
+constexpr TransportConstraint IPC = {
+  false, RCCL_EXECUTION_TRANSPORT_IPC};
+constexpr TransportConstraint SHM = {
+  false, RCCL_EXECUTION_TRANSPORT_SHM};
+constexpr TransportConstraint NET = {
+  false, RCCL_EXECUTION_TRANSPORT_NET};
+constexpr TransportConstraint COLLNET = {
+  false, RCCL_EXECUTION_TRANSPORT_COLLNET};
+constexpr TransportConstraint MIXED = {
+  false, RCCL_EXECUTION_TRANSPORT_MIXED};
 constexpr BoolConstraint ANY_BOOL = BoolConstraint::Any;
 constexpr BoolConstraint BOOL_FALSE = BoolConstraint::False;
 constexpr BoolConstraint BOOL_TRUE = BoolConstraint::True;
@@ -163,6 +182,10 @@ constexpr PathOverride SENDRECV = PathOverride::Set(RCCL_P2P_PATH_SENDRECV);
 constexpr TransferOverride AUTO_XFER = TransferOverride::Set(RCCL_P2P_TRANSFER_AUTO);
 constexpr TransferOverride WRITE = TransferOverride::Set(RCCL_P2P_TRANSFER_WRITE);
 constexpr TransferOverride READ = TransferOverride::Set(RCCL_P2P_TRANSFER_READ);
+constexpr TransportOverride USE_IPC =
+  TransportOverride::Set(RCCL_EXECUTION_TRANSPORT_IPC);
+constexpr TransportOverride USE_SHM =
+  TransportOverride::Set(RCCL_EXECUTION_TRANSPORT_SHM);
 
 constexpr bool isAny(const IntRange& range) {
   return range.min == INT_MIN && range.max == INT_MAX;
@@ -179,6 +202,12 @@ constexpr bool isValidCountRange(const IntRange& range, int minimum) {
 constexpr bool isValidBoolConstraint(BoolConstraint value) {
   return value == BoolConstraint::Any || value == BoolConstraint::False ||
          value == BoolConstraint::True;
+}
+
+constexpr bool isValidTransportConstraint(const TransportConstraint& constraint) {
+  return constraint.any ||
+         (constraint.value > RCCL_EXECUTION_TRANSPORT_UNKNOWN &&
+          constraint.value < RCCL_EXECUTION_TRANSPORT_COUNT);
 }
 
 template<typename T>
@@ -198,7 +227,8 @@ constexpr bool isSetTo(const Override<T>& value, T expected) {
 
 constexpr bool hasAssignment(const RuleProfile& profile) {
   return profile.nChannels.isSet || profile.algorithm.isSet || profile.protocol.isSet ||
-         profile.path.isSet || profile.transferMode.isSet;
+         profile.path.isSet || profile.transferMode.isSet ||
+         profile.transport.isSet;
 }
 
 // Checks invariants that depend only on build-time rule data. Runtime
@@ -215,7 +245,9 @@ constexpr bool isRuleSpecValid(const RuleSpec& rule) {
       !isValidCountRange(match.nRanks, /*minimum=*/1) ||
       !isValidCountRange(match.nChannels, /*minimum=*/0))
     return false;
-  if (!isValidBoolConstraint(match.p2pEnabled) || !isValidBoolConstraint(match.inPlace)) return false;
+  if (!isValidTransportConstraint(match.transport) ||
+      !isValidBoolConstraint(match.inPlace))
+    return false;
 
   if (profile.nChannels.isSet && overrideValue(profile.nChannels) != -1 &&
       (overrideValue(profile.nChannels) < 1 || overrideValue(profile.nChannels) > MAXCHANNELS))
@@ -223,7 +255,9 @@ constexpr bool isRuleSpecValid(const RuleSpec& rule) {
   if (!isValidOverride(profile.algorithm, -1, NCCL_NUM_ALGORITHMS - 1) ||
       !isValidOverride(profile.protocol, -1, NCCL_NUM_PROTOCOLS - 1) ||
       !isValidOverride(profile.path, RCCL_P2P_PATH_AUTO, RCCL_P2P_PATH_SENDRECV) ||
-      !isValidOverride(profile.transferMode, RCCL_P2P_TRANSFER_AUTO, RCCL_P2P_TRANSFER_READ))
+      !isValidOverride(profile.transferMode, RCCL_P2P_TRANSFER_AUTO, RCCL_P2P_TRANSFER_READ) ||
+      !isValidOverride(profile.transport, RCCL_EXECUTION_TRANSPORT_IPC,
+                       RCCL_EXECUTION_TRANSPORT_COUNT - 1))
     return false;
   if (!hasAssignment(profile)) return false;
 
@@ -302,9 +336,10 @@ inline RuleRow expandRule(const RuleSpec& spec) {
   appendIntRange(&row, RCCL_EXECUTION_INPUT_N_NODES, spec.match.nNodes);
   appendIntRange(&row, RCCL_EXECUTION_INPUT_N_RANKS, spec.match.nRanks);
   appendIntRange(&row, RCCL_EXECUTION_INPUT_N_CHANNELS, spec.match.nChannels);
-  if (spec.match.p2pEnabled != BoolConstraint::Any)
-    appendCondition(&row, RCCL_EXECUTION_INPUT_P2P_ENABLED, RCCL_EXECUTION_COMPARE_EQ,
-                    rcclExecutionPolicyValue::Boolean(spec.match.p2pEnabled == BoolConstraint::True));
+  if (!spec.match.transport.any)
+    appendCondition(&row, RCCL_EXECUTION_INPUT_TRANSPORT,
+                    RCCL_EXECUTION_COMPARE_EQ,
+                    rcclExecutionPolicyValue::Signed(spec.match.transport.value));
   if (spec.match.inPlace != BoolConstraint::Any)
     appendCondition(&row, RCCL_EXECUTION_INPUT_IN_PLACE, RCCL_EXECUTION_COMPARE_EQ,
                     rcclExecutionPolicyValue::Boolean(spec.match.inPlace == BoolConstraint::True));
@@ -314,6 +349,7 @@ inline RuleRow expandRule(const RuleSpec& spec) {
   appendAssignment(&row, RCCL_EXECUTION_OUTPUT_PROTOCOL, spec.profile.protocol);
   appendAssignment(&row, RCCL_EXECUTION_OUTPUT_PATH, spec.profile.path);
   appendAssignment(&row, RCCL_EXECUTION_OUTPUT_TRANSFER_MODE, spec.profile.transferMode);
+  appendAssignment(&row, RCCL_EXECUTION_OUTPUT_TRANSPORT, spec.profile.transport);
   return row;
 }
 
