@@ -10,12 +10,12 @@ Usage:
                                [--output-capture HIP_CAPTURE_GENERATED_CPP]
                                [--output-playback HIP_PLAYBACK_GENERATED_CPP]
 
-Defaults (paths relative to this script at projects/hrr/tools/):
+Defaults (paths relative to this script at projects/clr/hipamd/src/hrr/tools/):
     input            : ../../clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp
     public-header    : ../../hip/include/hip/hip_runtime_api.h
-    output-header    : ../include/hrr/hrr_api_args.h
-    output-capture   : ../../clr/hipamd/src/hrr/hip_capture_generated.cpp
-    output-playback  : ../playback/hip_playback_generated.cpp
+
+The output paths are required. CMake supplies binary-directory paths so code
+generation never writes into the source tree.
 
 hrr_api_args.h
 --------------
@@ -970,6 +970,7 @@ class ApiEntry:
     # Retired or unparsable dispatch-table slot. Occupies an hrr_api_id_t so
     # later members keep their IDs; no capture shim is installed.
     reserved: bool = False
+    reserved_reason: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -1188,7 +1189,7 @@ def parse_hip_api_trace(path: Path) -> List[ApiEntry]:
         print(f"WARNING: {why} for {func_name}; reserving ID so later slots "
               f"do not shift", file=sys.stderr)
         entries.append(ApiEntry(name=func_name, ret_type="void", params=[],
-                                table=table, reserved=True))
+                                table=table, reserved=True, reserved_reason=why))
 
     def add_entry(func_name: str, table: str, reserved: bool = False) -> None:
         if reserved:
@@ -1245,6 +1246,25 @@ def parse_hip_api_trace(path: Path) -> List[ApiEntry]:
         add_entry(func_name, "runtime")
 
     return entries
+
+
+def validate_capture_coverage(entries: List[ApiEntry], capture_cpp: str) -> None:
+    """Fail when an active dispatch-table slot lacks a capture shim."""
+    errors: List[str] = []
+    for entry in entries:
+        if entry.reserved:
+            if entry.reserved_reason != "retired void* dispatch slot":
+                errors.append(f"{entry.table}:{entry.name}: {entry.reserved_reason}")
+            continue
+        table_name = "g_cap_table" if entry.table == "runtime" else "cap"
+        assignment = f"{table_name}.{entry.name}_fn = capture_{entry.name};"
+        if assignment not in capture_cpp:
+            errors.append(f"{entry.table}:{entry.name}: missing table assignment")
+        if entry.name not in MANUAL_CAPTURE_APIS and f"capture_{entry.name}(" not in capture_cpp:
+            errors.append(f"{entry.table}:{entry.name}: missing generated shim")
+    if errors:
+        sys.exit("ERROR: HRR capture coverage check failed:\n  " + "\n  ".join(errors))
+    print(f"  HRR capture coverage: {sum(not e.reserved for e in entries)} active dispatch slots")
 
 
 # ---------------------------------------------------------------------------
@@ -2665,20 +2685,13 @@ def validate_playback_signatures(entries: List[ApiEntry],
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    # Script lives at projects/hrr/tools/ — resolve the split output layout.
-    # The portable header and playback live under projects/hrr; the capture
-    # shim stays inside CLR because it compiles into amdhip64.
-    tools_dir       = Path(__file__).resolve().parent   # projects/hrr/tools/
-    hrr_project_dir = tools_dir.parent                  # projects/hrr/
-    projects_dir    = hrr_project_dir.parent            # projects/
-    clr_root        = projects_dir / "clr"              # projects/clr/
-    clr_hrr_dir     = clr_root / "hipamd" / "src" / "hrr"  # capture stays in CLR
-    default_input    = clr_root / "hipamd/include/hip/amd_detail/hip_api_trace.hpp"
+    # Script lives at projects/clr/hipamd/src/hrr/tools/.
+    tools_dir = Path(__file__).resolve().parent
+    clr_root = tools_dir.parents[3]      # projects/clr/
+    projects_dir = clr_root.parent       # projects/
+    default_input = clr_root / "hipamd/include/hip/amd_detail/hip_api_trace.hpp"
     # Playback calls the PUBLIC API, so its declarations are validated too.
-    default_public   = projects_dir / "hip/include/hip/hip_runtime_api.h"
-    default_header   = hrr_project_dir / "include" / "hrr" / "hrr_api_args.h"
-    default_capture  = clr_hrr_dir / "hip_capture_generated.cpp"
-    default_playback = hrr_project_dir / "playback" / "hip_playback_generated.cpp"
+    default_public = projects_dir / "hip/include/hip/hip_runtime_api.h"
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input",           default=str(default_input),
@@ -2689,19 +2702,30 @@ def main() -> None:
                         help="Skip playback/public-API signature validation. "
                              "Unsafe: a playback cast may disagree with the "
                              "API it is passed to.")
-    parser.add_argument("--output-header",   default=str(default_header),
-                        help="Path to generated hrr_api_args.h")
-    parser.add_argument("--output-capture",  default=str(default_capture),
-                        help="Path to generated hip_capture_generated.cpp")
-    parser.add_argument("--output-playback", default=str(default_playback),
-                        help="Path to generated hip_playback_generated.cpp")
+    parser.add_argument("--output-header", required=True,
+                        help="Binary-directory path for generated hrr_api_args.h")
+    parser.add_argument("--output-capture",
+                        help="Binary-directory path for generated hip_capture_generated.cpp")
+    parser.add_argument("--output-playback",
+                        help="Binary-directory path for generated hip_playback_generated.cpp")
+    parser.add_argument("--skip-capture", action="store_true",
+                        help="Do not generate hip_capture_generated.cpp")
+    parser.add_argument("--skip-playback", action="store_true",
+                        help="Do not generate hip_playback_generated.cpp")
+    parser.add_argument("--check-hrr-coverage", action="store_true",
+                        help="Fail when an active dispatch-table slot lacks a capture shim")
     args = parser.parse_args()
+
+    if not args.skip_capture and not args.output_capture:
+        parser.error("--output-capture is required unless --skip-capture is set")
+    if not args.skip_playback and not args.output_playback:
+        parser.error("--output-playback is required unless --skip-playback is set")
 
     in_path       = Path(args.input)
     public_path   = Path(args.public_header)
     header_path   = Path(args.output_header)
-    capture_path  = Path(args.output_capture)
-    playback_path = Path(args.output_playback)
+    capture_path  = Path(args.output_capture) if args.output_capture else None
+    playback_path = Path(args.output_playback) if args.output_playback else None
 
     if not in_path.exists():
         sys.exit(f"ERROR: input file not found: {in_path}")
@@ -2780,20 +2804,30 @@ def main() -> None:
         public_decls = parse_public_api_signatures(public_path)
         validate_playback_signatures(entries, public_decls, public_path)
 
+    capture_cpp = (generate_capture_cpp(entries)
+                   if args.check_hrr_coverage or not args.skip_capture else None)
+    if args.check_hrr_coverage:
+        assert capture_cpp is not None
+        validate_capture_coverage(entries, capture_cpp)
+
     header_path.parent.mkdir(parents=True, exist_ok=True)
     header = generate_header(entries)
     header_path.write_text(header, encoding='utf-8')
     print(f"Written header   -> {header_path}")
 
-    capture_path.parent.mkdir(parents=True, exist_ok=True)
-    capture_cpp = generate_capture_cpp(entries)
-    capture_path.write_text(capture_cpp, encoding='utf-8')
-    print(f"Written capture  -> {capture_path}")
+    if not args.skip_capture:
+        assert capture_path is not None
+        capture_path.parent.mkdir(parents=True, exist_ok=True)
+        assert capture_cpp is not None
+        capture_path.write_text(capture_cpp, encoding="utf-8")
+        print(f"Written capture  -> {capture_path}")
 
-    playback_path.parent.mkdir(parents=True, exist_ok=True)
-    playback_cpp = generate_playback_cpp(entries)
-    playback_path.write_text(playback_cpp, encoding='utf-8')
-    print(f"Written playback -> {playback_path}")
+    if not args.skip_playback:
+        assert playback_path is not None
+        playback_path.parent.mkdir(parents=True, exist_ok=True)
+        playback_cpp = generate_playback_cpp(entries)
+        playback_path.write_text(playback_cpp, encoding="utf-8")
+        print(f"Written playback -> {playback_path}")
 
     # Spot-check a few important structs
     _spot_check(entries)

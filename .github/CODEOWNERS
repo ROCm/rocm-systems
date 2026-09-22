@@ -33,6 +33,7 @@
 # Language runtime build infra code owners
 /projects/clr/**/*.cmake                                              @ROCm/clr-reviewers @ROCm/lrt-build-infra
 /projects/clr/**/CMakeLists.txt                                       @ROCm/clr-reviewers @ROCm/lrt-build-infra
+/projects/clr/hipamd/src/hrr/                                         @ROCm/clr-reviewers @ROCm/hrr-reviewers
 /projects/hip/**/*.cmake                                              @ROCm/hip-reviewers @ROCm/lrt-build-infra
 /projects/hip/**/CMakeLists.txt                                       @ROCm/hip-reviewers @ROCm/lrt-build-infra
 /projects/hipother/**/*.cmake                                         @ROCm/hipother-reviewers @ROCm/lrt-build-infra

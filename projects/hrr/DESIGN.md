@@ -160,15 +160,15 @@ Handle-creating and handle-destroying events (malloc, free, stream/event/module 
 `hipModuleLaunchKernel` and `hipGraphLaunch` wrap their GPU submission with `hipEventRecord` before/after, synchronise the stop event, and accumulate elapsed time into `total_kernel_ms` / `total_graph_ms` (both guarded by `map_mutex`). Events are created once per replay thread (`thread_local`) and reused for every launch. Graph-capture streams are excluded from timing (recording events into a captured stream corrupts the graph). The summary reports kernel time, graph time, and combined total.
 
 ### Code Generation
-`gen_hrr_api_args.py` parses `hip_api_trace.hpp` and emits three files:
+`projects/clr/hipamd/src/hrr/tools/gen_hrr_api_args.py` parses `hip_api_trace.hpp` and writes its outputs into each build tree:
 
 | File | Contents |
 |------|----------|
-| `projects/hrr/include/hrr/hrr_api_args.h` | 529 `hrr_args_*` structs + `hrr_api_id_t` enum |
-| `projects/clr/hipamd/src/hrr/hip_capture_generated.cpp` | ~517 capture shims + `hip_capture_build_table()` |
-| `projects/hrr/playback/hip_playback_generated.cpp` | ~504 playback shims + `hrr_playback_dispatch[]` |
+| `<clr-build>/hipamd/src/hrr/generated/hrr/include/hrr/hrr_api_args.h` | 529 `hrr_args_*` structs + `hrr_api_id_t` enum |
+| `<clr-build>/hipamd/src/hrr/generated/hrr/hip_capture_generated.cpp` | ~517 capture shims + `hip_capture_build_table()` |
+| `<hrr-build>/generated/hip_playback_generated.cpp` | ~504 playback shims + `hrr_playback_dispatch[]` |
 
-Run from any directory: `python3 projects/hrr/tools/gen_hrr_api_args.py` (the generator resolves its output paths relative to its own location).
+The generator requires explicit output paths. `projects/clr/cmake/HrrCodegen.cmake` is shared by the independent CLR capture and standalone HRR playback builds.
 
 ### Build
 ```bash
@@ -307,9 +307,9 @@ A single Python script produces three files from `hip_api_trace.hpp`:
 | `projects/clr/hipamd/src/hrr/hip_capture_generated.cpp` | ~502 capture shims for APIs not in `MANUAL_CAPTURE_APIS` |
 | `projects/hrr/playback/hip_playback_generated.cpp` | ~201 playback shims + dispatch table for APIs not in `MANUAL_PLAYBACK_APIS` |
 
-Script location: `projects/hrr/tools/gen_hrr_api_args.py`
+Script location: `projects/clr/hipamd/src/hrr/tools/gen_hrr_api_args.py`
 
-Run from any directory: `python3 projects/hrr/tools/gen_hrr_api_args.py` (output paths resolve relative to the script location).
+Run from any directory: `python3 projects/clr/hipamd/src/hrr/tools/gen_hrr_api_args.py` (output paths resolve relative to the script location).
 
 The generator classifies each API:
 - **`MANUAL_CAPTURE_APIS`** (27): kernel launches ×4, memcpy H2D+D2H ×8, module load ×3, `__hipRegisterFatBinary`, `hipHostRegister/Unregister`, `hipMemcpy3D` variants ×4, array creation ×2, VMM, stream/memory attribute APIs, `hipMemcpyWithStream`

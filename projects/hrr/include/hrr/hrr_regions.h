@@ -48,7 +48,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "hrr_api_args.h" /* hrr_file_header, hrr_event_header */
+#include <hrr/hrr_api_args.h> /* hrr_file_header, hrr_event_header */
 
 /* Sidecar file-header magic. Occupies hrr_file_header.magic in place of
  * HRR_MAGIC so a region stream and an event stream can never be mistaken for

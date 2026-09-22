@@ -8,16 +8,38 @@ project(hrr LANGUAGES CXX)
 option(HRR_BUILD_PLAYBACK "Build HRR playback tools" ON)
 option(HRR_BUILD_TESTS "Build HRR unit tests" OFF)
 
+set(HRR_CLR_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../clr" CACHE PATH
+  "Path to the CLR source tree used by HRR code generation")
+set(HRR_HIP_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../hip" CACHE PATH
+  "Path to the HIP source tree used by HRR code generation")
+
+include("${HRR_CLR_SOURCE_DIR}/cmake/HrrCodegen.cmake")
+set(HRR_CODEGEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+hrr_add_codegen(
+  TARGET hrr_playback_codegen
+  HRR_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+  CLR_SOURCE_DIR "${HRR_CLR_SOURCE_DIR}"
+  HIP_SOURCE_DIR "${HRR_HIP_SOURCE_DIR}"
+  OUTPUT_DIR "${HRR_CODEGEN_DIR}"
+  PLAYBACK
+)
+
 # Shared HRR archive wire format (header-only public interface).
 add_library(hrr_api_args INTERFACE)
 add_library(hrr::api_args ALIAS hrr_api_args)
 
 target_include_directories(hrr_api_args INTERFACE
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${HRR_CODEGEN_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
 
-install(DIRECTORY include/ DESTINATION include)
+add_dependencies(hrr_api_args hrr_playback_codegen)
+
+install(FILES
+  "${HRR_CODEGEN_DIR}/include/hrr/hrr_api_args.h"
+  "${HRR_CODEGEN_DIR}/include/hrr/hrr_regions.h"
+  DESTINATION include/hrr
+)
 
 # The playback subdirectory defines both the CPU-only hrr_reader library and the
 # HIP-dependent hrr-playback tool. hrr_reader is needed by the unit tests even

@@ -31,6 +31,7 @@ target_include_directories(hrr_reader PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<INSTALL_INTERFACE:include/hrr/playback>
 )
+add_dependencies(hrr_reader hrr_playback_codegen)
 target_compile_definitions(hrr_reader PRIVATE HIP_ABI_IMPL)
 target_compile_definitions(hrr_reader PRIVATE
   HRR_API_ARGS_IMPLEMENTATION
@@ -41,13 +42,17 @@ target_compile_definitions(hrr_reader PRIVATE
 # hrr-playback — full replay tool (requires HIP)
 # ---------------------------------------------------------------------------
 if(HRR_BUILD_PLAYBACK)
+  if(NOT DEFINED HIP_PLATFORM)
+    set(HIP_PLATFORM amd CACHE STRING "HIP platform for HRR playback")
+  endif()
+  set_source_files_properties("${HRR_CODEGEN_DIR}/hip_playback_generated.cpp" PROPERTIES GENERATED TRUE)
   find_package(Threads REQUIRED)
   find_package(hip CONFIG REQUIRED)
 
   add_executable(hrr-playback
     hrr_playback.cpp
     hip_playback.cpp
-    hip_playback_generated.cpp
+    ${HRR_CODEGEN_DIR}/hip_playback_generated.cpp
     hrr_region_map.cpp
   )
   set_target_properties(hrr-playback PROPERTIES
@@ -63,6 +68,17 @@ if(HRR_BUILD_PLAYBACK)
     $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
   )
   target_link_libraries(hrr-playback PRIVATE hrr::reader hip::host Threads::Threads)
+  if(UNIX AND NOT APPLE)
+    foreach(prefix IN LISTS CMAKE_PREFIX_PATH)
+      if(EXISTS "${prefix}/lib")
+        target_link_options(hrr-playback PRIVATE "-Wl,-rpath-link,${prefix}/lib")
+      endif()
+    endforeach()
+    if(DEFINED ROCM_PATH AND EXISTS "${ROCM_PATH}/lib")
+      target_link_options(hrr-playback PRIVATE "-Wl,-rpath-link,${ROCM_PATH}/lib")
+    endif()
+  endif()
+  add_dependencies(hrr-playback hrr_playback_codegen)
 
   # Build identity reported by --version. Stamped by a build rule rather than at
   # configure time so it cannot name a commit the binary was not built from; see
