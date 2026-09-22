@@ -12,6 +12,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -133,6 +134,31 @@ static std::string ReadProfilerOutput(const char* dir, const char* commHashHex) 
     return ss.str();
 }
 
+// Returns the first per-collective record in `commHashHex`'s file, or "" if
+// the run emitted none. finalize() always appends a summary line, so a
+// non-empty file does not by itself mean a collective was profiled; select on
+// the "coll_perf" key rather than taking the first line.
+static std::string ReadCollRecord(const char* dir, const char* commHashHex) {
+    std::istringstream lines(ReadProfilerOutput(dir, commHashHex));
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (line.find("\"coll_perf\"") != std::string::npos) return line;
+    }
+    return std::string();
+}
+
+// Returns the LAST summary line in `commHashHex`'s file -- the one finalize
+// wrote -- or "" if absent.
+static std::string ReadSummaryLine(const char* dir, const char* commHashHex) {
+    std::istringstream lines(ReadProfilerOutput(dir, commHashHex));
+    std::string line, summary;
+    // Deliberately no break: keep overwriting so we end up holding the last.
+    while (std::getline(lines, line)) {
+        if (line.find("\"summary\"") != std::string::npos) summary = line;
+    }
+    return summary;
+}
+
 // Returns the numeric value of "key":<number> in `json`, or -1 if absent.
 static double JsonNumber(const std::string& json, const char* key) {
     std::string needle = std::string("\"") + key + "\":";
@@ -153,6 +179,16 @@ static void MakeCollDescr(ncclProfilerEventDescr_v5_t* d, uint8_t nChannels,
     d->coll.count = count;
     d->coll.seqNumber = seqNumber;
     d->coll.nChannels = nChannels;
+}
+
+// Fills a KernelCh event descriptor parented to `collHandle`.
+static void MakeKernelChDescr(ncclProfilerEventDescr_v5_t* d, void* collHandle,
+                              int channelId, uint64_t pTimer) {
+    memset(d, 0, sizeof(*d));
+    d->type = ncclProfileKernelCh;
+    d->parentObj = collHandle;
+    d->kernelCh.channelId = channelId;
+    d->kernelCh.pTimer = pTimer;
 }
 
 // =========================================================================
@@ -653,6 +689,14 @@ INSTANTIATE_TEST_SUITE_P(Values, AcclParseMinSizeTest, ::testing::Values(
     // Rejected. Every one of these produced a usable-looking number from atol().
     MinSizeParseCase{"-1", 1, 0},        // was SIZE_MAX: filters everything
     MinSizeParseCase{"-8192", 1, 0},
+    // Same case reached through the rest of the whitespace class. strtoull
+    // skips all of it, so a skip loop that only knows ' ' and '\t' leaves the
+    // '-' for strtoull to wrap to ULLONG_MAX -- silently, without ERANGE.
+    MinSizeParseCase{"\n-1", 1, 0},
+    MinSizeParseCase{"\r-1", 1, 0},
+    MinSizeParseCase{"\v-1", 1, 0},
+    MinSizeParseCase{"\f-1", 1, 0},
+    MinSizeParseCase{"\n8192\n", 0, 8192},
     MinSizeParseCase{"99999999999999999999999", 1, 0},  // was LONG_MAX: ditto
     MinSizeParseCase{"abc", 1, 0},       // was 0, indistinguishable from a real 0
     MinSizeParseCase{"0x2000", 1, 0},    // was 0, not 8192 as the writer meant
@@ -1944,24 +1988,6 @@ TEST(AcclProfilerLifecycle, FinalizeDoesNotCloseOutputUnderAWriter) {
 // -------------------------------------------------------------------------
 // Reads the run summary line back out of the emitted JSONL.
 // -------------------------------------------------------------------------
-static std::string ReadSummaryLine(const char* dir, const char* commHashHex) {
-    char host[256] = {0};
-    gethostname(host, sizeof(host) - 1);
-    char path[1024];
-    snprintf(path, sizeof(path), "%s/accl_profiler_rank0_%s_pid%d_%s.jsonl",
-             dir, host, (int)getpid(), commHashHex);
-    std::ifstream ifs(path);
-    std::string line, summary;
-    // Deliberately no break: keep overwriting so we end up holding the LAST
-    // summary line in the file, which is the one finalize wrote.
-    while (std::getline(ifs, line)) {
-        if (line.find("\"summary\"") != std::string::npos) {
-            summary = line;
-        }
-    }
-    return summary;
-}
-
 // =========================================================================
 // A run that lost proxy data must not report itself complete.
 //
