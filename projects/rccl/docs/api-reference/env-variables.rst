@@ -444,13 +444,14 @@ in the following table.
 
     * - | ``NCCL_GIN_TYPE``
         | Requires a specific GIN backend type, skipping all others.
-      - | ``-1``: Accept whichever backend is available (default)
+      - | ``-1``: Disables the generic filter, but does not auto-enable
+          the in-tree device backends
         | ``2``: Proxy
         | ``3``: GDAKI
         | ``4``: GPI
         | ``5``: EFA GDA
-        | ``6``: rocSHMEM GDA
-        | ``7``: Anvil SDMA
+        | ``6``: rocSHMEM GDA (required for that backend to initialize)
+        | ``7``: Anvil SDMA (also accepts unset)
 
     * - | ``NCCL_RMA_PLUGIN``
         | Selects external one-sided RMA plugins, which are also the backend
