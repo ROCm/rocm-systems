@@ -891,6 +891,11 @@ class Runtime {
   /// not fully and uniformly covered. Caller must hold prefetch_lock_.
   int32_t LookupCpuPrefetchNode(uintptr_t base, uintptr_t end);
 
+  /// @brief Drop any recorded CPU prefetch node overlapping [base, base+size). Called when
+  /// the backing SVM range is freed or unmapped so a later reuse of the same virtual address
+  /// cannot resurrect a stale CPU node. Acquires prefetch_lock_.
+  void ClearCpuPrefetchRange(void* base, size_t size);
+
   /// @brief Get the highest used node id.
   uint32_t max_node_id() const { return agents_by_node_.rbegin()->first; }
 
@@ -956,6 +961,10 @@ class Runtime {
   // Persistent record of the CPU NUMA node of the most recent completed SVM prefetch,
   // keyed by interval base address. Guarded by prefetch_lock_. See SetCpuPrefetchNode.
   std::map<uintptr_t, CpuPrefetchRange> cpu_prefetch_map_;
+
+  // Trim/split any cpu_prefetch_map_ entries so that [b, e) holds no record, preserving the
+  // non-overlapping tails of straddling intervals. Caller must hold prefetch_lock_.
+  void EraseCpuPrefetchInterval(uintptr_t b, uintptr_t e);
 
   // Allocator using ::system_region_
   std::function<void*(size_t size, size_t align, MemoryRegion::AllocateFlags flags,
