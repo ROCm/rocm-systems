@@ -35,10 +35,13 @@ static inline int QpShareEnvNGroups() {
     return QpShareEnvInt("RCCL_IB_COMM_NGROUPS", 0);
 }
 
-// connect.cc clamps the multiplier to >= 1 before scaling CQ/WR depth, so 0 or
-// a negative value behaves exactly like the default of 1.
+// qp_sharing.h's IbCastQpSharingDepthMultiplier() (called from connect.cc)
+// clamps the multiplier to >= 1 before it scales CQ/WR depth, so 0 or a
+// negative value behaves exactly like the default. That default is 8
+// (RCCL_PARAM(IbCastQpDepthMultiplier, "IB_QP_DEPTH_MULTIPLIER", 8) in
+// qp_sharing.cc) and this must track that literal, not connect.cc.
 static inline int QpShareEnvDepthMultiplier() {
-    return std::max(1, QpShareEnvInt("RCCL_IB_QP_DEPTH_MULTIPLIER", 1));
+    return std::max(1, QpShareEnvInt("RCCL_IB_QP_DEPTH_MULTIPLIER", 8));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

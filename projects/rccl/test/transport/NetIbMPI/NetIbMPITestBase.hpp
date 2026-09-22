@@ -98,9 +98,10 @@ using namespace RCCLTestHelpers;
 // a feature known to be mutually exclusive with sharing (resiliency, CAST
 // scheduler) is enabled alongside it. Must be called from the test body (not
 // a helper), because GTEST_SKIP() only interrupts execution when expanded
-// inline in the test scope. RCCL_IB_COMM_NGROUPS is set per preset by the
-// a_qpshare_* configs in ainic.json (and the matching qpshare_* categories in
-// test_categories_mpi.yaml).
+// inline in the test scope. RCCL_IB_COMM_NGROUPS and RCCL_IB_QP_SHARING_ENABLE
+// are set together by the qpshare_* categories in test_categories_mpi.yaml
+// (CI) and by the qpshare_base env block in
+// tools/scripts/test_runner/configs/mi355x_ainic_tw_roce.json (manual runs).
 #define QPSHARE_ENV_CHECK_OR_SKIP()                                                       \
     do {                                                                                   \
         auto _qpshareIsSetTo1 = [](const char* name) {                                     \
@@ -110,7 +111,8 @@ using namespace RCCLTestHelpers;
         const char* _ng = getenv("RCCL_IB_COMM_NGROUPS");                                  \
         if (!_ng || _ng[0] == '\0' || std::atoll(_ng) <= 0) {                              \
             GTEST_SKIP() << "Requires RCCL_IB_COMM_NGROUPS > 0. "                          \
-                            "Use the a_qpshare_* configs in ainic.json.";                   \
+                            "Use the qpshare_* categories in test_categories_mpi.yaml "     \
+                            "or the qpshare_base config in mi355x_ainic_tw_roce.json.";     \
         }                                                                                   \
         if (!_qpshareIsSetTo1("RCCL_IB_QP_SHARING_ENABLE")) {                              \
             GTEST_SKIP() << "Requires RCCL_IB_QP_SHARING_ENABLE=1 -- otherwise the "       \
@@ -1019,7 +1021,8 @@ protected:
         struct GroupTally {
             int      live      = 0;
             int      primaries = 0;
-            uint32_t qpn       = 0;
+            int      nqps      = 0;
+            uint32_t qpn[NCCL_IB_MAX_QPS] = {};
         };
         std::map<int, GroupTally> groups;
         std::vector<struct ncclIbQpSharingState> states(comms.size());
@@ -1068,12 +1071,24 @@ protected:
                               << " frees it";
                 ok = false;
             }
-            if (groups[g].qpn == 0) {
-                groups[g].qpn = st.qpn[0];
-            } else if (st.qpn[0] != groups[g].qpn) {
+            const int nqps = std::max(0, std::min(st.nqps, NCCL_IB_MAX_QPS));
+            if (groups[g].nqps == 0) {
+                groups[g].nqps = nqps;
+                for (int q = 0; q < nqps; q++) groups[g].qpn[q] = st.qpn[q];
+            } else if (nqps != groups[g].nqps) {
                 ADD_FAILURE() << stage << ": conn " << i << " is in group " << g
-                              << " but not on that group's physical QP";
+                              << " but reports nqps=" << nqps << " while the group's"
+                              << " other comms report nqps=" << groups[g].nqps;
                 ok = false;
+            } else {
+                for (int q = 0; q < nqps; q++) {
+                    if (st.qpn[q] != groups[g].qpn[q]) {
+                        ADD_FAILURE() << stage << ": conn " << i << " is in group " << g
+                                      << " but qp[" << q << "] is not on that group's"
+                                      << " physical QP";
+                        ok = false;
+                    }
+                }
             }
         }
 
@@ -1088,10 +1103,13 @@ protected:
         for (auto a = groups.begin(); a != groups.end(); ++a) {
             auto b = a;
             for (++b; b != groups.end(); ++b) {
-                if (a->second.qpn != 0 && a->second.qpn == b->second.qpn) {
-                    ADD_FAILURE() << stage << ": groups " << a->first << " and "
-                                  << b->first << " unexpectedly share one physical QP";
-                    ok = false;
+                for (int q = 0; q < a->second.nqps && q < b->second.nqps; q++) {
+                    if (a->second.qpn[q] != 0 && a->second.qpn[q] == b->second.qpn[q]) {
+                        ADD_FAILURE() << stage << ": groups " << a->first << " and "
+                                      << b->first << " unexpectedly share physical qp["
+                                      << q << "]";
+                        ok = false;
+                    }
                 }
             }
         }
