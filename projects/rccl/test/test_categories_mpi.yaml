@@ -227,6 +227,7 @@ test_categories:
     exclude_windows: *mpi_exclude_windows
     labels: *mpi_quick_labels
     env_variables:
+      - "RCCL_IB_QP_SHARING_ENABLE=1"
       - "NCCL_IB_MERGE_NICS=0"
       - "RCCL_IB_COMM_NGROUPS=1"
       - "RCCL_IB_QP_DEPTH_MULTIPLIER=8"
@@ -237,6 +238,7 @@ test_categories:
     exclude_windows: *mpi_exclude_windows
     labels: *mpi_quick_labels
     env_variables:
+      - "RCCL_IB_QP_SHARING_ENABLE=1"
       - "NCCL_IB_MERGE_NICS=0"
       - "RCCL_IB_COMM_NGROUPS=2"
       - "RCCL_IB_QP_DEPTH_MULTIPLIER=8"
@@ -247,6 +249,7 @@ test_categories:
     exclude_windows: *mpi_exclude_windows
     labels: *mpi_quick_labels
     env_variables:
+      - "RCCL_IB_QP_SHARING_ENABLE=1"
       - "NCCL_IB_MERGE_NICS=0"
       - "RCCL_IB_COMM_NGROUPS=16"
       - "RCCL_IB_QP_DEPTH_MULTIPLIER=8"
@@ -264,6 +267,7 @@ test_categories:
       - "mpi"
       - "qpshare"
     env_variables:
+      - "RCCL_IB_QP_SHARING_ENABLE=1"
       - "NCCL_IB_MERGE_NICS=0"
       - "RCCL_IB_COMM_NGROUPS=1"
       - "RCCL_IB_QP_DEPTH_MULTIPLIER=96"
@@ -475,6 +479,7 @@ test_categories:
     exclude_windows: *mpi_exclude_windows
     labels: *qpshare_labels
     env_variables:
+      - "RCCL_IB_QP_SHARING_ENABLE=1"
       - "NCCL_IB_MERGE_NICS=0"
       - "RCCL_IB_COMM_NGROUPS=2"
       - "RCCL_IB_QP_DEPTH_MULTIPLIER=64"
@@ -486,6 +491,7 @@ test_categories:
     exclude_windows: *mpi_exclude_windows
     labels: *qpshare_labels
     env_variables:
+      - "RCCL_IB_QP_SHARING_ENABLE=1"
       - "NCCL_IB_MERGE_NICS=0"
       - "RCCL_IB_COMM_NGROUPS=2"
       - "RCCL_IB_QP_DEPTH_MULTIPLIER=64"
@@ -501,6 +507,7 @@ test_categories:
     exclude_windows: *mpi_exclude_windows
     labels: *qpshare_labels
     env_variables:
+      - "RCCL_IB_QP_SHARING_ENABLE=1"
       - "NCCL_IB_MERGE_NICS=0"
       - "RCCL_IB_COMM_NGROUPS=16"
       - "RCCL_IB_QP_DEPTH_MULTIPLIER=8"

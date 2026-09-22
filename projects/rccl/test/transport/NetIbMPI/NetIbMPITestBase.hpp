@@ -103,15 +103,20 @@ using namespace RCCLTestHelpers;
 // test_categories_mpi.yaml).
 #define QPSHARE_ENV_CHECK_OR_SKIP()                                                       \
     do {                                                                                   \
+        auto _qpshareIsSetTo1 = [](const char* name) {                                     \
+            const char* v = getenv(name);                                                  \
+            return v && v[0] && strcmp(v, "1") == 0;                                       \
+        };                                                                                  \
         const char* _ng = getenv("RCCL_IB_COMM_NGROUPS");                                  \
         if (!_ng || _ng[0] == '\0' || std::atoll(_ng) <= 0) {                              \
             GTEST_SKIP() << "Requires RCCL_IB_COMM_NGROUPS > 0. "                          \
                             "Use the a_qpshare_* configs in ainic.json.";                   \
         }                                                                                   \
-        auto _qpshareIsSetTo1 = [](const char* name) {                                     \
-            const char* v = getenv(name);                                                  \
-            return v && v[0] && strcmp(v, "1") == 0;                                       \
-        };                                                                                  \
+        if (!_qpshareIsSetTo1("RCCL_IB_QP_SHARING_ENABLE")) {                              \
+            GTEST_SKIP() << "Requires RCCL_IB_QP_SHARING_ENABLE=1 -- otherwise the "       \
+                            "transport never takes the sharing path and this test "        \
+                            "would silently pass against the non-sharing code.";           \
+        }                                                                                   \
         if (_qpshareIsSetTo1("NCCL_IB_RESILIENCY_PORT_FAILOVER") ||                        \
             _qpshareIsSetTo1("NCCL_IB_RESILIENCY_PORT_RECOVERY")) {                         \
             GTEST_SKIP() << "QP sharing tests do not support resiliency combos yet.";      \
