@@ -499,13 +499,15 @@ class Roofline:
                 continue
 
             cache_key = cache_level.removeprefix("ai_")
-            bandwidth = self._peak_value(ceiling_data, cache_key)
             roof_perf = self._roof_value_at(
                 ai_value=ai_value,
                 cache_key=cache_key,
                 ceiling_data=ceiling_data,
                 cap=compute_cap,
             )
+            # This kernel's own achieved bandwidth at this level (not the
+            # hardware ceiling): performance (FLOP/s) / AI (FLOP/Byte) = Byte/s.
+            achieved_bandwidth = performance / ai_value
             pct_roof = 100.0 * performance / roof_perf if roof_perf else None
             points.append({
                 "peak": level_name,
@@ -513,11 +515,11 @@ class Roofline:
                 "perf": performance,
                 "roofPerf": roof_perf,
                 "pctRoof": pct_roof,
-                "bandwidth": bandwidth,
+                "bandwidth": achieved_bandwidth,
                 "hoverCells": [
                     format_hover_number(roof_perf, ",.3f"),
                     format_hover_number(pct_roof, ".4f"),
-                    format_bandwidth(bandwidth) if bandwidth is not None else "N/A",
+                    format_bandwidth(achieved_bandwidth),
                 ],
             })
             level_ai[level_name] = ai_value

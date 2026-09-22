@@ -224,7 +224,7 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
         compute_peaks=[],
     )
     assert "Performance limiter: Unknown" in unroofed_traces[0].hovertemplate
-    assert unroofed[0]["points"][0]["hoverCells"] == ["N/A", "N/A"]
+    assert unroofed[0]["points"][0]["hoverCells"] == ["N/A", "N/A", "900.000 GB/s"]
 
 
 def test_kernel_points_carry_raw_values_matching_hover_cells() -> None:
@@ -241,7 +241,8 @@ def test_kernel_points_carry_raw_values_matching_hover_cells() -> None:
         float(point["hoverCells"][0].replace(",", ""))
     )
     assert point["pctRoof"] == pytest.approx(float(point["hoverCells"][1]))
-    assert point["bandwidth"] == pytest.approx(CEILING["hbm"][2])
+    # Achieved bandwidth for this kernel: performance / AI, not the ceiling.
+    assert point["bandwidth"] == pytest.approx(50000.0 / 100.0)
 
 
 def test_kernel_model_carries_count_and_total_time() -> None:
