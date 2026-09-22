@@ -46,7 +46,7 @@ namespace sdma_anvil {
 
 class SdmaQueue {
  public:
-  SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& localAgent, uint32_t engineId);
+  SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& localAgent, uint32_t engineId, bool useEngineId = true);
   ~SdmaQueue();
 
   SdmaQueueDeviceHandle* deviceHandle() const;
@@ -83,6 +83,7 @@ class AnvilLib {
   SdmaQueue* getSdmaQueue(int srcDeviceId, int dstDeviceId, int channel_idx = 0);
   SdmaQueue* createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
                              int* channelIdx = nullptr);
+  uint32_t numSdmaEnginesTotal() const { return numSdmaEnginesTotal_; }
 
  private:
   /*

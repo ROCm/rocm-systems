@@ -118,7 +118,7 @@ static const std::string getBusId(int deviceId) {
 }
 
 SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId,
-                     const hsa_agent_t& localAgent, uint32_t engineId)
+                     const hsa_agent_t& localAgent, uint32_t engineId, bool useEngineId)
     : remoteDeviceId_(remoteDeviceId) {
   int originalDeviceId;
 
@@ -149,10 +149,26 @@ SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId,
   // Create SDMA Queue
   memset(&queue_, 0, sizeof(HsaQueueResource));
 
-  CHECK_HSAKMT_SUCCESS(hsaKmtCreateQueueExt(localNodeId, HSA_QUEUE_SDMA_BY_ENG_ID,
-                                            DEFAULT_QUEUE_PERCENTAGE, DEFAULT_PRIORITY, engineId,
-                                            queueBuffer_, SDMA_QUEUE_SIZE, nullptr, &queue_),
-                       "hsaKmtCreateQueueExt failed");
+  // Prefer HSA_QUEUE_SDMA_BY_ENG_ID for precise engine selection (MI300X+).
+  // Fall back to HSA_QUEUE_SDMA on GPUs that do not support engine-ID queues
+  // (e.g. gfx1250 / Navi48), where the KFD ioctl returns an error.
+  HSAKMT_STATUS queueStatus = HSAKMT_STATUS_ERROR;
+  if (useEngineId) {
+    queueStatus = hsaKmtCreateQueueExt(localNodeId, HSA_QUEUE_SDMA_BY_ENG_ID,
+                                       DEFAULT_QUEUE_PERCENTAGE, DEFAULT_PRIORITY, engineId,
+                                       queueBuffer_, SDMA_QUEUE_SIZE, nullptr, &queue_);
+    if (queueStatus != HSAKMT_STATUS_SUCCESS) {
+      LOG_WARN("SDMA: HSA_QUEUE_SDMA_BY_ENG_ID not supported (status=%d), "
+               "falling back to HSA_QUEUE_SDMA", queueStatus);
+    }
+  }
+  if (queueStatus != HSAKMT_STATUS_SUCCESS) {
+    CHECK_HSAKMT_SUCCESS(
+        hsaKmtCreateQueueExt(localNodeId, HSA_QUEUE_SDMA,
+                             DEFAULT_QUEUE_PERCENTAGE, DEFAULT_PRIORITY, 0,
+                             queueBuffer_, SDMA_QUEUE_SIZE, nullptr, &queue_),
+        "hsaKmtCreateQueueExt(HSA_QUEUE_SDMA) failed");
+  }
 
   // Populate Device Handle
   ANVIL_CHECK_HIP_ERROR(hipMalloc(&deviceHandle_, sizeof(SdmaQueueDeviceHandle)));
@@ -417,7 +433,8 @@ SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t 
                                      int* channelIdx) {
   auto& vec = sdma_channels_[dstDeviceId];
   vec.emplace_back(std::make_unique<SdmaQueue>(srcDeviceId, dstDeviceId,
-                                               getHipGpuAgent(srcDeviceId), engineId));
+                                               getHipGpuAgent(srcDeviceId), engineId,
+                                               numSdmaEnginesTotal_ > 0));
   if (channelIdx != nullptr) {
     *channelIdx = static_cast<int>(vec.size() - 1);
   }
