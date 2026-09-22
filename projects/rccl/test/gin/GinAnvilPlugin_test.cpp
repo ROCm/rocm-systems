@@ -845,6 +845,43 @@ TEST_F(GinAnvilPluginTest, ConnCheck_FailedBindRetriesGate) {
   stopGin(ictx, coll, ginCtx);
 }
 
+// closeColl must un-mark the set: production never reaches plugin finalize
+// (ginState is memset first), so leaving erase only in finalize would leave a
+// recycled ncclComm* marked and skip the gate on the next job.
+TEST_F(GinAnvilPluginTest, ConnCheck_CloseCollUnmarksCommForReuse) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+
+  void* ictx = nullptr;
+  void* coll = nullptr;
+  void* ginCtx = nullptr;
+  startTwoRankGin(&ictx, &coll, &ginCtx);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 1);
+
+  ASSERT_EQ(plugin_.destroyContext(ginCtx), ncclSuccess);
+  ginCtx = nullptr;
+  ASSERT_EQ(plugin_.closeColl(coll), ncclSuccess);
+  coll = nullptr;
+  // Intentionally skip finalize: that path is unreachable after HostFinalize.
+
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 2);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 2);
+
+  stopGin(ictx, coll, ginCtx);
+}
+
 // A qualifying bind must still run the gate after an earlier ineligible bind on
 // the same comm (nSignals < nRanks must not mark the comm checked).
 TEST_F(GinAnvilPluginTest, ConnCheck_SkipThenQualifyingBindStillRunsGate) {

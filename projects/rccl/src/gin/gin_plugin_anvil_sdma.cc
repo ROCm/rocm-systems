@@ -291,6 +291,13 @@ static ncclResult_t ginAnvilCloseListen(void* listenComm) {
 static ncclResult_t ginAnvilCloseColl(void* collComm) {
   ginAnvilCollCtx* cctx = (ginAnvilCollCtx*)collComm;
   if (cctx) {
+    // Erase here, not in finalize: ncclGinHostFinalize closeColls then memsets
+    // ginState before ncclGinFinalize, so plugin finalize never runs for a live
+    // GIN backend and a recycled ncclComm* would otherwise skip the gate.
+    if (cctx->comm) {
+      std::lock_guard<std::mutex> lock(pluginMutex);
+      ginAnvilConnCheckedComms.erase(cctx->comm);
+    }
     if (cctx->sdma) gin_anvil_sdma_destroy(cctx->sdma);
     delete cctx;
   }
@@ -298,12 +305,7 @@ static ncclResult_t ginAnvilCloseColl(void* collComm) {
 }
 
 static ncclResult_t ginAnvilFinalize(void* ctx) {
-  ginAnvilInitCtx* ictx = (ginAnvilInitCtx*)ctx;
-  if (ictx && ictx->comm) {
-    std::lock_guard<std::mutex> lock(pluginMutex);
-    ginAnvilConnCheckedComms.erase(ictx->comm);
-  }
-  delete ictx;
+  delete (ginAnvilInitCtx*)ctx;
   return ncclSuccess;
 }
 
@@ -665,15 +667,11 @@ static ncclResult_t ginAnvilCheckSignalConnectivity(ginAnvilGinCtx* ctx, void* l
       break;
     }
     if (rank == 0) {
-      if (!localFail && localMissing == 0 && globalMissing > 0) {
-        WARN("GIN anvil-sdma: LSA signal connectivity attempt %d/%d incomplete "
-             "(peer-reported missing increments=%d); retrying",
-             attempt + 1, MAX_ATTEMPTS, globalMissing);
-      } else {
-        WARN("GIN anvil-sdma: LSA signal connectivity attempt %d/%d incomplete "
-             "(global missing increments=%d); retrying",
-             attempt + 1, MAX_ATTEMPTS, globalMissing);
-      }
+      const char* missingKind =
+          (!localFail && localMissing == 0 && globalMissing > 0) ? "peer-reported" : "global";
+      WARN("GIN anvil-sdma: LSA signal connectivity attempt %d/%d incomplete "
+           "(%s missing increments=%d); retrying",
+           attempt + 1, MAX_ATTEMPTS, missingKind, globalMissing);
     }
   }
 
