@@ -877,6 +877,11 @@
           "test_filter": "ParameterApiTests.*:ParameterApiTypedTests*"
         },
         {
+          "name": "CollConfigTests",
+          "description": "Per-collective ncclCollConfig_t validation tests",
+          "test_filter": "CollConfigTests.*:CollConfigTypedTests*"
+        },
+        {
           "name": "ArgCheck",
           "description": "Argument validation tests",
           "test_filter": "ArgCheckTest.*"
@@ -980,7 +985,25 @@
         {
           "name": "P2pMaxNchannels",
           "description": "NCCL_MAX_P2P_NCHANNELS resolution, p2pnChannels upper bound, and the multi-node maxP2pPeers per-peer reduction",
-          "test_filter": "P2pMaxNchannels*"
+          "test_filter": "P2pMaxNchannels*",
+          "name": "RcclAlltoAllDecision",
+          "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
+          "test_filter": "RcclAlltoAllDecision.*"
+        },
+        {
+          "name": "RcclCeAr2ShotMax",
+          "description": "CE AllReduce 2-shot arch threshold upper-bound tests",
+          "test_filter": "RcclCeAr2ShotMax.*"
+        },
+        {
+          "name": "RcclCeArGrownBuffer",
+          "description": "CE AllReduce grown-buffer (ceRegMax) eligibility tests",
+          "test_filter": "RcclCeArGrownBuffer.*"
+        },
+        {
+          "name": "SkipPresetTopoMatching",
+          "description": "SkipPreset arch topology matching and threshold lookup tests",
+          "test_filter": "SkipPresetTopoMatching.*"
         }
       ]
     },
