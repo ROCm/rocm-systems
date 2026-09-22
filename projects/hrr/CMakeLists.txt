@@ -17,7 +17,6 @@ include("${HRR_CLR_SOURCE_DIR}/cmake/HrrCodegen.cmake")
 set(HRR_CODEGEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 hrr_add_codegen(
   TARGET hrr_playback_codegen
-  HRR_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
   CLR_SOURCE_DIR "${HRR_CLR_SOURCE_DIR}"
   HIP_SOURCE_DIR "${HRR_HIP_SOURCE_DIR}"
   OUTPUT_DIR "${HRR_CODEGEN_DIR}"
@@ -30,6 +29,7 @@ add_library(hrr::api_args ALIAS hrr_api_args)
 
 target_include_directories(hrr_api_args INTERFACE
   $<BUILD_INTERFACE:${HRR_CODEGEN_DIR}/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
 
@@ -37,7 +37,7 @@ add_dependencies(hrr_api_args hrr_playback_codegen)
 
 install(FILES
   "${HRR_CODEGEN_DIR}/include/hrr/hrr_api_args.h"
-  "${HRR_CODEGEN_DIR}/include/hrr/hrr_regions.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/hrr/hrr_regions.h"
   DESTINATION include/hrr
 )
 

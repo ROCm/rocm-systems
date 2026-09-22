@@ -1,6 +1,5 @@
 # HRR in-tree capture layer. The generated capture shim and wire-format
 # header are build artifacts so a CLR build never writes into the source tree.
-set(HRR_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../hrr")
 set(HRR_CLR_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
 set(HRR_HIP_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../hip")
 
@@ -8,7 +7,6 @@ include("${HRR_CLR_SOURCE_DIR}/cmake/HrrCodegen.cmake")
 set(HRR_CAPTURE_CODEGEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/hrr")
 hrr_add_codegen(
   TARGET hrr_capture_codegen
-  HRR_SOURCE_DIR "${HRR_SOURCE_DIR}"
   CLR_SOURCE_DIR "${HRR_CLR_SOURCE_DIR}"
   HIP_SOURCE_DIR "${HRR_HIP_SOURCE_DIR}"
   OUTPUT_DIR "${HRR_CAPTURE_CODEGEN_DIR}"

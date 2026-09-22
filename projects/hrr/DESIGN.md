@@ -311,6 +311,23 @@ Script location: `projects/clr/hipamd/src/hrr/tools/gen_hrr_api_args.py`
 
 Do not run the generator manually during normal development. `projects/clr/cmake/HrrCodegen.cmake` invokes it automatically during both CLR and standalone HRR builds, with explicit binary-directory output paths.
 
+### Inspecting Generated Code
+
+For code review or debugging only, generate all artifacts into a temporary directory from the repository root:
+
+```bash
+rm -rf /tmp/hrr-codegen-inspect
+python3 projects/clr/hipamd/src/hrr/tools/gen_hrr_api_args.py \
+  --input projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp \
+  --public-header projects/hip/include/hip/hip_runtime_api.h \
+  --output-header /tmp/hrr-codegen-inspect/include/hrr/hrr_api_args.h \
+  --output-capture /tmp/hrr-codegen-inspect/hip_capture_generated.cpp \
+  --output-playback /tmp/hrr-codegen-inspect/hip_playback_generated.cpp \
+  --check-hrr-coverage
+```
+
+This command is for inspecting generated source only. Normal CLR and standalone HRR builds must continue to use the CMake code-generation targets.
+
 The generator classifies each API:
 - **`MANUAL_CAPTURE_APIS`** (27): kernel launches ×4, memcpy H2D+D2H ×8, module load ×3, `__hipRegisterFatBinary`, `hipHostRegister/Unregister`, `hipMemcpy3D` variants ×4, array creation ×2, VMM, stream/memory attribute APIs, `hipMemcpyWithStream`
 - **`MANUAL_PLAYBACK_APIS`** (56): above plus malloc ×4, free ×2, stream create/destroy ×4, event create/destroy ×3, `hipModuleGetFunction`, the full graph chain ×4, VMM APIs ×6, and other APIs requiring non-trivial handle translation or replay logic
