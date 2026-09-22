@@ -3641,6 +3641,101 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
   })) << "the CP used a physical wave slot beyond COMPUTE_TMPRING_SIZE.WAVES";
 }
 
+TEST(CommandProcessorTest, DynamicScratchRequestBlocksRemovalOnlyUntilDelivery) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint32_t kQueueId = 20;
+  constexpr uint32_t kPrivateBytes = 10272;
+  constexpr uint64_t kRing = 0xF0100000;
+  constexpr uint64_t kQueueDescriptor = 0xF0110000;
+  constexpr uint64_t kQueueSignal = 0xE0100000;
+  constexpr uint64_t kMailbox = 0xE0101000;
+  constexpr uint32_t kEventId = 42;
+  constexpr uint64_t kInsufficientScratchWave32 = 0x401;
+  constexpr uint32_t kSignalValueOffset = 8;
+  constexpr uint32_t kMailboxPointerOffset = 16;
+  constexpr uint32_t kEventIdOffset = 24;
+
+  VmFixture fixture("cdna5", /*num_cus=*/1, /*num_wf_slots=*/2);
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  const uint64_t kernel = fixture.write_kernel(0x1000, code, sizeof(code));
+  fixture.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
+                         kPrivateBytes);
+
+  const uint64_t read_pointer = kQueueDescriptor + offsetof(amd_queue_t, read_dispatch_id);
+  const uint64_t write_pointer = kQueueDescriptor + offsetof(amd_queue_t, write_dispatch_id);
+  fixture.mem()->write64(read_pointer, 0);
+  fixture.mem()->write64(write_pointer, 0);
+  fixture.mem()->write64(kQueueDescriptor + offsetof(amd_queue_t, queue_inactive_signal),
+                         kQueueSignal);
+  fixture.mem()->write64(kQueueDescriptor + offsetof(amd_queue_t, scratch_backing_memory_location),
+                         0);
+  fixture.mem()->write32(kQueueDescriptor + offsetof(amd_queue_t, queue_properties), 0);
+  // A nonzero value different from the requested status holds publication at
+  // StoreStatus until ROCr makes the inactive signal available.
+  fixture.mem()->write64(kQueueSignal + kSignalValueOffset, 1);
+  fixture.mem()->write64(kQueueSignal + kMailboxPointerOffset, kMailbox);
+  fixture.mem()->write32(kQueueSignal + kEventIdOffset, kEventId);
+
+  uint32_t scratch_requests = 0;
+  amdgpu::InterruptSubscription subscription([&](uint32_t process_id, uint32_t event_id) {
+    if (fixture.mem()->read64(kQueueSignal + kSignalValueOffset) != kInsufficientScratchWave32) {
+      return;
+    }
+    EXPECT_EQ(process_id, kProcessId);
+    EXPECT_EQ(event_id, kEventId);
+    EXPECT_EQ(fixture.mem()->read64(kMailbox), kEventId);
+    ++scratch_requests;
+    // Model ROCr exhausting both scratch allocators: leave the status and queue
+    // metadata untouched, then suspend and destroy the queue below.
+  });
+
+  amdgpu::AqlQueueConfig queue{};
+  queue.interrupt_sink = subscription.sink();
+  queue.process_id = kProcessId;
+  queue.queue_id = kQueueId;
+  queue.ring_base_va = kRing;
+  queue.ring_size = amdgpu::kAqlPacketBytes;
+  queue.read_ptr_va = read_pointer;
+  queue.write_ptr_va = write_pointer;
+  queue.doorbell_mode = amdgpu::QueueDoorbellMode::Explicit;
+  queue.uses_kfd_queue_abi = true;
+  queue.queue_desc_va = kQueueDescriptor;
+  const uint64_t registration = fixture.cp()->register_queue(std::move(queue));
+  ASSERT_NE(registration, 0u);
+
+  hsa_kernel_dispatch_packet_t packet =
+      make_dispatch_packet(kernel, 0, /*grid_size_x=*/32, /*workgroup_size_x=*/32);
+  packet.private_segment_size = kPrivateBytes;
+  fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), kRing);
+  fixture.mem()->write64(write_pointer, 1);
+  fixture.cp()->notify_queue_doorbell(registration, 1);
+  ASSERT_TRUE(fixture.engine->step());
+  EXPECT_EQ(scratch_requests, 0u);
+  EXPECT_EQ(fixture.mem()->read64(kQueueSignal + kSignalValueOffset), 1u);
+  EXPECT_EQ(fixture.cp()->accepted_entry_count_for_test(kQueueId, kProcessId), 0u);
+  EXPECT_EQ(fixture.cp()->prepare_unregister_queue_registration(registration),
+            amdgpu::QueuePrepareCloseStatus::Busy)
+      << "queue removal must wait for the scratch notification to be published";
+  EXPECT_EQ(fixture.cp()->registered_queue_count_for_test(), 1u);
+
+  fixture.mem()->write64(kQueueSignal + kSignalValueOffset, 0);
+  fixture.cp()->notify_queue_doorbell(registration, 1);
+  for (uint32_t step = 0; step < 32 && scratch_requests == 0; ++step)
+    ASSERT_TRUE(fixture.engine->step());
+
+  ASSERT_EQ(scratch_requests, 1u);
+  EXPECT_EQ(fixture.mem()->read64(read_pointer), 0u)
+      << "the scratch-needing packet must remain available to ROCr";
+  ASSERT_TRUE(fixture.cp()->update_queue_registration(registration, kRing, amdgpu::kAqlPacketBytes,
+                                                      /*queue_percentage=*/0));
+  EXPECT_EQ(fixture.cp()->prepare_unregister_queue_registration(registration),
+            amdgpu::QueuePrepareCloseStatus::Ready)
+      << "a delivered scratch request is runtime-owned and must not pin queue teardown";
+  EXPECT_EQ(fixture.cp()->registered_queue_count_for_test(), 0u);
+}
+
 TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) {
   using namespace rocr::llvm::amdhsa;
 
