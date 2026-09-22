@@ -45,6 +45,28 @@ TEST_F(TestOutputRegistry, ThrowingWriter_DoesNotStopTheOthers)
     EXPECT_EQ(m_second->write_count(), 1);
 }
 
+TEST_F(TestOutputRegistry, ReplaceWriter_SwapsTheOneOfThatName)
+{
+    m_registry.register_writer(m_first);
+
+    EXPECT_TRUE(m_registry.replace_writer(m_first->name(), m_second));
+    m_registry.generate_all(m_tool_data);
+
+    EXPECT_EQ(m_first->write_count(), 0);
+    EXPECT_EQ(m_second->write_count(), 1);
+}
+
+TEST_F(TestOutputRegistry, ReplaceWriter_UnknownName_ChangesNothing)
+{
+    m_registry.register_writer(m_first);
+
+    EXPECT_FALSE(m_registry.replace_writer("absent", m_second));
+    m_registry.generate_all(m_tool_data);
+
+    EXPECT_EQ(m_first->write_count(), 1);
+    EXPECT_EQ(m_second->write_count(), 0);
+}
+
 TEST_F(TestOutputRegistry, Reset_DropsTheWriters)
 {
     m_registry.register_writer(m_first);

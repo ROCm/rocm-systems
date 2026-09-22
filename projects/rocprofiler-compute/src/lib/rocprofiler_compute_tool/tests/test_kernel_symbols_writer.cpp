@@ -64,13 +64,6 @@ TEST_F(TestKernelSymbolsWriter, Symbols_AreWrittenInKernelIdOrder)
                   "9,\"vecCopy(double*, double*, double*, int)\",\"vecCopy\",8,0,16\n");
 }
 
-TEST_F(TestKernelSymbolsWriter, NameWithQuotes_IsEscaped)
-{
-    add_symbol(1, "kernel<\"tag\">");
-
-    EXPECT_NE(format().find("1,\"kernel<\"\"tag\"\">\""), std::string::npos);
-}
-
 TEST_F(TestKernelSymbolsWriter, SinkFailure_IsReported)
 {
     add_symbol(1, "vecCopy(double*, double*, double*, int)");

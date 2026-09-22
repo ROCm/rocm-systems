@@ -168,11 +168,6 @@ private:
     std::unordered_map<uint64_t, std::vector<rocprofiler_counter_config_id_t>> m_profile_cache_per_agent = {};
     std::unordered_map<uint64_t, iteration_multiplexing_dispatch_record_t> m_iteration_multiplexing_per_agent = {};
 
-    static std::string truncate_name(std::string_view name);
-    static std::string cxa_demangle(const std::string& mangled_name, int* status);
-    /// Drops a trailing ".kd" and demangles, matching the name rocprofv3 puts
-    /// in its output so both paths report the same kernel.
-    static std::string format_kernel_name(const char* mangled_name);
     static std::vector<std::string> split_by_regex(const std::string& s, const std::string& regex_pattern);
 };
 }  // namespace rocprofiler_compute_tool

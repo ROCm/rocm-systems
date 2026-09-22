@@ -14,9 +14,10 @@ add_library(
     environ_cache.cpp
     input_parameters.h
     input_parameters.cpp
+    kernel_name.h
+    kernel_name.cpp
     output_registry.h
     output_registry.cpp
-    csv_gz_writer.h
     dispatch_writer.h
     dispatch_writer.cpp
     kernel_symbols_writer.h
@@ -31,7 +32,7 @@ target_include_directories(${target} PUBLIC .)
 # compression is PRIVATE: not exposed in public headers.
 target_link_libraries(
     ${target}
-    PUBLIC rocprofiler-sdk::rocprofiler-sdk gsl_assert pc-sampling-collector
+    PUBLIC rocprofiler-sdk::rocprofiler-sdk gsl_assert pc-sampling-collector csv
     PRIVATE compression
 )
 
