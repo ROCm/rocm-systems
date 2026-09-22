@@ -6,6 +6,8 @@
  *************************************************************************/
 
 #include "mlx5/mlx5dvwrap.h"
+#include <errno.h>
+#include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <mutex>
@@ -59,7 +61,10 @@ bool wrap_mlx5dv_is_supported(struct ibv_device* device) {
 }
 
 ncclResult_t wrap_mlx5dv_get_data_direct_sysfs_path(struct ibv_context* context, char* buf, size_t buf_len) {
-  CHECK_NOT_NULL(mlx5dvSymbols, mlx5dv_internal_get_data_direct_sysfs_path);
+  if (mlx5dvSymbols.mlx5dv_internal_get_data_direct_sysfs_path == NULL) {
+    /* Stock rdma-core (e.g. 50.0) does not export MLX5_1.25. Treat as "not data-direct". */
+    return ncclInvalidArgument;
+  }
   int ret = mlx5dvSymbols.mlx5dv_internal_get_data_direct_sysfs_path(context, buf, buf_len);
   if (ret == 0) return ncclSuccess;
   /* ENODEV can happen if the devices is not data-direct but mlx5 is used. It's not an error*/
@@ -72,6 +77,10 @@ ncclResult_t wrap_mlx5dv_get_data_direct_sysfs_path(struct ibv_context* context,
 /* DMA-BUF support */
 ncclResult_t wrap_mlx5dv_reg_dmabuf_mr(struct ibv_mr** ret, struct ibv_pd* pd, uint64_t offset, size_t length,
                                        uint64_t iova, int fd, int access, int mlx5_access) {
+  if (mlx5dvSymbols.mlx5dv_internal_reg_dmabuf_mr == NULL) {
+    errno = EOPNOTSUPP;
+    return ncclInternalError;
+  }
   MLX5DV_PTR_CHECK_ERRNO(mlx5dvSymbols, mlx5dv_internal_reg_dmabuf_mr,
                          mlx5dv_internal_reg_dmabuf_mr(pd, offset, length, iova, fd, access, mlx5_access), *ret, NULL,
                          "mlx5dv_reg_dmabuf_mr");
@@ -84,6 +93,18 @@ struct ibv_mr* wrap_direct_mlx5dv_reg_dmabuf_mr(struct ibv_pd* pd, uint64_t offs
     return NULL;
   }
   return mlx5dvSymbols.mlx5dv_internal_reg_dmabuf_mr(pd, offset, length, iova, fd, access, mlx5_access);
+}
+
+ncclResult_t wrap_reg_dmabuf_mr(struct ibv_mr** ret, struct ibv_pd* pd, uint64_t offset, size_t length, uint64_t iova,
+                                int fd, int access, bool dataDirect) {
+  if (dataDirect) {
+    ncclResult_t res =
+      wrap_mlx5dv_reg_dmabuf_mr(ret, pd, offset, length, iova, fd, access, MLX5DV_REG_DMABUF_ACCESS_DATA_DIRECT);
+    if (res == ncclSuccess) return ncclSuccess;
+    INFO(NCCL_NET,
+         "NET/IB: mlx5dv_reg_dmabuf_mr failed (%d, %s); falling back to ibv_reg_dmabuf_mr", res, strerror(errno));
+  }
+  return wrap_ibv_reg_dmabuf_mr(ret, pd, offset, length, iova, fd, access);
 }
 
 ncclResult_t wrap_mlx5dv_query_device(struct ibv_context* ctx_in, struct mlx5dv_context* attrs_out) {

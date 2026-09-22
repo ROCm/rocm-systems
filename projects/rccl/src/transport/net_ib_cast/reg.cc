@@ -28,13 +28,10 @@ ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, 
       bool relaxedOrdering = IbCastRelaxedOrderingEnabled && (mrFlags & NCCL_NET_MR_FLAG_FORCE_SO) == 0;
       if (relaxedOrdering) flags |= IBV_ACCESS_RELAXED_ORDERING;
       if (fd != -1) {
-        /* DMA-BUF support */
-        if (!IbCastDevs[base->ibDevN].capsProvider.mlx5.dataDirect) {
-          NCCLCHECK(wrap_ibv_reg_dmabuf_mr(&mr, base->pd, offset, pages * pageSize, addr, fd, flags));
-        } else {
-          NCCLCHECK(wrap_mlx5dv_reg_dmabuf_mr(&mr, base->pd, offset, pages * pageSize, addr, fd, flags,
-                                              MLX5DV_REG_DMABUF_ACCESS_DATA_DIRECT));
-        }
+        /* DMA-BUF support. Prefer mlx5 data-direct when advertised, but fall back
+         * to ibv_reg_dmabuf_mr when libmlx5 lacks mlx5dv_reg_dmabuf_mr (ROCM-30069). */
+        NCCLCHECK(wrap_reg_dmabuf_mr(&mr, base->pd, offset, pages * pageSize, addr, fd, flags,
+                                     IbCastDevs[base->ibDevN].capsProvider.mlx5.dataDirect));
       } else {
         if (relaxedOrdering) {
           // Use IBVERBS_1.8 API - needed for IBV_ACCESS_RELAXED_ORDERING support
