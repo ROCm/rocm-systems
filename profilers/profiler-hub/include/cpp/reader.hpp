@@ -13,6 +13,14 @@
 namespace profiler_hub
 {
 
+class reader_catalog_t;
+
+namespace common
+{
+class connection;
+class connection_pool;
+}  // namespace common
+
 // ============================================================================
 // Reader Interface
 // ============================================================================
@@ -284,6 +292,40 @@ struct reader_t
         const reader_types::time_window_t& window = {}) const;
 
 private:
+    friend class common::connection;
+    friend class common::connection_pool;
+
+    // Pooled/shared-catalog construction: `catalog` is shared with sibling
+    // connections in the same pool and may be populated by any of them (see
+    // connection_pool's parallel bootstrap). Caller guarantees non-null.
+    reader_t(std::unique_ptr<profiler_hub::storage_t> storage,
+             std::shared_ptr<reader_catalog_t>        catalog);
+
+    /**
+     * @brief Independently-buildable metadata categories (see
+     *        reader_catalog_t). Only used by connection_pool's parallel
+     *        bootstrap.
+     */
+    enum class catalog_category_t
+    {
+        string_list,
+        nodes,
+        processes,
+        threads,
+        agents,
+        tracks,
+        code_objects,
+        kernel_symbols,
+        streams,
+        queues,
+        pmc_infos,
+    };
+
+    // Builds one category of `catalog` using this reader's own connection.
+    // Caller (connection_pool) is responsible for respecting the dependency
+    // order documented on reader_catalog_t.
+    void build_catalog_category(catalog_category_t category, reader_catalog_t& catalog);
+
     struct impl;
     std::unique_ptr<impl> m_impl;
 };
