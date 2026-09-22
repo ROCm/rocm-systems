@@ -87,8 +87,7 @@ add_subdirectory(source)
 add_subdirectory(include/cpp)
 
 list(
-    APPEND
-    profiler-hub_public_headers
+    APPEND profiler-hub_public_headers
     ${CMAKE_CURRENT_LIST_DIR}/include/c/profiler_hub.h
     ${CMAKE_CURRENT_LIST_DIR}/include/c/profiler_hub_types.h
 )
