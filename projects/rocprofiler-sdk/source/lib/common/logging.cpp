@@ -93,6 +93,10 @@ init_logging(std::string_view env_prefix, logging_config cfg)
 
         cfg.logdir       = get_env(fmt::format("{}_LOG_DIR", env_prefix), cfg.logdir);
         cfg.vlog_modules = get_env(fmt::format("{}_vmodule", env_prefix), cfg.vlog_modules);
+        // Opt-in because it replaces the application's own fault handling: a tool that installs
+        // its own SIGSEGV handler, or a test that expects a bare crash, should not inherit ours.
+        cfg.install_failure_handler = get_env(fmt::format("{}_FAILURE_SIGNAL_HANDLER", env_prefix),
+                                              cfg.install_failure_handler);
 
         auto loglvl = to_lower(common::get_env(fmt::format("{}_LOG_LEVEL", env_prefix), ""));
         // default to warning

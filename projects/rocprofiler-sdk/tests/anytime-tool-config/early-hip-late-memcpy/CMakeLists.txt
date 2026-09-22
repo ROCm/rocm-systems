@@ -46,9 +46,10 @@ set(early-hip-late-memcpy-env
     "ROCPROFILER_TOOL_DISABLE_PERFETTO=1"
     # TEMPORARY DIAGNOSTIC -- revert once the teardown segfault is root-caused. This test
     # segfaults in CI between the first tool's finalizer returning and the second tool's
-    # starting, and it does not reproduce without a GPU, so the internal log is the only way
-    # to see which teardown step runs last.
-    "ROCPROFILER_LOG_LEVEL=info")
+    # starting and does not reproduce without a GPU, so the fault handler's stack trace is
+    # the only way to see where. Unlike raising the log level, installing the handler does
+    # not perturb the timing the crash depends on.
+    "ROCPROFILER_FAILURE_SIGNAL_HANDLER=1")
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py)
 

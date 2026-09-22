@@ -47,7 +47,10 @@ set(early-hip-late-dispatch-env
     "ROCPROFILER_TOOL_CONTEXTS=HIP_API_BUFFERED"
     "ROCPROFILER_TOOL_OUTPUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/early-hip-late-dispatch-tool-a.json"
     "ROCPROFILER_TOOL_LATE_OUTPUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/early-hip-late-dispatch-tool-b.json"
-    "ROCPROFILER_TOOL_DISABLE_PERFETTO=1")
+    "ROCPROFILER_TOOL_DISABLE_PERFETTO=1"
+    # TEMPORARY DIAGNOSTIC -- revert once the teardown segfault is root-caused. See
+    # early-hip-late-memcpy for the rationale.
+    "ROCPROFILER_FAILURE_SIGNAL_HANDLER=1")
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py)
 
