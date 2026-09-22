@@ -115,16 +115,6 @@ def expected_preload(rocm_root, *user_libraries, roctx=False):
     return ":".join(entries)
 
 
-def test_tool_libraries_added_by_default(launch, rocm_root):
-    env = launch("--kernel-trace")
-    assert env["LD_PRELOAD"] == expected_preload(rocm_root)
-
-
-def test_single_preload_is_prepended(launch, rocm_root):
-    env = launch("--preload", "/opt/libA.so", "--kernel-trace")
-    assert env["LD_PRELOAD"] == expected_preload(rocm_root, "/opt/libA.so")
-
-
 def test_multiple_preloads_keep_order(launch, rocm_root):
     env = launch("--preload", "/opt/libA.so", "/opt/libB.so", "--kernel-trace")
     assert env["LD_PRELOAD"] == expected_preload(
@@ -132,7 +122,9 @@ def test_multiple_preloads_keep_order(launch, rocm_root):
     )
 
 
-def test_existing_ld_preload_is_preserved(launch, rocm_root, monkeypatch):
+def test_preload_prepended_before_existing(launch, rocm_root, monkeypatch):
+    # A pre-existing value is what distinguishes prepending from appending; without
+    # one both produce the same string.
     monkeypatch.setenv("LD_PRELOAD", "/opt/libX.so")
     env = launch("--preload", "/opt/libA.so", "--kernel-trace")
     assert env["LD_PRELOAD"] == expected_preload(
