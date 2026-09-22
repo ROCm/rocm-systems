@@ -161,6 +161,11 @@ struct LaunchParams {
       violations_ |= kBlockOverflow;
     }
 
+    // Check non-zero local dimensions
+    if (local_[0] == 0 || local_[1] == 0 || local_[2] == 0) {
+      violations_ |= kZeroBlock;
+    }
+
     if (hipParams_) {
       // Check that the size_t globals fit in uint32_t before the narrowing cast above.
       if (!NDRange32::CanSafelyNarrow(globalX, globalY, globalZ)) {
@@ -169,8 +174,8 @@ struct LaunchParams {
     } else {
       // Non HIPLaunchParams, App directly calculated the global and local size,
       // manually deduce the grid (total blocks) size.
-      if (local_[0] == 0 || local_[1] == 0 || local_[2] == 0) {
-        violations_ |= kZeroBlock;
+      if ((violations_ & kZeroBlock) != 0) {
+        // Avoid divide by 0
         return;
       }
       grid_[0] = global_[0] / local_[0];
@@ -213,11 +218,10 @@ struct LaunchParams {
     return true;
   }
 
-  bool IsValidConfig() const {
-    uint16_t legacy = kGridOverflow | kBlockOverflow | kClusterOverflow | kClusterIndivisible;
-    if (!hipParams_) legacy |= kZeroBlock;   // today's zero-local check is non-HIP path only
-    return (violations_ & legacy) == 0;
-  }
+  static constexpr uint16_t kInvalidConfigBits =
+      kGridOverflow | kBlockOverflow | kClusterOverflow | kClusterIndivisible | kZeroBlock;
+
+  bool IsValidConfig() const { return (violations_ & kInvalidConfigBits) == 0; }
 };
 
 //! Structure to store launch parameters in HIP Style (global and local size needs computation).
