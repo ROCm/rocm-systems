@@ -982,4 +982,272 @@ TEST_F(TaskPreTuningMicrotest, TaskPreTuning_BcastQueueFails_PropagatesThroughTh
             TaskPreTuning_RawTasks(&scene_.comm()->rawTaskQueue.bcastQueue));
 }
 
+// T3: preTuningBcastFallsBack is hardcoded true, so production never reaches the statics below.
+constexpr int kOwnRoot = 1;
+constexpr int kOtherRoot = 2;
+constexpr int kSpareRoot = 3;
+constexpr int kRootBelowRange = -1;
+constexpr int kRootAtTheRankCount = kRanks;
+constexpr size_t kSmallSliceCount = 8;
+constexpr size_t kLargeSliceCount = 40;
+constexpr size_t kPresetMaxCount = 999;
+constexpr uintptr_t kBcastSendAddr = 0x61000ULL;
+constexpr uintptr_t kBcastRecvAddr = 0x72000ULL;
+
+const hipStream_t kOtherStream = reinterpret_cast<hipStream_t>(0xfeedULL);
+const hipStream_t kInvalidAggregateStream = reinterpret_cast<hipStream_t>(static_cast<intptr_t>(-1));
+
+struct ncclRawTask* TaskPreTuning_PoisonedRaw(TaskPrepScene* scene) {
+  struct ncclRawTask* raw = scene->NewRaw(ncclTaskKindColl);
+  std::memset(raw, kPoison, sizeof(*raw));
+  return raw;
+}
+
+struct ncclRawTaskAllGatherV* TaskPreTuning_NewAggregate(TaskPrepScene* scene) {
+  struct ncclRawTask* raw = TaskPreTuning_PoisonedRaw(scene);
+  EXPECT_EQ(ncclSuccess, preTuningInitAllGatherVRaw(scene->comm(), raw));
+  return &raw->allGatherV;
+}
+
+struct ncclRawTaskColl* TaskPreTuning_NewBcast(TaskPrepScene* scene, int root, size_t count,
+                                               ncclDataType_t datatype = ncclFloat64) {
+  struct ncclRawTask* raw = scene->NewColl(ncclFuncBroadcast, datatype);
+  raw->coll.root = root;
+  raw->coll.count = count;
+  raw->coll.stream = kStream;
+  raw->coll.sendbuff = TaskPreTuning_Addr(kBcastSendAddr + root);
+  raw->coll.recvbuff = TaskPreTuning_Addr(kBcastRecvAddr + root);
+  return &raw->coll;
+}
+
+TEST_F(TaskPreTuningMicrotest,
+       UnreachableMerge_InitAllGatherVRaw_PoisonedRawTask_ResetsEveryFieldAndClearsBothSliceArrays) {
+  struct ncclRawTask* raw = TaskPreTuning_PoisonedRaw(&scene_);
+
+  ASSERT_EQ(ncclSuccess, preTuningInitAllGatherVRaw(scene_.comm(), raw));
+
+  struct ncclRawTaskAllGatherV* agv = &raw->allGatherV;
+  EXPECT_EQ(ncclTaskKindAllGatherV, raw->kind);
+  EXPECT_EQ(ncclFuncAllGatherV, agv->func);
+  EXPECT_EQ(kRanks, agv->nRanks);
+  EXPECT_EQ(nullptr, agv->sendbuff);
+  EXPECT_EQ(0u, agv->maxCount);
+  EXPECT_EQ(ncclInt8, agv->datatype);
+  EXPECT_EQ(kInvalidAggregateStream, agv->stream);
+  ASSERT_NE(nullptr, agv->recvbuff);
+  ASSERT_NE(nullptr, agv->counts);
+  for (int root = 0; root < kRanks; root++) {
+    EXPECT_EQ(nullptr, agv->recvbuff[root]) << "root = " << root;
+    EXPECT_EQ(0u, agv->counts[root]) << "root = " << root;
+  }
+}
+
+TEST_F(TaskPreTuningMicrotest,
+       UnreachableMerge_InitAllGatherVRaw_AnyRankCount_GivesEveryRankASliceEntryNoLaterAllocationOverlaps) {
+  struct ncclRawTaskAllGatherV* agv = TaskPreTuning_NewAggregate(&scene_);
+  for (int root = 0; root < kRanks; root++) {
+    agv->recvbuff[root] = TaskPreTuning_Addr(kBcastRecvAddr + root);
+    agv->counts[root] = kSmallSliceCount + root;
+  }
+
+  size_t* later = ncclMemoryStackAlloc<size_t>(&scene_.comm()->memScoped, kRanks);
+  std::memset(later, kPoison, kRanks * sizeof(size_t));
+
+  for (int root = 0; root < kRanks; root++) {
+    EXPECT_EQ(TaskPreTuning_Addr(kBcastRecvAddr + root), agv->recvbuff[root]) << "root = " << root;
+    EXPECT_EQ(kSmallSliceCount + root, agv->counts[root]) << "root = " << root;
+  }
+}
+
+TEST_F(TaskPreTuningMicrotest, UnreachableMerge_InitAllGatherVRaw_TwoAggregates_GetSliceArraysOfTheirOwn) {
+  struct ncclRawTaskAllGatherV* first = TaskPreTuning_NewAggregate(&scene_);
+  struct ncclRawTaskAllGatherV* second = TaskPreTuning_NewAggregate(&scene_);
+  first->counts[kOtherRoot] = kLargeSliceCount;
+
+  EXPECT_NE(first->counts, second->counts);
+  EXPECT_NE(first->recvbuff, second->recvbuff);
+  EXPECT_EQ(0u, second->counts[kOtherRoot]);
+}
+
+TEST_F(TaskPreTuningMicrotest, UnreachableMerge_AllGatherVRootUsed_OneRootCarriesASlice_IsTrueForThatRootAlone) {
+  struct ncclRawTaskAllGatherV* agv = TaskPreTuning_NewAggregate(&scene_);
+  agv->counts[kOtherRoot] = kSmallSliceCount;
+
+  for (int root = 0; root < kRanks; root++) {
+    EXPECT_EQ(root == kOtherRoot, preTuningAllGatherVRootUsed(agv, root)) << "root = " << root;
+  }
+}
+
+TEST_F(TaskPreTuningMicrotest, UnreachableMerge_BcastFitsAllGatherV_SameStreamAndUnusedRoot_AcceptsTheBroadcast) {
+  struct ncclRawTaskAllGatherV* agv = TaskPreTuning_NewAggregate(&scene_);
+  agv->stream = kStream;
+  agv->counts[kSpareRoot] = kSmallSliceCount;
+  struct ncclRawTaskColl* bcast = TaskPreTuning_NewBcast(&scene_, kOtherRoot, kSmallSliceCount);
+
+  EXPECT_TRUE(preTuningBcastFitsAllGatherV(agv, bcast));
+}
+
+TEST_F(TaskPreTuningMicrotest, UnreachableMerge_BcastFitsAllGatherV_AnotherStream_RejectsTheBroadcastOnAnUnusedRoot) {
+  struct ncclRawTaskAllGatherV* agv = TaskPreTuning_NewAggregate(&scene_);
+  agv->stream = kOtherStream;
+  struct ncclRawTaskColl* bcast = TaskPreTuning_NewBcast(&scene_, kOtherRoot, kSmallSliceCount);
+
+  EXPECT_FALSE(preTuningBcastFitsAllGatherV(agv, bcast));
+}
+
+TEST_F(TaskPreTuningMicrotest, UnreachableMerge_BcastFitsAllGatherV_RootAlreadyCarriesASlice_RejectsTheBroadcast) {
+  struct ncclRawTaskAllGatherV* agv = TaskPreTuning_NewAggregate(&scene_);
+  agv->stream = kStream;
+  agv->counts[kOtherRoot] = kSmallSliceCount;
+  struct ncclRawTaskColl* bcast = TaskPreTuning_NewBcast(&scene_, kOtherRoot, kLargeSliceCount);
+
+  EXPECT_FALSE(preTuningBcastFitsAllGatherV(agv, bcast));
+}
+
+TEST_F(TaskPreTuningMicrotest,
+       UnreachableMerge_AddBcastToAllGatherV_RootOutsideTheRankRange_RejectsItWithoutTouchingTheAggregate) {
+  for (int root : {kRootBelowRange, kRootAtTheRankCount}) {
+    TaskPrepScene scene(kRanks, kOwnRoot);
+    struct ncclRawTaskAllGatherV* agv = TaskPreTuning_NewAggregate(&scene);
+    agv->maxCount = kPresetMaxCount;
+    struct ncclRawTaskColl* bcast = TaskPreTuning_NewBcast(&scene, kOtherRoot, kLargeSliceCount);
+    bcast->root = root;
+
+    EXPECT_EQ(ncclInvalidArgument, preTuningAddBcastToAllGatherV(scene.comm(), agv, bcast)) << "root = " << root;
+
+    EXPECT_EQ(kInvalidAggregateStream, agv->stream) << "root = " << root;
+    EXPECT_EQ(kPresetMaxCount, agv->maxCount) << "root = " << root;
+    EXPECT_EQ(nullptr, agv->sendbuff) << "root = " << root;
+  }
+}
+
+TEST_F(TaskPreTuningMicrotest, UnreachableMerge_AddBcastToAllGatherV_RootIsThisRank_TakesTheBroadcastSourceBuffer) {
+  TaskPrepScene scene(kRanks, kOwnRoot);
+  struct ncclRawTaskAllGatherV* agv = TaskPreTuning_NewAggregate(&scene);
+  struct ncclRawTaskColl* bcast = TaskPreTuning_NewBcast(&scene, kOwnRoot, kSmallSliceCount);
+
+  ASSERT_EQ(ncclSuccess, preTuningAddBcastToAllGatherV(scene.comm(), agv, bcast));
+
+  EXPECT_EQ(TaskPreTuning_Addr(kBcastSendAddr + kOwnRoot), agv->sendbuff);
+  EXPECT_EQ(TaskPreTuning_Addr(kBcastRecvAddr + kOwnRoot), agv->recvbuff[kOwnRoot]);
+}
+
+TEST_F(TaskPreTuningMicrotest, UnreachableMerge_AddBcastToAllGatherV_RootIsAnotherRank_LeavesTheSourceBufferUnset) {
+  TaskPrepScene scene(kRanks, kOwnRoot);
+  struct ncclRawTaskAllGatherV* agv = TaskPreTuning_NewAggregate(&scene);
+  struct ncclRawTaskColl* bcast = TaskPreTuning_NewBcast(&scene, kOtherRoot, kSmallSliceCount);
+
+  ASSERT_EQ(ncclSuccess, preTuningAddBcastToAllGatherV(scene.comm(), agv, bcast));
+
+  EXPECT_EQ(nullptr, agv->sendbuff);
+  EXPECT_EQ(TaskPreTuning_Addr(kBcastRecvAddr + kOtherRoot), agv->recvbuff[kOtherRoot]);
+}
+
+TEST_F(TaskPreTuningMicrotest,
+       UnreachableMerge_AddBcastToAllGatherV_AnyRoot_FillsThatRootsSliceInBytesAndAdoptsTheBroadcastStream) {
+  struct ncclRawTaskAllGatherV* agv = TaskPreTuning_NewAggregate(&scene_);
+  struct ncclRawTaskColl* bcast = TaskPreTuning_NewBcast(&scene_, kOtherRoot, kSmallSliceCount);
+
+  ASSERT_EQ(ncclSuccess, preTuningAddBcastToAllGatherV(scene_.comm(), agv, bcast));
+
+  EXPECT_EQ(kStream, agv->stream);
+  EXPECT_EQ(kSmallSliceCount * kDoubleSize, agv->counts[kOtherRoot]);
+  EXPECT_EQ(kSmallSliceCount * kDoubleSize, agv->maxCount);
+  EXPECT_EQ(kSmallSliceCount, bcast->count) << "the broadcast must not be rewritten";
+  for (int root = 0; root < kRanks; root++) {
+    if (root == kOtherRoot) {
+      continue;
+    }
+    EXPECT_EQ(nullptr, agv->recvbuff[root]) << "root = " << root;
+    EXPECT_EQ(0u, agv->counts[root]) << "root = " << root;
+  }
+}
+
+TEST_F(TaskPreTuningMicrotest,
+       UnreachableMerge_AddBcastToAllGatherV_SeveralRoots_FillTheirOwnSlicesAndTrackTheLargest) {
+  struct ncclRawTaskAllGatherV* agv = TaskPreTuning_NewAggregate(&scene_);
+  struct ncclRawTaskColl* small = TaskPreTuning_NewBcast(&scene_, kSpareRoot, kSmallSliceCount);
+  struct ncclRawTaskColl* large = TaskPreTuning_NewBcast(&scene_, kOtherRoot, kLargeSliceCount);
+
+  ASSERT_EQ(ncclSuccess, preTuningAddBcastToAllGatherV(scene_.comm(), agv, small));
+  ASSERT_EQ(ncclSuccess, preTuningAddBcastToAllGatherV(scene_.comm(), agv, large));
+
+  EXPECT_EQ(kSmallSliceCount * kDoubleSize, agv->counts[kSpareRoot]);
+  EXPECT_EQ(kLargeSliceCount * kDoubleSize, agv->counts[kOtherRoot]);
+  EXPECT_EQ(TaskPreTuning_Addr(kBcastRecvAddr + kSpareRoot), agv->recvbuff[kSpareRoot]);
+  EXPECT_EQ(TaskPreTuning_Addr(kBcastRecvAddr + kOtherRoot), agv->recvbuff[kOtherRoot]);
+  EXPECT_EQ(kLargeSliceCount * kDoubleSize, agv->maxCount);
+}
+
+TEST_F(TaskPreTuningMicrotest,
+       UnreachableMerge_AddBcastToAllGatherV_SmallerFollowingBroadcast_LeavesTheLargestSliceAlone) {
+  struct ncclRawTaskAllGatherV* agv = TaskPreTuning_NewAggregate(&scene_);
+  struct ncclRawTaskColl* large = TaskPreTuning_NewBcast(&scene_, kOtherRoot, kLargeSliceCount);
+  struct ncclRawTaskColl* small = TaskPreTuning_NewBcast(&scene_, kSpareRoot, kSmallSliceCount);
+
+  ASSERT_EQ(ncclSuccess, preTuningAddBcastToAllGatherV(scene_.comm(), agv, large));
+  ASSERT_EQ(ncclSuccess, preTuningAddBcastToAllGatherV(scene_.comm(), agv, small));
+
+  EXPECT_EQ(kSmallSliceCount * kDoubleSize, agv->counts[kSpareRoot]);
+  EXPECT_EQ(kLargeSliceCount * kDoubleSize, agv->maxCount);
+}
+
+TEST_F(TaskPreTuningMicrotest,
+       UnreachableMerge_FillAllGatherVTuningInput_AnyAggregate_CopiesTheRawFieldsAndSizesNBytesFromTheLargestSlice) {
+  struct ncclRawTask* raw = scene_.NewAllGatherV();
+  raw->allGatherV.datatype = ncclFloat64;
+  raw->allGatherV.maxCount = kLargeSliceCount;
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+  ASSERT_EQ(ncclSuccess, fillAllGatherVTuningInput(scene_.comm(), &raw->allGatherV, &in));
+
+  EXPECT_EQ(scene_.comm(), in.comm);
+  EXPECT_EQ(NCCL_TUNING_MASK_ALL, in.tuningMask);
+  EXPECT_EQ(ncclFuncAllGatherV, in.func);
+  EXPECT_EQ(ncclFloat64, in.datatype);
+  EXPECT_EQ(1, in.nWorks);
+  EXPECT_EQ(1, in.numPipeOps);
+  EXPECT_EQ(kLargeSliceCount, in.count);
+  EXPECT_EQ(kLargeSliceCount, in.countMax);
+  EXPECT_EQ(kLargeSliceCount * kDoubleSize, in.nBytes);
+}
+
+TEST_F(TaskPreTuningMicrotest,
+       UnreachableMerge_FillAllGatherVTuningInput_AggregateCarriesAnotherFunc_StillReportsAllGatherV) {
+  struct ncclRawTask* raw = scene_.NewAllGatherV();
+  raw->allGatherV.func = ncclFuncBroadcast;
+  raw->allGatherV.maxCount = kLargeSliceCount;
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+  ASSERT_EQ(ncclSuccess, fillAllGatherVTuningInput(scene_.comm(), &raw->allGatherV, &in));
+
+  EXPECT_EQ(ncclFuncAllGatherV, in.func);
+}
+
+TEST_F(TaskPreTuningMicrotest, UnreachableMerge_FillAllGatherVTuningInput_EmptyAggregate_ReportsNoPayload) {
+  struct ncclRawTask* raw = scene_.NewAllGatherV();
+  raw->allGatherV.maxCount = 0;
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+  ASSERT_EQ(ncclSuccess, fillAllGatherVTuningInput(scene_.comm(), &raw->allGatherV, &in));
+
+  EXPECT_EQ(ncclInt8, in.datatype);
+  EXPECT_EQ(0u, in.count);
+  EXPECT_EQ(0u, in.countMax);
+  EXPECT_EQ(0u, in.nBytes);
+}
+
+TEST_F(TaskPreTuningMicrotest,
+       UnreachableMerge_FillAllGatherVTuningInput_AnyAggregate_LeavesTheCollectiveOnlyFieldsToTheCaller) {
+  struct ncclRawTask* raw = scene_.NewAllGatherV();
+  raw->allGatherV.maxCount = kLargeSliceCount;
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+  ASSERT_EQ(ncclSuccess, fillAllGatherVTuningInput(scene_.comm(), &raw->allGatherV, &in));
+
+  EXPECT_EQ(TaskPrep_Poisoned<int>(), in.regBuff);
+  EXPECT_EQ(TaskPrep_Poisoned<int>(), in.nvlsSupport);
+  EXPECT_EQ(TaskPrep_Poisoned<ncclRedOp_t>(), in.redOp);
+}
+
 }  // namespace
