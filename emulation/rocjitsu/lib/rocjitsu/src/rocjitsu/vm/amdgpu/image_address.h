@@ -203,9 +203,38 @@ inline std::optional<uint64_t> gfx11_image_address(uint64_t base, uint32_t x, ui
   return (base & ~block_mask) + (*offset ^ (base & block_mask));
 }
 
-/// Accessible mip extents, allocation offset and packed-tail origin.
+/// Layer contribution to the GFX11 2D pipe/bank XOR for GB_ADDR_CONFIG=0x545.
+/// These are the Z inputs of the same AddrLib equations used for X/Y above.
+inline uint32_t gfx11_image_slice_xor(uint32_t layer, uint32_t bytes, uint32_t swizzle) {
+  if (swizzle == 22 || swizzle == 26 || swizzle == 30) {
+    const uint32_t bits = swizzle == 22 ? 4 : 5;
+    uint32_t value = 0;
+    for (uint32_t bit = 0; bit < bits; ++bit)
+      value |= ((layer >> bit) & 1u) << (7 + bits - bit);
+    return value;
+  }
+  if (swizzle != 24 && swizzle != 27 && swizzle != 28 && swizzle != 31)
+    return 0;
+  if (bytes <= 4)
+    return ((layer & 1) << 10) | ((layer & 2) << 8);
+  if (swizzle >= 28)
+    return ((layer & 1) << 17) | ((layer & 2) << 11) | ((layer & 4) << 9) | ((layer & 8) << 7) |
+           ((layer & 16) << 5);
+  if (bytes == 8)
+    return ((layer & 1) << 15) | ((layer & 2) << 10) | ((layer & 4) << 8) | ((layer & 8) << 6);
+  return ((layer & 1) << 11) | ((layer & 2) << 9) | ((layer & 4) << 7);
+}
+
+/// Apply the layer stride and XOR to a validated 2D mip base.
+inline uint64_t image_layer_base(bool gfx12, uint64_t base, uint64_t slice_size, uint32_t layer,
+                                 uint32_t bytes, uint32_t swizzle) {
+  return (base + uint64_t{layer} * slice_size) ^
+         (gfx12 ? 0 : gfx11_image_slice_xor(layer, bytes, swizzle));
+}
+
+/// Accessible mip extents, allocation offset, array-slice stride and packed-tail origin.
 struct ImageMipLayout {
-  uint64_t offset = 0;
+  uint64_t offset = 0, slice_size = 0;
   uint32_t width = 0, height = 0, pitch = 0;
   uint32_t tail_x = 0, tail_y = 0;
 };
@@ -234,8 +263,10 @@ inline std::optional<ImageMipLayout> image_mip_layout(bool gfx12, uint32_t swizz
   ImageMipLayout out{.width = std::max(1u, width >> level),
                      .height = std::max(1u, height >> level),
                      .pitch = width};
-  if (levels == 1)
+  if (levels == 1) {
+    out.slice_size = uint64_t{align(width, block_width)} * align(height, block_height) * bytes;
     return out;
+  }
   out.pitch = align(allocation_extent(width, level), block_width);
   const uint32_t micro_width = 1u << ((8 - element_log2 + 1) / 2);
   const uint32_t micro_height = 1u << ((8 - element_log2) / 2);
@@ -254,6 +285,10 @@ inline std::optional<ImageMipLayout> image_mip_layout(bool gfx12, uint32_t swizz
       break;
     }
   }
+  out.slice_size = first_tail < levels ? uint64_t{1} << block_log2 : 0;
+  for (uint32_t mip = 0; mip < first_tail; ++mip)
+    out.slice_size += uint64_t{align(allocation_extent(width, mip), block_width)} *
+                      align(allocation_extent(height, mip), block_height) * bytes;
   if (level >= first_tail) {
     const uint32_t slot = max_tail_levels - 1 - (level - first_tail);
     const uint32_t tail = slot > 6 ? 16u << slot : slot << 8;

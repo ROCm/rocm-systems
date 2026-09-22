@@ -169,6 +169,7 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
                                   {0x116, 0xb5},
                                   {0x205, 0x206},
                                   {0x207, 0x205},
+                                  {0x206, 0x207},
                                   {0x214, 0x8e},
                                   {0x216, 0x202},
                                   {0x319, 0x31b},
@@ -384,8 +385,8 @@ void GraphicsDraw::finish_vertices() {
     if (!primitive_valid_[i])
       throw std::runtime_error("missing graphics primitive export");
   for (uint32_t i = 0; i < vertex_count_; ++i) {
-    if (layer_viewport_[i])
-      throw std::runtime_error("graphics layer or viewport selection is not implemented");
+    if ((context_[0x206] & (1u << 19)) && (layer_viewport_[i] >> 16))
+      throw std::runtime_error("graphics viewport selection is not implemented");
     if (position_masks_[i] != 15)
       throw std::runtime_error("missing graphics position export");
     util::Logger::vm("position ", i, ": ", std::bit_cast<float>(positions_[i][0]), ", ",
@@ -446,6 +447,11 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
   const uint32_t data_format = info & 31, number_format = (info >> 8) & 7;
   memory_format_ = color_buffer_format(data_format, number_format);
   color_bytes_ = buffer_format_bytes(memory_format_);
+  const uint32_t layer_bits = gfx12 ? 14 : 13, layer_mask = (1u << layer_bits) - 1;
+  const uint32_t view = context_[0x319];
+  color_first_layer_ = view & layer_mask;
+  color_last_layer_ = (view >> layer_bits) & layer_mask;
+  const uint32_t color_depth = attrib3 & layer_mask;
   const uint32_t color_control = context_[0x216];
   const uint32_t color_mode = (color_control >> 4) & 7;
   color_enabled_ = context_[0x214] != 0 && color_mode != 0;
@@ -457,8 +463,9 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
     throw std::runtime_error("unsupported graphics stencil or depth bounds test");
   if (color_enabled_ &&
       (!memory_format_ || (info & (3u << 11)) || (attrib & (gfx12 ? ~0u : ~0x30u)) ||
-       (attrib3 & 0x3fffu) || (context_[0x31a] & ~31u) ||
-       (context_[0x319] & (gfx12 ? ~0u : ~(15u << 26))) || (context_[0x214] & ~15u) ||
+       ((attrib3 >> 24) & 3) > 1 || (attrib3 & (1u << layer_bits)) || (context_[0x31a] & ~31u) ||
+       color_first_layer_ > color_last_layer_ || color_last_layer_ > color_depth ||
+       (view & (gfx12 ? 0xf0000000u : 0xc0000000u)) || (context_[0x214] & ~15u) ||
        (color_format_ != 4 && color_format_ != 7 && color_format_ != 9)))
     throw std::runtime_error("unsupported graphics color state");
   const uint32_t blend = context_[0x1e0];
@@ -479,6 +486,7 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
     width_ = mip->width;
     height_ = mip->height;
     color_pitch_ = mip->pitch;
+    color_slice_size_ = mip->slice_size;
     color_tail_x_ = mip->tail_x;
     color_tail_y_ = mip->tail_y;
     color_base_ = addr_calc::buffer_virtual_address(
@@ -588,6 +596,14 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
           std::abs(v[k].y) > (1 << 20))
         throw std::runtime_error("graphics vertex exceeds supported raster coordinates");
     }
+    // Layer selection uses the provoking vertex before interpolation reorders vertices.
+    const uint32_t provoking = (context_[0x207] & (1u << 19)) ? 2 : 0;
+    const uint32_t relative_layer =
+        (context_[0x206] & (1u << 18)) ? layer_viewport_[indices[provoking]] & 0xffff : 0;
+    if (color_enabled_ && relative_layer > color_last_layer_ - color_first_layer_)
+      continue;
+    if ((depth_control_ & 2) && relative_layer)
+      throw std::runtime_error("graphics layered depth attachments are not implemented");
     if (outside_near == 3 || outside_far == 3)
       continue;
     // Clip coverage in homogeneous coordinates. Keep the original triangle's
@@ -717,6 +733,7 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       }
     }
     FragmentWave batch;
+    batch.color_layer = color_first_layer_ + relative_layer;
     batch.parameters = parameters;
     uint32_t used = 0;
     for (int y = min_y & ~1; y < max_y; y += 2) {
@@ -769,6 +786,7 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
         if (used == fragment_wave_size_) {
           fragments_.push_back(std::move(batch));
           batch = FragmentWave{};
+          batch.color_layer = color_first_layer_ + relative_layer;
           batch.parameters = parameters;
           used = 0;
         }
@@ -788,10 +806,12 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       const uint32_t block_bits = 8 - std::countr_zero(color_bytes_);
       const uint32_t block_width = 1u << ((block_bits + 1) / 2);
       const uint32_t block_height = 1u << (block_bits / 2);
-      for (uint32_t y = 0; y < height_; y += block_height)
-        for (uint32_t x = 0; x < width_; x += block_width)
-          materialize_gfx11_dcc(memory, color_base_, *color_metadata_, x, y, width_, height_,
-                                color_bytes_, swizzle_, attrib3 & (1u << 30));
+      for (uint32_t layer = color_first_layer_; layer <= color_last_layer_; ++layer)
+        for (uint32_t y = 0; y < height_; y += block_height)
+          for (uint32_t x = 0; x < width_; x += block_width)
+            materialize_gfx11_dcc(memory, color_base_, *color_metadata_, x, y, width_, height_,
+                                  color_bytes_, swizzle_, attrib3 & (1u << 30), layer,
+                                  color_slice_size_);
     }
     if ((depth_control_ & 2) && depth_metadata_) {
       uint32_t bits = depth_clear_;
@@ -883,7 +903,10 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
       } else if (f.mask != 15) {
         throw std::runtime_error("unsupported graphics color export mask");
       }
-      const auto address = image_address(color_base_, f.x + color_tail_x_, f.y + color_tail_y_,
+      const uint64_t layer_base =
+          image_layer_base(arch_ == ROCJITSU_CODE_ARCH_RDNA4, color_base_, color_slice_size_,
+                           batch.color_layer, color_bytes_, swizzle_);
+      const auto address = image_address(layer_base, f.x + color_tail_x_, f.y + color_tail_y_,
                                          color_pitch_, color_bytes_, swizzle_);
       if (!address)
         throw std::runtime_error("graphics color address is unsupported");

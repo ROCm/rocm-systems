@@ -57,6 +57,7 @@ private:
   struct FragmentWave {
     std::array<Fragment, 64> lanes{};
     std::vector<uint32_t> parameters;
+    uint32_t color_layer = 0;
   };
   std::vector<FragmentWave> fragments_;
   bool fragment_stage_ = false;
@@ -65,7 +66,8 @@ private:
   uint32_t memory_format_ = 0;
   uint32_t color_bytes_ = 0;
   uint32_t width_ = 0, height_ = 0, swizzle_ = 0;
-  uint64_t color_base_ = 0;
+  uint64_t color_base_ = 0, color_slice_size_ = 0;
+  uint32_t color_first_layer_ = 0, color_last_layer_ = 0;
   uint32_t color_max_mip_ = 0, color_mip_ = 0;
   uint32_t color_pitch_ = 0, color_tail_x_ = 0, color_tail_y_ = 0;
   bool color_enabled_ = false;

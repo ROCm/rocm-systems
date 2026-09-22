@@ -387,25 +387,25 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
           if (unorm8) {
             // Each weighted mip retains nineteen fractional texel-value bits
             // before the two contributions are added.
-            filtered = (round_even(filtered * (1 - fraction) * 524288) +
-                        round_even(filter_level(1) * fraction * 524288)) /
-                       524288;
+            filtered = (round_even(std::ldexp(filtered * (1 - fraction), 19)) +
+                        round_even(std::ldexp(filter_level(1) * fraction, 19))) /
+                       std::ldexp(1.0, 19);
           } else {
             filtered = filtered * (1 - fraction) + filter_level(1) * fraction;
           }
         }
-        // RGBA8 filtering retains thirteen fractional texel-value bits.
         if (unorm8) {
-          // Normalization expands the fixed-point value by byte replication.
+          // Preserve thirteen fractional texel bits, then normalize by byte replication.
           // Convert its 34 fractional bits to FP32 with midpoints rounded up.
-          const uint64_t numerator = uint64_t(round_even(filtered * 8192)) << 13;
+          const uint64_t numerator = static_cast<uint64_t>(round_even(std::ldexp(filtered, 13)))
+                                     << 13;
           uint64_t normalized = numerator + (numerator >> 8) + (numerator >> 16) +
                                 (numerator >> 24) + (numerator >> 32);
-          const uint32_t shift =
-              std::bit_width(normalized) > 24 ? std::bit_width(normalized) - 24 : 0;
+          const uint32_t bits = std::bit_width(normalized);
+          const uint32_t shift = bits > 24 ? bits - 24 : 0;
           if (shift)
             normalized = (normalized + (uint64_t{1} << (shift - 1))) >> shift;
-          filtered = std::ldexp(double(normalized), int(shift) - 34);
+          filtered = std::ldexp(static_cast<double>(normalized), static_cast<int>(shift) - 34);
         } else if (filtered > 0) {
           // The sRGB filter rounds its normalized result to 29 significant
           // bits before conversion to FP32. This intermediate rounding can

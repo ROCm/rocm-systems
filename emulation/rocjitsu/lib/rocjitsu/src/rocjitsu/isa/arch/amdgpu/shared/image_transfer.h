@@ -65,10 +65,13 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   const uint32_t first_level = gfx12 ? (r[1] >> 25) & 31 : (r[3] >> 12) & 15;
   const uint32_t last_level = gfx12 ? (r[3] >> 15) & 31 : (r[3] >> 16) & 15;
   const bool sample = sampler != ~0u;
+  const uint32_t first_layer = (r[4] >> 16) & (gfx12 ? 0x3fff : 0x1fff);
+  const uint32_t last_layer = r[4] & (gfx12 ? 0x3fff : 0x1fff);
   if ((type != 8 && type != 9 && type != 13) || (dim == 0 && type != 8) ||
-      (type == 8 && (height != 1 || swizzle)) || (r[4] >> 16) || !bytes ||
+      (type == 8 && (height != 1 || swizzle)) || (type != 13 && (r[4] >> 16)) || !bytes ||
+      (type == 13 && (first_layer > last_layer || (r[4] & (gfx12 ? 0xc000c000u : 0xe000e000u)))) ||
       first_level > last_level || last_level > max_level ||
-      (max_level && (type == 13 || r[4] || compressed)) ||
+      (max_level && ((type != 13 && r[4]) || compressed)) ||
       (!d.is_load &&
        (d.image_srgb || (mask != 15 && !(mask == 1 && format >= 20 && format <= 22)))))
     return unsupported();
@@ -85,7 +88,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   uint32_t coordinate_offset = 0;
   uint32_t wrap_x = 2, wrap_y = 2;
   if (sample) {
-    if (dim != 1 || !d.is_load)
+    if (dim != 1 || (type == 13 && first_layer) || !d.is_load)
       return unsupported();
     std::array<uint32_t, 4> s{};
     for (uint32_t i = 0; i < s.size(); ++i) {
@@ -157,12 +160,13 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   const uint32_t pitch = type == 9 && swizzle == 0 && pitch_field ? pitch_field + 1 : mip->pitch;
   if (compressed) {
     const bool depth = swizzle == 24 || swizzle == 28;
-    if (type != 9 || max_level ||
+    if ((type != 9 && type != 13) || (depth && type == 13) || max_level ||
         (depth ? (bytes != 2 && bytes != 4) : (swizzle != 27 && swizzle != 31)))
       return unsupported();
     d.image_metadata = std::make_unique<ImageMetadataAccess>();
     auto &image = *d.image_metadata;
     image.base = base;
+    image.slice_size = mip->slice_size;
     image.metadata =
         addr_calc::buffer_virtual_address((uint64_t{r[7]} << 16) | (uint64_t{r[6] >> 24} << 8));
     image.width = width;
@@ -309,19 +313,25 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
       d.lane_mask |= uint64_t{1} << lane;
       continue;
     }
-    const uint32_t z = dim == 5 ? wf.debug_read_vgpr(coords[2], lane) : 0;
-    if (z)
+    const uint32_t relative_layer = dim == 5 ? wf.debug_read_vgpr(coords[2], lane) : 0;
+    if (type != 13 && relative_layer)
       return unsupported();
-    if (x >= width || y >= height)
+    if (x >= width || y >= height || (type == 13 && relative_layer > last_layer - first_layer))
       continue;
-    const auto address =
-        gfx12 ? gfx12_image_address(base, x + mip->tail_x, y + mip->tail_y, pitch, bytes, swizzle)
-              : gfx11_image_address(base, x + mip->tail_x, y + mip->tail_y, pitch, bytes, swizzle);
+    const uint32_t layer = type == 13 ? first_layer + relative_layer : 0;
+    const uint64_t layer_base =
+        image_layer_base(gfx12, base, mip->slice_size, layer, bytes, swizzle);
+    const auto address = gfx12 ? gfx12_image_address(layer_base, x + mip->tail_x, y + mip->tail_y,
+                                                     pitch, bytes, swizzle)
+                               : gfx11_image_address(layer_base, x + mip->tail_x, y + mip->tail_y,
+                                                     pitch, bytes, swizzle);
     if (!address)
       return unsupported();
     d.per_lane_addr[lane] = *address;
-    if (d.image_metadata)
+    if (d.image_metadata) {
       d.image_metadata->coordinates[lane] = x | (y << 16);
+      d.image_metadata->layers[lane] = layer;
+    }
     d.lane_mask |= uint64_t{1} << lane;
   }
   if (!d.is_load)

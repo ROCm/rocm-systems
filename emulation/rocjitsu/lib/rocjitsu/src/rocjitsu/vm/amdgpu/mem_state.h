@@ -146,12 +146,14 @@ private:
 
 /// @brief Surface metadata needed to materialize image clears in the memory pipeline.
 struct ImageMetadataAccess {
-  uint64_t base = 0, metadata = 0;
+  uint64_t base = 0, metadata = 0, slice_size = 0;
   uint32_t width = 0, height = 0, swizzle = 0;
   bool pipe_aligned = true;
   bool depth = false;
   /// Per-lane x in bits 0-15 and y in bits 16-31.
   std::array<uint32_t, 64> coordinates{};
+  /// Per-lane absolute array layer, including the descriptor view start.
+  std::array<uint32_t, 64> layers{};
 };
 
 /// @brief Texel requests and interpolation weights captured at sample issue time.

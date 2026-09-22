@@ -20,10 +20,11 @@ namespace rocjitsu::amdgpu {
 /// Single-sample GFX11 metadata addressing for GB_ADDR_CONFIG=0x545.
 /// These XOR equations and block dimensions follow AddrLib's GFX11 metadata API.
 inline std::optional<uint64_t> gfx11_metadata_address(uint64_t base, uint32_t x, uint32_t y,
-                                                      uint32_t width, uint32_t bytes,
-                                                      uint32_t swizzle, bool depth,
-                                                      bool pipe_aligned = true) {
-  if (!width || x >= width || !std::has_single_bit(bytes) || bytes > 16 ||
+                                                      uint32_t width, uint32_t height,
+                                                      uint32_t bytes, uint32_t swizzle, bool depth,
+                                                      bool pipe_aligned = true,
+                                                      uint32_t layer = 0) {
+  if (!width || !height || x >= width || y >= height || !std::has_single_bit(bytes) || bytes > 16 ||
       (depth && bytes != 2 && bytes != 4) ||
       (depth ? (swizzle != 24 && swizzle != 28) : (swizzle != 27 && swizzle != 31)))
     return std::nullopt;
@@ -75,8 +76,13 @@ inline std::optional<uint64_t> gfx11_metadata_address(uint64_t base, uint32_t x,
     }
     offset |= ((std::popcount(x & (mask & 0xffff)) + std::popcount(y & (mask >> 16))) & 1u) << bit;
   }
-  const uint64_t block = uint64_t{y >> yb} * ((uint64_t{width} + (1u << xb) - 1) >> xb) + (x >> xb);
+  const uint64_t pitch_blocks = (uint64_t{width} + (1u << xb) - 1) >> xb;
+  const uint64_t slice_blocks = pitch_blocks * ((uint64_t{height} + (1u << yb) - 1) >> yb);
+  const uint64_t block =
+      uint64_t{layer} * slice_blocks + uint64_t{y >> yb} * pitch_blocks + (x >> xb);
   const uint64_t mask = (1u << block_log2) - 1;
+  if (depth || pipe_aligned)
+    offset ^= gfx11_image_slice_xor(layer, bytes, swizzle) & mask;
   return (base & ~mask) + (block << block_log2) + (offset ^ (base & mask));
 }
 
@@ -96,11 +102,13 @@ inline void write_image_bytes(const GpuVmAccess &memory, uint64_t address,
 /// General delta compression is never produced by the functional renderer.
 inline void materialize_gfx11_dcc(const GpuVmAccess &memory, uint64_t base, uint64_t metadata,
                                   uint32_t x, uint32_t y, uint32_t width, uint32_t height,
-                                  uint32_t bytes, uint32_t swizzle, bool pipe_aligned = true) {
-  const auto address =
-      gfx11_metadata_address(metadata, x, y, width, bytes, swizzle, false, pipe_aligned);
+                                  uint32_t bytes, uint32_t swizzle, bool pipe_aligned = true,
+                                  uint32_t layer = 0, uint64_t slice_size = 0) {
+  const auto address = gfx11_metadata_address(metadata, x, y, width, height, bytes, swizzle, false,
+                                              pipe_aligned, layer);
   if (!address)
     throw std::runtime_error("unsupported GFX11 DCC surface layout");
+  base = image_layer_base(false, base, slice_size, layer, bytes, swizzle);
   uint8_t key;
   read_image_bytes(memory, *address, {&key, 1});
   if (key == 0xff)
@@ -146,7 +154,7 @@ inline void materialize_gfx11_htile(const GpuVmAccess &memory, uint64_t base, ui
                                     uint32_t x, uint32_t y, uint32_t width, uint32_t height,
                                     uint32_t bytes, uint32_t swizzle,
                                     std::optional<uint32_t> clear_bits = std::nullopt) {
-  const auto address = gfx11_metadata_address(metadata, x, y, width, bytes, swizzle, true);
+  const auto address = gfx11_metadata_address(metadata, x, y, width, height, bytes, swizzle, true);
   if (!address)
     throw std::runtime_error("unsupported GFX11 HTILE surface layout");
   uint32_t key;

@@ -546,6 +546,93 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
   }
 }
 
+TEST_P(GraphicsExportTest, ArrayAttachmentViewsSelectProvokingVertexAndPreserveOtherLayers) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  const auto image_address = gfx12 ? amdgpu::gfx12_image_address : amdgpu::gfx11_image_address;
+  for (uint32_t first : {0u, 2u})
+    for (bool enabled : {false, true})
+      for (bool last_provoking : {false, true})
+        for (uint32_t exported : {1u, 3u}) {
+          SCOPED_TRACE(testing::Message()
+                       << "first=" << first << ", enabled=" << enabled
+                       << ", last_provoking=" << last_provoking << ", exported=" << exported);
+          amdgpu::Pm4QueueState state;
+          state.num_instances = 1;
+          state.uconfig_registers[0x242] = 4;
+          auto &context = state.context_registers;
+          context[gfx12 ? 0x3b0 : 0x31c] = 10;
+          context[gfx12 ? 0x31e : 0x3b0] = gfx12 ? 15 | (15 << 16) : 15 | (15 << 14);
+          context[gfx12 ? 0x31f : 0x3b8] = (gfx12 ? 3u << 15 : 26u << 14) | 4;
+          context[gfx12 ? 0x319 : 0x31b] = first | ((first + 2) << (gfx12 ? 14 : 13));
+          context[0x318] = 0x1000;
+          context[gfx12 ? 0x214 : 0x8e] = 15;
+          context[gfx12 ? 0x195 : 0x1c5] = 9;
+          context[gfx12 ? 0x198 : 0x1b4] = 2;
+          context[0x2f9] = 0x2d;
+          context[gfx12 ? 0x205 : 0x206] = 0x43f;
+          context[gfx12 ? 0x206 : 0x207] = enabled ? 1u << 18 : 0;
+          context[gfx12 ? 0x207 : 0x205] = last_provoking ? 1u << 19 : 0;
+          context[gfx12 ? 0x216 : 0x202] = 0xcc0010;
+          context[0x10f] = context[0x110] = context[0x111] = context[0x112] =
+              std::bit_cast<uint32_t>(8.0f);
+          context[0x91] = gfx12 ? 15 | (15 << 16) : 16 | (16 << 16);
+          context[0x30e] = context[0x30f] = 0xffffffff;
+          // One 64KiB block per slice on both chosen layouts; inspect every texel.
+          for (uint32_t layer = 0; layer < 5; ++layer)
+            for (uint32_t y = 0; y < 16; ++y)
+              for (uint32_t x = 0; x < 16; ++x) {
+                const uint64_t base =
+                    amdgpu::image_layer_base(gfx12, 0x100000, 65536, layer, 4, gfx12 ? 3 : 26);
+                const auto address = image_address(base, x, y, 16, 4, gfx12 ? 3 : 26);
+                memory_.write32(*address, 0xdeadbeef);
+              }
+          auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
+          for (uint32_t i = 0; i < 3; ++i) {
+            draw->export_lane(*wave_, i, 12, 15,
+                              {std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
+                               std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f), 0,
+                               std::bit_cast<uint32_t>(1.0f)});
+            draw->export_lane(*wave_, i, 13, 4, {0, 0, i == 2 ? exported : 0, 0});
+          }
+          draw->export_lane(*wave_, 0, 20, 1,
+                            {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
+          const uint32_t relative_layer = enabled && last_provoking ? exported : 0;
+          auto dispatch = draw->advance(*access_);
+          if (relative_layer > 2)
+            EXPECT_FALSE(dispatch);
+          else {
+            ASSERT_TRUE(dispatch);
+            EXPECT_GT(dispatch->grid_wgs_x, 1u);
+            for (uint32_t workgroup = 0; workgroup < dispatch->grid_wgs_x; ++workgroup) {
+              wave_->set_wg_coord(workgroup, 0, 0);
+              wave_->set_graphics_stage(draw);
+              draw->initialize(*wave_, workgroup, 0);
+              for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+                draw->export_lane(*wave_, lane, 0, 15, {0x3f800000, 0, 0, 0x3f800000});
+            }
+            EXPECT_FALSE(draw->advance(*access_));
+          }
+          uint32_t changed = 0;
+          for (uint32_t layer = 0; layer < 5; ++layer)
+            for (uint32_t y = 0; y < 16; ++y)
+              for (uint32_t x = 0; x < 16; ++x) {
+                const uint64_t base =
+                    amdgpu::image_layer_base(gfx12, 0x100000, 65536, layer, 4, gfx12 ? 3 : 26);
+                const auto address = image_address(base, x, y, 16, 4, gfx12 ? 3 : 26);
+                const auto value = memory_.read32(*address);
+                if (value != 0xdeadbeef) {
+                  ++changed;
+                  EXPECT_EQ(layer, first + relative_layer);
+                  EXPECT_EQ(value, 0xff0000ffu);
+                }
+              }
+          if (relative_layer <= 2)
+            EXPECT_GT(changed, 32u);
+          else
+            EXPECT_EQ(changed, 0u);
+        }
+}
+
 TEST_P(GraphicsExportTest, IndexedDrawPreservesVertexIndicesAndLocalConnectivity) {
   amdgpu::Pm4QueueState state;
   state.num_instances = 1;
@@ -658,6 +745,47 @@ TEST(GraphicsImageAddressTest, MipAddressesMatchAddrLibAtOddSizesAndTailTransiti
   }
 }
 
+TEST(GraphicsImageAddressTest, ArrayLayersUseMipChainStrideAndSliceXor) {
+  struct Case {
+    bool gfx12;
+    uint32_t swizzle, bytes, levels, level, x, y, layer;
+    uint64_t slice_size, address;
+  };
+  // Independent AddrLib offsets for 129x71 surfaces, including linear rows,
+  // mip tails, different block sizes and layer-dependent pipe/bank selection.
+  const Case cases[] = {
+      {false, 0, 4, 7, 3, 12, 6, 3, 82432, 251440},
+      {true, 0, 4, 7, 3, 12, 6, 3, 82432, 250672},
+      {false, 22, 4, 7, 2, 19, 14, 35, 102400, 3593652},
+      {false, 26, 8, 7, 2, 19, 14, 35, 393216, 13799848},
+      {false, 27, 4, 7, 2, 19, 14, 3, 262144, 836788},
+      {false, 27, 8, 7, 2, 19, 14, 7, 393216, 2776744},
+      {false, 27, 16, 7, 2, 19, 14, 7, 655360, 4676816},
+      {false, 31, 8, 7, 2, 19, 14, 31, 524288, 16428200},
+      {false, 31, 16, 7, 2, 19, 14, 31, 1048576, 32562384},
+      {true, 1, 4, 7, 2, 19, 14, 3, 57088, 175796},
+      {true, 3, 8, 7, 2, 19, 14, 35, 393216, 13798824},
+      {true, 4, 16, 7, 2, 19, 14, 255, 1048576, 267527632},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(testing::Message()
+                 << test.gfx12 << ", swizzle=" << test.swizzle << ", bytes=" << test.bytes
+                 << ", level=" << test.level << ", layer=" << test.layer);
+    const auto mip = amdgpu::image_mip_layout(test.gfx12, test.swizzle, test.bytes, 129, 71,
+                                              test.levels, test.level);
+    ASSERT_TRUE(mip);
+    EXPECT_EQ(mip->slice_size, test.slice_size);
+    const uint64_t base = amdgpu::image_layer_base(test.gfx12, mip->offset, mip->slice_size,
+                                                   test.layer, test.bytes, test.swizzle);
+    const auto image_address =
+        test.gfx12 ? amdgpu::gfx12_image_address : amdgpu::gfx11_image_address;
+    const auto address = image_address(base, test.x + mip->tail_x, test.y + mip->tail_y, mip->pitch,
+                                       test.bytes, test.swizzle);
+    ASSERT_TRUE(address);
+    EXPECT_EQ(*address, test.address);
+  }
+}
+
 TEST_P(GraphicsExportTest, HardwareImageLoadReadsTiledUintChannelsAndPacksD16) {
   if (GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
     GTEST_SKIP() << "RDNA4 image transfer encoding";
@@ -718,11 +846,17 @@ TEST_P(GraphicsExportTest, LinearImageLoadsRespectDefaultPitchAndArrayDescriptor
   struct Case {
     const char *name;
     uint32_t width, word4, type, dim, offset;
+    uint32_t layer = 0;
+    bool out_of_bounds = false;
   };
   const Case cases[] = {{"default pitch", 2, 0, 9, 1, gfx12 ? 132u : 260u},
                         {"custom pitch", 2, 127, 9, 1, 516},
                         {"two array layers", 128, 1, 13, 5, 516},
-                        {"one array layer", 128, 0, 13, 5, 516}};
+                        {"one array layer", 128, 0, 13, 5, 516},
+                        {"second array layer", 128, 1, 13, 5, 1540, 1},
+                        {"nonzero array view", 128, (2 << 16) | 4, 13, 5, 3588, 1},
+                        {"array view limit", 128, (2 << 16) | 4, 13, 5, 516, 3, true},
+                        {"array index overflow", 128, (2 << 16) | 4, 13, 5, 516, 0xffffffff, true}};
   for (uint32_t i = 0; i < std::size(cases); ++i) {
     const auto &c = cases[i];
     SCOPED_TRACE(c.name);
@@ -741,7 +875,7 @@ TEST_P(GraphicsExportTest, LinearImageLoadsRespectDefaultPitchAndArrayDescriptor
     wave_->set_exec(1);
     wave_->debug_write_vgpr(2, 0, 1);
     wave_->debug_write_vgpr(3, 0, 1);
-    wave_->debug_write_vgpr(4, 0, 0);
+    wave_->debug_write_vgpr(4, 0, c.layer);
     memory_.write32(base + c.offset, 0x44332211);
     std::array<uint32_t, 4> words{};
     if (gfx12) {
@@ -763,11 +897,16 @@ TEST_P(GraphicsExportTest, LinearImageLoadsRespectDefaultPitchAndArrayDescriptor
     auto instruction = std::move(decoded).value();
     ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
     ASSERT_NE(instruction->data(), nullptr);
-    EXPECT_EQ(instruction->data_as<amdgpu::VectorMemState>()->per_lane_addr[0], base + c.offset);
+    const auto *transfer = instruction->data_as<amdgpu::VectorMemState>();
+    EXPECT_EQ(transfer->lane_mask, c.out_of_bounds ? 0u : 1u);
+    if (!c.out_of_bounds)
+      EXPECT_EQ(transfer->per_lane_addr[0], base + c.offset);
     amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
     pipeline.issue(instruction.release(), *wave_);
     for (uint32_t component = 0; component < 4; ++component)
-      EXPECT_EQ(wave_->debug_read_vgpr(8 + component, 0), 0x11u * (component + 1));
+      EXPECT_EQ(wave_->debug_read_vgpr(8 + component, 0),
+                c.out_of_bounds ? 0 : 0x11u * (component + 1));
+    EXPECT_EQ(memory_.read32(base + c.offset), 0x44332211u);
   }
 }
 
@@ -776,84 +915,106 @@ TEST_P(GraphicsExportTest, CompressedImageTransfersMaterializeClearsAndPreserveS
     GTEST_SKIP() << "GFX12 metadata is allocation-managed";
   constexpr uint64_t base = 0x200000, metadata = 0x100700;
   constexpr uint32_t width = 17, height = 13;
-  const std::array<uint32_t, 8> descriptor{base >> 8,
-                                           46u << 20,
-                                           ((width - 1) >> 2) | ((height - 1) << 14),
-                                           (9u << 28) | (27u << 20) | 0xfac,
-                                           0,
-                                           0,
-                                           (1u << 21) | (1u << 19) |
-                                               (uint32_t((metadata >> 8) & 255) << 24),
-                                           metadata >> 16};
-  for (uint32_t i = 0; i < descriptor.size(); ++i)
-    wave_->debug_write_sgpr(8 + i, descriptor[i]);
-  wave_->set_exec(5);
-  for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
-    wave_->debug_write_vgpr(2, lane, lane == 2 ? width : 11);
-    wave_->debug_write_vgpr(3, lane, 10);
+  for (bool array : {false, true}) {
+    SCOPED_TRACE(array);
+    cu_->l1_vector().flush_all();
+    cache_.flush_all();
+    cu_->l1_vector().invalidate_all();
+    cache_.invalidate_all();
+    // AddrLib: layer 3 of this R_X surface has stride 64KiB and XOR 0x600.
+    const uint64_t selected_base = array ? base + 3 * 65536 + 0x600 : base;
+    const auto preserved = *amdgpu::gfx11_image_address(base, 11, 10, width, 4, 27);
+    memory_.write32(preserved, 0x12345678);
+    const std::array<uint32_t, 8> descriptor{
+        base >> 8,
+        46u << 20,
+        ((width - 1) >> 2) | ((height - 1) << 14),
+        ((array ? 13u : 9u) << 28) | (27u << 20) | 0xfac,
+        array ? (2u << 16) | 4 : 0,
+        0,
+        (1u << 21) | (1u << 19) | (static_cast<uint32_t>((metadata >> 8) & 255) << 24),
+        metadata >> 16};
+    for (uint32_t i = 0; i < descriptor.size(); ++i)
+      wave_->debug_write_sgpr(8 + i, descriptor[i]);
+    wave_->set_exec(5);
+    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
+      wave_->debug_write_vgpr(2, lane, lane == 2 ? width : 11);
+      wave_->debug_write_vgpr(3, lane, 10);
+      wave_->debug_write_vgpr(4, lane, 1);
+      for (uint32_t c = 0; c < 4; ++c)
+        wave_->debug_write_vgpr(8 + c, lane, 0xdeadbeef);
+    }
+    const auto tag = *amdgpu::gfx11_metadata_address(metadata, 11, 10, width, height, 4, 27, false,
+                                                     true, array ? 3 : 0);
+    // Queue the clear tag through L2 to check that the image path observes dirty
+    // metadata and does not overwrite it with a stale backing-memory value.
+    const uint8_t key = 8;
+    memory_.write8(tag, 2);
+    cache_.write(tag, &key, 1);
+    amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
+    const auto transfer = [&](uint32_t opcode) {
+      const auto encoding = rdna3::build_mimg(opcode, {.dim = static_cast<uint8_t>(array ? 5 : 1),
+                                                       .dmask = 15,
+                                                       .vaddr = 2,
+                                                       .vdata = 8,
+                                                       .srsrc = 2});
+      std::array<uint32_t, 4> words{};
+      std::copy(encoding.begin(), encoding.end(), words.begin());
+      auto decoded = decoder_->decode(words.data());
+      ASSERT_FALSE(decoded.failed());
+      auto instruction = std::move(decoded).value();
+      ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
+      pipeline.issue(instruction.release(), *wave_);
+      ASSERT_FALSE(wave_->instruction_execution_failed());
+    };
+    transfer(0);
+    for (uint32_t c = 0; c < 4; ++c) {
+      EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), c == 3 ? 255 : 0);
+      EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 1), 0xdeadbeef);
+      EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 2), 0);
+      wave_->debug_write_vgpr(8 + c, 0, 0x11 * (c + 1));
+    }
+    transfer(6); // IMAGE_STORE
+    transfer(0);
     for (uint32_t c = 0; c < 4; ++c)
-      wave_->debug_write_vgpr(8 + c, lane, 0xdeadbeef);
-  }
-  const auto tag = *amdgpu::gfx11_metadata_address(metadata, 11, 10, width, 4, 27, false);
-  // Queue the clear tag through L2 to check that the image path observes dirty
-  // metadata and does not overwrite it with a stale backing-memory value.
-  const uint8_t key = 8;
-  memory_.write8(tag, 2);
-  cache_.write(tag, &key, 1);
-  amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
-  const auto transfer = [&](uint32_t opcode) {
-    const auto encoding =
-        rdna3::build_mimg(opcode, {.dim = 1, .dmask = 15, .vaddr = 2, .vdata = 8, .srsrc = 2});
+      EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), 0x11u * (c + 1));
+    cu_->l1_vector().flush_all();
+    cache_.flush_all();
+    EXPECT_EQ(memory_.read32(*amdgpu::gfx11_image_address(selected_base, 11, 10, width, 4, 27)),
+              0x44332211u);
+    EXPECT_EQ(memory_.read32(*amdgpu::gfx11_image_address(selected_base, 10, 10, width, 4, 27)),
+              0xff000000u);
+    EXPECT_EQ(memory_.read8(tag), 0xff);
+    if (array) {
+      EXPECT_EQ(memory_.read32(preserved), 0x12345678u);
+      continue;
+    }
+    // Filtering must also publish dirty texels before materializing metadata.
+    const uint32_t updated = 0x66332211;
+    cache_.write(*amdgpu::gfx11_image_address(selected_base, 11, 10, width, 4, 27),
+                 reinterpret_cast<const uint8_t *>(&updated), 4);
+    wave_->debug_write_sgpr(9, 42u << 20);
+    wave_->debug_write_sgpr(4, 2 | (2 << 3) | (2 << 6));
+    wave_->debug_write_sgpr(5, 0);
+    wave_->debug_write_sgpr(6, (1 << 20) | (1 << 22));
+    wave_->debug_write_sgpr(7, 0);
+    wave_->set_exec(1);
+    wave_->debug_write_vgpr(2, 0, std::bit_cast<uint32_t>(11.0f / width));
+    wave_->debug_write_vgpr(3, 0, std::bit_cast<uint32_t>(10.5f / height));
+    const auto encoding = rdna3::build_mimg(
+        31, {.dim = 1, .dmask = 15, .vaddr = 2, .vdata = 8, .srsrc = 2, .ssamp = 1});
     std::array<uint32_t, 4> words{};
     std::copy(encoding.begin(), encoding.end(), words.begin());
     auto decoded = decoder_->decode(words.data());
     ASSERT_FALSE(decoded.failed());
     auto instruction = std::move(decoded).value();
     ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
-    pipeline.issue(instruction.release(), *wave_);
     ASSERT_FALSE(wave_->instruction_execution_failed());
-  };
-  transfer(0);
-  for (uint32_t c = 0; c < 4; ++c) {
-    EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), c == 3 ? 255 : 0);
-    EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 1), 0xdeadbeef);
-    EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 2), 0);
-    wave_->debug_write_vgpr(8 + c, 0, 0x11 * (c + 1));
+    pipeline.issue(instruction.release(), *wave_);
+    const float expected[] = {8.5f / 255, 17.0f / 255, 25.5f / 255, 178.5f / 255};
+    for (uint32_t c = 0; c < 4; ++c)
+      EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), std::bit_cast<uint32_t>(expected[c]));
   }
-  transfer(6); // IMAGE_STORE
-  transfer(0);
-  for (uint32_t c = 0; c < 4; ++c)
-    EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), 0x11u * (c + 1));
-  cu_->l1_vector().flush_all();
-  cache_.flush_all();
-  EXPECT_EQ(memory_.read32(*amdgpu::gfx11_image_address(base, 11, 10, width, 4, 27)), 0x44332211u);
-  EXPECT_EQ(memory_.read32(*amdgpu::gfx11_image_address(base, 10, 10, width, 4, 27)), 0xff000000u);
-  EXPECT_EQ(memory_.read8(tag), 0xff);
-  // Filtering must also publish dirty texels before materializing metadata.
-  const uint32_t updated = 0x66332211;
-  cache_.write(*amdgpu::gfx11_image_address(base, 11, 10, width, 4, 27),
-               reinterpret_cast<const uint8_t *>(&updated), 4);
-  wave_->debug_write_sgpr(9, 42u << 20);
-  wave_->debug_write_sgpr(4, 2 | (2 << 3) | (2 << 6));
-  wave_->debug_write_sgpr(5, 0);
-  wave_->debug_write_sgpr(6, (1 << 20) | (1 << 22));
-  wave_->debug_write_sgpr(7, 0);
-  wave_->set_exec(1);
-  wave_->debug_write_vgpr(2, 0, std::bit_cast<uint32_t>(11.0f / width));
-  wave_->debug_write_vgpr(3, 0, std::bit_cast<uint32_t>(10.5f / height));
-  const auto encoding = rdna3::build_mimg(
-      31, {.dim = 1, .dmask = 15, .vaddr = 2, .vdata = 8, .srsrc = 2, .ssamp = 1});
-  std::array<uint32_t, 4> words{};
-  std::copy(encoding.begin(), encoding.end(), words.begin());
-  auto decoded = decoder_->decode(words.data());
-  ASSERT_FALSE(decoded.failed());
-  auto instruction = std::move(decoded).value();
-  ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
-  ASSERT_FALSE(wave_->instruction_execution_failed());
-  pipeline.issue(instruction.release(), *wave_);
-  const float expected[] = {8.5f / 255, 17.0f / 255, 25.5f / 255, 178.5f / 255};
-  for (uint32_t c = 0; c < 4; ++c)
-    EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), std::bit_cast<uint32_t>(expected[c]));
 }
 
 TEST_P(GraphicsExportTest, UnsupportedComparisonSamplingReportsAnExecutionError) {
@@ -1975,9 +2136,9 @@ TEST_P(GraphicsExportTest, MetadataAttachmentsPreserveDrawsAndRejectedState) {
         memory_.write8(dcc + i, 0xff);
       for (uint32_t y = 0; y < height; y += 8) {
         for (uint32_t x = 0; x < width; x += 8) {
-          memory_.write8(*amdgpu::gfx11_metadata_address(dcc, x, y, width, 4, 27, false, aligned),
-                         8);
-          memory_.write32(*amdgpu::gfx11_metadata_address(htile, x, y, width, 4, 24, true),
+          memory_.write8(
+              *amdgpu::gfx11_metadata_address(dcc, x, y, width, height, 4, 27, false, aligned), 8);
+          memory_.write32(*amdgpu::gfx11_metadata_address(htile, x, y, width, height, 4, 24, true),
                           0x55555550);
         }
       }
@@ -2029,8 +2190,9 @@ TEST_P(GraphicsExportTest, MetadataAttachmentsPreserveDrawsAndRejectedState) {
       const auto color_address = *amdgpu::gfx11_image_address(color_base, 16, 8, width, 4, 27);
       const auto depth_address = *amdgpu::gfx11_image_address(depth_base, 16, 8, width, 4, 24);
       const auto color_key =
-          *amdgpu::gfx11_metadata_address(dcc, 16, 8, width, 4, 27, false, aligned);
-      const auto depth_key = *amdgpu::gfx11_metadata_address(htile, 16, 8, width, 4, 24, true);
+          *amdgpu::gfx11_metadata_address(dcc, 16, 8, width, height, 4, 27, false, aligned);
+      const auto depth_key =
+          *amdgpu::gfx11_metadata_address(htile, 16, 8, width, height, 4, 24, true);
       if (test.reject) {
         EXPECT_THROW(draw->advance(*access_), std::runtime_error);
         EXPECT_EQ(memory_.read32(color_address), 0x12345678u);
@@ -2119,11 +2281,12 @@ TEST(GraphicsImageMetadataTest, AddressesMatchAddrLibAcrossMetadataBlocks) {
       {28, 4, 4093, 3001, 2049, 31, 663636, true, true},
   };
   for (const auto &test : cases) {
+    // These single-layer offsets only require height to include the sampled y.
     // Descriptor writers mask the pipe XOR to the metadata allocation alignment.
     const uint32_t alignment = test.depth ? 131072 : test.pipe_aligned ? 16384 : 4096;
     const auto actual = amdgpu::gfx11_metadata_address(
-        0x100000 | ((test.pipe_xor << 8) & (alignment - 1)), test.x, test.y, test.width, test.bytes,
-        test.swizzle, test.depth, test.pipe_aligned);
+        0x100000 | ((test.pipe_xor << 8) & (alignment - 1)), test.x, test.y, test.width, test.y + 1,
+        test.bytes, test.swizzle, test.depth, test.pipe_aligned);
     EXPECT_EQ(actual, 0x100000 + test.expected)
         << test.swizzle << "," << test.bytes << "," << test.x << "," << test.y;
   }
@@ -2145,8 +2308,8 @@ TEST(GraphicsImageMetadataTest, DccClearsPreserveNeighborBlocksAndLaterWrites) {
                                      {6u, 0x3f800000u},
                                      {8u, 0xff000000u},
                                      {10u, 0x00ffffffu}}) {
-    const auto tag = amdgpu::gfx11_metadata_address(metadata, 8, 8, 17, 4, 27, false);
-    const auto neighbor = amdgpu::gfx11_metadata_address(metadata, 16, 8, 17, 4, 27, false);
+    const auto tag = amdgpu::gfx11_metadata_address(metadata, 8, 8, 17, 17, 4, 27, false);
+    const auto neighbor = amdgpu::gfx11_metadata_address(metadata, 16, 8, 17, 17, 4, 27, false);
     memory.write8(*tag, key);
     memory.write8(*neighbor, 2);
     memory.write32(*amdgpu::gfx11_image_address(base, 8, 8, 17, 4, 27), 0x76543210);
@@ -2166,6 +2329,27 @@ TEST(GraphicsImageMetadataTest, DccClearsPreserveNeighborBlocksAndLaterWrites) {
   }
 }
 
+TEST(GraphicsImageMetadataTest, LayerDccClearPreservesOtherLayers) {
+  amdgpu::GpuMemory memory{"layered_dcc_memory"};
+  amdgpu::GpuVm vm;
+  const auto address_space = vm.register_address_space(
+      0, std::make_shared<amdgpu::IdentityAddressSpaceTranslator>(),
+      std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(memory), {}, true);
+  const auto access = vm.snapshot(address_space);
+  ASSERT_TRUE(access);
+  // AddrLib: 129x71 RGBA8 R_X, layer 3 has data at 3*131072 ^ 0x600
+  // and DCC at 3*16384 ^ 0x600. Layer 2 uses XOR 0x200.
+  memory.write32(0x10c600, 2);
+  memory.write32(0x108200, 2);
+  memory.write32(0x460600, 0);
+  memory.write32(0x440200, 0x12345678);
+  amdgpu::materialize_gfx11_dcc(*access, 0x400000, 0x100000, 0, 0, 129, 71, 4, 27, true, 3, 131072);
+  EXPECT_EQ(memory.read32(0x460600), 0xffffffffu);
+  EXPECT_EQ(memory.read32(0x440200), 0x12345678u);
+  EXPECT_EQ(memory.read32(0x10c600), 0xffu);
+  EXPECT_EQ(memory.read32(0x108200), 2u);
+}
+
 TEST(GraphicsImageMetadataTest, HtileEndpointClearsAndExplicitClearRegister) {
   amdgpu::GpuMemory memory{"htile_clear_memory"};
   amdgpu::GpuVm vm;
@@ -2176,7 +2360,7 @@ TEST(GraphicsImageMetadataTest, HtileEndpointClearsAndExplicitClearRegister) {
   ASSERT_TRUE(access);
   constexpr uint64_t base = 0x200000, metadata = 0x100000;
   for (uint32_t bytes : {2u, 4u}) {
-    const auto tag = *amdgpu::gfx11_metadata_address(metadata, 8, 8, 17, bytes, 24, true);
+    const auto tag = *amdgpu::gfx11_metadata_address(metadata, 8, 8, 17, 17, bytes, 24, true);
     for (uint32_t key : {0u, 0xfffffff0u}) {
       memory.write32(tag, key);
       amdgpu::materialize_gfx11_htile(*access, base, metadata, 9, 9, 17, 13, bytes, 24);
