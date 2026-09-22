@@ -346,6 +346,10 @@ const AMDGpuMetricsUnitTypeTranslationTbl_t amdgpu_metrics_unit_type_translation
     {AMDGpuMetricsUnitType_t::kMetricTempXcd, "TempXcd"}, /* v1.9+ */
 };
 
+// Non-logging classification shared by translate_header_to_flag_version() and
+// is_gpu_metrics_version_supported(), so the version a caller is told about and
+// the object built for it always come from the same decision.
+//
 // Resolve a metrics header to its version flag without logging. Minor revisions
 // are byte-prefix supersets of the newest struct we model, so an APU exposing
 // gpu_metrics v2.0-v2.3 is read with the v2.4 layout (its extra trailing fields
