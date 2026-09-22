@@ -17,7 +17,7 @@ from typing import Any, Optional, Union, cast
 
 import config
 import utils.utils_profile_csv as csv_ops
-from utils import csv_compression, rocpd_data
+from utils import csv_compression, native_data, rocpd_data
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
@@ -152,6 +152,30 @@ def _duplicate_rocm_install_message(output: str) -> Optional[str]:
     if _LLVM_DUPLICATE_OPTION in output or _ROCPROFILER_REGISTER_CONFLICT in output:
         return _DUPLICATE_ROCM_MESSAGE
     return None
+
+
+def keep_native_artifacts(source_dir: Path, workload_dir: Path, fbase: str) -> None:
+    """Move the native tool's per-pid CSVs into the workload directory.
+
+    They are written next to the rocpd databases in a directory that is deleted
+    once the run is post-processed, and analyze joins them later, so they have
+    to be moved out first. The counter set goes into the name because the
+    application is run once per set, each run with its own processes and its
+    own dispatch ids.
+    """
+    for prefix, suffix in (
+        (native_data.COUNTERS_PREFIX, "_native_counter_collection.csv"),
+        (native_data.DISPATCH_PREFIX, "_dispatch.csv"),
+        (native_data.KERNEL_SYMBOLS_PREFIX, "_kernel_symbols.csv"),
+    ):
+        pattern = f"*{suffix}{csv_compression.GZIP_SUFFIX}"
+        for source in sorted(source_dir.glob(pattern)):
+            pid = source.name.split("_")[0]
+            destination = csv_compression.compressed_name(
+                workload_dir / f"{prefix}_{fbase}_{pid}.csv"
+            )
+            shutil.move(str(source), str(destination))
+            console_debug(f"Kept native profiling data: {destination}")
 
 
 def run_prof(
@@ -332,6 +356,8 @@ def run_prof(
                 str(db_name),
             )
             console_debug(f"Updated rocpd db {db_name} with native tool counters.")
+
+        keep_native_artifacts(out_pmc_1, Path(workload_dir), fbase)
     # Write results_fbase.csv
     counter_csv = csv_compression.compressed_name(
         out_pmc_1 / f"{fbase}_counter_collection.csv"

@@ -3,13 +3,11 @@
 #include "counters_writer.h"
 
 #include "compression/gzip_output_stream.h"
+#include "csv_gz_writer.h"
 
 #include <algorithm>
-#include <filesystem>
-#include <iostream>
 #include <sstream>
 #include <string>
-#include <system_error>
 
 namespace rocprofiler_compute_tool
 {
@@ -79,38 +77,9 @@ void CountersWriter::write(tool_data_t& tool_data)
 
 void CsvCountersWriter::write_counters(tool_data_t* tool_data)
 {
-    const std::string& final_path = tool_data->output_filename;
-    const std::string  temp_path  = final_path + ".tmp";
-
-    compression::GzipFileOutputStream stream(temp_path);
-    if (!stream.is_open())
-    {
-        std::cerr << "Failed to open output file: " << final_path << std::endl;
-        return;
-    }
-
-    const auto wrote = format_counters_csv(*tool_data,
-                                           [&stream](std::string_view text)
-                                           { return stream.write(text); });
-
-    std::error_code ec;
-    if (!stream.close() || !wrote)
-    {
-        std::filesystem::remove(temp_path, ec);
-        std::cerr << "Failed to write output file: " << final_path << std::endl;
-        return;
-    }
-
-    std::filesystem::rename(temp_path, final_path, ec);
-    if (ec)
-    {
-        std::filesystem::remove(temp_path, ec);
-        std::cerr << "Failed to write output file: " << final_path << std::endl;
-        return;
-    }
-
-    std::clog << "[rocprofiler-compute] [" << __FUNCTION__
-              << "] Counter collection data has been written to: " << final_path << std::endl;
+    write_csv_gz(tool_data->output_filename,
+                 "Counter collection data",
+                 [tool_data](const auto& sink) { return format_counters_csv(*tool_data, sink); });
 }
 
 }  // namespace rocprofiler_compute_tool

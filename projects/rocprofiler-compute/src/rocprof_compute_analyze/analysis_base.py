@@ -15,7 +15,7 @@ import pandas as pd
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import csv_compression, file_io, parser, schema
+from utils import csv_compression, file_io, native_data, parser, schema
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
@@ -450,6 +450,15 @@ class OmniAnalyze_Base:
 
         if pmc_perf.exists() and pmc_perf.stat().st_size > 0:
             console_debug(f"Using existing {pmc_perf}")
+        elif native_data.find_native_artifacts(workload_dir):
+            console_log(f"Joining native profiling data for {workload_dir}...")
+            if not native_data.write_counter_frame(workload_dir, pmc_perf):
+                pmc_perf.unlink(missing_ok=True)
+                console_error(
+                    f"No counter data in the native profiling data under "
+                    f"{workload_dir}.\nPlease re-run 'rocprof-compute profile'."
+                )
+            console_log(f"Created {pmc_perf}")
         elif result_files:
             console_log(f"Joining {results_glob} for {workload_dir}...")
             self.concat_result_csvs(result_files, pmc_perf)

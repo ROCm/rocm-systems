@@ -63,6 +63,33 @@ struct iteration_multiplexing_dispatch_record_t
     std::map<kernel_dispatch_info_t, std::size_t> kernel_params_to_profile_index;
 };
 
+/// One profiled kernel dispatch. Grid and workgroup sizes are the products of
+/// their three dimensions, which is the form analyze consumes.
+struct dispatch_record_t
+{
+    uint64_t dispatch_id          = 0;
+    uint64_t agent_id             = 0;
+    uint64_t kernel_id            = 0;
+    uint64_t grid_size            = 0;
+    uint64_t workgroup_size       = 0;
+    uint32_t lds_per_workgroup    = 0;
+    uint32_t scratch_per_workitem = 0;
+    uint64_t start_timestamp      = 0;
+    uint64_t end_timestamp        = 0;
+    uint64_t correlation_id       = 0;
+};
+
+/// Kernel properties that arrive once per kernel on code object load, not with
+/// each dispatch. Held by kernel id and joined back at analyze time.
+struct kernel_symbol_record_t
+{
+    std::string kernel_name;
+    std::string kernel_short_name;
+    uint32_t    arch_vgpr_count  = 0;
+    uint32_t    accum_vgpr_count = 0;
+    uint32_t    sgpr_count       = 0;
+};
+
 struct counter_info_record_t
 {
     uint64_t    dispatch_id     = 0;
@@ -76,14 +103,18 @@ struct counter_info_record_t
 
 struct tool_data_t
 {
-    std::mutex                                 mut{};
-    std::string                                output_filename{};
-    std::unordered_map<uint64_t, std::string>  counter_id_name_map{};
-    std::string                                requested_counters{};
-    std::string                                kernel_filter_include_regex{};
-    std::vector<std::pair<uint64_t, uint64_t>> kernel_filter_ranges{};
-    std::vector<counter_info_record_t>         counter_records;
-    std::set<uint64_t>                         target_kernel_ids{};
+    std::mutex                                           mut{};
+    std::string                                          output_filename{};
+    std::string                                          dispatch_filename{};
+    std::string                                          kernel_symbols_filename{};
+    std::unordered_map<uint64_t, std::string>            counter_id_name_map{};
+    std::string                                          requested_counters{};
+    std::string                                          kernel_filter_include_regex{};
+    std::vector<std::pair<uint64_t, uint64_t>>           kernel_filter_ranges{};
+    std::vector<counter_info_record_t>                   counter_records;
+    std::vector<dispatch_record_t>                       dispatch_records;
+    std::unordered_map<uint64_t, kernel_symbol_record_t> kernel_symbols{};
+    std::set<uint64_t>                                   target_kernel_ids{};
     iteration_multiplexing_mode_t iteration_multiplexing_mode{iteration_multiplexing_mode_t::DISABLED};
     pc_sampling_feature_t::ptr pc_sampling{std::make_shared<pc_sampling_feature_t>()};
 };
@@ -139,6 +170,9 @@ private:
 
     static std::string truncate_name(std::string_view name);
     static std::string cxa_demangle(const std::string& mangled_name, int* status);
+    /// Drops a trailing ".kd" and demangles, matching the name rocprofv3 puts
+    /// in its output so both paths report the same kernel.
+    static std::string format_kernel_name(const char* mangled_name);
     static std::vector<std::string> split_by_regex(const std::string& s, const std::string& regex_pattern);
 };
 }  // namespace rocprofiler_compute_tool

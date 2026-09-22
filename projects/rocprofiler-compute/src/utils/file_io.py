@@ -270,6 +270,14 @@ def _read_kernel_symbol_csvs(workload_path: str) -> list[pd.DataFrame]:
             symbols = pd.read_csv(symbol_csv_path)
         except (pd.errors.EmptyDataError, pd.errors.ParserError):
             continue
+        # The native tool writes one file per process, with its own column
+        # names. Both shapes are present until the rocpd path goes away.
+        symbols = symbols.rename(
+            columns={
+                "kernel_name": "Kernel_Name",
+                "kernel_short_name": "Kernel_Short_Name",
+            }
+        )
         if not symbols.empty and {"Kernel_Name", "Kernel_Short_Name"}.issubset(
             symbols.columns
         ):

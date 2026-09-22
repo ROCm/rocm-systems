@@ -437,6 +437,13 @@ artifact, so profile needs no writer. Analyze reads all per-process artifacts
 across both lanes, merges them, and still materializes `pmc_perf.csv.gz`; the reader
 interface and dropping `pmc_perf.csv` come in Phase D.
 
+The kernel lane is moving to the native tool as well. It now writes the
+dispatches and the kernel symbols as their own per-process CSVs, and analyze
+joins all three per process on `(pid, dispatch_id)` and `(pid, kernel_id)`, so
+the kernel data in the diagram below no longer has to come from the SDK's
+rocpd. The SDK tool stays loaded, and its rocpd still supplies the marker
+trace, until it leaves `LD_PRELOAD`.
+
 ```mermaid
 sequenceDiagram
     participant computeLauncher as [rocprof-compute]<br>[Profile phase]<br>utils_profile.py

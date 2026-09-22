@@ -16,6 +16,11 @@ add_library(
     input_parameters.cpp
     output_registry.h
     output_registry.cpp
+    csv_gz_writer.h
+    dispatch_writer.h
+    dispatch_writer.cpp
+    kernel_symbols_writer.h
+    kernel_symbols_writer.cpp
     sdk_wrapper.h
     sdk_wrapper.cpp
     pc_sampling_feature.h
