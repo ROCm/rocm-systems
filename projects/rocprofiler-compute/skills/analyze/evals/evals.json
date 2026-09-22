@@ -1,0 +1,69 @@
+{
+  "evaluations": [
+    {
+      "id": "interpret-occupancy-bottleneck",
+      "skill_should_trigger": true,
+      "prompt": "look at my rocprof-compute workload and tell me if occupancy is limiting this kernel",
+      "expected_behavior": [
+        "runs rocprof-compute analyze --list-stats then filters -k",
+        "reads wavefront/occupancy metrics from the report",
+        "gives VGPR/LDS guidance grounded in those numbers"
+      ]
+    },
+    {
+      "id": "memory-and-stall-bottlenecks",
+      "skill_should_trigger": true,
+      "prompt": "identify memory access inefficiencies and instruction stalls in this rocprofiler-compute capture",
+      "expected_behavior": [
+        "uses top-down SOL / memory chart / roofline",
+        "cites HBM/L2/L1 or stall columns from the report",
+        "suggests concrete kernel optimizations tied to the metrics"
+      ]
+    },
+    {
+      "id": "hottest-kernel",
+      "skill_should_trigger": true,
+      "prompt": "which kernel is the hotspot in ./workloads/my_app and why is it slow?",
+      "expected_behavior": [
+        "rocprof-compute analyze --path ./workloads/my_app --list-stats",
+        "focuses subsequent analyze on that kernel id"
+      ]
+    },
+    {
+      "id": "compare-baseline-optimized",
+      "skill_should_trigger": true,
+      "prompt": "compare rocprof-compute results for baseline vs optimized",
+      "expected_behavior": [
+        "passes two --path arguments to rocprof-compute analyze"
+      ]
+    },
+    {
+      "id": "produce-rocpd-db-report",
+      "skill_should_trigger": true,
+      "prompt": "write a sqlite analysis database from my rocprof-compute workload",
+      "expected_behavior": [
+        "uses --output-format db and --output-name",
+        "notes csv/db require a rocpd-collected profile"
+      ]
+    },
+    {
+      "id": "roctx-range-analysis",
+      "skill_should_trigger": true,
+      "prompt": "analyze only the ROCTX range named gemm_compute_phase in this workload",
+      "expected_behavior": [
+        "uses --list-stats to find dispatches in the range",
+        "filters with -d / --dispatch (1-based)"
+      ]
+    },
+    {
+      "id": "install-rocm",
+      "skill_should_trigger": false,
+      "prompt": "how do I install ROCm on Ubuntu?"
+    },
+    {
+      "id": "vague-gpu-improvement",
+      "skill_should_trigger": false,
+      "prompt": "how could i improve this gpu program?"
+    }
+  ]
+}

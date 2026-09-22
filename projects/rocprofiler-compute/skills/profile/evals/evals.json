@@ -1,0 +1,64 @@
+{
+  "evaluations": [
+    {
+      "id": "explicit-ask-to-profile-hip",
+      "skill_should_trigger": true,
+      "prompt": "profile my HIP application with rocprof-compute",
+      "expected_behavior": [
+        "asks for launch command and workload name if missing",
+        "runs rocprof-compute profile --name ... -- <app>",
+        "validates the workload directory (profiling_config.yaml / pmc_perf.csv)"
+      ]
+    },
+    {
+      "id": "filter-kernels-while-profiling",
+      "skill_should_trigger": true,
+      "prompt": "profile only the gemm kernels in my ROCm app",
+      "expected_behavior": [
+        "uses rocprof-compute profile with -k / --kernel, not --kernel-names",
+        "does not invent --single-pass"
+      ]
+    },
+    {
+      "id": "roctx-annotated-app",
+      "skill_should_trigger": true,
+      "prompt": "my HIP code has ROCTX ranges around the forward and backward passes; profile it so I can attribute counters to those ranges",
+      "expected_behavior": [
+        "explains ROCTX is captured automatically when linking libroctx64",
+        "profiles with rocprof-compute profile without a special ROCTX flag",
+        "points to analyze --list-stats and --dispatch for range attribution"
+      ]
+    },
+    {
+      "id": "skip-roofline",
+      "skill_should_trigger": true,
+      "prompt": "collect rocprofiler-compute counters but skip roofline to save time",
+      "expected_behavior": ["runs rocprof-compute profile with --no-roof"]
+    },
+    {
+      "id": "pc-sampling-profile",
+      "skill_should_trigger": true,
+      "prompt": "profile my MI300 kernel with stochastic PC sampling using rocprof-compute",
+      "expected_behavior": [
+        "passes --experimental --pc-sampling",
+        "sets --pc-sampling-method stochastic"
+      ]
+    },
+    {
+      "id": "retain-rocpd-db",
+      "skill_should_trigger": true,
+      "prompt": "profile with rocprof-compute and keep the raw rocpd database in the workload directory",
+      "expected_behavior": ["uses --retain-rocpd-output and explains profile always uses rocpd"]
+    },
+    {
+      "id": "vague-make-it-faster",
+      "skill_should_trigger": false,
+      "prompt": "how can i make my application faster?"
+    },
+    {
+      "id": "cuda-profiling-request",
+      "skill_should_trigger": false,
+      "prompt": "profile my CUDA application with nsys"
+    }
+  ]
+}
