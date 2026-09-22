@@ -71,19 +71,19 @@ on_scratch_memory(typename SdkBackend::scratch_memory_record_t* record, void* da
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
-inline constexpr auto k_scratch_memory = buffered_domain_definition<SdkBackend>{
-    .meta =
-        domain_descriptor{
-            .name  = "scratch_memory",
-            .id    = SdkBackend::BUFFER_TRACING_SCRATCH_MEMORY,
-            .mode  = collection_mode::buffered,
-            .group = std::nullopt,
-        },
-    .on_records =
-        buffered_callback_dispatcher<SdkBackend,
-                                     typename SdkBackend::scratch_memory_record_t,
-                                     on_scratch_memory<SdkBackend, Externals>>::callback,
-    .on_configure = on_scratch_memory_configure<Externals>
-};
+inline constexpr buffered_domain_definition<SdkBackend> k_scratch_memory =
+    buffered_domain_definition<SdkBackend>{
+        .meta =
+            domain_descriptor{
+                .name  = "scratch_memory",
+                .id    = SdkBackend::BUFFER_TRACING_SCRATCH_MEMORY,
+                .mode  = collection_mode::buffered,
+                .group = std::nullopt,
+            },
+        .on_records = buffered_callback_dispatcher<
+            SdkBackend, typename SdkBackend::scratch_memory_record_t,
+            on_scratch_memory<SdkBackend, Externals>>::callback,
+        .on_configure = on_scratch_memory_configure<Externals>
+    };
 
 }  // namespace rocprofsys::domains::buffered

@@ -139,8 +139,13 @@ private:
 
         result.add(buffered::k_kernel_dispatch<SdkBackend, Externals>);
         result.add(buffered::k_memory_copy<SdkBackend, Externals>);
-        result.add(buffered::k_memory_allocation<SdkBackend, Externals>);
         result.add(buffered::k_scratch_memory<SdkBackend, Externals>);
+
+        if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
+                     version{ .major = 0, .minor = 6, .patch = 0 })
+        {
+            result.add(buffered::k_memory_allocation<SdkBackend, Externals>);
+        }
 
         if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
                      version{ .major = 1, .minor = 2, .patch = 2 })
