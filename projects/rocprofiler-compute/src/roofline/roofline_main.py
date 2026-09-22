@@ -18,6 +18,7 @@ from roofline.roofline_hover import (
     build_compute_peak_hover,
     build_kernel_hover_template,
     build_roof_hover,
+    format_bandwidth,
     format_hover_number,
     wrap_hover_name,
 )
@@ -490,9 +491,11 @@ class Roofline:
             if not (ai_value > 0 and performance > 0):
                 continue
 
+            cache_key = cache_level.removeprefix("ai_")
+            bandwidth = self._peak_value(ceiling_data, cache_key)
             roof_perf = self._roof_value_at(
                 ai_value=ai_value,
-                cache_key=cache_level.removeprefix("ai_"),
+                cache_key=cache_key,
                 ceiling_data=ceiling_data,
                 cap=compute_cap,
             )
@@ -504,6 +507,7 @@ class Roofline:
                 "hoverCells": [
                     format_hover_number(roof_perf, ",.3f"),
                     format_hover_number(pct_roof, ".4f"),
+                    format_bandwidth(bandwidth) if bandwidth is not None else "N/A",
                 ],
             })
             level_ai[level_name] = ai_value
