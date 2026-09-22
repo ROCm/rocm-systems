@@ -68,6 +68,7 @@ set(SRC_FILES
   device/primitives.h
   device/prims_ll.h
   device/prims_ll128.h
+  device/prims_nan.h
   device/prims_simple.h
   device/rccl_metadata.h
   device/reduce.h
