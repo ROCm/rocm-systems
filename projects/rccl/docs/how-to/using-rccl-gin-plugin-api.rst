@@ -102,8 +102,10 @@ Environment variables
     * - ``NCCL_GIN_TYPE``
       - Require a specific backend type, skipping backends of any other type:
         ``2`` proxy, ``3`` GDAKI, ``4`` GPI, ``5`` EFA GDA, ``6`` rocSHMEM GDA,
-        ``7`` Anvil SDMA. ``-1`` accepts whichever backend is available.
-      - ``-1``
+        ``7`` Anvil SDMA. ``-1`` disables the generic type filter, but does not
+        auto-enable the in-tree device backends: rocSHMEM GDA requires ``6``,
+        while Anvil SDMA accepts an unset value or ``7``.
+      - Unset
 
     * - ``NCCL_RMA_PLUGIN``
       - Comma-separated list of RMA plugins to load, each a path or a short name
