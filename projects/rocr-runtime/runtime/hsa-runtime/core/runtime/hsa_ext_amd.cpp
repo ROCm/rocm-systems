@@ -525,6 +525,71 @@ hsa_status_t hsa_amd_profiling_convert_tick_to_system_domain(hsa_agent_t agent_h
   CATCH;
 }
 
+// Diagnostic-only attributes, accepted solely by this private ROCr build.
+// No normal signal creation is redirected. Both placements use this same real
+// Signal subclass and a dedicated, CPU-accessible 4 KiB ABI allocation.
+namespace {
+constexpr uint64_t kDiagnosticSignal = uint64_t(1) << 63;
+constexpr uint64_t kDiagnosticLocal = uint64_t(1) << 62;
+class DiagnosticSignalStorage {
+ public:
+  DiagnosticSignalStorage(hsa_signal_value_t value, GpuAgent* gpu, bool local) {
+    auto* runtime = core::Runtime::runtime_singleton_;
+    const auto flags = core::MemoryRegion::AllocateUncached |
+                       core::MemoryRegion::AllocateNonPaged |
+                       core::MemoryRegion::AllocateDirect;
+    if (local) {
+      // The allocator selects the last local fine-grained region. Reject a
+      // private/no-CPU-mapping region before constructing the ABI object.
+      const MemoryRegion* selected = nullptr;
+      for (auto* region : gpu->regions()) {
+        auto* amd_region = static_cast<const MemoryRegion*>(region);
+        if (amd_region->IsLocalMemory() && amd_region->fine_grain()) selected = amd_region;
+      }
+      if (!selected || !selected->IsPublic())
+        throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ALLOCATION,
+                                "Diagnostic signal needs public local fine memory");
+      allocation_ = gpu->finegrain_allocator()(4096, flags);
+    } else {
+      allocation_ = runtime->system_allocator()(4096, 4096, flags, 0);
+    }
+    if (!allocation_) throw std::bad_alloc();
+    // Both allocators return whole-page storage. Fail before exposing a handle.
+    if ((reinterpret_cast<uintptr_t>(allocation_) & 4095) != 0) {
+      runtime->FreeMemory(allocation_);
+      allocation_ = nullptr;
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ALLOCATION,
+                              "Diagnostic signal allocation is not page aligned");
+    }
+    std::memset(allocation_, 0, 4096);
+    abi_ = new (allocation_) core::SharedSignal();
+    abi_->amd_signal.value = value;
+    // Outside the actual 128-byte SharedSignal; checked after each drained run.
+    *reinterpret_cast<uint64_t*>(static_cast<char*>(allocation_) + 128) = 0x71a9b02cc38e5d64ULL;
+    *reinterpret_cast<uint64_t*>(static_cast<char*>(allocation_) + 4088) = 0x71a9b02cc38e5d64ULL;
+  }
+  ~DiagnosticSignalStorage() {
+    if (allocation_) {
+      abi_->~SharedSignal();
+      core::Runtime::runtime_singleton_->FreeMemory(allocation_);
+    }
+  }
+  core::SharedSignal* block() const { return abi_; }
+ private:
+  void* allocation_ = nullptr;
+  core::SharedSignal* abi_ = nullptr;
+};
+class DiagnosticSignal final : private DiagnosticSignalStorage, public core::BusyWaitSignal {
+ public:
+  DiagnosticSignal(hsa_signal_value_t value, GpuAgent* gpu, bool local)
+      : DiagnosticSignalStorage(value, gpu, local), core::BusyWaitSignal(block(), false) {}
+  // Private attributes promise no host wait/async registration or CPU RMW.
+  // Host/local controls take the same destruction path after both queues drain.
+  bool NeedsHostWakeOnDestroy() const override { return false; }
+  // BusyWaitSignal/Signal are destroyed before their backing storage base.
+};
+}  // namespace
+
 hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t num_consumers,
                                    const hsa_agent_t* consumers, uint64_t attributes,
                                    hsa_signal_t* hsa_signal) {
@@ -539,6 +604,20 @@ hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t nu
   IS_BAD_PTR(hsa_signal);
 
   core::Signal* ret;
+
+  if (attributes & (kDiagnosticSignal | kDiagnosticLocal)) {
+    const uint64_t expected = HSA_AMD_SIGNAL_AMD_GPU_ONLY | kDiagnosticSignal;
+    IS_TRUE((attributes & ~kDiagnosticLocal) == expected);
+    IS_TRUE(num_consumers == 1);
+    IS_BAD_PTR(consumers);
+    core::Agent* agent = core::Agent::Convert(consumers[0]);
+    IS_VALID(agent);
+    IS_TRUE(agent->device_type() == core::Agent::kAmdGpuDevice);
+    ret = new DiagnosticSignal(initial_value, static_cast<GpuAgent*>(agent),
+                               (attributes & kDiagnosticLocal) != 0);
+    *hsa_signal = core::Signal::Convert(ret);
+    return HSA_STATUS_SUCCESS;
+  }
 
   bool enable_ipc = attributes & HSA_AMD_SIGNAL_IPC;
   bool use_default =
