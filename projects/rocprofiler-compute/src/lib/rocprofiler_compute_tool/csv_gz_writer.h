@@ -28,12 +28,9 @@ inline std::string csv_quote(std::string_view field)
     return quoted;
 }
 
-/// Writes one gzip CSV artifact. format receives a sink it feeds text to and
-/// returns false if it could not write everything.
-///
-/// The file is built under a ".tmp" name and renamed once it is complete, so a
-/// reader never sees a partial artifact and a failed write leaves nothing
-/// behind.
+/// Writes one gzip CSV artifact. format feeds a sink and returns false if it
+/// could not write everything. Built as ".tmp" and renamed when complete, so a
+/// reader never sees a partial file.
 template<typename FormatFn>
 void write_csv_gz(const std::string& final_path, std::string_view artifact, FormatFn&& format)
 {

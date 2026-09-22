@@ -13,9 +13,8 @@ namespace rocprofiler_compute_tool
 /// Formats the dispatch CSV in batches; separate from the file for testing.
 bool format_dispatch_csv(const tool_data_t& tool_data, const std::function<bool(std::string_view)>& sink);
 
-/// Writes one row per profiled dispatch to tool_data.dispatch_filename. Kernel
-/// properties are not repeated here; they live in the kernel symbols artifact
-/// and are joined back by kernel id.
+/// Writes one row per profiled dispatch to tool_data.dispatch_filename.
+/// Kernel properties live in the kernel symbols artifact, joined by kernel id.
 class DispatchWriter : public OutputWriter
 {
 public:

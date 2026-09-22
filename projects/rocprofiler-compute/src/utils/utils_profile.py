@@ -155,13 +155,10 @@ def _duplicate_rocm_install_message(output: str) -> Optional[str]:
 
 
 def keep_native_artifacts(source_dir: Path, workload_dir: Path, fbase: str) -> None:
-    """Move the native tool's per-pid CSVs into the workload directory.
+    """Move the native tool's per-pid CSVs out of source_dir, which is deleted.
 
-    They are written next to the rocpd databases in a directory that is deleted
-    once the run is post-processed, and analyze joins them later, so they have
-    to be moved out first. The counter set goes into the name because the
-    application is run once per set, each run with its own processes and its
-    own dispatch ids.
+    The counter set is in the name because each set is its own run, with its
+    own processes and dispatch ids.
     """
     for prefix, suffix in (
         (native_data.COUNTERS_PREFIX, "_native_counter_collection.csv"),

@@ -79,8 +79,8 @@ struct dispatch_record_t
     uint64_t correlation_id       = 0;
 };
 
-/// Kernel properties that arrive once per kernel on code object load, not with
-/// each dispatch. Held by kernel id and joined back at analyze time.
+/// Kernel properties that arrive once per kernel on code object load, held by
+/// kernel id and joined back at analyze time.
 struct kernel_symbol_record_t
 {
     std::string kernel_name;
