@@ -49,15 +49,15 @@ def parse_operator_patterns(
     """
     framewise_patterns: dict[str, list[str]] = {}
     for backend in backends:
-        raw = getattr(
-            args, _ML_API_ANALYSIS_CLI_OPTIONS[backend]["filter_attr"], None
-        )
+        raw = getattr(args, _ML_API_ANALYSIS_CLI_OPTIONS[backend]["filter_attr"], None)
         if raw is None:
             continue
         pattern_list: list[str] = []
         for operator_arg in raw:
             pattern_list.extend(
-                p.strip() for p in str(operator_arg).split(",") if p.strip()
+                pattern.strip()
+                for pattern in str(operator_arg).split(",")
+                if pattern.strip()
             )
         if not pattern_list:
             pattern_list = ["**"]
@@ -72,18 +72,19 @@ def _collect_glob_matched_nodes(
     framewise_patterns: dict[str, list[str]],
 ) -> list[CallTreeNode]:
     """Return nodes whose backend matches and whose path or name glob-matches."""
-    matched_nodes: set[CallTreeNode] = set()
+    matched_nodes: list[CallTreeNode] = []
 
     def walk(node: CallTreeNode, ancestors: list[str]) -> None:
         path = "/".join(ancestors + [node.name])
         for backend, patterns in framewise_patterns.items():
             if node.backend != backend:
                 continue
-            if any( parser.torch_operator_pattern_matches(pattern, path)
+            if any(
+                parser.torch_operator_pattern_matches(pattern, path)
                 or parser.torch_operator_pattern_matches(pattern, node.name)
                 for pattern in patterns
             ):
-                matched_nodes.add(node)
+                matched_nodes.append(node)
         for child in node.children:
             walk(child, ancestors + [node.name])
 
@@ -147,7 +148,8 @@ class cli_analysis(OmniAnalyze_Base):
         if active_operator_filters and active_operator_lists:
             console_warning(
                 "ml api trace",
-                "Both operator listing and filter flags are set. Defaulting to listing. "
+                "Both operator listing and filter flags are set. "
+                "Defaulting to listing. "
                 "Use the filter flag to filter the operators instead.",
             )
             active_operator_filters = []
@@ -197,11 +199,15 @@ class cli_analysis(OmniAnalyze_Base):
             if active_operator_lists or active_operator_filters:
                 process_ml_api_trace_output(workload, path_info[0])
                 if active_operator_lists:
-                    self.list_operators(path_info[0], kernel_top_df, active_operator_lists)
+                    self.list_operators(
+                        path_info[0], kernel_top_df, active_operator_lists
+                    )
                     _warn_ml_api_trace_errors(workload)
                     sys.exit(0)
                 if active_operator_filters:
-                    self.apply_operator_filter(args, workload, path_info[0], active_operator_filters)
+                    self.apply_operator_filter(
+                        args, workload, path_info[0], active_operator_filters
+                    )
 
             # create the loaded table
             gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
@@ -334,7 +340,7 @@ class cli_analysis(OmniAnalyze_Base):
             self._runs[workload_path].ml_api_call_trees, backends
         )
         framework_labels = [
-            _ML_API_ANALYSIS_CLI_OPTIONS[b]["label"] for b in backends
+            _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"] for backend in backends
         ]
         tty.list_ml_operators(
             workload_path, forest_view, framework_labels=framework_labels
@@ -360,11 +366,13 @@ class cli_analysis(OmniAnalyze_Base):
         )
         workload.ml_api_glob_matches = matched_nodes
         labels = ", ".join(
-            _ML_API_ANALYSIS_CLI_OPTIONS[b]["label"] for b in backends
+            _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"] for backend in backends
         )
         if not matched_nodes:
             all_patterns = ", ".join(
-                p for ps in framewise_patterns.values() for p in ps
+                pattern
+                for patterns in framewise_patterns.values()
+                for pattern in patterns
             )
             console_warning(
                 "ml api trace",
@@ -408,10 +416,12 @@ class cli_analysis(OmniAnalyze_Base):
             return
         framewise_patterns = parse_operator_patterns(args, backends)
         patterns_str = ", ".join(
-            p for ps in (framewise_patterns or {}).values() for p in ps
+            pattern
+            for patterns in (framewise_patterns or {}).values()
+            for pattern in patterns
         )
         labels = ", ".join(
-            _ML_API_ANALYSIS_CLI_OPTIONS[b]["label"] for b in backends
+            _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"] for backend in backends
         )
         subtree = copy_matched_operator_subtree(
             workload.ml_api_call_trees, workload.ml_api_glob_matches
