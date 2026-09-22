@@ -25,17 +25,25 @@ PLUGIN_SO = f"{PLUGIN_DIR}/librccl-tuner-example.so"
 PROFILER_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/example"
 PROFILER_SO = f"{PROFILER_DIR}/librccl-profiler-example.so"
 
-INSPECTOR_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/inspector"
-INSPECTOR_SO = f"{INSPECTOR_DIR}/librccl-profiler-inspector.so"
-
 def _first_existing(*candidates):
     for path in candidates:
         if path and os.path.exists(path):
             return path
     return candidates[0] if candidates else ""
 
+_INSPECTOR_SRC = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "plugins", "profiler", "inspector")
+)
+INSPECTOR_SO = _first_existing(
+    os.path.join(RCCL_INSTALL_DIR, "plugins", "profiler", "inspector", "librccl-profiler-inspector.so"),
+    os.path.join(RCCL_INSTALL_DIR, "build", "release", "lib", "librccl-profiler-inspector.so"),
+    os.path.join(RCCL_INSTALL_DIR, "build", "debug", "lib", "librccl-profiler-inspector.so"),
+    os.path.join(_INSPECTOR_SRC, "librccl-profiler-inspector.so"),
+)
+INSPECTOR_DIR = os.path.dirname(INSPECTOR_SO)
+
 _PROXYTRACE_SRC = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "plugins", "profiler", "proxytrace")
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "plugins", "profiler", "proxytrace")
 )
 PROXYTRACE_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/proxytrace"
 PROXYTRACE_SO = _first_existing(
@@ -46,7 +54,7 @@ PROXYTRACE_SO = _first_existing(
 
 # The RMA example builds in place via its Makefile, or to test/unit/plugins via CMake.
 _RMA_SRC = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "plugins", "rma", "example")
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "plugins", "rma", "example")
 )
 RMA_DIR = f"{RCCL_INSTALL_DIR}/plugins/rma/example"
 RMA_SO = _first_existing(
@@ -91,11 +99,13 @@ def run_tuner_mpirun(args, env, log_file):
     (log_file.%h.%p). Assertions read those shards plus the captured stdout.
     """
     os.makedirs(os.path.dirname(os.path.abspath(log_file)), exist_ok=True)
-    for stale in glob.glob(log_file + ".*"):
+    shard_pattern = glob.escape(log_file) + ".*"
+    ignored_shards = set()
+    for stale in glob.glob(shard_pattern):
         try:
             os.remove(stale)
         except OSError:
-            pass
+            ignored_shards.add(stale)
     env = dict(env)
     env["NCCL_DEBUG_FILE"] = log_file + ".%h.%p"
     with open(log_file, "w") as out:
@@ -106,7 +116,9 @@ def run_tuner_mpirun(args, env, log_file):
     if os.path.isfile(log_file):
         with open(log_file) as fh:
             chunks.append(fh.read())
-    for path in sorted(glob.glob(log_file + ".*")):
+    for path in sorted(glob.glob(shard_pattern)):
+        if path in ignored_shards:
+            continue
         with open(path) as fh:
             chunks.append(fh.read())
     return result.returncode, "\n".join(chunks)

@@ -396,12 +396,10 @@ def test_ce_events_traced(paths):
             universal_newlines=True
         )
 
-    # Checked before the return code: forcing CE on hardware that cannot do it
-    # crashes the run, which would otherwise report as a failure rather than a skip.
+    assert result.returncode == 0, f"CE AllReduce profiling test failed, see {log_file}"
+
     if not paths.check_event_in_log(log_file, "AllReduce impl selected: algo CE"):
         pytest.skip(f"CE AllReduce was not dispatched on this configuration, see {log_file}")
-
-    assert result.returncode == 0, f"CE AllReduce profiling test failed, see {log_file}"
 
     trace_files = glob.glob(trace_pattern)
     assert len(trace_files) == 8, \
@@ -476,7 +474,6 @@ def test_ce_pool_wrap_does_not_hang(paths):
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/all_reduce_perf",
         "-b", "1M", "-e", "4M", "-f", "2", "-g", "1", "-n", "100", "-w", "20",
-        # CE needs symmetrically registered buffers.
         "-R", "2",
     ]
 
@@ -488,10 +485,10 @@ def test_ce_pool_wrap_does_not_hang(paths):
         except subprocess.TimeoutExpired:
             pytest.fail(f"CE pool wrap hung, see {log_file}")
 
+    assert result.returncode == 0, f"CE AllReduce with a wrapping pool failed, see {log_file}"
+
     if not paths.check_event_in_log(log_file, "AllReduce impl selected: algo CE"):
         pytest.skip(f"CE AllReduce was not dispatched on this configuration, see {log_file}")
-
-    assert result.returncode == 0, f"CE AllReduce with a wrapping pool failed, see {log_file}"
 
 
 @pytest.mark.ext_profiler
@@ -746,9 +743,6 @@ def test_kernel_phase_events_traced(paths):
 
     assert result.returncode == 0, f"Kernel phase profiling test failed, see {log_file}"
 
-    assert paths.check_event_in_log(log_file, "enabling ncclProfileKernelCh implicitly"), \
-        f"RCCL did not promote the mask to include ncclProfileKernelCh, see {log_file}"
-
     trace_files = glob.glob(trace_pattern)
     assert len(trace_files) == 8, \
         f"Should have 8 trace files (one per rank), found {len(trace_files)}: {trace_files}"
@@ -758,6 +752,8 @@ def test_kernel_phase_events_traced(paths):
     for trace_file in trace_files:
         is_valid, message = paths.validate_json_trace(trace_file)
         assert is_valid, f"Trace file {trace_file} validation failed: {message}"
+        assert paths.count_events_in_trace(trace_file, event_name="KernelCh") > 0, \
+            f"KernelPhase did not implicitly enable parent KernelCh events in {trace_file}"
 
         for name in phase_names:
             totals[name] += paths.count_events_in_trace(trace_file, event_name=name)
@@ -776,6 +772,8 @@ def test_kernel_phase_events_traced(paths):
                     args_obj = event.get("args", {})
                     assert "PhaseId" in args_obj, \
                         f"Phase event {event.get('name')} is missing PhaseId in {trace_file}"
+                    assert args_obj["StopGpuClk"] > args_obj["StartGpuClk"], \
+                        f"Phase event {event.get('name')} has no positive GPU duration in {trace_file}"
                     expected_dur = (
                         args_obj["StopGpuClk"] - args_obj["StartGpuClk"]
                     ) / 100.0
@@ -848,22 +846,24 @@ def test_symmetric_kernel_variant_metadata(paths):
             universal_newlines=True
         )
 
+    assert result.returncode == 0, f"Symmetric metadata profiling test failed, see {log_file}"
+
     if not paths.check_event_in_log(log_file, "AllReduce impl selected: algo SYM"):
         pytest.skip(
             f"Symmetric AllReduce was not dispatched on this configuration, "
             f"see {log_file}"
         )
 
-    assert result.returncode == 0, f"Symmetric metadata profiling test failed, see {log_file}"
-
     trace_files = glob.glob(trace_pattern)
+    assert len(trace_files) == 8, \
+        f"Should have 8 trace files (one per rank), found {len(trace_files)}: {trace_files}"
+
     sym_events = []
     for trace_file in trace_files:
-        try:
-            with open(trace_file) as fh:
-                events = json.load(fh)
-        except (OSError, json.JSONDecodeError):
-            continue
+        is_valid, message = paths.validate_json_trace(trace_file)
+        assert is_valid, f"Trace file {trace_file} validation failed: {message}"
+        with open(trace_file) as fh:
+            events = json.load(fh)
         for event in events:
             if not isinstance(event, dict) or event.get("cat") != "COLL":
                 continue
@@ -875,16 +875,12 @@ def test_symmetric_kernel_variant_metadata(paths):
         f"Symmetric AllReduce emitted no IsSymColl metadata; see {log_file}"
     )
 
-    assert len(trace_files) == 8, \
-        f"Should have 8 trace files (one per rank), found {len(trace_files)}: {trace_files}"
-
-    for trace_file in trace_files:
-        is_valid, message = paths.validate_json_trace(trace_file)
-        assert is_valid, f"Trace file {trace_file} validation failed: {message}"
-
     for args_obj in sym_events:
-        assert args_obj.get("KernelVariant"), \
+        variant = args_obj.get("KernelVariant")
+        assert variant, \
             f"A symmetric collective must name its kernel variant, got {args_obj!r}"
+        assert args_obj.get("Algorithm") == variant.split("_", 1)[-1], \
+            f"Algorithm must be the suffix of KernelVariant, got {args_obj!r}"
 
 
 @pytest.mark.ext_profiler
