@@ -196,7 +196,7 @@ __FP4_HOST_DEVICE_STATIC__ __half_raw __hip_cvt_fp4_to_halfraw(
       __amd_fp16x2_storage_t{__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk_f16_fp4)
                                  ? __builtin_amdgcn_cvt_scalef32_pk_f16_fp4(x, 0, 0)
                                  : __amd_fp16x2_storage_t{}};
-#elif HIP_ENABLE_GFX1250_OCP_BUILTINS
+#elif HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
   static_assert(sizeof(__amd_fp16x2_storage_t[4]) == sizeof(__amd_fp16x8_storage_t));
   static_assert(sizeof(__amd_fp4x2_storage_t[4]) == sizeof(unsigned int));
   union {
@@ -229,7 +229,7 @@ __FP4_HOST_DEVICE_STATIC__ __half2_raw __hip_cvt_fp4x2_to_halfraw2(
       __amd_fp16x2_storage_t{__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk_f16_fp4)
                                  ? __builtin_amdgcn_cvt_scalef32_pk_f16_fp4(x, 0, 0)
                                  : __amd_fp16x2_storage_t{}};
-#elif HIP_ENABLE_GFX1250_OCP_BUILTINS
+#elif HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
   static_assert(sizeof(__amd_fp16x2_storage_t[4]) == sizeof(__amd_fp16x8_storage_t));
   static_assert(sizeof(__amd_fp4x2_storage_t[4]) == sizeof(unsigned int));
   union {
@@ -366,7 +366,7 @@ struct __hip_fp4_e2m1 {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk_bf16_fp4))
       u.bf16x2 = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(__x, 1.0f /* scale */, 0);
-#elif HIP_ENABLE_GFX1250_OCP_BUILTINS
+#elif HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
     static_assert(sizeof(__amd_bf16x2_storage_t[4]) == sizeof(__amd_bf16x8_storage_t));
     static_assert(sizeof(__amd_fp4x2_storage_t[4]) == sizeof(unsigned int));
     union {
@@ -396,7 +396,7 @@ struct __hip_fp4_e2m1 {
     auto ret = __builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk_f32_fp4)
                    ? __builtin_amdgcn_cvt_scalef32_pk_f32_fp4(__x, 1.0f /* scale */, 0)
                    : __amd_floatx2_storage_t{};
-#elif HIP_ENABLE_GFX1250_OCP_BUILTINS
+#elif HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
     union {
       unsigned int ui32;
       __amd_fp4x2_storage_t fp4x2[4];
@@ -453,7 +453,7 @@ struct __hip_fp4x2_e2m1 {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk_bf16_fp4))
       u.bf16x2 = __builtin_amdgcn_cvt_scalef32_pk_bf16_fp4(__x, 1.0f /* scale */, 0);
-#elif HIP_ENABLE_GFX1250_OCP_BUILTINS
+#elif HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
     static_assert(sizeof(__amd_bf16x2_storage_t[4]) == sizeof(__amd_bf16x8_storage_t));
     static_assert(sizeof(__amd_fp4x2_storage_t[4]) == sizeof(unsigned int));
     union {
@@ -483,7 +483,7 @@ struct __hip_fp4x2_e2m1 {
     auto fp32x2 = __builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk_f32_fp4)
                       ? __builtin_amdgcn_cvt_scalef32_pk_f32_fp4(__x, 1.0f /* scale */, 0)
                       : __amd_floatx2_storage_t{};
-#elif HIP_ENABLE_GFX1250_OCP_BUILTINS
+#elif HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
     union {
       unsigned int ui32;
       __amd_fp4x2_storage_t fp4x2[4];
@@ -507,7 +507,7 @@ struct __hip_fp4x2_e2m1 {
     auto fp32x2 = __builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk_f32_fp4)
                       ? __builtin_amdgcn_cvt_scalef32_pk_f32_fp4(__x, 1.0f /* scale */, 0)
                       : __amd_floatx2_storage_t{};
-#elif HIP_ENABLE_GFX1250_OCP_BUILTINS
+#elif HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
     union {
       unsigned int ui32;
       __amd_fp4x2_storage_t fp4x2[4];
@@ -562,7 +562,7 @@ struct __hip_fp4x4_e2m1 {
                         ? __builtin_amdgcn_cvt_scalef32_pk_f32_fp4(__x >> 8, 1.0f /* scale */, 0)
                         : __amd_floatx2_storage_t{};
     return float4{fp32x2_1[0], fp32x2_1[1], fp32x2_2[0], fp32x2_2[1]};
-#elif HIP_ENABLE_GFX1250_OCP_BUILTINS
+#elif HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
     union {
       unsigned int ui32;
       __hip_fp4x4_storage_t fp4x4[2];
