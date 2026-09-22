@@ -293,6 +293,9 @@ protected:
     comm_->devrState.winSortedCount = comm_->devrState.winSortedCapacity = 0;
     comm_->devrState.lsaRankList = nullptr;   // borrowed, not malloc'd
     ResetCeFakes();
+    // g_cuStreamBatchMemOp lives in rma_fakes, and the launch fixtures bind a
+    // this-capturing lambda to it; without this the global outlives the fixture.
+    ResetRmaFakes();
     // Order matters: ResetDevRuntimeMicroFakes installs the VMM emulator, so the
     // HIP reset has to land after it. Otherwise this fixture hands the next
     // suite working HIP memory, and the suites that rely on the fail-loud
@@ -303,7 +306,10 @@ protected:
 
   // Belt and braces for the same hazard: a fixture that overrides TearDown
   // without chaining would otherwise leak the emulator into the next suite.
-  ~RmaCeInitTest() override { ResetHipFakes(); }
+  ~RmaCeInitTest() override {
+    ResetRmaFakes();
+    ResetHipFakes();
+  }
 
   // True once every configured context has finished its allocations, which is
   // where the CE stream and event are created.
@@ -866,6 +872,7 @@ TEST_F(RmaCeNonPersistTest, NonPersist_OneDataTask_CopiesTaskBufferToResolvedPee
   EXPECT_EQ(batches[0][0].dst, reinterpret_cast<char*>(PeerData(2)) + 8);
   EXPECT_EQ(batches[0][0].size, 64u);
   EXPECT_TRUE(batches[1].empty());         // nothing signalled
+  EXPECT_EQ(PoolFreeList().size(), 1u);    // the task is returned, not leaked
 }
 
 // Tasks for different peers travel together: one round, one op per peer.
