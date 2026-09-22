@@ -62,6 +62,10 @@ struct registered_context_storage
 {
     std::vector<std::shared_ptr<context>> owned = {};
     std::vector<const context*>           view  = {};
+    // Positional, unlike `view`: index i is registry slot i, holding nullptr where the slot is
+    // empty. Resolving a context id is an index operation, so it needs the slot numbering that
+    // allocate_context() assigns, which `view` loses by skipping empty slots.
+    std::vector<context*> slots = {};
 };
 
 namespace
@@ -196,8 +200,10 @@ publish_registered_contexts()
     {
         _data->owned.reserve(_impl->size());
         _data->view.reserve(_impl->size());
+        _data->slots.reserve(_impl->size());
         for(const auto& itr : *_impl)
         {
+            _data->slots.emplace_back(itr.get());
             if(!itr) continue;
             _data->owned.emplace_back(itr);
             _data->view.emplace_back(itr.get());
@@ -209,6 +215,10 @@ publish_registered_contexts()
 
 // The registry is index-addressed: allocate_context() derives context_idx from the slot position,
 // so a context id maps straight back to its slot.
+//
+// Requires get_contexts_mutex(). The registry is a stable_vector, which keeps element addresses
+// stable but reallocates the chunk index that at() walks, so an unlocked reader can index a freed
+// buffer. Callers that cannot take the mutex must go through lookup_registered_context() instead.
 context_ptr_t
 get_registered_context_slot(uint64_t handle)
 {
@@ -219,6 +229,23 @@ get_registered_context_slot(uint64_t handle)
     if(_idx >= _impl->size()) return {};
 
     return _impl->at(_idx);
+}
+
+// Resolves a context id off the published snapshot, for the callers that hold no lock. The
+// snapshot is immutable once published and owns the contexts it names, so indexing it neither
+// races allocate_context() nor touches a reference count.
+context*
+lookup_registered_context(uint64_t handle)
+{
+    if(handle < get_contexts_offset()) return nullptr;
+
+    auto _snapshot = current_registered_contexts();
+    if(!_snapshot) return nullptr;
+
+    auto _idx = handle - get_contexts_offset();
+    if(_idx >= _snapshot->slots.size()) return nullptr;
+
+    return _snapshot->slots[_idx];
 }
 
 // Context ids whose stop is in progress. stop_context() releases get_contexts_mutex() across the
@@ -416,7 +443,7 @@ allocate_context()
 context*
 get_mutable_registered_context(rocprofiler_context_id_t id)
 {
-    return get_registered_context_slot(id.handle).get();
+    return lookup_registered_context(id.handle);
 }
 
 const context*
@@ -451,12 +478,17 @@ start_context(rocprofiler_context_id_t context_id)
     if(validate_context(cfg) != ROCPROFILER_STATUS_SUCCESS)
         return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
-    uint64_t rocp_tot_contexts = get_registered_contexts_impl()->size();
+    uint64_t rocp_tot_contexts = 0;
     auto     idx               = rocp_tot_contexts;
     auto&    active_contexts   = get_active_contexts_impl();
     {
         // hold a lock here to prevent multiple threads from finding the same nullptr slot
         auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
+
+        // Sized under the lock: size() walks the registry's chunk index, which allocate_context()
+        // reallocates as it grows.
+        rocp_tot_contexts = get_registered_contexts_impl()->size();
+        idx               = rocp_tot_contexts;
 
         // A context that is mid-stop is still in the active array while its GPU drain runs, so
         // scanning against that state would either report a conflict against a context that is on
