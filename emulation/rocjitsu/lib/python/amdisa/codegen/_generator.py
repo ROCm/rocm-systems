@@ -963,7 +963,10 @@ class CodeGenerator:
             'cvt_norm_u16_f16',
         ):
             return 'amdgpu::sdwa::ResultFormat::NONE'
-        if sem and sem.name == 'V_PK_FMAC_F16':
+        if sem and (
+            sem.name == 'V_PK_FMAC_F16'
+            or sem.semantic_class == 'vector_cvt_pkrtz_f16_f32'
+        ):
             return 'amdgpu::sdwa::ResultFormat::PK_F16'
         suffix = {'f16': 'F16', 'f32': 'F32'}.get(
             sem.data_type if sem else None, 'NONE'
