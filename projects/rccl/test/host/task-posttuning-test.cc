@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <climits>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -3659,6 +3660,677 @@ TEST_F(TaskPostTuningMicrotest, LegacyTasks_QueuedEntries_ReleaseEveryRawAndStay
   EXPECT_EQ(plain, nvls->next);
   EXPECT_EQ(nullptr, nvls->raw);
   EXPECT_EQ(nullptr, plain->raw);
+}
+
+constexpr int kAgvRank = 1;
+constexpr int kAgvOwnRoot = kAgvRank;
+constexpr int kAgvFirstRoot = 0;
+constexpr int kAgvMidRoot = 2;
+constexpr int kAgvLastRoot = 3;
+constexpr size_t kAgvFirstCount = 24;
+constexpr size_t kAgvOwnCount = 48;
+constexpr size_t kAgvMidCount = 80;
+constexpr size_t kAgvLastCount = 112;
+constexpr size_t kAgvNoCount = 0;
+constexpr uintptr_t kAgvSendBase = 0x120000;
+constexpr uintptr_t kAgvRecvBase = 0x240000;
+constexpr uint32_t kAgvBroadcastDevFuncId = 51;
+constexpr int kCollnetAvailable = 1;
+constexpr int kNoCollnetSupport = 0;
+constexpr int kNoNvlsSupport = 0;
+constexpr int kOneTaskPerChannel = 1;
+constexpr int kUnsetResourceCap = 0;
+constexpr int kNoBcastPeers = 0;
+constexpr int kUnsetEventMask = 0;
+
+// ncclDevFuncId keys a Broadcast on coll and proto alone (device.h:909-912), unlike a general collective.
+uint64_t TaskPostTuning_BroadcastDevFuncKey(int proto) {
+  return (static_cast<uint64_t>(ncclFuncBroadcast & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
+         (static_cast<uint64_t>(proto & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT);
+}
+
+std::function<ncclResult_t(struct ncclComm*, bool*)> TaskPostTuning_RecordPreconnect(
+  TaskPostTuning_PreconnectLog* log, ncclResult_t result = ncclSuccess) {
+  return [log, result](struct ncclComm* comm, bool* algoNeedConnect) {
+    log->comm = comm;
+    std::memcpy(log->requested, algoNeedConnect, sizeof(log->requested));
+    log->calls += 1;
+    return result;
+  };
+}
+
+// The bcast peer range starts at the sentinels init.cc:872 uses, so a min/max update is not a no-op.
+class TaskPostTuning_AgvScene {
+ public:
+  TaskPostTuning_AgvScene() : scene_(kRanks, kAgvRank), planPeers_(kRanks) {
+    struct ncclComm* comm = scene_.comm();
+    comm->planner.peers = planPeers_.data();
+    comm->planner.bcast_info.minBcastPeer = INT_MAX;
+    comm->planner.bcast_info.maxBcastPeer = INT_MIN;
+    comm->runtimeConn = true;
+    comm->config.minCTAs = kCommMinCTAs;
+    comm->config.maxCTAs = kCommMaxCTAs;
+    comm->config.nvlsCTAs = kCommNvlsCTAs;
+    comm->config.cgaClusterSize = kCommCgaClusterSize;
+    ncclMemoryPoolConstruct(&comm->memPool_ncclTaskColl);
+    ncclMemoryPoolConstruct(&comm->memPool_ncclTaskBcast);
+    ncclIntruQueueConstruct(&comm->planner.collTaskQueue);
+    ncclIntruQueueConstruct(&comm->planner.collWorkQueue);
+    ncclIntruQueueConstruct(&comm->planner.collCleanupQueue);
+    tInfo_ = scene_.NewTuningInfo(scene_.NewAllGatherV());
+    agv()->sendbuff = TaskPostTuning_Addr(kAgvSendBase);
+    for (int root = 0; root < kRanks; root++) {
+      agv()->recvbuff[root] = TaskPostTuning_Addr(kAgvRecvBase + root);
+      agv()->counts[root] = kAgvNoCount;
+    }
+  }
+
+  struct ncclComm* comm() { return scene_.comm(); }
+  TaskPrepScene* scene() { return &scene_; }
+  struct ncclTaskTuningInfo* tInfo() { return tInfo_; }
+  struct ncclRawTaskAllGatherV* agv() { return &tInfo_->raw->allGatherV; }
+  struct ncclKernelPlanner* planner() { return &comm()->planner; }
+
+  ncclResult_t RunBroadcastTask(int root) { return postTuneAllGatherVEnqueueBroadcastTask(comm(), agv(), root); }
+  ncclResult_t RunBcastTasks() { return postTuneAllGatherVEnqueueBcastTasks(comm(), tInfo_); }
+
+  std::vector<struct ncclTaskColl*> CollTasks() {
+    std::vector<struct ncclTaskColl*> tasks;
+    for (struct ncclTaskColl* task = ncclIntruQueueHead(&planner()->collTaskQueue); task != nullptr;
+         task = task->next) {
+      tasks.push_back(task);
+    }
+    return tasks;
+  }
+
+  std::vector<struct ncclTaskBcast*> BcastTasks(int peer) {
+    std::vector<struct ncclTaskBcast*> tasks;
+    for (struct ncclTaskBcast* task = ncclIntruQueueHead(&planner()->peers[peer].bcastQueue); task != nullptr;
+         task = task->next) {
+      tasks.push_back(task);
+    }
+    return tasks;
+  }
+
+  size_t WorkNodes() {
+    size_t nodes = 0;
+    for (struct ncclWorkList* node = ncclIntruQueueHead(&planner()->collWorkQueue); node != nullptr;
+         node = node->next) {
+      nodes += 1;
+    }
+    return nodes;
+  }
+
+  struct ncclTaskBcast* OnlyBcast(int peer) {
+    const std::vector<struct ncclTaskBcast*> tasks = BcastTasks(peer);
+    EXPECT_EQ(1u, tasks.size());
+    return tasks.empty() ? nullptr : tasks[0];
+  }
+
+ private:
+  TaskPrepScene scene_;
+  std::vector<ncclKernelPlanner::Peer> planPeers_;
+  struct ncclTaskTuningInfo* tInfo_;
+};
+
+struct TaskPostTuning_AlgoInfoLog {
+  struct ncclComm* comm = nullptr;
+  struct ncclTaskColl* task = nullptr;
+  int collNetSupport = -1;
+  int nvlsSupport = -1;
+  int nTasksPerChannel = -1;
+  ncclSimInfo_t* simInfo = PoisonedSimInfoAddress();
+  int calls = 0;
+
+  static ncclSimInfo_t* PoisonedSimInfoAddress() { return reinterpret_cast<ncclSimInfo_t*>(kAgvSendBase); }
+};
+
+// The selector and the registrar answer permissively so a test only has to break the arm it is about.
+class TaskPostTuning_AgvHooks {
+ public:
+  explicit TaskPostTuning_AgvHooks(int algo = NCCL_ALGO_RING, int proto = NCCL_PROTO_SIMPLE,
+                                   ncclResult_t algoResult = ncclSuccess)
+    : algoInfo_(g_ncclGetAlgoInfo,
+                [this, algo, proto, algoResult](struct ncclComm* comm, struct ncclTaskColl* task, int collNetSupport,
+                                                int nvlsSupport, int nTasksPerChannel, ncclSimInfo_t* simInfo) {
+                  algoLog_.comm = comm;
+                  algoLog_.task = task;
+                  algoLog_.collNetSupport = collNetSupport;
+                  algoLog_.nvlsSupport = nvlsSupport;
+                  algoLog_.nTasksPerChannel = nTasksPerChannel;
+                  algoLog_.simInfo = simInfo;
+                  algoLog_.calls += 1;
+                  task->algorithm = algo;
+                  task->protocol = proto;
+                  return algoResult;
+                }),
+      coll_(g_ncclRegisterCollBuffers, TaskPostTuning_RecordCollRegistration(&collLog_, kRegistrationNeedsConnect)),
+      profiler_(g_profilerPluginLoaded, [] { return false; }) {
+    ncclDevFuncNameToId[TaskPostTuning_BroadcastDevFuncKey(proto)] = kAgvBroadcastDevFuncId;
+  }
+
+  const TaskPostTuning_AlgoInfoLog& algoLog() const { return algoLog_; }
+  const TaskPostTuning_CollRegistrationLog& collLog() const { return collLog_; }
+
+ private:
+  TaskPostTuning_AlgoInfoLog algoLog_;
+  TaskPostTuning_CollRegistrationLog collLog_;
+  ScopedHook<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, int, int, ncclSimInfo_t*)> algoInfo_;
+  ScopedHook<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, void**, void**, ncclCommCallbackQueue*, bool*)> coll_;
+  ScopedHook<bool()> profiler_;
+};
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnsureRingConnected_NoRuntimeConnection_LeavesTheRingUnmarkedAndConnectsNothing) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, TaskPostTuning_RecordPreconnect(&preconnect));
+  agv.comm()->runtimeConn = false;
+
+  ASSERT_EQ(ncclSuccess, postTuneAllGatherVEnsureRingConnected(agv.comm()));
+
+  EXPECT_EQ(0, preconnect.calls);
+  EXPECT_FALSE(agv.comm()->initAlgoChannels[NCCL_ALGO_RING]);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnsureRingConnected_RingAlreadyInitialized_ConnectsNothing) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, TaskPostTuning_RecordPreconnect(&preconnect));
+  agv.comm()->initAlgoChannels[NCCL_ALGO_RING] = true;
+
+  ASSERT_EQ(ncclSuccess, postTuneAllGatherVEnsureRingConnected(agv.comm()));
+
+  EXPECT_EQ(0, preconnect.calls);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnsureRingConnected_FreshRing_MarksItInitializedAndConnectsOnlyTheRing) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, TaskPostTuning_RecordPreconnect(&preconnect));
+
+  ASSERT_EQ(ncclSuccess, postTuneAllGatherVEnsureRingConnected(agv.comm()));
+
+  EXPECT_EQ(1, preconnect.calls);
+  EXPECT_EQ(agv.comm(), preconnect.comm);
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(preconnect.requested, {NCCL_ALGO_RING}));
+  EXPECT_TRUE(agv.comm()->initAlgoChannels[NCCL_ALGO_RING]);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnsureRingConnected_CalledAgainAfterMarkingTheRing_ConnectsOnlyOnce) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, TaskPostTuning_RecordPreconnect(&preconnect));
+
+  ASSERT_EQ(ncclSuccess, postTuneAllGatherVEnsureRingConnected(agv.comm()));
+  ASSERT_EQ(ncclSuccess, postTuneAllGatherVEnsureRingConnected(agv.comm()));
+
+  EXPECT_EQ(1, preconnect.calls);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnsureRingConnected_PreconnectFails_PropagatesWithTheRingAlreadyMarked) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, TaskPostTuning_RecordPreconnect(&preconnect, ncclSystemError));
+
+  EXPECT_EQ(ncclSystemError, postTuneAllGatherVEnsureRingConnected(agv.comm()));
+
+  EXPECT_EQ(1, preconnect.calls);
+  EXPECT_TRUE(agv.comm()->initAlgoChannels[NCCL_ALGO_RING]);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBroadcastTask_AnyRoot_MaterializesABroadcastCollTaskFromThatRootsSlice) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_AgvHooks hooks;
+  agv.agv()->counts[kAgvMidRoot] = kAgvMidCount;
+
+  ASSERT_EQ(ncclSuccess, agv.RunBroadcastTask(kAgvMidRoot));
+
+  const std::vector<struct ncclTaskColl*> tasks = agv.CollTasks();
+  ASSERT_EQ(1u, tasks.size());
+  EXPECT_EQ(ncclFuncBroadcast, tasks[0]->func);
+  EXPECT_EQ(TaskPostTuning_Addr(kAgvRecvBase + kAgvMidRoot), tasks[0]->recvbuff);
+  EXPECT_EQ(kAgvMidCount, tasks[0]->count);
+  EXPECT_EQ(kAgvMidRoot, tasks[0]->root);
+  EXPECT_EQ(ncclInt8, tasks[0]->datatype);
+  EXPECT_EQ(kAgvMidCount * kSingleTrafficPerByte, tasks[0]->trafficBytes);
+  EXPECT_EQ(ncclSum, tasks[0]->opHost);
+  EXPECT_EQ(kAgvBroadcastDevFuncId, tasks[0]->devFuncId);
+  EXPECT_EQ(1, agv.planner()->nTasksColl);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBroadcastTask_RootIsThisRank_SendsFromTheAllGatherVSourceBuffer) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_AgvHooks hooks;
+  agv.agv()->counts[kAgvOwnRoot] = kAgvOwnCount;
+
+  ASSERT_EQ(ncclSuccess, agv.RunBroadcastTask(kAgvOwnRoot));
+
+  ASSERT_EQ(1u, agv.CollTasks().size());
+  EXPECT_EQ(TaskPostTuning_Addr(kAgvSendBase), agv.CollTasks()[0]->sendbuff);
+  EXPECT_EQ(TaskPostTuning_Addr(kAgvRecvBase + kAgvOwnRoot), agv.CollTasks()[0]->recvbuff);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBroadcastTask_RootIsAnotherRank_LeavesTheSourceBufferUnset) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_AgvHooks hooks;
+  agv.agv()->counts[kAgvMidRoot] = kAgvMidCount;
+
+  ASSERT_EQ(ncclSuccess, agv.RunBroadcastTask(kAgvMidRoot));
+
+  ASSERT_EQ(1u, agv.CollTasks().size());
+  EXPECT_EQ(nullptr, agv.CollTasks()[0]->sendbuff);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBroadcastTask_ProfilerEventMaskSet_CarriesItOntoTheTask) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_AgvHooks hooks;
+  ncclProfilerEventMask = kProfilerEventMask;
+
+  ASSERT_EQ(ncclSuccess, agv.RunBroadcastTask(kAgvMidRoot));
+
+  ASSERT_EQ(1u, agv.CollTasks().size());
+  EXPECT_EQ(kProfilerEventMask, agv.CollTasks()[0]->eActivationMask);
+  ncclProfilerEventMask = kUnsetEventMask;
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBroadcastTask_AnyRoot_SelectsTheAlgorithmForTheTaskItJustBuilt) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_AgvHooks hooks;
+  ScopedHook collNet(g_getCollNetSupport, [](struct ncclComm*, struct ncclTaskColl*, int* out) {
+    *out = kCollnetAvailable;
+    return ncclSuccess;
+  });
+  agv.comm()->nvlsSupport = true;
+
+  ASSERT_EQ(ncclSuccess, agv.RunBroadcastTask(kAgvMidRoot));
+
+  ASSERT_EQ(1u, agv.CollTasks().size());
+  EXPECT_EQ(1, hooks.algoLog().calls);
+  EXPECT_EQ(agv.comm(), hooks.algoLog().comm);
+  EXPECT_EQ(agv.CollTasks()[0], hooks.algoLog().task);
+  EXPECT_EQ(kCollnetAvailable, hooks.algoLog().collNetSupport);
+  EXPECT_EQ(kNoNvlsSupport, hooks.algoLog().nvlsSupport);
+  EXPECT_EQ(kOneTaskPerChannel, hooks.algoLog().nTasksPerChannel);
+  EXPECT_EQ(nullptr, hooks.algoLog().simInfo);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBroadcastTask_EveryAlgorithm_SetsTheNvlsAndCollnetFlagsThatAlgorithmNeeds) {
+  struct Expectation {
+    int algorithm;
+    int nNodes;
+    uint32_t isNvls;
+    uint32_t isCollnet;
+  };
+  const Expectation expectations[] = {
+    {NCCL_ALGO_RING, kSingleNode, 0u, 0u},          {NCCL_ALGO_TREE, kMultiNode, 0u, 0u},
+    {NCCL_ALGO_PAT, kMultiNode, 0u, 0u},            {NCCL_ALGO_NVLS, kSingleNode, 1u, 0u},
+    {NCCL_ALGO_NVLS, kMultiNode, 1u, 1u},           {NCCL_ALGO_NVLS_TREE, kMultiNode, 1u, 0u},
+    {NCCL_ALGO_COLLNET_CHAIN, kSingleNode, 0u, 1u}, {NCCL_ALGO_COLLNET_DIRECT, kSingleNode, 0u, 1u},
+  };
+  for (const Expectation& expectation : expectations) {
+    TaskPostTuning_AgvScene agv;
+    TaskPostTuning_AgvHooks hooks(expectation.algorithm);
+    agv.comm()->nNodes = expectation.nNodes;
+
+    ASSERT_EQ(ncclSuccess, agv.RunBroadcastTask(kAgvMidRoot)) << expectation.algorithm;
+
+    ASSERT_EQ(1u, agv.CollTasks().size()) << expectation.algorithm;
+    EXPECT_EQ(expectation.isNvls, agv.CollTasks()[0]->isNvls) << expectation.algorithm;
+    EXPECT_EQ(expectation.isCollnet, agv.CollTasks()[0]->isCollnet) << expectation.algorithm;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBroadcastTask_LatencyProtocol_QuadruplesTheTrafficEstimate) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_AgvHooks hooks(NCCL_ALGO_RING, NCCL_PROTO_LL);
+  agv.agv()->counts[kAgvMidRoot] = kAgvMidCount;
+
+  ASSERT_EQ(ncclSuccess, agv.RunBroadcastTask(kAgvMidRoot));
+
+  ASSERT_EQ(1u, agv.CollTasks().size());
+  EXPECT_EQ(kAgvMidCount * kLlTrafficMultiplier, agv.CollTasks()[0]->trafficBytes);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBroadcastTask_EveryOtherProtocol_LeavesTheTrafficEstimateAlone) {
+  for (int proto : {NCCL_PROTO_LL128, NCCL_PROTO_SIMPLE}) {
+    TaskPostTuning_AgvScene agv;
+    TaskPostTuning_AgvHooks hooks(NCCL_ALGO_RING, proto);
+    agv.agv()->counts[kAgvMidRoot] = kAgvMidCount;
+
+    ASSERT_EQ(ncclSuccess, agv.RunBroadcastTask(kAgvMidRoot)) << proto;
+
+    ASSERT_EQ(1u, agv.CollTasks().size()) << proto;
+    EXPECT_EQ(kAgvMidCount, agv.CollTasks()[0]->trafficBytes) << proto;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBroadcastTask_AnyRoot_RegistersTheBuffersBeforeEnqueueingTheWork) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_AgvHooks hooks;
+
+  ASSERT_EQ(ncclSuccess, agv.RunBroadcastTask(kAgvMidRoot));
+
+  ASSERT_EQ(1u, agv.CollTasks().size());
+  EXPECT_EQ(1, hooks.collLog().calls);
+  EXPECT_EQ(agv.comm(), hooks.collLog().comm);
+  EXPECT_EQ(agv.CollTasks()[0], hooks.collLog().task);
+  EXPECT_EQ(&agv.planner()->collCleanupQueue, hooks.collLog().cleanupQueue);
+  EXPECT_TRUE(hooks.collLog().needConnectOnEntry);
+  EXPECT_EQ(1u, agv.WorkNodes());
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBroadcastTask_CollnetSupportLookupFails_PropagatesWithoutSelectingAnAlgorithm) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_AgvHooks hooks;
+  ScopedHook collNet(g_getCollNetSupport,
+                     [](struct ncclComm*, struct ncclTaskColl*, int*) { return ncclInvalidUsage; });
+
+  EXPECT_EQ(ncclInvalidUsage, agv.RunBroadcastTask(kAgvMidRoot));
+
+  EXPECT_EQ(0, hooks.algoLog().calls);
+  EXPECT_TRUE(agv.CollTasks().empty());
+  EXPECT_EQ(0, agv.planner()->nTasksColl);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBroadcastTask_AlgorithmSelectionFails_PropagatesWithoutRegisteringOrEnqueueing) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_AgvHooks hooks(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, ncclInvalidArgument);
+
+  EXPECT_EQ(ncclInvalidArgument, agv.RunBroadcastTask(kAgvMidRoot));
+
+  EXPECT_EQ(0, hooks.collLog().calls);
+  EXPECT_TRUE(agv.CollTasks().empty());
+  EXPECT_EQ(0u, agv.WorkNodes());
+  EXPECT_EQ(0, agv.planner()->nTasksColl);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBroadcastTask_RegistrationFails_PropagatesWithoutEnqueueingTheTask) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_AgvHooks hooks;
+  TaskPostTuning_CollRegistrationLog collLog;
+  ScopedHook coll(g_ncclRegisterCollBuffers,
+                  TaskPostTuning_RecordCollRegistration(&collLog, kRegistrationNeedsConnect, ncclSystemError));
+
+  EXPECT_EQ(ncclSystemError, agv.RunBroadcastTask(kAgvMidRoot));
+
+  EXPECT_TRUE(agv.CollTasks().empty());
+  EXPECT_EQ(0u, agv.WorkNodes());
+  EXPECT_EQ(0, agv.planner()->nTasksColl);
+}
+
+// enqueue.cc:612-615 seeds the lowered broadcast from comm->config; task_posttuning.cc:783 has no equivalent.
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBroadcastTask_AnyRoot_CurrentlyLeavesEveryResourceCapAtZero) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_AgvHooks hooks;
+
+  ASSERT_EQ(ncclSuccess, agv.RunBroadcastTask(kAgvMidRoot));
+
+  ASSERT_EQ(1u, agv.CollTasks().size());
+  EXPECT_EQ(kUnsetResourceCap, agv.CollTasks()[0]->minCTAs);
+  EXPECT_EQ(kUnsetResourceCap, agv.CollTasks()[0]->maxCTAs);
+  EXPECT_EQ(kUnsetResourceCap, agv.CollTasks()[0]->nvlsCTAs);
+  EXPECT_EQ(kUnsetResourceCap, agv.CollTasks()[0]->cgaClusterSize);
+}
+
+TEST_F(TaskPostTuningMicrotest, DISABLED_AllGatherVEnqueueBroadcastTask_AnyRoot_InheritsTheCommsResolvedResourceCaps) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_AgvHooks hooks;
+
+  ASSERT_EQ(ncclSuccess, agv.RunBroadcastTask(kAgvMidRoot));
+
+  ASSERT_EQ(1u, agv.CollTasks().size());
+  EXPECT_EQ(kCommMinCTAs, agv.CollTasks()[0]->minCTAs);
+  EXPECT_EQ(kCommMaxCTAs, agv.CollTasks()[0]->maxCTAs);
+  EXPECT_EQ(kCommNvlsCTAs, agv.CollTasks()[0]->nvlsCTAs);
+  EXPECT_EQ(kCommCgaClusterSize, agv.CollTasks()[0]->cgaClusterSize);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBcastTasks_RawIsNotAnAllGatherV_ReportsAnInternalError) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, TaskPostTuning_RecordPreconnect(&preconnect));
+  agv.agv()->counts[kAgvMidRoot] = kAgvMidCount;
+  agv.tInfo()->raw->kind = ncclTaskKindColl;
+
+  EXPECT_EQ(ncclInternalError, agv.RunBcastTasks());
+
+  EXPECT_EQ(0, preconnect.calls);
+  EXPECT_NE(nullptr, agv.tInfo()->raw);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBcastTasks_FuncIsNotAllGatherV_ReportsAnInternalError) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, TaskPostTuning_RecordPreconnect(&preconnect));
+  agv.agv()->counts[kAgvMidRoot] = kAgvMidCount;
+  agv.agv()->func = ncclFuncAllGather;
+
+  EXPECT_EQ(ncclInternalError, agv.RunBcastTasks());
+
+  EXPECT_EQ(0, preconnect.calls);
+  EXPECT_NE(nullptr, agv.tInfo()->raw);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBcastTasks_EveryRootContributesNothing_ReleasesTheRawWithoutConnecting) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, TaskPostTuning_RecordPreconnect(&preconnect));
+
+  ASSERT_EQ(ncclSuccess, agv.RunBcastTasks());
+
+  EXPECT_EQ(0, preconnect.calls);
+  EXPECT_EQ(nullptr, agv.tInfo()->raw);
+  EXPECT_EQ(0, agv.planner()->nTasksBcast);
+  EXPECT_EQ(0, agv.planner()->nTasksColl);
+  EXPECT_EQ(kNoBcastPeers, agv.planner()->bcast_info.BcastPeers);
+  EXPECT_EQ(INT_MAX, agv.planner()->bcast_info.minBcastPeer);
+  EXPECT_EQ(INT_MIN, agv.planner()->bcast_info.maxBcastPeer);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBcastTasks_ExactlyOneRootContributes_LowersItIntoABroadcastCollTask) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_AgvHooks hooks;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, TaskPostTuning_RecordPreconnect(&preconnect));
+  agv.agv()->counts[kAgvMidRoot] = kAgvMidCount;
+
+  ASSERT_EQ(ncclSuccess, agv.RunBcastTasks());
+
+  ASSERT_EQ(1u, agv.CollTasks().size());
+  EXPECT_EQ(kAgvMidRoot, agv.CollTasks()[0]->root);
+  EXPECT_EQ(kAgvMidCount, agv.CollTasks()[0]->count);
+  EXPECT_EQ(1, agv.planner()->nTasksColl);
+  EXPECT_EQ(0, agv.planner()->nTasksBcast);
+  EXPECT_TRUE(agv.BcastTasks(kAgvMidRoot).empty());
+  EXPECT_EQ(nullptr, agv.tInfo()->raw);
+}
+
+// The nRoots == 1 arm lowers to a coll task, yet task_posttuning.cc:838 already preconnected the ring.
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBcastTasks_ExactlyOneRootContributes_ConnectsTheRingBeforeLowering) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_AgvHooks hooks;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, TaskPostTuning_RecordPreconnect(&preconnect));
+  agv.agv()->counts[kAgvMidRoot] = kAgvMidCount;
+
+  ASSERT_EQ(ncclSuccess, agv.RunBcastTasks());
+
+  EXPECT_EQ(1, preconnect.calls);
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(preconnect.requested, {NCCL_ALGO_RING}));
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBcastTasks_SeveralRootsContribute_EnqueueOneBcastTaskOnEachRootsQueue) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, TaskPostTuning_RecordPreconnect(&preconnect));
+  agv.agv()->counts[kAgvFirstRoot] = kAgvFirstCount;
+  agv.agv()->counts[kAgvMidRoot] = kAgvMidCount;
+  agv.agv()->counts[kAgvLastRoot] = kAgvLastCount;
+
+  ASSERT_EQ(ncclSuccess, agv.RunBcastTasks());
+
+  EXPECT_EQ(3, agv.planner()->nTasksBcast);
+  EXPECT_EQ(0, agv.planner()->nTasksColl);
+  EXPECT_TRUE(agv.CollTasks().empty());
+  EXPECT_EQ(kAgvFirstCount, agv.OnlyBcast(kAgvFirstRoot)->count);
+  EXPECT_EQ(kAgvMidCount, agv.OnlyBcast(kAgvMidRoot)->count);
+  EXPECT_EQ(kAgvLastCount, agv.OnlyBcast(kAgvLastRoot)->count);
+  EXPECT_TRUE(agv.BcastTasks(kAgvOwnRoot).empty());
+  EXPECT_EQ(nullptr, agv.tInfo()->raw);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBcastTasks_SeveralRootsContribute_CarryEachRootsSliceOntoItsBcastTask) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, TaskPostTuning_RecordPreconnect(&preconnect));
+  ncclProfilerEventMask = kProfilerEventMask;
+  agv.agv()->counts[kAgvOwnRoot] = kAgvOwnCount;
+  agv.agv()->counts[kAgvMidRoot] = kAgvMidCount;
+
+  ASSERT_EQ(ncclSuccess, agv.RunBcastTasks());
+
+  const struct ncclTaskBcast* own = agv.OnlyBcast(kAgvOwnRoot);
+  const struct ncclTaskBcast* other = agv.OnlyBcast(kAgvMidRoot);
+  ASSERT_NE(nullptr, own);
+  ASSERT_NE(nullptr, other);
+  EXPECT_EQ(ncclFuncAllGatherV, own->func);
+  EXPECT_EQ(TaskPostTuning_Addr(kAgvSendBase), own->sendbuff);
+  EXPECT_EQ(TaskPostTuning_Addr(kAgvRecvBase + kAgvOwnRoot), own->recvbuff);
+  EXPECT_EQ(kAgvOwnRoot, own->root);
+  EXPECT_EQ(ncclInt8, own->datatype);
+  EXPECT_EQ(kProfilerEventMask, own->eActivationMask);
+  EXPECT_EQ(nullptr, other->sendbuff);
+  EXPECT_EQ(kAgvMidRoot, other->root);
+  EXPECT_EQ(TaskPostTuning_Addr(kAgvRecvBase + kAgvMidRoot), other->recvbuff);
+  ncclProfilerEventMask = kUnsetEventMask;
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBcastTasks_RootsContributingNothing_AreSkipped) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, TaskPostTuning_RecordPreconnect(&preconnect));
+  agv.agv()->counts[kAgvFirstRoot] = kAgvFirstCount;
+  agv.agv()->counts[kAgvLastRoot] = kAgvLastCount;
+
+  ASSERT_EQ(ncclSuccess, agv.RunBcastTasks());
+
+  EXPECT_EQ(2, agv.planner()->nTasksBcast);
+  EXPECT_TRUE(agv.BcastTasks(kAgvOwnRoot).empty());
+  EXPECT_TRUE(agv.BcastTasks(kAgvMidRoot).empty());
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBcastTasks_SeveralRootsContribute_WidenThePeerRangeAndCountEachFreshPeer) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, TaskPostTuning_RecordPreconnect(&preconnect));
+  agv.agv()->counts[kAgvOwnRoot] = kAgvOwnCount;
+  agv.agv()->counts[kAgvLastRoot] = kAgvLastCount;
+
+  ASSERT_EQ(ncclSuccess, agv.RunBcastTasks());
+
+  EXPECT_EQ(kAgvOwnRoot, agv.planner()->bcast_info.minBcastPeer);
+  EXPECT_EQ(kAgvLastRoot, agv.planner()->bcast_info.maxBcastPeer);
+  EXPECT_EQ(2, agv.planner()->bcast_info.BcastPeers);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBcastTasks_RootThatAlreadyHasAQueuedBcast_IsNotCountedAgain) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, TaskPostTuning_RecordPreconnect(&preconnect));
+  struct ncclTaskBcast* existing =
+    ncclMemoryPoolAlloc<struct ncclTaskBcast>(&agv.comm()->memPool_ncclTaskBcast, &agv.comm()->memPermanent);
+  ncclIntruQueueEnqueue(&agv.planner()->peers[kAgvMidRoot].bcastQueue, existing);
+  agv.agv()->counts[kAgvMidRoot] = kAgvMidCount;
+  agv.agv()->counts[kAgvLastRoot] = kAgvLastCount;
+
+  ASSERT_EQ(ncclSuccess, agv.RunBcastTasks());
+
+  EXPECT_EQ(1, agv.planner()->bcast_info.BcastPeers);
+  EXPECT_EQ(2u, agv.BcastTasks(kAgvMidRoot).size());
+  EXPECT_EQ(existing, agv.BcastTasks(kAgvMidRoot)[0]);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBcastTasks_SeveralRootsContribute_ConnectTheRingOnceBeforeAnyTask) {
+  TaskPostTuning_AgvScene agv;
+  int bcastTasksAtConnect = -1;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, [&](struct ncclComm* comm, bool* algoNeedConnect) {
+    bcastTasksAtConnect = agv.planner()->nTasksBcast;
+    return TaskPostTuning_RecordPreconnect(&preconnect)(comm, algoNeedConnect);
+  });
+  agv.agv()->counts[kAgvFirstRoot] = kAgvFirstCount;
+  agv.agv()->counts[kAgvMidRoot] = kAgvMidCount;
+
+  ASSERT_EQ(ncclSuccess, agv.RunBcastTasks());
+
+  EXPECT_EQ(1, preconnect.calls);
+  EXPECT_EQ(0, bcastTasksAtConnect);
+  EXPECT_EQ(2, agv.planner()->nTasksBcast);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVEnqueueBcastTasks_RingConnectFails_PropagatesWithoutEnqueueingOrReleasingTheRaw) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, TaskPostTuning_RecordPreconnect(&preconnect, ncclSystemError));
+  agv.agv()->counts[kAgvFirstRoot] = kAgvFirstCount;
+  agv.agv()->counts[kAgvMidRoot] = kAgvMidCount;
+
+  EXPECT_EQ(ncclSystemError, agv.RunBcastTasks());
+
+  EXPECT_EQ(0, agv.planner()->nTasksBcast);
+  EXPECT_NE(nullptr, agv.tInfo()->raw);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVTasks_EmptyQueue_MaterializesNothing) {
+  TaskPostTuning_AgvScene agv;
+  TaskTuningInfoQueue queue;
+  ncclIntruQueueConstruct(&queue);
+
+  ASSERT_EQ(ncclSuccess, postTuneAllGatherVTasks(agv.comm(), &queue));
+
+  EXPECT_EQ(0, agv.planner()->nTasksBcast);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&queue));
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVTasks_QueuedEntries_LowerEachInQueueOrderAndDrainTheQueue) {
+  TaskPostTuning_AgvScene agv;
+  TaskPostTuning_PreconnectLog preconnect;
+  ScopedHook preconnectHook(g_ncclCollPreconnect, TaskPostTuning_RecordPreconnect(&preconnect));
+  TaskTuningInfoQueue queue;
+  ncclIntruQueueConstruct(&queue);
+  agv.agv()->counts[kAgvFirstRoot] = kAgvFirstCount;
+  agv.agv()->counts[kAgvMidRoot] = kAgvMidCount;
+  struct ncclTaskTuningInfo* second = agv.scene()->NewTuningInfo(agv.scene()->NewAllGatherV());
+  second->raw->allGatherV.recvbuff[kAgvLastRoot] = TaskPostTuning_Addr(kAgvRecvBase + kAgvLastRoot);
+  second->raw->allGatherV.counts[kAgvLastRoot] = kAgvLastCount;
+  second->raw->allGatherV.counts[kAgvOwnRoot] = kAgvOwnCount;
+  second->raw->allGatherV.recvbuff[kAgvOwnRoot] = TaskPostTuning_Addr(kAgvRecvBase + kAgvOwnRoot);
+  ncclIntruQueueEnqueue(&queue, agv.tInfo());
+  ncclIntruQueueEnqueue(&queue, second);
+
+  ASSERT_EQ(ncclSuccess, postTuneAllGatherVTasks(agv.comm(), &queue));
+
+  EXPECT_TRUE(ncclIntruQueueEmpty(&queue));
+  EXPECT_EQ(4, agv.planner()->nTasksBcast);
+  EXPECT_EQ(1, preconnect.calls);
+  EXPECT_EQ(nullptr, agv.tInfo()->raw);
+  EXPECT_EQ(nullptr, second->raw);
+}
+
+TEST_F(TaskPostTuningMicrotest, AllGatherVTasks_AnEntryFails_PropagatesAndLeavesTheRestQueued) {
+  TaskPostTuning_AgvScene agv;
+  TaskTuningInfoQueue queue;
+  ncclIntruQueueConstruct(&queue);
+  agv.agv()->counts[kAgvMidRoot] = kAgvMidCount;
+  agv.agv()->func = ncclFuncAllGather;
+  struct ncclTaskTuningInfo* second = agv.scene()->NewTuningInfo(agv.scene()->NewAllGatherV());
+  ncclIntruQueueEnqueue(&queue, agv.tInfo());
+  ncclIntruQueueEnqueue(&queue, second);
+
+  EXPECT_EQ(ncclInternalError, postTuneAllGatherVTasks(agv.comm(), &queue));
+
+  EXPECT_EQ(second, ncclIntruQueueHead(&queue));
+  EXPECT_NE(nullptr, second->raw);
 }
 
 }  // namespace
