@@ -13,6 +13,8 @@
 #include <stdint.h>
 
 struct ncclComm;
+struct ncclTaskColl;
+struct ncclTaskP2p;
 
 // P2P and regular collectives share a matcher but have different execution
 // semantics. Scope prevents a rule for one planning path from matching the
@@ -33,6 +35,19 @@ enum rcclP2pTransferMode {
   RCCL_P2P_TRANSFER_READ = 2,
 };
 
+// Normalized transport selected by the runtime adapter. Rules match a concrete
+// tag instead of inferring transport from enable/disable booleans. Append new
+// transport kinds before COUNT without changing the generic evaluator.
+enum rcclExecutionTransport {
+  RCCL_EXECUTION_TRANSPORT_UNKNOWN = 0,
+  RCCL_EXECUTION_TRANSPORT_IPC,
+  RCCL_EXECUTION_TRANSPORT_SHM,
+  RCCL_EXECUTION_TRANSPORT_NET,
+  RCCL_EXECUTION_TRANSPORT_COLLNET,
+  RCCL_EXECUTION_TRANSPORT_MIXED,
+  RCCL_EXECUTION_TRANSPORT_COUNT,
+};
+
 // Concrete facts supplied by RCCL adapters. Add future dimensions here and in
 // the adapter without changing the generic evaluator or rule representation.
 struct rcclCollectivePolicyInput {
@@ -43,8 +58,11 @@ struct rcclCollectivePolicyInput {
   int nNodes;
   int nRanks;
   int nChannels;
-  bool p2pEnabled;
+  enum rcclExecutionTransport transport;
   bool inPlace;            // Active send/receive buffer ranges overlap
+  // UNKNOWN means automatic selection. A concrete value records an explicit
+  // user request and constrains policy transport outputs to that value.
+  enum rcclExecutionTransport requestedTransport;
 };
 
 // Sparse execution overrides. AUTO/-1 fields preserve RCCL's normal selection.
@@ -56,6 +74,7 @@ struct rcclCollectiveExecutionPolicy {
   int protocol;  // NCCL_PROTO_*; -1 means AUTO.
   enum rcclP2pExecutionPath path;
   enum rcclP2pTransferMode transferMode;
+  enum rcclExecutionTransport transport; // UNKNOWN preserves the configured path.
 };
 
 enum rcclExecutionPolicyValueType {
@@ -107,8 +126,9 @@ enum rcclExecutionPolicyInputField {
   RCCL_EXECUTION_INPUT_N_NODES,
   RCCL_EXECUTION_INPUT_N_RANKS,
   RCCL_EXECUTION_INPUT_N_CHANNELS,
-  RCCL_EXECUTION_INPUT_P2P_ENABLED,
+  RCCL_EXECUTION_INPUT_TRANSPORT,
   RCCL_EXECUTION_INPUT_IN_PLACE,
+  RCCL_EXECUTION_INPUT_REQUESTED_TRANSPORT,
 };
 
 enum rcclExecutionPolicyOutputField {
@@ -117,6 +137,7 @@ enum rcclExecutionPolicyOutputField {
   RCCL_EXECUTION_OUTPUT_PROTOCOL,
   RCCL_EXECUTION_OUTPUT_PATH,
   RCCL_EXECUTION_OUTPUT_TRANSFER_MODE,
+  RCCL_EXECUTION_OUTPUT_TRANSPORT,
 };
 
 enum rcclExecutionPolicyCompareOp {
@@ -178,6 +199,8 @@ enum rcclExecutionPolicyValidationError {
   RCCL_EXECUTION_POLICY_VALIDATION_INVALID_PATH_TRANSFER,
   RCCL_EXECUTION_POLICY_VALIDATION_P2P_PROTOCOL_UNAVAILABLE,
   RCCL_EXECUTION_POLICY_VALIDATION_P2P_TRANSFER_UNAVAILABLE,
+  RCCL_EXECUTION_POLICY_VALIDATION_TRANSPORT_UNAVAILABLE,
+  RCCL_EXECUTION_POLICY_VALIDATION_TRANSPORT_REQUEST_CONFLICT,
 };
 
 // Normalized per-resolution constraints. Callers translate environment,
@@ -200,6 +223,8 @@ struct rcclExecutionPolicyValidationContext {
   uint32_t p2pProtocolMask;
   bool validateP2pTransfer;
   uint32_t p2pTransferMask;
+  bool validateTransport;
+  uint32_t transportMask; // rcclExecutionTransport values are bit positions.
 };
 
 struct rcclExecutionPolicyResolution {
@@ -235,6 +260,21 @@ bool rcclBuffersOverlap(const void* firstBuffer, size_t firstBytes, const void* 
 int rcclGetCollectiveExecutionPolicyRequiredChannels(struct ncclComm* comm, bool p2pDisabled);
 
 // Convenience adapter from communicator state to generic rule-engine facts.
+struct rcclExecutionPolicyResolution rcclGetCollectiveExecutionPolicyWithValidation(
+  const struct ncclComm* comm, enum rcclExecutionScope scope, ncclFunc_t collType,
+  size_t dataSize, bool p2pDisabled, bool inPlace,
+  const struct rcclExecutionPolicyValidationContext* validation);
+
+// RCCL runtime adapters. These keep translation from mutable communicator,
+// task, environment, and cost-table state out of common enqueue call sites.
+bool rcclExecutionPolicyForP2pTask(
+  struct ncclComm* comm, struct ncclTaskP2p* task, bool p2pDisabled,
+  struct rcclCollectiveExecutionPolicy* policy);
+bool rcclApplyCollectiveExecutionPolicy(
+  struct ncclComm* comm, struct ncclTaskColl* info, size_t dataSize,
+  float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS],
+  int* policyChannels);
+
 bool rcclGetCollectiveExecutionPolicy(const struct ncclComm* comm, enum rcclExecutionScope scope,
                                       ncclFunc_t collType,
                                       size_t dataSize, bool p2pDisabled, bool inPlace,

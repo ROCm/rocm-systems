@@ -129,6 +129,10 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
                                    bool* needsProxy) {
   return g_ncclTransportP2pSetup(comm, graph, connIndex, needsProxy);
 }
+__attribute__((weak)) ncclResult_t ncclTransportP2pSetupSpecific(
+  struct ncclComm*, struct ncclTopoGraph*, int, bool*, int) {
+  ::abort();
+}
 
 // ppc64le TOC references survive --gc-sections, so netTransport must have
 // a definition even though the code path that uses it is dead.

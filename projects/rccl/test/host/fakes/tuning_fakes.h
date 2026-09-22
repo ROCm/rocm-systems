@@ -41,6 +41,9 @@ extern int g_topoGetAlgoTimeCalls;
 extern int64_t g_paramMinNchannels;
 extern int64_t g_paramMaxNchannels;
 extern int64_t g_tuningParamP2pDisable;
+extern int64_t g_paramShmDisable;
+extern int64_t g_paramP2pReadEnable;
+extern bool g_runtimeTransportToggleEligible;
 
 // rcclGetTuningIndexForArch (tuning.cc:1637). Records the arch it was handed:
 // a caller forwarding "" instead of comm->archName is invisible without it.
