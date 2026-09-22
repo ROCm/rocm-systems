@@ -596,23 +596,15 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
                                      {device->info().maxWorkGroupSize_,
                                       device->info().localMemSizePerCU_},
                                      0, 0, 0, 1, 1, 1);
-  if (!launch_params.IsValidConfig() ||
-       launch_params.local_.product() > device->info().maxWorkGroupSize_) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-
-  if (sharedMemBytes > device->info().localMemSizePerCU_) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-
-  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0
-      || launch_params.global_[2] == 0) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-
-  if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0
-                                    || launch_params.local_[2] == 0) {
-    HIP_RETURN(hipErrorInvalidValue);
+  static constexpr LaunchErrorRule kRules[] = {
+      {kConfigBits | amd::kBlockExceedsMaxWG,          hipErrorInvalidValue},
+      {amd::kSharedMemExceedsMax | amd::kSharedMemOverflow, hipErrorInvalidValue},
+      {amd::kZeroGlobal,                                    hipErrorInvalidValue},
+      {amd::kZeroBlock,                                     hipErrorInvalidValue},
+  };
+  hipError_t status = MapLaunchViolations(launch_params.violations_, kRules);
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
   }
 
   HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, extra, nullptr,
@@ -647,23 +639,16 @@ hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
                                    device->info().localMemSizePerCU_},
                                   1, 1, 1, 1, 1, 1, false);
 
-  if (!launch_params.IsValidConfig() ||
-       launch_params.local_.product() > device->info().maxWorkGroupSize_) {
-    HIP_RETURN(hipErrorInvalidConfiguration);
-  }
-
-  if (sharedMemBytes > device->info().localMemSizePerCU_) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-
-  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0
-      || launch_params.global_[2] == 0) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-
-  if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0
-                                    || launch_params.local_[2] == 0) {
-    HIP_RETURN(hipErrorInvalidValue);
+  static constexpr LaunchErrorRule kRules[] = {
+      {kConfigBits | amd::kZeroBlock | amd::kBlockExceedsMaxWG, hipErrorInvalidConfiguration},
+      {amd::kSharedMemExceedsMax | amd::kSharedMemOverflow,          hipErrorInvalidValue},
+      {amd::kZeroGlobal,                                             hipErrorInvalidValue},
+      // No separate kZeroBlock rule here: this is the non-HIP-params path, so kZeroBlock is
+      // already folded into the first rule above and would never reach a rule listed after it.
+  };
+  hipError_t status = MapLaunchViolations(launch_params.violations_, kRules);
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
   }
 
   HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, extra, startEvent,
@@ -719,23 +704,15 @@ hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDi
                                       device->info().localMemSizePerCU_},
                                      0, 0, 0, 1, 1, 1);
 
-  if (!launch_params.IsValidConfig() ||
-      launch_params.local_.product() > device->info().maxWorkGroupSize_) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-
-  if (sharedMemBytes > device->info().localMemSizePerCU_) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-
-  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0 ||
-      launch_params.global_[2] == 0) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-
-  if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0 ||
-      launch_params.local_[2] == 0) {
-    HIP_RETURN(hipErrorInvalidValue);
+  static constexpr LaunchErrorRule kRules[] = {
+      {kConfigBits | amd::kBlockExceedsMaxWG,          hipErrorInvalidValue},
+      {amd::kSharedMemExceedsMax | amd::kSharedMemOverflow, hipErrorInvalidValue},
+      {amd::kZeroGlobal,                                    hipErrorInvalidValue},
+      {amd::kZeroBlock,                                     hipErrorInvalidValue},
+  };
+  hipError_t status = MapLaunchViolations(launch_params.violations_, kRules);
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
   }
 
   HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, stream, kernelParams, nullptr, nullptr,
@@ -836,8 +813,12 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
                                         device.info().localMemSizePerCU_},
                                        0, 0, 0, 1, 1, 1);
 
-    if (!launch_params.IsValidConfig()) {
-      return hipErrorInvalidConfiguration;
+    static constexpr LaunchErrorRule kRules[] = {
+        {kConfigBits, hipErrorInvalidConfiguration},
+    };
+    hipError_t status = MapLaunchViolations(launch_params.violations_, kRules);
+    if (status != hipSuccess) {
+      return status;
     }
 
     result = ihipModuleLaunchKernel(launch.function, launch_params, launch.hStream,
@@ -971,13 +952,13 @@ hipError_t hipLaunchCooperativeKernel_common(const void* f, dim3 gridDim, dim3 b
                                       device->info().localMemSizePerCU_},
                                      0, 0, 0, 1, 1, 1);
 
-  if (!launch_params.IsValidConfig() ||
-      launch_params.local_.product() > device->info().maxWorkGroupSize_) {
-    return hipErrorInvalidConfiguration;
-  }
-
-  if (sharedMemBytes > device->info().localMemSizePerCU_) {
-    return hipErrorCooperativeLaunchTooLarge;
+  static constexpr LaunchErrorRule kRules[] = {
+      {kConfigBits | amd::kBlockExceedsMaxWG,          hipErrorInvalidConfiguration},
+      {amd::kSharedMemExceedsMax | amd::kSharedMemOverflow, hipErrorCooperativeLaunchTooLarge},
+  };
+  hipError_t status = MapLaunchViolations(launch_params.violations_, kRules);
+  if (status != hipSuccess) {
+    return status;
   }
 
   return ihipModuleLaunchKernel(func, launch_params, hStream, kernelParams, nullptr,
@@ -1450,8 +1431,12 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
                                       drvDevice->info().localMemSizePerCU_},
                                      0, 0, 0, 1, 1, 1);
 
-  if (!launch_params.IsValidConfig()) {
-    HIP_RETURN(hipErrorInvalidConfiguration);
+  static constexpr LaunchErrorRule kRules[] = {
+      {kConfigBits, hipErrorInvalidConfiguration},
+  };
+  hipError_t configStatus = MapLaunchViolations(launch_params.violations_, kRules);
+  if (configStatus != hipSuccess) {
+    HIP_RETURN(configStatus);
   }
 
   if (config->numAttrs == 0) {
