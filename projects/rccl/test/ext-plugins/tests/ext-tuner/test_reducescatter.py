@@ -5,7 +5,6 @@
 #  ************************************************************************
 
 import os
-import subprocess
 import pytest
 
 # Like AllGather, RCCL only routes ReduceScatter through the tuner when the rank

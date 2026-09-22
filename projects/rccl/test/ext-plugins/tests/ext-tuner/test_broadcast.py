@@ -5,7 +5,6 @@
 #  ************************************************************************
 
 import os
-import subprocess
 import pytest
 
 @pytest.mark.ext_tuner
