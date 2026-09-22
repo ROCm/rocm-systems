@@ -17,6 +17,8 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Resolved issues
 * On Windows, HIP runtime now correctly handles non-P2P data transfers between GPUs and coordinates multi-GPU kernel execution, eliminates deadlocks and invalid values in multi-process workloads and resolve issues observed when running LLMs, such as Llama, on multi-GPU Windows configurations.
 * Resolved an out-of-memory issue affecting certain AMD APUs, such as Strix Halo, on Windows when loading large language models (LLMs) that could exceed dedicated graphics memory and spill into shared memory. The HIP runtime now correctly utilizes the full unified memory pool available on high-memory APUs, enabling system RAM to be dynamically allocated as graphics memory. This enhancement improves memory utilization and supports the execution of larger AI models on affected APU platforms.
+* Fixed a memory leak in the HIP/HSA runtime that could occur during stream and signal creation on certain GPUs. The issue was triggered by hipStreamCreate(), resulting in allocated signal objects not being properly released.
+The HIP/HSA runtime now correctly releases allocated signal objects during stream destruction and runtime cleanup, eliminating the memory leak and improving resource management.
 
 ### Known issues
 
