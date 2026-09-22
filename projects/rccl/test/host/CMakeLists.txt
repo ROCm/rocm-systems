@@ -1455,7 +1455,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicroConnect
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroEnqueue (+ shipping -devlinker arm standalone)
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
 set(_enq_common_args
   SOURCES ${TEST_MICRO_ENQUEUE_SOURCE_FILES}
   EXTRA_INCLUDES
