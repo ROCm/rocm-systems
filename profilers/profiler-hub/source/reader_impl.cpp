@@ -11,8 +11,10 @@
 
 #include <algorithm>
 #include <limits>
+#include <map>
 #include <memory>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 
 namespace profiler_hub
@@ -272,6 +274,7 @@ reader_t::impl::get_all_tracks()
             {
                 track_info_ptr->agent_id    = agent_it->second.front().first;
                 track_info_ptr->event_count = agent_it->second.front().second;
+                track_info_ptr->category    = reader_types::track_kind_t::pmc_agent;
             }
             else
             {
@@ -336,9 +339,136 @@ reader_t::impl::get_all_tracks()
                 }
             }
         }
+
+        add_category_tracks(next_synthetic_id);
     }
 
     return m_track_info_list;
+}
+
+void
+reader_t::impl::add_category_tracks(size_t& next_synthetic_id)
+{
+    // optiq-parity category tracks (kernel-dispatch/memory-allocate/
+    // memory-copy, per agent+queue and per host-stream): derived directly
+    // from the raw event tables, no rocpd_track row backs them.
+    // Deliberately NOT added to m_track_ptr_to_topology/
+    // m_topology_to_track_ptr/m_track_ptr_to_db_id -- get_events_for_track()
+    // returns an empty list for these until event-fetch support for these
+    // categories is added (see planning/track-discovery-queries.md).
+    auto add_agent_queue_track = [&](reader_types::track_kind_t kind,
+                                     std::string                name,
+                                     size_t                     nid,
+                                     size_t                     agent_id,
+                                     size_t                     queue_id,
+                                     size_t                     count) {
+        auto track_ptr         = std::make_shared<reader_types::track_info_t>();
+        track_ptr->id          = next_synthetic_id++;
+        track_ptr->category    = kind;
+        track_ptr->name        = std::move(name);
+        track_ptr->agent_id    = agent_id;
+        track_ptr->queue_id    = queue_id;
+        track_ptr->event_count = count;
+
+        if(const auto node_it = m_node_info_utility.find(nid);
+           node_it != m_node_info_utility.end())
+        {
+            track_ptr->node_info = node_it->second;
+        }
+
+        m_track_info_list.push_back(track_ptr);
+        m_track_info_utility.emplace(track_ptr->id, track_ptr);
+    };
+
+    auto add_stream_track = [&](reader_types::track_kind_t kind,
+                                std::string                name,
+                                size_t                     nid,
+                                size_t                     pid,
+                                size_t                     stream_id,
+                                size_t                     count) {
+        auto track_ptr         = std::make_shared<reader_types::track_info_t>();
+        track_ptr->id          = next_synthetic_id++;
+        track_ptr->category    = kind;
+        track_ptr->name        = std::move(name);
+        track_ptr->stream_id   = stream_id;
+        track_ptr->event_count = count;
+
+        if(const auto node_it = m_node_info_utility.find(nid);
+           node_it != m_node_info_utility.end())
+        {
+            track_ptr->node_info = node_it->second;
+        }
+        if(const auto process_it = m_process_info_utility.find(pid);
+           process_it != m_process_info_utility.end())
+        {
+            track_ptr->process_info = process_it->second;
+        }
+
+        m_track_info_list.push_back(track_ptr);
+        m_track_info_utility.emplace(track_ptr->id, track_ptr);
+    };
+
+    const auto& category_statements = m_read_statements->track_category_statements();
+
+    for(const auto& row : category_statements.kernel_dispatch_agent_queue().to_vector())
+    {
+        add_agent_queue_track(
+            reader_types::track_kind_t::kernel_dispatch_agent_queue,
+            fmt::format("Kernel Dispatch [{}] Queue {}", row.agent_id, row.queue_id),
+            row.nid,
+            row.agent_id,
+            row.queue_id,
+            row.count);
+    }
+
+    for(const auto& row : category_statements.memory_allocate_agent_queue().to_vector())
+    {
+        add_agent_queue_track(
+            reader_types::track_kind_t::memory_allocate_agent_queue,
+            fmt::format("Memory Allocate [{}] Queue {}", row.agent_id, row.queue_id),
+            row.nid,
+            row.agent_id,
+            row.queue_id,
+            row.count);
+    }
+
+    for(const auto& row : category_statements.memory_copy_agent_queue().to_vector())
+    {
+        add_agent_queue_track(
+            reader_types::track_kind_t::memory_copy_agent_queue,
+            fmt::format("Memory Copy [{}] Queue {}", row.agent_id, row.queue_id),
+            row.nid,
+            row.agent_id,
+            row.queue_id,
+            row.count);
+    }
+
+    // optiq exposes one stream track per (nid,pid,stream_id) spanning all
+    // operation kinds, not one per event table -- merge the 3 per-table
+    // stream statements by identity before synthesizing tracks (confirmed
+    // against a real roc_optiq_track_info cache: e.g. stream 1's record
+    // count there is kernel-dispatch-stream + memory-copy-stream summed).
+    std::map<std::tuple<size_t, size_t, size_t>, size_t> stream_counts;
+    auto accumulate_stream = [&](const auto& rows) {
+        for(const auto& row : rows)
+        {
+            stream_counts[{ row.nid, row.pid, row.stream_id }] += row.count;
+        }
+    };
+    accumulate_stream(category_statements.kernel_dispatch_stream().to_vector());
+    accumulate_stream(category_statements.memory_allocate_stream().to_vector());
+    accumulate_stream(category_statements.memory_copy_stream().to_vector());
+
+    for(const auto& [key, count] : stream_counts)
+    {
+        const auto& [nid, pid, stream_id] = key;
+        add_stream_track(reader_types::track_kind_t::stream,
+                         fmt::format("Stream {}", stream_id),
+                         nid,
+                         pid,
+                         stream_id,
+                         count);
+    }
 }
 
 std::unordered_map<size_t, size_t>

@@ -331,6 +331,22 @@ struct track_agent_count_result
     size_t count{};
 };
 
+struct track_agent_queue_count_result
+{
+    size_t nid{};
+    size_t agent_id{};
+    size_t queue_id{};
+    size_t count{};
+};
+
+struct track_stream_count_result
+{
+    size_t nid{};
+    size_t pid{};
+    size_t stream_id{};
+    size_t count{};
+};
+
 struct pmc_sample_result
 {
     size_t timestamp{};
@@ -368,6 +384,7 @@ struct read_statements
         initialize_time_range_statements();
         initialize_track_event_count_statements();
         initialize_track_agent_count_statement();
+        initialize_track_category_statements();
         initialize_pmc_sample_statements();
     }
     read_statements()                                  = delete;
@@ -462,6 +479,21 @@ struct read_statements
 
     using track_agent_count_statement_func_t =
         std::function<sqlite_backend::result_set<track_agent_count_result>()>;
+
+    using track_agent_queue_count_statement_func_t =
+        std::function<sqlite_backend::result_set<track_agent_queue_count_result>()>;
+    using track_stream_count_statement_func_t =
+        std::function<sqlite_backend::result_set<track_stream_count_result>()>;
+
+    struct track_category_statement_set
+    {
+        track_agent_queue_count_statement_func_t kernel_dispatch_agent_queue;
+        track_agent_queue_count_statement_func_t memory_allocate_agent_queue;
+        track_agent_queue_count_statement_func_t memory_copy_agent_queue;
+        track_stream_count_statement_func_t      kernel_dispatch_stream;
+        track_stream_count_statement_func_t      memory_allocate_stream;
+        track_stream_count_statement_func_t      memory_copy_stream;
+    };
 
     using pmc_sample_statement_func_t =
         std::function<sqlite_backend::result_set<pmc_sample_result>(size_t, size_t)>;
@@ -625,6 +657,11 @@ struct read_statements
         const
     {
         return m_track_agent_count_statement;
+    }
+
+    [[nodiscard]] const track_category_statement_set& track_category_statements() const
+    {
+        return m_track_category_statements;
     }
 
     [[nodiscard]] const pmc_sample_statement_func_t& pmc_sample_statement() const
@@ -921,6 +958,74 @@ private:
                 sample_query,
                 &track_id_count_result::track_id,
                 &track_id_count_result::count);
+    }
+
+    // optiq-parity category tracks: one row per (nid,agent_id,queue_id) or
+    // (nid,pid,stream_id) combo, derived directly from the raw event tables
+    // (no rocpd_track dependency). See planning/track-discovery-queries.md.
+    void initialize_track_category_statements()
+    {
+        // select()/group_by() only accept literal column names (injection
+        // guard, see common::traits::is_string_literal), so the differing
+        // agent-id column for memory_copy (dst_agent_id) can't be threaded
+        // through a shared lambda parameter -- only the table name can be.
+        auto make_agent_queue_stmt = [&](const std::string& table) {
+            auto q = queries::select::table_select_query{}
+                         .select("nid", "agent_id", "queue_id", "COUNT(*) AS count")
+                         .from(fmt::format("{}_{}", table, m_uuid))
+                         .group_by("nid", "agent_id", "queue_id")
+                         .get_query_string();
+            return m_backend
+                ->create_read_statement_executor<track_agent_queue_count_result>(
+                    q,
+                    &track_agent_queue_count_result::nid,
+                    &track_agent_queue_count_result::agent_id,
+                    &track_agent_queue_count_result::queue_id,
+                    &track_agent_queue_count_result::count);
+        };
+
+        auto make_stream_stmt = [&](const std::string& table) {
+            auto q = queries::select::table_select_query{}
+                         .select("nid", "pid", "stream_id", "COUNT(*) AS count")
+                         .from(fmt::format("{}_{}", table, m_uuid))
+                         .group_by("nid", "pid", "stream_id")
+                         .get_query_string();
+            return m_backend->create_read_statement_executor<track_stream_count_result>(
+                q,
+                &track_stream_count_result::nid,
+                &track_stream_count_result::pid,
+                &track_stream_count_result::stream_id,
+                &track_stream_count_result::count);
+        };
+
+        m_track_category_statements.kernel_dispatch_agent_queue =
+            make_agent_queue_stmt("rocpd_kernel_dispatch");
+        m_track_category_statements.memory_allocate_agent_queue =
+            make_agent_queue_stmt("rocpd_memory_allocate");
+
+        // rocpd_memory_copy has both src_agent_id/dst_agent_id; group by
+        // dst_agent_id (matches optiq: "which device received the copy").
+        auto memory_copy_query =
+            queries::select::table_select_query{}
+                .select(
+                    "nid", "dst_agent_id AS agent_id", "queue_id", "COUNT(*) AS count")
+                .from(fmt::format("rocpd_memory_copy_{}", m_uuid))
+                .group_by("nid", "dst_agent_id", "queue_id")
+                .get_query_string();
+        m_track_category_statements.memory_copy_agent_queue =
+            m_backend->create_read_statement_executor<track_agent_queue_count_result>(
+                memory_copy_query,
+                &track_agent_queue_count_result::nid,
+                &track_agent_queue_count_result::agent_id,
+                &track_agent_queue_count_result::queue_id,
+                &track_agent_queue_count_result::count);
+
+        m_track_category_statements.kernel_dispatch_stream =
+            make_stream_stmt("rocpd_kernel_dispatch");
+        m_track_category_statements.memory_allocate_stream =
+            make_stream_stmt("rocpd_memory_allocate");
+        m_track_category_statements.memory_copy_stream =
+            make_stream_stmt("rocpd_memory_copy");
     }
 
     // Per-device (agent) breakdown of PMC/counter track samples. A track's
@@ -1641,6 +1746,7 @@ private:
 
     track_event_count_statement_set    m_track_event_count_statements;
     track_agent_count_statement_func_t m_track_agent_count_statement;
+    track_category_statement_set       m_track_category_statements;
 
     pmc_sample_statement_func_t               m_pmc_sample_statement;
     pmc_sample_time_filtered_statement_func_t m_pmc_sample_time_filtered_statement;

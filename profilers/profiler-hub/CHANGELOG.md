@@ -28,6 +28,15 @@ downstream consumer of the library.
   and stub declarations for a planned async task API (`ph_future_get`/`ph_future_wait`/
   `ph_future_cancel`/`ph_future_free`, not yet implemented).
 - `reader_types.hpp`: `track_info_t` now carries `id`, `event_count`, and `agent_id`.
+- `reader_types.hpp`: new `track_kind_t` enum, and `track_info_t` gains
+  `category`, `queue_id`, `stream_id` fields. `reader_t::get_all_tracks()`
+  now also returns per-agent+queue tracks for kernel dispatch, memory
+  allocate, and memory copy, plus one merged per-host-stream track
+  combining all three operation kinds per stream (optiq discovery parity,
+  including its "one stream track per stream, not per event type"
+  behavior; previously only thread-based `(nid,pid,tid)` tracks and
+  per-agent PMC tracks were derived). Not yet exposed through the C ABI
+  (`ph_track_t`).
 
 ### Changed
 
@@ -40,6 +49,13 @@ downstream consumer of the library.
 - `reader_types.hpp`: `counter_timeline_event_t::value` is now `double` (was `size_t`).
 - `reader_types.hpp`: `timeline_event_t::display_name`/`category` are now
   `std::string_view` (were `std::string`).
+
+### Fixed
+
+- `ph_ctx::initialize_track_list()` no longer crashes on tracks with no
+  associated process (e.g. the new per-agent+queue category tracks, which
+  have no `pid`) — `node_info`/`process_info` are now null-checked the same
+  way `thread_info` already was.
 
 ## [0.2.0] - 2026-09-02
 
