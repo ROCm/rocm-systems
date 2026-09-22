@@ -55,24 +55,9 @@ been handed an archive and want to open it without touching the host:
   all of them in. Unpacking the runtime package on its own is not enough, and
   fails at start-up on a missing library.
 
-If your installation does not carry the tool, build it from the ROCm sources
-against the installation you already have:
-
-.. code-block:: bash
-
-  cmake -S projects/hrr -B build/hrr \
-    -DROCM_PATH="${ROCM_PATH:-/opt/rocm}" \
-    -DCMAKE_PREFIX_PATH="${ROCM_PATH:-/opt/rocm}" \
-    -DCMAKE_BUILD_TYPE=Release
-  cmake --build build/hrr --target hrr-playback -j"$(nproc)"
-
-.. warning::
-
-  A tool built from the sources reads archives recorded by the HIP runtime built
-  from the same commit. The two sides share a generated description of every API's
-  arguments, so a tool built from a different revision can report a payload that
-  is too small, or a missing kernel, on an archive that is otherwise sound. Use
-  the installed tool for an archive recorded by an installed ROCm.
+If your installation does not carry the tool, the HRR README covers building it
+from the ROCm sources, and the rule that comes with it: a tool built from the
+sources reads archives recorded by the HIP runtime built from the same commit.
 
 Recording a workload
 =======================================================
