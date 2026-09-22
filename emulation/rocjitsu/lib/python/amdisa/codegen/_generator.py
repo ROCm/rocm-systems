@@ -7680,28 +7680,36 @@ class CodeGenerator:
                 (', inst_.samp' if gfx12 else ', inst_.ssamp * 4') if sample else ''
             )
             unsupported = 'inst_.r128 || inst_.tfe'
-            if not sample:
-                unsupported += ' || inst_.a16'
             if gfx12:
                 unsupported += ' || inst_.nv'
             if sample:
                 unsupported += ' || inst_.unorm || inst_.lwe'
-            coords = (
-                '{inst_.vaddr0, inst_.vaddr1, inst_.vaddr2}'
-                if gfx12
-                else '{inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u, '
-                'inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u}'
-            )
             if inst.name.upper() == 'IMAGE_SAMPLE_D':
                 coords = (
                     '{inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, '
-                    'inst_.vaddr3 + 1u, inst_.vaddr3 + 2u}'
+                    'inst_.vaddr3 + 1u, inst_.vaddr3 + 2u, inst_.vaddr3 + 3u}'
                     if gfx12
                     else '{inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u, '
                     'inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u, '
                     'inst_.nsa ? (raw_words_[2] >> 16) & 255 : inst_.vaddr + 3u, '
                     'inst_.nsa ? raw_words_[2] >> 24 : inst_.vaddr + 4u, '
-                    'inst_.nsa ? (raw_words_[2] >> 24) + 1u : inst_.vaddr + 5u}'
+                    'inst_.nsa ? (raw_words_[2] >> 24) + 1u : inst_.vaddr + 5u, '
+                    'inst_.nsa ? (raw_words_[2] >> 24) + 2u : inst_.vaddr + 6u}'
+                )
+            elif sample:
+                coords = (
+                    '{inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3}'
+                    if gfx12
+                    else '{inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u, '
+                    'inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u, '
+                    'inst_.nsa ? (raw_words_[2] >> 16) & 255 : inst_.vaddr + 3u}'
+                )
+            else:
+                coords = (
+                    '{inst_.vaddr0, inst_.vaddr1, inst_.vaddr2}'
+                    if gfx12
+                    else '{inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u, '
+                    'inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u}'
                 )
             if sample:
                 mode = {
@@ -7712,6 +7720,8 @@ class CodeGenerator:
                     'IMAGE_SAMPLE_D': 'Derivatives',
                 }[inst.name.upper()]
                 sampler += f', amdgpu::ImageSampleMode::{mode}, inst_.a16'
+            else:
+                sampler = ', ~0u, amdgpu::ImageSampleMode::Implicit, inst_.a16'
             mtype = (
                 'amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th)'
                 if gfx12

@@ -663,6 +663,55 @@ TEST_P(GraphicsExportTest, MergedVertexUserCountExcludesSystemRingPair) {
     EXPECT_EQ(wave_->debug_read_sgpr(8 + i), 100 + i);
 }
 
+TEST_P(GraphicsExportTest, TriangleAndRectangleListsKeepTrailingVerticesWithoutCreatingPrimitives) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  for (uint32_t primitive : {4u, 17u})
+    for (uint32_t vertices : {4u, 5u, 31u, 32u, 64u, 65u}) {
+      SCOPED_TRACE(testing::Message() << "vertices=" << vertices << ", primitive="
+                                      << (primitive == 4 ? "triangle list" : "rectangle list"));
+      amdgpu::Pm4QueueState state;
+      state.num_instances = 2;
+      state.uconfig_registers[0x242] = primitive;
+      auto &context = state.context_registers;
+      context[gfx12 ? 0x2a6 : 0x2d5] = 1u << 22; // Wave32: groups of thirty vertices.
+      context[gfx12 ? 0x31e : 0x3b0] = gfx12 ? 3 | (3 << 16) : 3 | (3 << 14);
+      context[0x2f9] = 0x2d;
+      context[gfx12 ? 0x205 : 0x206] = 0x43f;
+      context[gfx12 ? 0x216 : 0x202] = 0xcc0010;
+      context[0x10f] = context[0x110] = context[0x111] = context[0x112] =
+          std::bit_cast<uint32_t>(2.0f);
+      context[gfx12 ? 0x3b0 : 0x31c] = 10;
+      context[0x318] = 0x1000;
+      context[gfx12 ? 0x214 : 0x8e] = 15;
+      context[gfx12 ? 0x195 : 0x1c5] = 9;
+      // Cull these primitives so advance returns the
+      // next vertex group, allowing us to inspect every invocation and primitive.
+      context[gfx12 ? 0x207 : 0x205] = 3;
+      auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), vertices);
+      uint32_t invocations = 0, primitives = 0, groups = 0;
+      do {
+        ASSERT_LT(groups++, 10u);
+        draw->initialize(*wave_, 0, 0);
+        const uint32_t count = wave_->debug_read_sgpr(3) & 255;
+        const uint32_t primitive_count = (wave_->debug_read_sgpr(3) >> 8) & 255;
+        for (uint32_t i = 0; i < count; ++i) {
+          EXPECT_EQ(wave_->debug_read_vgpr(gfx12 ? 3 : 5, i), invocations % vertices);
+          ++invocations;
+          draw->export_lane(*wave_, i, 12, 15,
+                            {std::bit_cast<uint32_t>(i % 3 == 2 ? 1.0f : -1.0f),
+                             std::bit_cast<uint32_t>(i % 3 == 1 ? 1.0f : -1.0f), 0,
+                             std::bit_cast<uint32_t>(1.0f)});
+        }
+        for (uint32_t i = 0; i < primitive_count; ++i)
+          draw->export_lane(*wave_, i, 20, 1, {wave_->debug_read_vgpr(0, i), 0, 0, 0});
+        primitives += primitive_count;
+      } while (draw->advance(*access_));
+      EXPECT_EQ(invocations, 2 * vertices);
+      EXPECT_EQ(primitives, 2 * (vertices / 3));
+      EXPECT_FALSE(wave_->instruction_execution_failed());
+    }
+}
+
 TEST(GraphicsImageAddressTest, MatchesGfx12CoordinateBitsAndCrossesTileRows) {
   using amdgpu::gfx12_image_offset;
   EXPECT_EQ(gfx12_image_offset(1, 0, 256, 4, 3), 4);
@@ -789,56 +838,69 @@ TEST(GraphicsImageAddressTest, ArrayLayersUseMipChainStrideAndSliceXor) {
 TEST_P(GraphicsExportTest, HardwareImageLoadReadsTiledUintChannelsAndPacksD16) {
   if (GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
     GTEST_SKIP() << "RDNA4 image transfer encoding";
-  const std::array<uint32_t, 8> descriptor{
-      0x1000, (46u << 17) | (3u << 30), 3u << 14, (9u << 28) | (3u << 20) | 0xfac, 0, 0, 0, 0};
-  for (uint32_t r = 0; r < descriptor.size(); ++r)
-    wave_->debug_write_sgpr(8 + r, descriptor[r]);
-  wave_->set_exec(5);
-  for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
-    wave_->debug_write_vgpr(0, lane, 0xdeadbeef);
-    wave_->debug_write_vgpr(1, lane, 0xdeadbeef);
-    wave_->debug_write_vgpr(2, lane, lane == 2 ? 4 : 1);
-    wave_->debug_write_vgpr(3, lane, 2);
+  for (bool a16 : {false, true}) {
+    SCOPED_TRACE(a16);
+    cu_->l1_vector().flush_all();
+    cache_.flush_all();
+    cu_->l1_vector().invalidate_all();
+    cache_.invalidate_all();
+    const std::array<uint32_t, 8> descriptor{
+        0x1000, (46u << 17) | (3u << 30), 3u << 14, (9u << 28) | (3u << 20) | 0xfac, 0, 0, 0, 0};
+    for (uint32_t r = 0; r < descriptor.size(); ++r)
+      wave_->debug_write_sgpr(8 + r, descriptor[r]);
+    wave_->set_exec(5);
+    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
+      wave_->debug_write_vgpr(0, lane, 0xdeadbeef);
+      wave_->debug_write_vgpr(1, lane, 0xdeadbeef);
+      wave_->debug_write_vgpr(2, lane, (lane == 2 ? 4 : 1) | (a16 ? 2u << 16 : 0));
+      wave_->debug_write_vgpr(3, lane, 2);
+    }
+    // Byte address for texel (1,2) in a 4-byte GFX12 64 KiB tile.
+    memory_.write32(0x100000 + 36, 0x44332211);
+    const std::array<uint32_t, 4> words{0xd3c00021u | (a16 ? 1u << 6 : 0), 0x00001000,
+                                        a16 ? 0x0000ff02u : 0x00000302u, 0};
+    auto decoded = decoder_->decode(words.data());
+    ASSERT_FALSE(decoded.failed());
+    auto instruction_owner = std::move(decoded).value();
+    auto *instruction = instruction_owner.get();
+    ASSERT_TRUE(instruction->is_memory_op());
+    ASSERT_TRUE(cu_->execute_instruction(instruction, *wave_).succeeded());
+    ASSERT_FALSE(wave_->instruction_execution_failed());
+    ASSERT_NE(instruction->data(), nullptr);
+    EXPECT_EQ(instruction->data_as<amdgpu::VectorMemState>()->wait_counter_type,
+              amdgpu::WaitCounterType::LOADCNT);
+    amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
+    pipeline.issue(instruction_owner.release(), *wave_);
+    EXPECT_EQ(wave_->debug_read_vgpr(0, 0), 0x00220011);
+    EXPECT_EQ(wave_->debug_read_vgpr(1, 0), 0x00440033);
+    EXPECT_EQ(wave_->debug_read_vgpr(0, 1), 0xdeadbeef);
+    EXPECT_EQ(wave_->debug_read_vgpr(1, 1), 0xdeadbeef);
+    EXPECT_EQ(wave_->debug_read_vgpr(0, 2), 0);
+    EXPECT_EQ(wave_->debug_read_vgpr(1, 2), 0);
+    wave_->debug_write_vgpr(0, 0, 0x00660055);
+    wave_->debug_write_vgpr(1, 0, 0x00880077);
+    const auto store = rdna4::build_vimage(6, {.dim = 1,
+                                               .d16 = 1,
+                                               .a16 = a16,
+                                               .dmask = 15,
+                                               .rsrc = 8,
+                                               .vaddr0 = 2,
+                                               .vaddr1 = static_cast<uint8_t>(a16 ? 255 : 3)});
+    std::array<uint32_t, 4> store_words{};
+    std::copy(store.begin(), store.end(), store_words.begin());
+    auto decoded_store = decoder_->decode(store_words.data());
+    ASSERT_FALSE(decoded_store.failed());
+    auto store_instruction = std::move(decoded_store).value();
+    ASSERT_TRUE(store_instruction->is_memory_op());
+    ASSERT_TRUE(cu_->execute_instruction(store_instruction.get(), *wave_).succeeded());
+    ASSERT_NE(store_instruction->data(), nullptr);
+    EXPECT_EQ(store_instruction->data_as<amdgpu::VectorMemState>()->wait_counter_type,
+              amdgpu::WaitCounterType::STORECNT);
+    pipeline.issue(store_instruction.release(), *wave_);
+    cu_->l1_vector().flush_all();
+    cache_.flush_all();
+    EXPECT_EQ(memory_.read32(0x100000 + 36), 0x88776655);
   }
-  // Byte address for texel (1,2) in a 4-byte GFX12 64 KiB tile.
-  memory_.write32(0x100000 + 36, 0x44332211);
-  const std::array<uint32_t, 4> words{0xd3c00021, 0x00001000, 0x00000302, 0};
-  auto decoded = decoder_->decode(words.data());
-  ASSERT_FALSE(decoded.failed());
-  auto instruction_owner = std::move(decoded).value();
-  auto *instruction = instruction_owner.get();
-  ASSERT_TRUE(instruction->is_memory_op());
-  ASSERT_TRUE(cu_->execute_instruction(instruction, *wave_).succeeded());
-  ASSERT_FALSE(wave_->instruction_execution_failed());
-  ASSERT_NE(instruction->data(), nullptr);
-  EXPECT_EQ(instruction->data_as<amdgpu::VectorMemState>()->wait_counter_type,
-            amdgpu::WaitCounterType::LOADCNT);
-  amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
-  pipeline.issue(instruction_owner.release(), *wave_);
-  EXPECT_EQ(wave_->debug_read_vgpr(0, 0), 0x00220011);
-  EXPECT_EQ(wave_->debug_read_vgpr(1, 0), 0x00440033);
-  EXPECT_EQ(wave_->debug_read_vgpr(0, 1), 0xdeadbeef);
-  EXPECT_EQ(wave_->debug_read_vgpr(1, 1), 0xdeadbeef);
-  EXPECT_EQ(wave_->debug_read_vgpr(0, 2), 0);
-  EXPECT_EQ(wave_->debug_read_vgpr(1, 2), 0);
-  wave_->debug_write_vgpr(0, 0, 0x00660055);
-  wave_->debug_write_vgpr(1, 0, 0x00880077);
-  const auto store = rdna4::build_vimage(
-      6, {.dim = 1, .d16 = 1, .dmask = 15, .rsrc = 8, .vaddr0 = 2, .vaddr1 = 3});
-  std::array<uint32_t, 4> store_words{};
-  std::copy(store.begin(), store.end(), store_words.begin());
-  auto decoded_store = decoder_->decode(store_words.data());
-  ASSERT_FALSE(decoded_store.failed());
-  auto store_instruction = std::move(decoded_store).value();
-  ASSERT_TRUE(store_instruction->is_memory_op());
-  ASSERT_TRUE(cu_->execute_instruction(store_instruction.get(), *wave_).succeeded());
-  ASSERT_NE(store_instruction->data(), nullptr);
-  EXPECT_EQ(store_instruction->data_as<amdgpu::VectorMemState>()->wait_counter_type,
-            amdgpu::WaitCounterType::STORECNT);
-  pipeline.issue(store_instruction.release(), *wave_);
-  cu_->l1_vector().flush_all();
-  cache_.flush_all();
-  EXPECT_EQ(memory_.read32(0x100000 + 36), 0x88776655);
 }
 
 TEST_P(GraphicsExportTest, LinearImageLoadsRespectDefaultPitchAndArrayDescriptorFields) {
@@ -857,57 +919,65 @@ TEST_P(GraphicsExportTest, LinearImageLoadsRespectDefaultPitchAndArrayDescriptor
                         {"nonzero array view", 128, (2 << 16) | 4, 13, 5, 3588, 1},
                         {"array view limit", 128, (2 << 16) | 4, 13, 5, 516, 3, true},
                         {"array index overflow", 128, (2 << 16) | 4, 13, 5, 516, 0xffffffff, true}};
-  for (uint32_t i = 0; i < std::size(cases); ++i) {
-    const auto &c = cases[i];
-    SCOPED_TRACE(c.name);
-    const uint32_t base = 0x100000 + i * 0x10000;
-    const std::array<uint32_t, 8> descriptor{base >> 8,
-                                             (46u << (gfx12 ? 17 : 20)) |
-                                                 (((c.width - 1) & 3) << 30),
-                                             ((c.width - 1) >> 2) | (1u << 14),
-                                             (c.type << 28) | 0xfac,
-                                             c.word4,
-                                             0,
-                                             0,
-                                             0};
-    for (uint32_t r = 0; r < descriptor.size(); ++r)
-      wave_->debug_write_sgpr(8 + r, descriptor[r]);
-    wave_->set_exec(1);
-    wave_->debug_write_vgpr(2, 0, 1);
-    wave_->debug_write_vgpr(3, 0, 1);
-    wave_->debug_write_vgpr(4, 0, c.layer);
-    memory_.write32(base + c.offset, 0x44332211);
-    std::array<uint32_t, 4> words{};
-    if (gfx12) {
-      const auto inst = rdna4::build_vimage(0, {.dim = uint8_t(c.dim),
-                                                .dmask = 15,
-                                                .vdata = 8,
-                                                .rsrc = 8,
-                                                .vaddr0 = 2,
-                                                .vaddr1 = 3,
-                                                .vaddr2 = 4});
-      std::copy(inst.begin(), inst.end(), words.begin());
-    } else {
-      const auto inst = rdna3::build_mimg(
-          0, {.dim = uint8_t(c.dim), .dmask = 15, .vaddr = 2, .vdata = 8, .srsrc = 2});
-      std::copy(inst.begin(), inst.end(), words.begin());
+  for (bool a16 : {false, true})
+    for (uint32_t i = 0; i < std::size(cases); ++i) {
+      const auto &c = cases[i];
+      SCOPED_TRACE(c.name);
+      SCOPED_TRACE(a16);
+      cu_->l1_vector().flush_all();
+      cache_.flush_all();
+      cu_->l1_vector().invalidate_all();
+      cache_.invalidate_all();
+      const uint32_t base = 0x100000 + i * 0x10000;
+      const std::array<uint32_t, 8> descriptor{base >> 8,
+                                               (46u << (gfx12 ? 17 : 20)) |
+                                                   (((c.width - 1) & 3) << 30),
+                                               ((c.width - 1) >> 2) | (1u << 14),
+                                               (c.type << 28) | 0xfac,
+                                               c.word4,
+                                               0,
+                                               0,
+                                               0};
+      for (uint32_t r = 0; r < descriptor.size(); ++r)
+        wave_->debug_write_sgpr(8 + r, descriptor[r]);
+      wave_->set_exec(1);
+      wave_->debug_write_vgpr(2, 0, a16 ? 1 | (1 << 16) : 1);
+      wave_->debug_write_vgpr(3, 0, a16 ? (c.layer & 0xffff) | 0xbeef0000 : 1);
+      wave_->debug_write_vgpr(4, 0, c.layer);
+      memory_.write32(base + c.offset, 0x44332211);
+      std::array<uint32_t, 4> words{};
+      if (gfx12) {
+        const auto inst = rdna4::build_vimage(0, {.dim = uint8_t(c.dim),
+                                                  .a16 = a16,
+                                                  .dmask = 15,
+                                                  .vdata = 8,
+                                                  .rsrc = 8,
+                                                  .vaddr0 = 2,
+                                                  .vaddr1 = 3,
+                                                  .vaddr2 = static_cast<uint8_t>(a16 ? 255 : 4)});
+        std::copy(inst.begin(), inst.end(), words.begin());
+      } else {
+        const auto inst = rdna3::build_mimg(
+            0,
+            {.dim = uint8_t(c.dim), .dmask = 15, .a16 = a16, .vaddr = 2, .vdata = 8, .srsrc = 2});
+        std::copy(inst.begin(), inst.end(), words.begin());
+      }
+      auto decoded = decoder_->decode(words.data());
+      ASSERT_FALSE(decoded.failed());
+      auto instruction = std::move(decoded).value();
+      ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
+      ASSERT_NE(instruction->data(), nullptr);
+      const auto *transfer = instruction->data_as<amdgpu::VectorMemState>();
+      EXPECT_EQ(transfer->lane_mask, c.out_of_bounds ? 0u : 1u);
+      if (!c.out_of_bounds)
+        EXPECT_EQ(transfer->per_lane_addr[0], base + c.offset);
+      amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
+      pipeline.issue(instruction.release(), *wave_);
+      for (uint32_t component = 0; component < 4; ++component)
+        EXPECT_EQ(wave_->debug_read_vgpr(8 + component, 0),
+                  c.out_of_bounds ? 0 : 0x11u * (component + 1));
+      EXPECT_EQ(memory_.read32(base + c.offset), 0x44332211u);
     }
-    auto decoded = decoder_->decode(words.data());
-    ASSERT_FALSE(decoded.failed());
-    auto instruction = std::move(decoded).value();
-    ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
-    ASSERT_NE(instruction->data(), nullptr);
-    const auto *transfer = instruction->data_as<amdgpu::VectorMemState>();
-    EXPECT_EQ(transfer->lane_mask, c.out_of_bounds ? 0u : 1u);
-    if (!c.out_of_bounds)
-      EXPECT_EQ(transfer->per_lane_addr[0], base + c.offset);
-    amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
-    pipeline.issue(instruction.release(), *wave_);
-    for (uint32_t component = 0; component < 4; ++component)
-      EXPECT_EQ(wave_->debug_read_vgpr(8 + component, 0),
-                c.out_of_bounds ? 0 : 0x11u * (component + 1));
-    EXPECT_EQ(memory_.read32(base + c.offset), 0x44332211u);
-  }
 }
 
 TEST_P(GraphicsExportTest, CompressedImageTransfersMaterializeClearsAndPreserveStores) {
@@ -915,106 +985,124 @@ TEST_P(GraphicsExportTest, CompressedImageTransfersMaterializeClearsAndPreserveS
     GTEST_SKIP() << "GFX12 metadata is allocation-managed";
   constexpr uint64_t base = 0x200000, metadata = 0x100700;
   constexpr uint32_t width = 17, height = 13;
-  for (bool array : {false, true}) {
-    SCOPED_TRACE(array);
-    cu_->l1_vector().flush_all();
-    cache_.flush_all();
-    cu_->l1_vector().invalidate_all();
-    cache_.invalidate_all();
-    // AddrLib: layer 3 of this R_X surface has stride 64KiB and XOR 0x600.
-    const uint64_t selected_base = array ? base + 3 * 65536 + 0x600 : base;
-    const auto preserved = *amdgpu::gfx11_image_address(base, 11, 10, width, 4, 27);
-    memory_.write32(preserved, 0x12345678);
-    const std::array<uint32_t, 8> descriptor{
-        base >> 8,
-        46u << 20,
-        ((width - 1) >> 2) | ((height - 1) << 14),
-        ((array ? 13u : 9u) << 28) | (27u << 20) | 0xfac,
-        array ? (2u << 16) | 4 : 0,
-        0,
-        (1u << 21) | (1u << 19) | (static_cast<uint32_t>((metadata >> 8) & 255) << 24),
-        metadata >> 16};
-    for (uint32_t i = 0; i < descriptor.size(); ++i)
-      wave_->debug_write_sgpr(8 + i, descriptor[i]);
-    wave_->set_exec(5);
-    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
-      wave_->debug_write_vgpr(2, lane, lane == 2 ? width : 11);
-      wave_->debug_write_vgpr(3, lane, 10);
-      wave_->debug_write_vgpr(4, lane, 1);
+  for (bool a16 : {false, true})
+    for (bool array : {false, true}) {
+      SCOPED_TRACE(a16);
+      SCOPED_TRACE(array);
+      cu_->l1_vector().flush_all();
+      cache_.flush_all();
+      cu_->l1_vector().invalidate_all();
+      cache_.invalidate_all();
+      // AddrLib: layer 3 of this R_X surface has stride 64KiB and XOR 0x600.
+      const uint64_t selected_base = array ? base + 3 * 65536 + 0x600 : base;
+      const auto preserved = *amdgpu::gfx11_image_address(base, 11, 10, width, 4, 27);
+      memory_.write32(preserved, 0x12345678);
+      const std::array<uint32_t, 8> descriptor{
+          base >> 8,
+          46u << 20,
+          ((width - 1) >> 2) | ((height - 1) << 14),
+          ((array ? 13u : 9u) << 28) | (27u << 20) | 0xfac,
+          array ? (2u << 16) | 4 : 0,
+          0,
+          (1u << 21) | (1u << 19) | (static_cast<uint32_t>((metadata >> 8) & 255) << 24),
+          metadata >> 16};
+      for (uint32_t i = 0; i < descriptor.size(); ++i)
+        wave_->debug_write_sgpr(8 + i, descriptor[i]);
+      wave_->set_exec(5);
+      for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
+        wave_->debug_write_vgpr(2, lane, (lane == 2 ? width : 11) | (a16 ? 10u << 16 : 0));
+        wave_->debug_write_vgpr(3, lane, a16 ? 0xbeef0001 : 10);
+        wave_->debug_write_vgpr(4, lane, 1);
+        for (uint32_t c = 0; c < 4; ++c)
+          wave_->debug_write_vgpr(8 + c, lane, 0xdeadbeef);
+      }
+      const auto tag = *amdgpu::gfx11_metadata_address(metadata, 11, 10, width, height, 4, 27,
+                                                       false, true, array ? 3 : 0);
+      // Queue the clear tag through L2 to check that the image path observes dirty
+      // metadata and does not overwrite it with a stale backing-memory value.
+      const uint8_t key = 8;
+      memory_.write8(tag, 2);
+      cache_.write(tag, &key, 1);
+      amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
+      const auto transfer = [&](uint32_t opcode) {
+        const auto encoding = rdna3::build_mimg(opcode, {.dim = static_cast<uint8_t>(array ? 5 : 1),
+                                                         .dmask = 15,
+                                                         .a16 = a16,
+                                                         .vaddr = 2,
+                                                         .vdata = 8,
+                                                         .srsrc = 2});
+        std::array<uint32_t, 4> words{};
+        std::copy(encoding.begin(), encoding.end(), words.begin());
+        auto decoded = decoder_->decode(words.data());
+        ASSERT_FALSE(decoded.failed());
+        auto instruction = std::move(decoded).value();
+        ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
+        pipeline.issue(instruction.release(), *wave_);
+        ASSERT_FALSE(wave_->instruction_execution_failed());
+      };
+      transfer(0);
+      for (uint32_t c = 0; c < 4; ++c) {
+        EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), c == 3 ? 255 : 0);
+        EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 1), 0xdeadbeef);
+        EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 2), 0);
+        wave_->debug_write_vgpr(8 + c, 0, 0x11u * (c + 1));
+      }
+      transfer(6); // IMAGE_STORE
+      transfer(0);
       for (uint32_t c = 0; c < 4; ++c)
-        wave_->debug_write_vgpr(8 + c, lane, 0xdeadbeef);
-    }
-    const auto tag = *amdgpu::gfx11_metadata_address(metadata, 11, 10, width, height, 4, 27, false,
-                                                     true, array ? 3 : 0);
-    // Queue the clear tag through L2 to check that the image path observes dirty
-    // metadata and does not overwrite it with a stale backing-memory value.
-    const uint8_t key = 8;
-    memory_.write8(tag, 2);
-    cache_.write(tag, &key, 1);
-    amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
-    const auto transfer = [&](uint32_t opcode) {
-      const auto encoding = rdna3::build_mimg(opcode, {.dim = static_cast<uint8_t>(array ? 5 : 1),
-                                                       .dmask = 15,
-                                                       .vaddr = 2,
-                                                       .vdata = 8,
-                                                       .srsrc = 2});
+        EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), 0x11u * (c + 1));
+      cu_->l1_vector().flush_all();
+      cache_.flush_all();
+      EXPECT_EQ(memory_.read32(*amdgpu::gfx11_image_address(selected_base, 11, 10, width, 4, 27)),
+                0x44332211u);
+      EXPECT_EQ(memory_.read32(*amdgpu::gfx11_image_address(selected_base, 10, 10, width, 4, 27)),
+                0xff000000u);
+      EXPECT_EQ(memory_.read8(tag), 0xff);
+      if (array)
+        EXPECT_EQ(memory_.read32(preserved), 0x12345678u);
+      // Filtering must also publish dirty texels before materializing metadata.
+      const uint32_t updated = 0x66332211;
+      cache_.write(*amdgpu::gfx11_image_address(selected_base, 11, 10, width, 4, 27),
+                   reinterpret_cast<const uint8_t *>(&updated), 4);
+      wave_->debug_write_sgpr(9, 42u << 20);
+      wave_->debug_write_sgpr(4, 2 | (2 << 3) | (2 << 6));
+      wave_->debug_write_sgpr(5, 0);
+      wave_->debug_write_sgpr(6, (1 << 20) | (1 << 22));
+      wave_->debug_write_sgpr(7, 0);
+      wave_->set_exec(1);
+      wave_->debug_write_vgpr(2, 0, std::bit_cast<uint32_t>(11.0f / width));
+      wave_->debug_write_vgpr(3, 0, std::bit_cast<uint32_t>(10.5f / height));
+      wave_->debug_write_vgpr(4, 0, std::bit_cast<uint32_t>(1.0f));
+      // IMAGE_SAMPLE_LZ
+      const auto encoding = rdna3::build_mimg(31, {.dim = static_cast<uint8_t>(array ? 5 : 1),
+                                                   .dmask = 15,
+                                                   .vaddr = 2,
+                                                   .vdata = 8,
+                                                   .srsrc = 2,
+                                                   .ssamp = 1});
       std::array<uint32_t, 4> words{};
       std::copy(encoding.begin(), encoding.end(), words.begin());
       auto decoded = decoder_->decode(words.data());
       ASSERT_FALSE(decoded.failed());
       auto instruction = std::move(decoded).value();
       ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
-      pipeline.issue(instruction.release(), *wave_);
       ASSERT_FALSE(wave_->instruction_execution_failed());
-    };
-    transfer(0);
-    for (uint32_t c = 0; c < 4; ++c) {
-      EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), c == 3 ? 255 : 0);
-      EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 1), 0xdeadbeef);
-      EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 2), 0);
-      wave_->debug_write_vgpr(8 + c, 0, 0x11 * (c + 1));
+      pipeline.issue(instruction.release(), *wave_);
+      const float expected[] = {8.5f / 255, 17.0f / 255, 25.5f / 255, 178.5f / 255};
+      for (uint32_t c = 0; c < 4; ++c)
+        EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), std::bit_cast<uint32_t>(expected[c]));
+      // A subsequent dirty metadata clear must affect only the sampled layer.
+      cache_.write(tag, &key, 1);
+      auto cleared = decoder_->decode(words.data());
+      ASSERT_FALSE(cleared.failed());
+      instruction = std::move(cleared).value();
+      ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
+      pipeline.issue(instruction.release(), *wave_);
+      for (uint32_t c = 0; c < 4; ++c)
+        EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), c == 3 ? 0x3f800000u : 0);
+      if (array)
+        EXPECT_EQ(memory_.read32(preserved), 0x12345678u);
     }
-    transfer(6); // IMAGE_STORE
-    transfer(0);
-    for (uint32_t c = 0; c < 4; ++c)
-      EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), 0x11u * (c + 1));
-    cu_->l1_vector().flush_all();
-    cache_.flush_all();
-    EXPECT_EQ(memory_.read32(*amdgpu::gfx11_image_address(selected_base, 11, 10, width, 4, 27)),
-              0x44332211u);
-    EXPECT_EQ(memory_.read32(*amdgpu::gfx11_image_address(selected_base, 10, 10, width, 4, 27)),
-              0xff000000u);
-    EXPECT_EQ(memory_.read8(tag), 0xff);
-    if (array) {
-      EXPECT_EQ(memory_.read32(preserved), 0x12345678u);
-      continue;
-    }
-    // Filtering must also publish dirty texels before materializing metadata.
-    const uint32_t updated = 0x66332211;
-    cache_.write(*amdgpu::gfx11_image_address(selected_base, 11, 10, width, 4, 27),
-                 reinterpret_cast<const uint8_t *>(&updated), 4);
-    wave_->debug_write_sgpr(9, 42u << 20);
-    wave_->debug_write_sgpr(4, 2 | (2 << 3) | (2 << 6));
-    wave_->debug_write_sgpr(5, 0);
-    wave_->debug_write_sgpr(6, (1 << 20) | (1 << 22));
-    wave_->debug_write_sgpr(7, 0);
-    wave_->set_exec(1);
-    wave_->debug_write_vgpr(2, 0, std::bit_cast<uint32_t>(11.0f / width));
-    wave_->debug_write_vgpr(3, 0, std::bit_cast<uint32_t>(10.5f / height));
-    const auto encoding = rdna3::build_mimg(
-        31, {.dim = 1, .dmask = 15, .vaddr = 2, .vdata = 8, .srsrc = 2, .ssamp = 1});
-    std::array<uint32_t, 4> words{};
-    std::copy(encoding.begin(), encoding.end(), words.begin());
-    auto decoded = decoder_->decode(words.data());
-    ASSERT_FALSE(decoded.failed());
-    auto instruction = std::move(decoded).value();
-    ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
-    ASSERT_FALSE(wave_->instruction_execution_failed());
-    pipeline.issue(instruction.release(), *wave_);
-    const float expected[] = {8.5f / 255, 17.0f / 255, 25.5f / 255, 178.5f / 255};
-    for (uint32_t c = 0; c < 4; ++c)
-      EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), std::bit_cast<uint32_t>(expected[c]));
-  }
 }
 
 TEST_P(GraphicsExportTest, UnsupportedComparisonSamplingReportsAnExecutionError) {
@@ -1182,7 +1270,7 @@ TEST_P(GraphicsExportTest, ColorBlendingPreservesMasksAndUsesSeparateAlpha) {
     uint32_t blend, mask, expected;
     bool reject = false;
     bool constant_boundary = false;
-    uint32_t number_format = 0;
+    uint32_t number_format = 0, export_format = 9;
   };
   constexpr uint32_t enabled = 1u << 30, separate = 1u << 29;
   const Case cases[] = {
@@ -1196,6 +1284,14 @@ TEST_P(GraphicsExportTest, ColorBlendingPreservesMasksAndUsesSeparateAlpha) {
       {.blend = enabled | 13, .mask = 15, .expected = 0, .reject = true},
       {.blend = enabled | (5 << 5), .mask = 15, .expected = 0, .reject = true},
       {.blend = enabled | 1, .mask = 15, .expected = 0, .reject = true, .number_format = 4},
+      // FP32 sRGB exports and FP16 sRGB blending need separate qualification.
+      {.blend = 0, .mask = 15, .expected = 0, .reject = true, .number_format = 6},
+      {.blend = enabled | 1,
+       .mask = 15,
+       .expected = 0,
+       .reject = true,
+       .number_format = 6,
+       .export_format = 4},
       {.blend = enabled | 11, .mask = 5, .expected = 0xff20bf20},
       {.blend = enabled | separate | 11 | (17 << 16),
        .mask = 15,
@@ -1213,7 +1309,7 @@ TEST_P(GraphicsExportTest, ColorBlendingPreservesMasksAndUsesSeparateAlpha) {
     context[gfx12 ? 0x31f : 0x3b8] = gfx12 ? 3u << 15 : 26u << 14;
     context[0x318] = 0x1000;
     context[gfx12 ? 0x214 : 0x8e] = test.mask;
-    context[gfx12 ? 0x195 : 0x1c5] = 9;
+    context[gfx12 ? 0x195 : 0x1c5] = test.export_format;
     context[gfx12 ? 0x198 : 0x1b4] = 2;
     context[0x2f9] = 0x2d;
     context[gfx12 ? 0x205 : 0x206] = 0x43f;
@@ -1264,6 +1360,77 @@ TEST_P(GraphicsExportTest, WideColorAttachmentsWriteFullTexelsAndPreserveMaskedC
     std::array<uint32_t, 4> exported, expected;
   };
   const Case cases[] = {
+      // FP16 sRGB exports captured on both physical RDNA3 and RDNA4.
+      {.data_format = 10,
+       .number_format = 6,
+       .export_format = 4,
+       .bytes = 4,
+       .mask = 3,
+       .exported = {0x00000000, 0x00000000},
+       .expected = {0x00000000}},
+      {.data_format = 10,
+       .number_format = 6,
+       .export_format = 4,
+       .bytes = 4,
+       .mask = 3,
+       .exported = {0x41941234, 0x1234c70c},
+       .expected = {0x0000ff03}},
+      {.data_format = 10,
+       .number_format = 6,
+       .export_format = 4,
+       .bytes = 4,
+       .mask = 3,
+       .exported = {0x2b132aab, 0x2aabd685},
+       .expected = {0x0d004341}},
+      {.data_format = 10,
+       .number_format = 6,
+       .export_format = 4,
+       .bytes = 4,
+       .mask = 3,
+       .exported = {0x76c737ff, 0x37ff4471},
+       .expected = {0x7fffffbb}},
+      {.data_format = 10,
+       .number_format = 6,
+       .export_format = 4,
+       .bytes = 4,
+       .mask = 3,
+       .exported = {0x78003800, 0x38004800},
+       .expected = {0x80ffffbc}},
+      {.data_format = 10,
+       .number_format = 6,
+       .export_format = 4,
+       .bytes = 4,
+       .mask = 3,
+       .exported = {0x571c3bfc, 0x3bfc75c4},
+       .expected = {0xffffffff}},
+      {.data_format = 10,
+       .number_format = 6,
+       .export_format = 4,
+       .bytes = 4,
+       .mask = 3,
+       .exported = {0x5c003c00, 0x3c008400},
+       .expected = {0xff00ffff}},
+      {.data_format = 10,
+       .number_format = 6,
+       .export_format = 4,
+       .bytes = 4,
+       .mask = 3,
+       .exported = {0x9c007c00, 0x7c004400},
+       .expected = {0xffff00ff}},
+      {.data_format = 10,
+       .number_format = 6,
+       .export_format = 4,
+       .bytes = 4,
+       .mask = 3,
+       .exported = {0x0e007e00, 0x7e006200},
+       .expected = {0x00ff0100}},
+      {.data_format = 10,
+       .number_format = 6,
+       .export_format = 4,
+       .bytes = 4,
+       .mask = 3,
+       .exported = {0xdc00bc00, 0xbc000400},
+       .expected = {0x00000000}},
       {.data_format = 12,
        .number_format = 0,
        .export_format = 4,
@@ -1744,6 +1911,115 @@ TEST_P(GraphicsExportTest, SampleLodUsesMipViewsDerivativesAndBias) {
         EXPECT_EQ(wave_->debug_read_vgpr(6 + c, lane), std::bit_cast<uint32_t>(test.expected[c]))
             << lane << "," << c;
   }
+}
+
+TEST_P(GraphicsExportTest, SampledArrayViewsClampLayersAndKeepMipCoordinatesSeparate) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  std::optional<uint64_t> (*image_address)(uint64_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                                           uint32_t) =
+      gfx12 ? amdgpu::gfx12_image_address : amdgpu::gfx11_image_address;
+  for (uint32_t layer = 0; layer < 5; ++layer)
+    for (uint32_t level = 0; level < 4; ++level) {
+      const auto mip = amdgpu::image_mip_layout(gfx12, 0, 4, 8, 8, 4, level);
+      ASSERT_TRUE(mip);
+      for (uint32_t y = 0; y < mip->height; ++y)
+        for (uint32_t x = 0; x < mip->width; ++x)
+          memory_.write32(*image_address(0x100000 + layer * mip->slice_size + mip->offset, x, y,
+                                         mip->pitch, 4, 0),
+                          0xff000000 | (layer << 8) | level);
+    }
+  for (bool a16 : {false, true})
+    for (bool array : {false, true})
+      for (const auto [opcode, name] : {std::pair{27u, "IMAGE_SAMPLE"},
+                                        {28u, "IMAGE_SAMPLE_D"},
+                                        {29u, "IMAGE_SAMPLE_L"},
+                                        {30u, "IMAGE_SAMPLE_B"},
+                                        {31u, "IMAGE_SAMPLE_LZ"}}) {
+        SCOPED_TRACE(testing::Message()
+                     << "a16=" << a16 << ", array=" << array << ", opcode=" << name);
+        const std::array<uint32_t, 8> descriptor{0x1000,
+                                                 (46u << (gfx12 ? 17 : 20)) | (3u << 30) |
+                                                     (3u << (gfx12 ? 12 : 16)),
+                                                 1 | (7u << 14),
+                                                 (13u << 28) | 0xfac | (3u << (gfx12 ? 15 : 16)),
+                                                 (2u << 16) | 4,
+                                                 0,
+                                                 0,
+                                                 0};
+        for (uint32_t r = 0; r < descriptor.size(); ++r)
+          wave_->debug_write_sgpr(8 + r, descriptor[r]);
+        wave_->debug_write_sgpr(4, 2 | (2 << 3) | (2 << 6));
+        wave_->debug_write_sgpr(5, 768u << (gfx12 ? 13 : 12));
+        wave_->debug_write_sgpr(6, 1u << 26);
+        wave_->debug_write_sgpr(7, 0);
+        wave_->set_exec(15);
+        const uint32_t prefix = opcode == 28 ? 4 : opcode == 30 ? 1 : 0;
+        const std::array<uint32_t, 7> registers{6, 0, 4, 8, 9, 10, 11};
+        for (uint32_t lane = 0; lane < 4; ++lane) {
+          std::array<float, 7> values{};
+          if (opcode == 28)
+            values = {0.5f, 0, 0, 0.5f};
+          if (opcode == 30)
+            values[0] = 1;
+          values[prefix] = (lane & 1) * 0.5f;
+          values[prefix + 1] = ((lane >> 1) & 1) * 0.5f;
+          if (array)
+            values[prefix + 2] = lane == 0 ? -100.0f : lane == 3 ? 100.0f : 1.0f;
+          if (opcode == 29)
+            values[prefix + 2 + array] = 1.0f;
+          for (uint32_t i = 0; i < values.size(); ++i)
+            wave_->debug_write_vgpr(registers[i], lane, std::bit_cast<uint32_t>(values[i]));
+          if (a16) {
+            const uint32_t count = 2 + array + (opcode == 29);
+            for (uint32_t i = 0; i < count; i += 2)
+              wave_->debug_write_vgpr(
+                  registers[prefix + i / 2], lane,
+                  util::f32_to_f16(values[prefix + i]) |
+                      (uint32_t(util::f32_to_f16(i + 1 < count ? values[prefix + i + 1] : 0))
+                       << 16));
+          }
+        }
+        std::array<uint32_t, 4> words{};
+        if (gfx12) {
+          const auto encoded = rdna4::build_vsample(opcode, {.dim = uint8_t(array ? 5 : 1),
+                                                             .a16 = a16,
+                                                             .dmask = 15,
+                                                             .vdata = 12,
+                                                             .rsrc = 8,
+                                                             .samp = 4,
+                                                             .vaddr0 = 6,
+                                                             .vaddr1 = 0,
+                                                             .vaddr2 = 4,
+                                                             .vaddr3 = 8});
+          std::copy(encoded.begin(), encoded.end(), words.begin());
+        } else {
+          const auto encoded = rdna3::build_mimg(opcode, {.nsa = 1,
+                                                          .dim = uint8_t(array ? 5 : 1),
+                                                          .dmask = 15,
+                                                          .a16 = a16,
+                                                          .vaddr = 6,
+                                                          .vdata = 12,
+                                                          .srsrc = 2,
+                                                          .ssamp = 1});
+          std::copy(encoded.begin(), encoded.end(), words.begin());
+          words[2] = (4 << 8) | (8 << 16) | (9 << 24);
+        }
+        auto decoded = decoder_->decode(words.data());
+        ASSERT_FALSE(decoded.failed());
+        auto instruction = std::move(decoded).value();
+        ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
+        ASSERT_FALSE(wave_->instruction_execution_failed());
+        amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
+        pipeline.issue(instruction.release(), *wave_);
+        for (uint32_t lane = 0; lane < 4; ++lane) {
+          const uint32_t level = opcode == 31 ? 0 : opcode == 29 ? 1 : opcode == 30 ? 3 : 2;
+          const uint32_t layer = !array || lane == 0 ? 2 : lane == 3 ? 4 : 3;
+          EXPECT_EQ(wave_->debug_read_vgpr(12, lane), level);
+          EXPECT_EQ(wave_->debug_read_vgpr(13, lane), layer);
+          EXPECT_EQ(wave_->debug_read_vgpr(14, lane), 0u);
+          EXPECT_EQ(wave_->debug_read_vgpr(15, lane), 255u);
+        }
+      }
 }
 
 TEST_P(GraphicsExportTest, TrilinearUsesDistinctWeightsForNonuniformMipLevels) {

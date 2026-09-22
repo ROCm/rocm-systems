@@ -31,14 +31,17 @@ constexpr uint32_t kBlendZero = 0, kBlendOne = 1, kBlendSrcColor = 2, kBlendInvS
 constexpr uint32_t kBlendAdd = 0, kBlendSubtract = 1, kBlendMin = 2, kBlendMax = 3,
                    kBlendReverseSubtract = 4;
 constexpr uint32_t kBlendSeparateAlpha = 1u << 29, kBlendEnable = 1u << 30;
-constexpr uint32_t kNumberUnorm = 0, kNumberUint = 4, kNumberSint = 5, kNumberFloat = 7;
+constexpr uint32_t kNumberUnorm = 0, kNumberUint = 4, kNumberSint = 5, kNumberSrgb = 6,
+                   kNumberFloat = 7;
 constexpr uint32_t kBufRgba8Unorm = 42, kBufRgba16Unorm = 51, kBufRgba32Uint = 61;
 
 // CB color formats use separate data and number fields; pack_buffer_format uses
 // the combined GFX11 buffer format table.
 uint32_t color_buffer_format(uint32_t data_format, uint32_t number_format) {
   switch (data_format) {
-  case 10: // COLOR_8_8_8_8; NUMBER_SRGB (6) has no corresponding buffer encoding.
+  case 10: // COLOR_8_8_8_8
+    if (number_format == kNumberSrgb)
+      return kBufRgba8Unorm; // Encode RGB separately; alpha remains linear UNORM.
     if (number_format == kNumberUnorm || number_format == kNumberUint ||
         number_format == kNumberSint)
       return kBufRgba8Unorm + number_format;
@@ -128,6 +131,46 @@ float blend_component(uint32_t control, uint32_t component, const std::array<flo
     return source_term + destination_term;
   throw std::runtime_error("unsupported graphics blend operation");
 }
+
+// Color-buffer quantization thresholds for FP16 sRGB exports. Each entry is
+// the first positive half encoding producing the next byte value. Captures of
+// all 65536 FP16 inputs agree on RDNA3 and RDNA4; applying the ideal sRGB curve
+// instead changes values near these boundaries.
+uint8_t srgb_color_byte(float value) {
+  if (!(value > 0))
+    return 0;
+  if (value >= 1)
+    return 255;
+  static constexpr uint16_t boundaries[] = {
+      0x0900, 0x0f80, 0x1200, 0x1440, 0x1580, 0x16c0, 0x1800, 0x18a0, 0x1940, 0x19e0, 0x1a80,
+      0x1b30, 0x1be0, 0x1c50, 0x1cb0, 0x1d20, 0x1d80, 0x1e00, 0x1e70, 0x1ee0, 0x1f60, 0x1ff0,
+      0x2040, 0x2088, 0x20d0, 0x2120, 0x2170, 0x21c0, 0x2220, 0x2270, 0x22d0, 0x2330, 0x2390,
+      0x2400, 0x2430, 0x2468, 0x24a0, 0x24d8, 0x2510, 0x2550, 0x2590, 0x25d0, 0x2610, 0x2650,
+      0x2690, 0x26e0, 0x2720, 0x2770, 0x27b8, 0x2800, 0x2828, 0x2850, 0x2878, 0x28a0, 0x28d0,
+      0x28f8, 0x2928, 0x2950, 0x2980, 0x29b0, 0x29e0, 0x2a10, 0x2a40, 0x2a78, 0x2aa8, 0x2ae0,
+      0x2b10, 0x2b48, 0x2b80, 0x2bb8, 0x2bf0, 0x2c18, 0x2c34, 0x2c54, 0x2c70, 0x2c90, 0x2cb0,
+      0x2cd0, 0x2cf0, 0x2d10, 0x2d34, 0x2d58, 0x2d78, 0x2d98, 0x2dc0, 0x2de0, 0x2e08, 0x2e2c,
+      0x2e50, 0x2e78, 0x2ea0, 0x2ec8, 0x2ef0, 0x2f18, 0x2f40, 0x2f68, 0x2f90, 0x2fbc, 0x2fe8,
+      0x3008, 0x3020, 0x3034, 0x304c, 0x3064, 0x3078, 0x3090, 0x30a8, 0x30c0, 0x30d8, 0x30f0,
+      0x3108, 0x3124, 0x313c, 0x3154, 0x3170, 0x3188, 0x31a4, 0x31c0, 0x31d8, 0x31f4, 0x3210,
+      0x322c, 0x3248, 0x3264, 0x3280, 0x32a0, 0x32bc, 0x32d8, 0x32f8, 0x3318, 0x3334, 0x3354,
+      0x3370, 0x3390, 0x33b0, 0x33d0, 0x33f0, 0x3408, 0x3418, 0x342a, 0x343c, 0x344c, 0x345c,
+      0x346e, 0x3480, 0x3490, 0x34a2, 0x34b4, 0x34c6, 0x34d8, 0x34ea, 0x34fc, 0x3510, 0x3522,
+      0x3534, 0x3548, 0x355c, 0x3570, 0x3582, 0x3596, 0x35aa, 0x35be, 0x35d2, 0x35e8, 0x35fc,
+      0x3610, 0x3624, 0x3638, 0x3650, 0x3664, 0x3678, 0x3690, 0x36a4, 0x36bc, 0x36d0, 0x36e8,
+      0x36fc, 0x3714, 0x372c, 0x3740, 0x3758, 0x3770, 0x3788, 0x37a0, 0x37b8, 0x37d0, 0x37e8,
+      0x3800, 0x380c, 0x3818, 0x3824, 0x3832, 0x383e, 0x384a, 0x3858, 0x3864, 0x3870, 0x387e,
+      0x388c, 0x3898, 0x38a6, 0x38b4, 0x38c0, 0x38ce, 0x38dc, 0x38e8, 0x38f8, 0x3904, 0x3914,
+      0x3920, 0x3930, 0x393c, 0x394c, 0x395a, 0x3968, 0x3978, 0x3986, 0x3994, 0x39a4, 0x39b2,
+      0x39c0, 0x39d0, 0x39e0, 0x39f0, 0x39fe, 0x3a0e, 0x3a1c, 0x3a2c, 0x3a3c, 0x3a4c, 0x3a5c,
+      0x3a6c, 0x3a7c, 0x3a8c, 0x3a9c, 0x3aae, 0x3abe, 0x3ad0, 0x3ae0, 0x3af0, 0x3b00, 0x3b12,
+      0x3b24, 0x3b34, 0x3b44, 0x3b58, 0x3b68, 0x3b7a, 0x3b8c, 0x3b9c, 0x3bb0, 0x3bc0, 0x3bd4,
+      0x3be4, 0x3bf8,
+  };
+  const uint16_t half = util::f32_to_f16(value);
+  return static_cast<uint8_t>(std::upper_bound(std::begin(boundaries), std::end(boundaries), half) -
+                              std::begin(boundaries));
+}
 } // namespace
 
 GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint32_t vertices,
@@ -139,7 +182,6 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
       arch != ROCJITSU_CODE_ARCH_RDNA4)
     throw std::runtime_error("graphics draw requires RDNA3 or RDNA4");
   if (!instance_count_ || instance_count_ > 4096 || vertices < 3 || vertices > (1u << 20) ||
-      (primitive_type_ != kTriangleStrip && vertices % 3) ||
       (primitive_type_ != kTriangleList && primitive_type_ != kTriangleStrip &&
        primitive_type_ != kRectangleList))
     throw std::runtime_error("unsupported graphics primitive, vertex count, or instance count");
@@ -445,6 +487,7 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
                    attrib3, " export=", color_format_, " inputs=", context_[0x198],
                    " mask=", context_[0x214], " depth=", context_[0x1c], std::dec);
   const uint32_t data_format = info & 31, number_format = (info >> 8) & 7;
+  color_srgb_ = number_format == kNumberSrgb;
   memory_format_ = color_buffer_format(data_format, number_format);
   color_bytes_ = buffer_format_bytes(memory_format_);
   const uint32_t layer_bits = gfx12 ? 14 : 13, layer_mask = (1u << layer_bits) - 1;
@@ -462,16 +505,17 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
   if (depth_control_ & ~0x76u)
     throw std::runtime_error("unsupported graphics stencil or depth bounds test");
   if (color_enabled_ &&
-      (!memory_format_ || (info & (3u << 11)) || (attrib & (gfx12 ? ~0u : ~0x30u)) ||
-       ((attrib3 >> 24) & 3) > 1 || (attrib3 & (1u << layer_bits)) || (context_[0x31a] & ~31u) ||
+      (!memory_format_ || (number_format == kNumberSrgb && color_format_ != 4) ||
+       (info & (3u << 11)) || (attrib & (gfx12 ? ~0u : ~0x30u)) || ((attrib3 >> 24) & 3) > 1 ||
+       (attrib3 & (1u << layer_bits)) || (context_[0x31a] & ~31u) ||
        color_first_layer_ > color_last_layer_ || color_last_layer_ > color_depth ||
        (view & (gfx12 ? 0xf0000000u : 0xc0000000u)) || (context_[0x214] & ~15u) ||
        (color_format_ != 4 && color_format_ != 7 && color_format_ != 9)))
     throw std::runtime_error("unsupported graphics color state");
   const uint32_t blend = context_[0x1e0];
   if (color_enabled_ && (blend & kBlendEnable) &&
-      (memory_format_ != kBufRgba8Unorm || !supported_blend(blend) ||
-       ((blend & kBlendSeparateAlpha) && !supported_blend(blend >> 16))))
+      (number_format == kNumberSrgb || memory_format_ != kBufRgba8Unorm ||
+       !supported_blend(blend) || ((blend & kBlendSeparateAlpha) && !supported_blend(blend >> 16))))
     throw std::runtime_error("unsupported graphics blend operation or integer attachment");
   if ((context_[0x198] & ~0x8f7fu) || (context_[0x197] & ~context_[0x198]))
     throw std::runtime_error("unsupported graphics fragment inputs");
@@ -932,6 +976,9 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
         }
       }
       pack_buffer_format(memory_format_, 0xfac, components, std::span{bytes}.first(color_bytes_));
+      if (color_srgb_)
+        for (uint32_t c = 0; c < 3; ++c)
+          bytes[c] = srgb_color_byte(std::bit_cast<float>(components[c]));
       const uint32_t component_bytes = color_bytes_ / 4;
       for (uint32_t c = 0; c < 4; ++c)
         if (!(write_mask & (1u << c)))

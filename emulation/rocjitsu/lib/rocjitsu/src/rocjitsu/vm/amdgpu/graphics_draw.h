@@ -70,7 +70,7 @@ private:
   uint32_t color_first_layer_ = 0, color_last_layer_ = 0;
   uint32_t color_max_mip_ = 0, color_mip_ = 0;
   uint32_t color_pitch_ = 0, color_tail_x_ = 0, color_tail_y_ = 0;
-  bool color_enabled_ = false;
+  bool color_enabled_ = false, color_srgb_ = false;
   uint32_t depth_control_ = 0;
   uint32_t depth_width_ = 0, depth_height_ = 0, depth_swizzle_ = 0;
   uint32_t depth_bytes_ = 0;

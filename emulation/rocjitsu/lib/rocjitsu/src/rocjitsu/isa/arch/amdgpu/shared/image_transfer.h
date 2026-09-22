@@ -30,9 +30,9 @@ inline double round_sample_fixed8(double value) {
   return (lo + (part > 0.5 || (part == 0.5 && std::fmod(lo, 2.0) != 0))) / 256;
 }
 
-/// Prepare GFX11/12 single-sample 1D and 2D image transfers.
+/// Prepare GFX11/12 image transfers and sampling, including A16 and 2D arrays.
 inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t resource,
-                                   uint32_t data, std::array<uint32_t, 6> coords, uint32_t dim,
+                                   uint32_t data, std::array<uint32_t, 7> coords, uint32_t dim,
                                    uint32_t mask, bool d16, bool unsupported_flags,
                                    uint32_t sampler = ~0u,
                                    ImageSampleMode sample_mode = ImageSampleMode::Implicit,
@@ -88,7 +88,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   uint32_t coordinate_offset = 0;
   uint32_t wrap_x = 2, wrap_y = 2;
   if (sample) {
-    if (dim != 1 || (type == 13 && first_layer) || !d.is_load)
+    if ((dim != 1 && (dim != 5 || type != 13)) || !d.is_load)
       return unsupported();
     std::array<uint32_t, 4> s{};
     for (uint32_t i = 0; i < s.size(); ++i) {
@@ -144,11 +144,10 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   const uint32_t registers = d16 ? (d.buffer_components + 1) / 2 : d.buffer_components;
   if (data >= wf.num_vgprs() || registers > wf.num_vgprs() - data)
     return unsupported();
-  const uint32_t body_components = sample_mode == ImageSampleMode::Explicit ? 3 : 2;
+  const uint32_t body_components = 2 + (dim == 5) + (sample_mode == ImageSampleMode::Explicit);
+  const uint32_t load_components = dim == 5 ? 3 : dim == 0 ? 1 : 2;
   const uint32_t coordinate_count =
-      !sample ? (dim == 5   ? 3
-                 : dim == 0 ? 1
-                            : 2)
+      !sample ? (a16 ? (load_components + 1) / 2 : load_components)
               : coordinate_offset + (a16 ? (body_components + 1) / 2 : body_components);
   for (uint32_t i = 0; i < coordinate_count; ++i)
     if (coords[i] >= wf.num_vgprs())
@@ -180,8 +179,12 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(wf.exec() & (uint64_t{1} << lane)))
       continue;
-    uint32_t x = sample ? 0 : wf.debug_read_vgpr(coords[0], lane);
-    uint32_t y = sample || dim == 0 ? 0 : wf.debug_read_vgpr(coords[1], lane);
+    const auto load_coordinate = [&](uint32_t component) {
+      const uint32_t value = wf.debug_read_vgpr(coords[a16 ? component / 2 : component], lane);
+      return a16 ? (value >> (16 * (component % 2))) & 0xffff : value;
+    };
+    uint32_t x = sample ? 0 : load_coordinate(0);
+    uint32_t y = sample || dim == 0 ? 0 : load_coordinate(1);
     if (sample) {
       const auto read = [&](uint32_t index, uint32_t source_lane) {
         if (a16 && index >= coordinate_offset) {
@@ -195,9 +198,19 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
       double u = read(coordinate_offset, lane), v = read(coordinate_offset + 1, lane);
       if (!std::isfinite(u) || !std::isfinite(v))
         return unsupported();
+      uint32_t layer = first_layer;
+      if (dim == 5) {
+        const double slice = read(coordinate_offset + 2, lane);
+        if (!std::isfinite(slice))
+          return unsupported();
+        // RADV emits V_RNDNE_F32 for the floating-point slice before sampling.
+        // Convert that integral value and clamp it to the resource view.
+        layer += static_cast<uint32_t>(
+            std::clamp(std::trunc(slice), 0.0, double(last_layer - first_layer)));
+      }
       double lod = 0;
       if (sample_mode == ImageSampleMode::Explicit) {
-        lod = read(2, lane);
+        lod = read(coordinate_offset + 2 + (dim == 5), lane);
       } else if (sample_mode != ImageSampleMode::Zero && (max_level || min_filter != mag_filter)) {
         double dxu, dxv, dyu, dyv;
         if (sample_mode == ImageSampleMode::Derivatives) {
@@ -254,6 +267,8 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
       if (!lane_mip)
         return unsupported();
       const uint64_t resource_base = base - mip->offset;
+      if (d.image_metadata)
+        d.image_metadata->layers[lane] = layer;
       if (d.image_sample) {
         auto &access = *d.image_sample;
         const auto fraction = [](double value) {
@@ -277,11 +292,13 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
               address_coordinate(y0 + (linear ? (tap >> 1) & 1 : 0), selected->height, wrap_y);
           if (!tx || !ty)
             continue;
+          const uint64_t selected_base = image_layer_base(
+              gfx12, resource_base + selected->offset, selected->slice_size, layer, bytes, swizzle);
           const auto address =
-              gfx12 ? gfx12_image_address(resource_base + selected->offset, *tx + selected->tail_x,
+              gfx12 ? gfx12_image_address(selected_base, *tx + selected->tail_x,
                                           *ty + selected->tail_y,
                                           max_level ? selected->pitch : pitch, bytes, swizzle)
-                    : gfx11_image_address(resource_base + selected->offset, *tx + selected->tail_x,
+                    : gfx11_image_address(selected_base, *tx + selected->tail_x,
                                           *ty + selected->tail_y,
                                           max_level ? selected->pitch : pitch, bytes, swizzle);
           if (!address)
@@ -298,13 +315,13 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
                               wrap_x);
       y = *address_coordinate(std::floor(v * (normalized ? lane_mip->height : 1)), lane_mip->height,
                               wrap_y);
+      const uint64_t selected_base = image_layer_base(gfx12, resource_base + lane_mip->offset,
+                                                      lane_mip->slice_size, layer, bytes, swizzle);
       const auto address =
-          gfx12 ? gfx12_image_address(resource_base + lane_mip->offset, x + lane_mip->tail_x,
-                                      y + lane_mip->tail_y, max_level ? lane_mip->pitch : pitch,
-                                      bytes, swizzle)
-                : gfx11_image_address(resource_base + lane_mip->offset, x + lane_mip->tail_x,
-                                      y + lane_mip->tail_y, max_level ? lane_mip->pitch : pitch,
-                                      bytes, swizzle);
+          gfx12 ? gfx12_image_address(selected_base, x + lane_mip->tail_x, y + lane_mip->tail_y,
+                                      max_level ? lane_mip->pitch : pitch, bytes, swizzle)
+                : gfx11_image_address(selected_base, x + lane_mip->tail_x, y + lane_mip->tail_y,
+                                      max_level ? lane_mip->pitch : pitch, bytes, swizzle);
       if (!address)
         return unsupported();
       d.per_lane_addr[lane] = *address;
@@ -313,7 +330,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
       d.lane_mask |= uint64_t{1} << lane;
       continue;
     }
-    const uint32_t relative_layer = dim == 5 ? wf.debug_read_vgpr(coords[2], lane) : 0;
+    const uint32_t relative_layer = dim == 5 ? load_coordinate(2) : 0;
     if (type != 13 && relative_layer)
       return unsupported();
     if (x >= width || y >= height || (type == 13 && relative_layer > last_layer - first_layer))
