@@ -1528,22 +1528,19 @@ static void parse_transposed_power_profile_line(
 namespace amd::smi {
 
 // Parses raw pp_power_profile_mode text (as read from sysfs) into *p. Split out
-// from get_power_profiles() as a library-local test seam -- not an rsmi_/amdsmi_
-// public entry point, so it stays out of the shared-library ABI and the unit
-// tests reach it through the static archive (same pattern as present_reg_state).
+// from get_power_profiles() as a library-local test seam (not a public
+// rsmi_/amdsmi_ entry point), so it stays out of the shared-library ABI; the
+// unit tests reach it through the static archive.
 //
-// Handles both driver layouts: the classic one (text header on the first line,
-// one profile per line with the '*' current marker on the profile's own line)
-// and the transposed SMU 13.0.x one (every profile and the '*' on the first
-// line, e.g. gfx1102). The driver marks exactly one profile current, so a table
-// whose active profile maps to a known rsmi preset populates p->current. The
-// field is left RSMI_PWR_PROF_PRST_INVALID ("current unknown") when the active
-// profile's name has no rsmi preset in this build. A table with no marker at
-// all is not expected from a healthy driver -- it implies a parse miss or a
-// truncated sysfs read -- but it is likewise surfaced as SUCCESS with the
-// parsed profiles and current INVALID rather than aborting the caller. These
-// two "current unknown" outcomes (unmodeled active profile vs. no marker at
-// all) are not currently distinguishable to the caller.
+// - Handles both driver layouts: classic (header line, one profile per line)
+//   and transposed SMU 13.0.x (every profile and the '*' on the first line,
+//   e.g. gfx1102).
+// - The driver marks exactly one profile current. p->current is left
+//   RSMI_PWR_PROF_PRST_INVALID ("current unknown") when the active profile has
+//   no rsmi preset in this build, or when the table carries no marker (a
+//   malformed or truncated read); either way the parsed profiles are returned
+//   and the call never aborts.
+// - Those two "current unknown" cases are not currently distinguishable.
 rsmi_status_t ParsePowerProfileMode(
     const std::vector<std::string>& lines, rsmi_power_profile_status_t* p,
     std::map<rsmi_power_profile_preset_masks_t, uint32_t>* ind_map) {
