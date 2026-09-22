@@ -63,6 +63,11 @@ concept GpuIsa = requires {
   typename Isa::StatusReg;
 };
 
+/// @brief ISA has an opt-in host asynchronous MMA adapter.
+/// @details Missing ASYNC_MMA_WAVE_SIZE means unsupported.
+template <typename Isa>
+concept HasAsyncMma = GpuIsa<Isa> && requires { requires Isa::ASYNC_MMA_WAVE_SIZE != 0; };
+
 /// @brief Derived concept: ISA has a dedicated AccVGPR register file.
 ///
 /// @details True for CDNA2/3/4 (`MAX_ACC_VGPRS_PER_WF > 0`).
@@ -83,11 +88,15 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
   return (wf == 32 || wf == 64) && wf >= Isa::WF_SIZE && wf <= Isa::WF_SIZE_MAX;
 }
 
-/// @brief Return true when @p arch belongs to the CDNA ISA family.
+/// @brief Return true when @p arch is CDNA1 through CDNA4.
 ///
-/// @details Keep architecture-family policy near the ISA trait declarations so
-/// DBT call sites do not grow their own partial CDNA/RDNA switch statements.
-[[nodiscard]] inline constexpr bool arch_is_cdna(rj_code_arch_t arch) {
+/// @details This predicate represents the CDNA1-4 descriptor and wavefront
+/// policy boundary, not the entire CDNA family. Rocjitsu models CDNA5, which
+/// originated as gfx1250, with RDNA4-derived descriptor and wavefront
+/// properties. Adding CDNA5 here would silently change those decisions in
+/// callers. Keep this policy near the ISA trait declarations so DBT call sites
+/// do not grow their own partial architecture switch statements.
+[[nodiscard]] inline constexpr bool arch_is_cdna_4_or_lower(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
          arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
 }
@@ -116,7 +125,7 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
   default:
     return false;
   }
@@ -138,7 +147,7 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
 /// the granule-0 encoding rather than a budget any caller depends on. Only where the field is
 /// live can an SGPR requirement above the decoded count under-provision anyone.
 [[nodiscard]] inline constexpr bool arch_descriptor_encodes_sgpr_allocation(rj_code_arch_t arch) {
-  return !(arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250);
+  return !(arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5);
 }
 
 [[nodiscard]] inline constexpr uint32_t arch_descriptor_sgpr_allocation_limit(rj_code_arch_t arch) {
@@ -147,9 +156,9 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
   // scratch range in CdnaIsaBase), so they are named here rather than derived.
   constexpr uint32_t kCdnaDescriptorSgprLimit = 112;
   constexpr uint32_t kRdnaDescriptorSgprLimit = 106;
-  if (arch_is_cdna(arch))
+  if (arch_is_cdna_4_or_lower(arch))
     return kCdnaDescriptorSgprLimit;
-  if (arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5)
     return kRdnaDescriptorSgprLimit;
   return 0;
 }
@@ -167,17 +176,17 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
     return 64u * 1024u;
   case ROCJITSU_CODE_ARCH_CDNA4:
     return 160u * 1024u;
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    // gfx1250 can allocate up to 320 KiB to one workgroup. This is distinct
+    // from the configurable LDS/vector-cache partition sizes reported for a
+    // TCP, which must not be used as the descriptor allocation ceiling.
+    return 320u * 1024u;
   case ROCJITSU_CODE_ARCH_RDNA1:
   case ROCJITSU_CODE_ARCH_RDNA2:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
     return 64u * 1024u;
-  case ROCJITSU_CODE_ARCH_GFX1250:
-    // gfx1250 can allocate up to 320 KiB to one workgroup. This is distinct
-    // from the configurable LDS/vector-cache partition sizes reported for a
-    // TCP, which must not be used as the descriptor allocation ceiling.
-    return 320u * 1024u;
   default:
     return 0;
   }

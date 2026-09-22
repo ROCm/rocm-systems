@@ -44,9 +44,11 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
   set(OBJ_FILE   ${CMAKE_CURRENT_BINARY_DIR}/device_bitcode_tester_kernel_${GPU_ARCH}.o)
   set(HSACO_FILE ${CMAKE_CURRENT_BINARY_DIR}/device_bitcode_tester_kernel_${GPU_ARCH}.hsaco)
 
-  # Find the full arch string (with feature suffixes) for this base arch so we can
-  # pass target-feature flags. Without features the amdhsa.target metadata in the
-  # HSACO omits the suffix, causing hipModuleLoadData error 209 on devices that
+  # Find the full arch string (with feature suffixes) for this base arch and
+  # pass it directly via --offload-arch= to the kernel/device-source compile
+  # steps below, so the frontend embeds the correct amdhsa.target metadata
+  # from the start. Without features the amdhsa.target metadata in the HSACO
+  # omits the suffix, causing hipModuleLoadData error 209 on devices that
   # report e.g. gfx950:sramecc+:xnack-.
   set(_FULL_ARCH "${GPU_ARCH}")
   foreach(_candidate ${BITCODE_GPU_ARCHS_FULL})
@@ -56,68 +58,42 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
       break()
     endif()
   endforeach()
-  arch_features_to_target_feature_flags("${_FULL_ARCH}" _CLANG_MATTR_FLAGS)
 
-  # The device API functions (rocshmem_my_pe, rocshmem_putmem, etc.) are plain
-  # __device__ functions. When compiled at -O3 independently, LLVM DCEs them
-  # because no amdgpu_kernel in the same TU calls them. Compiling at -O0
-  # avoids DCE but produces unoptimized IR patterns that trigger an AMDGPU
-  # backend register-class bug (V_CMP_NE_U32 on $src_private_base).
-  #
-  # Solution: compile with -Xclang -disable-llvm-passes, which runs the
-  # frontend at -O3 (generating valid, structured IR) but skips the LLVM
-  # optimization and DCE passes. The resulting BC retains all device function
-  # bodies. After linking with the kernel (which provides callers), a final
-  # opt -O3 pass over the merged BC optimizes everything together.
-
-  # Device sources: suppress LLVM passes so DCE doesn't eliminate __device__
-  # functions that have no callers within the same TU. The kernel BC is compiled
-  # at plain -O3 (it has an amdgpu_kernel entry point, so nothing gets DCE'd).
-  set(_TESTER_DEVICE_FLAGS ${BITCODE_COMPILE_FLAGS_BASE})
-  list(APPEND _TESTER_DEVICE_FLAGS -Xclang -disable-llvm-passes)
-
-  # Compile the kernel and each device source into tester-private BCs.
-  set(_TESTER_BCS "")
-
+  # The kernel is compiled fresh (it stands in for an end user's own code),
+  # then linked directly against BITCODE_OUTPUT_${GPU_ARCH} -- the exact
+  # librocshmem_device_${GPU_ARCH}.bc that DeviceBitcode.cmake already built
+  # and ships to real users -- instead of independently recompiling
+  # BITCODE_SOURCES a second time.
   add_custom_command(
     OUTPUT ${KERNEL_BC}
     COMMAND ${LLVM_CLANG}
       ${BITCODE_COMPILE_FLAGS_BASE}
-      --offload-arch=${GPU_ARCH}
+      --offload-arch=${_FULL_ARCH}
       -c ${CMAKE_CURRENT_SOURCE_DIR}/device_bitcode_tester_kernel.hip
       -o ${KERNEL_BC}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/device_bitcode_tester_kernel.hip
     COMMENT "device_bitcode_tester: compiling kernel for ${GPU_ARCH}"
     VERBATIM
   )
-  list(APPEND _TESTER_BCS ${KERNEL_BC})
-
-  foreach(_src ${BITCODE_SOURCES})
-    get_filename_component(_src_name "${_src}" NAME_WE)
-    set(_src_bc ${CMAKE_CURRENT_BINARY_DIR}/tester_device_${GPU_ARCH}_${_src_name}.bc)
-    add_custom_command(
-      OUTPUT ${_src_bc}
-      COMMAND ${LLVM_CLANG}
-        ${_TESTER_DEVICE_FLAGS}
-        --offload-arch=${GPU_ARCH}
-        -c ${_src}
-        -o ${_src_bc}
-      DEPENDS ${_src}
-      COMMENT "device_bitcode_tester: compiling ${_src_name} for ${GPU_ARCH}"
-      VERBATIM
-    )
-    list(APPEND _TESTER_BCS ${_src_bc})
-  endforeach()
 
   set(_UNOPT_BC ${CMAKE_CURRENT_BINARY_DIR}/device_bitcode_tester_kernel_${GPU_ARCH}_unopt.bc)
 
+  # rocshmem_device_bitcode is listed explicitly (in addition to the file
+  # itself) because the Unix Makefiles generator only resolves custom-command
+  # OUTPUT dependencies within the directory that defines them; a bare file
+  # dependency on BITCODE_OUTPUT_${GPU_ARCH} (produced in the top-level
+  # directory scope by DeviceBitcode.cmake) has no rule when recursed into
+  # from this directory's own generated Makefile on a clean build. Depending
+  # on the target instead gives a global build-order edge that works
+  # regardless of generator.
   add_custom_command(
     OUTPUT ${_UNOPT_BC}
     COMMAND ${LLVM_LINK}
-      ${_TESTER_BCS}
+      ${KERNEL_BC}
+      ${BITCODE_OUTPUT_${GPU_ARCH}}
       -o ${_UNOPT_BC}
-    DEPENDS ${_TESTER_BCS}
-    COMMENT "device_bitcode_tester: linking all device sources for ${GPU_ARCH}"
+    DEPENDS ${KERNEL_BC} ${BITCODE_OUTPUT_${GPU_ARCH}} rocshmem_device_bitcode
+    COMMENT "device_bitcode_tester: linking kernel against rocshmem device bitcode for ${GPU_ARCH}"
     VERBATIM
   )
 
@@ -140,7 +116,6 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
     COMMAND ${LLVM_CLANG}
       -target amdgcn-amd-amdhsa
       -mcpu=${GPU_ARCH}
-      ${_CLANG_MATTR_FLAGS}
       -mllvm -amdgpu-internalize-symbols=false
       -x ir
       -c ${LINKED_BC}

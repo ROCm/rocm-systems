@@ -253,7 +253,12 @@ const Isa *IsaRegistry::GetIsa(const Isa::Version &version, IsaFeature sramecc, 
   auto isareg_iter = std::find_if(GetSupportedIsas().begin(),
                                   GetSupportedIsas().end(),
                                   [&](const IsaMap::value_type& isareg) {
-                                    return isareg.second.GetVersion() == version &&
+                                    // Skip "-strict" target ids: they share the base target's
+                                    // version and are only for code-object id via GetIsa(name).
+                                    // Enumerating one here (unordered map) could mis-resolve a
+                                    // base-target device.
+                                    return isareg.first.find("-strict") == std::string::npos &&
+                                        isareg.second.GetVersion() == version &&
                                         (isareg.second.GetSramecc() == IsaFeature::Unsupported ||
                                          isareg.second.GetSramecc() == sramecc) &&
                                         (isareg.second.GetXnack() == IsaFeature::Unsupported ||
@@ -287,7 +292,8 @@ IsaRegistry::GetSupportedGenericVersions() {
     {prepend_isa_prefix("gfx10-1-generic:xnack+"), 1},
     {prepend_isa_prefix("gfx10-3-generic"), 1},
     {prepend_isa_prefix("gfx11-generic"), 1},
-    {prepend_isa_prefix("gfx12-generic"), 1}
+    {prepend_isa_prefix("gfx12-generic"), 1},
+    {prepend_isa_prefix("gfx12-5-generic"), 1}
   };
   return *min_gen_versions;
 }
@@ -447,7 +453,8 @@ const IsaRegistry::IsaMap& IsaRegistry::GetSupportedIsas() {
   ISAREG_ENTRY_GEN("gfx1153",                11, 5, 3, unsupported, unsupported, 32, "gfx11-generic")
   ISAREG_ENTRY_GEN("gfx1200",                12, 0, 0, unsupported, unsupported, 32, "gfx12-generic")
   ISAREG_ENTRY_GEN("gfx1201",                12, 0, 1, unsupported, unsupported, 32, "gfx12-generic")
-  ISAREG_ENTRY_GEN("gfx1250",                12, 5, 0, unsupported, unsupported, 32, "gfx12-generic")
+  ISAREG_ENTRY_GEN("gfx1250",                12, 5, 0, unsupported, unsupported, 32, "gfx12-5-generic")
+  ISAREG_ENTRY_GEN("gfx1250-strict",         12, 5, 0, unsupported, unsupported, 32, "gfx12-5-generic")
 #undef ISAREG_ENTRY_GEN
 
   return *supported_isas;

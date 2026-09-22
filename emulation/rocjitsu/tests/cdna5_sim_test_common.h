@@ -75,7 +75,7 @@ RJ_DIAGNOSTIC_POP
 #include <vector>
 namespace rocjitsu::test::cdna5 {
 
-inline const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/gfx1250.json";
+inline const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/gfx1250_mi455x.json";
 
 inline constexpr uint32_t S_ENDPGM_GFX12 = 0xBFB00000u;
 inline constexpr uint32_t S_WAIT_KMCNT_0_GFX12 = 0xBFC70000u;
@@ -129,6 +129,10 @@ struct Gfx1250Sim {
   void build() {
     soc = loaded.soc();
     memory = loaded.memory();
+    // This fixture drives the engine directly and inspects single-partition
+    // state, so pin one worker instead of taking the config's default of one
+    // partition per XCD.
+    loaded.engine_config.num_threads = 1;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
     loaded.wire_links(engine->topology());
@@ -167,7 +171,7 @@ struct Gfx1250Sim {
                     ((vgprs / kGfx1250VgprEncodingGranule) - 1));
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                     ((sgprs / 8) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgprs);
+    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT, user_sgprs);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
                     enable_wg_id_x);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
@@ -323,7 +327,7 @@ inline uint32_t read_global_u32(amdgpu::GpuMemory &memory, uint64_t addr) {
 
 inline std::unique_ptr<Instruction> decode_gfx1250(const std::array<uint32_t, 3> &words,
                                                    std::string_view expected_mnemonic) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   if (!decoder) {
     ADD_FAILURE() << "Decoder::create() returned nullptr for gfx1250";
     return nullptr;

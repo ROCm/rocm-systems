@@ -7,10 +7,31 @@
 #include "CollectiveArgs.hpp"
 #include "PrepDataFuncs.hpp"
 #include <cstdio>
+#include <cstdlib>
 #include <hip/hip_runtime.h>
 
 namespace RcclUnitTesting
 {
+  // Byte written into expectedGpu[0] by the UT_DEVICE_DATA_FAULT negative control.
+  static constexpr int kDeviceDataFaultByte = 0xFF;
+
+  // Negative control: when UT_DEVICE_DATA_FAULT is set to a non-zero value, corrupt one
+  // expected element so a correct collective output must mismatch (proves device validate
+  // is not a no-op). No-op when the var is unset or "0".
+  static ErrCode MaybeInjectDeviceDataFault(CollectiveArgs& collArgs)
+  {
+    char const* faultEnv = getenv("UT_DEVICE_DATA_FAULT");
+    if (faultEnv != nullptr && atoi(faultEnv) != 0)
+    {
+      CHECK_HIP(hipMemset(collArgs.expectedGpu.ptr, kDeviceDataFaultByte,
+                          DataTypeToBytes(collArgs.dataType)));
+      fprintf(stdout, "[UT][device-data] FAULT injected into expectedGpu[0] (rank %d)\n",
+              collArgs.globalRank);
+      fflush(stdout);
+    }
+    return TEST_SUCCESS;
+  }
+
   ErrCode DefaultPrepareDataFunc(CollectiveArgs &collArgs)
   {
     switch (collArgs.funcType)
@@ -103,6 +124,26 @@ namespace RcclUnitTesting
     }
 
     size_t const numBytes = collArgs.numInputElements * DataTypeToBytes(collArgs.dataType);
+
+    // Device-data mode (AllReduce only, standard reduction): build this rank's input
+    // and the all-ranks reduced expected entirely on the GPU. Custom-op / scalar /
+    // bias / constant-input variants keep the host reference path.
+    if (UtDeviceDataEnabled() && isAllReduce
+        && UtDeviceDtypeSupported(collArgs.dataType)
+        && collArgs.numInputElements >= UtDeviceDataMinElements()
+        && collArgs.options.scalarMode < 0
+        && !collArgs.options.useBias
+        && collArgs.options.inputConstantValue < 0)
+    {
+      CHECK_CALL(collArgs.outputGpu.ClearGpuMem(numBytes));
+      CHECK_CALL(collArgs.inputGpu.FillPatternDevice(collArgs.dataType, collArgs.numInputElements,
+                                                     collArgs.globalRank, 0));
+      CHECK_CALL(collArgs.expectedGpu.FillReducedPatternDevice(collArgs.dataType, collArgs.numInputElements,
+                                                               collArgs.totalRanks, collArgs.options.redOp));
+      CHECK_CALL(MaybeInjectDeviceDataFault(collArgs));
+      collArgs.expectedOnDevice = true;
+      return TEST_SUCCESS;
+    }
 
     // Clear output for all ranks (done before filling input in case of in-place)
     CHECK_CALL(collArgs.outputGpu.ClearGpuMem(numBytes));
@@ -260,6 +301,28 @@ namespace RcclUnitTesting
     size_t const numInputBytes  = collArgs.numInputElements * DataTypeToBytes(collArgs.dataType);
     size_t const numOutputBytes = collArgs.numOutputElements * DataTypeToBytes(collArgs.dataType);
 
+    // Device-data mode: build this rank's full input (totalRanks*N) on the GPU and the
+    // reduced expected SLICE for this rank directly on the GPU, mirroring the host loop
+    // below but with no host fill / reduce / D2H. ReduceScatter output[j] for this rank
+    // is reduce-over-ranks of the pattern at global index globalRank*numOutput + j, so we
+    // pass that startIdx to the reduced-pattern kernel. Standard reductions only; the
+    // scalar/custom-op path keeps the host reference below.
+    if (UtDeviceDataEnabled()
+        && UtDeviceDtypeSupported(collArgs.dataType)
+        && collArgs.numInputElements >= UtDeviceDataMinElements()
+        && collArgs.options.scalarMode < 0)
+    {
+      CHECK_CALL(collArgs.outputGpu.ClearGpuMem(numOutputBytes));
+      CHECK_CALL(collArgs.inputGpu.FillPatternDevice(collArgs.dataType, collArgs.numInputElements,
+                                                     collArgs.globalRank, 0));
+      CHECK_CALL(collArgs.expectedGpu.FillReducedPatternDevice(collArgs.dataType, collArgs.numOutputElements,
+                                                               collArgs.totalRanks, collArgs.options.redOp,
+                                                               (size_t)collArgs.globalRank * collArgs.numOutputElements));
+      CHECK_CALL(MaybeInjectDeviceDataFault(collArgs));
+      collArgs.expectedOnDevice = true;
+      return TEST_SUCCESS;
+    }
+
     // Clear output for all ranks (done before filling input in case of in-place)
     CHECK_CALL(collArgs.outputGpu.ClearGpuMem(numOutputBytes));
 
@@ -383,6 +446,30 @@ namespace RcclUnitTesting
     size_t const numInputBytes = collArgs.numInputElements * DataTypeToBytes(collArgs.dataType);
     size_t const numOutputBytes = collArgs.numOutputElements * DataTypeToBytes(collArgs.dataType);
     size_t const numBytes = numInputBytes / collArgs.totalRanks;
+
+    // Device-data mode: build input and expected entirely on the GPU (no host fill,
+    // no H2D copy). AllToAll is a pure permutation, so expected block `rank` is this
+    // rank's slice of source rank `rank`'s pattern: FillPatternDevice with the source
+    // rank and a start index of globalRank*elemsPerBlock reproduces it exactly.
+    if (UtDeviceDataEnabled() && UtDeviceDtypeSupported(collArgs.dataType)
+        && collArgs.numInputElements >= UtDeviceDataMinElements())
+    {
+      size_t const elemsPerBlock = collArgs.numInputElements / collArgs.totalRanks;
+      CHECK_CALL(collArgs.outputGpu.ClearGpuMem(numOutputBytes));
+      CHECK_CALL(collArgs.inputGpu.FillPatternDevice(collArgs.dataType,
+                                                     collArgs.numInputElements,
+                                                     collArgs.globalRank, 0));
+      for (int rank = 0; rank < collArgs.totalRanks; ++rank)
+      {
+        PtrUnion blockDst;
+        blockDst.Attach(collArgs.expectedGpu.U1 + (numBytes * rank));
+        CHECK_CALL(blockDst.FillPatternDevice(collArgs.dataType, elemsPerBlock, rank,
+                                              (size_t)collArgs.globalRank * elemsPerBlock));
+      }
+      CHECK_CALL(MaybeInjectDeviceDataFault(collArgs));
+      collArgs.expectedOnDevice = true;
+      return TEST_SUCCESS;
+    }
 
     // Clear outputs on all ranks (prior to input in case of in-place)
     collArgs.outputGpu.ClearGpuMem(numOutputBytes);

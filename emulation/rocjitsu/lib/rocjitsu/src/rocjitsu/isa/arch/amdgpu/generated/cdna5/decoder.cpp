@@ -1959,6 +1959,8 @@ DecodeResult decodeVPermlane16SwapB32Vop3(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPermlane16VarB32Vop3(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPermlane64B32Vop1(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPermlaneBcastB32Vop3(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPermlaneDownB32Vop3(const MachineInst *opcode,
@@ -1978,6 +1980,7 @@ DecodeResult decodeVPipeflushVop3(const MachineInst *opcode, const DecodeErrorEm
 DecodeResult decodeVPkAddBf16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkAddF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkAddF32Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkAddF64Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkAddI16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkAddMaxI16Vop3p(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error);
@@ -1987,13 +1990,18 @@ DecodeResult decodeVPkAddMinI16Vop3p(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkAddMinU16Vop3p(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkAddNcU64Vop3p(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkAddU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkAshrrevI16Vop3p(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkFmaBf16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkFmaF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkFmaF32Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkFmaF64Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkFmacF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkLshlAddU64Vop3p(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkLshlrevB16Vop3p(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkLshrrevB16Vop3p(const MachineInst *opcode,
@@ -2009,6 +2017,8 @@ DecodeResult decodeVPkMaxNumBf16Vop3p(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkMaxNumF16Vop3p(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkMaxNumF64Vop3p(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkMaxU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkMaximum3F16Vop3p(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error);
@@ -2023,6 +2033,8 @@ DecodeResult decodeVPkMinNumBf16Vop3p(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkMinNumF16Vop3p(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkMinNumF64Vop3p(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkMinU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkMinimum3F16Vop3p(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error);
@@ -2031,9 +2043,12 @@ DecodeResult decodeVPkMinimumF16Vop3p(const MachineInst *opcode,
 DecodeResult decodeVPkMulBf16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkMulF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkMulF32Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkMulF64Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkMulLoU16Vop3p(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkSubI16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkSubNcU64Vop3p(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPkSubU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPrngB32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVPrngB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
@@ -2228,6 +2243,8 @@ DecodeResult decodeVWmmaF3216x16x64Fp8Fp8Vop3p(const MachineInst *opcode,
                                                const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVWmmaF3232x16x128F4Vop3p(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVWmmaF6416x16x4F64Vop3p(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVWmmaI3216x16x64Iu8Vop3p(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVWritelaneB32Vop3(const MachineInst *opcode,
@@ -2302,6 +2319,49 @@ bool isVop3pOp(const MachineInst opcode, uint32_t op) {
   return (opcode >> 24) == 0xcc && ((opcode >> 16) & 0xff) == op;
 }
 
+bool isGfx1250WmmaScaleSource(uint32_t selector, bool scale16) {
+  if (selector <= 105u || selector == 128u)
+    return true;
+  if (selector < 256u || selector > 511u)
+    return false;
+  return !scale16 || ((selector - 256u) % 2u == 0u && selector < 511u);
+}
+
+bool isGfx1250WmmaScaleFormatPairLegal(uint32_t matrix_a_fmt, uint32_t matrix_b_fmt,
+                                       uint32_t scale_a_fmt, uint32_t scale_b_fmt) {
+  if (matrix_a_fmt > 4u || matrix_b_fmt > 4u || scale_a_fmt > 2u || scale_b_fmt > 2u)
+    return false;
+  if (scale_a_fmt == 0u && scale_b_fmt == 0u)
+    return true;
+  if ((scale_a_fmt != 0u && matrix_a_fmt != 4u) || (scale_b_fmt != 0u && matrix_b_fmt != 4u))
+    return false;
+  return matrix_a_fmt != 4u || matrix_b_fmt != 4u || scale_a_fmt == scale_b_fmt;
+}
+
+bool isGfx1250WmmaScalePairValid(const MachineInst *opcode) {
+  const auto *scale = reinterpret_cast<const Vop3pMachineInst *>(opcode);
+  const auto *matrix = reinterpret_cast<const Vop3pMachineInst *>(opcode + 2);
+  const bool scale16 = scale->op == 0x3au;
+  // Accept LLVM's encoding as an alias for the ISA-canonical constant.
+  const bool fixed_src2_valid = scale->src2 == 0x080u || scale->src2 == 0x100u;
+  if (scale->vdst != 0u || (scale->neg_hi & 0x4u) != 0u || (scale->opsel & 0x2u) != 0u ||
+      scale->clamp != 0u || !fixed_src2_valid || (scale->opsel_hi & 0x2u) != 0u ||
+      (scale->neg & 0x4u) != 0u || (matrix->neg_hi & 0x3u) != 0u || matrix->clamp != 0u ||
+      (matrix->neg & 0x3u) != 0u)
+    return false;
+  if (!isGfx1250WmmaScaleSource(scale->src0, scale16) ||
+      !isGfx1250WmmaScaleSource(scale->src1, scale16))
+    return false;
+
+  const uint32_t scale_a_fmt = scale->neg & 0x3u;
+  const uint32_t scale_b_fmt = scale->neg_hi & 0x3u;
+  if (matrix->op == 0x88u)
+    return isGfx1250WmmaScaleFormatPairLegal(4u, 4u, scale_a_fmt, scale_b_fmt);
+  const uint32_t matrix_a_fmt = matrix->opsel;
+  const uint32_t matrix_b_fmt = (matrix->opsel_hi_2 << 2u) | matrix->opsel_hi;
+  return isGfx1250WmmaScaleFormatPairLegal(matrix_a_fmt, matrix_b_fmt, scale_a_fmt, scale_b_fmt);
+}
+
 } // namespace
 
 DecodeResult Decoder::decode(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
@@ -2371,6 +2431,8 @@ DecodeResult DecoderImpl::subDecodeVop3p(const MachineInst *opcode,
 DecodeResult DecoderImpl::decodeVWmmaScaleF32Vop3px2(const MachineInst *opcode,
                                                      const DecodeErrorEmitter &emit_error) {
   if (!isVop3pOp(opcode[2], 0x33) && !isVop3pOp(opcode[2], 0x88))
+    return decodeInvalid(opcode, emit_error);
+  if (!isGfx1250WmmaScalePairValid(opcode))
     return decodeInvalid(opcode, emit_error);
   return std::make_unique<VWmmaScaleF32Vop3px2>(opcode);
 }
@@ -2916,7 +2978,7 @@ const std::array<DecoderImpl::DecodeFunc, 128> DecoderImpl::sub_decode_vop1 = {
     &detail::decodeVCvtNormU16F16Vop1,
     &detail::decodeVSwapB32Vop1,
     &detail::decodeVSwapB16Vop1,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeVPermlane64B32Vop1,
     &detail::decodeVSwaprelB32Vop1,
     &detail::decodeVNotB16Vop1,
     &detail::decodeVCvtI32I16Vop1,
@@ -3708,8 +3770,8 @@ const std::array<DecoderImpl::DecodeFunc, 256> DecoderImpl::sub_decode_vop3p = {
     &detail::decodeVPkMin3NumF16Vop3p,
     &detail::decodeVPkMax3NumF16Vop3p,
     &DecoderImpl::decodeVWmmaScaleF32Vop3px2,
-    &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeVPkFmaF64Vop3p,
+    &detail::decodeVPkMulF64Vop3p,
     &detail::decodeVFmaMixF32Bf16Vop3p,
     &detail::decodeVFmaMixloBf16Vop3p,
     &detail::decodeVFmaMixhiBf16Vop3p,
@@ -3724,6 +3786,11 @@ const std::array<DecoderImpl::DecodeFunc, 256> DecoderImpl::sub_decode_vop3p = {
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
+    &detail::decodeVPkAddF64Vop3p,
+    &detail::decodeVPkAddNcU64Vop3p,
+    &detail::decodeVPkSubNcU64Vop3p,
+    &detail::decodeVPkMaxNumF64Vop3p,
+    &detail::decodeVPkMinNumF64Vop3p,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
@@ -3735,12 +3802,7 @@ const std::array<DecoderImpl::DecodeFunc, 256> DecoderImpl::sub_decode_vop3p = {
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeVWmmaF6416x16x4F64Vop3p,
     &DecoderImpl::decodeInvalid,
     &detail::decodeVWmmaF3216x16x4F32Vop3p,
     &DecoderImpl::decodeInvalid,
@@ -3775,7 +3837,7 @@ const std::array<DecoderImpl::DecodeFunc, 256> DecoderImpl::sub_decode_vop3p = {
     &detail::decodeVSwmmacI3216x16x128Iu8Vop3p,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeVPkLshlAddU64Vop3p,
     &DecoderImpl::decodeInvalid,
     &detail::decodeVWmmaF3216x16x128Fp8Fp8Vop3p,
     &detail::decodeVWmmaF3216x16x128Fp8Bf8Vop3p,

@@ -152,7 +152,8 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
     break;
   case OperandType::OPR_SSRC_LANESEL:
     if (!((encoding_value >= 0 && encoding_value <= 125) ||
-          (encoding_value >= 128 && encoding_value <= 191)))
+          (encoding_value >= 128 && encoding_value <= 192) ||
+          (encoding_value >= 255 && encoding_value <= 255)))
       defer_encoding_error(EncodingError::InvalidLaneSelector);
     break;
   case OperandType::OPR_SSRC_SPECIAL_SCC:
@@ -628,6 +629,8 @@ std::string Operand::name() const {
     break;
   }
   case OperandType::OPR_SSRC_LANESEL: {
+    if (encoding_value_ == 192u)
+      return "64";
     if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN &&
         encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN,
@@ -728,18 +731,18 @@ std::string Operand::name() const {
     return std::to_string(encoding_value_);
   case OperandType::OPR_VERSION:
     return std::to_string(encoding_value_);
-  case OperandType::OPR_WAITCNT: {
-    uint32_t expcnt = encoding_value_ & 0x7;
-    uint32_t lgkmcnt = (encoding_value_ >> 4) & 0x3F;
-    uint32_t vmcnt = (encoding_value_ >> 10) & 0x3F;
-    return std::format("vmcnt({}) expcnt({}) lgkmcnt({})", vmcnt, expcnt, lgkmcnt);
-  }
   case OperandType::OPR_WAIT_ALU:
     return std::to_string(encoding_value_);
   case OperandType::OPR_WAIT_EVENT:
     return std::to_string(encoding_value_);
   case OperandType::OPR_WAIT_MEM_DS:
     return std::to_string(encoding_value_);
+  case OperandType::OPR_WAITCNT: {
+    uint32_t expcnt = encoding_value_ & 0x7;
+    uint32_t lgkmcnt = (encoding_value_ >> 4) & 0x3F;
+    uint32_t vmcnt = (encoding_value_ >> 10) & 0x3F;
+    return std::format("vmcnt({}) expcnt({}) lgkmcnt({})", vmcnt, expcnt, lgkmcnt);
+  }
   }
   return std::to_string(encoding_value_);
 }
@@ -789,6 +792,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSdst::OPR_SDST_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ >= OpSelSdst::OPR_SDST_TTMP_MIN &&
+        encoding_value_ <= OpSelSdst::OPR_SDST_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSdst::OPR_SDST_TTMP_MIN),
+                         reg_width};
     if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
     if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_HI)
@@ -812,6 +820,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN),
           reg_width};
+    if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN &&
+        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN),
+          reg_width};
     break;
   }
   case OperandType::OPR_SMEM_OFFSET_NOK: {
@@ -821,6 +835,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_SGPR_MIN),
           reg_width};
+    if (encoding_value_ >= OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP_MIN &&
+        encoding_value_ <= OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSmemOffsetNok::OPR_SMEM_OFFSET_NOK_TTMP_MIN),
+          reg_width};
     break;
   }
   case OperandType::OPR_SRC: {
@@ -828,6 +848,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
         encoding_value_ <= OpSelSrc::OPR_SRC_SGPR_MAX)
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_SGPR_MIN),
+                         reg_width};
+    if (encoding_value_ >= OpSelSrc::OPR_SRC_TTMP_MIN &&
+        encoding_value_ <= OpSelSrc::OPR_SRC_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_TTMP_MIN),
                          reg_width};
     if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
@@ -864,6 +889,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSreg::OPR_SREG_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ >= OpSelSreg::OPR_SREG_TTMP_MIN &&
+        encoding_value_ <= OpSelSreg::OPR_SREG_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSreg::OPR_SREG_TTMP_MIN),
+                         reg_width};
     break;
   }
   case OperandType::OPR_SREG_LITERAL: {
@@ -873,6 +903,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSregLiteral::OPR_SREG_LITERAL_SGPR_MIN),
           reg_width};
+    if (encoding_value_ >= OpSelSregLiteral::OPR_SREG_LITERAL_TTMP_MIN &&
+        encoding_value_ <= OpSelSregLiteral::OPR_SREG_LITERAL_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSregLiteral::OPR_SREG_LITERAL_TTMP_MIN),
+          reg_width};
     break;
   }
   case OperandType::OPR_SREG_M0: {
@@ -881,6 +917,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSregM0::OPR_SREG_M0_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ >= OpSelSregM0::OPR_SREG_M0_TTMP_MIN &&
+        encoding_value_ <= OpSelSregM0::OPR_SREG_M0_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSregM0::OPR_SREG_M0_TTMP_MIN),
+                         reg_width};
     break;
   }
   case OperandType::OPR_SSRC: {
@@ -888,6 +929,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
         encoding_value_ <= OpSelSsrc::OPR_SSRC_SGPR_MAX)
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSsrc::OPR_SSRC_SGPR_MIN),
+                         reg_width};
+    if (encoding_value_ >= OpSelSsrc::OPR_SSRC_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrc::OPR_SSRC_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSsrc::OPR_SSRC_TTMP_MIN),
                          reg_width};
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
@@ -904,6 +950,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN),
+          reg_width};
+    if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN),
           reg_width};
     break;
   }
@@ -924,6 +976,26 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
                          reg_width};
     break;
   }
+  default:
+    break;
+  }
+  return std::nullopt;
+}
+
+std::optional<RegClass> Operand::to_special_reg_class() const {
+  switch (opr_type_) {
+  case OperandType::OPR_EXEC:
+    return RegClass::EXEC;
+  case OperandType::OPR_PC:
+    return RegClass::PC;
+  case OperandType::OPR_SDST_EXEC:
+    return RegClass::EXEC;
+  case OperandType::OPR_SDST_M0:
+    return RegClass::M0;
+  case OperandType::OPR_SSRC_SPECIAL_SCC:
+    return RegClass::SCC;
+  case OperandType::OPR_VCC:
+    return RegClass::VCC;
   default:
     break;
   }
@@ -1030,29 +1102,29 @@ std::optional<uint32_t> Operand::simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) 
   return callback ? (this->*callback)(wf) : std::nullopt;
 }
 
-const amdgpu::VgprStorage *Operand::simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const {
+amdgpu::ConstVgprStorage Operand::simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const {
   decltype(ExecutionBackend::simd_vgpr_storage) callback =
       execution_backend_ ? execution_backend_->simd_vgpr_storage : nullptr;
-  return callback ? (this->*callback)(wf) : nullptr;
+  return callback ? (this->*callback)(wf) : amdgpu::ConstVgprStorage{};
 }
 
-amdgpu::VgprStorage *Operand::simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const {
+amdgpu::VgprStorage Operand::simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const {
   decltype(ExecutionBackend::simd_vgpr_storage_mut) callback =
       execution_backend_ ? execution_backend_->simd_vgpr_storage_mut : nullptr;
-  return callback ? (this->*callback)(wf) : nullptr;
+  return callback ? (this->*callback)(wf) : amdgpu::VgprStorage{};
 }
 
 amdgpu::ConstVgprStoragePair64
 Operand::simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const {
   decltype(ExecutionBackend::simd_vgpr_storage64) callback =
       execution_backend_ ? execution_backend_->simd_vgpr_storage64 : nullptr;
-  return callback ? (this->*callback)(wf) : amdgpu::ConstVgprStoragePair64{nullptr, nullptr};
+  return callback ? (this->*callback)(wf) : amdgpu::ConstVgprStoragePair64{};
 }
 
 amdgpu::VgprStoragePair64 Operand::simd_vgpr_storage64_mut_impl(amdgpu::Wavefront &wf) const {
   decltype(ExecutionBackend::simd_vgpr_storage64_mut) callback =
       execution_backend_ ? execution_backend_->simd_vgpr_storage64_mut : nullptr;
-  return callback ? (this->*callback)(wf) : amdgpu::VgprStoragePair64{nullptr, nullptr};
+  return callback ? (this->*callback)(wf) : amdgpu::VgprStoragePair64{};
 }
 
 void Operand::simd_notify_read_impl(const amdgpu::Wavefront &wf, uint64_t lane_mask,

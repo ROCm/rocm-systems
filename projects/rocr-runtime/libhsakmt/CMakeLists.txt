@@ -177,8 +177,6 @@ else()
                      "src/libhsakmt.c"
                      "src/memory.c"
                      "src/openclose.c"
-                     "src/perfctr.c"
-                     "src/pmc_table.c"
                      "src/queues.c"
                      "src/time.c"
                      "src/topology.c"
@@ -190,6 +188,9 @@ else()
                      "src/ais.c"
                      "src/kfdcontext.c"
                      "src/extsem.c")
+    if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+      list(APPEND HSAKMT_SRC "src/perfctr.c" "src/pmc_table.c")
+    endif()
   endif()
 
   ## Declare the library target name
@@ -211,6 +212,10 @@ else()
       ${CMAKE_CURRENT_SOURCE_DIR}/../runtime
       ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime/core
       ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime)
+  endif()
+
+  if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+    target_include_directories( ${HSAKMT_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/linux )
   endif()
 
   ## Add headers.  The public headers need to point at their location in both build and install
@@ -483,6 +488,10 @@ else()
     ## In static builds, libdrm and libdrm_amdgpu need to be linked statically
     add_library (${HSAKMT_STATIC_DRM_TARGET}  STATIC "")
     target_sources (${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${HSAKMT_SRC})
+
+    if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+      target_include_directories( ${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/linux )
+    endif()
 
     target_include_directories( ${HSAKMT_STATIC_DRM_TARGET}
       PUBLIC

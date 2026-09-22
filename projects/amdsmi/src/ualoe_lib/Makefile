@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 LIB_NAME = ualoecfg
 LIB_TARGET = lib$(LIB_NAME).a
 

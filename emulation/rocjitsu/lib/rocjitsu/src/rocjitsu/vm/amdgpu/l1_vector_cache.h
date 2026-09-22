@@ -1,19 +1,22 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_VM_AMDGPU_L1_VECTOR_CACHE_H_
-#define ROCJITSU_VM_AMDGPU_L1_VECTOR_CACHE_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "simdojo/components/cache.h"
 
 #include <cstdint>
+#include <span>
 
 namespace rocjitsu {
 namespace amdgpu {
 
 class GpuMemory;
+class GpuVm;
 class L2Cache;
+class RequestMtypeResolver;
+enum class VmAccessOutcome : uint8_t;
 
 /// @brief L1 Vector Cache (V$) controller for FLAT/MUBUF/MTBUF instructions.
 ///
@@ -40,14 +43,31 @@ public:
   L1VectorCache &operator=(L1VectorCache &&) = delete;
 
   void set_l2(L2Cache *l2);
-  void set_memory(GpuMemory *mem);
-  void load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size, uint32_t num_elems,
-            uint8_t *dst, Mtype mtype, bool non_temporal, bool request_l1_bypass, uint32_t wf_size,
-            uint32_t vmid = 0);
+  void set_gpu_vm(GpuVm *gpu_vm);
 
-  void store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size, uint32_t num_elems,
-             const uint8_t *src, Mtype mtype, bool non_temporal, uint32_t wf_size,
-             uint32_t vmid = 0);
+  /// @param addr_base_offset Low bits of a uniform address contribution applied after
+  /// swizzling. This does not change the first-byte addresses in @p addrs; it only keeps the
+  /// contribution from moving logical dword boundaries.
+  /// @param element_lane_masks Empty when every element uses @p lane_mask;
+  /// otherwise contains exactly @p num_elems masks. In the latter form,
+  /// @p lane_mask is the union of lanes valid for at least one element.
+  VmAccessOutcome load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
+                       uint32_t num_elems, uint8_t *dst, Mtype mtype, bool non_temporal,
+                       bool request_l1_bypass, uint32_t wf_size, uint32_t vmid = 0,
+                       uint32_t addr_stride = 0, uint32_t addr_base_offset = 0,
+                       std::span<const uint64_t> element_lane_masks = {});
+
+  /// @param addr_base_offset Low bits of a uniform address contribution applied after
+  /// swizzling. This does not change the first-byte addresses in @p addrs; it only keeps the
+  /// contribution from moving logical dword boundaries.
+  /// @param element_lane_masks Empty when every element uses @p lane_mask;
+  /// otherwise contains exactly @p num_elems masks. In the latter form,
+  /// @p lane_mask is the union of lanes valid for at least one element.
+  VmAccessOutcome store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
+                        uint32_t num_elems, const uint8_t *src, Mtype mtype, bool non_temporal,
+                        uint32_t wf_size, uint32_t vmid = 0, uint32_t addr_stride = 0,
+                        uint32_t addr_base_offset = 0,
+                        std::span<const uint64_t> element_lane_masks = {});
 
   void invalidate(uint64_t addr, uint32_t vmid = 0);
   void invalidate_all();
@@ -58,17 +78,19 @@ public:
   uint64_t store_l2_writes() const { return store_l2_writes_; }
 
 private:
-  void invalidate_all_locked();
-  void synchronize_epoch_locked();
-  void read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, bool non_temporal,
-                  bool request_l1_bypass, uint32_t vmid);
-  void write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype, bool non_temporal,
-                   uint32_t vmid);
-  void ensure_line(uint64_t addr, uint32_t vmid);
+  void invalidate_all_lines();
+  void synchronize_epoch();
+  VmAccessOutcome read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, bool non_temporal,
+                             bool request_l1_bypass, uint32_t vmid, RequestMtypeResolver &mtypes);
+  VmAccessOutcome write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, bool non_temporal,
+                              uint32_t vmid, RequestMtypeResolver &mtypes);
+  void cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid);
+  // Store allocation leaves untouched bytes absent instead of reading backing.
+  VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss = true);
 
   CacheStore cache_;
   L2Cache *l2_;
-  GpuMemory *memory_ = nullptr;
+  GpuVm *gpu_vm_ = nullptr;
   uint64_t coherence_epoch_ = 0;
   uint64_t store_count_ = 0;
   uint64_t store_active_count_ = 0;
@@ -77,5 +99,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_L1_VECTOR_CACHE_H_

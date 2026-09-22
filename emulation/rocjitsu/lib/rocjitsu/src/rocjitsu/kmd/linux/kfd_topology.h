@@ -32,6 +32,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 RJ_DIAGNOSTIC_POP
 
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/cwsr.h"
 
 #include <cstdint>
 
@@ -117,7 +118,10 @@ inline DebugTopology debug_topology_for(uint32_t gfx_target_version) {
 
   DebugTopology topo;
 
-  // Trap-based debugging is advertised for every debug-capable GPU.
+  // Trap-based debugging is advertised for every debug-capable GPU. The
+  // simulator withholds the support bit again at the end of this function for
+  // parts whose CWSR layout it cannot produce; derive it here so the driver
+  // mirroring stays readable as one piece.
   topo.capability = HSA_CAP_TRAP_DEBUG_SUPPORT |
                     HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_TRAP_OVERRIDE_SUPPORTED |
                     HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_MODE_SUPPORTED;
@@ -125,7 +129,9 @@ inline DebugTopology debug_topology_for(uint32_t gfx_target_version) {
   // Every debug-capable ASIC the simulator models carries the four hardware
   // address-watch registers, so advertise them here rather than alongside the
   // generic non-debug bits: rocdbgapi reads this out of the device snapshot to
-  // decide how many data watchpoints it may insert.
+  // decide how many data watchpoints it may insert. Without the bits it reports
+  // zero watch registers and refuses to insert one ("too many hardware
+  // watchpoints").
   topo.capability |= HSA_CAP_WATCH_POINTS_SUPPORTED |
                      ((kWatchPointsTotalBits << HSA_CAP_WATCH_POINTS_TOTALBITS_SHIFT) &
                       HSA_CAP_WATCH_POINTS_TOTALBITS_MASK);
@@ -171,6 +177,19 @@ inline DebugTopology debug_topology_for(uint32_t gfx_target_version) {
   // The simulator always provides compatible "firmware", so advertise it.
   topo.capability |= HSA_CAP_TRAP_DEBUG_FIRMWARE_SUPPORTED;
 
+  // Everything above mirrors the driver. This does not, and is the one place the
+  // simulator is deliberately less capable than the hardware it models: a
+  // debugger can only be serviced on a part whose CWSR record layout the codec
+  // reproduces, because rocm-dbgapi reads wave state straight out of the save
+  // area rather than through an ioctl. Withhold the single bit it keys
+  // agent_t::supports_debugging() on, so an unmodelled agent is declined at the
+  // capability boundary -- at attach, with every other agent still usable --
+  // instead of attaching and then having each individual wave stop declined.
+  // The descriptive sub-capabilities stay as the driver derives them; they
+  // qualify a support that is no longer claimed.
+  if (!cwsr_layout_modelled_for_gc_ip_version(gc))
+    topo.capability &= ~static_cast<uint32_t>(HSA_CAP_TRAP_DEBUG_SUPPORT);
+
   return topo;
 }
 
@@ -188,6 +207,12 @@ inline DebugTopology effective_topology_for(uint32_t gfx_target_version, uint32_
   effective.capability =
       (effective.capability & ~HSA_CAP_ASIC_REVISION_MASK) |
       ((revision_id << HSA_CAP_ASIC_REVISION_SHIFT) & HSA_CAP_ASIC_REVISION_MASK);
+  // Again after the override merge, not only in debug_topology_for(): a config
+  // that captured a real device's capability word carries that device's
+  // trap-debug bit, and the simulator must not inherit a claim it cannot honour.
+  if (!cwsr_layout_modelled_for_gc_ip_version(
+          gc_ip_version_for_gfx_target_version(gfx_target_version)))
+    effective.capability &= ~static_cast<uint32_t>(HSA_CAP_TRAP_DEBUG_SUPPORT);
   return effective;
 }
 

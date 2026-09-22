@@ -4253,8 +4253,8 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   // gfx1250 A0 and B0 share an ELF machine ID, so a same-arch/same-mach match
   // does not identify the revision. When both revisions are configured, use the
   // selected same-ISA translation profile. Otherwise fail closed.
-  const bool gfx1250_same_target = source_target.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-                                   config->target.arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+  const bool gfx1250_same_target = source_target.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+                                   config->target.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
                                    source_target.mach == config->target.mach;
   const bool have_gfx1250_revisions = config->guest_revision != ProcessorRevision::Unspecified &&
                                       config->host_revision != ProcessorRevision::Unspecified;

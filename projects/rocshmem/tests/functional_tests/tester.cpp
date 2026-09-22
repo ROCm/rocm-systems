@@ -220,6 +220,14 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
   BackendType backend_type = rocshmem_query_backend_type();
   TestType type = (TestType)args.algorithm;
 
+  if (args.num_wf > 0) {
+    int device_id;
+    hipDeviceProp_t props;
+    CHECK_HIP(hipGetDevice(&device_id));
+    CHECK_HIP(hipGetDeviceProperties(&props, device_id));
+    args.wg_size = props.warpSize * args.num_wf;
+  }
+
   switch (type) {
     case InitTestType:
       test_name = "Init";
@@ -939,6 +947,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case HostCtxCreateTestType:
       test_name = "Host CTX Create";
       testers.push_back(new HostCtxCreateTester(args));
+      break;
     case TeamSplit2DTestType:
       test_name = "Team Split 2D";
       testers.push_back(new TeamSplit2DTester(args));

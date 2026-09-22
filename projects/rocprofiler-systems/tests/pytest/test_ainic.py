@@ -15,7 +15,7 @@ Two independent checks live here:
 
 * ``test_performance_tracks`` — verifies that rocprofiler-systems correctly
   collects the AI NIC RDMA counters per device and writes them to both the
-  Perfetto (.proto) trace and the ROCpd (.db) database. AI NIC devices are
+  Perfetto (.pftrace) trace and the ROCpd (.db) database. AI NIC devices are
   discovered at runtime via ``amd-smi static | grep -i netdev``; this test is
   skipped automatically when no AI NIC devices are present on the system.
 """
@@ -114,8 +114,8 @@ def ainic_rocpd_rules(validation_rules_dir) -> list[Path]:
 class TestAINIC(RocprofsysTest):
     """Tests for AI NIC support and performance metric collection."""
 
-    PERFETTO_PASS_REGEX = [r"perfetto-trace\.proto validated"]
-    PERFETTO_FAIL_REGEX = [r"Failure validating.*perfetto-trace\.proto"]
+    PERFETTO_PASS_REGEX = [r"perfetto-trace\.pftrace validated"]
+    PERFETTO_FAIL_REGEX = [r"Failure validating.*perfetto-trace\.pftrace"]
 
     # No NIC hardware required
     @pytest.mark.timeout(30)
@@ -191,7 +191,7 @@ class TestAINIC(RocprofsysTest):
 
         self.assert_regex(result)
 
-        # Validate Perfetto .proto: all 10 AI NIC counter track substrings must match
+        # Validate Perfetto .pftrace: all 10 AI NIC counter track substrings must match
         # We are only validating the presence: in this test, RDMA counters may
         # legitimately be 0.
         self.assert_perfetto(

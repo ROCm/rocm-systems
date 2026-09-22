@@ -73,6 +73,7 @@ The RCCL build and installation helper script options are as follows:
    RCCL build & installation helper script
     Options:
           --address-sanitizer     Build with address sanitizer enabled
+          --all_unrolls           Build every unroll factor (1,2,4,8,16,32) for the targeted GPU arch(es) instead of the per-arch default set
           --amdgpu_targets        Only compile for specified GPU architecture(s). For multiple targets, separate by ';' (builds for all supported GPU architectures by default)
           --cmake-options         Pass additional CMake options (e.g. --cmake-options "-DFOO=BAR -DBAZ=ON")
           --debug                 Build debug library
@@ -86,6 +87,7 @@ The RCCL build and installation helper script options are as follows:
        -c|--enable-code-coverage  Enable code coverage
           --enable_backtrace      Build with custom backtrace support
           --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)
+          --enable-tdm-simple     Build the experimental gfx1250 TDM SIMPLE copy path
        -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)
           --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes
        -h|--help                  Prints this help message
