@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "develop"
+      - "users/ianwood2/rocjitsu-benchmark-ci-test"
   workflow_dispatch:
 
 # Each job grants only the access it needs.
@@ -17,7 +18,7 @@ env:
   CORPUS_SHA: 896ebb017d5c6be5d2dca7d9b99fada5347207cf # rocjitsu-test-corpus#43
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
   CORPUS_SOURCE_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
-  RESULTS_BRANCH: shared/rocjitsu-benchmark-results
+  RESULTS_BRANCH: users/ianwood2/rocjitsu-benchmark-ci-test-results
   RESULTS_ARTIFACT: rocjitsu-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
@@ -133,7 +134,7 @@ jobs:
   publish:
     name: Publish dashboard data
     needs: benchmark
-    if: ${{ !cancelled() && github.ref == 'refs/heads/develop' && needs.benchmark.outputs.ran == 'true' }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/users/ianwood2/rocjitsu-benchmark-ci-test' && needs.benchmark.outputs.ran == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
