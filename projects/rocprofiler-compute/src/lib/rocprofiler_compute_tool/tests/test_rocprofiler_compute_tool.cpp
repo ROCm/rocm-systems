@@ -267,13 +267,15 @@ TEST_F(TestRocprofilerComputeTool, OnToolInit_ConfiguresDispatchCountingService)
 TEST_F(TestRocprofilerComputeTool, OnFiniEmptyCounterRecords_DoesntWriteCounters)
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_TRUE(test_knobs::replace_writer("counters", m_counters_writer));
     cfg->finalize(cfg->tool_data);
     EXPECT_EQ(m_counters_writer->get_write_counters_info().size(), 0);
 }
 
 TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCounterRecords_WritesCounters)
 {
-    const auto         cfg        = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_TRUE(test_knobs::replace_writer("counters", m_counters_writer));
     const auto         tool_data  = get_tool_data(cfg);
     constexpr uint64_t counter_id = 20;
     constexpr uint64_t kernel_id  = 11;
@@ -285,7 +287,8 @@ TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCounterRecords_WritesCounte
 
 TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCountersAndKernelFiltering_WriteOnlyFilteredCounters)
 {
-    const auto         cfg        = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_TRUE(test_knobs::replace_writer("counters", m_counters_writer));
     const auto         tool_data  = get_tool_data(cfg);
     constexpr uint64_t counter_id = 20;
     constexpr uint64_t kernel_id0 = 11;
@@ -378,7 +381,6 @@ void TestRocprofilerComputeTool::SetUp()
 
     test_knobs::set_input_parameters(m_input_parameters);
     test_knobs::set_sdk_wrapper(m_sdk_wrapper);
-    test_knobs::set_csv_writer(m_counters_writer);
 }
 
 void TestRocprofilerComputeTool::TearDown()
