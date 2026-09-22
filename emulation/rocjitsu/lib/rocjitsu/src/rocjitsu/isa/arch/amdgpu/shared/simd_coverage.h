@@ -488,6 +488,20 @@ template <bool Vop3, typename Inst>
     if (!mask)
       continue;
     U av = a.template load_native<uint32_t>(base), bv = b.template load_native<uint32_t>(base);
+    // Inline constants denote one half value broadcast to both elements;
+    // literals and register sources already contain an independent packed pair.
+    auto inline_pair = [](U raw, const auto &operand, uint32_t selector) {
+      if (pk16_src_needs_narrowing(selector, operand.size_bits()))
+        raw = util::f32_to_f16_simd(std::bit_cast<util::native<float>>(raw));
+      if (dot2_src_needs_half_replication(selector)) {
+        raw &= U(0xffffu);
+        raw |= raw << 16;
+      }
+      return raw;
+    };
+    av = inline_pair(av, inst.src0, inst.inst_.src0);
+    if constexpr (Vop3)
+      bv = inline_pair(bv, second, inst.inst_.src1);
     U cv = dst.template load_native<uint32_t>(base);
     auto compute = [&](unsigned shift) {
       return fma_f16_mode_simd(

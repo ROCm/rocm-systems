@@ -267,14 +267,14 @@ def gen_scalar_unary(
                 )
             elif op == 'rndne' and dtype == 'f32':
                 L.append(
-                    '  uint32_t result = std::bit_cast<uint32_t>(std::nearbyint(std::bit_cast<float>(val)));'
+                    '  uint32_t result = std::bit_cast<uint32_t>(util::rndne_scalar(std::bit_cast<float>(val)));'
                 )
             elif op == 'rndne' and dtype == 'f16':
                 L.append(
                     '  float f = util::f16_to_f32(static_cast<uint16_t>(val & 0xFFFF));'
                 )
                 L.append(
-                    '  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(std::nearbyint(f)));'
+                    '  uint32_t result = static_cast<uint32_t>(util::f32_to_f16(util::rndne_scalar(f)));'
                 )
             elif op == 'cvt_f32_i32':
                 L.append(

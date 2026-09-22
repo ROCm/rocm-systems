@@ -1169,7 +1169,7 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' return static_cast<uint32_t>'
     '(v < 0 ? (0u - static_cast<uint32_t>(v))'
     ' : static_cast<uint32_t>(v)); }}()',
-    'rndne': 'std::nearbyint({0})',
+    'rndne': 'util::rndne_scalar({0})',
     'ceil': 'util::ceil_scalar({0})',
     'exp2': 'amdgpu::transcendental::exp_f32({0})',
     'bcnt': 'static_cast<uint32_t>(std::popcount({0}))',
@@ -1337,7 +1337,8 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'cvt_f32_ubyte2': 'std::bit_cast<uint32_t>(static_cast<float>(({0} >> 16) & 0xFFu))',
     'cvt_f32_ubyte3': 'std::bit_cast<uint32_t>(static_cast<float>(({0} >> 24) & 0xFFu))',
     'cvt_rpi_i32_f32': '[&]() -> uint32_t {{ float s = std::bit_cast<float>(static_cast<uint32_t>({0}));'
-    ' float r = std::ceil(s - 0.5f);'
+    ' float r = std::floor(s);'
+    ' if (s - r >= 0.5f) r += 1.0f;'
     ' if (std::isnan(r)) return 0u;'
     ' if (r >= 2147483648.0f) return static_cast<uint32_t>(INT32_MAX);'
     ' if (r < -2147483648.0f) return static_cast<uint32_t>(INT32_MIN);'

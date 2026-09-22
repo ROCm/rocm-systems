@@ -386,9 +386,9 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'uint32_t',
         '[](auto a) { return a & 0xFFFFu; }',
     ),
-    # RDNA f32->i32 round-toward-floor / round-to-nearest-even conversions
-    # (cdna4 spells these v_cvt_flr_i32_f32 / v_cvt_rpi_i32_f32). floor via
-    # stdx::floor; nearest via ceil(s - 0.5) (round-half-to-even on the .5 path).
+    # RDNA f32->i32 floor / nearest conversions (CDNA4 uses flr / rpi).
+    # Nearest ties round toward positive infinity. Compare the fractional part
+    # instead of adding 0.5, which can round an adjacent non-tie to an integer.
     # Out-of-range saturates to INT32_MIN/MAX and NaN -> 0, matching the scalar.
     'v_cvt_floor_i32_f32_vop1': (
         'float32_t',
@@ -401,7 +401,8 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'float32_t',
         'int32_t',
         '[](auto s) {'
-        ' auto r = util::stdx::ceil(s - util::native<float32_t>(0.5f));'
+        ' auto r = util::stdx::floor(s);'
+        ' util::stdx::where(s - r >= util::native<float32_t>(0.5f), r) += 1.0f;'
         ' return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r); }',
     ),
     # --- bit-scan (SWAR, no stdx primitive) -----------------------------------
@@ -664,7 +665,8 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'float32_t',
         'int32_t',
         '[](auto s) {'
-        ' auto r = util::stdx::ceil(s - util::native<float32_t>(0.5f));'
+        ' auto r = util::stdx::floor(s);'
+        ' util::stdx::where(s - r >= util::native<float32_t>(0.5f), r) += 1.0f;'
         ' return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r); }',
     ),
     # --- f16 (half) ops. Scalar bodies route through an f32 intermediate with a
@@ -1954,7 +1956,7 @@ SIMD_VOP3_BINARY_FP64: dict[str, str] = {
 }
 
 # Plain f64 unary: scalar bodies are std::ceil / std::floor / std::trunc /
-# std::nearbyint applied to the (modifier-applied) double, then omod/clamp on
+# Fixed-direction rounding of the modifier-applied double, then omod/clamp on
 # the result. util::{ceil,floor,trunc,rndne}_simd wrap the stdx native<double>
 # rounding primitives and repair the two edge cases libstdc++ gets wrong at
 # narrow widths (sign-of-zero on a zero-magnitude result, NaN-payload
@@ -2957,9 +2959,9 @@ def simd_probe_line(
                 ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {_fp16_ovfl_cpp_op(cpp_op)});'
                 return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
             return probe
-        # VOP3-encoded twins of the SIMD VOP1 unary ops. The plain int/cvt forms
-        # apply no modifiers and read the same src0/vdst operands as VOP1, so they
-        # reuse the VOP1 unary path verbatim. The f32 forms (and the float-domain
+        # VOP3-encoded twins of the SIMD VOP1 unary ops. Integer forms reuse the
+        # VOP1 path; integer-to-f32 conversions use it only without output
+        # modifiers. The f32 forms (and the float-domain
         # v_mov_b32) carry abs/neg/omod/clamp and route through the f32 unary glue.
         # The f16 forms also carry modifiers, but applying them around the f16<->f32
         # round trip is not yet handled, so they are left scalar (_VOP3_UNARY_SKIP).
@@ -2980,6 +2982,28 @@ def simd_probe_line(
             if base in _VOP3_UNARY_FP_F32:
                 return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, {cpp_op});'
             probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});'
+            if base in (
+                'v_cvt_i32_f32',
+                'v_cvt_u32_f32',
+                'v_cvt_rpi_i32_f32',
+                'v_cvt_flr_i32_f32',
+                'v_cvt_nearest_i32_f32',
+                'v_cvt_floor_i32_f32',
+            ):
+                # The VOP1 shortcut does not apply floating source modifiers.
+                # F16 results also use uint32_t storage, but must reach the
+                # mode-aware half-conversion probe below.
+                return f'  if (!inst.inst_.abs && !inst.inst_.neg) {{\n{probe}\n  }}'
+            if base in (
+                'v_cvt_f32_i32',
+                'v_cvt_f32_u32',
+                'v_cvt_f32_ubyte0',
+                'v_cvt_f32_ubyte1',
+                'v_cvt_f32_ubyte2',
+                'v_cvt_f32_ubyte3',
+            ):
+                # The VOP1 shortcut has no output scaling or saturation.
+                return f'  if (!inst.inst_.omod && !inst.inst_.clamp) {{\n{probe}\n  }}'
             if _probe_uses_fp16_ovfl_f16_result_narrow(cpp_op):
                 ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {_fp16_ovfl_cpp_op(cpp_op)});'
                 return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
