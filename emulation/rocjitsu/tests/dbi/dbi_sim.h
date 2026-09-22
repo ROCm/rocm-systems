@@ -16,6 +16,12 @@
 /// ELF whose descriptor advertises a small allocation still executes with the
 /// full register file: the orchestrator's register-ownership gates are exercised
 /// statically, at patch time, and never by execution here.
+///
+/// The one place the two descriptors must agree is the kernarg segment pointer,
+/// which the DBI entry prologue reads at a slot fixed at patch time from the
+/// patched descriptor's enable bits. set_kernarg() is what makes the synthesized
+/// descriptor carry the same properties word, so the CP writes the pointer where
+/// the prologue expects it rather than where it happens to land.
 
 #pragma once
 
@@ -39,8 +45,10 @@ RJ_DIAGNOSTIC_POP
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -84,6 +92,31 @@ public:
 
   amdgpu::CommandProcessor *cp() { return soc_->xcd(0)->command_processor(); }
 
+  /// @brief Address the kernarg image passed to set_kernarg() is loaded at, and
+  ///        therefore the value the CP places in the kernarg SGPR pair.
+  static constexpr uint64_t KERNARG_ADDR = 0x40000;
+
+  /// @brief Supply the bytes dispatched as the kernarg segment.
+  /// @details Loaded at KERNARG_ADDR on every subsequent run. @p properties goes
+  /// into the synthesized descriptor's kernel_code_properties, and the default
+  /// declares the kernarg pointer as the only user SGPR, putting it at s[0:1].
+  /// Pass more properties only to move the pointer deliberately; @p
+  /// user_sgpr_count must then be the total those properties imply, since a
+  /// descriptor whose count disagrees with its enable bits places the system
+  /// SGPRs somewhere no real kernel would read.
+  ///
+  /// A DbiSim that is never given kernargs leaves the word 0, which takes the
+  /// CP's fallback for internal test dispatches (command_processor.cpp:461).
+  /// That path writes nothing when the dispatch carries no kernarg address.
+  void set_kernarg(std::vector<uint8_t> bytes,
+                   uint32_t properties =
+                       rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                   uint32_t user_sgpr_count = 2) {
+    kernarg_bytes_ = std::move(bytes);
+    kernarg_properties_ = properties;
+    user_sgpr_count_ = user_sgpr_count;
+  }
+
   /// @brief Write a kernel_descriptor_t (entry at code start) followed by
   ///        @p code, with @p private_bytes of per-lane scratch.
   /// @return The kernel_object address.
@@ -98,7 +131,9 @@ public:
     // 104 SGPRs is ample for the probe link pair s[30:31] and envelope temps.
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                     ((104 / 8) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgpr_count_);
+    kd.kernel_code_properties = kernarg_properties_;
+    kd.kernarg_size = static_cast<uint32_t>(kernarg_bytes_.size());
     kd.private_segment_fixed_size = private_bytes;
 
     mem_->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
@@ -119,29 +154,15 @@ public:
   std::vector<std::vector<uint32_t>> run_and_read_vgprs(const std::vector<uint32_t> &code,
                                                         uint32_t private_bytes,
                                                         const std::vector<uint32_t> &regs) {
-    const uint64_t ko = write_kernel(0x1000, code, private_bytes);
-    // Callers reuse one DbiSim for several dispatches, and each AqlQueue leaves
-    // its registration behind on the CP, so every run needs its own queue --
-    // its own id, since two live queues sharing one on a CP are rejected (fan-out
-    // routes shards back by (queue_id, process_id)), and its own ring and pointer
-    // page, since queues sharing a ring would let one doorbell be fetched and
-    // dispatched once per registration.
-    const uint32_t queue_id = ++queue_seq_;
-    const uint64_t ring = AqlQueue::DEFAULT_RING_ADDR + uint64_t{queue_id} * 0x100000ULL;
-    AqlQueue queue(mem_, cp(), ring, AqlQueue::DEFAULT_RING_SIZE, ring + 0x10000, ring + 0x10008,
-                   ring + 0x10010, /*xcd_fanout=*/false, /*queue_id=*/queue_id);
-    queue.dispatch(ko, /*grid_size_x=*/wave_size_, /*workgroup_size_x=*/wave_size_);
-    engine_->run();
-
-    if (snapshot_plugin_->snapshots().empty())
+    const WavefrontSnapshot *wf = run(code, private_bytes);
+    if (wf == nullptr)
       return std::vector<std::vector<uint32_t>>(regs.size());
-    const WavefrontSnapshot &wf = snapshot_plugin_->snapshots().front();
 
     std::vector<std::vector<uint32_t>> out(regs.size());
     for (size_t i = 0; i < regs.size(); ++i) {
       out[i].resize(wave_size_);
       for (uint32_t lane = 0; lane < wave_size_; ++lane)
-        out[i][lane] = wf.vgpr(regs[i], lane);
+        out[i][lane] = wf->vgpr(regs[i], lane);
     }
     return out;
   }
@@ -152,9 +173,52 @@ public:
     return run_and_read_vgprs(code, private_bytes, {reg}).front();
   }
 
+  /// @brief Dispatch @p code over one wave and return the 64-bit SGPR pair based
+  ///        at architectural index @p base after the kernel halts.
+  /// @return std::nullopt when no wave halted, so an absent value is
+  ///   distinguishable from a genuine zero pair.
+  std::optional<uint64_t> run_and_read_sgpr64(const std::vector<uint32_t> &code,
+                                              uint32_t private_bytes, uint32_t base) {
+    const WavefrontSnapshot *wf = run(code, private_bytes);
+    if (wf == nullptr)
+      return std::nullopt;
+    return wf->sgpr64(base);
+  }
+
 private:
+  /// @brief Write the kernel and its kernargs, dispatch one wave, and run to
+  ///        completion.
+  /// @return The halt snapshot, or nullptr when no wave halted (the kernel did
+  ///   not run to completion). The plugin never drops a snapshot, so a DbiSim
+  ///   reused for several dispatches still reports the first one here.
+  const WavefrontSnapshot *run(const std::vector<uint32_t> &code, uint32_t private_bytes) {
+    const uint64_t ko = write_kernel(0x1000, code, private_bytes);
+    if (!kernarg_bytes_.empty())
+      mem_->load_image(kernarg_bytes_.data(), kernarg_bytes_.size(), KERNARG_ADDR);
+    // Callers reuse one DbiSim for several dispatches, and each AqlQueue leaves
+    // its registration behind on the CP, so every run needs its own queue --
+    // its own id, since two live queues sharing one on a CP are rejected (fan-out
+    // routes shards back by (queue_id, process_id)), and its own ring and pointer
+    // page, since queues sharing a ring would let one doorbell be fetched and
+    // dispatched once per registration.
+    const uint32_t queue_id = ++queue_seq_;
+    const uint64_t ring = AqlQueue::DEFAULT_RING_ADDR + uint64_t{queue_id} * 0x100000ULL;
+    AqlQueue queue(mem_, cp(), ring, AqlQueue::DEFAULT_RING_SIZE, ring + 0x10000, ring + 0x10008,
+                   ring + 0x10010, /*xcd_fanout=*/false, /*queue_id=*/queue_id);
+    queue.dispatch(ko, /*grid_size_x=*/wave_size_, /*workgroup_size_x=*/wave_size_,
+                   kernarg_bytes_.empty() ? 0 : KERNARG_ADDR);
+    engine_->run();
+
+    if (snapshot_plugin_->snapshots().empty())
+      return nullptr;
+    return &snapshot_plugin_->snapshots().front();
+  }
+
   uint32_t wave_size_ = 64;
   uint32_t queue_seq_ = 0;
+  uint32_t kernarg_properties_ = 0;
+  uint32_t user_sgpr_count_ = 2;
+  std::vector<uint8_t> kernarg_bytes_;
   config::LoadedConfig loaded_;
   SoC *soc_ = nullptr;
   amdgpu::GpuMemory *mem_ = nullptr;
