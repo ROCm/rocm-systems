@@ -720,6 +720,9 @@ fail:
   }
   free(mem->ginSegmentInfos);
   mem->ginSegmentInfos = nullptr;
+  // Defensive only: mem-level ginHostWins/ginDevWins are populated solely by
+  // the numGinSegments==1 cache copy above, which sits after the last goto fail.
+  // ncclGinRegister writes ginSegmentInfos[seg].ginHostWins instead.
   for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS; i++) {
     mem->ginHostWins[i] = nullptr;
     mem->ginDevWins[i] = nullptr;
@@ -742,7 +745,11 @@ static void symMemoryUnregister(struct ncclComm* comm, struct ncclDevrMemory* me
       (void)ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
     }
   }
-  if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1) {
+  // rmaHostWins[0] is a reliable witness that register completed (same pattern
+  // as windowRegisterNonSym / ncclCommWindowDeregister). Skip if connect/register
+  // failed partway so deregister does not walk an unbound rmaCommCount.
+  if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1 &&
+      mem->rmaHostWins[0] != nullptr) {
     (void)ncclRmaProxyDeregister(comm, mem->rmaHostWins);
   }
 }
