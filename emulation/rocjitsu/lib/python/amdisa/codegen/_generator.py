@@ -6911,8 +6911,7 @@ class CodeGenerator:
             L.append('  uint64_t value = 0;')
             L.append('  switch (msg) {')
             L.append('  case 0x83: {')
-            L.append('    auto *engine = wf.cu().engine();')
-            L.append('    value = engine ? engine->global_time() : 0;')
+            L.append('    value = wf.realtime_timestamp();')
             L.append('    break;')
             L.append('  }')
             L.append('  case 0x80:')  # MSG_RTN_GET_DOORBELL

@@ -370,6 +370,10 @@ void ComputeUnitCore::flush_wg_completions() {
 
 void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome) {
   assert(outcome != VmAccessOutcome::Complete && outcome != VmAccessOutcome::Unavailable);
+  if (wf.fail_pm4_submission()) {
+    abort_dispatch(wf.dispatch_id());
+    return;
+  }
   pending_vm_faults_.push_back({.queue_id = wf.queue_id(),
                                 .process_id = wf.process_id(),
                                 .dispatch_id = wf.dispatch_id(),
@@ -1117,6 +1121,7 @@ template <bool EnableAsync>
     // Under a debugger, surface the undecodable instruction as an illegal-
     // instruction exception (stops the wave at this PC) instead of silently
     // retiring it. Without a debugger this halts as before.
+    active->fail_pm4_submission();
     if (illegal_inst_handler_ && illegal_inst_handler_(*active))
       return;
     active->halt();
@@ -1306,8 +1311,10 @@ template <bool EnableAsync>
                                             this->name(), active->wf_id(), inst->mnemonic(),
                                             active->pc, instruction_execution_error_name(error));
     util::Logger::warn(failure);
-    if (auto *sim_engine = this->engine())
-      sim_engine->request_exit(failure, /*code=*/1);
+    if (!active->fail_pm4_submission()) {
+      if (auto *sim_engine = this->engine())
+        sim_engine->request_exit(failure, /*code=*/1);
+    }
     active->halt();
     return;
   }
