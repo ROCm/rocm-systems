@@ -419,8 +419,8 @@ __device__ void IPCContext::internal_ring_allreduce_wg(
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
-      detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                             detail::atomic::memory_order_acquire>();
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::acquire>();
       __syncthreads();
 
       ipc_compute_reduce<T, Op>(&pWrk[off_recv], &dst[off_seg + off_recv],
@@ -440,8 +440,8 @@ __device__ void IPCContext::internal_ring_allreduce_wg(
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
-      detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                             detail::atomic::memory_order_acquire>();
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::acquire>();
 
       __syncthreads();
     }
@@ -493,8 +493,8 @@ __device__ void IPCContext::internal_ring_allreduce_wave(
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
       }
       wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
-      detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                             detail::atomic::memory_order_acquire>();
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::acquire>();
       __builtin_amdgcn_wave_barrier();
 
       for (int j = wf_tid; j < chunk_size; j += wave_size) {
@@ -517,8 +517,8 @@ __device__ void IPCContext::internal_ring_allreduce_wave(
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
       }
       wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
-      detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                             detail::atomic::memory_order_acquire>();
+      atomic::threadfence<atomic::memory_scope::system,
+                          atomic::memory_order::acquire>();
       __builtin_amdgcn_wave_barrier();
     }
   }

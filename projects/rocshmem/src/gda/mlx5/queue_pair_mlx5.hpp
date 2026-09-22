@@ -339,7 +339,7 @@ __device__ inline __noinline__ void QueuePairMLX5::quiet_single() {
 __device__ inline void QueuePairMLX5::poll_cq_until(uint16_t requested_available_slots) {
   uint16_t sq_depth = sq.depth;
 
-  uint64_t sq_post = __hip_atomic_load(&sq.post, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
+  uint64_t sq_post = __scoped_atomic_load_n(&sq.post, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
   // don't need to check CQ if we haven't ever filled SQ and there's enough space left
   if (sq_post + requested_available_slots <= sq_depth) {
     return;
@@ -351,8 +351,8 @@ __device__ inline void QueuePairMLX5::poll_cq_until(uint16_t requested_available
     /* Update the SQ head
      * This param provides us the sq_wqebb_counter; all our WQEs are exactly one WQEBB (64B) */
     // 32-bit load: big-endian 16-bit field, then two 8-bit fields
-    uint32_t wqecnt_sig_op_own = __hip_atomic_load(reinterpret_cast<uint32_t*>(&cqe->wqe_counter),
-                                                   __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+    uint32_t wqecnt_sig_op_own = __scoped_atomic_load_n(reinterpret_cast<uint32_t*>(&cqe->wqe_counter),
+                                                        __ATOMIC_ACQUIRE, __MEMORY_SCOPE_SYSTEM);
     // GPU is little-endian, so wqe_counter is loaded into the low half of wqecnt_sig_op_own
     __be16 be_wqe_counter = static_cast<__be16>(wqecnt_sig_op_own);
     /* GPU is little-endian, so op_own is loaded into the top byte of wqecnt_sig_op_own;
@@ -395,7 +395,7 @@ __device__ inline void QueuePairMLX5::poll_cq_until(uint16_t requested_available
      *   - no additional WQEs have been posted
      *   - the number of requested SQ slots are available */
     uint64_t prior_sq_post = sq_post;
-    sq_post = __hip_atomic_load(&sq.post, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
+    sq_post = __scoped_atomic_load_n(&sq.post, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
     if (sq_post == prior_sq_post && available_slots >= requested_available_slots) {
       return;
     }
@@ -414,9 +414,9 @@ __device__ __forceinline__ void QueuePairMLX5::ring_doorbell(
   gda_mlx5_bf_buffer* bf = sq.bf_buffer();
 
   // store sq_wqebb_counter to doorbell record
-  __hip_atomic_store(sq.dbrec, be_sq_wqebb_counter, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+  __scoped_atomic_store_n(sq.dbrec, be_sq_wqebb_counter, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
   // ring doorbell by storing first 8B of WQE to the doorbell register
-  __hip_atomic_store(&bf->db_reg, db_val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+  __scoped_atomic_store_n(&bf->db_reg.val, db_val.val, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
 
   LOGD_TRACE("SQ: posted WQEs with dbrec(%p)=%x (%hu), dbreg(%p)=%lx (%x, %x)",
              sq.dbrec, be_sq_wqebb_counter, sq_wqebb_counter, &bf->db_reg, db_val.val,
@@ -431,7 +431,7 @@ __device__ __forceinline__ void QueuePairMLX5::acquire_lock(uint32_t* lock) {
    * this is fine, since we only need to ensure happens-before between the threads
    * that released and acquired the lock, not between the different threads contending on the lock
    * when they (eventually) acquire the lock, *then* they will synchronize */
-  while (__hip_atomic_exchange(lock, 1, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT)) {
+  while (__scoped_atomic_exchange_n(lock, 1, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE)) {
 #if GDA_MLX5_LOCK_USE_S_SLEEP
     // sleep so we don't hammer the memory
     __builtin_amdgcn_s_sleep(LOCK_S_SLEEP_DELAY);
@@ -441,7 +441,7 @@ __device__ __forceinline__ void QueuePairMLX5::acquire_lock(uint32_t* lock) {
 
 __device__ __forceinline__ void QueuePairMLX5::release_lock(uint32_t* lock) {
   // release lock by storing 0 (unlocked)
-  __hip_atomic_store(lock, 0, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+  __scoped_atomic_store_n(lock, 0, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
 #if GDA_MLX5_LOCK_USE_S_WAKEUP
   // wake up any other sleeping waves (in the same workgroup)
   amdgcn_s_wakeup();
@@ -470,7 +470,7 @@ __device__ inline __noinline__ void QueuePairMLX5::print_cqe_error(
     LOGD_ERROR("CQ: unexpected signature error (%x)", opcode);
     break;
   case MLX5_CQE_REQ_ERR:
-    syndrome = __hip_atomic_load(&err_cqe->syndrome, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    syndrome = __scoped_atomic_load_n(&err_cqe->syndrome, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
     switch (syndrome) {
     case MLX5_CQE_SYNDROME_LOCAL_LENGTH_ERR:
       LOGD_ERROR("CQ requester error LOCAL_LENGTH_ERR (%x)", syndrome);
