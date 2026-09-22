@@ -2099,168 +2099,64 @@ static hsa_status_t SubmitAndWaitChain(int fd, const BOHandle* cmd_bos, size_t n
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
-                                        uint64_t first_pkt_idx, uint64_t num_pkts,
-                                        const core::Agent& agent, uint64_t* num_completed) {
-  auto kmq_metadata = static_cast<KmqMetadata*>(queue_metadata);
-
-  // Nothing has executed until a chain comes back. Every early return below leaves this at zero,
-  // which is correct for all of them: they all refuse the batch before anything is submitted.
-  *num_completed = 0;
-
-  auto* queue = static_cast<hsa_amd_aie_kernel_dispatch_packet_t*>(q.base_address);
-  const uint64_t mask = q.size - 1;
-
-  // Nothing to submit.
-  if (num_pkts == 0) return HSA_STATUS_SUCCESS;
-
-  // The first packet fixes the mode for the whole batch; the loop below checks the rest agree as
-  // it walks them. Grouping dispatches by mode is the caller's job: a mixed batch is rejected
-  // rather than split. The queue itself is not pinned to that mode - a later batch may pick the
-  // other one, and the rebuild below switches the context to it.
-  // The two kinds need incompatible hardware contexts -- PDI + instruction sequence needs CU
-  // configuration, full-ELF must not have any -- and a hardware context's CU configuration cannot
-  // be changed once set. That rules out switching a live context, not a queue: one batch is one
-  // kind, and between batches the queue is drained, so the context can be torn down and rebuilt
-  // then.
-  const AieKernelDescriptor* first_desc = PacketDescriptor(&queue[first_pkt_idx & mask]);
-  const AieKernelKind mode =
-      ValidDescriptor(first_desc) ? first_desc->kind : AieKernelKind::Undecided;
-  // A packet with no kernel object names no dispatch shape at all. Refused here rather than left
-  // to the homogeneity check below, which would pass a whole batch of them through to a command
-  // builder and a hardware context rebuild for a kind that does not exist.
-  if (mode != AieKernelKind::PdiInsts && mode != AieKernelKind::FullElf) {
-    log_warning_n(10, "AIE: the packet does not name a kernel object.\n");
-    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-  }
-
-  // Control-code buffers this batch's full-ELF packets are dispatched from, one per packet. They
-  // must outlive the dispatch, so they are freed on the way out of this function -- after the
-  // chains have been submitted and waited on, and on every early return in between. A PDI +
-  // instruction sequence batch allocates none.
-  std::vector<DeviceBuffer> ctrl_buffers;
-  // One per full-ELF packet, so the final size is known here. A PDI + instruction sequence batch
-  // allocates none, hence the condition. The guard below holds the vector, not its elements, so
-  // growth would be safe either way -- this is to avoid the reallocations, not to make it correct.
-  if (mode == AieKernelKind::FullElf) {
-    ctrl_buffers.reserve(num_pkts);
-  }
-  MAKE_SCOPE_GUARD([&] { FreeDeviceBuffers(fd_, dev_heap_vaddr, &ctrl_buffers); });
-
-  // BO handles listed per packet: the instruction sequence (PDI + insts) or the control code and
-  // the PDI (full ELF), plus one per kernarg. So 2 + num_kernargs is the per-packet worst case,
-  // and this covers it for the two-argument designs in hand. A kernel with more arguments than
-  // that reallocates -- a hint, not a bound, since a batch's packets need not agree on it.
-  std::vector<uint32_t> bo_handles;
-  bo_handles.reserve(num_pkts * 4);
-
-  // Commands to be submitted, and how many argument dwords each occupies in a chain slot.
-  std::vector<BOHandle> cmd_bo_handles;
-  std::vector<uint32_t> cmd_arg_cnts;
-  cmd_bo_handles.reserve(num_pkts);
-  cmd_arg_cnts.reserve(num_pkts);
-
-  // Flag to reconfigure the hardware context because of a new PDI.
-  bool reconfigure_queue = false;
-
-  // Building a command adds its PDI to the cache, but the hardware context is only reconfigured
-  // to match once every packet has been built. If the batch fails in between, those entries would
-  // claim compute units the context was never given, and the next submission would find them
-  // cached, skip the reconfigure, and dispatch against a context that cannot run them. Roll them
-  // back unless the cache and the context end up agreeing. A full-ELF batch adds no entries and
-  // drops the cache outright below, so for one the rollback would have nothing to restore.
-  const auto pdi_cache_watermark = kmq_metadata->pdi_cache.size();
-  MAKE_NAMED_SCOPE_GUARD(pdi_cache_guard, [&] {
-    if (mode == AieKernelKind::PdiInsts) kmq_metadata->pdi_cache.Truncate(pdi_cache_watermark);
-  });
-
-  for (uint64_t i = 0; i < num_pkts; ++i) {
-    const auto pkt_idx = (first_pkt_idx + i) & mask;
-    auto* pkt = queue + pkt_idx;
-
-    // The first packet fixed the batch's mode; the rest have to agree. Checked here rather than in
-    // a pass of its own, so the ring is walked once. A refusal leaves nothing of the packets built
-    // before it: their control-code buffers are the runtime's own and are freed on the way out,
-    // and nothing the build wrote is visible to the caller.
-    if (static_cast<hsa_amd_aie_packet_opcode_t>(pkt->opcode) != HSA_AMD_AIE_PACKET_OPCODE_KMQ) {
-      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-    }
-    // Resolved once here and handed to the builder, which dereferences it on trust: nothing
-    // between the two can change what the handle names.
-    const AieKernelDescriptor* desc = PacketDescriptor(pkt);
-    if (!ValidDescriptor(desc) || desc->kind != mode) {
-      log_warning_n(10,
-                    "AIE batch cannot mix full-ELF and PDI dispatches; submit each mode as its "
-                    "own batch.\n");
-      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-    }
-
-    BOHandle cmd_bo_handle;
-    uint32_t arg_cnt = 0;
-    const hsa_status_t err = (mode == AieKernelKind::FullElf)
-        ? BuildFullElfCommand(fd_, dev_heap_vaddr, pkt, desc, agent, kmq_metadata, &bo_handles,
-                              &ctrl_buffers, &cmd_bo_handle, &arg_cnt)
-        : BuildPdiInstsCommand(pkt, desc, agent, kmq_metadata, &bo_handles, &reconfigure_queue,
-                               &cmd_bo_handle, &arg_cnt);
-    if (err != HSA_STATUS_SUCCESS) return err;
-
-    cmd_bo_handles.push_back(cmd_bo_handle);
-    cmd_arg_cnts.push_back(arg_cnt);
-  }
-
-  // Rebuild the hardware context when this batch needs one the queue does not have: either the
-  // dispatch mode changed, or a new PDI needs a compute unit.
-  //
-  // Note: we can do this because we have forced synchronization between command chains. If we
-  // move to a more asynchronous model, we will need to figure out how hardware context
-  // destruction works while applications are running.
-  //
-  // Undecided counts as a change, so a queue's first batch always lands here. That costs a
-  // full-ELF-first queue one rebuild of a context it could have kept - a PDI-first queue rebuilds
-  // regardless, having just cached its first PDI - and in exchange the checks below run only when
-  // a context is about to be built, not on every submission.
-  const bool mode_changed = (kmq_metadata->mode != mode);
-  // A failed CreateHwCtx leaves no context at all. Without this, a later batch needing neither a
-  // switch nor a reconfigure would submit against an invalid handle.
-  const bool no_context = (kmq_metadata->hw_ctx_handle == AMDXDNA_INVALID_CTX_HANDLE);
-  if (mode_changed || reconfigure_queue || no_context) {
-    // A full-ELF context must carry no CU configuration, and CreateHwCtx derives that from the
-    // PDI cache, so the cache is dropped before the rebuild. Switching back later finds it empty
-    // and re-adds each PDI, which is what forces the reconfigure that restores the CU config.
-    if (mode == AieKernelKind::FullElf) {
-      // Full ELF is an aie2p feature. Reached whenever the queue enters the mode, which is the
-      // only time the device has to be asked about it.
-      if (kmq_metadata->device_type != XDNADeviceType::Stx) {
-        return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-      }
-      kmq_metadata->pdi_cache.Truncate(0);
-    }
-
-    if (kmq_metadata->hw_ctx_handle != AMDXDNA_INVALID_CTX_HANDLE) {
-      const hsa_status_t err = DestroyHwCtx(fd_, kmq_metadata->hw_ctx_handle);
-      if (err != HSA_STATUS_SUCCESS) {
-        assert(false && "Failed to destroy hardware context for queue.");
-        return err;
-      }
-      kmq_metadata->hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
-      kmq_metadata->syncobj_handle = 0;
-    }
-
-    const hsa_status_t err = CreateHwCtx(fd_, kmq_metadata);
+/// @brief Destroys the queue's current hardware context, if any, and creates a fresh one from
+/// @p kmq_metadata's present configuration (mode, PDI cache, CU tiles).
+///
+/// Callers decide *whether* a rebuild is needed and prepare @p kmq_metadata for it (e.g.
+/// truncating the PDI cache for a full-ELF context); this only does the mechanical destroy+create.
+///
+/// @note We can do this because we have forced synchronization between command chains. If we move
+/// to a more asynchronous model, we will need to figure out how hardware context destruction works
+/// while applications are running.
+///
+/// @param[in] fd driver file descriptor
+/// @param[in,out] kmq_metadata KMQ metadata to rebuild the hardware context for
+static hsa_status_t RebuildHwContext(int fd, KmqMetadata* kmq_metadata) {
+  if (kmq_metadata->hw_ctx_handle != AMDXDNA_INVALID_CTX_HANDLE) {
+    const hsa_status_t err = DestroyHwCtx(fd, kmq_metadata->hw_ctx_handle);
     if (err != HSA_STATUS_SUCCESS) {
-      assert(false && "Failed to configure hardware context for queue.");
+      assert(false && "Failed to destroy hardware context for queue.");
       return err;
     }
+    kmq_metadata->hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
+    kmq_metadata->syncobj_handle = 0;
   }
 
-  // Every packet was accepted, so the queue is committed to this mode.
-  kmq_metadata->mode = mode;
-  pdi_cache_guard.Dismiss();
+  const hsa_status_t err = CreateHwCtx(fd, kmq_metadata);
+  if (err != HSA_STATUS_SUCCESS) {
+    assert(false && "Failed to configure hardware context for queue.");
+    return err;
+  }
+  return HSA_STATUS_SUCCESS;
+}
 
+/// @brief Submits already-built commands, split into chains the driver's 4 KiB chain buffer can
+/// hold, and retires whatever executed.
+///
+/// Shared tail for both dispatch kinds: by this point the kind-specific build loop and hardware
+/// context rebuild are done, so nothing here depends on which kind the batch was.
+///
+/// @param[in] fd driver file descriptor
+/// @param[in,out] cmd_bo_handles commands to submit, one per packet in submission order
+/// @param[in] cmd_arg_cnts argument dword count per command, parallel to @p cmd_bo_handles
+/// @param[in,out] bo_handles BOs the commands reference; deduplicated in place before submission
+/// @param[in,out] kmq_metadata KMQ metadata supplying the hardware context and syncobj
+/// @param[in] queue base of the packet ring
+/// @param[in] mask ring index mask (queue size - 1)
+/// @param[in] first_pkt_idx ring index of the batch's first packet
+/// @param[in] num_pkts number of packets in the batch
+/// @param[out] num_completed how many packets executed and had their completion signals released
+static hsa_status_t SubmitBatchInChunks(int fd, std::vector<BOHandle>* cmd_bo_handles,
+                                        const std::vector<uint32_t>& cmd_arg_cnts,
+                                        std::vector<uint32_t>* bo_handles,
+                                        KmqMetadata* kmq_metadata,
+                                        hsa_amd_aie_kernel_dispatch_packet_t* queue, uint64_t mask,
+                                        uint64_t first_pkt_idx, uint64_t num_pkts,
+                                        uint64_t* num_completed) {
   // Remove duplicate BOs, since the driver reports an error if the same BO is provided multiple
   // times.
-  std::sort(bo_handles.begin(), bo_handles.end());
-  bo_handles.erase(std::unique(bo_handles.begin(), bo_handles.end()), bo_handles.end());
+  std::sort(bo_handles->begin(), bo_handles->end());
+  bo_handles->erase(std::unique(bo_handles->begin(), bo_handles->end()), bo_handles->end());
 
   // Flush cache for the arguments.
   for (uint64_t i = 0; i < num_pkts; ++i) {
@@ -2273,12 +2169,12 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
   // chain outright, so the split has to happen here; the commands are independent, so submitting
   // them as several chains back to back is equivalent to one long chain.
   size_t chunk_start = 0;
-  while (chunk_start < cmd_bo_handles.size()) {
+  while (chunk_start < cmd_bo_handles->size()) {
     // Every command in a chain shares one buffer, so take commands until the next one would not
     // fit.
     size_t chunk_len = 0;
     uint32_t chunk_bytesize = 0;
-    for (size_t i = chunk_start; i < cmd_bo_handles.size(); ++i) {
+    for (size_t i = chunk_start; i < cmd_bo_handles->size(); ++i) {
       const uint32_t slot_bytesize = ChainSlotBytesize(cmd_arg_cnts[i]);
       if (chunk_bytesize + slot_bytesize > MAX_CHAIN_CMDBUF_SIZE) break;
       chunk_bytesize += slot_bytesize;
@@ -2292,8 +2188,8 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     }
 
     size_t chunk_completed = 0;
-    const hsa_status_t status = SubmitAndWaitChain(fd_, &cmd_bo_handles[chunk_start], chunk_len,
-                                                   bo_handles, kmq_metadata, &chunk_completed);
+    const hsa_status_t status = SubmitAndWaitChain(fd, &(*cmd_bo_handles)[chunk_start], chunk_len,
+                                                   *bo_handles, kmq_metadata, &chunk_completed);
     if (status != HSA_STATUS_SUCCESS) {
       // Commands map one-to-one onto packets in submission order, so everything before this chunk
       // ran, plus however far into it the device got. Those packets executed and wrote their
@@ -2311,6 +2207,230 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
   RetireCompletedPackets(queue, mask, first_pkt_idx, num_pkts);
 
   return HSA_STATUS_SUCCESS;
+}
+
+/// @brief Validates that the packet at @p pkt is a KMQ packet whose descriptor names @p mode, for
+/// the per-packet checks shared by both dispatch kinds' build loops.
+///
+/// @param[in] pkt packet to validate
+/// @param[in] mode kind the batch has committed to; @p pkt must name a kernel object of this kind
+/// @param[out] desc @p pkt's kernel descriptor, set on success
+static hsa_status_t ValidateBatchPacket(const hsa_amd_aie_kernel_dispatch_packet_t* pkt,
+                                        AieKernelKind mode, const AieKernelDescriptor** desc) {
+  // The first packet fixed the batch's mode; the rest have to agree. Checked here rather than in
+  // a pass of its own, so the ring is walked once. A refusal leaves nothing of the packets built
+  // before it: their control-code buffers are the runtime's own and are freed on the way out,
+  // and nothing the build wrote is visible to the caller.
+  if (static_cast<hsa_amd_aie_packet_opcode_t>(pkt->opcode) != HSA_AMD_AIE_PACKET_OPCODE_KMQ) {
+    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  }
+  // Resolved once here and handed to the builder, which dereferences it on trust: nothing
+  // between the two can change what the handle names.
+  *desc = PacketDescriptor(pkt);
+  if (!ValidDescriptor(*desc) || (*desc)->kind != mode) {
+    log_warning_n(10,
+                  "AIE batch cannot mix full-ELF and PDI dispatches; submit each mode as its "
+                  "own batch.\n");
+    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+/// @brief Builds and submits a batch of full-ELF packets. See @ref XdnaDriver::SubmitCmdChain.
+///
+/// @param[in] fd driver file descriptor
+/// @param[in] dev_heap_vaddr base of the mapped device heap, for control-code buffer allocation
+/// @param[in] queue base of the packet ring
+/// @param[in] mask ring index mask (queue size - 1)
+/// @param[in] first_pkt_idx ring index of the batch's first packet
+/// @param[in] num_pkts number of packets in the batch
+/// @param[in] agent agent that owns the queue
+/// @param[in,out] kmq_metadata KMQ metadata; updated if the hardware context is rebuilt
+/// @param[out] num_completed how many packets executed and had their completion signals released
+static hsa_status_t SubmitFullElfChain(int fd, void* dev_heap_vaddr,
+                                       hsa_amd_aie_kernel_dispatch_packet_t* queue, uint64_t mask,
+                                       uint64_t first_pkt_idx, uint64_t num_pkts,
+                                       const core::Agent& agent, KmqMetadata* kmq_metadata,
+                                       uint64_t* num_completed) {
+  // Full ELF is an aie2p feature. Checked here rather than earlier, since this is the only time
+  // the device has to be asked about it: a full-ELF queue that already has a matching context
+  // never re-checks.
+  const bool mode_changed = (kmq_metadata->mode != AieKernelKind::FullElf);
+  const bool no_context = (kmq_metadata->hw_ctx_handle == AMDXDNA_INVALID_CTX_HANDLE);
+  if ((mode_changed || no_context) && kmq_metadata->device_type != XDNADeviceType::Stx) {
+    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  }
+
+  // Control-code buffers this batch's packets are dispatched from, one per packet. They must
+  // outlive the dispatch, so they are freed on the way out of this function -- after the chain
+  // has been submitted and waited on, and on every early return in between.
+  std::vector<DeviceBuffer> ctrl_buffers;
+  ctrl_buffers.reserve(num_pkts);
+  MAKE_SCOPE_GUARD([&] { FreeDeviceBuffers(fd, dev_heap_vaddr, &ctrl_buffers); });
+
+  // BO handles listed per packet: the control code and the PDI, plus one per kernarg. So
+  // 2 + num_kernargs is the per-packet worst case, and this covers it for the two-argument
+  // designs in hand. A kernel with more arguments than that reallocates -- a hint, not a bound,
+  // since a batch's packets need not agree on it.
+  std::vector<uint32_t> bo_handles;
+  bo_handles.reserve(num_pkts * 4);
+
+  // Commands to be submitted, and how many argument dwords each occupies in a chain slot.
+  std::vector<BOHandle> cmd_bo_handles;
+  std::vector<uint32_t> cmd_arg_cnts;
+  cmd_bo_handles.reserve(num_pkts);
+  cmd_arg_cnts.reserve(num_pkts);
+
+  for (uint64_t i = 0; i < num_pkts; ++i) {
+    auto* pkt = queue + ((first_pkt_idx + i) & mask);
+
+    const AieKernelDescriptor* desc = nullptr;
+    hsa_status_t err = ValidateBatchPacket(pkt, AieKernelKind::FullElf, &desc);
+    if (err != HSA_STATUS_SUCCESS) return err;
+
+    BOHandle cmd_bo_handle;
+    uint32_t arg_cnt = 0;
+    err = BuildFullElfCommand(fd, dev_heap_vaddr, pkt, desc, agent, kmq_metadata, &bo_handles,
+                              &ctrl_buffers, &cmd_bo_handle, &arg_cnt);
+    if (err != HSA_STATUS_SUCCESS) return err;
+
+    cmd_bo_handles.push_back(cmd_bo_handle);
+    cmd_arg_cnts.push_back(arg_cnt);
+  }
+
+  // Rebuild the hardware context when this batch needs one the queue does not have: either the
+  // dispatch mode changed, or the queue never had a context to begin with. Undecided counts as a
+  // change, so a queue's first batch always lands here.
+  if (mode_changed || no_context) {
+    // A full-ELF context must carry no CU configuration, and CreateHwCtx derives that from the
+    // PDI cache, so the cache is dropped before the rebuild. Switching back to PDI+insts later
+    // finds it empty and re-adds each PDI, which is what forces the reconfigure that restores the
+    // CU config.
+    kmq_metadata->pdi_cache.Truncate(0);
+    const hsa_status_t err = RebuildHwContext(fd, kmq_metadata);
+    if (err != HSA_STATUS_SUCCESS) return err;
+  }
+
+  // Every packet was accepted, so the queue is committed to this mode.
+  kmq_metadata->mode = AieKernelKind::FullElf;
+
+  return SubmitBatchInChunks(fd, &cmd_bo_handles, cmd_arg_cnts, &bo_handles, kmq_metadata, queue,
+                             mask, first_pkt_idx, num_pkts, num_completed);
+}
+
+/// @brief Builds and submits a batch of PDI + instruction-sequence packets. See
+/// @ref XdnaDriver::SubmitCmdChain.
+///
+/// @param[in] fd driver file descriptor
+/// @param[in] queue base of the packet ring
+/// @param[in] mask ring index mask (queue size - 1)
+/// @param[in] first_pkt_idx ring index of the batch's first packet
+/// @param[in] num_pkts number of packets in the batch
+/// @param[in] agent agent that owns the queue
+/// @param[in,out] kmq_metadata KMQ metadata; updated if the hardware context is rebuilt
+/// @param[out] num_completed how many packets executed and had their completion signals released
+static hsa_status_t SubmitPdiInstsChain(int fd, hsa_amd_aie_kernel_dispatch_packet_t* queue,
+                                        uint64_t mask, uint64_t first_pkt_idx, uint64_t num_pkts,
+                                        const core::Agent& agent, KmqMetadata* kmq_metadata,
+                                        uint64_t* num_completed) {
+  // BO handles listed per packet: the instruction sequence (PDI + insts), plus one per kernarg. So
+  // 2 + num_kernargs is the per-packet worst case, and this covers it for the two-argument designs
+  // in hand. A kernel with more arguments than that reallocates -- a hint, not a bound, since a
+  // batch's packets need not agree on it.
+  std::vector<uint32_t> bo_handles;
+  bo_handles.reserve(num_pkts * 4);
+
+  // Commands to be submitted, and how many argument dwords each occupies in a chain slot.
+  std::vector<BOHandle> cmd_bo_handles;
+  std::vector<uint32_t> cmd_arg_cnts;
+  cmd_bo_handles.reserve(num_pkts);
+  cmd_arg_cnts.reserve(num_pkts);
+
+  // Flag to reconfigure the hardware context because of a new PDI.
+  bool reconfigure_queue = false;
+
+  // Building a command adds its PDI to the cache, but the hardware context is only reconfigured
+  // to match once every packet has been built. If the batch fails in between, those entries would
+  // claim compute units the context was never given, and the next submission would find them
+  // cached, skip the reconfigure, and dispatch against a context that cannot run them. Roll them
+  // back unless the cache and the context end up agreeing.
+  const auto pdi_cache_watermark = kmq_metadata->pdi_cache.size();
+  MAKE_NAMED_SCOPE_GUARD(pdi_cache_guard,
+                         [&] { kmq_metadata->pdi_cache.Truncate(pdi_cache_watermark); });
+
+  for (uint64_t i = 0; i < num_pkts; ++i) {
+    auto* pkt = queue + ((first_pkt_idx + i) & mask);
+
+    const AieKernelDescriptor* desc = nullptr;
+    hsa_status_t err = ValidateBatchPacket(pkt, AieKernelKind::PdiInsts, &desc);
+    if (err != HSA_STATUS_SUCCESS) return err;
+
+    BOHandle cmd_bo_handle;
+    uint32_t arg_cnt = 0;
+    err = BuildPdiInstsCommand(pkt, desc, agent, kmq_metadata, &bo_handles, &reconfigure_queue,
+                               &cmd_bo_handle, &arg_cnt);
+    if (err != HSA_STATUS_SUCCESS) return err;
+
+    cmd_bo_handles.push_back(cmd_bo_handle);
+    cmd_arg_cnts.push_back(arg_cnt);
+  }
+
+  // Rebuild the hardware context when this batch needs one the queue does not have: either the
+  // dispatch mode changed, a new PDI needs a compute unit, or the queue never had a context to
+  // begin with.
+  const bool mode_changed = (kmq_metadata->mode != AieKernelKind::PdiInsts);
+  const bool no_context = (kmq_metadata->hw_ctx_handle == AMDXDNA_INVALID_CTX_HANDLE);
+  if (mode_changed || reconfigure_queue || no_context) {
+    const hsa_status_t err = RebuildHwContext(fd, kmq_metadata);
+    if (err != HSA_STATUS_SUCCESS) return err;
+  }
+
+  // Every packet was accepted, so the queue is committed to this mode.
+  kmq_metadata->mode = AieKernelKind::PdiInsts;
+  pdi_cache_guard.Dismiss();
+
+  return SubmitBatchInChunks(fd, &cmd_bo_handles, cmd_arg_cnts, &bo_handles, kmq_metadata, queue,
+                             mask, first_pkt_idx, num_pkts, num_completed);
+}
+
+hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
+                                        uint64_t first_pkt_idx, uint64_t num_pkts,
+                                        const core::Agent& agent, uint64_t* num_completed) {
+  auto kmq_metadata = static_cast<KmqMetadata*>(queue_metadata);
+
+  // Nothing has executed until a chain comes back. Every early return below leaves this at zero,
+  // which is correct for all of them: they all refuse the batch before anything is submitted.
+  *num_completed = 0;
+
+  auto* queue = static_cast<hsa_amd_aie_kernel_dispatch_packet_t*>(q.base_address);
+  const uint64_t mask = q.size - 1;
+
+  // Nothing to submit.
+  if (num_pkts == 0) return HSA_STATUS_SUCCESS;
+
+  // The first packet fixes the mode for the whole batch; each mode's build loop checks the rest
+  // agree as it walks them. Grouping dispatches by mode is the caller's job: a mixed batch is
+  // rejected rather than split. The queue itself is not pinned to that mode - a later batch may
+  // pick the other one, and the rebuild inside the chosen path switches the context to it.
+  // The two kinds need incompatible hardware contexts - PDI + instruction sequence needs CU
+  // configuration, full-ELF must not have any - and a hardware context's CU configuration cannot
+  // be changed once set.
+  const AieKernelDescriptor* first_desc = PacketDescriptor(&queue[first_pkt_idx & mask]);
+  const AieKernelKind mode =
+      ValidDescriptor(first_desc) ? first_desc->kind : AieKernelKind::Undecided;
+
+  // Dispatch.
+  switch (mode) {
+    case AieKernelKind::FullElf:
+      return SubmitFullElfChain(fd_, dev_heap_vaddr, queue, mask, first_pkt_idx, num_pkts, agent,
+                                kmq_metadata, num_completed);
+    case AieKernelKind::PdiInsts:
+      return SubmitPdiInstsChain(fd_, queue, mask, first_pkt_idx, num_pkts, agent, kmq_metadata,
+                                 num_completed);
+    default:
+      log_warning_n(10, "AIE: the packet does not name a kernel object.\n");
+      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+  }
 }
 
 hsa_status_t XdnaDriver::SPMAcquire(uint32_t preferred_node_id) const {
