@@ -12,10 +12,6 @@
 #include <limits>
 
 namespace amd {
-class Device;
-}  // namespace amd
-
-namespace amd {
 
 /*! \addtogroup Runtime
  *  @{
@@ -92,6 +88,27 @@ using NDRange32 = NDRangeImpl<uint32_t>;  //!< AQL grid_size_{x,y,z}
 using NDRange16 = NDRangeImpl<uint16_t>;  //!< AQL workgroup_size_{x,y,z}
 using NDRange8 = NDRangeImpl<uint8_t>;    //!< AQL cluster_size_{x,y,z}
 
+//! Bitmask of launch-configuration violations detected for a given LaunchParams instance.
+enum LaunchViolation : uint16_t {
+  kLaunchOk            = 0,
+  kZeroGlobal          = 1u << 0,  //!< global_ has a zero dim (grid*block == 0)
+  kZeroBlock           = 1u << 1,  //!< local_ has a zero dim
+  kGridOverflow        = 1u << 2,  //!< global_ does not fit uint32_t
+  kBlockOverflow       = 1u << 3,  //!< local_ does not fit uint16_t
+  kClusterOverflow     = 1u << 4,  //!< cluster_ does not fit uint8_t
+  kClusterIndivisible  = 1u << 5,  //!< grid_ % cluster_ != 0
+  kBlockExceedsMaxWG   = 1u << 6,  //!< local_.product() > info.maxWorkGroupSize_ (PR-B)
+  kSharedMemExceedsMax = 1u << 7,  //!< sharedMemBytes > info.localMemSizePerCU_ (PR-B)
+  kSharedMemOverflow   = 1u << 8,  //!< sharedMemBytes does not fit uint32_t (PR-B)
+};
+
+//! The device limits LaunchParams needs, passed explicitly so this header stays self-contained
+//! (amd::Device is only forward-declared here).
+struct LaunchDeviceLimits {
+  size_t maxWorkGroupSize;     //!< Device::Info::maxWorkGroupSize_
+  uint32_t localMemSizePerCU;  //!< Device::Info::localMemSizePerCU_
+};
+
 //! Stucture to store launch parameters.
 struct LaunchParams {
   NDRange32 global_;         //!< Total number of work-items in N-dims (matches AQL grid_size)
@@ -99,11 +116,12 @@ struct LaunchParams {
   NDRange8 cluster_;         //!< Cluster dims (matches AQL cluster_size, max 255)
   NDRange32 grid_;           //!< Total number of workgroups in grid in N-dims
   uint32_t sharedMemBytes_;  //!< Shared Memory bytes
+  LaunchDeviceLimits limits_;  //!< Device limits needed for launch-config validation
   bool hipParams_;           //!< If this is launched through hipParams_
-  bool validConfig_;         //!< Flag will be set to false when config is not correct.
+  uint16_t violations_;      //!< Bitmask of LaunchViolation bits detected for this config.
 
   LaunchParams(size_t globalX, size_t globalY, size_t globalZ, uint32_t localX, uint32_t localY,
-               uint32_t localZ, uint32_t sharedMemBytes, const Device& device,
+               uint32_t localZ, size_t sharedMemBytes, const LaunchDeviceLimits& limits,
                uint32_t clusterX = 1, uint32_t clusterY = 1, uint32_t clusterZ = 1,
                uint32_t gridX = 1, uint32_t gridY = 1, uint32_t gridZ = 1, bool hipParams = false)
       : global_(static_cast<uint32_t>(globalX), static_cast<uint32_t>(globalY),
@@ -113,27 +131,51 @@ struct LaunchParams {
         cluster_(static_cast<uint8_t>(clusterX), static_cast<uint8_t>(clusterY),
                  static_cast<uint8_t>(clusterZ)),
         grid_(gridX, gridY, gridZ),
-        sharedMemBytes_(sharedMemBytes),
+        sharedMemBytes_(static_cast<uint32_t>(sharedMemBytes)),
+        limits_(limits),
         hipParams_(hipParams),
-        validConfig_(true) {
+        violations_(kLaunchOk) {
+    // Device-dependent checks computed up front (before the early-return block below) so they
+    // are set regardless of the !hipParams_ zero-block early return; they depend only on local_,
+    // sharedMemBytes_ and limits_, all fully initialised by the member-init list above.
+    if (local_.product() > limits_.maxWorkGroupSize) {
+      violations_ |= kBlockExceedsMaxWG;
+    }
+    // Truncated member — mirrors Layer 2's check against launch_params.sharedMemBytes_.
+    if (sharedMemBytes_ > limits_.localMemSizePerCU) {
+      violations_ |= kSharedMemExceedsMax;
+    }
+    // Raw size_t parameter, pre-truncation — mirrors the call-site checks that run before the
+    // narrowing cast to sharedMemBytes_ above.
+    if (sharedMemBytes > std::numeric_limits<uint32_t>::max()) {
+      violations_ |= kSharedMemOverflow;
+    }
+
+    // Deliberately test the narrowed global_ member (not the raw size_t params) so this bit
+    // exactly mirrors what the call sites it replaces compare against (e.g. global_[0] == 0);
+    // global_ is fully initialised by the member-init list above.
+    if (global_[0] == 0 || global_[1] == 0 || global_[2] == 0) {
+      violations_ |= kZeroGlobal;
+    }
+
     if (!NDRange8::CanSafelyNarrow(clusterX, clusterY, clusterZ)) {
-      validConfig_ = false;
+      violations_ |= kClusterOverflow;
     }
 
     if (!NDRange16::CanSafelyNarrow(localX, localY, localZ)) {
-      validConfig_ = false;
+      violations_ |= kBlockOverflow;
     }
 
     if (hipParams_) {
       // Check that the size_t globals fit in uint32_t before the narrowing cast above.
       if (!NDRange32::CanSafelyNarrow(globalX, globalY, globalZ)) {
-        validConfig_ = false;
+        violations_ |= kGridOverflow;
       }
     } else {
       // Non HIPLaunchParams, App directly calculated the global and local size,
       // manually deduce the grid (total blocks) size.
       if (local_[0] == 0 || local_[1] == 0 || local_[2] == 0) {
-        validConfig_ = false;
+        violations_ |= kZeroBlock;
         return;
       }
       grid_[0] = global_[0] / local_[0];
@@ -144,7 +186,7 @@ struct LaunchParams {
     // If cluster parameters is set, then check if it is divisble by grid (total blocks).
     if (clusterX > 1 || clusterY > 1 || clusterZ > 1) {
       if (!CheckClusterDivisibility(clusterX, clusterY, clusterZ)) {
-        validConfig_ = false;
+        violations_ |= kClusterIndivisible;
       }
     }
   }
@@ -165,8 +207,10 @@ struct LaunchParams {
     // If cluster parameters are not > 1, we dont need to update since it is the default value set.
     if (clusterX > 1 || clusterY > 1 || clusterZ > 1) {
       if (!CheckClusterDivisibility(clusterX, clusterY, clusterZ)) {
+        violations_ |= kClusterIndivisible;
         return false;
       }
+      violations_ &= ~static_cast<uint16_t>(kClusterIndivisible);
       cluster_[0] = static_cast<uint8_t>(clusterX);
       cluster_[1] = static_cast<uint8_t>(clusterY);
       cluster_[2] = static_cast<uint8_t>(clusterZ);
@@ -174,22 +218,26 @@ struct LaunchParams {
     return true;
   }
 
-  bool IsValidConfig() const { return validConfig_; }
+  bool IsValidConfig() const {
+    uint16_t legacy = kGridOverflow | kBlockOverflow | kClusterOverflow | kClusterIndivisible;
+    if (!hipParams_) legacy |= kZeroBlock;   // today's zero-local check is non-HIP path only
+    return (violations_ & legacy) == 0;
+  }
 };
 
 //! Structure to store launch parameters in HIP Style (global and local size needs computation).
 struct HIPLaunchParams : public LaunchParams {
 
   HIPLaunchParams(uint32_t gridX, uint32_t gridY, uint32_t gridZ, uint32_t blockX,
-                  uint32_t blockY, uint32_t blockZ, uint32_t sharedMemBytes, const Device& device,
-                  uint32_t globalX_remainder = 0, uint32_t globalY_remainder = 0,
-                  uint32_t globalZ_remainder = 0, uint32_t clusterX = 1,
-                  uint32_t clusterY = 1, uint32_t clusterZ = 1)
+                  uint32_t blockY, uint32_t blockZ, size_t sharedMemBytes,
+                  const LaunchDeviceLimits& limits, uint32_t globalX_remainder = 0,
+                  uint32_t globalY_remainder = 0, uint32_t globalZ_remainder = 0,
+                  uint32_t clusterX = 1, uint32_t clusterY = 1, uint32_t clusterZ = 1)
                   : LaunchParams(static_cast<size_t>(gridX) * blockX + globalX_remainder,
                                  static_cast<size_t>(gridY) * blockY + globalY_remainder,
                                  static_cast<size_t>(gridZ) * blockZ + globalZ_remainder,
-                                 blockX, blockY, blockZ, sharedMemBytes, device, clusterX, clusterY,
-                                 clusterZ, gridX, gridY, gridZ, true /*hipParams*/) {}
+                                 blockX, blockY, blockZ, sharedMemBytes, limits, clusterX,
+                                 clusterY, clusterZ, gridX, gridY, gridZ, true /*hipParams*/) {}
 };
 
 //! A container for the local and global worksizes.
