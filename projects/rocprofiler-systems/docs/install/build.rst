@@ -72,6 +72,9 @@ Build requirements
         pip install --user 'cmake==3.25.0'
         export PATH=${HOME}/.local/bin:${PATH}
 
+* `Ninja <https://ninja-build.org/>`_ (required by the CMake presets in this project,
+  unless you override the generator)
+
 Required third-party packages
 -----------------------------
 
@@ -106,6 +109,9 @@ while Dyninst requires TBB), and the CMake option to build the package alongside
    "ElfUtils", "0.178", "Dyninst", "``ROCPROFSYS_BUILD_ELFUTILS`` (default: OFF)"
    "LibIberty",  "", "Dyninst", "``ROCPROFSYS_BUILD_LIBIBERTY`` (default: OFF)"
    "OpenMP", "4.x", "Dyninst", ""
+
+The CMake presets described later on this page turn on in-tree Dyninst, TBB, Elfutils, and
+LibIberty even though the CMake defaults for those options are ``OFF``.
 
 ROCm dependencies
 -----------------
@@ -146,145 +152,94 @@ CMake options.
    "MPI", "``ROCPROFSYS_USE_MPI`` (default: OFF)"
    "MPI (header-only)", "``ROCPROFSYS_USE_MPI_HEADERS`` (default: ON)"
 
-Installing Dyninst
-------------------
+Get the source
+--------------
 
-The easiest way to install Dyninst is alongside ROCm Systems Profiler.
-
-Building Dyninst alongside ROCm Systems Profiler
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-To install Dyninst alongside ROCm Systems Profiler, configure ROCm Systems Profiler with ``ROCPROFSYS_BUILD_DYNINST=ON``.
-Depending on the version of Ubuntu, the ``apt`` package manager might have current enough
-versions of the Dyninst TBB and LibIberty dependencies
-(use ``apt-get install libtbb-dev libiberty-dev``).
-However, it is possible to also build and install the Dyninst dependencies
-via ``ROCPROFSYS_BUILD_<DEP>=ON``, as follows:
+Clone the ``rocm-systems`` repository and check out only the ROCm Systems Profiler project:
 
 .. code-block:: shell
 
    git clone --filter=blob:none --sparse https://github.com/ROCm/rocm-systems.git
    git -C rocm-systems sparse-checkout set projects/rocprofiler-systems
 
-   cmake -B rocprof-sys-build -DROCPROFSYS_BUILD_DYNINST=ON \
-         -DROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=ON \
-         -S rocm-systems/projects/rocprofiler-systems
+CMake presets live in ``projects/rocprofiler-systems/CMakePresets.json``. Run the
+configure and build commands from that directory.
 
-where ``-DROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=ON`` is expanded by
-the shell to ``-DROCPROFSYS_BUILD_TBB=ON -DROCPROFSYS_BUILD_ELFUTILS=ON ...``
+Configure and build with CMake presets
+--------------------------------------
 
-.. _cmake-options:
+The project ships configure presets for common developer and CI layouts. All visible
+presets inherit a hidden ``default`` preset that selects the Ninja generator, the
+``gcc``/``g++`` compilers, install prefix ``/opt/rocprofiler-systems``, Python support,
+and in-tree builds of Dyninst, TBB, Elfutils, and LibIberty.
 
-Building and installing ROCm Systems Profiler
----------------------------------------------
-
-ROCm Systems Profiler has CMake configuration options for MPI support (``ROCPROFSYS_USE_MPI`` or
-``ROCPROFSYS_USE_MPI_HEADERS``), OpenMP-Tools (``ROCPROFSYS_USE_OMPT``),
-hardware counters via PAPI (``ROCPROFSYS_USE_PAPI``), among other features.
-ROCm support is always enabled.
-Various additional features can be enabled via the
-``TIMEMORY_USE_*`` `CMake options <https://timemory.readthedocs.io/en/develop/installation.html#cmake-options>`_.
-Any ``ROCPROFSYS_USE_<VAL>`` option which has a corresponding ``TIMEMORY_USE_<VAL>``
-option means that the Timemory support for this feature has been integrated
-into Perfetto support for ROCm Systems Profiler, for example, ``ROCPROFSYS_USE_PAPI=<VAL>`` also configures
-``TIMEMORY_USE_PAPI=<VAL>``. This means the data that Timemory is able to collect via this package
-is passed along to Perfetto and is displayed when the ``.pftrace`` file is visualized
-in `the Perfetto UI <https://ui.perfetto.dev>`_.
+List the available presets, then configure, build, and install. The file defines
+configure presets only, so pass the build directory (not ``--preset``) to
+``cmake --build`` and ``cmake --install``.
 
 .. code-block:: shell
 
-   git clone --filter=blob:none --sparse https://github.com/ROCm/rocm-systems.git
-   git -C rocm-systems sparse-checkout set projects/rocprofiler-systems
-
-   cmake                                                 \
-       -B rocprof-sys-build                              \
-       -D CMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems  \
-       -D ROCPROFSYS_USE_PYTHON=ON                       \
-       -D ROCPROFSYS_BUILD_DYNINST=ON                    \
-       -D ROCPROFSYS_BUILD_TBB=ON                        \
-       -D ROCPROFSYS_BUILD_ELFUTILS=ON                   \
-       -D ROCPROFSYS_BUILD_LIBIBERTY=ON                  \
-       -S rocm-systems/projects/rocprofiler-systems
-   cmake --build rocprof-sys-build --target all --parallel 8
-   cmake --build rocprof-sys-build --target install
+   cd rocm-systems/projects/rocprofiler-systems
+   cmake --list-presets
+   cmake --preset release
+   cmake --build build/release --parallel
+   cmake --install build/release
    source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
 
-.. _build-script:
+Replace ``release`` and ``build/release`` with another preset name and its
+binary directory from the table below.
 
-Using the build script
-^^^^^^^^^^^^^^^^^^^^^^
+.. csv-table::
+   :header: "Preset", "Binary directory", "Description"
+   :widths: 18, 28, 54
 
-This method automates the CMake process with a script that wraps the CMake
-commands and handles build logic, environment variables, and packaging. Run
-``./scripts/build-release.sh`` with your desired options to generate packages.
+   "``release``", "``build/release``", "Official Release build"
+   "``debug``", "``build/debug``", "Debug build with tests and examples"
+   "``debug-optimized``", "``build/debug-optimized``", "RelWithDebInfo build with tests and examples"
+   "``ci``", "``build/ci``", "Official CI Release build with tests, gtest, examples, and ``ROCPROFSYS_MAX_THREADS=64``"
+   "``release-mpi``", "``build/release-mpi``", "``release`` plus full MPI (``ROCPROFSYS_USE_MPI=ON``)"
+   "``debug-mpi``", "``build/debug-mpi``", "``debug`` plus full MPI (``ROCPROFSYS_USE_MPI=ON``)"
+   "``coverage``", "``build/coverage``", "GCC coverage instrumentation; installs to ``/opt/rocprofiler-systems-dev``; uses system TBB, Elfutils, and LibIberty; enables MPI"
 
-Use ``./scripts/build-release.sh --help`` for more information.
-
-.. code-block:: shell-session
-
-   ./scripts/build-release.sh --help
-   Options:
-       --core       [+nopython] [+python]                    Core (Use '+nopython' to build w/o python, use '+python' to python build with python)
-       --mpi        [+nopython] [+python]                    MPI (Use '+nopython' to build w/o python, use '+python' to python build with python)
-       --rocm       [+nopython] [+python]                    ROCm (Use '+nopython' to build w/o python, use '+python' to python build with python)
-       --rocm-mpi   [+nopython] [+python]                    ROCm + MPI (Use '+nopython' to build w/o python, use '+python' to python build with python)
-       --mpi-impl   [openmpi|mpich]                          MPI implementation
-
-       --lto                  [on|off]                       Enable LTO (default: off)
-       --strip                [on|off]                       Strip libraries (default: off)
-       --perfetto-tools       [on|off]                       Install perfetto tools (default: on)
-       --static-libgcc        [on|off]                       Build with static libgcc (default: on)
-       --static-libstdcxx     [on|off]                       Build with static libstdc++ (default: on)
-       --hidden-visibility    [on|off]                       Build with hidden visibility (default: on)
-       --max-threads          N                              Max number of threads supported (default: 2048)
-       --parallel             N                              Number of parallel build jobs (default: 12)
-       --generators           [STGZ][DEB][RPM][+others]      CPack generators (default: stgz deb rpm)
-
-.. _mpi-support-rocprof-sys:
-
-MPI support within ROCm Systems Profiler
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-ROCm Systems Profiler can have full (``ROCPROFSYS_USE_MPI=ON``) or partial (``ROCPROFSYS_USE_MPI_HEADERS=ON``) MPI support.
-The only difference between these two modes is whether or not the results collected
-via Timemory and/or Perfetto can be aggregated into a single
-output file during finalization. When full MPI support is enabled, combining the
-Timemory results always occurs, whereas combining the Perfetto
-results is configurable via the ``ROCPROFSYS_PERFETTO_COMBINE_TRACES`` setting.
-
-The primary benefits of partial or full MPI support are the automatic wrapping
-of MPI functions and the ability
-to label output with suffixes which correspond to the ``MPI_COMM_WORLD`` rank ID
-instead of having to use the system process identifier (i.e. ``PID``).
-In general, it's recommended to use partial MPI support with the OpenMPI
-headers as this is the most portable configuration.
-If full MPI support is selected, make sure your target application is built
-against the same MPI distribution as ROCm Systems Profiler.
-For example, do not build ROCm Systems Profiler with MPICH and use it on a target application built against OpenMPI.
-If partial support is selected, the reason the OpenMPI headers are recommended instead of the MPICH headers is
-because the ``MPI_COMM_WORLD`` in OpenMPI is a pointer to ``ompi_communicator_t`` (8 bytes),
-whereas ``MPI_COMM_WORLD`` in MPICH is an ``int`` (4 bytes). Building ROCm Systems Profiler with partial MPI support
-and the MPICH headers and then using
-ROCm Systems Profiler on an application built against OpenMPI causes a segmentation fault.
-This happens because the value of the ``MPI_COMM_WORLD`` is truncated
-during the function wrapping before being passed along to the underlying MPI function.
-
-Python support within ROCm Systems Profiler
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-ROCm Systems Profiler supports profiling Python code via the ``ROCPROFSYS_USE_PYTHON`` CMake option.
-Python support is enabled via the ``ROCPROFSYS_USE_PYTHON`` and the
-``ROCPROFSYS_PYTHON_VERSIONS="<MAJOR>.<MINOR>`` CMake options.
-Alternatively, to build multiple Python versions, use
-``ROCPROFSYS_PYTHON_VERSIONS="<MAJOR>.<MINOR>;[<MAJOR>.<MINOR>]"``,
-and ``ROCPROFSYS_PYTHON_ROOT_DIRS="/path/to/version;[/path/to/version]"`` instead of just ``ROCPROFSYS_PYTHON_VERSIONS``.
-When building multiple Python versions, the length of the ``ROCPROFSYS_PYTHON_VERSIONS``
-and ``ROCPROFSYS_PYTHON_ROOT_DIRS`` lists must
-be the same size.
+To override a cache variable from a preset, pass extra ``-D`` options after
+``--preset``. For example, build Python support for more than one interpreter:
 
 .. code-block:: shell
 
    cmake --preset release -D ROCPROFSYS_PYTHON_ROOT_DIRS="/usr/bin;/usr/bin" -D ROCPROFSYS_PYTHON_VERSIONS="3.10;3.12"
+
+When you set ``ROCPROFSYS_PYTHON_VERSIONS`` and ``ROCPROFSYS_PYTHON_ROOT_DIRS``,
+the two lists must be the same length.
+
+.. _cmake-options:
+
+Additional CMake options
+------------------------
+
+ROCm support is always enabled. You can still pass extra ``-D`` flags with a
+preset, including OpenMP-Tools (``ROCPROFSYS_USE_OMPT``) and hardware counters via
+PAPI (``ROCPROFSYS_USE_PAPI``).
+
+Many ``ROCPROFSYS_USE_<VAL>`` options also set the matching ``TIMEMORY_USE_<VAL>``
+option, so Timemory data for that feature is forwarded to Perfetto and shown in
+`the Perfetto UI <https://ui.perfetto.dev>`_ when you open the ``.pftrace`` file.
+See the Timemory `CMake options <https://timemory.readthedocs.io/en/develop/installation.html#cmake-options>`_
+for related flags.
+
+.. _mpi-support-rocprof-sys:
+
+Full MPI (``ROCPROFSYS_USE_MPI=ON``, as in the ``*-mpi`` presets) can combine
+Timemory and, optionally, Perfetto output across ranks. Header-only MPI
+(``ROCPROFSYS_USE_MPI_HEADERS=ON``) wraps MPI C calls and labels output by
+``MPI_COMM_WORLD`` rank without linking a specific MPI library. Prefer the
+OpenMPI headers for header-only builds: ``MPI_COMM_WORLD`` is a pointer in
+OpenMPI and an ``int`` in MPICH, so wrapping with MPICH headers and running
+against OpenMPI can crash. For full MPI, build ROCm Systems Profiler against the
+same MPI distribution as the target application.
+
+Python profiling is enabled by the presets (``ROCPROFSYS_USE_PYTHON=ON``).
+Use ``ROCPROFSYS_PYTHON_VERSIONS`` and, for multiple versions,
+``ROCPROFSYS_PYTHON_ROOT_DIRS`` as shown in the override example above.
 
 Post-installation
 =================
