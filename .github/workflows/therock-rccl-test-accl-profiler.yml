@@ -90,14 +90,14 @@ jobs:
           touch "${probe}"
           rm -f "${probe}"
 
-      - name: Fetch RCCL, rccl-tests, and MPI artifacts
+      - name: Fetch RCCL and rccl-tests artifacts
         uses: './.github/actions/setup_test_environment'
         with:
           ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
           ARTIFACT_GROUP: ${{ inputs.artifact_group }}
           OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
           VENV_DIR: ${{ env.VENV_DIR }}
-          FETCH_ARTIFACT_ARGS: '--rccl --tests --mpi'
+          FETCH_ARTIFACT_ARGS: '--rccl --tests'
 
       - name: Verify packaged ACCL profiler assets
         run: |
@@ -115,6 +115,7 @@ jobs:
             --nodes '${{ inputs.nodes }}' \
             --gpus-per-node 8 \
             --partition meta64 \
+            --mpi-root /apps/sp/ompi-install \
             --timeout-minutes 90 \
             --min-bytes 1K \
             --max-bytes 256M \

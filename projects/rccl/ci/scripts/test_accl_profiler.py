@@ -58,40 +58,34 @@ RUBY_RCCL_ENV = {
     "NCCL_NET": "IB",
     "NCCL_IB_DISABLE": "0",
     "NCCL_IB_HCA": (
-        "bnxt_re0:1,bnxt_re1:1,bnxt_re2:1,bnxt_re3:1,"
-        "bnxt_re4:1,bnxt_re5:1,bnxt_re6:1,bnxt_re7:1"
+        "bnxt_re0,bnxt_re1,bnxt_re2,bnxt_re3,"
+        "bnxt_re4,bnxt_re5,bnxt_re6,bnxt_re7"
     ),
     "NCCL_IB_GID_INDEX": "3",
     "NCCL_IB_TC": "104",
     "NCCL_IB_QPS_PER_CONNECTION": "4",
-    "NCCL_SOCKET_IFNAME": "fenic0",
+    "NCCL_SOCKET_IFNAME": "fenic0,enp49s0f0np0",
     "NCCL_IGNORE_CPU_AFFINITY": "1",
     "HSA_NO_SCRATCH_RECLAIM": "1",
 }
 
-# Keep this aligned with the Ruby/Thor2 multi-node RCCL configuration in
-# tools/scripts/test_runner/configs/mi355x_thor2_roce.json. Open MPI uses SSH
-# only to start ranks inside the Slurm allocation; RCCL data traffic still uses
-# the eight bnxt_re devices selected above.
+# Keep this aligned with the working Ruby CVS multi-node RCCL launcher. Let
+# PRRTE use its Slurm launcher inside the allocation: forcing its SSH launcher
+# or constraining its control interface made remote prted startup unreliable
+# on Ruby. RCCL data traffic still uses the eight bnxt_re devices above.
 RUBY_MPI_ARGS = (
     "--mca",
     "pml",
     "ob1",
     "--mca",
     "btl",
-    "^openib",
+    "^vader,openib",
     "--mca",
     "plm_rsh_no_tree_spawn",
     "1",
     "--mca",
-    "oob_tcp_if_include",
-    "10.190.0.0/16",
-    "--mca",
-    "btl_tcp_if_include",
-    "10.190.0.0/16",
-    "--mca",
-    "plm_rsh_agent",
-    "ssh -p 2224 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -q",
+    "plm_rsh_args",
+    "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
     "--bind-to",
     "none",
 )
@@ -120,7 +114,6 @@ def _raise_keyboard_interrupt(signum, _frame) -> None:
 class ArtifactPaths:
     root: Path
     rccl_library: Path
-    mpi_launcher: Path
     profiler_plugin: Path
     report_script: Path
     binaries: dict[str, Path]
@@ -139,6 +132,7 @@ class RunConfig:
     step_factor: int = 2
     iterations: int = 20
     warmup_iterations: int = 5
+    mpi_root: Path = Path("/apps/sp/ompi-install")
 
     @property
     def ranks(self) -> int:
@@ -180,7 +174,6 @@ def discover_artifacts(artifact_dir: Path) -> ArtifactPaths:
     return ArtifactPaths(
         root=root,
         rccl_library=_find_artifact(root, "lib/librccl.so", "librccl.so"),
-        mpi_launcher=_find_artifact(root, "bin/mpirun", "mpirun"),
         profiler_plugin=_find_artifact(
             root, "lib/librccl-profiler-accl.so", "librccl-profiler-accl.so"
         ),
@@ -204,11 +197,12 @@ def _mpi_command(
     program: list[str] | str,
 ) -> str:
     """Render the Ruby Open MPI launch used by the RCCL multi-node suites."""
-    mpi_prefix = paths.mpi_launcher.parent.parent
+    mpi_root = config.mpi_root.resolve()
+    mpi_launcher = mpi_root / "bin" / "mpirun"
     command = [
-        str(paths.mpi_launcher),
+        str(mpi_launcher),
         "--prefix",
-        str(mpi_prefix),
+        str(mpi_root),
         "-np",
         str(config.ranks),
     ]
@@ -248,19 +242,26 @@ def render_slurm_script(
     config: RunConfig,
 ) -> str:
     validate_kpack_layout(paths)
+    mpi_root = config.mpi_root.resolve()
+    mpi_launcher = mpi_root / "bin" / "mpirun"
+    if not mpi_launcher.is_file():
+        raise FileNotFoundError(f"Open MPI launcher does not exist: {mpi_launcher}")
+    mpi_lib_dir = mpi_root / "lib"
+    if not mpi_lib_dir.is_dir():
+        raise FileNotFoundError(
+            f"Open MPI library directory does not exist: {mpi_lib_dir}"
+        )
     raw_dir = work_dir / "raw"
     test_log_dir = work_dir / "rccl-tests"
     status_file = work_dir / "collective-status.tsv"
     preflight_log = work_dir / "preflight.log"
     lib_dir = paths.rccl_library.parent
-    mpi_root = paths.mpi_launcher.parent.parent
     sysdeps_dir = paths.root / "lib" / "rocm_sysdeps" / "lib"
     ld_paths = [str(lib_dir)]
-    mpi_lib_dir = mpi_root / "lib"
-    if mpi_lib_dir.is_dir() and mpi_lib_dir.resolve() != lib_dir.resolve():
-        ld_paths.append(str(mpi_lib_dir.resolve()))
     if sysdeps_dir.is_dir():
         ld_paths.append(str(sysdeps_dir.resolve()))
+    if mpi_lib_dir.resolve() != lib_dir.resolve():
+        ld_paths.append(str(mpi_lib_dir.resolve()))
 
     # The GitHub runner and the Ruby compute nodes use different Linux
     # distributions. In particular, setup-python adds a Python toolcache to
@@ -269,12 +270,8 @@ def render_slurm_script(
     # give the Slurm payload a node-local PATH and only the fetched artifact
     # libraries it needs.
     path_entries = [
+        str(mpi_root / "bin"),
         str(paths.root / "bin"),
-        *(
-            [str(paths.mpi_launcher.parent)]
-            if paths.mpi_launcher.parent.resolve() != (paths.root / "bin").resolve()
-            else []
-        ),
         "/usr/bin",
         "/bin",
         "/usr/sbin",
@@ -298,7 +295,7 @@ def render_slurm_script(
         _shell_export("NCCL_DEBUG", "WARN"),
         _shell_export("ACCL_RCCL_LIB", str(paths.rccl_library)),
         _shell_export("ACCL_PLUGIN", str(paths.profiler_plugin)),
-        _shell_export("ACCL_MPIRUN", str(paths.mpi_launcher)),
+        _shell_export("ACCL_MPIRUN", str(mpi_launcher)),
         _shell_export("ACCL_EXPECT_NODES", str(config.nodes)),
         _shell_export("ACCL_EXPECT_RANKS", str(config.ranks)),
         _shell_export("ACCL_GPUS_PER_NODE", str(config.gpus_per_node)),
@@ -665,7 +662,7 @@ def validate_collective_output(
                 raise ValueError(
                     f"Missing decomposition fields in {path}: {sorted(missing)}"
                 )
-            kernel_events = obj.get("event_trace_ts", {}).get("kernel_events")
+            kernel_events = coll_perf.get("event_trace_ts", {}).get("kernel_events")
             if not isinstance(kernel_events, list) or not kernel_events:
                 raise ValueError(f"Missing kernel events in {path}")
 
@@ -782,7 +779,7 @@ def build_manifest(
             "root": str(paths.root),
             "librccl": str(paths.rccl_library),
             "librccl_sha256": sha256_file(paths.rccl_library),
-            "mpi_launcher": str(paths.mpi_launcher),
+            "mpi_launcher": str(config.mpi_root.resolve() / "bin" / "mpirun"),
             "profiler": str(paths.profiler_plugin),
             "profiler_sha256": sha256_file(paths.profiler_plugin),
             "report_script": str(paths.report_script),
@@ -836,6 +833,14 @@ def main() -> int:
     parser.add_argument("--iterations", type=int, default=20)
     parser.add_argument("--warmup-iterations", type=int, default=5)
     parser.add_argument(
+        "--mpi-root",
+        type=Path,
+        default=Path("/apps/sp/ompi-install"),
+        help=(
+            "Shared Open MPI installation visible on the Ruby runner and compute nodes"
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Write the Slurm script after artifact discovery without submitting it",
@@ -858,6 +863,7 @@ def main() -> int:
         step_factor=args.step_factor,
         iterations=args.iterations,
         warmup_iterations=args.warmup_iterations,
+        mpi_root=args.mpi_root,
     )
 
     paths = discover_artifacts(args.artifact_dir)
