@@ -1,0 +1,5 @@
+Archive: /private/tmp/emptyarchive3
+
+The usual cause is that the runtime the workload loaded has no capture support, or that HIP_HRR_CAPTURE_OUTPUT never reached the process that used the GPU. Run 'hrr_capture.sh preflight' in the same environment.
+
+Verdict: nothing captured. The directory exists but holds no pid-* process directory, so no process ever opened a capture here.

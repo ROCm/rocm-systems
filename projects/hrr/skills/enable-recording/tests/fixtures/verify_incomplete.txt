@@ -1,0 +1,44 @@
+Archive: /work/captures-develop/oob.hrr
+Processes: 1   Size on disk: 19.5 KiB
+
+  pid-94
+    events: 6   blobs: 3   state: incomplete (no clean-shutdown trailer)
+    events.bin: 475 B   blob files: 2   code objects: 1
+    parent pid: 53
+
+At least one process has no clean-shutdown trailer. That is what a workload that crashed looks like, and such an archive is still readable and still worth sending: the events before the crash are all there.
+
+hrr-playback --info:
+  HRR Archive: /work/captures-develop/oob.hrr/pid-94
+  ========================================
+  Complete:     NO (no shutdown trailer; capture likely crashed)
+  Recovered:    6 events
+  Events:       6
+  Kernels:      1
+  Blobs:        2
+  Code Objects: 1
+  Threads:      1
+  
+  Event Type Breakdown:
+    Type                   Count
+    ----                   -----
+    __hipPopCallConfiguration 1
+    __hipPushCallConfiguration 1
+    __hipRegisterFatBinary 1
+    hipMemcpy              1
+    hipMemset              1
+    hipModuleLaunchKernel  1
+  
+  Kernel Summary (first 20):
+    ID   Kernel                                             Grid            Block           SharedMem
+    --   ------                                             ----            -----           ---------
+    0    _Z5stompPfm                                        [64,1,1]        [256,1,1]       0
+  
+  Kernel Call Counts:
+    Kernel                                                       Calls
+    ------                                                       -----
+    _Z5stompPfm                                                  1
+  
+  [HRR] Archive has no clean-shutdown trailer (capture likely crashed); recovered 6 events
+
+Verdict: recorded. 1 of 1 process directories hold events.

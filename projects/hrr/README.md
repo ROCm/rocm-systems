@@ -200,6 +200,11 @@ Optional Cursor/agent skill: [skills/decode-and-triage/SKILL.md](skills/decode-a
 requires Linux or WSL2. Docker replay uses the image HRR stack by default; set
 `HRR_DOCKER_MOUNT_CLR=1` to overlay a host dev build (`CLR_BUILD` / `HRR_PLAYBACK`).
 
+For the other end, producing an archive in the first place:
+[skills/enable-recording/SKILL.md](skills/enable-recording/SKILL.md)
+checks that the runtime a workload loads can capture at all, runs it with capture
+enabled, and reports whether the archive holds anything.
+
 ## Copyright
 
 AMD SPDX MIT — see individual source files.
