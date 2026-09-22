@@ -11,6 +11,7 @@
 
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "signature-drift.h"
 
@@ -53,6 +54,17 @@ DEFINE_DDA_BLOCKS(allGatherDdaIpcBlocks, ncclAllGatherDdaIpcBlocks, 121)
 DEFINE_DDA_BLOCKS(allGatherDdaFabricBlocks, ncclAllGatherDdaFabricBlocks, 122)
 DEFINE_DDA_BLOCKS(allGatherDdaFabricLLBlocks, ncclAllGatherDdaFabricLLBlocks, 123)
 DEFINE_DDA_BLOCKS(allGatherDdaFabricLL128Blocks, ncclAllGatherDdaFabricLL128Blocks, 124)
+
+// AlltoAll takes the same operand shape as AllGather (no reduction op), so it
+// reuses that macro.
+DEFINE_DDA_ALLGATHER_ELIGIBLE(allToAllDdaIpcEligible, ncclAllToAllDdaIpcEligible)
+DEFINE_DDA_ALLGATHER_ELIGIBLE(allToAllDdaFabricEligible, ncclAllToAllDdaFabricEligible)
+DEFINE_DDA_ALLGATHER_ELIGIBLE(allToAllDdaFabricLLEligible, ncclAllToAllDdaFabricLLEligible)
+DEFINE_DDA_ALLGATHER_ELIGIBLE(allToAllDdaFabricLL128Eligible, ncclAllToAllDdaFabricLL128Eligible)
+DEFINE_DDA_BLOCKS(allToAllDdaIpcBlocks, ncclAllToAllDdaIpcBlocks, 141)
+DEFINE_DDA_BLOCKS(allToAllDdaFabricBlocks, ncclAllToAllDdaFabricBlocks, 142)
+DEFINE_DDA_BLOCKS(allToAllDdaFabricLLBlocks, ncclAllToAllDdaFabricLLBlocks, 143)
+DEFINE_DDA_BLOCKS(allToAllDdaFabricLL128Blocks, ncclAllToAllDdaFabricLL128Blocks, 144)
 
 DEFINE_DDA_REDUCTION_ELIGIBLE(reduceScatterDdaIpcEligible, ncclReduceScatterDdaIpcEligible)
 DEFINE_DDA_REDUCTION_ELIGIBLE(reduceScatterDdaFabricEligible, ncclReduceScatterDdaFabricEligible)

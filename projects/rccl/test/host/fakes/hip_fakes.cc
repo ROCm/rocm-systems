@@ -41,6 +41,8 @@ ASSERT_HOOK_MATCHES_PROD(g_hipMemRetainAllocationHandle,  hipMemRetainAllocation
 ASSERT_HOOK_MATCHES_PROD(g_hipMemExportToShareableHandle, hipMemExportToShareableHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemRelease,                 hipMemRelease);
 ASSERT_HOOK_MATCHES_PROD(g_hipPointerGetAttribute,        hipPointerGetAttribute);
+ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
+ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitEvent,            hipStreamWaitEvent);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -474,6 +476,18 @@ void InstallHipVmmEmulator()
         return hipSuccess;
     };
 }
+// Cross-stream ordering seams; defaults preserve the replaced stubs' behaviour.
+static hipError_t DefaultHipEventRecord(hipEvent_t, hipStream_t)
+{
+    return hipErrorInvalidValue;
+}
+static hipError_t DefaultHipStreamWaitEvent(hipStream_t, hipEvent_t, unsigned int)
+{
+    return hipErrorInvalidValue;
+}
+std::function<hipError_t(hipEvent_t, hipStream_t)> g_hipEventRecord = DefaultHipEventRecord;
+std::function<hipError_t(hipStream_t, hipEvent_t, unsigned int)> g_hipStreamWaitEvent =
+    DefaultHipStreamWaitEvent;
 
 // Restore every HIP hook to its default.
 void ResetHipFakes()
@@ -529,6 +543,8 @@ void ResetHipFakes()
     g_hipStreamDestroy              = DefaultHipStreamDestroy;
     g_hipThreadExchangeStreamCaptureMode = DefaultHipThreadExchangeStreamCaptureMode;
     g_hipGetLastError               = DefaultHipGetLastError;
+    g_hipEventRecord                = DefaultHipEventRecord;
+    g_hipStreamWaitEvent            = DefaultHipStreamWaitEvent;
 }
 
 // ===========================================================================
@@ -623,7 +639,10 @@ hipError_t hipEventCreate(hipEvent_t* event)
 
 hipError_t hipEventDestroy(hipEvent_t)      { return hipSuccess; }  // benign teardown (commFree)
 hipError_t hipEventQuery(hipEvent_t)        { return hipErrorInvalidValue; }
-hipError_t hipEventRecord(hipEvent_t, hipStream_t) { return hipErrorInvalidValue; }
+hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream)
+{
+    return g_hipEventRecord(event, stream);
+}
 
 hipError_t hipExtMallocWithFlags(void** ptr, size_t size, unsigned int flags)
 {
@@ -786,7 +805,10 @@ hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_t* prop, int device)
     return g_hipGetDeviceProperties(prop, device);
 }
 hipError_t hipDriverGetVersion(int* v) { if (v) *v = 70002000; return hipSuccess; }
-hipError_t hipStreamWaitEvent(hipStream_t, hipEvent_t, unsigned int) { return hipErrorInvalidValue; }
+hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event, unsigned int flags)
+{
+    return g_hipStreamWaitEvent(stream, event, flags);
+}
 hipError_t hipStreamCreate(hipStream_t*) { return hipErrorInvalidValue; }
 // hipStreamCreateWithPriority / hipDeviceGetStreamPriorityRange are defined
 // above (seam-routed) -- the develop merge added plainer duplicates here.
