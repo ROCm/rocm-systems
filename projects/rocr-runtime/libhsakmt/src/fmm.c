@@ -2733,8 +2733,29 @@ static int __fmm_release(HsaKFDContext *ctx,
 	if (ret)
 		goto err_free_mem_failed;
 
-	if (object->is_svm_paged)
+	if (object->is_svm_paged) {
+		/* Paged host memory backed by SVM is registered through
+		 * fmm_register_mem_svm_api() when it is allocated, which takes
+		 * a reference on the tracking range. Nothing deregisters it -
+		 * the object is released, not deregistered - so drop that
+		 * reference here, or the range outlives the VA and a later
+		 * registration that reuses it inherits the stale entry.
+		 */
+		if (ctx->fmm_context->svm.svm_host_unregister) {
+			struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+			struct svm_revoke_range *rr = NULL;
+			int nr, j;
+
+			pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+			nr = svm_api_range_put_locked(fmm_ctx, object->start, &rr);
+			for (j = 0; j < nr; j++)
+				fmm_unregister_mem_svm_api(ctx, rr[j].addr, rr[j].size);
+			pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+			free(rr);
+		}
+
 		munmap(object->start, object->size);
+	}
 
 	aperture_release_area(aperture, object->start, object->size);
 	vm_remove_object(aperture, object);
