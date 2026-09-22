@@ -979,13 +979,11 @@ function(rccl_standalone_setup)
     __HIP_PLATFORM_AMD__
     NCCL_OS_LINUX
     ROCM_VERSION=70000
-=======
     # init.cc selects amdsmi_wrap.h (amd_smi/amdsmi.h, ships with ROCm) over the
     # legacy rocm_smi_wrap.h; the amd_smi_* wrapper API it declares is stubbed by
     # init_fakes.cc, so no SMI runtime is linked. The in-RCCL-build path inherits
     # this from RCCL_COMMON_COMPILE_DEFS instead.
     USE_AMDSMI
->>>>>>> a43f13020a6 (fix: address review feedback from amd-argus (round 2))
     $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
     $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
     $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
