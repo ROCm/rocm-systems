@@ -753,6 +753,9 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 
   comm->hierarchicalIntraComm = nullptr;
   comm->hierarchicalInterComm = nullptr;
+  comm->hierarchicalEligible = false;
+  comm->hierarchicalInitAttempted = false;
+  comm->hierarchicalInitResult = ncclSuccess;
   comm->hierarchicalCommsInitialized = false;
   comm->hierarchicalTempBuffer = nullptr;
   // Enable PAT for interComm hierarchical collectives
@@ -3025,9 +3028,11 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     NCCLCHECK(ncclMemAlloc((void**)&comm->gatheredSizes, nGather * sizeof(size_t)));
   }
 
-  // Initialize hierarchical sub-communicators and temp buffers
-  if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && comm->maxLocalRanks > 1 &&
-      (rcclParamHierarchicalAllGather() == 1 || rcclParamHierarchicalReduceScatter() == 1)) {
+  // Record topology eligibility now, but defer hierarchical AllGather resources
+  // until the first eligible live call. Hierarchical ReduceScatter retains its
+  // existing eager behavior when explicitly enabled.
+  comm->hierarchicalEligible = false;
+  if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && comm->maxLocalRanks > 1) {
     if (comm->minLocalRanks != comm->maxLocalRanks) {
       INFO(NCCL_INIT, "Hierarchical collectives: non-uniform GPU count per node, skipping hierarchical setup");
     } else {
@@ -3044,25 +3049,13 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
       if (!compactRanks) {
         INFO(NCCL_INIT, "Hierarchical collectives: non-compact rank ordering, skipping hierarchical algorithms");
       } else {
-        int node_id = comm->rankToNode[comm->rank];
-        int local_rank = comm->rankToLocalRank[comm->rank];
-        NCCLCHECKGOTO(ncclCommSplit(comm, node_id, local_rank, &comm->hierarchicalIntraComm, NULL), res, fail);
-        // honor user input if user explicitly disables PAT
-        const char* patEnableEnv = ncclGetEnv("NCCL_PAT_ENABLE");
-        bool userDisabledPat = (patEnableEnv != nullptr) && (std::atoi(patEnableEnv) == 0);
-        comm->forcePatEnable = !userDisabledPat && !rcclUseAinic();
-        NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
-        comm->forcePatEnable = false;
-        // inherit PXN disable from parent comm
-        comm->hierarchicalInterComm->pxnDisable = comm->pxnDisable;
-        size_t tempBufSize = rcclHierarchicalTempBufferSize(comm->nNodes, rcclParamHierarchicalAllGather() == 1,
-                                                            rcclParamHierarchicalReduceScatter() == 1);
-        NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalTempBuffer), tempBufSize, comm->memManager), res, fail);
-        comm->hierarchicalCommsInitialized = true;
-        INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
-             comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
+        comm->hierarchicalEligible = true;
+        INFO(NCCL_INIT, "Hierarchical collectives: eligible, deferring sub-communicator setup to first use");
       }
     }
+  }
+  if (comm->hierarchicalEligible && rcclParamHierarchicalReduceScatter() == 1) {
+    NCCLCHECKGOTO(rcclEnsureHierarchicalComms(comm), res, fail);
   }
 
   // RCCL: init-time allocations are done; release the side stream now so its GPU
@@ -3130,6 +3123,48 @@ fail:
   } else { \
     INFO(NCCL_ENV, "Comm config " fieldStr " set to " format, config->field); \
   }
+
+// Build the hierarchical sub-communicators and temporary buffer. All ranks in
+// the parent communicator must call this function together.
+ncclResult_t rcclEnsureHierarchicalComms(struct ncclComm* comm) {
+  if (comm->hierarchicalCommsInitialized) return ncclSuccess;
+  if (!comm->hierarchicalEligible) return ncclSuccess;
+  if (comm->hierarchicalInitAttempted) return comm->hierarchicalInitResult;
+
+  ncclResult_t res = ncclSuccess;
+  const char* patEnableEnv = nullptr;
+  bool userDisabledPat = false;
+  size_t tempBufSize = 0;
+  comm->hierarchicalInitAttempted = true;
+  comm->hierarchicalInitResult = ncclInternalError;
+
+  int node_id = comm->rankToNode[comm->rank];
+  int local_rank = comm->rankToLocalRank[comm->rank];
+
+  NCCLCHECKGOTO(ncclCommSplit(comm, node_id, local_rank, &comm->hierarchicalIntraComm, NULL), res, fail);
+  // honor user input if user explicitly disables PAT
+  patEnableEnv = ncclGetEnv("NCCL_PAT_ENABLE");
+  userDisabledPat = (patEnableEnv != nullptr) && (std::atoi(patEnableEnv) == 0);
+  comm->forcePatEnable = !userDisabledPat && !rcclUseAinic();
+  NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
+  comm->forcePatEnable = false;
+  // inherit PXN disable from parent comm
+  comm->hierarchicalInterComm->pxnDisable = comm->pxnDisable;
+
+  tempBufSize = rcclHierarchicalTempBufferSize(comm->nNodes, rcclParamHierarchicalAllGather() == 1,
+                                               rcclParamHierarchicalReduceScatter() == 1);
+  NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalTempBuffer), tempBufSize, comm->memManager), res, fail);
+
+  comm->hierarchicalCommsInitialized = true;
+  INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) initialized",
+       comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
+exit:
+  comm->forcePatEnable = false;
+  comm->hierarchicalInitResult = res;
+  return res;
+fail:
+  goto exit;
+}
 
 static ncclResult_t envConfigOverride(ncclComm_t comm) {
   ncclResult_t ret = ncclSuccess;
