@@ -6,7 +6,7 @@
 import common
 import pandas as pd
 
-from utils.profile_data import export_pmc_data, get_profile_data_reader
+from utils.profile_data import export_pmc_data, read_rocpd_pmc_csv
 
 
 def test_reader_combines_result_files_in_memory(tmp_path) -> None:
@@ -25,7 +25,7 @@ def test_reader_combines_result_files_in_memory(tmp_path) -> None:
         header + row_prefix + "SQ_BUSY_CYCLES,100\n",
     )
 
-    pmc_df = get_profile_data_reader().read_pmc(tmp_path, verbose=0)
+    pmc_df = read_rocpd_pmc_csv(tmp_path, verbose=0)
 
     assert len(pmc_df) == 1
     assert pmc_df["SQ_WAVES"].iloc[0] == 4
@@ -37,4 +37,4 @@ def test_export_does_not_become_reader_input(tmp_path) -> None:
     """The debug export is one-way and is not treated as profiling data."""
     export_pmc_data(tmp_path, pd.DataFrame({"Kernel_Name": ["kernel_a"]}))
 
-    assert get_profile_data_reader().read_pmc(tmp_path, verbose=0).empty
+    assert read_rocpd_pmc_csv(tmp_path, verbose=0).empty

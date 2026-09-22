@@ -355,7 +355,7 @@ def create_df_pmc(
     Read all raw PMC counters into one analysis DataFrame.
     """
     workload_dir = Path(raw_data_dir)
-    df = profile_data.get_profile_data_reader().read_pmc(workload_dir, verbose)
+    df = profile_data.read_rocpd_pmc_csv(workload_dir, verbose)
 
     if gen_pmc and not df.empty:
         profile_data.export_pmc_data(workload_dir, df)
