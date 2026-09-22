@@ -151,6 +151,7 @@ struct VectorMemState : DynamicInstState {
   uint32_t buffer_format = 0;
   BufferFormatEncoding buffer_format_encoding = BufferFormatEncoding::Gfx11;
   uint32_t buffer_selectors = 0;
+  bool image_srgb = false;
   uint32_t buffer_components = 0;
   bool buffer_d16 = false;
   // Scratch (private) accesses store data in the hardware dword-interleaved

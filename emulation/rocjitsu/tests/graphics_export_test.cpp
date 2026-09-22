@@ -182,6 +182,23 @@ TEST_P(GraphicsExportTest, RectangleRunsFragmentWavesAndWritesOnlyCoveredPixels)
     }
 }
 
+TEST_P(GraphicsExportTest, IndexedDrawPreservesVertexIndicesAndLocalConnectivity) {
+  amdgpu::Pm4QueueState state;
+  state.num_instances = 1;
+  state.uconfig_registers[0x242] = 4;
+  amdgpu::GraphicsDraw draw(state, GetParam(), 3, {9, 4, 9});
+  draw.initialize(*wave_, 0, 0);
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  const uint32_t vertex_id = gfx12 ? 3 : 5;
+  EXPECT_EQ(wave_->debug_read_vgpr(vertex_id, 0), 9);
+  EXPECT_EQ(wave_->debug_read_vgpr(vertex_id, 1), 4);
+  EXPECT_EQ(wave_->debug_read_vgpr(vertex_id, 2), 9);
+  const uint32_t bits = gfx12 ? 9 : 10;
+  EXPECT_EQ(wave_->debug_read_vgpr(0, 0), (1u << bits) | (2u << (2 * bits)));
+  state.uconfig_registers[0x24b] = 1;
+  EXPECT_THROW(amdgpu::GraphicsDraw(state, GetParam(), 3, {9, 4, 9}), std::runtime_error);
+}
+
 TEST_P(GraphicsExportTest, MergedVertexUserCountExcludesSystemRingPair) {
   amdgpu::Pm4QueueState state;
   state.num_instances = 1;
@@ -265,6 +282,100 @@ TEST_P(GraphicsExportTest, HardwareImageLoadReadsTiledUintChannelsAndPacksD16) {
   cu_->l1_vector().flush_all();
   cache_.flush_all();
   EXPECT_EQ(memory_.read32(0x100000 + 36), 0x88776655);
+}
+
+TEST_P(GraphicsExportTest, HardwareSampleClampsCoordinatesAndConvertsSrgb) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+    GTEST_SKIP() << "RDNA4 image sampling encoding";
+  const std::array<uint32_t, 8> descriptor{
+      0x1000, (66u << 17) | (1u << 30), 1u << 14, (9u << 28) | 0xfac, 0, 0, 0, 0};
+  for (uint32_t r = 0; r < descriptor.size(); ++r)
+    wave_->debug_write_sgpr(8 + r, descriptor[r]);
+  for (uint32_t r = 4; r < 8; ++r)
+    wave_->debug_write_sgpr(r, r == 4 ? 2 | (2 << 3) | (2 << 6) : 0);
+  wave_->set_exec(5);
+  for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
+    wave_->debug_write_vgpr(8, lane, std::bit_cast<uint32_t>(lane == 2 ? 0.1f : 2.0f));
+    wave_->debug_write_vgpr(9, lane, std::bit_cast<uint32_t>(lane == 2 ? -0.25f : 2.0f));
+    wave_->debug_write_vgpr(10, lane, 0xdeadbeef);
+  }
+  memory_.write32(0x100000, 0xff000000);
+  memory_.write32(0x10000c, 0x804080ff);
+  // The cube shader aliases both coordinate VGPRs with the sampled result.
+  const std::array<uint32_t, 4> words{0xe7c6c001, 0x02001008, 0x00000809, 0};
+  auto decoded = decoder_->decode(words.data());
+  ASSERT_FALSE(decoded.failed());
+  auto instruction = std::move(decoded).value();
+  ASSERT_TRUE(instruction->is_memory_op());
+  ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
+  ASSERT_FALSE(wave_->instruction_execution_failed());
+  ASSERT_NE(instruction->data(), nullptr);
+  EXPECT_EQ(instruction->data_as<amdgpu::VectorMemState>()->wait_counter_type,
+            amdgpu::WaitCounterType::SAMPLECNT);
+  amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
+  pipeline.issue(instruction.release(), *wave_);
+  EXPECT_FLOAT_EQ(std::bit_cast<float>(wave_->debug_read_vgpr(8, 0)), 1.0f);
+  EXPECT_NEAR(std::bit_cast<float>(wave_->debug_read_vgpr(9, 0)), 0.215861f, 0.000001f);
+  EXPECT_NEAR(std::bit_cast<float>(wave_->debug_read_vgpr(10, 0)), 0.0512695f, 0.000001f);
+  EXPECT_FLOAT_EQ(std::bit_cast<float>(wave_->debug_read_vgpr(11, 0)), 128.0f / 255.0f);
+  EXPECT_EQ(wave_->debug_read_vgpr(10, 1), 0xdeadbeef);
+  EXPECT_EQ(wave_->debug_read_vgpr(8, 2), 0);
+  EXPECT_FLOAT_EQ(std::bit_cast<float>(wave_->debug_read_vgpr(11, 2)), 1.0f);
+}
+
+TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+    GTEST_SKIP() << "RDNA4 depth layout";
+  for (uint32_t bytes : {2u, 4u}) {
+    for (uint32_t comparison = 0; comparison < 8; ++comparison) {
+      amdgpu::Pm4QueueState state;
+      state.num_instances = 1;
+      state.uconfig_registers[0x242] = 17;
+      state.context_registers[5] = (3 << 16) | 3;
+      state.context_registers[6] = (bytes == 2 ? 1 : 3) | (3 << 4);
+      state.context_registers[8] = state.context_registers[10] = 0x2000;
+      state.context_registers[0x1c] = 6 | (comparison << 4);
+      state.context_registers[0x198] = 2;
+      state.context_registers[0x205] = 0x43f;
+      state.context_registers[0x10f] = state.context_registers[0x110] =
+          state.context_registers[0x111] = state.context_registers[0x112] =
+              std::bit_cast<uint32_t>(2.0f);
+      state.context_registers[0x113] = std::bit_cast<uint32_t>(1.0f);
+      state.context_registers[0x90] = 1 | (1 << 16);
+      state.context_registers[0x91] = 3 | (3 << 16);
+      for (uint32_t y = 0; y < 4; ++y)
+        for (uint32_t x = 0; x < 4; ++x) {
+          const auto address = amdgpu::gfx12_image_address(0x200000, x, y, 4, bytes, 3);
+          ASSERT_TRUE(address);
+          const uint32_t value = bytes == 2 ? 65535 : std::bit_cast<uint32_t>(1.0f);
+          memory_.write_block(*address, {reinterpret_cast<const uint8_t *>(&value), bytes}, 0);
+        }
+      auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
+      for (uint32_t i = 0; i < 3; ++i)
+        draw->export_lane(*wave_, i, 12, 15,
+                          {std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
+                           std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f), 0,
+                           std::bit_cast<uint32_t>(1.0f)});
+      draw->export_lane(*wave_, 0, 20, 1, {0 | (1 << 9) | (2 << 18), 0, 0, 0});
+      ASSERT_TRUE(draw->advance(memory_, 0));
+      // Depth-only clears have no fragment exports; fixed-function Z still writes.
+      EXPECT_FALSE(draw->advance(memory_, 0));
+      const bool pass = comparison == 1 || comparison == 3 || comparison == 5 || comparison == 7;
+      for (uint32_t y = 0; y < 4; ++y)
+        for (uint32_t x = 0; x < 4; ++x) {
+          const auto address = amdgpu::gfx12_image_address(0x200000, x, y, 4, bytes, 3);
+          uint32_t actual = 0;
+          ASSERT_EQ(
+              memory_.read_block_exact(*address, {reinterpret_cast<uint8_t *>(&actual), bytes}, 0),
+              amdgpu::AccessOutcome::Complete);
+          const bool changed = pass && x >= 1 && x < 3 && y >= 1 && y < 3;
+          EXPECT_EQ(actual, changed      ? 0
+                            : bytes == 2 ? 65535
+                                         : std::bit_cast<uint32_t>(1.0f))
+              << bytes << "," << comparison << "," << x << "," << y;
+        }
+    }
+  }
 }
 
 TEST_P(GraphicsExportTest, HardwareInterpolationEncodingUsesVgprSelectors) {

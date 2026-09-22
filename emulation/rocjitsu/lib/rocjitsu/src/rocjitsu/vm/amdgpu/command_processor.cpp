@@ -2315,12 +2315,14 @@ void CommandProcessor::dispatch_pm4(const HwQueue &queue, HwQueueState &qs,
   qs.push_entry(std::move(dp));
 }
 
-void CommandProcessor::draw_pm4(const HwQueue &queue, HwQueueState &qs, uint32_t vertices) {
+void CommandProcessor::draw_pm4(const HwQueue &queue, HwQueueState &qs, uint32_t vertices,
+                                std::vector<uint32_t> indices) {
   if (!vertices || !queue.pm4->num_instances)
     return;
   if (cus_.empty())
     throw std::runtime_error("graphics draw requires a compute unit");
-  auto draw = std::make_shared<GraphicsDraw>(*queue.pm4, cus_[0]->config().arch, vertices);
+  auto draw = std::make_shared<GraphicsDraw>(*queue.pm4, cus_[0]->config().arch, vertices,
+                                             std::move(indices));
   auto dp = draw->vertex_dispatch();
   queue.pm4->draw = std::move(draw);
   dispatch_graphics_pm4(queue, qs, std::move(dp));
@@ -2746,6 +2748,29 @@ void CommandProcessor::fetch_pm4(HwQueue &queue, HwQueueState &qs, simdojo::Tick
         if (!qs.entries.empty())
           return;
         break;
+      case Pm4Opcode::DrawIndex2: {
+        require(5);
+        if (!submission.graphics_engine || words[4] || words[3] > (1u << 20))
+          throw std::runtime_error("unsupported DRAW_INDEX_2 initiator or count");
+        const uint32_t type = state.uconfig_registers[0x243] & 3;
+        if (type > 2)
+          throw std::runtime_error("unsupported graphics index type");
+        const uint32_t bytes = type == 0 ? 2 : type == 1 ? 4 : 1;
+        const uint32_t valid = std::min(words[0], words[3]);
+        flush_gpu_caches();
+        std::vector<uint8_t> data(valid * bytes);
+        if (!data.empty() && memory_->read_block_exact(address(1), data, queue.process_id) !=
+                                 AccessOutcome::Complete)
+          throw std::runtime_error("graphics index read failed");
+        std::vector<uint32_t> indices(words[3]);
+        for (uint32_t i = 0; i < valid; ++i)
+          for (uint32_t b = 0; b < bytes; ++b)
+            indices[i] |= uint32_t{data[i * bytes + b]} << (b * 8);
+        draw_pm4(queue, qs, words[3], std::move(indices));
+        if (!qs.entries.empty())
+          return;
+        break;
+      }
       case Pm4Opcode::DispatchDirect:
         require(4);
         dispatch_pm4(queue, qs, {words[0], words[1], words[2], words[3]});

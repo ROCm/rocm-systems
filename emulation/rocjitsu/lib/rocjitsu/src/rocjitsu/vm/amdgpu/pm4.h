@@ -40,6 +40,7 @@ enum class Pm4Opcode : uint32_t {
   Nop = 0x10,
   SetBase = 0x11,
   ClearState = 0x12,
+  DrawIndex2 = 0x27,
   ContextControl = 0x28,
   DrawIndexAuto = 0x2d,
   NumInstances = 0x2f,

@@ -15,7 +15,8 @@ class GpuMemory;
 /// Register snapshot and shader outputs for one ordered graphics draw.
 class GraphicsDraw final : public GraphicsStage {
 public:
-  GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint32_t vertices);
+  GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint32_t vertices,
+               std::vector<uint32_t> indices = {});
   DispatchEntry vertex_dispatch() const;
   void initialize(Wavefront &wave, uint32_t workgroup, uint32_t wave_index) override;
   void export_lane(Wavefront &wave, uint32_t lane, uint32_t target, uint32_t mask,
@@ -30,6 +31,7 @@ private:
   uint32_t total_vertices_, first_vertex_ = 0;
   uint32_t instance_count_, instance_ = 0;
   uint32_t primitive_type_;
+  std::vector<uint32_t> indices_;
   std::array<uint32_t, 0x400> sh_;
   std::array<uint32_t, 0x2000> context_;
   std::array<std::array<uint32_t, 4>, 64> positions_{};
@@ -39,7 +41,7 @@ private:
   std::array<bool, 64> primitive_valid_{};
   struct Fragment {
     int32_t x = 0, y = 0;
-    float i = 0, j = 0;
+    float i = 0, j = 0, z = 0;
     bool covered = false;
     uint32_t mask = 0;
     std::array<uint32_t, 4> color{};
@@ -55,10 +57,15 @@ private:
   uint32_t memory_format_ = 0;
   uint32_t width_ = 0, height_ = 0, swizzle_ = 0;
   uint64_t color_base_ = 0;
+  bool color_enabled_ = false;
+  uint32_t depth_control_ = 0;
+  uint32_t depth_width_ = 0, depth_height_ = 0, depth_swizzle_ = 0;
+  uint32_t depth_bytes_ = 0;
+  uint64_t depth_base_ = 0;
   void finish_vertices();
   DispatchEntry fragment_dispatch() const;
   void rasterize(GpuMemory &memory, uint32_t process_id);
-  void write_colors(GpuMemory &memory, uint32_t process_id);
+  void write_outputs(GpuMemory &memory, uint32_t process_id);
   uint32_t primitive_count() const;
   void select_vertex_group();
   std::optional<DispatchEntry> next_vertex_group();

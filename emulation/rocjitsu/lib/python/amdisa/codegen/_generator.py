@@ -347,6 +347,7 @@ class CodeGenerator:
         'global_store_addtid': 'vmem_store',
         'buffer_load': 'vmem_load',
         'buffer_store': 'vmem_store',
+        'image_sample_2d': 'vmem_sample',
         'buffer_atomic': 'vmem_atomic',
         'tbuffer_load': 'vmem_load',
         'tbuffer_store': 'vmem_store',
@@ -7616,9 +7617,16 @@ class CodeGenerator:
         if self.isa_spec.arch_name == 'rdna4' and inst.name.upper() in (
             'IMAGE_LOAD',
             'IMAGE_STORE',
+            'IMAGE_SAMPLE',
+            'IMAGE_SAMPLE_LZ',
         ):
-            load = inst.name.upper() == 'IMAGE_LOAD'
-            counter = 'LOADCNT' if load else 'STORECNT'
+            sample = inst.name.upper() in ('IMAGE_SAMPLE', 'IMAGE_SAMPLE_LZ')
+            load = inst.name.upper() != 'IMAGE_STORE'
+            counter = 'SAMPLECNT' if sample else ('LOADCNT' if load else 'STORECNT')
+            sampler = ', inst_.samp' if sample else ''
+            unsupported = 'inst_.r128 || inst_.a16 || inst_.tfe || inst_.nv'
+            if sample:
+                unsupported += ' || inst_.unorm || inst_.lwe'
             return '\n'.join(
                 [
                     '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
@@ -7627,7 +7635,7 @@ class CodeGenerator:
                     f'  d->wait_counter_type = amdgpu::WaitCounterType::{counter};',
                     '  if (!amdgpu::prepare_image_transfer(wf, *d, inst_.rsrc, inst_.vdata,',
                     '      {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2}, inst_.dim, inst_.dmask, inst_.d16,',
-                    '      inst_.r128 || inst_.a16 || inst_.tfe)) return;',
+                    f'      {unsupported}{sampler})) return;',
                     '  set_data(std::move(d));',
                 ]
             )
@@ -7886,6 +7894,8 @@ class CodeGenerator:
                 if uses_granular_counter_types
                 else 'amdgpu::WaitCounterType::VMCNT'
             )
+        if kind == 'vmem_sample':
+            return 'amdgpu::WaitCounterType::SAMPLECNT'
         if kind in ('flat_store', 'vmem_store'):
             if uses_granular_counter_types:
                 return 'amdgpu::WaitCounterType::STORECNT'
@@ -7950,7 +7960,7 @@ class CodeGenerator:
             completion = ordered_async_load
         elif kind == 'async_store':
             completion = ordered_async_store
-        elif kind == 'vmem_load':
+        elif kind in ('vmem_load', 'vmem_sample'):
             completion = ordered_vmem
         elif kind == 'vmem_store':
             completion = (
@@ -8055,6 +8065,11 @@ class CodeGenerator:
 
     def _memory_issue_semantic_class(self, sem: InstructionSemantics) -> str:
         """Return the issue-metadata variant for one decoded instruction."""
+        if self.isa_spec.arch_name == 'rdna4' and sem.name in (
+            'IMAGE_SAMPLE',
+            'IMAGE_SAMPLE_LZ',
+        ):
+            return 'image_sample_2d'
         if self.isa_spec.arch_name == 'rdna4' and sem.name in (
             'IMAGE_LOAD',
             'IMAGE_STORE',
@@ -12660,7 +12675,7 @@ class CodeGenerator:
                 )
                 is_mem_enc = enc.enc_name.upper() in _MEM_ENC_NAMES or (
                     self.isa_spec.arch_name == 'rdna4'
-                    and enc.enc_name.upper() == 'ENC_VIMAGE'
+                    and enc.enc_name.upper() in ('ENC_VIMAGE', 'ENC_VSAMPLE')
                 )
                 if is_mem_enc:
                     cpp_includes.extend(
@@ -12699,9 +12714,9 @@ class CodeGenerator:
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/image_resource.h', False)
                     )
-                if (
-                    self.isa_spec.arch_name == 'rdna4'
-                    and enc.enc_name.upper() == 'ENC_VIMAGE'
+                if self.isa_spec.arch_name == 'rdna4' and enc.enc_name.upper() in (
+                    'ENC_VIMAGE',
+                    'ENC_VSAMPLE',
                 ):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/image_transfer.h', False)

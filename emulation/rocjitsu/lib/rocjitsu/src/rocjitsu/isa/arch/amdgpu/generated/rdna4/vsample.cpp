@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vsample.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -50,6 +51,8 @@ ImageSampleVsample::ImageSampleVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -158,6 +161,8 @@ ImageSampleLzVsample::ImageSampleLzVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {

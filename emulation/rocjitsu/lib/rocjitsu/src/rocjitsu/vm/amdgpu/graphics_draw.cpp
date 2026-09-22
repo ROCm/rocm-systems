@@ -20,10 +20,11 @@ namespace {
 constexpr uint32_t kTriangleList = 4, kTriangleStrip = 6, kRectangleList = 17;
 }
 
-GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint32_t vertices)
+GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint32_t vertices,
+                           std::vector<uint32_t> indices)
     : arch_(arch), vertex_count_(vertices), total_vertices_(vertices),
       instance_count_(state.num_instances), primitive_type_(state.uconfig_registers[0x242]),
-      sh_(state.sh_registers), context_(state.context_registers) {
+      indices_(std::move(indices)), sh_(state.sh_registers), context_(state.context_registers) {
   if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5 &&
       arch != ROCJITSU_CODE_ARCH_RDNA4)
     throw std::runtime_error("graphics draw requires RDNA3 or RDNA4");
@@ -33,6 +34,10 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
        primitive_type_ != kRectangleList))
     throw std::runtime_error("unsupported graphics primitive, vertex count, or instance count");
   select_vertex_group();
+  if (!indices_.empty() && indices_.size() != total_vertices_)
+    throw std::runtime_error("graphics index count does not match draw");
+  if (!indices_.empty() && (state.uconfig_registers[0x24b] & 1))
+    throw std::runtime_error("graphics primitive restart is not implemented");
 }
 
 uint32_t GraphicsDraw::primitive_count() const {
@@ -134,7 +139,10 @@ void GraphicsDraw::initialize(Wavefront &wave, uint32_t workgroup, uint32_t wave
                               ((first + 2) << (2 * index_bits)));
     for (uint32_t i = 1; i < (gfx12 ? 3u : 5u); ++i)
       wave.debug_write_vgpr(i, lane, 0);
-    wave.debug_write_vgpr(gfx12 ? 3 : 5, lane, first_vertex_ + lane);
+    const uint32_t index = indices_.empty()       ? first_vertex_ + lane
+                           : lane < vertex_count_ ? indices_[first_vertex_ + lane]
+                                                  : 0;
+    wave.debug_write_vgpr(gfx12 ? 3 : 5, lane, index);
     const uint32_t components = (sh_[0x8b] >> 16) & 3;
     if (components >= (gfx12 ? 1u : 3u))
       wave.debug_write_vgpr(gfx12 ? 4 : 8, lane, instance_);
@@ -144,6 +152,10 @@ void GraphicsDraw::initialize(Wavefront &wave, uint32_t workgroup, uint32_t wave
 void GraphicsDraw::export_lane(Wavefront &wave, uint32_t lane, uint32_t target, uint32_t mask,
                                const std::array<uint32_t, 4> &values) {
   if (fragment_stage_) {
+    if (target == 8 && mask == 1) {
+      fragments_.at(wave.wg_coord()[0]).lanes[lane].z = std::bit_cast<float>(values[0]);
+      return;
+    }
     if (target != 0) {
       wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
       return;
@@ -219,13 +231,45 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
                    attrib3, " export=", color_format_, " inputs=", context_[0x198],
                    " mask=", context_[0x214], " depth=", context_[0x1c], std::dec);
   memory_format_ = ((info >> 8) & 7) == 4 ? 46 : 42;
-  if ((info & 31) != 10 || (((info >> 8) & 31) != 0 && ((info >> 8) & 31) != 4) || attrib ||
-      (attrib3 & 0xf83fff) || context_[0x31a] || context_[0x319] ||
-      (context_[0x1e0] & (1u << 30)) || context_[0x1c] || context_[0x214] != 15 ||
-      (color_format_ != 4 && color_format_ != 7 && color_format_ != 9) || context_[0x198] != 2)
-    throw std::runtime_error("unsupported graphics color, depth, blend, or fragment inputs");
+  color_enabled_ = context_[0x214] != 0;
+  depth_control_ = context_[0x1c];
+  if (depth_control_ & ~0x76u)
+    throw std::runtime_error("unsupported graphics stencil or depth bounds test");
+  if (color_enabled_ &&
+      ((info & 31) != 10 || (((info >> 8) & 31) != 0 && ((info >> 8) & 31) != 4) || attrib ||
+       (attrib3 & 0xf83fff) || context_[0x31a] || context_[0x319] ||
+       (context_[0x1e0] & (1u << 30)) || context_[0x214] != 15 ||
+       (color_format_ != 4 && color_format_ != 7 && color_format_ != 9)))
+    throw std::runtime_error("unsupported graphics color or blend state");
+  if (context_[0x198] != 2)
+    throw std::runtime_error("unsupported graphics fragment inputs");
   width_ = (attrib2 >> 16) + 1;
   height_ = (attrib2 & 0xffff) + 1;
+  if (depth_control_ & 2) {
+    const uint32_t zinfo = context_[6];
+    depth_width_ = (context_[5] & 0xffff) + 1;
+    depth_height_ = (context_[5] >> 16) + 1;
+    depth_swizzle_ = (zinfo >> 4) & 31;
+    depth_bytes_ = (zinfo & 3) == 1 ? 2 : 4;
+    depth_base_ =
+        addr_calc::buffer_virtual_address(((uint64_t{context_[9] & 255} << 32) | context_[8]) << 8);
+    const uint64_t write_base = addr_calc::buffer_virtual_address(
+        ((uint64_t{context_[11] & 255} << 32) | context_[10]) << 8);
+    util::Logger::cp("graphics depth info=", std::hex, zinfo, " view=", context_[1], ",",
+                     context_[2], " base=", depth_base_, " write=", write_base, std::dec);
+    if (((zinfo & 15) != 3 && (zinfo & 15) != 1) || (zinfo & (31u << 15)) || depth_swizzle_ > 4 ||
+        context_[1] || (context_[2] & 0x7c000000u) ||
+        ((depth_control_ & 4) && ((context_[2] & (1u << 24)) || depth_base_ != write_base)))
+      throw std::runtime_error("unsupported graphics depth surface");
+    if (!color_enabled_) {
+      width_ = depth_width_;
+      height_ = depth_height_;
+    } else if (depth_width_ != width_ || depth_height_ != height_) {
+      throw std::runtime_error("graphics depth and color extents must match");
+    }
+  } else if (!color_enabled_) {
+    throw std::runtime_error("graphics draw has no supported attachment");
+  }
   if (width_ > 4096 || height_ > 4096)
     throw std::runtime_error("graphics render target exceeds supported dimensions");
   swizzle_ = (attrib3 >> 15) & 7;
@@ -264,7 +308,7 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
       continue;
     std::array<uint32_t, 3> indices{};
     struct Point {
-      double x, y, w;
+      double x, y, w, z;
     };
     std::array<Point, 3> v{};
     for (uint32_t k = 0; k < 3; ++k) {
@@ -279,7 +323,7 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
         throw std::runtime_error("graphics homogeneous clipping is not implemented");
       }
       v[k] = {std::round((x / w * sx + ox) * 256) / 256, std::round((y / w * sy + oy) * 256) / 256,
-              w};
+              w, std::bit_cast<float>(position[2]) / w};
       if (!std::isfinite(v[k].x) || !std::isfinite(v[k].y) || std::abs(v[k].x) > (1 << 20) ||
           std::abs(v[k].y) > (1 << 20))
         throw std::runtime_error("graphics vertex exceeds supported raster coordinates");
@@ -341,6 +385,9 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
           const double rw = (1 - b1 - b2) / v[0].w + b1 / v[1].w + b2 / v[2].w;
           f.i = b1 / v[1].w / rw;
           f.j = b2 / v[2].w / rw;
+          f.z = ((1 - b1 - b2) * v[0].z + b1 * v[1].z + b2 * v[2].z) *
+                    std::bit_cast<float>(context_[0x113]) +
+                std::bit_cast<float>(context_[0x114]);
           bool inside = true;
           if (rectangle) {
             inside = px >= min_x && px < max_x && py >= min_y && py < max_y;
@@ -374,11 +421,64 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
   }
 }
 
-void GraphicsDraw::write_colors(GpuMemory &memory, uint32_t process_id) {
+void GraphicsDraw::write_outputs(GpuMemory &memory, uint32_t process_id) {
   for (const auto &batch : fragments_) {
     for (uint32_t lane = 0; lane < fragment_wave_size_; ++lane) {
       const auto &f = batch.lanes[lane];
-      if (!f.covered || !f.mask)
+      if (!f.covered)
+        continue;
+      if (depth_control_ & 2) {
+        const auto address =
+            gfx12_image_address(depth_base_, f.x, f.y, depth_width_, depth_bytes_, depth_swizzle_);
+        uint32_t previous_bits = 0;
+        if (!address || memory.read_block_exact(
+                            *address, {reinterpret_cast<uint8_t *>(&previous_bits), depth_bytes_},
+                            process_id) != AccessOutcome::Complete)
+          throw std::runtime_error("graphics depth read failed");
+        uint32_t next_bits = std::bit_cast<uint32_t>(f.z);
+        if (depth_bytes_ == 2) {
+          const std::array<uint32_t, 1> component{next_bits};
+          pack_buffer_format(7, 4, component, {reinterpret_cast<uint8_t *>(&next_bits), 2});
+          next_bits &= 0xffff;
+        }
+        const float previous =
+            depth_bytes_ == 2 ? previous_bits / 65535.0f : std::bit_cast<float>(previous_bits);
+        const float depth = depth_bytes_ == 2 ? next_bits / 65535.0f : f.z;
+        bool pass = false;
+        switch ((depth_control_ >> 4) & 7) {
+        case 0:
+          break;
+        case 1:
+          pass = depth < previous;
+          break;
+        case 2:
+          pass = depth == previous;
+          break;
+        case 3:
+          pass = depth <= previous;
+          break;
+        case 4:
+          pass = depth > previous;
+          break;
+        case 5:
+          pass = depth != previous;
+          break;
+        case 6:
+          pass = depth >= previous;
+          break;
+        case 7:
+          pass = true;
+          break;
+        }
+        if (!pass)
+          continue;
+        if ((depth_control_ & 4) &&
+            memory.write_block(*address,
+                               {reinterpret_cast<const uint8_t *>(&next_bits), depth_bytes_},
+                               process_id) != AccessOutcome::Complete)
+          throw std::runtime_error("graphics depth write failed");
+      }
+      if (!color_enabled_ || !f.mask)
         continue;
       std::array<uint32_t, 4> components = f.color;
       if (color_format_ == 4 || color_format_ == 7) {
@@ -403,7 +503,7 @@ void GraphicsDraw::write_colors(GpuMemory &memory, uint32_t process_id) {
 
 std::optional<DispatchEntry> GraphicsDraw::advance(GpuMemory &memory, uint32_t process_id) {
   if (fragment_stage_) {
-    write_colors(memory, process_id);
+    write_outputs(memory, process_id);
     return next_vertex_group();
   }
   finish_vertices();

@@ -579,7 +579,11 @@ public:
       wait_target_.expcnt = static_cast<uint8_t>(threshold & 0x07);
       if (!wait_satisfied())
         state_ = WfState::WAITCNT;
-    } else if (name == "wait_samplecnt" || name == "wait_bvhcnt") {
+    } else if (name == "wait_samplecnt") {
+      wait_target_.samplecnt = t;
+      if (!wait_satisfied())
+        state_ = WfState::WAITCNT;
+    } else if (name == "wait_bvhcnt") {
       wait_target_.vmcnt = t; // map to vmcnt
       if (!wait_satisfied())
         state_ = WfState::WAITCNT;

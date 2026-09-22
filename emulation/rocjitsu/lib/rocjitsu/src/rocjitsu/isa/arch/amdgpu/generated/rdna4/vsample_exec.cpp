@@ -5,14 +5,22 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vsample.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_transfer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstring>
 #include <limits>
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna4 {
@@ -23,7 +31,16 @@ void ImageMsaaLoadVsample::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageSampleVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata, {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2}, inst_.dim,
+          inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.a16 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleDVsample::execute_impl(amdgpu::Wavefront &wf) {
@@ -39,7 +56,16 @@ void ImageSampleBVsample::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageSampleLzVsample::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata, {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2}, inst_.dim,
+          inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.a16 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCVsample::execute_impl(amdgpu::Wavefront &wf) {

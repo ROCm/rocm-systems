@@ -28,6 +28,7 @@ enum class WaitCounterType : uint8_t {
   KMCNT,     ///< Scalar-memory subtype on GFX11; architectural counter on GFX12+.
   TENSORCNT, ///< Tensor data mover count (GFX12.5).
   ASYNCCNT,  ///< Async global/cluster LDS transfer count (GFX12.5).
+  SAMPLECNT, ///< Image sample count (GFX12).
 };
 
 /// @brief Return whether waiting on @p wait_type also constrains an event
@@ -51,6 +52,7 @@ enum class WaitCounterType : uint8_t {
   case WaitCounterType::KMCNT:
   case WaitCounterType::TENSORCNT:
   case WaitCounterType::ASYNCCNT:
+  case WaitCounterType::SAMPLECNT:
     return event_type == wait_type;
   }
   return false;
