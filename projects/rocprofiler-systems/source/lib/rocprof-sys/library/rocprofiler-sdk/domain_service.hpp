@@ -8,6 +8,7 @@
 #include "library/rocprofiler-sdk/callback_domain.hpp"
 #include "library/rocprofiler-sdk/domain_registry.hpp"
 #include "library/rocprofiler-sdk/domain_selection.hpp"
+#include "library/rocprofiler-sdk/external_correlation_domain.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 #include "logger/debug.hpp"
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
@@ -163,6 +164,11 @@ private:
         m_buffered_domains.emplace_back(definition, context(), std::move(operations));
         m_buffered_domains.back().configure();
 
+        if(definition.correlation_dependency != nullptr)
+        {
+            configure_correlation_dependency(*definition.correlation_dependency);
+        }
+
         if(definition.on_configure)
         {
             definition.on_configure();
@@ -182,10 +188,27 @@ private:
         m_callback_domains.emplace_back(definition, context(), std::move(operations));
         m_callback_domains.back().configure();
 
+        if(definition.correlation_dependency != nullptr)
+        {
+            configure_correlation_dependency(*definition.correlation_dependency);
+        }
+
         if(definition.on_configure)
         {
             definition.on_configure();
         }
+    }
+
+    void configure_correlation_dependency(
+        const domains::external_correlation_domain_definition<SdkBackend>& dependency)
+    {
+        LOG_DEBUG("Configuring external-correlation dependency (kind {})",
+                  static_cast<std::underlying_type_t<
+                      typename SdkBackend::external_correlation_request_kind_t>>(
+                      dependency.kind));
+
+        m_correlation_domains.emplace_back(dependency, context());
+        m_correlation_domains.back().configure();
     }
 
     SdkBackend::context_id_t context()
@@ -202,11 +225,12 @@ private:
     }
 
 private:
-    std::vector<domains::domain_info>                 m_available_domains;
-    std::vector<domains::domain_configuration>        m_configuration;
-    std::vector<domains::buffered_domain<SdkBackend>> m_buffered_domains;
-    std::vector<domains::callback_domain<SdkBackend>> m_callback_domains;
-    SdkBackend::context_id_t                          m_context{};
+    std::vector<domains::domain_info>                             m_available_domains;
+    std::vector<domains::domain_configuration>                    m_configuration;
+    std::vector<domains::buffered_domain<SdkBackend>>             m_buffered_domains;
+    std::vector<domains::callback_domain<SdkBackend>>             m_callback_domains;
+    std::vector<domains::external_correlation_domain<SdkBackend>> m_correlation_domains;
+    SdkBackend::context_id_t                                      m_context{};
 
     std::vector<domains::domain_info> filter_supported_domains(
         const auto& table, domains::collection_mode mode)

@@ -96,6 +96,15 @@ on_kernel_dispatch(typename SdkBackend::kernel_dispatch_record_t* record, void* 
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
+inline constexpr external_correlation_domain_definition<SdkBackend>
+    k_kernel_dispatch_stream_correlation =
+        external_correlation_domain_definition<SdkBackend>{
+            .kind       = SdkBackend::EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
+            .on_request = Externals::request_stream_correlation_id,
+        };
+
+template <policies::domain_service::backend   SdkBackend,
+          policies::domain_service::externals Externals>
 inline constexpr buffered_domain_definition<SdkBackend> k_kernel_dispatch =
     buffered_domain_definition<SdkBackend>{
         .meta =
@@ -108,7 +117,9 @@ inline constexpr buffered_domain_definition<SdkBackend> k_kernel_dispatch =
         .on_records = buffered_callback_dispatcher<
             SdkBackend, typename SdkBackend::kernel_dispatch_record_t,
             on_kernel_dispatch<SdkBackend, Externals>>::callback,
-        .on_configure = on_kernel_dispatch_configure<Externals>
+        .on_configure = on_kernel_dispatch_configure<Externals>,
+        .correlation_dependency =
+            &k_kernel_dispatch_stream_correlation<SdkBackend, Externals>
     };
 
 }  // namespace rocprofsys::domains::buffered

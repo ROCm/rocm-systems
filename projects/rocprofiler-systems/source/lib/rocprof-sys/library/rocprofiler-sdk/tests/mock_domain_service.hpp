@@ -76,6 +76,11 @@ using buffer_policy_t         = int;
 using on_records_cb_t         = void (*)(context_id_t, buffer_id_t, record_header_t**,
                                  std::size_t, void*, std::uint64_t);
 using on_record_cb_t          = void (*)(callback_tracing_record_t, user_data_t*, void*);
+using external_correlation_request_kind_t  = std::size_t;
+using external_correlation_id_request_cb_t = int (*)(std::uint64_t, context_id_t,
+                                                     external_correlation_request_kind_t,
+                                                     std::uint32_t, std::uint64_t,
+                                                     user_data_t*, void*);
 
 struct agent_id_t
 {
@@ -344,6 +349,10 @@ struct gmock_sdk_backend
                 (context_id_t context, callback_tracing_kind_t kind,
                  tracing_operation_t* operations, std::size_t num_operations,
                  on_record_cb_t on_record, void* callback_data));
+    MOCK_METHOD(void, configure_external_correlation_id_request_service,
+                (context_id_t context, external_correlation_request_kind_t* kinds,
+                 std::size_t num_kinds, external_correlation_id_request_cb_t callback,
+                 void* callback_data));
 };
 
 inline std::unique_ptr<::testing::StrictMock<gmock_sdk_backend>> g_mock;
@@ -379,6 +388,10 @@ struct mock_sdk
     using agent_id_t                = test_support::agent_id_t;
     using timestamp_t               = std::uint64_t;
     using correlation_id_t          = test_support::correlation_id_t;
+    using external_correlation_request_kind_t =
+        test_support::external_correlation_request_kind_t;
+    using external_correlation_id_request_cb_t =
+        test_support::external_correlation_id_request_cb_t;
     // Satisfies policies::domain_service::backend's requirement that
     // iterate_callback_tracing_kind_operation_args() accept a callback of this shape;
     // the real backend<Wrapper> forwards this type straight from rocprofiler-sdk.
@@ -417,6 +430,9 @@ struct mock_sdk
     static constexpr std::size_t      BUFFER_TRACING_MEMORY_COPY              = 29;
     static constexpr std::size_t      BUFFER_TRACING_MEMORY_ALLOCATION        = 30;
     static constexpr std::size_t      BUFFER_TRACING_SCRATCH_MEMORY           = 31;
+    static constexpr std::size_t      EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH   = 32;
+    static constexpr std::size_t      EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY       = 33;
+    static constexpr std::size_t      EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION = 34;
     // NOLINTEND(readability-identifier-naming)
 
     using kfd_event_dropped_record      = test_support::kfd_event_dropped_record;
@@ -483,6 +499,15 @@ struct mock_sdk
     {
         g_mock->configure_callback_tracing_service(
             context, kind, operations, num_operations, on_record, callback_data);
+    }
+
+    static void configure_external_correlation_id_request_service(
+        context_id_t context, external_correlation_request_kind_t* kinds,
+        std::size_t num_kinds, external_correlation_id_request_cb_t callback,
+        void* callback_data)
+    {
+        g_mock->configure_external_correlation_id_request_service(
+            context, kinds, num_kinds, callback, callback_data);
     }
 
     static tracing_names_t get_buffer_tracing_names() { return g_buffer_table; }
@@ -1049,6 +1074,19 @@ struct externals
 
     static constexpr std::string_view scratch_memory_category_name =
         "rocm_scratch_memory";
+
+    // Stub external-correlation-id-request callback shared by the kernel_dispatch,
+    // memory_copy, and memory_allocation buffered domains' correlation_dependency.
+    // No test currently asserts on its invocation; add an EXPECT_CALL-backed
+    // variant here if one needs to.
+    static int request_stream_correlation_id(
+        std::uint64_t /*thread_id*/, test_support::context_id_t /*context_id*/,
+        test_support::external_correlation_request_kind_t /*kind*/,
+        std::uint32_t /*operation*/, std::uint64_t /*internal_corr_id*/,
+        test_support::user_data_t* /*external_corr_id*/, void* /*user_data*/)
+    {
+        return 0;
+    }
 
     // Forward to gmock_metadata_registry/gmock_buffer_storage (defined at namespace
     // scope above, alongside gmock_externals) so tests can EXPECT_CALL every member
