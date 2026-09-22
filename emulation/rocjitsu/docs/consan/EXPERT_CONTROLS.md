@@ -15,7 +15,7 @@ changes them.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `RJ_CONSAN_POLICY=default\|strict` | `default` | `strict` defaults fail-closed and require-patch guards to true; for the default mode it also defaults automatic-record and forbid-overflow guards to true. It does not require complete static coverage or make race diagnostics fatal. A load-time rejection terminates with exit code 92. |
+| `RJ_CONSAN_POLICY=default\|strict` | `default` | `strict` defaults fail-closed and require-patch guards to true; for the default mode it also defaults automatic-record and forbid-overflow guards to true. It does not require complete static coverage or make race diagnostics fatal. Configuration rejection or a load-time code-object rejection terminates with exit code 92. |
 | `RJ_CONSAN_FAIL_CLOSED=0\|1` | `0` | Reject unsupported/invalid transformation outcomes instead of loading the original. |
 | `RJ_CONSAN_REQUIRE_PATCH=0\|1` | `0` | Reject an applicable code object when no real access/barrier/atomic/fence instrumentation patch is emitted. Prologues and metadata-only changes do not satisfy it. |
 | `RJ_CONSAN_FLAT_PROVENANCE=likely\|strict` | `likely` | Admit proven `Group` plus heuristic `MaybeGroup` flat LDS sites, or only proven `Group` sites. |
@@ -42,6 +42,12 @@ with a predeclared expected result can add one of these assertions:
 export RJ_CONSAN_FORBID_DIAGNOSTICS=1   # known-correct ConSan control
 export RJ_CONSAN_REQUIRE_DIAGNOSTICS=1  # predeclared positive ConSan control
 ```
+
+With a valid `RJ_CONSAN_POLICY=strict` setting, invalid ConSan configuration
+also terminates during hook initialization with exit code 92 and a
+`ConSan configuration rejected` diagnostic. Under the default policy,
+configuration rejection warns that ConSan is not installed and the run is
+unchecked, then allows the application to continue.
 
 Do not enable both diagnostic guards. Strict policy can be too restrictive for
 a broad application that loads helper code objects with no admitted sites. A

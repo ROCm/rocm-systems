@@ -207,6 +207,7 @@ mutation families and their additional selectors.
 No ConSan logs:
 
 - verify `HSA_TOOLS_LIB` names the newly built hook;
+- set `HSA_TOOLS_DISABLE_REGISTER=1` so profiler registration does not shadow the hook;
 - verify the process uses an HSA runtime that honors HSA tools; and
 - set `RJ_CONSAN_LOG=1` explicitly.
 
