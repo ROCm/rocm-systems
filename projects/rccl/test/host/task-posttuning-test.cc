@@ -3709,4 +3709,308 @@ TEST_F(TaskPostTuningMicrotest, DISABLED_LegacyRecordAlgoNeedConnect_PatWithoutA
   EXPECT_TRUE(connect.needConnect());
 }
 
+struct TaskPostTuning_PreconnectLog {
+  struct ncclComm* comm = nullptr;
+  bool requested[NCCL_NUM_ALGORITHMS] = {};
+  int collTasksAtCall = -1;
+  size_t workNodesAtCall = 0;
+  int calls = 0;
+};
+
+class TaskPostTuning_LegacyDrive {
+ public:
+  explicit TaskPostTuning_LegacyDrive(ncclResult_t preconnectResult = ncclSuccess)
+    : preconnectHook_(g_ncclCollPreconnect, RecordPreconnect(preconnectResult)) {
+    ncclIntruQueueConstruct(&queue_);
+    ncclIntruQueueConstruct(&scene_.comm()->planner.collCleanupQueue);
+    ncclIntruQueueConstruct(&scene_.comm()->planner.collTaskQueue);
+    ncclIntruQueueConstruct(&scene_.comm()->planner.collWorkQueue);
+    ncclMemoryPoolConstruct(&scene_.comm()->memPool_ncclTaskColl);
+    scene_.comm()->runtimeConn = true;
+  }
+
+  struct ncclTaskTuningInfo* Add(int algo) {
+    const ncclCollConfig_t unsetConfig = NCCL_COLLCONFIG_INITIALIZER;
+    struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllReduce);
+    raw->coll.collConfig = unsetConfig;
+    struct ncclTaskTuningInfo* tInfo = scene_.NewTuningInfo(raw);
+    TaskPostTuning_SetTunerOutput(&tInfo->tuningOut, algo, NCCL_PROTO_SIMPLE);
+    TaskPostTuning_StampDevFuncId(algo, NCCL_PROTO_SIMPLE);
+    ncclIntruQueueEnqueue(&queue_, tInfo);
+    return tInfo;
+  }
+
+  struct ncclComm* comm() { return scene_.comm(); }
+  TaskTuningInfoQueue* queue() { return &queue_; }
+  ncclResult_t Run() { return postTuneLegacyTasks(comm(), &queue_); }
+  const TaskPostTuning_PreconnectLog& preconnect() const { return preconnect_; }
+
+  std::vector<int> TaskAlgorithms() {
+    std::vector<int> algorithms;
+    for (struct ncclTaskColl* task = ncclIntruQueueHead(&comm()->planner.collTaskQueue); task != nullptr;
+         task = task->next) {
+      algorithms.push_back(task->algorithm);
+    }
+    return algorithms;
+  }
+
+  std::vector<uint32_t> TaskDevFuncIds() {
+    std::vector<uint32_t> ids;
+    for (struct ncclTaskColl* task = ncclIntruQueueHead(&comm()->planner.collTaskQueue); task != nullptr;
+         task = task->next) {
+      ids.push_back(task->devFuncId);
+    }
+    return ids;
+  }
+
+  std::vector<struct ncclWorkList*> WorkNodes() {
+    std::vector<struct ncclWorkList*> nodes;
+    for (struct ncclWorkList* node = ncclIntruQueueHead(&comm()->planner.collWorkQueue); node != nullptr;
+         node = node->next) {
+      nodes.push_back(node);
+    }
+    return nodes;
+  }
+
+ private:
+  // Owns the log and the hook so each drive site is one line, the way TaskPostTuning_P2pNetRegister owns its.
+  std::function<ncclResult_t(struct ncclComm*, bool*)> RecordPreconnect(ncclResult_t result) {
+    return [this, result](struct ncclComm* comm, bool* algoNeedConnect) {
+      preconnect_.comm = comm;
+      std::memcpy(preconnect_.requested, algoNeedConnect, sizeof(preconnect_.requested));
+      preconnect_.collTasksAtCall = this->comm()->planner.nTasksColl;
+      preconnect_.workNodesAtCall = WorkNodes().size();
+      preconnect_.calls += 1;
+      return result;
+    };
+  }
+
+  TaskPrepScene scene_;
+  TaskTuningInfoQueue queue_;
+  TaskPostTuning_PreconnectLog preconnect_;
+  ScopedHook<ncclResult_t(struct ncclComm*, bool*)> preconnectHook_;
+};
+
+// The registrars and the profiler answer permissively so a test only has to break the arm it is about.
+class TaskPostTuning_LegacyHooks {
+ public:
+  explicit TaskPostTuning_LegacyHooks(bool nvlsNeedsConnect = kRegistrationNeedsConnect,
+                                      ncclResult_t nvlsResult = ncclSuccess)
+    : coll_(g_ncclRegisterCollBuffers, TaskPostTuning_RecordCollRegistration(&collLog_, kRegistrationNeedsConnect)),
+      nvls_(g_ncclRegisterCollNvlsBuffers,
+           TaskPostTuning_RecordCollRegistration(&nvlsLog_, nvlsNeedsConnect, nvlsResult)),
+      profiler_(g_profilerPluginLoaded, [] { return false; }) {}
+
+  int collCalls() const { return collLog_.calls; }
+  int nvlsCalls() const { return nvlsLog_.calls; }
+  const TaskPostTuning_CollRegistrationLog& collLog() const { return collLog_; }
+  const TaskPostTuning_CollRegistrationLog& nvlsLog() const { return nvlsLog_; }
+
+ private:
+  TaskPostTuning_CollRegistrationLog collLog_;
+  TaskPostTuning_CollRegistrationLog nvlsLog_;
+  ScopedHook<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, void**, void**, ncclCommCallbackQueue*, bool*)> coll_;
+  ScopedHook<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, void**, void**, ncclCommCallbackQueue*, bool*)> nvls_;
+  ScopedHook<bool()> profiler_;
+};
+
+TEST_F(TaskPostTuningMicrotest, LegacyTasks_EmptyQueue_ConnectsNothingAndMaterializesNothing) {
+  TaskPostTuning_LegacyDrive drive;
+  TaskPostTuning_LegacyHooks hooks;
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  EXPECT_EQ(0, drive.preconnect().calls);
+  EXPECT_EQ(0, hooks.collCalls());
+  EXPECT_EQ(0, hooks.nvlsCalls());
+  EXPECT_EQ(0, drive.comm()->planner.nTasksColl);
+  EXPECT_TRUE(drive.TaskAlgorithms().empty());
+  EXPECT_TRUE(drive.WorkNodes().empty());
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyTasks_MixedAlgorithms_MaterializeEveryNvlsEntryAheadOfThePlainOnes) {
+  TaskPostTuning_LegacyDrive drive;
+  TaskPostTuning_LegacyHooks hooks;
+  drive.Add(NCCL_ALGO_RING);
+  drive.Add(NCCL_ALGO_NVLS);
+  drive.Add(NCCL_ALGO_TREE);
+  drive.Add(NCCL_ALGO_NVLS_TREE);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  const std::vector<int> expected = {NCCL_ALGO_NVLS, NCCL_ALGO_NVLS_TREE, NCCL_ALGO_RING, NCCL_ALGO_TREE};
+  EXPECT_EQ(expected, drive.TaskAlgorithms());
+  EXPECT_EQ(4u, drive.WorkNodes().size());
+  EXPECT_EQ(4, drive.comm()->planner.nTasksColl);
+  for (uint32_t devFuncId : drive.TaskDevFuncIds()) {
+    EXPECT_EQ(kStampedDevFuncId, devFuncId);
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyTasks_NvlsEntries_RegisterThroughTheNvlsRegistrarOnly) {
+  TaskPostTuning_LegacyDrive drive;
+  TaskPostTuning_LegacyHooks hooks;
+  drive.Add(NCCL_ALGO_NVLS);
+  drive.Add(NCCL_ALGO_NVLS_TREE);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  EXPECT_EQ(2, hooks.nvlsCalls());
+  EXPECT_EQ(0, hooks.collCalls());
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyTasks_PlainEntries_RegisterThroughTheCollRegistrarOnly) {
+  TaskPostTuning_LegacyDrive drive;
+  TaskPostTuning_LegacyHooks hooks;
+  drive.Add(NCCL_ALGO_RING);
+  drive.Add(NCCL_ALGO_PAT);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  EXPECT_EQ(2, hooks.collCalls());
+  EXPECT_EQ(0, hooks.nvlsCalls());
+  EXPECT_EQ(drive.comm(), hooks.collLog().comm);
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(drive.preconnect().requested, {NCCL_ALGO_RING, NCCL_ALGO_PAT}));
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyTasks_ConnectRequested_PreconnectsOnceAfterTheNvlsPassAndBeforeThePlainPass) {
+  TaskPostTuning_LegacyDrive drive;
+  TaskPostTuning_LegacyHooks hooks;
+  drive.Add(NCCL_ALGO_RING);
+  drive.Add(NCCL_ALGO_NVLS_TREE);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  EXPECT_EQ(1, drive.preconnect().calls);
+  EXPECT_EQ(drive.comm(), drive.preconnect().comm);
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(drive.preconnect().requested,
+                                             {NCCL_ALGO_RING, NCCL_ALGO_NVLS, NCCL_ALGO_NVLS_TREE}));
+  EXPECT_EQ(1, drive.preconnect().collTasksAtCall);
+  EXPECT_EQ(1u, drive.preconnect().workNodesAtCall);
+  EXPECT_EQ(2, drive.comm()->planner.nTasksColl);
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyTasks_NoRuntimeConnection_SkipsPreconnectAndStillMaterializesEveryTask) {
+  TaskPostTuning_LegacyDrive drive;
+  TaskPostTuning_LegacyHooks hooks;
+  drive.comm()->runtimeConn = false;
+  drive.Add(NCCL_ALGO_NVLS);
+  drive.Add(NCCL_ALGO_RING);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  EXPECT_EQ(0, drive.preconnect().calls);
+  EXPECT_EQ(2, drive.comm()->planner.nTasksColl);
+}
+
+// task_posttuning.cc:732 gates preconnect on needConnect, not comm->runtimeConn (true here); a lone NVLS
+// entry that declines connect keeps needConnect false, so substituting runtimeConn would fire this anyway.
+TEST_F(TaskPostTuningMicrotest, LegacyTasks_NvlsRegistrationDeclinesConnectAlone_SkipsPreconnect) {
+  TaskPostTuning_LegacyDrive drive;
+  TaskPostTuning_LegacyHooks hooks(kRegistrationNeedsNoConnect);
+  drive.Add(NCCL_ALGO_NVLS);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  EXPECT_EQ(0, drive.preconnect().calls);
+  EXPECT_EQ(1, drive.comm()->planner.nTasksColl);
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyTasks_NvlsRegistrationDeclinesConnect_LeavesTheNvlsEntryUnrecorded) {
+  TaskPostTuning_LegacyDrive drive;
+  TaskPostTuning_LegacyHooks hooks(kRegistrationNeedsNoConnect);
+  drive.Add(NCCL_ALGO_NVLS);
+  drive.Add(NCCL_ALGO_RING);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  EXPECT_EQ(1, drive.preconnect().calls);
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(drive.preconnect().requested, {NCCL_ALGO_RING}));
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyTasks_PreconnectFails_PropagatesBeforeMaterializingThePlainEntries) {
+  TaskPostTuning_LegacyDrive drive(ncclSystemError);
+  TaskPostTuning_LegacyHooks hooks;
+  drive.Add(NCCL_ALGO_NVLS);
+  struct ncclTaskTuningInfo* plain = drive.Add(NCCL_ALGO_RING);
+
+  EXPECT_EQ(ncclSystemError, drive.Run());
+
+  EXPECT_EQ(1, drive.preconnect().calls);
+  EXPECT_EQ(0, hooks.collCalls());
+  EXPECT_EQ(1, drive.comm()->planner.nTasksColl);
+  EXPECT_NE(nullptr, plain->raw);
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyTasks_NvlsRegistrationFails_PropagatesWithoutEnqueueingItsWork) {
+  TaskPostTuning_LegacyDrive drive;
+  TaskPostTuning_LegacyHooks hooks(kRegistrationNeedsConnect, ncclInvalidUsage);
+  drive.Add(NCCL_ALGO_NVLS);
+
+  EXPECT_EQ(ncclInvalidUsage, drive.Run());
+
+  EXPECT_EQ(0, drive.preconnect().calls);
+  EXPECT_EQ(0, drive.comm()->planner.nTasksColl);
+  EXPECT_TRUE(drive.WorkNodes().empty());
+}
+
+// Mirrors LegacyTasks_PlainEntryConfigIsRejected below, but on the NVLS pass (task_posttuning.cc:718):
+// no other test forces applyTuningToCollTask to fail there, so that NCCLCHECK could be deleted unnoticed.
+TEST_F(TaskPostTuningMicrotest, LegacyTasks_NvlsEntryConfigIsRejected_PropagatesFromTheNvlsPass) {
+  TaskPostTuning_LegacyDrive drive;
+  TaskPostTuning_LegacyHooks hooks;
+  struct ncclTaskTuningInfo* rejected = drive.Add(NCCL_ALGO_NVLS);
+  rejected->raw->coll.collConfig.algSelection = kUnknownAlgSelection;
+
+  EXPECT_EQ(ncclInvalidArgument, drive.Run());
+
+  EXPECT_EQ(0, drive.preconnect().calls);
+  EXPECT_EQ(0, hooks.nvlsCalls());
+  EXPECT_EQ(0, drive.comm()->planner.nTasksColl);
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyTasks_PlainEntryConfigIsRejected_PropagatesFromThePlainPass) {
+  TaskPostTuning_LegacyDrive drive;
+  TaskPostTuning_LegacyHooks hooks;
+  struct ncclTaskTuningInfo* rejected = drive.Add(NCCL_ALGO_RING);
+  rejected->raw->coll.collConfig.algSelection = kUnknownAlgSelection;
+
+  EXPECT_EQ(ncclInvalidArgument, drive.Run());
+
+  EXPECT_EQ(1, drive.preconnect().calls);
+  EXPECT_EQ(0, hooks.collCalls());
+  EXPECT_EQ(0, drive.comm()->planner.nTasksColl);
+}
+
+// Mirrors LegacyTasks_NvlsRegistrationFails above, but on the plain pass (task_posttuning.cc:748):
+// no other test forces the coll registrar itself to fail there, so that NCCLCHECK could be deleted unnoticed.
+TEST_F(TaskPostTuningMicrotest, LegacyTasks_PlainRegistrationFails_PropagatesWithoutEnqueueingItsWork) {
+  TaskPostTuning_LegacyDrive drive;
+  TaskPostTuning_CollRegistrationLog collLog;
+  ScopedHook<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, void**, void**, ncclCommCallbackQueue*, bool*)>
+    coll(g_ncclRegisterCollBuffers,
+        TaskPostTuning_RecordCollRegistration(&collLog, kRegistrationNeedsConnect, ncclInvalidUsage));
+  drive.Add(NCCL_ALGO_RING);
+
+  EXPECT_EQ(ncclInvalidUsage, drive.Run());
+
+  EXPECT_EQ(1, drive.preconnect().calls);
+  EXPECT_EQ(0, drive.comm()->planner.nTasksColl);
+  EXPECT_TRUE(drive.WorkNodes().empty());
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyTasks_QueuedEntries_ReleaseEveryRawAndStayOnTheQueue) {
+  TaskPostTuning_LegacyDrive drive;
+  TaskPostTuning_LegacyHooks hooks;
+  struct ncclTaskTuningInfo* nvls = drive.Add(NCCL_ALGO_NVLS);
+  struct ncclTaskTuningInfo* plain = drive.Add(NCCL_ALGO_RING);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  EXPECT_EQ(nvls, ncclIntruQueueHead(drive.queue()));
+  EXPECT_EQ(plain, nvls->next);
+  EXPECT_EQ(nullptr, nvls->raw);
+  EXPECT_EQ(nullptr, plain->raw);
+}
+
 }  // namespace
