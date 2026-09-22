@@ -142,15 +142,6 @@ class RegisterAccess {
     return effective_lane_mask;
   }
 
-  static void check_native_region_bounds(uint32_t relative_reg, uint32_t reg_count,
-                                         uint32_t lane_base, std::size_t lane_count,
-                                         uint32_t wave_size, const char *view_name) {
-    if (relative_reg >= reg_count)
-      throw std::out_of_range(std::string(view_name) + " relative VGPR outside region");
-    if (lane_base > wave_size || lane_count > wave_size - lane_base)
-      throw std::out_of_range(std::string(view_name) + " lane window exceeds wave size");
-  }
-
 public:
   class OperandReadView {
   public:
@@ -783,9 +774,9 @@ public:
     template <typename T>
     [[nodiscard]] util::native<T> load_native(uint32_t relative_reg, uint32_t lane_base) const {
       static_assert(sizeof(T) == sizeof(uint32_t), "load_native expects 32-bit lanes");
-      constexpr std::size_t W = util::native_width_v<T>;
-      RegisterAccess::check_native_region_bounds(relative_reg, reg_count_, lane_base, W, wf_size_,
-                                                 "VgprReadRegion");
+      assert(relative_reg < reg_count_ && "relative VGPR outside read region");
+      assert(lane_base <= wf_size_ && util::native_width_v<T> <= wf_size_ - lane_base &&
+             "native lane window exceeds wave size");
 
       const uint32_t *data =
           !valid_ || !observed_
@@ -904,8 +895,9 @@ public:
                       uint64_t lane_mask) const {
       static_assert(sizeof(T) == sizeof(uint32_t), "store_native expects 32-bit lanes");
       constexpr std::size_t W = util::native_width_v<T>;
-      RegisterAccess::check_native_region_bounds(relative_reg, reg_count_, lane_base, W, wf_size_,
-                                                 "VgprWriteRegion");
+      assert(relative_reg < reg_count_ && "relative VGPR outside write region");
+      assert(lane_base <= wf_size_ && W <= wf_size_ - lane_base &&
+             "native lane window exceeds wave size");
       lane_mask = RegisterAccess::checked_store_lane_mask(lane_mask_, lane_base, W, lane_mask,
                                                           "VgprWriteRegion");
       if (!cu_)
