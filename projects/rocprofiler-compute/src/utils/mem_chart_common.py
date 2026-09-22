@@ -261,7 +261,7 @@ def build_cu_panel(
         content,
         title=f"[bold {color}]Compute Units[/bold {color}]",
         border_style=color,
-        width=19,
+        width=22,
         height=height,
     )
 
