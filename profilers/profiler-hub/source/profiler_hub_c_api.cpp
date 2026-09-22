@@ -1,5 +1,9 @@
 #include "profiler-hub/c/profiler_hub.h"
 #include "profiler_hub_ctx.hpp"
+#include "profiler_hub_future.hpp"
+
+#include <tuple>
+#include <utility>
 
 ph_result_t
 ph_ctx_create(ph_ctx_t* ctx, const char* file_path)
@@ -147,5 +151,98 @@ ph_get_track_samples(ph_ctx_t          ctx,
 
     *samples = ctx->get_track_samples(track_id, start_ts, end_ts);
 
+    return PH_RESULT_SUCCESS;
+}
+
+namespace
+{
+ph_result_t
+submit_and_wrap_future(ph_ctx_t                                   ctx,
+                       ph_future_t*                               future,
+                       profiler_hub::common::thread_pool::task_fn task)
+{
+    auto handle = ctx->get_thread_pool().submit(std::move(task));
+
+    try
+    {
+        *future = new ph_future(std::move(handle));
+    } catch(...)
+    {
+        return PH_RESULT_FUTURE_ALLOCATION_FAILED;
+    }
+
+    ctx->register_future(*future);
+    return PH_RESULT_SUCCESS;
+}
+}  // namespace
+
+ph_result_t
+ph_future_get(ph_ctx_t ctx, ph_future_t* future, ph_task_fn task_fn, void* user_data)
+{
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+
+    if(future == nullptr || task_fn == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return submit_and_wrap_future(
+        ctx, future, [task_fn, user_data](const std::stop_token&) {
+            task_fn(user_data);
+        });
+}
+
+ph_result_t
+ph_future_wait(ph_ctx_t ctx, ph_future_t future)
+{
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+
+    if(future == nullptr || !ctx->owns_future(future))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    future->m_handle.wait();
+    return PH_RESULT_SUCCESS;
+}
+
+ph_result_t
+ph_future_cancel(ph_ctx_t ctx, ph_future_t future)
+{
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+
+    if(future == nullptr || !ctx->owns_future(future))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    std::ignore = future->m_handle.cancel();
+    return PH_RESULT_SUCCESS;
+}
+
+ph_result_t
+ph_future_free(ph_ctx_t ctx, ph_future_t future)
+{
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+
+    if(future == nullptr || !ctx->owns_future(future))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    ctx->unregister_future(future);
+    delete future;
     return PH_RESULT_SUCCESS;
 }
