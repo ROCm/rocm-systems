@@ -704,7 +704,7 @@
         "RCCL_IB_QP_SCHED_RESET_INTERVAL": "1000",
         "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "2000",
         "NCCL_IB_RETURN_ASYNC_EVENTS": "1",
-        "RCCL_IB_FAULT_INJECTION":     "1"
+        "RCCL_IB_FAULT_INJECTION": "1"
       },
       "tests": [
         {
@@ -1279,6 +1279,74 @@
           "name": "CeAlltoAllEligibilityTest",
           "description": "CE AlltoAll eligibility gating tests matching taskAppend (CTA_POLICY_ZERO, sysmem, capture, group depth)",
           "test_filter": "CeAlltoAllEligibilityTest.*"
+        },
+        {
+          "name": "CeAllReduceEligibilityTest",
+          "description": "CE AllReduce eligibility gate tests. RCCL_CE_AR_MAX_MSG_BYTES activates 2-shot on gfx1250 (ceNonRegMax[AllReduce]=0 by table design).",
+          "test_filter": "CeAllReduceEligibilityTest.*:RcclCeAllReduceEligibility.*",
+          "env_variables": {
+            "RCCL_CE_AR_MAX_MSG_BYTES": "268435456"
+          }
+        },
+        {
+          "name": "DdaFabricEligibilityTest",
+          "description": "DDA fabric eligibility tests for AllReduce, AllGather, ReduceScatter, AlltoAll across LL/LL128/VMM tiers on gfx1250",
+          "test_filter": "DdaFabricEligibilityTest.*:DdaFabricLL128EligibilityTest.*"
+        },
+        {
+          "name": "DdaFabricMaxBlocksTest",
+          "description": "DDA fabric max-blocks CU cap computation and env-override tests",
+          "test_filter": "DdaFabricMaxBlocksTest.*"
+        },
+        {
+          "name": "DdaFabricScratchSizingTest",
+          "description": "DDA fabric scratch-buffer sizing tests covering LL floor, LL128 floor, and CE scratch interplay",
+          "test_filter": "DdaFabricScratchSizingTest.*"
+        },
+        {
+          "name": "DdaAlltoAllThresholdTest",
+          "description": "DDA AlltoAll threshold tests for gfx1250/gfx942/gfx950: entry gate, rank count, staging copy selection",
+          "test_filter": "DdaAlltoAllThresholdTest.*:DdaAlltoAllThreshold.*"
+        },
+        {
+          "name": "RcclDdaTierThresholds",
+          "description": "Arch-table tier threshold resolution tests: gfx1250 table, env overrides, IGNORE_ARCH_TABLE fallback",
+          "test_filter": "RcclDdaTierThresholds.*"
+        },
+        {
+          "name": "RcclAllReduceDdaDecision",
+          "description": "AllReduce DDA dispatch decision tests across gfx1250/gfx942/gfx950: symk yield, CE yield, rank gate",
+          "test_filter": "RcclAllReduceDdaDecision.*"
+        },
+        {
+          "name": "RcclAllGatherCeRegisteredWindow",
+          "description": "AllGather CE-registered window eligibility tests: ceRegMax gate, recv-registered requirement",
+          "test_filter": "RcclAllGatherCeRegisteredWindow.*"
+        },
+        {
+          "name": "RcclCeGraphLatch",
+          "description": "CE AllReduce graph-mode latch tests: set on capture, cleared when all plan refs dropped",
+          "test_filter": "RcclCeGraphLatch.*"
+        },
+        {
+          "name": "RcclAlltoAllDecision",
+          "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
+          "test_filter": "RcclAlltoAllDecision.*"
+        },
+        {
+          "name": "RcclCeAr2ShotMax",
+          "description": "CE AllReduce 2-shot arch threshold upper-bound tests",
+          "test_filter": "RcclCeAr2ShotMax.*"
+        },
+        {
+          "name": "RcclCeArGrownBuffer",
+          "description": "CE AllReduce grown-buffer (ceRegMax) eligibility tests",
+          "test_filter": "RcclCeArGrownBuffer.*"
+        },
+        {
+          "name": "SkipPresetTopoMatching",
+          "description": "SkipPreset arch topology matching and threshold lookup tests",
+          "test_filter": "SkipPresetTopoMatching.*"
         }
       ]
     },
