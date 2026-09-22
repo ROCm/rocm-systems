@@ -309,7 +309,10 @@ TEST_F(NetIbMultiSegmentMPITest, WholeBufferSingleTransfer) {
 
 // NEGATIVE: a buffer with more than NCCL_IB_MAX_SEGMENTS physical segments is
 // rejected at registration with ncclInvalidUsage and produces no handle. The
-// wire protocol carries at most NCCL_IB_MAX_SEGMENTS segments.
+// wire protocol carries at most NCCL_IB_MAX_SEGMENTS segments. A registration
+// at exactly the cap is the positive control: declining by policy returns the
+// same ncclInvalidUsage/NULL pair, so only the at-cap success proves the
+// rejection below came from the segment count.
 TEST_F(NetIbMultiSegmentMPITest, ExceedsMaxSegmentsRejected) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit));
@@ -317,6 +320,8 @@ TEST_F(NetIbMultiSegmentMPITest, ExceedsMaxSegmentsRejected) {
     if (SyncSkip(!PtrSupported(NCCL_PTR_DMABUF))) GTEST_SKIP() << "DMA-BUF registration not supported";
 
     const int rank = MPIEnvironment::world_rank;
+    MultiSegmentVmmBuffer* atCap = AllocSym(NCCL_IB_MAX_SEGMENTS);
+    if (SyncSkip(atCap == nullptr)) GTEST_SKIP() << "could not allocate at-cap VMM window";
     MultiSegmentVmmBuffer* big = AllocSym(NCCL_IB_MAX_SEGMENTS + 1);
     if (SyncSkip(big == nullptr)) GTEST_SKIP() << "could not allocate over-cap VMM window";
 
@@ -324,13 +329,21 @@ TEST_F(NetIbMultiSegmentMPITest, ExceedsMaxSegmentsRejected) {
     ASSERT_SETUP_CONNECTION(0, pair, guard);
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
 
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
+    {
+        void* atCapMh = nullptr;
+        ncclResult_t atCapRet = RegisterMultiSegmentMr(comm, *atCap, net_ == &netIbCast, &atCapMh);
+        NetMHandleGuard atCapGuard(atCapMh, NetMHandleDeleter(net_, comm));
+        ASSERT_EQ(atCapRet, ncclSuccess) << "registration at exactly NCCL_IB_MAX_SEGMENTS must succeed";
+        ASSERT_NE(atCapMh, nullptr) << "at-cap registration must produce a handle";
+    }
+
     void* mh = nullptr;
     ncclResult_t r = RegisterMultiSegmentMr(comm, *big, net_ == &netIbCast, &mh);
-#if NCCL_CUMEM_DMABUF_EXPORT_GATE
     EXPECT_EQ(r, ncclInvalidUsage) << "over-cap segment buffer must be rejected";
     EXPECT_EQ(mh, nullptr) << "no handle should be produced for an over-cap buffer";
 #else
-    (void)r;
+    (void)comm;
     GTEST_SKIP() << "dma-buf export API unavailable at build time";
 #endif
     MPI_Barrier(MPI_COMM_WORLD);
