@@ -521,7 +521,7 @@ void rcclCsvTunerResetConfigPath() {
 // Tuner init function
 static ncclResult_t csvTunerInit(void** context, uint64_t commId, size_t nRanks, size_t nNodes,
                                  ncclDebugLogger_t logFunction, ncclNvlDomainInfo_t* nvlDomainInfo,
-                                 ncclTunerConstants_t* constants) {
+                                 ncclTunerConstants_v5_t* constants) {
   CsvTunerContext* ctx = (CsvTunerContext*)malloc(sizeof(CsvTunerContext));
   if (!ctx) return ncclSystemError;
 

@@ -101,12 +101,18 @@ ncclResult_t ncclTuningSetThreadThresholds(struct ncclComm* comm) {
     comm->tuningContext.maxThreads[NCCL_ALGO_TREE][NCCL_PROTO_LL128] =
       ncclTuningGetNthreads("NCCL_LL128_NTHREADS", ncclParamLl128Nthreads(), NCCL_LL128_MAX_NTHREADS / 4,
                             NCCL_LL128_MAX_NTHREADS, NCCL_LL128_MAX_NTHREADS);
+  // The NaN protocol moves the same 128-bit lines as LL128, minus the flag lane,
+  // so it inherits LL128's thread budget.
+  comm->tuningContext.maxThreads[NCCL_ALGO_RING][NCCL_PROTO_NAN] =
+    comm->tuningContext.maxThreads[NCCL_ALGO_TREE][NCCL_PROTO_NAN] =
+      comm->tuningContext.maxThreads[NCCL_ALGO_RING][NCCL_PROTO_LL128];
 
   // Set per-thread amount of work before we increase nThreads and nChannels
   for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
     comm->tuningContext.threadThresholds[a][NCCL_PROTO_LL] = NCCL_LL_THREAD_THRESHOLD;
     comm->tuningContext.threadThresholds[a][NCCL_PROTO_LL128] = NCCL_LL128_THREAD_THRESHOLD;
     comm->tuningContext.threadThresholds[a][NCCL_PROTO_SIMPLE] = NCCL_SIMPLE_THREAD_THRESHOLD;
+    comm->tuningContext.threadThresholds[a][NCCL_PROTO_NAN] = NCCL_LL128_THREAD_THRESHOLD;
   }
   comm->tuningContext.threadThresholds[NCCL_ALGO_RING][NCCL_PROTO_LL] *= comm->nRanks;
   comm->tuningContext.threadThresholds[NCCL_ALGO_COLLNET_DIRECT][NCCL_PROTO_SIMPLE] = 512;
@@ -116,7 +122,11 @@ ncclResult_t ncclTuningSetThreadThresholds(struct ncclComm* comm) {
   const char* str = ncclGetEnv("NCCL_THREAD_THRESHOLDS");
   if (str) {
     INFO(NCCL_ENV, "NCCL_THREAD_THRESHOLDS set by environment to %s", str);
-    ssize_t t[2][NCCL_NUM_PROTOCOLS] = {{-2, -2, -2}, {-2, -2, -2}};
+    // NCCL_THREAD_THRESHOLDS only names LL/LL128/Simple; -2 keeps every unnamed
+    // protocol (including NaN) on its default instead of being zeroed.
+    ssize_t t[2][NCCL_NUM_PROTOCOLS];
+    for (int a = 0; a < 2; a++)
+      for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) t[a][p] = -2;
     sscanf(str, "%ld %ld %ld %ld %ld %ld", t[0], t[0] + 1, t[0] + 2, t[1], t[1] + 1, t[1] + 2);
     for (int a = 0; a < 2; a++) {
       for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {

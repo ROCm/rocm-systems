@@ -227,7 +227,10 @@ static const ncclTunerConstants_t ncclTunerConstantsDefaults = {
 float treeCorrectionFactor[NCCL_NUM_PROTOCOLS][24] = {
   {1.0, 1.0, 1.0, 1.0, .9, .8, .7, .7, .7, .7, .6, .5, .4, .4, .5, .6, .7, .8, .9, 1.0, 1.0, 1.0, 1.0, 1.0},
   {1.0, 1.0, 1.0, 1.0, 1.0, .9, .8, .8, .8, .7, .6, .6, .6, .6, .6, .6, .8, .9, .9, .9, .9, 1.0, 1.0, 1.0},
-  {.9, .9, .9, .9, .9, .9, .9, .8, .7, .6, .6, .5, .5, .5, .5, .6, .7, .8, .7, .7, .8, .9, .9, .9}
+  {.9, .9, .9, .9, .9, .9, .9, .8, .7, .6, .6, .5, .5, .5, .5, .6, .7, .8, .7, .7, .8, .9, .9, .9},
+  // NaN: mirrors LL128. Unused today (the protocol is ring-only) but a zero row
+  // would silently drive the modelled bandwidth to zero if that ever changes.
+  {1.0, 1.0, 1.0, 1.0, 1.0, .9, .8, .8, .8, .7, .6, .6, .6, .6, .6, .6, .8, .9, .9, .9, .9, 1.0, 1.0, 1.0}
 };
 
 // IMPORTANT: this table need must be consistent with the algRegistry in src/config/algorithm_registry.cc
@@ -240,24 +243,31 @@ Enable order: Broadcast, Reduce, AllGather, ReduceScatter, AllReduce
   {ncclTuningTreeModelInit, ncclTuningTreeModelSim, nullptr, {0, 0, 0, 0, 1}},       // Tree/LL
   {ncclTuningTreeModelInit, ncclTuningTreeModelSim, nullptr, {0, 0, 0, 0, 1}},       // Tree/LL128
   {ncclTuningTreeModelInit, ncclTuningTreeModelSim, nullptr, {0, 0, 0, 0, 1}},       // Tree/Simple
+  {nullptr, nullptr, nullptr, {0}}, // Tree/NaN, disabled as there is no implementation
   {ncclTuningRingModelInit, ncclTuningRingModelSim, nullptr, {1, 1, 1, 1, 1}},       // Ring/LL
   {ncclTuningRingModelInit, ncclTuningRingModelSim, nullptr, {1, 1, 1, 1, 1}},       // Ring/LL128
   {ncclTuningRingModelInit, ncclTuningRingModelSim, nullptr, {1, 1, 1, 1, 1}},       // Ring/Simple
+  {ncclTuningRingModelInit, ncclTuningRingModelSim, nullptr, {0, 0, 0, 0, 1}},       // Ring/NaN
   {nullptr, nullptr, nullptr, {0}}, // CollNetDirect/LL, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}}, // CollNetDirect/LL128, disabled as there is no implementation
   {ncclTuningCollnetModelInit, ncclTuningCollnetModelSim, nullptr, {0, 0, 1, 1, 1}}, // CollNetDirect/Simple
+  {nullptr, nullptr, nullptr, {0}}, // CollNetDirect/NaN, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}}, // CollNetChain/LL, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}}, // CollNetChain/LL128, disabled as there is no implementation
   {ncclTuningCollnetModelInit, ncclTuningCollnetModelSim, nullptr, {0, 0, 0, 0, 1}}, // CollNetChain/Simple
+  {nullptr, nullptr, nullptr, {0}}, // CollNetChain/NaN, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}}, // NVLS/LL, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}}, // NVLS/LL128, disabled as there is no implementation
   {ncclTuningNvlsModelInit, ncclTuningNvlsModelSim, nullptr, {0, 0, 1, 1, 1}}, // NVLS/Simple
+  {nullptr, nullptr, nullptr, {0}}, // NVLS/NaN, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}}, // NVLSTree/LL, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}}, // NVLSTree/LL128, disabled as there is no implementation
   {ncclTuningNvlsModelInit, ncclTuningNvlsModelSim, nullptr, {0, 0, 0, 0, 1}}, // NVLSTree/Simple
+  {nullptr, nullptr, nullptr, {0}}, // NVLSTree/NaN, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}}, // PAT/LL
   {nullptr, nullptr, nullptr, {0}}, // PAT/LL128
   {ncclTuningPatModelInit, ncclTuningPatModelSim, nullptr, {0, 0, 1, 1, 0}}, // PAT/Simple
+  {nullptr, nullptr, nullptr, {0}}, // PAT/NaN, disabled as there is no implementation
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 0, 0, 1}}, // AllReduce_AGxLL_R
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 0, 0, 1}}, // AllReduce_AGxLLMC_R
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 0, 0, 1}}, // AllReduce_RSxTmaLD_AGxTmaST
@@ -280,6 +290,12 @@ Enable order: Broadcast, Reduce, AllGather, ReduceScatter, AllReduce
   {nullptr, ncclTuningCeModelSim, nullptr, {0, 0, 1, 0, 0}}, // CE AllGather Multicast
 };
 
+// modelMap is indexed positionally: algo * NCCL_NUM_PROTOCOLS + proto for the
+// general kernels, then the symmetric kernels, then CE. Adding a protocol shifts
+// every row after the first algorithm, so pin the length.
+static_assert(sizeof(modelMap) / sizeof(modelMap[0]) == NCCL_TUNING_COUNT,
+              "modelMap must have one row per tuning id; a new algorithm or protocol needs a row per algorithm");
+
 /*
   Get a model entry from the model map.
   This will return the model entry for the given id.
@@ -301,6 +317,22 @@ static ncclResult_t getModelEntry(int id, struct ncclTuningModelEntry_t** entry)
 ncclResult_t ncclTuningCostModelInit(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
   comm->tuningContext.tuningConstants = ncclTunerConstantsDefaults;
+  // ncclTunerConstantsDefaults only spells out the three original protocol
+  // columns, so the NaN column comes out zero-initialized and would model as
+  // infinitely slow. Seed it from LL128, whose wire format it matches apart from
+  // the flag lane.
+  for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
+    comm->tuningContext.tuningConstants.baseLatencies[a][NCCL_PROTO_NAN] =
+      comm->tuningContext.tuningConstants.baseLatencies[a][NCCL_PROTO_LL128];
+    for (int hw = 0; hw < NCCL_NUM_HW_LINKS; hw++) {
+      comm->tuningContext.tuningConstants.hwLatencies[hw][a][NCCL_PROTO_NAN] =
+        comm->tuningContext.tuningConstants.hwLatencies[hw][a][NCCL_PROTO_LL128];
+    }
+    for (int n = 0; n < 2; n++) {
+      comm->tuningContext.tuningConstants.bwRatio[n][a][NCCL_PROTO_NAN] =
+        comm->tuningContext.tuningConstants.bwRatio[n][a][NCCL_PROTO_LL128];
+    }
+  }
   // Protocols/Algorithms enable/disable, and user overrides.
   // All are enabled except ll128 which is enabled by default only in certain cases.
   int protoEnable[NCCL_NUM_FUNCTIONS * NCCL_NUM_PROTOCOLS];
