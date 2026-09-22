@@ -236,9 +236,6 @@ static void divisionErrorHandler(int sig, siginfo_t* info, void* ptr) {
   ::abort();
 }
 
-typedef int (*pthread_setaffinity_fn)(pthread_t, size_t, const cpu_set_t*);
-static pthread_setaffinity_fn pthread_setaffinity_fptr;
-
 static void init() __attribute__((constructor(101)));
 static void init() { Os::init(); }
 static cpu_set_t nativeMask_;
@@ -272,7 +269,6 @@ bool Os::init() {
   processorCount_ = ::sysconf(_SC_NPROCESSORS_CONF);
 
   pthread_getaffinity_np(pthread_self(), sizeof(cpu_set_t), &nativeMask_);
-  pthread_setaffinity_fptr = (pthread_setaffinity_fn)dlsym(RTLD_NEXT, "pthread_setaffinity_np");
 
   return Thread::init();
 }
@@ -978,7 +974,6 @@ bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t
     return false;
   }
 
-  struct stat stat_buf;
   int fd = shm_open(fname, O_RDWR | O_CREAT, S_IRWXU | S_IRWXG | S_IRWXO);
   if (fd < 0) {
     return false;
@@ -1141,8 +1136,8 @@ bool NumaNode::GetAffinity() {
   auto iter = affinity->begin();
   // To parse from the end (little-endian layout)
   for (int i = line.size(); i > 0; i -= kHexsPerUInt64) {
-    uint32_t start = (i >= kHexsPerUInt64) ? i - kHexsPerUInt64 : 0;
-    uint32_t len = (i >= kHexsPerUInt64) ? kHexsPerUInt64 : i;
+    uint32_t start = (i >= static_cast<int>(kHexsPerUInt64)) ? i - kHexsPerUInt64 : 0;
+    uint32_t len = (i >= static_cast<int>(kHexsPerUInt64)) ? kHexsPerUInt64 : i;
 
     const std::string chunk = line.substr(start, len);
     const uint64_t value = std::stoul(chunk, nullptr, 16);

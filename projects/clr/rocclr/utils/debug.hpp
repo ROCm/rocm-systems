@@ -213,7 +213,8 @@ inline void warning(const char* msg) { amd::report_warning(msg); }
   } while (false)
 
 #define IsLogEnabled(level, mask)                                                                  \
-  (AMD_LOG_LEVEL >= level && (AMD_LOG_MASK & mask || AMD_LOG_MASK == amd::LOG_ALWAYS))
+  (AMD_LOG_LEVEL >= level &&                                                                       \
+   (AMD_LOG_MASK & mask || AMD_LOG_MASK == static_cast<uint32_t>(amd::LOG_ALWAYS)))
 
 // called on entry and exit, calculates duration with local starttime variable defined in
 // HIP_INIT_API

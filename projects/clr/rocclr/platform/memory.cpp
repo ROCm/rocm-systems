@@ -541,7 +541,9 @@ void Memory::uncommitSvmMemory() {
 }
 
 Device* Memory::GetDeviceById() {
-  size_t device_idx = (userData_.deviceId < getContext().devices().size()) ? userData_.deviceId : 0;
+  size_t device_idx = (static_cast<size_t>(userData_.deviceId) < getContext().devices().size())
+                          ? userData_.deviceId
+                          : 0;
   return getContext().devices()[device_idx];
 }
 
@@ -1219,7 +1221,7 @@ Image* Image::createView(const Context& context, const Format& format, device::V
       for (uint i = 0; i < numDevices_; ++i) {
         // Make sure the parent's device memory is avaialbe
         if ((deviceMemories_[i].ref_ != nullptr) && (deviceMemories_[i].value_ != nullptr)) {
-          device::Memory* mem = view->getDeviceMemory(*(deviceMemories_[i].ref_));
+          (void)view->getDeviceMemory(*(deviceMemories_[i].ref_));
         }
       }
     }
