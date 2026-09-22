@@ -28,6 +28,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/amdgpu/wf_scheduler.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
@@ -1271,6 +1272,85 @@ TEST(GpuMemoryTest, SamePageMappingsRemainIndependent) {
   EXPECT_EQ(memory.resolve_host_ptr(kSecondVa, kPid, second.size()), second.data());
   memory.write8(kSecondVa, 0x33, kPid);
   EXPECT_EQ(second.front(), 0x33);
+}
+
+TEST(GpuMemoryTest, UnmapRangePreservesPartialBoundaryPages) {
+  rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kPageSize = KfdProcess::kPageSize;
+  constexpr uint64_t kFirstMiddleVa = kBaseVa + kPageSize + 128;
+  constexpr uint64_t kSecondMiddleVa = kBaseVa + kPageSize + 1024;
+  constexpr size_t kExtentSize = 64;
+
+  KfdProcess process(kPid);
+  std::array<uint8_t, kPageSize> first{};
+  std::array<uint8_t, kPageSize> last{};
+  std::array<uint8_t, kExtentSize> middle_first{};
+  std::array<uint8_t, kExtentSize> middle_second{};
+  first.fill(0x11);
+  last.fill(0x22);
+  middle_first.fill(0x33);
+  middle_second.fill(0x44);
+  process.map_pages(kBaseVa, first.data(), first.size());
+  process.map_pages(kFirstMiddleVa, middle_first.data(), middle_first.size());
+  process.map_pages(kSecondMiddleVa, middle_second.data(), middle_second.size());
+  process.map_pages(kBaseVa + 2 * kPageSize, last.data(), last.size());
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  // Populate translation caches before removing both extents of the middle page.
+  ASSERT_EQ(memory.read8(kFirstMiddleVa, kPid), 0x33);
+  ASSERT_EQ(memory.read8(kSecondMiddleVa, kPid), 0x44);
+  process.unmap_pages(kBaseVa + kPageSize / 2, 2 * kPageSize);
+
+  EXPECT_EQ(process.page_table_.size(), 2u);
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa, kPid, kPageSize / 2), first.data());
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kPageSize / 2, kPid), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kPageSize - 1, kPid), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(kFirstMiddleVa, kPid), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(kSecondMiddleVa, kPid), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + 2 * kPageSize, kPid), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + 2 * kPageSize + kPageSize / 2 - 1, kPid), nullptr);
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + 2 * kPageSize + kPageSize / 2, kPid, kPageSize / 2),
+            last.data() + kPageSize / 2);
+  EXPECT_EQ(memory.read8(kBaseVa + kPageSize / 2 - 1, kPid), 0x11);
+  EXPECT_EQ(memory.read8(kBaseVa + 3 * kPageSize - 1, kPid), 0x22);
+}
+
+TEST(GpuMemoryTest, FullPageUnmapAndRemapRefreshesCachedBacking) {
+  rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr size_t kPageSize = KfdProcess::kPageSize;
+  constexpr uint64_t kRemapVa = kBaseVa + 128;
+  constexpr size_t kRemapBytes = 64;
+
+  KfdProcess process(kPid);
+  std::array<uint8_t, kPageSize> old_backing{};
+  std::array<uint8_t, kPageSize> new_backing{};
+  old_backing.fill(0x11);
+  new_backing.fill(0x22);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  for (uint32_t iteration = 0; iteration < 16; ++iteration) {
+    SCOPED_TRACE(iteration);
+    process.map_pages(kBaseVa, old_backing.data(), old_backing.size(), amdgpu::Mtype::CC);
+    ASSERT_EQ(memory.read8(kBaseVa, kPid), 0x11);
+    ASSERT_EQ(memory.pte_mtype(kBaseVa, kPid), amdgpu::Mtype::CC);
+    process.unmap_pages(kBaseVa, kPageSize);
+    EXPECT_TRUE(process.page_table_.empty());
+    EXPECT_EQ(memory.resolve_host_ptr(kBaseVa, kPid), nullptr);
+
+    // Reuse node storage without retaining the old backing, MTYPE, or extents.
+    process.map_pages(kRemapVa, new_backing.data(), kRemapBytes, amdgpu::Mtype::UC);
+    EXPECT_EQ(memory.read8(kRemapVa, kPid), 0x22);
+    EXPECT_EQ(memory.pte_mtype(kRemapVa, kPid), amdgpu::Mtype::UC);
+    EXPECT_EQ(memory.resolve_host_ptr(kBaseVa, kPid), nullptr);
+    EXPECT_EQ(memory.resolve_host_ptr(kRemapVa + kRemapBytes, kPid), nullptr);
+    process.unmap_pages(kBaseVa, kPageSize);
+  }
 }
 
 TEST(GpuMemoryThreadingTest, SplitMappedAtomicLocksEveryBackingStripe) {
@@ -3899,6 +3979,76 @@ TEST(FunctionalSchedulingTest, UncontendedComputeUnitKeepsFullFunctionalQuantum)
             kCodeAddress + amdgpu::ComputeUnitCore::kFunctionalQuantum * sizeof(uint32_t));
 }
 
+struct WavefrontSlotTestParam {
+  std::string arch;
+  uint32_t wave_size;
+};
+
+class WavefrontSlotTest : public ::testing::TestWithParam<WavefrontSlotTestParam> {};
+
+TEST_P(WavefrontSlotTest, WavefrontSlotsMaterializeOnDispatchAndRemainReusable) {
+  const auto &[arch, wave_size] = GetParam();
+  constexpr uint32_t kSlots = 4;
+  VmFixture f(arch, 1, kSlots);
+  auto *cu = f.cu();
+  const rocjitsu::amdgpu::ComputeUnitCore &idle_cu = *cu;
+  EXPECT_EQ(cu->num_wfs(), 0u);
+  EXPECT_FALSE(cu->has_active_wfs());
+  EXPECT_FALSE(cu->has_runnable_wfs());
+  EXPECT_TRUE(cu->can_accept_workgroup(kSlots, 0));
+  for (uint32_t slot = 0; slot < kSlots; ++slot)
+    EXPECT_EQ(idle_cu.wf(slot), nullptr);
+
+  // Checkpoint restoration can first populate a nonzero slot, leaving holes.
+  auto *last = cu->dispatch_wf_at(kSlots - 1, 7, 0x1040, 104, 256, wave_size);
+  ASSERT_NE(last, nullptr);
+  EXPECT_EQ(last->wf_id(), kSlots - 1);
+  EXPECT_EQ(last->wf_size(), wave_size);
+  EXPECT_EQ(cu->num_wfs(), 1u);
+  for (uint32_t slot = 0; slot < kSlots - 1; ++slot)
+    EXPECT_EQ(cu->wf(slot), nullptr);
+  EXPECT_EQ(cu->dispatch_wf_at(kSlots - 1, 8, 0x1080, 104, 256, wave_size), nullptr);
+  EXPECT_EQ(cu->dispatch_wf_at(kSlots, 8, 0x1080, 104, 256, wave_size), nullptr);
+
+  cu->free_wavefront_resources(*last);
+  EXPECT_TRUE(last->is_halted());
+  EXPECT_EQ(cu->wf(kSlots - 1), last);
+  EXPECT_FALSE(cu->has_active_wfs());
+  auto *reused = cu->dispatch_wf_at(kSlots - 1, 9, 0x1080, 104, 256, wave_size);
+  ASSERT_EQ(reused, last);
+  EXPECT_EQ(reused->wg_id(), 9u);
+  EXPECT_EQ(reused->pc, 0x1080u);
+  EXPECT_EQ(reused->wf_size(), wave_size);
+
+  auto *first = cu->dispatch_wf(10, 0x10c0, 104, 256, wave_size);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->wf_id(), 0u);
+  EXPECT_EQ(first->wf_size(), wave_size);
+  EXPECT_EQ(cu->wf(1), nullptr);
+  EXPECT_EQ(cu->wf(2), nullptr);
+
+  // A rejected first dispatch retains an idle object for the next attempt.
+  EXPECT_EQ(cu->dispatch_wf_at(1, 11, 0x1100, 104, 256, /*wave_size=*/1), nullptr);
+  auto *rejected = cu->wf(1);
+  ASSERT_NE(rejected, nullptr);
+  EXPECT_TRUE(rejected->is_halted());
+  EXPECT_EQ(cu->num_wfs(), 2u);
+  EXPECT_EQ(cu->dispatch_wf_at(1, 11, 0x1100, 104, 256, wave_size), rejected);
+  EXPECT_EQ(rejected->wf_size(), wave_size);
+}
+
+INSTANTIATE_TEST_SUITE_P(Cdna, WavefrontSlotTest,
+                         ::testing::Values(WavefrontSlotTestParam{"cdna3", 64},
+                                           WavefrontSlotTestParam{"cdna4", 64},
+                                           WavefrontSlotTestParam{"cdna5", 32}),
+                         [](const auto &info) { return info.param.arch; });
+
+TEST(WavefrontSchedulerTest, UnmaterializedSlotsAreIdle) {
+  std::vector<std::unique_ptr<amdgpu::Wavefront>> slots(4);
+  amdgpu::OldestFirstScheduler scheduler;
+  EXPECT_EQ(scheduler.schedule(slots), nullptr);
+}
+
 TEST_P(IsaTest, DispatchWfReturnsNullWhenSlotsExhausted) {
   // dispatch_wf() promises nullptr (not an out-of-bounds slot) when the CU is full.
   // The CP relies on can_accept_workgroup() gating, but the API contract must hold
@@ -4016,7 +4166,7 @@ TEST(CommandProcessorTest, DispatchToQuiescedDebugHaltedCuReactivatesEventLoop) 
   for (uint32_t i = 0; i < 100 && f.engine->step(); ++i) {
     for (uint32_t slot = 0; slot < f.cu(0)->num_wf_slots(); ++slot) {
       auto *wf = f.cu(0)->wf(slot);
-      if (wf != stopped && wf->dispatch_id() == 3) {
+      if (wf && wf != stopped && wf->dispatch_id() == 3) {
         followup_wf = wf;
         break;
       }
@@ -6673,8 +6823,10 @@ std::vector<uint32_t> make_multi_quantum_nop_kernel() {
 }
 
 void step_until_first_quantum(VmFixture &fixture, amdgpu::ComputeUnitCore *cu) {
-  for (uint32_t i = 0; i < 16 && cu->wf(0)->trace_inst_count_ < cu->functional_quantum(); ++i)
+  for (uint32_t i = 0;
+       i < 16 && (!cu->wf(0) || cu->wf(0)->trace_inst_count_ < cu->functional_quantum()); ++i)
     ASSERT_TRUE(fixture.engine->step());
+  ASSERT_NE(cu->wf(0), nullptr);
   ASSERT_EQ(cu->wf(0)->trace_inst_count_, cu->functional_quantum());
   ASSERT_TRUE(cu->has_active_wfs());
 }

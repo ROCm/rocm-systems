@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory_resource>
 #include <unordered_map>
 #include <vector>
 
@@ -53,6 +54,6 @@ public:
   bool operator==(const LegacyPageTableEntry &) const = default;
 };
 
-using LegacyPageTable = std::unordered_map<uint64_t, LegacyPageTableEntry>;
+using LegacyPageTable = std::pmr::unordered_map<uint64_t, LegacyPageTableEntry>;
 
 } // namespace rocjitsu::amdgpu

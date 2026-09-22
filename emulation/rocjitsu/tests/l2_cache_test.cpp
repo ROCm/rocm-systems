@@ -1227,8 +1227,11 @@ protected:
     process_.map_pages(kBase + GpuMemory::PAGE_SIZE, second_page_.data(), second_page_.size(),
                        second_mtype);
     address_space_ = legacy_vm_.register_address_space(
-        kVmid, &process_.page_table_, &process_.page_table_mutex_, process_.page_table_generation(),
-        process_.page_table_request_mutex());
+        kVmid, {.page_table = &process_.page_table_,
+                .page_table_mutex = &process_.page_table_mutex_,
+                .page_table_generation = process_.page_table_generation(),
+                .request_mutex = process_.page_table_request_mutex(),
+                .mutation_epoch = process_.page_table_mutation_epoch()});
     ASSERT_TRUE(address_space_);
     l2_.set_backing_memory(&memory_);
     l2_.set_gpu_vm(&gpu_vm_);
@@ -1483,6 +1486,129 @@ TEST_F(L1CacheMtypeTest, VmidUnregistrationRevokesLiveResolverSnapshot) {
 
   RequestMtypeResolver new_request(&gpu_vm_, kVmid);
   EXPECT_EQ(new_request.at(kAddr + 1), Mtype::RW);
+}
+
+TEST_F(L1CacheMtypeTest, SamePageHitDoesNotTakePageTableLocks) {
+  map_pages(Mtype::UC, Mtype::RW);
+  RequestMtypeResolver request(&gpu_vm_, kVmid);
+  ASSERT_EQ(request.at(kBase), Mtype::UC);
+  std::unique_lock request_lock(*process_.page_table_request_mutex());
+  std::unique_lock table_lock(process_.page_table_mutex_);
+  auto hit = std::async(std::launch::async, [&] { return request.at(kBase + 4); });
+  const auto status = hit.wait_for(std::chrono::seconds(2));
+  table_lock.unlock();
+  request_lock.unlock();
+  EXPECT_EQ(status, std::future_status::ready);
+  EXPECT_EQ(hit.get(), Mtype::UC);
+}
+
+TEST_F(L1CacheMtypeTest, InstructionPolicyIsPreservedAcrossHitsAndMutation) {
+  map_pages(Mtype::RW, Mtype::RW);
+  RequestMtypeResolver request(&gpu_vm_, kVmid, Mtype::NT);
+  ASSERT_EQ(request.at(kBase), Mtype::NT);
+  EXPECT_EQ(request.at(kBase + 4), Mtype::NT);
+  process_.set_page_mtype(kBase, GpuMemory::PAGE_SIZE, Mtype::UC);
+  EXPECT_EQ(request.at(kBase + 4), Mtype::UC);
+  process_.set_page_mtype(kBase, GpuMemory::PAGE_SIZE, Mtype::RW);
+  EXPECT_EQ(request.at(kBase + 4), Mtype::NT);
+}
+
+TEST_F(L1CacheMtypeTest, LiveResolverObservesUnmapAndRemapOnSamePage) {
+  map_pages(Mtype::UC, Mtype::RW);
+  RequestMtypeResolver request(&gpu_vm_, kVmid);
+  ASSERT_EQ(request.at(kAddr), Mtype::UC);
+  EXPECT_EQ(request.at(kAddr + 1), Mtype::UC);
+
+  process_.unmap_pages(kBase, GpuMemory::PAGE_SIZE);
+  EXPECT_EQ(request.at(kAddr), Mtype::RW);
+  process_.map_pages(kBase, first_page_.data(), first_page_.size(), Mtype::CC);
+  EXPECT_EQ(request.at(kAddr + 1), Mtype::CC);
+}
+
+TEST_F(L1CacheMtypeTest, LiveResolverSurvivesRegisteredProcessDestruction) {
+  auto process = std::make_unique<rocjitsu::KfdProcess>(kVmid);
+  process->map_pages(kBase, first_page_.data(), first_page_.size(), Mtype::UC);
+  address_space_ = legacy_vm_.register_address_space(
+      kVmid, {.page_table = &process->page_table_,
+              .page_table_mutex = &process->page_table_mutex_,
+              .page_table_generation = process->page_table_generation(),
+              .request_mutex = process->page_table_request_mutex(),
+              .mutation_epoch = process->page_table_mutation_epoch()});
+  ASSERT_TRUE(address_space_);
+  RequestMtypeResolver request(&gpu_vm_, kVmid);
+  ASSERT_EQ(request.at(kAddr), Mtype::UC);
+  ASSERT_TRUE(legacy_vm_.unregister_vmid(kVmid));
+  address_space_ = {};
+  process.reset();
+  EXPECT_EQ(request.at(kAddr), Mtype::RW);
+
+  map_pages(Mtype::CC, Mtype::RW);
+  // A retired snapshot must not adopt a new owner of the same numeric VMID.
+  EXPECT_EQ(request.at(kAddr), Mtype::RW);
+  RequestMtypeResolver replacement(&gpu_vm_, kVmid);
+  EXPECT_EQ(replacement.at(kAddr), Mtype::CC);
+}
+
+TEST_F(L1CacheMtypeTest, LiveResolverWithoutMutationTokenStillRefreshes) {
+  map_pages(Mtype::UC, Mtype::RW);
+  ASSERT_TRUE(legacy_vm_.unregister_vmid(kVmid));
+  address_space_ = legacy_vm_.register_address_space(
+      kVmid, {.page_table = &process_.page_table_,
+              .page_table_mutex = &process_.page_table_mutex_,
+              .page_table_generation = process_.page_table_generation(),
+              .request_mutex = process_.page_table_request_mutex(),
+              .mutation_epoch = {}});
+  ASSERT_TRUE(address_space_);
+  RequestMtypeResolver request(&gpu_vm_, kVmid);
+  ASSERT_EQ(request.at(kAddr), Mtype::UC);
+  process_.set_page_mtype(kBase, GpuMemory::PAGE_SIZE, Mtype::CC);
+  EXPECT_EQ(request.at(kAddr + 1), Mtype::CC);
+}
+
+TEST_F(L1CacheMtypeTest, LiveResolverWithoutGenerationDoesNotCacheMutationToken) {
+  map_pages(Mtype::UC, Mtype::RW);
+  ASSERT_TRUE(legacy_vm_.unregister_vmid(kVmid));
+  address_space_ = legacy_vm_.register_address_space(
+      kVmid, {.page_table = &process_.page_table_,
+              .page_table_mutex = &process_.page_table_mutex_,
+              .page_table_generation = nullptr,
+              .request_mutex = process_.page_table_request_mutex(),
+              .mutation_epoch = process_.page_table_mutation_epoch()});
+  ASSERT_TRUE(address_space_);
+  RequestMtypeResolver request(&gpu_vm_, kVmid);
+  ASSERT_EQ(request.at(kAddr), Mtype::UC);
+  {
+    // Legacy registrations may omit generation publication; they must keep
+    // observing the table through the locked path on every lookup.
+    std::unique_lock request_lock(*process_.page_table_request_mutex());
+    std::unique_lock table_lock(process_.page_table_mutex_);
+    process_.page_table_.at(kBase >> GpuMemory::PAGE_SHIFT).mtype = Mtype::CC;
+  }
+  EXPECT_EQ(request.at(kAddr + 1), Mtype::CC);
+}
+
+TEST_F(L1CacheMtypeTest, MutationTokenRefreshesPolicyWithoutGenerationPublication) {
+  map_pages(Mtype::UC, Mtype::RW);
+  auto epoch = std::make_shared<std::atomic<uint64_t>>(1);
+  ASSERT_TRUE(legacy_vm_.unregister_vmid(kVmid));
+  address_space_ = legacy_vm_.register_address_space(
+      kVmid, {.page_table = &process_.page_table_,
+              .page_table_mutex = &process_.page_table_mutex_,
+              .page_table_generation = process_.page_table_generation(),
+              .request_mutex = process_.page_table_request_mutex(),
+              .mutation_epoch = epoch});
+  ASSERT_TRUE(address_space_);
+  RequestMtypeResolver request(&gpu_vm_, kVmid);
+  ASSERT_EQ(request.at(kAddr), Mtype::UC);
+  {
+    // Model a mutation that invalidates snapshots and changes a PTE, then
+    // throws before publishing the ordinary page-table generation.
+    std::unique_lock request_lock(*process_.page_table_request_mutex());
+    std::unique_lock table_lock(process_.page_table_mutex_);
+    epoch->fetch_add(1, std::memory_order_release);
+    process_.page_table_.at(kBase >> GpuMemory::PAGE_SHIFT).mtype = Mtype::CC;
+  }
+  EXPECT_EQ(request.at(kAddr + 1), Mtype::CC);
 }
 
 TEST_F(L1CacheMtypeTest, VectorLoadKeepsPageSpecificMtypeAcrossBoundary) {

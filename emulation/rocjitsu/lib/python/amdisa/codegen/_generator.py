@@ -419,6 +419,9 @@ class CodeGenerator:
         self.shared_plan = shared_plan
         # Keyed by (mnemonic, enc_name) to avoid cross-encoding conflicts.
         self._shared_execute_bodies: dict[tuple[str, str], tuple] = {}
+        # Preflight must see scalar candidates even when a local SIMD probe
+        # later replaces the shared call for this ISA.
+        self._shared_execute_candidates: dict[tuple[str, str], tuple] = {}
         # Canonical fixed encoding value per fieldless operand type, computed
         # lazily from the spec's selectors on first use (see
         # _fieldless_canonical_value).
@@ -960,7 +963,10 @@ class CodeGenerator:
             'cvt_norm_u16_f16',
         ):
             return 'amdgpu::sdwa::ResultFormat::NONE'
-        if sem and sem.name == 'V_PK_FMAC_F16':
+        if sem and (
+            sem.name == 'V_PK_FMAC_F16'
+            or sem.semantic_class == 'vector_cvt_pkrtz_f16_f32'
+        ):
             return 'amdgpu::sdwa::ResultFormat::PK_F16'
         suffix = {'f16': 'F16', 'f32': 'F32'}.get(
             sem.data_type if sem else None, 'NONE'
@@ -2514,6 +2520,10 @@ class CodeGenerator:
                   amdgpu::RegisterAccess(wf).write_lane(*y_.dst, lane, y_result32);
               }
             ''')
+        execute_impl_body = (
+            f'  if (amdgpu::try_execute_vopd_simd<{str(has_vopd3).lower()}>(x_, y_, wf)) return;\n'
+            + execute_impl_body
+        )
         vopd_execute_slot_cases = join_cases(
             vopd_execute_slot_cases, vopd3_execute_slot_cases
         )
@@ -2653,13 +2663,7 @@ class CodeGenerator:
             }
 
             uint32_t Vopd::bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table) {
-              uint32_t result = 0;
-              for (uint32_t bit = 0; bit < 32; ++bit) {
-                uint32_t idx = (((src0 >> bit) & 1u) << 2) |
-                               (((src1 >> bit) & 1u) << 1);
-                result |= ((truth_table >> idx) & 1u) << bit;
-              }
-              return result;
+              return amdgpu::bitop3_words(src0, src1, uint32_t{0}, static_cast<uint8_t>(truth_table));
             }
             @VOPD3_F64_HELPERS@
 
@@ -9376,6 +9380,14 @@ class CodeGenerator:
             vop3p_local_simd_probe_line,
         )
 
+        if self.isa_spec.profile.generated_dir_name == 'cdna5':
+            mixed = {
+                'v_fma_mix_f32': 'F32',
+                'v_fma_mixlo_f16': 'F16_LO',
+                'v_fma_mixhi_f16': 'F16_HI',
+            }.get(inst.mnemonic)
+            if mixed:
+                return f'  ROCJITSU_TRY_SIMD_FUSED_MIX({mixed});'
         return vop3p_local_simd_probe_line(
             f'{inst.mnemonic}_{enc_key}',
             self.isa_spec.profile.vop3p_opsel_fields,
@@ -12157,6 +12169,10 @@ class CodeGenerator:
                         _portable_probe = self._can_force_shared_simd_probe(
                             inst, enc.enc_name
                         )
+                        if not body_throws and (can_share or _portable_probe):
+                            self._shared_execute_candidates[
+                                (inst.mnemonic, enc.enc_name)
+                            ] = (inst, sem, body, enc.enc_name, body_true16_vop3)
                         _local_true16_probe = self._true16_vop3_local_simd_probe(
                             inst,
                             sem,
@@ -12167,7 +12183,47 @@ class CodeGenerator:
                             inst, enc.enc_name
                         )
                         assert not (_local_true16_probe and _renamed_vop3p_probe)
-                        _local_simd_probe = _local_true16_probe or _renamed_vop3p_probe
+                        from amdisa.codegen.execute.simd_codegen import (
+                            local_coverage_probe,
+                        )
+
+                        _coverage_probe = (
+                            local_coverage_probe(
+                                f'{inst.mnemonic}_{enc.enc_name.lower().replace("enc_", "")}',
+                                true16_vop3=self._uses_true16_vop3_execute(
+                                    inst, enc.enc_name
+                                ),
+                                e32=(
+                                    self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
+                                    and enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2')
+                                    and any(op.size == 16 for op in inst.operands)
+                                ),
+                                e32_half_dst=any(
+                                    op.is_output and op.size == 16
+                                    for op in inst.operands
+                                ),
+                                e32_half_inputs=sum(
+                                    1 << i
+                                    for i, name in enumerate(('src0', 'vsrc1'))
+                                    if any(
+                                        op.name == name and op.size == 16
+                                        for op in inst.operands
+                                    )
+                                ),
+                                cmpx_writes_vcc=self.isa_spec.profile.cmpx_writes_vcc,
+                                result_writer=_mask_result_writer,
+                            )
+                            if self.generated_dir_name in ('cdna5', 'cdna4', 'rdna4')
+                            else None
+                        )
+                        if _coverage_probe:
+                            can_share = False
+                            _portable_probe = False
+                        _local_simd_probe = (
+                            _coverage_probe
+                            or _local_true16_probe
+                            or _renamed_vop3p_probe
+                        )
                         _local_simd_probe_body = ''
                         _local_scalar_body = _local_body
                         _local_execute_body = _local_scalar_body

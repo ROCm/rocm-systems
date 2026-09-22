@@ -514,6 +514,22 @@ inline native<float> bf16_to_f32_simd(native<uint32_t> v) {
   return std::bit_cast<native<float>>((v & 0xFFFFu) << 16);
 }
 
+/// BF16 conversion is integer rounding; host floating-point controls do not
+/// participate. Preserve NaN payloads and optionally saturate finite overflow.
+inline native<uint32_t> pack_bf16_simd(native<uint32_t> bits, bool overflow) {
+  using U = native<uint32_t>;
+  U out = (bits + U(0x7fffu) + ((bits >> 16) & U(1))) >> 16;
+  const auto special = (bits & U(0x7f800000u)) == U(0x7f800000u);
+  stdx::where(special, out) = bits >> 16;
+  stdx::where(special && ((bits & U(0xffffu)) != U(0)), out) = (bits >> 16) | U(1);
+  if (overflow) {
+    const auto finite = (bits & U(0x7fffffffu)) < U(0x7f800000u);
+    stdx::where(finite && ((out & U(0x7fffu)) == U(0x7f80u)), out) =
+        (out & U(0x8000u)) | U(0x7f7fu);
+  }
+  return out;
+}
+
 /// Vectorized, bit-exact port of `f32_to_f16` (util/data_types.h). Returns the
 /// f16 bits in the low 16 bits of each lane (high bits zero). All conditions
 /// are expressed as unsigned comparisons on the biased f32 exponent `fe`, so
@@ -847,6 +863,18 @@ inline native<uint32_t> ctz_u32_simd(native<uint32_t> x) {
   using U = native<uint32_t>;
   U lowbit = x & (~x + U(1u));
   return popcount_u32_simd(lowbit - U(1u));
+}
+
+/// @brief Widen unsigned E5M3 scale values from the low byte of each lane.
+inline native<float> fp8_e5m3_to_f32_simd(native<uint32_t> value) {
+  using U = native<uint32_t>;
+  using F = native<float>;
+  U byte = value & U(0xffu), exponent = byte >> 3, mantissa = byte & U(7);
+  U result = ((exponent + U(112)) << 23) | (mantissa << 20);
+  U subnormal = std::bit_cast<U>(stdx::static_simd_cast<F>(mantissa) * F(0x1p-17f));
+  stdx::where(exponent == U(0), result) = subnormal;
+  stdx::where(byte == U(0xffu), result) = U(0x7fc00000u);
+  return std::bit_cast<F>(result);
 }
 
 /// Vector port of `util::fp8_e4m3_to_f32` over the low byte of each lane (E4M3:

@@ -24,8 +24,6 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/except.h"
 #include <array>
-#include <bit>
-#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -710,7 +708,30 @@ inline uint8_t sdwa_dst_byte_mask(uint32_t dst_sel, uint32_t dst_unused) {
   return sdwa_src_byte_mask(dst_sel);
 }
 
-inline uint32_t sdwa_clamp_f32(uint32_t result, const Wavefront &wf);
+/// @brief Clamp the numerical result before destination selection and merging.
+///
+/// Raw IEEE bits make the operation independent of host denormal and rounding
+/// modes, and preserve NaN payloads unless DX10_CLAMP requests positive zero.
+template <ResultFormat Format> inline uint32_t clamp_result(uint32_t result, const Wavefront &wf) {
+  if constexpr (Format == ResultFormat::NONE) {
+    return result;
+  } else if constexpr (Format == ResultFormat::PK_F16) {
+    const uint32_t low = clamp_result<ResultFormat::F16>(result & 0xFFFFu, wf);
+    const uint32_t high = clamp_result<ResultFormat::F16>(result >> 16, wf);
+    return low | (high << 16);
+  } else {
+    static_assert(Format == ResultFormat::F16 || Format == ResultFormat::F32);
+    constexpr uint32_t kSign = Format == ResultFormat::F16 ? 0x8000u : 0x80000000u;
+    constexpr uint32_t kInfinity = Format == ResultFormat::F16 ? 0x7C00u : 0x7F800000u;
+    constexpr uint32_t kOne = Format == ResultFormat::F16 ? 0x3C00u : 0x3F800000u;
+    const uint32_t magnitude = result & (kSign - 1);
+    if (magnitude > kInfinity)
+      return wf.dx10_clamp() ? 0u : result;
+    if (result & kSign)
+      return 0u;
+    return magnitude > kOne ? kOne : result;
+  }
+}
 
 /// @brief Return the enabled output modifier for the SDWA result format.
 template <ResultFormat Format, typename Inst>
@@ -825,8 +846,8 @@ template <typename Inst> inline bool supports_direct_simd_store(const Inst &inst
 
 /// @brief Store one semantic result with destination modifiers applied.
 ///
-/// Scaling, destination preservation and optional clamp are part of one
-/// architectural write.
+/// Scaling and clamp use the semantic result width before destination placement.
+/// Preserved destination bytes are neither clamped nor reported as architectural writes.
 template <ResultFormat Format, typename Inst, typename Op>
 inline void write_lane(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t lane,
                        uint32_t value) {
@@ -840,15 +861,11 @@ inline void write_lane(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t
     if (inst.inst_.src0 == amdgpu::SRC_SDWA && op.is_vgpr() &&
         inst.dst_operand(0) == static_cast<const Operand *>(&op)) {
       value = scale_result<Format>(inst, wf, value);
-      const bool clamp = Format != ResultFormat::NONE && inst.sdwa_clamp_;
-      const uint8_t update_byte_mask =
-          sdwa_dst_byte_mask(inst.sdwa_dst_sel_, inst.sdwa_dst_unused_);
-      const uint8_t observed_byte_mask =
-          clamp ? rocjitsu::ExecutionPlugin::kFullByteMask : update_byte_mask;
+      if (inst.sdwa_clamp_)
+        value = clamp_result<Format>(value, wf);
+      const uint8_t byte_mask = sdwa_dst_byte_mask(inst.sdwa_dst_sel_, inst.sdwa_dst_unused_);
       const uint32_t placed = sdwa_dst_merge(value, 0, inst.sdwa_dst_sel_, inst.sdwa_dst_unused_);
-      amdgpu::RegisterAccess(wf).write_lane_masked(op, lane, placed, update_byte_mask,
-                                                   observed_byte_mask,
-                                                   clamp ? &sdwa_clamp_f32 : nullptr);
+      amdgpu::RegisterAccess(wf).write_lane_masked(op, lane, placed, byte_mask);
       return;
     }
   }
@@ -861,20 +878,6 @@ inline void write_lane64(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32
   (void)Format;
   (void)inst;
   amdgpu::RegisterAccess(wf).write_lane64(op, lane, value);
-}
-
-/// @brief Apply SDWA clamp to an ALU result.
-///
-/// For floating-point operations, clamps the result to [0.0, 1.0].
-/// NaN bits are preserved unless MODE.DX10_CLAMP requests conversion to zero.
-/// The caller determines whether the operation is float or integer based on
-/// the instruction's semantic type.
-inline uint32_t sdwa_clamp_f32(uint32_t result, const Wavefront &wf) {
-  float f = std::bit_cast<float>(result);
-  if (std::isnan(f))
-    return wf.dx10_clamp() ? std::bit_cast<uint32_t>(0.0f) : result;
-  f = std::fmin(std::fmax(f, 0.0f), 1.0f);
-  return std::bit_cast<uint32_t>(f);
 }
 
 } // namespace sdwa

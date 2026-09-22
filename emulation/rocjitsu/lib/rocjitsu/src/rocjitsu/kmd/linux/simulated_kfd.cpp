@@ -819,6 +819,7 @@ bool SimulatedKfd::register_process_address_spaces(const std::shared_ptr<KfdProc
          .page_table_mutex = &proc->page_table_mutex_,
          .page_table_generation = proc->page_table_generation(),
          .request_mutex = proc->page_table_request_mutex(),
+         .mutation_epoch = proc->page_table_mutation_epoch(),
          .client_pid = client_pid,
          .client_mem_fd = -1,
          .passthrough = passthrough,
@@ -1533,7 +1534,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
           return MAP_FAILED;
         source_doorbell_fd = created_source.get();
       }
-      new_doorbell_fd.reset(safe_fcntl(source_doorbell_fd, F_DUPFD_CLOEXEC, 4096));
+      new_doorbell_fd.reset(safe_fcntl(source_doorbell_fd, F_DUPFD_CLOEXEC, kBackingFdMin));
       if (!new_doorbell_fd && created_source)
         new_doorbell_fd = std::move(created_source);
       if (!new_doorbell_fd)
@@ -1686,7 +1687,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
       auto raw_events_fd = memfd_create("rocjitsu_events", MFD_CLOEXEC | MFD_ALLOW_SEALING);
       if (raw_events_fd < 0)
         return -1;
-      int backing = safe_fcntl(raw_events_fd, F_DUPFD_CLOEXEC, 4096);
+      int backing = safe_fcntl(raw_events_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
       if (backing < 0)
         backing = raw_events_fd;
       else
@@ -2079,7 +2080,7 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   } else if (daemon_mode_ || !user_provided_va) {
     auto raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (raw_fd >= 0) {
-      alloc.memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, 4096);
+      alloc.memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
       if (alloc.memfd < 0)
         alloc.memfd = raw_fd;
       else
@@ -2173,7 +2174,7 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
   if (raw_fd < 0)
     return false;
 
-  int memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, 4096);
+  int memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
   if (memfd < 0)
     memfd = raw_fd;
   else
@@ -3312,7 +3313,7 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
       cu->with_wave_state_locked([&] {
         for (uint32_t i = 0; i < cu->num_wf_slots(); ++i) {
           auto *wave = cu->wf(i);
-          if (wave->debug_stopped() && wave->process_id() == process_id &&
+          if (wave && wave->debug_stopped() && wave->process_id() == process_id &&
               wave->queue_id() == queue_id)
             waves_by_area[area].push_back(build_cwsr_wave_state(*wave, gpu->soc->arch()));
         }
@@ -3836,7 +3837,7 @@ void SimulatedKfd::release_debuggee_state(pid_t target_pid, KfdProcess *target_p
         cu->with_wave_state_locked([&] {
           for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
             auto *wave = cu->wf(slot);
-            if (wave->is_halted() || wave->process_id() != target_proc->process_id() ||
+            if (!wave || wave->is_halted() || wave->process_id() != target_proc->process_id() ||
                 wave->queue_id() != queue_id || wave->fatal_exception_pending())
               continue;
             wave->set_debug_single_step(false);
@@ -4050,7 +4051,7 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
         cu->with_wave_state_locked([&] {
           for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
             auto *wave = cu->wf(slot);
-            if (wave->debug_stopped() && wave->process_id() == proc->process_id() &&
+            if (wave && wave->debug_stopped() && wave->process_id() == proc->process_id() &&
                 wave->queue_id() == context.queue_id) {
               stopped.push_back(wave);
               states_by_area[area].push_back(build_cwsr_wave_state(*wave, gpu->soc->arch()));
@@ -4255,7 +4256,7 @@ int SimulatedKfd::suspend_debug_queues(KfdProcess *proc, uint32_t *queue_ids, ui
         cu->with_wave_state_locked([&] {
           for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
             auto *wave = cu->wf(slot);
-            if (!wave->is_halted() && !wave->debug_suspended() &&
+            if (wave && !wave->is_halted() && !wave->debug_suspended() &&
                 wave->process_id() == process_id && wave->queue_id() == queue.queue_id) {
               wave->set_debug_suspended(true);
               newly_suspended.emplace_back(cu, wave);
@@ -4323,7 +4324,7 @@ void SimulatedKfd::clear_completed_debug_queues(KfdProcess *proc, const uint32_t
         cu->with_wave_state_locked([&] {
           for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
             const auto *wave = cu->wf(slot);
-            if (wave->debug_stopped() && wave->process_id() == process_id &&
+            if (wave && wave->debug_stopped() && wave->process_id() == process_id &&
                 wave->queue_id() == queue_id)
               has_stopped_wave = true;
           }

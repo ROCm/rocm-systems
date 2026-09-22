@@ -601,6 +601,7 @@ add_executable(
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
+    simd_correctness/simd_coverage_test.cpp
     simd_correctness/vop1_cvt_f64_scalar_correctness_test.cpp
     simd_correctness/vopc_cmp_class_scalar_correctness_test.cpp
     simd_correctness/vop2_simd_correctness_test.cpp
@@ -1751,6 +1752,13 @@ function(rj_add_interposer_test_suite _suite)
 endfunction()
 
 set(_rj_interposer_dup_tests
+    ConstructorPreservesDescriptorLimit
+    Dup2PreservesHiddenEventBacking
+    Dup3PreservesHiddenEventBacking
+    Dup2PreservesHiddenAllocationBacking
+    Dup3PreservesHiddenAllocationBacking
+    Dup2PreservesHiddenDoorbellBacking
+    Dup3PreservesHiddenDoorbellBacking
     DupKeepsKfdRoutingAfterPrimaryClose
     FcntlDupfdKeepsKfdRouting
     Dup2OverPrimaryInvalidatesKfdIdentity
@@ -1778,6 +1786,7 @@ rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
 rj_add_interposer_test_suite(
     InterposerDrmTest
     DeviceInfoReportsActiveCuCount
+    OpensWithinCurrentDescriptorLimit
 )
 
 rj_add_interposer_test_suite(

@@ -467,7 +467,8 @@ def test_renamed_vop3p_packed_f32_probe_passes_profile_selectors():
         is None
     )
     assert (
-        vop3p_local_simd_probe_line('v_pk_add_f16_vop3p', ('opsel', 'opsel_hi')) is None
+        vop3p_local_simd_probe_line('v_pk_add_f16_vop3p', ('opsel', 'opsel_hi'))
+        == '  ROCJITSU_TRY_SIMD_PACKED_FLOAT(ADD, false);'
     )
 
 
@@ -600,3 +601,18 @@ def test_gfx1250_bf16_mad_mix_variants_use_mode_rounding_helper():
     assert 'wf.fp_round_mode_f16_f64(), inst_.clamp' in cpp_lo
     assert 'util::f32_to_bf16(result)' not in cpp_lo
     assert 'util::f32_to_bf16(result)' not in cpp_hi
+
+
+def test_renamed_packed_float_routes_use_exact_helpers():
+    for spelling, operation, bf16 in (
+        ('v_pk_fma_f16_vop3p', 'FMA', False),
+        ('v_pk_min_f16_vop3p', 'MIN', False),
+        ('v_pk_max_f16_vop3p', 'MAX', False),
+        ('v_pk_add_bf16_vop3p', 'ADD', True),
+        ('v_pk_fma_bf16_vop3p', 'FMA', True),
+    ):
+        probe = vop3p_local_simd_probe_line(spelling, ('opsel', 'opsel_hi'))
+        assert (
+            probe
+            == f'  ROCJITSU_TRY_SIMD_PACKED_FLOAT({operation}, {str(bf16).lower()});'
+        )

@@ -2099,6 +2099,11 @@ void VCvtF32Bf16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  auto &inst = *this;
+  if (amdgpu::try_execute_words_simd<1, false, false, 0>(inst, wf, [](auto a) {
+        return std::bit_cast<util::native<uint32_t>>(util::bf16_to_f32_simd(a));
+      }))
+    return;
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2128,6 +2133,11 @@ RJ_NOINLINE void VCvtF32Bf16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  auto &inst = *this;
+  if (amdgpu::try_execute_words_simd<1, false, false, 0>(inst, wf, [](auto a) {
+        return std::bit_cast<util::native<uint32_t>>(util::bf16_to_f32_simd(a));
+      }))
+    return;
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))

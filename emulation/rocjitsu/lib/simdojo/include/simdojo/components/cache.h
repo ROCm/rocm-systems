@@ -16,8 +16,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <new>
+#include <type_traits>
 #include <vector>
 
 namespace simdojo {
@@ -32,33 +34,36 @@ namespace simdojo {
 /// @tparam Associativity Number of ways per set.
 template <uint32_t NumSets, uint32_t Associativity> class LRUPolicy {
 public:
-  LRUPolicy() : order_(NumSets * Associativity) {
+  LRUPolicy() : order_(static_cast<size_t>(NumSets) * Associativity) {
     for (uint32_t s = 0; s < NumSets; ++s)
       for (uint32_t w = 0; w < Associativity; ++w)
-        order_[s * Associativity + w] = w;
+        order_[static_cast<size_t>(s) * Associativity + w] = static_cast<WayIndex>(w);
   }
 
   /// @brief Promote a way to MRU position within a set.
   /// @param set Set index.
   /// @param way Way index within the set.
   void access(uint32_t set, uint32_t way) {
-    uint32_t *o = &order_[set * Associativity];
+    WayIndex *o = &order_[static_cast<size_t>(set) * Associativity];
     uint32_t pos = 0;
     for (; pos < Associativity; ++pos)
       if (o[pos] == way)
         break;
     for (uint32_t i = pos; i + 1 < Associativity; ++i)
       o[i] = o[i + 1];
-    o[Associativity - 1] = way;
+    o[Associativity - 1] = static_cast<WayIndex>(way);
   }
 
   /// @brief Return the LRU way index for a set (eviction candidate).
   /// @param set Set index.
   /// @returns Way index of the least recently used entry.
-  uint32_t victim(uint32_t set) const { return order_[set * Associativity]; }
+  uint32_t victim(uint32_t set) const { return order_[static_cast<size_t>(set) * Associativity]; }
 
 private:
-  std::vector<uint32_t> order_;
+  // Compact indices reduce construction traffic; larger ways retain 32-bit indices.
+  using WayIndex = std::conditional_t<(Associativity <= std::numeric_limits<uint8_t>::max() + 1u),
+                                      uint8_t, uint32_t>;
+  std::vector<WayIndex> order_;
 };
 
 /// @brief Coherence state for a cache line (MOESI protocol).
@@ -114,7 +119,7 @@ public:
     uint8_t *data = nullptr;
   };
 
-  Cache() : tags_(static_cast<size_t>(NumSets) * Associativity), touched_sets_(NumSets, 0) {
+  Cache() : touched_sets_(NumSets, 0) {
     static_assert(util::is_power_of_2(NumSets), "NumSets must be a power of 2");
     static_assert(LINE_SIZE <= 128, "Cache byte-validity mask supports lines up to 128 bytes");
   }
@@ -427,44 +432,59 @@ public:
   static uint64_t tag_bits(uint64_t addr) { return addr >> (LineSizeBits + log2_sets()); }
 
 private:
-  // calloc preserves zero-initialized data while allowing the allocator and OS
-  // to provide untouched zero pages for large caches. A vector's explicit fill
-  // writes every page before any cache line is used.
-  class DataStorage {
+  // Zero bytes represent unused data and invalid tags. Allocation initializes
+  // valid_bytes before making a tag valid, so its nonzero default is unnecessary
+  // for unused tags. Keep calloc storage restricted to these types.
+  template <typename T, size_t Count> class ZeroStorage {
   public:
-    DataStorage() : bytes_(allocate()) {}
-    DataStorage(const DataStorage &other) : bytes_(other.bytes_ ? allocate() : nullptr) {
-      if (bytes_)
-        std::memcpy(bytes_.get(), other.bytes_.get(), size());
+    static_assert(std::is_trivially_copyable_v<T>, "Cache storage requires trivial copies");
+    static_assert(std::is_trivially_destructible_v<T>,
+                  "Cache storage requires trivial destruction");
+    static_assert(std::is_same_v<T, uint8_t> || std::is_same_v<T, CacheTag>,
+                  "Cache storage only supports byte data and CacheTag");
+    // Bind every field so additions require checking the unused-tag representation.
+    static_assert(
+        [] {
+          const auto [tag, coherence_epoch, valid_bytes, vmid, valid, dirty, coherence] =
+              CacheTag{};
+          return tag == 0 && coherence_epoch == 0 && vmid == 0 && !valid && !dirty &&
+                 static_cast<uint8_t>(coherence) == 0 &&
+                 valid_bytes == std::array<uint64_t, 2>{~uint64_t{0}, ~uint64_t{0}};
+        }(),
+        "CacheTag fields must permit zero-initialized invalid entries");
+
+    ZeroStorage() : elements_(allocate()) {}
+    ZeroStorage(const ZeroStorage &other) : elements_(other.elements_ ? allocate() : nullptr) {
+      if (elements_)
+        std::memcpy(elements_.get(), other.elements_.get(), Count * sizeof(T));
     }
-    DataStorage &operator=(const DataStorage &other) {
+    ZeroStorage &operator=(const ZeroStorage &other) {
       if (this != &other) {
-        if (other.bytes_) {
-          if (!bytes_)
-            bytes_.reset(allocate());
-          std::memcpy(bytes_.get(), other.bytes_.get(), size());
+        if (other.elements_) {
+          if (!elements_)
+            elements_.reset(allocate());
+          std::memcpy(elements_.get(), other.elements_.get(), Count * sizeof(T));
         } else {
-          bytes_.reset();
+          elements_.reset();
         }
       }
       return *this;
     }
-    DataStorage(DataStorage &&) noexcept = default;
-    DataStorage &operator=(DataStorage &&) noexcept = default;
+    ZeroStorage(ZeroStorage &&) noexcept = default;
+    ZeroStorage &operator=(ZeroStorage &&) noexcept = default;
 
-    uint8_t &operator[](size_t index) { return bytes_[index]; }
-    const uint8_t &operator[](size_t index) const { return bytes_[index]; }
+    T &operator[](size_t index) { return elements_[index]; }
+    const T &operator[](size_t index) const { return elements_[index]; }
 
   private:
     class Free {
     public:
-      void operator()(uint8_t *ptr) const { std::free(ptr); }
+      void operator()(T *ptr) const { std::free(ptr); }
     };
-    static constexpr size_t size() { return TOTAL_SIZE; }
-    static uint8_t *allocate() {
+    static T *allocate() {
       while (true) {
-        auto *ptr = static_cast<uint8_t *>(std::calloc(size(), sizeof(uint8_t)));
-        if (ptr || size() == 0)
+        auto *ptr = static_cast<T *>(std::calloc(Count, sizeof(T)));
+        if (ptr || Count == 0)
           return ptr;
         std::new_handler handler = std::get_new_handler();
         if (!handler)
@@ -472,7 +492,7 @@ private:
         handler();
       }
     }
-    std::unique_ptr<uint8_t[], Free> bytes_;
+    std::unique_ptr<T[], Free> elements_;
   };
 
   static constexpr uint32_t log2_sets() {
@@ -500,8 +520,8 @@ private:
     return &data_[(static_cast<size_t>(set) * Associativity + way) * LINE_SIZE];
   }
 
-  std::vector<CacheTag> tags_;
-  DataStorage data_;
+  ZeroStorage<CacheTag, static_cast<size_t>(NumSets) * Associativity> tags_;
+  ZeroStorage<uint8_t, TOTAL_SIZE> data_;
   Policy policy_;
   // Keep this allocation after existing storage to preserve its allocator layout.
   // Track sets allocated since full invalidation, even if their individual lines

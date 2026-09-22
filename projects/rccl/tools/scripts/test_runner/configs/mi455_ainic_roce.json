@@ -658,6 +658,17 @@
         }
       ]
     },
+    "cast_grh": {
+      "extends": "cast_base",
+      "timeout": 60,
+      "tests": [
+        {
+          "name": "Cast_GrhSetOnRoceQp",
+          "description": "RoCE QPs use global (GRH/GID) addressing: is_global=1 read back from the driver via ibv_query_qp on every RoCE QP, plus a data-integrity send/recv",
+          "test_filter": "NetIbMPITest.CastGrhSetOnRoceQp"
+        }
+      ]
+    },
     "cast_four_qp": {
       "extends": "cast_base",
       "timeout": 120,
@@ -1309,6 +1320,26 @@
           "name": "CeAlltoAllEligibilityTest",
           "description": "CE AlltoAll eligibility gating tests matching taskAppend (CTA_POLICY_ZERO, sysmem, capture, group depth)",
           "test_filter": "CeAlltoAllEligibilityTest.*"
+        },
+        {
+          "name": "RcclAlltoAllDecision",
+          "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
+          "test_filter": "RcclAlltoAllDecision.*"
+        },
+        {
+          "name": "RcclCeAr2ShotMax",
+          "description": "CE AllReduce 2-shot arch threshold upper-bound tests",
+          "test_filter": "RcclCeAr2ShotMax.*"
+        },
+        {
+          "name": "RcclCeArGrownBuffer",
+          "description": "CE AllReduce grown-buffer (ceRegMax) eligibility tests",
+          "test_filter": "RcclCeArGrownBuffer.*"
+        },
+        {
+          "name": "SkipPresetTopoMatching",
+          "description": "SkipPreset arch topology matching and threshold lookup tests",
+          "test_filter": "SkipPresetTopoMatching.*"
         }
       ]
     },
@@ -3756,6 +3787,12 @@
       "name": "NET IB - CAST Single QP (QPS=1)",
       "description": "WRR bypass path: single-QP connection must skip scheduler initialisation",
       "config": "cast_single_qp",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST GRH on RoCE QP",
+      "description": "RoCE QPs use global (GRH/GID) addressing: is_global=1 verified via ibv_query_qp, plus data-integrity send/recv",
+      "config": "cast_grh",
       "enabled": true
     },
     {

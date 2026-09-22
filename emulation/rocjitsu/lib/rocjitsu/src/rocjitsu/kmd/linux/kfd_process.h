@@ -25,6 +25,7 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <memory_resource>
 #include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
@@ -309,6 +310,7 @@ public:
                  HostExtentOwner owner = HostExtentOwner::Application) {
     std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
+    invalidate_page_policies_locked();
     auto *base = static_cast<uint8_t *>(host_ptr);
     uint64_t mapped_va = gpu_va;
     size_t host_offset = 0;
@@ -337,6 +339,7 @@ public:
   void unmap_pages(uint64_t gpu_va, size_t size) {
     std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
+    invalidate_page_policies_locked();
     uint64_t mapped_va = gpu_va;
     size_t unmapped_bytes = 0;
     while (unmapped_bytes < size) {
@@ -344,8 +347,10 @@ public:
           std::min<size_t>(kPageSize - (mapped_va & (kPageSize - 1)), size - unmapped_bytes);
       auto page = page_table_.find(mapped_va >> kPageShift);
       if (page != page_table_.end()) {
-        erase_host_extent(page->second, mapped_va & (kPageSize - 1), chunk);
-        if (page->second.host_extents.empty())
+        // Avoid building a temporary extent vector for a page being discarded.
+        if (chunk != kPageSize)
+          erase_host_extent(page->second, mapped_va & (kPageSize - 1), chunk);
+        if (chunk == kPageSize || page->second.host_extents.empty())
           page_table_.erase(page);
       }
       mapped_va += chunk;
@@ -363,6 +368,7 @@ public:
   void remap_page_host_ptrs(uint64_t gpu_va, void *old_host_ptr, void *new_host_ptr, size_t size) {
     std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
+    invalidate_page_policies_locked();
     auto *old_base = static_cast<uint8_t *>(old_host_ptr);
     auto *new_base = static_cast<uint8_t *>(new_host_ptr);
     bool changed = false;
@@ -397,6 +403,7 @@ public:
   void set_page_mtype(uint64_t gpu_va, size_t size, amdgpu::Mtype mtype) {
     std::unique_lock request_lock(*page_table_request_mutex_);
     std::unique_lock lock(page_table_mutex_);
+    invalidate_page_policies_locked();
     bool changed = false;
     uint64_t mapped_va = gpu_va;
     size_t updated_bytes = 0;
@@ -418,13 +425,23 @@ public:
   /// @brief Return the mutation counter used by GpuMemory translation caches.
   const uint64_t *page_table_generation() const { return &page_table_generation_; }
 
+  /// @brief Return the retained token invalidated before each page-policy mutation.
+  std::shared_ptr<const std::atomic<uint64_t>> page_table_mutation_epoch() const {
+    return page_table_mutation_epoch_;
+  }
+
   /// @brief Return the lease shared by page-table readers and mutations.
   std::shared_ptr<std::shared_mutex> page_table_request_mutex() const {
     return page_table_request_mutex_;
   }
 
   mutable std::shared_mutex page_table_mutex_;
-  PageTable page_table_;
+  /// @brief Pool for page-table nodes and buckets.
+  /// @details Writers serialize allocation under page_table_mutex_. Declaration
+  /// order keeps the pool alive until the table is destroyed; capacity is
+  /// retained for reuse until this process is destroyed.
+  std::pmr::unsynchronized_pool_resource page_table_pool_;
+  PageTable page_table_{&page_table_pool_};
 
   // -- Per-process state --
 
@@ -579,16 +596,27 @@ private:
     normalize_host_extents(page);
   }
 
+  // Invalidate copied policies before mutation, including a partial update
+  // that throws before publishing the ordinary translation generation.
+  void invalidate_page_policies_locked() {
+    page_table_mutation_epoch_->fetch_add(1, std::memory_order_release);
+  }
+
   void publish_page_table_mutation_locked() { ++page_table_generation_; }
+
+  std::shared_ptr<std::shared_mutex> page_table_request_mutex_ =
+      std::make_shared<std::shared_mutex>();
 
   /// @brief Page table version counter, bumped on every PTE mutation.
   /// @details GpuMemory keeps per-thread TLB-like translation caches keyed by
   ///          this generation. Mutations hold both page_table_request_mutex_
   ///          and page_table_mutex_; readers hold at least one of those locks,
   ///          so the counter itself does not need atomics.
-  std::shared_ptr<std::shared_mutex> page_table_request_mutex_ =
-      std::make_shared<std::shared_mutex>();
   uint64_t page_table_generation_{1};
+  /// @brief Retained atomic token for lockless copied-policy checks.
+  /// @details Invalidate before mutation, including partially throwing updates.
+  std::shared_ptr<std::atomic<uint64_t>> page_table_mutation_epoch_ =
+      std::make_shared<std::atomic<uint64_t>>(1);
 };
 
 } // namespace rocjitsu

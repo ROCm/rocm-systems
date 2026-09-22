@@ -52,6 +52,41 @@ inline int sweep_iters() {
 
 constexpr std::size_t kW = util::native_width_v<uint32_t>;
 
+TEST(UtilSimd, Bf16PackingMatchesEveryHalfAndRandomTies) {
+  SKIP_IF_NO_SIMD();
+  using U = util::native<uint32_t>;
+  std::mt19937 rng(129);
+  for (bool overflow : {false, true}) {
+    for (uint32_t bits = 0; bits < 65536; bits += U::size()) {
+      U raw([&](auto i) { return uint32_t(((bits + i) << 16) | (uint32_t(rng()) & 0xffffu)); });
+      U actual = util::pack_bf16_simd(raw, overflow);
+      for (unsigned i = 0; i < U::size(); ++i)
+        ASSERT_EQ(actual[i],
+                  util::f32_to_bf16_rne_mode(std::bit_cast<float>(uint32_t(raw[i])), overflow))
+            << raw[i];
+    }
+  }
+}
+
+TEST(UtilSimd, Fp8WideningExhaustsEveryCode) {
+  SKIP_IF_NO_SIMD();
+  using U = util::native<uint32_t>;
+  for (uint32_t code = 0; code < 256; code += U::size()) {
+    U bits([&](auto i) { return uint32_t(code + i); });
+    auto e5m3 = util::fp8_e5m3_to_f32_simd(bits);
+    auto e4m3 = util::fp8_e4m3_to_f32_simd(bits);
+    auto e5m2 = util::bf8_e5m2_to_f32_simd(bits);
+    for (uint32_t i = 0; i < U::size(); ++i) {
+      EXPECT_EQ(std::bit_cast<uint32_t>(float(e5m3[i])),
+                std::bit_cast<uint32_t>(util::fp8_e5m3_to_f32(code + i)));
+      EXPECT_EQ(std::bit_cast<uint32_t>(float(e4m3[i])),
+                std::bit_cast<uint32_t>(util::fp8_e4m3_to_f32(code + i)));
+      EXPECT_EQ(std::bit_cast<uint32_t>(float(e5m2[i])),
+                std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(code + i)));
+    }
+  }
+}
+
 TEST(UtilSimd, Native64MaskWorkaroundMacroIsBooleanOverridePoint) {
   constexpr int workaround = UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS;
   constexpr int user_override = UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS_USER_OVERRIDE;

@@ -143,9 +143,6 @@ class RegisterAccess {
   }
 
 public:
-  /// @brief Transform a merged destination dword using current architectural state.
-  using PostWriteTransform = uint32_t (*)(uint32_t, const Wavefront &);
-
   class OperandReadView {
   public:
     OperandReadView() = delete;
@@ -1084,11 +1081,10 @@ public:
   }
   /// @brief Write selected destination bytes in one VGPR lane.
   ///
-  /// `update_byte_mask` controls which stored bytes receive `value`.
-  /// `observed_byte_mask` reports the complete architectural write effect,
-  /// which may be wider when a transform uses the merged dword.
-  void write_lane_masked(const Operand &op, uint32_t lane, uint32_t value, uint8_t update_byte_mask,
-                         uint8_t observed_byte_mask, PostWriteTransform post_transform) const {
+  /// `byte_mask` selects both the stored bytes receiving `value` and the bytes
+  /// reported as architectural writes. Other bytes are preserved without a read notification.
+  void write_lane_masked(const Operand &op, uint32_t lane, uint32_t value,
+                         uint8_t byte_mask) const {
     Wavefront &wf = mutable_wavefront();
     auto physical_reg = op.simd_vgpr_base_mut(wf);
     if (!physical_reg)
@@ -1100,12 +1096,9 @@ public:
       throw std::logic_error("partial-byte operand write requires VGPR storage");
     if (!(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
       return;
-    mutable_cu().notify_vgpr_write(&wf, *physical_reg, uint64_t{1} << lane, observed_byte_mask);
-    const uint32_t bit_mask = byte_bit_mask(update_byte_mask);
-    uint32_t merged = (storage[lane] & ~bit_mask) | (value & bit_mask);
-    if (post_transform)
-      merged = post_transform(merged, wf);
-    storage[lane] = merged;
+    mutable_cu().notify_vgpr_write(&wf, *physical_reg, uint64_t{1} << lane, byte_mask);
+    const uint32_t bit_mask = byte_bit_mask(byte_mask);
+    storage[lane] = (storage[lane] & ~bit_mask) | (value & bit_mask);
   }
 
   void write_lane64(const Operand &op, uint32_t lane, uint64_t value) const {
