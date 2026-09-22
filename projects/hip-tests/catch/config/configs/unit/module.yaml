@@ -324,3 +324,6 @@ module:
     # Compiled-in kernel path; fixture/build support is amd-only.
     disabled: [nvidia_linux, nvidia_windows]
     tags: [load]
+  Unit_hipLaunchErrorCodeMatrix_Golden:
+    <<: *level_2
+    tags: [launch, P0]

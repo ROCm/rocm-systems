@@ -21,6 +21,7 @@ set(TEST_SRC
     hipModuleGetFunctionCount.cc
     hipModuleLoadFatBinary.cc
     test_fatbin_mixed_arch.cc
+    hipLaunchErrorCodeMatrix.cc
 )
 
 if (HIP_PLATFORM MATCHES "amd")
