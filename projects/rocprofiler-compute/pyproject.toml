@@ -3,7 +3,7 @@ name = "rocprof_compute"
 # Baseline floor for the project (profile mode). Analyze mode requires >=3.9,
 # enforced at runtime in src/rocprof-compute.
 requires-python = ">=3.8"
-version = "3.10.0"
+dynamic = ["version"]
 
 [tool.ruff]
 line-length = 88
