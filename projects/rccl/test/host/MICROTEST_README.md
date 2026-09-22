@@ -49,6 +49,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `dev_runtime.cc` (`DEV_RUNTIME_CC_PATH`, from `dev-runtime-test.cc`);
     suites `Alloc*`, `Comm*`, `Compute*`, `DeepCopy*`, `Dev*`, `Gin*`, `Nccl*`,
     `Sym*`, and `Win*`.
+  - the generated `sym_kernels_host.cc` (`SYM_KERNELS_HOST_CC_PATH`, from
+    `sym-kernels-index-test.cc`); suites `SymKernelIndex*`,
+    `SymAllEmittedCombinations/*`, `SymUnhandledCombinations/*` (covered by the
+    `Sym*` CTest pattern). Each kernel `__global__` is neutered to an ordinary
+    host stub (see the file's own header comment) so the 84 generated function
+    pointers link without the HIP runtime.
   - `rccl_wrap.cc` (`WRAP_CC_PATH`, from `wrap-test.cc`); suites
     `WrapMicrotest.*`, `WrapMicrotestIsolated.*`. Shared dependency seams live
     in their production-TU owners (`ce_fakes.cc`, `sym_kernels_fakes.cc`,
@@ -96,6 +102,17 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   entries are omitted for this target via `RCCL_STUBS_OMIT_<symbol>` macros
   because `enqueue.cc` defines them itself. See
   `test_categories_micro_enqueue.yaml`.
+- **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
+  `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
+  GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
+  `SymKernelMaskTest.*`, `SymAllChunkEltsCases/*` (covered by the `Sym*` CTest
+  pattern). Its own binary, not shared with `rccl-UnitTestsMicro`:
+  `fakes/sym_kernels_fakes.cc` (needed there by other units) fakes the exact
+  symbols the real file also defines, which would duplicate-symbol together;
+  this binary simply does not link that file, so no guard is needed.
+  `getRequirements_gin`'s large tuning/GIN dependency surface is never called
+  by these tests, so `-ffunction-sections`/`--gc-sections` drop it before any
+  fake would be needed.
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**, **`-faultinj`**) — `init.cc` (via
   `INIT_CC_PATH`);
   suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
@@ -106,6 +123,21 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   binaries cover both arms of both without a 2x2 cross product. init.cc compiles the *real* `argcheck.cc`/`archinfo.cc`/`utils.cc` ("oracle"
   TUs) from the hipify tree rather than stubbing them; `--gc-sections` drops the
   deep-path symbols the tests never reach. See `test_categories_micro_init.yaml`.
+- **`rccl-UnitTestsMicroWarpSpeed`** — `allgatherv_sched.cc` +
+  `symmetric_sched.cc` (via `ALLGATHERV_SCHED_CC_PATH`/`SYMMETRIC_SCHED_CC_PATH`,
+  both from `scheduler-test.cc`); suite `SchedulerMicrotest.*`. Its own binary,
+  not sharing `rccl-UnitTestsMicro`: some of its test scenarios need
+  `ENABLE_WARP_SPEED`, which must be binary-wide (every TU compiled in has to
+  agree on `struct ncclComm`'s layout), and giving the macro its own small,
+  dedicated binary keeps it from silently reaching the ~8 unrelated TUs that
+  used to share a binary with it. `ncclDevrInitOnce`/`ncclDevrFindWindow` are
+  faked here (`fakes/dev_runtime_fakes.cc`) rather than compiling the real
+  `dev_runtime.cc` in, unlike `dev-runtime-test.cc`: `ncclDevrFindWindow` can
+  only ever return success against a fresh comm, and `ncclDevrInitOnce`'s real
+  error path is already covered directly by `dev-runtime-test.cc`'s own suite,
+  so a fake tests this binary's own error-propagation logic just as well
+  without pulling in that file's dependency floor. See
+  `test_categories_micro_scheduler.yaml`.
 
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
@@ -250,7 +282,8 @@ symbol.
 | `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
 | `src/register/*.cc` | `fakes/register_stubs.cc` |
-| `src/scheduler/*.cc` and the deep launch paths | `fakes/sched_stubs.cc` |
+| `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
+| `src/scheduler/*.cc`'s dependencies (`rccl-UnitTestsMicroWarpSpeed`, which compiles the real files and tests them directly) | `fakes/enqueue_symbols_fakes.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`) | `fakes/libc_interposers.cc` |
@@ -592,8 +625,9 @@ make -j $(nproc) rccl-UnitTestsMicro
 `test/host/CMakeLists.txt` is dual-mode. Alongside the in-RCCL-build target
 above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
-`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroInit[-uncached|-faultinj]` and
-`rccl-UnitTestsMicroEnqueue[-devlinker]` — **without configuring/building all of
+`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
+`rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`
+and `rccl-UnitTestsMicroSymKernels` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
 
@@ -623,11 +657,13 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DRCCL_BUILD_DIR=/path/to/projects/rccl/build/release
 cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicro          # p2p tests, ldd shows no HIP/ROCm/HSA/RCCL
+./build/rccl-UnitTestsMicroWarpSpeed  # src/scheduler/*.cc tests
 ./build/rccl-UnitTestsMicroInit      # init.cc tests
 ./build/rccl-UnitTestsMicroInit-uncached
 ./build/rccl-UnitTestsMicroInit-faultinj      # same, ENABLE_FAULT_INJECTION arm
 ./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
+./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-HostUnitTests
 ```
 
