@@ -4,7 +4,9 @@
 #include "rocprofiler_compute_tool.h"
 
 #include "counters_writer.h"
+#include "dispatch_writer.h"
 #include "input_parameters.h"
+#include "kernel_symbols_writer.h"
 #include "output_registry.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
@@ -188,6 +190,9 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
 
     const auto output_path = g_input_parameters->get_output_path();
     tool_data->output_filename = generate_output_filename(output_path, CsvCountersWriter::kFileSuffix);
+    tool_data->dispatch_filename = generate_output_filename(output_path, DispatchWriter::kFileSuffix);
+    tool_data->kernel_symbols_filename = generate_output_filename(output_path,
+                                                                  KernelSymbolsWriter::kFileSuffix);
 
     const auto pc_sampling_method = g_input_parameters->get_pc_sampling_method();
     if (!pc_sampling_method.empty())
@@ -278,6 +283,8 @@ rocprofiler_tool_configure_result_t* rocprofiler_configure(uint32_t             
         auto* tool_data_ptr = &g_tool_data;
 
         g_output_registry.register_writer(g_counters_writer);
+        g_output_registry.register_writer(std::make_shared<DispatchWriter>());
+        g_output_registry.register_writer(std::make_shared<KernelSymbolsWriter>());
         g_output_registry.register_writer(g_tool_data->pc_sampling);
 
         g_cfg = std::make_shared<rocprofiler_tool_configure_result_t>(
