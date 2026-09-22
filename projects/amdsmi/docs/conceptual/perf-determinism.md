@@ -141,8 +141,11 @@ returns an error.
   `STABLE_*` are rejected by PMFW. Performance determinism is **defeatured**; CSC
   (Clock Stretching Compensation) is intended to address the variability use case
   that determinism previously covered.
-- **MI450** -- Only `AUTO` and `MANUAL` are supported; all other performance
-  levels and performance determinism are **not** supported.
+- **MI450** -- On the tested part (gfx1250), only `AUTO` and `MANUAL` are
+  accepted; `LOW`, `HIGH`, and `STABLE_*` are rejected by PMFW
+  (`AMDSMI_STATUS_NOT_SUPPORTED`). Performance determinism is **not** supported:
+  `amd-smi set --perf-determinism` returns `AMDSMI_STATUS_NOT_SUPPORTED`. Other
+  MI450 SKUs have not been tested.
 - **RDNA 3 (Navi 3x)** -- All performance levels (`AUTO`, `LOW`, `HIGH`,
   `MANUAL`, `STABLE_*`) are supported. Performance determinism is **not**
   supported on the tested consumer parts (Navi 31 / RX 7900 XTX, Navi 32 /
