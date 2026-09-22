@@ -177,6 +177,29 @@ def perfetto_buffer_size_kb(val):
     return value
 
 
+def get_mpi_env_int(var_name, label, minimum):
+    """Read an integer MPI environment variable, rejecting values that cannot be used.
+
+    Returns None when the variable is not set, which callers treat as "undetected".
+    """
+    if var_name not in os.environ:
+        return None
+
+    value = os.environ[var_name]
+    try:
+        result = int(value)
+    except ValueError:
+        fatal_error(f"MPI {label} variable {var_name}='{value}' is not an integer")
+
+    if result < minimum:
+        fatal_error(
+            f"MPI {label} variable {var_name}={result} is out of range "
+            f"(expected {minimum} or greater)"
+        )
+
+    return result
+
+
 def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
     """Detect MPI rank and size from the same MPI implementation's environment variables.
 
@@ -194,8 +217,8 @@ def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
     """
     # If custom environment variables are specified, use them exclusively
     if custom_rank_env is not None and custom_size_env is not None:
-        rank = int(os.environ[custom_rank_env]) if custom_rank_env in os.environ else None
-        size = int(os.environ[custom_size_env]) if custom_size_env in os.environ else None
+        rank = get_mpi_env_int(custom_rank_env, "rank", 0)
+        size = get_mpi_env_int(custom_size_env, "world size", 1)
         return (rank, size, custom_rank_env, custom_size_env)
 
     for rank_var, size_var in [
