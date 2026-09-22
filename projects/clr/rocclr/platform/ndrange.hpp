@@ -97,9 +97,9 @@ enum LaunchViolation : uint16_t {
   kBlockOverflow       = 1u << 3,  //!< local_ does not fit uint16_t
   kClusterOverflow     = 1u << 4,  //!< cluster_ does not fit uint8_t
   kClusterIndivisible  = 1u << 5,  //!< grid_ % cluster_ != 0
-  kBlockExceedsMaxWG   = 1u << 6,  //!< local_.product() > info.maxWorkGroupSize_ (PR-B)
-  kSharedMemExceedsMax = 1u << 7,  //!< sharedMemBytes > info.localMemSizePerCU_ (PR-B)
-  kSharedMemOverflow   = 1u << 8,  //!< sharedMemBytes does not fit uint32_t (PR-B)
+  kBlockExceedsMaxWG   = 1u << 6,  //!< (local_[0] * local[1] * local[2]) exceeds info.maxWorkGroupSize
+  kSharedMemExceedsMax = 1u << 7,  //!< sharedMemBytes exceeds localMemSizePerCU
+  kSharedMemOverflow   = 1u << 8,  //!< sharedMemBytes does not fit uint32_t
 };
 
 //! The device limits LaunchParams needs, passed explicitly so this header stays self-contained
