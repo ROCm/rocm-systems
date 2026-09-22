@@ -89,6 +89,24 @@ public:
         return m_configuration;
     }
 
+    void resume()
+    {
+        auto ctx = context();
+        if(SdkBackend::context_is_valid(ctx) && !SdkBackend::context_is_active(ctx))
+        {
+            SdkBackend::start_context(ctx);
+        }
+    }
+
+    void pause()
+    {
+        auto ctx = context();
+        if(SdkBackend::context_is_valid(ctx) && SdkBackend::context_is_active(ctx))
+        {
+            SdkBackend::stop_context(ctx);
+        }
+    }
+
 private:
     [[nodiscard]] std::vector<domains::domain_configuration> resolve_configuration(
         std::span<const domain_selection> selections) const

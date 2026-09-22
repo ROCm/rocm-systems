@@ -184,9 +184,6 @@ using rocprofiler_sdk::wrapper;
 
 using production_backend = backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>;
 
-// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
-extern client_data* g_tool_data;
-
 struct external_dependencies
 {
     using agent_t         = ::rocprofsys::agent;
@@ -2896,6 +2893,8 @@ resume()
         return;
     }
     start_context(g_tool_data->get_main_contexts());
+
+    g_domain_service->resume();
 }
 
 void
@@ -2906,6 +2905,8 @@ pause()
         return;
     }
     stop_context(g_tool_data->get_main_contexts());
+
+    g_domain_service->pause();
 
     flush_counter_tracks_to_zero(0);
 }
