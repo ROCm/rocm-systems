@@ -1122,11 +1122,12 @@
     "cast_opt_recv": {
       "extends": "net_ib_base",
       "timeout": 300,
-      "description": "Optional recv completion enabled: QP sched off, RCCL_IB_OPT_RECV_COMPLETION=1. Reuses transfer tests plus dedicated flag/skip-path gtests.",
+      "description": "Optional recv completion enabled: QP sched off, RCCL_IB_OPT_RECV_COMPLETION=1, CTS offload pinned off so the flag is attributable to the control param.",
       "env_variables": {
         "NCCL_NET": "IB-CAST",
         "RCCL_IB_QP_SCHED_ENABLE": "0",
         "RCCL_IB_OPT_RECV_COMPLETION": "1",
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
         "NCCL_IB_QPS_PER_CONNECTION": "1",
         "NCCL_DEBUG": "INFO",
         "NCCL_DEBUG_SUBSYS": "NET,INIT"
@@ -1166,6 +1167,11 @@
           "name": "Cast_OptRecv_MultiRecvNoHint",
           "description": "n>1 irecv without the optional-recv hint still transfers correctly",
           "test_filter": "NetIbMPITest.OptRecvCompletionMultiRecvNoHint"
+        },
+        {
+          "name": "Cast_OptRecv_MultiRecvWithHint",
+          "description": "n>1 with the optional-recv hint degrades to WRITE_WITH_IMM and completes",
+          "test_filter": "NetIbMPITest.OptRecvCompletionMultiRecvWithHint"
         }
       ]
     },
