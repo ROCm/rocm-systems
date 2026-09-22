@@ -377,6 +377,15 @@ bool ncclCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncc
   return ncclCeAvailable(comm, ncclFuncAlltoAllv, ncclDevSum, datatype, winRegType, nullptr, nullptr);
 }
 
+bool ncclHierCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
+                                 struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin,
+                                 bool hasSysmemSegment, bool capturing) {
+  if (ncclGroupDepth != 0) return false;
+  if (!(comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) return false;
+  if (hasSysmemSegment || capturing) return false;
+  return ncclHierCeAvailable(comm, ncclFuncAlltoAllv, ncclDevSum, datatype, winRegType, sendWin, recvWin);
+}
+
 bool ncclCeAlltoAllEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
                             bool hasSysmemSegment, bool capturing) {
   if (ncclGroupDepth != 0) return false;
@@ -1248,8 +1257,8 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRe
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: host-backed cuMem segments are not supported");
     return false;
   }
-  if (coll != ncclFuncAllGather && coll != ncclFuncAlltoAll) {
-    TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: only AllGather and AlltoAll are supported");
+  if (coll != ncclFuncAllGather && coll != ncclFuncAlltoAll && coll != ncclFuncAlltoAllv) {
+    TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: only AllGather, AlltoAll, and AlltoAllv are supported");
     return false;
   }
 
@@ -2117,6 +2126,289 @@ fail:
   goto exit;
 }
 
+
+// Hierarchical AlltoAllv: variable-size alltoall over RMA (inter-node) + CE (intra-node).
+// Same phase DAG as ncclHierCeAlltoAll; offsets/sizes come from gathered args->sizes.
+// First cut: one RMA put per non-zero remote peer (no uniform multi-peer chunk plan).
+ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream) {
+  ncclResult_t ret = ncclSuccess;
+
+  struct ncclCeCollArgs* args = plan->ceCollArgs;
+  if (args->sizes == nullptr) {
+    WARN("CE AlltoAllv: missing size metadata");
+    return ncclInvalidUsage;
+  }
+
+  struct ncclRmaProxyState* rmaProxyState = &comm->rmaState.rmaProxyState;
+  int baseCtx = comm->config.numRmaCtx;
+  int railCtx = baseCtx;
+  int myRank = comm->rank;
+  int myNode = comm->node;
+  int nNodes = comm->nNodes;
+  int nRanks = comm->nRanks;
+  int localRanks = comm->localRanks;
+  int myLsaRank = comm->devrState.lsaSelf;
+  int lsaSize = comm->devrState.lsaSize;
+  int numRemotePeers = (nNodes - 1) * localRanks;
+  bool persistent = plan->persistent;
+
+  const void* sendbuff = args->sendBuff;
+  void* recvbuff = args->recvBuff;
+  struct ncclDevrWindow* sendWin = args->sendWin;
+  struct ncclDevrWindow* recvWin = args->recvWin;
+
+  size_t* sendSizes = ncclAlltoAllvSendSizes(args->sizes, myRank, nRanks);
+  size_t* sendDispls = ncclAlltoAllvSendDispls(args->sizes, myRank, nRanks);
+  size_t* recvSizes = ncclAlltoAllvRecvSizes(args->sizes, myRank, nRanks);
+
+  size_t maxSend = 0;
+  for (int i = 0; i < nRanks; i++) {
+    if (sendSizes[i] > maxSend) maxSend = sendSizes[i];
+  }
+  int numCtx = ncclHierCollNumCtx(rmaProxyState, maxSend, persistent);
+
+  struct ncclRmaProxyCtx* railProxyCtx = (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[railCtx];
+
+  int startOps = ncclRmaProxyPutGroupStartNumOps(persistent);
+  int doneOps = ncclRmaProxyPutGroupDoneNumOps(persistent);
+  int* ctxOps = nullptr;
+  int* ctxFill = nullptr;
+  struct ncclRmaProxyDesc** groupDesc = nullptr;
+  struct ncclRmaPutSignalOp** groupOps = nullptr;
+  int nActiveCtx = 0;
+  CUstreamBatchMemOpParams* groupStartParams = nullptr;
+  CUstreamBatchMemOpParams* groupDoneParams = nullptr;
+  int** waitPeers = nullptr;
+  int** waitSigCounts = nullptr;
+  int** waitSignalIdxs = nullptr;
+  struct ncclRmaProxyDesc** waitDesc = nullptr;
+  CUstreamBatchMemOpParams* waitBatch = nullptr;
+  struct ncclCeBatchOpsParams ceLocalA2A = {};
+  int* inboundCtxOps = nullptr;
+
+  NCCLCHECKGOTO(ncclAlltoAllvValidateSizeMatrix(args->sizes, nRanks), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&ctxOps, numCtx), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&ctxFill, numCtx), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&groupDesc, numCtx), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&groupOps, numCtx), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&waitPeers, numCtx), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&waitSigCounts, numCtx), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&waitSignalIdxs, numCtx), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&waitDesc, numCtx), ret, fail);
+
+  // ====================================================================
+  // Phase 1: Rail sync (rail-only cross-node entry barrier)
+  // ====================================================================
+  NCCLCHECKGOTO(ncclRailSync(comm, railProxyCtx, plan, railCtx, stream), ret, fail);
+
+  // ====================================================================
+  // Phase 2: Intra-node barrier
+  // ====================================================================
+  NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
+
+  // ====================================================================
+  // Phase 3: Build & submit put-signal-group (one put per non-zero remote peer).
+  // Context key is peer rank (peer % numCtx) so sender and waiter agree.
+  // ====================================================================
+  {
+    // Pass 1: count ops per context.
+    for (int s = 1; s < nNodes; s++) {
+      int n = (myNode + s) % nNodes;
+      for (int lr = 0; lr < localRanks; lr++) {
+        int peer = comm->nodeRanks[n].localRankToRank[lr];
+        if (sendSizes[peer] > 0) ctxOps[peer % numCtx]++;
+      }
+    }
+
+    for (int k = 0; k < numCtx; k++) {
+      if (ctxOps[k] == 0) continue;
+      NCCLCHECKGOTO(ncclCalloc(&groupOps[k], ctxOps[k]), ret, fail);
+      NCCLCHECKGOTO(ncclCalloc(&groupDesc[k], 1), ret, fail);
+      nActiveCtx++;
+    }
+    NCCLCHECKGOTO(ncclCalloc(&groupStartParams, (size_t)nActiveCtx * startOps), ret, fail);
+    NCCLCHECKGOTO(ncclCalloc(&groupDoneParams, (size_t)nActiveCtx * doneOps), ret, fail);
+
+    // Pass 2: build each put.
+    for (int s = 1; s < nNodes; s++) {
+      int n = (myNode + s) % nNodes;
+      for (int lr = 0; lr < localRanks; lr++) {
+        int peer = comm->nodeRanks[n].localRankToRank[lr];
+        size_t peerBytes = sendSizes[peer];
+        if (peerBytes == 0) continue;
+
+        size_t srcWinOffset =
+          ((const uint8_t*)sendbuff + sendDispls[peer]) - (const uint8_t*)sendWin->userPtr;
+        size_t* peerRecvDispls = ncclAlltoAllvRecvDispls(args->sizes, peer, nRanks);
+        size_t peerWinOffset =
+          ((const uint8_t*)recvbuff + peerRecvDispls[myRank]) - (const uint8_t*)recvWin->userPtr;
+
+        int k = peer % numCtx;
+        NCCLCHECKGOTO(ncclRmaProxyPutBuildOp(comm, (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[baseCtx + k],
+                                             baseCtx + k, persistent, sendWin, srcWinOffset, recvWin, peerWinOffset,
+                                             peerBytes, peer, /*signalIdx=*/0, NCCL_SIGNAL,
+                                             &groupOps[k][ctxFill[k]++]),
+                      ret, fail);
+      }
+    }
+
+    int a = 0;
+    for (int k = 0; k < numCtx; k++) {
+      if (ctxOps[k] == 0) continue;
+      struct ncclRmaProxyCtx* pc = (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[baseCtx + k];
+      NCCLCHECKGOTO(ncclRmaProxyPutGroupBuildDesc(comm, pc, plan, ctxOps[k], &groupOps[k], baseCtx + k, groupDesc[k]),
+                    ret, fail);
+      NCCLCHECKGOTO(ncclRmaProxyPutGroupStartParams(groupDesc[k], groupStartParams + a * startOps), ret, fail);
+      NCCLCHECKGOTO(ncclRmaProxyPutGroupDoneParams(groupDesc[k], groupDoneParams + a * doneOps), ret, fail);
+      NCCLCHECKGOTO(ncclRmaProxyEnqueueDesc(pc, &groupDesc[k]), ret, fail);
+      a++;
+    }
+    if (nActiveCtx > 0) {
+      NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, nActiveCtx * startOps, groupStartParams), ret, fail);
+    }
+  }
+
+  // ====================================================================
+  // Phase 4: Intra-node alltoallv (batched CE memcpy over LSA).
+  // ====================================================================
+  NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&ceLocalA2A, lsaSize), ret, fail);
+  {
+    for (int k = 0; k < lsaSize; k++) {
+      int targetLsa = (myLsaRank + k) % lsaSize;
+      int targetWorldRank = comm->nodeRanks[myNode].localRankToRank[targetLsa];
+      size_t chunkBytes = sendSizes[targetWorldRank];
+      if (chunkBytes == 0) continue;
+
+      void* src = (void*)((const uint8_t*)sendbuff + sendDispls[targetWorldRank]);
+      size_t* targetRecvDispls = ncclAlltoAllvRecvDispls(args->sizes, targetWorldRank, nRanks);
+      size_t dstWinOff =
+        ((const uint8_t*)recvbuff + targetRecvDispls[myRank]) - (const uint8_t*)recvWin->userPtr;
+
+      if (targetLsa == myLsaRank) {
+        void* dst = (void*)((uint8_t*)recvbuff + targetRecvDispls[myRank]);
+        if (src != dst) {
+          ceLocalA2A.srcs[ceLocalA2A.numOps] = src;
+          ceLocalA2A.dsts[ceLocalA2A.numOps] = dst;
+          ceLocalA2A.sizes[ceLocalA2A.numOps] = chunkBytes;
+          ceLocalA2A.numOps++;
+        }
+      } else {
+        void* peerRecvSlot;
+        NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, recvWin, dstWinOff, targetLsa, &peerRecvSlot), ret, fail);
+        ceLocalA2A.srcs[ceLocalA2A.numOps] = src;
+        ceLocalA2A.dsts[ceLocalA2A.numOps] = peerRecvSlot;
+        ceLocalA2A.sizes[ceLocalA2A.numOps] = chunkBytes;
+        ceLocalA2A.numOps++;
+      }
+    }
+    NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &ceLocalA2A, stream, args), ret, fail);
+  }
+
+  // ====================================================================
+  // Phase 5: Aggregate wait for inbound RMA (one signal per non-zero remote sender).
+  // Remotes put to us with ctx = myRank % numCtx; wait on that same context.
+  // ====================================================================
+  {
+    NCCLCHECKGOTO(ncclCalloc(&inboundCtxOps, numCtx), ret, fail);
+    for (int s = 1; s < nNodes; s++) {
+      int n = (myNode - s + nNodes) % nNodes;
+      for (int lr = 0; lr < localRanks; lr++) {
+        int peer = comm->nodeRanks[n].localRankToRank[lr];
+        // Peer raised signal on ctx (destination rank % numCtx) == (myRank % numCtx).
+        if (recvSizes[peer] > 0) inboundCtxOps[myRank % numCtx]++;
+      }
+    }
+
+    int waitOpsTotal = 0;
+    for (int k = 0; k < numCtx; k++) {
+      if (inboundCtxOps[k] == 0) continue;
+
+      NCCLCHECKGOTO(ncclCalloc(&waitPeers[k], numRemotePeers), ret, fail);
+      NCCLCHECKGOTO(ncclCalloc(&waitSigCounts[k], numRemotePeers), ret, fail);
+      NCCLCHECKGOTO(ncclCalloc(&waitSignalIdxs[k], numRemotePeers), ret, fail);
+
+      int wp = 0;
+      for (int s = 1; s < nNodes; s++) {
+        int n = (myNode - s + nNodes) % nNodes;
+        for (int lr = 0; lr < localRanks; lr++) {
+          int peer = comm->nodeRanks[n].localRankToRank[lr];
+          if (recvSizes[peer] > 0 && (myRank % numCtx) == k) {
+            waitPeers[k][wp] = peer;
+            waitSigCounts[k][wp] = 1;
+            wp++;
+          }
+        }
+      }
+
+      struct ncclRmaProxyCtx* pc = (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[baseCtx + k];
+      NCCLCHECKGOTO(ncclCalloc(&waitDesc[k], 1), ret, fail);
+      NCCLCHECKGOTO(ncclRmaProxyWaitBuildDesc(comm, pc, plan, wp, &waitPeers[k], &waitSigCounts[k], &waitSignalIdxs[k],
+                                              waitDesc[k]),
+                    ret, fail);
+      waitOpsTotal += ncclRmaProxyWaitNumStreamOps(waitDesc[k]);
+    }
+
+    if (waitOpsTotal > 0) {
+      NCCLCHECKGOTO(ncclCalloc(&waitBatch, waitOpsTotal), ret, fail);
+      int off = 0;
+      for (int k = 0; k < numCtx; k++) {
+        if (waitDesc[k] == nullptr) continue;
+        struct ncclRmaProxyCtx* pc = (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[baseCtx + k];
+        int waitOps = ncclRmaProxyWaitNumStreamOps(waitDesc[k]);
+        NCCLCHECKGOTO(ncclRmaProxyWaitParams(pc, waitDesc[k], waitBatch + off), ret, fail);
+        NCCLCHECKGOTO(ncclRmaProxyEnqueueDesc(pc, &waitDesc[k]), ret, fail);
+        off += waitOps;
+      }
+      NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, waitOpsTotal, waitBatch), ret, fail);
+    }
+  }
+
+  // ====================================================================
+  // Phase 6: PutGroupDone memop (outbound puts complete on the wire).
+  // ====================================================================
+  if (nActiveCtx > 0) {
+    NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, nActiveCtx * doneOps, groupDoneParams), ret, fail);
+  }
+
+  // ====================================================================
+  // Phase 7: Intra-node barrier
+  // ====================================================================
+  NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
+
+exit:
+  ncclCeFreeBatchOpsParams(&ceLocalA2A);
+  for (int k = 0; groupOps && k < numCtx; k++) free(groupOps[k]);
+  if (groupDesc) {
+    for (int k = 0; k < numCtx; k++) {
+      if (groupDesc[k] != nullptr) (void)ncclRmaProxyDestroyDesc(comm, &groupDesc[k]);
+    }
+  }
+  if (waitDesc) {
+    for (int k = 0; k < numCtx; k++) {
+      if (waitDesc[k] != nullptr) (void)ncclRmaProxyDestroyDesc(comm, &waitDesc[k]);
+    }
+  }
+  for (int k = 0; waitPeers && k < numCtx; k++) free(waitPeers[k]);
+  for (int k = 0; waitSigCounts && k < numCtx; k++) free(waitSigCounts[k]);
+  for (int k = 0; waitSignalIdxs && k < numCtx; k++) free(waitSignalIdxs[k]);
+  free(groupOps);
+  free(groupStartParams);
+  free(groupDoneParams);
+  free(groupDesc);
+  free(waitBatch);
+  free(waitDesc);
+  free(waitPeers);
+  free(waitSigCounts);
+  free(waitSignalIdxs);
+  free(ctxOps);
+  free(ctxFill);
+  free(inboundCtxOps);
+  return ret;
+fail:
+  goto exit;
+}
+
+
 // Allocate CE AllReduce scatter staging on first AllReduce, not during generic
 // CE init. AlltoAll/AllGather should not reserve two staging slots of VMM.
 static ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) {
@@ -2434,6 +2726,9 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
       break;
     case ncclFuncAlltoAll:
       NCCLCHECKGOTO(ncclHierCeAlltoAll(comm, plan, stream), ret, fail);
+      break;
+    case ncclFuncAlltoAllv:
+      NCCLCHECKGOTO(ncclHierCeAlltoAllv(comm, plan, stream), ret, fail);
       break;
     default:
       WARN("Hierarchical CE collective not supported for %s", ncclFuncToString(args->func));
