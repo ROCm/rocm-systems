@@ -9,7 +9,7 @@
 #include "data_storage/schema_v3/insert_statements.hpp"
 #include "data_storage/schema_version.hpp"
 #include "json_serializers.hpp"
-#include "profiler-hub/writer_types.hpp"
+#include "profiler-hub/cpp/writer_types.hpp"
 
 #include "debug.hpp"
 

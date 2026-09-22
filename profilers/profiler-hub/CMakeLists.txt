@@ -83,15 +83,7 @@ add_subdirectory(source)
 # Public API
 # ------------------------------------------------------------ #
 
-set(profiler-hub_public_headers
-    ${CMAKE_CURRENT_LIST_DIR}/include/writer.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/reader.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/storage.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/version.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/writer_types.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/reader_types.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/shared_types.hpp
-)
+add_subdirectory(include/cpp)
 
 foreach(HEADER_FILE ${profiler-hub_public_headers})
     file(
