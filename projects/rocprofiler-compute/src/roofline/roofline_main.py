@@ -12,6 +12,11 @@ import plotly.colors as pcolors
 import plotly.graph_objects as go
 from dash import dcc, html
 
+from roofline.roofline_csv import (
+    build_kernel_roofline_dataframe,
+    collect_kernel_roofline_rows,
+    write_kernel_roofline_csv,
+)
 from roofline.roofline_frame import FrameAnchors, frame_bounds
 from roofline.roofline_hover import (
     build_compute_peak_hover,
@@ -431,6 +436,8 @@ class Roofline:
                 "color": color,
                 "points": points,
                 "pctRuntime": pct_val,
+                "count": count_val,
+                "totalTime": time_val,
             })
 
         return traces, kernels_model
@@ -476,6 +483,9 @@ class Roofline:
                 "peak": level_name,
                 "ai": ai_value,
                 "perf": performance,
+                "roofPerf": roof_perf,
+                "pctRoof": pct_roof,
+                "bandwidth": bandwidth,
                 "hoverCells": [
                     format_hover_number(roof_perf, ",.3f"),
                     format_hover_number(pct_roof, ".4f"),
@@ -582,6 +592,26 @@ class Roofline:
             path = f"{workload_dir}/empirRoof_gpu-{dev_id}{kernel_list}.html"
             Path(path).write_text(document, encoding="utf-8")
             console_log("roofline", "Roofline HTML files saved.")
+
+    def save_kernel_csv(self) -> Optional[Path]:
+        """Write the per-kernel roofline data next to the HTML, as a tidy CSV.
+
+        Reuses the FLOP figure's kernel view-model, so the CSV and the
+        interactive HTML always agree. Call after construct_plotly_figures,
+        which is what populates that view-model.
+        """
+        view_model = self.__view_models.get("FLOP")
+        if view_model is None or not view_model.kernels:
+            return None
+
+        time_unit = (self.__ai_data or {}).get("timeUnit", "")
+        rows = collect_kernel_roofline_rows(view_model.kernels, time_unit)
+        if not rows:
+            return None
+
+        df = build_kernel_roofline_dataframe(rows)
+        workload_dir = self.__run_parameters["workload_dir"]
+        return write_kernel_roofline_csv(df, workload_dir)
 
     def _combined_html_figure(
         self,

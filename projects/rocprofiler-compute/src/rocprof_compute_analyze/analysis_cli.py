@@ -248,6 +248,7 @@ class cli_analysis(OmniAnalyze_Base):
                             flops_dt,
                         ) = roof_obj.construct_plotly_figures(ai_data=ai_data)
                         roof_obj.save_html_files(ops_fig, flops_fig, ops_dt, flops_dt)
+                        roof_obj.save_kernel_csv()
                     else:
                         console_warning(
                             "roofline",
