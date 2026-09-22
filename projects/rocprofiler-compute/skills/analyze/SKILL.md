@@ -188,16 +188,15 @@ Do not claim support for arbitrary user-authored ROCTx ranges.
 
 ### 3h. Normalize metrics
 
-`-n` / `--normal-unit`: `per_kernel` (default), `per_wave`, `per_cycle`,
-`per_second`.
+`-n` / `--normal-unit` applies to every metric in that invocation:
+`per_kernel` (default), `per_wave`, `per_cycle`, or `per_second`.
 
-```bash
-rocprof-compute analyze --path ./workloads/<workload_name>/<gpu_model> -n per_wave
-```
-
-Use a unit that matches the metric: bandwidth as `per_second` or
-`per_kernel`; occupancy as `per_wave` or `per_kernel`; IPC as `per_cycle`
-or `per_wave`. When unsure, keep `per_kernel`.
+Keep `per_kernel` for a mixed report. Do not pick one unit for the whole
+report when it is meaningless for some of the metrics. Bandwidth per cycle
+is not a useful quantity. Change the unit only when the user asks about one
+metric family and that unit still describes it: bandwidth as `per_second`
+or `per_kernel`, occupancy as `per_wave` or `per_kernel`, IPC as
+`per_cycle` or `per_wave`.
 
 ### 3i. PC sampling
 
@@ -219,7 +218,10 @@ rocprof-compute analyze \
 | Stall reason | Why the wavefront stalled (VMEM, LDS, barrier, VALU, …) |
 
 High sample count + VMEM stall → that instruction is waiting on global
-memory. Analyze already correlates samples to ISA/source when symbols exist.
+memory. Samples always map to assembly. Associating an assembly line with a
+source line requires the application to be built with debug info, for example
+`hipcc -g`. Without it, `source_line` is `N/A` and the per-kernel CSV
+`Source` column is empty.
 
 `--output-format csv` writes per-kernel disassembly under
 `per_kernel_pc_sampling/`. `--output-format db` stores the same in the
@@ -275,7 +277,6 @@ rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --output-format db
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k 0
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -d 12 34 --decimal 3
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -b 1 2 3
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -n per_wave
 rocprof-compute analyze --path ./workloads/baseline/<gpu_model> --path ./workloads/opt/<gpu_model>
 rocprof-compute analyze --help
 ```

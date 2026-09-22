@@ -79,6 +79,9 @@ rocprof-compute analyze \
 
 A high sample count identifies a hot instruction, not necessarily a defect.
 Interpret a stall reason only for stochastic samples; host-trap records none.
+Assembly mapping does not require debug info. Source-line mapping does:
+build with debug info, for example `hipcc -g`. Without it, `source_line` is
+`N/A`.
 Host-trap sampling can skid to a nearby instruction. Very short workloads may
 not yield enough samples.
 
@@ -106,7 +109,10 @@ like-for-like kernels; do not aggregate away load imbalance before inspection.
   dispatch—not necessarily zero hardware activity.
 - Do not compare runs from different GPU/partition/clock configurations
   without calling out those differences.
-- Do not normalize a metric to a physically meaningless unit.
+- Do not normalize a metric to a physically meaningless unit. `-n` applies
+  to the whole report, so do not use one unit for every metric. Bandwidth
+  per cycle is not meaningful. Keep `per_kernel` unless the requested
+  metric family still makes sense in another unit.
 - Experimental PC-sampling and framework-trace behavior must be checked
   against the installed release.
 

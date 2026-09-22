@@ -204,7 +204,9 @@ Load `references/support-and-operations.md` before choosing a set or block.
 PC sampling is experimental and hardware-dependent. Load
 `references/support-and-operations.md`, query the installed device's valid
 configuration, and avoid hardcoding an interval. Prefer stochastic when
-supported; use `host_trap` as the named sampling fallback.
+supported; use `host_trap` as the named sampling fallback. Samples map to
+assembly without debug info. To associate those assembly lines with source
+lines, the application must be built with debug info, for example `hipcc -g`.
 
 ### 4g. PyTorch operator tracing
 
