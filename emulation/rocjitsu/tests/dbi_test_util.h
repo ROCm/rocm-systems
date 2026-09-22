@@ -702,6 +702,18 @@ inline std::vector<uint32_t> section_words(const AmdGpuCodeObject &obj, std::str
   return {};
 }
 
+// Copy a named section's raw bytes, for the `.rocjitsu.*` metadata sections,
+// which are byte payloads rather than instruction words.
+inline std::vector<uint8_t> section_bytes(const AmdGpuCodeObject &obj, std::string_view name) {
+  for (const auto &sec : obj.all_sections()) {
+    if (sec->name() != name)
+      continue;
+    const auto *data = reinterpret_cast<const uint8_t *>(sec->data());
+    return std::vector<uint8_t>(data, data + sec->size());
+  }
+  return {};
+}
+
 // Read back the (single) kernel's scratch size from a patched ELF.
 inline uint32_t patched_private_segment_size(const AmdGpuCodeObject &obj) {
   if (obj.text_sections().empty())
