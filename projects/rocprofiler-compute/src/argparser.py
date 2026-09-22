@@ -675,6 +675,12 @@ Examples:
         help="\t\tSpecify the raw data root dirs or desired results directory.",
     )
     analyze_group.add_argument(
+        "--verify-deps",
+        dest="verify_deps",
+        action="store_true",
+        help="\t\tCheck the Python dependencies analyze mode needs, then exit.",
+    )
+    analyze_group.add_argument(
         "--list-stats",
         action="store_true",
         help="\t\tList all detected kernels and kernel dispatches.",
