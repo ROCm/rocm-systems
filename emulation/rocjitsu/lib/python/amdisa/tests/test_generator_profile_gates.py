@@ -2890,6 +2890,26 @@ def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():
         assert 's2, const_acc, 0u);' in body
 
 
+def test_gfx1251_f64_wmma_uses_wave32_mode_independent_executor():
+    operands = [
+        Operand('vdst', 512, 'OPR_VGPR', False, True, False, False, 0),
+        Operand('src0', 128, 'OPR_SRC_VGPR', True, False, False, False, 1),
+        Operand('src1', 128, 'OPR_SRC_VGPR', True, False, False, False, 2),
+        Operand('src2', 512, 'OPR_SRC_VGPR_OR_INLINE', True, False, False, False, 3),
+    ]
+    inst = Instruction('V_WMMA_F64_16X16X4_F64', 'ENC_VOP3P', 0, operands)
+
+    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna5')
+
+    assert 'amdgpu::exec_wmma_f64_16x16x4_f64(cu, dst,' in body
+    assert 'inst_.neg, inst_.neg_hi' in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar64(src2)' in body
+    assert 'wf.fp_round_mode_f16_f64()' not in body
+    assert 'wf.fp_denorm_mode_f16_f64()' not in body
+    assert 'wf.exec()' in body
+    assert 'amdgpu::exec_f64' not in body
+
+
 @pytest.mark.parametrize('dtype, mode', [('f32', 'f32'), ('f64', 'f16_f64')])
 def test_div_scale_delegates_classification_and_preserves_explicit_mask(dtype, mode):
     body = gen_vector_div_scale(
@@ -5341,6 +5361,33 @@ def test_gfx1251_packed_f64_fma_rejects_undefined_layouts_and_register_tuples(
         assert f'{operand_name} <= 510u' in body
 
 
+def test_gfx1251_f64_wmma_validates_fields_sources_and_register_tuples(
+    gfx1250_generated_root: Path,
+):
+    source = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+    body = _generated_decode_body(source, 'VWmmaF6416x16x4F64Vop3p')
+
+    assert 'has an invalid F64 WMMA element layout' in body
+    assert 'has unsupported modifier bits' in body
+    assert 'vdst register tuple that exceeds the selector range' in body
+    assert 'invalid vdst register tuple alignment' in body
+    assert 'src0 register tuple outside the selector range' in body
+    assert 'invalid src0 register tuple alignment' in body
+    assert 'src1 register tuple outside the selector range' in body
+    assert 'invalid src1 register tuple alignment' in body
+    assert 'src0 < 256u ||' in body
+    assert 'src1 < 256u ||' in body
+    assert 'src0 == amdgpu::SRC_DPP ||' in body
+    assert 'amdgpu::dpp::is_src_dpp8' in body
+    assert 'requires a legal inline accumulator or ' in body
+    assert '16-register VGPR tuple' in body
+    assert 'src2 >= 128u &&' in body
+    assert 'src2 <= 208u' in body
+    assert 'src2 >= 240u &&' in body
+    assert 'src2 <= 248u' in body
+    assert 'invalid src2 register tuple alignment' in body
+
+
 def test_gfx1251_packed_f64_literals_use_f64_high_bits_widening(
     gfx1250_generated_root: Path,
 ):
@@ -5443,23 +5490,11 @@ def test_split_execution_ids_name_and_match_callbacks(
 def test_cdna5_variant_execution_callback_inventory(
     gfx1250_generated_root: Path,
 ) -> None:
-    model_only_classes = ('VWmmaF6416x16x4F64Vop3p',)
     header = (gfx1250_generated_root / 'vop3p.h').read_text()
     model = (gfx1250_generated_root / 'vop3p.cpp').read_text()
     backend_header = (gfx1250_generated_root / 'execution_backend.h').read_text()
     backend_source = (gfx1250_generated_root / 'execution_backend_exec.cpp').read_text()
     execution_source = (gfx1250_generated_root / 'vop3p_exec.cpp').read_text()
-
-    for class_name in model_only_classes:
-        class_body = header.split(f'class {class_name} ', 1)[1].split('\n};', 1)[0]
-        assert 'execute_impl' not in class_body
-        constructor = model.split(f'{class_name}::{class_name}(', 1)[1].split('\n}', 1)[
-            0
-        ]
-        assert 'nullptr' in constructor
-        assert class_name not in backend_header
-        assert class_name not in backend_source
-        assert class_name not in execution_source
 
     executable_classes = (
         'VPkFmaF64Vop3p',
@@ -5470,6 +5505,7 @@ def test_cdna5_variant_execution_callback_inventory(
         'VPkMaxNumF64Vop3p',
         'VPkMinNumF64Vop3p',
         'VPkLshlAddU64Vop3p',
+        'VWmmaF6416x16x4F64Vop3p',
     )
     for executable_class in executable_classes:
         class_body = header.split(f'class {executable_class} ', 1)[1].split('\n};', 1)[
@@ -5508,6 +5544,17 @@ def test_cdna5_variant_execution_callback_inventory(
     assert 'if (!reg || reg->cls != RegClass::VGPR)' in u32_read_helper
     assert 'read_lane(operand, lane)' in u32_read_helper
     assert 'read_lane_pair32(operand, lane)' in u32_read_helper
+    assert 'is_general_register' not in u64_read_helper
+    assert 'exec_wmma_f64_16x16x4_f64' in execution_source
+    execute_body = execution_source.split(
+        'void VWmmaF6416x16x4F64Vop3p::execute_impl', 1
+    )[1].split('void VWmmaScaleF32Vop3px2::execute_impl', 1)[0]
+    assert execute_body.index(
+        'is_gfx1251_wmma_execution_state_valid'
+    ) < execute_body.index('resolved_vgpr_offset')
+    assert 'report_instruction_execution_error' in execute_body
+    assert 'InstructionExecutionError::UnsupportedOperandValue' in execute_body
+    assert 'throw ' not in execute_body
 
 
 def test_generated_vop_execution_has_no_instruction_storage_bypass(

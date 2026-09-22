@@ -118,6 +118,14 @@ public:
   /// the queue can no longer make progress. This gives tests a deterministic
   /// completion boundary without imposing a host-time timeout on SDMA work.
   [[nodiscard]] bool synchronize_host_queue_for_test(uint32_t process_id, uint32_t queue_id);
+  /// @brief Drive one explicitly notified queue to its captured producer cursor.
+  /// @details Runs @p service_dependencies between scheduler turns so a
+  /// topology-free frontend test can apply callbacks that the worker marshals
+  /// onto its owner thread. The queue must describe work expected to complete;
+  /// a deliberately unsatisfied packet has no completion boundary.
+  [[nodiscard]] bool
+  synchronize_queue_for_test(uint32_t process_id, uint32_t queue_id,
+                             const std::function<void()> &service_dependencies = {});
   /// @brief Wait until a queue retains a packet that cannot yet retire.
   /// @details Samples scheduler-owned state only between service turns, giving
   /// tests a race-free boundary for exercising management of a busy queue.
@@ -147,6 +155,8 @@ private:
   };
 
   [[nodiscard]] std::shared_ptr<QueueRecord> find_locked(Handle handle) const;
+  [[nodiscard]] std::shared_ptr<QueueRecord> find_locked(uint32_t process_id,
+                                                         uint32_t queue_id) const;
   [[nodiscard]] Handle allocate_locked(std::shared_ptr<QueueRecord> queue);
   [[nodiscard]] QueuePrepareCloseStatus detach(Handle handle, bool force) noexcept;
   void ensure_worker_locked();

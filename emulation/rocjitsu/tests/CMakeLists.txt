@@ -396,11 +396,42 @@ add_test(
         ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pretranslate.py -v
 )
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+        NAME VfioGuestRunUnitTest
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_vfio_guest.py -v
+    )
+endif()
+
+add_test(
+    NAME RocjitsuVfioCapabilityCheck
+    COMMAND $<TARGET_FILE:rocjitsu_bin> --check-vfio-user
+)
+if(NOT ROCJITSU_ENABLE_VFIO)
+    set_tests_properties(RocjitsuVfioCapabilityCheck PROPERTIES WILL_FAIL TRUE)
+endif()
+
 add_test(
     NAME CommandProcessorSdmaBoundaryTest
     COMMAND
         ${CMAKE_COMMAND} -DROCJITSU_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P
         ${CMAKE_CURRENT_SOURCE_DIR}/check_cp_sdma_boundary.cmake
+)
+
+add_test(
+    NAME SdmaFrontendBoundaryTest
+    COMMAND
+        ${CMAKE_COMMAND} -DROCJITSU_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/check_sdma_frontend_boundary.cmake
+)
+
+add_test(
+    NAME MesFrontendBoundaryTest
+    COMMAND
+        ${CMAKE_COMMAND} -DROCJITSU_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/check_mes_frontend_boundary.cmake
 )
 
 add_test(
@@ -632,6 +663,7 @@ add_executable(
     pci/gpu_pci_device_test.cpp
     pci/scratch_pci_device_test.cpp
     pci/ip_discovery_test.cpp
+    pci/ip_block_model_test.cpp
 )
 if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
     target_sources(rocjitsu_tests PRIVATE perfsim_plugin_test.cpp)
