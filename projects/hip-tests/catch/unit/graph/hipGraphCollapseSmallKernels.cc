@@ -107,6 +107,7 @@ struct DotFileGuard {
   ~DotFileGuard() { std::remove(path.c_str()); }
 };
 
+#if HT_AMD  // relies on DEBUG_HIP_GRAPH_* flags that are hipamd-only
 TEST_CASE("Unit_hipGraph_CollapseSmallKernels_SingleStream", "[graph][collapse][level_2]") {
   // Requires: DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=0 DEBUG_HIP_GRAPH_MIN_OVERLAP=2
   //           DEBUG_HIP_GRAPH_DOT_PRINT=2
@@ -162,10 +163,12 @@ TEST_CASE("Unit_hipGraph_CollapseSmallKernels_SingleStream", "[graph][collapse][
   for (int i = 0; i < kNumLeaves; ++i) HIP_CHECK(hipFree(d_leaves[i]));
   // dot_guard removes the dot file on scope exit (even if a REQUIRE above failed)
 }
+#endif  // HT_AMD
 
 /**
  * Test: with mode=2 (DFS, no collapse), the same graph uses multiple streams.
  */
+#if HT_AMD  // relies on DEBUG_HIP_GRAPH_* flags that are hipamd-only
 TEST_CASE("Unit_hipGraph_CollapseSmallKernels_MultiStream_Mode2", "[graph][collapse][level_2]") {
   // Requires: DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=2 DEBUG_HIP_GRAPH_MIN_OVERLAP=2
   //           DEBUG_HIP_GRAPH_DOT_PRINT=2
@@ -222,3 +225,4 @@ TEST_CASE("Unit_hipGraph_CollapseSmallKernels_MultiStream_Mode2", "[graph][colla
   for (int i = 0; i < kNumLeaves; ++i) HIP_CHECK(hipFree(d_leaves[i]));
   // dot_guard removes the dot file on scope exit (even if a REQUIRE above failed)
 }
+#endif  // HT_AMD
