@@ -125,7 +125,7 @@ void VMovB64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane64<false>(
+    amdgpu::sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
         *this, wf, vdst, lane,
         static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane)));
   }
@@ -149,7 +149,7 @@ RJ_NOINLINE void VMovB64Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane64<false>(
+    amdgpu::sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
         *this, wf, vdst, lane,
         static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane)));
   }
@@ -174,8 +174,8 @@ void VMovreldB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<false>(*this, wf, rel_dst, lane,
-                                    amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        *this, wf, rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane(src0, lane));
   }
 }
 
@@ -208,8 +208,8 @@ RJ_NOINLINE void VMovreldB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<false>(*this, wf, rel_dst, lane,
-                                    amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        *this, wf, rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane(src0, lane));
   }
   dpp_write_mask_scope_.restore();
 }
@@ -243,8 +243,8 @@ void VMovrelsB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane,
-                                    amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        *this, wf, vdst, lane, amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
   }
 }
 
@@ -283,8 +283,8 @@ RJ_NOINLINE void VMovrelsB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane,
-                                    amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        *this, wf, vdst, lane, amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
   }
   dpp_write_mask_scope_.restore();
 }
@@ -329,8 +329,8 @@ void VMovrelsdB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<false>(*this, wf, rel_dst, lane,
-                                    amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        *this, wf, rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
   }
 }
 
@@ -380,8 +380,8 @@ RJ_NOINLINE void VMovrelsdB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) 
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<false>(*this, wf, rel_dst, lane,
-                                    amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        *this, wf, rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
   }
   dpp_write_mask_scope_.restore();
 }
@@ -426,8 +426,8 @@ void VMovrelsd2B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<false>(*this, wf, rel_dst, lane,
-                                    amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        *this, wf, rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
   }
 }
 
@@ -477,8 +477,8 @@ RJ_NOINLINE void VMovrelsd2B32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<false>(*this, wf, rel_dst, lane,
-                                    amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        *this, wf, rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
   }
   dpp_write_mask_scope_.restore();
 }
@@ -651,7 +651,7 @@ void VPermPk16B4U4Vop3::execute_impl(amdgpu::Wavefront &wf) {
       uint32_t index = (selectors >> (i * 4)) & 0xfu;
       packed |= ((table >> (index * 4)) & 0xfu) << (i * 4);
     }
-    amdgpu::sdwa::write_lane64<false>(*this, wf, vdst, lane, packed);
+    amdgpu::sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, packed);
   }
 }
 
@@ -687,7 +687,8 @@ void VPermPk16B6U4Vop3::execute_impl(amdgpu::Wavefront &wf) {
     dst_word.size_bits_ = 32;
     for (uint32_t word = 0; word < 3u; ++word) {
       dst_word.encoding_value_ = vdst.encoding_value_ + static_cast<int>(word);
-      amdgpu::sdwa::write_lane<false>(*this, wf, dst_word, lane, packed[word]);
+      amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, dst_word, lane,
+                                                                 packed[word]);
     }
   }
 }
@@ -726,7 +727,8 @@ void VPermPk16B8U4Vop3::execute_impl(amdgpu::Wavefront &wf) {
     dst_word.size_bits_ = 32;
     for (uint32_t word = 0; word < 4u; ++word) {
       dst_word.encoding_value_ = vdst.encoding_value_ + static_cast<int>(word);
-      amdgpu::sdwa::write_lane<false>(*this, wf, dst_word, lane, packed[word]);
+      amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, dst_word, lane,
+                                                                 packed[word]);
     }
   }
 }
@@ -779,10 +781,11 @@ void VPermlane16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     bool src_active = (exec & (1ULL << src_lane)) != 0;
     if (!src_active && !fi) {
       if (bound_ctrl)
-        amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, 0);
+        amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
       continue;
     }
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, snap[src_lane]);
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
+                                                               snap[src_lane]);
   }
 }
 
@@ -808,10 +811,11 @@ void VPermlanex16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     bool src_active = (exec & (1ULL << src_lane)) != 0;
     if (!src_active && !fi) {
       if (bound_ctrl)
-        amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, 0);
+        amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
       continue;
     }
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, snap[src_lane]);
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
+                                                               snap[src_lane]);
   }
 }
 
@@ -892,10 +896,11 @@ void VPermlaneBcastB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t src_offset = selector % lane_group_width;
     uint32_t src_lane = group_base + src_offset;
     if (src_offset >= lane_group_width || src_lane >= wf.wf_size()) {
-      amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, 0);
+      amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
       continue;
     }
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, snap[src_lane]);
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
+                                                               snap[src_lane]);
   }
 }
 
@@ -917,10 +922,11 @@ void VPermlaneUpB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t src_offset = (selector <= offset) ? (offset - selector) : lane_group_width;
     uint32_t src_lane = group_base + src_offset;
     if (src_offset >= lane_group_width || src_lane >= wf.wf_size()) {
-      amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, 0);
+      amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
       continue;
     }
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, snap[src_lane]);
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
+                                                               snap[src_lane]);
   }
 }
 
@@ -942,10 +948,11 @@ void VPermlaneDownB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t src_offset = offset + selector;
     uint32_t src_lane = group_base + src_offset;
     if (src_offset >= lane_group_width || src_lane >= wf.wf_size()) {
-      amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, 0);
+      amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
       continue;
     }
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, snap[src_lane]);
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
+                                                               snap[src_lane]);
   }
 }
 
@@ -967,10 +974,11 @@ void VPermlaneXorB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t src_offset = offset ^ selector;
     uint32_t src_lane = group_base + src_offset;
     if (src_offset >= lane_group_width || src_lane >= wf.wf_size()) {
-      amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, 0);
+      amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
       continue;
     }
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, snap[src_lane]);
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
+                                                               snap[src_lane]);
   }
 }
 
@@ -991,10 +999,11 @@ void VPermlane16VarB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     bool src_active = (exec & (1ULL << src_lane)) != 0;
     if (!src_active && !fi) {
       if (bound_ctrl)
-        amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, 0);
+        amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
       continue;
     }
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, snap[src_lane]);
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
+                                                               snap[src_lane]);
   }
 }
 
@@ -1017,10 +1026,11 @@ void VPermlanex16VarB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     bool src_active = (exec & (1ULL << src_lane)) != 0;
     if (!src_active && !fi) {
       if (bound_ctrl)
-        amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, 0);
+        amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
       continue;
     }
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, snap[src_lane]);
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
+                                                               snap[src_lane]);
   }
 }
 
@@ -1031,7 +1041,8 @@ void VPermlaneIdxGenB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t value = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, value ^ selector);
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
+                                                               value ^ selector);
   }
 }
 
