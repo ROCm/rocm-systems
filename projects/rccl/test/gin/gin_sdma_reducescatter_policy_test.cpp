@@ -149,7 +149,7 @@ TEST(ReduceScatterPolicyPool, PoolCoversTheSelfSelectedLadderAtEveryBandEdge) {
   for (int v : {1, 8, 16, 48, 96}) {
     const int pool = reduceScatterPoolCtas(v);
     for (size_t b : edges) {
-      EXPECT_LE(reduceScatterGridCtas(b, kThresholdUnset, pool), pool)
+      EXPECT_LE(reduceScatterCtas(b, kThresholdUnset), pool)
           << "-V " << v << " bytes " << b;
     }
   }
@@ -216,6 +216,24 @@ TEST(ReduceScatterPolicyBandwidth, NullPointersAreSafe) {
   double alg = -1.0;
   bandwidthGBps(1000, 4, 0.5, 4, &alg, nullptr);
   EXPECT_GT(alg, 0.0);
+}
+
+TEST(ReduceScatterPolicyEnv, ParseCtasEnvRejectsGarbage) {
+  EXPECT_EQ(parseReduceScatterCtasEnvString(nullptr), kThresholdUnset);
+  EXPECT_EQ(parseReduceScatterCtasEnvString(""), kThresholdUnset);
+  EXPECT_EQ(parseReduceScatterCtasEnvString("-2"), kThresholdUnset);
+  EXPECT_EQ(parseReduceScatterCtasEnvString("8foo"), kThresholdUnset);
+  EXPECT_EQ(parseReduceScatterCtasEnvString("8"), 8u);
+}
+
+TEST(ReduceScatterPolicyEnv, ParseUnrollMinRejectsGarbageAndOverflow) {
+  EXPECT_EQ(parseReduceScatterUnrollMinBytesString(nullptr), 0u);
+  EXPECT_EQ(parseReduceScatterUnrollMinBytesString(""), 0u);
+  EXPECT_EQ(parseReduceScatterUnrollMinBytesString("-1"), 0u);
+  EXPECT_EQ(parseReduceScatterUnrollMinBytesString("48foo"), 0u);
+  EXPECT_EQ(parseReduceScatterUnrollMinBytesString("48"), 48u << 20);
+  // A shift that wraps must not come back as a plausible threshold.
+  EXPECT_EQ(parseReduceScatterUnrollMinBytesString("18446744073709551615"), 0u);
 }
 
 }  // namespace

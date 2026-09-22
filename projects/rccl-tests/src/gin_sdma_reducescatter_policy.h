@@ -19,15 +19,16 @@
 // NOTE on the tier: the shipped GinReduceScatterKernel is SINGLE-TIER (a direct
 // LSA read-reduce for all sizes; the load SCHEDULE adapts by total bytes, but the
 // algorithm never changes). The RSTier / threshold helpers below are retained for
-// documentation and forward-compatibility (a future put-partials large tier, see
-// reducescatter-gin-sdma-phase2.md) and to give NCCL_GIN_ANVIL_SDMA_THRESHOLD_-
-// REDUCESCATTER a defined meaning; the current kernel does not branch on them.
+// a follow-up put-partials large tier (AICOMRCCL-1803, not this PR) and to give
+// NCCL_GIN_ANVIL_SDMA_THRESHOLD_REDUCESCATTER a defined meaning; the current
+// kernel does not branch on them.
 
 #ifndef GIN_SDMA_REDUCESCATTER_POLICY_H_
 #define GIN_SDMA_REDUCESCATTER_POLICY_H_
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 
 #if defined(GIN_SDMA_HOST_ONLY)
 #ifndef GIN_SDMA_RS_HD
@@ -67,8 +68,8 @@ GIN_SDMA_RS_HD inline size_t sliceBytes(size_t perRankCount, size_t eltSize) {
 // Compiled default ReduceScatter LSA<->GIN crossover (bytes per rank slice).
 // 256 KiB/rank is the provisional cutover from the Phase-2 design plan. RETAINED
 // FOR DOCUMENTATION ONLY: the shipped kernel is single-tier LSA read-reduce and
-// does not branch on this value (see the file-top NOTE and
-// reducescatter-gin-sdma-phase2.md). Used by pickSdmaThreshold as the fallback.
+// does not branch on this value (see the file-top NOTE). The put-partials tier
+// is a follow-up under AICOMRCCL-1803. Used by pickSdmaThreshold as the fallback.
 static constexpr size_t kReduceScatterSdmaThresholdDefault = 262144;  // 256 KiB/rank slice
 
 enum class RSTier { LSA, Gin };
@@ -184,6 +185,43 @@ GIN_SDMA_RS_HD inline void bandwidthGBps(size_t perRankCount, int typeSize, doub
     *busBw = baseBw * factor;
   }
 }
+
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+// Host-side env resolution (unit-testable without pulling in reduce_scatter.cu).
+
+// Parse NCCL_GIN_ANVIL_RS_CTAS. Returns kThresholdUnset for null/empty/negative/
+// trailing-garbage so "8foo" and "-2" do not pin a CTA count. strtoull wraps a
+// leading '-' into a huge unsigned, which the CTA clamp would then honor.
+inline size_t parseReduceScatterCtasEnvString(const char* e) {
+  if (e == nullptr || e[0] == '\0' || e[0] == '-') return kThresholdUnset;
+  char* end = nullptr;
+  unsigned long long v = strtoull(e, &end, 10);
+  if (end == e || *end != '\0') return kThresholdUnset;
+  if ((size_t)v == kThresholdUnset) return kThresholdUnset;
+  return (size_t)v;
+}
+
+inline size_t parseReduceScatterCtasEnv(const char* name) {
+  return parseReduceScatterCtasEnvString(getenv(name));
+}
+
+// NCCL_GIN_ANVIL_RS_UNROLL_MIN is a MiB crossover. Absent/unparseable -> 0
+// (warp-unroll tier stays off). Rejects a leading '-', trailing garbage, and a
+// shift that would wrap back into a plausible threshold.
+inline size_t parseReduceScatterUnrollMinBytesString(const char* e) {
+  if (e == nullptr || e[0] == '\0' || e[0] == '-') return 0;
+  char* end = nullptr;
+  unsigned long long mib = strtoull(e, &end, 10);
+  if (end == e || *end != '\0') return 0;
+  if (mib > (((size_t)-1) >> 20)) return 0;
+  return (size_t)mib << 20;
+}
+
+inline size_t parseReduceScatterUnrollMinBytes() {
+  return parseReduceScatterUnrollMinBytesString(getenv("NCCL_GIN_ANVIL_RS_UNROLL_MIN"));
+}
+
+#endif  // host env helpers
 
 }  // namespace gin_sdma_reducescatter
 

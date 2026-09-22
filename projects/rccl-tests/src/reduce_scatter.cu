@@ -43,28 +43,10 @@
 // ReduceScatterRunTest skip.
 static ncclDevResourceHandle g_rsScratchHandle = 0;  // unused (no scratch); passed to kernel as 0
 
-// Thin getenv() wrapper: parse a decimal CTA-count env var (NCCL_GIN_ANVIL_RS_CTAS)
-// into a size_t, returning the policy "unset" sentinel when absent/empty/unparseable
-// so gin_sdma_reducescatter::reduceScatterCtas() falls back to its size-adaptive
-// ladder. Self-contained here (the target common.h has no testParseSdmaThresholdEnv).
-// Rejects a leading '-' (strtoull would wrap it to a huge unsigned, which then
-// clamps to the CTA ceiling instead of being ignored) and trailing garbage, so
-// "8foo" is not silently read as 8. Matches gin_sdma_allgather_policy.h's
-// parseAllGatherCtasEnv and BroadcastParseCtasEnv.
+// Caching wrapper. The parser lives in gin_sdma_reducescatter_policy.h so the
+// host unit test can lock "8foo" / leading '-' without compiling this TU.
 static inline size_t ReduceScatterParseCtasEnv(const char* name) {
-  const char* e = getenv(name);
-  if (e == nullptr || e[0] == '\0' || e[0] == '-') {
-    return gin_sdma_reducescatter::kThresholdUnset;
-  }
-  char* end = nullptr;
-  unsigned long long v = strtoull(e, &end, 10);
-  if (end == e || *end != '\0') {
-    return gin_sdma_reducescatter::kThresholdUnset;
-  }
-  if ((size_t)v == gin_sdma_reducescatter::kThresholdUnset) {
-    return gin_sdma_reducescatter::kThresholdUnset;
-  }
-  return (size_t)v;
+  return gin_sdma_reducescatter::parseReduceScatterCtasEnv(name);
 }
 
 // Mid/large SCHEDULE crossover (total message bytes) for the -D 3 read-reduce.
@@ -76,12 +58,7 @@ static inline size_t ReduceScatterParseCtasEnv(const char* name) {
 // NCCL_GIN_ANVIL_RS_UNROLL_MIN (MiB, e.g. "48") re-enables the large tier at that
 // crossover for diagnostics/regression; absent/unparseable -> the 0 default.
 static inline size_t ReduceScatterUnrollMinBytes() {
-  const char* e = getenv("NCCL_GIN_ANVIL_RS_UNROLL_MIN");
-  if (e == nullptr || e[0] == '\0') return 0;
-  char* end = nullptr;
-  unsigned long long mib = strtoull(e, &end, 10);
-  if (end == e) return 0;
-  return (size_t)mib << 20;
+  return gin_sdma_reducescatter::parseReduceScatterUnrollMinBytes();
 }
 
 // Op-aware dispatch for the reduction collective (ReduceScatter). Unlike the
