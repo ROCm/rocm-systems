@@ -779,7 +779,7 @@ if(BUILD_TESTS)
     task-prep-test.cc
     task-classify-test.cc
     task-pretuning-test.cc
-    ${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_posttuning.cc
+    task-posttuning-test.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
@@ -813,7 +813,6 @@ if(BUILD_TESTS)
     ../common/main_altrsmi.cpp
   )
   set_source_files_properties(
-    ${PROJECT_BINARY_DIR}/hipify/src/enqueue/task_prep/task_posttuning.cc
     ${PROJECT_BINARY_DIR}/hipify/src/config/algorithm_parser.cc
     ${PROJECT_BINARY_DIR}/hipify/src/config/algorithm_registry.cc
     ${PROJECT_BINARY_DIR}/hipify/src/config/collconfig.cc
@@ -1579,7 +1578,7 @@ set(TEST_MICRO_TASKPREP_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/task-prep-test.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/task-classify-test.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/task-pretuning-test.cc
-  ${RCCL_HIPIFY_DIR}/src/enqueue/task_prep/task_posttuning.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/task-posttuning-test.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/transport_stubs.cc

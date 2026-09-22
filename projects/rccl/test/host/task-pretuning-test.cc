@@ -50,10 +50,6 @@ constexpr size_t kMisalignedGap = 8;
 
 const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x5eedULL);
 
-void* TaskPreTuning_Addr(uintptr_t address) {
-  return reinterpret_cast<void*>(address);
-}
-
 // Records which registration each probe was handed, so passing one buffer's reg twice cannot pass.
 class TaskPreTuning_LocallyValidRegistrations {
  public:
@@ -233,9 +229,9 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_EitherBufferInAWindow_Queries
   for (bool sendSide : {true, false}) {
     TaskPrepScene scene;
     struct ncclRawTask* raw = scene.NewColl(ncclFuncAllReduce);
-    TaskPreTuning_Windows windows(sendSide ? raw->coll.sendbuff : nullptr, TaskPreTuning_Addr(kSendWindowAddr),
+    TaskPreTuning_Windows windows(sendSide ? raw->coll.sendbuff : nullptr, TaskPrep_Addr(kSendWindowAddr),
                                   sendSide ? nullptr : raw->coll.recvbuff,
-                                  TaskPreTuning_Addr(kRecvWindowAddr));
+                                  TaskPrep_Addr(kRecvWindowAddr));
     struct ncclDevrWindow* seenSend = nullptr;
     struct ncclDevrWindow* seenRecv = nullptr;
     ScopedHook regType(g_getSymRegType, [&](struct ncclDevrWindow* sendWin,
@@ -258,8 +254,8 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_EitherBufferInAWindow_Queries
 
 TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_SymRegTypeFails_Propagates) {
   struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllReduce);
-  TaskPreTuning_Windows windows(raw->coll.sendbuff, TaskPreTuning_Addr(kSendWindowAddr),
-                                raw->coll.recvbuff, TaskPreTuning_Addr(kRecvWindowAddr));
+  TaskPreTuning_Windows windows(raw->coll.sendbuff, TaskPrep_Addr(kSendWindowAddr),
+                                raw->coll.recvbuff, TaskPrep_Addr(kRecvWindowAddr));
   ScopedHook regType(g_getSymRegType,
                      [](struct ncclDevrWindow*, struct ncclDevrWindow*, ncclSymRegType_t*) {
                        return ncclInvalidUsage;
@@ -304,8 +300,8 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_NoWindows_MeasuresTheAlignmen
   for (size_t recvGap : {kAlignedGap, kMisalignedGap}) {
     TaskPrepScene scene;
     struct ncclRawTask* raw = scene.NewColl(ncclFuncAllReduce);
-    raw->coll.sendbuff = TaskPreTuning_Addr(kSendAddr);
-    raw->coll.recvbuff = TaskPreTuning_Addr(kSendAddr + recvGap);
+    raw->coll.sendbuff = TaskPrep_Addr(kSendAddr);
+    raw->coll.recvbuff = TaskPrep_Addr(kSendAddr + recvGap);
     ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
 
     ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene.comm(), &raw->coll, &in));
@@ -318,12 +314,12 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_BuffersInWindows_MeasuresTheA
   for (bool useWindows : {false, true}) {
     TaskPrepScene scene;
     struct ncclRawTask* raw = scene.NewColl(ncclFuncAllReduce);
-    raw->coll.sendbuff = TaskPreTuning_Addr(kSendAddr);
-    raw->coll.recvbuff = TaskPreTuning_Addr(kRecvAddr);
-    TaskPreTuning_Windows windows(useWindows ? TaskPreTuning_Addr(kSendAddr) : nullptr,
-                                  TaskPreTuning_Addr(kSendWindowAddr),
-                                  useWindows ? TaskPreTuning_Addr(kRecvAddr) : nullptr,
-                                  TaskPreTuning_Addr(kRecvWindowAddr));
+    raw->coll.sendbuff = TaskPrep_Addr(kSendAddr);
+    raw->coll.recvbuff = TaskPrep_Addr(kRecvAddr);
+    TaskPreTuning_Windows windows(useWindows ? TaskPrep_Addr(kSendAddr) : nullptr,
+                                  TaskPrep_Addr(kSendWindowAddr),
+                                  useWindows ? TaskPrep_Addr(kRecvAddr) : nullptr,
+                                  TaskPrep_Addr(kRecvWindowAddr));
     ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
 
     ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene.comm(), &raw->coll, &in));
@@ -335,11 +331,11 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_BuffersInWindows_MeasuresTheA
 // One window only: a single (sendWin && recvWin) gate over both offsets would read this pair as misaligned.
 TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_OnlyTheRecvBufferInAWindow_StillOffsetsByItsUserPtr) {
   struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllReduce);
-  raw->coll.sendbuff = TaskPreTuning_Addr(kSendAddr);
-  raw->coll.recvbuff = TaskPreTuning_Addr(kRecvWindowAlignedAddr);
-  TaskPreTuning_Windows windows(nullptr, TaskPreTuning_Addr(kSendWindowAddr),
-                                TaskPreTuning_Addr(kRecvWindowAlignedAddr),
-                                TaskPreTuning_Addr(kRecvWindowAddr));
+  raw->coll.sendbuff = TaskPrep_Addr(kSendAddr);
+  raw->coll.recvbuff = TaskPrep_Addr(kRecvWindowAlignedAddr);
+  TaskPreTuning_Windows windows(nullptr, TaskPrep_Addr(kSendWindowAddr),
+                                TaskPrep_Addr(kRecvWindowAlignedAddr),
+                                TaskPrep_Addr(kRecvWindowAddr));
   ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
 
   ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &raw->coll, &in));
@@ -350,10 +346,10 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_OnlyTheRecvBufferInAWindow_St
 // The send twin: symAligned16B is bool, so poison reads back as true and only a written false can fail this.
 TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_OnlyTheSendBufferInAWindow_StillOffsetsByItsUserPtr) {
   struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllReduce);
-  raw->coll.sendbuff = TaskPreTuning_Addr(kSendAddr);
-  raw->coll.recvbuff = TaskPreTuning_Addr(kRawAlignedRecvAddr);
-  TaskPreTuning_Windows windows(TaskPreTuning_Addr(kSendAddr), TaskPreTuning_Addr(kSendWindowAddr), nullptr,
-                                TaskPreTuning_Addr(kRecvWindowAddr));
+  raw->coll.sendbuff = TaskPrep_Addr(kSendAddr);
+  raw->coll.recvbuff = TaskPrep_Addr(kRawAlignedRecvAddr);
+  TaskPreTuning_Windows windows(TaskPrep_Addr(kSendAddr), TaskPrep_Addr(kSendWindowAddr), nullptr,
+                                TaskPrep_Addr(kRecvWindowAddr));
   ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
 
   ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &raw->coll, &in));
