@@ -945,7 +945,7 @@ hipError_t Graph::CreateSegmentsFromPaths(
         node_priority = static_cast<const GraphKernelNode*>(node)->GetDeclaredPriority();
       } else if (node->GetType() == hipGraphNodeTypeGraph) {
         Graph* child = node->GetChildGraph();
-        if (child == nullptr) continue;
+        if (child == nullptr || child->segments_.empty()) continue;
         node_priority = hip::Stream::Priority::Low;
         for (const auto& child_seg : child->segments_)
           node_priority = std::min(node_priority, child_seg.declared_priority);
