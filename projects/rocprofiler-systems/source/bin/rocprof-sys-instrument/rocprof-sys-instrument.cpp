@@ -39,6 +39,7 @@
 #include <iomanip>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <regex>
 #include <stdexcept>
 #include <string>
@@ -82,20 +83,82 @@ get_default_max_library_functions()
         rocprofsys::env_vars::DEFAULT_MAX_LIBRARY_FUNCTIONS, 20000);
 }
 
-/// Read read_fd until EOF and return everything received. The caller must have closed
-/// every other copy of the pipe's write end first, or this blocks forever. On a read
-/// error, the bytes received so far are returned.
-std::string
-read_fd_until_eof(int read_fd)
+constexpr int k_invalid_fd = -1;
+
+struct pipe_fds
+{
+    int read_fd  = k_invalid_fd;
+    int write_fd = k_invalid_fd;
+};
+
+[[nodiscard]] std::optional<pipe_fds>
+create_pipe()
+{
+    auto fds = std::array<int, 2>{ k_invalid_fd, k_invalid_fd };
+    if(::pipe(fds.data()) != 0)
+    {
+        return std::nullopt;
+    }
+
+    return pipe_fds{ .read_fd = fds.at(0), .write_fd = fds.at(1) };
+}
+
+/// The current environment plus LD_TRACE_LOADED_OBJECTS, NULL-terminated.
+/// The result points into environ - only valid while the environment is left untouched.
+[[nodiscard]] std::vector<char*>
+create_dependency_listing_envp()
+{
+    auto envp = std::vector<char*>{};
+
+    // Copy existing environment until nullptr terminator is reached
+    for(char** var = ::environ; var != nullptr && *var != nullptr; ++var)
+    {
+        envp.emplace_back(*var);
+    }
+    // Add the loader's listing env var and nullptr terminator
+    envp.emplace_back(const_cast<char*>("LD_TRACE_LOADED_OBJECTS=1"));
+    envp.emplace_back(nullptr);
+
+    return envp;
+}
+
+/// Redirect stdout to the pipe's write end, then become exe_path with the given
+/// environment. Never returns: on success the process image is replaced, on failure exits
+/// with 127. This function is used after fork, and between fork and exec the child may
+/// not allocate or modify the environment, so everything here must be async-signal-safe.
+[[noreturn]] void
+exec_with_stdout_to_pipe(const std::string& exe_path, pipe_fds fds,
+                         const std::vector<char*>& envp)
+{
+    ::close(fds.read_fd);
+    ::dup2(fds.write_fd, STDOUT_FILENO);
+    ::close(fds.write_fd);
+
+    auto argv = std::array<char*, 2>{ const_cast<char*>(exe_path.c_str()), nullptr };
+    ::execve(exe_path.c_str(), argv.data(), envp.data());
+
+    // Return from execve means it failed: use "command could not be executed" status
+    constexpr int k_exec_failure_status = 127;
+    ::_exit(k_exec_failure_status);
+}
+
+/// Read the pipe until EOF and return everything received. Closes both ends and
+/// invalidates fds. On a read error, the bytes received so far are returned.
+[[nodiscard]] std::string
+read_pipe_until_eof(pipe_fds& fds)
 {
     constexpr size_t k_read_buffer_size = 4096;
+
+    // Pipe's write end should be closed to get EOF signal from read end
+    ::close(fds.write_fd);
+    fds.write_fd = k_invalid_fd;
 
     auto out = std::string{};
     auto buf = std::array<char, k_read_buffer_size>{};
     while(true)
     {
         // bytes_read is ssize_t: >0 data, 0 EOF, <0 error (EINTR means retry)
-        const auto bytes_read = ::read(read_fd, buf.data(), buf.size());
+        const auto bytes_read = ::read(fds.read_fd, buf.data(), buf.size());
         if(bytes_read > 0)
         {
             out.append(buf.data(), static_cast<std::size_t>(bytes_read));
@@ -105,82 +168,68 @@ read_fd_until_eof(int read_fd)
             break;
         }
     }
+
+    ::close(fds.read_fd);
+    fds.read_fd = k_invalid_fd;
+
     return out;
 }
 
-/// Get the shared libraries exe_path actually loads, as absolute paths. Obtained by
-/// running it with LD_TRACE_LOADED_OBJECTS=1, which makes the dynamic loader print every
-/// resolved dependency and exit before main(), so the target is never really run. Empty
-/// if the binary cannot be executed.
-std::vector<std::string>
+/// Get the shared libraries exe_path actually loads, as absolute paths. exe_path must be
+/// dynamically linked: the listing works by running it with LD_TRACE_LOADED_OBJECTS=1,
+/// which makes the dynamic loader print every resolved dependency and exit before main().
+/// A static executable has no loader to intercept it, so it would run for real instead.
+[[nodiscard]] std::optional<std::vector<std::string>>
 read_dynamic_dependencies(const std::string& exe_path)
 {
-    auto fds = std::array<int, 2>{ -1, -1 };  // -1 is invalid file descriptor
-    if(::pipe(fds.data()) != 0)
+    auto pipe_optional = create_pipe();
+    if(!pipe_optional)
     {
-        return {};
+        return std::nullopt;
     }
-    auto& [read_fd, write_fd] = fds;
+    auto& fds = *pipe_optional;
 
-    // Copy current env and add tracing env var. LD_LIBRARY_PATH and LD_PRELOAD are also
-    // copied from env, so the later-listed paths will match what a real run would load.
-    // Built before the fork: between fork and exec the child may only make
-    // async-signal-safe calls, so it must not allocate or modify the environment.
-    auto tracing_envp = std::vector<char*>{};
-    for(char** var = ::environ; var != nullptr && *var != nullptr; ++var)
-    {
-        tracing_envp.emplace_back(*var);
-    }
-    tracing_envp.emplace_back(const_cast<char*>("LD_TRACE_LOADED_OBJECTS=1"));
-    tracing_envp.emplace_back(nullptr);
+    // Build environment for listing deps. LD_LIBRARY_PATH and LD_PRELOAD are copied from
+    // current env, so the later-listed lib paths will match what a real run would load.
+    // Built before forking: between fork and exec the child must not allocate or modify
+    // the environment.
+    const auto listing_envp = create_dependency_listing_envp();
 
     const auto pid = ::fork();
-    if(pid < 0)  // fork failed
+    if(pid < 0)
     {
-        ::close(read_fd);
-        ::close(write_fd);
-        return {};
+        ::close(fds.read_fd);
+        ::close(fds.write_fd);
+        return std::nullopt;
     }
 
     if(pid == 0)  // we are in the child
     {
-        // child: stdout -> pipe, then become the target binary
-        ::close(read_fd);
-        ::dup2(write_fd, STDOUT_FILENO);
-        ::close(write_fd);
-
-        auto argv = std::array<char*, 2>{ const_cast<char*>(exe_path.c_str()), nullptr };
-        ::execve(exe_path.c_str(), argv.data(), tracing_envp.data());
-        // Return from execve means it failed. Use conventional shell exit status
-        // for "command could not be executed"
-        constexpr int k_exec_failure_status = 127;
-        ::_exit(k_exec_failure_status);
+        exec_with_stdout_to_pipe(exe_path, fds, listing_envp);
     }
 
     // If we are here - we are in the parent
 
-    ::close(write_fd);  // the parent's copy must go, or the read below never sees EOF
+    const auto loader_output = read_pipe_until_eof(fds);
 
-    const auto trace_output = read_fd_until_eof(read_fd);
-    ::close(read_fd);
-
+    // Reap the child
     auto status = 0;
     while(::waitpid(pid, &status, 0) < 0 && errno == EINTR)
     {
-        // do nothing
+        // Retry if interrupted by a signal
+    }
+    if(!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+    {
+        return std::nullopt;
     }
 
-    // Each trace line is "<soname> => <path> (<addr>)".
-    // Parse and keep only absolute paths.
-    auto libs = std::vector<std::string>{};
-    for(const auto& trace_element : rocprofsys::delimit(trace_output, " \n\t=>"))
-    {
-        if(trace_element.starts_with('/'))
-        {
-            libs.emplace_back(trace_element);
-        }
-    }
-    return libs;
+    // Loader output lines we need:
+    //   <soname> => <abs path> (<addr>)
+    //   <abs path> (<addr>)"
+    // Parse and keep only abs paths.
+    auto out = rocprofsys::delimit(loader_output, " \n\t=>");
+    std::erase_if(out, [](const std::string& item) { return !item.starts_with('/'); });
+    return out;
 }
 }  // namespace
 
@@ -2619,17 +2668,33 @@ main(int argc, char** argv)
             }
         }
 
-        if(main_func)
+        // read_dynamic_dependencies should not be called on static executables
+        if(main_func && !is_static_exe)
         {
-            verbprintf(0, "Getting linked libraries for %s...\n", cmdv0.c_str());
-            verbprintf(0, "Consider instrumenting the relevant libraries...\n");
-            verbprintf(0, "\n");
+            // no newline: will append result later
+            verbprintf(0, "Getting linked libraries for %s... ", cmdv0.c_str());
 
-            for(const auto& lib_path : read_dynamic_dependencies(cmdv0))
+            const auto linked_libs = read_dynamic_dependencies(cmdv0);
+            if(!linked_libs)
             {
-                verbprintf(0, "\t%s\n", lib_path.c_str());
+                verbprintf_bare(0, "Error\n");
             }
-
+            else
+            {
+                if(linked_libs->empty())
+                {
+                    verbprintf_bare(0, "Not found\n");
+                }
+                else
+                {
+                    verbprintf_bare(0, "Done\n");
+                    verbprintf(0, "Consider instrumenting the relevant libraries:\n");
+                    for(const auto& lib_path : *linked_libs)
+                    {
+                        verbprintf(0, "\t%s\n", lib_path.c_str());
+                    }
+                }
+            }
             verbprintf(0, "\n");
         }
     }
