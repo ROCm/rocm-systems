@@ -57,7 +57,7 @@ IR_TEST_SRC = os.path.join(IR_DIR, "test", "IR_test.cpp")
 BITCODE = os.path.join(RCCL_BUILD, "lib", "librccl_device.bc")
 HIPIFY_INC = os.path.join(RCCL_BUILD, "hipify", "src", "include")
 GENERATED_INC = os.path.join(RCCL_BUILD, "include")
-HIPCC = os.path.join(ROCM_PATH, "bin", "hipcc")
+AMDCLANGPP = os.path.join(ROCM_PATH, "bin", "amdclang++")
 TEST_EXE = os.path.join(IR_OUTDIR, "IR_test.exe")
 
 # --- Multi-rank GIN/composite barrier functional test (separate MPI binary) ---
@@ -104,8 +104,8 @@ def _missing_prerequisite():
     """
     if not os.path.isfile(IR_TEST_SRC):
         return f"IR_test.cpp not found at {IR_TEST_SRC}"
-    if not os.path.isfile(HIPCC):
-        return f"hipcc not found at {HIPCC} (set ROCM_PATH)"
+    if not os.path.isfile(AMDCLANGPP):
+        return f"amdclang++ not found at {AMDCLANGPP} (set ROCM_PATH)"
     llvm_dis = os.path.join(ROCM_PATH, "llvm", "bin", "llvm-dis")
     if not os.path.isfile(llvm_dis):
         return f"llvm-dis not found at {llvm_dis} (install ROCm llvm tools for IR device tests)"
@@ -174,9 +174,11 @@ def _build_test_binary():
     gtest_inc = os.path.join(GTEST_ROOT, "include")
     gtest_libdir = _find_gtest_libdir()
     args = [
-        HIPCC,
+        AMDCLANGPP,
+        "-x", "hip",
         f"--offload-arch={ARCH}", "-O0",
         "-D__HIP_PLATFORM_AMD__=1",
+        f"-I{os.path.join(ROCM_PATH, 'include')}",
         # Source wrapper first: cmake -DEMIT_LLVM_IR=OFF does not restage
         # build/include/nccl_device_wrapper.h, so a generated copy can be stale.
         f"-I{IR_DIR}",
@@ -187,6 +189,7 @@ def _build_test_binary():
         IR_TEST_SRC,
         "-Xoffload-linker", BITCODE,
         "-Xoffload-linker", "-plugin-opt=-amdgpu-internalize-symbols=false",
+        f"-L{os.path.join(ROCM_PATH, 'lib')}", "-lamdhip64",
         f"-L{gtest_libdir}", "-lgtest_main", "-lgtest", "-lpthread",
         "-o", TEST_EXE,
     ]
@@ -253,9 +256,12 @@ def _build_gin_mpi_binary():
     rccl_libdir = _find_rccl_libdir()
     mpi_cxx = shutil.which("mpicxx")
     args = [
-        mpi_cxx,
+        AMDCLANGPP,
+        "-x", "hip",
         f"--offload-arch={ARCH}", "-O0",
         "-D__HIP_PLATFORM_AMD__=1",
+        f"-I{os.path.join(ROCM_PATH, 'include')}",
+        f"-I{MPI_INC}",
         f"-I{IR_DIR}",
         f"-I{HIPIFY_INC}",
         f"-I{os.path.join(HIPIFY_INC, 'nccl_device')}",
@@ -264,7 +270,9 @@ def _build_gin_mpi_binary():
         GIN_MPI_TEST_SRC,
         "-Xoffload-linker", BITCODE,
         "-Xoffload-linker", "-plugin-opt=-amdgpu-internalize-symbols=false",
-        # Resolve main here before librccl exposes the RAS client's main symbol.
+        f"-L{rccl_libdir}", f"-Wl,-rpath,{rccl_libdir}", "-lrccl",
+        "-lmpichcxx", "-lmpich",
+        f"-L{os.path.join(ROCM_PATH, 'lib')}", "-lamdhip64",
         f"-L{gtest_libdir}", "-lgtest_main", "-lgtest", "-lpthread",
         f"-L{rccl_libdir}", f"-Wl,-rpath,{rccl_libdir}", "-lrccl",
         "-o", GIN_MPI_TEST_EXE,
@@ -369,7 +377,7 @@ def ir_test_binary():
     logger.info("librccl_device.bc READY at %s (log: %s)", BITCODE, bc_log)
 
     logger.info(
-        "Compiling IR_test.cpp -> %s (hipcc -O0, arch=%s)...", TEST_EXE, ARCH)
+        "Compiling IR_test.cpp -> %s (amdclang++ -O0, arch=%s)...", TEST_EXE, ARCH)
     test_log = _build_test_binary()
     logger.info("IR_test binary BUILT at %s (log: %s)", TEST_EXE, test_log)
     return TEST_EXE
