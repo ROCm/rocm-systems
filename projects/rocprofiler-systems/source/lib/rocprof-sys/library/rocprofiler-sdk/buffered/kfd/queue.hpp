@@ -125,18 +125,20 @@ on_kfd_queue(typename SdkBackend::kfd_queue_record* record, void* data)
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
-inline constexpr auto k_queue = buffered_domain_definition<SdkBackend>{
-    .meta =
-        domain_descriptor{
-            .name  = "kfd_queue",
-            .id    = SdkBackend::BUFFER_TRACING_KFD_QUEUE,
-            .mode  = collection_mode::buffered,
-            .group = domain_group{ .name = "kfd_events" },
-        },
-    .on_records =
-        buffered_callback_dispatcher<SdkBackend, typename SdkBackend::kfd_queue_record,
-                                     on_kfd_queue<SdkBackend, Externals>>::callback,
-    .on_configure = on_kfd_queue_configure<Externals>
-};
+inline constexpr buffered_domain_definition<SdkBackend> k_queue =
+    buffered_domain_definition<SdkBackend>{
+        .meta =
+            domain_descriptor{
+                .name  = "kfd_queue",
+                .id    = SdkBackend::BUFFER_TRACING_KFD_QUEUE,
+                .mode  = collection_mode::buffered,
+                .group = domain_group{ .name = "kfd_events" },
+            },
+        .on_records =
+            buffered_callback_dispatcher<SdkBackend,
+                                         typename SdkBackend::kfd_queue_record,
+                                         on_kfd_queue<SdkBackend, Externals>>::callback,
+        .on_configure = on_kfd_queue_configure<Externals>
+    };
 
 }  // namespace rocprofsys::domains::buffered::kfd

@@ -171,18 +171,19 @@ on_kfd_event_page_migrate(typename SdkBackend::kfd_event_page_migrate_record* re
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
-inline constexpr auto k_event_page_migrate = buffered_domain_definition<SdkBackend>{
-    .meta =
-        domain_descriptor{
-            .name  = "kfd_event_page_migrate",
-            .id    = SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
-            .mode  = collection_mode::buffered,
-            .group = domain_group{ .name = "kfd_events" },
-        },
-    .on_records = buffered_callback_dispatcher<
-        SdkBackend, typename SdkBackend::kfd_event_page_migrate_record,
-        on_kfd_event_page_migrate<SdkBackend, Externals>>::callback,
-    .on_configure = on_kfd_event_page_migrate_configure<Externals>
-};
+inline constexpr buffered_domain_definition<SdkBackend> k_event_page_migrate =
+    buffered_domain_definition<SdkBackend>{
+        .meta =
+            domain_descriptor{
+                .name  = "kfd_event_page_migrate",
+                .id    = SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
+                .mode  = collection_mode::buffered,
+                .group = domain_group{ .name = "kfd_events" },
+            },
+        .on_records = buffered_callback_dispatcher<
+            SdkBackend, typename SdkBackend::kfd_event_page_migrate_record,
+            on_kfd_event_page_migrate<SdkBackend, Externals>>::callback,
+        .on_configure = on_kfd_event_page_migrate_configure<Externals>
+    };
 
 }  // namespace rocprofsys::domains::buffered::kfd

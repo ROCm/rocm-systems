@@ -41,19 +41,19 @@ on_code_object_exit(typename SdkBackend::callback_tracing_record_t record,
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
-inline constexpr auto k_code_object = callback_domain_definition<SdkBackend>{
-    .meta =
-        domain_descriptor{
-            .name  = "code_object",
-            .id    = SdkBackend::CALLBACK_TRACING_CODE_OBJECT,
-            .mode  = collection_mode::callback,
-            .group = std::nullopt,
-        },
-    .on_record =
-        tracing_callback_dispatcher<SdkBackend,
-                                    on_code_object_enter<SdkBackend, Externals>,
-                                    on_code_object_exit<SdkBackend, Externals>>::callback,
-    .on_configure = on_code_object_configure<Externals>
-};
+inline constexpr callback_domain_definition<SdkBackend> k_code_object =
+    callback_domain_definition<SdkBackend>{
+        .meta =
+            domain_descriptor{
+                .name  = "code_object",
+                .id    = SdkBackend::CALLBACK_TRACING_CODE_OBJECT,
+                .mode  = collection_mode::callback,
+                .group = std::nullopt,
+            },
+        .on_record = tracing_callback_dispatcher<
+            SdkBackend, on_code_object_enter<SdkBackend, Externals>,
+            on_code_object_exit<SdkBackend, Externals>>::callback,
+        .on_configure = on_code_object_configure<Externals>
+    };
 
 }  // namespace rocprofsys::domains::callback

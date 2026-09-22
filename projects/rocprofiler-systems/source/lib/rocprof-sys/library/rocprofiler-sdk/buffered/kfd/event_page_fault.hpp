@@ -123,18 +123,19 @@ on_kfd_event_page_fault(typename SdkBackend::kfd_event_page_fault_record* record
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
-inline constexpr auto k_event_page_fault = buffered_domain_definition<SdkBackend>{
-    .meta =
-        domain_descriptor{
-            .name  = "kfd_event_page_fault",
-            .id    = SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
-            .mode  = collection_mode::buffered,
-            .group = domain_group{ .name = "kfd_events" },
-        },
-    .on_records = buffered_callback_dispatcher<
-        SdkBackend, typename SdkBackend::kfd_event_page_fault_record,
-        on_kfd_event_page_fault<SdkBackend, Externals>>::callback,
-    .on_configure = on_kfd_event_page_fault_configure<Externals>
-};
+inline constexpr buffered_domain_definition<SdkBackend> k_event_page_fault =
+    buffered_domain_definition<SdkBackend>{
+        .meta =
+            domain_descriptor{
+                .name  = "kfd_event_page_fault",
+                .id    = SdkBackend::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
+                .mode  = collection_mode::buffered,
+                .group = domain_group{ .name = "kfd_events" },
+            },
+        .on_records = buffered_callback_dispatcher<
+            SdkBackend, typename SdkBackend::kfd_event_page_fault_record,
+            on_kfd_event_page_fault<SdkBackend, Externals>>::callback,
+        .on_configure = on_kfd_event_page_fault_configure<Externals>
+    };
 
 }  // namespace rocprofsys::domains::buffered::kfd
