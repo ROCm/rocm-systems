@@ -810,13 +810,28 @@ static bool inspectorOtelSendAll(int fd, const std::string& request) {
 
 static bool inspectorOtelParseStatus(int fd, int* statusCode) {
   char response[512];
-  ssize_t got = recv(fd, response, sizeof(response) - 1, 0);
-  if (got <= 0) return false;
-  response[got] = '\0';
+  size_t used = 0;
+  char* lineEnd = nullptr;
+  while (used < sizeof(response) - 1 && lineEnd == nullptr) {
+    ssize_t got = recv(fd, response + used, sizeof(response) - 1 - used, 0);
+    if (got < 0) {
+      if (errno == EINTR) continue;
+      return false;
+    }
+    if (got == 0) return false;
+    used += (size_t)got;
+    response[used] = '\0';
+    lineEnd = strstr(response, "\r\n");
+    if (lineEnd == nullptr) lineEnd = strchr(response, '\n');
+  }
 
+  if (lineEnd == nullptr || strncmp(response, "HTTP/", 5) != 0) return false;
   char* space = strchr(response, ' ');
-  if (space == nullptr) return false;
-  *statusCode = atoi(space + 1);
+  if (space == nullptr || space >= lineEnd) return false;
+  char* codeEnd = nullptr;
+  long code = strtol(space + 1, &codeEnd, 10);
+  if (codeEnd == space + 1 || codeEnd > lineEnd || code < 100 || code > 999) return false;
+  *statusCode = (int)code;
   return *statusCode >= 200 && *statusCode < 300;
 }
 
