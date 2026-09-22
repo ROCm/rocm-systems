@@ -299,20 +299,17 @@ test suite.
 
   — naming the resolved runtime and the ROCm version beside it. Run the
   workload under a newer ROCm (`mirage run --image <a newer ROCm image>`
-  is the usual way) or emulate a GPU this ROCm supports — which is the
-  profile's target, or the device a drop-in `--config` describes.
-  The check is deliberately conservative. It warns only when a trusted
-  system executable directly links ROCr through a modern absolute or
-  `$ORIGIN`-based `RUNPATH`, with no loader override or hardware-capability
-  alternative. It stays silent for user-built executables, Python or
-  other programs that load ROCr later with `dlopen`, transitive
-  dependencies, legacy `RPATH`, cache-only resolution, preloads —
-  including a system-wide `/etc/ld.so.preload` — and HSA overrides, as
-  well as set-ID or file-capability executables. Its
-  silence therefore does not rule the cause out. Broader coverage can be
-  added later with a bounded, loader-equivalent static resolver; the
-  preflight must never execute workload code or guess which runtime will
-  load.
+  is the usual way), or emulate a GPU this ROCm supports: a session's
+  target comes from its profile, or from the device a drop-in `--config`
+  describes. The check is deliberately conservative — it warns only for a
+  trusted system executable that links ROCr directly through a modern
+  absolute or `$ORIGIN`-based `RUNPATH`, with no loader override or
+  hardware-capability alternative in the way. Everything else stays
+  silent: user-built executables, anything that loads ROCr later with
+  `dlopen` (Python included), transitive dependencies, legacy `RPATH`,
+  cache-only resolution, preloads including a system-wide
+  `/etc/ld.so.preload`, HSA overrides, and set-ID or file-capability
+  executables. Its silence therefore does not rule this cause out.
 - **A backend reported as not installed** — run `mirage emulators -l`
   first. It prints every path that was searched for that backend's
   library and the environment variables that would resolve it, which is

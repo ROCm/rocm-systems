@@ -226,7 +226,7 @@ fn dropin_config_keeps_its_runtime_dir_inside_the_session() {
     // reopens this path for the life of the session, so it has to be a
     // document the session owns and an edit cannot retarget.
     assert_eq!(
-        std::fs::read_to_string(runtime_dir.join("config_path")).unwrap(),
+        std::fs::read_to_string(runtime_dir.join(mirage_rocjitsu::CONFIG_PATH_NAME)).unwrap(),
         format!(
             "{}\n",
             mirage_rocjitsu::rj_config_path(&session_dir).display()

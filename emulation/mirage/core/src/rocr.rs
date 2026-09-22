@@ -2,7 +2,7 @@
 //! how to enumerate.
 //!
 //! An emulated device is only half of a working session. mirage (through
-//! rocjitsu) synthesises a KFD node for the GPU a profile describes, and
+//! rocjitsu) synthesises a KFD node for the GPU a session emulates, and
 //! then something has to *recognise* it: `libhsa-runtime64.so`, the ROCm
 //! runtime the workload itself loads, reads that node's
 //! `gfx_target_version`, looks the ISA up in the table it was compiled
@@ -19,7 +19,15 @@
 //!
 //! So mirage asks the question before each workload starts. Which ROCm
 //! runtime does this command's dynamic loader resolve, and can its image
-//! rule out the ISA the profile emulates?
+//! rule out the ISA the session emulates?
+//!
+//! "The session", throughout, and never "the profile". The two usually
+//! name the same GPU and a profile is the usual way to choose it, but a
+//! drop-in `--config` describes a device of its own, and what a session
+//! emulates is read from the configuration it was brought up on. The
+//! terminology matters at the one point it is visible: the warning below
+//! tells a user what to change, and naming the profile would send
+//! somebody to edit an input that is not deciding it.
 //!
 //! # Why the answer is read out of the library's own image
 //!
@@ -28,17 +36,15 @@
 //! initialise ROCr in mirage's own process rather than inspect the
 //! library and environment selected for the workload. What the binary
 //! does guarantee is one-way: every ISA in the registry leaves its
-//! target name in the image. Other ROCr subsystems leave target names
-//! there too, so presence is inconclusive, but absence from a
-//! recognisably complete ROCr image rules support out.
+//! target name in the image, and other ROCr subsystems — legacy
+//! code-object conversion among them — leave target names there too. So
+//! presence proves nothing, and only absence from a recognisably
+//! complete ROCr image is a verdict.
 //!
-//! That is evidence rather than an interface, and this module is built
-//! to fail towards silence because of it. A target name appearing in
-//! the image proves nothing: ROCr also embeds names used only for legacy
-//! code-object conversion. Only absence from a recognisably complete
-//! image is a verdict. A missing loader answer, an unreadable runtime, a
-//! target mention, or too few target references all yield no verdict.
-//! Even a verdict warns rather than refuses, because this diagnostic
+//! That is evidence rather than an interface, so this module fails
+//! towards silence: a missing loader answer, an unreadable runtime, a
+//! target mention, or too few target references all yield no verdict,
+//! and even a verdict warns rather than refuses, because this diagnostic
 //! must never block a run that would have worked.
 
 use std::collections::BTreeSet;
@@ -55,7 +61,10 @@ use rustix::io::Errno;
 /// The ROCm runtime SONAME the dynamic loader actually resolves. Unlike
 /// the unversioned development symlink, this name exists in a
 /// runtime-only install and is what a workload's `DT_NEEDED` requests.
-pub const ROCR_SONAME: &str = "libhsa-runtime64.so.1";
+///
+/// Private: it is what this module recognises a runtime by, not
+/// something anything outside it has to agree with.
+const ROCR_SONAME: &str = "libhsa-runtime64.so.1";
 
 /// How many plausible ISA names must be found in a library's image
 /// before the absence of one more is worth reporting.
@@ -68,6 +77,18 @@ pub const ROCR_SONAME: &str = "libhsa-runtime64.so.1";
 /// 7.0.2.2 references forty-five. Ten is far below a real image and far
 /// above an accident.
 const MIN_PLAUSIBLE_TARGET_REFERENCES: usize = 10;
+
+/// The largest workload executable this probe will read.
+///
+/// Both images are read whole, so both need a ceiling, and over it there
+/// is no verdict — the answer everything else this probe cannot do
+/// gives. An executable this size is not one whose `DT_RUNPATH` is worth
+/// a diagnostic.
+const MAX_EXECUTABLE_BYTES: u64 = 256 * 1024 * 1024;
+
+/// The largest runtime image this probe will scan. Looser than
+/// [`MAX_EXECUTABLE_BYTES`] because a debug ROCr legitimately is large.
+const MAX_RUNTIME_BYTES: u64 = 512 * 1024 * 1024;
 
 /// The shortest run of characters after `gfx` that can be a whole
 /// target name.
@@ -97,7 +118,7 @@ pub enum TargetSupport {
 /// with everything needed to say so usefully.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnsupportedTarget {
-    /// The ISA the profile emulates, e.g. `gfx1250`.
+    /// The ISA the session emulates, e.g. `gfx1250`.
     pub target: String,
     /// The ROCm runtime mirage found, which is the one the workload is
     /// expected to load.
@@ -116,17 +137,8 @@ impl UnsupportedTarget {
     ///
     /// The symptom is spelled out rather than left implied. "ROCr does
     /// not support gfx1250" is only actionable to somebody who already
-    /// knows what ROCr does with an agent it cannot name, and the whole
-    /// reason this exists is that the visible behaviour — a session that
-    /// starts, a command that runs, an exit status of 0 — looks like
-    /// success.
-    ///
-    /// It says "this session" rather than "this profile" because those
-    /// are not always the same answer: a drop-in `--config` names a
-    /// device of its own, and the ISA reported here is read from the
-    /// configuration the session was actually brought up on. Naming the
-    /// profile would send a user to edit the one input that is not
-    /// deciding this.
+    /// knows what ROCr does with an agent it cannot name, and the module
+    /// documentation says why that is the whole point.
     #[must_use]
     pub fn explain(&self) -> String {
         let version = self
@@ -292,7 +304,7 @@ fn locate_for_process(
     let executable = trusted_system_file(&executable)?;
     unprivileged_executable(&executable)?;
     let metadata = executable.metadata().ok()?;
-    (metadata.len() <= 256 * 1024 * 1024).then_some(())?;
+    (metadata.len() <= MAX_EXECUTABLE_BYTES).then_some(())?;
     let image = std::fs::read(&executable).ok()?;
     let runtime = direct_runpath_runtime(&executable, &image, true)?;
     trusted_system_file(&runtime)
@@ -357,7 +369,7 @@ fn direct_runpath_runtime(
                 if require_trusted_paths {
                     candidate = trusted_system_file(&candidate)?;
                 }
-                (candidate.metadata().ok()?.len() <= 512 * 1024 * 1024).then_some(())?;
+                (candidate.metadata().ok()?.len() <= MAX_RUNTIME_BYTES).then_some(())?;
                 let candidate_image = std::fs::read(&candidate).ok()?;
                 let Object::Elf(candidate_elf) = Object::parse(&candidate_image).ok()? else {
                     return None;
@@ -491,21 +503,15 @@ fn legacy_combination_runtime_exists(
                 if used & bit != 0 {
                     continue;
                 }
-                let mut path = parent.join(component);
+                let path = parent.join(component);
                 match path.metadata() {
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
                     Err(_) => return None,
                     Ok(metadata) if !metadata.is_dir() => continue,
                     Ok(_) => {}
                 }
-                if require_trusted_paths {
-                    path = trusted_system_directory(&path)?;
-                }
-                let runtime = path.join(ROCR_SONAME);
-                if runtime.is_file() {
-                    if require_trusted_paths {
-                        trusted_system_file(&runtime)?;
-                    }
+                let (path, found) = searchable_directory(&path, require_trusted_paths)?;
+                if found {
                     return Some(true);
                 }
                 next.push((path, used | bit));
@@ -518,10 +524,7 @@ fn legacy_combination_runtime_exists(
 
 /// Whether a modern `<dir>/glibc-hwcaps/<level>` holds a ROCr.
 fn hwcap_runtime_exists(hwcaps: &Path, require_trusted_paths: bool) -> Option<bool> {
-    let mut hwcaps = hwcaps.to_path_buf();
-    if require_trusted_paths {
-        hwcaps = trusted_system_directory(&hwcaps)?;
-    }
+    let (hwcaps, _) = searchable_directory(hwcaps, require_trusted_paths)?;
     let listing = match std::fs::read_dir(hwcaps) {
         Ok(listing) => listing,
         // The same race, and the same answer: no alternative here.
@@ -529,23 +532,40 @@ fn hwcap_runtime_exists(hwcaps: &Path, require_trusted_paths: bool) -> Option<bo
         Err(_) => return None,
     };
     for entry in listing {
-        let entry = entry.ok()?;
-        let mut path = entry.path();
+        let path = entry.ok()?.path();
         if !path.is_dir() {
             continue;
         }
-        if require_trusted_paths {
-            path = trusted_system_directory(&path)?;
-        }
-        let runtime = path.join(ROCR_SONAME);
-        if runtime.is_file() {
-            if require_trusted_paths {
-                trusted_system_file(&runtime)?;
-            }
+        if searchable_directory(&path, require_trusted_paths)?.1 {
             return Some(true);
         }
     }
     Some(false)
+}
+
+/// One directory the loader could search, as this probe is able to see
+/// it: the path to descend from, and whether a ROCr sits in it.
+///
+/// `None` declines the verdict, which is what a directory or a runtime
+/// this probe cannot vouch for has to do — that one the loader *will*
+/// search, so being unable to judge it is being unable to judge the
+/// answer. The returned path is the canonical one the trust check
+/// produced, so a caller that descends further descends from the
+/// directory it actually checked.
+fn searchable_directory(directory: &Path, require_trusted_paths: bool) -> Option<(PathBuf, bool)> {
+    let directory = if require_trusted_paths {
+        trusted_system_directory(directory)?
+    } else {
+        directory.to_path_buf()
+    };
+    let runtime = directory.join(ROCR_SONAME);
+    if !runtime.is_file() {
+        return Some((directory, false));
+    }
+    if require_trusted_paths {
+        trusted_system_file(&runtime)?;
+    }
+    Some((directory, true))
 }
 
 fn trusted_system_file(path: &Path) -> Option<PathBuf> {
@@ -647,10 +667,9 @@ fn verdict(target: &str, runtime: &Path, version: Option<String>, image: &[u8]) 
         return TargetSupport::Unknown;
     }
     if mentions(image, target) {
-        // ROCr contains names that its ISA registry does not: notably
-        // gfx600/601/602 for legacy code-object conversion. A mention is
-        // therefore not proof of support. Absence is still proof of
-        // non-support once the image is recognisably complete.
+        // The concrete reason presence is inconclusive: ROCr carries
+        // names its ISA registry does not, notably gfx600/601/602 for
+        // legacy code-object conversion.
         return TargetSupport::Unknown;
     }
     TargetSupport::Unsupported(Box::new(UnsupportedTarget {
@@ -1306,19 +1325,35 @@ mod tests {
         );
     }
 
+    /// The loader search lists, and the variables that name an object to
+    /// load or a version to report.
+    ///
+    /// One transcription of each for the whole module. The tests below
+    /// assert different things about the same two lists, and three copies
+    /// of them would start drifting from each other before they drifted
+    /// from [`loader_resolution_env_var`] and [`ambiguous_probe_env_var`].
+    const SEARCH_LIST_VARS: &[&str] = &[
+        "LD_LIBRARY_PATH",
+        "LD_ORIGIN_PATH",
+        "LD_HWCAP_MASK",
+        "LD_ASSUME_KERNEL",
+        "GLIBC_TUNABLES",
+    ];
+    const NAMED_OBJECT_VARS: &[&str] = &[
+        "LD_PRELOAD",
+        "LD_AUDIT",
+        "HSA_OVERRIDE_GFX_VERSION",
+        "HSA_OVERRIDE_GFX_VERSION_0",
+        "HSA_OVERRIDE_GFX_VERSION_17",
+    ];
+
     /// Preloads can replace the runtime's symbols, HSA overrides change
     /// which ISA is looked up, and loader-selection variables can
     /// select user-controlled transitive dependencies. None permits a
     /// safe verdict from a loader trace.
     #[test]
     fn preload_and_hsa_overrides_make_the_answer_ambiguous() {
-        for key in [
-            "LD_PRELOAD",
-            "LD_AUDIT",
-            "HSA_OVERRIDE_GFX_VERSION",
-            "HSA_OVERRIDE_GFX_VERSION_0",
-            "HSA_OVERRIDE_GFX_VERSION_17",
-        ] {
+        for &key in NAMED_OBJECT_VARS {
             let env = [(OsString::from(key), OsString::from("set"))]
                 .into_iter()
                 .collect();
@@ -1375,13 +1410,7 @@ mod tests {
     /// merely mentions `LD_PRELOAD` would silence the diagnostic.
     #[test]
     fn an_emptied_search_list_is_ambiguous_but_an_empty_preload_is_not() {
-        for key in [
-            "LD_LIBRARY_PATH",
-            "LD_ORIGIN_PATH",
-            "LD_HWCAP_MASK",
-            "LD_ASSUME_KERNEL",
-            "GLIBC_TUNABLES",
-        ] {
+        for &key in SEARCH_LIST_VARS {
             let env = [(OsString::from(key), OsString::new())]
                 .into_iter()
                 .collect();
@@ -1391,12 +1420,7 @@ mod tests {
             );
         }
 
-        for key in [
-            "LD_PRELOAD",
-            "LD_AUDIT",
-            "HSA_OVERRIDE_GFX_VERSION",
-            "HSA_OVERRIDE_GFX_VERSION_0",
-        ] {
+        for &key in NAMED_OBJECT_VARS {
             let env = [(OsString::from(key), OsString::new())]
                 .into_iter()
                 .collect();
@@ -1409,17 +1433,10 @@ mod tests {
 
     #[test]
     fn every_loader_input_is_deduplicated_and_redirects_are_ambiguous() {
-        for key in [
-            "PATH",
-            "LD_LIBRARY_PATH",
-            "LD_ORIGIN_PATH",
-            "LD_HWCAP_MASK",
-            "LD_ASSUME_KERNEL",
-            "GLIBC_TUNABLES",
-            "LD_PRELOAD",
-            "LD_AUDIT",
-            "HSA_OVERRIDE_GFX_VERSION_0",
-        ] {
+        for &key in std::iter::once(&"PATH")
+            .chain(SEARCH_LIST_VARS)
+            .chain(NAMED_OBJECT_VARS)
+        {
             assert!(
                 affects_process_probe(key),
                 "{key} can change the probe answer"
@@ -1430,13 +1447,7 @@ mod tests {
             "unrelated workload setup must not split deduplication"
         );
 
-        for key in [
-            "LD_LIBRARY_PATH",
-            "LD_ORIGIN_PATH",
-            "LD_HWCAP_MASK",
-            "LD_ASSUME_KERNEL",
-            "GLIBC_TUNABLES",
-        ] {
+        for &key in SEARCH_LIST_VARS {
             let effective = [(OsString::from(key), OsString::from("set"))]
                 .into_iter()
                 .collect();
