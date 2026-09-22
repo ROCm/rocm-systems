@@ -269,6 +269,9 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
     throw std::runtime_error("graphics user clip planes are not implemented");
   if (context_[0x1b] & (1u << 6)) // DB_SHADER_CONTROL.KILL_ENABLE
     throw std::runtime_error("graphics fragment discard is not implemented");
+  const uint32_t polygon_mode = (context_[0x207] >> 3) & 3;
+  if (polygon_mode && (polygon_mode != 1 || ((context_[0x207] >> 5) & 63) != (2 | (2 << 3))))
+    throw std::runtime_error("graphics point or line polygon modes are not implemented");
   if (context_[0x2f9] != 0x2d)
     throw std::runtime_error("unsupported graphics pixel center or subpixel rounding");
   const uint32_t info = context_[0x3b0];

@@ -202,7 +202,7 @@ TEST_P(GraphicsExportTest, ParameterLoadUsesQuadMaskAndPrimitiveOffsets) {
 
 TEST_P(GraphicsExportTest, RectangleRunsFragmentWavesAndWritesOnlyCoveredPixels) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
-  for (uint32_t scenario = 0; scenario < 10; ++scenario) {
+  for (uint32_t scenario = 0; scenario < 15; ++scenario) {
     SCOPED_TRACE(scenario);
     for (uint32_t y = 0; y < 4; ++y)
       for (uint32_t x = 0; x < 4; ++x) {
@@ -261,6 +261,12 @@ TEST_P(GraphicsExportTest, RectangleRunsFragmentWavesAndWritesOnlyCoveredPixels)
       state.context_registers[gfx12 ? 0x216 : 0x202] = 0xcc0020;
     if (scenario == 9)
       state.context_registers[gfx12 ? 0x216 : 0x202] = 0xcc0018;
+    if (scenario >= 10) {
+      // Dual polygon mode: lines, points, mixed faces, invalid mode, and filled faces.
+      constexpr uint32_t modes[] = {8 | (1 << 5) | (1 << 8), 8, 8 | (2 << 5) | (1 << 8),
+                                    16 | (2 << 5) | (2 << 8), 8 | (2 << 5) | (2 << 8)};
+      state.context_registers[gfx12 ? 0x207 : 0x205] = modes[scenario - 10];
+    }
     const float extent = scenario == 1 ? 0.625f : 1.0f;
     auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
     for (uint32_t i = 0; i < 3; ++i) {
@@ -273,7 +279,8 @@ TEST_P(GraphicsExportTest, RectangleRunsFragmentWavesAndWritesOnlyCoveredPixels)
     }
     draw->export_lane(*wave_, 0, 20, 1,
                       {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
-    if (scenario == 3 || scenario == 5 || scenario == 6 || scenario == 8 || scenario == 9) {
+    if (scenario == 3 || scenario == 5 || scenario == 6 || scenario == 8 || scenario == 9 ||
+        (scenario >= 10 && scenario < 14)) {
       EXPECT_THROW(draw->advance(memory_, 0), std::runtime_error);
       continue;
     }
