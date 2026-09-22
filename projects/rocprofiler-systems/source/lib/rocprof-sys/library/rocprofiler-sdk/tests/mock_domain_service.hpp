@@ -74,7 +74,7 @@ using buffer_tracing_kind_t   = std::size_t;
 using callback_tracing_kind_t = std::size_t;
 using buffer_policy_t         = int;
 using on_records_cb_t         = void (*)(context_id_t, buffer_id_t, record_header_t**,
-                                         std::size_t, void*, std::uint64_t);
+                                 std::size_t, void*, std::uint64_t);
 using on_record_cb_t          = void (*)(callback_tracing_record_t, user_data_t*, void*);
 
 struct agent_id_t
@@ -984,7 +984,6 @@ struct externals
     };
 
     static bool is_active() { return true; }
-    static bool get_use_timemory() { return false; }
 
     template <typename CategoryT>
     static void tracing_push_timemory(CategoryT, std::string_view /*name*/)
