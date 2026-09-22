@@ -2598,19 +2598,22 @@ void CommandProcessor::fetch_pm4(HwQueue &queue, HwQueueState &qs, simdojo::Tick
         }
         break;
       }
-      case Pm4Opcode::LoadShRegIndex: {
+      case Pm4Opcode::LoadShRegIndex:
+      case Pm4Opcode::LoadContextRegIndex: {
         require(4);
         const uint32_t first = words[2], count = words[3];
+        const std::span<uint32_t> registers = opcode == uint32_t(Pm4Opcode::LoadShRegIndex)
+                                                  ? std::span<uint32_t>(state.sh_registers)
+                                                  : std::span<uint32_t>(state.context_registers);
         // Direct-address mode, contiguous values (no register/value pairs).
-        if ((words[0] & 3) || !count || first >= state.sh_registers.size() ||
-            count > state.sh_registers.size() - first)
-          throw std::runtime_error("unsupported LOAD_SH_REG_INDEX range or mode");
+        if ((words[0] & 3) || !count || first >= registers.size() ||
+            count > registers.size() - first)
+          throw std::runtime_error("unsupported register load range or mode");
         flush_gpu_caches();
         if (memory_->read_block_exact(
-                address(0),
-                {reinterpret_cast<uint8_t *>(state.sh_registers.data() + first), count * 4},
+                address(0), {reinterpret_cast<uint8_t *>(registers.data() + first), count * 4},
                 queue.process_id) != AccessOutcome::Complete)
-          throw std::runtime_error("PM4 LOAD_SH_REG_INDEX read failed");
+          throw std::runtime_error("PM4 register load read failed");
         break;
       }
       case Pm4Opcode::SetShReg:

@@ -59,6 +59,7 @@ enum class Pm4Opcode : uint32_t {
   DmaData = 0x50,
   AcquireMem = 0x58,
   LoadShRegIndex = 0x63,
+  LoadContextRegIndex = 0x9f,
   SetShReg = 0x76,
   SetShRegIndex = 0x9b,
   SetUconfigReg = 0x79,

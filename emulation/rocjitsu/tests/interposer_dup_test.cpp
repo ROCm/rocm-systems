@@ -798,6 +798,64 @@ TEST_F(InterposerPm4Test, GraphicsRegistersRetainAllPacketForms) {
     EXPECT_EQ(memory_[1536 + i], expected[i]) << "register " << std::hex << registers[i];
 }
 
+TEST_F(InterposerPm4Test, ContextRegisterLoadReadsMemoryAndPreservesAdjacentRegisters) {
+  const uint32_t packet[] = {0xc0046900,
+                             0x300,
+                             11,
+                             22,
+                             33,
+                             44,
+                             0xc0039f00,
+                             uint32_t(kAddress + 4096),
+                             uint32_t(kAddress >> 32),
+                             0x301,
+                             2,
+                             0xc0044000,
+                             5u << 8,
+                             0xa300,
+                             0,
+                             uint32_t(kAddress + 6144),
+                             uint32_t(kAddress >> 32),
+                             0xc0044000,
+                             5u << 8,
+                             0xa301,
+                             0,
+                             uint32_t(kAddress + 6148),
+                             uint32_t(kAddress >> 32),
+                             0xc0044000,
+                             5u << 8,
+                             0xa302,
+                             0,
+                             uint32_t(kAddress + 6152),
+                             uint32_t(kAddress >> 32),
+                             0xc0044000,
+                             5u << 8,
+                             0xa303,
+                             0,
+                             uint32_t(kAddress + 6156),
+                             uint32_t(kAddress >> 32)};
+  memory_[1024] = 55;
+  memory_[1025] = 66;
+  std::memcpy(memory_, packet, sizeof(packet));
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(std::size(packet), false, &sequence, AMDGPU_HW_IP_GFX), 0);
+  ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), 0);
+  EXPECT_EQ(memory_[1536], 11);
+  EXPECT_EQ(memory_[1537], 55);
+  EXPECT_EQ(memory_[1538], 66);
+  EXPECT_EQ(memory_[1539], 44);
+}
+
+TEST_F(InterposerPm4Test, ContextRegisterLoadRejectsRangeOverflow) {
+  const uint32_t packet[] = {0xc0039f00, uint32_t(kAddress + 4096), uint32_t(kAddress >> 32),
+                             0x1fff, 2};
+  std::memcpy(memory_, packet, sizeof(packet));
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(std::size(packet), false, &sequence, AMDGPU_HW_IP_GFX), 0);
+  EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), -1);
+  EXPECT_EQ(errno, EIO);
+}
+
 TEST_F(InterposerPm4Test, MalformedPackedGraphicsRegistersFailFence) {
   const uint32_t packet[] = {0xc003b900, 4, 0x03010300, 0x11111111, 0x22222222};
   std::memcpy(memory_, packet, sizeof(packet));

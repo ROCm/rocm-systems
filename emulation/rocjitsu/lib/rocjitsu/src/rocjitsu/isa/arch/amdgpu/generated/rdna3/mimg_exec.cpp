@@ -6,22 +6,39 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/mimg.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_transfer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstring>
 #include <limits>
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna3 {
 
 void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.srsrc * 4, inst_.vdata,
+          {inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u,
+           inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u},
+          inst_.dim, inst_.dmask, inst_.d16, inst_.r128 || inst_.a16 || inst_.tfe))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageLoadMipMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -50,8 +67,17 @@ void ImageLoadMipPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.srsrc * 4, inst_.vdata,
+          {inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u,
+           inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u},
+          inst_.dim, inst_.dmask, inst_.d16, inst_.r128 || inst_.a16 || inst_.tfe))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageStoreMipMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -142,7 +168,18 @@ void ImageBvh64IntersectRayMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageSampleMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.srsrc * 4, inst_.vdata,
+          {inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u,
+           inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.a16 || inst_.tfe || inst_.unorm || inst_.lwe, inst_.ssamp * 4))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleDMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -158,7 +195,18 @@ void ImageSampleBMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageSampleLzMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.srsrc * 4, inst_.vdata,
+          {inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u,
+           inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.a16 || inst_.tfe || inst_.unorm || inst_.lwe, inst_.ssamp * 4))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCMimg::execute_impl(amdgpu::Wavefront &wf) {

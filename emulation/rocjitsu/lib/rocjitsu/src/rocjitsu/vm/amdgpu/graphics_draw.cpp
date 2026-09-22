@@ -34,6 +34,42 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
       (primitive_type_ != kTriangleList && primitive_type_ != kTriangleStrip &&
        primitive_type_ != kRectangleList))
     throw std::runtime_error("unsupported graphics primitive, vertex count, or instance count");
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
+    // Normalize relocated registers into the GFX12 slots used below. Read the
+    // original snapshot because several source and destination slots overlap.
+    const auto &ctx = state.context_registers;
+    for (const auto [dst, src] : {std::pair{0x1c, 0x200},
+                                  {0x190, 0x1b6},
+                                  {0x195, 0x1c5},
+                                  {0x198, 0x1b4},
+                                  {0x205, 0x206},
+                                  {0x207, 0x205},
+                                  {0x214, 0x8e},
+                                  {0x319, 0x31b},
+                                  {0x31b, 0x31d},
+                                  {0x31f, 0x3b8},
+                                  {0x3b0, 0x31c}})
+      context_[dst] = ctx[src];
+    context_[0x31a] = 0;
+    if ((ctx[0x8e] && (ctx[0x31e] & (1u << 22))) || ((ctx[0x200] & 2) && (ctx[0x10] & (1u << 29))))
+      throw std::runtime_error("GFX11 compressed attachments require RADV_DEBUG=nodcc,nohiz");
+    context_[0x31e] = (ctx[0x3b0] & 0x3fff) | (((ctx[0x3b0] >> 14) & 0x3fff) << 16);
+    if (ctx[0x3b0] >> 28)
+      throw std::runtime_error("graphics color mip levels are not implemented");
+    for (uint32_t i = 0; i < 32; ++i)
+      context_[0x199 + i] = ctx[0x191 + i];
+    sh_[0x31] = ((ctx[0x1b1] >> 1) & 31) | ((ctx[0x1b6] & 63) << 11);
+    sh_[0x84] = state.sh_registers[0x88];
+    sh_[0x85] = state.sh_registers[0x89];
+    context_[5] = (ctx[7] & 0x3fff) | (((ctx[7] >> 16) & 0x3fff) << 16);
+    context_[6] = ctx[0x10];
+    context_[8] = ctx[0x12];
+    context_[9] = ctx[0x1a];
+    context_[10] = ctx[0x14];
+    context_[11] = ctx[0x1c];
+    context_[1] = ctx[2] & 0xc0ffffff;
+    context_[2] = ctx[2] & 0x3f000000;
+  }
   select_vertex_group();
   if (!indices_.empty() && indices_.size() != total_vertices_)
     throw std::runtime_error("graphics index count does not match draw");
@@ -223,8 +259,7 @@ DispatchEntry GraphicsDraw::fragment_dispatch() const {
 }
 
 void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
-  if (arch_ != ROCJITSU_CODE_ARCH_RDNA4)
-    throw std::runtime_error("graphics rasterization currently requires RDNA4");
+  const bool gfx12 = arch_ == ROCJITSU_CODE_ARCH_RDNA4;
   if (context_[0x2f9] != 0x2d)
     throw std::runtime_error("unsupported graphics pixel center or subpixel rounding");
   const uint32_t info = context_[0x3b0];
@@ -239,10 +274,10 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
   if (depth_control_ & ~0x76u)
     throw std::runtime_error("unsupported graphics stencil or depth bounds test");
   if (color_enabled_ &&
-      ((info & 31) != 10 || (((info >> 8) & 31) != 0 && ((info >> 8) & 31) != 4) || attrib ||
-       (attrib3 & 0xf83fff) || context_[0x31a] || context_[0x319] ||
-       (context_[0x1e0] & (1u << 30)) || context_[0x214] != 15 ||
-       (color_format_ != 4 && color_format_ != 7 && color_format_ != 9)))
+      ((info & 31) != 10 || (((info >> 8) & 31) != 0 && ((info >> 8) & 31) != 4) ||
+       (attrib & (gfx12 ? ~0u : ~0x30u)) || (attrib3 & (gfx12 ? 0xf83fffu : 0x3fffu)) ||
+       context_[0x31a] || context_[0x319] || (context_[0x1e0] & (1u << 30)) ||
+       context_[0x214] != 15 || (color_format_ != 4 && color_format_ != 7 && color_format_ != 9)))
     throw std::runtime_error("unsupported graphics color or blend state");
   if (context_[0x198] != 2)
     throw std::runtime_error("unsupported graphics fragment inputs");
@@ -260,7 +295,9 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
         ((uint64_t{context_[11] & 255} << 32) | context_[10]) << 8);
     util::Logger::cp("graphics depth info=", std::hex, zinfo, " view=", context_[1], ",",
                      context_[2], " base=", depth_base_, " write=", write_base, std::dec);
-    if (((zinfo & 15) != 3 && (zinfo & 15) != 1) || (zinfo & (31u << 15)) || depth_swizzle_ > 4 ||
+    if (((zinfo & 15) != 3 && (zinfo & 15) != 1) || (zinfo & (31u << 15)) ||
+        !(gfx12 ? gfx12_image_offset(0, 0, depth_width_, depth_bytes_, depth_swizzle_)
+                : gfx11_image_offset(0, 0, depth_width_, depth_bytes_, depth_swizzle_)) ||
         context_[1] || (context_[2] & 0x7c000000u) ||
         ((depth_control_ & 4) && ((context_[2] & (1u << 24)) || depth_base_ != write_base)))
       throw std::runtime_error("unsupported graphics depth surface");
@@ -275,8 +312,9 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
   }
   if (width_ > 4096 || height_ > 4096)
     throw std::runtime_error("graphics render target exceeds supported dimensions");
-  swizzle_ = (attrib3 >> 15) & 7;
-  if (swizzle_ > 4)
+  swizzle_ = gfx12 ? (attrib3 >> 15) & 7 : (attrib3 >> 14) & 31;
+  if (!(gfx12 ? gfx12_image_offset(0, 0, width_, 4, swizzle_)
+              : gfx11_image_offset(0, 0, width_, 4, swizzle_)))
     throw std::runtime_error("unsupported graphics surface layout");
   color_base_ = addr_calc::buffer_virtual_address(
       ((uint64_t{context_[0x390] & 255} << 32) | context_[0x318]) << 8);
@@ -315,7 +353,8 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
     };
     std::array<Point, 3> v{}, screen{};
     for (uint32_t k = 0; k < 3; ++k) {
-      indices[k] = (primitives_[p] >> (9 * k)) & 511;
+      const uint32_t index_bits = gfx12 ? 9 : 10;
+      indices[k] = (primitives_[p] >> (index_bits * k)) & ((1u << index_bits) - 1);
       if (indices[k] >= vertex_count_)
         throw std::runtime_error("graphics primitive index exceeds vertex exports");
       const auto &position = positions_[indices[k]];
@@ -384,7 +423,7 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
     std::vector<uint32_t> parameters(attributes * 12);
     for (uint32_t a = 0; a < attributes; ++a) {
       const uint32_t control = context_[0x199 + a];
-      if (control & ~0x33fu)
+      if (control & ~0x100033fu)
         throw std::runtime_error("unsupported graphics parameter interpolation");
       for (uint32_t c = 0; c < 4; ++c) {
         std::array<float, 3> values{};
@@ -462,6 +501,8 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
 }
 
 void GraphicsDraw::write_outputs(GpuMemory &memory, uint32_t process_id) {
+  const auto image_address =
+      arch_ == ROCJITSU_CODE_ARCH_RDNA4 ? gfx12_image_address : gfx11_image_address;
   for (const auto &batch : fragments_) {
     for (uint32_t lane = 0; lane < fragment_wave_size_; ++lane) {
       const auto &f = batch.lanes[lane];
@@ -469,7 +510,7 @@ void GraphicsDraw::write_outputs(GpuMemory &memory, uint32_t process_id) {
         continue;
       if (depth_control_ & 2) {
         const auto address =
-            gfx12_image_address(depth_base_, f.x, f.y, depth_width_, depth_bytes_, depth_swizzle_);
+            image_address(depth_base_, f.x, f.y, depth_width_, depth_bytes_, depth_swizzle_);
         uint32_t previous_bits = 0;
         if (!address || memory.read_block_exact(
                             *address, {reinterpret_cast<uint8_t *>(&previous_bits), depth_bytes_},
@@ -534,7 +575,7 @@ void GraphicsDraw::write_outputs(GpuMemory &memory, uint32_t process_id) {
       }
       std::array<uint8_t, 4> bytes{};
       pack_buffer_format(memory_format_, 0xfac, components, bytes);
-      const auto address = gfx12_image_address(color_base_, f.x, f.y, width_, 4, swizzle_);
+      const auto address = image_address(color_base_, f.x, f.y, width_, 4, swizzle_);
       if (!address || memory.write_block(*address, bytes, process_id) != AccessOutcome::Complete)
         throw std::runtime_error("graphics color write failed");
     }

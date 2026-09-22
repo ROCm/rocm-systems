@@ -7614,27 +7614,50 @@ class CodeGenerator:
         # single base+width Operand cannot express -- so decode it from the
         # machine-inst fields here. ``vdata`` and ``rsrc`` are field-bearing
         # and already modeled.
-        if self.isa_spec.arch_name == 'rdna4' and inst.name.upper() in (
+        if self.isa_spec.arch_name in (
+            'rdna3',
+            'rdna3_5',
+            'rdna4',
+        ) and inst.name.upper() in (
             'IMAGE_LOAD',
             'IMAGE_STORE',
             'IMAGE_SAMPLE',
             'IMAGE_SAMPLE_LZ',
         ):
+            gfx12 = self.isa_spec.arch_name == 'rdna4'
             sample = inst.name.upper() in ('IMAGE_SAMPLE', 'IMAGE_SAMPLE_LZ')
             load = inst.name.upper() != 'IMAGE_STORE'
-            counter = 'SAMPLECNT' if sample else ('LOADCNT' if load else 'STORECNT')
-            sampler = ', inst_.samp' if sample else ''
-            unsupported = 'inst_.r128 || inst_.a16 || inst_.tfe || inst_.nv'
+            counter = (
+                'SAMPLECNT' if sample and gfx12 else ('LOADCNT' if load else 'STORECNT')
+            )
+            resource = 'inst_.rsrc' if gfx12 else 'inst_.srsrc * 4'
+            sampler = (
+                (', inst_.samp' if gfx12 else ', inst_.ssamp * 4') if sample else ''
+            )
+            unsupported = 'inst_.r128 || inst_.a16 || inst_.tfe'
+            if gfx12:
+                unsupported += ' || inst_.nv'
             if sample:
                 unsupported += ' || inst_.unorm || inst_.lwe'
+            coords = (
+                '{inst_.vaddr0, inst_.vaddr1, inst_.vaddr2}'
+                if gfx12
+                else '{inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u, '
+                'inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u}'
+            )
+            mtype = (
+                'amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th)'
+                if gfx12
+                else 'amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc)'
+            )
             return '\n'.join(
                 [
                     '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
                     f'  d->is_load = {str(load).lower()};',
-                    '  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);',
+                    f'  d->mtype = {mtype};',
                     f'  d->wait_counter_type = amdgpu::WaitCounterType::{counter};',
-                    '  if (!amdgpu::prepare_image_transfer(wf, *d, inst_.rsrc, inst_.vdata,',
-                    '      {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2}, inst_.dim, inst_.dmask, inst_.d16,',
+                    f'  if (!amdgpu::prepare_image_transfer(wf, *d, {resource}, inst_.vdata,',
+                    f'      {coords}, inst_.dim, inst_.dmask, inst_.d16,',
                     f'      {unsupported}{sampler})) return;',
                     '  set_data(std::move(d));',
                 ]
@@ -8070,11 +8093,13 @@ class CodeGenerator:
             'IMAGE_SAMPLE_LZ',
         ):
             return 'image_sample_2d'
-        if self.isa_spec.arch_name == 'rdna4' and sem.name in (
+        if self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4') and sem.name in (
+            'IMAGE_SAMPLE',
+            'IMAGE_SAMPLE_LZ',
             'IMAGE_LOAD',
             'IMAGE_STORE',
         ):
-            return 'buffer_load' if sem.name == 'IMAGE_LOAD' else 'buffer_store'
+            return 'buffer_store' if sem.name == 'IMAGE_STORE' else 'buffer_load'
         if (
             sem.semantic_class == 'ds_barrier_arrive'
             and getattr(sem, 'operation', None) == 'async_barrier_arrive'
@@ -12673,9 +12698,16 @@ class CodeGenerator:
                         'ENC_VBUFFER',
                     }
                 )
-                is_mem_enc = enc.enc_name.upper() in _MEM_ENC_NAMES or (
-                    self.isa_spec.arch_name == 'rdna4'
-                    and enc.enc_name.upper() in ('ENC_VIMAGE', 'ENC_VSAMPLE')
+                is_mem_enc = (
+                    enc.enc_name.upper() in _MEM_ENC_NAMES
+                    or (
+                        self.isa_spec.arch_name == 'rdna4'
+                        and enc.enc_name.upper() in ('ENC_VIMAGE', 'ENC_VSAMPLE')
+                    )
+                    or (
+                        self.isa_spec.arch_name in ('rdna3', 'rdna3_5')
+                        and enc.enc_name.upper() == 'ENC_MIMG'
+                    )
                 )
                 if is_mem_enc:
                     cpp_includes.extend(
@@ -12714,7 +12746,12 @@ class CodeGenerator:
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/image_resource.h', False)
                     )
-                if self.isa_spec.arch_name == 'rdna4' and enc.enc_name.upper() in (
+                if self.isa_spec.arch_name in (
+                    'rdna3',
+                    'rdna3_5',
+                    'rdna4',
+                ) and enc.enc_name.upper() in (
+                    'ENC_MIMG',
                     'ENC_VIMAGE',
                     'ENC_VSAMPLE',
                 ):
