@@ -14,9 +14,8 @@ namespace rocprofiler_compute_tool
 bool format_kernel_symbols_csv(const tool_data_t&                           tool_data,
                                const std::function<bool(std::string_view)>& sink);
 
-/// Writes one row per kernel to tool_data.kernel_symbols_filename. Kernels are
-/// far fewer than dispatches, so holding these properties here instead of
-/// repeating them on every dispatch row keeps the dispatch artifact small.
+/// Writes one row per kernel to tool_data.kernel_symbols_filename, so these
+/// properties do not repeat on every dispatch row.
 class KernelSymbolsWriter : public OutputWriter
 {
 public:
