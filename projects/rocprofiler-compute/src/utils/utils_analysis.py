@@ -19,14 +19,14 @@ from utils.logger import (
     demarcate,
 )
 from utils.ml_api_trace_errors import (
-    ForwardThreadNotFoundError,
+    LauncherThreadNotFoundError,
     MarkerNotNestedError,
     MissingSourceLocationError,
     MlApiTraceError,
     OverlappingMarkerRangeError,
     PassMarkerMismatchError,
     UnaccountedKernelError,
-    UncorrelatedForwardIntervalError,
+    UncorrelatedLauncherIntervalError,
 )
 from utils.utils_counter_defs import UNIT_COUNTER
 
@@ -98,10 +98,11 @@ class CallTreeNode:
     """A node in the operator call tree.
 
     children is the list of child operator nodes. file_name, line_number,
-    backend, start_timestamp, end_timestamp, t_tid, f_tid, and thread_id
-    are optional fields copied from a marker row when set. invocation_ids
-    stores marker-start strings for this node. args_invocations maps each
-    distinct operator-argument blob to the invocation ids that used it.
+    backend, start_timestamp, end_timestamp, t_tid, f_tid, thread_id, and
+    launcher_thread_id are optional fields copied from a marker row when set.
+    invocation_ids stores marker-start strings for this node. args_invocations
+    maps each distinct operator-argument blob to the invocation ids that used
+    it.
 
     Inclusive over this node plus all descendants:
       kernel_launches, total_duration_ms, min/max/mean dispatch stats.
@@ -125,6 +126,7 @@ class CallTreeNode:
     t_tid: Optional[str] = None
     f_tid: Optional[str] = None
     thread_id: Optional[str] = None
+    launcher_thread_id: Optional[str] = None
 
     @property
     def call_count(self) -> int:
@@ -320,6 +322,7 @@ def parse_marker_function(function_value: object) -> dict[str, Any]:
         "seqNr": "n/a",
         "tid": "n/a",
         "ftid": "n/a",
+        "ltid": "n/a",
         "scope": "n/a",
         "args": "n/a",
     }
@@ -337,6 +340,9 @@ def parse_marker_function(function_value: object) -> dict[str, Any]:
             parsed_keys[key] = value
     t_tid = "" if parsed_keys["tid"] in ("", "n/a") else parsed_keys["tid"]
     f_tid = "" if parsed_keys["ftid"] in ("", "n/a") else parsed_keys["ftid"]
+    launcher_thread_id = ""
+    if parsed_keys["ltid"] not in ("", "n/a"):
+        launcher_thread_id = parsed_keys["ltid"]
     return {
         "Operator_Name": decode_marker_name(operator_name),
         "File_Name": file_name,
@@ -345,6 +351,7 @@ def parse_marker_function(function_value: object) -> dict[str, Any]:
         "seqNr": parsed_keys["seqNr"],
         "T_Tid": t_tid,
         "F_Tid": f_tid,
+        "launcher_thread_id": launcher_thread_id,
         "scope": parsed_keys["scope"],
         "args": parsed_keys["args"],
     }
@@ -376,6 +383,15 @@ def _optional_pytorch_tid(value: object) -> Optional[str]:
         return None
     text = str(value)
     if text in ("n/a", "0"):
+        return None
+    return text
+
+
+def _optional_launcher_thread_id(value: object) -> Optional[str]:
+    if value is None or value == "" or pd.isna(value):
+        return None
+    text = str(value)
+    if text == "n/a":
         return None
     return text
 
@@ -456,6 +472,9 @@ def _call_tree_node_from_marker_row(row: object) -> CallTreeNode:
         t_tid=_optional_pytorch_tid(getattr(row, "T_Tid", "")),
         f_tid=_optional_pytorch_tid(getattr(row, "F_Tid", "")),
         thread_id=str(getattr(row, "Thread_Id", "")),
+        launcher_thread_id=_optional_launcher_thread_id(
+            getattr(row, "launcher_thread_id", "")
+        ),
     )
     invocation_id = str(row.Start_Timestamp)
     node.invocation_ids.add(invocation_id)
@@ -516,30 +535,14 @@ def nest_marker_intervals(
     return forest
 
 
-def _forward_tid_from_tree(node: CallTreeNode) -> Optional[str]:
-    if node.f_tid is not None:
-        return node.f_tid
+def _launcher_thread_id_from_tree(node: CallTreeNode) -> Optional[str]:
+    if node.launcher_thread_id is not None:
+        return node.launcher_thread_id
     for child in node.children:
-        found = _forward_tid_from_tree(child)
+        found = _launcher_thread_id_from_tree(child)
         if found is not None:
             return found
     return None
-
-
-def _tree_has_t_tid(node: CallTreeNode, pytorch_tid: str) -> bool:
-    if node.t_tid == pytorch_tid:
-        return True
-    return any(_tree_has_t_tid(child, pytorch_tid) for child in node.children)
-
-
-def _thread_ids_with_pytorch_tid(
-    forest: dict[str, list[CallTreeNode]], pytorch_tid: str
-) -> list[str]:
-    return [
-        thread_id
-        for thread_id, roots in forest.items()
-        if any(_tree_has_t_tid(root, pytorch_tid) for root in roots)
-    ]
 
 
 def _interval_contains(node: CallTreeNode, start: float, end: float) -> bool:
@@ -559,10 +562,10 @@ def _deepest_containing_node(
     return None
 
 
-def attach_unlocated_trees_by_forward_thread(
+def attach_unlocated_trees_by_launcher_thread(
     forest: dict[str, list[CallTreeNode]],
 ) -> list[MlApiTraceError]:
-    """Stack torch/triton trees with no source onto the matching forward thread.
+    """Stack torch/triton trees with no source onto the autograd launcher thread.
 
     Roots that cannot be placed stay in the forest. Placement errors are returned
     so the caller can report them after the call tree is shown.
@@ -579,8 +582,8 @@ def attach_unlocated_trees_by_forward_thread(
     for thread_id, root in pending:
         start = float(root.start_timestamp or 0.0)
         end = float(root.end_timestamp or 0.0)
-        f_tid = _forward_tid_from_tree(root)
-        if f_tid is None:
+        launcher_thread_id = _launcher_thread_id_from_tree(root)
+        if launcher_thread_id is None:
             attach_errors.append(
                 MissingSourceLocationError(
                     operator_name=root.name,
@@ -589,29 +592,27 @@ def attach_unlocated_trees_by_forward_thread(
                 )
             )
             continue
-        matches = _thread_ids_with_pytorch_tid(forest, f_tid)
-        if len(matches) != 1:
+        launcher_key = str(launcher_thread_id)
+        if launcher_key not in forest:
             attach_errors.append(
-                ForwardThreadNotFoundError(
+                LauncherThreadNotFoundError(
                     operator_name=root.name,
                     thread_id=thread_id,
                     start_timestamp=start,
-                    f_tid=f_tid,
+                    launcher_thread_id=launcher_key,
                 )
             )
             continue
-        forward_thread_id = matches[0]
-        dest_roots = [node for node in forest[forward_thread_id] if node is not root]
+        dest_roots = [node for node in forest[launcher_key] if node is not root]
         parent = _deepest_containing_node(dest_roots, start, end)
         if parent is None:
             attach_errors.append(
-                UncorrelatedForwardIntervalError(
+                UncorrelatedLauncherIntervalError(
                     operator_name=root.name,
                     thread_id=thread_id,
                     start_timestamp=start,
                     end_timestamp=end,
-                    f_tid=f_tid,
-                    forward_thread_id=forward_thread_id,
+                    launcher_thread_id=launcher_key,
                 )
             )
             continue
@@ -694,6 +695,7 @@ def clone_call_tree_node(node: CallTreeNode) -> CallTreeNode:
         t_tid=node.t_tid,
         f_tid=node.f_tid,
         thread_id=node.thread_id,
+        launcher_thread_id=node.launcher_thread_id,
     )
     copied.invocation_ids = set(node.invocation_ids)
     copied.args_invocations = {
@@ -774,6 +776,7 @@ def _merge_identical_sibling_group(group: list[CallTreeNode]) -> CallTreeNode:
         t_tid=first.t_tid,
         f_tid=first.f_tid,
         thread_id=first.thread_id,
+        launcher_thread_id=first.launcher_thread_id,
     )
     for node in group:
         merged.invocation_ids.update(node.invocation_ids)
@@ -1458,7 +1461,7 @@ def process_ml_api_trace_output(
         )
     )
     workload.ml_api_call_trees = nest_marker_intervals(workload.ml_api_trace_df, errors)
-    errors.extend(attach_unlocated_trees_by_forward_thread(workload.ml_api_call_trees))
+    errors.extend(attach_unlocated_trees_by_launcher_thread(workload.ml_api_call_trees))
     _validate_all_markers_nested(
         workload.ml_api_trace_df, workload.ml_api_call_trees, errors
     )
