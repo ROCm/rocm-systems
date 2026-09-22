@@ -17,6 +17,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/legacy_page_table.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "util/distributed_shared_mutex.h"
 #include "util/unique_handle.h"
 
 #include <algorithm>
@@ -27,7 +28,6 @@
 #include <memory>
 #include <memory_resource>
 #include <mutex>
-#include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -431,11 +431,11 @@ public:
   }
 
   /// @brief Return the lease shared by page-table readers and mutations.
-  std::shared_ptr<std::shared_mutex> page_table_request_mutex() const {
+  std::shared_ptr<util::DistributedSharedMutex> page_table_request_mutex() const {
     return page_table_request_mutex_;
   }
 
-  mutable std::shared_mutex page_table_mutex_;
+  mutable util::DistributedSharedMutex page_table_mutex_;
   /// @brief Pool for page-table nodes and buckets.
   /// @details Writers serialize allocation under page_table_mutex_. Declaration
   /// order keeps the pool alive until the table is destroyed; capacity is
@@ -604,8 +604,8 @@ private:
 
   void publish_page_table_mutation_locked() { ++page_table_generation_; }
 
-  std::shared_ptr<std::shared_mutex> page_table_request_mutex_ =
-      std::make_shared<std::shared_mutex>();
+  std::shared_ptr<util::DistributedSharedMutex> page_table_request_mutex_ =
+      std::make_shared<util::DistributedSharedMutex>();
 
   /// @brief Page table version counter, bumped on every PTE mutation.
   /// @details GpuMemory keeps per-thread TLB-like translation caches keyed by
