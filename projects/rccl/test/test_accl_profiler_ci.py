@@ -27,10 +27,6 @@ def _artifact_paths(tmp_path: Path, kpack_names: tuple[str, ...] = ()) -> Artifa
     }
     for path in files.values():
         path.write_text("fixture", encoding="utf-8")
-    mpi_launcher = tmp_path / "bin" / "mpirun"
-    mpi_launcher.parent.mkdir()
-    mpi_launcher.write_text("fixture", encoding="utf-8")
-    mpi_launcher.chmod(0o755)
     binaries = {}
     for binary in COLLECTIVES:
         path = tmp_path / binary
@@ -46,7 +42,6 @@ def _artifact_paths(tmp_path: Path, kpack_names: tuple[str, ...] = ()) -> Artifa
     return ArtifactPaths(
         root=tmp_path,
         rccl_library=files["rccl_library"],
-        mpi_launcher=mpi_launcher,
         profiler_plugin=files["profiler_plugin"],
         report_script=files["report_script"],
         binaries=binaries,
@@ -75,9 +70,21 @@ def _record(rank: int, size: int, coll: str = "AllReduce") -> dict:
                 "n_send_ops": 4,
                 "n_recv_ops": 4,
             },
+            "event_trace_ts": {
+                "kernel_events": [{"channel_id": 0, "duration_us": 2}]
+            },
         },
-        "event_trace_ts": {"kernel_events": [{"channel_id": 0, "duration_us": 2}]},
     }
+
+
+def _run_config(tmp_path: Path, **kwargs) -> RunConfig:
+    mpi_root = tmp_path / "openmpi"
+    (mpi_root / "bin").mkdir(parents=True, exist_ok=True)
+    (mpi_root / "lib").mkdir()
+    launcher = mpi_root / "bin" / "mpirun"
+    launcher.write_text("fixture", encoding="utf-8")
+    launcher.chmod(0o755)
+    return RunConfig(mpi_root=mpi_root, **kwargs)
 
 
 def _write_rank_file(
@@ -108,23 +115,30 @@ def _write_rank_file(
 
 def test_slurm_script_runs_only_five_supported_collectives(tmp_path):
     paths = _artifact_paths(tmp_path)
-    script = render_slurm_script(paths, tmp_path / "work", RunConfig(nodes=2))
+    script = render_slurm_script(
+        paths, tmp_path / "work", _run_config(tmp_path, nodes=2)
+    )
     for binary in COLLECTIVES:
         assert binary in script
     assert "alltoall_perf" not in script
     assert "srun --nodes=2 --ntasks=2 --ntasks-per-node=1" in script
     assert "--ntasks=16" not in script
-    assert f"{tmp_path}/bin/mpirun --prefix {tmp_path} -np 16" in script
+    expected_mpi = (
+        f"{tmp_path}/openmpi/bin/mpirun --prefix {tmp_path}/openmpi -np 16"
+    )
+    assert expected_mpi in script
     assert '--host "$ACCL_MPI_HOSTS"' in script
-    assert "--mca pml ob1 --mca btl '^openib'" in script
-    assert "ssh -p 2224" in script
+    assert "--mca pml ob1 --mca btl '^vader,openib'" in script
+    assert "plm_rsh_args" in script
+    assert "ssh -p 2224" not in script
+    assert "oob_tcp_if_include" not in script
     assert "ulimit -l unlimited" in script
     assert "NCCL_PROFILER_PLUGIN" in script
 
 
 def test_slurm_script_validates_mpi_rank_placement(tmp_path):
     script = render_slurm_script(
-        _artifact_paths(tmp_path), tmp_path / "work", RunConfig(nodes=2)
+        _artifact_paths(tmp_path), tmp_path / "work", _run_config(tmp_path, nodes=2)
     )
 
     assert 'scontrol show hostnames "$SLURM_JOB_NODELIST"' in script
@@ -140,7 +154,7 @@ def test_rendered_slurm_script_has_valid_bash_syntax(tmp_path):
     paths = _artifact_paths(tmp_path)
     script_path = tmp_path / "run.sbatch"
     script_path.write_text(
-        render_slurm_script(paths, tmp_path / "work", RunConfig()),
+        render_slurm_script(paths, tmp_path / "work", _run_config(tmp_path)),
         encoding="utf-8",
     )
     result = subprocess.run(
@@ -160,11 +174,14 @@ def test_slurm_script_does_not_inherit_runner_python_paths(tmp_path, monkeypatch
     )
 
     script = render_slurm_script(
-        _artifact_paths(tmp_path), tmp_path / "work", RunConfig()
+        _artifact_paths(tmp_path), tmp_path / "work", _run_config(tmp_path)
     )
 
     assert "_tool/Python" not in script
-    assert f"export PATH={tmp_path}/bin:/usr/bin:/bin:/usr/sbin:/sbin" in script
+    assert (
+        f"export PATH={tmp_path}/openmpi/bin:{tmp_path}/bin:"
+        "/usr/bin:/bin:/usr/sbin:/sbin" in script
+    )
     assert f"export LD_LIBRARY_PATH={tmp_path}" in script
     assert (
         "unset PYTHONHOME PYTHONPATH VIRTUAL_ENV "
@@ -180,7 +197,7 @@ def test_slurm_script_uses_embedded_kpack_references(tmp_path):
         ("rccl_lib_gfx950.kpack", "rccl_test_gfx950.kpack"),
     )
 
-    script = render_slurm_script(paths, tmp_path / "work", RunConfig())
+    script = render_slurm_script(paths, tmp_path / "work", _run_config(tmp_path))
 
     assert "export ROCM_KPACK_PATH=" not in script
     assert "export ROCM_KPACK_PATH_PREFIX=" not in script
@@ -196,7 +213,7 @@ def test_slurm_script_rejects_incomplete_kpack_layout(tmp_path):
     paths = _artifact_paths(tmp_path, ("rccl_lib_gfx950.kpack",))
 
     with pytest.raises(FileNotFoundError, match="rccl_test_gfx950.kpack"):
-        render_slurm_script(paths, tmp_path / "work", RunConfig())
+        render_slurm_script(paths, tmp_path / "work", _run_config(tmp_path))
 
 
 def test_validate_collective_output_accepts_complete_rank_coverage(tmp_path):
@@ -207,6 +224,20 @@ def test_validate_collective_output_accepts_complete_rank_coverage(tmp_path):
     assert result["ranks"] == [0, 1]
     assert result["message_sizes"] == [1024, 2048]
     assert result["minimum_samples_per_rank_size"] == 3
+
+
+def test_validate_collective_output_requires_nested_kernel_events(tmp_path):
+    _write_rank_file(tmp_path, 0)
+    path = tmp_path / "rank0.jsonl"
+    objects = [json.loads(line) for line in path.read_text().splitlines()]
+    event_trace = objects[0]["coll_perf"].pop("event_trace_ts")
+    objects[0]["event_trace_ts"] = event_trace
+    path.write_text(
+        "\n".join(json.dumps(obj) for obj in objects) + "\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="Missing kernel events"):
+        validate_collective_output(tmp_path, "AllReduce", 2, warmup_iterations=2)
 
 
 def test_validate_collective_output_rejects_incomplete_summary(tmp_path):
