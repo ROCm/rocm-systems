@@ -162,7 +162,6 @@ HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Positive_Check) {
 HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
-#if defined(_WIN32) || defined(__linux__)
   unsigned int width = 64;
   unsigned int height = 64;
   unsigned int mipmap_level = 1;
@@ -195,11 +194,7 @@ HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Negative_Parameters) {
   }
 
   HIP_CHECK(hipFreeMipmappedArray(mip_array_ptr));
-#else
-  HIP_SKIP_TEST(HipTest::SkipReason::kMipmappedArraysUnsupported);
-#endif
 }
-#endif
 
 /**
  * End doxygen group TextureTest.
