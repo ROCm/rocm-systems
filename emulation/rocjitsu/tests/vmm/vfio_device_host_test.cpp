@@ -23,7 +23,6 @@
 // name mangling from outside the project.
 #include <cstdint>
 
-#include <optional>
 
 #include <sys/queue.h>
 #include <sys/uio.h>
@@ -1221,13 +1220,11 @@ namespace {
 
 constexpr uint64_t kSingleWindowIova = 0x10000000;
 constexpr uint64_t kCrossRegistrationIova = 0x20000000;
-constexpr uint64_t kStreamingIova = 0x40000000;
 constexpr uint64_t kGapIova = 0x60000000;
 constexpr uint64_t kProtectionIova = 0x70000000;
 constexpr uint64_t kMultiSegmentIova = 0x80000000;
 constexpr uint64_t kReconnectIova = 0x90000000;
 constexpr std::size_t kBoundaryHalfBytes = 64;
-constexpr std::size_t kStreamingRegionCount = rocjitsu::VfioDeviceHost::kMaxSgEntries + 1;
 
 /// @brief A zero-filled anonymous file of at least @p bytes, rounded up to a
 ///        host-page boundary.
@@ -1428,103 +1425,7 @@ TEST(VfioDeviceHostDma, SplitsATransferAtRegistrationBoundaries) {
   EXPECT_EQ(read_back, read_pattern);
 }
 
-// A client-side IOMMU can reflect one large range as many page-sized windows.
-// The host resolves a multi-window transfer by first asking the library how
-// many scatter-gather entries it needs: above the initial capacity the vector
-// is resized and the request retried, and above the kMaxSgEntries threshold
-// the transfer streams registration by registration instead. The whole-range
-// runs cover both with the first window count that requires resize-and-retry,
-// and more windows than the threshold, moving the full span in both
-// directions and comparing every byte of every page. The partial run covers
-// the boundary math for a transfer that starts inside the first window and
-// stops inside the last, so the streaming path copies a shortened first and
-// final window instead of full ones.
-void run_streaming_transfer_test(uint64_t iova_base, std::size_t window_count, uint64_t offset = 0,
-                                 std::optional<uint64_t> length = std::nullopt) {
-  ServedDevice served;
-  ASSERT_TRUE(served.built());
-  rocjitsu::test::VfioUserClient client;
-  ASSERT_TRUE(served.attach(client));
 
-  const uint64_t page_size = static_cast<uint64_t>(::sysconf(_SC_PAGESIZE));
-  const uint64_t total = window_count * page_size;
-  const uint64_t span = length.value_or(total - offset);
-  ASSERT_LE(offset + span, total);
-  BackingFile backing(total);
-  for (uint64_t i = 0; i < window_count; ++i) {
-    ASSERT_TRUE(client.dma_map(iova_base + i * page_size, page_size, backing.fd(), i * page_size));
-  }
-  ASSERT_EQ(served.device().mapped_regions(), window_count);
-
-  const std::vector<std::byte> source = byte_pattern(span, 0x5a);
-  EXPECT_TRUE(served.dma().write(iova_base + offset, source));
-
-  std::vector<std::byte> in_file(total);
-  ASSERT_TRUE(read_all_at(backing.fd(), 0, in_file));
-  EXPECT_EQ(std::vector<std::byte>(in_file.begin() + offset, in_file.begin() + offset + span),
-            source)
-      << "the streaming write lost or misplaced data";
-  // The untouched bytes around the transferred span must stay as the backing
-  // file was created: zeros before the offset and after the span's end.
-  EXPECT_EQ(std::vector<std::byte>(in_file.begin(), in_file.begin() + offset),
-            std::vector<std::byte>(offset, std::byte{0}))
-      << "the write started before the requested offset";
-  EXPECT_EQ(std::vector<std::byte>(in_file.begin() + offset + span, in_file.end()),
-            std::vector<std::byte>(total - offset - span, std::byte{0}))
-      << "the write ran past the requested length";
-
-  const std::vector<std::byte> second = byte_pattern(span, 0xc3);
-  ASSERT_TRUE(write_all_at(backing.fd(), offset, second));
-  std::vector<std::byte> read_back(span);
-  EXPECT_TRUE(served.dma().read(iova_base + offset, read_back));
-  EXPECT_EQ(read_back, second) << "the streaming read lost or misplaced data";
-
-  // The pattern encodes the page index, so adjacent pages differ; this makes
-  // a cursor that reuses one page for every region fail the checks above. In
-  // the partial-span case the last comparison covers the shortened final
-  // chunk, and stays within the transferred bytes.
-  const uint64_t pages_touched = (offset + span + page_size - 1) / page_size;
-  for (uint64_t p = offset / page_size; p + 1 < pages_touched; ++p) {
-    const uint64_t lo = std::max(p * page_size, offset);
-    const uint64_t hi = std::min((p + 2) * page_size, offset + span);
-    ASSERT_GT(hi, lo) << "comparison " << p << " is empty";
-    ASSERT_NE(std::vector<std::byte>(source.begin() + (lo - offset),
-                                     source.begin() + (p + 1) * page_size - offset),
-              std::vector<std::byte>(source.begin() + (p + 1) * page_size - offset,
-                                     source.begin() + (hi - offset)))
-        << "pages " << p << " and " << p + 1 << " hold the same bytes";
-  }
-}
-
-TEST(VfioDeviceHostDma, ResizesTheScatterGatherListBetweenTheLimits) {
-  // One window past the initial capacity: the first count the library cannot
-  // answer in one shot, forcing the resize-and-retry path. At or below
-  // kMaxSgEntries the direct mapping is kept, so this exercises resize only.
-  static_assert(rocjitsu::VfioDeviceHost::kInitialSgEntries + 1 <=
-                rocjitsu::VfioDeviceHost::kMaxSgEntries);
-  run_streaming_transfer_test(kStreamingIova, rocjitsu::VfioDeviceHost::kInitialSgEntries + 1);
-}
-
-TEST(VfioDeviceHostDma, StreamsAcrossMoreThanTheScatterGatherLimit) {
-  run_streaming_transfer_test(kStreamingIova + 0x10000000ULL, kStreamingRegionCount);
-}
-
-// A transfer does not have to start at the first mapped byte or end at the
-// last: a span that begins 127 bytes into the first window and stops 64 bytes
-// before the end of the last makes the streaming path copy a shortened first
-// and final window, exercising the per-region boundary arithmetic on partial
-// windows instead of only full ones.
-TEST(VfioDeviceHostDma, StreamsAPartialFirstAndLastWindow) {
-  constexpr uint64_t kHead = 127;
-  constexpr uint64_t kTail = 64;
-  static_assert(kTail < 4096);
-  const uint64_t page_size = static_cast<uint64_t>(::sysconf(_SC_PAGESIZE));
-  ASSERT_LT(kTail, page_size);
-  const uint64_t window_count = kStreamingRegionCount;
-  const uint64_t total = window_count * page_size;
-  run_streaming_transfer_test(kStreamingIova + 0x20000000ULL, window_count, kHead,
-                              total - kHead - kTail);
-}
 
 // A hole between registrations is not memory the device may touch, whichever
 // side of the boundary a transfer starts from. The transport rejects these

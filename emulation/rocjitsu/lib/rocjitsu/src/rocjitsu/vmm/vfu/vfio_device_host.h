@@ -78,20 +78,6 @@ public:
   VfioDeviceHost(std::string socket_path, simdojo::PciDevice &device);
   ~VfioDeviceHost() override;
 
-  /// @brief Scatter-gather entries a transfer is first attempted with before
-  /// the library is asked how many it actually needs. An internal threshold
-  /// of the retry path, not a device-facing limit: requests needing more are
-  /// retried with a larger list up to kMaxSgEntries, and beyond that
-  /// threshold they are streamed one registered window at a time.
-  static constexpr std::size_t kInitialSgEntries = 8;
-
-  /// @brief Segments a transfer may span before the transport stops mapping
-  /// it in one shot. An internal threshold of the same retry path rather
-  /// than a cap on what a transfer may request: requests above it are
-  /// streamed one registered window at a time rather than rejected solely
-  /// for exceeding it.
-  static constexpr std::size_t kMaxSgEntries = 256;
-
   /// @brief Build the libvfio-user context from the device's declared bus shape.
   /// @retval true The device is realized and the socket is ready for a client.
   /// @retval false Setup failed; the reason has been logged.
