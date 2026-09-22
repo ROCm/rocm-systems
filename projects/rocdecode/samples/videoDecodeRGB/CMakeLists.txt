@@ -155,23 +155,27 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
             ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/colorspace_kernels.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/resize_kernels.cpp)
     else()
-        # HIP kernel files must be compiled with hipcc on Windows (VS generator does not support HIP language)
+        # The Windows host compiler is MSVC (the amdclang++ override is Linux-only), so device
+        # code cannot ride along on hip::device the way it does on Linux. CMake's HIP language
+        # is not an option either: it requires Ninja and forbids mixing MSVC-style and
+        # clang-style command lines in one project. Compile the kernels out of line with
+        # amdclang++ -- the same compiler the Linux path uses for these files.
         # The per-config kernel objects below need a generator expression in
         # add_custom_command(OUTPUT), which CMake only evaluates from 3.20 on. The
         # Linux path uses no custom commands, so the file keeps its lower floor.
         if(CMAKE_VERSION VERSION_LESS 3.20)
             message(FATAL_ERROR "Building videoDecodeRGB on Windows requires CMake 3.20 or newer (found ${CMAKE_VERSION}).")
         endif()
-        set(HIPCC ${ROCM_PATH}/bin/hipcc.exe)
+        set(HIP_KERNEL_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++.exe)
         set(KERNEL_SOURCES
             ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/colorspace_kernels.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/resize_kernels.cpp)
         set(KERNEL_OBJS)
-        # hipcc needs one --offload-arch= per target; GPU_TARGETS is a list and
+        # amdclang++ needs one --offload-arch= per target; GPU_TARGETS is a list and
         # would otherwise expand into bare arguments that clang reads as inputs
-        set(HIPCC_OFFLOAD_ARCH_FLAGS)
+        set(OFFLOAD_ARCH_FLAGS)
         foreach(GPU_TARGET ${GPU_TARGETS})
-            list(APPEND HIPCC_OFFLOAD_ARCH_FLAGS --offload-arch=${GPU_TARGET})
+            list(APPEND OFFLOAD_ARCH_FLAGS --offload-arch=${GPU_TARGET})
         endforeach()
         foreach(KSRC ${KERNEL_SOURCES})
             get_filename_component(KNAME ${KSRC} NAME_WE)
@@ -185,8 +189,8 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR (Threads_FOUND A
             add_custom_command(
                 OUTPUT ${KOBJ}
                 COMMAND ${CMAKE_COMMAND} -E make_directory ${KOBJ_DIR}
-                COMMAND ${HIPCC} -c ${KSRC} -o ${KOBJ}
-                    ${HIPCC_OFFLOAD_ARCH_FLAGS}
+                COMMAND ${HIP_KERNEL_COMPILER} -x hip -c ${KSRC} -o ${KOBJ} -D__HIP_PLATFORM_AMD__=1 -std=c++17
+                    ${OFFLOAD_ARCH_FLAGS}
                     --rocm-path=${ROCM_PATH}
                     --rocm-device-lib-path=${ROCM_PATH}/lib/llvm/amdgcn/bitcode
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../utils
