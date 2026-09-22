@@ -6,8 +6,8 @@
 
 // Fail-loud stub floor for the plan schedulers and the deep launch paths a
 // host-only microtest never executes: src/scheduler/symmetric_sched.cc,
-// src/scheduler/allgatherv_sched.cc, src/rma/rma_proxy_launch.cc,
-// src/allocator.cc and src/device/onerank.cu.
+// src/scheduler/allgatherv_sched.cc, src/rma/rma_proxy_launch.cc
+// and src/device/onerank.cu.
 //
 // Reaching one aborts, which is the point: an unfaked path must be loud, not
 // silent. A test that needs one replaces that individual entry with a real fake.
@@ -51,9 +51,4 @@ ncclResult_t ncclRmaProxyReclaimPlan(struct ncclComm*, struct ncclKernelPlan*) {
 ncclResult_t ncclLaunchOneRank(void*, void const*, size_t, struct ncclDevRedOpFull,
                                ncclDataType_t, hipStream_t, void const*) {
   FailLoudUnfaked("sched_stubs", "ncclLaunchOneRank");
-}
-
-// allocator.cc
-ncclResult_t ncclShadowPoolToHost(struct ncclShadowPool*, void*, void**) {
-  FailLoudUnfaked("sched_stubs", "ncclShadowPoolToHost");
 }
