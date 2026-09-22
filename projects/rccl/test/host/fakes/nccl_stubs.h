@@ -10,8 +10,10 @@
 #define RCCL_TEST_HOST_NCCL_STUBS_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "nccl.h"
@@ -67,6 +69,12 @@ extern int g_getROCmVersionResult;
 extern unsigned int g_rocmVersionMajor;
 extern unsigned int g_rocmVersionMinor;
 extern unsigned int g_rocmVersionPatch;
+
+// src/plugin/profiler.cc: no profiler plugin loaded in a host-only binary by default.
+extern std::function<bool()> g_profilerPluginLoaded;
+
+// Generated device-function table (src/device/generate.py); empty default matches a miss (-1, with a WARN).
+extern std::unordered_map<uint64_t, int> ncclDevFuncNameToId;
 
 void ResetNcclStubs();
 
