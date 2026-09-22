@@ -5,7 +5,8 @@
 
 namespace {
 
-__global__ void epoch_exhaustion_for_consan(uint32_t *output, uint32_t barriers, bool ordered) {
+__global__ void epoch_exhaustion_for_consan(uint32_t *output, uint32_t barriers, bool ordered,
+                                            uint32_t trailing_barriers) {
   __shared__ uint32_t word;
   // Runtime count prevents loop unrolling and exercises repeated dynamic barriers.
   for (uint32_t i = 0; i < barriers; ++i)
@@ -17,12 +18,15 @@ __global__ void epoch_exhaustion_for_consan(uint32_t *output, uint32_t barriers,
   // Exactly one lane per wave accesses the cell, avoiding intra-wave collisions.
   if (threadIdx.x % warpSize == 0)
     output[threadIdx.x / warpSize] = consan_device_test::load_lds_word_without_cave(&word);
+  // Exhausting the epoch later must not erase already published race evidence.
+  for (uint32_t i = 0; i < trailing_barriers; ++i)
+    __syncthreads();
 }
 
-void run_epoch_boundary(uint32_t barriers, bool ordered) {
+void run_epoch_boundary(uint32_t barriers, bool ordered, uint32_t trailing_barriers = 0) {
   uint32_t *output = nullptr;
   HIP_ASSERT(hipMalloc(&output, 4 * sizeof(uint32_t)));
-  epoch_exhaustion_for_consan<<<1, 128>>>(output, barriers, ordered);
+  epoch_exhaustion_for_consan<<<1, 128>>>(output, barriers, ordered, trailing_barriers);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
   if (ordered) {
@@ -36,6 +40,7 @@ void run_epoch_boundary(uint32_t barriers, bool ordered) {
 
 TEST(ConSanDeviceEpochTest, LastOrderedPair) { run_epoch_boundary(1022, true); }
 TEST(ConSanDeviceEpochTest, LastEpochRace) { run_epoch_boundary(1023, false); }
+TEST(ConSanDeviceEpochTest, LastEpochRaceThenExhaustion) { run_epoch_boundary(1023, false, 2); }
 TEST(ConSanDeviceEpochTest, ExhaustedOrderedPair) { run_epoch_boundary(1023, true); }
 TEST(ConSanDeviceEpochTest, RepeatedExhaustion) { run_epoch_boundary(1100, true); }
 

@@ -457,6 +457,7 @@ function(rj_add_consan_device_conformance_cases)
         ITEMS
             LastOrderedPair
             LastEpochRace
+            LastEpochRaceThenExhaustion
             ExhaustedOrderedPair
             RepeatedExhaustion
             OverflowPolicy
@@ -476,14 +477,15 @@ function(rj_add_consan_device_conformance_cases)
         set(_epoch_complete true)
         set(_epoch_exhaustion 0)
         set(_epoch_race 0)
-        if(_epoch_filter MATCHES "Exhausted|Repeated")
+        if(_epoch_filter MATCHES "Exhausted|Repeated|ThenExhaustion")
             set(_epoch_complete false)
             if(_device_TARGET MATCHES "gfx942|gfx950")
                 set(_epoch_exhaustion 2)
             else()
                 set(_epoch_exhaustion 4)
             endif()
-        elseif(_epoch_case STREQUAL "LastEpochRace")
+        endif()
+        if(_epoch_case MATCHES "^LastEpochRace")
             set(_epoch_race 1)
         endif()
         rj_add_consan_hip_case(
