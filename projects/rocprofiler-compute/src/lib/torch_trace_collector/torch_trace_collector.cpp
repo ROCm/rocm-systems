@@ -7,6 +7,7 @@
 #include "wire_format.h"
 
 #include <ATen/record_function.h>
+#include <c10/util/ThreadLocalDebugInfo.h>
 
 #include <cstdint>
 #include <memory>
@@ -23,6 +24,27 @@ namespace
 using namespace torch_trace_collector::detail;
 
 constexpr const char* kRecordFnBackend = "torch";
+
+constexpr std::string_view kLauncherTidKindName{"ROCPROF_COMPUTE_LAUNCHER_TID"};
+const c10::DebugInfoKind   kLauncherTidKind{&kLauncherTidKindName};
+
+struct LauncherTidInfo : public c10::DebugInfoBase
+{
+    std::uint64_t launcher_tid = 0;
+};
+
+thread_local int g_launcher_tid_depth = 0;
+
+std::string launcher_tid_for_marker()
+{
+    auto* base = c10::ThreadLocalDebugInfo::get(kLauncherTidKind);
+    if (base == nullptr)
+    {
+        return kUnavailable;
+    }
+    auto* info = static_cast<LauncherTidInfo*>(base);
+    return std::to_string(info->launcher_tid);
+}
 
 struct RoctxObserverContext : public at::ObserverContext
 {
@@ -74,11 +96,13 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& record_f
                                                          : std::to_string(seqNrValue);
         const std::string  tid        = std::to_string(at::RecordFunction::currentThreadId());
         const std::string  ftid       = std::to_string(record_fn.forwardThreadId());
+        const std::string  ltid       = launcher_tid_for_marker();
         const std::string  wire       = build_range_name(name,
                                                          kUnavailable,
                                                          seqNr,
                                                          tid,
                                                          ftid,
+                                                         ltid,
                                                          record_scope_name(record_fn.scope()),
                                                          capture_record_function_args(record_fn),
                                                          kRecordFnBackend);
@@ -121,4 +145,38 @@ bool install()
 extern "C" int torch_trace_collector_install(void)
 {
     return install() ? 0 : 1;
+}
+
+extern "C" int torch_trace_collector_push_launcher_tid(uint64_t launcher_tid)
+{
+    try
+    {
+        auto info          = std::make_shared<LauncherTidInfo>();
+        info->launcher_tid = launcher_tid;
+        c10::ThreadLocalDebugInfo::_push(kLauncherTidKind, info);
+        ++g_launcher_tid_depth;
+        return 0;
+    }
+    catch (...)
+    {
+        return 1;
+    }
+}
+
+extern "C" int torch_trace_collector_pop_launcher_tid(void)
+{
+    if (g_launcher_tid_depth <= 0)
+    {
+        return 1;
+    }
+    try
+    {
+        c10::ThreadLocalDebugInfo::_pop(kLauncherTidKind);
+        --g_launcher_tid_depth;
+        return 0;
+    }
+    catch (...)
+    {
+        return 1;
+    }
 }
