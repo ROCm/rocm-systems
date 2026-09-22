@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "fakes/init_fakes.h"
+#include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize
 #include "../common/LogCapture.hpp"                 // CaptureLog: assert on WARN/INFO text
 #include "../common/ProcessIsolatedTestRunner.hpp"  // fork+execv process isolation
 
@@ -2087,6 +2088,66 @@ TEST_F(InitMicrotest, CommFree_AfterCommAlloc_ReturnsSuccessAndFrees) {
   EXPECT_EQ(1, abortRef);
 }
 
+// See the comment at the ncclProfilerThreadDestroy call site in src/init.cc.
+TEST_F(InitMicrotest, CommFree_StopsProfilerThreadBeforeFreeingTheBuffersItPolls) {
+  InstallCommAllocSuccess();
+  ncclComm* comm = nullptr;
+  ASSERT_EQ(ncclSuccess, ncclCalloc(&comm, 1));
+  ASSERT_EQ(ncclSuccess, commAlloc(comm, /*parent=*/nullptr, /*ndev=*/8, /*rank=*/0));
+  uint32_t abortFlag = 0;
+  int abortRef = 2;  // >1 so commFree skips the abortFlag free-branch
+  comm->abortFlag = &abortFlag;
+  comm->abortFlagRefCount = &abortRef;
+
+  // Stands in for comm->profiler.workStarted/workCompleted/workPhases: a
+  // host-pinned allocation released by the destructor loop, exactly as
+  // ncclCommPushCudaHostFree does for the real ones.
+  int pinnedProfilerBuffer = 0;
+  ncclCommPushCudaHostFree(comm, &pinnedProfilerBuffer);
+
+  std::vector<std::string> order;
+  ScopedHook threadDestroy(g_ncclProfilerThreadDestroy, [&](struct ncclComm*) {
+    order.push_back("profilerThreadDestroy");
+    return ncclSuccess;
+  });
+  ScopedHook hostFree(g_hipHostFree, [&](void* p) {
+    if (p == &pinnedProfilerBuffer) order.push_back("freePinnedProfilerBuffer");
+    return hipSuccess;
+  });
+  ScopedHook pluginFinalize(g_ncclProfilerPluginFinalize, [&](struct ncclComm*) {
+    order.push_back("profilerPluginFinalize");
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, commFree(comm));  // frees comm; do not touch it afterwards
+  EXPECT_EQ(1, abortRef);
+
+  // Each step has to have happened at all -- an ordering assertion over a
+  // missing step would pass vacuously.
+  ASSERT_EQ(1, threadDestroy.calls) << "commFree never stopped the profiler thread";
+  ASSERT_EQ(1, pluginFinalize.calls) << "commFree never finalized the profiler plugin";
+  auto indexOf = [&](const std::string& name) -> std::ptrdiff_t {
+    auto it = std::find(order.begin(), order.end(), name);
+    return it == order.end() ? -1 : std::distance(order.begin(), it);
+  };
+  ASSERT_NE(-1, indexOf("freePinnedProfilerBuffer"))
+      << "the destructor loop never released the pinned buffer; this test is no longer "
+         "exercising the window it exists to guard";
+
+  EXPECT_LT(indexOf("profilerThreadDestroy"), indexOf("freePinnedProfilerBuffer"))
+      << "commFree freed the host-pinned profiler buffers while the profiler thread was "
+         "still polling them. The thread must be stopped and joined BEFORE the "
+         "comm->destructorHead loop runs, or profilerProgressOps() dereferences an "
+         "unmapped mapping and the process takes SIGSEGV. Observed order: "
+      << ::testing::PrintToString(order);
+
+  EXPECT_LT(indexOf("profilerThreadDestroy"), indexOf("profilerPluginFinalize"))
+      << "ncclProfilerThreadDestroy must precede ncclProfilerPluginFinalize: it purges this "
+         "comm's queued ops, and the plugin's profilerContext is gone after finalize. "
+         "Observed order: "
+      << ::testing::PrintToString(order);
+}
+
 // ===========================================================================
 // commCleanup (init.cc:3696). Pure ordering + error propagation: set the device,
 // optionally finalize-then-unload the tuner, then commFree. Every assertion below
@@ -3523,6 +3584,34 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx1151_ZeroInitChannelsIsTreatedAsUnse
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
   EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(6, c.get()->graphs[NCCL_ALGO_RING].nChannels);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx110xP2pDisabledUses56RingChannels) {
+  TransportsRankComm c(/*nRanks=*/8, /*rank=*/0);
+  ncclTopoSystem* topo = c.installTopo();
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx1100");
+  SetParams({{"P2P_DISABLE", 1}});
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(8));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  const ncclTopoGraph& ring = c.get()->graphs[NCCL_ALGO_RING];
+  EXPECT_EQ(56, ring.nChannels);
+  EXPECT_EQ(56, ring.maxChannels);
+  EXPECT_EQ(56, c.get()->graphs[NCCL_ALGO_TREE].minChannels);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_Gfx120xP2pDisabledHonorsExplicitChannelCount) {
+  TransportsRankComm c(/*nRanks=*/8, /*rank=*/0);
+  ncclTopoSystem* topo = c.installTopo();
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx1201");
+  SetParams({{"P2P_DISABLE", 1}, {"RCCL_INIT_CHANNELS", 12}});
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(8));
+  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
+  const ncclTopoGraph& ring = c.get()->graphs[NCCL_ALGO_RING];
+  EXPECT_EQ(12, ring.nChannels);
+  EXPECT_EQ(12, ring.maxChannels);
+  EXPECT_EQ(12, c.get()->graphs[NCCL_ALGO_TREE].minChannels);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_NonGfx1151_KeepsTheComputedRingChannelCount) {
@@ -5997,7 +6086,7 @@ TEST_F(InitMicrotest, CommFree_SymmetricSupport_FinalizesSymmetricResources) {
   ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
   comm->symmetricSupport = true;
   ncclComm* finalized = nullptr;
-  ScopedHook symk(g_ncclSymkFinalize, [&](ncclComm* c) {
+  ScopedHook symk(g_symkFinalize, [&](ncclComm* c) {
     finalized = c;
     return ncclSuccess;
   });
@@ -6013,7 +6102,7 @@ TEST_F(InitMicrotest, CommFree_NoSymmetricSupport_SkipsSymmetricFinalize) {
   int abortRef = 2;
   ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
   comm->symmetricSupport = false;
-  ScopedHook symk(g_ncclSymkFinalize, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook symk(g_symkFinalize, [](ncclComm*) { return ncclSuccess; });
 
   EXPECT_EQ(ncclSuccess, commFree(comm));
   EXPECT_EQ(0, symk.calls);
@@ -6025,7 +6114,7 @@ TEST_F(InitMicrotest, CommFree_SymmetricFinalizeFails_PropagatesAndStopsTeardown
   int abortRef = 2;
   ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
   comm->symmetricSupport = true;
-  ScopedHook symk(g_ncclSymkFinalize, [](ncclComm*) { return ncclInternalError; });
+  ScopedHook symk(g_symkFinalize, [](ncclComm*) { return ncclInternalError; });
 
   EXPECT_EQ(ncclInternalError, commFree(comm));
   EXPECT_EQ(1, symk.calls);
@@ -6485,7 +6574,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersPositiveConfigSet_OverwritesA
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", 6}});
   EXPECT_EQ(6, c.config().maxP2pPeers);
-  EXPECT_TRUE(LogHas(log, "Comm config maxP2pPeers reset to NCCL_MAX_P2P_PEERS=6")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "Comm config maxP2pPeers reset to NCCL_P2P_MAX_PEERS=6")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersZero_KeepsConfigAndLogsTooLow) {
@@ -6493,7 +6582,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersZero_KeepsConfigAndLogsTooLow
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", 0}});
   EXPECT_EQ(2, c.config().maxP2pPeers);
-  EXPECT_TRUE(LogHas(log, "NCCL_MAX_P2P_PEERS 0 is too low, leaving it set at 2")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "NCCL_P2P_MAX_PEERS 0 is too low, leaving it set at 2")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersNegative_KeepsConfigAndLogsTooLow) {
@@ -6501,7 +6590,7 @@ TEST_F(InitMicrotest, EnvConfigOverride_MaxP2pPeersNegative_KeepsConfigAndLogsTo
   c.config().maxP2pPeers = 2;
   const std::string log = c.RunCapturingLog({{"P2P_MAX_PEERS", -4}});
   EXPECT_EQ(2, c.config().maxP2pPeers);
-  EXPECT_TRUE(LogHas(log, "NCCL_MAX_P2P_PEERS -4 is too low, leaving it set at 2")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "NCCL_P2P_MAX_PEERS -4 is too low, leaving it set at 2")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, EnvConfigOverride_GraphStreamOrderingParamUndefined_LeavesConfigUntouched) {

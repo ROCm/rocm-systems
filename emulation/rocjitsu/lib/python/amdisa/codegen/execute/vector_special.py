@@ -904,38 +904,13 @@ def gen_vector_div_fixup(
         L.extend(vop3_src_mod('p', 0, has_abs))
         L.extend(vop3_src_mod('b', 1, has_abs))
         L.extend(vop3_src_mod('c', 2, has_abs))
-    L.append('    float result;')
-    L.append('    if (std::isnan(c)) result = c;')
-    L.append('    else if (std::isnan(b)) result = b;')
     L.append(
-        '    else if (c == 0.0f && b == 0.0f) result = std::numeric_limits<float>::quiet_NaN();'
+        '    float result = amdgpu::div_fixup_f16(p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());'
     )
-    L.append(
-        '    else if (std::isinf(c) && std::isinf(b)) result = std::numeric_limits<float>::quiet_NaN();'
-    )
-    L.append('    else if (b == 0.0f) {')
-    L.append('      result = std::copysign(std::numeric_limits<float>::infinity(),')
-    L.append(
-        '                             std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));'
-    )
-    L.append('    }')
-    L.append(
-        '    else if (c == 0.0f) result = std::copysign(0.0f, std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));'
-    )
-    L.append('    else if (std::isinf(c)) {')
-    L.append('      result = std::copysign(std::numeric_limits<float>::infinity(),')
-    L.append(
-        '                             std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));'
-    )
-    L.append('    }')
-    L.append(
-        '    else if (std::isinf(b)) result = std::copysign(0.0f, std::bit_cast<float>(std::bit_cast<uint32_t>(b) ^ std::bit_cast<uint32_t>(c)));'
-    )
-    L.append('    else result = p;')
     if is_vop3:
         L.extend(vop3_dst_mod('result', omod_result_type='f16'))
         L.append(
-            '    uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());'
+            '    uint32_t result_bits = amdgpu::narrow_div_fixup_f16(result, wf.fp16_ovfl());'
         )
         L.append(
             '    result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
@@ -945,7 +920,7 @@ def gen_vector_div_fixup(
         )
     else:
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, util::f32_to_f16_mode(result, wf.fp16_ovfl()));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, amdgpu::narrow_div_fixup_f16(result, wf.fp16_ovfl()));'
         )
     L.append('  }')
     return '\n'.join(L)
@@ -990,8 +965,10 @@ def gen_vector_div_scale(
         L.extend(vop3_src_mod('s1', 1, has_abs))
         L.extend(vop3_src_mod('s2', 2, has_abs))
     mode = 'f16_f64' if is_f64 else 'f32'
+    # RDNA3 preserves F64 signaling NaNs; physical gfx1100 and gfx1201 differ.
+    quiet_nan = ', wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA3' if is_f64 else ''
     L.append(
-        f'    const DivisionScaleResult<{fp_type}> scaled = div_scale(s0, s1, s2, wf.fp_round_mode_{mode}(), wf.fp_denorm_mode_{mode}());'
+        f'    const amdgpu::DivisionScaleResult<{fp_type}> scaled = amdgpu::div_scale(s0, s1, s2, wf.fp_round_mode_{mode}(), wf.fp_denorm_mode_{mode}(){quiet_nan});'
     )
     L.append(f'    const {fp_type} result = scaled.value;')
     L.append('    const bool set_vcc = scaled.post_scale;')
@@ -1171,7 +1148,6 @@ def gen_vector_bitop3(
     Index bit ordering:
       bit 2 = src0, bit 1 = src1, bit 0 = src2
     """
-    nbits = '16' if dtype == 'b16' else '32'
     L = []
     L.append('  uint8_t truth_table = static_cast<uint8_t>')
     L.append('      ((inst_.omod << 6) | (inst_.abs << 3) | inst_.neg);')
@@ -1193,13 +1169,8 @@ def gen_vector_bitop3(
         L.append(
             f'    uint32_t c = amdgpu::RegisterAccess(wf).read_lane({src[2]}, lane);'
         )
-    L.append(f'    uint32_t result = 0;')
-    L.append(f'    for (int i = 0; i < {nbits}; ++i) {{')
-    L.append(
-        '      uint32_t idx = (((a >> i) & 1) << 2) | (((b >> i) & 1) << 1) | ((c >> i) & 1);'
-    )
-    L.append('      result |= ((truth_table >> idx) & 1) << i;')
-    L.append('    }')
+    mask = ' & 0xffffu' if dtype == 'b16' else ''
+    L.append(f'    uint32_t result = amdgpu::bitop3_words(a, b, c, truth_table){mask};')
     if dtype == 'b16' and true16_opsel:
         L.append(
             f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, '

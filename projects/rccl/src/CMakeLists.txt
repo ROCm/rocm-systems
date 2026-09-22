@@ -396,6 +396,7 @@ set(SRC_FILES
   include/proxy.h
   include/proxy_diag_counters.h
   include/ras.h
+  include/rccl_arch_thresholds.h
   include/rccl_common.h
   include/rccl_decision.h
   include/rccl_float8.h
@@ -521,6 +522,7 @@ set(SRC_FILES
   ras/ras_param.cc
   ras/ras_param.h
   ras/rasnet.cc
+  rccl_arch_thresholds.cc
   rccl_wrap.cc
   register/coll_reg.cc
   register/register.cc
@@ -1471,8 +1473,8 @@ if(ROCM_MAJOR_VERSION GREATER_EQUAL 6)
 endif()
 # Wrap fmt in $<BUILD_INTERFACE:...> so it's only used while building rccl
 # and is omitted from the exported rccl-targets export set. Without this,
-# a FetchContent-built fmt-header-only target leaks into rccl's link
-# interface and breaks install(EXPORT) for static builds.
+# a fmt-header-only target leaks into rccl's link interface and breaks
+# install(EXPORT) for static builds.
 target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
 if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   # Resolve to a full path: nothing on the link line supplies ${ROCM_PATH}/lib, so a bare
