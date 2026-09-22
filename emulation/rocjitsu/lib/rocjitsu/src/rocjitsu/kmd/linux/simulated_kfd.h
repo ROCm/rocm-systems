@@ -259,6 +259,9 @@ public:
   /// @details Drives DRM AMDGPU_GEM_VA MAP/REPLACE from the interposer: maps
   /// @p size bytes at @p gpu_va to @p host_ptr with the MTYPE derived from
   /// @p alloc_flags.
+  /// @pre host_ptr names the interposer-owned read-write dmabuf mapping, which
+  /// remains alive until these GPU mappings are removed. Application-owned
+  /// pointers must use map_to_gpu with HostExtentOwner::Application instead.
   /// @retval true the range was installed.
   /// @retval false the local process is gone, so nothing was mapped (the caller
   ///         must surface an error rather than report a phantom success).
