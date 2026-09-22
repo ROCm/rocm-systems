@@ -16,6 +16,7 @@ add_executable(
     test_counters_writer.cpp
     test_output_registry.h
     test_output_registry.cpp
+    test_kernel_name.cpp
     test_dispatch_writer.h
     test_dispatch_writer.cpp
     test_kernel_symbols_writer.h

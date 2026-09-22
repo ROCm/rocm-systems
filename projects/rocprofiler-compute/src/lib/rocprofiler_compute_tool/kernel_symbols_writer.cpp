@@ -3,10 +3,11 @@
 #include "kernel_symbols_writer.h"
 
 #include "compression/gzip_output_stream.h"
-#include "csv_gz_writer.h"
+#include "csv/csv.h"
 
 #include <algorithm>
-#include <sstream>
+#include <iostream>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -25,8 +26,7 @@ static_assert(KernelSymbolsWriter::kFileSuffix.size() >= compression::kGzipSuffi
               "KernelSymbolsWriter::kFileSuffix must end in the gzip suffix");
 }  // namespace
 
-bool format_kernel_symbols_csv(const tool_data_t&                           tool_data,
-                               const std::function<bool(std::string_view)>& sink)
+bool format_kernel_symbols_csv(const tool_data_t& tool_data, const csv::Sink& sink)
 {
     // The symbols live in a hash map, so sort to keep the artifact stable
     // across runs.
@@ -36,18 +36,15 @@ bool format_kernel_symbols_csv(const tool_data_t&                           tool
         kernel_ids.push_back(kernel_id);
     std::sort(kernel_ids.begin(), kernel_ids.end());
 
-    // One row per kernel, so the whole artifact fits in a single batch.
-    std::ostringstream out;
-    out << kHeader;
-    for (auto kernel_id : kernel_ids)
+    const auto write_row = [&tool_data](std::ostream& out, uint64_t kernel_id)
     {
         const auto& symbol = tool_data.kernel_symbols.at(kernel_id);
-        out << kernel_id << ',' << csv_quote(symbol.kernel_name) << ','
-            << csv_quote(symbol.kernel_short_name) << ',' << symbol.arch_vgpr_count << ','
-            << symbol.accum_vgpr_count << ',' << symbol.sgpr_count << '\n';
-    }
+        out << kernel_id << ',' << csv::quote(symbol.kernel_name) << ','
+            << csv::quote(symbol.kernel_short_name) << ',' << symbol.arch_vgpr_count << ','
+            << symbol.accum_vgpr_count << ',' << symbol.sgpr_count;
+    };
 
-    return sink(out.str());
+    return csv::format(kHeader, kernel_ids, write_row, sink);
 }
 
 void KernelSymbolsWriter::write(tool_data_t& tool_data)
@@ -55,10 +52,25 @@ void KernelSymbolsWriter::write(tool_data_t& tool_data)
     if (tool_data.kernel_symbols.empty() || tool_data.kernel_symbols_filename.empty())
         return;
 
-    write_csv_gz(tool_data.kernel_symbols_filename,
-                 "Kernel symbols",
-                 [&tool_data](const auto& sink)
-                 { return format_kernel_symbols_csv(tool_data, sink); });
+    compression::GzipFileOutputStream stream(tool_data.kernel_symbols_filename);
+    if (!stream.is_open())
+    {
+        std::cerr << "Failed to open output file: " << tool_data.kernel_symbols_filename << std::endl;
+        return;
+    }
+
+    const auto wrote = format_kernel_symbols_csv(tool_data,
+                                                 [&stream](std::string_view text)
+                                                 { return stream.write(text); });
+
+    if (!stream.close() || !wrote)
+    {
+        std::cerr << "Failed to write output file: " << tool_data.kernel_symbols_filename << std::endl;
+        return;
+    }
+
+    std::clog << "[rocprofiler-compute] Kernel symbols have been written to: "
+              << tool_data.kernel_symbols_filename << std::endl;
 }
 
 }  // namespace rocprofiler_compute_tool
