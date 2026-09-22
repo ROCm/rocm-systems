@@ -184,7 +184,7 @@ void VMacLegacyF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<true>(
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         *this, wf, vdst, lane,
         std::bit_cast<uint32_t>(
             std::fma(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)),
