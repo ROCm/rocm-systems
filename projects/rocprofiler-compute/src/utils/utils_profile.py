@@ -354,6 +354,8 @@ def run_prof(
             )
             console_debug(f"Updated rocpd db {db_name} with native tool counters.")
 
+        # out_pmc_1 is deleted at the end of this function, so move the files
+        # analyze needs into the workload directory first.
         keep_native_artifacts(out_pmc_1, Path(workload_dir), fbase)
     # Write results_fbase.csv
     counter_csv = csv_compression.compressed_name(
