@@ -1187,7 +1187,6 @@ target_include_directories(rccl-UnitTestsMicroWarpSpeed PRIVATE
   ${RCCL_INCLUDE_DIRS}
 )
 target_compile_definitions(rccl-UnitTestsMicroWarpSpeed PRIVATE
-  __HIP_PLATFORM_AMD__
   NCCL_OS_LINUX
   ROCM_VERSION=70000
   ENABLE_WARP_SPEED
@@ -1199,6 +1198,18 @@ target_compile_definitions(rccl-UnitTestsMicroWarpSpeed PRIVATE
   $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
+# Apply HIP compile requirements without linking the runtime.
+foreach(_hip_tgt hip::host hip::device)
+  if(TARGET ${_hip_tgt})
+    target_include_directories(rccl-UnitTestsMicroWarpSpeed PRIVATE
+      $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+    target_compile_definitions(rccl-UnitTestsMicroWarpSpeed PRIVATE
+      $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
+    target_compile_options(rccl-UnitTestsMicroWarpSpeed PRIVATE
+      $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_OPTIONS>)
+  endif()
+endforeach()
+target_compile_options(rccl-UnitTestsMicroWarpSpeed PRIVATE --offload-host-only)
 target_link_options(rccl-UnitTestsMicroWarpSpeed PRIVATE -no-hip-rt -Wl,--gc-sections)
 target_link_libraries(rccl-UnitTestsMicroWarpSpeed PRIVATE
   GTest::GTest
