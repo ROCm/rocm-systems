@@ -414,6 +414,8 @@ void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const 
     wait.add(amdgpu::WaitCounterType::EXPCNT, target.expcnt);
   } else if (mnemonic == "s_wait_loadcnt") {
     wait.add(amdgpu::WaitCounterType::LOADCNT, target.vmcnt);
+  } else if (mnemonic == "s_wait_samplecnt") {
+    wait.add(amdgpu::WaitCounterType::SAMPLECNT, target.samplecnt);
   } else if (mnemonic == "s_wait_storecnt") {
     wait.add(amdgpu::WaitCounterType::STORECNT, target.vscnt);
   } else if (mnemonic == "s_wait_dscnt") {

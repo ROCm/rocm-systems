@@ -22,6 +22,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -114,8 +115,18 @@ private:
   size_t size_ = 0;
 };
 
+/// @brief Surface metadata needed to materialize image clears in the memory pipeline.
+struct ImageMetadataAccess {
+  uint64_t base = 0, metadata = 0;
+  uint32_t width = 0, height = 0, swizzle = 0;
+  bool pipe_aligned = true;
+  bool depth = false;
+  /// Per-lane x in bits 0-15 and y in bits 16-31.
+  std::array<uint32_t, 64> coordinates{};
+};
+
 /// @brief Dynamic pipeline state for vector memory instructions
-/// (FLAT, MUBUF, MTBUF, DS).
+/// (FLAT, MUBUF, MTBUF, MIMG, DS).
 struct VectorMemState : DynamicInstState {
   VectorMemState(MemPipelineTag pipeline) {
     tag_ = pipeline;
@@ -151,6 +162,8 @@ struct VectorMemState : DynamicInstState {
   uint32_t buffer_format = 0;
   BufferFormatEncoding buffer_format_encoding = BufferFormatEncoding::Gfx11;
   uint32_t buffer_selectors = 0;
+  bool image_srgb = false;
+  std::unique_ptr<ImageMetadataAccess> image_metadata;
   uint32_t buffer_components = 0;
   bool buffer_d16 = false;
   // Scratch (private) accesses store data in the hardware dword-interleaved

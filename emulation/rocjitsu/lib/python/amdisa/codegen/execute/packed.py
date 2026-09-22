@@ -1043,7 +1043,10 @@ def gen_mad_mix_lo_hi(
         f'    float result = {"std::fma(a, b, c)" if use_cdna5_helpers else "a * b + c"};'
     )
     L.append('    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);')
-    L.append(f'    uint16_t h = util::f32_to_f16_mode(result, wf.fp16_ovfl());')
+    L.append('    uint16_t h = amdgpu::pseudo_scalar::round_f16_result(')
+    L.append(
+        '        result, wf.fp_round_mode_f16_f64(), 0, false, wf.fp16_ovfl(), false);'
+    )
     if is_lo:
         L.append(
             f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, 0u, h);'

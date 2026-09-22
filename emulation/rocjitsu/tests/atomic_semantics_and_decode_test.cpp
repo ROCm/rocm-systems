@@ -98,7 +98,12 @@ public:
     cu->write_sgpr(scalar + 4, 0x1000);
     cu->write_sgpr(scalar + 5, 0);
     cu->write_sgpr(scalar + 6, 4096);
-    cu->write_sgpr(scalar + 7, 0);
+    const auto arch = cu->arch();
+    const bool rdna_bounds = arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+                             arch == ROCJITSU_CODE_ARCH_RDNA3_5 || arch == ROCJITSU_CODE_ARCH_RDNA4;
+    // A raw byte-addressed buffer uses OOB_SELECT=3. Structured mode zero
+    // rejects every access when this fixture's STRIDE is zero.
+    cu->write_sgpr(scalar + 7, rdna_bounds ? 3u << 28 : 0);
     cu->write_vgpr(base + 4, 0, 0);
     cu->write_vgpr(base + 5, 0, 0);
     const uint32_t returned = run(words, src, 0, 0, 0xf0, true, buffer);

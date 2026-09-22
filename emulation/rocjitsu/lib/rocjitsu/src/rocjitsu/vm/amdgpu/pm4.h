@@ -5,7 +5,7 @@
 #define ROCJITSU_VM_AMDGPU_PM4_H_
 
 /// @file
-/// @brief Compute PM4 packets, register offsets and submission lifetime state.
+/// @brief PM4 packets, shader registers and submission lifetime state.
 
 #include <array>
 #include <atomic>
@@ -18,6 +18,8 @@
 #include <vector>
 
 namespace rocjitsu::amdgpu {
+
+class GraphicsDraw;
 
 /// @brief Compute register offsets relative to the SH register aperture.
 inline constexpr uint32_t kPm4ComputeStartX = 0x204;
@@ -33,12 +35,15 @@ inline constexpr uint32_t kPm4ComputePgmRsrc2 = 0x213;
 inline constexpr uint32_t kPm4ComputeTmpringSize = 0x218;
 inline constexpr uint32_t kPm4ComputeUserData0 = 0x240;
 
-/// @brief Type-3 packet opcodes accepted by the compute command processor.
+/// @brief Type-3 packet opcodes accepted by the command processor.
 enum class Pm4Opcode : uint32_t {
   Nop = 0x10,
   SetBase = 0x11,
   ClearState = 0x12,
+  DrawIndex2 = 0x27,
   ContextControl = 0x28,
+  DrawIndexAuto = 0x2d,
+  NumInstances = 0x2f,
   PfpSyncMe = 0x42,
   SetContextReg = 0x69,
   SetContextRegPairs = 0xb8,
@@ -54,8 +59,11 @@ enum class Pm4Opcode : uint32_t {
   DmaData = 0x50,
   AcquireMem = 0x58,
   LoadShRegIndex = 0x63,
+  LoadContextRegIndex = 0x9f,
   SetShReg = 0x76,
+  SetShRegIndex = 0x9b,
   SetUconfigReg = 0x79,
+  SetUconfigRegIndex = 0x7a,
   SetShRegPairs = 0xba,
   SetUconfigRegPairs = 0xbe,
 };
@@ -122,10 +130,14 @@ struct Pm4Submission {
   std::function<void(bool)> complete;
 };
 
-/// @brief Compute register file and ordered DRM submissions for one CP queue.
+/// @brief Shader and graphics register files and ordered submissions for one CP queue.
 struct Pm4QueueState {
   uint64_t indirect_base = 0;
+  uint32_t num_instances = 1;
+  std::shared_ptr<GraphicsDraw> draw;
   std::array<uint32_t, 0x400> sh_registers{};
+  std::array<uint32_t, 0x2000> context_registers{};
+  std::array<uint32_t, 0x4000> uconfig_registers{};
   std::deque<Pm4Submission> submissions;
 };
 

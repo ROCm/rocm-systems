@@ -347,6 +347,7 @@ class CodeGenerator:
         'global_store_addtid': 'vmem_store',
         'buffer_load': 'vmem_load',
         'buffer_store': 'vmem_store',
+        'image_sample_2d': 'vmem_sample',
         'buffer_atomic': 'vmem_atomic',
         'tbuffer_load': 'vmem_load',
         'tbuffer_store': 'vmem_store',
@@ -3937,44 +3938,45 @@ class CodeGenerator:
                     f'{{{size_line}}}'
                 )
             class_func_impls.append(cgen.Line(class_ctor_impl))
-            if profile.renders_gfx11_image_syntax and enc_upper == 'ENC_MIMG':
+            if profile.has_gfx11_image_address_extension and enc_upper == 'ENC_MIMG':
                 public_members.append(
                     cgen.Line(
                         'void capture_nsa_words(const MachineInst *inst, '
                         'const Operand *vaddr);'
                     )
                 )
-                public_members.append(
-                    cgen.Line(
-                        'void append_src_operand(std::string &out, '
-                        'uint8_t operand_index) const override {\n'
-                        '  const Operand *operand = src_operands_[operand_index];\n'
-                        '  if (!inst_.nsa || operand != nsa_vaddr_operand_) {\n'
-                        '    Instruction::append_src_operand(out, operand_index);\n'
-                        '    return;\n'
-                        '  }\n'
-                        '  const uint32_t vaddr_words = (operand->size_bits() + 31) / 32;\n'
-                        '  out += "[";\n'
-                        '  uint32_t consumed_words = 0;\n'
-                        '  for (uint32_t index = 0; index < 5 && consumed_words < vaddr_words; ++index) {\n'
-                        '    const uint32_t group_words = gfx11_mimg_nsa_group_width(index, vaddr_words);\n'
-                        '    if (group_words == 0) break;\n'
-                        '    if (index != 0) out += ", ";\n'
-                        '    const uint32_t selector = index == 0\n'
-                        '        ? inst_.vaddr\n'
-                        '        : (raw_words_[2] >> ((index - 1) * 8)) & 0xffu;\n'
-                        '    if (group_words > 1) {\n'
-                        '      out += "v[" + std::to_string(selector) + ":";\n'
-                        '      out += std::to_string(selector + group_words - 1) + "]";\n'
-                        '    } else {\n'
-                        '      out += "v" + std::to_string(selector);\n'
-                        '    }\n'
-                        '    consumed_words += group_words;\n'
-                        '  }\n'
-                        '  out += "]";\n'
-                        '}'
+                if profile.renders_gfx11_image_syntax:
+                    public_members.append(
+                        cgen.Line(
+                            'void append_src_operand(std::string &out, '
+                            'uint8_t operand_index) const override {\n'
+                            '  const Operand *operand = src_operands_[operand_index];\n'
+                            '  if (!inst_.nsa || operand != nsa_vaddr_operand_) {\n'
+                            '    Instruction::append_src_operand(out, operand_index);\n'
+                            '    return;\n'
+                            '  }\n'
+                            '  const uint32_t vaddr_words = (operand->size_bits() + 31) / 32;\n'
+                            '  out += "[";\n'
+                            '  uint32_t consumed_words = 0;\n'
+                            '  for (uint32_t index = 0; index < 5 && consumed_words < vaddr_words; ++index) {\n'
+                            '    const uint32_t group_words = gfx11_mimg_nsa_group_width(index, vaddr_words);\n'
+                            '    if (group_words == 0) break;\n'
+                            '    if (index != 0) out += ", ";\n'
+                            '    const uint32_t selector = index == 0\n'
+                            '        ? inst_.vaddr\n'
+                            '        : (raw_words_[2] >> ((index - 1) * 8)) & 0xffu;\n'
+                            '    if (group_words > 1) {\n'
+                            '      out += "v[" + std::to_string(selector) + ":";\n'
+                            '      out += std::to_string(selector + group_words - 1) + "]";\n'
+                            '    } else {\n'
+                            '      out += "v" + std::to_string(selector);\n'
+                            '    }\n'
+                            '    consumed_words += group_words;\n'
+                            '  }\n'
+                            '  out += "]";\n'
+                            '}'
+                        )
                     )
-                )
                 class_func_impls.append(
                     cgen.Line(
                         f'void {inst_enc.fmt_enc_name}::capture_nsa_words('
@@ -4268,7 +4270,7 @@ class CodeGenerator:
                         f'std::array<uint32_t, {raw_word_count}> raw_words_{{}}'
                     )
                 )
-            elif profile.renders_gfx11_image_syntax and enc_upper == 'ENC_MIMG':
+            elif profile.has_gfx11_image_address_extension and enc_upper == 'ENC_MIMG':
                 class_members.append(
                     cgen.Statement('std::array<uint32_t, 5> raw_words_{}')
                 )
@@ -7604,7 +7606,7 @@ class CodeGenerator:
             L.append(f'  }}')
             return '\n'.join(L)
 
-        # ── Image pipeline stubs ──────────────────────────────────────────
+        # ── Image transfers and resource queries ──────────────────────────────────────────
         # NOTE for image execution: the image ADDRESS is carried as the
         # fieldless ``vaddr`` operand (OPR_VGPR), currently emitted as an
         # inert placeholder. The real gfx12 address is NSA -- up to
@@ -7612,17 +7614,54 @@ class CodeGenerator:
         # single base+width Operand cannot express -- so decode it from the
         # machine-inst fields here. ``vdata`` and ``rsrc`` are field-bearing
         # and already modeled.
-        if cls == 'image_load':
-            # Minimal image load: treat as a flat read from the image resource base address.
-            # Full image addressing (texture coordinates, dimensions) not yet implemented.
-            L.append('  // Minimal image load stub — not yet implemented.')
-            L.append('  (void)wf;')
-            return '\n'.join(L)
-
-        if cls == 'image_store':
-            L.append('  // Minimal image store stub — not yet implemented.')
-            L.append('  (void)wf;')
-            return '\n'.join(L)
+        if self.isa_spec.arch_name in (
+            'rdna3',
+            'rdna3_5',
+            'rdna4',
+        ) and inst.name.upper() in (
+            'IMAGE_LOAD',
+            'IMAGE_STORE',
+            'IMAGE_SAMPLE',
+            'IMAGE_SAMPLE_LZ',
+        ):
+            gfx12 = self.isa_spec.arch_name == 'rdna4'
+            sample = inst.name.upper() in ('IMAGE_SAMPLE', 'IMAGE_SAMPLE_LZ')
+            load = inst.name.upper() != 'IMAGE_STORE'
+            counter = (
+                'SAMPLECNT' if sample and gfx12 else ('LOADCNT' if load else 'STORECNT')
+            )
+            resource = 'inst_.rsrc' if gfx12 else 'inst_.srsrc * 4'
+            sampler = (
+                (', inst_.samp' if gfx12 else ', inst_.ssamp * 4') if sample else ''
+            )
+            unsupported = 'inst_.r128 || inst_.a16 || inst_.tfe'
+            if gfx12:
+                unsupported += ' || inst_.nv'
+            if sample:
+                unsupported += ' || inst_.unorm || inst_.lwe'
+            coords = (
+                '{inst_.vaddr0, inst_.vaddr1, inst_.vaddr2}'
+                if gfx12
+                else '{inst_.vaddr, inst_.nsa ? raw_words_[2] & 255 : inst_.vaddr + 1u, '
+                'inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u}'
+            )
+            mtype = (
+                'amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th)'
+                if gfx12
+                else 'amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc)'
+            )
+            return '\n'.join(
+                [
+                    '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
+                    f'  d->is_load = {str(load).lower()};',
+                    f'  d->mtype = {mtype};',
+                    f'  d->wait_counter_type = amdgpu::WaitCounterType::{counter};',
+                    f'  if (!amdgpu::prepare_image_transfer(wf, *d, {resource}, inst_.vdata,',
+                    f'      {coords}, inst_.dim, inst_.dmask, inst_.d16,',
+                    f'      {unsupported}{sampler})) return;',
+                    '  set_data(std::move(d));',
+                ]
+            )
 
         if cls == 'image_query' and inst.name.upper() == 'IMAGE_GET_RESINFO':
             resource = (
@@ -7641,16 +7680,53 @@ class CodeGenerator:
                 f"{self._vgpr_base_expr('vdata')}, inst_.dmask, {r128}, inst_.a16);"
             )
 
-        if cls in ('image_atomic', 'image_sample', 'image_query', 'image_bvh'):
-            L.append('  (void)wf; // Image pipeline not yet implemented.')
-            return '\n'.join(L)
+        if cls in (
+            'image_load',
+            'image_store',
+            'image_atomic',
+            'image_sample',
+            'image_query',
+            'image_bvh',
+        ):
+            return (
+                '  wf.report_instruction_execution_error('
+                'amdgpu::InstructionExecutionError::UnimplementedInstruction);'
+            )
 
-        # ── Graphics-only stubs (no-ops in compute simulation) ───────────
+        # ── Graphics exports and interpolation ─────────────────────────
         if cls == 'export':
+            if self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4'):
+                return (
+                    '  wf.export_graphics(inst_.tgt, inst_.en, '
+                    '{inst_.vsrc0, inst_.vsrc1, inst_.vsrc2, inst_.vsrc3}, '
+                    'inst_.row_en);'
+                )
             L.append('  (void)wf; // Export: no-op in compute simulation.')
             return '\n'.join(L)
 
         if cls in ('interp', 'lds_direct'):
+            if self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4'):
+                if inst.name.upper() in ('V_INTERP_P10_F32', 'V_INTERP_P2_F32'):
+                    second = str(inst.name.upper() == 'V_INTERP_P2_F32').lower()
+                    opsel = (
+                        'inst_.opsel'
+                        if self.isa_spec.arch_name == 'rdna4'
+                        else 'inst_.op_sel'
+                    )
+                    return (
+                        '  amdgpu::execute_graphics_interp_f32(wf, inst_.vdst, '
+                        f'{{inst_.src0 - 256u, inst_.src1 - 256u, inst_.src2 - 256u}}, {second}, '
+                        f'inst_.neg, inst_.clamp, {opsel});'
+                    )
+                if inst.name.upper() in ('LDS_PARAM_LOAD', 'DS_PARAM_LOAD'):
+                    return (
+                        '  amdgpu::execute_graphics_parameter_load(wf, inst_.vdst, '
+                        'inst_.attr, inst_.attr_chan);'
+                    )
+                return (
+                    '  wf.report_instruction_execution_error('
+                    'amdgpu::InstructionExecutionError::UnimplementedInstruction);'
+                )
             L.append(
                 '  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.'
             )
@@ -7838,6 +7914,8 @@ class CodeGenerator:
                 if uses_granular_counter_types
                 else 'amdgpu::WaitCounterType::VMCNT'
             )
+        if kind == 'vmem_sample':
+            return 'amdgpu::WaitCounterType::SAMPLECNT'
         if kind in ('flat_store', 'vmem_store'):
             if uses_granular_counter_types:
                 return 'amdgpu::WaitCounterType::STORECNT'
@@ -7902,7 +7980,7 @@ class CodeGenerator:
             completion = ordered_async_load
         elif kind == 'async_store':
             completion = ordered_async_store
-        elif kind == 'vmem_load':
+        elif kind in ('vmem_load', 'vmem_sample'):
             completion = ordered_vmem
         elif kind == 'vmem_store':
             completion = (
@@ -8007,6 +8085,18 @@ class CodeGenerator:
 
     def _memory_issue_semantic_class(self, sem: InstructionSemantics) -> str:
         """Return the issue-metadata variant for one decoded instruction."""
+        if self.isa_spec.arch_name == 'rdna4' and sem.name in (
+            'IMAGE_SAMPLE',
+            'IMAGE_SAMPLE_LZ',
+        ):
+            return 'image_sample_2d'
+        if self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4') and sem.name in (
+            'IMAGE_SAMPLE',
+            'IMAGE_SAMPLE_LZ',
+            'IMAGE_LOAD',
+            'IMAGE_STORE',
+        ):
+            return 'buffer_store' if sem.name == 'IMAGE_STORE' else 'buffer_load'
         if (
             sem.semantic_class == 'ds_barrier_arrive'
             and getattr(sem, 'operation', None) == 'async_barrier_arrive'
@@ -11406,7 +11496,7 @@ class CodeGenerator:
                                 )
 
                     if (
-                        profile.renders_gfx11_image_syntax
+                        profile.has_gfx11_image_address_extension
                         and enc.enc_name.upper() == 'ENC_MIMG'
                     ):
                         ctor_body_parts.append('capture_nsa_words(inst, &vaddr);')
@@ -11431,7 +11521,11 @@ class CodeGenerator:
 
                     ctor_body_parts.extend(vgpr_msb_role_body)
 
-                    if _mem_sem and _mem_sem.semantic_class in self._MEMORY_CLASSES:
+                    if _mem_sem and (
+                        _mem_sem.semantic_class in self._MEMORY_CLASSES
+                        or self._memory_issue_semantic_class(_mem_sem)
+                        in self._MEMORY_CLASSES
+                    ):
                         ctor_body_parts.append(
                             self._memory_issue_initializer(_mem_sem, inst_field_names)
                         )
@@ -12601,7 +12695,17 @@ class CodeGenerator:
                         'ENC_VBUFFER',
                     }
                 )
-                is_mem_enc = enc.enc_name.upper() in _MEM_ENC_NAMES
+                is_mem_enc = (
+                    enc.enc_name.upper() in _MEM_ENC_NAMES
+                    or (
+                        self.isa_spec.arch_name == 'rdna4'
+                        and enc.enc_name.upper() in ('ENC_VIMAGE', 'ENC_VSAMPLE')
+                    )
+                    or (
+                        self.isa_spec.arch_name in ('rdna3', 'rdna3_5')
+                        and enc.enc_name.upper() == 'ENC_MIMG'
+                    )
+                )
                 if is_mem_enc:
                     cpp_includes.extend(
                         [
@@ -12638,6 +12742,30 @@ class CodeGenerator:
                 if any(i.name.upper() == 'IMAGE_GET_RESINFO' for i in all_insts):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/image_resource.h', False)
+                    )
+                if self.isa_spec.arch_name in (
+                    'rdna3',
+                    'rdna3_5',
+                    'rdna4',
+                ) and enc.enc_name.upper() in (
+                    'ENC_MIMG',
+                    'ENC_VIMAGE',
+                    'ENC_VSAMPLE',
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/image_transfer.h', False)
+                    )
+                if enc.enc_name.upper() in (
+                    'ENC_VINTERP',
+                    'ENC_VINTRP',
+                    'ENC_LDSDIR',
+                    'ENC_VDSDIR',
+                ) and self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4'):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/graphics_instructions.h',
+                            False,
+                        )
                     )
                 has_matrix_exec = any(
                     self.semantics
@@ -13588,6 +13716,7 @@ class CodeGenerator:
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/graphics_instructions.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/division.h"',
             *simd_extra_includes(),
             '#include "util/data_types.h"',

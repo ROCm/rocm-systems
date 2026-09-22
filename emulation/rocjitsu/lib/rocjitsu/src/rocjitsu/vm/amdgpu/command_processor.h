@@ -8,8 +8,8 @@
 /// @brief Command processor (CP) component.
 ///
 /// @details Models a CP that works with the ROCm runtime to fetch
-/// and process HSA AQL packets, or consume DRM PM4 compute submissions, and
-/// dispatch work to compute units.
+/// and process HSA AQL packets or DRM PM4 compute and graphics submissions,
+/// dispatching shader work to compute units.
 ///
 /// Architecture: the CP directly owns queue state and doorbell monitoring
 /// (CP hardware functions). Three sub-blocks handle distinct pipeline stages:
@@ -122,8 +122,8 @@ enum class SdmaPacketDialect {
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.
 ///
 /// @details Distributes AQL dispatch packets across the registered compute units in
-/// round-robin order, activating pre-allocated wavefront slots. PM4 compute queues
-/// build the same dispatch entries from shader registers and dispatch packets.
+/// round-robin order, activating pre-allocated wavefront slots. PM4 queues build
+/// compute dispatches and graphics draws from registers and command packets.
 ///
 /// Event-driven: the CP monitors registered hardware queue doorbells via a
 /// polling thread. When new AQL packets are detected, it fetches them from the
@@ -453,6 +453,9 @@ private:
   /// @brief Decode shader launch registers and append a compute dispatch to qs.
   void dispatch_pm4(const HwQueue &queue, HwQueueState &qs,
                     const std::array<uint32_t, 4> &dimensions);
+  void draw_pm4(const HwQueue &queue, HwQueueState &qs, uint32_t vertices,
+                std::vector<uint32_t> indices = {});
+  void dispatch_graphics_pm4(const HwQueue &queue, HwQueueState &qs, DispatchEntry dp);
 
   rocr::llvm::amdhsa::kernel_descriptor_t
   read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid, bool host_accessible = false);

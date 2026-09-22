@@ -10,6 +10,7 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     device_cache_coherence.cpp
     gpu_queue_registry.cpp
     gpu_vm.cpp
+    graphics_draw.cpp
     hwreg.cpp
     iod.cpp
     l1_scalar_cache.cpp

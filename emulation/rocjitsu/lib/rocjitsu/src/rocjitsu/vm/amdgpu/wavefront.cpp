@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/amdgpu/graphics_stage.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -61,6 +62,30 @@ bool Wavefront::fail_pm4_submission() {
     return false;
   pm4_failure_->fail();
   return true;
+}
+
+void Wavefront::export_graphics(uint32_t target, uint32_t mask,
+                                const std::array<uint32_t, 4> &sources, bool row) {
+  if (!exec() || (status_raw() & (1u << 18)))
+    return;
+  if (!graphics_stage_ || row) {
+    report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  for (uint32_t component = 0; component < 4; ++component)
+    if ((mask & (1u << component)) && sources[component] >= num_vgprs()) {
+      report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+      return;
+    }
+  for (uint32_t lane = 0; lane < wf_size(); ++lane) {
+    if (!(exec() & (uint64_t{1} << lane)))
+      continue;
+    std::array<uint32_t, 4> values{};
+    for (uint32_t component = 0; component < 4; ++component)
+      if (mask & (1u << component))
+        values[component] = debug_read_vgpr(sources[component], lane);
+    graphics_stage_->export_lane(*this, lane, target, mask, values);
+  }
 }
 
 void Wavefront::halt(CpCompletionNotice notice) {
