@@ -186,8 +186,14 @@ GIN_SDMA_RS_HD inline void bandwidthGBps(size_t perRankCount, int typeSize, doub
   }
 }
 
-#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
 // Host-side env resolution (unit-testable without pulling in reduce_scatter.cu).
+//
+// Deliberately NOT wrapped in `#if !defined(__HIP_DEVICE_COMPILE__)`. HIP parses
+// the whole translation unit in the device pass, including the bodies of host
+// functions it will not codegen, so hiding these there breaks name lookup in
+// ReduceScatterParseCtasEnv/ReduceScatterUnrollMinBytes and fails the
+// reduce_scatter_perf build on every arch. Plain `inline` is already host-only;
+// it is what gin_sdma_allgather_policy.h's parseAllGatherCtasEnv relies on.
 
 // Parse NCCL_GIN_ANVIL_RS_CTAS. Returns kThresholdUnset for null/empty/negative/
 // trailing-garbage so "8foo" and "-2" do not pin a CTA count. strtoull wraps a
@@ -220,8 +226,6 @@ inline size_t parseReduceScatterUnrollMinBytesString(const char* e) {
 inline size_t parseReduceScatterUnrollMinBytes() {
   return parseReduceScatterUnrollMinBytesString(getenv("NCCL_GIN_ANVIL_RS_UNROLL_MIN"));
 }
-
-#endif  // host env helpers
 
 }  // namespace gin_sdma_reducescatter
 
