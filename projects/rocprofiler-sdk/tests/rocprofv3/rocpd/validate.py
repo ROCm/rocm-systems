@@ -152,14 +152,12 @@ def test_counter_collection_fields_match_across_rocpd_csv_json(
 
 
 def test_counter_collection_fields_match_perfetto(pftrace_reader, json_data):
-    samples = pftrace_reader.query_tp(
-        """
+    samples = pftrace_reader.query_tp("""
         SELECT counter_track.name AS track_name, counter.ts, counter.value
         FROM counter
         JOIN counter_track ON counter.track_id = counter_track.id
         WHERE counter_track.name GLOB 'Agent * PMC *'
-        """
-    )
+        """)
     assert not samples.empty
     assert (samples["ts"] > 0).all()
     assert (samples["value"] >= 0).all()
