@@ -487,6 +487,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   // Default false: conservatively forces SetParams for node types without an override.
   virtual bool HasSameParams(const GraphNode* node) const { return false; }
   virtual GraphMemcpyNodeKind GetMemcpyNodeKind() const { return GraphMemcpyNodeKind::None; }
+  virtual void SetCapturedPriority(int priority) {}
   virtual void GenerateDOT(std::ostream& fout, hipGraphDebugDotFlags flag) {}
   virtual void GenerateDOTNode(size_t graphId, std::ostream& fout, hipGraphDebugDotFlags flag) {
     fout << "\n";
@@ -1972,20 +1973,12 @@ class GraphKernelNode : public GraphNode {
 
   int GetDeclaredPriority() const { return priority_; }
 
-  void SetCapturedPriority(int priority) {
+  void SetCapturedPriority(int priority) override {
     priority_ = std::clamp(priority, static_cast<int>(hip::Stream::Priority::High),
                            static_cast<int>(hip::Stream::Priority::Low));
   }
 
-  // Copy stream priority into node at capture time. Called from the interceptor,
-  // not ihipGraphAddNode, because only the interceptor knows which stream recorded the node.
-  static void CopyCaptureStreamPriority(GraphNode* node, const hip::Stream* stream) {
-    if (node == nullptr || stream == nullptr || node->GetType() != hipGraphNodeTypeKernel) {
-      return;
-    }
-    static_cast<GraphKernelNode*>(node)->SetCapturedPriority(stream->GetPriority());
-  }
-  }
+
 
   hipError_t CreateCommand(hip::Stream* stream) override {
     // Clear commands_ first, even if node is disabled
@@ -4117,5 +4110,12 @@ class hipGraphBatchMemOpNode : public GraphNode {
     return SetParams(&other->batchMemOpNodeParam_);
   }
 };
+
+
+// Defined here so hip::GraphNode is complete.
+inline void hip::Stream::SetLastCapturedNode(hip::GraphNode* graphNode) {
+  lastCapturedNodes_ = {graphNode};
+  graphNode->SetCapturedPriority(priority_);
+}
 
 }  // namespace hip

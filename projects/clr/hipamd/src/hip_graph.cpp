@@ -301,7 +301,6 @@ hipError_t capturehipLaunchKernel(hipStream_t& stream, const void*& hostFunction
   if (status != hipSuccess) {
     return status;
   }
-  hip::GraphKernelNode::CopyCaptureStreamPriority(pGraphNode, s);
   s->SetLastCapturedNode(pGraphNode);
   return hipSuccess;
 }
@@ -357,7 +356,6 @@ hipError_t ihipExtLaunchKernel(hipStream_t stream, hipFunction_t f, uint32_t glo
   if (status != hipSuccess) {
     return status;
   }
-  hip::GraphKernelNode::CopyCaptureStreamPriority(pGraphNode, s);
   s->SetLastCapturedNode(pGraphNode);
 
   return hipSuccess;
@@ -417,7 +415,6 @@ hipError_t capturehipModuleLaunchKernel(hipStream_t& stream, hipFunction_t& f, u
   if (status != hipSuccess) {
     return status;
   }
-  hip::GraphKernelNode::CopyCaptureStreamPriority(pGraphNode, s);
   s->SetLastCapturedNode(pGraphNode);
   return hipSuccess;
 }
@@ -484,7 +481,6 @@ hipError_t capturehipDrvLaunchKernelEx(hipStream_t& stream, const HIP_LAUNCH_CON
   if (status != hipSuccess) {
     return status;
   }
-  hip::GraphKernelNode::CopyCaptureStreamPriority(pGraphNode, s);
   s->SetLastCapturedNode(pGraphNode);
   return hipSuccess;
 }
@@ -518,7 +514,6 @@ hipError_t capturehipModuleLaunchCooperativeKernel(hipStream_t& stream, hipFunct
   if (status != hipSuccess) {
     return status;
   }
-  hip::GraphKernelNode::CopyCaptureStreamPriority(pGraphNode, s);
   s->SetLastCapturedNode(pGraphNode);
 
   return hipSuccess;
@@ -548,7 +543,6 @@ hipError_t capturehipLaunchByPtr(hipStream_t& stream, hipFunction_t func, dim3 b
   if (status != hipSuccess) {
     return status;
   }
-  hip::GraphKernelNode::CopyCaptureStreamPriority(pGraphNode, s);
   s->SetLastCapturedNode(pGraphNode);
 
   return hipSuccess;
@@ -580,7 +574,6 @@ hipError_t capturehipLaunchCooperativeKernel(hipStream_t& stream, const void*& f
   if (status != hipSuccess) {
     return status;
   }
-  hip::GraphKernelNode::CopyCaptureStreamPriority(pGraphNode, s);
   s->SetLastCapturedNode(pGraphNode);
 
   return hipSuccess;
