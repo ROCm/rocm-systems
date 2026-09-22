@@ -27,6 +27,8 @@
 #include <vector>
 
 namespace rocjitsu {
+class ExecutionPluginGroup;
+
 namespace amdgpu {
 
 struct Pm4FailureState;
@@ -991,6 +993,10 @@ public:
   /// to defaults. Does not change permanent bindings (cu_, wf_id_) or ISA-fixed
   /// properties (wf_size_, max_sgprs_, max_vgprs_) or the status register.
   void reset() {
+    // A slot can be reused for a different dispatch and plugin selection.
+    // Retain the vector allocation, but never retain a published decision.
+    hot_hook_subscriptions_valid_ = false;
+    hot_hook_observer_count_ = 0;
     pc = 0;
     wg_id_ = 0;
     wg_coord_ = {};
@@ -1198,10 +1204,17 @@ public:
     assert(slot < plugin_states_.size());
     return plugin_states_[slot].get();
   }
+  bool has_plugin_state(uint32_t slot) const {
+    return slot < plugin_states_.size() && plugin_states_[slot] != nullptr;
+  }
   void set_plugin_state(uint32_t slot, std::unique_ptr<WavefrontState> s) {
     if (plugin_states_.size() <= slot)
       plugin_states_.resize(slot + 1);
     plugin_states_[slot] = std::move(s);
+  }
+  void clear_plugin_state(uint32_t slot) {
+    if (slot < plugin_states_.size())
+      plugin_states_[slot].reset();
   }
 
 private:
@@ -1210,10 +1223,17 @@ private:
   // const (it doesn't alter GPU state), but plugins need to update their own
   // tracking during reads.
   mutable std::vector<std::unique_ptr<WavefrontState>> plugin_states_;
+  // ExecutionPluginGroup publishes one stable hot-hook decision per plugin
+  // after all wave-dispatch callbacks have completed. Storage is retained
+  // across slot reuse to avoid allocation on every dispatched wave.
+  std::vector<uint8_t> hot_hook_subscriptions_;
+  uint32_t hot_hook_observer_count_ = 0;
+  bool hot_hook_subscriptions_valid_ = false;
   uint64_t ready_cycle_ = 0;
   WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
 
   friend class ComputeUnitCore; // CU sets allocation fields during dispatch.
+  friend class ::rocjitsu::ExecutionPluginGroup;
 
   // Memory pipelines complete deferred VM loads into physical SGPR/VGPR
   // storage. They intentionally bypass instruction read-observation because

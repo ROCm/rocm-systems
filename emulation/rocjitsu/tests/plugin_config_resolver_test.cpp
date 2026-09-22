@@ -74,6 +74,16 @@ TEST(PluginConfigResolver, RequiredArgProvidedSucceeds) {
   EXPECT_NE(out.find("\"path\": \"/tmp/log\""), std::string::npos);
 }
 
+TEST(PluginConfigResolver, OptionalArgMayBeAbsentOrProvided) {
+  const char *schema = R"({ "label": { "type": "string", "optional": true } })";
+  std::string out;
+  EXPECT_TRUE(resolve(schema, "", out));
+  EXPECT_EQ(out.find("\"label\""), std::string::npos);
+
+  EXPECT_TRUE(resolve(schema, R"({"label":"target"})", out));
+  EXPECT_NE(out.find("\"label\": \"target\""), std::string::npos);
+}
+
 TEST(PluginConfigResolver, WrongTypeFails) {
   const char *schema = R"({ "level": { "type": "number", "default": 3 } })";
   std::string out;

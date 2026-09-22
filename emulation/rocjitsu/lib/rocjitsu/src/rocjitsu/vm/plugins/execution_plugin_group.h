@@ -102,18 +102,36 @@ public:
       if (existing.plugin->name() == p->name())
         return false;
     p->slot_index_ = static_cast<uint32_t>(plugins_.size());
+    const bool observes_before_execute_instruction = p->observes_before_execute_instruction();
+    const bool observes_after_execute_instruction = p->observes_after_execute_instruction();
+    const bool observes_async_instruction_issued = p->observes_async_instruction_issued();
+    const bool observes_memory_instruction_routing = p->observes_memory_instruction_routing();
+    const bool observes_vgpr_reads = p->observes_vgpr_reads();
+    const bool observes_vgpr_writes = p->observes_vgpr_writes();
+    const bool observes_sgpr_reads = p->observes_sgpr_reads();
+    const bool observes_scalar_register_writes = p->observes_scalar_register_writes();
     const bool observes_memory_routing = p->observes_memory_routing();
     const bool observes_tensor_dma_memory_access = p->observes_tensor_dma_memory_access();
     serialize_hot_hooks_ |= p->requires_serial_hot_hooks();
+    observes_before_execute_instruction_ |= observes_before_execute_instruction;
+    observes_after_execute_instruction_ |= observes_after_execute_instruction;
+    observes_async_instruction_issued_ |= observes_async_instruction_issued;
+    observes_memory_instruction_routing_ |= observes_memory_instruction_routing;
+    observes_vgpr_reads_ |= observes_vgpr_reads;
+    observes_vgpr_writes_ |= observes_vgpr_writes;
+    observes_sgpr_reads_ |= observes_sgpr_reads;
+    observes_scalar_register_writes_ |= observes_scalar_register_writes;
     observes_memory_routing_ |= observes_memory_routing;
     observes_tensor_dma_memory_access_ |= observes_tensor_dma_memory_access;
-    observes_sgpr_reads_ |= p->observes_sgpr_reads();
     supports_async_instructions_ &= p->supports_async_instructions();
     SinkBundle sink = build_sink_bundle(p->name() + ".log");
     if (auto *configured_sink = sink.get())
       p->sink_ = configured_sink;
-    plugins_.push_back(PluginEntry{std::move(sink), observes_memory_routing,
-                                   observes_tensor_dma_memory_access, std::move(p)});
+    plugins_.push_back(PluginEntry{
+        std::move(sink), observes_before_execute_instruction, observes_after_execute_instruction,
+        observes_async_instruction_issued, observes_memory_instruction_routing, observes_vgpr_reads,
+        observes_vgpr_writes, observes_sgpr_reads, observes_scalar_register_writes,
+        observes_memory_routing, observes_tensor_dma_memory_access, std::move(p)});
     return true;
   }
 
@@ -131,6 +149,14 @@ public:
   /// Whether high-frequency callbacks are serialized for this group. Plugin
   /// policy is sampled when each plugin is added so hot dispatch stays O(1).
   bool requires_serial_hot_hooks() const { return serialize_hot_hooks_; }
+
+  bool observes_before_execute_instruction() const { return observes_before_execute_instruction_; }
+  bool observes_after_execute_instruction() const { return observes_after_execute_instruction_; }
+  bool observes_async_instruction_issued() const { return observes_async_instruction_issued_; }
+  bool observes_memory_instruction_routing() const { return observes_memory_instruction_routing_; }
+  bool observes_vgpr_reads() const { return observes_vgpr_reads_; }
+  bool observes_vgpr_writes() const { return observes_vgpr_writes_; }
+  bool observes_scalar_register_writes() const { return observes_scalar_register_writes_; }
 
   /// @brief Whether any contained plugin consumes the routed-memory hook.
   /// @details False for an empty group, so the caller's guard covers both.
@@ -165,38 +191,75 @@ public:
   // -- AMDGPU (non-virtual) --
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                         amdgpu::Wavefront &wf) {
-    dispatch_with_optional_plugin_lock([&]() {
-      for (auto &entry : plugins_)
-        entry.plugin->onAmdgpuBeforeExecuteInstruction(pc, inst, wf);
+    if (!observes_before_execute_instruction_)
+      return;
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_before_execute_instruction &&
+            plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuBeforeExecuteInstruction(pc, inst, wf);
+      }
     });
   }
 
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
                                         std::span<const uint32_t> fetch_window) {
-    dispatch_with_optional_plugin_lock([&]() {
-      for (auto &entry : plugins_)
-        entry.plugin->onAmdgpuBeforeExecuteInstruction(pc, inst, wf, fetch_window);
+    if (!observes_before_execute_instruction_)
+      return;
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_before_execute_instruction &&
+            plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuBeforeExecuteInstruction(pc, inst, wf, fetch_window);
+      }
     });
   }
 
   void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
                                        amdgpu::Wavefront &wf) {
-    dispatch_with_optional_plugin_lock([&]() {
-      for (auto &entry : plugins_)
-        entry.plugin->onAmdgpuAfterExecuteInstruction(pc, inst, wf);
+    if (!observes_after_execute_instruction_)
+      return;
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_after_execute_instruction &&
+            plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuAfterExecuteInstruction(pc, inst, wf);
+      }
     });
   }
 
   void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf) {
+    if (!observes_async_instruction_issued_)
+      return;
     dispatch_async_hook(
-        [&](ExecutionPlugin &plugin) { plugin.onAmdgpuAsyncInstructionIssued(pc, inst, wf); });
+        &wf, [&](ExecutionPlugin &plugin) { plugin.onAmdgpuAsyncInstructionIssued(pc, inst, wf); });
   }
 
   void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) {
-    dispatch_with_optional_plugin_lock([&]() {
-      for (auto &entry : plugins_)
-        entry.plugin->onAmdgpuRouteMemoryInstruction(inst, wf);
+    if (!observes_memory_instruction_routing_)
+      return;
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_memory_instruction_routing &&
+            plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuRouteMemoryInstruction(inst, wf);
+      }
     });
+  }
+
+  /// Whether any memory-routing observer is subscribed to this wavefront.
+  bool observes_memory_routing(const amdgpu::Wavefront &wf) const {
+    const bool cached = has_hot_hook_subscription_cache(&wf);
+    for (size_t index = 0; index != plugins_.size(); ++index) {
+      const auto &entry = plugins_[index];
+      if (entry.observes_memory_routing && plugin_observes_hot_hooks(index, &wf, cached))
+        return true;
+    }
+    return false;
   }
 
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access) {
@@ -209,11 +272,24 @@ public:
 
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
                                   const Instruction &inst, amdgpu::Wavefront &wf) {
-    dispatch_with_optional_plugin_lock([&]() {
-      for (auto &entry : plugins_)
-        if (entry.observes_memory_routing)
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_memory_routing && plugin_observes_hot_hooks(index, &wf, cached))
           entry.plugin->onAmdgpuMemoryAccessRouted(access, inst, wf);
+      }
     });
+  }
+
+  /// Whether any tensor-DMA observer is subscribed to this wavefront.
+  bool observes_tensor_dma_memory_access(const amdgpu::Wavefront &wf) const {
+    const bool cached = has_hot_hook_subscription_cache(&wf);
+    for (size_t index = 0; index != plugins_.size(); ++index) {
+      const auto &entry = plugins_[index];
+      if (entry.observes_tensor_dma_memory_access && plugin_observes_hot_hooks(index, &wf, cached))
+        return true;
+    }
+    return false;
   }
 
   void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) {
@@ -221,6 +297,18 @@ public:
       for (auto &entry : plugins_)
         if (entry.observes_tensor_dma_memory_access)
           entry.plugin->onAmdgpuTensorDmaMemoryAccess(access);
+    });
+  }
+
+  void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,
+                                     const amdgpu::Wavefront &wf) {
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_tensor_dma_memory_access &&
+            plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuTensorDmaMemoryAccess(access, wf);
+      }
     });
   }
 
@@ -277,13 +365,18 @@ public:
   }
 
   void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
+    invalidate_hot_hook_subscription_cache(wf);
     dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuWavefrontDispatched(wf);
+      publish_hot_hook_subscription_cache(wf);
     });
   }
 
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
+    // Halt callbacks still see live registers. Invalidate first so a reentrant
+    // hot hook observes the plugin's current state rather than a stale decision.
+    invalidate_hot_hook_subscription_cache(wf);
     dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuWavefrontHalted(wf);
@@ -292,39 +385,64 @@ public:
 
   void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
-    dispatch_with_optional_plugin_lock([&]() {
-      for (auto &entry : plugins_)
-        entry.plugin->onAmdgpuReadVgprLanes(wf, physical_reg, lane_mask, byte_mask);
+    if (!observes_vgpr_reads_)
+      return;
+    dispatch_wave_hot_hook(wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_vgpr_reads && plugin_observes_hot_hooks(index, wf, cached))
+          entry.plugin->onAmdgpuReadVgprLanes(wf, physical_reg, lane_mask, byte_mask);
+      }
     });
   }
 
   void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
                               uint64_t lane_mask,
                               uint8_t byte_mask = ExecutionPlugin::kFullByteMask) {
-    dispatch_with_optional_plugin_lock([&]() {
-      for (auto &entry : plugins_)
-        entry.plugin->onAmdgpuWriteVgprLanes(wf, physical_reg, lane_mask, byte_mask);
+    if (!observes_vgpr_writes_)
+      return;
+    dispatch_wave_hot_hook(wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_vgpr_writes && plugin_observes_hot_hooks(index, wf, cached))
+          entry.plugin->onAmdgpuWriteVgprLanes(wf, physical_reg, lane_mask, byte_mask);
+      }
     });
   }
 
   void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) {
-    dispatch_with_optional_plugin_lock([&]() {
-      for (auto &entry : plugins_)
-        entry.plugin->onAmdgpuReadSgpr(wf, physical_reg);
+    if (!observes_sgpr_reads_)
+      return;
+    dispatch_wave_hot_hook(wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_sgpr_reads && plugin_observes_hot_hooks(index, wf, cached))
+          entry.plugin->onAmdgpuReadSgpr(wf, physical_reg);
+      }
     });
   }
 
   void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) {
-    dispatch_with_optional_plugin_lock([&]() {
-      for (auto &entry : plugins_)
-        entry.plugin->onAmdgpuReadScalarRegister(wf, reg);
+    if (!observes_sgpr_reads_)
+      return;
+    dispatch_wave_hot_hook(wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_sgpr_reads && plugin_observes_hot_hooks(index, wf, cached))
+          entry.plugin->onAmdgpuReadScalarRegister(wf, reg);
+      }
     });
   }
 
   void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) {
-    dispatch_with_optional_plugin_lock([&]() {
-      for (auto &entry : plugins_)
-        entry.plugin->onAmdgpuWriteScalarRegister(wf, reg);
+    if (!observes_scalar_register_writes_)
+      return;
+    dispatch_wave_hot_hook(wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_scalar_register_writes && plugin_observes_hot_hooks(index, wf, cached))
+          entry.plugin->onAmdgpuWriteScalarRegister(wf, reg);
+      }
     });
   }
 
@@ -376,14 +494,23 @@ private:
 
   // Complete issue accounting for every observer even if one throws. Preserve
   // the first exception for the issuer, which joins all accepted jobs.
-  template <typename Callback> void dispatch_async_hook(Callback &&callback) {
-    dispatch_with_optional_plugin_lock([&]() {
+  template <typename Callback>
+  void dispatch_async_hook(const amdgpu::Wavefront *wf, Callback &&callback) {
+    dispatch_wave_hot_hook(wf, [&](bool cached) {
       size_t index = 0;
       try {
-        for (; index != plugins_.size(); ++index)
-          callback(*plugins_[index].plugin);
+        for (; index != plugins_.size(); ++index) {
+          const auto &entry = plugins_[index];
+          if (entry.observes_async_instruction_issued &&
+              plugin_observes_hot_hooks(index, wf, cached))
+            callback(*plugins_[index].plugin);
+        }
       } catch (...) {
         for (++index; index != plugins_.size(); ++index) {
+          const auto &entry = plugins_[index];
+          if (!entry.observes_async_instruction_issued ||
+              !plugin_observes_hot_hooks(index, wf, cached))
+            continue;
           try {
             callback(*plugins_[index].plugin);
           } catch (...) {
@@ -394,6 +521,57 @@ private:
     });
   }
 
+  [[nodiscard]] bool has_hot_hook_subscription_cache(const amdgpu::Wavefront *wf) const {
+    return wf != nullptr && wf->hot_hook_subscriptions_valid_ &&
+           wf->hot_hook_subscriptions_.size() == plugins_.size();
+  }
+
+  [[nodiscard]] bool plugin_observes_hot_hooks(size_t index, const amdgpu::Wavefront *wf,
+                                               bool cached) const {
+    if (cached)
+      return wf->hot_hook_subscriptions_[index] != 0;
+    return plugins_[index].plugin->observes_hot_hooks_for_wavefront(wf);
+  }
+
+  static void invalidate_hot_hook_subscription_cache(amdgpu::Wavefront &wf) {
+    wf.hot_hook_subscriptions_valid_ = false;
+    wf.hot_hook_observer_count_ = 0;
+  }
+
+  void publish_hot_hook_subscription_cache(amdgpu::Wavefront &wf) const {
+    wf.hot_hook_subscriptions_.resize(plugins_.size());
+    uint32_t observers = 0;
+    for (size_t index = 0; index != plugins_.size(); ++index) {
+      const bool observes = plugins_[index].plugin->observes_hot_hooks_for_wavefront(&wf);
+      wf.hot_hook_subscriptions_[index] = static_cast<uint8_t>(observes);
+      observers += static_cast<uint32_t>(observes);
+    }
+    wf.hot_hook_observer_count_ = observers;
+    wf.hot_hook_subscriptions_valid_ = true;
+  }
+
+  template <typename Callback>
+  void dispatch_wave_hot_hook(const amdgpu::Wavefront *wf, Callback &&callback) {
+    if (plugins_.empty())
+      return;
+    const bool cached = has_hot_hook_subscription_cache(wf);
+    if (cached) {
+      if (wf->hot_hook_observer_count_ == 0)
+        return;
+    } else {
+      bool observed = false;
+      for (const auto &entry : plugins_) {
+        if (entry.plugin->observes_hot_hooks_for_wavefront(wf)) {
+          observed = true;
+          break;
+        }
+      }
+      if (!observed)
+        return;
+    }
+    dispatch_with_optional_plugin_lock([&]() { std::forward<Callback>(callback)(cached); });
+  }
+
   // Infrequent hooks may synchronously fire hot register hooks. Recursive
   // acquisition preserves one cross-hook serialization domain without
   // deadlocking that same-thread re-entry.
@@ -402,9 +580,16 @@ private:
   // empty groups return before touching either the mutex or this counter.
   uint64_t callback_lock_acquisitions_ = 0;
   bool serialize_hot_hooks_ = false;
+  bool observes_before_execute_instruction_ = false;
+  bool observes_after_execute_instruction_ = false;
+  bool observes_async_instruction_issued_ = false;
+  bool observes_memory_instruction_routing_ = false;
+  bool observes_vgpr_reads_ = false;
+  bool observes_vgpr_writes_ = false;
   bool observes_memory_routing_ = false;
   bool observes_tensor_dma_memory_access_ = false;
   bool observes_sgpr_reads_ = false;
+  bool observes_scalar_register_writes_ = false;
   bool supports_async_instructions_ = true;
 
   /// Internal fanout over sinks whose lifetime is guaranteed by the owning
@@ -479,6 +664,14 @@ private:
   /// therefore destroyed before its sink bundle.
   struct PluginEntry {
     SinkBundle sink;
+    bool observes_before_execute_instruction = true;
+    bool observes_after_execute_instruction = true;
+    bool observes_async_instruction_issued = true;
+    bool observes_memory_instruction_routing = true;
+    bool observes_vgpr_reads = true;
+    bool observes_vgpr_writes = true;
+    bool observes_sgpr_reads = true;
+    bool observes_scalar_register_writes = true;
     bool observes_memory_routing = false;
     bool observes_tensor_dma_memory_access = false;
     OwnedPlugin plugin;
