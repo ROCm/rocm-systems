@@ -66,4 +66,12 @@ inline double round_subpixel(double value) {
   return (lo + (fraction > 0.5 || (fraction == 0.5 && std::fmod(lo, 2.0) != 0))) / 256;
 }
 
+// Viewport scaling and translation each truncate to single precision before
+// the fixed-point conversion. Keeping a wide product through the addition, or
+// rounding either operation to nearest, changes coverage at subpixel ties.
+inline double viewport_coordinate(float position, float w, float scale, float offset) {
+  const float scaled = truncate_float(double(position / w) * scale);
+  return round_subpixel(truncate_float(double(scaled) + offset));
+}
+
 } // namespace rocjitsu::amdgpu::raster

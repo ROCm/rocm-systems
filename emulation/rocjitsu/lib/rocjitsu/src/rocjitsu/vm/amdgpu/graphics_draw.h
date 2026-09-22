@@ -47,6 +47,8 @@ private:
   struct Fragment {
     int32_t x = 0, y = 0;
     float i = 0, j = 0, z = 0;
+    float linear_i = 0, linear_j = 0;
+    std::array<float, 3> pull_model{};
     bool covered = false;
     uint32_t mask = 0;
     std::array<uint32_t, 4> color{};

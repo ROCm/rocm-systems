@@ -56,6 +56,7 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
                                   {0x1c, 0x200},
                                   {0x190, 0x1b6},
                                   {0x195, 0x1c5},
+                                  {0x197, 0x1b3},
                                   {0x198, 0x1b4},
                                   {0x115, 0xb4},
                                   {0x116, 0xb5},
@@ -161,8 +162,34 @@ void GraphicsDraw::initialize(Wavefront &wave, uint32_t workgroup, uint32_t wave
     uint64_t exec = 0;
     for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
       const auto &f = batch.lanes[lane];
-      wave.debug_write_vgpr(0, lane, std::bit_cast<uint32_t>(f.i));
-      wave.debug_write_vgpr(1, lane, std::bit_cast<uint32_t>(f.j));
+      // INPUT_ADDR reserves the VGPRs in architectural order, including
+      // inputs whose calculation is disabled in INPUT_ENA.
+      uint32_t vgpr = 0;
+      const auto put = [&](float value) {
+        wave.debug_write_vgpr(vgpr++, lane, std::bit_cast<uint32_t>(value));
+      };
+      for (uint32_t input = 0; input < 7; ++input) {
+        if (!(context_[0x198] & (1u << input)))
+          continue;
+        if (input == 3) {
+          for (float value : f.pull_model)
+            put(value);
+        } else if (input < 3) {
+          // With one sample, center, sample and covered centroid coincide.
+          put(f.i);
+          put(f.j);
+        } else {
+          put(f.linear_i);
+          put(f.linear_j);
+        }
+      }
+      const std::array<float, 4> position{float(f.x) + 0.5f, float(f.y) + 0.5f, f.z,
+                                          f.pull_model[2]};
+      for (uint32_t component = 0; component < 4; ++component)
+        if (context_[0x198] & (1u << (8 + component)))
+          put(position[component]);
+      if (context_[0x198] & (1u << 15))
+        wave.debug_write_vgpr(vgpr++, lane, (uint32_t(f.x) & 0xffff) | (uint32_t(f.y) << 16));
       if (f.covered)
         exec |= uint64_t{1} << lane;
     }
@@ -318,7 +345,7 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
        (context_[0x319] & (gfx12 ? ~0u : ~(15u << 26))) || (context_[0x1e0] & (1u << 30)) ||
        context_[0x214] != 15 || (color_format_ != 4 && color_format_ != 7 && color_format_ != 9)))
     throw std::runtime_error("unsupported graphics color or blend state");
-  if (context_[0x198] != 2)
+  if ((context_[0x198] & ~0x8f7fu) || (context_[0x197] & ~context_[0x198]))
     throw std::runtime_error("unsupported graphics fragment inputs");
   width_ = (attrib2 >> 16) + 1;
   height_ = (attrib2 & 0xffff) + 1;
@@ -399,7 +426,7 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
     struct Point {
       double x, y, w, z;
     };
-    std::array<Point, 3> v{}, screen{};
+    std::array<Point, 3> v{}, screen{}, clip_positions{};
     uint32_t outside_near = 0, outside_far = 0;
     for (uint32_t k = 0; k < 3; ++k) {
       const uint32_t index_bits = gfx12 ? 9 : 10;
@@ -416,14 +443,14 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       const float z = std::bit_cast<float>(position[2]);
       if (!std::isfinite(z))
         throw std::runtime_error("graphics nonfinite depth is not implemented");
+      clip_positions[k] = {x, y, w, z};
       if (!(clip_control & (1u << 16))) {
         const float near = (clip_control & (1u << 19)) ? 0.0f : -w;
         outside_near += !(clip_control & (1u << 26)) && z < near;
         outside_far += !(clip_control & (1u << 27)) && z > w;
       }
-      screen[k] = {x / w * sx + ox, y / w * sy + oy, w, z / w};
-      v[k] = {raster::round_subpixel(screen[k].x), raster::round_subpixel(screen[k].y), screen[k].w,
-              screen[k].z};
+      v[k] = {raster::viewport_coordinate(x, w, sx, ox), raster::viewport_coordinate(y, w, sy, oy),
+              w, z / w};
       screen[k] = v[k];
       if (!std::isfinite(v[k].x) || !std::isfinite(v[k].y) || std::abs(v[k].x) > (1 << 20) ||
           std::abs(v[k].y) > (1 << 20))
@@ -431,8 +458,53 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
     }
     if (outside_near == 3 || outside_far == 3)
       continue;
-    if (outside_near || outside_far)
-      throw std::runtime_error("graphics near/far clipping is not implemented");
+    // Clip coverage in homogeneous coordinates. Keep the original triangle's
+    // interpolation planes: adding vertices must not change its varyings or
+    // the vertex values exposed by explicit interpolation.
+    std::vector<Point> coverage(v.begin(), v.end());
+    if (outside_near || outside_far) {
+      if (primitive_type_ == kRectangleList)
+        throw std::runtime_error("graphics clipped rectangles are not implemented");
+      coverage.assign(clip_positions.begin(), clip_positions.end());
+      const auto clip = [&](const auto &distance) {
+        std::vector<Point> output;
+        if (coverage.empty())
+          return;
+        Point previous = coverage.back();
+        double previous_distance = distance(previous);
+        for (const Point &current : coverage) {
+          const double current_distance = distance(current);
+          if ((previous_distance < 0 && current_distance > 0) ||
+              (previous_distance > 0 && current_distance < 0)) {
+            const double t = previous_distance / (previous_distance - current_distance);
+            output.push_back(
+                {std::lerp(previous.x, current.x, t), std::lerp(previous.y, current.y, t),
+                 std::lerp(previous.w, current.w, t), std::lerp(previous.z, current.z, t)});
+          }
+          if (current_distance >= 0)
+            output.push_back(current);
+          previous = current;
+          previous_distance = current_distance;
+        }
+        coverage = std::move(output);
+      };
+      if (outside_near)
+        clip([&](Point point) { return point.z + ((clip_control & (1u << 19)) ? 0 : point.w); });
+      if (outside_far)
+        clip([](Point point) { return point.w - point.z; });
+      if (coverage.size() < 3)
+        continue;
+      for (auto &point : coverage) {
+        point.x = raster::viewport_coordinate(point.x, point.w, sx, ox);
+        point.y = raster::viewport_coordinate(point.y, point.w, sy, oy);
+      }
+      const auto same_position = [](Point a, Point b) { return a.x == b.x && a.y == b.y; };
+      coverage.erase(std::unique(coverage.begin(), coverage.end(), same_position), coverage.end());
+      if (coverage.size() > 1 && same_position(coverage.front(), coverage.back()))
+        coverage.pop_back();
+      if (coverage.size() < 3)
+        continue;
+    }
     const auto edge = [](Point a, Point b, double x, double y) {
       return (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x);
     };
@@ -485,12 +557,14 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
     std::vector<uint32_t> parameters(attributes * 12);
     for (uint32_t a = 0; a < attributes; ++a) {
       const uint32_t control = context_[0x199 + a];
-      if (control & ~0x100033fu)
+      // FLAT_SHADE with OFFSET bit 5 exposes the three raw vertex values.
+      const bool passthrough = (control & 0x420) == 0x420;
+      if ((control & ~0x100073fu) || ((control & 0x400) && !passthrough))
         throw std::runtime_error("unsupported graphics parameter interpolation");
       for (uint32_t c = 0; c < 4; ++c) {
         std::array<float, 3> values{};
         for (uint32_t k = 0; k < 3; ++k) {
-          if (control & 32) {
+          if ((control & 32) && !passthrough) {
             values[k] = ((control >> 8) & (c == 3 ? 1u : 2u)) ? 1.0f : 0.0f;
           } else {
             const auto address = addr_calc::rdna_buffer_address(
@@ -504,8 +578,10 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
           }
         }
         parameters[a * 12 + c * 3] = std::bit_cast<uint32_t>(values[0]);
-        parameters[a * 12 + c * 3 + 1] = std::bit_cast<uint32_t>(values[1] - values[0]);
-        parameters[a * 12 + c * 3 + 2] = std::bit_cast<uint32_t>(values[2] - values[0]);
+        parameters[a * 12 + c * 3 + 1] =
+            std::bit_cast<uint32_t>(passthrough ? values[1] : values[1] - values[0]);
+        parameters[a * 12 + c * 3 + 2] =
+            std::bit_cast<uint32_t>(passthrough ? values[2] : values[2] - values[0]);
       }
     }
     FragmentWave batch;
@@ -520,12 +596,16 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
           f.x = x + (q & 1);
           f.y = y + (q >> 1);
           const double px = f.x + 0.5, py = f.y + 0.5;
-          const double b1 = plane_i.at_quad(x + 0.5 - screen[0].x, y + 0.5 - screen[0].y, q);
-          const double b2 = plane_j.at_quad(x + 0.5 - screen[0].x, y + 0.5 - screen[0].y, q);
           const double dx = x + 0.5 - screen[0].x, dy = y + 0.5 - screen[0].y;
-          const float w = 1.0f / plane_rw.at_quad(dx, dy, q);
-          f.i = raster::multiply_perspective(plane_iw.at_quad(dx, dy, q), w);
-          f.j = raster::multiply_perspective(plane_jw.at_quad(dx, dy, q), w);
+          const double b1 = plane_i.at_quad(dx, dy, q);
+          const double b2 = plane_j.at_quad(dx, dy, q);
+          f.linear_i = b1;
+          f.linear_j = b2;
+          f.pull_model = {plane_iw.at_quad(dx, dy, q), plane_jw.at_quad(dx, dy, q),
+                          plane_rw.at_quad(dx, dy, q)};
+          const float w = 1.0f / f.pull_model[2];
+          f.i = raster::multiply_perspective(f.pull_model[0], w);
+          f.j = raster::multiply_perspective(f.pull_model[1], w);
           f.z = ((1 - b1 - b2) * v[0].z + b1 * v[1].z + b2 * v[2].z) *
                     std::bit_cast<float>(context_[0x113]) +
                 std::bit_cast<float>(context_[0x114]);
@@ -536,8 +616,8 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
                      py >= std::min({v[0].y, v[1].y, v[2].y}) &&
                      py < std::max({v[0].y, v[1].y, v[2].y});
           } else {
-            for (uint32_t k = 0; k < 3; ++k) {
-              Point a = v[k], b = v[(k + 1) % 3];
+            for (uint32_t k = 0; k < coverage.size(); ++k) {
+              Point a = coverage[k], b = coverage[(k + 1) % coverage.size()];
               if (area < 0)
                 std::swap(a, b);
               const double e = edge(a, b, px, py);

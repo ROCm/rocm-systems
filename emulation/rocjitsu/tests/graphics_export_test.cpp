@@ -208,6 +208,33 @@ TEST(GraphicsRasterMathTest, SubpixelQuantizationRoundsMidpointsToEven) {
   }
 }
 
+TEST(GraphicsRasterMathTest, ViewportTruncationMatchesPhysicalRdna3AndRdna4) {
+  // Controlled triangles distinguish truncating the multiply and the add from
+  // a fused operation and from discarding aligned operand bits before adding.
+  // Coordinates were recovered from raw hardware barycentric captures.
+  struct Case {
+    float position, w, scale, offset;
+    int subpixel;
+  };
+  const Case cases[] = {
+      {-0.8996930718421936f, 1, 210, 210, 5393},
+      {-0.8993768692016602f, 1, 210, 210, 5410},
+      {-0.8990606069564819f, 1, 210, 210, 5427},
+      {-0.6084542870521545f, 1, 210, 210, 21049},
+      {-0.6078218221664429f, 1, 210, 210, 21084},
+      {-0.39026230573654175f, 1, 210, 210, 32780},
+      {-0.3889974355697632f, 1, 210, 210, 32847},
+      {0.0005859374068677425f, 1, 210, 210, 53791},
+      {0.0012183779617771506f, 1, 210, 210, 53825},
+      {0x1.719728p+3f, 0x1.2cded6p+4f, 210, 210, 86779},
+      {0x1.4410a2p+4f, 0x1.4367dcp+4f, 160, 160, 82003},
+      {0x1.ff166cp-1f, 0x1.0a0878p+2f, 64, 64, 20318},
+  };
+  for (const auto &test : cases)
+    EXPECT_EQ(amdgpu::raster::viewport_coordinate(test.position, test.w, test.scale, test.offset),
+              test.subpixel / 256.0);
+}
+
 TEST(GraphicsRasterMathTest, PerspectiveProductsMatchPhysicalRdna3AndRdna4) {
   // Raw barycentric captures with power-of-two plane gradients isolate the
   // interpolation multiplier from triangle setup and parameter interpolation.
@@ -251,7 +278,7 @@ TEST_P(GraphicsExportTest, ParameterLoadUsesQuadMaskAndPrimitiveOffsets) {
   }
 }
 
-TEST_P(GraphicsExportTest, RectangleCoverageAndUnsupportedRasterStates) {
+TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   enum class Outcome { Draw, Empty, Reject };
   struct Case {
@@ -263,15 +290,23 @@ TEST_P(GraphicsExportTest, RectangleCoverageAndUnsupportedRasterStates) {
     uint32_t polygon_mode = 0;
     uint32_t samples = 0;
     uint32_t sample_coverage = 15;
+    uint32_t inputs = 2;
     std::array<float, 4> depth_bias{};
     bool depth_only = false;
     float depth = 0;
     bool first_vertex_depth_only = false;
     float extent = 1;
     bool full_scissor = false;
+    bool triangle = false;
+    uint32_t expected_coverage = 0;
+    bool passthrough = false;
   };
   const Case cases[] = {
       {.name = "integer coverage"},
+      {.name = "unequal W and explicit vertex parameters", .inputs = 0x8f28, .passthrough = true},
+      {.name = "position z and packed coordinates", .inputs = 0x8402},
+      {.name = "unsupported line stipple input", .outcome = Outcome::Reject, .inputs = 0x80},
+      {.name = "unsupported ancillary input", .outcome = Outcome::Reject, .inputs = 0x2000},
       {.name = "fractional coverage", .extent = 0.625f, .full_scissor = true},
       {.name = "rasterizer discard", .outcome = Outcome::Empty, .clip_control = 1u << 22},
       {.name = "fragment discard", .outcome = Outcome::Reject, .shader_control = 1u << 6},
@@ -286,6 +321,38 @@ TEST_P(GraphicsExportTest, RectangleCoverageAndUnsupportedRasterStates) {
        .outcome = Outcome::Reject,
        .depth = 2,
        .first_vertex_depth_only = true},
+      {.name = "triangle far clipping",
+       .depth = 2,
+       .first_vertex_depth_only = true,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x136},
+      {.name = "triangle near clipping",
+       .depth = -2,
+       .first_vertex_depth_only = true,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x136},
+      {.name = "triangle D3D near boundary",
+       .outcome = Outcome::Empty,
+       .clip_control = 1u << 19,
+       .depth = -2,
+       .first_vertex_depth_only = true,
+       .triangle = true},
+      {.name = "triangle far clipping disabled",
+       .clip_control = 1u << 27,
+       .depth = 2,
+       .first_vertex_depth_only = true,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x137},
+      {.name = "triangle near clipping disabled",
+       .clip_control = (1u << 19) | (1u << 26),
+       .depth = -2,
+       .first_vertex_depth_only = true,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x137},
       {.name = "logic op clear", .outcome = Outcome::Reject, .color_control = 0x10},
       {.name = "color disabled", .color_control = 0, .depth_only = true},
       {.name = "unsupported color mode", .outcome = Outcome::Reject, .color_control = 0xcc0020},
@@ -326,14 +393,14 @@ TEST_P(GraphicsExportTest, RectangleCoverageAndUnsupportedRasterStates) {
       }
     amdgpu::Pm4QueueState state;
     state.num_instances = 1;
-    state.uconfig_registers[0x242] = 0x11;
+    state.uconfig_registers[0x242] = test.triangle ? 4 : 0x11;
     state.context_registers[0x3b0] = 10;
     state.context_registers[0x31e] = (3 << 16) | 3;
     state.context_registers[0x31f] = 3 << 15;
     state.context_registers[0x318] = 0x1000;
     state.context_registers[0x214] = 15;
     state.context_registers[0x195] = 4;
-    state.context_registers[0x198] = 2;
+    state.context_registers[0x198] = test.inputs;
     state.context_registers[0x2f9] = 0x2d;
     state.context_registers[0x205] = 0x43f;
     state.context_registers[0x10f] = state.context_registers[0x110] =
@@ -348,7 +415,7 @@ TEST_P(GraphicsExportTest, RectangleCoverageAndUnsupportedRasterStates) {
       state.context_registers[0x31e] = 0;
       state.context_registers[0x8e] = 15;
       state.context_registers[0x1c5] = 4;
-      state.context_registers[0x1b4] = 2;
+      state.context_registers[0x1b4] = test.inputs;
       state.context_registers[0x206] = 0x43f;
       state.context_registers[0x205] = 0;
     }
@@ -374,14 +441,30 @@ TEST_P(GraphicsExportTest, RectangleCoverageAndUnsupportedRasterStates) {
       state.context_registers[gfx12 ? 8 : 0x12] = 0x2000;
       state.context_registers[gfx12 ? 10 : 0x14] = 0x2000;
     }
+    if (test.passthrough) {
+      state.sh_registers[gfx12 ? 0x84 : 0x88] = 0x300000;
+      if (gfx12)
+        state.sh_registers[0x31] = 1u << 11;
+      else
+        state.context_registers[0x1b6] = 1;
+      state.context_registers[gfx12 ? 0x199 : 0x191] = 0x420;
+      state.context_registers[gfx12 ? 0x197 : 0x1b3] = test.inputs;
+      for (uint32_t c = 0; c < 4; ++c)
+        memory_.write32(0x3000a0 + c * 4, c == 0 ? 0x400000 : 0);
+      for (uint32_t k = 0; k < 3; ++k)
+        for (uint32_t c = 0; c < 4; ++c)
+          memory_.write32(0x400000 + k * 16 + c * 4,
+                          std::bit_cast<uint32_t>(float(10 + k * 4 + c)));
+    }
     const float extent = test.extent;
     auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
     for (uint32_t i = 0; i < 3; ++i) {
+      const float w = test.passthrough ? float(1u << i) : 1.0f;
       const std::array<uint32_t, 4> position{
-          std::bit_cast<uint32_t>(i == 2 ? extent : -extent),
-          std::bit_cast<uint32_t>(i == 1 ? extent : -extent),
+          std::bit_cast<uint32_t>((i == 2 ? extent : -extent) * w),
+          std::bit_cast<uint32_t>((i == 1 ? extent : -extent) * w),
           std::bit_cast<uint32_t>(!test.first_vertex_depth_only || i == 0 ? test.depth : 0.0f),
-          std::bit_cast<uint32_t>(1.0f)};
+          std::bit_cast<uint32_t>(w)};
       draw->export_lane(*wave_, i, 12, 15, position);
     }
     draw->export_lane(*wave_, 0, 20, 1,
@@ -401,7 +484,38 @@ TEST_P(GraphicsExportTest, RectangleCoverageAndUnsupportedRasterStates) {
     wave_->set_wg_coord(0, 0, 0);
     wave_->set_graphics_stage(draw);
     draw->initialize(*wave_, 0, 0);
-    EXPECT_EQ(std::popcount(wave_->exec()), std::popcount(test.sample_coverage));
+    EXPECT_EQ(std::popcount(wave_->exec()), test.triangle ? std::popcount(test.expected_coverage)
+                                                          : std::popcount(test.sample_coverage));
+    uint32_t covered_index = 0;
+    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
+      if (!(wave_->exec() & (uint64_t{1} << lane)))
+        continue;
+      if (test.inputs == 0x8f28) {
+        // Pull I/W, J/W, 1/W; linear I/J; position XYZW; packed XY.
+        const uint32_t x = 1 + covered_index % 2, y = 1 + covered_index / 2;
+        // Screen vertices are (0,0), (0,4), (4,0), with W={1,2,4}.
+        // Every intermediate below is dyadic and exactly representable.
+        const float b1 = (y + 0.5f) / 4, b2 = (x + 0.5f) / 4;
+        const float rw = 1 - b1 - b2 + b1 / 2 + b2 / 4;
+        const float expected[] = {b1 / 2, b2 / 4, rw, b1, b2, x + 0.5f, y + 0.5f, 0, rw};
+        for (uint32_t reg = 0; reg < 9; ++reg)
+          EXPECT_EQ(wave_->debug_read_vgpr(reg, lane), std::bit_cast<uint32_t>(expected[reg]))
+              << "register=" << reg << " lane=" << lane;
+        EXPECT_EQ(wave_->debug_read_vgpr(9, lane), x | (y << 16));
+        for (uint32_t c = 0; c < 4; ++c)
+          for (uint32_t k = 0; k < 3; ++k)
+            EXPECT_EQ(lds_.read32(wave_->lds_base() + (c * 3 + k) * 4),
+                      std::bit_cast<uint32_t>(float(10 + k * 4 + c)));
+      } else if (test.inputs == 0x8402) {
+        EXPECT_EQ(wave_->debug_read_vgpr(2, lane), 0u);
+        const uint32_t packed = wave_->debug_read_vgpr(3, lane);
+        EXPECT_GE(packed & 0xffff, 1u);
+        EXPECT_LT(packed & 0xffff, 3u);
+        EXPECT_GE(packed >> 16, 1u);
+        EXPECT_LT(packed >> 16, 3u);
+      }
+      ++covered_index;
+    }
     // Include helper lanes in exports; only covered fragments may write.
     for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
       draw->export_lane(*wave_, lane, 0, 3, {0x00003c00, 0x3c000000, 0, 0});
@@ -412,10 +526,10 @@ TEST_P(GraphicsExportTest, RectangleCoverageAndUnsupportedRasterStates) {
                                    : amdgpu::gfx11_image_offset(x, y, 4, 4, 26);
         ASSERT_TRUE(address);
         const bool sample_enabled = test.sample_coverage & (1u << ((x & 1) + 2 * (y & 1)));
+        const bool covered = test.triangle ? (test.expected_coverage & (1u << (y * 4 + x)))
+                                           : x >= 1 && x < 3 && y >= 1 && y < 3;
         EXPECT_EQ(memory_.read32(0x100000 + *address),
-                  !test.depth_only && sample_enabled && x >= 1 && x < 3 && y >= 1 && y < 3
-                      ? 0xff0000ffu
-                      : 0u)
+                  !test.depth_only && sample_enabled && covered ? 0xff0000ffu : 0u)
             << x << "," << y;
       }
   }
