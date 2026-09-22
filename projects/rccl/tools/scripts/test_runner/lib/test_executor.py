@@ -65,14 +65,17 @@ def glob_filter_matches(name: str, pattern_str: str) -> bool:
     return (not pos) or any(p.match(name) for p in pos)
 
 
-def collect_mpi_export_vars(env, merged_env):
+def collect_mpi_export_vars(env, merged_env, launcher_export_keys=()):
     """Yield (key, value) pairs that mpirun must -x so every rank sees them.
 
-    OpenMPI forwards only explicitly exported variables to remote ranks.
-    Local ranks inherit the launcher environment. A leftover NCCL_* from the
-    parent shell (for example NCCL_IB_QPS_PER_CONNECTION=2 from a CAST run)
-    would otherwise apply to rank 0 only; mismatched QP counts then fail
-    ibv_modify_qp INIT→RTR with EIO.
+    merged_env (global + suite + test JSON env) is authoritative and is always
+    exported. OpenMPI forwards only explicitly exported variables to remote
+    ranks while local ranks inherit the launcher environment, so a variable the
+    config does not set applies to rank 0 alone -- a mismatched
+    NCCL_IB_QPS_PER_CONNECTION then fails ibv_modify_qp INIT→RTR with EIO. A
+    suite that genuinely takes such a value from the operator's shell names it
+    in "mpi_export_env"; only those names are read from *env*, so an unrelated
+    NCCL_*/RCCL_* left over in the launcher shell never reaches the ranks.
     """
     seen = set()
     for key, value in merged_env.items():
@@ -80,10 +83,14 @@ def collect_mpi_export_vars(env, merged_env):
             continue
         seen.add(key)
         yield key, value
-    for key, value in env.items():
-        if key.startswith(("NCCL_", "RCCL_")) and key not in seen:
-            seen.add(key)
-            yield key, value
+    # LD_LIBRARY_PATH is exported separately by the caller with the merged
+    # search-path priority, so the allowlist must not be able to reinstate the
+    # launcher's bare value.
+    for key in launcher_export_keys:
+        if key == "LD_LIBRARY_PATH" or key in seen or key not in env:
+            continue
+        seen.add(key)
+        yield key, env[key]
 
 
 def configure_coverage_build(install_flags, cmake_options, coverage_report):
@@ -1118,6 +1125,29 @@ class TestExecutor:
         return str(value).strip()
 
     @staticmethod
+    def _normalize_export_env(*values):
+        """
+        Normalize "mpi_export_env" config values into an allowlist of names.
+
+        Each value may be a list of variable names or a string of comma/space
+        separated names. Sources are unioned in the order given and
+        de-duplicated, so a suite extends the top-level list and a test extends
+        the suite's. Returns [] when nothing opts in.
+        """
+        keys = []
+        for value in values:
+            if value is None:
+                continue
+            if isinstance(value, (list, tuple)):
+                items = [str(item).strip() for item in value]
+            else:
+                items = str(value).replace(",", " ").split()
+            for item in items:
+                if item and item not in keys:
+                    keys.append(item)
+        return keys
+
+    @staticmethod
     def _resolve_gpu_count(value, detected):
         """
         Resolve a num_gpus value into a concrete integer.
@@ -1503,11 +1533,18 @@ class TestExecutor:
             )
 
             # Add environment variables for MPI (quote values to handle shell metacharacters like ;)
-            # Export JSON/suite vars plus any leftover NCCL_*/RCCL_* in the
-            # launcher env so remote ranks match rank 0 (OpenMPI does not
-            # forward the rest of the environment).
+            # Export the JSON/suite vars, plus the variables the config
+            # explicitly names in "mpi_export_env" when the launcher shell (and
+            # therefore rank 0 only) is their sole source. Names are listed one
+            # by one on purpose: an operator's stray NCCL_*/RCCL_* must not ride
+            # along into every suite.
+            launcher_export_keys = self._normalize_export_env(
+                self.config_processor.config.get("mpi_export_env"),
+                suite_config.get("mpi_export_env"),
+                test_config.get("mpi_export_env"),
+            )
             env_fmt = self.mpi_config["env_format"]
-            for key, value in collect_mpi_export_vars(env, merged_env):
+            for key, value in collect_mpi_export_vars(env, merged_env, launcher_export_keys):
                 mpi_args += " " + env_fmt.format(key=key, value=value)
 
             mpi_args += " " + env_fmt.format(key="LD_LIBRARY_PATH", value=env['LD_LIBRARY_PATH'])
