@@ -319,7 +319,7 @@ def is_roofline_shown(
 def list_ml_operators(
     workload_path: str,
     call_trees: dict[str, list[CallTreeNode]],
-    framework_label: str = "PyTorch",
+    framework_labels: list[str],
 ) -> None:
     """Display operators as a call tree sorted by GPU kernel duration.
 
@@ -327,12 +327,12 @@ def list_ml_operators(
     "Triton").
     """
     if not call_trees:
-        print(f"\n{framework_label} Operators in: {workload_path}")
+        print(f"\n{', '.join(framework_labels)} Operators in: {workload_path}")
         print("Total: 0 operators")
         return
 
     print(f"\n{'=' * 80}")
-    print(f"{framework_label} Operator Call Tree: {workload_path}")
+    print(f"{', '.join(framework_labels)} Operator Call Tree: {workload_path}")
     print("Sorted by total GPU kernel duration.")
     print(f"{'=' * 80}")
     show_call_tree(call_trees)
