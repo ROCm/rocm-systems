@@ -22,6 +22,7 @@ set(TEST_SRC
     hipModuleEnumerateFunctions.cc
     hipModuleLoadFatBinary.cc
     test_fatbin_mixed_arch.cc
+    hipLaunchErrorCodeMatrix.cc
 )
 
 if (HIP_PLATFORM MATCHES "amd")
@@ -454,14 +455,7 @@ if(HIP_PLATFORM MATCHES "amd")
   add_dependencies(ModuleTest copyKernel_code copyKernel_s)
   add_dependencies(ModuleTest addKernel_code)
   add_dependencies(ModuleTest fatbin_mismatch_module)
-  # TODO - Rock build failure from clang
-  if(NOT WIN32)
-    add_dependencies(ModuleTest addKernel_spv)
-    add_dependencies(ModuleTest addKernel-bundle_spv)
-  endif()
   add_dependencies(ModuleTest copyKernelCompressed_code)
-  add_dependencies(ModuleTest copyKernelGenericTarget_code)
-  add_dependencies(ModuleTest copyKernelGenericTargetCompressed_code)
   add_dependencies(ModuleTest anyOrderLaunch_code)
 
   if(UNIX)
