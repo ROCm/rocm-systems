@@ -36,6 +36,10 @@ NS_TO_MS = 1.0 / 1_000_000.0
 VALUE_COL_PREFERENCE: tuple[str, ...] = ("Avg", "Value")
 PEAK_COL_PREFERENCE: tuple[str, ...] = ("Peak", "Peak (Empirical)")
 
+ARGS_DISPLAY_MAX_ITEMS = 8
+ARGS_DISPLAY_MAX_CHARS = 160
+ARGS_DISPLAY_MAX_VARIANTS = 5
+
 
 def get_bw_scale_and_unit(value: float) -> tuple[float, str]:
     """Return the divisor and suffix for a bandwidth value in Bytes/s."""
@@ -96,7 +100,8 @@ class CallTreeNode:
     children is the list of child operator nodes. file_name, line_number,
     backend, start_timestamp, end_timestamp, t_tid, f_tid, and thread_id
     are optional fields copied from a marker row when set. invocation_ids
-    stores marker-start strings for this node.
+    stores marker-start strings for this node. args_invocations maps each
+    distinct operator-argument blob to the invocation ids that used it.
 
     Inclusive over this node plus all descendants:
       kernel_launches, total_duration_ms, min/max/mean dispatch stats.
@@ -108,6 +113,7 @@ class CallTreeNode:
     kernel_launches: int = 0
     total_duration_ms: float = 0.0
     invocation_ids: set[str] = field(default_factory=set)
+    args_invocations: dict[str, set[str]] = field(default_factory=dict)
     min_dispatch_ns: Optional[float] = None
     max_dispatch_ns: Optional[float] = None
     mean_dispatch_ns: Optional[float] = None
@@ -123,6 +129,17 @@ class CallTreeNode:
     @property
     def call_count(self) -> int:
         return len(self.invocation_ids)
+
+    @property
+    def args_variants(self) -> list[tuple[str, int]]:
+        """Distinct operator-argument blobs with call counts, most frequent first."""
+        return sorted(
+            (
+                (args_blob, len(recorded_invocation_ids))
+                for args_blob, recorded_invocation_ids in self.args_invocations.items()
+            ),
+            key=lambda variant: (-variant[1], variant[0]),
+        )
 
 
 @dataclass
@@ -208,6 +225,67 @@ def rollup_node_stats(node: CallTreeNode) -> NodeRollup:
 def decode_marker_name(name: str) -> str:
     """Decode a percent-encoded marker segment ('%2F' -> '/', '%25' -> '%')."""
     return name.replace("%2F", "/").replace("%25", "%")
+
+
+def split_operator_args(args_blob: str) -> list[str]:
+    """Split a parenthesized operator-args blob into top-level argument tokens."""
+    args_text = args_blob.strip()
+    if args_text.startswith("(") and args_text.endswith(")"):
+        args_text = args_text[1:-1]
+    args_text = args_text.strip()
+    if not args_text:
+        return []
+
+    tokens: list[str] = []
+    token_chars: list[str] = []
+    depth = 0
+    quote_char: Optional[str] = None
+    escaped = False
+    for char in args_text:
+        if quote_char is not None:
+            token_chars.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote_char:
+                quote_char = None
+        elif char in "'\"":
+            quote_char = char
+            token_chars.append(char)
+        elif char in "([{":
+            depth += 1
+            token_chars.append(char)
+        elif char in ")]}":
+            depth = max(depth - 1, 0)
+            token_chars.append(char)
+        elif char == "," and depth == 0:
+            tokens.append("".join(token_chars).strip())
+            token_chars = []
+        else:
+            token_chars.append(char)
+    tokens.append("".join(token_chars).strip())
+    return [token for token in tokens if token]
+
+
+def format_operator_args(
+    args_blob: str,
+    max_items: int = ARGS_DISPLAY_MAX_ITEMS,
+    max_chars: int = ARGS_DISPLAY_MAX_CHARS,
+) -> str:
+    """Render an operator-args blob, truncated to max_items and max_chars."""
+    tokens = split_operator_args(args_blob)
+    if not tokens:
+        return ""
+
+    shown_tokens = tokens[:max_items]
+    if len(tokens) > max_items:
+        shown_tokens.append("...")
+    formatted_args = "(" + ", ".join(shown_tokens) + ")"
+    if len(formatted_args) > max_chars:
+        kept_length = max(max_chars - 4, 0)
+        formatted_args = (formatted_args[:kept_length].rstrip() + "...)")[:max_chars]
+    return formatted_args
 
 
 def _split_name_and_location(first_token: str) -> tuple[str, str, object]:
@@ -302,6 +380,28 @@ def _optional_pytorch_tid(value: object) -> Optional[str]:
     return text
 
 
+def _optional_operator_args_blob(value: object) -> str:
+    """Return the operator-args blob, or empty when none were recorded."""
+    if value is None or value == "" or pd.isna(value):
+        return ""
+    args_text = str(value).strip()
+    if args_text in ("n/a", "()"):
+        return ""
+    if not split_operator_args(args_text):
+        return ""
+    return args_text
+
+
+def _record_operator_args(
+    node: CallTreeNode, args_value: object, invocation_id: str
+) -> None:
+    """Record the operator-args blob on node for this invocation."""
+    args_blob = _optional_operator_args_blob(args_value)
+    if not args_blob:
+        return
+    node.args_invocations.setdefault(args_blob, set()).add(invocation_id)
+
+
 def _sequence_from_cell(value: object) -> list[object]:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return []
@@ -357,7 +457,9 @@ def _call_tree_node_from_marker_row(row: object) -> CallTreeNode:
         f_tid=_optional_pytorch_tid(getattr(row, "F_Tid", "")),
         thread_id=str(getattr(row, "Thread_Id", "")),
     )
-    node.invocation_ids.add(str(row.Start_Timestamp))
+    invocation_id = str(row.Start_Timestamp)
+    node.invocation_ids.add(invocation_id)
+    _record_operator_args(node, getattr(row, "args", ""), invocation_id)
     return node
 
 
@@ -594,6 +696,10 @@ def clone_call_tree_node(node: CallTreeNode) -> CallTreeNode:
         thread_id=node.thread_id,
     )
     copied.invocation_ids = set(node.invocation_ids)
+    copied.args_invocations = {
+        args_blob: set(recorded_invocation_ids)
+        for args_blob, recorded_invocation_ids in node.args_invocations.items()
+    }
     copied.children = [clone_call_tree_node(child) for child in node.children]
     return copied
 
@@ -643,6 +749,13 @@ def _add_kernel_stats(
         existing.kernel_id = stats.kernel_id
 
 
+def _merge_args_invocations(
+    destination: dict[str, set[str]], source: dict[str, set[str]]
+) -> None:
+    for args_blob, recorded_invocation_ids in source.items():
+        destination.setdefault(args_blob, set()).update(recorded_invocation_ids)
+
+
 def _merge_identical_sibling_group(group: list[CallTreeNode]) -> CallTreeNode:
     first = group[0]
     kernels: dict[str, KernelStats] = {}
@@ -664,6 +777,7 @@ def _merge_identical_sibling_group(group: list[CallTreeNode]) -> CallTreeNode:
     )
     for node in group:
         merged.invocation_ids.update(node.invocation_ids)
+        _merge_args_invocations(merged.args_invocations, node.args_invocations)
     rollup_node_stats(merged)
     return merged
 

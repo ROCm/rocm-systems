@@ -24,8 +24,10 @@ from utils.utils_analysis import (
     attach_unlocated_trees_by_forward_thread,
     build_operator_summary,
     fold_identical_sibling_subtrees,
+    format_operator_args,
     nest_marker_intervals,
     rollup_node_stats,
+    split_operator_args,
 )
 
 
@@ -905,6 +907,79 @@ def test_fold_identical_sibling_subtrees_merges_nested_children():
     assert len(folded[0].children) == 1
     assert folded[0].children[0].call_count == 2
     assert folded[0].children[0].kernels["k"].launches == 2
+
+
+def test_split_operator_args_respects_nested_commas():
+    tokens = split_operator_args("(self=float32[2, 2], other=(1, 2), name='a,b')")
+    assert tokens == ["self=float32[2, 2]", "other=(1, 2)", "name='a,b'"]
+
+
+def test_split_operator_args_empty_blob():
+    assert split_operator_args("") == []
+    assert split_operator_args("()") == []
+    assert split_operator_args("  (  )  ") == []
+
+
+def test_format_operator_args_caps_item_count_and_length():
+    args_blob = "(" + ", ".join(f"a{i}={i}" for i in range(12)) + ")"
+    formatted_args = format_operator_args(args_blob, max_items=3, max_chars=40)
+    assert formatted_args.startswith("(a0=0, a1=1, a2=2, ...")
+    assert len(formatted_args) <= 40
+    assert formatted_args.endswith(")")
+
+
+def test_format_operator_args_empty_blob():
+    assert format_operator_args("") == ""
+    assert format_operator_args("()") == ""
+
+
+def test_args_variants_orders_by_call_count():
+    node = CallTreeNode(name="aten::mm")
+    node.args_invocations["(self=float32[2x2])"] = {"1"}
+    node.args_invocations["(self=float32[4x4])"] = {"2", "3"}
+    assert node.args_variants == [
+        ("(self=float32[4x4])", 2),
+        ("(self=float32[2x2])", 1),
+    ]
+
+
+def test_fold_identical_sibling_subtrees_merges_args_variants():
+    first = leaf_operator("aten::addmm", "1", 2_000_000.0)
+    first.args_invocations["(self=float32[2x2])"] = {"1"}
+    second = leaf_operator("aten::addmm", "2", 3_000_000.0)
+    second.args_invocations["(self=float32[4x4])"] = {"2"}
+    folded = fold_identical_sibling_subtrees([first, second])
+    assert len(folded) == 1
+    assert folded[0].args_variants == [
+        ("(self=float32[2x2])", 1),
+        ("(self=float32[4x4])", 1),
+    ]
+    assert first.args_invocations == {"(self=float32[2x2])": {"1"}}
+
+
+def test_nest_marker_intervals_records_operator_args():
+    trace_df = pd.DataFrame({
+        "Thread_Id": ["1"],
+        "Start_Timestamp": [0.0],
+        "End_Timestamp": [10.0],
+        "Operator_Name": ["aten::mm"],
+        "args": ["(self=float32[2x2])"],
+    })
+    forest = nest_marker_intervals(trace_df)
+    node = forest["1"][0]
+    assert node.args_invocations == {"(self=float32[2x2])": {"0.0"}}
+
+
+def test_nest_marker_intervals_skips_unavailable_args():
+    trace_df = pd.DataFrame({
+        "Thread_Id": ["1"],
+        "Start_Timestamp": [0.0],
+        "End_Timestamp": [10.0],
+        "Operator_Name": ["aten::mm"],
+        "args": ["n/a"],
+    })
+    forest = nest_marker_intervals(trace_df)
+    assert forest["1"][0].args_invocations == {}
 
 
 def test_attach_defers_missing_source_and_grafts_other_roots():
