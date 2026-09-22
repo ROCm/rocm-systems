@@ -987,6 +987,165 @@
         "NCCL_NET": "ib-cast"
       }
     },
+    "net_ib_rma_multisegment": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "description": "Multi-segment DMA-BUF RMA registration (AIRUNTIME-2351), 1 rank per node on 2 nodes. NCCL_CUMEM_ENABLE gates segment enumeration and RCCL_MPI_LOG_ALL_RANKS is what lets every rank read back the 'multi-segment buffer' INFO line; without either the tests skip instead of exercising the per-segment path.",
+      "env_variables": {
+        "NCCL_NET": "ib",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DEBUG_SUBSYS": "ALL",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "NetIB_RMA_MultiSeg_Reproducer",
+          "description": "Reproducer: a 4-segment VMM window registers per segment and moves data end to end",
+          "test_filter": "RmaMultiSegmentMPITest.Reproducer_MultiSegmentRegistrationAndTransfer"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_PartialFinalSegment",
+          "description": "Two full mappings plus half of a third: the last MR is clipped to the requested range and a transfer ending at the last registered byte succeeds",
+          "test_filter": "RmaMultiSegmentMPITest.PartialFinalSegmentRegistrationAndTransfer"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_IPutCrossBoundaryAtOffset",
+          "description": "IPut starting and ending mid-segment, so the WR builder splits on a non-zero per-segment offset on both sides",
+          "test_filter": "RmaMultiSegmentMPITest.IPutCrossSegmentBoundaryAtOffset"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_IGet",
+          "description": "IGet of a whole multi-segment window: the read opcode through the split",
+          "test_filter": "RmaMultiSegmentMPITest.IGetMultiSegment"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_IGetCrossBoundaryAtOffset",
+          "description": "IGet starting and ending mid-segment on both the remote source and the local destination",
+          "test_filter": "RmaMultiSegmentMPITest.IGetCrossSegmentBoundaryAtOffset"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_DeepEP_EngramMixedWindowIGet",
+          "description": "DeepEP Engram layout ([GPU receive][CPU storage]): IGet from a non-zero offset in the remote CPU segment into a different offset of the local GPU segment",
+          "test_filter": "RmaMultiSegmentMPITest.DeepEP_EngramMixedWindowIGet"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_DeepEP_EngramIGetStress",
+          "description": "32-iteration DeepEP Engram fetch sweep over changing remote CPU and local GPU offsets; skips unless there is exactly one rank on each of two nodes",
+          "test_filter": "RmaMultiSegmentMPITest.DeepEP_MultiNodeEngramMixedWindowIGetStress"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_IFlush",
+          "description": "Receiver-side iflush fences every physical segment after a full-window iput",
+          "test_filter": "RmaMultiSegmentMPITest.IFlushMultiSegment"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_IFlushAfterPartialPut",
+          "description": "iflush after a partial offset iput: the touched segments are fenced and the untouched sentinel bytes stay intact",
+          "test_filter": "RmaMultiSegmentMPITest.IFlushAfterPartialMultiSegmentPut"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_IFlushSingleSegmentRegression",
+          "description": "Regression: iflush on an ordinary single-allocation buffer still fences and verifies (nSeg==1 fast path)",
+          "test_filter": "RmaMultiSegmentMPITest.IFlushSingleSegmentRegression"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_IPutSignal",
+          "description": "iputSignal over a multi-segment payload: per-segment data WRs followed by the chained signal atomic",
+          "test_filter": "RmaMultiSegmentMPITest.IPutSignalMultiSegment"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_IPutSizeSweepFromZero",
+          "description": "IPut sweep from 0 to the full window over byte, word, page, 64K and segment-boundary sizes, checking nothing past the payload was touched",
+          "test_filter": "RmaMultiSegmentMPITest.IPutSizeSweepFromZero"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_IPutSizeSweepAtBoundaryOffset",
+          "description": "The same sweep started just inside the first segment, so every transfer begins mid-segment and most cross a boundary",
+          "test_filter": "RmaMultiSegmentMPITest.IPutSizeSweepAtBoundaryOffset"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_ExceedsMaxSegmentsRejected",
+          "description": "Negative: a window spanning more than NCCL_RMA_MAX_SEGMENTS is rejected with ncclInvalidUsage and yields no handle",
+          "test_filter": "RmaMultiSegmentMPITest.RegisterExceedsMaxSegmentsRejected"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_SingleSegmentRegression",
+          "description": "Regression: an ordinary single-allocation buffer still registers and transfers on the nSeg==1 fast path",
+          "test_filter": "RmaMultiSegmentMPITest.SingleSegmentRegression"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_AsymmetricSegmentCountRejected",
+          "description": "Negative: ranks registering windows with different physical segment counts are rejected collectively instead of running a mismatched-stride all-gather",
+          "test_filter": "RmaMultiSegmentMPITest.RegisterAsymmetricSegmentCountRejected"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_EqualCountDifferentBoundaries",
+          "description": "Equal segment counts with different per-rank boundaries: each side splits the full-window put on its own segOff table",
+          "test_filter": "RmaMultiSegmentMPITest.RegisterEqualCountDifferentBoundariesTransfer"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_RankLocalFailureRejectedCollectively",
+          "description": "Negative: only rank 0 exceeds the segment cap, so both ranks must still meet in the status collective and reject; an early return on rank 0 hangs registration",
+          "test_filter": "RmaMultiSegmentMPITest.RankLocalRegistrationFailureRejectedCollectively"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_IPutOutOfRangeRejected",
+          "description": "Negative: out-of-range iput offsets and sizes are rejected with ncclInvalidArgument, nothing is posted and the destination window is byte-for-byte intact",
+          "test_filter": "RmaMultiSegmentMPITest.IPutOutOfRangeRejectedNoCorruption"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_IGetOutOfRangeRejected",
+          "description": "Negative: out-of-range iget offsets and sizes are rejected with ncclInvalidArgument",
+          "test_filter": "RmaMultiSegmentMPITest.IGetOutOfRangeRejected"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_IPutSignalOutOfRangeRejected",
+          "description": "Negative: an out-of-range iputSignal payload, an out-of-range signal offset and an unaligned signal atomic are all rejected without posting",
+          "test_filter": "RmaMultiSegmentMPITest.IPutSignalOutOfRangeRejectedNoCorruption"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_BoundaryStress",
+          "description": "Straddle every interior boundary of an 8-segment window with sentinel checks, then transfer the whole window at once",
+          "test_filter": "RmaMultiSegmentMPITest.BoundaryStressNoCorruption"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_MultiNodeAsymmetricIGetStress",
+          "description": "32 IGets, each crossing a different remote and local boundary, exercising rkey and lkey selection; skips unless there is exactly one rank on each of two nodes",
+          "test_filter": "RmaMultiSegmentMPITest.MultiNodeAsymmetricIGetBoundaryStress"
+        }
+      ]
+    },
+    "net_ib_rma_multisegment_hybrid": {
+      "extends": "net_ib_base",
+      "num_ranks": 8,
+      "num_nodes": 2,
+      "num_gpus": 4,
+      "timeout": 300,
+      "description": "DeepEP HybridElasticSymmetricMemory windows ([GPU][CPU per local rank]). Extends net_ib_base rather than net_ib_rma_multisegment because extends merges test lists, and these tests assert exactly 4 shared-memory local ranks, so they need the 8-rank/2-node placement rather than that suite's 1 rank per node.",
+      "env_variables": {
+        "NCCL_NET": "ib",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DEBUG_SUBSYS": "ALL",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "NetIB_RMA_MultiSeg_DeepEP_HybridImportedCpuIGet",
+          "description": "Every process imports the same local CPU handles, then fetches from the matching CPU segment on the other node into a non-zero local GPU offset",
+          "test_filter": "RmaMultiSegmentMPITest.DeepEP_HybridImportedCpuSegmentIGet"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_DeepEP_HybridMultiNodeIGetStress",
+          "description": "32 iterations alternating the remote node's imported CPU-owner segment while varying offsets and sizes: segment-window selection, shared-handle lifetime and independent local/remote cursors",
+          "test_filter": "RmaMultiSegmentMPITest.DeepEP_HybridMultiNodeIGetStress"
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_DeepEP_HybridOutOfRangeIGetRejected",
+          "description": "Negative: an IGet overrunning the final imported CPU segment is rejected before posting and leaves the GPU destination intact",
+          "test_filter": "RmaMultiSegmentMPITest.DeepEP_HybridOutOfRangeIGetRejected"
+        }
+      ]
+    },
     "net_ib_multithread_base": {
       "extends": "net_ib_base",
       "timeout": 600,
@@ -1427,6 +1586,18 @@
       "name": "NET IB-CAST - GIN DmaBuf",
       "description": "GIN plugin tests with dma-buf support",
       "config": "net_ib_cast_gin_dmabuf",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - RMA Multi-Segment",
+      "description": "AIRUNTIME-2351: per-segment DMA-BUF registration of multi-segment VMM windows, boundary-split iput/iget/iputSignal/iflush, range and segment-cap rejection, and the DeepEP Engram mixed GPU+CPU window",
+      "config": "net_ib_rma_multisegment",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - RMA Multi-Segment DeepEP Hybrid (8-rank)",
+      "description": "DeepEP hybrid elastic windows with one imported CPU segment per local rank; needs 4 ranks on each of 2 nodes",
+      "config": "net_ib_rma_multisegment_hybrid",
       "enabled": true
     },
     {
