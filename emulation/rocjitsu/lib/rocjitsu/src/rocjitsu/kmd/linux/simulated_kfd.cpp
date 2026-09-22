@@ -819,6 +819,7 @@ bool SimulatedKfd::register_process_address_spaces(const std::shared_ptr<KfdProc
          .page_table_mutex = &proc->page_table_mutex_,
          .page_table_generation = proc->page_table_generation(),
          .request_mutex = proc->page_table_request_mutex(),
+         .mutation_epoch = proc->page_table_mutation_epoch(),
          .client_pid = client_pid,
          .client_mem_fd = -1,
          .passthrough = passthrough,

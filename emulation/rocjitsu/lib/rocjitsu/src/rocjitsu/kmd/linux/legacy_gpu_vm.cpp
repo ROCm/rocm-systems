@@ -30,7 +30,8 @@ public:
   Binding(std::shared_ptr<GpuMemory> memory, uint32_t vmid,
           LegacyAddressSpaceRegistration registration, std::shared_ptr<void> frontend_lifetime)
       : memory_(std::move(memory)), address_space_(std::make_shared<LegacyAddressSpace>(*memory_)),
-        vmid_(vmid), frontend_lifetime_(std::move(frontend_lifetime)) {
+        vmid_(vmid), mutation_epoch_(std::move(registration.mutation_epoch)),
+        frontend_lifetime_(std::move(frontend_lifetime)) {
     address_space_->register_process(vmid_, registration.page_table, registration.page_table_mutex,
                                      registration.page_table_generation,
                                      std::move(registration.request_mutex));
@@ -73,6 +74,18 @@ public:
 
   [[nodiscard]] std::optional<Mtype> query_mtype(uint64_t address) const override {
     return address_space_->pte_mtype(address, vmid_);
+  }
+
+  [[nodiscard]] VmMtypeSnapshot snapshot_mtype(uint64_t address) const override {
+    auto guard = address_space_->acquire_page_table_request(vmid_);
+    if (!mutation_epoch_ || !guard.cacheable())
+      return {.mtype = guard.owns_lock() ? address_space_->pte_mtype(address, guard)
+                                         : query_mtype(address)};
+    return {.mtype = address_space_->pte_mtype(address, guard),
+            .begin = address & ~(kLegacyPageSize - 1),
+            .size = kLegacyPageSize,
+            .mutation_epoch = mutation_epoch_,
+            .captured_epoch = mutation_epoch_->load(std::memory_order_relaxed)};
   }
 
   [[nodiscard]] VmTranslationResult probe_translation(uint64_t address, std::size_t size,
@@ -200,6 +213,7 @@ private:
   std::shared_ptr<GpuMemory> memory_;
   std::shared_ptr<LegacyAddressSpace> address_space_;
   uint32_t vmid_ = 0;
+  std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch_;
   std::shared_ptr<void> frontend_lifetime_;
 };
 

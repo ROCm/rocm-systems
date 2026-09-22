@@ -148,6 +148,7 @@ public:
   std::shared_mutex *page_table_mutex = nullptr;
   const uint64_t *page_table_generation = nullptr;
   std::shared_ptr<std::shared_mutex> request_mutex;
+  std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch{};
   pid_t client_pid = 0;
   int client_mem_fd = -1;
   bool passthrough = false;

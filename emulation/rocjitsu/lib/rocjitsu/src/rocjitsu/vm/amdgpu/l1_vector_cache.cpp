@@ -136,9 +136,8 @@ void L1VectorCache::cache_partial_bytes(uint64_t addr, const uint8_t *src, uint3
 VmAccessOutcome L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size,
                                           bool non_temporal, bool request_l1_bypass, uint32_t vmid,
                                           RequestMtypeResolver &mtypes) {
-  const Mtype effective = mtypes.at(addr);
-
   util::Logger::cp([&](auto &os) {
+    const Mtype effective = mtypes.at(addr);
     static thread_local uint64_t mtype_counts[5] = {};
     static thread_local uint64_t total = 0;
     ++mtype_counts[static_cast<int>(effective)];
@@ -206,10 +205,9 @@ VmAccessOutcome L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t 
 VmAccessOutcome L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size,
                                            bool non_temporal, uint32_t vmid,
                                            RequestMtypeResolver &mtypes) {
-  const Mtype effective = mtypes.at(addr);
-
   util::Logger::vm([&](auto &os) {
     if (addr >= 0x4d00c00000ULL && addr < 0x4d00c00100ULL) {
+      const Mtype effective = mtypes.at(addr);
       uint32_t val = 0;
       if (size >= 4)
         std::memcpy(&val, src, 4);
