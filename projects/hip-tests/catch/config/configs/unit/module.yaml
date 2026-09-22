@@ -382,3 +382,6 @@ module:
       targets: [nvidia_linux, nvidia_windows]
       reason: "AIRUNTIME-2744 - compiled-in kernel path; fixture/build support is amd-only; needs to be re-triaged."
     tags: [load]
+  Unit_hipLaunchErrorCodeMatrix_Golden:
+    <<: *level_2
+    tags: [launch, P0]
