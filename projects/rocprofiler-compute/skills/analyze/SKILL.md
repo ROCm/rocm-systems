@@ -44,13 +44,15 @@ For support/dependencies, known issues, and detailed interpretation, load
 ## 2. Prerequisites
 
 ```bash
-skills/analyze/scripts/inspect-workload.sh ./workloads/<workload_name>
+skills/analyze/scripts/inspect-workload.sh ./workloads/<workload_name>/<gpu_model>
 rocprof-compute analyze --help
 ```
 
-Point `--path` / `-p` at the directory that contains `profiling_config.yaml`
-(the workload root or the GPU-model folder, depending on how it was
-collected).
+Point `--path` / `-p` at the directory that contains `profiling_config.yaml`.
+A default profile writes that directory at
+`./workloads/<workload_name>/<gpu_model>/`, or `<rank>/` under MPI.
+`analyze` does not search child directories. If a path has no
+`profiling_config.yaml`, use the child directory that does.
 
 ## 3. Terminal analysis
 
@@ -71,7 +73,7 @@ collected).
 
 ```bash
 rocprof-compute analyze \
-    --path ./workloads/<workload_name> \
+    --path ./workloads/<workload_name>/<gpu_model> \
     --list-stats
 ```
 
@@ -81,8 +83,8 @@ Note integer **kernel IDs** for `-k` and **1-based dispatch IDs** for `-d` /
 ### 3b. Full report
 
 ```bash
-rocprof-compute analyze --path ./workloads/<workload_name>
-rocprof-compute analyze --path ./workloads/<workload_name> | less -R
+rocprof-compute analyze --path ./workloads/<workload_name>/<gpu_model>
+rocprof-compute analyze --path ./workloads/<workload_name>/<gpu_model> | less -R
 ```
 
 ### 3c. Save a report when requested
@@ -96,19 +98,19 @@ with `--output-name`.
 ```bash
 # Text report
 rocprof-compute analyze \
-    --path ./workloads/<workload_name> \
+    --path ./workloads/<workload_name>/<gpu_model> \
     --output-format txt \
     --output-name my_analysis
 
 # One CSV per analysis view (requires rocpd-collected profile)
 rocprof-compute analyze \
-    --path ./workloads/<workload_name> \
+    --path ./workloads/<workload_name>/<gpu_model> \
     --output-format csv \
     --output-name my_analysis
 
 # SQLite analysis database (requires rocpd-collected profile)
 rocprof-compute analyze \
-    --path ./workloads/<workload_name> \
+    --path ./workloads/<workload_name>/<gpu_model> \
     --output-format db \
     --output-name my_analysis
 ```
@@ -121,11 +123,11 @@ raw capture with `--retain-rocpd-output` on profile.
 
 ```bash
 rocprof-compute analyze \
-    --path ./workloads/<workload_name> \
+    --path ./workloads/<workload_name>/<gpu_model> \
     --list-available-metrics
 
 rocprof-compute analyze \
-    --path ./workloads/<workload_name> \
+    --path ./workloads/<workload_name>/<gpu_model> \
     -b 1 2
 ```
 
@@ -136,31 +138,31 @@ ids/aliases from `--list-blocks`.
 
 ```bash
 # Kernel id from --list-stats
-rocprof-compute analyze --path ./workloads/<workload_name> -k 0
+rocprof-compute analyze --path ./workloads/<workload_name>/<gpu_model> -k 0
 
 # Dispatch ids are 1-based
-rocprof-compute analyze --path ./workloads/<workload_name> -d 12 34 --decimal 3
+rocprof-compute analyze --path ./workloads/<workload_name>/<gpu_model> -d 12 34 --decimal 3
 
 # Kernel + block
-rocprof-compute analyze --path ./workloads/<workload_name> -k 0 -b <block_id>
+rocprof-compute analyze --path ./workloads/<workload_name>/<gpu_model> -k 0 -b <block_id>
 ```
 
 ### 3f. Top-down workflow
 
 ```bash
 # Hottest kernel
-rocprof-compute analyze --path ./workloads/<workload_name> --list-stats
+rocprof-compute analyze --path ./workloads/<workload_name>/<gpu_model> --list-stats
 
 # Stable aliases avoid architecture-specific numeric block IDs
-rocprof-compute analyze --path ./workloads/<workload_name> -k 0 -b sol
-rocprof-compute analyze --path ./workloads/<workload_name> -k 0 -b memchart
+rocprof-compute analyze --path ./workloads/<workload_name>/<gpu_model> -k 0 -b sol
+rocprof-compute analyze --path ./workloads/<workload_name>/<gpu_model> -k 0 -b memchart
 
 # Roofline HTML from profile (if not --no-roof):
-# ./workloads/<workload_name>/<gpu>/empirRoof_gpu-0_FP32.html
+# ./workloads/<workload_name>/<gpu_model>/empirRoof_gpu-0_FP32.html
 # Left of ridge = memory-bound; right = compute-bound.
 
 rocprof-compute analyze \
-    --path ./workloads/<workload_name> \
+    --path ./workloads/<workload_name>/<gpu_model> \
     -k 0 \
     -R FP16 BF16 FP32
 ```
@@ -178,7 +180,7 @@ Both analysis options are experimental:
 rocprof-compute analyze \
     --experimental \
     --list-torch-operators \
-    --path ./workloads/<workload_name>
+    --path ./workloads/<workload_name>/<gpu_model>
 ```
 
 Use `--torch-operator <pattern>` only after listing the captured operators.
@@ -190,7 +192,7 @@ Do not claim support for arbitrary user-authored ROCTx ranges.
 `per_second`.
 
 ```bash
-rocprof-compute analyze --path ./workloads/<workload_name> -n per_wave
+rocprof-compute analyze --path ./workloads/<workload_name>/<gpu_model> -n per_wave
 ```
 
 Use a unit that matches the metric: bandwidth as `per_second` or
@@ -204,7 +206,7 @@ sort is **count** (hottest first).
 
 ```bash
 rocprof-compute analyze \
-    --path ./workloads/<workload_name> \
+    --path ./workloads/<workload_name>/<gpu_model> \
     --pc-sampling-sorting-type count \
     --pc-sampling-rows 10 \
     -k <kernel_id>
@@ -237,12 +239,12 @@ rocprof-compute profile --name baseline -- ./app_v1
 rocprof-compute profile --name optimized -- ./app_v2
 
 rocprof-compute analyze \
-    --path ./workloads/baseline \
-    --path ./workloads/optimized
+    --path ./workloads/baseline/<gpu_model> \
+    --path ./workloads/optimized/<gpu_model>
 
 rocprof-compute analyze \
-    --path ./workloads/baseline \
-    --path ./workloads/optimized \
+    --path ./workloads/baseline/<gpu_model> \
+    --path ./workloads/optimized/<gpu_model> \
     --output-format csv \
     --output-name comparison
 ```
@@ -265,16 +267,16 @@ reference instead of inferring behavior.
 ## 7. Verified commands
 
 ```bash
-rocprof-compute analyze --path ./workloads/<name> --list-stats
-rocprof-compute analyze --path ./workloads/<name> --list-available-metrics
-rocprof-compute analyze --path ./workloads/<name>
-rocprof-compute analyze --path ./workloads/<name> --output-format txt --output-name report
-rocprof-compute analyze --path ./workloads/<name> --output-format db --output-name report
-rocprof-compute analyze --path ./workloads/<name> -k 0
-rocprof-compute analyze --path ./workloads/<name> -d 12 34 --decimal 3
-rocprof-compute analyze --path ./workloads/<name> -b 1 2 3
-rocprof-compute analyze --path ./workloads/<name> -n per_wave
-rocprof-compute analyze --path ./workloads/baseline --path ./workloads/opt
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-stats
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-available-metrics
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model>
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --output-format txt --output-name report
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --output-format db --output-name report
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k 0
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -d 12 34 --decimal 3
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -b 1 2 3
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -n per_wave
+rocprof-compute analyze --path ./workloads/baseline/<gpu_model> --path ./workloads/opt/<gpu_model>
 rocprof-compute analyze --help
 ```
 

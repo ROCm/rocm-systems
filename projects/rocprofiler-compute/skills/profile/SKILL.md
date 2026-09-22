@@ -192,11 +192,12 @@ in `references/support-and-operations.md` or the analyze skill.
 
 ```bash
 skills/analyze/scripts/inspect-workload.sh \
-    ./workloads/<workload_name>
+    ./workloads/<workload_name>/<gpu_model>
 ```
 
-Point `--path` in analyze at the workload directory (the folder that
-contains `profiling_config.yaml`).
+Point `--path` in analyze at that directory. It is the folder that contains
+`profiling_config.yaml`. For MPI, the last component is the rank instead of
+the GPU model. `analyze` does not search a parent directory for that file.
 
 ## 6. Common profiling issues
 
@@ -209,8 +210,8 @@ guessing parameters.
 Use `skills/analyze/SKILL.md`. Quick preview:
 
 ```bash
-rocprof-compute analyze --path ./workloads/<workload_name> --list-stats
-rocprof-compute analyze --path ./workloads/<workload_name>
+rocprof-compute analyze --path ./workloads/<workload_name>/<gpu_model> --list-stats
+rocprof-compute analyze --path ./workloads/<workload_name>/<gpu_model>
 ```
 
 ## 8. Useful reference commands
