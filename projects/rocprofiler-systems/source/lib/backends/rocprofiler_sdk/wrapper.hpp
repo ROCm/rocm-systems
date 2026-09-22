@@ -117,11 +117,6 @@ struct wrapper
 
     // ─── Correlation types ────────────────────────────────────────────────────────
     using correlation_id_t = rocprofiler_correlation_id_t;
-    // rocprofiler_async_correlation_id_t (no ancestor field) is what kernel_dispatch/
-    // memory_copy buffer records carry on SDKs new enough to declare it (added in
-    // rocprofiler-sdk 0.7.0, "Add Stack IDs"); older SDKs carry
-    // rocprofiler_correlation_id_t for those records instead (see the
-    // corresponding get_parent_stack_id(correlation_id_t) overload in backend.hpp).
 #if ROCPROFILER_VERSION >= 700
     using async_correlation_id_t = rocprofiler_async_correlation_id_t;
 #endif

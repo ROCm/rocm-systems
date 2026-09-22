@@ -589,8 +589,7 @@ public:
     static std::uint64_t get_memory_copy_dst_address(
         [[maybe_unused]] const memory_copy_record_t& record)
     {
-        constexpr auto k_version_700 = 700;
-        if constexpr(Wrapper::compile_time_version >= k_version_700)
+        if constexpr(requires { record.dst_address.value; })
         {
             return record.dst_address.value;
         }
@@ -603,8 +602,7 @@ public:
     static std::uint64_t get_memory_copy_src_address(
         [[maybe_unused]] const memory_copy_record_t& record)
     {
-        constexpr auto k_version_700 = 700;
-        if constexpr(Wrapper::compile_time_version >= k_version_700)
+        if constexpr(requires { record.src_address.value; })
         {
             return record.src_address.value;
         }
@@ -618,8 +616,7 @@ public:
     static std::uint64_t get_memory_allocation_address(
         [[maybe_unused]] const memory_allocation_record_t& record)
     {
-        constexpr auto k_version_700 = 700;
-        if constexpr(Wrapper::compile_time_version >= k_version_700)
+        if constexpr(requires { record.address.value; })
         {
             return record.address.value;
         }
