@@ -1,28 +1,34 @@
-# HRR in-tree capture layer. The generated capture shim and wire-format
-# header are build artifacts so a CLR build never writes into the source tree.
+# HRR In-Tree Capture Layer
+# Adds capture source files to the amdhip64 target.
+# No separate library — capture is compiled into amdhip64 directly.
+# Regenerate HRR sources in the binary tree and verify that the checked-in
+# generated files are current. The checked-in files remain the compilation inputs.
+set(HRR_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../hrr")
 set(HRR_CLR_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
 set(HRR_HIP_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../hip")
-
 include("${HRR_CLR_SOURCE_DIR}/cmake/HrrCodegen.cmake")
-set(HRR_CAPTURE_CODEGEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/hrr")
-hrr_add_codegen(
-  TARGET hrr_capture_codegen
+set(HRR_CODEGEN_CHECK_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/hrr")
+hrr_add_codegen_check(
+  TARGET hrr_codegen_check
+  HRR_SOURCE_DIR "${HRR_SOURCE_DIR}"
   CLR_SOURCE_DIR "${HRR_CLR_SOURCE_DIR}"
   HIP_SOURCE_DIR "${HRR_HIP_SOURCE_DIR}"
-  OUTPUT_DIR "${HRR_CAPTURE_CODEGEN_DIR}"
-  CAPTURE
-)
+  OUTPUT_DIR "${HRR_CODEGEN_CHECK_DIR}")
 
-set_source_files_properties("${HRR_CAPTURE_CODEGEN_DIR}/hip_capture_generated.cpp" PROPERTIES GENERATED TRUE)
+
+add_dependencies(amdhip64 hrr_codegen_check)
+
 target_sources(amdhip64 PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/hip_capture.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hip_capture_metadata.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hip_capture_writer.cpp
-  ${HRR_CAPTURE_CODEGEN_DIR}/hip_capture_generated.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip_capture_generated.cpp
 )
-add_dependencies(amdhip64 hrr_capture_codegen)
 
+# Capture headers live here; the shared HRR archive wire format now lives in
+# projects/hrr/include and is included as "hrr/hrr_api_args.h".
+# Playback tools (hrr-playback, hrr_reader) now live in projects/hrr.
 target_include_directories(amdhip64 PRIVATE
-  ${HRR_CAPTURE_CODEGEN_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../hrr/include
 )

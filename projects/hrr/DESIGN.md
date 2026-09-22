@@ -160,15 +160,30 @@ Handle-creating and handle-destroying events (malloc, free, stream/event/module 
 `hipModuleLaunchKernel` and `hipGraphLaunch` wrap their GPU submission with `hipEventRecord` before/after, synchronise the stop event, and accumulate elapsed time into `total_kernel_ms` / `total_graph_ms` (both guarded by `map_mutex`). Events are created once per replay thread (`thread_local`) and reused for every launch. Graph-capture streams are excluded from timing (recording events into a captured stream corrupts the graph). The summary reports kernel time, graph time, and combined total.
 
 ### Code Generation
-`projects/clr/hipamd/src/hrr/tools/gen_hrr_api_args.py` parses `hip_api_trace.hpp` and writes its outputs into each build tree:
+`gen_hrr_api_args.py` parses `hip_api_trace.hpp` and emits three files:
 
 | File | Contents |
 |------|----------|
-| `<clr-build>/hipamd/src/hrr/generated/hrr/include/hrr/hrr_api_args.h` | 529 `hrr_args_*` structs + `hrr_api_id_t` enum |
-| `<clr-build>/hipamd/src/hrr/generated/hrr/hip_capture_generated.cpp` | ~517 capture shims + `hip_capture_build_table()` |
-| `<hrr-build>/generated/hip_playback_generated.cpp` | ~504 playback shims + `hrr_playback_dispatch[]` |
+| `projects/hrr/include/hrr/hrr_api_args.h` | 529 `hrr_args_*` structs + `hrr_api_id_t` enum |
+| `projects/clr/hipamd/src/hrr/hip_capture_generated.cpp` | ~517 capture shims + `hip_capture_build_table()` |
+| `projects/hrr/playback/hip_playback_generated.cpp` | ~504 playback shims + `hrr_playback_dispatch[]` |
 
-Normal builds do not invoke this script manually. `projects/clr/cmake/HrrCodegen.cmake` invokes it automatically during both CLR capture and standalone HRR playback builds, with explicit binary-directory output paths.
+The checked-in generated files above are the compilation inputs. During CLR and standalone HRR builds, `projects/clr/cmake/HrrCodegen.cmake` generates temporary copies in the binary directory, runs `--check-hrr-coverage`, and fails the build if any temporary file differs from its checked-in counterpart.
+
+For code review or debugging, generate temporary copies from the repository root without modifying the source tree:
+
+```bash
+rm -rf /tmp/hrr-codegen-inspect
+python3 projects/hrr/tools/gen_hrr_api_args.py \
+  --input projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp \
+  --public-header projects/hip/include/hip/hip_runtime_api.h \
+  --output-header /tmp/hrr-codegen-inspect/include/hrr/hrr_api_args.h \
+  --output-capture /tmp/hrr-codegen-inspect/hip_capture_generated.cpp \
+  --output-playback /tmp/hrr-codegen-inspect/hip_playback_generated.cpp \
+  --check-hrr-coverage
+```
+
+When the generated output is intentionally updated, run `python3 projects/hrr/tools/gen_hrr_api_args.py --check-hrr-coverage` from the repository root to refresh the checked-in files.
 
 ### Build
 ```bash
@@ -299,34 +314,17 @@ path used by `hipModuleLaunchKernel`.
 
 ## Generator — `gen_hrr_api_args.py`
 
-A single Python script produces three build artifacts from `hip_api_trace.hpp`:
+A single Python script produces three files from `hip_api_trace.hpp`:
 
 | Output | Description |
 |--------|-------------|
-| `<hrr-build>/generated/include/hrr/hrr_api_args.h` | Shared header: format constants, `hrr_event_header`, one `hrr_args_*` struct per API, `hrr_api_id_t` enum, `hrr_api_names[]` |
-| `<clr-build>/hipamd/src/hrr/generated/hrr/hip_capture_generated.cpp` | ~502 capture shims for APIs not in `MANUAL_CAPTURE_APIS` |
-| `<hrr-build>/generated/hip_playback_generated.cpp` | ~201 playback shims + dispatch table for APIs not in `MANUAL_PLAYBACK_APIS` |
+| `projects/hrr/include/hrr/hrr_api_args.h` | Shared header: format constants, `hrr_event_header`, one `hrr_args_*` struct per API, `hrr_api_id_t` enum, `hrr_api_names[]` |
+| `projects/clr/hipamd/src/hrr/hip_capture_generated.cpp` | ~502 capture shims for APIs not in `MANUAL_CAPTURE_APIS` |
+| `projects/hrr/playback/hip_playback_generated.cpp` | ~201 playback shims + dispatch table for APIs not in `MANUAL_PLAYBACK_APIS` |
 
-Script location: `projects/clr/hipamd/src/hrr/tools/gen_hrr_api_args.py`
+Script location: `projects/hrr/tools/gen_hrr_api_args.py`
 
-Do not run the generator manually during normal development. `projects/clr/cmake/HrrCodegen.cmake` invokes it automatically during both CLR and standalone HRR builds, with explicit binary-directory output paths.
-
-### Inspecting Generated Code
-
-For code review or debugging only, generate all artifacts into a temporary directory from the repository root:
-
-```bash
-rm -rf /tmp/hrr-codegen-inspect
-python3 projects/clr/hipamd/src/hrr/tools/gen_hrr_api_args.py \
-  --input projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp \
-  --public-header projects/hip/include/hip/hip_runtime_api.h \
-  --output-header /tmp/hrr-codegen-inspect/include/hrr/hrr_api_args.h \
-  --output-capture /tmp/hrr-codegen-inspect/hip_capture_generated.cpp \
-  --output-playback /tmp/hrr-codegen-inspect/hip_playback_generated.cpp \
-  --check-hrr-coverage
-```
-
-This command is for inspecting generated source only. Normal CLR and standalone HRR builds must continue to use the CMake code-generation targets.
+Normal builds generate temporary files and verify them against the checked-in compilation inputs. Run `python3 projects/hrr/tools/gen_hrr_api_args.py --check-hrr-coverage` from the repository root only when intentionally refreshing those checked-in files; use the temporary-output command above for inspection.
 
 The generator classifies each API:
 - **`MANUAL_CAPTURE_APIS`** (27): kernel launches ×4, memcpy H2D+D2H ×8, module load ×3, `__hipRegisterFatBinary`, `hipHostRegister/Unregister`, `hipMemcpy3D` variants ×4, array creation ×2, VMM, stream/memory attribute APIs, `hipMemcpyWithStream`
@@ -334,7 +332,7 @@ The generator classifies each API:
 - **`NOOP_PLAYBACK_APIS`** (~271): APIs where replay is not meaningful (stale handles, context-destroying calls, missing in ROCm SDK 6.4) — emit `return hipSuccess;` without calling the real function. These are **not replay-tested**; tests that exercise only these APIs verify capture does not crash, not that replay works.
 
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
-When adding HIP API support, update this script to classify the API explicitly in the appropriate capture and playback policy sets. APIs that need non-trivial serialization or replay must be added to `MANUAL_CAPTURE_APIS` and/or `MANUAL_PLAYBACK_APIS`; intentionally unsupported replay APIs must be classified in `NOOP_PLAYBACK_APIS`. The build-time HRR coverage check rejects active dispatch-table slots that do not have a capture shim.
+When adding HIP API support, update this script to classify the API in the appropriate capture and playback policy sets. APIs requiring non-trivial serialization or replay belong in `MANUAL_CAPTURE_APIS` and/or `MANUAL_PLAYBACK_APIS`; intentionally unsupported replay APIs belong in `NOOP_PLAYBACK_APIS`.
 
 ## Archive Format (v3)
 
