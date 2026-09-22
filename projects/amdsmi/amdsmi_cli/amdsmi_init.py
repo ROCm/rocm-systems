@@ -13,13 +13,17 @@ import threading
 from pathlib import Path
 
 # CLI module resolution order (distinct from `import amdsmi` in a user script):
-#   1. this installation's share/amd_smi copy -- the modules the CLI shipped
-#      with, always preferred so `amd-smi` uses its own version even on a host
-#      with multiple ROCm installs or a pip-installed amdsmi (restores #3082).
-#   2. a pip install -- fallback when the share copy is absent; the natural
+#   1. $ROCM_PATH (or $ROCM_HOME) share/amd_smi -- an explicit override that
+#      selects which installation the CLI drives; its modules and its library
+#      are picked up together, so the two stay a matched pair.
+#   2. this installation's share/amd_smi copy -- the modules the CLI shipped
+#      with, preferred over a pip install so `amd-smi` uses its own version on
+#      a host with multiple ROCm installs or a pip-installed amdsmi
+#      (restores #3082).
+#   3. a pip install -- fallback when the share copy is absent; the natural
 #      import below finds it (pip's site-packages precedes the system copy on
 #      sys.path).
-#   3. the system site-packages -- last resort.
+#   4. the system site-packages -- last resort.
 # A pip install is meant for Python scripting, not for changing CLI behavior,
 # so it must not override the shipped modules; the fallbacks are safety nets.
 _share_candidates = []
