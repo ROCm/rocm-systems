@@ -231,13 +231,16 @@ class RocProfCompute_Base:
                 current.append("21")
             args.filter_blocks = current
 
-        # When --membw-analysis is set, inject "30" into filter_blocks so the
-        # profiling config yaml records it and downstream code is unchanged.
+        # When --membw-analysis is set and the user specified explicit blocks,
+        # inject "30" so block 30 counters are collected alongside the
+        # requested blocks.  When filter_blocks is empty (no -b), all blocks
+        # are collected by default and soc_base.detect_counters() already
+        # includes/excludes block 30 based on args.membw_analysis.
         if getattr(args, "membw_analysis", False):
             current = list(args.filter_blocks or [])
-            if "30" not in current:
+            if current and not any(t == "30" or t.startswith("30.") for t in current):
                 current.append("30")
-            args.filter_blocks = current
+                args.filter_blocks = current
 
         selected_frameworks = _compute_selected_frameworks(args)
         if selected_frameworks and is_only_pc_sampling(args.filter_blocks):

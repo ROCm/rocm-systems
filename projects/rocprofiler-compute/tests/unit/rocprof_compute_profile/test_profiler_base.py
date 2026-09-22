@@ -702,13 +702,27 @@ def test_sanitize_block_experimental_gating(
     [
         pytest.param(
             _make_rpc_args(membw_analysis=True, experimental=True, filter_blocks=[]),
-            ["30"],
-            id="membw_analysis_with_experimental_injects_30",
+            [],
+            id="membw_analysis_empty_filter_stays_empty",
         ),
         pytest.param(
             _make_rpc_args(filter_blocks=["3"], membw_analysis=True, experimental=True),
             ["3", "30"],
             id="membw_analysis_with_existing_blocks_appends_30",
+        ),
+        pytest.param(
+            _make_rpc_args(
+                filter_blocks=["3.1"], membw_analysis=True, experimental=True
+            ),
+            ["3.1", "30"],
+            id="membw_analysis_with_sub_block_appends_30",
+        ),
+        pytest.param(
+            _make_rpc_args(
+                filter_blocks=["30.13"], membw_analysis=True, experimental=True
+            ),
+            ["30.13"],
+            id="membw_analysis_with_block_30_sub_no_duplicate",
         ),
     ],
 )
