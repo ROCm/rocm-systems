@@ -2897,18 +2897,25 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       }
     };
 
-    const auto physical_vgpr = [&](uint16_t low,
-                                   amdgpu::VgprMsbRole role) -> std::optional<uint16_t> {
-      const auto bank = amdgpu::vgpr_msb_bank_for_role(state.vgpr_msb_imm, role);
-      if (!bank)
-        return std::nullopt;
-      return static_cast<uint16_t>(low + static_cast<uint16_t>(*bank) * 256u);
-    };
-
     for (size_t index = block.first_index; index <= block.last_index; ++index) {
       const Instruction &inst = *ctx.insts[index];
       const InstructionFacts &facts = ctx.facts[index];
       const std::string_view mnemonic = inst.mnemonic();
+      // The gfx1250 setreg hazard is consumed by the next instruction even
+      // when this scanner handles that instruction through an early exit or
+      // snapshots its state at a call edge. Preserve the incoming MODE value
+      // separately because this instruction's operands use pre-instruction
+      // banks.
+      const std::optional<uint8_t> operand_vgpr_msb_imm = state.vgpr_msb_imm;
+      update_vgpr_mode(state.vgpr_msb_imm, state.setreg_vgpr_msb_hazard, inst, ctx.text,
+                       ctx.setreg_vgpr_msb_fixup);
+      const auto physical_vgpr = [&](uint16_t low,
+                                     amdgpu::VgprMsbRole role) -> std::optional<uint16_t> {
+        const auto bank = amdgpu::vgpr_msb_bank_for_role(operand_vgpr_msb_imm, role);
+        if (!bank)
+          return std::nullopt;
+        return static_cast<uint16_t>(low + static_cast<uint16_t>(*bank) * 256u);
+      };
       // Large dispatchers keep getpc-built targets in long-lived SGPRs, then
       // copy selected pairs into short-lived call operands. Capture the source
       // before generic destination invalidation and publish the copy only when
@@ -3200,8 +3207,6 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
                                  StashedPcHalf{.value = copied_pair->second, .high = true});
       }
 
-      update_vgpr_mode(state.vgpr_msb_imm, state.setreg_vgpr_msb_hazard, inst, ctx.text,
-                       ctx.setreg_vgpr_msb_fixup);
       update_gpr_idx_enabled(state.gpr_idx_enabled, inst, ctx.text, ctx.arch);
     }
     publish_builders();

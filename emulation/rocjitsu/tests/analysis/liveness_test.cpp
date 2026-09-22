@@ -4452,6 +4452,161 @@ TEST(IndirectBranchDiscovery, ConcreteTargetControlsModeWriteLaneStashMapping) {
   EXPECT_EQ(gfx1251_fixups[0].source_target_offset, 64u);
 }
 
+TEST(IndirectBranchDiscovery, InterveningLaneWriteConsumesSetregAdjacencyHazard) {
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
+  constexpr auto select_src0_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
+  const std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      60u,
+      0u, // 0x04: s_add_nc_u64 ..., lit64(60) -> target 0x40.
+      setreg[0],
+      0u, // 0x10: s_setreg_imm32_b32 MODE, 0; arms the next-instruction hazard.
+      0xD761002Cu,
+      0x02010000u, // 0x18: v_writelane_b32 physical v44, s0, 0; consumes the hazard.
+      0xD761002Cu,
+      0x02010201u,             // 0x20: v_writelane_b32 physical v44, s1, 1.
+      select_src0_bank_one[0], // 0x28: executes and selects physical v300 for readlane.
+      0xD7600000u,
+      0x0201012Cu, // 0x2c: s0 <- physical v300 lane 0, not the v44 stash.
+      0xD7600001u,
+      0x0201032Cu,                              // 0x34: s1 <- physical v300 lane 1.
+      0xBE9E4900u,                              // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x40: would-be target.
+  };
+
+  const auto fixups = run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1250);
+  EXPECT_TRUE(fixups.empty())
+      << "the lane write must consume the hazard before the later s_set_vgpr_msb";
+}
+
+TEST(IndirectBranchDiscovery, InterveningLaneReadConsumesSetregAdjacencyHazard) {
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
+  constexpr auto select_src0_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
+  const std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      68u,
+      0u, // 0x04: s_add_nc_u64 ..., lit64(68) -> target 0x48.
+      0xD761002Cu,
+      0x02010000u, // 0x10: v_writelane_b32 physical v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x18: v_writelane_b32 physical v44, s1, 1.
+      setreg[0],
+      0u, // 0x20: s_setreg_imm32_b32 MODE, 0; arms the next-instruction hazard.
+      0xD7600002u,
+      0x0201012Cu,             // 0x28: s2 <- physical v44 lane 0; consumes the hazard.
+      select_src0_bank_one[0], // 0x30: executes and selects physical v300 for readlane.
+      0xD7600000u,
+      0x0201012Cu, // 0x34: s0 <- physical v300 lane 0, not the v44 stash.
+      0xD7600001u,
+      0x0201032Cu,                              // 0x3c: s1 <- physical v300 lane 1.
+      0xBE9E4900u,                              // 0x44: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x48: would-be target.
+  };
+
+  const auto fixups = run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1250);
+  EXPECT_TRUE(fixups.empty())
+      << "the lane read must consume the hazard before the later s_set_vgpr_msb";
+}
+
+TEST(IndirectBranchDiscovery, InterveningGetPcConsumesSetregAdjacencyHazard) {
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
+  constexpr auto select_src0_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
+  constexpr auto getpc_s2 = cdna5::build_sop1(cdna5::kSGetPcI64Sop1, {.sdst = 2});
+  const std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      64u,
+      0u, // 0x04: s_add_nc_u64 ..., lit64(64) -> target 0x44.
+      0xD761002Cu,
+      0x02010000u, // 0x10: v_writelane_b32 physical v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x18: v_writelane_b32 physical v44, s1, 1.
+      setreg[0],
+      0u,                      // 0x20: s_setreg_imm32_b32 MODE, 0.
+      getpc_s2[0],             // 0x28: s_get_pc_i64 s[2:3]; consumes the hazard.
+      select_src0_bank_one[0], // 0x2c: executes and selects physical v300 for readlane.
+      0xD7600000u,
+      0x0201012Cu, // 0x30: s0 <- physical v300 lane 0, not the v44 stash.
+      0xD7600001u,
+      0x0201032Cu,                              // 0x38: s1 <- physical v300 lane 1.
+      0xBE9E4900u,                              // 0x40: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x44: would-be target.
+  };
+
+  const auto fixups = run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1250);
+  EXPECT_TRUE(fixups.empty()) << "get-PC must consume the hazard before the later s_set_vgpr_msb";
+}
+
+TEST(IndirectBranchDiscovery, InterveningPairUpdateConsumesSetregAdjacencyHazard) {
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
+  constexpr auto select_src0_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
+  const std::vector<uint32_t> words = {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      setreg[0],
+      0u, // 0x04: s_setreg_imm32_b32 MODE, 0.
+      0xA980FE00u,
+      60u,
+      0u,                      // 0x0c: s_add_nc_u64 ..., lit64(60); consumes the hazard.
+      select_src0_bank_one[0], // 0x18: executes; DST bank 0 and SRC0 bank 1.
+      0xD761002Cu,
+      0x02010000u, // 0x1c: v_writelane_b32 physical v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x24: v_writelane_b32 physical v44, s1, 1.
+      0xD7600000u,
+      0x0201012Cu, // 0x2c: s0 <- physical v300 lane 0, not the v44 stash.
+      0xD7600001u,
+      0x0201032Cu,                              // 0x34: s1 <- physical v300 lane 1.
+      0xBE9E4900u,                              // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x40: would-be target.
+  };
+
+  const auto fixups = run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1250);
+  EXPECT_TRUE(fixups.empty())
+      << "the pair update must consume the hazard before the later s_set_vgpr_msb";
+}
+
+TEST(IndirectBranchDiscovery, DirectCallConsumesSetregHazardBeforeCalleeEntry) {
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr auto select_dst_src0_bank_one =
+      cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0x41});
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
+  constexpr auto select_src0_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
+  const std::vector<uint32_t> words = {
+      select_dst_src0_bank_one[0], // 0x00: select physical v300 for write and read roles.
+      0xBE804700u,                 // 0x04: s_get_pc_i64 s[0:1].
+      0xA980FE00u, 68u,
+      0u, // 0x08: s_add_nc_u64 ..., lit64(68) -> target 0x4c.
+      0xD761002Cu,
+      0x02010000u, // 0x14: v_writelane_b32 physical v300, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x1c: v_writelane_b32 physical v300, s1, 1.
+      setreg[0],
+      0u, // 0x24: s_setreg_imm32_b32 MODE, 0; switches to bank zero and arms the hazard.
+      rocjitsu::build_s_call_b64(kReturnSreg, 1, ROCJITSU_CODE_ARCH_CDNA5),
+      // 0x2c: direct call consumes the hazard and targets 0x34.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x30: continuation.
+      select_src0_bank_one[0],                  // 0x34: executes in the callee.
+      0xD7600000u,
+      0x0201012Cu, // 0x38: s0 <- the physical v300 stash.
+      0xD7600001u,
+      0x0201032Cu,                              // 0x40: s1 <- the physical v300 stash.
+      0xBE824900u,                              // 0x48: s_swap_pc_i64 s[2:3], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x4c: target.
+  };
+
+  const auto fixups = run_indirect_discovery_for_test(words, nullptr, ROCJITSU_CODE_TARGET_GFX1250);
+  ASSERT_EQ(fixups.size(), 1u)
+      << "the direct call must not carry its caller's adjacency hazard into the callee";
+  EXPECT_EQ(fixups[0].source_target_offset, 76u);
+}
+
 TEST(IndirectBranchDiscovery, InferredEntryClearsSetregAdjacencyHazard) {
   constexpr auto set_dst_src0_bank_one =
       cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0x41});
@@ -5502,6 +5657,54 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbCfgJoinPreservesAgreeingBank) {
   EXPECT_EQ(liveness.vgpr_msb_bank_before(joined_move, amdgpu::VgprMsbRole::Src0), 2);
   EXPECT_TRUE(liveness.is_live_before(joined_move, {RegClass::VGPR, 513, 1}));
   EXPECT_FALSE(liveness.is_live_before(joined_move, {RegClass::VGPR, 1, 1}));
+}
+
+TEST(LivenessAnalysis, Gfx1250MaybeHazardPreservesOnlyPostSetAgreeingBanks) {
+  constexpr auto branch_to_set = cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = 2});
+  constexpr uint16_t kAllVgprMsbFieldsHwreg = 1u | (12u << 6) | (7u << 11);
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kAllVgprMsbFieldsHwreg});
+  // The armed path drops S_SET_VGPR_MSB with SRC0=1 and SRC1=0. The clear path executes it with
+  // SRC0=1 and SRC1=2. SRC0 therefore remains known at bank one while SRC1 becomes ambiguous.
+  constexpr uint8_t kDroppedBanks = 0x01;
+  constexpr uint8_t kExecutedBanks = 0x09;
+  constexpr uint32_t kSetregLiteral =
+      static_cast<uint32_t>(amdgpu::set_vgpr_msb_to_mode_layout(kDroppedBanks))
+      << amdgpu::VGPR_MSB_MODE_SHIFT;
+  constexpr auto maybe_dropped_set =
+      cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = kExecutedBanks});
+  constexpr auto add =
+      cdna5::build_vop2(cdna5::kVAddNcU32Vop2, {.src0 = 257, .vsrc1 = 2, .vdst = 0});
+  constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
+  TestCodeObject co(
+      {branch_to_set[0], setreg[0], kSetregLiteral, maybe_dropped_set[0], add[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
+  auto scope = block_scope(blocks);
+  BasicBlock *join = block_starting_at(blocks, 12);
+  ASSERT_NE(join, nullptr);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  auto joined = join->instructions().begin();
+  ASSERT_NE(joined, join->instructions().end());
+  ++joined;
+  ASSERT_NE(joined, join->instructions().end());
+  ASSERT_EQ(joined.operator*().mnemonic(), "v_add_nc_u32_e32");
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*joined, amdgpu::VgprMsbRole::Src0), 1);
+  EXPECT_EQ(liveness.vgpr_msb_bank_before(*joined, amdgpu::VgprMsbRole::Src1), std::nullopt);
+  EXPECT_TRUE(liveness.is_live_before(*joined, {RegClass::VGPR, 257, 1}));
+  EXPECT_FALSE(liveness.is_live_before(*joined, {RegClass::VGPR, 1, 1}));
+  for (uint16_t bank = 0; bank < 4; ++bank)
+    EXPECT_TRUE(liveness.is_live_before(
+        *joined, {RegClass::VGPR, static_cast<uint16_t>(2 + bank * 256), 1}));
 }
 
 TEST(LivenessAnalysis, Gfx1250VgprMsbJoinExcludesUnreachablePredecessor) {
