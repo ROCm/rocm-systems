@@ -95,12 +95,15 @@ Ensure ROCm is installed and follow the steps:
 
       python3 -m venv ~/.venvs/rocprof-compute-analyze
       source ~/.venvs/rocprof-compute-analyze/bin/activate
-      pip install -r <ROCM_PATH>/libexec/rocprofiler-compute/requirements.txt
+      pip install --extra-index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm-profiler[compute-analyze]"
 
-   **Note:** Replace ``<ROCM_PATH>`` with the ROCm installation path (e.g., ``/opt/rocm`` or ``/opt/rocm-7.3.0``).
+   To check that the environment has everything analyze mode needs, run
+   ``rocprof-compute analyze --verify-deps``.
 
    Profile your application with its own Python environment, then activate this
-   environment to run analyze mode on the results.
+   environment to run analyze mode on the results. For the packaged ROCm
+   installation and other ways to install these dependencies, see
+   :ref:`analyze-deps`.
 
 For detailed installation instructions, refer to :doc:`/install/core-install`.
 

@@ -115,6 +115,10 @@ class RocProfCompute:
     def get_mode(self) -> Optional[str]:
         return self.__mode
 
+    def get_args(self) -> argparse.Namespace:
+        assert self.__args is not None
+        return self.__args
+
     def set_version(self) -> None:
         vData = get_version(config.rocprof_compute_home)
         self.__version["ver"] = vData["version"]
