@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -38,11 +39,28 @@ class _OtlpHandler(BaseHTTPRequestHandler):
         pass
 
 
+class _FragmentedStatusHandler(_OtlpHandler):
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(length) if length else b""
+        self.server.received.append((self.path, self.headers.get("Content-Type"), body))
+        self.connection.sendall(b"HTTP/1.1 ")
+        time.sleep(0.05)
+        self.connection.sendall(
+            b"200 OK\r\nContent-Type: application/json\r\n"
+            b"Content-Length: 2\r\nConnection: close\r\n\r\n{}"
+        )
+        self.close_connection = True
+
+
 class _OtlpCollector:
     """Minimal OTLP/HTTP endpoint that records what the exporter sends."""
 
+    def __init__(self, handler=_OtlpHandler):
+        self._handler = handler
+
     def __enter__(self):
-        self._server = ThreadingHTTPServer(("127.0.0.1", 0), _OtlpHandler)
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler)
         self._server.received = []
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
@@ -77,6 +95,7 @@ def _run_all_reduce(paths, dump_dir, extra_env, log_name):
         "NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS": "500",
         "NCCL_INSPECTOR_DUMP_DIR": dump_dir,
         "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "INIT,PROFILE",
     })
     for name in (
         "NCCL_INSPECTOR_OTEL_EXPORT",
@@ -168,6 +187,31 @@ def test_otel_export_posts_metrics(paths):
     assert OTEL_VERBOSE_ONLY_METRIC not in joined, (
         f"Aggregated export must not emit {OTEL_VERBOSE_ONLY_METRIC}; see {log_file}"
     )
+
+
+@pytest.mark.ext_inspector
+@pytest.mark.allreduce
+def test_otel_export_accepts_fragmented_http_status(paths):
+    """A successful HTTP status line may arrive across multiple TCP reads."""
+    dump_dir = os.path.join(paths.INSPECTOR_DUMP_DIR, "otel_export", "fragmented")
+    os.makedirs(dump_dir, exist_ok=True)
+
+    with _OtlpCollector(_FragmentedStatusHandler) as collector:
+        rc, log, log_file = _run_all_reduce(
+            paths,
+            dump_dir,
+            {
+                "NCCL_INSPECTOR_OTEL_EXPORT": "1",
+                "OTEL_EXPORTER_OTLP_ENDPOINT": f"http://127.0.0.1:{collector.port}",
+            },
+            "otel_export_fragmented_status.log",
+        )
+        received = list(collector.received)
+
+    assert rc == 0, f"AllReduce with fragmented OTEL response failed, see {log_file}"
+    assert received, f"Inspector sent no OTLP request, see {log_file}"
+    assert "NCCL Inspector OTEL: export to" not in log, \
+        f"Inspector rejected a fragmented HTTP 200 response, see {log_file}"
 
 
 @pytest.mark.ext_inspector

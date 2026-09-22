@@ -454,6 +454,14 @@ in the following table.
       - | Remapping specification string
         | Used with Rome 4P2H topology
 
+    * - | ``NCCL_RMA_PLUGIN``
+        | Selects external one-sided RMA plugins, which are also the backend
+          the built-in GIN proxy forwards to.
+      - | Comma-separated list of paths or short names
+        | A short name is resolved against the ``librccl-rma`` prefix, so
+          ``example`` loads ``librccl-rma-example.so``
+        | See :ref:`using-rccl-rma-plugin`
+
 Development and testing (advanced)
 ==================================
 
@@ -715,6 +723,7 @@ plugin must export ``ncclProfiler_v7`` to receive them.
         | ``65536``: RCCL proxy diagnostics
         | Combine by adding, so ``32771`` selects group, collective and kernel
           phase. Default: ``0``
+
 Algorithm dispatch and tuning (gfx1250 / MI450)
 ================================================
 
