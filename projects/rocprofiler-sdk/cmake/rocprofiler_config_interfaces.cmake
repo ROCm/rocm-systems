@@ -99,6 +99,19 @@ endif()
 
 # ----------------------------------------------------------------------------------------#
 #
+# Windows Event Tracing (ETW)
+#
+# ----------------------------------------------------------------------------------------#
+
+if(WIN32)
+    # advapi32 provides the controller and consumer entry points (StartTraceW,
+    # EnableTraceEx2, OpenTraceW, ProcessTrace); tdh provides the TraceLogging schema
+    # reader (TdhGetEventInformation). Both ship with the Windows SDK.
+    target_link_libraries(rocprofiler-sdk-etw INTERFACE advapi32 tdh)
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
 # atomic library
 #
 # ----------------------------------------------------------------------------------------#

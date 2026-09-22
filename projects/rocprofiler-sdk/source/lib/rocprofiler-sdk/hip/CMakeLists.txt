@@ -4,6 +4,8 @@
 target_sources(rocprofiler-sdk-object-library PRIVATE defines.hpp hip.hpp names.cpp
                                                       names.hpp)
 
+add_subdirectory(etw)
+
 # The HIP callback/buffer tracing sources pull in details/ostream.hpp, which references
 # Linux glibc types (__locale_struct, etc.), so they are excluded on Windows until that is
 # ported.

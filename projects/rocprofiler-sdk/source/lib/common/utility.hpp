@@ -111,20 +111,28 @@ get_qpc_frequency() noexcept
     return _v;
 }
 
+// ETW delivers raw QPC counter values in EVENT_HEADER::TimeStamp when the session is created
+// with Wnode.ClientContext = 1, so the consumer converts them through this to land in the same
+// clock domain as timestamp_ns().
+inline uint64_t
+qpc_ticks_to_ns(uint64_t _ticks) noexcept
+{
+    constexpr uint64_t nanosec = std::nano::den;
+
+    const auto _freq = get_qpc_frequency();
+
+    // QPC counts from boot at ~1e7 Hz, so ticks * nanosec overflows uint64_t after roughly
+    // 31 minutes of uptime. Split into whole seconds plus remainder to keep the multiply small.
+    return ((_ticks / _freq) * nanosec) + (((_ticks % _freq) * nanosec) / _freq);
+}
+
 inline uint64_t get_ticks(clockid_t /*clk_id_v*/) noexcept
 {
     // Use QPC for high-resolution monotonic timestamps on Windows
     auto _count = LARGE_INTEGER{};
     ::QueryPerformanceCounter(&_count);
 
-    constexpr uint64_t nanosec = std::nano::den;
-
-    const auto _ticks = static_cast<uint64_t>(_count.QuadPart);
-    const auto _freq  = get_qpc_frequency();
-
-    // QPC counts from boot at ~1e7 Hz, so ticks * nanosec overflows uint64_t after roughly
-    // 31 minutes of uptime. Split into whole seconds plus remainder to keep the multiply small.
-    return ((_ticks / _freq) * nanosec) + (((_ticks % _freq) * nanosec) / _freq);
+    return qpc_ticks_to_ns(static_cast<uint64_t>(_count.QuadPart));
 }
 #endif
 
