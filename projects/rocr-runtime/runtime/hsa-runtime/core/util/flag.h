@@ -1,0 +1,694 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+// The University of Illinois/NCSA
+// Open Source License (NCSA)
+//
+// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+//
+// Developed by:
+//
+//                 AMD Research and AMD HSA Software Development
+//
+//                 Advanced Micro Devices, Inc.
+//
+//                 www.amd.com
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal with the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
+//
+//  - Redistributions of source code must retain the above copyright notice,
+//    this list of conditions and the following disclaimers.
+//  - Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimers in
+//    the documentation and/or other materials provided with the distribution.
+//  - Neither the names of Advanced Micro Devices, Inc,
+//    nor the names of its contributors may be used to endorse or promote
+//    products derived from this Software without specific prior written
+//    permission.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIESd OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS WITH THE SOFTWARE.
+//
+////////////////////////////////////////////////////////////////////////////////
+
+#ifndef HSA_RUNTIME_CORE_INC_FLAG_H_
+#define HSA_RUNTIME_CORE_INC_FLAG_H_
+
+#include <stdint.h>
+
+#include <vector>
+#include <map>
+#include <string>
+
+#include "core/util/os.h"
+#include "core/util/utils.h"
+
+namespace rocr {
+
+constexpr size_t DEFAULT_COUNTED_QUEUE_SIZE = 16384;
+constexpr uint32_t DEFAULT_GPU_HW_QUEUES_MAX = 4;
+
+class Flag {
+ public:
+  enum SDMA_OVERRIDE { SDMA_DISABLE, SDMA_ENABLE, SDMA_DEFAULT };
+  enum SRAMECC_ENABLE { SRAMECC_DISABLED, SRAMECC_ENABLED, SRAMECC_DEFAULT };
+
+  // The values are meaningful and chosen to satisfy the thunk API.
+  enum XNACK_REQUEST { XNACK_DISABLE = 0, XNACK_ENABLE = 1, XNACK_UNCHANGED = 2 };
+  static_assert(XNACK_DISABLE == 0, "XNACK_REQUEST enum values improperly changed.");
+  static_assert(XNACK_ENABLE == 1, "XNACK_REQUEST enum values improperly changed.");
+
+  // Lift limit for 2.10 release RCCL workaround. This limit is not used when asynchronous scratch
+  // reclaim is supported
+  const size_t DEFAULT_SCRATCH_SINGLE_LIMIT = (140 * (1UL << 20));              // small_limit >> 2;
+  const size_t DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC = (3 * (1UL << 30));  // 3 GB
+  const size_t DEFAULT_PCS_MAX_DEVICE_BUFFER_SIZE = (256 * (1UL << 20));        // 256 MB
+
+  Flag() {}
+
+  virtual ~Flag() {}
+
+  // True when the variable is set to anything other than a spelled-out
+  // negative. An unset or empty variable reads as false.
+  static bool IsEnvVarTruthy(const char* name) {
+    // No IsEnvVarSet() pre-check: GetEnvVar returns an empty string for an unset
+    // variable on both platforms, and the !value.empty() guard below already maps
+    // that to false. The pre-check was a second lookup that changed no outcome.
+    //
+    // Folded in ASCII rather than with tolower(): the accepted spellings are all
+    // ASCII keywords, so this stays independent of the active locale and of
+    // whichever header happens to declare tolower here.
+    std::string value = os::GetEnvVar(name);
+    for (char& c : value) {
+      if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    }
+
+    return !value.empty() && value != "0" && value != "off" && value != "false" && value != "no" &&
+        value != "n" && value != "f";
+  }
+
+  void Refresh() {
+    std::string var = os::GetEnvVar("HSA_CHECK_FLAT_SCRATCH");
+    check_flat_scratch_ = (var == "1") ? true : false;
+
+    var = os::GetEnvVar("HSA_ENABLE_VM_FAULT_MESSAGE");
+    enable_vm_fault_message_ = (var == "0") ? false : true;
+
+    var = os::GetEnvVar("HSA_ENABLE_QUEUE_FAULT_MESSAGE");
+    enable_queue_fault_message_ = (var == "0") ? false : true;
+
+    // RAS poison-consumption SIGBUS opt-in (forwarded to the amdgpu KFD driver
+    // via DRM_IOCTL_AMDGPU_PROC_OPTIONS).  Lets the registered system-event
+    // handler observe the poison-consumed event before (or instead of) the
+    // process being killed by SIGBUS.
+    //   unset / empty       - do not call ioctl, kernel default (immediate SIGBUS)
+    //   "off" / "disable"   - suppress SIGBUS entirely (UINT32_MAX)
+    //   numeric value (ms)  - safety timeout: deliver SIGBUS after N ms if the
+    //                         app does not handle the error in time
+    var = os::GetEnvVar("HSA_SIGBUS_DELAY_MS");
+    poison_sigbus_delay_set_ = !var.empty();
+    if (!poison_sigbus_delay_set_) {
+      poison_sigbus_delay_ms_ = 0;
+    } else if (var == "off" || var == "disable" || var == "disabled") {
+      poison_sigbus_delay_ms_ = UINT32_MAX;
+    } else {
+      poison_sigbus_delay_ms_ = static_cast<uint32_t>(strtoul(var.c_str(), nullptr, 0));
+    }
+
+    var = os::GetEnvVar("HSA_ENABLE_INTERRUPT");
+    enable_interrupt_ = (var == "0") ? false : true;
+
+    var = os::GetEnvVar("HSA_ENABLE_SDMA");
+    enable_sdma_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+
+    var = os::GetEnvVar("HSA_ENABLE_PEER_SDMA");
+    enable_peer_sdma_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+
+    var = os::GetEnvVar("HSA_ENABLE_SDMA_GANG");
+    enable_sdma_gang_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+    if (enable_sdma_ == SDMA_DISABLE) enable_sdma_gang_ = SDMA_DISABLE;
+
+    var = os::GetEnvVar("HSA_ENABLE_SDMA_COPY_SIZE_OVERRIDE");
+    enable_sdma_copy_size_override_ =
+        (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+
+    var = os::GetEnvVar("HSA_ENABLE_SDMA_RECOMMENDED_ENG");
+    enable_sdma_recommended_eng_ =
+        (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+
+    visible_gpus_ = os::GetEnvVar("ROCR_VISIBLE_DEVICES");
+    filter_visible_gpus_ = os::IsEnvVarSet("ROCR_VISIBLE_DEVICES");
+
+    // Honor the env var as an explicit override; otherwise auto-detect Valgrind.
+    if (os::IsEnvVarSet("HSA_RUNNING_UNDER_VALGRIND")) {
+      var = os::GetEnvVar("HSA_RUNNING_UNDER_VALGRIND");
+      running_valgrind_ = (var == "1") ? true : false;
+    } else {
+      running_valgrind_ = DetectRunningUnderValgrind();
+    }
+
+    var = os::GetEnvVar("HSA_SDMA_WAIT_IDLE");
+    sdma_wait_idle_ = (var == "1") ? true : false;
+
+    var = os::GetEnvVar("HSA_MAX_QUEUES");
+    max_queues_ = static_cast<uint32_t>(atoi(var.c_str()));
+
+    // Maximum amount of scratch mem that can be used per process per gpu
+    var = os::GetEnvVar("HSA_SCRATCH_MEM");
+    scratch_mem_size_ = atoi(var.c_str());
+
+    // Scratch memory sizes > HSA_SCRATCH_SINGLE_LIMIT will trigger a use-once scheme
+    // We also reserve HSA_SCRATCH_SINGLE_LIMIT per process per gpu to guarrantee we
+    // have sufficient memory to for scratch in case user tried to allocate all device
+    // memory
+    if (os::IsEnvVarSet("HSA_SCRATCH_SINGLE_LIMIT")) {
+      var = os::GetEnvVar("HSA_SCRATCH_SINGLE_LIMIT");
+      char* end;
+      scratch_single_limit_ = strtoul(var.c_str(), &end, 10);
+    } else {
+      scratch_single_limit_ = DEFAULT_SCRATCH_SINGLE_LIMIT;
+    }
+
+    // On GPUs that support asynchronous scratch reclaim
+    // Scratch memory sizes > HSA_SCRATCH_SINGLE_LIMIT_ASYNC will trigger a use-once scheme
+    // Note: This only sets the initial value for the threshold. If
+    // hsa_amd_agent_set_async_scratch_limit is called after initialization, the threshold
+    // will be updated.
+    if (os::IsEnvVarSet("HSA_SCRATCH_SINGLE_LIMIT_ASYNC")) {
+      var = os::GetEnvVar("HSA_SCRATCH_SINGLE_LIMIT_ASYNC");
+      char* end;
+      scratch_single_limit_async_ = strtoul(var.c_str(), &end, 10);
+    } else {
+      scratch_single_limit_async_ = 0;  // DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC;
+    }
+
+    // On GPUs that support asynchronous scratch reclaim this can be used to disable this feature.
+    // Disabling asynchronous scratch reclaim also disables use of alternate scratch
+    // HSA_ENABLE_SCRATCH_ALT
+    var = os::GetEnvVar("HSA_ENABLE_SCRATCH_ASYNC_RECLAIM");
+    enable_scratch_async_reclaim_ = (var == "0") ? false : true;
+
+    var = os::GetEnvVar("HSA_ENABLE_SCRATCH_ALT");
+    // Temporary: Completely disable alternate scratch because we need to update
+    // the debugger so that it can tell whether a dispatch is using alternate scratch
+    // instead of main scratch
+    // enable_scratch_alt_ = (var == "0") || !enable_scratch_async_reclaim_ ? false : true;
+    enable_scratch_alt_ = false;
+
+    tools_lib_names_ = os::GetEnvVar("HSA_TOOLS_LIB");
+
+    var = os::GetEnvVar("HSA_TOOLS_REPORT_LOAD_FAILURE");
+
+    ifdebug { report_tool_load_failures_ = (var == "1") ? true : false; }
+    else {
+      report_tool_load_failures_ = (var == "0") ? false : true;
+    }
+
+    var = os::GetEnvVar("HSA_TOOLS_DISABLE_REGISTER");
+    disable_tool_register_ = (var == "1") ? true : false;
+
+    var = os::GetEnvVar("HSA_TOOLS_REPORT_REGISTER_FAILURE");
+    report_tool_register_failures_ = (var == "1") ? true : false;
+
+    // Kill switch for the rocjitsu hotswap tool. Unlike most flags here it
+    // accepts the spelled-out negatives, because the scripts that set it were
+    // written against the retired hotswap implementation and pass "0"/"false"
+    // to mean "leave hotswap on".
+    hotswap_disable_ = IsEnvVarTruthy("HSA_HOTSWAP_DISABLE");
+
+    var = os::GetEnvVar("HSA_DISABLE_FRAGMENT_ALLOCATOR");
+    disable_fragment_alloc_ = (var == "1") ? true : false;
+
+    var = os::GetEnvVar("HSA_ENABLE_SDMA_HDP_FLUSH");
+    enable_sdma_hdp_flush_ = (var == "0") ? false : true;
+
+    var = os::GetEnvVar("HSA_REV_COPY_DIR");
+    rev_copy_dir_ = (var == "1") ? true : false;
+
+    var = os::GetEnvVar("HSA_FORCE_FINE_GRAIN_PCIE");
+    fine_grain_pcie_ = (var == "1") ? true : false;
+
+    var = os::GetEnvVar("HSA_NO_SCRATCH_RECLAIM");
+    no_scratch_reclaim_ = (var == "1") ? true : false;
+
+    var = os::GetEnvVar("HSA_NO_SCRATCH_THREAD_LIMITER");
+    no_scratch_thread_limit_ = (var == "1") ? true : false;
+
+    var = os::GetEnvVar("HSA_DISABLE_IMAGE");
+    disable_image_ = (var == "1") ? true : false;
+
+    var = os::GetEnvVar("HSA_DISABLE_PC_SAMPLING");
+    disable_pc_sampling_ = (var == "1") ? true : false;
+
+    // Controls reporting of the "strict" ISA variant on A0 silicon. Disabled by
+    // default, so the agent keeps the base target. Set the variable to 0 to opt
+    // in and have the agent re-point to the strict variant.
+    var = os::GetEnvVar("HSA_DISABLE_GFX12_STRICT");
+    disable_gfx12_strict_ = (var == "0") ? false : true;
+
+    var = os::GetEnvVar("HSA_LOADER_ENABLE_MMAP_URI");
+    loader_enable_mmap_uri_ = (var == "1") ? true : false;
+
+    var = os::GetEnvVar("HSA_FORCE_SDMA_SIZE");
+    force_sdma_size_ = var.empty() ? 1024 * 1024 : atoi(var.c_str());
+
+    var = os::GetEnvVar("HSA_IGNORE_SRAMECC_MISREPORT");
+    check_sramecc_validity_ = (var == "1") ? false : true;
+
+    // Legal values are zero "0" or one "1". Any other value will
+    // be interpreted as not defining the env variable.
+    var = os::GetEnvVar("HSA_XNACK");
+    xnack_ = (var == "0") ? XNACK_DISABLE : ((var == "1") ? XNACK_ENABLE : XNACK_UNCHANGED);
+
+    var = os::GetEnvVar("HSA_ENABLE_DEBUG");
+    debug_ = (var == "1") ? true : false;
+
+    var = os::GetEnvVar("HSA_CU_MASK_SKIP_INIT");
+    cu_mask_skip_init_ = (var == "1") ? true : false;
+
+    // Temporary opt-in for corrected HSA_AMD_AGENT_INFO_COOPERATIVE_COMPUTE_UNIT_COUNT behavior.
+    // Will become opt-out and possibly removed in future releases.
+    var = os::GetEnvVar("HSA_COOP_CU_COUNT");
+    coop_cu_count_ = (var == "1") ? true : false;
+
+    var = os::GetEnvVar("HSA_DISCOVER_COPY_AGENTS");
+    discover_copy_agents_ = (var == "1") ? true : false;
+
+    var = os::GetEnvVar("HSA_SVM_PROFILE");
+    svm_profile_ = var;
+
+    var = os::GetEnvVar("HSA_ENABLE_SRAMECC");
+    sramecc_enable_ =
+        (var == "0") ? SRAMECC_DISABLED : ((var == "1") ? SRAMECC_ENABLED : SRAMECC_DEFAULT);
+
+    var = os::GetEnvVar("HSA_IMAGE_PRINT_SRD");
+    image_print_srd_ = (var == "1") ? true : false;
+
+    var = os::GetEnvVar("HSA_ENABLE_MWAITX");
+    enable_mwaitx_ = (var == "0") ? false : true;
+
+    var = os::GetEnvVar("HSA_ENABLE_IPC_MODE_LEGACY");
+    enable_ipc_mode_legacy_ = (var == "1") ? true : false;
+
+    if (os::IsEnvVarSet("HSA_PCS_MAX_DEVICE_BUFFER_SIZE")) {
+      var = os::GetEnvVar("HSA_PCS_MAX_DEVICE_BUFFER_SIZE");
+      char* end;
+      pc_sampling_max_device_buffer_size_ = strtoul(var.c_str(), &end, 10);
+    } else {
+      pc_sampling_max_device_buffer_size_ = DEFAULT_PCS_MAX_DEVICE_BUFFER_SIZE;
+    }
+
+    // Temporary environment variable to disable CPU affinity override
+    // Will either rename to HSA_OVERRIDE_CPU_AFFINITY later or remove completely.
+    var = os::GetEnvVar("HSA_OVERRIDE_CPU_AFFINITY_DEBUG");
+    override_cpu_affinity_ = (var == "0") ? false : true;
+
+    var = os::GetEnvVar("HSA_ALLOCATE_QUEUE_DEV_MEM");
+    dev_mem_queue_buf_ = (var == "1") ? true : false;
+
+    var = os::GetEnvVar("HSA_WAIT_ANY_DEBUG");
+    wait_any_ = (var == "1") ? true : false;
+
+    /* hsa_signal_wait_relaxed abort timeout  */
+    var = os::GetEnvVar("HSA_SIGNAL_WAIT_ABORT_TIMEOUT");
+    signal_abort_timeout_ = var.empty() ? 0 : atoi(var.c_str());
+
+    /* Valid inputs are 0-99, HIGH, MAX */
+    var = os::GetEnvVar("HSA_ASYNCEVENTS_THREAD_PRIORITY");
+    async_events_thread_priority_ = os::OS_THREAD_PRIORITY_DEFAULT;
+    if (var == "MAX") {
+      async_events_thread_priority_ = os::OS_THREAD_PRIORITY_MAX;
+    } else if (var == "HIGH") {
+      async_events_thread_priority_ = os::OS_THREAD_PRIORITY_HIGH;
+    } else if (var != "") {
+      char* end;
+      int input = strtol(var.c_str(), &end, 10);
+      if (input >= 0 && input <= 99)
+        async_events_thread_priority_ = input;
+      else
+        fprintf(stderr, "Failed to parse HSA_ASYNCEVENTS_THREAD_PRIORITY");
+    }
+
+    var = os::GetEnvVar("HSA_IMAGE_ENABLE_3D_SWIZZLE_DEBUG");
+    enable_3d_swizzle_ = (var == "1") ? true : false;
+
+    // This allows convient usage in scripting for enabling dtif.
+    // IE the user should set HSA_DTIF_ENABLED = 1 to enable DTIF.
+    // HSA_DTIF_ENABLED = 0 will disable DTIF backend.
+    var = os::GetEnvVar("HSA_ENABLE_DTIF");
+    enable_dtif_ = (var == "1") ? true : false;
+
+    // Shared DTIF/FFM fast-copy enable: skips the staging blit and uses host
+    // memcpy in the ROCr blit kernel/SDMA paths.
+    //   HSA_ENABLE_DTIF_FAST_COPY=1 -> on
+    //   HSA_ENABLE_DTIF_FAST_COPY=0 -> off
+    //   unset -> on if HSA_MODEL_TOPOLOGY is set (FFM model mode default).
+    var = os::GetEnvVar("HSA_ENABLE_DTIF_FAST_COPY");
+    enable_dtif_fast_copy_ = var.empty() ? os::IsEnvVarSet("HSA_MODEL_TOPOLOGY") : (var == "1");
+
+    var = os::GetEnvVar("HSA_DTIF_SKIP_INV_CODE_CACHE");
+    enable_dtif_skip_inv_code_cache_ = (var == "1") ? true : false;
+
+    // This allows detecting if the dxg driver is loaded.
+    var = os::GetEnvVar("HSA_ENABLE_DXG_DETECTION");
+    enable_dxg_detection_ = (var == "0") ? false : true;
+
+    var = os::GetEnvVar("HSA_CO_DMACOPY_SIZE");
+    co_dmacopy_size_ = var.empty() ? 1024 * 1024 : atoi(var.c_str());
+
+    var = os::GetEnvVar("HSA_COREDUMP_SHOW_PROGRESS");
+    enable_core_dump_progress_ = (var == "1");
+
+    var = os::GetEnvVar("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
+    core_dump_disable_ = (var == "1");
+
+    core_dump_pattern_ = os::GetEnvVar("HSA_COREDUMP_PATTERN");
+
+    // This enables generation of lightweight gpu coredumps (Scratch & CWSR).
+    var = os::GetEnvVar("HSA_ENABLE_LIGHTWEIGHT_COREDUMP");
+    lightweight_core_dump_enable_ = (var == "1");
+
+    // This limits the maximum number of hardware queues that can be created per
+    // priority level for counted queues on every GPU agent. By default, the limit is set to 4.
+    var = os::GetEnvVar("GPU_MAX_HW_QUEUES");
+    cp_queues_limit_ = var.empty() ? DEFAULT_GPU_HW_QUEUES_MAX : atoi(var.c_str());
+
+    // This allows configuring the size of counted queues created through
+    // hsa_amd_counted_queue_acquire API. If not set, default queue size is set to 16384.
+    var = os::GetEnvVar("HSA_COUNTED_QUEUE_SIZE");
+    counted_queue_size_ = var.empty() ? DEFAULT_COUNTED_QUEUE_SIZE : atoi(var.c_str());
+
+    // HSA_SDMA_LINEAR_B2B: 1=force B2B, 0=force broadcast, unset=auto (size threshold)
+    var = os::GetEnvVar("HSA_SDMA_LINEAR_B2B");
+    sdma_linear_b2b_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+
+    // HSA_SDMA_MULTICAST: 1=force multicast at any size, 0=force off (fan-out),
+    // unset=auto (use multicast up to kMulticastMaxSize, fan-out above).
+    var = os::GetEnvVar("HSA_SDMA_MULTICAST");
+    sdma_multicast_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+  }
+
+  void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
+    std::string var = os::GetEnvVar("HSA_CU_MASK");
+    parse_masks(var, maxGpu, maxCU);
+  }
+
+  bool wait_any() const { return wait_any_; }
+
+  bool check_flat_scratch() const { return check_flat_scratch_; }
+
+  bool enable_vm_fault_message() const { return enable_vm_fault_message_; }
+
+  bool enable_queue_fault_message() const { return enable_queue_fault_message_; }
+
+  bool poison_sigbus_delay_set() const { return poison_sigbus_delay_set_; }
+
+  uint32_t poison_sigbus_delay_ms() const { return poison_sigbus_delay_ms_; }
+
+  bool enable_interrupt() const { return enable_interrupt_; }
+
+  bool enable_sdma_hdp_flush() const { return enable_sdma_hdp_flush_; }
+
+  bool running_valgrind() const { return running_valgrind_; }
+
+  bool sdma_wait_idle() const { return sdma_wait_idle_; }
+
+  bool report_tool_load_failures() const { return report_tool_load_failures_; }
+
+  bool hotswap_disable() const { return hotswap_disable_; }
+
+  bool report_tool_register_failures() const { return report_tool_register_failures_; }
+
+  bool disable_tool_register() const { return disable_tool_register_; }
+
+  bool disable_fragment_alloc() const { return disable_fragment_alloc_; }
+
+  bool rev_copy_dir() const { return rev_copy_dir_; }
+
+  bool fine_grain_pcie() const { return fine_grain_pcie_; }
+
+  bool no_scratch_reclaim() const { return no_scratch_reclaim_; }
+
+  bool no_scratch_thread_limiter() const { return no_scratch_thread_limit_; }
+
+  SDMA_OVERRIDE enable_sdma() const { return enable_sdma_; }
+
+  SDMA_OVERRIDE enable_peer_sdma() const { return enable_peer_sdma_; }
+
+  SDMA_OVERRIDE enable_sdma_gang() const { return enable_sdma_gang_; }
+
+  SDMA_OVERRIDE enable_sdma_copy_size_override() const { return enable_sdma_copy_size_override_; }
+
+  SDMA_OVERRIDE enable_sdma_recommended_eng() const { return enable_sdma_recommended_eng_; }
+
+  std::string visible_gpus() const { return visible_gpus_; }
+
+  bool filter_visible_gpus() const { return filter_visible_gpus_; }
+
+  uint32_t max_queues() const { return max_queues_; }
+
+  size_t scratch_mem_size() const { return scratch_mem_size_; }
+
+  size_t scratch_single_limit() const { return scratch_single_limit_; }
+
+  bool enable_scratch_async_reclaim() const { return enable_scratch_async_reclaim_; }
+
+  bool enable_scratch_alt() const { return enable_scratch_alt_; }
+
+  bool enable_scratch() const { return enable_scratch_; }
+
+  size_t scratch_single_limit_async() const { return scratch_single_limit_async_; }
+
+  std::string tools_lib_names() const { return tools_lib_names_; }
+
+  bool disable_image() const { return disable_image_; }
+
+  void disable_image(bool disable) { disable_image_ = disable; }
+
+  void set_ipc_mode_legacy(bool enable) { enable_ipc_mode_legacy_ = enable; }
+
+  bool disable_pc_sampling() const { return disable_pc_sampling_; }
+
+  bool disable_gfx12_strict() const { return disable_gfx12_strict_; }
+
+  bool loader_enable_mmap_uri() const { return loader_enable_mmap_uri_; }
+
+  size_t force_sdma_size() const { return force_sdma_size_; }
+
+  bool check_sramecc_validity() const { return check_sramecc_validity_; }
+
+  bool override_cpu_affinity() const { return override_cpu_affinity_; }
+
+  bool image_print_srd() const { return image_print_srd_; }
+
+  bool check_mwaitx(bool mwaitx_supported) {
+    if (enable_mwaitx_ && !mwaitx_supported) enable_mwaitx_ = false;
+
+    return enable_mwaitx_;
+  }
+
+  XNACK_REQUEST xnack() const { return xnack_; }
+
+  bool debug() const { return debug_; }
+
+  const std::vector<uint32_t>& cu_mask(uint32_t gpu_index) const {
+    static const std::vector<uint32_t> empty;
+    auto it = cu_mask_.find(gpu_index);
+    if (it == cu_mask_.end()) return empty;
+    return it->second;
+  }
+
+  bool cu_mask_skip_init() const { return cu_mask_skip_init_; }
+
+  bool coop_cu_count() const { return coop_cu_count_; }
+
+  bool discover_copy_agents() const { return discover_copy_agents_; }
+
+  const std::string& svm_profile() const { return svm_profile_; }
+
+  SRAMECC_ENABLE sramecc_enable() const { return sramecc_enable_; }
+
+  bool enable_ipc_mode_legacy() const { return enable_ipc_mode_legacy_; }
+
+  size_t pc_sampling_max_device_buffer_size() const { return pc_sampling_max_device_buffer_size_; }
+
+  size_t co_dmacopy_size() const { return co_dmacopy_size_; }
+
+  uint32_t cp_queues_limit() const { return cp_queues_limit_; }
+
+  size_t counted_queue_size() const { return counted_queue_size_; }
+
+  bool dev_mem_queue_buf() const { return dev_mem_queue_buf_; }
+
+  uint32_t signal_abort_timeout() const { return signal_abort_timeout_; }
+
+  int async_events_thread_priority() const { return async_events_thread_priority_; }
+
+  bool enable_3d_swizzle() const { return enable_3d_swizzle_; }
+
+  bool enable_dtif() const { return enable_dtif_; }
+
+  bool enable_dtif_fast_copy() const { return enable_dtif_fast_copy_; }
+
+  bool enable_dtif_skip_inv_code_cache() const { return enable_dtif_skip_inv_code_cache_; }
+
+  bool enable_dxg_detection() const { return enable_dxg_detection_; }
+
+  SDMA_OVERRIDE sdma_linear_b2b() const { return sdma_linear_b2b_; }
+
+  SDMA_OVERRIDE sdma_multicast() const { return sdma_multicast_; }
+
+  [[nodiscard]]
+  bool core_dump_disable() const {
+    return core_dump_disable_;
+  }
+
+  [[nodiscard]]
+  bool enable_core_dump_progress() const {
+    return enable_core_dump_progress_;
+  }
+
+  [[nodiscard]]
+  const std::string& core_dump_pattern() const {
+    return core_dump_pattern_;
+  }
+
+  [[nodiscard]]
+  bool lightweight_core_dump_enable() const {
+    return lightweight_core_dump_enable_;
+  }
+
+  void set_sdma(bool peer_sdma, bool sdma_gang) {
+    enable_peer_sdma_ = peer_sdma ? SDMA_ENABLE : SDMA_DISABLE;
+    enable_sdma_gang_ = sdma_gang ? SDMA_ENABLE : SDMA_DISABLE;
+  }
+
+  void disable_scratch() {
+    scratch_single_limit_ = 0;
+    // scratch_single_limit_async_ = 0;
+    enable_scratch_async_reclaim_ = false;
+    enable_scratch_alt_ = false;
+    enable_scratch_ = false;
+    scratch_mem_size_ = 0;
+    no_scratch_reclaim_ = true;
+    no_scratch_thread_limit_ = true;
+  }
+
+  void disable_xnack() { xnack_ = XNACK_DISABLE; }
+
+  void disable_fine_grain_pcie() { fine_grain_pcie_ = false; }
+
+  void disable_dev_mem_queue_buf() { dev_mem_queue_buf_ = false; }
+
+  void disable_sdma_hdp_flush() { enable_sdma_hdp_flush_ = false; }
+
+  void set_disable_tool_register(bool disable) { disable_tool_register_ = disable; }
+
+ private:
+  bool check_flat_scratch_;
+  bool enable_vm_fault_message_;
+  bool enable_interrupt_;
+  bool enable_sdma_hdp_flush_;
+  bool running_valgrind_;
+  bool sdma_wait_idle_;
+  bool enable_queue_fault_message_;
+  bool poison_sigbus_delay_set_ = false;
+  uint32_t poison_sigbus_delay_ms_ = 0;
+  bool report_tool_load_failures_;
+  bool hotswap_disable_ = false;
+  bool report_tool_register_failures_ = false;
+  bool disable_tool_register_ = false;
+  bool disable_fragment_alloc_;
+  bool rev_copy_dir_;
+  bool fine_grain_pcie_;
+  bool no_scratch_reclaim_;
+  bool no_scratch_thread_limit_;
+  bool disable_image_;
+  bool disable_pc_sampling_;
+  bool disable_gfx12_strict_ = true;
+  bool loader_enable_mmap_uri_;
+  bool check_sramecc_validity_;
+  bool debug_;
+  bool cu_mask_skip_init_;
+  bool coop_cu_count_;
+  bool discover_copy_agents_;
+  bool override_cpu_affinity_;
+  bool image_print_srd_;
+  bool enable_mwaitx_;
+  bool enable_ipc_mode_legacy_;
+  bool wait_any_;
+  bool dev_mem_queue_buf_;
+  uint32_t signal_abort_timeout_;
+  int async_events_thread_priority_;
+  bool enable_3d_swizzle_ = false;
+  bool enable_dtif_;
+  bool enable_dtif_fast_copy_;
+  bool enable_dtif_skip_inv_code_cache_;
+  bool enable_dxg_detection_;
+  SDMA_OVERRIDE sdma_linear_b2b_ = SDMA_DEFAULT;
+
+  SDMA_OVERRIDE sdma_multicast_ = SDMA_DEFAULT;
+
+  SDMA_OVERRIDE enable_sdma_;
+  SDMA_OVERRIDE enable_peer_sdma_;
+  SDMA_OVERRIDE enable_sdma_gang_;
+  SDMA_OVERRIDE enable_sdma_copy_size_override_;
+  SDMA_OVERRIDE enable_sdma_recommended_eng_;
+
+  bool filter_visible_gpus_;
+  std::string visible_gpus_;
+
+  uint32_t max_queues_;
+
+  size_t scratch_mem_size_;
+  size_t scratch_single_limit_;
+  size_t scratch_single_limit_async_;
+  bool enable_scratch_async_reclaim_;
+  bool enable_scratch_alt_;
+  bool enable_scratch_ = true;
+
+  std::string tools_lib_names_;
+  std::string svm_profile_;
+
+  size_t force_sdma_size_;
+
+  // Indicates user preference for Xnack state.
+  XNACK_REQUEST xnack_;
+
+  SRAMECC_ENABLE sramecc_enable_;
+
+  size_t pc_sampling_max_device_buffer_size_;
+
+  size_t co_dmacopy_size_;
+
+  bool core_dump_disable_ = false;
+  bool enable_core_dump_progress_ = false;
+  std::string core_dump_pattern_;
+  bool lightweight_core_dump_enable_ = false;
+
+  uint32_t cp_queues_limit_;
+  size_t counted_queue_size_;
+
+  // Map GPU index post RVD to its default cu mask.
+  std::map<uint32_t, std::vector<uint32_t>> cu_mask_;
+
+  void parse_masks(std::string& args, uint32_t maxGpu, uint32_t maxCU);
+
+  // Returns true when the process runs under Valgrind.
+  static bool DetectRunningUnderValgrind();
+
+  DISALLOW_COPY_AND_ASSIGN(Flag);
+};
+
+}  // namespace rocr
+
+#endif  // header guard

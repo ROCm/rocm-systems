@@ -1,0 +1,46 @@
+# TODO: add System Info
+#      - title: "System Info"
+#        data_path: ["1. System Info", "1.1"]
+#        collapsed: true
+sections:
+  - title: "High Level Analysis"
+    collapsed: True
+    class: "sysinfo-section"
+    subsections:
+      - title: "GPU Speed-of-Light"
+        data_path: ["32. GPU Speed-of-Light", "32.1 GPU Speed-of-Light"]
+        collapsed: True
+      - title: "Compute Throughput"
+        data_path: ["33. Compute Throughput", "33.1 Compute Throughput"]
+        collapsed: True
+      - title: "Memory Throughput"
+        data_path: ["34. Memory Throughput", "34.1 Memory Throughput"]
+        collapsed: True
+      - title: "Memory Chart"
+        data_path: ["3. Memory Chart", "3.1 Memory Chart"]
+        collapsed: True
+        tui_style: "mem_chart"
+
+  - title: "Detailed Block Analysis"
+    collapsed: True
+    class: "block-section"
+    subsections:
+      - arch_config_data: True
+        exclude_keys:
+          - "0. Top Stats"
+          - "1. System Info"
+          - "2. System Speed-of-Light"
+          - "3. Memory Chart"
+          - "4. Roofline"
+          - "32. GPU Speed-of-Light"
+          - "33. Compute Throughput"
+          - "34. Memory Throughput"
+        collapsed: True
+
+  - title: "Source Level Analysis"
+    collapsed: True
+    class: "source-section"
+    subsections:
+      - title: "PC Sampling"
+        data_path: ["21. PC Sampling", "21.1 PC Sampling"]
+        collapsed: True

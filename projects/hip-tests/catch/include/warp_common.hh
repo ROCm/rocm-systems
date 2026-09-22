@@ -1,0 +1,762 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+
+#pragma once
+
+#define HIP_ENABLE_WARP_SYNC_BUILTINS
+#define HIP_ENABLE_EXTRA_WARP_SYNC_TYPES
+
+#include <hip_test_common.hh>
+#include <resource_guards.hh>
+#include <hip/cooperative_groups/hip_reduce.h>
+#include <hip/hip_cooperative_groups.h>
+#include <hip/hip_fp16.h>
+#include <random>
+#include <cmath>
+#include <iostream>
+#include <ios>
+
+#include <cmd_options.hh>
+
+#define MASK_SHIFT(x, n) \
+  (x & (static_cast<uint64_t>(1) << n)) >> n
+
+const unsigned long long Every5thBit = 0x1084210842108421;
+const unsigned long long Every9thBit = 0x8040201008040201;
+const unsigned long long Every5thBut9th = Every5thBit & ~Every9thBit;
+const unsigned long long AllThreads = ~0;
+// number of warps to reduce. Both when testing warp intrinsics and cooperative groups
+// must be a multiple of warpSize
+static constexpr int kNumReduces = 78 * 32;
+
+inline __device__ bool deactivate_thread(const uint64_t* const active_masks) {
+  const auto warp =
+      cooperative_groups::tiled_partition(cooperative_groups::this_thread_block(), warpSize);
+  const auto block = cooperative_groups::this_thread_block();
+  const auto warps_per_block = (block.size() + warpSize - 1) / warpSize;
+  const auto block_rank = (blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x;
+  const auto idx = block_rank * warps_per_block + block.thread_rank() / warpSize;
+  return !(active_masks[idx] & (static_cast<uint64_t>(1) << warp.thread_rank()));
+}
+
+inline std::mt19937& GetRandomGen() {
+  static std::mt19937 mt(std::random_device{}());
+  return mt;
+}
+
+template <typename T> inline T GenRandomInteger(const T min, const T max) {
+  std::uniform_int_distribution<T> dist(min, max);
+  return dist(GetRandomGen());
+}
+
+template <typename T> inline T GenRandomReal(const T min, const T max) {
+  std::uniform_real_distribution<T> dist(min, max);
+  return dist(GetRandomGen());
+}
+
+inline int generate_width(int warp_size) {
+  int exponent = 0;
+  while (warp_size >>= 1) {
+    ++exponent;
+  }
+
+  return GENERATE_COPY(map([](int e) { return 1 << e; }, range(1, exponent + 1)));
+}
+
+inline uint64_t get_active_mask(unsigned int warp_id, unsigned int warp_size) {
+  uint64_t active_mask = 0;
+  switch (warp_id % 5) {
+    case 0:  // even threads in the warp
+      active_mask = 0xAAAAAAAAAAAAAAAA;
+      break;
+    case 1:  // odd threads in the warp
+      active_mask = 0x5555555555555555;
+      break;
+    case 2:  // first half of the warp
+      for (int i = 0; i < warp_size / 2; i++) {
+        active_mask = active_mask | (static_cast<uint64_t>(1) << i);
+      }
+      break;
+    case 3:  // second half of the warp
+      for (int i = warp_size / 2; i < warp_size; i++) {
+        active_mask = active_mask | (static_cast<uint64_t>(1) << i);
+      }
+      break;
+    case 4:  // all threads
+      active_mask = 0xFFFFFFFFFFFFFFFF;
+      break;
+  }
+  return active_mask;
+}
+
+template <typename T, std::enable_if_t<std::is_integral<T>::value, bool> = true>
+inline T expandPrecision(int X) { return X; }
+
+template <typename T, std::enable_if_t<std::is_floating_point<T>::value, bool> = true>
+inline T expandPrecision(int X) {
+  return X * 3.141592653589793115997963468544185161590576171875;
+}
+
+template <typename T, std::enable_if_t<std::is_same<T, __half>::value, bool> = true>
+inline __half expandPrecision(int X) {
+  return (__half)expandPrecision<float>(X);
+}
+
+template <typename T, std::enable_if_t<std::is_same<T, __half2>::value, bool> = true>
+inline __half2 expandPrecision(int X) {
+  __half H = expandPrecision<float>(X);
+  return {H, H};
+}
+
+template <typename T, std::enable_if_t<std::is_integral<T>::value, bool> = true>
+inline void expandPrecision(T* Array, int size) {
+  (void)Array;
+  (void)size;
+}
+
+template <typename T, std::enable_if_t<std::is_floating_point<T>::value, bool> = true>
+inline void expandPrecision(T *Array, int size) {
+  for (int i = 0; i != size; ++i) {
+    Array[i] *= 3.141592653589793115997963468544185161590576171875;
+  }
+}
+
+template <typename T>
+inline void initializeInput(T *Input, int size) {
+  int Values[] = {0, -1, 2, 3, 4, 5, -6, 7,
+                  8, -9, 10, 11, 12, 13, -14, 15,
+                  16, 17, -18, 19, 20, -21, 22, 23,
+                  24, 25, 26, -27, 28, 29, 30, 31,
+                  -32, 33, 34, 35, -36, 37, 38, -39,
+                  40, 41, 42, 43, -44, -45, 46, 47,
+                  48, 49, 50, -51, 52, 53, -54, 55,
+                  56, 57, -58, 59, 60, 61, 62, -63};
+
+  for (int i = 0; i != size; ++i) {
+    Input[i] = expandPrecision<T>(Values[i]);
+  }
+}
+
+template <typename T>
+inline void initializeExpected(T *Expected, int *Values, int size) {
+  for (int i = 0; i != size; ++i) {
+    Expected[i] = expandPrecision<T>(Values[i]);
+  }
+}
+
+template <typename T>
+inline bool compareEqual(T X, T Y) { return X == Y; }
+
+template <>
+inline bool compareEqual(__half X, __half Y) {
+  return __half2float(X) == __half2float(Y);
+}
+
+template <>
+inline bool compareEqual(__half2 X, __half2 Y) {
+  return compareEqual(X.x, Y.x) && compareEqual(X.y, Y.y);
+}
+
+inline bool compareMaskEqual(unsigned long long *Actual, unsigned long long *Expected,
+                       int i, int warpSize) {
+  if (warpSize == 32)
+    return (unsigned)Actual[i] == (unsigned)Expected[i];
+  return Actual[i] == Expected[i];
+}
+
+template <typename T>
+inline T alignUp(T num, size_t n) {
+  if (num % n == 0) {
+    return num;
+  }
+
+  return ((num + n - 1) / n) * n;
+}
+
+template <class T>
+struct DistributionType {
+  using type = std::uniform_int_distribution<T>;
+};
+
+// there is no std::uniform_real_distribution for 'half' type, so we cast from
+// unsigned short, avoiding Nan and Infinity
+template <>
+struct DistributionType<__half> {
+  using type = std::uniform_int_distribution<unsigned short>;
+};
+
+template <>
+struct DistributionType<float> {
+  using type = std::uniform_real_distribution<float>;
+};
+
+template <>
+struct DistributionType<double> {
+  using type = std::uniform_real_distribution<double>;
+};
+
+
+template <class T>
+struct MinOp {
+  T operator()(T lhs, T rhs) const
+  {
+    return std::min(lhs, rhs);
+  }
+};
+
+template <class T>
+struct MaxOp {
+  T operator()(T lhs, T rhs) const
+  {
+    return std::max(lhs, rhs);
+  }
+};
+
+template <class T>
+struct XorOp {
+  __host__ __device__ T operator()(T lhs, T rhs)
+  {
+    return lhs ^ rhs;
+  }
+};
+
+template <class T>
+struct AndOp {
+  __host__ __device__ T operator()(T lhs, T rhs)
+  {
+    return lhs & rhs;
+  }
+};
+
+template <class T>
+struct OrOp {
+  __host__ __device__ T operator()(T lhs, T rhs)
+  {
+    return lhs | rhs;
+  }
+};
+
+template <class T>
+struct MaxOfAbsolute {
+  T __host__ __device__ operator()(T i, T j)
+  {
+    return std::max(std::abs(i), std::abs(j));
+  }
+};
+
+template <class T>
+struct NonCommutativeOp {
+  T __host__ __device__ operator()(T i, T j)
+  {
+    return std::abs(i) * j;
+  }
+};
+
+// typeid(T).name() does seem to return a very descriptive name for primitive types,
+// at least on clang, so we roll out an equivalent
+template<class T>
+const char* typeToString()
+{
+  if (std::is_same<T, int>::value)
+    return "int";
+  if (std::is_same<T, unsigned int>::value)
+    return "unsigned int";
+  if (std::is_same<T, long long>::value)
+    return "long long";
+  if (std::is_same<T, unsigned long long>::value)
+    return "unsigned long long";
+  if (std::is_same<T, half>::value)
+    return "half";
+  if (std::is_same<T, float>::value)
+    return "float";
+  if (std::is_same<T, double>::value)
+    return "double";
+
+  assert(false && "Missing conversion to string for type");
+  return "";
+}
+
+template<class T, class Op>
+const char* opToString()
+{
+  if constexpr (std::is_same<Op, std::plus<T>>::value)
+    return "add";
+  else if constexpr (std::is_same<Op, MinOp<T>>::value)
+    return "min";
+  else if constexpr (std::is_same<Op, MaxOp<T>>::value)
+    return "max";
+  else if constexpr (std::is_same<Op, AndOp<T>>::value)
+    return "logical_and";
+  else if constexpr (std::is_same<Op, OrOp<T>>::value)
+    return "logical_or";
+  else if constexpr (std::is_same<Op, XorOp<T>>::value)
+    return "logical_xor";
+#if HT_AMD
+  else if constexpr (std::is_same<Op, cooperative_groups::plus<T>>::value)
+    return "cooperative_groups::plus";
+  else if constexpr (std::is_same<Op, cooperative_groups::less<T>>::value)
+    return "cooperative_groups::less";
+  else if constexpr (std::is_same<Op, cooperative_groups::greater<T>>::value)
+    return "cooperative_groups::greater";
+  else if constexpr (std::is_same<Op, cooperative_groups::bit_and<T>>::value)
+    return "cooperative_groups::bit_and";
+  else if constexpr (std::is_same<Op, cooperative_groups::bit_or<T>>::value)
+    return "cooperative_groups::bit_or";
+  else if constexpr (std::is_same<Op, cooperative_groups::bit_xor<T>>::value)
+    return "cooperative_groups::bit_xor";
+#endif
+  else if constexpr (std::is_same<Op, MaxOfAbsolute<T>>::value)
+    return "MaxOfAbsolute";
+  else if constexpr (std::is_same<Op, NonCommutativeOp<T>>::value)
+    return "NonCommutativeOp";
+  else {
+    return "unknown operator";
+  }
+}
+
+template <class T, class Gen>
+void genRandomMasks(LinearAllocGuard<T>& d_buf,
+                    LinearAllocGuard<T>& buf,
+                    Gen& gen,
+                    int numItems)
+{
+  // masks must be != 0, hence passing 1 as the 'a' distribution parameter
+  int wavefrontSize = getWarpSize();
+  std::uniform_int_distribution<unsigned long long> dist(1, wavefrontSize == 64? ~0ull : (1ull << 32) - 1);
+  std::uniform_int_distribution<unsigned long long> distNoHoles(1, getWarpSize() - 2);
+  int numBytes = numItems * sizeof(T);
+  LinearAllocGuard<T> tmp(LinearAllocs::malloc, numBytes);
+  LinearAllocGuard<T> d_tmp(LinearAllocs::hipMalloc, numBytes);
+
+  buf = std::move(tmp);
+  d_buf = std::move(d_tmp);
+
+  for (int i = 0; i < numItems; i++) {
+    T mask;
+
+    if (i % 5 == 0) {
+      // every five masks, create a mask that starts in position zero and has "no holes",
+      // because those take a different code path, where DPP instructions are used
+      mask = 1ull << distNoHoles(gen);
+      mask--;
+    } else {
+      mask = dist(gen);
+    }
+
+    buf.ptr()[i] = mask;
+  }
+
+  HIP_CHECK(hipMemcpy(d_buf.ptr(), buf.ptr(), numBytes, hipMemcpyHostToDevice));
+}
+
+// generates a random __half (instead of using uniform_real_distribution<float> casting to __half
+// which is problematic)
+template <class Gen>
+__half genRandomHalf(std::uniform_int_distribution<unsigned short>& dist,
+                     Gen& gen,
+                     unsigned char exponent)
+{
+  __half_raw tmp;
+  unsigned short mantissa = dist(gen) & 0x7ff;
+
+  tmp.x = (exponent << 10) | mantissa;
+  return tmp;
+}
+
+// generates a random buffer in buf, copies it to device memory in d_buf
+template <class T, class Dist, class Gen>
+void genRandomBuffers(LinearAllocGuard<T>& d_buf,
+                      LinearAllocGuard<T>& buf,
+                      Dist& dist,
+                      Gen& gen,
+                      int numItems)
+{
+  int numBytes = numItems * sizeof(T);
+  LinearAllocGuard<T> tmp(LinearAllocs::malloc, numBytes);
+  LinearAllocGuard<T> d_tmp(LinearAllocs::hipMalloc, numBytes);
+
+  buf = std::move(tmp);
+  d_buf = std::move(d_tmp);
+
+  if constexpr (std::is_same<T, __half>::value) {
+    // avoid denormals (exponent = 0) and NaN/infinite (exponent = 255).
+    // use numbers to be (-8<x<8) (just to avoid overflows)
+    // When using __half we create all the numbers with the same exponent. That
+    // makes testing easier, as if they are all different exponents, they will have
+    // very different precissions and we will get bigger differences between the
+    // CPU and the GPU
+    unsigned char exponent = dist(gen) % 17 + 1;
+
+    for (int i = 0; i < numItems; i++) {
+      buf.ptr()[i] = genRandomHalf(dist, gen, exponent);
+    }
+  } else {
+    for (int i = 0; i < numItems; i++) {
+      buf.ptr()[i] = dist(gen);
+    }
+  }
+  HIP_CHECK(hipMemcpy(d_buf.ptr(), buf.ptr(), numBytes, hipMemcpyHostToDevice));
+}
+
+enum class AggregationType { Reduce,
+                             InclusiveScan,
+                             ExclusiveScan,
+                             /// @brief an inclusive scan with the default operator, i.e. cg::plus
+                             InclusiveScanDefault,
+                             /// @brief an exclusive scan with the default operator, i.e. cg::plus
+                             ExclusiveScanDefault };
+
+inline bool isInclusive(AggregationType aggType)
+{
+  switch (aggType) {
+  case AggregationType::Reduce:
+    return true;
+  case AggregationType::InclusiveScan:
+    return true;
+  case AggregationType::ExclusiveScan:
+    return false;
+  case AggregationType::InclusiveScanDefault:
+    return true;
+  case AggregationType::ExclusiveScanDefault:
+    return false;
+  default:
+    assert(false && "Unknown aggregation type");
+    return "unknown";
+  }
+}
+
+inline const char* aggregationTypeToStr(AggregationType aggType)
+{
+  switch (aggType) {
+  case AggregationType::Reduce:
+    return "reduce";
+  case AggregationType::InclusiveScan:
+    return "inclusive scan";
+  case AggregationType::ExclusiveScan:
+    return "exclusive scan";
+  case AggregationType::InclusiveScanDefault:
+    return "inclusive scan plus";
+  case AggregationType::ExclusiveScanDefault:
+    return "exclusive scan plus";
+  default:
+    assert(false && "Unknown aggregation type");
+    return "unknown";
+  }
+}
+
+constexpr uint64_t nextPowerOf2(uint64_t v) {
+  v += (v == 0);
+  v--;
+  v |= v >> 1;
+  v |= v >> 2;
+  v |= v >> 4;
+  v |= v >> 8;
+  v |= v >> 16;
+  v |= v >> 32;
+  return ++v;
+}
+
+// Sets id to the expected value exclusive_scan returns for the first active lane
+template <class T, class Op>
+void scanIdentity(T& id)
+{
+  T result = {};
+
+  if constexpr (std::is_same<Op, MinOp<T>>::value || std::is_same<Op, cooperative_groups::less<T>>::value) {
+    if constexpr (std::is_same<T, __half>::value) {
+      result = HIPRT_INF_FP16;
+    } else if (std::is_floating_point<T>::value) {
+      result = std::numeric_limits<T>::infinity();
+    } else {
+      result = std::numeric_limits<T>::max();
+    }
+  } else if constexpr (std::is_same<Op, MaxOp<T>>::value || std::is_same<Op, cooperative_groups::greater<T>>::value) {
+    if constexpr (std::is_same<T, __half>::value) {
+      result = -HIPRT_INF_FP16;
+    } else if (std::is_floating_point<T>::value) {
+      result = -std::numeric_limits<T>::infinity();
+    } else {
+      result = std::numeric_limits<T>::lowest();
+    }
+  } else if constexpr (std::is_same<Op, std::bit_and<T>>::value) {
+    result = ~result;
+  } else if constexpr (std::is_same<Op, std::bit_or<T>>::value) {
+  } else {
+    std::memset(&result, 0, sizeof(T));
+  }
+
+  id = result;
+}
+
+// given an operation produces the expected result of the warp-wide reduction
+// @mask indicates the lanes that will participate in the computation
+// @return the result associated the lane with the highest index that is active according to the
+//         mask
+template <class T, class Op>
+T calculateExpected(T* output,
+                    const T* input,
+                    Op op,
+                    unsigned long long mask,
+                    AggregationType aggType)
+{
+  T result;
+  bool inclusive = aggType != AggregationType::ExclusiveScan && aggType != AggregationType::ExclusiveScanDefault;
+  int lastLane = 64 - __builtin_clzll(mask) - 1;
+  T aggregation[64];
+  // the results for the previous step of the aggregation
+  T lastAggregation[64];
+  // identity value for this type and operator
+  T id {};
+
+  std::memset(aggregation, 0, 64 * sizeof(T));
+  std::memset(lastAggregation, 0, 64 * sizeof(T));
+
+  scanIdentity<T, Op>(id);
+
+  for (int i = 0; i < 64; i++) {
+    output[i] = id;
+  }
+
+  if constexpr (std::is_same<Op, std::plus<T>>::value ||
+                std::is_same<Op, cooperative_groups::plus<T>>::value ) {
+    for (int i = 0; i < lastLane + 1; i++) {
+       if (mask & (1ull << i)) {
+         aggregation[i] = input[i];
+         lastAggregation[i] = input[i];
+       }
+    }
+
+    for (int modulo = 2; modulo <= nextPowerOf2(lastLane + 1); modulo *= 2) {
+      for (int i = 0; i < lastLane + 1; i += 1) {
+        int j = i - modulo / 2;
+
+        if (j >= 0) {
+          aggregation[i] += lastAggregation[j];
+        }
+      }
+      std::memcpy(lastAggregation, aggregation, sizeof(lastAggregation));
+    }
+
+    for (int i = 0; i < lastLane + 1; i += 1) {
+      if (inclusive) {
+        output[i] = aggregation[i];
+      } else if (i > 0) {
+        output[i] = aggregation[i - 1];
+      }
+    }
+
+    result = output[lastLane];
+  } else if constexpr (std::is_same<Op, cooperative_groups::less<T>>::value) {
+    MinOp<T> minOp;
+    return calculateExpected(output, input, minOp, mask, aggType);
+  } else if constexpr (std::is_same<Op, cooperative_groups::greater<T>>::value) {
+    MaxOp<T> maxOp;
+    return calculateExpected(output, input, maxOp, mask, aggType);
+  } else if constexpr (std::is_same<Op, cooperative_groups::bit_xor<T>>::value) {
+    std::bit_xor<T> xorOp;
+    return calculateExpected(output, input, xorOp, mask, aggType);
+  } else if constexpr (std::is_same<Op, cooperative_groups::bit_or<T>>::value) {
+    std::bit_or<T> orOp;
+    return calculateExpected(output, input, orOp, mask, aggType);
+  } else if constexpr (std::is_same<Op, cooperative_groups::bit_and<T>>::value) {
+    std::bit_and<T> andOp;
+    return calculateExpected(output, input, andOp, mask, aggType);
+  } else {
+    bool initialized = false;
+
+    result = id;
+
+    for (int i = 0; i < lastLane + 1; i++) {
+      if (mask & (1ull << i)) {
+        if (initialized) {
+          if (inclusive) {
+            result = op(result, input[i]);
+            output[i] = result;
+          } else {
+            output[i] = result;
+            result = op(result, input[i]);
+          }
+        } else {
+          result = input[i];
+
+          if (inclusive) {
+            output[i] = result;
+          } else {
+            output[i] = id;
+          }
+          initialized = true;
+        }
+      }
+    }
+  }
+
+  if (aggType == AggregationType::Reduce) {
+    for (int i = 0; i < lastLane + 1; i++) {
+      output[i] = result;
+    }
+  }
+
+  return result;
+}
+
+template <class T>
+void printMismatch(const T& result, const T& expected, const T* input, unsigned long long mask, int laneId)
+{
+  std::ios init(NULL);
+
+  init.copyfmt(std::cout);
+  std::cout << "\nMismatch at lane: " << laneId << "\n";
+  std::cout << "Mask: 0x" << std::hex << std::setfill('0') << std::setw(16) << mask << "\n";
+  std::cout << "Input:\n";
+  std::cout.copyfmt(init);
+
+  for (int i = 0; i < getWarpSize(); i++) {
+    if ((1ull << i) & mask) {
+      if constexpr (std::is_same<T, __half>::value) {
+        const unsigned char* ptr = reinterpret_cast<const unsigned char*>(&input[i]);
+
+        std::cout << "Lane " << i << ": " << __half2float(input[i])
+                  << std::hex
+                  << " (0x" << static_cast<int>(ptr[1]) << static_cast<int>(ptr[0]) << ")"
+                  << "\n";
+        std::cout.copyfmt(init);
+      } else {
+        std::cout << "Lane " << i << ": " << input[i] << "\n";
+      }
+    }
+  }
+
+  if constexpr (std::is_same<T, __half>::value) {
+    std::cout << "Result: " << __half2float(result) << "\n";
+    std::cout << "Expected: " << __half2float(expected) << "\n";
+  } else {
+    std::cout << "Result: " << result << "\n";
+    std::cout << "Expected: " << expected << "\n";
+  }
+}
+
+template <class Op, class T>
+void compareFloatingPoint(const T& result, const T& expected, unsigned long long mask, const T* input, int laneId)
+{
+  using namespace Catch::Matchers;
+  std::string opName = opToString<T, Op>();
+
+  if constexpr (std::is_same<T, __half>::value) {
+    float resultFloat = __half2float(result);
+    float expectedFloat = __half2float(expected);
+    float absDifference = fabs(resultFloat - expectedFloat);
+    float relativeEpsilon = 0.1 * fmax(resultFloat, expectedFloat);
+    float eps = 0.01f;
+
+    if constexpr (std::is_same<T, __half>::value) {
+      INFO("result: 0x" << std::hex << __half_as_ushort(result));
+    } else {
+      INFO("result: 0x" << std::hex << result);
+    }
+
+    REQUIRE(!__hisnan(result));
+
+    if (relativeEpsilon > eps) {
+      if (absDifference > 0.0001) {
+        if (absDifference >= eps * fabs(fmax(resultFloat, expectedFloat))) {
+          printMismatch(result, expected, input, mask, laneId);
+          std::cout << "Relative epsilon: " << relativeEpsilon << "\n";
+          std::cout << "Difference: " << absDifference << "\n";
+        }
+      }
+
+      INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
+      REQUIRE_THAT(__half2float(resultFloat), WithinRel(expectedFloat, eps));
+    }
+  } else {
+    // for float or double, also lossy in terms of precision
+    T absDifference = fabs(result - expected);
+    T relativeEpsilon = 0.1 * fmax(result, expected);
+    T eps = 0.01;
+
+    if (relativeEpsilon > eps) {
+      if (absDifference > 0.0001) {
+        if (absDifference >= eps * fabs(fmax(result, expected))) {
+          printMismatch(result, expected, input, mask, laneId);
+          std::cout << "Relative epsilon: " << relativeEpsilon << "\n";
+          std::cout << "Difference: " << absDifference << "\n";
+        }
+
+        INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
+        REQUIRE_THAT(result, WithinRel(expected, eps));
+      }
+    }
+  }
+}
+
+// @tparam Reduce a functor; abstracts away kernel dispatching
+//         (via hiprtc or normal execution)
+template <class T, class Reduce, template <typename> class Op>
+void runTestReduce(int iteration, Reduce reduce)
+{
+  using namespace Catch::Matchers;
+  using distribution = typename DistributionType<T>::type;
+  unsigned int wavefrontSize = getWarpSize();
+  // one result per reduce per thread to be checked
+  LinearAllocGuard<T> d_output(LinearAllocs::hipMalloc, kNumReduces * wavefrontSize * sizeof(T));
+  LinearAllocGuard<T> output(LinearAllocs::malloc, kNumReduces * wavefrontSize * sizeof(T));
+  std::mt19937_64 gen(iteration);
+  // for float16, we generate any random unsigned short, but cap the exponent later on
+  // On the rest of the types, just use a bigger reduced range of numbers to avoid overflows too
+  typename distribution::result_type a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() :
+                                      (std::is_signed<T>::value? -1023 : 0);
+  typename distribution::result_type b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() :
+                                      1023;
+  distribution dist(a, b);
+  LinearAllocGuard<T> input, d_input;
+  LinearAllocGuard<unsigned long long> masks, d_masks;
+  Op<T> op;
+  std::string opName = opToString<T, Op<T>>();
+  int numReduce = 0;
+
+  genRandomBuffers(d_input, input, dist, gen, kNumReduces * wavefrontSize);
+  genRandomMasks(d_masks, masks, gen, kNumReduces);
+  reduce(d_output.ptr(), d_input.ptr(), d_masks.ptr(), kNumReduces, op);
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(output.ptr(), d_output.ptr(), d_output.size_bytes(), hipMemcpyDeviceToHost));
+
+  while (numReduce < kNumReduces) {
+    T expectedByLane[64];
+    T* waveInput = &input.ptr()[numReduce * wavefrontSize];
+    T expected = calculateExpected<T>(expectedByLane,
+                                      waveInput,
+                                      op,
+                                      masks.ptr()[numReduce],
+                                      AggregationType::Reduce);
+    int lane = 0;
+
+    while (lane < wavefrontSize) {
+      auto result = output.ptr()[numReduce * wavefrontSize + lane];
+      unsigned long long mask = masks.ptr()[numReduce];
+
+      if ((1ull << lane) & mask) {
+        if constexpr (std::is_integral<T>::value || std::is_same<Op<T>, MinOp<T>>::value ||
+                      std::is_same<Op<T>, MaxOp<T>>::value) {
+          // for integral types or min/max the result should match exactly
+          if constexpr (std::is_same<T, __half>::value)
+            REQUIRE(__half2float(result) == __half2float(expected));
+          else {
+            if (result != expected) {
+              printMismatch(result, expected, waveInput, mask, lane);
+              INFO("Operator: " << opName << " mask: 0x" << std::hex << mask);
+              REQUIRE(result == expected);
+            }
+          }
+        } else
+          compareFloatingPoint<Op<T>>(result, expected, mask, waveInput, lane);
+
+      }
+      lane++;
+    }
+    numReduce++;
+  }
+}

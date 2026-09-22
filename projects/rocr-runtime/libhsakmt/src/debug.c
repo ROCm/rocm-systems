@@ -1,0 +1,805 @@
+/*
+ * Copyright © 2014 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person
+ * obtaining a copy of this software and associated documentation
+ * files (the "Software"), to deal in the Software without
+ * restriction, including without limitation the rights to use, copy,
+ * modify, merge, publish, distribute, sublicense, and/or sell copies
+ * of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including
+ * the next paragraph) shall be included in all copies or substantial
+ * portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ */
+
+#include "libhsakmt.h"
+#include "kfd_ioctl.h"
+#include "fmm.h"
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <assert.h>
+#include <xf86drm.h>
+
+/* Forward declarations for internal Ctx functions */
+static HSAKMT_STATUS hsaKmtGetCoreRuntimeInfoCtx(HsaKFDContext *ctx,
+						  struct kfd_runtime_info *runtime_info);
+static HSAKMT_STATUS hsaKmtGetCoreDeviceInfoCtx(HsaKFDContext *ctx,
+						 HSAuint32 gpu_id,
+						 struct kfd_dbg_device_info_entry *device_info);
+
+/*
+ * hsa_kfd_debug_context
+ *
+ * Represents the debug state for a KFD context.
+ * Each HsaKFDContext has its own independent debug context.
+ */
+struct hsa_kfd_debug_context {
+	/* Array tracking which nodes are being debugged */
+	bool *is_device_debugged;
+
+	/* Runtime debug capabilities mask */
+	uint32_t runtime_capabilities_mask;
+
+	struct kfd_runtime_info core_runtime_info;
+};
+
+int hsakmt_kfdcontext_init_debug_context(HsaKFDContext *ctx)
+{
+	CHECK_CTX(ctx, -1);
+
+	if (ctx->debug_context)
+		return 0;
+
+	ctx->debug_context = calloc(1, sizeof(struct hsa_kfd_debug_context));
+	if (!ctx->debug_context) {
+		pr_err("Alloc memory failed for struct hsa_kfd_debug_context size %zu\n",
+				 sizeof(struct hsa_kfd_debug_context));
+		return -1;
+	}
+	return 0;
+}
+
+HSAKMT_STATUS hsakmt_init_device_debugging_memory(HsaKFDContext *ctx, unsigned int NumNodes)
+{
+	unsigned int i;
+	struct hsa_kfd_debug_context *debug_ctx = ctx->debug_context;
+
+	debug_ctx->is_device_debugged = malloc(NumNodes * sizeof(bool));
+	if (!debug_ctx->is_device_debugged)
+		return HSAKMT_STATUS_NO_MEMORY;
+
+	for (i = 0; i < NumNodes; i++)
+		debug_ctx->is_device_debugged[i] = false;
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+void hsakmt_destroy_device_debugging_memory(HsaKFDContext *ctx)
+{
+	struct hsa_kfd_debug_context *debug_ctx = ctx->debug_context;
+
+	if (debug_ctx->is_device_debugged) {
+		free(debug_ctx->is_device_debugged);
+		debug_ctx->is_device_debugged = NULL;
+	}
+}
+
+bool hsakmt_debug_get_reg_status(HsaKFDContext *ctx, uint32_t node_id)
+{
+	struct hsa_kfd_debug_context *debug_ctx = ctx->debug_context;
+	if (!debug_ctx->is_device_debugged)
+		return false;
+
+	return debug_ctx->is_device_debugged[node_id];
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtDbgRegister(HSAuint32 NodeId)
+{
+	HSAKMT_STATUS result;
+	uint32_t gpu_id;
+
+	CHECK_KFD_OPEN();
+	struct hsa_kfd_debug_context *debug_ctx =
+				hsakmt_primary_kfd_ctx.debug_context;
+	if (!debug_ctx->is_device_debugged)
+		return HSAKMT_STATUS_NO_MEMORY;
+
+	result = hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
+	if (result != HSAKMT_STATUS_SUCCESS)
+		return result;
+
+	struct kfd_ioctl_dbg_register_args args = {0};
+
+	args.gpu_id = gpu_id;
+
+	long err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_DBG_REGISTER_DEPRECATED, &args);
+
+	if (err == 0)
+		result = HSAKMT_STATUS_SUCCESS;
+	else
+		result = HSAKMT_STATUS_ERROR;
+
+	return result;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtDbgUnregister(HSAuint32 NodeId)
+{
+	uint32_t gpu_id;
+	HSAKMT_STATUS result;
+
+	CHECK_KFD_OPEN();
+	struct hsa_kfd_debug_context *debug_ctx =
+				hsakmt_primary_kfd_ctx.debug_context;
+	if (!debug_ctx->is_device_debugged)
+		return HSAKMT_STATUS_NO_MEMORY;
+
+	result = hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
+	if (result != HSAKMT_STATUS_SUCCESS)
+		return result;
+
+	struct kfd_ioctl_dbg_unregister_args args = {0};
+
+	args.gpu_id = gpu_id;
+	long err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_DBG_UNREGISTER_DEPRECATED, &args);
+
+	if (err)
+		return HSAKMT_STATUS_ERROR;
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtDbgWavefrontControl(HSAuint32 NodeId,
+						  HSA_DBG_WAVEOP Operand,
+						  HSA_DBG_WAVEMODE Mode,
+						  HSAuint32 TrapId,
+						  HsaDbgWaveMessage *DbgWaveMsgRing)
+{
+	HSAKMT_STATUS result;
+	uint32_t gpu_id;
+
+	struct kfd_ioctl_dbg_wave_control_args *args;
+
+	CHECK_KFD_OPEN();
+
+	result = hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
+	if (result != HSAKMT_STATUS_SUCCESS)
+		return result;
+
+
+/* Determine Size of the ioctl buffer */
+	uint32_t buff_size = sizeof(Operand) + sizeof(Mode) + sizeof(TrapId) +
+			     sizeof(DbgWaveMsgRing->DbgWaveMsg) +
+			     sizeof(DbgWaveMsgRing->MemoryVA) + sizeof(*args);
+
+	args = (struct kfd_ioctl_dbg_wave_control_args *)malloc(buff_size);
+	if (!args)
+		return HSAKMT_STATUS_ERROR;
+
+	memset(args, 0, buff_size);
+
+	args->gpu_id = gpu_id;
+	args->buf_size_in_bytes = buff_size;
+
+	/* increment pointer to the start of the non fixed part */
+	unsigned char *run_ptr = (unsigned char *)args + sizeof(*args);
+
+	/* save variable content pointer for kfd */
+	args->content_ptr = (uint64_t)run_ptr;
+
+	/* insert items, and increment pointer accordingly */
+	*((HSA_DBG_WAVEOP *)run_ptr) = Operand;
+	run_ptr += sizeof(Operand);
+
+	*((HSA_DBG_WAVEMODE *)run_ptr) = Mode;
+	run_ptr += sizeof(Mode);
+
+	*((HSAuint32 *)run_ptr) = TrapId;
+	run_ptr += sizeof(TrapId);
+
+	*((HsaDbgWaveMessageAMD *)run_ptr) = DbgWaveMsgRing->DbgWaveMsg;
+	run_ptr += sizeof(DbgWaveMsgRing->DbgWaveMsg);
+
+	*((void **)run_ptr) = DbgWaveMsgRing->MemoryVA;
+	run_ptr += sizeof(DbgWaveMsgRing->MemoryVA);
+
+	/* send to kernel */
+	long err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_DBG_WAVE_CONTROL_DEPRECATED, args);
+
+	free(args);
+
+	if (err)
+		return HSAKMT_STATUS_ERROR;
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtDbgAddressWatch(HSAuint32 NodeId,
+					      HSAuint32 NumWatchPoints,
+					      HSA_DBG_WATCH_MODE WatchMode[],
+					      void *WatchAddress[],
+					      HSAuint64 WatchMask[],
+					      HsaEvent *WatchEvent[])
+{
+	HSAKMT_STATUS result;
+	uint32_t gpu_id;
+
+	/* determine the size of the watch mask and event buffers
+	 * the value is NULL if and only if no vector data should be attached
+	 */
+	uint32_t watch_mask_items = WatchMask[0] > 0 ? NumWatchPoints:1;
+	uint32_t watch_event_items = WatchEvent != NULL ? NumWatchPoints:0;
+
+	struct kfd_ioctl_dbg_address_watch_args *args;
+	HSAuint32 i = 0;
+
+	CHECK_KFD_OPEN();
+
+	result = hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
+	if (result != HSAKMT_STATUS_SUCCESS)
+		return result;
+
+	if (NumWatchPoints > MAX_ALLOWED_NUM_POINTS)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	/* Size and structure of the ioctl buffer is dynamic in this case
+	 * Here we calculate the buff size.
+	 */
+	uint32_t buff_size = sizeof(NumWatchPoints) +
+		(sizeof(WatchMode[0]) + sizeof(WatchAddress[0])) *
+			NumWatchPoints +
+		watch_mask_items * sizeof(HSAuint64) +
+		watch_event_items * sizeof(HsaEvent *) + sizeof(*args);
+
+	args = (struct kfd_ioctl_dbg_address_watch_args *) malloc(buff_size);
+	if (!args)
+		return HSAKMT_STATUS_ERROR;
+
+	memset(args, 0, buff_size);
+
+	args->gpu_id = gpu_id;
+	args->buf_size_in_bytes = buff_size;
+
+
+	/* increment pointer to the start of the non fixed part */
+	unsigned char *run_ptr = (unsigned char *)args + sizeof(*args);
+
+	/* save variable content pointer for kfd */
+	args->content_ptr = (uint64_t)run_ptr;
+	/* insert items, and increment pointer accordingly */
+
+	*((HSAuint32 *)run_ptr) = NumWatchPoints;
+	run_ptr += sizeof(NumWatchPoints);
+
+	for (i = 0; i < NumWatchPoints; i++) {
+		*((HSA_DBG_WATCH_MODE *)run_ptr) = WatchMode[i];
+		run_ptr += sizeof(WatchMode[i]);
+	}
+
+	for (i = 0; i < NumWatchPoints; i++) {
+		*((void **)run_ptr) = WatchAddress[i];
+		run_ptr += sizeof(WatchAddress[i]);
+	}
+
+	for (i = 0; i < watch_mask_items; i++) {
+		*((HSAuint64 *)run_ptr) = WatchMask[i];
+		run_ptr += sizeof(WatchMask[i]);
+	}
+
+	for (i = 0; i < watch_event_items; i++)	{
+		*((HsaEvent **)run_ptr) = WatchEvent[i];
+		run_ptr += sizeof(WatchEvent[i]);
+	}
+
+	/* send to kernel */
+	long err = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_DBG_ADDRESS_WATCH_DEPRECATED, args);
+
+	free(args);
+
+	if (err)
+		return HSAKMT_STATUS_ERROR;
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+#define HSA_RUNTIME_ENABLE_MAX_MAJOR   1
+#define HSA_RUNTIME_ENABLE_MIN_MINOR   13
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtCheckRuntimeDebugSupportCtx(HsaKFDContext *ctx) {
+	HsaNodeProperties node = {0};
+	HsaSystemProperties props = {0};
+	HsaVersionInfo versionInfo = {0};
+
+	//secondary context doesn't support the debugger
+	if (!ctx->hsakmt_is_primary_ctx)
+		return HSAKMT_STATUS_NOT_SUPPORTED;
+
+	memset(&node, 0x00, sizeof(node));
+	memset(&props, 0x00, sizeof(props));
+	if (hsaKmtAcquireSystemPropertiesCtx(ctx, &props))
+		return HSAKMT_STATUS_ERROR;
+
+	//the firmware of gpu node doesn't support the debugger, disable it.
+	for (uint32_t i = 0; i < props.NumNodes; i++) {
+		if (hsaKmtGetNodePropertiesCtx(ctx, i, &node))
+			return HSAKMT_STATUS_ERROR;
+
+		//ignore cpu node
+		if (node.NumCPUCores && !node.NumFComputeCores)
+			continue;
+		if (!node.Capability.ui32.DebugSupportedFirmware)
+			return HSAKMT_STATUS_NOT_SUPPORTED;
+	}
+
+	if (hsaKmtGetVersion(&versionInfo))
+		return HSAKMT_STATUS_NOT_SUPPORTED;
+
+	if (versionInfo.KernelInterfaceMajorVersion < HSA_RUNTIME_ENABLE_MAX_MAJOR ||
+		(versionInfo.KernelInterfaceMajorVersion ==
+			HSA_RUNTIME_ENABLE_MAX_MAJOR &&
+		(int)versionInfo.KernelInterfaceMinorVersion < HSA_RUNTIME_ENABLE_MIN_MINOR))
+		return HSAKMT_STATUS_NOT_SUPPORTED;
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeEnableCtx(HsaKFDContext *ctx,
+					    void *rDebug,
+					    bool setupTtmp)
+{
+	struct hsa_kfd_debug_context *debug_ctx = ctx->debug_context;
+
+	struct kfd_ioctl_runtime_enable_args args = {0};
+	HSAKMT_STATUS result = hsaKmtCheckRuntimeDebugSupportCtx(ctx);
+	if (result)
+		return result;
+
+	memset(&args, 0x00, sizeof(args));
+	args.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK |
+		((setupTtmp) ? KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK : 0);
+	args.r_debug = (HSAuint64)rDebug;
+
+	long err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_RUNTIME_ENABLE, &args);
+
+	debug_ctx->core_runtime_info.r_debug = args.r_debug;
+	debug_ctx->core_runtime_info.ttmp_setup =
+		(args.mode_mask & KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK) ? 1 : 0;
+
+	if (err) {
+		if (errno == EBUSY) {
+			debug_ctx->core_runtime_info.runtime_state = DEBUG_RUNTIME_STATE_ENABLED_BUSY;
+			return HSAKMT_STATUS_UNAVAILABLE;
+		} else {
+			return HSAKMT_STATUS_ERROR;
+		}
+	}
+
+	debug_ctx->runtime_capabilities_mask = args.capabilities_mask;
+	debug_ctx->core_runtime_info.runtime_state = DEBUG_RUNTIME_STATE_ENABLED;
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeDisableCtx(HsaKFDContext *ctx)
+{
+	struct kfd_ioctl_runtime_enable_args args = {0};
+	HSAKMT_STATUS result = hsaKmtCheckRuntimeDebugSupportCtx(ctx);
+
+	if (result)
+		return result;
+
+	memset(&args, 0x00, sizeof(args));
+	args.mode_mask = 0; //Disable
+
+	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_RUNTIME_ENABLE, &args))
+		return HSAKMT_STATUS_ERROR;
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetRuntimeCapabilitiesCtx(HsaKFDContext *ctx,
+						  HSAuint32 *caps_mask)
+{
+	struct hsa_kfd_debug_context *debug_ctx = ctx->debug_context;
+
+	*caps_mask = debug_ctx->runtime_capabilities_mask;
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+static HSAKMT_STATUS hsaKmtGetCoreRuntimeInfoCtx(HsaKFDContext *ctx,
+						  struct kfd_runtime_info *runtime_info)
+{
+	if (!runtime_info || !ctx->debug_context)
+		return HSAKMT_STATUS_ERROR;
+
+	*runtime_info = ctx->debug_context->core_runtime_info;
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+static HSAKMT_STATUS dbg_trap_get_device_data(HsaKFDContext *ctx,
+					      void *data,
+					      uint32_t *n_entries,
+					      uint32_t entry_size)
+{
+	struct kfd_ioctl_dbg_trap_args args = {0};
+
+	args.device_snapshot.snapshot_buf_ptr = (uint64_t) data;
+	args.device_snapshot.num_devices = *n_entries;
+	args.device_snapshot.entry_size = entry_size;
+	args.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+	args.pid = getpid();
+	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_DBG_TRAP, &args))
+		return HSAKMT_STATUS_ERROR;
+	*n_entries = args.device_snapshot.num_devices;
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+static HSAKMT_STATUS dbg_trap_get_queue_data(HsaKFDContext *ctx,
+					     void *data,
+					     uint32_t *n_entries,
+					     uint32_t entry_size,
+					     uint32_t *queue_ids)
+{
+	struct kfd_ioctl_dbg_trap_args args = {0};
+
+	args.queue_snapshot.num_queues = *n_entries;
+	args.queue_snapshot.entry_size = entry_size;
+	args.queue_snapshot.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+	args.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+	args.queue_snapshot.snapshot_buf_ptr = (uint64_t) data;
+	args.pid = getpid();
+
+	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_DBG_TRAP, &args))
+		return HSAKMT_STATUS_ERROR;
+
+	*n_entries = args.queue_snapshot.num_queues;
+	if (queue_ids && *n_entries) {
+		struct kfd_queue_snapshot_entry *queue_entry =
+		    (struct kfd_queue_snapshot_entry *) data;
+		for (uint32_t i = 0; i < *n_entries; i++)
+			queue_ids[i] = queue_entry[i].queue_id;
+	}
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+static HSAKMT_STATUS dbg_trap_suspend_queues(HsaKFDContext *ctx,
+					     uint32_t *queue_ids,
+					     uint32_t num_queues)
+{
+	struct kfd_ioctl_dbg_trap_args args = {0};
+	int r;
+
+	args.suspend_queues.queue_array_ptr = (uint64_t) queue_ids;
+	args.suspend_queues.num_queues = num_queues;
+	args.suspend_queues.exception_mask = KFD_EC_MASK(EC_QUEUE_NEW);
+	args.op = KFD_IOC_DBG_TRAP_SUSPEND_QUEUES;
+	args.pid = getpid();
+
+	r = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_DBG_TRAP, &args);
+	if (r < 0)
+		return HSAKMT_STATUS_ERROR;
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+/* Debugger support has been in KFD ABI 1.13.  */
+#define KFD_MINOR_MIN_DEBUG 13
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtDbgEnableCtx(HsaKFDContext *ctx,
+					     void **runtime_info,
+					     HSAuint32 *data_size)
+{
+	struct kfd_ioctl_dbg_trap_args args = {0};
+
+	CHECK_KFD_OPEN();
+	CHECK_KFD_MINOR_VERSION(KFD_MINOR_MIN_DEBUG);
+	*data_size = sizeof(struct kfd_runtime_info);
+	args.enable.rinfo_size = *data_size;
+	args.enable.dbg_fd = ctx->fd;
+	*runtime_info = malloc(args.enable.rinfo_size);
+	if (!*runtime_info)
+		return HSAKMT_STATUS_NO_MEMORY;
+	args.enable.rinfo_ptr = (uint64_t) *runtime_info;
+	args.op = KFD_IOC_DBG_TRAP_ENABLE;
+	args.pid = getpid();
+
+	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_DBG_TRAP, &args)) {
+		free(*runtime_info);
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+HSAKMT_STATUS HSAKMTAPI hsaKmtDbgDisableCtx(HsaKFDContext *ctx)
+{
+	struct kfd_ioctl_dbg_trap_args args = {0};
+
+	CHECK_KFD_OPEN();
+	CHECK_KFD_MINOR_VERSION(KFD_MINOR_MIN_DEBUG);
+	args.enable.dbg_fd = ctx->fd;
+	args.op = KFD_IOC_DBG_TRAP_DISABLE;
+	args.pid = getpid();
+
+	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_DBG_TRAP, &args))
+		return HSAKMT_STATUS_ERROR;
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtDbgGetDeviceDataCtx(HsaKFDContext *ctx,
+						void **data,
+						HSAuint32 *n_entries,
+						HSAuint32 *entry_size)
+{
+	HSAKMT_STATUS ret = HSAKMT_STATUS_NO_MEMORY;
+
+	CHECK_KFD_OPEN();
+	CHECK_KFD_MINOR_VERSION(KFD_MINOR_MIN_DEBUG);
+	*n_entries = UINT32_MAX;
+	*entry_size = sizeof(struct kfd_dbg_device_info_entry);
+	*data = malloc(*entry_size * *n_entries);
+	if (!*data)
+		return ret;
+	ret = dbg_trap_get_device_data(ctx, *data, n_entries, *entry_size);
+	if (ret)
+		free(*data);
+
+	return ret;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtDbgGetQueueDataCtx(HsaKFDContext *ctx,
+						void **data,
+						HSAuint32 *n_entries,
+						HSAuint32 *entry_size,
+						bool suspend_queues)
+{
+	uint32_t *queue_ids = NULL;
+
+	CHECK_KFD_OPEN();
+	CHECK_KFD_MINOR_VERSION(KFD_MINOR_MIN_DEBUG);
+	*entry_size = sizeof(struct kfd_queue_snapshot_entry);
+	*n_entries = 0;
+	if (dbg_trap_get_queue_data(ctx, NULL, n_entries, *entry_size, NULL))
+		return HSAKMT_STATUS_ERROR;
+	*data = malloc(*n_entries * *entry_size);
+	if (!*data)
+		return HSAKMT_STATUS_NO_MEMORY;
+	if (suspend_queues && *n_entries)
+		queue_ids = (uint32_t *)malloc(sizeof(uint32_t) * *n_entries);
+	if (!queue_ids ||
+	    dbg_trap_get_queue_data(ctx, *data, n_entries, *entry_size, queue_ids))
+		goto free_data;
+	if (queue_ids) {
+		if (dbg_trap_suspend_queues(ctx, queue_ids, *n_entries) ||
+		    dbg_trap_get_queue_data(ctx, *data, n_entries, *entry_size, NULL))
+			goto free_data;
+		free(queue_ids);
+	}
+	return HSAKMT_STATUS_SUCCESS;
+free_data:
+	free(*data);
+	if (queue_ids)
+		free(queue_ids);
+
+	return HSAKMT_STATUS_ERROR;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtDebugTrapIoctlCtx(HsaKFDContext *ctx,
+						struct kfd_ioctl_dbg_trap_args *args,
+						HSA_QUEUEID *Queues,
+						HSAuint64 *DebugReturn)
+{
+	HSAKMT_STATUS result;
+
+	CHECK_KFD_OPEN();
+
+	if (Queues) {
+		int num_queues = args->op == KFD_IOC_DBG_TRAP_SUSPEND_QUEUES ?
+						args->suspend_queues.num_queues :
+						args->resume_queues.num_queues;
+		void *queue_ptr = args->op == KFD_IOC_DBG_TRAP_SUSPEND_QUEUES ?
+						(void *)args->suspend_queues.queue_array_ptr :
+						(void *)args->resume_queues.queue_array_ptr;
+
+		uint32_t *queue_ids = hsakmt_convert_queue_ids(num_queues, Queues);
+		if (!queue_ids) {
+			return HSAKMT_STATUS_NO_MEMORY;
+		}
+		memcpy(queue_ptr, queue_ids, num_queues * sizeof(uint32_t));
+		free(queue_ids);
+	}
+
+	long err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_DBG_TRAP, args);
+	if (DebugReturn)
+		*DebugReturn = err;
+
+	if (args->op == KFD_IOC_DBG_TRAP_SUSPEND_QUEUES &&
+				err >= 0 && err <= args->suspend_queues.num_queues)
+		result = HSAKMT_STATUS_SUCCESS;
+	else if (args->op == KFD_IOC_DBG_TRAP_RESUME_QUEUES &&
+				err >= 0 && err <= args->resume_queues.num_queues)
+		result = HSAKMT_STATUS_SUCCESS;
+	else if (err == 0)
+		result = HSAKMT_STATUS_SUCCESS;
+	else
+		result = HSAKMT_STATUS_ERROR;
+
+	return result;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtCheckRuntimeDebugSupport(void)
+{
+	return hsaKmtCheckRuntimeDebugSupportCtx(&hsakmt_primary_kfd_ctx);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeEnable(void *rDebug,
+					     bool setupTtmp)
+{
+	return hsaKmtRuntimeEnableCtx(&hsakmt_primary_kfd_ctx, rDebug, setupTtmp);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeDisable(void)
+{
+	return hsaKmtRuntimeDisableCtx(&hsakmt_primary_kfd_ctx);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetRuntimeCapabilities(HSAuint32 *caps_mask)
+{
+	return hsaKmtGetRuntimeCapabilitiesCtx(&hsakmt_primary_kfd_ctx, caps_mask);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetCoreRuntimeInfo(struct kfd_runtime_info *runtime_info)
+{
+	return hsaKmtGetCoreRuntimeInfoCtx(&hsakmt_primary_kfd_ctx, runtime_info);
+}
+
+static HSAKMT_STATUS hsaKmtGetCoreDeviceInfoCtx(HsaKFDContext *ctx,
+						 HSAuint32 gpu_id,
+						 struct kfd_dbg_device_info_entry *device_info)
+{
+	HSAKMT_STATUS ret;
+	uint32_t node_id;
+	HsaNodeProperties props;
+
+	if (!device_info)
+		return HSAKMT_STATUS_ERROR;
+
+	/* Convert gpu_id to node_id */
+	ret = hsakmt_gpuid_to_nodeid(ctx, gpu_id, &node_id);
+	if (ret != HSAKMT_STATUS_SUCCESS)
+		return ret;
+
+	/* Get node properties */
+	ret = hsakmt_topology_get_node_props(ctx, node_id, &props);
+	if (ret != HSAKMT_STATUS_SUCCESS)
+		return ret;
+
+	/* Zero out the structure first */
+	memset(device_info, 0, sizeof(*device_info));
+
+	/* Populate easy fields from node properties */
+	device_info->gpu_id = gpu_id;
+	device_info->location_id = props.LocationId;
+	device_info->vendor_id = props.VendorId;
+	device_info->device_id = props.DeviceId;
+
+	/* gfx_target_version from EngineId - decimal encoding for KFD 1.18 compatibility */
+	device_info->gfx_target_version = (props.EngineId.ui32.Major * 10000
+	                                        + props.EngineId.ui32.Minor * 100
+	                                        + props.EngineId.ui32.Stepping);
+
+	/* fw_version from EngineId */
+	device_info->fw_version = props.EngineId.ui32.uCode;
+
+	/* SIMD/compute topology */
+	device_info->simd_count = props.NumFComputeCores;
+	device_info->max_waves_per_simd = props.MaxWavesPerSIMD;
+	device_info->array_count = (props.NumArrays * props.NumShaderBanks) / props.NumXcc;
+	device_info->simd_arrays_per_engine = props.NumArrays;
+	device_info->num_xcc = props.NumXcc;
+
+	/* Capabilities */
+	device_info->capability = props.Capability.Value;
+	device_info->debug_prop = props.DebugProperties.Value;
+
+	/* Get aperture base/limits from FMM */
+	HSAuint64 base, limit;
+
+	/* LDS aperture */
+	ret = hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_LDS, gpu_id,
+	                                              &base, &limit);
+	if (ret != HSAKMT_STATUS_SUCCESS)
+		return ret;
+	device_info->lds_base = base;
+	device_info->lds_limit = limit;
+
+	/* Scratch aperture */
+	ret = hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_SCRATCH, gpu_id,
+	                                              &base, &limit);
+	if (ret != HSAKMT_STATUS_SUCCESS)
+		return ret;
+	device_info->scratch_base = base;
+	device_info->scratch_limit = limit;
+
+	/* GPUVM aperture */
+	ret = hsakmt_fmm_get_aperture_base_and_limit(ctx, FMM_GPUVM, gpu_id,
+	                                              &base, &limit);
+	if (ret != HSAKMT_STATUS_SUCCESS)
+		return ret;
+	device_info->gpuvm_base = base;
+	device_info->gpuvm_limit = limit;
+
+	/* Get PCI subsystem info from libdrm */
+	if (props.DrmRenderMinor >= 0) {
+		int drm_fd = drmOpenRender(props.DrmRenderMinor);
+		if (drm_fd >= 0) {
+			drmDevicePtr drm_device = NULL;
+			/* Use DRM_DEVICE_GET_PCI_REVISION flag to get revision_id */
+			if (drmGetDevice2(drm_fd, DRM_DEVICE_GET_PCI_REVISION, &drm_device) == 0) {
+				if (drm_device->bustype == DRM_BUS_PCI && drm_device->deviceinfo.pci) {
+					device_info->revision_id = drm_device->deviceinfo.pci->revision_id;
+					device_info->subsystem_vendor_id = drm_device->deviceinfo.pci->subvendor_id;
+					device_info->subsystem_device_id = drm_device->deviceinfo.pci->subdevice_id;
+				}
+				drmFreeDevice(&drm_device);
+			}
+			drmClose(drm_fd);
+		}
+	}
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetCoreDeviceInfo(HSAuint32 gpu_id,
+						 struct kfd_dbg_device_info_entry *device_info)
+{
+	return hsaKmtGetCoreDeviceInfoCtx(&hsakmt_primary_kfd_ctx, gpu_id, device_info);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtDbgEnable(void **runtime_info,
+					     HSAuint32 *data_size)
+{
+	return hsaKmtDbgEnableCtx(&hsakmt_primary_kfd_ctx, runtime_info, data_size);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtDbgDisable(void)
+{
+	return hsaKmtDbgDisableCtx(&hsakmt_primary_kfd_ctx);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtDbgGetDeviceData(void **data,
+					     HSAuint32 *n_entries,
+					     HSAuint32 *entry_size)
+{
+	return hsaKmtDbgGetDeviceDataCtx(&hsakmt_primary_kfd_ctx, data, n_entries, entry_size);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtDbgGetQueueData(void **data,
+						HSAuint32 *n_entries,
+						HSAuint32 *entry_size,
+						bool suspend_queues)
+{
+	return hsaKmtDbgGetQueueDataCtx(&hsakmt_primary_kfd_ctx, data,
+					        n_entries, entry_size, suspend_queues);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtDebugTrapIoctl(struct kfd_ioctl_dbg_trap_args *args,
+					HSA_QUEUEID *Queues,
+					HSAuint64 *DebugReturn)
+{
+	return hsaKmtDebugTrapIoctlCtx(&hsakmt_primary_kfd_ctx, args, Queues, DebugReturn);
+}

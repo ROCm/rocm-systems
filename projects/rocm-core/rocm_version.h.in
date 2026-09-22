@@ -1,0 +1,58 @@
+//Copyright © Advanced Micro Devices, Inc., or its affiliates.
+//SPDX-License-Identifier: MIT
+
+#ifndef _ROCM_VERSION_H_
+#define _ROCM_VERSION_H_
+
+
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
+
+#if defined(_WIN32) || defined(__CYGWIN__)
+#define LIB_API_PUBLIC __declspec(dllexport)
+#define ATTRIBUTE_NON_NULL
+#else
+#define LIB_API_PUBLIC __attribute__((visibility("default")))
+#define ATTRIBUTE_NON_NULL __attribute__((nonnull))
+#endif
+
+#define ROCM_VERSION_MAJOR   @VERSION_MAJOR@
+#define ROCM_VERSION_MINOR   @VERSION_MINOR@
+#define ROCM_VERSION_PATCH   @VERSION_PATCH@
+
+#define ROCM_BUILD_INFO	     "@PACKAGE_BUILD_INFO@"
+
+typedef enum {
+	VerSuccess=0,
+	VerIncorrectParameters,
+	VerMemoryAllocationFailed,
+	VerValuesNotDefined,
+	VerErrorMAX		//This should always be last value in the enumerations
+} VerErrors;
+
+
+//  API for getting the version
+//  Return val :  VerErros : API execution status.  The parameters are valid only when the execution status is SUCCESS==0
+LIB_API_PUBLIC VerErrors getROCmVersion(unsigned int* Major, unsigned int* Minor, unsigned int* Patch) ATTRIBUTE_NON_NULL ;
+//  Usage :
+//  int mj=0,mn=0,p=0,ret=0;
+//  ret=getROCMVersion(&mj,&mn,&p);
+//  if(ret !=VerSuccess )  // error occured
+//
+//  check for the values and
+//
+
+
+
+//API for building build info on console
+LIB_API_PUBLIC VerErrors printBuildInfo();
+
+
+#ifdef __cplusplus
+}  // end extern "C" block
+#endif
+
+#endif  //_ROCM_VERSION_H_  header guard
+

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+if [ -z "$BASH_SOURCE" ]; then
+    # If not running bash, try to obtain directory with $0
+    BASEDIR="$( cd "$(dirname "$0")"; pwd -P )"
+else
+    BASEDIR=$(dirname ${BASH_SOURCE[0]})
+fi
+command -v realpath &> /dev/null && BASEDIR=$(realpath ${BASEDIR}/../..) || BASEDIR=$(cd ${BASEDIR}/../.. && pwd)
+
+if [ ! -d "${BASEDIR}" ]; then
+    echo "${BASEDIR} does not exist"
+    return 1
+fi
+
+@PROJECT_NAME_UNDERSCORED@_ROOT=${BASEDIR}
+PATH=${BASEDIR}/bin:${PATH}
+PATH=${BASEDIR}/@CMAKE_INSTALL_LIBEXECDIR@/@PROJECT_NAME@:${PATH}
+LD_LIBRARY_PATH=${BASEDIR}/@CMAKE_INSTALL_LIBDIR@:${LD_LIBRARY_PATH}
+PYTHONPATH=${BASEDIR}/@CMAKE_INSTALL_PYTHONDIR@:${PYTHONPATH}
+CMAKE_PREFIX_PATH=${BASEDIR}:${CMAKE_PREFIX_PATH}
+@PROJECT_NAME_UNDERSCORED@_DIR=${BASEDIR}/@CMAKE_INSTALL_DATAROOTDIR@/cmake/@PROJECT_NAME@
+
+export @PROJECT_NAME_UNDERSCORED@_ROOT
+export PATH
+export LD_LIBRARY_PATH
+export PYTHONPATH
+export CMAKE_PREFIX_PATH
+export @PROJECT_NAME_UNDERSCORED@_DIR

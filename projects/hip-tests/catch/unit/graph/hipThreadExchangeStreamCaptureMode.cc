@@ -1,0 +1,144 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <hip_test_checkers.hh>
+#include <hip_test_common.hh>
+#include <hip_test_kernels.hh>
+
+#include "stream_capture_common.hh"
+
+
+/**
+ * @addtogroup hipThreadExchangeStreamCaptureMode
+ * hipThreadExchangeStreamCaptureMode
+ * @{
+ * @ingroup GraphTest
+ * `hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode *mode)` -
+ * swaps the stream capture mode of a thread
+ */
+
+/* Local Function for swaping stream capture mode of a thread
+ */
+static void hipGraphLaunchWithMode(hipStream_t stream, hipStreamCaptureMode mode,
+                                   bool threadSafe = false) {
+  constexpr size_t N = 1024;
+  size_t Nbytes = N * sizeof(float);
+  constexpr float fill_value = 5.0f;
+
+  hipGraph_t graph{nullptr};
+  hipGraphExec_t graphExec{nullptr};
+
+  LinearAllocGuard<float> A_h(LinearAllocs::malloc, Nbytes);
+  LinearAllocGuard<float> B_h(LinearAllocs::malloc, Nbytes);
+  LinearAllocGuard<float> A_d(LinearAllocs::hipMalloc, Nbytes);
+  LinearAllocGuard<float> B_d(LinearAllocs::hipMalloc, Nbytes);
+  float* C_d;
+
+  HIP_CHECK_OPT_THREAD(threadSafe, hipThreadExchangeStreamCaptureMode(&mode));
+
+  HIP_CHECK_OPT_THREAD(threadSafe, hipStreamBeginCapture(stream, mode));
+
+  captureSequenceLinear(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), B_d.ptr(), N, stream, threadSafe);
+  captureSequenceCompute(A_d.ptr(), B_h.host_ptr(), B_d.ptr(), N, stream, threadSafe);
+
+  if (mode == hipStreamCaptureModeRelaxed) {
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMalloc(&C_d, Nbytes));
+  }
+
+  HIP_CHECK_OPT_THREAD(threadSafe, hipStreamEndCapture(stream, &graph));
+
+  // Validate end capture is successful
+  REQUIRE_OPT_THREAD(threadSafe, graph != nullptr);
+
+  HIP_CHECK_OPT_THREAD(threadSafe, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+
+  std::fill_n(A_h.host_ptr(), N, fill_value);
+  HIP_CHECK_OPT_THREAD(threadSafe, hipGraphLaunch(graphExec, stream));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipStreamSynchronize(stream));
+
+  // Validate the computation
+  ArrayFindIfNot(B_h.host_ptr(), fill_value * fill_value, N);
+  if (mode == hipStreamCaptureModeRelaxed) {
+    HIP_CHECK_OPT_THREAD(threadSafe, hipFree(C_d));
+  }
+
+  HIP_CHECK_OPT_THREAD(threadSafe, hipGraphExecDestroy(graphExec));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipGraphDestroy(graph));
+}
+
+void threadFuncCaptureMode(hipStream_t stream, hipStreamCaptureMode mode) {
+  hipGraphLaunchWithMode(stream, mode, true);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify basic functionality for API that swaps the stream capture
+ * mode of a thread. All combinations for main and other thread capture modes
+ * are tested
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipThreadExchangeStreamCaptureMode.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.3
+ */
+HIP_TEST_CASE(Unit_hipThreadExchangeStreamCaptureMode_Positive_Functional) {
+  StreamGuard stream_guard(Streams::created);
+  hipStream_t stream = stream_guard.stream();
+
+  const hipStreamCaptureMode captureModeMain = GENERATE(
+      hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
+  const hipStreamCaptureMode captureModeThread = GENERATE(
+      hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
+
+  hipGraphLaunchWithMode(stream, captureModeMain);
+  std::thread t(threadFuncCaptureMode, stream, captureModeThread);
+  t.join();
+  HIP_CHECK_THREAD_FINALIZE();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify API behavior with invalid arguments:
+ *        -# Mode as nullptr
+ *        -# Mode as -1
+ *        -# Mode as INT_MAX
+ *        -# Mode other than existing 3 modes (hipStreamCaptureModeRelaxed + 1)
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipThreadExchangeStreamCaptureMode.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.3
+ */
+#if HT_AMD  // getting error in Cuda Setup
+HIP_TEST_CASE(Unit_hipThreadExchangeStreamCaptureMode_Negative_Parameters) {
+  hipStreamCaptureMode mode;
+
+  SECTION("Pass Mode as nullptr") {
+    HIP_CHECK_ERROR(hipThreadExchangeStreamCaptureMode(nullptr), hipErrorInvalidValue);
+  }
+  SECTION("Pass Mode as -1") {
+    mode = hipStreamCaptureMode(-1);
+    HIP_CHECK_ERROR(hipThreadExchangeStreamCaptureMode(&mode), hipErrorInvalidValue);
+  }
+  SECTION("Pass Mode as INT_MAX") {
+    mode = hipStreamCaptureMode(INT_MAX);
+    HIP_CHECK_ERROR(hipThreadExchangeStreamCaptureMode(&mode), hipErrorInvalidValue);
+  }
+  SECTION("Pass Mode as hipStreamCaptureModeRelaxed + 1") {
+    mode = hipStreamCaptureMode(hipStreamCaptureModeRelaxed + 1);
+    HIP_CHECK_ERROR(hipThreadExchangeStreamCaptureMode(&mode), hipErrorInvalidValue);
+  }
+}
+#endif
+
+/**
+ * End doxygen group GraphTest.
+ * @}
+ */

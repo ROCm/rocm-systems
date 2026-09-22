@@ -1,0 +1,154 @@
+module &m:1:0:$full:$large:$default;
+extension "amd:gcn";
+extension "IMAGE";
+
+decl prog function &abort()();
+
+prog kernel &__OpenCL_simple_convolution(kernarg_u64 %__global_offset_0,
+                                        kernarg_u64 %output,
+                                        kernarg_u64 %input,
+                                        kernarg_u64 %mask,
+                                        kernarg_u32 %inputDimensions[2],
+                                        kernarg_u32 %maskDimensions[2]) {
+
+	pragma  "AMD RTI", "ARGSTART:__OpenCL_simple_convolution";
+	pragma  "AMD RTI", "version:3:1:104";
+	pragma  "AMD RTI", "device:generic";
+	pragma  "AMD RTI", "uniqueid:1024";
+	pragma  "AMD RTI", "memory:private:0";
+	pragma  "AMD RTI", "memory:region:0";
+	pragma  "AMD RTI", "memory:local:0";
+	pragma  "AMD RTI", "value:__global_offset_0:u64:1:1:0";
+	pragma  "AMD RTI", "pointer:output:u32:1:1:96:uav:7:4:RW:0:0:0";
+	pragma  "AMD RTI", "pointer:input:u32:1:1:112:uav:7:4:RW:0:0:0";
+	pragma  "AMD RTI", "pointer:mask:float:1:1:128:uav:7:4:RW:0:0:0";
+	pragma  "AMD RTI", "value:inputDimensions:u32:2:1:144";
+	pragma  "AMD RTI", "constarg:4:inputDimensions";
+	pragma  "AMD RTI", "value:maskDimensions:u32:2:1:160";
+	pragma  "AMD RTI", "constarg:5:maskDimensions";
+	pragma  "AMD RTI", "function:1:0";
+	pragma  "AMD RTI", "memory:64bitABI";
+	pragma  "AMD RTI", "privateid:8";
+	pragma  "AMD RTI", "enqueue_kernel:0";
+	pragma  "AMD RTI", "kernel_index:0";
+	pragma  "AMD RTI", "reflection:0:size_t";
+	pragma  "AMD RTI", "reflection:1:uint*";
+	pragma  "AMD RTI", "reflection:2:uint*";
+	pragma  "AMD RTI", "reflection:3:float*";
+	pragma  "AMD RTI", "reflection:4:uint2";
+	pragma  "AMD RTI", "reflection:5:uint2";
+	pragma  "AMD RTI", "ARGEND:__OpenCL_simple_convolution";
+
+  @__OpenCL_simple_convolution_Entry:
+
+  // BB#0:    // %entry
+
+	workitemabsid_u32	$s6, 0;
+	cvt_u64_u32	$d0, $s6;
+	ld_kernarg_align(8)_width(all)_u64	$d4, [%__global_offset_0];
+	add_u64	$d0, $d0, $d4;
+	cvt_u32_u64	$s5, $d0;
+	ld_v2_kernarg_align(4)_width(all)_u32	($s0, $s4), [%inputDimensions];
+	ld_v2_kernarg_align(4)_width(all)_u32	($s1, $s9), [%maskDimensions];
+	rem_u32	$s7, $s5, $s0;
+	add_u32	$s2, $s1, 4294967295;
+	shr_u32	$s8, $s2, 1;
+	add_u32	$s2, $s7, $s8;
+	add_u32	$s3, $s0, 4294967295;
+	cmp_ge_b1_u32	$c0, $s2, $s0;
+	cmov_b32	$s2, $c0, $s3, $s2;
+	sub_u32	$s3, $s7, $s8;
+	cmp_lt_b1_u32	$c0, $s7, $s8;
+	cmov_b32	$s3, $c0, 0, $s3;
+	ld_kernarg_align(8)_width(all)_u64	$d1, [%output];
+	cmp_le_b1_u32	$c0, $s3, $s2;
+	cbr_b1	$c0, @BB0_2;
+
+	// BB#1:
+
+  mov_b32	$s6, 0;
+	br	@BB0_6;
+
+	// @BB0_2:    // %for.cond32.preheader.lr.ph
+
+  @BB0_2:
+
+  div_u32	$s5, $s5, $s0;
+	add_u32	$s9, $s9, 4294967295;
+	shr_u32	$s9, $s9, 1;
+	add_u32	$s10, $s5, $s9;
+	add_u32	$s11, $s4, 4294967295;
+	cmp_ge_b1_u32	$c0, $s10, $s4;
+	cmov_b32	$s4, $c0, $s11, $s10;
+	sub_u32	$s10, $s5, $s9;
+	cmp_lt_b1_u32	$c0, $s5, $s9;
+	cmov_b32	$s5, $c0, 0, $s10;
+	ld_kernarg_align(8)_width(all)_u64	$d2, [%mask];
+	ld_kernarg_align(8)_width(all)_u64	$d3, [%input];
+	cvt_u64_u32	$d5, $s6;
+	add_u64	$d4, $d4, $d5;
+	cvt_u32_u64	$s6, $d4;
+	div_u32	$s6, $s6, $s0;
+	max_u32	$s10, $s9, $s6;
+	sub_u32	$s12, $s10, $s6;
+	max_u32	$s11, $s7, $s8;
+	mov_b32	$s6, 0;
+	mad_u32	$s12, $s1, $s12, $s11;
+	sub_u32	$s7, $s12, $s7;
+	sub_u32	$s9, $s10, $s9;
+	mad_u32	$s9, $s0, $s9, $s11;
+	sub_u32	$s8, $s9, $s8;
+
+	// @BB0_3:    // %for.cond32.preheader
+
+  @BB0_3:
+
+  cmp_gt_b1_u32	$c0, $s5, $s4;
+	mov_b32	$s9, $s7;
+	mov_b32	$s10, $s8;
+	mov_b32	$s11, $s5;
+	cbr_b1	$c0, @BB0_5;
+
+  // @BB0_4:    // %for.body35
+
+  @BB0_4:
+
+	cvt_u64_u32	$d4, $s9;
+	shl_u64	$d4, $d4, 2;
+	add_u64	$d4, $d2, $d4;
+	ld_global_align(4)_f32	$s12, [$d4];
+	cvt_u64_u32	$d4, $s10;
+	shl_u64	$d4, $d4, 2;
+	add_u64	$d4, $d3, $d4;
+	ld_global_align(4)_u32	$s13, [$d4];
+	cvt_f32_u32	$s13, $s13;
+	mul_ftz_f32	$s12, $s13, $s12;
+	add_u32	$s9, $s9, $s1;
+	add_u32	$s10, $s10, $s0;
+	add_u32	$s11, $s11, 1;
+	add_ftz_f32	$s6, $s6, $s12;
+	cmp_le_b1_u32	$c0, $s11, $s4;
+	cbr_b1	$c0, @BB0_4;
+
+	// @BB0_5:    // %for.inc48
+
+  @BB0_5:
+
+  add_u32	$s7, $s7, 1;
+	add_u32	$s8, $s8, 1;
+	add_u32	$s3, $s3, 1;
+	cmp_le_b1_u32	$c0, $s3, $s2;
+	cbr_b1	$c0, @BB0_3;
+
+	// @BB0_6:    // %for.end50
+
+  @BB0_6:
+
+  and_b64	$d0, $d0, 4294967295;
+	shl_u64	$d0, $d0, 2;
+	add_u64	$d0, $d1, $d0;
+	add_ftz_f32	$s0, $s6, 0F3f000000;
+	cvt_ftz_u32_f32	$s0, $s0;
+	st_global_align(4)_u32	$s0, [$d0];
+	ret;
+};

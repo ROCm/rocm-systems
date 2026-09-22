@@ -1,0 +1,1711 @@
+/*************************************************************************
+ * Copyright (c) 2019-2022, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+#include <ctype.h>
+#include <float.h>
+#include "core.h"
+#include "nvmlwrap.h"
+#include "xml.h"
+#ifdef USE_AMDSMI
+#include "amdsmi_wrap.h"
+#else
+#include "rocm_smi_wrap.h"
+#endif
+#include "archinfo.h"
+#include "os.h"
+#include "topo.h"
+#if defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
+#if defined(_MSC_VER)
+#include <intrin.h>
+#else
+#include <cpuid.h>
+#endif
+#endif
+
+// Arbitrarily large number for constructing virtual topology string
+#define NCCL_MAX_XML_DEPTH 1024
+
+static int ncclTopoPciClassIsGpu(const char* deviceClass) {
+  if (deviceClass == NULL || deviceClass[0] == '\0') return 0;
+  if (strncmp(deviceClass, PCI_ACCELERATOR_CLASS, strlen(PCI_ACCELERATOR_CLASS)) == 0) return 1;
+  if (strncmp(deviceClass, "0x03", 4) == 0) return 1;
+  return 0;
+}
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// XGMI peers come from accelerator enumeration, so do not infer their class
+// from a HIP alias BDF that may be missing or identify another PCI function.
+static ncclResult_t ncclTopoXmlAddXgmiPeerGpu(struct ncclXml* xml, struct ncclXmlNode* gpuNode, const char* target,
+                                              int count, struct ncclXmlNode** nodeOut, int* createdOut = NULL) {
+  struct ncclXmlNode* node = NULL;
+  NCCLCHECK(xmlGetSubKv(gpuNode, "xgmi", &node, "target", target));
+  int created = node == NULL;
+  if (created) {
+    NCCLCHECK(xmlAddNode(xml, gpuNode, "xgmi", &node));
+    NCCLCHECK(xmlSetAttr(node, "target", target));
+    NCCLCHECK(xmlSetAttrInt(node, "count", count));
+    NCCLCHECK(xmlSetAttr(node, "tclass", PCI_ACCELERATOR_CLASS));
+  }
+  if (nodeOut) *nodeOut = node;
+  if (createdOut) *createdOut = created;
+  return ncclSuccess;
+}
+#endif
+
+/*******************/
+/* XML File Parser */
+/*******************/
+
+typedef ncclResult_t (*xmlHandlerFunc_t)(FILE*, struct ncclXml*, struct ncclXmlNode*);
+
+struct xmlHandler {
+  const char* name;
+  xmlHandlerFunc_t func;
+};
+
+#if defined(NCCL_OS_LINUX)
+
+ncclResult_t xmlGetChar(FILE* file, char* c) {
+  if (fread(c, 1, 1, file) == 0) {
+    WARN("XML Parse : Unexpected EOF");
+    return ncclInternalError;
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t xmlGetValue(FILE* file, char* value, char* last) {
+  char c;
+  NCCLCHECK(xmlGetChar(file, &c));
+  if (c != '"' && c != '\'') {
+#if INT_OK
+    int o = 0;
+    do {
+      value[o] = c;
+      if (o == MAX_STR_LEN - 1) {
+        value[o] = '\0';
+        WARN("Error : value %s too long (max %d)", value, MAX_STR_LEN);
+        return ncclInternalError;
+      }
+      o++;
+      NCCLCHECK(xmlGetChar(file, &c));
+    } while (c >= '0' && c <= '9');
+    value[o] = '\0';
+    *last = c;
+    return ncclSuccess;
+#else
+    WARN("XML Parse : Expected (double) quote.");
+    return ncclInternalError;
+#endif
+  }
+  int o = 0;
+  char quote = c;  // Remember which quote type we started with
+  do {
+    NCCLCHECK(xmlGetChar(file, &c));
+    value[o] = c;
+    if (o == MAX_STR_LEN - 1) {
+      value[o] = '\0';
+      WARN("Error : value %s too long (max %d)", value, MAX_STR_LEN);
+      return ncclInternalError;
+    }
+    o++;
+  } while (c != quote);
+  value[o - 1] = '\0';
+  NCCLCHECK(xmlGetChar(file, last));
+  return ncclSuccess;
+}
+
+ncclResult_t xmlGetToken(FILE* file, char* name, char* value, char* last) {
+  char c;
+  char* ptr = name;
+  int o = 0;
+  do {
+    NCCLCHECK(xmlGetChar(file, &c));
+    if (c == '=') {
+      ptr[o] = '\0';
+      if (value == NULL) {
+        WARN("XML Parse : Unexpected value with name %s", ptr);
+        return ncclInternalError;
+      }
+      return xmlGetValue(file, value, last);
+    }
+    ptr[o] = c;
+    if (o == MAX_STR_LEN - 1) {
+      ptr[o] = '\0';
+      WARN("Error : name %s too long (max %d)", ptr, MAX_STR_LEN);
+      return ncclInternalError;
+    }
+    o++;
+  } while (c != ' ' && c != '>' && c != '/' && c != '\n' && c != '\r');
+  ptr[o - 1] = '\0';
+  *last = c;
+  return ncclSuccess;
+}
+
+// Shift the 3-chars string by one char and append c at the end
+#define SHIFT_APPEND(s, c) \
+  do { \
+    s[0] = s[1]; \
+    s[1] = s[2]; \
+    s[2] = c; \
+  } while (0)
+ncclResult_t xmlSkipComment(FILE* file, char* start, char next) {
+  // Start from something neutral with \0 at the end.
+  char end[4] = "...";
+
+  // Inject all trailing chars from previous reads. We don't need
+  // to check for --> here because there cannot be a > in the name.
+  for (int i = 0; i < strlen(start); i++) SHIFT_APPEND(end, start[i]);
+  SHIFT_APPEND(end, next);
+
+  // Stop when we find "-->"
+  while (strcmp(end, "-->") != 0) {
+    int c;
+    if (fread(&c, 1, 1, file) != 1) {
+      WARN("XML Parse error : unterminated comment");
+      return ncclInternalError;
+    }
+    SHIFT_APPEND(end, c);
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t xmlGetNode(FILE* file, struct ncclXmlNode* node) {
+  node->type = NODE_TYPE_NONE;
+  char c = ' ';
+  while (c == ' ' || c == '\n' || c == '\r') {
+    if (fread(&c, 1, 1, file) == 0) return ncclSuccess;
+  }
+  if (c != '<') {
+    WARN("XML Parse error : expecting '<', got '%c'", c);
+    return ncclInternalError;
+  }
+  // Read XML element name
+  NCCLCHECK(xmlGetToken(file, node->name, NULL, &c));
+
+  // Check for comments
+  if (strncmp(node->name, "!--", 3) == 0) {
+    NCCLCHECK(xmlSkipComment(file, node->name + 3, c));
+    return xmlGetNode(file, node);
+  }
+
+  // Check for closing tag
+  if (node->name[0] == '\0' && c == '/') {
+    node->type = NODE_TYPE_CLOSE;
+    // Re-read the name, we got '/' in the first call
+    NCCLCHECK(xmlGetToken(file, node->name, NULL, &c));
+    if (c != '>') {
+      WARN("XML Parse error : unexpected trailing %c in closing tag %s", c, node->name);
+      return ncclInternalError;
+    }
+    return ncclSuccess;
+  }
+
+  node->type = NODE_TYPE_OPEN;
+
+  // Get Attributes
+  int a = 0;
+  while (c == ' ') {
+    NCCLCHECK(xmlGetToken(file, node->attrs[a].key, node->attrs[a].value, &c));
+    if (a == MAX_ATTR_COUNT) {
+      INFO(NCCL_GRAPH, "XML Parse : Ignoring extra attributes (max %d)", MAX_ATTR_COUNT);
+      // Actually we need to still consume the extra attributes so we have an extra one.
+    } else a++;
+  }
+  node->nAttrs = a;
+  if (c == '/') {
+    node->type = NODE_TYPE_SINGLE;
+    char str[MAX_STR_LEN];
+    NCCLCHECK(xmlGetToken(file, str, NULL, &c));
+  }
+  if (c != '>') {
+    WARN("XML Parse : expected >, got '%c'", c);
+    return ncclInternalError;
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t xmlLoadSub(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head, struct xmlHandler handlers[],
+                        int nHandlers) {
+  if (head && head->type == NODE_TYPE_SINGLE) return ncclSuccess;
+  while (1) {
+    if (xml->maxIndex == xml->maxNodes) {
+      WARN("Error : XML parser is limited to %d nodes", xml->maxNodes);
+      return ncclInternalError;
+    }
+    struct ncclXmlNode* node = xml->nodes + xml->maxIndex;
+    memset(node, 0, sizeof(struct ncclXmlNode));
+    NCCLCHECK(xmlGetNode(file, node));
+    if (node->type == NODE_TYPE_NONE) {
+      if (head) {
+        WARN("XML Parse : unterminated %s", head->name);
+        return ncclInternalError;
+      } else {
+        // All done
+        return ncclSuccess;
+      }
+    }
+    if (head && node->type == NODE_TYPE_CLOSE) {
+      if (strcmp(node->name, head->name) != 0) {
+        WARN("XML Mismatch : %s / %s", head->name, node->name);
+        return ncclInternalError;
+      }
+      return ncclSuccess;
+    }
+    int found = 0;
+    for (int h = 0; h < nHandlers; h++) {
+      if (strcmp(node->name, handlers[h].name) == 0) {
+        if (head) {
+          if (head->nSubs == MAX_SUBS) {
+            WARN("Error : XML parser is limited to %d subnodes", MAX_SUBS);
+            return ncclInternalError;
+          }
+          head->subs[head->nSubs++] = node;
+        }
+        node->parent = head;
+        node->nSubs = 0;
+        xml->maxIndex++;
+        NCCLCHECK(handlers[h].func(file, xml, node));
+        found = 1;
+        break;
+      }
+    }
+    if (!found) {
+      if (nHandlers) INFO(NCCL_GRAPH, "Ignoring element %s", node->name);
+      NCCLCHECK(xmlLoadSub(file, xml, node, NULL, 0));
+    }
+  }
+}
+
+#endif
+
+/**************/
+/* XML Writer */
+/**************/
+
+// exp == 1 -- serialize; exp == 0 -- deserialize
+ncclResult_t ncclTopoConvertXml(struct ncclXml* xml, uintptr_t base, int exp) {
+  for (int n = 0; n < xml->maxIndex; n++) {
+    struct ncclXmlNode* node = &xml->nodes[n];
+
+    // For "parent", we shift the base by 1 so that we can distinguish actual
+    // NULL pointers from pointers pointing to the first node.
+    if (node->parent)
+      node->parent =
+        (struct ncclXmlNode*)(exp ? ((uintptr_t)node->parent - base + 1) : (base - 1 + (uintptr_t)node->parent));
+
+    for (int s = 0; s < node->nSubs; s++) {
+      node->subs[s] =
+        (struct ncclXmlNode*)(exp ? ((uintptr_t)node->subs[s] - base) : (base + (uintptr_t)node->subs[s]));
+    }
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoDumpXmlRec(int indent, FILE* file, struct ncclXmlNode* node) {
+  for (int i = 0; i < indent; i++) fprintf(file, " ");
+  fprintf(file, "<%s", node->name);
+
+  for (int a = 0; a < node->nAttrs; a++) {
+    fprintf(file, " %s=\"%s\"", node->attrs[a].key, node->attrs[a].value);
+  }
+  if (node->nSubs == 0) {
+    fprintf(file, "/>\n");
+  } else {
+    fprintf(file, ">\n");
+    for (int s = 0; s < node->nSubs; s++) {
+      NCCLCHECK(ncclTopoDumpXmlRec(indent + 2, file, node->subs[s]));
+    }
+    for (int i = 0; i < indent; i++) fprintf(file, " ");
+    fprintf(file, "</%s>\n", node->name);
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoDumpXmlToFile(const char* xmlTopoFile, struct ncclXml* xml) {
+  FILE* file = fopen(xmlTopoFile, "w");
+  if (file == NULL) {
+    INFO(NCCL_GRAPH | NCCL_ENV, "Unable to open %s, not dumping topology.", xmlTopoFile);
+    return ncclSuccess;
+  }
+  NCCLCHECK(ncclTopoDumpXmlRec(0, file, xml->nodes));
+  fclose(file);
+  return ncclSuccess;
+}
+
+static ncclResult_t xmlTopoFuseXmlRecursive(struct ncclXml* dst, struct ncclXmlNode* dstParent,
+                                            struct ncclXmlNode* srcParent) {
+  for (int i = 0; i < srcParent->nSubs; i++) {
+    struct ncclXmlNode* srcNode = srcParent->subs[i];
+    struct ncclXmlNode* dstNode;
+    NCCLCHECK(xmlFindNode(dstParent, srcNode, &dstNode));
+    if (dstNode == NULL) {
+      NCCLCHECK(xmlAddTree(dst, dstParent, srcNode));
+    } else {
+      NCCLCHECK(xmlTopoFuseXmlRecursive(dst, dstNode, srcNode));
+    }
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoFuseXml(struct ncclXml* dst, struct ncclXml* src) {
+  struct ncclXmlNode* topNodeDst;
+  NCCLCHECK(xmlFindTag(dst, "system", &topNodeDst));
+
+  if (topNodeDst == NULL) {
+    xmlAddTree(dst, NULL, src->nodes);
+    return ncclSuccess;
+  }
+
+  struct ncclXmlNode* topNodeSrc;
+  NCCLCHECK(xmlFindTag(src, "system", &topNodeSrc));
+
+  NCCLCHECK(xmlTopoFuseXmlRecursive(dst, topNodeDst, topNodeSrc));
+
+  return ncclSuccess;
+}
+
+#if NCCL_OS_LINUX
+
+/****************************************/
+/* Parser rules for our specific format */
+/****************************************/
+
+ncclResult_t ncclTopoXmlLoadNvlink(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  NCCLCHECK(xmlLoadSub(file, xml, head, NULL, 0));
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlLoadPciLink(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  NCCLCHECK(xmlLoadSub(file, xml, head, NULL, 0));
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlLoadC2c(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  NCCLCHECK(xmlLoadSub(file, xml, head, NULL, 0));
+  return ncclSuccess;
+}
+ncclResult_t ncclTopoXmlLoadGpu(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  struct xmlHandler handlers[] = {{"xgmi", ncclTopoXmlLoadNvlink}};
+#else
+  struct xmlHandler handlers[] = {{"nvlink", ncclTopoXmlLoadNvlink}, {"c2c", ncclTopoXmlLoadC2c}};
+#endif
+  NCCLCHECK(xmlLoadSub(file, xml, head, handlers, sizeof(handlers) / sizeof(handlers[0])));
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlLoadNet(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  NCCLCHECK(xmlLoadSub(file, xml, head, NULL, 0));
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlLoadNic(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  struct xmlHandler handlers[] = {{"net", ncclTopoXmlLoadNet}};
+  NCCLCHECK(xmlLoadSub(file, xml, head, handlers, 1));
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlLoadPci(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  struct xmlHandler handlers[] = {{"pci", ncclTopoXmlLoadPci},
+                                  {"gpu", ncclTopoXmlLoadGpu},
+                                  {"nic", ncclTopoXmlLoadNic},
+                                  {"pcilink", ncclTopoXmlLoadPciLink}};
+  NCCLCHECK(xmlLoadSub(file, xml, head, handlers, 4));
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlLoadCpu(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  struct xmlHandler handlers[] = {{"pci", ncclTopoXmlLoadPci}, {"nic", ncclTopoXmlLoadNic}};
+  NCCLCHECK(xmlLoadSub(file, xml, head, handlers, 2));
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlLoadSystem(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  int version;
+  NCCLCHECK(xmlGetAttrInt(head, "version", &version));
+  if (version != NCCL_TOPO_XML_VERSION) {
+    WARN("XML Topology has wrong version %d, %d needed", version, NCCL_TOPO_XML_VERSION);
+    return ncclInvalidUsage;
+  }
+  const char* name;
+  NCCLCHECK(xmlGetAttr(head, "name", &name));
+  if (name != NULL) {
+    INFO(NCCL_GRAPH, "Loading topology %s", name);
+  } else {
+    INFO(NCCL_GRAPH, "Loading unnamed topology");
+  }
+
+  struct xmlHandler handlers[] = {{"cpu", ncclTopoXmlLoadCpu}};
+  NCCLCHECK(xmlLoadSub(file, xml, head, handlers, 1));
+  return ncclSuccess;
+}
+
+#endif // NCCL_OS_LINUX (XML file parsers)
+
+ncclResult_t ncclTopoGetXmlFromFile(const char* xmlTopoFile, struct ncclXml* xml, int warn) {
+#if NCCL_OS_LINUX
+  FILE* file = fopen(xmlTopoFile, "r");
+  if (file == NULL) {
+    if (warn) {
+      INFO(NCCL_GRAPH | NCCL_ENV, "Could not open XML topology file %s : %s", xmlTopoFile, strerror(errno));
+    }
+    return ncclSuccess;
+  }
+  INFO(NCCL_GRAPH, "Loading topology file %s", xmlTopoFile);
+  struct xmlHandler handlers[] = {{"system", ncclTopoXmlLoadSystem}};
+  xml->maxIndex = 0;
+  NCCLCHECK(xmlLoadSub(file, xml, NULL, handlers, 1));
+  fclose(file);
+#elif NCCL_OS_WINDOWS
+  (void)xmlTopoFile;
+  (void)xml;
+  (void)warn;
+#endif
+  return ncclSuccess;
+}
+
+/**********************/
+/* XML creation       */
+/* from autodetection */
+/**********************/
+
+#define BUSID_SIZE (sizeof("0000:00:00.0"))
+#define BUSID_REDUCED_SIZE (sizeof("0000:00"))
+
+ncclResult_t ncclTopoSetAttrFromSys(struct ncclXmlNode* pciNode, const char* path, const char* fileName,
+                                    const char* attrName) {
+  char strValue[MAX_STR_LEN];
+  NCCLCHECK(ncclOsTopoGetStrFromSys(path, fileName, strValue, MAX_STR_LEN));
+  if (strValue[0] != '\0') NCCLCHECK(xmlSetAttr(pciNode, attrName, strValue));
+  TRACE(NCCL_GRAPH, "Read from sys %s/%s -> %s=%s", path, fileName, attrName, strValue);
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoSetAttrFromNvml(struct ncclXmlNode* pciNode, nvmlDevice_t device, const char* attrName) {
+  nvmlPciInfo_t pciInfo;
+  ncclResult_t ret = ncclNvmlDeviceGetPciInfo(device, &pciInfo);
+  if (ret != ncclSuccess) return ret;
+
+  char strValue[MAX_STR_LEN];
+  strValue[0] = '\0';
+  if (strcmp(attrName, "vendor") == 0) {
+    snprintf(strValue, MAX_STR_LEN, "0x%x", pciInfo.pciDeviceId & 0xFFFF);
+  } else if (strcmp(attrName, "device") == 0) {
+    snprintf(strValue, MAX_STR_LEN, "0x%x", (pciInfo.pciDeviceId >> 16) & 0xFFFF);
+  } else if (strcmp(attrName, "subsystem_vendor") == 0) {
+    snprintf(strValue, MAX_STR_LEN, "0x%x", pciInfo.pciSubSystemId & 0xFFFF);
+  } else if (strcmp(attrName, "subsystem_device") == 0) {
+    snprintf(strValue, MAX_STR_LEN, "0x%x", (pciInfo.pciSubSystemId >> 16) & 0xFFFF);
+  }
+  if (strValue[0] == '\0') return ncclInternalError;
+
+  NCCLCHECK(xmlSetAttr(pciNode, attrName, strValue));
+  TRACE(NCCL_GRAPH, "Read from NVML %s=%s", attrName, strValue);
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoGetXmlFromCpu(struct ncclXmlNode* cpuNode, struct ncclXml* xml) {
+  int index;
+  NCCLCHECK(xmlGetAttrIndex(cpuNode, "affinity", &index));
+  if (index == -1) {
+    const char* numaId;
+    NCCLCHECK(xmlGetAttr(cpuNode, "numaid", &numaId));
+    if (numaId == NULL) {
+      WARN("GetXmlFromCpu : could not find CPU numa ID.");
+      return ncclInternalError;
+    }
+    // Set affinity using OS-specific implementation
+    unsigned int nodeNumber = (unsigned int)strtoul(numaId, NULL, 0);
+    char affinityStr[MAX_STR_LEN];
+    NCCLCHECK(ncclOsGetNumaNodeAffinity(nodeNumber, affinityStr, sizeof(affinityStr)));
+    NCCLCHECK(xmlSetAttr(cpuNode, "affinity", affinityStr));
+  }
+
+  NCCLCHECK(xmlGetAttrIndex(cpuNode, "arch", &index));
+  if (index == -1) {
+    // Fill CPU type / vendor / model
+#if defined(__PPC__)
+    NCCLCHECK(xmlSetAttr(cpuNode, "arch", "ppc64"));
+#elif defined(__aarch64__)
+    NCCLCHECK(xmlSetAttr(cpuNode, "arch", "arm64"));
+#elif defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
+    NCCLCHECK(xmlSetAttr(cpuNode, "arch", "x86_64"));
+#else
+    WARN("getXmlFromCpu: Unknown CPU architecture");
+    return ncclInternalError;
+#endif
+  }
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
+  NCCLCHECK(xmlGetAttrIndex(cpuNode, "vendor", &index));
+  if (index == -1) {
+    union {
+      struct {
+        // CPUID 0 String register order
+        uint32_t ebx;
+        uint32_t edx;
+        uint32_t ecx;
+      };
+      char vendor[12];
+    } cpuid0;
+
+#if NCCL_OS_LINUX
+    unsigned unused;
+    __cpuid(0, unused, cpuid0.ebx, cpuid0.ecx, cpuid0.edx);
+#elif NCCL_OS_WINDOWS
+    int cpuInfo[4];
+    __cpuid(cpuInfo, 0);
+    cpuid0.ebx = cpuInfo[1];
+    cpuid0.edx = cpuInfo[3];
+    cpuid0.ecx = cpuInfo[2];
+#endif
+    char vendor[13];
+    strncpy(vendor, cpuid0.vendor, 12);
+    vendor[12] = '\0';
+    NCCLCHECK(xmlSetAttr(cpuNode, "vendor", vendor));
+  }
+
+  NCCLCHECK(xmlGetAttrIndex(cpuNode, "familyid", &index));
+  if (index == -1) {
+    union {
+      struct {
+        unsigned steppingId:4;
+        unsigned modelId:4;
+        unsigned familyId:4;
+        unsigned processorType:2;
+        unsigned resv0:2;
+        unsigned extModelId:4;
+        unsigned extFamilyId:8;
+        unsigned resv1:4;
+      };
+      uint32_t val;
+    } cpuid1;
+#if NCCL_OS_LINUX
+    unsigned unused;
+    __cpuid(1, cpuid1.val, unused, unused, unused);
+#elif NCCL_OS_WINDOWS
+    int cpuInfo[4];
+    __cpuid(cpuInfo, 1);
+    cpuid1.val = cpuInfo[0];  // EAX contains the processor info
+#endif
+    int familyId = cpuid1.familyId;
+    int modelId = cpuid1.modelId;
+    if (familyId == 15 || familyId == 6) modelId += cpuid1.extModelId << 4;
+    if (familyId == 15) familyId += cpuid1.extFamilyId;
+    NCCLCHECK(xmlSetAttrInt(cpuNode, "familyid", familyId));
+    NCCLCHECK(xmlSetAttrInt(cpuNode, "modelid", modelId));
+  }
+#endif
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoGetPciNode(struct ncclXml* xml, const char* busId, struct ncclXmlNode** pciNode) {
+  NCCLCHECK(xmlFindTagKv(xml, "pci", pciNode, "busid", busId));
+  if (*pciNode == NULL) {
+    NCCLCHECK(xmlAddNode(xml, NULL, "pci", pciNode));
+    NCCLCHECK(xmlSetAttr(*pciNode, "busid", busId));
+  }
+  return ncclSuccess;
+}
+
+// Check whether a string is in BDF format or not.
+// BDF (Bus-Device-Function) is "BBBB:BB:DD.F" where B, D and F are hex digits.
+// There can be trailing chars.
+int isHex(char c) {
+  return ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
+}
+int checkBDFFormat(char* bdf) {
+  if (strlen(bdf) != 12) return 0;
+  if ((bdf[4] != ':') || (bdf[7] != ':') || (bdf[10] != '.')) return 0;
+  if ((isHex(bdf[0]) == 0) || (isHex(bdf[1]) == 0) || (isHex(bdf[2]) == 0) || (isHex(bdf[3]) == 0) ||
+      (isHex(bdf[5]) == 0) || (isHex(bdf[6]) == 0) || (isHex(bdf[8]) == 0) || (isHex(bdf[9]) == 0) ||
+      (isHex(bdf[11]) == 0))
+    return 0;
+  return 1;
+}
+
+ncclResult_t ncclTopoGetXmlFromSys(struct ncclXmlNode* pciNode, struct ncclXml* xml) {
+  ncclResult_t ret = ncclSuccess;
+  const char* vendor = NULL;
+  struct ncclXmlNode* parent = NULL;
+  char* peers = NULL;
+
+  // Fill info, then parent
+  const char* busId;
+  NCCLCHECK(xmlGetAttr(pciNode, "busid", &busId));
+  nvmlDevice_t device;
+  bool nvmlDeviceFound = false;
+
+#if NCCL_OS_LINUX
+  char* path = NULL;
+  const char* deviceClass = NULL;
+  NOWARN(ncclOsGetPciPath(busId, &path), NCCL_GRAPH);
+  if (path) NCCLCHECKGOTO(ncclTopoSetAttrFromSys(pciNode, path, "class", "class"), ret, exit);
+
+  NCCLCHECKGOTO(xmlGetAttr(pciNode, "class", &deviceClass), ret, exit);
+  if (deviceClass == NULL || deviceClass[0] == '\0' || strncmp(deviceClass, "0x03", 4) == 0) {
+    ncclResult_t nvmlRet;
+    NOWARN(nvmlRet = ncclNvmlDeviceGetHandleByPciBusId(busId, &device), NCCL_GRAPH);
+    if (nvmlRet == ncclSuccess) nvmlDeviceFound = true;
+  }
+
+#elif NCCL_OS_WINDOWS
+  char* parentBusId = NULL;
+  char deviceClass[MAX_STR_LEN];
+  deviceClass[0] = '\0';
+  bool isGpuDevice = false;
+  if (ncclOsGetPciDeviceClassByBusId(busId, deviceClass, sizeof(deviceClass)) == ncclSuccess &&
+      deviceClass[0] != '\0') {
+    NCCLCHECK(xmlSetAttr(pciNode, "class", deviceClass));
+    TRACE(NCCL_GRAPH, "Read from Windows SetupDi class=%s", deviceClass);
+    isGpuDevice = (strncmp(deviceClass, "0x03", 4) == 0);
+  } else {
+    TRACE(NCCL_INIT, "ncclTopoGetXmlFromSys: Could not get device class for %s", busId);
+  }
+  if (isGpuDevice) {
+    ncclResult_t winNvmlRet;
+    NOWARN(winNvmlRet = ncclNvmlDeviceGetHandleByPciBusId(busId, &device), NCCL_GRAPH);
+    if (winNvmlRet == ncclSuccess) nvmlDeviceFound = true;
+  }
+#endif
+
+  int index;
+  NCCLCHECKGOTONOWARN(xmlGetAttrIndex(pciNode, "vendor", &index), ret, exit, NCCL_GRAPH);
+  if (index == -1) {
+    if (nvmlDeviceFound) NOWARN(ncclTopoSetAttrFromNvml(pciNode, device, "vendor"), NCCL_GRAPH);
+#if NCCL_OS_LINUX
+    else if (path) NOWARN(ncclTopoSetAttrFromSys(pciNode, path, "vendor", "vendor"), NCCL_GRAPH);
+#endif
+  }
+  NCCLCHECKGOTONOWARN(xmlGetAttrIndex(pciNode, "device", &index), ret, exit, NCCL_GRAPH);
+  if (index == -1) {
+    if (nvmlDeviceFound) NOWARN(ncclTopoSetAttrFromNvml(pciNode, device, "device"), NCCL_GRAPH);
+#if NCCL_OS_LINUX
+    else if (path) NOWARN(ncclTopoSetAttrFromSys(pciNode, path, "device", "device"), NCCL_GRAPH);
+#endif
+  }
+  NCCLCHECKGOTONOWARN(xmlGetAttrIndex(pciNode, "subsystem_vendor", &index), ret, exit, NCCL_GRAPH);
+  if (index == -1) {
+    if (nvmlDeviceFound) NOWARN(ncclTopoSetAttrFromNvml(pciNode, device, "subsystem_vendor"), NCCL_GRAPH);
+#if NCCL_OS_LINUX
+    else if (path) NOWARN(ncclTopoSetAttrFromSys(pciNode, path, "subsystem_vendor", "subsystem_vendor"), NCCL_GRAPH);
+#endif
+  }
+  NCCLCHECKGOTONOWARN(xmlGetAttrIndex(pciNode, "subsystem_device", &index), ret, exit, NCCL_GRAPH);
+  if (index == -1) {
+    if (nvmlDeviceFound) NOWARN(ncclTopoSetAttrFromNvml(pciNode, device, "subsystem_device"), NCCL_GRAPH);
+#if NCCL_OS_LINUX
+    else if (path) NOWARN(ncclTopoSetAttrFromSys(pciNode, path, "subsystem_device", "subsystem_device"), NCCL_GRAPH);
+#endif
+  }
+  NCCLCHECKGOTO(xmlGetAttrIndex(pciNode, "link_speed", &index), ret, exit);
+  if (index == -1) {
+    if (nvmlDeviceFound) {
+      unsigned int linkGen = 0;
+      if (ncclNvmlDeviceGetCurrPcieLinkGeneration(device, &linkGen) == ncclSuccess && linkGen > 0) {
+        const char* speeds[] = {
+          "", "2.5 GT/s PCIe", "5.0 GT/s PCIe", "8.0 GT/s PCIe", "16.0 GT/s PCIe", "32.0 GT/s PCIe", "64.0 GT/s PCIe"
+        };
+        if (linkGen <= 6) {
+          NCCLCHECKGOTO(xmlSetAttr(pciNode, "link_speed", speeds[linkGen]), ret, exit);
+        }
+      } else {
+        NCCLCHECKGOTO(xmlSetAttr(pciNode, "link_speed", "16.0 GT/s PCIe"), ret, exit);
+      }
+    }
+#if NCCL_OS_LINUX
+    else if (path) {
+      char deviceSpeedStr[MAX_STR_LEN];
+      float deviceSpeed = FLT_MAX;
+      NCCLCHECKGOTO(ncclOsTopoGetStrFromSys(path, "max_link_speed", deviceSpeedStr, sizeof(deviceSpeedStr)), ret, exit);
+      sscanf(deviceSpeedStr, "%f GT/s", &deviceSpeed);
+      char portSpeedStr[MAX_STR_LEN];
+      float portSpeed = FLT_MAX;
+      NCCLCHECKGOTO(ncclOsTopoGetStrFromSys(path, "../max_link_speed", portSpeedStr, sizeof(portSpeedStr)), ret, exit);
+      sscanf(portSpeedStr, "%f GT/s", &portSpeed);
+      NCCLCHECKGOTO(xmlSetAttr(pciNode, "link_speed", portSpeed < deviceSpeed ? portSpeedStr : deviceSpeedStr), ret,
+                    exit);
+    }
+#endif
+    else {
+#if NCCL_OS_LINUX
+      NCCLCHECKGOTO(xmlSetAttr(pciNode, "link_speed", ""), ret, exit);
+#elif NCCL_OS_WINDOWS
+      NCCLCHECKGOTO(xmlSetAttr(pciNode, "link_speed", "16.0 GT/s PCIe"), ret, exit);
+#endif
+    }
+  }
+  // Set link width from NVML (shared), sysfs fallback (Linux), or defaults
+  NCCLCHECKGOTO(xmlGetAttrIndex(pciNode, "link_width", &index), ret, exit);
+  if (index == -1) {
+    if (nvmlDeviceFound) {
+      unsigned int linkWidth = 0;
+      if (ncclNvmlDeviceGetCurrPcieLinkWidth(device, &linkWidth) == ncclSuccess && linkWidth > 0) {
+        NCCLCHECKGOTO(xmlSetAttrInt(pciNode, "link_width", linkWidth), ret, exit);
+      } else {
+        NCCLCHECKGOTO(xmlSetAttrInt(pciNode, "link_width", 16), ret, exit);
+      }
+    }
+#if NCCL_OS_LINUX
+    else if (path) {
+      char strValue[MAX_STR_LEN];
+      NCCLCHECKGOTO(ncclOsTopoGetStrFromSys(path, "max_link_width", strValue, MAX_STR_LEN), ret, exit);
+      int deviceWidth = strtol(strValue, NULL, 0);
+      NCCLCHECKGOTO(ncclOsTopoGetStrFromSys(path, "../max_link_width", strValue, MAX_STR_LEN), ret, exit);
+      int portWidth = strtol(strValue, NULL, 0);
+      NCCLCHECKGOTO(xmlSetAttrInt(pciNode, "link_width", std::min(deviceWidth, portWidth)), ret, exit);
+    }
+#endif
+    else {
+#if NCCL_OS_LINUX
+      NCCLCHECKGOTO(xmlSetAttr(pciNode, "link_width", ""), ret, exit);
+#elif NCCL_OS_WINDOWS
+      NCCLCHECKGOTO(xmlSetAttrInt(pciNode, "link_width", 16), ret, exit);
+#endif
+    }
+  }
+
+  NCCLCHECKGOTO(xmlGetAttr(pciNode, "vendor", &vendor), ret, exit);
+  if (vendor != NULL && strcmp(vendor, "0x1000") == 0) {
+    // BCM switch, look for P2P connections
+    int nlinks;
+    NCCLCHECKGOTO(ncclOsGetBcmLinks(busId, &nlinks, &peers), ret, exit);
+    for (int l = 0; l < nlinks; l++) {
+      char* target = peers + l * BUSID_SIZE;
+      struct ncclXmlNode* linkNode;
+      NCCLCHECKGOTO(xmlGetSubKv(pciNode, "pcilink", &linkNode, "target", target), ret, exit);
+      if (linkNode == NULL) {
+        NCCLCHECKGOTO(xmlAddNode(xml, pciNode, "pcilink", &linkNode), ret, exit);
+        NCCLCHECKGOTO(xmlSetAttr(linkNode, "target", target), ret, exit);
+      }
+    }
+    free(peers);
+    peers = NULL;
+  }
+
+  parent = pciNode->parent;
+  if (parent == NULL) {
+#ifdef NCCL_OS_LINUX
+    if (path) {
+      // Save that for later in case next step is a CPU
+      char numaIdStr[MAX_STR_LEN];
+      NCCLCHECKGOTO(ncclOsTopoGetStrFromSys(path, "numa_node", numaIdStr, MAX_STR_LEN), ret, exit);
+      // Workaround kernel bug for now
+      if (strcmp(numaIdStr, "-1") == 0) strcpy(numaIdStr, "0");
+
+      // Go up one level in the PCI tree. Rewind two "/" and follow the upper PCI
+      // switch, or stop if we reach a CPU root complex.
+      int slashCount = 0;
+      int parentOffset;
+      for (parentOffset = strlen(path) - 1; parentOffset > 0; parentOffset--) {
+        if (path[parentOffset] == '/') {
+          slashCount++;
+          path[parentOffset] = '\0';
+          int start = parentOffset - 1;
+          while (start > 0 && path[start] != '/') start--;
+          // Check whether the parent path looks like "BBBB:BB:DD.F" or not.
+          if (checkBDFFormat(path + start + 1) == 0) {
+            // This a CPU root complex. Create a CPU tag and stop there.
+            struct ncclXmlNode* topNode;
+            NCCLCHECKGOTO(xmlFindTag(xml, "system", &topNode), ret, exit);
+            NCCLCHECKGOTO(xmlGetSubKv(topNode, "cpu", &parent, "numaid", numaIdStr), ret, exit);
+            if (parent == NULL) {
+              NCCLCHECKGOTO(xmlAddNode(xml, topNode, "cpu", &parent), ret, exit);
+              NCCLCHECKGOTO(xmlSetAttrLong(parent, "host_hash", getHostHash()), ret, exit);
+              NCCLCHECKGOTO(xmlSetAttr(parent, "numaid", numaIdStr), ret, exit);
+            }
+          } else if (slashCount == 2) {
+            // Continue on the upper PCI switch
+            for (int i = strlen(path) - 1; i > 0; i--) {
+              if (path[i] == '/') {
+                NCCLCHECKGOTO(xmlFindTagKv(xml, "pci", &parent, "busid", path + i + 1), ret, exit);
+                if (parent == NULL) {
+                  NCCLCHECKGOTO(xmlAddNode(xml, NULL, "pci", &parent), ret, exit);
+                  NCCLCHECKGOTO(xmlSetAttr(parent, "busid", path + i + 1), ret, exit);
+                }
+                break;
+              }
+            }
+          }
+        }
+        if (parent) break;
+      }
+      free(path);
+      path = NULL;
+    }
+#elif NCCL_OS_WINDOWS
+    INFO(NCCL_INIT, "ncclTopoGetXmlFromSys: Windows - creating parent node");
+    if (nvmlDeviceFound) {
+      char numaIdStr[MAX_STR_LEN] = "0";
+      INFO(NCCL_INIT, "ncclTopoGetXmlFromSys: Using NUMA node %s (Windows default)", numaIdStr);
+
+      // Get PCI device parent using Windows Setup API
+      ncclResult_t result = ncclOsGetPciDeviceParent(device, &parentBusId);
+
+      if (result == ncclSuccess && parentBusId != NULL) {
+        // Check if parent is a valid PCI device (has BDF format) or CPU root complex
+        if (checkBDFFormat(parentBusId) == 1) {
+          // Continue on the upper PCI switch
+          NCCLCHECKGOTO(xmlFindTagKv(xml, "pci", &parent, "busid", parentBusId), ret, exit);
+          if (parent == NULL) {
+            NCCLCHECKGOTO(xmlAddNode(xml, NULL, "pci", &parent), ret, exit);
+            NCCLCHECKGOTO(xmlSetAttr(parent, "busid", parentBusId), ret, exit);
+          }
+        } else {
+          // This is a CPU root complex. Create a CPU tag and stop there.
+          struct ncclXmlNode* topNode;
+          NCCLCHECKGOTO(xmlFindTag(xml, "system", &topNode), ret, exit);
+          NCCLCHECKGOTO(xmlGetSubKv(topNode, "cpu", &parent, "numaid", numaIdStr), ret, exit);
+          if (parent == NULL) {
+            NCCLCHECKGOTO(xmlAddNode(xml, topNode, "cpu", &parent), ret, exit);
+            NCCLCHECKGOTO(xmlSetAttrLong(parent, "host_hash", getHostHash()), ret, exit);
+            NCCLCHECKGOTO(xmlSetAttr(parent, "numaid", numaIdStr), ret, exit);
+          }
+        }
+      } else {
+        // Failed to get parent - default to CPU root complex
+        INFO(NCCL_GRAPH, "ncclTopoGetXmlFromSys: could not get PCI parent for %s, defaulting to CPU root complex",
+             busId);
+        struct ncclXmlNode* topNode;
+        NCCLCHECKGOTO(xmlFindTag(xml, "system", &topNode), ret, exit);
+        NCCLCHECKGOTO(xmlGetSubKv(topNode, "cpu", &parent, "numaid", numaIdStr), ret, exit);
+        if (parent == NULL) {
+          NCCLCHECKGOTO(xmlAddNode(xml, topNode, "cpu", &parent), ret, exit);
+          NCCLCHECKGOTO(xmlSetAttrLong(parent, "host_hash", getHostHash()), ret, exit);
+          NCCLCHECKGOTO(xmlSetAttr(parent, "numaid", numaIdStr), ret, exit);
+        } else {
+          INFO(NCCL_INIT, "ncclTopoGetXmlFromSys: CPU node already exists (default)");
+        }
+      }
+    }
+#endif
+    else {
+      // No information on /sys, attach GPU to unknown CPU
+      NCCLCHECKGOTO(xmlFindTagKv(xml, "cpu", &parent, "numaid", "-1"), ret, exit);
+      if (parent == NULL) {
+        struct ncclXmlNode* topNode;
+        NCCLCHECKGOTO(xmlFindTag(xml, "system", &topNode), ret, exit);
+        NCCLCHECKGOTO(xmlAddNode(xml, topNode, "cpu", &parent), ret, exit);
+        NCCLCHECKGOTO(xmlSetAttrLong(parent, "host_hash", getHostHash()), ret, exit);
+        NCCLCHECKGOTO(xmlSetAttr(parent, "numaid", "-1"), ret, exit);
+        NCCLCHECKGOTO(ncclTopoGetXmlFromCpu(parent, xml), ret, exit);
+      }
+    }
+    pciNode->parent = parent;
+    // Keep PCI sub devices ordered by PCI Bus ID (Issue #820)
+    // Coverity complains about dereferenced parent being NULL
+    // but this can never happen.
+    // coverity[var_deref_op]
+    int subIndex = parent->nSubs;
+    const char* newBusId;
+    NCCLCHECKGOTO(xmlGetAttrStr(pciNode, "busid", &newBusId), ret, exit);
+    for (int s = 0; s < parent->nSubs; s++) {
+      const char* busId;
+      NCCLCHECKGOTO(xmlGetAttr(parent->subs[s], "busid", &busId), ret, exit);
+      if (busId != NULL && strcmp(newBusId, busId) < 0) {
+        subIndex = s;
+        break;
+      }
+    }
+    if (parent->nSubs == MAX_SUBS) {
+      WARN("Error : XML parser is limited to %d subnodes", MAX_SUBS);
+      ret = ncclInternalError;
+      goto exit;
+    }
+    for (int s = parent->nSubs; s > subIndex; s--) parent->subs[s] = parent->subs[s - 1];
+    parent->subs[subIndex] = pciNode;
+    parent->nSubs++;
+  }
+  if (strcmp(parent->name, "pci") == 0) {
+    NCCLCHECKGOTO(ncclTopoGetXmlFromSys(parent, xml), ret, exit);
+  } else if (strcmp(parent->name, "cpu") == 0) {
+    NCCLCHECKGOTO(ncclTopoGetXmlFromCpu(parent, xml), ret, exit);
+  }
+exit:
+  free(peers);
+#if NCCL_OS_LINUX
+  free(path);
+#elif NCCL_OS_WINDOWS
+  free(parentBusId);
+#endif
+  return ret;
+}
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// HIP may expose logical GPUs at function .1-.7 of the same device while sysfs
+// at that BDF is missing or a different function. Link those HIP siblings with
+// 1-hop XGMI even when SMI only enumerates the physical GPU.
+static ncclResult_t ncclTopoXmlAddHipPartitionXgmi(struct ncclXml* xml, struct ncclXmlNode* gpuNode,
+                                                   struct ncclXmlNode* pciNode, uint32_t xmlDev) {
+  const char* pciBusId = NULL;
+  NCCLCHECK(xmlGetAttr(pciNode, "busid", &pciBusId));
+  if (pciBusId == NULL) return ncclSuccess;
+  int64_t physId = 0;
+  NCCLCHECK(busIdToInt64(pciBusId, &physId));
+  physId &= ~0xfLL;
+  int nHip = 0;
+  if (hipGetDeviceCount(&nHip) != hipSuccess) return ncclSuccess;
+  for (int h = 0; h < nHip; h++) {
+    if (h == (int)xmlDev) continue;
+    char peerBus[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+    if (hipDeviceGetPCIBusId(peerBus, sizeof(peerBus), h) != hipSuccess) continue;
+    int64_t peerId = 0;
+    if (busIdToInt64(peerBus, &peerId) != ncclSuccess) continue;
+    if ((peerId & ~0xfLL) != physId) continue;
+    char lowerId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+    for (int c = 0; c < NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE; c++) {
+      lowerId[c] = tolower(peerBus[c]);
+      if (peerBus[c] == 0) break;
+    }
+    struct ncclXmlNode* nvl = NULL;
+    NCCLCHECK(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, lowerId, 1, &nvl));
+    if (nvl) {
+      int idx;
+      NCCLCHECK(xmlGetAttrIndex(nvl, "fabric_supported", &idx));
+      if (idx == -1) NCCLCHECK(xmlSetAttrInt(nvl, "fabric_supported", 0));
+    }
+  }
+  return ncclSuccess;
+}
+#endif
+
+ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev, uint32_t smiDev, struct ncclXml* xml,
+                                   struct ncclXmlNode** gpuNodeRet) {
+  struct ncclXmlNode* gpuNode = NULL;
+  NCCLCHECK(xmlGetSubKvInt(pciNode, "gpu", &gpuNode, "dev", (int)xmlDev));
+  if (gpuNode == NULL) NCCLCHECK(xmlAddNode(xml, pciNode, "gpu", &gpuNode));
+
+  int index = -1;
+
+  int dev = -1;
+  NCCLCHECK(xmlGetAttrIndex(gpuNode, "dev", &index));
+  if (index == -1) {
+    NCCLCHECK(xmlSetAttrInt(gpuNode, "dev", xmlDev));
+  }
+  NCCLCHECK(xmlGetAttrInt(gpuNode, "dev", &dev));
+  if (dev == -1) {
+    *gpuNodeRet = NULL;
+    return ncclSuccess;
+  }
+
+  NCCLCHECK(xmlGetAttrIndex(gpuNode, "sm", &index));
+  if (index == -1) {
+    cudaDeviceProp devProp;
+    CUDACHECK(cudaGetDeviceProperties(&devProp, (int)xmlDev));
+    NCCLCHECK(xmlSetAttrInt(gpuNode, "sm", devProp.multiProcessorCount));
+  }
+  int sm;
+  NCCLCHECK(xmlGetAttrInt(gpuNode, "sm", &sm));
+
+  const char* gcn;
+  const char* gcnArchName;
+  NCCLCHECK(xmlGetAttrIndex(gpuNode, "gcn", &index));
+  if (index == -1) {
+    hipDeviceProp_t devProp;
+    CUDACHECK(hipGetDeviceProperties(&devProp, (int)xmlDev));
+    // extract only the releveant info from the gcnArchName attribute
+    // e.g.: convert "gfx908:sramecc+:xnack-" to "gfx908"
+    char gcnArchNameSubstr[128];
+    GcnArchNameFormat(devProp.gcnArchName, gcnArchNameSubstr);
+    gcn = gcnArchNameSubstr;
+    NCCLCHECK(xmlSetAttr(gpuNode, "gcn", gcn));
+  }
+  NCCLCHECK(xmlGetAttr(gpuNode, "gcn", &gcn));
+  convertGcnArchToGcnArchName(gcn, &gcnArchName);
+  if (gcn != gcnArchName) {
+    NCCLCHECK(xmlSetAttr(gpuNode, "gcn", gcnArchName));
+  }
+
+  rcclHipDeviceArch_t arch;
+  NCCLCHECK(xmlGetAttrIndex(gpuNode, "arch", &index));
+  if (index == -1) {
+    hipDeviceProp_t devProp;
+    CUDACHECK(hipGetDeviceProperties(&devProp, (int)xmlDev));
+    memcpy(&arch.arch, &devProp.arch, sizeof(hipDeviceArch_t));
+    NCCLCHECK(xmlSetAttrInt(gpuNode, "arch", arch.value));
+  }
+  NCCLCHECK(xmlGetAttrInt(gpuNode, "arch", &arch.value));
+
+  struct ncclXmlNode* nvlNode = NULL;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  NCCLCHECK(xmlGetSub(gpuNode, "xgmi", &nvlNode));
+#else
+  NCCLCHECK(xmlGetSub(gpuNode, "nvlink", &nvlNode));
+#endif
+  if (nvlNode == NULL) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    const char* busId;
+    NCCLCHECK(xmlGetAttr(pciNode, "busid", &busId));
+    uint32_t deviceCnt;
+#ifdef USE_AMDSMI
+    NCCLCHECK(amd_smi_getNumDevice(&deviceCnt));
+    for (int i = 0; i < deviceCnt; i++) {
+      if (i != smiDev) {
+        amdsmi_link_type_t amdsmi_type;
+        // Based on amd-smi team, there will be a new UALoE link type
+        // First, we will check if UALoE is supported, if not we will check for XGMI links
+        bool canUseUALoE = false;
+        amdsmiFabricDeviceInfo fabInfo_dev;
+        amdsmiFabricDeviceInfo fabInfo;
+        if (amd_smi_getFabricDeviceInfo(smiDev, &fabInfo_dev) == ncclSuccess &&
+            amd_smi_getFabricDeviceInfo(i, &fabInfo) == ncclSuccess) {
+          if (fabInfo_dev.fabricSupported && fabInfo.fabricSupported && fabInfo_dev.cliqueId == fabInfo.cliqueId &&
+              (memcmp(fabInfo_dev.clusterUuid, fabInfo.clusterUuid, UALOE_GPU_FABRIC_UUID_LEN) == 0)) {
+            canUseUALoE = true;
+          }
+        }
+        if (canUseUALoE) {
+          char busIdStr[] = "00000000:00:00.0";
+          NCCLCHECK(amd_smi_getDevicePciBusIdString(i, busIdStr, sizeof(busIdStr)));
+          char lowerId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+          for (int c = 0; c < NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE; c++) {
+            lowerId[c] = tolower(busIdStr[c]);
+            if (busIdStr[c] == 0) break;
+          }
+          // UALoE when both peers report a usable fabric (ready/active, same clique).
+          // Unconfigured ualink is a node setup issue, not a missing interconnect:
+          // fabricSupported is false and discovery falls through to 1-hop XGMI.
+          // Either path stamps accelerator tclass: HIP bus IDs need not exist on
+          // the physical PCI bus, so sysfs class at that BDF is not the peer GPU.
+          int created;
+          // count=1: amd-smi does not yet report UALoE link count.
+          // TODO: Update amd_smi_getLinkInfo to return the number of links for UALoE.
+          NCCLCHECK(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, lowerId, 1, &nvlNode, &created));
+          if (created) {
+            uint64_t uuidHigh = 0;
+            uint64_t uuidLow = 0;
+            memcpy(&uuidHigh, fabInfo.clusterUuid, sizeof(uuidHigh));
+            memcpy(&uuidLow, fabInfo.clusterUuid + sizeof(uuidHigh), sizeof(uuidLow));
+            NCCLCHECK(xmlSetAttrInt(nvlNode, "fabric_supported", 1));
+            NCCLCHECK(xmlSetAttrInt(nvlNode, "accelerator_id", fabInfo.acceleratorId));
+            NCCLCHECK(xmlSetAttrInt(nvlNode, "bandwidth", fabInfo.bandwidth));
+            NCCLCHECK(xmlSetAttrInt(nvlNode, "latency", fabInfo.latency));
+            NCCLCHECK(xmlSetAttrUint64(nvlNode, "uuidHigh", uuidHigh));
+            NCCLCHECK(xmlSetAttrUint64(nvlNode, "uuidLow", uuidLow));
+            NCCLCHECK(xmlSetAttrInt(nvlNode, "ppod_size", fabInfo.ppodSize));
+            NCCLCHECK(xmlSetAttrInt(nvlNode, "vpod_id", fabInfo.cliqueId));
+            NCCLCHECK(xmlSetAttrInt(nvlNode, "vpod_size", fabInfo.vpodSize));
+          }
+        } else {
+          int hops, count;
+          if (amd_smi_getLinkInfo(smiDev, i, &amdsmi_type, &hops, &count) == ncclSuccess) {
+            if (amdsmi_type == AMDSMI_LINK_TYPE_XGMI && hops == 1) {
+              char busIdStr[] = "00000000:00:00.0";
+              NCCLCHECK(amd_smi_getDevicePciBusIdString(i, busIdStr, sizeof(busIdStr)));
+              char lowerId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+              for (int c = 0; c < NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE; c++) {
+                lowerId[c] = tolower(busIdStr[c]);
+                if (busIdStr[c] == 0) break;
+              }
+              int created;
+              NCCLCHECK(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, lowerId, count, &nvlNode, &created));
+              if (created) {
+                NCCLCHECK(xmlSetAttrInt(nvlNode, "fabric_supported", 0));
+              }
+            }
+          }
+        }
+      }
+    }
+#else
+    NCCLCHECK(rocm_smi_getNumDevice(&deviceCnt));
+    for (int i = 0; i < deviceCnt; i++) {
+      if (i != smiDev) {
+        RSMI_IO_LINK_TYPE rsmi_type;
+        int hops, count;
+        if (rocm_smi_getLinkInfo(smiDev, i, &rsmi_type, &hops, &count) == ncclSuccess) {
+          if (rsmi_type == RSMI_IOLINK_TYPE_XGMI && hops == 1) {
+            char busIdStr[] = "00000000:00:00.0";
+            NCCLCHECK(rocm_smi_getDevicePciBusIdString(i, busIdStr, sizeof(busIdStr)));
+            char lowerId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+            for (int c = 0; c < NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE; c++) {
+              lowerId[c] = tolower(busIdStr[c]);
+              if (busIdStr[c] == 0) break;
+            }
+            NCCLCHECK(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, lowerId, count, &nvlNode));
+          }
+        }
+      }
+    }
+#endif
+#else
+    // NVML NVLink detection
+    int maxNvLinks = (sm < 60) ? 0 : (sm < 70) ? 4 : (sm < 80) ? 6 : (sm < 90) ? 12 : 18;
+
+    if (maxNvLinks > 0 && nvmlDev == NULL) {
+      INFO(NCCL_GRAPH, "No NVML device handle. Skipping nvlink detection.");
+      maxNvLinks = 0;
+    }
+
+    for (int l = 0; l < maxNvLinks; ++l) {
+      // Check whether we can use this NVLink for P2P
+      unsigned canP2P;
+      if ((ncclNvmlDeviceGetNvLinkCapability(nvmlDev, l, NVML_NVLINK_CAP_P2P_SUPPORTED, &canP2P) != ncclSuccess) ||
+          !canP2P) {
+        continue;
+      }
+
+      // Make sure the Nvlink is up. The previous call should have trained the link.
+      nvmlEnableState_t isActive = NVML_FEATURE_DISABLED;
+#if CUDART_VERSION >= 11080
+      if (sm >= 90) {
+        nvmlFieldValue_t fv;
+        fv.fieldId = NVML_FI_DEV_NVLINK_GET_STATE;
+        fv.scopeId = l;
+        // fv.value will contain NV_FEATURE_ENABLED or NV_FEATURE_DISABLED
+        if ((ncclNvmlDeviceGetFieldValues(nvmlDev, 1, &fv) == ncclSuccess) && (fv.nvmlReturn == NVML_SUCCESS))
+          isActive = (nvmlEnableState_t)fv.value.uiVal;
+      } else /* FALLTHRU to GetNvLinkState if before SM90 */
+#endif
+      {
+        (void)ncclNvmlDeviceGetNvLinkState(nvmlDev, l, &isActive);
+      }
+      if (isActive != NVML_FEATURE_ENABLED) continue;
+
+      // Try to figure out what's on the other side of the NVLink
+      char tclass[MAX_STR_LEN] = "", lowerId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE] = "";
+      nvmlIntNvLinkDeviceType_t remoteDeviceType;
+      if (ncclNvmlDeviceGetNvLinkRemoteDeviceType(nvmlDev, l, &remoteDeviceType) != ncclSuccess) {
+        INFO(NCCL_INIT | NCCL_GRAPH, "Unable to get RemoteDeviceType for NVLink %d, igoring.", l);
+        continue;
+      }
+      switch (remoteDeviceType) {
+      case NVML_NVLINK_DEVICE_TYPE_SWITCH:
+        {
+          strncpy(lowerId, "fffffff:ffff:ff", NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE);
+          strncpy(tclass, PCI_NVSWITCH_CLASS, MAX_STR_LEN);
+        }
+        break;
+      case NVML_NVLINK_DEVICE_TYPE_GPU:
+      case NVML_NVLINK_DEVICE_TYPE_IBMNPU: // similar to an NVLink endpoint
+        {
+          nvmlPciInfo_t remoteProc = {};
+          if (ncclNvmlDeviceGetNvLinkRemotePciInfo(nvmlDev, l, &remoteProc) != ncclSuccess ||
+              remoteProc.busIdLegacy[0] == '\0') {
+            INFO(NCCL_INIT | NCCL_GRAPH, "Unable to get RemotePciInfo for NVLink %d, igoring.", l);
+            continue;
+          }
+          // small cap the device PCI bus id
+          char* p = remoteProc.busIdLegacy;
+          for (int c = 0; c < NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE; c++) {
+            lowerId[c] = tolower(p[c]);
+            if (p[c] == 0) break;
+          }
+          // if the OS doesn't recognize the class, use the device type information
+          if (ncclOsGetPciDeviceClassByBusId(lowerId, tclass, sizeof(tclass)) != ncclSuccess || tclass[0] != '\0') {
+            strncpy(tclass, (remoteDeviceType == NVML_NVLINK_DEVICE_TYPE_GPU) ? PCI_GPU_CLASS : PCI_IBMNPU_CLASS,
+                    sizeof(tclass));
+          }
+        }
+        break;
+      default:
+        INFO(NCCL_GRAPH, "Unknown NVLink remote device type %d for dev %d link %d, skipping", remoteDeviceType, dev, l);
+        continue;
+      }
+
+      NCCLCHECK(xmlGetSubKv(gpuNode, "nvlink", &nvlNode, "target", lowerId));
+      if (nvlNode == NULL) {
+        NCCLCHECK(xmlAddNode(xml, gpuNode, "nvlink", &nvlNode));
+        NCCLCHECK(xmlSetAttr(nvlNode, "target", lowerId));
+        NCCLCHECK(xmlSetAttr(nvlNode, "tclass", tclass));
+        NCCLCHECK(xmlSetAttrInt(nvlNode, "count", 1));
+      } else {
+        int count;
+        NCCLCHECK(xmlGetAttrInt(nvlNode, "count", &count));
+        NCCLCHECK(xmlSetAttrInt(nvlNode, "count", count + 1));
+      }
+    }
+#endif
+  }
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  NCCLCHECK(ncclTopoXmlAddHipPartitionXgmi(xml, gpuNode, pciNode, xmlDev));
+#endif
+#if CUDART_VERSION >= 11080
+  struct ncclXmlNode* c2cNode = NULL;
+  NCCLCHECK(xmlGetSub(gpuNode, "c2c", &c2cNode));
+  if (c2cNode == NULL) {
+    if (sm >= 90) {
+      int c2cLinksCount = 0;
+      nvmlFieldValue_t fv;
+      fv.fieldId = NVML_FI_DEV_C2C_LINK_COUNT;
+      if ((ncclNvmlDeviceGetFieldValues(nvmlDev, 1, &fv) == ncclSuccess) && (fv.nvmlReturn == NVML_SUCCESS)) {
+        c2cLinksCount = fv.value.uiVal;
+        int bw = 0;
+        int count = 0;
+        for (int l = 0; l < c2cLinksCount; l++) {
+          nvmlFieldValue_t fvs[2];
+          fvs[0].fieldId = NVML_FI_DEV_C2C_LINK_GET_STATUS;
+          fvs[0].scopeId = l;
+          fvs[1].fieldId = NVML_FI_DEV_C2C_LINK_GET_MAX_BW;
+          fvs[1].scopeId = l;
+          if ((ncclNvmlDeviceGetFieldValues(nvmlDev, 2, fvs) == ncclSuccess) && (fvs[0].nvmlReturn == NVML_SUCCESS) &&
+              (fvs[0].value.uiVal == 1) && (fvs[1].nvmlReturn == NVML_SUCCESS)) {
+            bw = fvs[1].value.uiVal;
+            count++;
+          }
+        }
+        if (count > 0) {
+          NCCLCHECK(xmlAddNode(xml, gpuNode, "c2c", &c2cNode));
+          NCCLCHECK(xmlSetAttrInt(c2cNode, "bw", bw));
+          NCCLCHECK(xmlSetAttrInt(c2cNode, "count", count));
+        }
+      }
+    }
+  }
+#endif
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // Sysfs class is only meaningful for a physical PCI function. HIP can name a
+  // logical GPU at a BDF that is not on the bus (e.g. function .1); ualink
+  // configured or not does not change that. Trust only GPU/accelerator classes.
+  // Fill target classes of the XGMI links (the NVLink path sets "tclass" while creating the nodes above)
+  for (int s = 0; s < gpuNode->nSubs; s++) {
+    struct ncclXmlNode* sub = gpuNode->subs[s];
+    if (strcmp(sub->name, "xgmi") != 0) continue;
+    int index;
+    NCCLCHECK(xmlGetAttrIndex(sub, "tclass", &index));
+    if (index == -1) {
+      const char* busId;
+      NCCLCHECK(xmlGetAttr(sub, "target", &busId));
+      if (strcmp(busId, "fffffff:ffff:ff") == 0) {
+        // Remote NVLink device is not visible inside this VM. Assume NVSwitch.
+        INFO(NCCL_GRAPH, "NVLink target %s not visible, assuming NVSwitch", busId);
+        NCCLCHECK(xmlSetAttr(sub, "tclass", PCI_NVSWITCH_CLASS));
+      } else {
+        char deviceClass[MAX_STR_LEN];
+        deviceClass[0] = '\0';
+        if (ncclOsGetPciDeviceClassByBusId(busId, deviceClass, sizeof(deviceClass)) == ncclSuccess &&
+            deviceClass[0] != '\0') {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+          int isGpu = ncclTopoPciClassIsGpu(deviceClass);
+          if (!isGpu) {
+            INFO(NCCL_GRAPH,
+                 "XGMI target %s sysfs class %s is not a GPU (HIP logical BDF?); using accelerator tclass",
+                 busId, deviceClass);
+            NCCLCHECK(xmlSetAttr(sub, "tclass", PCI_ACCELERATOR_CLASS));
+          } else {
+            NCCLCHECK(xmlSetAttr(sub, "tclass", deviceClass));
+            TRACE(NCCL_GRAPH, "Read NVLink target class: tclass=%s for busId=%s", deviceClass, busId);
+          }
+#else
+          NCCLCHECK(xmlSetAttr(sub, "tclass", deviceClass));
+          TRACE(NCCL_GRAPH, "Read NVLink target class: tclass=%s for busId=%s", deviceClass, busId);
+#endif
+        } else {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+          INFO(NCCL_GRAPH, "No sysfs PCI class for XGMI target %s; using accelerator tclass", busId);
+          NCCLCHECK(xmlSetAttr(sub, "tclass", PCI_ACCELERATOR_CLASS));
+#else
+          INFO(NCCL_GRAPH, "Could not get device class for NVLink target %s, assuming NVSwitch", busId);
+          NCCLCHECK(xmlSetAttr(sub, "tclass", PCI_NVSWITCH_CLASS));
+#endif
+        }
+      }
+    }
+  }
+#endif
+  *gpuNodeRet = gpuNode;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoFillGpu(struct ncclXml* xml, const char* busId, struct ncclXmlNode** gpuNode) {
+  struct ncclXmlNode* node;
+  const char* pciBusId = busId;
+  char physBusId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // HIP logical GPUs can sit at a BDF that is not the GPU's PCI function (DPX
+  // function .1 is often a NIC in sysfs; CPX .1-.7 are missing from sysfs).
+  // Attach the <gpu> under the physical function-0 PCI node; mlopart is filled
+  // from the fake function in fillInfo.
+  int64_t hipId = 0;
+  NCCLCHECK(busIdToInt64(busId, &hipId));
+  int fn = (int)(hipId & 0xf);
+  if (fn > 0 && fn < NCCL_TOPO_MLOPART_DEV_MAX) {
+    char deviceClass[MAX_STR_LEN];
+    deviceClass[0] = '\0';
+    (void)ncclOsGetPciDeviceClassByBusId(busId, deviceClass, sizeof(deviceClass));
+    if (!ncclTopoPciClassIsGpu(deviceClass)) {
+      NCCLCHECK(int64ToBusId(hipId & ~0xfLL, physBusId));
+      pciBusId = physBusId;
+      INFO(NCCL_GRAPH,
+           "HIP logical GPU at %s is not a physical GPU PCI function (class %s); attaching under %s", busId,
+           deviceClass[0] ? deviceClass : "missing", pciBusId);
+    }
+  }
+#endif
+  NCCLCHECK(ncclTopoGetPciNode(xml, pciBusId, &node));
+  NCCLCHECK(xmlSetAttrIfUnset(node, "class", "0x03"));
+  NCCLCHECK(ncclTopoGetXmlFromSys(node, xml));
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  uint32_t smiIndex = 0;
+#ifdef USE_AMDSMI
+  static int amdsmiInit = 0;
+  if (amdsmiInit == 0) {
+    NCCLCHECK(amd_smi_init());
+  }
+  NCCLCHECK(amd_smi_getDeviceIndexByPciBusId(busId, &smiIndex));
+#else
+  static int rocmsmiInit = 0;
+  if (rocmsmiInit == 0) {
+    NCCLCHECK(rocm_smi_init());
+  }
+  NCCLCHECK(rocm_smi_getDeviceIndexByPciBusId(busId, &smiIndex));
+#endif
+  int hipDev = -1;
+  if (hipDeviceGetByPCIBusId(&hipDev, busId) != hipSuccess || hipDev < 0) hipDev = (int)smiIndex;
+  NCCLCHECK(ncclTopoGetXmlFromGpu(node, (uint32_t)hipDev, smiIndex, xml, gpuNode));
+#else
+  nvmlDevice_t nvmlDev;
+  NCCLCHECK(ncclNvmlDeviceGetHandleByPciBusId(busId, &nvmlDev));
+  NCCLCHECK(ncclTopoGetXmlFromGpu(node, nvmlDev, xml, gpuNode));
+#endif
+  return ncclSuccess;
+}
+
+// Returns the subsystem name of a path, i.e. the end of the path
+// where sysPath/subsystem points to.
+ncclResult_t ncclTopoGetSubsystem(const char* sysPath, char* subSys) {
+#if NCCL_OS_LINUX
+  char subSysPath[PATH_MAX];
+  snprintf(subSysPath, sizeof(subSysPath), "%s/subsystem", sysPath);
+  char* path = ncclOsRealpath(subSysPath, NULL);
+  if (path == NULL) {
+    subSys[0] = '\0';
+  } else {
+    int offset;
+    for (offset = strlen(path); offset > 0 && path[offset] != '/'; offset--);
+    strcpy(subSys, path + offset + 1);
+    free(path);
+  }
+#elif NCCL_OS_WINDOWS
+  (void)sysPath;
+  subSys[0] = '\0';
+#endif
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoFillNet(struct ncclXml* xml, const char* tagName, const char* pciPath, const char* netName,
+                             struct ncclXmlNode** netNode, struct ncclXmlNode* forceParent) {
+  NCCLCHECK(xmlFindTagKv(xml, tagName, netNode, "name", netName));
+
+  if (*netNode != NULL) return ncclSuccess;
+
+  struct ncclXmlNode* parent = NULL;
+  if (forceParent) {
+    parent = forceParent;
+  } else {
+    const char* pciSysPath = pciPath;
+    if (pciSysPath) {
+      char subSystem[PATH_MAX];
+      NCCLCHECK(ncclTopoGetSubsystem(pciSysPath, subSystem));
+      // This is not a PCI device (virtual, usb, ...).
+      if (strcmp(subSystem, "pci") != 0 && !forceParent) {
+        INFO(NCCL_NET | NCCL_GRAPH,
+             "Topology detection: network path (name = %s) %s is not a PCI device (%s). Attaching to first CPU",
+             netName, pciSysPath, subSystem);
+        pciSysPath = NULL;
+      }
+    }
+
+    if (pciSysPath) {
+      int offset;
+      for (offset = strlen(pciSysPath) - 1; pciSysPath[offset] != '/'; offset--);
+      char busId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+      strcpy(busId, pciSysPath + offset + 1);
+      NCCLCHECK(ncclTopoGetPciNode(xml, busId, &parent));
+      NCCLCHECK(xmlSetAttrIfUnset(parent, "class", "0x02"));
+      NCCLCHECK(ncclTopoGetXmlFromSys(parent, xml));
+    } else {
+      // Virtual NIC, no PCI device, attach to first CPU
+      NCCLCHECK(xmlFindTag(xml, "cpu", &parent));
+    }
+  }
+
+  if (parent == NULL) {
+    // No CPU node exists yet, create a default one
+    struct ncclXmlNode* topNode;
+    NCCLCHECK(xmlFindTag(xml, "system", &topNode));
+    if (topNode) {
+      NCCLCHECK(xmlAddNode(xml, topNode, "cpu", &parent));
+      NCCLCHECK(xmlSetAttrLong(parent, "host_hash", getHostHash()));
+      NCCLCHECK(xmlSetAttr(parent, "numaid", "0"));
+    }
+  }
+  if (parent == NULL) {
+    WARN("ncclTopoFillNet: parent is NULL even after fallback for %s", netName);
+    return ncclInternalError;
+  }
+
+  struct ncclXmlNode* nicNode = NULL;
+  NCCLCHECK(xmlGetSub(parent, "nic", &nicNode));
+  if (nicNode == NULL) {
+    NCCLCHECK(xmlAddNode(xml, parent, "nic", &nicNode));
+  }
+
+  // We know that this net does not exist yet (we searched for it at the
+  // beginning of this function), so we can add it.
+  NCCLCHECK(xmlAddNode(xml, nicNode, tagName, netNode));
+  NCCLCHECK(xmlSetAttr(*netNode, "name", netName));
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoTrimXmlRec(struct ncclXmlNode* node, int* keep) {
+  const char* str;
+  NCCLCHECK(xmlGetAttr(node, "keep", &str));
+  if (str && strcmp(str, "1") == 0) {
+    NCCLCHECK(xmlUnsetAttr(node, "keep"));
+    *keep = 1;
+  } else {
+    // Copy nSubs and subs as they could change as we trim recursively.
+    struct ncclXmlNode** subs = NULL;
+    NCCLCHECK(ncclCalloc(&subs, MAX_SUBS));
+    int nSubs = node->nSubs;
+    memcpy(subs, node->subs, node->nSubs * sizeof(struct ncclXmlNode*));
+    *keep = 0;
+    ncclResult_t subsRes = ncclSuccess;
+    for (int s = 0; s < nSubs; s++) {
+      int k = 0;
+      subsRes = ncclTopoTrimXmlRec(subs[s], &k);
+      if (subsRes != ncclSuccess) {
+        break;
+      }
+      *keep += k;
+    }
+    free(subs);
+    NCCLCHECK(subsRes);
+    // Remove node if it has no children and no keep attribute
+    if (*keep == 0 && // Trim PCI switches, CPUs with no used GPU/NIC under them, or pruned NICs
+        (strcmp(node->name, "pci") == 0 || strcmp(node->name, "cpu") == 0 || strcmp(node->name, "nic") == 0 ||
+         strcmp(node->name, "net") == 0)) {
+#ifdef ENABLE_TRACE
+      const char* name;
+      const char* busid;
+      NCCLCHECK(xmlGetAttr(node, "name", &name));
+      NCCLCHECK(xmlGetAttr(node, "busid", &busid));
+      TRACE(NCCL_GRAPH, "Removing node %s %s %s\n", node->name, name, busid);
+#endif
+      NCCLCHECK(xmlRemoveNode(node));
+    }
+  }
+  return ncclSuccess;
+}
+ncclResult_t ncclTopoTrimXml(struct ncclXml* xml) {
+  int keep = 0;
+  NCCLCHECK(ncclTopoTrimXmlRec(xml->nodes, &keep));
+  return ncclSuccess;
+}
+
+#if NCCL_OS_LINUX
+
+/**************************************************/
+/* Parser rules for the user-defined graph search */
+/**************************************************/
+
+ncclResult_t ncclTopoXmlGraphLoadGpu(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  NCCLCHECK(xmlLoadSub(file, xml, head, NULL, 0));
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlGraphLoadNet(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  NCCLCHECK(xmlLoadSub(file, xml, head, NULL, 0));
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlGraphLoadChannel(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  struct xmlHandler handlers[] = {{"net", ncclTopoXmlGraphLoadNet}, {"gpu", ncclTopoXmlGraphLoadGpu}};
+  NCCLCHECK(xmlLoadSub(file, xml, head, handlers, 2));
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlGraphLoadGraph(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  struct xmlHandler handlers[] = {{"channel", ncclTopoXmlGraphLoadChannel}};
+  NCCLCHECK(xmlLoadSub(file, xml, head, handlers, 1));
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlGraphLoadGraphs(FILE* file, struct ncclXml* xmlGraph, struct ncclXmlNode* head) {
+  int version;
+  NCCLCHECK(xmlGetAttrInt(head, "version", &version));
+  if (version != NCCL_GRAPH_XML_VERSION) {
+    WARN("XML Graph has wrong version %d, %d needed", version, NCCL_GRAPH_XML_VERSION);
+    return ncclInvalidUsage;
+  }
+  const char* name;
+  NCCLCHECK(xmlGetAttr(head, "name", &name));
+  if (name != NULL) INFO(NCCL_GRAPH, "Loading graphs for topology %s", name);
+  else INFO(NCCL_GRAPH, "Loading graphs");
+
+  struct xmlHandler handlers[] = {{"graph", ncclTopoXmlGraphLoadGraph}};
+  NCCLCHECK(xmlLoadSub(file, xmlGraph, head, handlers, 1));
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoGetXmlGraphFromFile(const char* xmlGraphFile, struct ncclXml* xml) {
+  FILE* file = fopen(xmlGraphFile, "r");
+  if (file == NULL) {
+    WARN("Could not open XML graph file %s : %s", xmlGraphFile, strerror(errno));
+    return ncclSystemError;
+  }
+  struct xmlHandler handlers[] = {{"graphs", ncclTopoXmlGraphLoadGraphs}};
+  xml->maxIndex = 0;
+  NCCLCHECK(xmlLoadSub(file, xml, NULL, handlers, 1));
+  fclose(file);
+  return ncclSuccess;
+}
+
+#elif NCCL_OS_WINDOWS
+
+/* Stub implementations for Windows */
+
+ncclResult_t xmlGetChar(FILE* file, char* c) {
+  (void)file;
+  (void)c;
+  return ncclSuccess;
+}
+
+ncclResult_t xmlGetValue(FILE* file, char* value, char* last) {
+  (void)file;
+  (void)value;
+  (void)last;
+  return ncclSuccess;
+}
+
+ncclResult_t xmlGetToken(FILE* file, char* name, char* value, char* last) {
+  (void)file;
+  (void)name;
+  (void)value;
+  (void)last;
+  return ncclSuccess;
+}
+
+ncclResult_t xmlSkipComment(FILE* file, char* start, char next) {
+  (void)file;
+  (void)start;
+  (void)next;
+  return ncclSuccess;
+}
+
+ncclResult_t xmlGetNode(FILE* file, struct ncclXmlNode* node) {
+  (void)file;
+  (void)node;
+  return ncclSuccess;
+}
+
+ncclResult_t xmlLoadSub(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head, struct xmlHandler handlers[],
+                        int nHandlers) {
+  (void)file;
+  (void)xml;
+  (void)head;
+  (void)handlers;
+  (void)nHandlers;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlLoadNvlink(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  (void)file;
+  (void)xml;
+  (void)head;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlLoadPciLink(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  (void)file;
+  (void)xml;
+  (void)head;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlLoadC2c(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  (void)file;
+  (void)xml;
+  (void)head;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlLoadGpu(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  (void)file;
+  (void)xml;
+  (void)head;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlLoadNet(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  (void)file;
+  (void)xml;
+  (void)head;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlLoadNic(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  (void)file;
+  (void)xml;
+  (void)head;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlLoadPci(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  (void)file;
+  (void)xml;
+  (void)head;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlLoadCpu(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  (void)file;
+  (void)xml;
+  (void)head;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlLoadSystem(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  (void)file;
+  (void)xml;
+  (void)head;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlGraphLoadGpu(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  (void)file;
+  (void)xml;
+  (void)head;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlGraphLoadNet(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  (void)file;
+  (void)xml;
+  (void)head;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlGraphLoadChannel(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  (void)file;
+  (void)xml;
+  (void)head;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlGraphLoadGraph(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
+  (void)file;
+  (void)xml;
+  (void)head;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoXmlGraphLoadGraphs(FILE* file, struct ncclXml* xmlGraph, struct ncclXmlNode* head) {
+  (void)file;
+  (void)xmlGraph;
+  (void)head;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclTopoGetXmlGraphFromFile(const char* xmlGraphFile, struct ncclXml* xml) {
+  (void)xmlGraphFile;
+  (void)xml;
+  return ncclSuccess;
+}
+
+#endif

@@ -1,0 +1,216 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "common/defines.h"
+#include "core/common.hpp"
+#include "core/components/fwd.hpp"
+#include "core/timemory.hpp"
+#include "library/components/category_region.hpp"
+#include <cstdint>
+
+#include <timemory/api/macros.hpp>
+#include <timemory/components/gotcha/backends.hpp>
+#include <timemory/components/macros.hpp>
+#include <timemory/operations/types/set.hpp>
+#include <timemory/utility/types.hpp>
+
+#include <optional>
+
+#if defined(ROCPROFSYS_USE_MPI)
+#    include <mpi.h>
+#endif
+
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <set>
+#include <string>
+#include <utility>
+
+ROCPROFSYS_COMPONENT_ALIAS(comm_data_tracker_t,
+                           ::tim::component::data_tracker<float, project::rocprofsys>)
+
+namespace rocprofsys
+{
+namespace component
+{
+using gotcha_data = ::tim::component::gotcha_data;
+
+struct comm_data : base<comm_data, void>
+{
+    using value_type = void;
+    using this_type  = comm_data;
+    using base_type  = base<this_type, value_type>;
+    using tracker_t  = tim::auto_tuple<comm_data_tracker_t>;
+    using data_type  = float;
+
+    struct mpi_recv
+    {
+        static constexpr auto value = "comm_data";
+        static constexpr auto label = "MPI Comm Recv";
+    };
+
+    struct mpi_send
+    {
+        static constexpr auto value = "comm_data";
+        static constexpr auto label = "MPI Comm Send";
+    };
+
+    struct ucx_recv
+    {
+        static constexpr auto value = "comm_data";
+        static constexpr auto label = "UCX Comm Recv";
+    };
+
+    struct ucx_send
+    {
+        static constexpr auto value = "comm_data";
+        static constexpr auto label = "UCX Comm Send";
+    };
+
+    static void preinit();
+    static void configure();
+    static void global_finalize();
+    static void start();
+    static void stop() {}
+
+#if defined(ROCPROFSYS_USE_MPI)
+    static int mpi_type_size(MPI_Datatype _datatype)
+    {
+        int _size = 0;
+        PMPI_Type_size(_datatype, &_size);
+        return _size;
+    }
+
+    // MPI_Send
+    static void audit(const gotcha_data& _data, audit::incoming, const void*, int count,
+                      MPI_Datatype datatype, int dst, int tag, MPI_Comm);
+
+    // MPI_Recv
+    static void audit(const gotcha_data& _data, audit::incoming, void*, int count,
+                      MPI_Datatype datatype, int dst, int tag, MPI_Comm, MPI_Status*);
+
+    // MPI_Isend
+    static void audit(const gotcha_data& _data, audit::incoming, const void*, int count,
+                      MPI_Datatype datatype, int dst, int tag, MPI_Comm, MPI_Request*);
+
+    // MPI_Irecv
+    static void audit(const gotcha_data& _data, audit::incoming, void*, int count,
+                      MPI_Datatype datatype, int dst, int tag, MPI_Comm, MPI_Request*);
+
+    // MPI_Bcast
+    static void audit(const gotcha_data& _data, audit::incoming, void*, int count,
+                      MPI_Datatype datatype, int root, MPI_Comm);
+
+    // MPI_Allreduce
+    static void audit(const gotcha_data& _data, audit::incoming, const void*, void*,
+                      int count, MPI_Datatype datatype, MPI_Op, MPI_Comm);
+
+    // MPI_Sendrecv
+    static void audit(const gotcha_data& _data, audit::incoming, const void*,
+                      int sendcount, MPI_Datatype sendtype, int, int sendtag, void*,
+                      int recvcount, MPI_Datatype recvtype, int, int recvtag, MPI_Comm,
+                      MPI_Status*);
+
+    // MPI_Gather
+    // MPI_Scatter
+    static void audit(const gotcha_data& _data, audit::incoming, const void*,
+                      int sendcount, MPI_Datatype sendtype, void*, int recvcount,
+                      MPI_Datatype recvtype, int root, MPI_Comm);
+
+    // MPI_Alltoall
+    static void audit(const gotcha_data& _data, audit::incoming, const void*,
+                      int sendcount, MPI_Datatype sendtype, void*, int recvcount,
+                      MPI_Datatype recvtype, MPI_Comm);
+#endif
+
+    // UCX communication tracking
+    // ucp_tag_send_nbx - send with tag matching (5 params: ep, buffer, count, tag, param)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, const void*,
+                      size_t count, std::uint64_t tag, const void*);
+
+    // ucp_tag_recv_nbx - receive with tag matching (6 params: worker, buffer, count, tag,
+    // tag_mask, param)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, void*,
+                      size_t count, std::uint64_t tag, std::uint64_t tag_mask,
+                      const void*);
+
+    // ucp_put_nbx - RMA put operation (6 params: ep, buffer, count, remote_addr, rkey,
+    // param)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, const void*,
+                      size_t count, std::uint64_t remote_addr, void* rkey, const void*);
+
+    // ucp_get_nbx - RMA get operation (6 params: ep, buffer, count, remote_addr, rkey,
+    // param)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, void*,
+                      size_t count, std::uint64_t remote_addr, void* rkey, const void*);
+
+    // ucp_am_send_nbx - active message send (7 params: ep, id, header, header_length,
+    // buffer, count, param)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, unsigned id,
+                      const void* header, size_t header_length, const void* buffer,
+                      size_t count, const void*);
+
+    // ucp_stream_send_nbx - stream send (4 params: ep, buffer, count, param)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, const void*,
+                      size_t             count, const void*);
+
+    // ucp_stream_recv_nbx - stream receive (5 params: ep, buffer, count, length, param)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, void*,
+                      size_t count, size_t* length, const void*);
+
+    // Legacy UCX functions (kept for compatibility)
+    // ucp_tag_send_nb/nbx - send with tag matching
+    static void audit(const gotcha_data& _data, audit::incoming, void*, size_t count,
+                      void*, void*, void*);
+
+    // ucp_tag_recv_nb/nbx - receive with tag matching
+    static void audit(const gotcha_data& _data, audit::incoming, void*, size_t count,
+                      void*, void*, void*, void*, void*);
+
+    // ucp_put/get operations - RMA (legacy)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, size_t length,
+                      std::uint64_t, void*, void*);
+
+    // ucp_am_send_nb/nbx - active message send (legacy)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, unsigned, void*,
+                      size_t, void*, size_t, unsigned, void*);
+
+    // ucp_stream_send/recv operations (legacy)
+    static void audit(const gotcha_data& _data, audit::incoming, void*, void*,
+                      size_t             count, void*, unsigned, void*);
+
+private:
+    static auto& add(tracker_t& _t, data_type value)
+    {
+        if(rocprofsys::state::process::get() != rocprofsys::state::process::Active)
+        {
+            _t.invoke<operation::set_is_invalid>(true);
+            return _t;
+        }
+        _t.store(std::plus<data_type>{}, value);
+        return _t;
+    }
+
+    static auto add(const gotcha_data& _data, data_type value)
+    {
+        tracker_t _t{ std::string_view{ _data.tool_id.c_str() } };
+        return add(_t, value);
+    }
+
+    static auto add(std::string&& _name, data_type value)
+    {
+        tracker_t _t{ _name };
+        return add(_t, value);
+    }
+
+    static auto add(std::string_view _name, data_type value)
+    {
+        tracker_t _t{ _name };
+        return add(_t, value);
+    }
+};
+}  // namespace component
+}  // namespace rocprofsys

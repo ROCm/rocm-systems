@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+ROCMDIR=@ROCM_PATH@
+CURRENTDIR=`pwd`
+
+HIPINCDIR=$ROCMDIR/@CMAKE_INSTALL_INCLUDEDIR@/hip
+([ ! -d $HIPINCDIR ]) && exit 0
+
+#FILE_REORG_BACKWARD_COMPATIBILITY
+  #backward copatibility code , to be removed later
+HIPDIR=$ROCMDIR/hip
+HIPINCDIR=$ROCMDIR/hip/include/hip
+([ ! -d $HIPINCDIR ]) && exit 0
+([ ! -d $HIPDIR ]) && exit 0
+rmdir --ignore-fail-on-non-empty $HIPDIR

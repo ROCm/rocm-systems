@@ -1,0 +1,243 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#pragma once
+
+#include <vector>
+#include <string>
+#include <string_view>
+
+
+#include "vdi_common.hpp"
+#include "rocclr/utils/debug.hpp"
+#include "rocclr/utils/flags.hpp"
+#include "device/comgrctx.hpp"
+#include "hip/hip_runtime_api.h"
+
+namespace hip {
+
+// RAII wrapper for Comgr handles to ensure proper resource management
+namespace comgr_helper {
+
+template <typename comgr_T> class ComgrUniqueHandle {
+ public:
+  ComgrUniqueHandle() = default;
+  // constructor which takes ownership of a correctly initialized handle
+  ComgrUniqueHandle(comgr_T& handle) : comgr_obj_(handle) { handle = {0}; };
+
+  template <typename T = comgr_T,
+            std::enable_if_t<std::is_same_v<T, amd_comgr_data_set_t> ||
+                                 std::is_same_v<T, amd_comgr_action_info_t>,
+                             bool> = true>
+  [[nodiscard]] amd_comgr_status_t Create() {
+    if constexpr (std::is_same_v<T, amd_comgr_data_set_t>) {
+      return amd::Comgr::create_data_set(&comgr_obj_);
+    } else if constexpr (std::is_same_v<T, amd_comgr_action_info_t>) {
+      return amd::Comgr::create_action_info(&comgr_obj_);
+    }
+
+    // Unreachable code
+    return AMD_COMGR_STATUS_SUCCESS;
+  }
+
+  template <typename T = comgr_T,
+            std::enable_if_t<std::is_same_v<T, amd_comgr_data_t>, bool> = true>
+  [[nodiscard]] amd_comgr_status_t Create(amd_comgr_data_kind_t kind) {
+    return amd::Comgr::create_data(kind, &comgr_obj_);
+  }
+
+  ~ComgrUniqueHandle() {
+    if (comgr_obj_.handle != 0) {
+      if constexpr (std::is_same_v<comgr_T, amd_comgr_data_set_t>) {
+        amd::Comgr::destroy_data_set(comgr_obj_);
+      } else if constexpr (std::is_same_v<comgr_T, amd_comgr_action_info_t>) {
+        amd::Comgr::destroy_action_info(comgr_obj_);
+      } else if constexpr (std::is_same_v<comgr_T, amd_comgr_data_t>) {
+        amd::Comgr::release_data(comgr_obj_);
+      }
+    }
+  }
+
+  // Delete all copy and move operators
+  ComgrUniqueHandle(ComgrUniqueHandle&) = delete;
+  ComgrUniqueHandle(ComgrUniqueHandle&&) = delete;
+  ComgrUniqueHandle& operator=(ComgrUniqueHandle&) = delete;
+  ComgrUniqueHandle& operator=(ComgrUniqueHandle&&) = delete;
+
+  // Method to access data
+  comgr_T get() const {
+    assert(comgr_obj_.handle != 0);
+    return comgr_obj_;
+  }
+
+ private:
+  comgr_T comgr_obj_{0};
+};
+
+typedef ComgrUniqueHandle<amd_comgr_data_set_t> ComgrDataSetUniqueHandle;
+typedef ComgrUniqueHandle<amd_comgr_action_info_t> ComgrActionInfoUniqueHandle;
+typedef ComgrUniqueHandle<amd_comgr_data_t> ComgrDataUniqueHandle;
+
+}  // namespace comgr_helper
+
+namespace helpers {
+bool UnbundleBitCode(std::string_view bundled_bit_code, const std::string& isa, size_t& co_offset,
+                     size_t& co_size);
+bool addCodeObjData(comgr_helper::ComgrDataSetUniqueHandle& input, std::string_view source,
+                    const std::string& name, const amd_comgr_data_kind_t type);
+bool extractBuildLog(comgr_helper::ComgrDataSetUniqueHandle& dataSet, std::string& buildLog);
+bool extractByteCodeBinary(const comgr_helper::ComgrDataSetUniqueHandle& inDataSet,
+                           const amd_comgr_data_kind_t dataKind, std::vector<char>& bin);
+bool createAction(comgr_helper::ComgrActionInfoUniqueHandle& action,
+                  const std::vector<std::string>& options, const std::string& isa,
+                  const amd_comgr_language_t lang = AMD_COMGR_LANGUAGE_NONE);
+bool compileToExecutable(const comgr_helper::ComgrDataSetUniqueHandle& compileInputs,
+                         const std::string& isa, const std::vector<std::string>& compileOptions,
+                         const std::vector<std::string>& linkOptions, std::string& buildLog,
+                         std::vector<char>& exe);
+bool compileToIR(const comgr_helper::ComgrDataSetUniqueHandle& compileInputs,
+                 const std::string& isa, const std::vector<std::string>& compileOptions,
+                 std::string& buildLog, std::vector<char>& ir, amd_comgr_data_kind_t kind);
+bool linkLLVMBitcode(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
+                     const std::string& isa, const std::vector<std::string>& linkOptions,
+                     std::string& buildLog, std::vector<char>& LinkedLLVMBitcode);
+bool createExecutable(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
+                      const std::string& isa, const std::vector<std::string>& exeOptions,
+                      std::string& buildLog, std::vector<char>& executable, bool spirv_bc = false);
+bool convertSPIRVToLLVMBC(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
+                          const std::string& isa, const std::vector<std::string>& linkOptions,
+                          std::string& buildLog,
+                          comgr_helper::ComgrDataSetUniqueHandle& linkOutputs);
+bool demangleName(const std::string& mangledName, std::string& demangledName);
+std::string handleMangledName(std::string loweredName);
+bool fillMangledNames(const std::vector<char>& executable,
+                      std::map<std::string, std::string>& mangledNames, bool isBitcode);
+void GenerateUniqueFileName(std::string& name);
+
+bool CheckIfBundled(std::string_view llvm_bitcode);
+
+bool UnbundleUsingComgr(std::string_view source, const std::string& isa,
+                        const std::vector<std::string>& linkOptions, std::string& buildLog,
+                        std::vector<char>& unbundled_spirv_bitcode, const char* bundleEntryIDs[],
+                        size_t bundleEntryIDsCount);
+
+// Mapping from targets to generic targets
+const std::map<std::string, std::string>& GenericTargetMapping();
+
+// Return true if agent target compatible with generic code object target, false otherwise.
+// Both targets should not have any feature.
+bool IsCompatibleWithGenericTarget(const std::string& coTarget, const std::string& agentTarget);
+}  // namespace helpers
+/**
+ * HIPRTC linker options
+ */
+struct LinkArguments {
+  uint64_t max_registers_ = 0;            ///< Maximum registers that a thread may a use
+  uint64_t threads_per_block_ = 0;        ///< Minimum No. of threads per block
+  float wall_time_ = 0.0f;                ///< Value for total wall clock time
+  char* info_log_ = nullptr;              ///< Pointer to a buffer to print log information
+  uint64_t info_log_size_ = 0;            ///< Size of the buffer in bytes for logged info
+  char* error_log_ = nullptr;             ///< Pointer to a buffer to print log errors
+  uint64_t error_log_size_ = 0;           ///< Size of the buffer in bytes for logged errors
+  uint64_t optimization_level_ = 3;       ///< Value of the optimization level for generated code
+                                          ///< acceptable options -O0, -O1, -O2, -O3
+  uint64_t target_from_hip_context_ = 0;  ///< Determines the target, based on the current context
+  uint64_t jit_target_ = 0;               ///< CUDA Only JIT target
+  uint64_t fallback_strategy_ = 0;        ///< CUDA Only Choice of fallback strategy
+  uint32_t generate_debug_info_ = 0;      ///< Create debug information in output -g, if set
+  uint64_t log_verbose_ = 0;              ///< Generate verbose log messages
+  uint32_t generate_line_info_ = 0;       ///< Generate line number information
+  uint64_t cache_mode_ = 0;               ///< CUDA Only Enables caching explicitly
+  bool sm3x_opt_ = false;                 ///< CUDA Only New SM3X option
+  bool fast_compile_ = false;             ///< CUDA Only Set fast compile
+  const char** global_symbol_names_ = nullptr;  ///< Array of device symbol names to be relocated
+                                                ///< to the host
+  void** global_symbol_addresses_ = nullptr;    ///< Array of host addresses to be relocated to the
+                                                ///< device
+  uint64_t global_symbol_count_ = 0;            ///< Number of symbol count
+  int32_t lto_ = 0;                             ///< Enable link time optimization for device code
+  int32_t ftz_ = 0;                             ///< Set single-precision denormals
+  int32_t prec_div_ = 1;                        ///< Set single-precision floating-point division
+                                                ///< and reciprocals
+  int32_t prec_sqrt_ = 1;                       ///< Set single-precision floating-point square root
+  int32_t fma_ = 1;                             ///< Enable floating-point multiplies and
+                                                ///< adds/subtracts operations
+  int32_t pic_ = 0;                             ///< Generates Position Independent code
+  int32_t min_cta_per_sm_ = 0;                  ///< Hints to JIT compiler the minimum number of
+                                                ///< CTAs from kernel's grid to be mapped to SM
+  int32_t max_threads_per_block_ = 0;           ///< Maximum number of threads in a thread block
+  int32_t override_directive_values_ = 0;       ///< Override Directive values
+  const char** linker_ir2isa_args_ = nullptr;   ///< Hip Only Linker options to be passed on
+                                                ///< to compiler
+  uint64_t linker_ir2isa_args_count_ = 0;       ///< Hip Only Count of linker options to be passed
+                                                ///< on to compiler
+};
+
+class RTCProgram {
+ protected:
+  // Lock and control variables
+  static std::recursive_mutex lock_;
+  static std::once_flag initialized_;
+
+  RTCProgram(const std::string &name);
+  ~RTCProgram() {}
+
+  // Member Functions
+  bool findIsa();
+  static void AppendOptions(const std::string &app_env_var, std::vector<std::string>* options);
+
+  // Data Members
+  std::string name_;
+  std::string isa_;
+  std::string build_log_;
+  std::vector<char> executable_;
+  amd_comgr_data_kind_t ir_kind_{AMD_COMGR_DATA_KIND_UNDEF};
+
+  hip::comgr_helper::ComgrDataSetUniqueHandle exec_input_;
+};
+
+class LinkProgram : public RTCProgram {
+  // Private Member Functions (forbid these function calls)
+  LinkProgram() = delete;
+  LinkProgram(LinkProgram&) = delete;
+  LinkProgram& operator=(LinkProgram&) = delete;
+
+  amd_comgr_data_kind_t data_kind_;
+  amd_comgr_data_kind_t GetCOMGRDataKind(hipJitInputType input_type);
+
+  // Linker Arguments at hipLinkCreate
+  LinkArguments link_args_;
+
+  // Spirv is bundled
+  bool is_bundled_ = false;
+
+  // Private Data Members
+  hip::comgr_helper::ComgrDataSetUniqueHandle link_input_;
+  std::vector<std::string> link_options_;
+  static std::unordered_set<LinkProgram*> linker_set_;
+
+  bool AddLinkerDataImpl(std::string_view link_data, hipJitInputType input_type,
+                         const std::string& link_file_name);
+
+ public:
+  LinkProgram(const std::string &name);
+  ~LinkProgram() {
+    std::scoped_lock lock(lock_);
+    linker_set_.erase(this);
+  }
+  // Public Member Functions
+  bool AddLinkerOptions(unsigned int num_options, hipJitOption* options_ptr,
+                        void** options_vals_ptr);
+  bool AddLinkerFile(const std::string& file_path, hipJitInputType input_type);
+  bool AddLinkerData(const void* image_ptr, size_t image_size, const std::string& link_file_name,
+                     hipJitInputType input_type);
+  bool LinkComplete(void** bin_out, size_t* size_out);
+  void AppendLinkerOptions() { AppendOptions(HIPRTC_LINK_OPTIONS_APPEND, &link_options_); }
+  static bool isLinkerValid(LinkProgram* link_program);
+};
+
+
+}  // namespace hip

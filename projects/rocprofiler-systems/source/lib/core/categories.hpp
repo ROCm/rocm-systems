@@ -1,0 +1,305 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "common/defines.h"
+#include "rocprofiler-systems/categories.h"  // in rocprof-sys-common-api
+
+#if defined(TIMEMORY_PERFETTO_CATEGORIES)
+#    error "TIMEMORY_PERFETTO_CATEGORIES is already defined. Please include \"" __FILE__ "\" before including any timemory files"
+#endif
+
+#include <timemory/api.hpp>
+#include <timemory/api/macros.hpp>
+#include <timemory/mpl/macros.hpp>
+#include <timemory/mpl/types.hpp>
+
+#define ROCPROFSYS_DEFINE_NAME_TRAIT(NAME, DESC, ...)                                    \
+    namespace tim                                                                        \
+    {                                                                                    \
+    namespace trait                                                                      \
+    {                                                                                    \
+    template <>                                                                          \
+    struct perfetto_category<__VA_ARGS__>                                                \
+    {                                                                                    \
+        static constexpr auto value       = NAME;                                        \
+        static constexpr auto description = DESC;                                        \
+    };                                                                                   \
+    }                                                                                    \
+    }
+
+namespace rocprofsys
+{
+template <size_t>
+struct category_type_id;
+
+template <typename Tp>
+struct category_enum_id;
+
+template <size_t Idx>
+using category_type_id_t = typename category_type_id<Idx>::type;
+}  // namespace rocprofsys
+
+#define ROCPROFSYS_DEFINE_CATEGORY_TRAIT(TYPE, ENUM)                                     \
+    namespace rocprofsys                                                                 \
+    {                                                                                    \
+    template <>                                                                          \
+    struct category_type_id<ENUM>                                                        \
+    {                                                                                    \
+        using type = TYPE;                                                               \
+    };                                                                                   \
+    template <>                                                                          \
+    struct category_enum_id<TYPE>                                                        \
+    {                                                                                    \
+        static constexpr auto value = ENUM;                                              \
+    };                                                                                   \
+    }
+
+#define ROCPROFSYS_DECLARE_CATEGORY(NS, VALUE, ENUM, NAME, DESC)                         \
+    TIMEMORY_DECLARE_NS_API(NS, VALUE)                                                   \
+    ROCPROFSYS_DEFINE_NAME_TRAIT(NAME, DESC, NS::VALUE)                                  \
+    ROCPROFSYS_DEFINE_CATEGORY_TRAIT(::tim::NS::VALUE, ENUM)
+#define ROCPROFSYS_DEFINE_CATEGORY(NS, VALUE, ENUM, NAME, DESC)                          \
+    TIMEMORY_DEFINE_NS_API(NS, VALUE)                                                    \
+    ROCPROFSYS_DEFINE_NAME_TRAIT(NAME, DESC, NS::VALUE)                                  \
+    ROCPROFSYS_DEFINE_CATEGORY_TRAIT(::tim::NS::VALUE, ENUM)
+
+// clang-format off
+// these are defined by rocprofsys
+ROCPROFSYS_DEFINE_CATEGORY(project, rocprofsys, ROCPROFSYS_CATEGORY_NONE, "rocprofsys", "ROCm Systems Profiler project")
+ROCPROFSYS_DEFINE_CATEGORY(category, host, ROCPROFSYS_CATEGORY_HOST, "host", "Host-side function tracing")
+ROCPROFSYS_DEFINE_CATEGORY(category, user, ROCPROFSYS_CATEGORY_USER, "user", "User-defined regions")
+ROCPROFSYS_DEFINE_CATEGORY(category, python, ROCPROFSYS_CATEGORY_PYTHON, "python", "Python regions")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm, ROCPROFSYS_CATEGORY_ROCM, "rocm", "General ROCm tracing")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_hip_api, ROCPROFSYS_CATEGORY_ROCM_HIP_API, "rocm_hip_api", "ROCm HIP functions")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_hsa_api, ROCPROFSYS_CATEGORY_ROCM_HSA_API, "rocm_hsa_api", "ROCm HSA functions")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kernel_dispatch, ROCPROFSYS_CATEGORY_ROCM_KERNEL_DISPATCH, "rocm_kernel_dispatch", "ROCm Kernel dispatch")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_memory_copy, ROCPROFSYS_CATEGORY_ROCM_MEMORY_COPY, "rocm_memory_copy", "ROCm Async Memory Copy")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_memory_allocate, ROCPROFSYS_CATEGORY_ROCM_MEMORY_ALLOCATE, "rocm_memory_allocate", "ROCm Memory Allocations")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_hip_stream, ROCPROFSYS_CATEGORY_ROCM_HIP_STREAM, "rocm_hip_stream", "ROCm HIP Stream")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_scratch_memory, ROCPROFSYS_CATEGORY_ROCM_SCRATCH_MEMORY, "rocm_scratch_memory", "ROCm kernel scratch memory reallocations")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_page_migration, ROCPROFSYS_CATEGORY_ROCM_PAGE_MIGRATION, "rocm_page_migration", "ROCm memory page migration")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_counter_collection, ROCPROFSYS_CATEGORY_ROCM_COUNTER_COLLECTION, "rocm_counter_collection", "ROCm device counter collection")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_marker_api, ROCPROFSYS_CATEGORY_ROCM_MARKER_API, "rocm_marker_api", "ROCTx labels")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rocdecode_api, ROCPROFSYS_CATEGORY_ROCM_ROCDECODE_API, "rocm_rocdecode_api", "ROCm RocDecode API")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rocjpeg_api, ROCPROFSYS_CATEGORY_ROCM_ROCJPEG_API, "rocm_rocjpeg_api", "ROCm RocJPEG API")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_hipfile_api, ROCPROFSYS_CATEGORY_ROCM_HIPFILE_API, "rocm_hipfile_api", "ROCm hipFILE API")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl_api, ROCPROFSYS_CATEGORY_ROCM_RCCL_API, "rocm_rccl_api", "ROCm RCCL API")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rocshmem_api, ROCPROFSYS_CATEGORY_ROCM_ROCSHMEM_API, "rocm_rocshmem_api", "ROCm rocSHMEM API")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_ompt_api, ROCPROFSYS_CATEGORY_ROCM_OMPT_API, "rocm_ompt_api", "ROCm OMPT API")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_page_fault, ROCPROFSYS_CATEGORY_ROCM_KFD_PAGE_FAULT, "rocm_kfd_page_fault", "KFD Page Fault Events")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_page_migrate, ROCPROFSYS_CATEGORY_ROCM_KFD_PAGE_MIGRATE, "rocm_kfd_page_migrate", "KFD Page Migration Events")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_page_fault, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_PAGE_FAULT, "rocm_kfd_event_page_fault", "KFD Event Page Fault Events")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_page_migrate, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_PAGE_MIGRATE, "rocm_kfd_event_page_migrate", "KFD Event Page Migration Events")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_queue, ROCPROFSYS_CATEGORY_ROCM_KFD_QUEUE, "rocm_kfd_queue", "KFD Queue Events")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_queue, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_QUEUE, "rocm_kfd_event_queue", "KFD Event Queue Operations")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_unmap_from_gpu, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_UNMAP_FROM_GPU, "rocm_kfd_event_unmap_from_gpu", "KFD Unmap from GPU Events")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kfd_event_dropped_events, ROCPROFSYS_CATEGORY_ROCM_KFD_EVENT_DROPPED_EVENTS, "rocm_kfd_event_dropped_events", "KFD Dropped Events")
+ROCPROFSYS_DEFINE_CATEGORY(category, unified_memory_migration_throughput, ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_MIGRATION_THROUGHPUT, "unified_memory_migration_throughput", "Unified Memory Migration Throughput")
+ROCPROFSYS_DEFINE_CATEGORY(category, unified_memory_fault_rate, ROCPROFSYS_CATEGORY_UNIFIED_MEMORY_FAULT_RATE, "unified_memory_fault_rate", "Unified Memory Page Fault Rate")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi, ROCPROFSYS_CATEGORY_AMD_SMI, "amd_smi", "AMD-SMI data")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC, "amd_smi_nic", "AMD-SMI NIC data")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_rx_cnp_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RX_CNP_PKTS, "nic_rx_cnp_pkts", "AI NIC RX CNP Packets")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_tx_cnp_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_CNP_PKTS, "nic_tx_cnp_pkts", "AI NIC TX CNP Packets")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_rx_ucast_bytes, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RX_UCAST_BYTES, "nic_rx_ucast_bytes", "AI NIC RX UCAST BYTES")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_rx_ucast_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RX_UCAST_PKTS, "nic_rx_ucast_pkts", "AI NIC RX UCAST PKTS")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_tx_ucast_bytes, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_UCAST_BYTES, "nic_tx_ucast_bytes", "AI NIC TX UCAST BYTES")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_tx_ucast_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_UCAST_PKTS, "nic_tx_ucast_pkts", "AI NIC TX UCAST PKTS")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_tx_rdma_ack_timeout, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_ACK_TIMEOUT, "nic_tx_rdma_ack_timeout", "AI NIC TX ACK TIMEOUT")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_resp_tx_pkt_seq_err, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RESP_TX_PKT_SEQ_ERR, "nic_resp_tx_pkt_seq_err", "AI NIC RESP TX PKT SEQ ERROR")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_req_rx_pkt_seq_err, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_REQ_RX_PKT_SEQ_ERR, "nic_req_rx_pkt_seq_err", "AI NIC REQ RX PKT SEQ ERROR")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_req_rx_impl_nak_seq_err, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_REQ_RX_IMPL_NAK_SEQ_ERR, "nic_req_rx_impl_nak_seq_err", "AI NIC REQ RX IMPL NAK SEQ ERROR")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_gfx_busy, ROCPROFSYS_CATEGORY_AMD_SMI_BUSY_GFX, "device_busy_gfx", "Busy percentage of GFX engine on a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_umc_busy, ROCPROFSYS_CATEGORY_AMD_SMI_BUSY_UMC, "device_busy_umc", "Busy percentage of UMC engin on a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_mm_busy, ROCPROFSYS_CATEGORY_AMD_SMI_BUSY_MM, "device_busy_mm", "Busy percentage of MM engine on a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_temp, ROCPROFSYS_CATEGORY_AMD_SMI_TEMP, "device_temp",   "Temperature of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_power, ROCPROFSYS_CATEGORY_AMD_SMI_POWER, "device_power", "Power consumption of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_memory_usage, ROCPROFSYS_CATEGORY_AMD_SMI_MEMORY_USAGE, "device_memory_usage", "Memory usage of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_vcn_activity, ROCPROFSYS_CATEGORY_AMD_SMI_VCN_ACTIVITY, "device_vcn_activity", "VCN Activity of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_jpeg_activity, ROCPROFSYS_CATEGORY_AMD_SMI_JPEG_ACTIVITY, "device_jpeg_activity", "JPEG Activity of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_xgmi_link_width, ROCPROFSYS_CATEGORY_AMD_SMI_XGMI_LINK_WIDTH, "device_xgmi_link_width", "XGMI Link Width")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_xgmi_link_speed, ROCPROFSYS_CATEGORY_AMD_SMI_XGMI_LINK_SPEED, "device_xgmi_link_speed", "XGMI Link Speed")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_xgmi_read_data, ROCPROFSYS_CATEGORY_AMD_SMI_XGMI_READ_DATA, "device_xgmi_read_data", "XGMI Read Data Accumulator")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_xgmi_write_data, ROCPROFSYS_CATEGORY_AMD_SMI_XGMI_WRITE_DATA, "device_xgmi_write_data", "XGMI Write Data Accumulator")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_link_width, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_LINK_WIDTH, "device_pcie_link_width", "PCIe Link Width")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_link_speed, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_LINK_SPEED, "device_pcie_link_speed", "PCIe Link Speed")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_bandwidth_acc, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_BANDWIDTH_ACC, "device_pcie_bandwidth_acc", "PCIe Bandwidth Accumulated")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_pcie_bandwidth_inst, ROCPROFSYS_CATEGORY_AMD_SMI_PCIE_BANDWIDTH_INST, "device_pcie_bandwidth_inst", "PCIe Bandwidth Instantaneous")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_sdma_usage, ROCPROFSYS_CATEGORY_AMD_SMI_SDMA_USAGE, "device_sdma_usage", "SDMA Utilization percentage of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_gfx_clock, ROCPROFSYS_CATEGORY_AMD_SMI_GFX_CLOCK, "device_gfx_clock", "GFX clock frequency of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_mem_clock, ROCPROFSYS_CATEGORY_AMD_SMI_MEM_CLOCK, "device_mem_clock", "Memory clock frequency of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl, ROCPROFSYS_CATEGORY_ROCM_RCCL, "rccl", "ROCm Communication Collectives Library (RCCL) regions")
+ROCPROFSYS_DEFINE_CATEGORY(category, pthread, ROCPROFSYS_CATEGORY_PTHREAD, "pthread", "POSIX threading functions")
+ROCPROFSYS_DEFINE_CATEGORY(category, kokkos, ROCPROFSYS_CATEGORY_KOKKOS, "kokkos", "KokkosTools regions")
+ROCPROFSYS_DEFINE_CATEGORY(category, mpi, ROCPROFSYS_CATEGORY_MPI, "mpi", "MPI regions")
+ROCPROFSYS_DEFINE_CATEGORY(category, ucx, ROCPROFSYS_CATEGORY_UCX, "ucx", "UCX regions")
+ROCPROFSYS_DEFINE_CATEGORY(category, shmem, ROCPROFSYS_CATEGORY_SHMEM, "shmem", "OpenSHMEM regions")
+ROCPROFSYS_DEFINE_CATEGORY(category, process_sampling, ROCPROFSYS_CATEGORY_PROCESS_SAMPLING, "process_sampling", "Process-level data")
+ROCPROFSYS_DEFINE_CATEGORY(category, comm_data, ROCPROFSYS_CATEGORY_COMM_DATA, "comm_data", "MPI/RCCL/UCX counters for tracking amount of data sent or received")
+ROCPROFSYS_DEFINE_CATEGORY(category, causal, ROCPROFSYS_CATEGORY_CAUSAL, "causal", "Causal profiling data")
+ROCPROFSYS_DEFINE_CATEGORY(category, cpu_freq, ROCPROFSYS_CATEGORY_CPU_FREQ, "cpu_frequency", "CPU frequency (collected in background thread)")
+ROCPROFSYS_DEFINE_CATEGORY(category, cpu_load, ROCPROFSYS_CATEGORY_CPU_LOAD, "cpu_load", "CPU load percentage (collected in background thread)")
+ROCPROFSYS_DEFINE_CATEGORY(category, process_page, ROCPROFSYS_CATEGORY_PROCESS_PAGE, "process_physical_memory", "Physical memory usage (RSS) in process in MB (collected in background thread)")
+ROCPROFSYS_DEFINE_CATEGORY(category, process_virt, ROCPROFSYS_CATEGORY_PROCESS_VIRT, "process_virtual_memory", "Virtual memory usage in process in MB (collected in background thread)")
+ROCPROFSYS_DEFINE_CATEGORY(category, process_peak, ROCPROFSYS_CATEGORY_PROCESS_PEAK, "process_memory_hwm", "Memory High-Water Mark i.e. peak memory usage (collected in background thread)")
+ROCPROFSYS_DEFINE_CATEGORY(category, process_context_switch, ROCPROFSYS_CATEGORY_PROCESS_CONTEXT_SWITCH, "process_context_switch", "Context switches in process (collected in background thread)")
+ROCPROFSYS_DEFINE_CATEGORY(category, process_page_fault, ROCPROFSYS_CATEGORY_PROCESS_PAGE_FAULT, "process_page_fault", "Memory page faults in process (collected in background thread)")
+ROCPROFSYS_DEFINE_CATEGORY(category, process_user_mode_time, ROCPROFSYS_CATEGORY_PROCESS_USER_MODE_TIME, "process_user_cpu_time", "CPU time of functions executing in user-space in process in seconds (collected in background thread)")
+ROCPROFSYS_DEFINE_CATEGORY(category, process_kernel_mode_time, ROCPROFSYS_CATEGORY_PROCESS_KERNEL_MODE_TIME, "process_kernel_cpu_time", "CPU time of functions executing in kernel-space in process in seconds (collected in background thread)")
+ROCPROFSYS_DEFINE_CATEGORY(category, thread_wall_time, ROCPROFSYS_CATEGORY_THREAD_WALL_TIME, "thread_wall_time", "Wall-clock time on thread (derived from sampling)")
+ROCPROFSYS_DEFINE_CATEGORY(category, thread_cpu_time, ROCPROFSYS_CATEGORY_THREAD_CPU_TIME, "thread_cpu_time", "CPU time on thread (derived from sampling)")
+ROCPROFSYS_DEFINE_CATEGORY(category, thread_page_fault, ROCPROFSYS_CATEGORY_THREAD_PAGE_FAULT, "thread_page_fault", "Memory page faults on thread (derived from sampling)")
+ROCPROFSYS_DEFINE_CATEGORY(category, thread_peak_memory, ROCPROFSYS_CATEGORY_THREAD_PEAK_MEMORY, "thread_peak_memory", "Peak memory usage on thread in MB (derived from sampling)")
+ROCPROFSYS_DEFINE_CATEGORY(category, thread_context_switch, ROCPROFSYS_CATEGORY_THREAD_CONTEXT_SWITCH, "thread_context_switch", "Context switches on thread (derived from sampling)")
+ROCPROFSYS_DEFINE_CATEGORY(category, thread_hardware_counter, ROCPROFSYS_CATEGORY_THREAD_HARDWARE_COUNTER, "thread_hardware_counter", "Hardware counter value on thread (derived from sampling)")
+ROCPROFSYS_DEFINE_CATEGORY(category, kernel_hardware_counter, ROCPROFSYS_CATEGORY_KERNEL_HARDWARE_COUNTER, "kernel_hardware_counter", "Hardware counter value for kernel (deterministic)")
+ROCPROFSYS_DEFINE_CATEGORY(category, numa, ROCPROFSYS_CATEGORY_NUMA, "numa", "Non-unified memory architecture")
+ROCPROFSYS_DEFINE_CATEGORY(category, vaapi, ROCPROFSYS_CATEGORY_VAAPI, "vaapi", "Video Accelerator API")
+ROCPROFSYS_DEFINE_CATEGORY(category, timer_sampling, ROCPROFSYS_CATEGORY_TIMER_SAMPLING, "timer_sampling", "Sampling based on a timer")
+ROCPROFSYS_DEFINE_CATEGORY(category, overflow_sampling, ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING, "overflow_sampling", "Sampling based on a counter overflow")
+
+ROCPROFSYS_DECLARE_CATEGORY(category, sampling, ROCPROFSYS_CATEGORY_SAMPLING, "sampling", "Host-side call-stack sampling")
+// clang-format on
+
+namespace tim
+{
+namespace trait
+{
+template <typename... Tp>
+using name = perfetto_category<Tp...>;
+}
+}  // namespace tim
+
+#define ROCPROFSYS_PERFETTO_CATEGORY(TYPE)                                               \
+    ::perfetto::Category(::tim::trait::perfetto_category<::tim::TYPE>::value)            \
+        .SetDescription(::tim::trait::perfetto_category<::tim::TYPE>::description)
+
+#define ROCPROFSYS_PERFETTO_CATEGORIES                                                   \
+    ROCPROFSYS_PERFETTO_CATEGORY(category::host),                                        \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::user),                                    \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::python),                                  \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::sampling),                                \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm),                                    \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_hip_api),                            \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_hsa_api),                            \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kernel_dispatch),                    \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_memory_copy),                        \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_memory_allocate),                    \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_hip_stream),                         \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_scratch_memory),                     \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_page_migration),                     \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_counter_collection),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_marker_api),                         \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rocdecode_api),                      \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rocjpeg_api),                        \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_hipfile_api),                        \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rccl_api),                           \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rocshmem_api),                       \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_ompt_api),                           \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_page_fault),                     \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_page_migrate),                   \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_event_page_fault),               \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_event_page_migrate),             \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_queue),                          \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_event_queue),                    \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_event_unmap_from_gpu),           \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kfd_event_dropped_events),           \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi),                                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic),                             \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_rx_cnp_pkts),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_cnp_pkts),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_rx_ucast_bytes),              \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_ucast_bytes),              \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_rx_ucast_pkts),               \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_ucast_pkts),               \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_rdma_ack_timeout),         \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_resp_tx_pkt_seq_err),         \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_req_rx_pkt_seq_err),          \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_req_rx_impl_nak_seq_err),     \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_gfx_busy),                        \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_umc_busy),                        \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_mm_busy),                         \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_temp),                            \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_power),                           \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_memory_usage),                    \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_vcn_activity),                    \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_jpeg_activity),                   \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_xgmi_link_width),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_xgmi_link_speed),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_xgmi_read_data),                  \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_xgmi_write_data),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_link_width),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_link_speed),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_bandwidth_acc),              \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_pcie_bandwidth_inst),             \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_sdma_usage),                      \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_gfx_clock),                       \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_mem_clock),                       \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rccl),                               \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::pthread),                                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::kokkos),                                  \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::mpi),                                     \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::ucx),                                     \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::shmem),                                   \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::sampling),                                \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::process_sampling),                        \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::comm_data),                               \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::causal),                                  \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::cpu_freq),                                \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::cpu_load),                                \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::process_page),                            \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::process_virt),                            \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::process_peak),                            \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::process_context_switch),                  \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::process_page_fault),                      \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::process_user_mode_time),                  \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::process_kernel_mode_time),                \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::thread_wall_time),                        \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::thread_cpu_time),                         \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::thread_page_fault),                       \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::thread_peak_memory),                      \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::thread_context_switch),                   \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::thread_hardware_counter),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::kernel_hardware_counter),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::numa),                                    \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::vaapi),                                   \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::timer_sampling),                          \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::overflow_sampling),                       \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::unified_memory_migration_throughput),     \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::unified_memory_fault_rate),               \
+        ::perfetto::Category("timemory").SetDescription("Events from the timemory API")
+
+#if defined(TIMEMORY_USE_PERFETTO)
+#    define TIMEMORY_PERFETTO_CATEGORIES ROCPROFSYS_PERFETTO_CATEGORIES
+#endif
+
+#include <set>
+#include <string>
+
+namespace rocprofsys
+{
+inline namespace config
+{
+std::set<std::string>
+get_enabled_categories();
+
+std::set<std::string>
+get_disabled_categories();
+}  // namespace config
+
+namespace categories
+{
+void
+enable_categories(const std::set<std::string>& = config::get_enabled_categories());
+
+void
+disable_categories(const std::set<std::string>& = config::get_disabled_categories());
+
+void
+setup();
+
+void
+shutdown();
+}  // namespace categories
+}  // namespace rocprofsys

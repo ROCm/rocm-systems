@@ -1,0 +1,31 @@
+# mongodb_connector files
+__pycache__
+.cline_storage
+
+# edit files
+*~
+
+# generated files/folders
+/dist
+/omniperf.spec
+/build*
+/.vscode
+/.cache
+/.venv
+/workloads
+.coverage
+saved_analysis
+pmc_kernel_top.csv
+VERSION.sha
+**/_build
+**/out
+
+# temp files
+/tests/Testing
+
+# documentation artifacts
+/_build
+_toc.yml
+
+# Backup directories
+.backups/

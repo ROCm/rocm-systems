@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 3.18.0 FATAL_ERROR)
+
+if(NOT @GTEST_DISCOVER_TESTS_TARGET@_TESTS)
+    message(FATAL_ERROR "@GTEST_DISCOVER_TESTS_TARGET@_TESTS is not defined")
+endif()
+
+foreach(_TEST ${@GTEST_DISCOVER_TESTS_TARGET@_TESTS})
+    set_tests_properties(
+        ${_TEST} PROPERTIES LABELS "@GTEST_DISCOVER_TESTS_LABELS@" ENVIRONMENT
+                            "@GTEST_DISCOVER_TESTS_ENVIRONMENT@")
+endforeach()

@@ -1,0 +1,212 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+// The University of Illinois/NCSA
+// Open Source License (NCSA)
+//
+// Copyright (c) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
+//
+// Developed by:
+//
+//                 AMD Research and AMD HSA Software Development
+//
+//                 Advanced Micro Devices, Inc.
+//
+//                 www.amd.com
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal with the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
+//
+//  - Redistributions of source code must retain the above copyright notice,
+//    this list of conditions and the following disclaimers.
+//  - Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimers in
+//    the documentation and/or other materials provided with the distribution.
+//  - Neither the names of Advanced Micro Devices, Inc,
+//    nor the names of its contributors may be used to endorse or promote
+//    products derived from this Software without specific prior written
+//    permission.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS WITH THE SOFTWARE.
+//
+////////////////////////////////////////////////////////////////////////////////
+
+#ifndef HSA_RUNTIME_CORE_INC_AMD_KFD_DRIVER_H_
+#define HSA_RUNTIME_CORE_INC_AMD_KFD_DRIVER_H_
+
+#include <memory>
+#include <string>
+
+#include "hsakmt/hsakmt.h"
+
+#include "core/inc/driver.h"
+#include "core/inc/memory_region.h"
+
+namespace rocr {
+
+namespace core {
+
+class Queue;
+
+}
+
+namespace AMD {
+
+/// @brief AMD Kernel Fusion Driver (KFD) for AMD GPU and CPU agents.
+///
+/// @details The user-mode driver into the Linux KFD for AMD GPU and CPU HSA
+/// agents. Provides APIs for the ROCr core to discover the topology produced
+/// by the KFD, allocate memory out of the KFD, manage DMA bufs, allocate queues,
+/// and more.
+class KfdDriver final : public core::Driver {
+public:
+  KfdDriver(std::string devnode_name);
+
+  /// @brief Determine if the KFD is present on the system and attempt to open it if found.
+  ///
+  /// @param[out] Driver object for the KFD.
+  /// @return HSA_STATUS_SUCCESS if driver found and opened.
+  /// @return HSA_STATUS_ERROR if unable to find or open the KFD.
+  static hsa_status_t DiscoverDriver(std::unique_ptr<core::Driver>& driver);
+
+  hsa_status_t Init() override;
+  hsa_status_t ShutDown() override;
+  hsa_status_t QueryKernelModeDriver(core::DriverQuery query) override;
+  hsa_status_t Open() override;
+  hsa_status_t Close() override;
+  hsa_status_t GetSystemProperties(HsaSystemProperties& sys_props) const override;
+  hsa_status_t GetNodeProperties(HsaNodeProperties& node_props, uint32_t node_id) const override;
+  hsa_status_t GetEdgeProperties(std::vector<HsaIoLinkProperties>& io_link_props,
+                                 uint32_t node_id) const override;
+  hsa_status_t GetMemoryProperties(uint32_t node_id,
+                                   std::vector<HsaMemoryProperties>& mem_props) const override;
+  hsa_status_t GetCacheProperties(uint32_t node_id, uint32_t processor_id,
+                                  std::vector<HsaCacheProperties>& cache_props) const override;
+  hsa_status_t AllocateMemory(const core::MemoryRegion& mem_region,
+                              core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                              uint32_t node_id, core::DriverMemoryHandle* handle) override;
+  hsa_status_t FreeMemory(const core::DriverMemoryHandle& handle) override;
+  hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
+                           HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
+                           uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes, HsaEvent* event,
+                           HsaQueueResource& queue_resource) const override;
+  hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct, HSA::hsa_amd_queue_priority_internal_t priority,
+                           void* queue_addr, uint64_t queue_size, HsaEvent* event) const override;
+  hsa_status_t DestroyQueue(HSA_QUEUEID queue_id) const override;
+  hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
+                              uint32_t* queue_cu_mask) const override;
+  hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
+                             uint32_t* first_gws) const override;
+  hsa_status_t ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
+                                  core::ShareType type, void* export_handle) override;
+  hsa_status_t ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
+                                  core::ShareType type, void* import_handle,
+                                  void* mem = nullptr) override;
+  hsa_status_t Map(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
+                   size_t size, hsa_access_permission_t perms,uint32_t node_id) override;
+  hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
+                     size_t size, uint32_t node_id) override;
+  hsa_status_t CreateShareableHandle(core::DriverMemoryHandle* handle, const core::Agent& agent,
+                                     uint64_t* offset) override;
+  hsa_status_t DestroyMemoryHandle(core::DriverMemoryHandle* handle) override;
+  hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
+  hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
+  hsa_status_t SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t size_bytes, uint32_t* timeout,
+                                uint32_t* size_copied, void* dest_mem_addr,
+                                bool* is_spm_data_loss) const override;
+  hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
+                              const void* buffer_base, uint64_t buffer_base_size) const override;
+  hsa_status_t SetSigbusDelay(uint32_t node_id, uint32_t delay_ms) const override;
+  hsa_status_t GetDeviceHandle(uint32_t node_id, void** device_handle) const override;
+  hsa_status_t GetDeviceFd(uint32_t node_id, int *fd) const override;
+  hsa_status_t GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const override;
+  hsa_status_t GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const override;
+  hsa_status_t GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const override;
+  hsa_status_t AllocateScratchMemory(uint32_t node_id, uint64_t size, void** mem) const override;
+  hsa_status_t AvailableMemory(uint32_t node_id, uint64_t* available_size) const override;
+  hsa_status_t RegisterMemory(void* ptr, uint64_t size, HsaMemFlags mem_flags) const override;
+  hsa_status_t DeregisterMemory(void* ptr) const override;
+  hsa_status_t MakeMemoryResident(const void* mem, size_t size, uint64_t* alternate_va,
+                                  const HsaMemFlags* mem_flags, uint32_t num_nodes,
+                                  const uint32_t* nodes) const override;
+  hsa_status_t MakeMemoryUnresident(const void* mem) const override;
+
+  hsa_status_t OpenSMI(uint32_t node_id, int* fd) const override;
+
+  hsa_status_t ImportExternalSemaphore(uint32_t node_id, void* nt_handle,
+                                       hsa_amd_external_semaphore_handle_type_t type,
+                                       hsa_amd_external_semaphore_t* out_sem) const override;
+  hsa_status_t DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const override;
+
+  hsa_status_t SignalExternalSemaphore(uint64_t queue_id, hsa_amd_external_semaphore_t sem,
+                                       uint64_t value) const override;
+  hsa_status_t WaitExternalSemaphore(uint64_t queue_id, hsa_amd_external_semaphore_t sem,
+                                     uint64_t value) const override;
+
+  hsa_status_t IsModelEnabled(bool* enable) const override;
+
+  hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
+
+  hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
+
+ private:
+  /// @brief Flags for @ref ExportMemoryHandleImpl.
+  enum ExportMemoryFlags : uint32_t {
+    EXPORT_MEMORY_FLAGS_NONE = 0,
+    /// Export a KFD allocation via @c hsaKmtExportDMABufHandle. @p handle.handle is the
+    /// allocation address and @p handle.size is the allocation size. @p export_offset is required.
+    EXPORT_MEMORY_FLAGS_KFD_DMABUF = 1,
+  };
+
+  /// @brief Internal export implementation supporting KFD-specific flags and offset.
+  ///
+  /// @param[in] agent agent that owns the memory
+  /// @param[in] handle driver memory handle to export
+  /// @param[in] type @ref core::ShareType to export
+  /// @param[in] flags @ref ExportMemoryFlags
+  /// @param[out] export_handle output handle; @p int* for @p DMABUF_FD,
+  ///             @p hsa_fabric_handle_t* for @p FABRIC_HANDLE
+  /// @param[out] export_offset allocation offset; required when @p EXPORT_MEMORY_FLAGS_KFD_DMABUF
+  ///             is set in @p flags
+  hsa_status_t ExportMemoryHandleImpl(const core::Agent& agent,
+                                      const core::DriverMemoryHandle& handle, core::ShareType type,
+                                      uint32_t flags, void* export_handle, uint64_t* export_offset);
+
+  /// @brief Query for user preference and use that to determine Xnack mode
+  /// of ROCm system. Return true if Xnack mode is ON or false if OFF. Xnack
+  /// mode of a system is orthogonal to devices that do not support Xnack mode.
+  /// It is legal for a system with Xnack ON to have devices that do not support
+  /// Xnack functionality.
+  static bool BindXnackMode();
+
+  /// @brief Take the one topology snapshot reference this driver owns.
+  hsa_status_t AcquireTopologySnapshot() const;
+
+  /// @brief Release this driver's topology snapshot reference, if held.
+  hsa_status_t ReleaseTopologySnapshot();
+
+  /// @brief Disable the KFD runtime if Init() enabled it.
+  hsa_status_t DisableRuntime();
+
+  mutable bool topology_snapshot_acquired_ = false;
+  bool runtime_enabled_ = false;
+  mutable HsaSystemProperties sys_props_{};
+
+  // Minimum acceptable KFD version numbers.
+  static const uint32_t kfd_version_major_min = 0;
+  static const uint32_t kfd_version_minor_min = 99;
+};
+
+} // namespace AMD
+} // namespace rocr
+
+#endif // header guard

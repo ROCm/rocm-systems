@@ -1,0 +1,718 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "library/perf.hpp"
+#include "core/locking.hpp"
+#include "core/state.hpp"
+#include "core/timemory.hpp"
+#include "core/utility.hpp"
+#include "library/thread_data.hpp"
+#include <cstdint>
+
+#include <timemory/log/logger.hpp>
+#include <timemory/log/macros.hpp>
+
+#include "logger/debug.hpp"
+
+#include <asm/unistd.h>
+#include <chrono>
+#include <cstddef>
+#include <ctime>
+#include <fcntl.h>
+#include <linux/perf_event.h>
+#include <mutex>
+#include <poll.h>
+#include <regex>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#if !defined(ROCPROFSYS_RETURN_ERROR_MSG)
+#    define ROCPROFSYS_RETURN_ERROR_MSG(COND, ...)                                       \
+        if((COND))                                                                       \
+        {                                                                                \
+            auto _msg_ss = std::stringstream{};                                          \
+            _msg_ss << __VA_ARGS__;                                                      \
+            return std::optional<std::string>{ _msg_ss.str() };                          \
+        }
+#endif
+
+namespace rocprofsys::perf
+{
+namespace
+{
+/// sysconf(_SC_PAGESIZE) returns -1 on failure; falling back to the common
+/// 4 KiB page size avoids that -1 becoming SIZE_MAX and overflowing the mmap
+/// size computation below.
+size_t
+get_page_size() noexcept
+{
+    constexpr long k_fallback_page_size = 4096;
+    const long     page_size            = ::sysconf(_SC_PAGESIZE);
+    return static_cast<size_t>(page_size > 0 ? page_size : k_fallback_page_size);
+}
+
+struct size_params
+{
+    const size_t num_pages = 2;
+    const size_t page      = get_page_size();
+    const size_t data      = num_pages * page;
+    const size_t mmap      = data + page;
+};
+
+const size_params k_sizes = {};
+}  // namespace
+
+long
+perf_event_open(struct perf_event_attr* hw_event, pid_t _pid, int _cpu, int group_fd,
+                unsigned long flags)
+{
+    return syscall(__NR_perf_event_open, hw_event, _pid, _cpu, group_fd, flags);
+}
+
+/// Move constructor
+perf_event::perf_event(perf_event&& rhs) noexcept
+{
+    // Release resources if the current perf_event is initialized and not equal to this
+    // one
+    if(m_fd != -1 && m_fd != rhs.m_fd)
+    {
+        ::close(m_fd);
+        LOG_DEBUG("Closed perf event fd {}", m_fd);
+    }
+
+    if(m_mapping != nullptr && m_mapping != rhs.m_mapping)
+    {
+        munmap(m_mapping, k_sizes.mmap);
+    }
+
+    // take rhs perf event's file descriptor and replace it with -1
+    m_fd     = rhs.m_fd;
+    rhs.m_fd = -1;
+
+    // take rhs perf_event's mapping and replace it with nullptr
+    m_mapping     = rhs.m_mapping;
+    rhs.m_mapping = nullptr;
+
+    // Copy over the sample type and read format
+    m_sample_type = rhs.m_sample_type;
+    m_read_format = rhs.m_read_format;
+}
+
+/// Close the perf_event file descriptor and unmap the ring buffer
+perf_event::~perf_event() { close(); }
+
+/// Move assignment
+perf_event&
+perf_event::operator=(perf_event&& rhs) noexcept
+{
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    if(&rhs == this) return *this;
+
+    // Release resources if the current perf_event is initialized and not equal to this
+    // one
+    if(m_fd != -1 && m_fd != rhs.m_fd) ::close(m_fd);
+    if(m_mapping != nullptr && m_mapping != rhs.m_mapping)
+    {
+        munmap(m_mapping, k_sizes.mmap);
+    }
+
+    // take rhs perf event's file descriptor and replace it with -1
+    m_fd     = rhs.m_fd;
+    rhs.m_fd = -1;
+
+    // take rhs perf_event's mapping and replace it with nullptr
+    m_mapping     = rhs.m_mapping;
+    rhs.m_mapping = nullptr;
+
+    // Copy over the sample type and read format
+    m_sample_type = rhs.m_sample_type;
+    m_read_format = rhs.m_read_format;
+
+    return *this;
+}
+
+// Open a perf_event file and map it (if sampling is enabled)
+std::optional<std::string>
+perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
+{
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    m_sample_type            = _pe.sample_type;
+    m_read_format            = _pe.read_format;
+    m_batch_size             = _pe.wakeup_events;
+
+    // Set some mandatory fields
+    // NOLINTNEXTLINE
+    _pe.size     = sizeof(struct perf_event_attr);
+    _pe.disabled = 1;
+
+    // Open the file
+    m_fd = perf_event_open(&_pe, _pid, _cpu, -1, 0);
+    if(m_fd == -1)
+    {
+        const std::string path = "/proc/sys/kernel/perf_event_paranoid";
+
+        auto file = std::ifstream{ path.c_str() };
+
+        ROCPROFSYS_RETURN_ERROR_MSG(!file,
+                                    "Failed to open " << path << ": " << strerror(errno));
+
+        int value = 4;
+        file >> value;
+
+        ROCPROFSYS_RETURN_ERROR_MSG(file.bad(), "Failed to read from "
+                                                    << path << ": " << strerror(errno));
+
+        ROCPROFSYS_RETURN_ERROR_MSG(
+            true, "Failed to open perf event. Consider tweaking "
+                      << path << " to 2 or less " << "(current value is " << value
+                      << "), "
+                      << "or granting rocprof-sys CAP_PERFMON (or CAP_SYS_ADMIN).");
+    }
+
+    // If sampling, map the perf event file
+    if(_pe.sample_type != 0 && _pe.sample_period != 0)
+    {
+        void* ring_buffer = mmap(nullptr, k_sizes.mmap, PROT_READ | PROT_WRITE,
+                                 MAP_SHARED, static_cast<int>(m_fd), 0);
+
+        ROCPROFSYS_RETURN_ERROR_MSG(
+            ring_buffer == MAP_FAILED,
+            "Mapping perf_event ring buffer failed. Make sure the current user has "
+            "permission to invoke the perf tool, and that the program being profiled "
+            "does not use an excessive number of threads (>1000)");
+
+        m_mapping = reinterpret_cast<struct perf_event_mmap_page*>(ring_buffer);
+    }
+
+    return std::optional<std::string>{};
+}
+
+std::optional<std::string>
+perf_event::open(double freq, std::uint32_t batch_size, pid_t pid, int cpu)
+{
+    const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
+    const std::uint64_t period =
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::duration<double>{ 1.0 / freq })
+                                       .count());
+    struct perf_event_attr perf_event_a;
+
+    if(batch_size > 0)
+    {
+        m_batch_size = batch_size;
+    }
+    else
+    {
+        batch_size = m_batch_size;
+    }
+
+    memset(&perf_event_a, 0, sizeof(perf_event_a));
+    perf_event_a.type           = PERF_TYPE_SOFTWARE;
+    perf_event_a.config         = PERF_COUNT_SW_TASK_CLOCK;
+    perf_event_a.sample_type    = PERF_SAMPLE_IP | PERF_SAMPLE_CALLCHAIN;
+    perf_event_a.sample_period  = period;
+    perf_event_a.wakeup_events  = batch_size;
+    perf_event_a.exclude_idle   = 1;
+    perf_event_a.exclude_kernel = 1;
+    perf_event_a.disabled       = 1;
+    // potential additions
+    perf_event_a.inherit                  = 0;
+    perf_event_a.exclude_hv               = 1;
+    perf_event_a.exclude_callchain_kernel = 1;
+    perf_event_a.use_clockid              = 1;
+    // NOLINTNEXTLINE
+    perf_event_a.clockid = CLOCK_REALTIME;
+
+    return open(perf_event_a, pid, cpu);
+}
+
+/// Read event count
+long
+perf_event::get_fileno() const
+{
+    return m_fd;
+}
+
+/// Read event count
+std::uint64_t
+perf_event::get_count() const
+{
+    std::uint64_t count;
+    if(read(m_fd, &count, sizeof(std::uint64_t)) != sizeof(std::uint64_t))
+    {
+        LOG_CRITICAL("Failed to read event count from perf_event file");
+        std::exit(1);
+    }
+    return count;
+}
+
+/// Start counting events
+bool
+perf_event::start() const
+{
+    if(m_fd != -1)
+    {
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        if(ioctl(m_fd, PERF_EVENT_IOC_ENABLE, 0) == -1)
+        {
+            LOG_CRITICAL("Failed to start perf event: {}", strerror(errno));
+            std::exit(1);
+        }
+    }
+    return (m_fd != -1);
+}
+
+/// Stop counting events
+bool
+perf_event::stop() const
+{
+    if(m_fd != -1)
+    {
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        if(ioctl(m_fd, PERF_EVENT_IOC_DISABLE, 0) == -1)
+        {
+            LOG_CRITICAL("Failed to stop perf event: {}", strerror(errno));
+            std::exit(1);
+        }
+    }
+    return (m_fd != -1);
+}
+
+bool
+perf_event::is_open() const
+{
+    return (m_fd != -1);
+}
+
+void
+perf_event::close()
+{
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    stop();
+
+    if(m_fd != -1)
+    {
+        ::close(m_fd);
+        m_fd = -1;
+    }
+
+    if(m_mapping != nullptr)
+    {
+        munmap(m_mapping, k_sizes.mmap);
+        m_mapping = nullptr;
+    }
+}
+
+void
+perf_event::set_ready_signal(int sig) const
+{
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    // Set the perf_event file to async
+    if(fcntl(m_fd, F_SETFL, fcntl(m_fd, F_GETFL, 0) | O_ASYNC) == -1)
+    {
+        LOG_CRITICAL("Failed to set perf_event file to async mode: {}", strerror(errno));
+        std::exit(1);
+    }
+
+    // Set the notification signal for the perf file
+    if(fcntl(m_fd, F_SETSIG, sig) == -1)
+    {
+        LOG_CRITICAL("Failed to set perf_event file signal: {}", strerror(errno));
+        std::exit(1);
+    }
+
+    // Set the current thread as the owner of the file (to target signal delivery)
+    if(fcntl(m_fd, F_SETOWN, gettid()) == -1)
+    {
+        LOG_CRITICAL("Failed to set the owner of the perf_event file: {}",
+                     strerror(errno));
+        std::exit(1);
+    }
+}
+
+void
+perf_event::iterator::next()
+{
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+
+    struct perf_event_header _hdr;
+
+    // Copy out the record header
+    perf_event::copy_from_ring_buffer(m_mapping, m_index, &_hdr,
+                                      sizeof(struct perf_event_header));
+
+    // Advance to the next record
+    m_index += _hdr.size;
+}
+
+perf_event::iterator::iterator(perf_event& _source, struct perf_event_mmap_page* _mapping)
+: m_source{ _source }
+, m_mapping{ _mapping }
+{
+    if(_mapping != nullptr)
+    {
+        m_index = _mapping->data_tail;
+        m_head  = _mapping->data_head;
+    }
+    else
+    {
+        m_index = 0;
+        m_head  = 0;
+    }
+}
+
+perf_event::iterator::~iterator()
+{
+    if(m_mapping != nullptr)
+    {
+        m_mapping->data_tail = m_index;
+    }
+}
+
+perf_event::iterator&
+perf_event::iterator::operator++()
+{
+    next();
+    return *this;
+}
+
+bool
+perf_event::iterator::operator!=(const iterator& other) const
+{
+    return has_data() != other.has_data();
+}
+
+perf_event::record
+perf_event::iterator::get()
+{
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+
+    // Copy out the record header
+    perf_event::copy_from_ring_buffer(m_mapping, m_index, _buf,
+                                      sizeof(struct perf_event_header));
+
+    // Get a pointer to the header
+    struct perf_event_header* header = reinterpret_cast<struct perf_event_header*>(_buf);
+
+    // Copy out the entire record
+    perf_event::copy_from_ring_buffer(m_mapping, m_index, _buf, header->size);
+
+    return perf_event::record(&m_source, header);
+}
+
+bool
+perf_event::iterator::has_data() const
+{
+    // If there is no ring buffer, there is no data
+    if(m_mapping == nullptr)
+    {
+        return false;
+    }
+
+    // If there isn't enough data in the ring buffer to hold a header, there is no data
+    if(m_index + sizeof(struct perf_event_header) >= m_head)
+    {
+        return false;
+    }
+
+    struct perf_event_header _hdr;
+    perf_event::copy_from_ring_buffer(m_mapping, m_index, &_hdr,
+                                      sizeof(struct perf_event_header));
+
+    // If the first record is larger than the available data, nothing can be read
+    if(m_index + _hdr.size > m_head)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+void
+perf_event::copy_from_ring_buffer(struct perf_event_mmap_page* mapping,
+                                  std::ptrdiff_t index, void* dest, size_t nbytes)
+{
+    const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
+
+    const uintptr_t base    = reinterpret_cast<uintptr_t>(mapping) + k_sizes.page;
+    const size_t    beg_idx = index % k_sizes.data;
+    const size_t    end_idx = beg_idx + nbytes;
+
+    if(end_idx <= k_sizes.data)
+    {
+        memcpy(dest, reinterpret_cast<void*>(base + beg_idx), nbytes);
+    }
+    else
+    {
+        const size_t chunk_size2 = end_idx - k_sizes.data;
+        const size_t chunk_size1 = nbytes - chunk_size2;
+
+        void* dest2 =
+            reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(dest) + chunk_size1);
+
+        memcpy(dest, reinterpret_cast<void*>(base + beg_idx), chunk_size1);
+        memcpy(dest2, reinterpret_cast<void*>(base), chunk_size2);
+    }
+}
+
+std::uint64_t
+perf_event::record::get_ip() const
+{
+    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::ip))
+    {
+        LOG_CRITICAL("Record does not have an ip field ({}|{:p})", is_sample(),
+                     static_cast<const void*>(m_source));
+        std::abort();
+    }
+    return *locate_field<sample::ip, std::uint64_t*>();
+}
+
+std::uint64_t
+perf_event::record::get_pid() const
+{
+    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::pid_tid))
+    {
+        LOG_CRITICAL("Record does not have a `pid` field ({}|{:p})", is_sample(),
+                     static_cast<const void*>(m_source));
+        std::abort();
+    }
+    return locate_field<sample::pid_tid, std::uint32_t*>()[0];
+}
+
+std::uint64_t
+perf_event::record::get_tid() const
+{
+    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::pid_tid))
+    {
+        LOG_CRITICAL("Record does not have a `tid` field ({}|{:p})", is_sample(),
+                     static_cast<const void*>(m_source));
+        std::abort();
+    }
+    return locate_field<sample::pid_tid, std::uint32_t*>()[1];
+}
+
+std::uint64_t
+perf_event::record::get_time() const
+{
+    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::time))
+    {
+        LOG_CRITICAL("Record does not have a 'time' field ({}|{:p})", is_sample(),
+                     static_cast<const void*>(m_source));
+        std::abort();
+    }
+    return *locate_field<sample::time, std::uint64_t*>();
+}
+
+std::uint64_t
+perf_event::record::get_period() const
+{
+    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::period))
+    {
+        LOG_CRITICAL("Record does not have a 'period' field ({}|{:p})", is_sample(),
+                     static_cast<const void*>(m_source));
+        std::abort();
+    }
+    return *locate_field<sample::period, std::uint64_t*>();
+}
+
+std::uint32_t
+perf_event::record::get_cpu() const
+{
+    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::cpu))
+    {
+        LOG_CRITICAL("Record does not have a 'cpu' field ({}|{:p})", is_sample(),
+                     static_cast<const void*>(m_source));
+        std::abort();
+    }
+    return *locate_field<sample::cpu, std::uint32_t*>();
+}
+
+container::c_array<std::uint64_t>
+perf_event::record::get_callchain() const
+{
+    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::callchain))
+    {
+        LOG_CRITICAL("Record does not have a callchain field ({}|{:p})", is_sample(),
+                     static_cast<const void*>(m_source));
+        std::abort();
+    }
+
+    std::uint64_t*      _base = locate_field<sample::callchain, std::uint64_t*>();
+    const std::uint64_t _size = *_base;
+    // Advance the callchain array pointer past the size
+    ++_base;
+    return container::wrap_c_array(_base, _size);
+}
+
+template <sample SampleT, typename Tp>
+Tp
+perf_event::record::locate_field() const
+{
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+
+    uintptr_t p =
+        reinterpret_cast<uintptr_t>(m_header) + sizeof(struct perf_event_header);
+
+    // Walk through the fields in the sample structure. Once the requested field is
+    // reached, return. Skip past any unrequested fields that are included in the sample
+    // type
+
+    // ip
+    if constexpr(SampleT == sample::ip) return reinterpret_cast<Tp>(p);
+    if(m_source != nullptr && m_source->is_sampling(sample::ip))
+        p += sizeof(std::uint64_t);
+
+    // pid, tid
+    if constexpr(SampleT == sample::pid_tid) return reinterpret_cast<Tp>(p);
+    if(m_source != nullptr && m_source->is_sampling(sample::pid_tid))
+        p += sizeof(std::uint32_t) + sizeof(std::uint32_t);
+
+    // time
+    if constexpr(SampleT == sample::time) return reinterpret_cast<Tp>(p);
+    if(m_source != nullptr && m_source->is_sampling(sample::time))
+        p += sizeof(std::uint64_t);
+
+    // addr
+    if constexpr(SampleT == sample::addr) return reinterpret_cast<Tp>(p);
+    if(m_source != nullptr && m_source->is_sampling(sample::addr))
+        p += sizeof(std::uint64_t);
+
+    // id
+    if constexpr(SampleT == sample::id) return reinterpret_cast<Tp>(p);
+    if(m_source != nullptr && m_source->is_sampling(sample::id))
+        p += sizeof(std::uint64_t);
+
+    // stream_id
+    if constexpr(SampleT == sample::stream_id) return reinterpret_cast<Tp>(p);
+    if(m_source != nullptr && m_source->is_sampling(sample::stream_id))
+        p += sizeof(std::uint64_t);
+
+    // cpu
+    if constexpr(SampleT == sample::cpu) return reinterpret_cast<Tp>(p);
+    if(m_source != nullptr && m_source->is_sampling(sample::cpu))
+        p += sizeof(std::uint32_t) + sizeof(std::uint32_t);
+
+    // period
+    if constexpr(SampleT == sample::period) return reinterpret_cast<Tp>(p);
+    if(m_source != nullptr && m_source->is_sampling(sample::period))
+        p += sizeof(std::uint64_t);
+
+    // value
+    if constexpr(SampleT == sample::read) return reinterpret_cast<Tp>(p);
+    if(m_source != nullptr && m_source->is_sampling(sample::read))
+    {
+        const std::uint64_t read_format = m_source->get_read_format();
+        if(read_format & PERF_FORMAT_GROUP)
+        {
+            // Get the number of values in the read format structure
+            const std::uint64_t nr = *reinterpret_cast<std::uint64_t*>(p);
+            // The default size of each entry is a u64
+            size_t sz = sizeof(std::uint64_t);
+            // If requested, the id will be included with each value
+            if(read_format & PERF_FORMAT_ID) sz += sizeof(std::uint64_t);
+            // Skip over the entry count, and each entry
+            p += sizeof(std::uint64_t) + nr * sz;
+        }
+        else
+        {
+            // Skip over the value
+            p += sizeof(std::uint64_t);
+            // Skip over the id, if included
+            if(read_format & PERF_FORMAT_ID) p += sizeof(std::uint64_t);
+        }
+
+        // Skip over the time_enabled field
+        if(read_format & PERF_FORMAT_TOTAL_TIME_ENABLED) p += sizeof(std::uint64_t);
+        // Skip over the time_running field
+        if(read_format & PERF_FORMAT_TOTAL_TIME_RUNNING) p += sizeof(std::uint64_t);
+    }
+
+    // callchain
+    if constexpr(SampleT == sample::callchain) return reinterpret_cast<Tp>(p);
+    if(m_source != nullptr && m_source->is_sampling(sample::callchain))
+    {
+        const std::uint64_t nr = *reinterpret_cast<std::uint64_t*>(p);
+        p += sizeof(std::uint64_t) + (nr * sizeof(std::uint64_t));
+    }
+
+    // raw
+    if constexpr(SampleT == sample::raw) return reinterpret_cast<Tp>(p);
+    if(m_source != nullptr && m_source->is_sampling(sample::raw))
+    {
+        const std::uint32_t raw_size = *reinterpret_cast<std::uint32_t*>(p);
+        p += sizeof(std::uint32_t) + raw_size;
+    }
+
+    // branch_stack
+    if constexpr(SampleT == sample::branch_stack) return reinterpret_cast<Tp>(p);
+    if(m_source != nullptr && m_source->is_sampling(sample::branch_stack))
+    {
+        LOG_CRITICAL("Branch stack sampling is not supported");
+        std::abort();
+    }
+    // regs
+    if constexpr(SampleT == sample::regs) return reinterpret_cast<Tp>(p);
+    if(m_source != nullptr && m_source->is_sampling(sample::regs))
+    {
+        LOG_CRITICAL("Register sampling is not supported");
+        std::abort();
+    }
+
+    // stack
+    if constexpr(SampleT == sample::stack) return reinterpret_cast<Tp>(p);
+    if(m_source != nullptr && m_source->is_sampling(sample::stack))
+    {
+        LOG_CRITICAL("Stack sampling is not supported");
+        std::abort();
+    }
+
+    // end
+    if constexpr(SampleT == sample::last) return reinterpret_cast<Tp>(p);
+
+    LOG_CRITICAL("Unsupported sample field requested!");
+    std::abort();
+
+    if constexpr(std::is_pointer<Tp>::value)
+        return nullptr;
+    else
+        return Tp{};
+}
+
+namespace
+{
+inline auto&
+get_instances()
+{
+    using thread_data_t = thread_data<identity<std::unique_ptr<perf_event>>, perf_event>;
+    static auto& _v     = thread_data_t::instance(construct_on_init{});
+    return _v;
+}
+}  // namespace
+
+std::unique_ptr<perf_event>&
+get_instance(std::int64_t _tid)
+{
+    static auto nullInstance = std::unique_ptr<perf_event>{ nullptr };
+    auto&       _data        = get_instances();
+
+    // If get_instances() returned an empty object, we have to return a reference to a
+    // static null instance, or else we will crash.
+    if(_data == nullptr)
+    {
+        return nullInstance;
+    }
+
+    if(static_cast<size_t>(_tid) >= _data->size())
+    {
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        _data->resize(_tid + 1);
+    }
+    return _data->at(_tid);
+}
+}  // namespace rocprofsys::perf

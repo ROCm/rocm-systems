@@ -1,0 +1,57 @@
+# rccl-UnitTestsAltRsmi — shared/ctest schema (ROCm 6.4+, Debug build).
+# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
+#
+# Tiers:
+#   quick — canonical anchor; NCCL_DEBUG=INFO for library logging.
+#   standard — merge quick; override labels.
+#   comprehensive — merge quick; override labels.
+#   full — merge quick; override labels.
+
+test_categories:
+  quick: &altrsmi_quick
+    description: "Smoke — comprehensive AltRsmiTest suite (single suite), short timeout."
+    test_patterns:
+      - "AltRsmiTest.*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "altrsmi"
+      - "debug"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+  standard:
+    <<: *altrsmi_quick
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "altrsmi"
+      - "debug"
+  comprehensive:
+    <<: *altrsmi_quick
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "altrsmi"
+      - "debug"
+  full:
+    <<: *altrsmi_quick
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "altrsmi"
+      - "debug"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 600
+    comprehensive: 600
+    full: 600

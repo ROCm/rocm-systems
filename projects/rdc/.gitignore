@@ -1,0 +1,34 @@
+# build artifacts
+.cache/
+build/
+DEBIAN/postinst
+DEBIAN/prerm
+RPM/
+include/rdc/rdc64Config.h
+
+# documentation artifacts
+_build/
+_images/
+_static/
+_templates/
+_toc.yml
+docBin/
+docs/_doxygen/
+
+# VisualStudioCode
+.vscode
+
+# misc
+__pycache__/
+authentication/CA/
+
+# act
+act.variables
+act.secrets
+
+# do NOT ignore these files
+!.clang-format
+!.cmake-format
+!.editorconfig
+!.gersemirc
+!.pre-commit-config.yaml

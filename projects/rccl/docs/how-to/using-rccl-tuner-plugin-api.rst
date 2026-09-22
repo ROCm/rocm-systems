@@ -1,0 +1,178 @@
+.. meta::
+   :description: How to use the RCCL Tuner plugin API
+   :keywords: RCCL, ROCm, library, API, Tuner, plugin
+
+.. _using-rccl-tuner-plugin:
+
+*******************************
+Using the RCCL Tuner plugin API
+*******************************
+
+An external plugin enables users to hand-tailor the selection of an algorithm,
+protocol, and number of channels (thread blocks) based on an input configuration specifying the
+message size, number of nodes and GPUs, and link types (for instance, PCIe, XGMI, or NET).
+One advantage of this plugin is that each user can create and maintain their own hand-tailored tuner
+without relying on RCCL to develop and maintain it. This topic describes the API required to implement
+an external tuner plugin for RCCL.
+
+The following usage notes are relevant when using the RCCL Tuner plugin API:
+
+*  The API allows partial outputs: a tuner can adjust only the cost table and let RCCL set the remaining fields,
+   such as the number of channels.
+*  If ``getCollInfo()`` fails, RCCL uses its default internal mechanisms to determine the best collective configuration.
+*  ``getCollInfo`` is called for each collective invocation per communicator, so special care
+   must be taken to avoid introducing excessive latency.
+*  The supported RCCL algorithms are ``NCCL_ALGO_TREE``, and ``NCCL_ALGO_RING``.
+*  The supported RCCL protocols are ``NCCL_PROTO_SIMPLE``, ``NCCL_PROTO_LL`` and ``NCCL_PROTO_LL128``.
+
+   *  RCCL pre-sets the algorithm/protocol combinations it cannot use to ``NCCL_ALGO_PROTO_IGNORE`` (``-1.0``)
+      in the cost table, so a plugin skips those entries instead of testing support flags itself:
+
+      .. code-block:: cpp
+
+         if (table[a][p] == NCCL_ALGO_PROTO_IGNORE) continue;
+
+.. note::
+   
+   The `example plugin <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl/plugins/tuner/example/plugin.c>`_
+   uses math models to approximate the bandwidth and latency of the available selection of algorithms and protocols
+   and select the one with the lowest calculated latency. It is customized for the AMD Instinct MI300 accelerators and RoCEv2 networks
+   on a limited number of nodes. This example, which is intended for demonstration purposes only, is not meant to be inclusive of all potential AMD GPUs and network configuration.
+
+API description
+================
+
+To build a custom tuner, implement the ``ncclTuner_v6_t`` structure and export it as
+``ncclTunerPlugin_v6``. RCCL looks for the newest version a plugin exports and falls back to
+older ones, so a plugin built against an earlier version still loads, but only ``v6`` gets
+``getChunkSize``.
+
+Structure: ncclTuner_v6_t
+---------------------------
+
+**Fields**
+
+*  ``name``
+  
+   *  **Type**: ``const char*``
+   *  **Description**: The name of the tuner, which can be used for logging purposes when ``NCCL_DEBUG=INFO`` and ``NCCL_DEBUG_SUBSYS=TUNING`` are set.
+
+**Functions**
+
+*  ``init`` (called upon communicator initialization with ``ncclCommInitRank``)
+
+   Initializes the tuner states. Each communicator initializes its tuner. ``nNodes`` x ``nRanks`` = the total number of GPUs participating in the collective communication.
+
+   *  **Parameters**:
+
+      * ``commId`` (``uint64_t``): A unique identifier for the communicator.
+      * ``nRanks`` (``size_t``): The number of devices (GPUs).
+      * ``nNodes`` (``size_t``): The number of operating system nodes (physical nodes or VMs).
+      * ``logFunction`` (``ncclDebugLogger_t``): A log function for certain debugging info.
+      * ``nvlDomainInfo`` (``ncclNvlDomainInfo_v6_t*``): NVLink domain information for the communicator.
+      * ``constants`` (``ncclTunerConstants_v6_t*``): RCCL tuning constants (bandwidth, latency tables).
+
+   *  **Outputs**:
+
+      * ``context`` (``void**``): The tuner context object, passed back to ``getCollInfo``, ``getChunkSize``, and ``finalize``.
+        A plugin that keeps no per-communicator state may set it to ``NULL``.
+
+   *  **Return**:
+
+      *  **Type**: ``ncclResult_t``
+      *  **Description**: The result of the initialization.
+
+*  ``getCollInfo`` (called for each collective call per communicator)
+
+   Retrieves information about the collective algorithm, protocol, and number of channels for the given input parameters.
+
+   *  **Parameters**:
+
+      * ``context`` (``void*``): The tuner context returned by ``init``.
+      * ``collType`` (``ncclFunc_t``): The collective type, for example, ``allreduce``, ``allgather``, etc.
+      * ``nBytes`` (``size_t``): The size of the collective in bytes.
+      * ``numPipeOps`` (``int``): The number of operations in the group.
+      * ``numAlgo`` (``int``): The number of algorithms in the cost table.
+      * ``numProto`` (``int``): The number of protocols in the cost table.
+      * ``regBuff`` (``int``): Whether the user buffer can be registered.
+
+   *  **In/out**:
+
+      * ``collCostTable`` (``float**``): Cost table indexed ``[algorithm][protocol]``, generated by RCCL. A plugin
+        expresses its preference by lowering an entry's cost; entries RCCL cannot use are pre-set to
+        ``NCCL_ALGO_PROTO_IGNORE`` and must be left alone. Cast it as ``float (*)[NCCL_NUM_PROTOCOLS]``
+        before indexing.
+
+   *  **Outputs**:
+
+      * ``nChannels`` (``int*``): The number of channels (and SMs) to be used. Set ``0`` to leave the choice to RCCL.
+
+   *  **Description**:
+
+      If ``getCollInfo()`` does not return ``ncclSuccess``, RCCL falls back to its default tuning for the given collective.
+      The tuner is allowed to leave fields unset, in which case RCCL automatically sets those fields.
+
+   *  **Return**:
+
+      *  **Type**: ``ncclResult_t``
+      *  **Description**: The result of the operation.
+
+*  ``finalize`` (called upon communicator finalization with ``ncclCommFinalize``)
+
+   Terminates the plugin and cleans up any resources allocated by the tuner.
+
+   *  **Parameters**:
+
+      * ``context`` (``void*``): The tuner context returned by ``init``.
+
+   *  **Return**:
+
+      *  **Type**: ``ncclResult_t``
+      *  **Description**: The result of the cleanup process.
+
+*  ``getChunkSize`` (optional, called after the algorithm and protocol are chosen)
+
+   Overrides the chunk size RCCL computed. Leave the field ``NULL`` to keep RCCL's own value.
+   RCCL clamps whatever the plugin writes to the maximum its buffers allow.
+
+   *  **Parameters**:
+
+      * ``context`` (``void*``): The tuner context returned by ``init``.
+      * ``collType`` (``ncclFunc_t``): The collective being tuned.
+      * ``nBytes`` (``size_t``): The collective size in bytes.
+      * ``algo`` (``int``): The selected algorithm (``NCCL_ALGO_*``).
+      * ``proto`` (``int``): The selected protocol (``NCCL_PROTO_*``).
+      * ``nChannels`` (``int``): The number of channels being used.
+
+   *  **In/out**:
+
+      * ``chunkSize`` (``size_t*``): The chunk size RCCL computed, which the plugin may read and modify.
+
+   *  **Return**:
+
+      *  **Type**: ``ncclResult_t``
+      *  **Description**: The result of the operation.
+
+Build and usage instructions
+============================
+
+To use the external plugin, implement the desired algorithm and protocol selection technique using the API described above.
+As a reference, the `following example <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl/plugins/tuner/example/plugin.c>`_ is based on the
+MI300 tuning table by default.
+
+Building and using the example librccl-tuner-example.so file
+-----------------------------------------------------
+
+#. Build the ``librccl-tuner-example.so`` file following `the example Makefile <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl/plugins/tuner/example/Makefile>`_.
+
+   .. code-block:: shell
+
+      cd $RCCL_HOME/plugins/tuner/example/
+      make
+
+#. Tell RCCL to use the custom ``librccl-tuner-example.so`` file by setting the following environment variable
+   to the file path:
+
+   .. code-block:: shell
+
+      export NCCL_TUNER_PLUGIN=$RCCL_HOME/plugins/tuner/example/librccl-tuner-example.so

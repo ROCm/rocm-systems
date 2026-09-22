@@ -1,0 +1,133 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+// The University of Illinois/NCSA
+// Open Source License (NCSA)
+//
+// Copyright (c) 2014-2021, Advanced Micro Devices, Inc. All rights reserved.
+//
+// Developed by:
+//
+//                 AMD Research and AMD HSA Software Development
+//
+//                 Advanced Micro Devices, Inc.
+//
+//                 www.amd.com
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal with the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
+//
+//  - Redistributions of source code must retain the above copyright notice,
+//    this list of conditions and the following disclaimers.
+//  - Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimers in
+//    the documentation and/or other materials provided with the distribution.
+//  - Neither the names of Advanced Micro Devices, Inc,
+//    nor the names of its contributors may be used to endorse or promote
+//    products derived from this Software without specific prior written
+//    permission.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS WITH THE SOFTWARE.
+//
+////////////////////////////////////////////////////////////////////////////////
+
+#ifndef EXT_IMAGE_IMAGE_MANAGER_GFX11_H_
+#define EXT_IMAGE_IMAGE_MANAGER_GFX11_H_
+
+#include <optional>
+
+#include "addrlib/inc/addrinterface.h"
+#include "image_lut_gfx11.h"
+#include "image_manager_kv.h"
+
+namespace rocr {
+namespace image {
+
+class ImageManagerGfx11 : public ImageManagerKv {
+ public:
+  ImageManagerGfx11();
+  virtual ~ImageManagerGfx11();
+
+  /// @brief Calculate the size and alignment of the backing storage of an
+  /// image.
+  virtual hsa_status_t CalculateImageSizeAndAlignment(
+      hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
+      hsa_ext_image_data_layout_t image_data_layout,
+      uint32_t num_mipmap_levels,
+      size_t image_data_row_pitch, size_t image_data_slice_pitch,
+      hsa_ext_image_data_info_t& image_info) const;
+
+  /// @brief Fill image structure with device specific image object.
+  virtual hsa_status_t PopulateImageSrd(Image& image) const;
+
+  /// @brief Fill image structure with device specific image object using the given format.
+  virtual hsa_status_t PopulateImageSrd(Image& image, const metadata_amd_t* desc) const;
+
+  /// @brief Modify device specific image object according to the specified
+  /// new format.
+  virtual hsa_status_t ModifyImageSrd(Image& image,
+                                      hsa_ext_image_format_t& new_format) const;
+
+  /// @brief Fill sampler structure with device specific sampler object.
+  virtual hsa_status_t PopulateSamplerSrd(Sampler& sampler) const;
+
+  /// @brief Fill image backing storage using agent copy.
+  virtual hsa_status_t FillImage(const Image& image, const void* pattern,
+                                 const hsa_ext_image_region_t& region);
+
+  /// @brief Fill mipmap structure with device specific mipmapped array object.
+  virtual hsa_status_t PopulateMipmapSrd(MipmappedArray& mipmap_array) const;
+
+  /// @brief Fill mipmap structure with pre-computed AMD metadata descriptor.
+  virtual hsa_status_t PopulateMipmapSrd(MipmappedArray& mipmap_array, const metadata_amd_t* desc) const;
+
+  /// @brief Create mip level view using SRD BASE_LEVEL/LAST_LEVEL fields
+  virtual hsa_status_t PopulateMipLevelSrd(MipmappedArray& level_view,
+        const MipmappedArray& mipmap_array, uint32_t mip_level) const;
+
+  virtual void printSRDDetailed(const uint32_t* srd) const;
+  virtual void printChannelSelect(uint32_t sel) const;
+  virtual void printResourceType(uint32_t type) const;
+  virtual void printSwizzleMode(uint32_t sw_mode) const;
+
+ protected:
+  /// @brief Compute addrlib surface info. If forced_sw_mode is empty, addrlib picks its preferred
+  /// swizzle (native allocation); otherwise the given swizzle mode is forced so the computed tiling
+  /// matches an imported surface whose layout is dictated externally (Vulkan image interop). Returns
+  /// the swizzle mode used, or (uint32_t)-1 on failure.
+  uint32_t GetAddrlibSurfaceInfoNv(hsa_agent_t component,
+                             const hsa_ext_image_descriptor_t& desc,
+                             uint32_t num_mipmap_levels,
+                             Image::TileMode tileMode,
+                             size_t image_data_row_pitch,
+                             size_t image_data_slice_pitch,
+                             ADDR2_COMPUTE_SURFACE_INFO_OUTPUT& out,
+                             std::optional<uint32_t> forced_sw_mode = std::nullopt) const;
+
+  /// @brief Build a mipmapped-array image SRD. If meta is null the native path runs (addrlib's
+  /// preferred swizzle, mipmap.tile_mode). Otherwise the surface metadata's swizzle is forced and its
+  /// tile_swizzle (pipe-bank-XOR) is injected into the base address, reconstructing the SRD of an
+  /// imported surface whose layout is dictated externally (Vulkan image interop on Windows, where
+  /// the AMD Vulkan driver exposes no extension to query the SRD).
+  hsa_status_t BuildMipmapSrd(MipmappedArray& mipmap, const HsaWddmSurfaceMetadata* meta) const;
+
+  bool IsLocalMemory(const void* address) const;
+  virtual const ImageLutGfx11& ImageLut() const { return image_lut_gfx11; };
+
+ private:
+  ImageLutGfx11 image_lut_gfx11;
+  DISALLOW_COPY_AND_ASSIGN(ImageManagerGfx11);
+};
+
+}  // namespace image
+}  // namespace rocr
+#endif  // EXT_IMAGE_IMAGE_MANAGER_GFX11_H_

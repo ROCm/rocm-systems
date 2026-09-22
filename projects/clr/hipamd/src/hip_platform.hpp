@@ -1,0 +1,132 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#pragma once
+
+#include "hip_internal.hpp"
+#include "hip_fatbin.hpp"
+#include "device/device.hpp"
+#include "hip_code_object.hpp"
+
+#include <unordered_set>
+
+namespace hip_impl {
+
+hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
+    int* maxBlocksPerCU, int* numBlocksPerGrid, int* bestBlockSize, const amd::Device& device,
+    hipFunction_t func, int inputBlockSize, size_t dynamicSMemSize, bool bCalcPotentialBlkSz);
+}  // namespace hip_impl
+
+namespace hip {
+class PlatformState {
+ public:
+  void Init();
+
+  // Dynamic Code Objects functions
+  hipError_t LoadModule(hipModule_t* module, const char* fname, const void* image = nullptr);
+  hipError_t UnloadModule(hipModule_t hmod);
+
+  //! Tracks kernel handles from creation to release, so IsValidFuncHandle() can
+  //! reject a pointer that never came from the runtime.
+  void RegisterFuncHandle(const void* hfunc) {
+    std::scoped_lock lock(funcHandleLock_);
+    funcHandles_.insert(hfunc);
+  }
+
+  void UnregisterFuncHandle(const void* hfunc) {
+    std::scoped_lock lock(funcHandleLock_);
+    funcHandles_.erase(hfunc);
+  }
+
+  bool IsValidFuncHandle(const void* hfunc) {
+    std::scoped_lock lock(funcHandleLock_);
+    return funcHandles_.find(hfunc) != funcHandles_.end();
+  }
+
+  hipError_t GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod, const char* func_name);
+  hipError_t GetFuncCount(unsigned int* count, hipModule_t hmod);
+  hipError_t GetDynGlobalVar(const char* hostVar, hipModule_t hmod, hipDeviceptr_t* dev_ptr,
+                             size_t* size_ptr);
+  hipError_t GetDynTexRef(const char* hostVar, hipModule_t hmod, textureReference** texRef);
+
+  hipError_t RegisterTexRef(textureReference* texRef, hipModule_t hmod, std::string name);
+  hipError_t GetDynTexGlobalVar(textureReference* texRef, hipDeviceptr_t* dev_ptr,
+                                size_t* size_ptr);
+
+  // Singleton instance
+  static PlatformState& Instance() {
+    if (platform_ == nullptr) {
+      // __hipRegisterFatBinary() will call this when app starts, thus
+      // there is no multiple entry issue here.
+      platform_ = new PlatformState();
+    }
+    return *platform_;
+  }
+
+  // Load hip dynamic library
+  void* GetDynamicLibraryHandle();
+  void SetDynamicLibraryHandle(void* handle);
+
+  // Exec Functions
+  void SetupArgument(const void* arg, size_t size, size_t offset);
+  void ConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipStream_t stream);
+  void PopExec(ihipExec_t& exec);
+
+  // Logging lock accessor
+  std::recursive_mutex& GetLogLock() { return lg_lock_; }
+
+  // Friend functions for logging access
+  friend hipError_t hipExtEnableLogging();
+  friend hipError_t hipExtDisableLogging();
+  friend hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
+
+  inline bool RegisterLibraryFunction(const hipKernel_t f, const hipLibrary_t l) {
+    std::scoped_lock lock(lock_);
+    return library_functions_.try_emplace(f, l).second;
+  }
+
+  inline bool UnregisterLibraryFunction(const hipKernel_t f) {
+    std::scoped_lock lock(lock_);
+    return library_functions_.erase(f) > 0;
+  }
+
+  inline bool GetFunctionLibrary(const hipKernel_t f, hipLibrary_t* lib) {
+    std::scoped_lock lock(lock_);
+    auto it = library_functions_.find(f);
+    if (it != library_functions_.end()) {
+      *lib = it->second;
+      return true;
+    }
+    return false;
+  }
+
+  hip::StatCO& StatCO() { return statCO_; }  //!< Static Code object var
+  bool IsInitialized() const { return initialized_; }
+
+ private:
+  PlatformState() : statCO_(*this), log_level_(0), log_size_(0), log_mask_(0) {}
+  ~PlatformState() {}
+
+  std::recursive_mutex lock_;       //!< Guards PlatformState globals
+  std::recursive_mutex lg_lock_;    //!< Lock for logging operations
+  static PlatformState* platform_;  //!< Singleton instance
+
+  //! Dynamic Code Object map, keyin module to get the corresponding object
+  std::unordered_map<hipModule_t, hip::DynCO*> dynCO_map_;
+  std::mutex funcHandleLock_;
+  std::unordered_set<const void*> funcHandles_;
+  hip::StatCO statCO_;              //!< Static Code object var
+  bool initialized_{false};         //!< Platform initialization state
+  //! Texture reference map: texRef -> (module, name)
+  std::unordered_map<textureReference*, std::pair<hipModule_t, std::string>> texRef_map_;
+  void* dynamicLibraryHandle_{nullptr};  //!< Handle to dynamic library
+  //! Library function map: kernel -> library
+  std::unordered_map<hipKernel_t, hipLibrary_t> library_functions_;
+  size_t log_level_;  //!< Logging level
+  size_t log_size_;   //!< Logging buffer size
+  size_t log_mask_;   //!< Logging mask
+};
+}  // namespace hip

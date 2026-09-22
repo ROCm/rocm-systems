@@ -1,0 +1,5 @@
+pmc:  TD_ATOMIC_WAVEFRONT_sum TD_STORE_WAVEFRONT_sum
+
+gpu:
+range:
+kernel:

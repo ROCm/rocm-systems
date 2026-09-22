@@ -1,0 +1,77 @@
+# attention_patterns — Flash-Attention / SDPA / KV-cache signatures used
+# by the Compute Specialist when the hot kernel is attention-shaped.
+#
+# Phase-10 Feature G.
+
+version: 1
+
+patterns:
+  - id: flash_attention_v2
+    name: "Flash-Attention v2 / v3 kernel"
+    # Flash/SDPA runs on any modern AMD GPU, but the HBM / MFMA
+    # thresholds below are calibrated for CDNA2+ (gfx90a/942/950). RDNA
+    # + legacy gfx908 hit different sweet spots — skip until re-tuned.
+    applies_to_gfx: [gfx90a, gfx942, gfx950]
+    description: >
+      Flash-Attention fuses Q*K^T, softmax, and P*V in on-chip SRAM so the
+      attention intermediates never land in HBM. Signature: single kernel,
+      SQ_INSTS_VALU_MFMA high, TCC_EA_RDREQ_sum low relative to seq_len^2.
+    signature:
+      name_contains: [flash_attn, flash_fwd, mha_fwd]
+      counter_ratios:
+        - "mfma_util_pct >= 0.30"
+        - "hbm_util_pct < 0.50"
+    verdict: "healthy — Flash path active"
+    recommend_if_absent:
+      - "Replace naive SDPA with torch.nn.functional.scaled_dot_product_attention"
+      - "Rebuild torch with AMD Flash-Attention kernel enabled"
+
+  - id: naive_sdpa
+    name: "Naive softmax(QK^T)V attention"
+    applies_to_gfx: [gfx90a, gfx942, gfx950]
+    description: >
+      Three separate kernels (matmul, softmax, matmul) with a full HBM
+      round-trip of the attention scores. Worst on long sequences.
+    signature:
+      name_sequence: [matmul, softmax, matmul]
+      counter_ratios:
+        - "hbm_util_pct >= 0.70"
+    recommend:
+      - "Switch to Flash-Attention via torch.nn.functional.scaled_dot_product_attention"
+      - "If custom kernel — fuse softmax + matmul epilogue"
+      - "For seq_len >= 2048, naive SDPA dominates HBM — do not ship"
+
+  - id: kv_cache_read_amplified
+    name: "KV-cache read amplification"
+    applies_to_gfx: [gfx90a, gfx942, gfx950]
+    description: >
+      Large KV-cache dominates HBM reads on decode. Detect via repeated
+      DtoD memcpy of K/V tensors + high HBM_RD but low MFMA count.
+    signature:
+      memcpy_kv_share_pct_ge: 0.30
+      mfma_util_pct_lt: 0.10
+    recommend:
+      - "Quantize KV-cache to int8 / fp8 (bitsandbytes / TransformerEngine)"
+      - "Enable PagedAttention (vLLM) to remove contiguous KV reshuffles"
+      - "Use multi-query / grouped-query attention to shrink K/V dimension"
+
+  - id: kv_cache_grouped_query
+    name: "Grouped-query attention (GQA/MQA)"
+    applies_to_gfx: [gfx90a, gfx942, gfx950]
+    description: >
+      Fewer K/V heads than Q heads; HBM pressure lower but still worth
+      tuning the num_kv_heads knob per decode batch size.
+    signature:
+      kv_head_ratio_lt: 0.5
+    verdict: "healthy"
+
+derivation:
+  kv_share:
+    description: "KV memcpy share = (memcpy_bytes_matching 'kv_cache') / total_memcpy_bytes"
+    source: tracelens_port.analyze_kernels_by_category
+
+notes: |
+  Signatures are heuristic — always confirm via `tracelens_port.analyze_
+  kernels_by_category` + counter data before recommending a patch. GQA
+  detection needs model metadata the trace does not carry, so that
+  signature is a secondary hint only.

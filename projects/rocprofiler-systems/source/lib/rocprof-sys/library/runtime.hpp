@@ -1,0 +1,124 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "api.hpp"
+#include "common/defines.h"
+#include "core/common.hpp"
+#include "core/state.hpp"
+#include "core/timemory.hpp"
+#include "library/causal/components/causal_gotcha.hpp"
+#include "library/components/exit_gotcha.hpp"
+#include "library/components/fork_gotcha.hpp"
+#include "library/components/kill_gotcha.hpp"
+#include "library/components/mpi_gotcha.hpp"
+#include "library/components/numa_gotcha.hpp"
+#include "library/components/pthread_gotcha.hpp"
+#include "library/components/vaapi_gotcha.hpp"
+#include "library/thread_data.hpp"
+#include <cstdint>
+
+#include <timemory/backends/threading.hpp>
+
+#include <memory>
+#include <set>
+#include <string>
+#include <string_view>
+#include <unordered_set>
+
+namespace rocprofsys
+{
+// started during preinit phase
+using preinit_bundle_t =
+    tim::lightweight_tuple<exit_gotcha_t, fork_gotcha_t, mpi_gotcha_t, kill_gotcha_t>;
+
+// started during init phase
+using init_bundle_t = tim::lightweight_tuple<causal::component::causal_gotcha,
+                                             pthread_gotcha, component::numa_gotcha>;
+
+// bundle of components around rocprofsys_init and rocprofsys_finalize
+using main_bundle_t =
+    tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::page_rss,
+                           comp::cpu_clock, comp::cpu_util>;
+
+// bundle of components around each thread
+#if defined(TIMEMORY_RUSAGE_THREAD) && TIMEMORY_RUSAGE_THREAD > 0
+using thread_bundle_t = tim::lightweight_tuple<comp::wall_clock, comp::thread_cpu_clock,
+                                               comp::thread_cpu_util, comp::peak_rss>;
+#else
+using thread_bundle_t = tim::lightweight_tuple<comp::wall_clock, comp::thread_cpu_clock,
+                                               comp::thread_cpu_util>;
+#endif
+
+std::unique_ptr<main_bundle_t>&
+get_main_bundle();
+
+std::unique_ptr<init_bundle_t>&
+get_init_bundle();
+
+std::unique_ptr<preinit_bundle_t>&
+get_preinit_bundle();
+
+std::atomic<std::uint64_t>&
+get_cpu_cid() ROCPROFSYS_HOT;
+
+unique_ptr_t<std::vector<std::uint64_t>>&
+get_cpu_cid_stack(std::int64_t _tid    = threading::get_id(),
+                  std::int64_t _parent = 0) ROCPROFSYS_HOT;
+
+using cpu_cid_data_t       = std::tuple<std::uint64_t, std::uint64_t, std::uint32_t>;
+using cpu_cid_pair_t       = std::tuple<std::uint64_t, std::uint32_t>;
+using cpu_cid_parent_map_t = std::unordered_map<std::uint64_t, cpu_cid_pair_t>;
+
+unique_ptr_t<cpu_cid_parent_map_t>&
+get_cpu_cid_parents(std::int64_t _tid = threading::get_id()) ROCPROFSYS_HOT;
+
+cpu_cid_data_t
+create_cpu_cid_entry(std::int64_t _tid = threading::get_id()) ROCPROFSYS_HOT;
+
+cpu_cid_pair_t
+get_cpu_cid_entry(std::uint64_t _cid,
+                  std::int64_t  _tid = threading::get_id()) ROCPROFSYS_HOT;
+
+tim::mutex_t&
+get_cpu_cid_stack_lock(std::int64_t _tid = threading::get_id()) ROCPROFSYS_HOT;
+
+// query current value
+bool
+sampling_enabled_on_child_threads();
+
+// use this to disable sampling in a region (e.g. right before thread creation)
+bool
+push_enable_sampling_on_child_threads(bool _v);
+
+// use this to restore previous setting
+bool
+pop_enable_sampling_on_child_threads();
+
+// make sure every newly created thead starts with this value
+void
+set_sampling_on_all_future_threads(bool _v);
+
+struct scoped_child_sampling
+{
+    scoped_child_sampling(bool _v) { push_enable_sampling_on_child_threads(_v); }
+    ~scoped_child_sampling() { pop_enable_sampling_on_child_threads(); }
+};
+
+pid_t
+get_root_process_id();
+
+bool
+is_root_process();
+
+bool
+is_child_process();
+}  // namespace rocprofsys
+
+#define ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(VALUE)                               \
+    const ::rocprofsys::scoped_child_sampling ROCPROFSYS_VARIABLE(                       \
+        _scoped_child_sampling_, __LINE__)                                               \
+    {                                                                                    \
+        VALUE                                                                            \
+    }

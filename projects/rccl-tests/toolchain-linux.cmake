@@ -1,0 +1,38 @@
+if (DEFINED ROCM_PATH)
+  set(compiler_bin "${ROCM_PATH}/llvm/bin")
+elseif (DEFINED ENV{ROCM_PATH})
+  set(ROCM_PATH "$ENV{ROCM_PATH}" CACHE PATH "ROCm installation path")
+  set(compiler_bin "$ENV{ROCM_PATH}/llvm/bin")
+else()
+  set(ROCM_PATH "/opt/rocm" CACHE PATH "ROCm installation path")
+  set(compiler_bin "/opt/rocm/llvm/bin")
+endif()
+
+if (NOT DEFINED ENV{CXX})
+  set(CMAKE_CXX_COMPILER "${compiler_bin}/amdclang++" CACHE PATH "Path to the C++ compiler")
+else()
+  set(CMAKE_CXX_COMPILER "$ENV{CXX}" CACHE PATH "Path to the C++ compiler")
+endif()
+
+# Clang++ compiler fails to auto detect device lib path in some ROCK builds
+if (NOT EXISTS "${ROCM_PATH}/amdgcn/bitcode" AND EXISTS "${ROCM_PATH}/llvm/amdgcn/bitcode")
+  set(DEVICE_LIB_PATH "--rocm-device-lib-path=${ROCM_PATH}/llvm/amdgcn/bitcode")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${DEVICE_LIB_PATH}")
+  set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} ${DEVICE_LIB_PATH}")
+endif()
+
+if (NOT DEFINED ENV{CXXFLAGS})
+  set(CMAKE_CXX_FLAGS_DEBUG "-g -O1")
+  set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+endif()
+
+if (NOT DEFINED ENV{CC})
+  set(CMAKE_C_COMPILER "${compiler_bin}/amdclang" CACHE PATH "Path to the C compiler")
+else()
+  set(CMAKE_C_COMPILER "$ENV{CC}" CACHE PATH "Path to the C compiler")
+endif()
+
+if (NOT DEFINED ENV{CFLAGS})
+  set(CMAKE_C_FLAGS_DEBUG "-g -O1")
+  set(CMAKE_C_FLAGS_RELEASE "-O3")
+endif()

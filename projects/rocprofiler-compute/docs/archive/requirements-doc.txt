@@ -1,0 +1,7 @@
+sphinx
+myst-parser
+recommonmark
+pygments
+sphinxmark
+sphinx-rtd-theme
+Pillow>=10.3.0

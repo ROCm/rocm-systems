@@ -1,0 +1,202 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "MemUtils.hh"
+#include <utils.hh>
+/*
+ * These testcases verify that synchronization behaviour for memcpy functions with respect to
+ * the host.
+ */
+
+using namespace mem_utils;
+
+// value used for memset operations
+constexpr int testValue = 0x11;
+
+
+/*
+ * Set of helper functions handling the different cases for memcpy
+ */
+
+static inline hipMemcpyKind getMemcpyType(allocType type, bool fromHost) {
+  if (fromHost) {
+    switch (type) {
+      case allocType::deviceMalloc:
+        return hipMemcpyHostToDevice;
+        break;
+      case allocType::devRegistered:
+        return hipMemcpyHostToDevice;
+        break;
+      default:  // host
+        return hipMemcpyHostToHost;
+        break;
+    }
+  } else {
+    switch (type) {
+      case allocType::deviceMalloc:
+        return hipMemcpyDeviceToDevice;
+        break;
+      case allocType::devRegistered:
+        return hipMemcpyDeviceToDevice;
+        break;
+      default:  // host
+        return hipMemcpyDeviceToHost;
+        break;
+    }
+  }
+}
+
+static inline void memcpyCheck(allocType type, memType memType, char* aPtr, MultiDData& data,
+                               char* fillerData, bool async, hipStream_t stream, bool fromHost) {
+  auto cpyType = getMemcpyType(type, fromHost);
+  auto sizeInBytes = data.pitch * data.getH() * data.getD() * sizeof(char);
+  switch (memType) {
+    case memType::hipMem:
+      if (async) {
+        HIP_CHECK(hipMemcpyAsync(aPtr + data.offset, fillerData, sizeInBytes, cpyType, stream));
+      } else {
+        HIP_CHECK(hipMemcpy(aPtr + data.offset, fillerData, sizeInBytes, cpyType));
+      }
+      break;
+    case memType::hipMem2D:
+      if (async) {
+        HIP_CHECK(hipMemcpy2DAsync(aPtr + data.offset, data.pitch, fillerData, sizeInBytes,
+                                   data.width, data.getH(), cpyType, stream));
+      } else {
+        HIP_CHECK(hipMemcpy2D(aPtr + data.offset, data.pitch, fillerData, sizeInBytes, data.width,
+                              data.getH(), cpyType));
+      }
+      break;
+    case memType::hipMem3D: {
+      hipMemcpy3DParms params{};
+      params.kind = cpyType;
+      params.srcPos = make_hipPos(0, 0, 0);
+      params.dstPos = make_hipPos(data.offset, data.offset, data.offset);
+      params.srcPtr = make_hipPitchedPtr(fillerData, data.width, data.width, data.getH());
+      params.dstPtr = make_hipPitchedPtr(aPtr, data.pitch, data.width, data.getH());
+      hipExtent extent;
+      extent.width = data.width * sizeof(char);
+      extent.height = data.getH();
+      extent.depth = data.getD();
+
+      params.extent = extent;
+      if (async) {
+        HIP_CHECK(hipMemcpy3DAsync(&params, stream));
+      } else {
+        HIP_CHECK(hipMemcpy3D(&params));
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+static inline char* createFillerData(size_t count, size_t value, bool fromHost) {
+  if (fromHost) {
+    char* fillerData = new char[count];
+    std::fill(fillerData, fillerData + count, value);
+    return fillerData;
+  } else {
+    char* fillerData;
+    HIP_CHECK(hipMalloc(&fillerData, count * sizeof(char)));
+    HIP_CHECK(hipMemset(fillerData, value, count * sizeof(char)));
+    return fillerData;
+  }
+}
+
+static void checkForSync(hipStream_t stream, bool async, allocType type, bool fromHost) {
+  if (fromHost) {
+    if (type == allocType::deviceMalloc) {
+      HIP_CHECK_ERROR(hipStreamQuery(stream), hipErrorNotReady);
+    } else {
+      HIP_CHECK(hipStreamQuery(stream));
+    }
+  } else {
+    if (type != allocType::deviceMalloc && !async) {
+      HIP_CHECK(hipStreamQuery(stream));
+    } else {
+      HIP_CHECK_ERROR(hipStreamQuery(stream), hipErrorNotReady);
+    }
+  }
+}
+
+
+// Helper function to run tests for hipMemset allocation types
+static void runMemcpyTests(hipStream_t stream, bool async, allocType type, memType memType,
+                           MultiDData data) {
+  bool fromHost = GENERATE(true, false);
+
+  std::pair<char*, char*> aPtr = initMemory<char>(type, memType, data);
+  size_t sizeInBytes = data.getCount();
+
+  // filler data for device memory created beforehand as it uses memset
+  // which might interfere with synchronization testing
+  auto fillerData = createFillerData(sizeInBytes, testValue, fromHost);
+  CAPTURE(type, memType, data.width, data.height, data.depth, stream, async, fromHost, sizeInBytes);
+
+  using namespace std::chrono_literals;
+  const std::chrono::duration<uint64_t, std::milli> delay = 100ms;
+  LaunchDelayKernel(delay, stream);
+
+  memcpyCheck(type, memType, aPtr.first, data, fillerData, async, stream, fromHost);
+  checkForSync(stream, async, type, fromHost);
+  // verify
+  HIP_CHECK(hipStreamSynchronize(stream));
+  verifyData(aPtr.first, testValue, data, type, memType);
+  if (type == allocType::devRegistered) {
+    freeStuff(aPtr.second, type);
+  } else {
+    freeStuff(aPtr.first, type);
+  }
+  if (fromHost) {
+    delete[] fillerData;
+  } else {
+    HIP_CHECK(hipFree(fillerData));
+  }
+}
+
+#if HT_AMD /* Disabled because frequency based wait is timing out on nvidia platforms */
+
+HIP_TEST_CASE(Unit_hipMemcpySync) {
+  HIP_SKIP_TEST("Sync behaviour differs on AMD and NVIDIA. See AIRUNTIME-2545.");
+  allocType type = GENERATE(allocType::deviceMalloc, allocType::hostMalloc, allocType::hostRegisted,
+                            allocType::devRegistered);
+  memType memcpy_type = memType::hipMem;
+  MultiDData data;
+  data.width = 1;
+
+  doMemTest<char>(runMemcpyTests, type, memcpy_type, data);  // Uses long running kernel
+}
+
+HIP_TEST_CASE(Unit_hipMemcpy2DSync) {
+  HIP_SKIP_TEST("Sync behaviour differs on AMD and NVIDIA. See AIRUNTIME-2545.");
+  allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
+                                  allocType::hostRegisted, allocType::devRegistered);
+
+  memType memcpy_type = memType::hipMem2D;
+  MultiDData data;
+  data.width = 1;
+  data.height = 1;
+
+  doMemTest<char>(runMemcpyTests, mallocType, memcpy_type, data);
+}
+
+HIP_TEST_CASE(Unit_hipMemcpy3DSync) {
+  HIP_SKIP_TEST("Sync behaviour differs on AMD and NVIDIA. See AIRUNTIME-2545.");
+  allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
+                                  allocType::hostRegisted, allocType::devRegistered);
+
+  memType memcpy_type = memType::hipMem3D;
+  MultiDData data;
+  data.width = 1;
+  data.height = 1;
+  data.depth = 1;
+
+  doMemTest<char>(runMemcpyTests, mallocType, memcpy_type, data);
+}
+
+#endif

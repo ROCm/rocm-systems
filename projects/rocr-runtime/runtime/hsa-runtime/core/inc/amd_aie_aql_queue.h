@@ -1,0 +1,141 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+// The University of Illinois/NCSA
+// Open Source License (NCSA)
+//
+// Copyright (c) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
+//
+// Developed by:
+//
+//                 AMD Research and AMD HSA Software Development
+//
+//                 Advanced Micro Devices, Inc.
+//
+//                 www.amd.com
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal with the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
+//
+//  - Redistributions of source code must retain the above copyright notice,
+//    this list of conditions and the following disclaimers.
+//  - Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimers in
+//    the documentation and/or other materials provided with the distribution.
+//  - Neither the names of Advanced Micro Devices, Inc,
+//    nor the names of its contributors may be used to endorse or promote
+//    products derived from this Software without specific prior written
+//    permission.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS WITH THE SOFTWARE.
+//
+////////////////////////////////////////////////////////////////////////////////
+
+#ifndef HSA_RUNTIME_CORE_INC_AMD_HW_AQL_AIE_COMMAND_PROCESSOR_H_
+#define HSA_RUNTIME_CORE_INC_AMD_HW_AQL_AIE_COMMAND_PROCESSOR_H_
+
+#include "core/inc/amd_aie_agent.h"
+#include "core/inc/exceptions.h"
+#include "core/inc/queue.h"
+#include "core/inc/runtime.h"
+#include "core/inc/signal.h"
+
+namespace rocr {
+namespace AMD {
+
+/// @brief Encapsulates HW AIE AQL Command Processor functionality. It
+/// provides the interface for things such as doorbells, queue read and
+/// write pointers, and a buffer.
+class AieAqlQueue : public core::Queue,
+                    private core::LocalSignal,
+                    core::DoorbellSignal {
+ public:
+  static __forceinline bool IsType(core::Signal *signal) {
+    return signal->IsType(&rtti_id());
+  }
+
+  static __forceinline bool IsType(core::Queue *queue) {
+    return queue->IsType(&rtti_id());
+  }
+
+  AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_t req_size_pkts,
+              uint32_t node_id, core::HsaEventCallback callback, void* err_data, uint64_t flags);
+  ~AieAqlQueue();
+
+  hsa_status_t Inactivate() override;
+  hsa_status_t SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) override;
+  void Destroy() override;
+  uint64_t LoadReadIndexRelaxed() override;
+  uint64_t LoadReadIndexAcquire() override;
+  uint64_t LoadWriteIndexRelaxed() override;
+  uint64_t LoadWriteIndexAcquire() override;
+  void StoreReadIndexRelaxed(uint64_t value) override { assert(false); }
+  void StoreReadIndexRelease(uint64_t value) override { assert(false); }
+  void StoreWriteIndexRelaxed(uint64_t value) override;
+  void StoreWriteIndexRelease(uint64_t value) override;
+  uint64_t CasWriteIndexRelaxed(uint64_t expected, uint64_t value) override;
+  uint64_t CasWriteIndexAcquire(uint64_t expected, uint64_t value) override;
+  uint64_t CasWriteIndexRelease(uint64_t expected, uint64_t value) override;
+  uint64_t CasWriteIndexAcqRel(uint64_t expected, uint64_t value) override;
+  uint64_t AddWriteIndexRelaxed(uint64_t value) override;
+  uint64_t AddWriteIndexAcquire(uint64_t value) override;
+  uint64_t AddWriteIndexRelease(uint64_t value) override;
+  uint64_t AddWriteIndexAcqRel(uint64_t value) override;
+  void StoreRelaxed(hsa_signal_value_t value) override;
+  void StoreRelease(hsa_signal_value_t value) override;
+  hsa_status_t GetInfo(hsa_queue_info_attribute_t attribute,
+                       void *value) override;
+  hsa_status_t GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mask) override;
+  hsa_status_t SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* cu_mask) override;
+  void ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope_t acquireFence,
+                  hsa_fence_scope_t releaseFence, hsa_signal_t* signal) override;
+
+  /// @brief Invoke the per-queue error callback if a non-default one is registered.
+  void InvokeErrorCallback(hsa_status_t error) {
+    if (errors_callback_ != nullptr && errors_callback_ != core::Queue::DefaultErrorHandler) {
+      errors_callback_(error, public_handle(), errors_data_);
+    }
+  }
+
+ protected:
+  bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
+
+ private:
+  /// @brief Called when the doorbell is rung to submit all queued packets.
+  void SubmitPackets();
+
+  static __forceinline int& rtti_id() {
+    static int rtti_id_ = 0;
+    return rtti_id_;
+  }
+
+  /// @brief Queue size in bytes.
+  uint32_t queue_size_bytes_ = 0;
+  /// @brief Base of the queue's ring buffer storage.
+  void* ring_buf_ = nullptr;
+  /// @brief Kernel Mode Queue (KMQ) metadata associated with this queue.
+  void* kmq_metadata_ = nullptr;
+  /// @brief Indicates if queue is active.
+  std::atomic<bool> active_ = false;
+  /// @brief Set when the queue is suspended after an error; no further packets are submitted.
+  /// Only accessed on the packet-submission path, so it does not need to be atomic.
+  bool suspended_ = false;
+  /// @brief Per-queue error callback registered at queue creation.
+  AMD::callback_t<core::HsaEventCallback> errors_callback_;
+  /// @brief User data passed to @ref errors_callback_.
+  void* errors_data_;
+};
+
+} // namespace AMD
+} // namespace rocr
+
+#endif  // HSA_RUNTIME_CORE_INC_AMD_HW_AQL_AIE_COMMAND_PROCESSOR_H_

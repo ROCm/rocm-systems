@@ -1,0 +1,134 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+// TODO Enable it after hipStreamAttachMemAsync is feature complete on HIP
+
+#include <hip_test_common.hh>
+#include <memory>
+
+__device__ __managed__ int var = 0;
+
+enum class StreamAttachTestType { NullStream = 0, StreamPerThread, CreatedStream };
+
+HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_Negative) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  hipStream_t stream{nullptr};
+
+  auto streamType =
+      GENERATE(StreamAttachTestType::NullStream, StreamAttachTestType::StreamPerThread,
+               StreamAttachTestType::CreatedStream);
+
+  if (streamType == StreamAttachTestType::StreamPerThread) {
+    stream = hipStreamPerThread;
+  } else if (streamType == StreamAttachTestType::CreatedStream) {
+    HIP_CHECK(hipStreamCreate(&stream));
+    REQUIRE(stream != nullptr);
+  }
+
+  SECTION("Invalid Resource Handle") {
+    int definitelyNotAManagedVariable = 0;
+    HIP_CHECK_ERROR(
+        hipStreamAttachMemAsync(stream, reinterpret_cast<hipDeviceptr_t*>(&definitelyNotAManagedVariable),
+                                sizeof(int), hipMemAttachSingle),
+        hipErrorInvalidValue);
+  }
+
+  SECTION("Invalid devptr") {
+    HIP_CHECK_ERROR(hipStreamAttachMemAsync(stream, nullptr, sizeof(int), hipMemAttachSingle),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("Invalid Resource Size") {
+    HIP_CHECK_ERROR(hipStreamAttachMemAsync(stream, reinterpret_cast<hipDeviceptr_t*>(&var), sizeof(int) - 1,
+                                            hipMemAttachSingle),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("Invalid Flags") {
+    HIP_CHECK_ERROR(
+        hipStreamAttachMemAsync(stream, reinterpret_cast<hipDeviceptr_t*>(&var), sizeof(int) - 1,
+                                hipMemAttachSingle | hipMemAttachHost | hipMemAttachGlobal),
+        hipErrorInvalidValue);
+  }
+
+  if (streamType == StreamAttachTestType::CreatedStream) {
+    HIP_CHECK(hipStreamDestroy(stream));
+  }
+}
+
+__global__ void kernel(int* ptr, size_t size) {
+  auto i = threadIdx.x;
+  if (i < size) {
+    ptr[i] = 1024;
+  }
+}
+
+constexpr size_t size = 1024;
+__device__ __managed__ int m_memory[size];
+
+HIP_TEST_CASE(Unit_hipStreamAttachMemAsync_UseCase) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  hipStream_t stream{nullptr};
+
+  auto streamType =
+      GENERATE(StreamAttachTestType::NullStream, StreamAttachTestType::StreamPerThread,
+               StreamAttachTestType::CreatedStream);
+
+  if (streamType == StreamAttachTestType::CreatedStream) {
+    HIP_CHECK(hipStreamCreate(&stream));
+    REQUIRE(stream != nullptr);
+  }
+
+  SECTION("Size zero is valid") {
+    int* d_memory{nullptr};
+    HIP_CHECK(hipMallocManaged(&d_memory, sizeof(int) * size, hipMemAttachHost));
+    HIP_CHECK(
+        hipStreamAttachMemAsync(stream, reinterpret_cast<hipDeviceptr_t*>(d_memory), 0, hipMemAttachHost));
+    HIP_CHECK(hipStreamSynchronize(stream));  // Wait for command to complete
+    HIP_CHECK(hipFree(d_memory));
+  }
+
+  SECTION("Access from device and host") {
+    int* d_memory{nullptr};
+
+    HIP_CHECK(hipMallocManaged(&d_memory, sizeof(int) * size, hipMemAttachHost));
+    HIP_CHECK(hipMemset(d_memory, 0, sizeof(int) * size));
+    HIP_CHECK(
+        hipStreamAttachMemAsync(stream, reinterpret_cast<hipDeviceptr_t*>(d_memory), 0, hipMemAttachHost));
+    HIP_CHECK(hipStreamSynchronize(stream));  // Wait for the command to complete
+
+    kernel<<<1, size, 0, stream>>>(d_memory, size);
+    HIP_CHECK(hipStreamSynchronize(stream));  // Wait for the kernel to complete
+
+    auto ptr = std::make_unique<int[]>(size);
+    std::copy(d_memory, d_memory + size, ptr.get());
+
+    HIP_CHECK(hipFree(d_memory));
+
+    REQUIRE(std::all_of(ptr.get(), ptr.get() + size, [](int n) { return n == size; }));
+  }
+
+  SECTION("Access ManagedMemory") {
+    HIP_CHECK(hipMemset(m_memory, 0, sizeof(int) * size));
+    HIP_CHECK(
+        hipStreamAttachMemAsync(stream, reinterpret_cast<hipDeviceptr_t*>(m_memory), 0, hipMemAttachHost));
+    HIP_CHECK(hipStreamSynchronize(stream));  // Wait for the command to complete
+
+    kernel<<<1, size, 0, stream>>>(m_memory, size);
+    HIP_CHECK(hipStreamSynchronize(stream));  // Wait for the kernel to complete
+
+    auto ptr = std::make_unique<int[]>(size);
+    std::copy(m_memory, m_memory + size, ptr.get());
+
+    REQUIRE(std::all_of(ptr.get(), ptr.get() + size, [](int n) { return n == size; }));
+  }
+
+  if (streamType == StreamAttachTestType::CreatedStream) {
+    HIP_CHECK(hipStreamDestroy(stream));
+  }
+}

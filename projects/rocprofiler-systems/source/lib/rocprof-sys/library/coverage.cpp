@@ -1,0 +1,321 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "library/coverage.hpp"
+#include "api.hpp"
+#include "common/env_vars.hpp"
+#include "common/path.hpp"
+#include "core/config.hpp"
+#include "library/coverage/impl.hpp"
+#include "library/thread_data.hpp"
+#include <cstdint>
+
+#include <fmt/format.h>
+#include <timemory/backends/threading.hpp>
+#include <timemory/tpls/cereal/cereal.hpp>
+#include <timemory/utility/popen.hpp>
+
+#include "logger/debug.hpp"
+
+#include <algorithm>
+#include <map>
+#include <mutex>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <unordered_map>
+
+#define ROCPROFSYS_SERIALIZE(MEMBER_VARIABLE)                                            \
+    ar(::tim::cereal::make_nvp(#MEMBER_VARIABLE, MEMBER_VARIABLE))
+
+namespace rocprofsys
+{
+namespace coverage
+{
+namespace
+{
+template <typename... Tp>
+using uomap_t = std::unordered_map<Tp...>;
+//
+using coverage_thread_data_type =
+    uomap_t<std::string_view, uomap_t<std::string_view, std::map<size_t, size_t>>>;
+//
+using coverage_data_vector = std::vector<coverage_data>;
+//
+using coverage_data_map =
+    uomap_t<std::string_view,
+            uomap_t<std::string_view, std::map<size_t, coverage_data_vector::iterator>>>;
+//
+using coverage_thread_data =
+    rocprofsys::thread_data<coverage_thread_data_type, code_coverage>;
+//
+auto&
+get_code_coverage()
+{
+    static auto _v = code_coverage{};
+    return _v;
+}
+//
+auto&
+get_post_processed()
+{
+    static auto* _v = new bool{ false };
+    return *_v;
+}
+//
+auto&
+get_coverage_data()
+{
+    static auto _v = coverage_data_vector{};
+    return _v;
+}
+//
+auto&
+get_coverage_count(std::int64_t _tid = tim::threading::get_id())
+{
+    return coverage_thread_data::instance(construct_on_thread{ _tid });
+}
+}  // namespace
+
+//--------------------------------------------------------------------------------------//
+
+void
+post_process()
+{
+    using data_tuple_t = coverage_data::data_tuple_t;
+
+    if(get_post_processed()) return;
+    get_post_processed() = true;
+
+    if(!config::get_use_code_coverage()) return;
+
+    auto& _coverage      = get_code_coverage();
+    auto& _coverage_data = get_coverage_data();
+
+    if(_coverage.size == 0)
+    {
+        LOG_WARNING("Code coverage enabled but no code coverage data is available!");
+        return;
+    }
+
+    auto _data = coverage_thread_data_type{};
+    {
+        auto _coverage_map = coverage_data_map{};
+        auto _find         = [&_coverage_data, &_coverage_map](data_tuple_t&& _v) {
+            auto& _cache = _coverage_map[std::get<0>(_v)][std::get<1>(_v)];
+            auto  mitr   = _cache.find(std::get<2>(_v));
+            if(mitr != _cache.end()) return std::make_pair(mitr->second, true);
+
+            for(auto itr = _coverage_data.begin(); itr != _coverage_data.end(); ++itr)
+            {
+                if(*itr == _v)
+                {
+                    _cache[std::get<2>(_v)] = itr;
+                    return std::make_pair(itr, true);
+                }
+            }
+            return std::make_pair(_coverage_data.end(), false);
+        };
+
+        for(size_t i = 0; i < coverage_thread_data::size(); ++i)
+        {
+            const auto& _thr_data = *get_coverage_count(i);
+            for(const auto& file : _thr_data)
+            {
+                for(const auto& func : file.second)
+                {
+                    for(const auto& addr : func.second)
+                    {
+                        _data[file.first][func.first][addr.first] += addr.second;
+                        auto&& _v = _find({ file.first, func.first, addr.first });
+                        if(_v.second)
+                        {
+                            _v.first->count += addr.second;
+                        }
+                        else
+                        {
+                            LOG_WARNING("No matching coverage data for {} :: {} (0x{:X})",
+                                        func.first, file.first,
+                                        (unsigned int) addr.first);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for(const auto& file : _data)
+    {
+        for(const auto& func : file.second)
+        {
+            for(const auto& addr : func.second)
+            {
+                if(addr.second > 0)
+                {
+                    _coverage.count += 1;
+                    _coverage.covered.modules.emplace(file.first);
+                    _coverage.covered.functions.emplace(func.first);
+                    _coverage.covered.addresses.emplace(addr.first);
+                }
+            }
+        }
+    }
+
+    std::sort(_coverage_data.begin(), _coverage_data.end(),
+              std::greater<coverage_data>{});
+
+    {
+        auto _tmp_map     = coverage_data_map{};
+        auto _tmp         = std::decay_t<decltype(_coverage_data)>{};
+        auto _find_in_tmp = [&_tmp, &_tmp_map](const auto& _v) {
+            auto& _cache = _tmp_map[_v.module][_v.function];
+            auto  mitr   = _cache.find(_v.address);
+            if(mitr != _cache.end()) return std::make_pair(mitr->second, true);
+
+            for(auto titr = _tmp.begin(); titr != _tmp.end(); ++titr)
+            {
+                if(titr->source == _v.source && titr->address != _v.address &&
+                   titr->count == _v.count)
+                {
+                    _cache[_v.address] = titr;
+                    return std::make_pair(titr, true);
+                }
+            }
+            return std::make_pair(_tmp.end(), false);
+        };
+        for(auto&& itr : _coverage_data)
+        {
+            if(!_find_in_tmp(itr).second) _tmp.emplace_back(itr);
+        }
+        std::swap(_coverage_data, _tmp);
+    }
+
+    LOG_INFO("code coverage :: {:.2f}%", _coverage() * 100.0);
+    LOG_INFO("module coverage :: {:.2f}%", _coverage(code_coverage::MODULE) * 100.0);
+    LOG_INFO("function coverage :: {:.2f}%", _coverage(code_coverage::FUNCTION) * 100.0);
+
+    std::sort(_coverage_data.begin(), _coverage_data.end(),
+              std::greater<coverage_data>{});
+
+    auto _get_setting = [](const std::string& _v) {
+        auto&& _b = config::get_setting_value<bool>(_v);
+        if(!_b)
+        {
+            throw std::runtime_error(
+                fmt::format("Error! No configuration setting named '{}'", _v));
+        }
+        return _b.value_or(true);
+    };
+
+    auto _text_output = _get_setting(std::string{ env_vars::TEXT_OUTPUT });
+    auto _json_output = _get_setting(std::string{ env_vars::JSON_OUTPUT });
+
+    if(_text_output)
+    {
+        auto          _fname = tim::settings::compose_output_filename("coverage", ".txt");
+        std::ofstream ofs{};
+        if(path::create_parent_dirs_and_open_ofstream(ofs, _fname))
+        {
+            if(get_verbose() >= 0)
+            {
+                operation::file_output_message<code_coverage>{}(
+                    _fname, std::string{ "coverage" });
+            }
+            for(auto& itr : _coverage_data)
+            {
+                auto addr = fmt::format("0x{:x}", itr.address);
+                ofs << fmt::format("{:>8}  {:>8}  {}\n", itr.count, addr, itr.source);
+            }
+        }
+        else
+        {
+            throw std::runtime_error(
+                fmt::format("Error opening coverage output file: {}", _fname));
+        }
+    }
+
+    if(_json_output)
+    {
+        std::stringstream oss{};
+        {
+            namespace cereal = tim::cereal;
+            auto ar =
+                tim::policy::output_archive<cereal::PrettyJSONOutputArchive>::get(oss);
+
+            ar->setNextName("rocprofsys");
+            ar->startNode();
+            ar->setNextName("coverage");
+            ar->startNode();
+            (*ar)(cereal::make_nvp("summary", _coverage));
+            (*ar)(cereal::make_nvp("details", _coverage_data));
+            ar->finishNode();
+            ar->finishNode();
+        }
+        auto _fname = tim::settings::compose_output_filename("coverage", ".json");
+        std::ofstream ofs{};
+        if(path::create_parent_dirs_and_open_ofstream(ofs, _fname))
+        {
+            if(get_verbose() >= 0)
+            {
+                operation::file_output_message<code_coverage>{}(
+                    _fname, std::string{ "coverage" });
+            }
+            ofs << oss.str() << "\n";
+        }
+        else
+        {
+            throw std::runtime_error(
+                fmt::format("Error opening coverage output file: {}", _fname));
+        }
+    }
+}
+}  // namespace coverage
+}  // namespace rocprofsys
+
+//--------------------------------------------------------------------------------------//
+
+namespace coverage = rocprofsys::coverage;
+
+extern "C" void
+rocprofsys_register_source_hidden(const char* file, const char* func, size_t line,
+                                  size_t address, const char* source)
+{
+    if(coverage::get_post_processed()) return;
+
+    using coverage_data = coverage::coverage_data;
+
+    LOG_DEBUG("[0x{:X}] :: {:20s} :: {:20s}:{} :: {}", (unsigned int) address, func, file,
+              line, source);
+
+    coverage::get_coverage_data().emplace_back(
+        coverage_data{ size_t{ 0 }, address, line, file, func,
+                       (source && strlen(source) > 0) ? source : func });
+
+    coverage::get_code_coverage().size += 1;
+    coverage::get_code_coverage().possible.modules.emplace(file);
+    coverage::get_code_coverage().possible.functions.emplace(func);
+    coverage::get_code_coverage().possible.addresses.emplace(address);
+
+    // initialize
+    for(size_t i = 0; i < coverage::coverage_thread_data::size(); ++i)
+    {
+        (*coverage::get_coverage_count(i))[file][func].emplace(address, 0);
+    }
+}
+
+//--------------------------------------------------------------------------------------//
+
+extern "C" void
+rocprofsys_register_coverage_hidden(const char* file, const char* func, size_t address)
+{
+    if(coverage::get_post_processed()) return;
+    if(rocprofsys::state::process::get() < rocprofsys::state::process::Active &&
+       !rocprofsys_init_tooling_hidden())
+        return;
+    else if(rocprofsys::state::process::get() >= rocprofsys::state::process::Finalized)
+        return;
+
+    (*coverage::get_coverage_count())[file][func][address] += 1;
+}
+
+//--------------------------------------------------------------------------------------//

@@ -1,0 +1,27 @@
+#
+# LeakSanitizer suppressions file for rocprofiler project.
+#
+
+leak:amd_comgr
+leak:hsa-runtime
+leak:amdhip
+leak:python
+leak:hsa-amd-aqlprofile
+leak:__new_exitfn
+leak:omptarget
+leak:llvm
+leak:bash
+
+# Suppress leaks from external tools and libraries
+leak:liblzma
+leak:liblsan
+leak:seq
+leak:__GI___strdup
+
+# Suppress leaks during tool detach/shutdown - these allocations are
+# intentionally not freed as the process is exiting
+leak:rocprofiler::tool::metadata::get_string_entries
+leak:rocprofiler::tool::write_rocpd
+leak:rocprofiler::tool::generate_output
+leak:tool_detach
+leak:rocprofiler_register_detach

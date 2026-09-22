@@ -1,0 +1,385 @@
+/******************************************************************************
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * SPDX-License-Identifier: MIT
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *****************************************************************************/
+
+#pragma once
+#include <algorithm>
+#include <cstring>
+#include <future>
+#include <map>
+#include <random>
+#include <set>
+#include <sstream>
+#include <stdarg.h>
+#include <thread>
+#include <unistd.h>
+#include <vector>
+#include <iostream>
+
+#include <stdio.h>
+#include <string.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <filesystem>
+#include <fstream>
+
+#include <hip/hip_ext.h>
+#include <hip/hip_runtime.h>
+#include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
+
+#include "util.hpp"
+
+namespace rocshmem
+{
+  using std::map;
+  using std::pair;
+  using std::set;
+  using std::vector;
+
+  /**
+   * PCIe path types between GPU and NIC, ordered by increasing distance.
+   */
+  enum NicPathType {
+    NIC_PATH_PIX, ///< Through a single PCIe switch
+    NIC_PATH_PXB, ///< Through multiple PCIe switches (same root complex)
+    NIC_PATH_PHB, ///< Through the PCIe host bridge (same NUMA node)
+    NIC_PATH_SYS, ///< Across NUMA nodes
+  };
+
+  NicPathType ParseNicMergeLevel(const std::string &level_str);
+
+  std::vector<std::string> ParseNicList(const std::string &csv);
+
+  std::string SelectRankGroup(const std::string &spec, int rank);
+
+  std::vector<std::string> BuildFilteredNicAddresses(const char *hca_list);
+
+  NicPathType ComputeGpuNicPathType(int gpuIndex, const std::string &nicBusId,
+                                    int nicNuma);
+
+  /**
+   * Enumeration of GID priority
+   *
+   * @note These are the GID types ordered in priority from lowest (0) to highest
+   */
+  enum GidPriority
+  {
+    UNKNOWN           = -1,                      ///< Default
+    ROCEV1_LINK_LOCAL = 0,                       ///< RoCEv1 Link-local
+    ROCEV2_LINK_LOCAL = 1,                       ///< RoCEv2 Link-local fe80::/10
+    ROCEV1_IPV6       = 2,                       ///< RoCEv1 IPv6
+    ROCEV2_IPV6       = 3,                       ///< RoCEv2 IPv6
+    ROCEV1_IPV4       = 4,                       ///< RoCEv1 IPv4-mapped IPv6
+    ROCEV2_IPV4       = 5,                       ///< RoCEv2 IPv4-mapped IPv6 ::ffff:192.168.x.x
+  };
+
+
+  /**
+   * Enumeration of supported memory types
+   *
+   * @note These are possible types of memory to be used as sources/destinations
+   */
+  enum MemType
+  {
+    MEM_CPU          = 0,                       ///< Coarse-grained pinned CPU memory
+    MEM_GPU          = 1,                       ///< Coarse-grained global GPU memory
+  };
+
+ /**
+   * Enumeration of supported Executor types
+   *
+   * @note The Executor is the device used to perform a Transfer
+   * @note IBVerbs executor is currently not implemented yet
+   */
+
+  enum DeviceType
+  {
+    EXE_CPU          = 0,
+    EXE_GPU          = 1,
+    EXE_NIC          = 2
+  };
+
+  inline bool IsCpuExeType(DeviceType e){ return e == EXE_CPU; }
+  inline bool IsGpuExeType(DeviceType e){ return e == EXE_GPU; }
+  inline bool IsNicExeType(DeviceType e){ return e == EXE_NIC; }
+
+  /**
+   * A ExeDevice defines a specific Executor
+   */
+  struct ExeDevice
+  {
+    DeviceType exeType;                         ///< Device type
+    int32_t exeIndex;                           ///< Device index
+
+    bool operator<(ExeDevice const& other) const {
+      return (exeType < other.exeType) || (exeType == other.exeType && exeIndex < other.exeIndex);
+    }
+  };
+
+
+  /**
+   * A MemDevice indicates a memory type on a specific device
+   */
+  struct MemDevice
+  {
+    MemType memType;                            ///< Memory type
+    int32_t memIndex;                           ///< Device index
+
+    bool operator<(MemDevice const& other) const {
+      return (memType < other.memType) || (memType == other.memType && memIndex < other.memIndex);
+    }
+  };
+
+  inline bool IsCpuMemType(MemType m) { return (m == MEM_CPU); }
+  inline bool IsGpuMemType(MemType m) { return (m == MEM_GPU); }
+
+  /**
+   * Structure to track PCIe topology
+   */
+  struct PCIeNode
+  {
+    std::string         address;                   ///< PCIe address for this PCIe node
+    mutable std::string description;               ///< Description for this PCIe node
+    std::set<PCIeNode>  children;                  ///< Children PCIe nodes
+    mutable bool        is_virtual_p2p_link = false; ///< PCIe node is a virtual p2p link
+    mutable PCIeNode*   p2p_node = nullptr;        ///< Pointer to actual node of p2p link
+
+    // Default constructor
+    PCIeNode() : address(""), description("") {}
+
+    // Constructor
+    PCIeNode(std::string const& addr) : address(addr) {}
+
+    // Constructor
+    PCIeNode(std::string const& addr, std::string const& desc)
+      :address(addr), description(desc) {}
+
+    // Comparison operator for std::set
+    bool operator<(PCIeNode const& other) const {
+      return address < other.address;
+    }
+  };
+
+  /**
+   * Extract the bus number from a PCIe address (domain:bus:device.function)
+   *
+   * @param[in] pcieAddress PCIe address string (e.g., "0000:02:00.0")
+   * @returns Bus number in hex, or -1 if parsing fails
+   */
+  int ExtractBusNumber(std::string const& pcieAddress);
+
+  /**
+   * Compute the distance between two PCIe bus IDs
+   *
+   * @param[in] pcieAddress1 First PCIe address
+   * @param[in] pcieAddress2 Second PCIe address
+   * @returns Absolute difference between bus numbers, or -1 if either address is invalid
+   */
+  int GetBusIdDistance(std::string const& pcieAddress1,
+                       std::string const& pcieAddress2);
+
+  /**
+   * Find the lowest common ancestor in PCIe tree between two nodes
+   *
+   * @param[in] root Root of the PCIe tree
+   * @param[in] node1Address Address of first node
+   * @param[in] node2Address Address of second node
+   * @returns Pointer to the lowest common ancestor node, or nullptr if not found
+   */
+  PCIeNode const* GetLcaBetweenNodes(PCIeNode    const* root,
+                                     std::string const& node1Address,
+                                     std::string const& node2Address);
+
+  /**
+   * Get the depth of a node in the PCIe tree
+   *
+   * @param[in] targetBusID Address of the target node
+   * @param[in] node Root node to start search from
+   * @param[in] depth Current depth (default 0)
+   * @returns Depth of the node in the tree, or -1 if not found
+   */
+  int GetLcaDepth(std::string const&     targetBusID,
+                  PCIeNode const* const& node,
+                  int                    depth = 0);
+
+  /**
+   * Insert a PCIe path into the tree
+   *
+   * @param[in] pcieAddress PCIe address to insert
+   * @param[in] description Description for the node
+   * @param[in,out] root Root node of the tree
+   * @returns 0 on success, -1 on error
+   */
+  int InsertPCIePathToTree(std::string const& pcieAddress,
+                           std::string const& description,
+                           PCIeNode&          root);
+
+  /**
+   * Get nearest devices in PCIe tree based on topology (uses system PCIe tree)
+   *
+   * @param[in] targetBusId Target device PCIe address
+   * @param[in] candidateBusIdList List of candidate device addresses
+   * @returns Set of indices of nearest devices from candidate list
+   */
+  std::set<int> GetNearestDevicesInTree(std::string              const& targetBusId,
+                                        std::vector<std::string> const& candidateBusIdList);
+
+  /**
+   * Get nearest devices in PCIe tree based on topology (custom root)
+   *
+   * @param[in] targetBusId Target device PCIe address
+   * @param[in] candidateBusIdList List of candidate device addresses
+   * @param[in] root Custom PCIe tree root to use
+   * @returns Set of indices of nearest devices from candidate list
+   */
+  std::set<int> GetNearestDevicesInTree(std::string              const& targetBusId,
+                                        std::vector<std::string> const& candidateBusIdList,
+                                        PCIeNode                 const* root);
+
+  /**
+   * Returns the index of the NUMA node closest to the given GPU
+   *
+   * @param[in] gpuIndex Index of the GPU to query
+   * @returns NUMA node index closest to GPU gpuIndex, or -1 if unable to detect
+   */
+  int GetClosestCpuNumaToGpu(int gpuIndex);
+
+  /**
+   * Returns the index of the NUMA node closest to the given NIC
+   *
+   * @param[in] nicIndex Index of the NIC to query
+   * @returns NUMA node index closest to the NIC nicIndex, or -1 if unable to detect
+   */
+  int GetClosestCpuNumaToNic(int nicIndex);
+
+  struct IbvDevice {
+    void *devicePtr;
+    std::string name;
+    std::string busId;
+    bool hasActivePort;
+    int numaNode;
+    int gidIndex;
+    std::string gidDescriptor;
+    bool isRoce;
+  };
+
+  std::vector<IbvDevice> const &GetIbvDeviceList();
+
+  /**
+   * Returns the index of the NIC closest to the given GPU
+   *
+   * @param[in] gpuIndex Index of the GPU to query
+   * @param[in] hca_list Include list of device names that can be used (Exclude if prefixed by ^)
+   * @param[out] dev_name Name of the IB Verbs capable NIC index closest to GPU gpuIndex
+   * @returns index of IB Verbs capable NIC index closest to GPU gpuIndex, or -1 if unable to detect
+   */
+  int GetClosestNicToGpu(int gpuIndex, const char *hca_list,
+                         std::string *dev_name);
+
+  /**
+   * Returns the names of NICs closest to the given GPU within a PCIe path limit.
+   *
+   * @param[in] gpuIndex Index of the GPU to query
+   * @param[in] hca_list Include list of device names (Exclude if prefixed by ^)
+   * @param[in] max_path_type Maximum PCIe path distance to include
+   * @param[out] nic_names Populated with names of matching NICs
+   * @returns number of NICs found, or -1 on error
+   */
+  int GetClosestNicsToGpu(int gpuIndex, const char *hca_list,
+                          NicPathType max_path_type,
+                          std::vector<std::string> &nic_names);
+
+  /**
+   * Returns information about number of available Devices
+   *
+   * @param[in]  Type    Hardware Device type to query
+   * @returns    Number of detected Devices of type Type
+   */
+  int GetNumDevices(DeviceType Type);
+
+  void DisplayTopology(bool outputToCsv);
+
+};
+
+//==========================================================================================
+// End of rocshmem API
+//==========================================================================================
+
+// Error check macros
+#define ROCSHMEM_SUCCESS 0
+
+#define ERR_CHECK(cmd)            \
+  do {                            \
+    int error = cmd;                                                      \
+    if (error != 0) {                                                \
+      fprintf(stderr, "error: %d at %s:%d\n", error, __FILE__, __LINE__);     \
+      exit(EXIT_FAILURE);                                                     \
+    }                                                                         \
+} while (0)
+
+// Helper macros for calling RDMA functions and reporting errors
+#ifdef VERBS_DEBUG
+#define IBV_CALL(__func__, ...)                                         \
+  do {                                                                  \
+    int error = __func__(__VA_ARGS__);                                  \
+    if (error != 0) {                                                   \
+      fprintf(stderr,"Encountered IbVerbs error (%d) at line (%d) "        \
+              "and function (%s)", (error), __LINE__, #__func__);       \
+      exit(EXIT_FAILURE);                                               \
+    }                                                                   \
+  } while (0)
+
+#define IBV_PTR_CALL(__ptr__, __func__, ...)                               \
+  do {                                                                     \
+    __ptr__ = __func__(__VA_ARGS__);                                       \
+    if (__ptr__ == nullptr) {                                              \
+      fprintf(stderr, "Encountered IbVerbs nullptr error at line (%d) " \
+              "and function (%s)", __LINE__, #__func__);                   \
+      exit(EXIT_FAILURE);                                               \
+    }                                                                      \
+  } while (0)
+#else
+#define IBV_CALL(__func__, ...)                                         \
+  do {                                                                  \
+    int error = __func__(__VA_ARGS__);                                  \
+    if (error != 0) {                                                   \
+      fprintf(stderr, "Encountered IbVerbs error (%d) in func (%s) " \
+              , error, #__func__);                                      \
+      exit(EXIT_FAILURE);                                               \
+    }                                                                   \
+  } while (0)
+
+#define IBV_PTR_CALL(__ptr__, __func__, ...)                               \
+  do {                                                                     \
+    __ptr__ = __func__(__VA_ARGS__);                                       \
+    if (__ptr__ == nullptr) {                                              \
+      fprintf(stderr, "Encountered IbVerbs nullptr error in func (%s) ",   \
+               #__func__);                                                \
+      exit(EXIT_FAILURE);                                               \
+    }                                                                      \
+  } while (0)
+#endif
+

@@ -1,0 +1,557 @@
+# MIT License
+#
+# Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+#
+# rocprofv3 tool test
+#
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
+
+include(FindPackageHandleStandardArgs)
+
+project(
+    rocprofiler-sdk-tests-rocprofv3-att
+    LANGUAGES CXX
+    VERSION 0.0.0)
+
+set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}] ")
+
+string(REPLACE "LD_PRELOAD=" "--preload;" PRELOAD_ARGS
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+
+rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py
+                                                          att_input.json)
+
+find_package(rocprofiler-sdk REQUIRED)
+
+find_library(
+    attdecoder_LIBRARY
+    NAMES rocprof-trace-decoder
+    HINTS ${ROCM_PATH}
+    PATHS ${ROCM_PATH}
+    PATH_SUFFIXES lib)
+
+if(attdecoder_LIBRARY)
+    cmake_path(GET attdecoder_LIBRARY PARENT_PATH attdecoder_LIB_DIR)
+endif()
+
+find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
+                                                           attdecoder_LIBRARY)
+
+set(COMMON_PARAMS_NO_LIB ${PRELOAD_ARGS} --att --output-format json --log-level env -d
+                         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/)
+
+set(IS_DISABLED ON)
+if(attdecoder_FOUND)
+    set(IS_DISABLED OFF)
+    set(COMMON_PARAMS --att-library-path ${attdecoder_LIB_DIR} ${COMMON_PARAMS_NO_LIB})
+endif()
+
+# hsa multiqueue dependency test with lib path
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-hsa-multiqueue-cmd-env-att-lib-path
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input
+        --att-target-cu 1 --att-shader-engine-mask 0x11 --kernel-include-regex copyD
+        --att-buffer-size 0x6000000 --att-simd-select 0x3 --att-serialize-all 1 -o out --
+        $<TARGET_FILE:hsa_code_object_testapp>
+    DEPENDS hsa_code_object_testapp
+    LABELS "integration-tests"
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    FIXTURES_SETUP rocprofv3-test-att-hsa-multiqueue-cmd-env-att-lib-path)
+
+# hsa multiqueue dependency test with json input
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-hsa-multiqueue-json
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/json_input -i
+        ${CMAKE_CURRENT_BINARY_DIR}/att_input.json --
+        $<TARGET_FILE:hsa_code_object_testapp>
+    DEPENDS hsa_code_object_testapp
+    LABELS "integration-tests"
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    FIXTURES_SETUP rocprofv3-test-att-hsa-multiqueue-json)
+
+# validate output
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-hsa-multiqueue-cmd
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-hsa-multiqueue-cmd-env-att-lib-path
+    ARGS --input
+         ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/cmd_input/out_results.json
+         --code-object-input
+         ${CMAKE_CURRENT_BINARY_DIR}
+         --output-path
+         ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/cmd_input
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-hsa-multiqueue-json
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT 45
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-att-hsa-multiqueue-json
+    DISABLED ${IS_DISABLED}
+    ARGS --input
+         ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/json_input/out_results.json
+         --code-object-input
+         ${CMAKE_CURRENT_BINARY_DIR}
+         --output-path
+         ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/json_input
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
+function(configure_att_input _FILENAME)
+    set(LIB_PATH_LOC "${attdecoder_LIB_DIR}")
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}//${_FILENAME}.in
+                   ${CMAKE_CURRENT_BINARY_DIR}/${_FILENAME} @ONLY)
+endfunction()
+
+configure_att_input(att_input.yml)
+configure_att_input(att_input_will_fail.yml)
+
+# test yaml input
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-yaml-input
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS_NO_LIB}/yaml -i
+        ${CMAKE_CURRENT_BINARY_DIR}/att_input.yml --echo --
+        $<TARGET_FILE:hsa_code_object_testapp>
+    DEPENDS hsa_code_object_testapp
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED})
+
+# Invalid lib path has to fail
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-yaml-input-will-fail
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
+        ${CMAKE_CURRENT_BINARY_DIR}/att_input_will_fail.yml --log-level env --echo --
+        $<TARGET_FILE:hsa_code_object_testapp>
+    DEPENDS hsa_code_object_testapp
+    TIMEOUT 45
+    LABELS "integration-tests"
+    WILL_FAIL
+    DISABLED ${IS_DISABLED})
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-library-path-cmd-line-will-fail
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --att-library-path .
+            --log-level env --echo -- $<TARGET_FILE:hsa_code_object_testapp>
+    DEPENDS hsa_code_object_testapp
+    TIMEOUT 45
+    LABELS "integration-tests"
+    WILL_FAIL
+    DISABLED ${IS_DISABLED})
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-library-path-env-var-will-fail
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS_NO_LIB}/envfail
+            --att-library-path . --echo -- $<TARGET_FILE:hsa_code_object_testapp>
+    DEPENDS hsa_code_object_testapp
+    TIMEOUT 45
+    LABELS "integration-tests"
+    WILL_FAIL
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-env-var
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS_NO_LIB}/envvar --
+            $<TARGET_FILE:hsa_code_object_testapp>
+    DEPENDS hsa_code_object_testapp
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}")
+#
+# Uses ATT and Counter Collection at the same time
+#
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-hsa-multiqueue-plus-pmc
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input --pmc
+            SQ_WAVES -o pmc -- $<TARGET_FILE:vector-ops>
+    DEPENDS vector-ops
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_SETUP rocprofv3-test-att-hsa-multiqueue-plus-pmc)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-hsa-multiqueue-plus-pmc
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-hsa-multiqueue-plus-pmc
+    DISCOVERY_ARGS -k test_counter_collection_with_att
+    ARGS --att-pmc-input
+         ${CMAKE_CURRENT_BINARY_DIR}/vector-ops-trace/cmd_input/pmc_results.json
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
+# Check for conflict PMC + activity
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-hsa-multiqueue-activity-pmc-will-fail
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input --pmc
+            SQ_WAVES -o out --att-activity 8 -- $<TARGET_FILE:vector-ops>
+    DEPENDS vector-ops
+    TIMEOUT 45
+    LABELS "integration-tests"
+    WILL_FAIL
+    DISABLED ${IS_DISABLED})
+
+# Check for conflict Perfcounters + activity
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-hsa-multiqueue-activity-perf-will-fail
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input
+            --att-perfcounter-ctrl 8 -o out --att-activity 8 -- $<TARGET_FILE:vector-ops>
+    DEPENDS vector-ops
+    TIMEOUT 45
+    LABELS "integration-tests"
+    WILL_FAIL
+    DISABLED ${IS_DISABLED})
+
+# ATT plus PC sampling
+
+rocprofiler_sdk_pc_sampling_stochastic_disabled(IS_PC_SAMPLING_STOCHASTIC_DISABLED)
+
+set(ATT_PLUS_PCS_DISABLE ${IS_DISABLED})
+if(${IS_PC_SAMPLING_STOCHASTIC_DISABLED})
+    set(ATT_PLUS_PCS_DISABLE ON)
+endif()
+if(${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+    set(ATT_PLUS_PCS_DISABLE ON)
+endif()
+set(PCS_ARGS --pc-sampling-beta-enabled 1 --pc-sampling-unit cycles
+             --pc-sampling-interval 16384 --pc-sampling-method stochastic)
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-plus-pc-sampling
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input
+            ${PCS_ARGS} -o out -- $<TARGET_FILE:vector-ops>
+    DEPENDS vector-ops
+    TIMEOUT 90
+    LABELS "integration-tests;thread-trace;pc-sampling"
+    DISABLED ${ATT_PLUS_PCS_DISABLE})
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-gpu-index-two-gpus
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d att-multi-gpu --att --att-gpu-index
+        0,1 --att-consecutive-kernels 1 --kernel-trace --output-format csv --
+        $<TARGET_FILE:vector-ops>
+    DEPENDS vector-ops
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-gpu-index-two-gpus)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-gpu-index-two-gpus
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_multi_gpu_separate_agents
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}
+    FIXTURES_REQUIRED rocprofv3-test-att-gpu-index-two-gpus
+    ARGS --att-multi-gpu-out-dir ${CMAKE_CURRENT_BINARY_DIR}/att-multi-gpu
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
+# No machine has gpu index = 9999 The FAIL regex for this test is the ROCP_ERROR specific
+# to invalid device index
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-gpu-index-will-fail
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input -o out
+            --att-gpu-index 0,9999 -- $<TARGET_FILE:vector-ops>
+    DEPENDS vector-ops
+    TIMEOUT 45
+    LABELS "integration-tests"
+    WILL_FAIL
+    DISABLED ${IS_DISABLED}
+    FAIL_REGULAR_EXPRESSION "Invalid GPU Device Index")
+
+#
+# Test --att-perfcounter-target-cu option This test verifies that perfcounter events are
+# only generated for the specified target CU
+#
+set(TARGET_CU 2)
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-perfcounter-target-cu
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/perfcounter_target_cu
+        --att-activity 6 --att-target-cu ${TARGET_CU} --att-perfcounter-target-only True
+        -o out --kernel-include-regex matrixTranspose -- $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_SETUP rocprofv3-test-att-perfcounter-target-cu)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-perfcounter-target-cu-validate
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-perfcounter-target-cu
+    ARGS --input
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/perfcounter_target_cu/out_results.json
+         --output-path
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/perfcounter_target_cu
+         --target-cu
+         ${TARGET_CU}
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
+if(attdecoder_FOUND
+   AND DEFINED rocm_version_NUMERIC_VERSION
+   AND rocm_version_NUMERIC_VERSION GREATER_EQUAL 71400)
+    rocprofiler_add_integration_execute_test(
+        rocprofv3-test-att-event-tracing
+        COMMAND
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/event_tracing -o
+            out --kernel-include-regex matrixTranspose -- $<TARGET_FILE:simple-transpose>
+        DEPENDS simple-transpose
+        TIMEOUT 45
+        LABELS "integration-tests"
+        FIXTURES_SETUP rocprofv3-test-att-event-tracing)
+
+    rocprofiler_add_integration_validate_test(
+        rocprofv3-test-att-event-tracing-validate
+        TEST_PATHS validate.py
+        COPY conftest.py
+        CONFIG pytest.ini
+        DISCOVERY_ARGS -k test_occupancy_event_tracing_fields
+        TIMEOUT 45
+        LABELS "integration-tests"
+        FIXTURES_REQUIRED rocprofv3-test-att-event-tracing
+        ARGS --att-occupancy-event-trace-out-dir
+             ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/event_tracing
+        FAIL_REGULAR_EXPRESSION "AssertionError")
+endif()
+
+set(ATT_NO_DETAIL_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-no-detail")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-no-detail
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_NO_DETAIL_OUT_DIR} --att
+        --att-no-detail --output-format json --kernel-include-regex matrixTranspose --
+        $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-no-detail)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-no-detail
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_att_no_detail
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-no-detail
+    ARGS --att-no-detail-out-dir ${ATT_NO_DETAIL_OUT_DIR}
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
+# Other SIMD file tests
+set(IS_DISABLED_OTHER_SIMD ON)
+list(GET rocprofiler-sdk-tests-gfx-info 0 att-gpu-0-gfx-info)
+if("${att-gpu-0-gfx-info}" MATCHES "^(gfx(11|12)[0-9][0-9])$")
+    set(IS_DISABLED_OTHER_SIMD OFF)
+endif()
+
+set(OTHER_SIMD_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-other-simd")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-other-simd
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${OTHER_SIMD_OUT_DIR} --att --
+            $<TARGET_FILE:vector-ops>
+    DEPENDS vector-ops
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED_OTHER_SIMD}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-other-simd)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-other-simd
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED_OTHER_SIMD}
+    FIXTURES_REQUIRED rocprofv3-test-att-other-simd
+    DISCOVERY_ARGS -k test_other_simd_data
+    ARGS --att-other-simd-out-dir ${OTHER_SIMD_OUT_DIR}
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
+# ATT with marker-controlled device thread trace
+set(ATT_MARKER_TRACE_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-marker-trace-out")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-marker-trace
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_MARKER_TRACE_OUT_DIR} --att
+        --selected-regions --att-shader-engine-mask 0xF --output-format json --log-level
+        env -o out -- $<TARGET_FILE:att-marker-trace>
+    DEPENDS att-marker-trace
+    LABELS "integration-tests;thread-trace"
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-marker-trace)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-marker-trace
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-marker-trace
+    DISCOVERY_ARGS -k test_att_marker_trace
+    ARGS --input ${ATT_MARKER_TRACE_OUT_DIR}/out_results.json --att-marker-trace-out-dir
+         ${ATT_MARKER_TRACE_OUT_DIR}
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
+# Conflict: att selected-regions + att-consecutive-kernels should fail
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-marker-trace-conflict-will-fail
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --selected-regions
+            --att-consecutive-kernels 5 -- $<TARGET_FILE:att-marker-trace>
+    DEPENDS att-marker-trace
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    WILL_FAIL
+    DISABLED ${IS_DISABLED}
+    FAIL_REGULAR_EXPRESSION
+        "--selected-regions and --att-consecutive-kernels are mutually exclusive")
+
+set(ATT_NO_INTERCEPT_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-no-intercept-out")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-no-intercept
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_NO_INTERCEPT_OUT_DIR}
+        --att-no-intercept --kernel-include-regex looping_lds_kernel --output-format json
+        --log-level env -o out -- $<TARGET_FILE:thread-trace-test-app>
+    DEPENDS thread-trace-test-app
+    LABELS "integration-tests;thread-trace"
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-no-intercept)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-no-intercept
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_att_no_intercept_target_kernel
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-no-intercept
+    ARGS --att-no-intercept-out-dir ${ATT_NO_INTERCEPT_OUT_DIR}
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
+set(ATT_HSA_FALLBACK_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-hsa-fallback-out")
+
+# End-to-end rocprofv3 run on the HSA queue/signal backend instead of KFD.
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-hsa-fallback
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${ATT_HSA_FALLBACK_OUT_DIR} --att
+            --output-format json -o out -- $<TARGET_FILE:thread-trace-test-app>
+    DEPENDS thread-trace-test-app
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT
+        "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR};ROCPROFILER_SQTT_FORCE_HSA=1"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-hsa-fallback)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-hsa-fallback
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_shaderdata
+    TIMEOUT 45
+    LABELS "integration-tests;thread-trace"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-hsa-fallback
+    ARGS --att-shaderdata-out-dir ${ATT_HSA_FALLBACK_OUT_DIR}
+    FAIL_REGULAR_EXPRESSION "AssertionError")
+
+set(SHADERDATA_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-rocprofv3-shaderdata")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-shaderdata
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${SHADERDATA_OUT_DIR} --att --
+            $<TARGET_FILE:thread-trace-test-app>
+    DEPENDS thread-trace-test-app
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-shaderdata)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-shaderdata
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_shaderdata
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-shaderdata
+    ARGS --att-shaderdata-out-dir ${SHADERDATA_OUT_DIR}
+    FAIL_REGULAR_EXPRESSION "AssertionError")

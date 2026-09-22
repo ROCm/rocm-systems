@@ -1,0 +1,51 @@
+#!/bin/bash
+
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+ROCMDIR=@ROCM_PATH@
+HIPDIR=$ROCMDIR/hip
+HIPCMAKEDIR=$ROCMDIR/hip/lib/cmake/hip
+HIPLANGCMAKEDIR=$ROCMDIR/hip/lib/cmake/hip-lang
+HIPRTCCMAKEDIR=$ROCMDIR/hip/lib/cmake/hiprtc
+CURRENTDIR=`pwd`
+([ ! -d $ROCMDIR ] || [ ! -d $HIPDIR ]) && exit 0
+
+([ ! -d $HIPCMAKEDIR ] ) && exit 0
+# Remove soft-links to hip-target
+HIPTARGETFILES=$(ls -A $HIPCMAKEDIR | grep "^hip-targets")
+
+cd  $HIPCMAKEDIR
+for f in $HIPTARGETFILES; do
+    [ -e $f ] || continue
+    rm $(basename $f)
+done
+cd $CURRENTDIR
+([ ! -d $HIPLANGCMAKEDIR ] ) && exit 0
+# Remove soft-links to hip-lang-target
+HIPLANGTARGETFILES=$(ls -A $HIPLANGCMAKEDIR | grep "^hip-lang-targets")
+
+cd  $HIPLANGCMAKEDIR
+for f in $HIPLANGTARGETFILES; do
+    [ -e $f ] || continue
+    rm $(basename $f)
+done
+
+cd $CURRENTDIR
+
+([ ! -d $HIPRTCCMAKEDIR ] ) && exit 0
+# Remove soft-links to hiprtc-target
+HIPRTCTARGETFILES=$(ls -A $HIPRTCCMAKEDIR | grep "^hiprtc-targets")
+
+cd  $HIPRTCCMAKEDIR
+for f in $HIPRTCTARGETFILES; do
+    [ -e $f ] || continue
+    rm $(basename $f)
+done
+
+cd $CURRENTDIR
+
+rmdir --ignore-fail-on-non-empty $HIPCMAKEDIR
+rmdir --ignore-fail-on-non-empty $HIPLANGCMAKEDIR
+rmdir --ignore-fail-on-non-empty $HIPRTCCMAKEDIR

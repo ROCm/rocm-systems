@@ -1,0 +1,9 @@
+{
+    "jobs": [
+        {
+            "runtime_trace": true,
+            "minimum_output_data":1000000
+        }
+       
+    ]
+}

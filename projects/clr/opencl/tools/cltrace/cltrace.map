@@ -1,0 +1,7 @@
+CLTRACE_1.0 {
+global:
+    vdiAgent_OnLoad;
+    vdiAgent_OnUnload;
+local:
+    *;
+};

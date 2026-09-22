@@ -1,0 +1,111 @@
+# MIT License
+#
+# Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+#
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
+
+project(
+    rocprofiler-sdk-tests-rocprofv3-conversion-script
+    LANGUAGES CXX
+    VERSION 0.0.0)
+
+find_package(rocprofiler-sdk REQUIRED)
+
+# copy to binary directory
+rocprofiler_configure_pytest_files(COPY validate.py input.txt conftest.py
+                                   CONFIG pytest.ini)
+
+string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-conversion-script
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i ${CMAKE_CURRENT_BINARY_DIR}/input.txt
+        -T -d ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script -o pmc1 --output-format
+        csv -- $<TARGET_FILE:vector-ops>
+    DEPENDS vector-ops
+    LABELS "integration-tests"
+    TIMEOUT 45
+    PRELOAD "${PRELOAD_ENV}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-conversion-script)
+
+set(convert_tests rocprofv3-test-conversion-script-convert-no-agent-prefix
+                  rocprofv3-test-conversion-script-convert-agent-prefix)
+
+set(validate_tests rocprofv3-test-conversion-script-validate-no-agent-prefix
+                   rocprofv3-test-conversion-script-validate-agent-prefix)
+
+set(output_dir ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script_no_agent_prefix
+               ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script_agent_prefix)
+
+set(agent_index_flag false true)
+
+list(LENGTH convert_tests convert_test_length)
+
+foreach(i RANGE 0 ${convert_test_length})
+    if(${i} EQUAL ${convert_test_length})
+        break()
+    endif()
+    list(GET convert_tests ${i} test_name)
+    list(GET output_dir ${i} output)
+    list(GET agent_index_flag ${i} flag)
+    list(GET validate_tests ${i} validate_test_name)
+    if(${flag})
+        set(conversion_cmd
+            ${Python3_EXECUTABLE}
+            $<TARGET_FILE:rocprofiler-sdk::convert-counters-collection-format>
+            --input
+            ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script
+            --output
+            ${output}
+            --retain-agent-prefix)
+        set(validate_args --retain-agent-prefix true)
+    else()
+        set(conversion_cmd
+            ${Python3_EXECUTABLE}
+            $<TARGET_FILE:rocprofiler-sdk::convert-counters-collection-format> --input
+            ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script --output ${output})
+        set(validate_args --retain-agent-prefix false)
+    endif()
+
+    rocprofiler_add_integration_execute_test(
+        ${test_name}
+        COMMAND ${conversion_cmd}
+        DEPENDS rocprofiler-sdk::convert-counters-collection-format
+        TIMEOUT 45
+        LABELS "integration-tests"
+        PRELOAD "${PRELOAD_ENV}"
+        FIXTURES_REQUIRED rocprofv3-test-conversion-script
+        FIXTURES_SETUP ${test_name})
+
+    rocprofiler_add_integration_validate_test(
+        ${validate_test_name}
+        TEST_PATHS validate.py
+        COPY conftest.py input.txt
+        CONFIG pytest.ini
+        ARGS --input ${output} ${validate_args}
+        TIMEOUT 45
+        LABELS "integration-tests"
+        FIXTURES_REQUIRED ${test_name})
+endforeach()

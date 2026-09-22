@@ -1,0 +1,5 @@
+pmc:
+
+gpu:
+range: 6:8
+kernel:

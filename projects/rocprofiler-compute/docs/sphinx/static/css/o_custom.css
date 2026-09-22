@@ -1,0 +1,8 @@
+/* Override PyData Sphinx Theme default colors */
+html[data-theme='light'] {
+    --pst-color-table-row-hover-bg: #E2E8F0;
+}
+
+html[data-theme='dark'] {
+    --pst-color-table-row-hover-bg: #1E293B;
+}

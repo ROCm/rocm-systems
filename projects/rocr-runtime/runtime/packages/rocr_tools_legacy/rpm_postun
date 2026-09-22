@@ -1,0 +1,3 @@
+if [ $1 -eq 0]; then
+    rm -f /etc/ld.so.conf.d/rocr_tools_legacy.conf && ldconfig
+fi

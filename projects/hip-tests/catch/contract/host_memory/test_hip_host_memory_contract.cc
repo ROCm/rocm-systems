@@ -1,0 +1,95 @@
+/*
+ * Copyright Advanced Micro Devices, Inc.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
+#include <hip/hip_runtime_api.h>
+#include <hip_test_common.hh>
+#include <contract_cleanup.hh>
+
+namespace {
+constexpr size_t kElementCount = 128;
+
+std::array<uint8_t, kElementCount> MakePattern(uint8_t seed) {
+  std::array<uint8_t, kElementCount> pattern{};
+  for (size_t i = 0; i < pattern.size(); ++i) {
+    pattern[i] = static_cast<uint8_t>(seed + i);
+  }
+  return pattern;
+}
+}
+
+// @asserts: hipHostMalloc - returns a non-null host pointer whose bytes are readable and writable by the host
+HIP_TEST_CASE(Contract_HostMemory_HipHostMalloc_Default_ReturnsUsablePointer) {
+  hip::contract::ContractCleanup cleanup;
+  void* host_ptr = nullptr;
+
+  HIP_CHECK(hipHostMalloc(&host_ptr, kElementCount, hipHostMallocDefault));
+  cleanup.Add([host_ptr] { (void)hipHostFree(host_ptr); });
+
+  REQUIRE(host_ptr != nullptr);
+
+  auto* bytes = static_cast<uint8_t*>(host_ptr);
+  const auto pattern = MakePattern(0x19);
+  for (size_t i = 0; i < pattern.size(); ++i) {
+    bytes[i] = pattern[i];
+  }
+  for (size_t i = 0; i < pattern.size(); ++i) {
+    REQUIRE(bytes[i] == pattern[i]);
+  }
+}
+
+// @asserts: hipHostFree - frees a pointer previously returned by hipHostMalloc successfully
+HIP_TEST_CASE(Contract_HostMemory_HipHostFree_Default_Succeeds) {
+  void* host_ptr = nullptr;
+
+  HIP_CHECK(hipHostMalloc(&host_ptr, kElementCount, hipHostMallocDefault));
+  HIP_CHECK(hipHostFree(host_ptr));
+}
+
+// @asserts: hipHostRegister - registering then unregistering an existing host buffer round-trips successfully
+HIP_TEST_CASE(Contract_HostMemory_HipHostRegister_Unregister_Succeeds) {
+  std::array<uint8_t, kElementCount> host_buffer{};
+
+  HIP_CHECK(hipHostRegister(host_buffer.data(), host_buffer.size(), hipHostRegisterDefault));
+  HIP_CHECK(hipHostUnregister(host_buffer.data()));
+}
+
+// @asserts: hipHostGetDevicePointer - yields a device-visible pointer for mapped host memory that round-trips bytes via hipMemcpy
+HIP_TEST_CASE(Contract_HostMemory_HipHostGetDevicePointer_Default_RoundTripsBytes) {
+  hip::contract::ContractCleanup cleanup;
+  const auto src = MakePattern(0x41);
+  std::array<uint8_t, kElementCount> dst{};
+  void* host_ptr = nullptr;
+  void* device_visible_ptr = nullptr;
+
+  HIP_CHECK(hipHostMalloc(&host_ptr, src.size(), hipHostMallocMapped));
+  cleanup.Add([host_ptr] { (void)hipHostFree(host_ptr); });
+  HIP_CHECK(hipHostGetDevicePointer(&device_visible_ptr, host_ptr, 0));
+
+  REQUIRE(device_visible_ptr != nullptr);
+
+  HIP_CHECK(hipMemcpy(device_visible_ptr, src.data(), src.size(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dst.data(), device_visible_ptr, dst.size(), hipMemcpyDeviceToHost));
+
+  REQUIRE(dst == src);
+}
+
+// @asserts: hipHostGetFlags - reports back at least the allocation flags requested at hipHostMalloc time
+HIP_TEST_CASE(Contract_HostMemory_HipHostGetFlags_Default_IncludesRequestedFlags) {
+  hip::contract::ContractCleanup cleanup;
+  void* host_ptr = nullptr;
+  unsigned int flags = 0;
+  constexpr unsigned int requested_flags = hipHostMallocMapped;
+
+  HIP_CHECK(hipHostMalloc(&host_ptr, kElementCount, requested_flags));
+  cleanup.Add([host_ptr] { (void)hipHostFree(host_ptr); });
+  HIP_CHECK(hipHostGetFlags(&flags, host_ptr));
+
+  REQUIRE((flags & requested_flags) == requested_flags);
+}

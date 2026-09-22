@@ -1,0 +1,53 @@
+{
+    "required_tables": [
+        {
+            "commit": "Validation rules for rocm_memory_copy",
+            "name": "memory_copies",
+            "required_columns": [
+                "id",
+                "category",
+                "name",
+                "start",
+                "end"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Check that we have 4 MEMORY_COPY_DEVICE_TO_HOST entries",
+                    "error_message": "Expecting 4 MEMORY_COPY_DEVICE_TO_HOST memory copies",
+                    "expected_result": 4,
+                    "query": "SELECT COUNT(*) FROM memory_copies WHERE name = 'MEMORY_COPY_DEVICE_TO_HOST'"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Check that we have 4 MEMORY_COPY_HOST_TO_DEVICE entries",
+                    "error_message": "Expecting 4 MEMORY_COPY_HOST_TO_DEVICE memory copies",
+                    "expected_result": 4,
+                    "query": "SELECT COUNT(*) FROM memory_copies WHERE name = 'MEMORY_COPY_HOST_TO_DEVICE'"
+                }
+            ]
+        },
+        {
+            "commit": "Validation rules for rocm_kernel_dispatch",
+            "name": "kernels",
+            "required_columns": [
+                "id",
+                "category",
+                "name",
+                "start",
+                "end",
+                "queue",
+                "stream"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Check that we have 4 cube kernel dispatches (one per stream)",
+                    "error_message": "Expecting 4 cube kernel dispatches",
+                    "expected_result": 4,
+                    "query": "SELECT COUNT(*) FROM kernels WHERE name LIKE '%cube%'"
+                }
+            ]
+        }
+    ]
+}

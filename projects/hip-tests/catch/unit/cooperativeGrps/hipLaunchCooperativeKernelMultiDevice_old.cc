@@ -1,0 +1,223 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+// Test Description:
+/*The general idea of the application is to test how multi-GPU Cooperative
+Groups kernel launches to a stream interact with other things that may be
+simultaneously running in the same streams.
+
+The HIP specification says that a multi-GPU cooperative launch will wait
+until all of the streams it's using finish their work. Only then will the
+cooperative kernel be launched to all of the devices. Then no other work
+can take part in the any of the streams until all of the multi-GPU
+cooperative work is done.
+
+However, there are flags that allow you to disable each of these
+serialization points: hipCooperativeLaunchMultiDeviceNoPreSync and
+hipCooperativeLaunchMultiDeviceNoPostSync.
+
+As such, this benchmark tests the following five situations launching
+to two GPUs (and thus two streams):
+
+    1. Normal multi-GPU cooperative kernel:
+        This should result in the following pattern:
+        Stream 0: Cooperative
+        Stream 1: Cooperative
+    2. Regular kernel launches and multi-GPU cooperative kernel launches
+       with the default flags, resulting in the following pattern:
+        Stream 0: Regular --> Cooperative
+        Stream 1:         --> Cooperative --> Regular
+
+    3. Regular kernel launches and multi-GPU cooperative kernel launches
+       that turn off "pre-sync". This should allow a cooperative kernel
+       to launch even if work is already in a stream pointing to
+       another GPU.
+        This should result in the following pattern:
+        Stream 0: Regular --> Cooperative
+        Stream 1: Cooperative            --> Regular
+
+    4. Regular kernel launches and multi-GPU cooperative kernel launches
+       that turn off "post-sync". This should allow a new kernel to enter
+       a GPU even if another GPU still has a cooperative kernel on it.
+        This should result in the following pattern:
+        Stream 0: Regular --> Cooperative
+        Stream 1:         --> Cooperative--> Regular
+
+    5. Regular kernel launches and multi-GPU cooperative kernel launches
+       that turn off both pre- and post-sync. This should allow any of
+       the kernels to launch to their GPU regardless of the status of
+       other kernels in other multi-GPU stream groups.
+        This should result in the following pattern:
+        Stream 0: Regular --> Cooperative
+        Stream 1: Cooperative --> Regular
+
+We time how long it takes to run each of these benchmarks and print it as
+the output of the benchmark. The kernels themselves are just useless time-
+wasting code so that the kernel takes a meaningful amount of time on the
+GPU before it exits. We only launch a single wavefront for each kernel, so
+any serialization should not be because of GPU occupancy concerns.
+
+If tests 2, 3, and 4 take roughly 3x as long as #1, that implies that
+cooperative kernels are serialized as expected.
+
+If test #5 takes roughly twice as long as #1, that implies that the
+overlap-allowing flags work as expected.
+*/
+
+#include <hip_test_common.hh>
+#include <hip/hip_cooperative_groups.h>
+
+namespace cg = cooperative_groups;
+
+static constexpr size_t kBufferLen = 1024 * 1024;
+
+__global__ void test_gws(uint* buf, uint buf_size, unsigned long long* tmp_buf,
+                         unsigned long long* result) {
+  extern __shared__ unsigned long long tmp[];
+
+  cg::thread_block tb = cg::this_thread_block();
+  cg::grid_group gg = cg::this_grid();
+  cg::multi_grid_group mgg = cg::this_multi_grid();
+
+  const auto tid = gg.thread_rank();
+  const auto stride = gg.size();
+  const auto local_tid = tb.thread_rank();
+  const auto wid = blockIdx.x;
+  const auto workgroup_size = tb.size();
+  const auto gid = mgg.grid_rank();
+  const auto grid_size = gridDim.x;
+  const auto num_grids = mgg.num_grids();
+
+  unsigned long long sum = 0;
+  for (size_t i = tid; i < buf_size; i += stride) {
+    sum += buf[i];
+  }
+  tmp[local_tid] = sum;
+  tb.sync();
+
+  if (local_tid == 0) {
+    sum = 0;
+    for (size_t i = 0; i < workgroup_size; i++) {
+      sum += tmp[i];
+    }
+    tmp_buf[wid] = sum;
+  }
+  gg.sync();
+
+  if (tid < grid_size) {
+    atomicAdd(&result[gid + 1], tmp_buf[tid]);
+  }
+  mgg.sync();
+
+  if (gid == 0) {
+    sum = 0;
+    for (size_t i = 0; i < num_grids; i++) {
+      sum += result[i + 1];
+    }
+    *result = sum;
+  }
+}
+
+HIP_TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Basic) {
+  constexpr uint num_kernel_args = 4;
+
+  int device_num = 0;
+  HIP_CHECK(hipGetDeviceCount(&device_num));
+
+  std::vector<hipDeviceProp_t> device_properties(device_num);
+  for (int i = 0; i < device_num; i++) {
+    HIP_CHECK(hipSetDevice(i));
+
+    // Calculate the device occupancy to know how many blocks can be run concurrently
+    HIP_CHECK(hipGetDeviceProperties(&device_properties[i], 0));
+    if (!device_properties[i].cooperativeMultiDeviceLaunch) {
+      HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
+    }
+  }
+
+  size_t buffer_size = kBufferLen * sizeof(int);
+
+  int* A_h = nullptr;
+  std::vector<int*> A_d(device_num);
+  std::vector<unsigned long long*> B_d(device_num);
+  unsigned long long* C_d;
+  std::vector<hipStream_t> stream(device_num);
+
+  A_h = reinterpret_cast<int*>(malloc(buffer_size * device_num));
+  for (uint32_t i = 0; i < kBufferLen * device_num; i++) {
+    A_h[i] = static_cast<int>(i);
+  }
+
+  for (int i = 0; i < device_num; i++) {
+    HIP_CHECK(hipSetDevice(i));
+
+    HIP_CHECK(hipMalloc(&A_d[i], buffer_size));
+    HIP_CHECK(hipMemcpy(A_d[i], &A_h[i * kBufferLen], buffer_size, hipMemcpyHostToDevice));
+
+    HIP_CHECK(hipStreamCreate(&stream[i]));
+
+    HIP_CHECK(hipDeviceSynchronize());
+  }
+
+  HIP_CHECK(hipHostMalloc(&C_d, (device_num + 1) * sizeof(unsigned long long)));
+
+  uint workgroup = GENERATE(32, 64, 128, 256);
+
+  dim3 dimBlock = dim3(workgroup);
+  dim3 dimGrid = dim3(1);
+  int num_blocks = 0;
+
+  hipLaunchParams* launch_params_list = new hipLaunchParams[device_num];
+  std::vector<void*> args(device_num * num_kernel_args);
+
+  for (int i = 0; i < device_num; i++) {
+    HIP_CHECK(hipSetDevice(i));
+
+    HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+        &num_blocks, test_gws, dimBlock.x * dimBlock.y * dimBlock.z,
+        dimBlock.x * sizeof(unsigned long long)));
+
+    INFO("GPU" << i << " has block size = " << dimBlock.x << " and num blocks per CU " << num_blocks
+               << "\n");
+
+    dimGrid.x = device_properties[i].multiProcessorCount * std::min(num_blocks, 32);
+
+    HIP_CHECK(hipMalloc(&B_d[i], dimGrid.x * sizeof(unsigned long long)));
+
+    args[i * num_kernel_args] = (void*)&A_d[i];
+    args[i * num_kernel_args + 1] = (void*)&kBufferLen;
+    args[i * num_kernel_args + 2] = (void*)&B_d[i];
+    args[i * num_kernel_args + 3] = (void*)&C_d;
+
+    launch_params_list[i].func = reinterpret_cast<void*>(test_gws);
+    launch_params_list[i].gridDim = dimGrid;
+    launch_params_list[i].blockDim = dimBlock;
+    launch_params_list[i].sharedMem = dimBlock.x * sizeof(unsigned long long);
+    launch_params_list[i].stream = stream[i];
+    launch_params_list[i].args = &args[i * num_kernel_args];
+  }
+
+  HIP_CHECK(hipLaunchCooperativeKernelMultiDevice(launch_params_list, device_num, 0));
+  for (int i = 0; i < device_num; i++) {
+    HIP_CHECK(hipStreamSynchronize(stream[i]));
+  }
+
+  size_t processed_Dwords = kBufferLen * device_num;
+  REQUIRE(*C_d == (((unsigned long long)(processed_Dwords) * (processed_Dwords - 1)) / 2));
+
+  delete[] launch_params_list;
+
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipHostFree(C_d));
+  for (int i = 0; i < device_num; i++) {
+    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipFree(A_d[i]));
+    HIP_CHECK(hipFree(B_d[i]));
+    HIP_CHECK(hipStreamDestroy(stream[i]));
+  }
+
+  free(A_h);
+}

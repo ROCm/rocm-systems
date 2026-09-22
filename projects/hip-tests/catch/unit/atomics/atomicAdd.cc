@@ -1,0 +1,176 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "arithmetic_common.hh"
+#include "atomicAdd_negative_kernels_rtc.hh"
+
+#include <hip_test_common.hh>
+
+/**
+ * @addtogroup atomicAdd atomicAdd
+ * @{
+ * @ingroup AtomicsTest
+ */
+
+// Helper function to run atomicAdd tests (single kernel)
+template <typename TestType>
+static void runAtomicAddTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kAdd>(1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kAdd>(warp_size, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kAdd>(warp_size, cache_line_size);
+    }
+  }
+}
+
+// Helper function to run atomicAdd tests (multiple kernels)
+template <typename TestType>
+static void runAtomicAddMultiKernelTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kAdd>(2, 1, sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Adjacent addresses " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kAdd>(2, warp_size,
+                                                                      sizeof(TestType));
+    }
+
+    DYNAMIC_SECTION("Scattered addresses " << current) {
+      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kAdd>(2, warp_size,
+                                                                      cache_line_size);
+    }
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Executes a single kernel on a single device wherein all threads will perform an atomic
+ * addition on a target memory location. Each thread will add the same value to the memory location,
+ * storing the return value into a separate output array slot corresponding to it. Once complete,
+ * the output array and target memory is validated to contain all the expected values. Several
+ * memory access patterns are tested:
+ *      -# All threads add to a single, compile time deducible, memory location
+ *      -# Each thread targets an array containing warp_size elements, using tid % warp_size
+ *         for indexing
+ *      -# Same as the above, but the elements are spread out by L1 cache line size bytes.
+ *
+ *    - The test is run for:
+ *      - All overloads of atomicAdd
+ *      - hipMalloc, hipMallocManaged, hipHostMalloc and hipHostRegister allocated memory
+ *      - Shared memory
+ *      - Several grid and block dimension combinations (only one block is used for shared memory).
+ * Test source
+ * ------------------------
+ *    - unit/atomics/atomicAdd.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_atomicAdd_Positive) {
+  SECTION("int") { runAtomicAddTest<int>(); }
+  SECTION("unsigned int") { runAtomicAddTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicAddTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicAddTest<unsigned long long>(); }
+  SECTION("float") { runAtomicAddTest<float>(); }
+  SECTION("double") { runAtomicAddTest<double>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Executes a kernel two times concurrently on a single device wherein all threads will perform
+ * an atomic addition on a target memory location. Each thread will add the same value to the memory
+ * location, storing the return value into a separate output array slot corresponding to it. Once
+ * complete, the output array and target memory is validated to contain all the expected values.
+ * Several memory access patterns are tested:
+ *      -# All threads add to a single, compile time deducible, memory location
+ *      -# Each thread targets an array containing warp_size elements, using tid % warp_size
+ *         for indexing
+ *      -# Same as the above, but the elements are spread out by L1 cache line size bytes.
+ *
+ *    - The test is run for:
+ *      - All overloads of atomicAdd
+ *      - hipMalloc, hipMallocManaged, hipHostMalloc and hipHostRegister allocated memory
+ *      - Several grid and block dimension combinations.
+ * Test source
+ * ------------------------
+ *    - unit/atomics/atomicAdd.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_atomicAdd_Positive_Multi_Kernel) {
+  SECTION("int") { runAtomicAddMultiKernelTest<int>(); }
+  SECTION("unsigned int") { runAtomicAddMultiKernelTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicAddMultiKernelTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicAddMultiKernelTest<unsigned long long>(); }
+  SECTION("float") { runAtomicAddMultiKernelTest<float>(); }
+  SECTION("double") { runAtomicAddMultiKernelTest<double>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - RTCs kernels that pass combinations of arguments of invalid types for all overloads of
+ * atomicAdd.
+ * Test source
+ * ------------------------
+ *    - unit/atomics/atomicAdd.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_atomicAdd_Negative_Parameters_RTC) {
+  hiprtcProgram program{};
+
+  const auto program_source = GENERATE(kAtomicAdd_int, kAtomicAdd_uint, kAtomicAdd_ulong,
+                                       kAtomicAdd_ulonglong, kAtomicAdd_float, kAtomicAdd_double);
+  HIPRTC_CHECK(
+      hiprtcCreateProgram(&program, program_source, "atomicAdd_negative.cc", 0, nullptr, nullptr));
+  hiprtcResult result{hiprtcCompileProgram(program, 0, nullptr)};
+
+  // Get the compile log and count compiler error messages
+  size_t log_size{};
+  HIPRTC_CHECK(hiprtcGetProgramLogSize(program, &log_size));
+  std::string log(log_size, ' ');
+  HIPRTC_CHECK(hiprtcGetProgramLog(program, log.data()));
+  int error_count{0};
+
+  int expected_error_count{8};
+  std::string error_message{"error:"};
+
+  size_t n_pos = log.find(error_message, 0);
+  while (n_pos != std::string::npos) {
+    ++error_count;
+    n_pos = log.find(error_message, n_pos + 1);
+  }
+
+  HIPRTC_CHECK(hiprtcDestroyProgram(&program));
+  HIPRTC_CHECK_ERROR(result, HIPRTC_ERROR_COMPILATION);
+  REQUIRE(error_count == expected_error_count);
+}
+
+/**
+ * End doxygen group AtomicsTest.
+ * @}
+ */

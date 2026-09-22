@@ -1,0 +1,22 @@
+# Configuration details
+# https://docs.codecov.io/docs/codecov-yaml
+
+# Validate YAML
+# curl --data-binary @.codecov.yaml https://codecov.io/validate
+
+# Coverage configuration
+coverage:
+  status:
+    patch: true
+
+  range: 60..80     # First number represents red, and second represents green
+  round: nearest    # up, down, or nearest
+  precision: 2      # Number of decimal places, between 0 and 5
+
+comment: # this is a top-level key
+  layout: "diff, files"
+  behavior: default
+  require_changes: true        # learn more in the Requiring Changes section below
+  require_base: true           # [true :: must have a base report to post]
+  require_head: true           # [true :: must have a head report to post]
+  hide_project_coverage: true  # [true :: only show coverage on the git diff]

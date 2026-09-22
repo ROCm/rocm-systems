@@ -1,0 +1,155 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "hip_conversions.hpp"
+
+namespace hip {
+hipError_t ihipMemcpy3D_validate(const hipMemcpy3DParms* p);
+
+hipError_t ihipDrvMemcpy3D_validate(const HIP_MEMCPY3D* pCopy);
+
+hipError_t hipMemcpy2DValidateArray(hipArray_const_t arr, size_t wOffset, size_t hOffset,
+                                    size_t width, size_t height);
+
+hipError_t hipMemcpy2DValidateBuffer(const void* buf, size_t pitch, size_t width);
+
+hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, const void* srcMemory,
+                             size_t sizeBytes, hipMemcpyKind kind, hip::Stream& stream,
+                             size_t dstOffset, bool isAsync = true);
+
+hipError_t ihipMemcpyCommand(amd::Command*& command, void* dstMemory, amd::Memory* srcMemory,
+                             size_t sizeBytes, hipMemcpyKind kind, hip::Stream& stream,
+                             size_t srcOffset, bool isAsync = true);
+
+hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, amd::Memory* srcMemory,
+                             size_t sizeBytes, hipMemcpyKind kind, hip::Stream& stream,
+                             size_t dstOffset, size_t srcOffset, bool isAsync = true);
+
+void ihipHtoHMemcpy(void* dst, const void* src, size_t sizeBytes, hip::Stream& stream);
+
+bool IsHtoHMemcpy(void* dst, const void* src);
+
+hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& launch_params,
+                                     void** kernelParams, void** extra, int deviceId,
+                                     uint32_t params);
+
+hipError_t ihipMemset_validate(amd::Memory* dstMemory, int64_t value, size_t valueSize,
+                               size_t sizeBytes, size_t offset);
+
+hipError_t ihipMemset3D_validate(hipPitchedPtr pitchedDevPtr, amd::Memory* memory, size_t offset,
+                                 int value, hipExtent extent, size_t sizeBytes);
+
+hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
+                                   amd::LaunchParams& launch_params, hip::Stream* stream,
+                                   void** kernelParams, void** extra, hipEvent_t startEvent,
+                                   hipEvent_t stopEvent, uint32_t flags, uint32_t params,
+                                   uint32_t gridId, uint32_t numGrids, uint64_t prevGridSum,
+                                   uint64_t allGridSum, uint32_t firstDevice);
+
+hipError_t ihipMemcpy3DCommand(amd::Command*& command, const hipMemcpy3DParms* p,
+                               hip::Stream* stream);
+
+hipError_t ihipGetMemcpyParam3DCommand(amd::Command*& command, const HIP_MEMCPY3D* pCopy,
+                                       hip::Stream* stream);
+
+hipError_t ihipMemsetCommand(amd::Command*& command, amd::Memory* dstMemory, int64_t value,
+                             size_t valueSize, size_t sizeBytes, hip::Stream* stream,
+                             size_t offset);
+
+hipError_t ihipMemset3DCommand(amd::Command*& command, hipPitchedPtr pitchedDevPtr,
+                               amd::Memory* memory, size_t offset, int value, hipExtent extent,
+                               hip::Stream* stream, size_t elementSize = 1);
+
+// Helper functions for hip_graph to maintain vector behavior
+inline hipError_t ihipMemsetCommand(std::vector<amd::Command*>& commands, amd::Memory* dstMemory,
+                                    int64_t value, size_t valueSize, size_t sizeBytes,
+                                    hip::Stream* stream, size_t offset) {
+  amd::Command* command = nullptr;
+  hipError_t status =
+      ihipMemsetCommand(command, dstMemory, value, valueSize, sizeBytes, stream, offset);
+  if (status == hipSuccess && command != nullptr) {
+    commands.push_back(command);
+  }
+  return status;
+}
+
+inline hipError_t ihipMemset3DCommand(std::vector<amd::Command*>& commands,
+                                      hipPitchedPtr pitchedDevPtr, amd::Memory* memory,
+                                      size_t offset, int value, hipExtent extent,
+                                      hip::Stream* stream, size_t elementSize = 1) {
+  amd::Command* command = nullptr;
+  hipError_t status = ihipMemset3DCommand(command, pitchedDevPtr, memory, offset, value, extent,
+                                          stream, elementSize);
+  if (status == hipSuccess && command != nullptr) {
+    commands.push_back(command);
+  }
+  return status;
+}
+
+hipError_t ihipMemcpySymbol_validate(const void* symbol, size_t sizeBytes, size_t offset,
+                                     size_t& sym_size, hipDeviceptr_t& device_ptr);
+
+hipError_t ihipMemcpyAtoDValidate(hipArray_t srcArray, void* dstDevice, amd::Coord3D& srcOrigin,
+                                  amd::Coord3D& dstOrigin, amd::Coord3D& copyRegion,
+                                  size_t dstRowPitch, size_t dstSlicePitch, amd::Memory*& dstMemory,
+                                  amd::Image*& srcImage, amd::BufferRect& srcRect,
+                                  amd::BufferRect& dstRect);
+
+hipError_t ihipMemcpyDtoAValidate(void* srcDevice, hipArray_t dstArray, amd::Coord3D& srcOrigin,
+                                  amd::Coord3D& dstOrigin, amd::Coord3D& copyRegion,
+                                  size_t srcRowPitch, size_t srcSlicePitch, amd::Image*& dstImage,
+                                  amd::Memory*& srcMemory, amd::BufferRect& dstRect,
+                                  amd::BufferRect& srcRect);
+
+hipError_t ihipMemcpyDtoDValidate(void* srcDevice, void* dstDevice, amd::Coord3D& srcOrigin,
+                                  amd::Coord3D& dstOrigin, amd::Coord3D& copyRegion,
+                                  size_t srcRowPitch, size_t srcSlicePitch, size_t dstRowPitch,
+                                  size_t dstSlicePitch, amd::Memory*& srcMemory,
+                                  amd::Memory*& dstMemory, amd::BufferRect& srcRect,
+                                  amd::BufferRect& dstRect);
+
+
+hipError_t ihipMemcpyDtoHValidate(void* srcDevice, void* dstHost, amd::Coord3D& srcOrigin,
+                                  amd::Coord3D& dstOrigin, amd::Coord3D& copyRegion,
+                                  size_t srcRowPitch, size_t srcSlicePitch, size_t dstRowPitch,
+                                  size_t dstSlicePitch, amd::Memory*& srcMemory,
+                                  amd::BufferRect& srcRect, amd::BufferRect& dstRect);
+
+hipError_t ihipMemcpyHtoDValidate(const void* srcHost, void* dstDevice, amd::Coord3D& srcOrigin,
+                                  amd::Coord3D& dstOrigin, amd::Coord3D& copyRegion,
+                                  size_t srcRowPitch, size_t srcSlicePitch, size_t dstRowPitch,
+                                  size_t dstSlicePitch, amd::Memory*& dstMemory,
+                                  amd::BufferRect& srcRect, amd::BufferRect& dstRect);
+
+
+hipError_t ihipMemcpyAtoAValidate(hipArray_t srcArray, hipArray_t dstArray, amd::Coord3D& srcOrigin,
+                                  amd::Coord3D& dstOrigin, amd::Coord3D& copyRegion,
+                                  amd::Image*& srcImage, amd::Image*& dstImage);
+
+
+hipError_t ihipMemcpyHtoAValidate(const void* srcHost, hipArray_t dstArray, amd::Coord3D& srcOrigin,
+                                  amd::Coord3D& dstOrigin, amd::Coord3D& copyRegion,
+                                  size_t srcRowPitch, size_t srcSlicePitch, amd::Image*& dstImage,
+                                  size_t& start);
+
+hipError_t ihipMemcpyAtoHValidate(hipArray_t srcArray, void* dstHost, amd::Coord3D& srcOrigin,
+                                  amd::Coord3D& dstOrigin, amd::Coord3D& copyRegion,
+                                  size_t dstRowPitch, size_t dstSlicePitch, amd::Image*& srcImage,
+                                  size_t& start);
+
+hipError_t ihipGraphMemsetParams_validate(const hipMemsetParams* pNodeParams);
+
+constexpr hip::MemcpyType ihipGetMemcpyType(const void* src, void* dst) {
+  return hipHostToHost;
+}
+constexpr hip::MemcpyType ihipGetMemcpyType(const void* src, amd::Memory* dst) {
+  return hipWriteBuffer;
+}
+constexpr hip::MemcpyType ihipGetMemcpyType(amd::Memory* src, void* dst) {
+  return hipReadBuffer;
+}
+hip::MemcpyType ihipGetMemcpyType(amd::Memory* src, amd::Memory* dst, hipMemcpyKind kind);
+}  // namespace hip

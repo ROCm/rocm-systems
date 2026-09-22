@@ -1,0 +1,145 @@
+#
+# Integration tests
+#
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
+
+if(COMMAND rocprofiler_deactivate_clang_tidy)
+    rocprofiler_deactivate_clang_tidy()
+endif()
+
+project(rocprofiler-sdk-tests LANGUAGES C CXX)
+
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "tests")
+set(ROCPROFILER_SDK_TESTS_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
+set(ROCPROFILER_SDK_TESTS_BINARY_DIR "${PROJECT_BINARY_DIR}")
+
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE
+        "Release"
+        CACHE STRING "" FORCE)
+endif()
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_HIP_STANDARD 17)
+set(CMAKE_HIP_EXTENSIONS OFF)
+set(CMAKE_HIP_STANDARD_REQUIRED ON)
+
+# this should be defaulted to OFF by ROCm 7.0.1 or 7.1 this should only used to disable
+# tests in extreme circumstances
+option(ROCPROFILER_DISABLE_UNSTABLE_CTESTS "Disable unstable tests" ON)
+
+# Long-running performance sweeps (labelled perf-nightly). Off by default: they take a
+# large share of the CI test budget, and what they are good for is a trend across runs
+# rather than a per-commit gate, so a single noisy run failing a PR costs more than it
+# catches. The shorter perf regressions stay in the default set. Nightly jobs and local
+# perf work turn this on.
+option(ROCPROFILER_BUILD_NIGHTLY_PERF_CTESTS
+       "Register the long-running performance sweep tests" OFF)
+
+enable_testing()
+include(CTest)
+
+include(GNUInstallDirs)
+# always use lib instead of lib64
+set(CMAKE_INSTALL_LIBDIR "lib")
+
+# define the library output directory
+if(PROJECT_IS_TOP_LEVEL)
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}")
+else()
+    set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}] ")
+endif()
+
+# needed for validation
+find_package(Python3 REQUIRED)
+
+# generally needed
+find_package(rocprofiler-sdk REQUIRED)
+find_package(rocprofiler_sdk_pytest REQUIRED)
+
+# get the gfx architectures that are present on the system
+rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
+
+# configure python module <BINARY_DIR>/rocprofiler_sdk/pytest_utils
+add_subdirectory(pytest-packages)
+
+# common utilities
+add_subdirectory(common)
+
+# unit-test subdirectory only exists in rocprofiler-sdk-tests package
+add_subdirectory(unit-tests)
+
+# tool libraries used for data collection during integration tests
+add_subdirectory(tools)
+
+# libraries used by integration test applications
+add_subdirectory(lib)
+
+# applications used by integration tests
+add_subdirectory(bin)
+
+# validation tests
+add_subdirectory(kernel-tracing)
+add_subdirectory(async-copy-tracing)
+add_subdirectory(rocshmem-trace)
+add_subdirectory(hsa-memory-allocation)
+add_subdirectory(scratch-memory-tracing)
+add_subdirectory(c-tool)
+add_subdirectory(thread-trace)
+add_subdirectory(pc_sampling)
+add_subdirectory(hip-graph-tracing)
+add_subdirectory(hip-graph-forkjoin-deadlock)
+add_subdirectory(counter-collection)
+add_subdirectory(kernel-replay-concurrency)
+add_subdirectory(kernel-replay-local-context)
+add_subdirectory(perf-common)
+add_subdirectory(kernel-replay-perf)
+add_subdirectory(queue-hooks-perf)
+add_subdirectory(openmp-tools)
+add_subdirectory(openmp-tools-coexist)
+add_subdirectory(rocdecode)
+add_subdirectory(rocjpeg)
+add_subdirectory(hipfile)
+add_subdirectory(hip-host-tracing)
+add_subdirectory(code-object-multi-threaded)
+add_subdirectory(code-object-host-symbols)
+add_subdirectory(spm)
+
+# environment variable tests
+add_subdirectory(environment)
+
+# rocpd validation tests
+add_subdirectory(rocpd)
+add_subdirectory(rocpd-api)
+add_subdirectory(rocpd-back-compat)
+
+# rocattach validation tests
+add_subdirectory(rocattach)
+
+# rocprofv3 validation tests
+add_subdirectory(rocprofv3)
+
+# late-start tracing validation tests
+add_subdirectory(late-start-tracing)
+
+# multiple anytime tool configuration validation tests
+add_subdirectory(multi-tool-test)
+
+# duplicate rocprofiler-sdk initialization validation test
+add_subdirectory(duplicate-sdk-initialization)
+
+# anytime tool configuration (force_configure) validation tests
+add_subdirectory(anytime-tool-config)
+
+# python bindings
+add_subdirectory(python-bindings)
+add_subdirectory(rocprofv3-avail)
+
+add_test(
+    NAME rocprofiler-sdk-spm-runner-preflight
+    COMMAND ${Python3_EXECUTABLE} -m unittest spm_runner_preflight_test
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+set_tests_properties(rocprofiler-sdk-spm-runner-preflight PROPERTIES LABELS "unittests")

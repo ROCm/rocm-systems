@@ -1,0 +1,178 @@
+# - Config file for @PACKAGE_NAME@ and its component libraries
+# It defines the following variables:
+#
+# @PACKAGE_NAME@_VERSION
+# @PACKAGE_NAME@_INCLUDE_DIR
+# @PACKAGE_NAME@_LIB_DIR
+# @PACKAGE_NAME@_LIBRARIES
+#
+# It provides the following interface libraries:
+#
+# @PROJECT_NAME@::@PROJECT_NAME@
+# @PACKAGE_NAME@::@PACKAGE_NAME@
+#
+
+# prevent "target already exists" error
+include_guard(DIRECTORY)
+
+# compute paths
+get_filename_component(@PACKAGE_NAME@_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+
+@PACKAGE_INIT@
+
+set_and_check(@PACKAGE_NAME@_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+set_and_check(@PACKAGE_NAME@_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@")
+get_filename_component(@PACKAGE_NAME@_ROOT_DIR ${@PACKAGE_NAME@_INCLUDE_DIR} PATH)
+
+# extra validation
+foreach(_@PACKAGE_NAME@_SUBDIR @PROJECT_EXTRA_DIRS@)
+    set_and_check(_@PACKAGE_NAME@_SUBDIR_CHECK
+                  "${PACKAGE_PREFIX_DIR}/${_@PACKAGE_NAME@_SUBDIR}")
+    unset(_@PACKAGE_NAME@_SUBDIR_CHECK)
+endforeach()
+
+set(@PACKAGE_NAME@_LIBRARIES)
+
+# add interface library
+add_library(@PACKAGE_NAME@::@PACKAGE_NAME@ INTERFACE IMPORTED)
+
+target_include_directories(@PACKAGE_NAME@::@PACKAGE_NAME@
+                           INTERFACE "${@PACKAGE_NAME@_INCLUDE_DIR}")
+target_link_directories(@PACKAGE_NAME@::@PACKAGE_NAME@ INTERFACE
+                        "${@PACKAGE_NAME@_LIB_DIR}")
+
+if(@PACKAGE_NAME@_BUILD_TREE
+   AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/@PACKAGE_NAME@-build-config.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/@PACKAGE_NAME@-build-config.cmake")
+else()
+    find_package(
+        AMDDeviceLibs
+        REQUIRED
+        CONFIG
+        HINTS
+        @AMDDeviceLibs_DIR@
+        @rocm_version_DIR@
+        PATHS
+        @AMDDeviceLibs_DIR@
+        @rocm_version_DIR@)
+
+    find_package(
+        amd_comgr
+        @PACKAGE_amd_comgr_VERSION@
+        REQUIRED
+        CONFIG
+        HINTS
+        @amd_comgr_DIR@
+        @rocm_version_DIR@
+        PATHS
+        @amd_comgr_DIR@
+        @rocm_version_DIR@)
+
+    find_package(
+        hsa-runtime64
+        @PACKAGE_hsa-runtime64_VERSION@
+        REQUIRED
+        CONFIG
+        HINTS
+        @hsa-runtime64_DIR@
+        @rocm_version_DIR@
+        PATHS
+        @hsa-runtime64_DIR@
+        @rocm_version_DIR@)
+
+    find_package(
+        hip
+        @PACKAGE_hip_VERSION@
+        REQUIRED
+        CONFIG
+        HINTS
+        @hip_DIR@
+        @rocm_version_DIR@
+        PATHS
+        @hip_DIR@
+        @rocm_version_DIR@)
+
+    include("${@PACKAGE_NAME@_CMAKE_DIR}/@PACKAGE_NAME@-config-nolink-target.cmake")
+
+    add_library(@PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink INTERFACE IMPORTED)
+
+    # if rccl not found or <rccl/amd_detail/api_trace.h> not found when rocprofiler-sdk
+    # was built, use the packaged rccl.h and api_trace.h
+    if(NOT @rccl_FOUND@ OR NOT @rccl_API_TRACE_FOUND@)
+        target_compile_definitions(@PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink
+                                   INTERFACE ROCPROFILER_SDK_USE_SYSTEM_RCCL=0)
+    endif()
+
+    include("${@PACKAGE_NAME@_CMAKE_DIR}/@PACKAGE_NAME@-targets.cmake")
+
+    rocprofiler_config_nolink_target(@PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink hip::host)
+    rocprofiler_config_nolink_target(@PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink hsa-runtime64::hsa-runtime64)
+    rocprofiler_config_nolink_target(@PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink amd_comgr)
+
+    # Library dependencies
+    if(@PACKAGE_NAME@_FIND_COMPONENTS)
+        foreach(COMP ${@PACKAGE_NAME@_FIND_COMPONENTS})
+            set(TARG @PACKAGE_NAME@::@PACKAGE_NAME@-${COMP})
+            if(TARGET ${TARG})
+                set(@PACKAGE_NAME@_${COMP}_FOUND 1)
+                list(APPEND @PACKAGE_NAME@_LIBRARIES ${TARG})
+                target_link_libraries(@PACKAGE_NAME@::@PACKAGE_NAME@ INTERFACE ${TARG})
+            else()
+                set(@PACKAGE_NAME@_${COMP}_FOUND 0)
+            endif()
+        endforeach()
+    else()
+        foreach(TARG @PROJECT_BUILD_TARGETS@)
+            set(TARG @PACKAGE_NAME@::@PACKAGE_NAME@-${TARG})
+            list(APPEND @PACKAGE_NAME@_LIBRARIES ${TARG})
+            target_link_libraries(@PACKAGE_NAME@::@PACKAGE_NAME@ INTERFACE ${TARG})
+        endforeach()
+    endif()
+
+    if(EXISTS ${@PACKAGE_NAME@_CMAKE_DIR}/Modules)
+        list(INSERT CMAKE_MODULE_PATH 0 ${@PACKAGE_NAME@_CMAKE_DIR}/Modules)
+        find_package(libdw)
+        list(REMOVE_AT CMAKE_MODULE_PATH 0)
+    endif()
+
+    if(libdw_FOUND AND TARGET libdw::libdw)
+        rocprofiler_config_nolink_target(@PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink
+                                         libdw::libdw)
+    endif()
+
+    target_link_libraries(@PACKAGE_NAME@::@PACKAGE_NAME@
+                          INTERFACE @PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink)
+endif()
+
+add_executable(@PACKAGE_NAME@::rocprofv3 IMPORTED)
+set_property(
+    TARGET @PACKAGE_NAME@::rocprofv3
+    PROPERTY IMPORTED_LOCATION
+             ${@PACKAGE_NAME@_ROOT_DIR}/@CMAKE_INSTALL_BINDIR@/rocprofv3)
+
+add_executable(@PACKAGE_NAME@::rocprofv3-avail IMPORTED)
+set_property(
+    TARGET @PACKAGE_NAME@::rocprofv3-avail
+    PROPERTY IMPORTED_LOCATION ${@PACKAGE_NAME@_ROOT_DIR}/@CMAKE_INSTALL_BINDIR@/rocprofv3-avail)
+
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(
+    @PACKAGE_NAME@
+    FOUND_VAR @PACKAGE_NAME@_FOUND
+    VERSION_VAR @PACKAGE_NAME@_VERSION
+    REQUIRED_VARS @PACKAGE_NAME@_ROOT_DIR @PACKAGE_NAME@_INCLUDE_DIR
+                  @PACKAGE_NAME@_LIB_DIR @PACKAGE_NAME@_LIBRARIES @PACKAGE_NAME@_VERSION
+    HANDLE_COMPONENTS HANDLE_VERSION_RANGE)
+
+if(EXISTS ${@PACKAGE_NAME@_CMAKE_DIR}/Modules)
+    list(APPEND CMAKE_MODULE_PATH ${@PACKAGE_NAME@_CMAKE_DIR}/Modules)
+    include(rocprofiler-sdk-utilities)
+endif()
+
+add_executable(@PACKAGE_NAME@::convert-counters-collection-format IMPORTED)
+set_property(
+    TARGET @PACKAGE_NAME@::convert-counters-collection-format
+    PROPERTY
+        IMPORTED_LOCATION
+        ${@PACKAGE_NAME@_ROOT_DIR}/share/@PACKAGE_NAME@/convert-counters-collection-format.py
+    )

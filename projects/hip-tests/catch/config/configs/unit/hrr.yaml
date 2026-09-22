@@ -1,0 +1,8 @@
+---
+hrr:
+  Unit_HRR_CaptureSmoke:
+    <<: *level_2
+    tags: [smoke, capture]
+  Unit_HRR_CaptureSmoke_Direct:
+    <<: *level_2
+    tags: [direct, smoke]

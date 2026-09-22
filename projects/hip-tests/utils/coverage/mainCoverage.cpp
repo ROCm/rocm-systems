@@ -1,0 +1,91 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "reportGenerators.h"
+
+int main(int argc, char** argv) {
+  if (argc == 2 && std::string(argv[1]) == "--help") {
+    std::cout << "Usage: " << argv[0] << " <hip-include-dir> <catch-test-dir> [work-dir]\n\n"
+              << "Arguments:\n\n"
+              << "  hip-include-dir   Path to the directory containing HIP headers.\n"
+              << "                    Example: <project-root>/projects/hip/include\n"
+              << "  catch-test-dir    Path to the directory containing HIP Catch2 tests.\n"
+              << "                    Example: <project-root>/projects/hip-tests/catch2\n"
+              << "  work-dir          (Optional) Path to the working directory.\n" 
+              << "                    Defaults to the current directory.\n"
+              << std::endl;
+    return 0;
+  }
+
+  if (argc < 3 || argc > 4) {
+    std::cerr << "Error: Invalid number of arguments. Use --help for usage information.\n";
+    return 1;
+  }
+
+  std::string hip_include_path = argv[1];
+  std::string tests_root_directory{argv[2]};
+
+  std::string work_directory = ".";
+
+  if (argc == 4) {
+    work_directory = argv[3];
+  }
+
+  /*
+  Relative paths to all needed files, as it is expected that the application
+  is called from the HIP/tests/catch/coverage directory.
+  */
+  std::string hip_api_header_file{
+      findAbsolutePathOfFile(hip_include_path + "/hip/hip_runtime_api.h")};
+  std::string hip_rtc_header_file{findAbsolutePathOfFile(hip_include_path + "/hip/hiprtc.h")};
+  
+  std::string device_api_file{"device_api_list.txt"};
+
+  std::vector<std::string> api_group_names;
+  // Extract all HIP API declarations from the HIP API header file.
+  std::vector<HipAPI> hip_apis{extractHipAPIs(hip_api_header_file, api_group_names, false)};
+  std::cout << "Number of detected HIP APIs from " << hip_api_header_file << ": " << hip_apis.size()
+            << std::endl;
+
+  api_group_names.push_back("Runtime Compilation");
+  std::vector<HipAPI> hip_rtc_apis{extractHipAPIs(hip_rtc_header_file, api_group_names, true)};
+  std::cout << "Number of detected HIP APIs from " << hip_rtc_header_file << ": "
+            << hip_rtc_apis.size() << std::endl;
+  hip_apis.insert(hip_apis.end(), hip_rtc_apis.begin(), hip_rtc_apis.end());
+
+  std::vector<HipAPI> device_apis{extractDeviceAPIs(device_api_file, api_group_names)};
+  std::cout << "Number of detected device APIs from " << device_api_file << ": "
+            << device_apis.size() << std::endl;
+  hip_apis.insert(hip_apis.end(), device_apis.begin(), device_apis.end());
+
+  // Extract all test module .cc files that shall be used for API searching.
+  std::cout << "Searching for HIP API calls in source files within " << tests_root_directory << "."
+            << std::endl;
+  std::vector<std::string> test_module_files{extractTestModuleFiles(tests_root_directory)};
+
+  // Search for each HIP API in the extracted test .cc files.
+  for (HipAPI& hip_api : hip_apis) {
+    searchForAPI(hip_api, test_module_files);
+  }
+
+  std::vector<HipAPIGroup> hip_api_groups;
+  for (auto const& api_group_name : api_group_names) {
+    HipAPIGroup hip_api_group{api_group_name, hip_apis};
+    // Avoid having duplicated groups.
+    if (std::find(hip_api_groups.begin(), hip_api_groups.end(), hip_api_group) ==
+        hip_api_groups.end()) {
+      hip_api_groups.push_back(hip_api_group);
+    }
+  }
+
+  std::cout << "Generating XML report files." << std::endl;
+  generateXMLReportFiles(hip_apis, hip_api_groups, work_directory);
+  std::cout << "Generating HTML report files." << std::endl;
+  generateHTMLReportFiles(hip_apis, hip_api_groups, tests_root_directory, hip_api_header_file,
+                          hip_rtc_header_file, work_directory);
+
+  return 0;
+}

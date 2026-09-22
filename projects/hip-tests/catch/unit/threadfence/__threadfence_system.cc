@@ -1,0 +1,117 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <cmd_options.hh>
+#include <hip_test_common.hh>
+#include <resource_guards.hh>
+
+#include "threadfence_common.hh"
+
+/**
+ * @addtogroup __threadfence_system __threadfence_system
+ * @{
+ * @ingroup ThreadfenceTest
+ */
+
+__global__ void WriteKernel(int* in) {
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (tid == 0) {
+    Write<ThreadfenceScope::kSystem>(in);
+  }
+}
+
+__global__ void ReadKernel(int* out, int* in) {
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (tid == 0) {
+    Read<ThreadfenceScope::kSystem>(out, in);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Basic test for a system-wide memory fence on global peer device memory.
+ *
+ * Test source
+ * ------------------------
+ *    - unit/threadfence/__threadfence_system.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit___threadfence_system_Positive_Basic_Peer) {
+  const auto device_count = HipTest::getDeviceCount();
+  if (device_count < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+
+  int can_access_peer = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1));
+  if (!can_access_peer) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+  }
+
+  HIP_CHECK(hipSetDevice(0));
+
+  LinearAllocGuard<int> in_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
+  LinearAllocGuard<int> out_dev(LinearAllocs::hipMalloc, 2 * sizeof(int));
+
+  LinearAllocGuard<int> out_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
+
+  for (int i = 0; i < cmd_options.iterations; ++i) {
+    HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(&(in_dev.ptr()[0])), kInitVal1, 1));
+    HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(&(in_dev.ptr()[1])), kInitVal2, 1));
+
+    HipTest::launchKernel(WriteKernel, 1, 1, 0, nullptr, in_dev.ptr());
+
+    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipDeviceEnablePeerAccess(0, 0));
+    HipTest::launchKernel(ReadKernel, 1, 1, 0, nullptr, out_dev.ptr(), in_dev.ptr());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    HIP_CHECK(hipMemcpy(out_host.host_ptr(), out_dev.ptr(), 2 * sizeof(int), hipMemcpyDefault));
+
+    REQUIRE(!(out_host.ptr()[0] == kInitVal1 && out_host.ptr()[1] == kSetVal2));
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Basic test for a system-wide memory fence on page-locked host memory.
+ *
+ * Test source
+ * ------------------------
+ *    - unit/threadfence/__threadfence_system.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit___threadfence_system_Positive_Basic_Host) {
+  LinearAllocGuard<int> in_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
+  LinearAllocGuard<int> out_host(LinearAllocs::hipHostMalloc, 2 * sizeof(int));
+
+  for (int i = 0; i < cmd_options.iterations; ++i) {
+    in_host.host_ptr()[0] = kInitVal1;
+    in_host.host_ptr()[1] = kInitVal2;
+
+    HipTest::launchKernel(WriteKernel, 1, 1, 0, nullptr, in_host.host_ptr());
+    Read<ThreadfenceScope::kDevice>(out_host.host_ptr(), in_host.host_ptr());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    REQUIRE(!(out_host.host_ptr()[0] == kInitVal1 && out_host.ptr()[1] == kSetVal2));
+  }
+}
+
+/**
+ * End doxygen group ThreadfenceTest.
+ * @}
+ */

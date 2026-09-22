@@ -1,0 +1,3925 @@
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/kernel_symbol.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/vm/amdgpu/hsa_clock.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
+
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/amd_ext_aql_packet.h"
+#include "hsa/amd_hsa_queue.h"
+RJ_DIAGNOSTIC_POP
+
+#include "simdojo/sim/message.h"
+#include "simdojo/sim/simulation.h"
+#include "util/bit.h"
+#include "util/log.h"
+
+#include <algorithm>
+#include <atomic>
+#include <bit>
+#include <cassert>
+#include <chrono>
+#include <condition_variable>
+#include <cstring>
+#include <elf.h>
+#include <format>
+#include <limits>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <sys/mman.h>
+#include <thread>
+
+namespace rocjitsu {
+namespace amdgpu {
+
+void CommandProcessor::configure_for_arch(rj_code_arch_t arch) {
+  // Matches LLVM's FeaturePackedTID: gfx90a and later CDNA targets, plus
+  // GFX11 and later RDNA targets, receive work-item IDs packed in v0.
+  packed_tid_ = arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+                arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+                arch == ROCJITSU_CODE_ARCH_RDNA3_5 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+                arch == ROCJITSU_CODE_ARCH_CDNA5;
+
+  sdma_packet_dialect_ = SdmaPacketDialect::Legacy;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+    sdma_packet_dialect_ = SdmaPacketDialect::Gfx1250;
+  else if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+           arch == ROCJITSU_CODE_ARCH_RDNA4)
+    sdma_packet_dialect_ = SdmaPacketDialect::Gfx11Plus;
+}
+
+namespace {
+
+// The supported cluster size must fit the M0 multicast mask captured at issue time.
+constexpr uint32_t kMaxClusterWorkgroups = kClusterMulticastMaskBits;
+static_assert(kMaxClusterWorkgroups <= kClusterMulticastMaskBits);
+static_assert(kMaxClusterWorkgroups <= 16,
+              "TTMP6 cluster max and max-flat-ID fields are 4 bits wide");
+
+// GFX12 launch-state TTMP indices used by compiler-generated workgroup and
+// cluster identity sequences. These are indices into the wave's trap-temporary
+// file (Wavefront::ttmp()), not SGPR numbers: the shader reaches them through
+// the TTMP operand encodings (scalar selectors 108..123), which the ISA decoder
+// routes to that file rather than to the SGPR allocation.
+constexpr uint32_t kGfx12Ttmp6 = 6;
+constexpr uint32_t kGfx12Ttmp7 = 7;
+constexpr uint32_t kGfx12Ttmp8 = 8;
+constexpr uint32_t kGfx12Ttmp9 = 9;
+
+// LLVM's gfx1250 architected-SGPR ABI maps TTMP6 as seven 4-bit fields:
+// cluster-local XYZ, cluster-max XYZ, and max-flat-ID from low to high bits.
+// TTMP7 holds 16-bit cluster-grid Y/Z IDs. TTMP8 holds queue-packet ID
+// [24:0], wave-in-workgroup [29:25], grid-Y/Z-valid [30], and debug-mark
+// [31]. TTMP9 holds cluster-grid X.
+constexpr uint32_t kGfx12Ttmp6ClusterLocalXShift = 0;
+constexpr uint32_t kGfx12Ttmp6ClusterLocalYShift = 4;
+constexpr uint32_t kGfx12Ttmp6ClusterLocalZShift = 8;
+constexpr uint32_t kGfx12Ttmp6ClusterMaxXShift = 12;
+constexpr uint32_t kGfx12Ttmp6ClusterMaxYShift = 16;
+constexpr uint32_t kGfx12Ttmp6ClusterMaxZShift = 20;
+constexpr uint32_t kGfx12Ttmp6ClusterMaxFlatIdShift = 24;
+constexpr uint32_t kGfx12Ttmp7ClusterGridDimensionMask = 0xFFFFu;
+constexpr uint32_t kGfx12Ttmp8QueuePacketIdMask = 0x1FFFFFFu;
+constexpr uint32_t kGfx12Ttmp8WaveIdInGroupShift = 25;
+constexpr uint32_t kGfx12Ttmp8GridYzValidShift = 30;
+
+struct PlannedWorkgroup {
+  uint32_t local_wg_id = 0;
+  uint32_t global_wg_id = 0;
+  ComputeUnitCore *cu = nullptr;
+};
+
+uint32_t nonzero_or_one(uint32_t v) { return v == 0 ? 1 : v; }
+
+uint32_t checked_ext_dispatch_grid_size(uint32_t cluster_count, uint32_t cluster_size,
+                                        uint32_t workgroup_size, const char *axis) {
+  if (cluster_count == 0 || cluster_size == 0 || workgroup_size == 0) {
+    throw std::runtime_error(
+        std::format("AMD extended dispatch {} fields must be nonzero: cluster_count={} "
+                    "cluster_size={} workgroup_size={}",
+                    axis, cluster_count, cluster_size, workgroup_size));
+  }
+  uint64_t grid_size =
+      static_cast<uint64_t>(cluster_count) * cluster_size * static_cast<uint64_t>(workgroup_size);
+  if (grid_size > std::numeric_limits<uint32_t>::max()) {
+    throw std::runtime_error(std::format(
+        "AMD extended dispatch grid_size_{} overflows 32 bits: cluster_count={} cluster_size={} "
+        "workgroup_size={}",
+        axis, cluster_count, cluster_size, workgroup_size));
+  }
+  return static_cast<uint32_t>(grid_size);
+}
+
+void validate_cluster_shape(const DispatchEntry &dp) {
+  if (!dp.has_workgroup_clusters())
+    return;
+  auto cluster_size =
+      static_cast<uint64_t>(dp.cluster_size_x) * dp.cluster_size_y * dp.cluster_size_z;
+  // This also keeps every TTMP6 cluster dimension/max field within 4 bits.
+  if (cluster_size == 0 || cluster_size > kMaxClusterWorkgroups) {
+    throw std::runtime_error(
+        std::format("unsupported workgroup cluster size {}x{}x{} ({} workgroups)",
+                    dp.cluster_size_x, dp.cluster_size_y, dp.cluster_size_z, cluster_size));
+  }
+  if (!dp.cluster_grid_is_complete()) {
+    throw std::runtime_error(std::format(
+        "workgroup cluster shape {}x{}x{} count {}x{}x{} does not cover grid {}x{}x{} exactly",
+        dp.cluster_size_x, dp.cluster_size_y, dp.cluster_size_z, dp.cluster_count_x,
+        dp.cluster_count_y, dp.cluster_count_z, dp.grid_wgs_x, dp.grid_wgs_y, dp.grid_wgs_z));
+  }
+  const uint64_t rank_period = dp.cluster_rank_period();
+  if (dp.workgroup_id_offset % rank_period != 0) {
+    throw std::runtime_error(std::format(
+        "clustered workgroup ID offset {} does not preserve cluster-local ranks; expected a "
+        "multiple of {}",
+        dp.workgroup_id_offset, rank_period));
+  }
+}
+
+uint32_t read_memory_u32(GpuMemory *memory, uint64_t addr, uint32_t vmid = 0) {
+  uint32_t value = 0;
+  for (uint32_t i = 0; i < sizeof(value); ++i)
+    value |= static_cast<uint32_t>(memory->read8(addr + i, vmid)) << (i * 8);
+  return value;
+}
+
+uint32_t aligned_lds_bytes_per_workgroup(const DispatchEntry &entry) {
+  // Match ComputeUnitCore::allocate_lds()/can_accept_workgroup() granularity for all dispatches.
+  return util::align_up(entry.group_segment_fixed_size, 256u);
+}
+
+bool any_active_wavefronts(const std::vector<ComputeUnitCore *> &cus) {
+  return std::any_of(cus.begin(), cus.end(), [](const auto *cu) { return cu->has_active_wfs(); });
+}
+
+bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_local_wg_id,
+                             size_t next_cu, const std::vector<ComputeUnitCore *> &cus,
+                             std::vector<PlannedWorkgroup> &plan, size_t &planned_next_cu) {
+  plan.clear();
+  uint32_t cluster_size = entry.cluster_size();
+  const uint32_t lds_bytes_per_wg = aligned_lds_bytes_per_workgroup(entry);
+  constexpr auto kU32Max = std::numeric_limits<uint32_t>::max();
+  std::vector<uint32_t> planned_per_cu(cus.size(), 0);
+  size_t last_cu_idx = next_cu;
+
+  for (uint32_t rank = 0; rank < cluster_size; ++rank) {
+    bool assigned = false;
+    uint32_t local_wg_id = entry.cluster_peer_local_wg_id(cluster_base_local_wg_id, rank);
+    for (size_t attempt = 0; attempt < cus.size(); ++attempt) {
+      size_t cu_idx = (next_cu + rank + attempt) % cus.size();
+      auto *cu = cus[cu_idx];
+      if (!entry.allows_cu(cu))
+        continue;
+
+      uint32_t reserved_wgs = planned_per_cu[cu_idx] + 1;
+      uint64_t reserved_wfs = static_cast<uint64_t>(entry.wfs_per_workgroup) * reserved_wgs;
+      uint64_t reserved_lds = static_cast<uint64_t>(lds_bytes_per_wg) * reserved_wgs;
+      if (reserved_wfs > kU32Max || reserved_lds > kU32Max)
+        continue;
+      if (!cu->can_accept_workgroup(static_cast<uint32_t>(reserved_wfs),
+                                    static_cast<uint32_t>(reserved_lds)))
+        continue;
+
+      plan.push_back({local_wg_id, local_wg_id + entry.workgroup_id_offset, cu});
+      ++planned_per_cu[cu_idx];
+      last_cu_idx = cu_idx;
+      assigned = true;
+      break;
+    }
+    if (!assigned) {
+      plan.clear();
+      return false;
+    }
+  }
+
+  planned_next_cu = (last_cu_idx + 1) % cus.size();
+  return true;
+}
+
+bool sgpr_count_is_descriptor_encoded(rj_code_arch_t arch, uint32_t sgpr_gran) {
+  if (sgpr_gran != 0)
+    return true;
+  return isa_properties(arch).descriptor_sgpr_count_encoded;
+}
+
+bool compute_pgm_rsrc1_mode_preserves_dx10_ieee(rj_code_arch_t arch) {
+  /*
+   * New ISA families should classify descriptor-to-MODE field initialization
+   * for the architecture's MODE layout.
+   */
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return true;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_CDNA5:
+  case ROCJITSU_CODE_ARCH_RV32I:
+  case ROCJITSU_CODE_ARCH_RV64I:
+  case ROCJITSU_CODE_ARCH_NUM_ARCHS:
+    return false;
+  }
+  // Handle out-of-range values without a default, so -Wswitch catches new architectures.
+  return false;
+}
+
+bool compute_pgm_rsrc1_mode_has_debug_field(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return true;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_CDNA5:
+  case ROCJITSU_CODE_ARCH_RV32I:
+  case ROCJITSU_CODE_ARCH_RV64I:
+  case ROCJITSU_CODE_ARCH_NUM_ARCHS:
+    return false;
+  }
+  // Handle out-of-range values without a default, so -Wswitch catches new architectures.
+  return false;
+}
+
+uint32_t initial_mode_from_compute_pgm_rsrc1(uint32_t rsrc1, rj_code_arch_t arch) {
+  using namespace rocr::llvm::amdhsa;
+
+  uint32_t mode = 0;
+  mode |= AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_32) << 0;
+  mode |= AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_16_64) << 2;
+  mode |= AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_32) << 4;
+  mode |= AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_16_64) << 6;
+  if (compute_pgm_rsrc1_mode_preserves_dx10_ieee(arch)) {
+    mode |= AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP) << 8;
+    mode |= AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE) << 9;
+  }
+  if (compute_pgm_rsrc1_mode_has_debug_field(arch))
+    mode |= AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_DEBUG_MODE) << 11;
+  if (AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FP16_OVFL))
+    mode |= Wavefront::FP16_OVFL_BIT;
+  return mode;
+}
+
+} // namespace
+
+CommandProcessor::CommandProcessor(std::string name, simdojo::ExecMode exec_mode)
+    : simdojo::Component(std::move(name)), exec_mode_(exec_mode) {
+  // register_queue() may start the doorbell monitor before startup(), so the
+  // event must already have a handler when the queue becomes visible.
+  doorbell_event_.set_handler(
+      [this](simdojo::Tick ts, simdojo::Message *) { handle_doorbell(ts); });
+  dispatch_continuation_event_.set_handler([this](simdojo::Tick ts, simdojo::Message *message) {
+    if (!message || message->payload() != dispatch_continuation_generation_)
+      return;
+    dispatch_continuation_pending_ = false;
+    dispatch_continuation_tick_ = simdojo::TICK_MAX;
+    handle_doorbell_sync(ts);
+  });
+}
+
+CommandProcessor::~CommandProcessor() { stop_doorbell_monitor(); }
+
+void CommandProcessor::set_shared_dispatch_pool(CpuDispatchPool *pool) {
+  shared_dispatch_pool_ = pool;
+  if (shared_dispatch_pool_)
+    local_dispatch_pool_.reset();
+}
+
+void CommandProcessor::set_dispatch_threads(uint32_t threads) {
+  threads = std::max(threads, 1u);
+  if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL)
+    threads = 1;
+  if (dispatch_threads_ == threads)
+    return;
+
+  const bool was_pool_driven = dispatch_threads_ > 1;
+  const bool pool_driven = threads > 1;
+  dispatch_threads_ = threads;
+  local_dispatch_pool_.reset();
+
+  if (was_pool_driven == pool_driven) {
+    for (auto *cu : cus_)
+      cu->set_pool_driven(pool_driven);
+    return;
+  }
+
+  simdojo::Tick now = 0;
+  if (engine())
+    now = engine()->context(partition_id()).current_tick();
+
+  if (pool_driven) {
+    pooled_due_ticks_.clear();
+    for (auto *cu : cus_) {
+      const simdojo::Tick serial_due = cu->suspend_scheduled_work();
+      cu->set_pool_driven(true);
+      if (cu->has_runnable_wfs()) {
+        simdojo::Tick tick = serial_due == simdojo::TICK_MAX ? now + 1 : serial_due;
+        if (tick < now)
+          tick = now + 1;
+        pooled_due_ticks_[cu] = tick;
+      }
+    }
+    const simdojo::Tick next = next_pooled_due_tick(now);
+    if (next != simdojo::TICK_MAX)
+      arm_dispatch_continuation(next);
+    return;
+  }
+
+  cancel_dispatch_continuation();
+  for (auto *cu : cus_) {
+    cu->set_pool_driven(false);
+    if (!cu->has_active_wfs())
+      continue;
+    auto due = pooled_due_ticks_.find(cu);
+    simdojo::Tick tick = due == pooled_due_ticks_.end() ? now + 1 : due->second;
+    if (tick < now)
+      tick = now + 1;
+    cu->schedule_work_at(tick);
+  }
+  pooled_due_ticks_.clear();
+}
+
+void CommandProcessor::arm_dispatch_continuation(simdojo::Tick tick) {
+  if (!engine())
+    return;
+  if (dispatch_continuation_pending_ && dispatch_continuation_tick_ <= tick)
+    return;
+
+  dispatch_continuation_pending_ = true;
+  dispatch_continuation_tick_ = tick;
+  const uintptr_t generation = ++dispatch_continuation_generation_;
+  schedule_event(&dispatch_continuation_event_, tick,
+                 std::make_unique<simdojo::Message>(simdojo::MessageHeader{}, generation));
+}
+
+void CommandProcessor::cancel_dispatch_continuation() {
+  dispatch_continuation_pending_ = false;
+  dispatch_continuation_tick_ = simdojo::TICK_MAX;
+  ++dispatch_continuation_generation_;
+}
+
+void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
+                                           const DispatchEntry &pkt, uint32_t global_wg_id,
+                                           uint32_t wf_index_in_wg) {
+  using namespace rocr::llvm::amdhsa;
+  uint32_t sbase = wf->sgpr_alloc().base;
+  uint32_t kcp = pkt.kernel_code_properties;
+
+  // User SGPRs per AMDHSA ABI: placed sequentially based on enable bits.
+  // Order: private_segment_buffer(4), dispatch_ptr(2), queue_ptr(2),
+  //        kernarg_segment_ptr(2), dispatch_id(2), flat_scratch_init(2),
+  //        private_segment_size(1).
+  // When kernel_code_properties is 0 (internal test dispatches), fall back to
+  // the legacy layout: kernarg at s[0:1].
+  int flat_scratch_init_sgpr = -1;
+  if (kcp != 0) {
+    uint32_t idx = 0;
+    if (AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)) {
+      if (pkt.queue_ptr != 0) {
+        uint64_t srd_va = pkt.queue_ptr + offsetof(amd_queue_t, scratch_resource_descriptor);
+        const uint32_t srd0 = read_gpu_u32(srd_va + 0, pkt.process_id);
+        const uint32_t srd1 = read_gpu_u32(srd_va + 4, pkt.process_id);
+        cu->write_sgpr(sbase + idx + 0, srd0);
+        cu->write_sgpr(sbase + idx + 1, srd1);
+        cu->write_sgpr(sbase + idx + 2, read_gpu_u32(srd_va + 8, pkt.process_id));
+        cu->write_sgpr(sbase + idx + 3, read_gpu_u32(srd_va + 12, pkt.process_id));
+      }
+      idx += 4;
+    }
+    if (AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR)) {
+      cu->write_sgpr(sbase + idx, static_cast<uint32_t>(pkt.dispatch_ptr));
+      cu->write_sgpr(sbase + idx + 1, static_cast<uint32_t>(pkt.dispatch_ptr >> 32));
+      idx += 2;
+    }
+    if (AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR)) {
+      cu->write_sgpr(sbase + idx, static_cast<uint32_t>(pkt.queue_ptr));
+      cu->write_sgpr(sbase + idx + 1, static_cast<uint32_t>(pkt.queue_ptr >> 32));
+      idx += 2;
+    }
+    if (AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR)) {
+      cu->write_sgpr(sbase + idx, static_cast<uint32_t>(pkt.kernarg_addr));
+      cu->write_sgpr(sbase + idx + 1, static_cast<uint32_t>(pkt.kernarg_addr >> 32));
+      util::Logger::vm("CP: init_wf kernarg s[", idx, ":", idx + 1, "] = 0x", std::hex,
+                       pkt.kernarg_addr, std::dec, " sbase=", sbase);
+      idx += 2;
+    }
+    if (AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID)) {
+      uint64_t dispatch_id = 0;
+      if (pkt.queue_ptr != 0) {
+        uint64_t wdi_va = pkt.queue_ptr + offsetof(amd_queue_t, write_dispatch_id);
+        dispatch_id = read_gpu_u64(wdi_va, pkt.process_id);
+      }
+      cu->write_sgpr(sbase + idx, static_cast<uint32_t>(dispatch_id));
+      cu->write_sgpr(sbase + idx + 1, static_cast<uint32_t>(dispatch_id >> 32));
+      idx += 2;
+    }
+    if (AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_FLAT_SCRATCH_INIT)) {
+      flat_scratch_init_sgpr = static_cast<int>(idx);
+      idx += 2;
+    }
+    if (AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_SIZE)) {
+      cu->write_sgpr(sbase + idx, pkt.private_segment_fixed_size);
+      idx += 1;
+    }
+
+    uint32_t preload_length = AMDHSA_BITS_GET(pkt.kernarg_preload, KERNARG_PRELOAD_SPEC_LENGTH);
+    uint32_t preload_offset = AMDHSA_BITS_GET(pkt.kernarg_preload, KERNARG_PRELOAD_SPEC_OFFSET);
+    if (preload_length != 0) {
+      if (pkt.kernarg_addr == 0 || memory_ == nullptr)
+        throw std::runtime_error("AMDHSA kernarg preload requires a mapped kernarg segment");
+      if (idx + preload_length > pkt.num_user_sgprs)
+        throw std::runtime_error("AMDHSA kernarg preload exceeds declared user SGPR count");
+      uint32_t preload_end = preload_offset + preload_length;
+      // Some assembly code objects leave descriptor kernarg_size at zero while
+      // carrying the real size in metadata; treat zero as unknown.
+      if (pkt.kernarg_size != 0 && preload_end > pkt.kernarg_size / sizeof(uint32_t))
+        throw std::runtime_error("AMDHSA kernarg preload exceeds kernarg segment size");
+
+      uint64_t preload_addr = pkt.kernarg_addr + static_cast<uint64_t>(preload_offset) * 4;
+      for (uint32_t i = 0; i < preload_length; ++i)
+        cu->write_sgpr(sbase + idx + i,
+                       read_memory_u32(memory_, preload_addr + i * 4, pkt.process_id));
+      util::Logger::vm("CP: init_wf kernarg preload s[", idx, ":", idx + preload_length - 1,
+                       "] length=", preload_length, " offset=", preload_offset, " sbase=", sbase);
+      idx += preload_length;
+    }
+  } else {
+    // Legacy: kernarg at s[0:1].
+    if (pkt.kernarg_addr != 0) {
+      cu->write_sgpr(sbase + 0, static_cast<uint32_t>(pkt.kernarg_addr));
+      cu->write_sgpr(sbase + 1, static_cast<uint32_t>(pkt.kernarg_addr >> 32));
+    }
+  }
+
+  uint32_t gx = pkt.grid_wgs_x > 0 ? pkt.grid_wgs_x : 1;
+  uint32_t gy = pkt.grid_wgs_y > 0 ? pkt.grid_wgs_y : 1;
+  uint32_t grid_wg_id_x = global_wg_id % gx;
+  uint32_t wg_id_y = (global_wg_id / gx) % gy;
+  uint32_t wg_id_z = global_wg_id / (gx * gy);
+  uint32_t wg_id_x = (pkt.enable_wg_id_y || pkt.enable_wg_id_z) ? grid_wg_id_x : global_wg_id;
+
+  // System SGPRs: workgroup_id_{x,y,z} placed sequentially after user SGPRs.
+  // Only the IDs whose enable bits are set in compute_pgm_rsrc2 are written.
+  // When kernel_code_properties is 0 (internal test dispatches), always write
+  // workgroup_id_x as a fallback since internal kernels expect it.
+  uint32_t sys_idx = pkt.num_user_sgprs;
+  {
+    bool kcp_zero = (pkt.kernel_code_properties == 0);
+    if (pkt.enable_wg_id_x || kcp_zero)
+      cu->write_sgpr(sbase + sys_idx++, wg_id_x);
+    if (pkt.enable_wg_id_y)
+      cu->write_sgpr(sbase + sys_idx++, wg_id_y);
+    if (pkt.enable_wg_id_z)
+      cu->write_sgpr(sbase + sys_idx++, wg_id_z);
+  }
+  const auto properties = isa_properties(cu->arch());
+  if (properties.uses_ttmp_workgroup_ids) {
+    // The ordinary TTMP ABI uses grid coordinates. Targets advertising the
+    // clustered extension reinterpret these fields below.
+    uint32_t ttmp6 = 0;
+    uint32_t ttmp7 = ((wg_id_z & kGfx12Ttmp7ClusterGridDimensionMask) << 16) |
+                     (wg_id_y & kGfx12Ttmp7ClusterGridDimensionMask);
+    uint32_t ttmp8 = pkt.queue_packet_id & kGfx12Ttmp8QueuePacketIdMask;
+    ttmp8 |= wf_index_in_wg << kGfx12Ttmp8WaveIdInGroupShift;
+    if (pkt.grid_yz_valid)
+      ttmp8 |= 1u << kGfx12Ttmp8GridYzValidShift;
+    uint32_t ttmp9 = grid_wg_id_x;
+    if (properties.uses_cluster_ttmp_workgroup_ids) {
+      const uint32_t cluster_size_x = nonzero_or_one(pkt.cluster_size_x);
+      const uint32_t cluster_size_y = nonzero_or_one(pkt.cluster_size_y);
+      const uint32_t cluster_size_z = nonzero_or_one(pkt.cluster_size_z);
+      const WorkgroupCoord cluster_local = pkt.cluster_local_wg_coord_for_flat_wg_id(global_wg_id);
+      const uint32_t cluster_max_x = cluster_size_x - 1;
+      const uint32_t cluster_max_y = cluster_size_y - 1;
+      const uint32_t cluster_max_z = cluster_size_z - 1;
+      const uint32_t cluster_max_flat_id = cluster_size_x * cluster_size_y * cluster_size_z - 1;
+
+      ttmp6 = (cluster_local.x << kGfx12Ttmp6ClusterLocalXShift) |
+              (cluster_local.y << kGfx12Ttmp6ClusterLocalYShift) |
+              (cluster_local.z << kGfx12Ttmp6ClusterLocalZShift) |
+              (cluster_max_x << kGfx12Ttmp6ClusterMaxXShift) |
+              (cluster_max_y << kGfx12Ttmp6ClusterMaxYShift) |
+              (cluster_max_z << kGfx12Ttmp6ClusterMaxZShift) |
+              (cluster_max_flat_id << kGfx12Ttmp6ClusterMaxFlatIdShift);
+      const uint32_t cluster_grid_y =
+          (wg_id_y / cluster_size_y) & kGfx12Ttmp7ClusterGridDimensionMask;
+      const uint32_t cluster_grid_z =
+          (wg_id_z / cluster_size_z) & kGfx12Ttmp7ClusterGridDimensionMask;
+      ttmp7 = (cluster_grid_z << 16) | cluster_grid_y;
+      ttmp9 = grid_wg_id_x / cluster_size_x;
+    }
+    wf->set_ttmp(kGfx12Ttmp6, ttmp6);
+    wf->set_ttmp(kGfx12Ttmp7, ttmp7);
+    wf->set_ttmp(kGfx12Ttmp8, ttmp8);
+    wf->set_ttmp(kGfx12Ttmp9, ttmp9);
+  }
+
+  // Workitem IDs per AMDHSA ABI. The SPI decomposes the flat thread index
+  // into (x, y, z) using the AQL packet's workgroup dimensions.
+  // enable_vgpr_workitem_id (TIDIG_COMP_CNT from compute_pgm_rsrc2):
+  //   0 = v0 only (workitem_id_x)
+  //   1 = v0 + v1 (workitem_id_x, workitem_id_y)
+  //   2 = v0 + v1 + v2 (workitem_id_x, workitem_id_y, workitem_id_z)
+  // On packed-TID targets (CDNA3/4 and GFX11+): v0[9:0]=X, v0[19:10]=Y,
+  // v0[29:20]=Z. TIDIG_COMP_CNT controls which components the SPI supplies;
+  // unused packed components are zero.
+  uint32_t vbase = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    const WorkitemCoord id = workitem_local_coord(pkt, wf_index_in_wg, lane, wf->wf_size());
+    if (packed_tid_) {
+      cu->write_vgpr(vbase, lane, pack_workitem_id(id, pkt.enable_vgpr_workitem_id));
+    } else {
+      cu->write_vgpr(vbase, lane, id.x);
+      if (pkt.enable_vgpr_workitem_id >= 1)
+        cu->write_vgpr(vbase + 1, lane, id.y);
+      if (pkt.enable_vgpr_workitem_id >= 2)
+        cu->write_vgpr(vbase + 2, lane, id.z);
+    }
+  }
+
+  // Scratch (private segment) setup.
+  // Each wavefront gets a unique slice of scratch memory. The per-lane
+  // private size is private_segment_fixed_size; the per-wave region is
+  // that multiplied by wf_size. The global wave index is derived from
+  // (global_wg_id, wf_index_in_wg) to ensure non-overlapping scratch
+  // across all CUs and workgroups in the dispatch.
+  if (pkt.private_segment_fixed_size > 0) {
+    uint64_t scratch_pool = pkt.scratch_backing_addr;
+    if (scratch_pool == 0)
+      scratch_pool = 0x1'0000'0000ULL;
+    // Round the per-wave region to the 1 KB COMPUTE_TMPRING_SIZE.WAVESIZE granule
+    // so that each wave's base equals scratch_pool + scoreboard_id * wavesize,
+    // which is exactly what rocm-dbgapi computes to locate a wave's private
+    // memory (rocdbgapi architecture.cpp scratch_memory_region).
+    uint64_t raw_per_wave = static_cast<uint64_t>(pkt.private_segment_fixed_size) * wf->wf_size();
+    uint64_t per_wave_size = ((raw_per_wave + 1023) / 1024) * 1024;
+    uint32_t wg_total_size = static_cast<uint32_t>(pkt.workgroup_size_x) *
+                             std::max<uint16_t>(1, pkt.workgroup_size_y) *
+                             std::max<uint16_t>(1, pkt.workgroup_size_z);
+    uint32_t waves_per_wg = (wg_total_size + wf->wf_size() - 1) / wf->wf_size();
+    uint64_t global_wave_idx = static_cast<uint64_t>(global_wg_id) * waves_per_wg + wf_index_in_wg;
+    uint64_t scratch_slot = global_wave_idx;
+    if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+      const uint32_t shader_engine_count =
+          std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
+      const uint32_t shader_engine_id = wf->shader_engine_id();
+      const uint32_t scoreboard_id = wf->scratch_scoreboard_id();
+      assert(shader_engine_id < shader_engine_count);
+      assert(scoreboard_id < scratch_waves_per_se_);
+      scratch_slot =
+          (static_cast<uint64_t>(scratch_xcc_id_) * shader_engine_count + shader_engine_id) *
+              scratch_waves_per_se_ +
+          scoreboard_id;
+    } else {
+      // Legacy CWSR records use the dispatch-wide logical scratch slot.
+      wf->set_scratch_scoreboard_id(static_cast<uint32_t>(global_wave_idx));
+    }
+    uint64_t wave_scratch = scratch_pool + scratch_slot * per_wave_size;
+
+    if (memory_ && !memory_->has_host_backing(wave_scratch, pkt.process_id, per_wave_size) &&
+        scratch_allocator_) {
+      // Size against the whole grid, not this XCD's share: every XCD of a
+      // fanned-out dispatch shares the allocation. CDNA5 uses the complete
+      // physical XCC/SE/scoreboard address space instead of logical grid slots.
+      uint64_t scratch_slots = static_cast<uint64_t>(pkt.grid_total_wgs()) * waves_per_wg;
+      if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+        const uint32_t shader_engine_count =
+            std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
+        scratch_slots =
+            static_cast<uint64_t>(scratch_xcc_count_) * shader_engine_count * scratch_waves_per_se_;
+      }
+      uint64_t total_scratch = per_wave_size * scratch_slots;
+      scratch_allocator_(pkt.process_id, scratch_pool, static_cast<size_t>(total_scratch));
+    }
+
+    wf->set_scratch_base(wave_scratch);
+    wf->set_scratch_lane_size(pkt.private_segment_fixed_size);
+    // CDNA compiler-generated functions use s32 as the private stack pointer
+    // and s33 as its current frame value for explicit scratch SADDR operands.
+    // The pointer is an offset within the per-wave scratch slice, not the SRD
+    // base address supplied in the user SGPR block.
+    if (cu->config().arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+        cu->config().arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      cu->write_sgpr(sbase + 32, 32);
+      cu->write_sgpr(sbase + 33, 0);
+    }
+    util::Logger::cp([&](auto &os) {
+      os << std::format(
+          "SCRATCH wf{} pool={:#x} wave_scratch={:#x} per_wave={} priv_size={} "
+          "backing_addr={:#x} host_backed={}",
+          wf->wf_id(), scratch_pool, wave_scratch, per_wave_size, pkt.private_segment_fixed_size,
+          pkt.scratch_backing_addr,
+          memory_ ? memory_->has_host_backing(wave_scratch, pkt.process_id, per_wave_size) : false);
+    });
+
+    if (flat_scratch_init_sgpr >= 0) {
+      cu->write_sgpr(sbase + flat_scratch_init_sgpr, static_cast<uint32_t>(wave_scratch));
+      cu->write_sgpr(sbase + flat_scratch_init_sgpr + 1, static_cast<uint32_t>(wave_scratch >> 32));
+    }
+  }
+}
+
+void CommandProcessor::startup() {
+  // INVARIANT: this CP and every CU it dispatches to share one partition (engine
+  // thread). on_cu_idle() dispatches inline and calls ComputeUnitCore::schedule_work()
+  // on those CUs, which mutates their non-atomic executing_/tick_event_ and pushes to
+  // the partition event queue without synchronization — safe only same-partition. The
+  // generic balanced partitioner could in principle split a CP from a CU under
+  // num_threads > 1; assert here (after partitioning, before the run loop) so any
+  // such split fails loudly rather than silently racing.
+  for ([[maybe_unused]] const auto *cu : cus_)
+    assert(cu->partition_id() == partition_id() &&
+           "CommandProcessor and its compute units must share one partition");
+  completion_ = std::make_unique<CompletionTracker>(memory_, cus_, l2_caches_);
+  completion_->set_plugin_group(plugin_group_);
+  completion_->set_dispatch_retired_callback(
+      [this](const DispatchEntry &entry) { erase_cluster_workgroups(entry.dispatch_id); });
+  completion_->set_grid_retired_callback([this](const DispatchEntry &) { wake_all_xcds(); });
+  if (interrupt_cb_)
+    completion_->set_interrupt_callback(interrupt_cb_);
+}
+
+void CommandProcessor::shutdown() {
+  stop_doorbell_monitor();
+  if (is_primary_ && engine()) {
+    engine()->primary_release();
+    is_primary_ = false;
+  }
+  completion_.reset();
+}
+
+void CommandProcessor::set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers) {
+  assert(rank < peers.size() && "XCD rank must index its own SoC's CP list");
+  assert(peers[rank] == this && "XCD rank must be this CP's own position");
+  xcd_rank_ = rank;
+  xcd_peers_ = std::move(peers);
+  // Carve this XCD its own dispatch-id space; see allocate_dispatch_id().
+  dispatch_id_stride_ = static_cast<uint32_t>(xcd_peers_.size());
+  dispatch_id_base_ = 1 + rank;
+  next_dispatch_id_ = dispatch_id_base_;
+}
+
+HwQueueState *CommandProcessor::find_queue_state(uint32_t queue_id, uint32_t process_id) {
+  for (size_t i = 0; i < hw_queues_.size(); ++i) {
+    if (hw_queues_[i].queue_id == queue_id && hw_queues_[i].process_id == process_id)
+      return &new_queue_states_[i];
+  }
+  return nullptr;
+}
+
+void CommandProcessor::accept_fanout_shard(DispatchEntry shard) {
+  {
+    util::Logger::cp([&](auto &os) {
+      os << std::format("{}: FANOUT_SHARD d={} rank={}/{} wgs={}", name(), shard.dispatch_id,
+                        shard.shard.rank(), shard.shard.stride(), shard.total_wgs);
+    });
+    // Deliberately NOT hw_queue_mutex_. The caller runs under its own CP's
+    // hw_queue_mutex_ (fan-out happens inside handle_doorbell), so taking a peer's
+    // hw_queue_mutex_ here would let two CPs fanning out concurrently acquire each
+    // other's locks in opposite orders. Nothing that can lead back to another CP's
+    // hw_queue_mutex_ is acquired while holding this one, and it is held only for
+    // the push so a peer's engine thread never blocks on it for long.
+    std::lock_guard<std::mutex> lock(fanout_inbox_mutex_);
+    fanout_inbox_.push_back(std::move(shard));
+  }
+  // Cross-thread and cross-partition safe: the engine buffers the event and drains
+  // it into this CP's partition at its next safe point. Dispatching inline here
+  // would reach into another partition's compute units.
+  if (engine())
+    engine()->schedule_event_now(doorbell_event());
+}
+
+void CommandProcessor::drain_fanout_inbox() {
+  std::vector<DispatchEntry> inbox;
+  {
+    std::lock_guard<std::mutex> lock(fanout_inbox_mutex_);
+    inbox.swap(fanout_inbox_);
+  }
+  // Real work arrived: the next wait this CP takes starts from a tight re-check.
+  // Reset here rather than in accept_fanout_shard(), which runs on the OWNER's
+  // thread -- writing this CP's backoff from there races the reads and writes its
+  // own partition thread makes in arm_stall_recheck(). The shard is not visible to
+  // this CP until it is drained anyway, and the drain runs before the re-arm in the
+  // same handler pass, so resetting here is both correct and correctly ordered.
+  if (inbox.empty())
+    return;
+  stall_recheck_backoff_ = 1;
+
+  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  for (auto &shard : inbox) {
+    auto *qs = find_queue_state(shard.queue_id, shard.process_id);
+    if (!qs) {
+      // The replica was destroyed between the owner handing this shard over and
+      // this drain. Drop it, exactly as unregister_queue drops a share it never
+      // published: these workgroups have not run and this XCD's caches have not
+      // been written back, so crediting the share would let the owner retire the
+      // grid and fire the completion signal for work that never executed.
+      //
+      // Nothing is stranded by dropping it, for the reason unregister_queue
+      // already relies on: a fan-out queue is destroyed on every XCD at once, so
+      // the teardown that removed this replica removes the owner too. KFD
+      // teardown is what reaches this window -- for_each_cp removes replicas in
+      // XCD order while a later owner is still registered, and an
+      // already-scheduled peer doorbell can drain concurrently.
+      continue;
+    }
+    // Honour the packet's acquire fence on this XCD too. The owner invalidated
+    // only its own CUs; this runs on our partition's thread, so ours are safe
+    // to touch here and the peer ends up with the same view the owner has.
+    if (shard.acquire_invalidate)
+      flush_gpu_caches();
+    qs->push_entry(std::move(shard));
+  }
+}
+
+void CommandProcessor::wake_all_xcds() {
+  // Cross-partition safe: the engine buffers each event into the target's own
+  // partition and never re-enters the component, so this is callable while
+  // holding hw_queue_mutex_.
+  for (auto *peer : xcd_peers_) {
+    if (peer && peer->engine())
+      peer->engine()->schedule_event_now(peer->doorbell_event());
+  }
+}
+
+void CommandProcessor::fan_out_dispatch(DispatchEntry &dp) {
+  const auto num_xcds = static_cast<uint32_t>(xcd_peers_.size());
+  if (num_xcds <= 1)
+    return;
+
+  // A masked queue may have no usable CU on its owning XCD. Only eligible
+  // XCDs receive work; the owner still tracks whole-grid completion.
+  std::vector<uint32_t> participants;
+  if (dp.enabled_cus) {
+    for (uint32_t rank = 0; rank < num_xcds; ++rank) {
+      if (std::ranges::any_of(xcd_peers_[rank]->cus_,
+                              [&](const auto *cu) { return dp.allows_cu(cu); }))
+        participants.push_back(rank);
+    }
+  }
+  const uint32_t participant_count =
+      dp.enabled_cus ? static_cast<uint32_t>(participants.size()) : num_xcds;
+  assert(participant_count != 0);
+
+  const uint32_t grid_wgs = dp.total_wgs;
+  auto grid = std::make_shared<GridCompletion>();
+  grid->grid_wgs = grid_wgs;
+
+  const auto apply_share = [&](DispatchEntry &entry, uint32_t physical_rank) {
+    if (!entry.enabled_cus) {
+      entry.apply_shard(XcdShard(physical_rank, num_xcds));
+      return;
+    }
+    const auto participant = std::ranges::find(participants, physical_rank);
+    if (participant == participants.end())
+      entry.total_wgs = 0;
+    else
+      entry.apply_shard(
+          XcdShard(static_cast<uint32_t>(participant - participants.begin()), participant_count));
+  };
+
+  // Excluded XCDs need empty shares too: a later CU-mask change can route work
+  // to them, and barriers must still wait for the same predecessors everywhere.
+  for (uint32_t physical_rank = 0; physical_rank < num_xcds; ++physical_rank) {
+    if (physical_rank == xcd_rank_)
+      continue;
+    DispatchEntry shard = dp;
+    shard.grid_completion = grid;
+    shard.fanout_peer = true;
+    // The peer must not fire the dispatch's completion signal; the owning XCD
+    // does that once the grid counter shows every share retired.
+    shard.completion_signal = 0;
+    apply_share(shard, physical_rank);
+    xcd_peers_[physical_rank]->accept_fanout_shard(std::move(shard));
+  }
+
+  dp.grid_completion = std::move(grid);
+  apply_share(dp, xcd_rank_);
+}
+
+void CommandProcessor::replicate_non_kernel_entry(const DispatchEntry &dp) {
+  const auto num_xcds = static_cast<uint32_t>(xcd_peers_.size());
+  if (num_xcds <= 1)
+    return;
+
+  assert(dp.is_non_kernel() && "only packets that run no shader are replicated whole");
+  for (uint32_t rank = 0; rank < num_xcds; ++rank) {
+    if (rank == xcd_rank_)
+      continue;
+    DispatchEntry copy = dp;
+    copy.fanout_peer = true;
+    copy.completion_signal = 0;
+    xcd_peers_[rank]->accept_fanout_shard(std::move(copy));
+  }
+}
+
+void CommandProcessor::register_queue(HwQueue queue) {
+  util::Logger::cp([&](auto &os) {
+    os << std::format("{}: REGISTER_QUEUE id={} pid={} ring={:#x} size={} rptr={:#x} wptr={:#x} "
+                      "doorbell_off={} is_sdma={} db_base={}",
+                      name(), queue.queue_id, queue.process_id, queue.ring_base_va, queue.ring_size,
+                      queue.read_ptr_va, queue.write_ptr_va, queue.doorbell_offset, queue.is_sdma,
+                      reinterpret_cast<uintptr_t>(queue.doorbell_base));
+  });
+  // A replica exists only to receive dispatch shards from the XCD that owns the
+  // queue. It must never read the ring or poll the doorbell, or the same packets
+  // would be dispatched once per XCD.
+  bool start_poll = queue.host_accessible && !queue.fanout_replica;
+  // Replicate onto the peer XCDs before taking the lock: accept_fanout_shard()
+  // and the peers' register_queue() take their own locks, and a shard can arrive
+  // only after this returns, so there is no window where a peer has work but no
+  // queue state.
+  {
+    // Checked before replicating, so a rejection cannot leave replicas behind on
+    // the peers. Shard routing keys on (queue_id, process_id), so a duplicate would
+    // silently deliver every shard to whichever slot matched first -- a wrong-answer
+    // bug rather than a crash, which is precisely what an assert compiled out of a
+    // release build would let through. Enforced in every build for that reason.
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    if (find_queue_state(queue.queue_id, queue.process_id) != nullptr) {
+      throw std::runtime_error(
+          std::format("duplicate queue registration on {}: queue_id={} process_id={} is already "
+                      "registered, and fan-out routes dispatch shards by that key",
+                      name(), queue.queue_id, queue.process_id));
+    }
+  }
+  const auto num_xcds = static_cast<uint32_t>(xcd_peers_.size());
+  bool replicate = queue.xcd_fanout && num_xcds > 1;
+  if (replicate) {
+    for (uint32_t rank = 0; rank < num_xcds; ++rank) {
+      if (rank == xcd_rank_)
+        continue;
+      HwQueue replica = queue;
+      replica.xcd_fanout = false;
+      replica.fanout_replica = true;
+      xcd_peers_[rank]->register_queue(std::move(replica));
+    }
+  }
+  {
+    std::unique_lock<std::shared_mutex> structure_lock(queue_structure_mutex_);
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    HwQueueState qs{};
+    qs.queue_desc_va = queue.queue_desc_va;
+    qs.fanout_replica = queue.fanout_replica;
+    hw_queues_.push_back(std::move(queue));
+    new_queue_states_.push_back(std::move(qs));
+    // KFD queues rely on the VM-level primary (rj_vm.cpp); only internal test
+    // queues (no host-accessible queue anywhere on this CP) need the CP to own the
+    // primary lifecycle. Gate on the same aggregate predicate as the teardown
+    // release (!has_kfd_queues()) — checked AFTER the push_back so it reflects the
+    // new queue — so a CP can never register a primary it will never release.
+    if (!is_primary_ && engine() && !has_kfd_queues()) {
+      engine()->register_as_primary();
+      is_primary_ = true;
+    } else if (is_primary_ && engine() && has_kfd_queues()) {
+      // A KFD queue joined a CP that had registered a test-owned primary; the
+      // VM-level primary now anchors this CP's lifecycle, so drop the CP-owned
+      // primary to keep register/release symmetric (the teardown path only
+      // releases when !has_kfd_queues()).
+      engine()->primary_release();
+      is_primary_ = false;
+    }
+  }
+  // Start (or restart) the doorbell poll thread for KFD (host-accessible) queues
+  // AFTER releasing hw_queue_mutex_. ensure_doorbell_monitor() serializes on its
+  // own doorbell_thread_mutex_. Keeping that lock order consistent with the stop
+  // path avoids joining a monitor while holding the queue mutex it needs to finish
+  // a scan. Internal test queues inject doorbell events directly via
+  // schedule_event_now() and need no monitor.
+  if (start_poll)
+    ensure_doorbell_monitor();
+}
+
+bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t process_id,
+                                              uint64_t status) {
+  uint64_t exception_status_va = 0;
+  uint32_t exception_event_id = 0;
+  {
+    std::lock_guard<std::recursive_mutex> lk(hw_queue_mutex_);
+    auto queue = std::find_if(hw_queues_.begin(), hw_queues_.end(), [&](const HwQueue &candidate) {
+      return candidate.queue_id == queue_id && candidate.process_id == process_id;
+    });
+    if (queue == hw_queues_.end() || queue->exception_status_va == 0)
+      return false;
+    exception_status_va = queue->exception_status_va;
+    exception_event_id = queue->exception_event_id;
+  }
+
+  memory_->write64(exception_status_va, status, process_id);
+  if (interrupt_cb_)
+    interrupt_cb_(process_id, exception_event_id);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  while (memory_->read64(exception_status_va, process_id) == status &&
+         std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+
+  for (auto *cu : cus_) {
+    cu->with_wave_state_locked([&] {
+      for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+        auto *wave = cu->wf(slot);
+        if (!wave->is_halted() && wave->process_id() == process_id && wave->queue_id() == queue_id)
+          wave->set_debug_suspended(true);
+      }
+    });
+  }
+  return true;
+}
+
+void CommandProcessor::unregister_queue(uint32_t queue_id, uint32_t process_id) {
+  bool drop_replicas = false;
+  {
+    std::unique_lock<std::shared_mutex> structure_lock(queue_structure_mutex_);
+    // Holds hw_queue_mutex_ across with_wave_state_locked(), which is the order
+    // the dispatch path uses too (handle_doorbell -> dispatch_workgroups ->
+    // dispatch_wf). Nothing takes them the other way any more: a wave reaching
+    // s_endpgm under the wave-state lock queues its completion instead of sending
+    // it, and WaveStateGuard delivers it after that lock is dropped. Keep it that
+    // way -- a CU-side call back into the CP while the wave-state lock is held
+    // would deadlock a DESTROY_QUEUE against the engine worker.
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    for (auto *cu : cus_) {
+      cu->with_wave_state_locked([&] {
+        for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+          auto *wave = cu->wf(slot);
+          if (!wave->is_halted() && wave->process_id() == process_id &&
+              wave->queue_id() == queue_id)
+            wave->halt();
+        }
+      });
+    }
+    for (size_t i = 0; i < hw_queues_.size(); ++i) {
+      if (hw_queues_[i].queue_id == queue_id && hw_queues_[i].process_id == process_id) {
+        drop_replicas = hw_queues_[i].xcd_fanout;
+        // Any shares still unpublished here are simply dropped. They cannot be
+        // credited to the grid from this thread: publish_share is the release edge
+        // that must follow this XCD's cache write-back, and flushing walks cus_,
+        // which belong to the engine partition rather than to the caller. Crediting
+        // without the flush would let the owner fire the completion signal with this
+        // XCD's results still cached.
+        //
+        // Dropping them is safe because a fan-out queue is only ever destroyed on
+        // every XCD at once: the KFD paths sweep all command processors, and an
+        // owner cascades to its replicas below. No XCD is left holding a grid that
+        // can no longer retire. Unregistering a lone replica is not supported.
+        hw_queues_.erase(hw_queues_.begin() + static_cast<ptrdiff_t>(i));
+        new_queue_states_.erase(new_queue_states_.begin() + static_cast<ptrdiff_t>(i));
+        break;
+      }
+    }
+  }
+  // Tear the replicas down outside our own lock: a peer's unregister_queue takes
+  // that peer's lock, and holding both would fix no order between two CPs whose
+  // queues are being destroyed concurrently.
+  if (drop_replicas) {
+    const auto num_xcds = static_cast<uint32_t>(xcd_peers_.size());
+    for (uint32_t rank = 0; rank < num_xcds; ++rank) {
+      if (rank != xcd_rank_)
+        xcd_peers_[rank]->unregister_queue(queue_id, process_id);
+    }
+  }
+
+  // Reap the monitor when the last host queue is removed. This runs after
+  // releasing hw_queue_mutex_: the poller needs that mutex to finish its current
+  // scan. The poll loop may also be in the engine event-queue path or the
+  // interrupt/event-state callback, but neither path enters a KFD ioctl or acquires
+  // KfdProcess::op_mutex_, which the production callers hold here. Preserve that
+  // invariant: no poll-loop callback may wait for a lock held by an
+  // unregister_queue() caller. The synchronous join makes queue-destroy latency
+  // include at most the current poll iteration and its bounded callbacks. The
+  // helper rechecks the queue set while holding the lifecycle mutex, so a concurrent
+  // registration either keeps this monitor alive or starts a new one after the join.
+  stop_doorbell_monitor_if_idle();
+}
+
+void CommandProcessor::set_queue_cu_selection(uint32_t queue_id, uint32_t process_id,
+                                              const QueueCuSelection &enabled_cus) {
+  {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    for (auto &queue : hw_queues_) {
+      if (queue.queue_id == queue_id && queue.process_id == process_id)
+        queue.enabled_cus = enabled_cus;
+    }
+  }
+  if (engine())
+    engine()->schedule_event_now(doorbell_event());
+}
+
+void CommandProcessor::update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
+                                    uint32_t ring_size, uint32_t queue_percentage) {
+  const bool suspended = queue_percentage == 0;
+  bool changed = false;
+  bool wake_command_processor = false;
+  {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    for (auto &q : hw_queues_) {
+      if (q.queue_id == queue_id && q.process_id == process_id) {
+        q.ring_base_va = ring_base_va;
+        q.ring_size = ring_size;
+        changed = q.runtime_suspended != suspended;
+        q.runtime_suspended = suspended;
+        // Only consume the deferral once *no* reason still gates the queue.
+        // debug_work_deferred is shared by both suspend reasons, so clearing it
+        // here while the debugger still holds the gate would leave the later
+        // debugger resume with nothing to release, and the already-fetched
+        // packets would sit until an unrelated doorbell arrived.
+        if (changed && !suspended && !q.debug_suspended)
+          wake_command_processor = std::exchange(q.debug_work_deferred, false);
+        break;
+      }
+    }
+  }
+  if (!changed)
+    return;
+  for (auto *cu : cus_) {
+    cu->with_wave_state_locked([&] {
+      for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+        auto *wave = cu->wf(slot);
+        if (!wave->is_halted() && wave->process_id() == process_id && wave->queue_id() == queue_id)
+          // The runtime's own pause reason. Writing the debugger's bit here let
+          // a runtime resume clear a debugger pause, and a debugger or CWSR
+          // resume clear an active runtime pause.
+          wave->set_runtime_suspended(suspended);
+      }
+    });
+    if (!suspended)
+      cu->schedule_work_async();
+  }
+  // Runtime resume has to release deferred queue work the same way a debugger
+  // resume does, or already-fetched work sits until the next doorbell.
+  if (wake_command_processor && engine())
+    engine()->schedule_event_now(&doorbell_event_);
+}
+
+void CommandProcessor::set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id,
+                                                 bool suspended) {
+  bool wake_command_processor = false;
+  {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    for (size_t index = 0; index < hw_queues_.size(); ++index) {
+      auto &q = hw_queues_[index];
+      if (q.queue_id == queue_id && q.process_id == process_id) {
+        if (q.debug_suspended == suspended)
+          continue;
+        q.debug_suspended = suspended;
+        if (suspended) {
+          // Existing queue work needs a resume pass only when the gate, rather
+          // than an earlier incomplete dispatch, is what prevents it from
+          // running. Resident waves are reactivated directly by KFD resume.
+          auto &state = new_queue_states_[index];
+          // Accumulate: the flag is shared with the runtime's suspend reason,
+          // and fetch_from_queue() may already have recorded a deferral for a
+          // queue the runtime had gated. Assigning would discard it, leaving
+          // neither resume path with anything to release.
+          if (state.next_dispatch_idx < state.entries.size()) {
+            const auto &entry = state.entries[state.next_dispatch_idx];
+            const bool barrier_ready =
+                !entry.wait_for_predecessors || barrier_satisfied(state, state.next_dispatch_idx);
+            q.debug_work_deferred |=
+                barrier_ready && (entry.is_non_kernel() || !entry.fully_dispatched());
+          }
+        } else if (!q.runtime_suspended) {
+          wake_command_processor |= std::exchange(q.debug_work_deferred, false);
+        }
+      }
+    }
+  }
+  if (wake_command_processor && engine())
+    engine()->schedule_event_now(&doorbell_event_);
+}
+
+void CommandProcessor::set_doorbell_base(uint32_t process_id, void *base) {
+  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  for (auto &q : hw_queues_) {
+    if (q.process_id == process_id)
+      q.doorbell_base = base;
+  }
+}
+
+void CommandProcessor::ensure_doorbell_monitor() {
+  std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
+  // A monitor is already servicing this CP's queues — nothing to do. (The
+  // register→ring window is fine: the live monitor scans every registered queue
+  // each pass, so it will pick up the queue this call just added.)
+  if (doorbell_running_)
+    return;
+  util::Logger::cp([&](auto &os) { os << std::format("{}: STARTING doorbell thread", name()); });
+  // Construct the thread BEFORE setting doorbell_running_: if the jthread
+  // constructor throws (std::system_error on thread-creation failure) the flag
+  // must stay false so a later ensure_doorbell_monitor() retries instead of
+  // no-oping forever. We still hold doorbell_thread_mutex_, so teardown cannot
+  // observe the new handle until both it and the running flag are published.
+  assert(!doorbell_thread_.joinable());
+  doorbell_thread_ = std::jthread([this](std::stop_token stop) { doorbell_poll_loop(stop); });
+  doorbell_running_ = true;
+}
+
+void CommandProcessor::stop_doorbell_monitor() {
+  std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
+  if (doorbell_thread_.joinable()) {
+    doorbell_thread_.request_stop();
+    doorbell_thread_.join();
+  }
+  doorbell_running_ = false;
+}
+
+void CommandProcessor::stop_doorbell_monitor_if_idle() {
+  std::lock_guard<std::mutex> thread_lock(doorbell_thread_mutex_);
+  {
+    std::lock_guard<std::recursive_mutex> queue_lock(hw_queue_mutex_);
+    // polls_kfd_queues(), not has_kfd_queues(): a fan-out replica is
+    // host-accessible but is never polled, so keying this on presence would
+    // strand a monitor on a CP whose own queue was destroyed while a replica of
+    // some other queue happened to remain.
+    if (polls_kfd_queues())
+      return;
+  }
+  if (doorbell_thread_.joinable()) {
+    doorbell_thread_.request_stop();
+    doorbell_thread_.join();
+  }
+  doorbell_running_ = false;
+}
+
+uint64_t CommandProcessor::read_gpu_u64(uint64_t va, uint32_t vmid) const {
+  uint64_t val = 0;
+  // Ring pointers and signal values are 64-bit locations the host publishes with a
+  // single atomic store, so read them with a single atomic load where the mapping
+  // allows it. The byte walk below can observe a half-updated value, and it also
+  // leaves this CP with no ordering edge to the writer -- which is why the packets a
+  // new write index publishes were being read unsynchronized as well.
+  if (memory_->try_read_u64_atomic(va, &val, vmid))
+    return val;
+  // Fall back for a split, unaligned or page-crossing range: those cannot be read
+  // atomically, and the byte walk resolves each byte's mapping independently.
+  auto *dst = reinterpret_cast<uint8_t *>(&val);
+  for (uint32_t i = 0; i < sizeof(val); ++i)
+    dst[i] = memory_->read8(va + i, vmid);
+  return val;
+}
+
+uint32_t CommandProcessor::read_gpu_u32(uint64_t va, uint32_t vmid) const {
+  uint32_t val = 0;
+  auto *dst = reinterpret_cast<uint8_t *>(&val);
+  for (uint32_t i = 0; i < sizeof(val); ++i)
+    dst[i] = memory_->read8(va + i, vmid);
+  return val;
+}
+
+void CommandProcessor::read_gpu_block(uint64_t va, void *dst, size_t size, uint32_t vmid) const {
+  auto *p = static_cast<uint8_t *>(dst);
+  for (size_t i = 0; i < size; ++i)
+    p[i] = memory_->read8(va + i, vmid);
+}
+
+amdgpu::AccessOutcome CommandProcessor::write_gpu_block(uint64_t va, const void *src, size_t size,
+                                                        uint32_t vmid) {
+  return memory_->write_block(va, std::span<const uint8_t>(static_cast<const uint8_t *>(src), size),
+                              vmid);
+}
+
+CopyOutcome CommandProcessor::read_doorbell(const HwQueue &queue, uint64_t &value) const {
+  value = 0;
+  if (queue.host_accessible) {
+    if (!queue.doorbell_base)
+      return CopyOutcome::Faulted;
+    auto *address = static_cast<char *>(queue.doorbell_base) + queue.doorbell_offset;
+    if (reinterpret_cast<uintptr_t>(address) % alignof(uint64_t) != 0)
+      return CopyOutcome::Faulted;
+    value = std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(address))
+                .load(std::memory_order_acquire);
+    return CopyOutcome::Complete;
+  }
+  if (!memory_ || queue.doorbell_va == 0 || queue.doorbell_va % alignof(uint64_t) != 0)
+    return CopyOutcome::Faulted;
+  // A publication cursor must be one acquire load, including on passthrough
+  // mappings. The byte-wise fallback in read_gpu_u64 can tear.
+  return memory_->atomic_load(queue.doorbell_va, sizeof(value), value, queue.process_id);
+}
+
+/// @brief Scan all HW queues for doorbell changes; return true if any changed.
+/// Caller must NOT hold hw_queue_mutex_.
+bool CommandProcessor::scan_doorbells() {
+  bool found = false;
+  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  for (auto &q : hw_queues_) {
+    // A replica shares the owner's ring and doorbell. Only the owning XCD may
+    // consume them, or every XCD would dispatch the whole grid.
+    if (q.fanout_replica)
+      continue;
+    uint64_t doorbell_value;
+    if (read_doorbell(q, doorbell_value) != CopyOutcome::Complete)
+      continue;
+    if (doorbell_value != q.last_doorbell) {
+      util::Logger::cp([&](auto &os) {
+        os << std::format("{}: DOORBELL_CHANGE pid={} qid={} sdma={} old={:#x} new={:#x} "
+                          "db_base={} db_off={}",
+                          name(), q.process_id, q.queue_id, q.is_sdma, q.last_doorbell,
+                          doorbell_value, reinterpret_cast<uintptr_t>(q.doorbell_base),
+                          q.doorbell_offset);
+      });
+      q.last_doorbell = doorbell_value;
+      found = true;
+    }
+  }
+  return found;
+}
+
+void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
+  using namespace std::chrono_literals;
+  uint64_t poll_count = 0;
+  // INVARIANT: this loop must re-read invalid_pending_/stall_pending_ (below) on
+  // EVERY iteration, unconditionally. Those flags are level-triggered — the engine
+  // clears them at handle_doorbell entry and re-sets them if a stall is still
+  // unsatisfied — so this unconditional 100us heartbeat re-check is what guarantees a
+  // pending stall is eventually retried. A future change that lets the loop skip the
+  // flag re-read on some iterations (an early continue before the retry check) would
+  // reintroduce a lost-wakeup.
+  while (!stop.stop_requested()) {
+    bool doorbell_changed = scan_doorbells();
+    // Retry on a pending INVALID packet (the runtime has not finished writing it
+    // yet) OR a pending barrier/dependency stall (waiting on a signal a peer rank
+    // or another queue will write) even when no doorbell value changed. Pace those
+    // retries with the same 100us idle wait rather than spinning: a real doorbell
+    // change fires the event immediately (latency-sensitive), but a pending retry
+    // only needs to poll until the awaited state changes, so it must not burn a
+    // core. Rescheduling these on the main event queue (now+1) instead would spin
+    // simulated time millions of ticks per collective while wall-clock RPC latency
+    // elapses — the RCCL slowdown this replaces.
+    bool retry = !doorbell_changed && (invalid_pending_.load(std::memory_order_acquire) ||
+                                       stall_pending_.load(std::memory_order_acquire));
+    if (doorbell_changed)
+      engine()->schedule_event_now(&doorbell_event_);
+    else if (retry) {
+      std::this_thread::sleep_for(100us);
+      engine()->schedule_event_now(&doorbell_event_);
+    } else
+      std::this_thread::sleep_for(100us);
+    ++poll_count;
+
+    // HQD idle monitoring: periodically fire HQD_IDLE for queues that are
+    // currently empty. On real hardware the CP continuously monitors queue
+    // activity and fires the idle interrupt whenever the queue is inactive.
+    // Our drain_completions fires on the non-empty→empty transition, but a
+    // process may create a new event AFTER that transition and miss the
+    // signal. Re-broadcasting every ~10ms ensures late-created events see
+    // the idle state within a bounded window.
+    if (poll_count % 100 == 0) {
+      // Snapshot the idle queues' process ids under the lock, then fire interrupt_cb_
+      // OUTSIDE it. interrupt_cb_ is an external KFD-layer callback whose internal
+      // locking is opaque to the CP; invoking it while holding hw_queue_mutex_ risks a
+      // lock-order inversion if that callback ever takes a lock held elsewhere while
+      // acquiring hw_queue_mutex_.
+      std::vector<uint32_t> idle_pids;
+      {
+        std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+        for (size_t i = 0; i < hw_queues_.size(); ++i) {
+          // A replica does not own the queue, so it must not report it idle: its
+          // shards drain before the owner's and the same KFD queue would otherwise
+          // raise this from several CPs at once.
+          if (hw_queues_[i].fanout_replica)
+            continue;
+          if (new_queue_states_[i].entries.empty() && hw_queues_[i].process_id != 0)
+            idle_pids.push_back(hw_queues_[i].process_id);
+        }
+      }
+      if (interrupt_cb_)
+        for (uint32_t pid : idle_pids)
+          interrupt_cb_(pid, 0);
+    }
+
+    if (poll_count % 5000 == 1) {
+      std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+      for (auto &q : hw_queues_) {
+        uint64_t current;
+        if (read_doorbell(q, current) != CopyOutcome::Complete)
+          current = q.last_doorbell;
+        util::Logger::cp([&](auto &os) {
+          os << std::format("{}: DOORBELL_POLL pid={} qid={} current={:#x} last={:#x} "
+                            "monitor_base={} db_off={} polls={}",
+                            name(), q.process_id, q.queue_id, current, q.last_doorbell,
+                            reinterpret_cast<uintptr_t>(q.doorbell_base), q.doorbell_offset,
+                            poll_count);
+        });
+      }
+    }
+  }
+}
+
+HwQueueState *CommandProcessor::schedule_next_queue() {
+  if (new_queue_states_.empty())
+    return nullptr;
+  size_t start = next_queue_idx_;
+  for (size_t i = 0; i < new_queue_states_.size(); ++i) {
+    size_t idx = (start + i) % new_queue_states_.size();
+    auto &qs = new_queue_states_[idx];
+    if (hw_queues_[idx].is_sdma || hw_queues_[idx].debug_suspended ||
+        hw_queues_[idx].runtime_suspended)
+      continue;
+    if (qs.next_dispatch_idx < qs.entries.size()) {
+      next_queue_idx_ = (idx + 1) % new_queue_states_.size();
+      return &qs;
+    }
+  }
+  return nullptr;
+}
+
+bool CommandProcessor::barrier_satisfied(const HwQueueState &qs, size_t idx) const {
+  if (idx == 0 && !qs.implicit_barrier_next)
+    return true;
+
+  // Barrier bit: all prior entries must be fully completed, device-wide. A prior
+  // entry that is one XCD's share of a fanned-out dispatch is not done just
+  // because this XCD finished it, so gate on the whole grid or this XCD would run
+  // the next packet while a peer is still executing the previous one.
+  for (size_t i = 0; i < idx; ++i) {
+    if (!qs.entries[i].grid_fully_completed())
+      return false;
+  }
+  return true;
+}
+
+void CommandProcessor::drain_pending_wg_completions() {
+  for (const auto completion : pending_wg_completions_) {
+    plugin_group_->onAmdgpuWorkgroupCompleted(completion.dispatch_id, completion.wg_id);
+    for (auto *spi : spis_)
+      if (spi->release_wgp_workgroup(completion.dispatch_id, completion.wg_id))
+        break;
+    mark_cluster_workgroup_complete(completion.dispatch_id, completion.wg_id);
+    if (completion_)
+      completion_->notify_wg_complete(completion.dispatch_id, completion.wg_id, new_queue_states_);
+  }
+  pending_wg_completions_.clear();
+}
+
+void CommandProcessor::drain_pending_cluster_barrier_completions() {
+  std::vector<PendingClusterBarrierCompletion> completions;
+  {
+    std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
+    completions.swap(pending_cluster_barrier_completions_);
+  }
+
+  for (auto &completion : completions) {
+    std::vector<Wavefront *> members;
+    for (auto [cu, peer_wg_id] : completion.peers) {
+      auto peer_members =
+          cu->complete_barrier(completion.dispatch_id, peer_wg_id, completion.completion_bit);
+      members.insert(members.end(), peer_members.begin(), peer_members.end());
+    }
+    if (!members.empty())
+      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members));
+  }
+}
+
+void CommandProcessor::register_cluster_workgroup(const DispatchEntry &entry, uint32_t local_wg_id,
+                                                  uint32_t global_wg_id, ComputeUnitCore *cu,
+                                                  uint32_t lds_base) {
+  if (!entry.has_workgroup_clusters())
+    return;
+  std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
+  uint32_t cluster_base_wg_id =
+      entry.cluster_base_local_wg_id(local_wg_id) + entry.workgroup_id_offset;
+  uint64_t cluster_key = wg_key(entry.dispatch_id, cluster_base_wg_id);
+  cu->pin_lds_until_cluster_retired(cluster_key);
+  ClusterWorkgroupPlacement placement{};
+  placement.cu = cu;
+  placement.lds_base = lds_base;
+  placement.cluster_key = cluster_key;
+  placement.cluster_rank = entry.cluster_rank_for_flat_wg_id(global_wg_id);
+  placement.cluster_size = entry.cluster_size();
+  placement.peer_wg_ids.reserve(placement.cluster_size);
+  for (uint32_t rank = 0; rank < placement.cluster_size; ++rank) {
+    uint32_t peer_local_wg_id = entry.cluster_peer_local_wg_id(local_wg_id, rank);
+    placement.peer_wg_ids.push_back(peer_local_wg_id + entry.workgroup_id_offset);
+  }
+  cluster_wg_placements_[wg_key(entry.dispatch_id, global_wg_id)] = std::move(placement);
+  auto &barriers = cluster_barriers_[cluster_key];
+  if (barriers.expected_member_count == 0) {
+    barriers.expected_member_count = entry.cluster_size();
+    barriers.member_count = entry.cluster_size();
+  }
+  barriers.registered_workgroups.insert(global_wg_id);
+}
+
+bool CommandProcessor::find_valid_cluster_barrier_locked(const Wavefront &wf, int32_t barrier_id,
+                                                         ClusterWorkgroupPlacement *&placement,
+                                                         ClusterBarrierState *&barriers) {
+  if (barrier_id != kClusterBarrierId && barrier_id != kClusterTrapBarrierId)
+    return false;
+  auto placement_it = cluster_wg_placements_.find(wg_key(wf.dispatch_id(), wf.wg_id()));
+  if (placement_it == cluster_wg_placements_.end())
+    return false;
+  auto barriers_it = cluster_barriers_.find(placement_it->second.cluster_key);
+  if (barriers_it == cluster_barriers_.end() || barriers_it->second.member_count == 0 ||
+      barriers_it->second.registered_workgroups.size() != barriers_it->second.expected_member_count)
+    return false;
+  placement = &placement_it->second;
+  barriers = &barriers_it->second;
+  return true;
+}
+
+bool CommandProcessor::find_valid_cluster_barrier_locked(
+    const Wavefront &wf, int32_t barrier_id, const ClusterWorkgroupPlacement *&placement,
+    const ClusterBarrierState *&barriers) const {
+  if (barrier_id != kClusterBarrierId && barrier_id != kClusterTrapBarrierId)
+    return false;
+  auto placement_it = cluster_wg_placements_.find(wg_key(wf.dispatch_id(), wf.wg_id()));
+  if (placement_it == cluster_wg_placements_.end())
+    return false;
+  auto barriers_it = cluster_barriers_.find(placement_it->second.cluster_key);
+  if (barriers_it == cluster_barriers_.end() || barriers_it->second.member_count == 0 ||
+      barriers_it->second.registered_workgroups.size() != barriers_it->second.expected_member_count)
+    return false;
+  placement = &placement_it->second;
+  barriers = &barriers_it->second;
+  return true;
+}
+
+bool CommandProcessor::cluster_barrier_valid(const Wavefront &wf, int32_t barrier_id) const {
+  std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
+  const ClusterWorkgroupPlacement *placement = nullptr;
+  const ClusterBarrierState *barriers = nullptr;
+  return find_valid_cluster_barrier_locked(wf, barrier_id, placement, barriers);
+}
+
+uint32_t CommandProcessor::cluster_barrier_state(const Wavefront &wf, int32_t barrier_id,
+                                                 uint32_t allocation_blocks) const {
+  std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
+  const ClusterWorkgroupPlacement *placement = nullptr;
+  const ClusterBarrierState *barriers = nullptr;
+  if (!find_valid_cluster_barrier_locked(wf, barrier_id, placement, barriers))
+    return 0;
+  const uint32_t index = static_cast<uint32_t>(-barrier_id - kClusterBarrierBit);
+  return 1u | ((barriers->member_count & 0x7fu) << 4) |
+         ((barriers->signaled_workgroups[index].size() & 0x7fu) << 16) |
+         ((allocation_blocks & 0x7u) << 24);
+}
+
+bool CommandProcessor::cluster_barrier_signal(Wavefront &wf, int32_t barrier_id) {
+  bool is_first = false;
+  const uint8_t completion_bit = static_cast<uint8_t>(-barrier_id);
+  {
+    std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
+    ClusterWorkgroupPlacement *placement = nullptr;
+    ClusterBarrierState *barriers = nullptr;
+    if (!find_valid_cluster_barrier_locked(wf, barrier_id, placement, barriers))
+      return false;
+
+    const uint32_t index = static_cast<uint32_t>(completion_bit - kClusterBarrierBit);
+    auto [_, inserted] = barriers->signaled_workgroups[index].insert(wf.wg_id());
+    if (!inserted)
+      return false;
+    is_first = barriers->signaled_workgroups[index].size() == 1;
+    if (barriers->signaled_workgroups[index].size() < barriers->member_count)
+      return is_first;
+
+    barriers->signaled_workgroups[index].clear();
+    PendingClusterBarrierCompletion completion{wf.dispatch_id(), completion_bit, {}};
+    auto &peers = completion.peers;
+    peers.reserve(placement->peer_wg_ids.size());
+    for (uint32_t peer_wg_id : placement->peer_wg_ids) {
+      auto peer = cluster_wg_placements_.find(wg_key(wf.dispatch_id(), peer_wg_id));
+      if (peer != cluster_wg_placements_.end() && peer->second.cu)
+        peers.emplace_back(peer->second.cu, peer_wg_id);
+    }
+    pending_cluster_barrier_completions_.push_back(std::move(completion));
+  }
+
+  // In serial mode this instruction already runs on the CP/engine thread, so
+  // preserve immediate barrier resolution. Pool workers leave the compact
+  // record queued until the fan-out rejoins below.
+  if (dispatch_threads_ <= 1)
+    drain_pending_cluster_barrier_completions();
+  return is_first;
+}
+
+void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uint32_t wg_id) {
+  // Cluster barriers resolve here, but complete_barrier() and the LDS reclaim
+  // both reach into a CU. Collect them under the lock and act after it is
+  // dropped -- see cluster_placements_mutex_.
+  std::array<std::vector<std::pair<ComputeUnitCore *, uint32_t>>, 2> resolved_peers;
+  std::vector<std::pair<ComputeUnitCore *, uint64_t>> unpin;
+  {
+    std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
+    auto it = cluster_wg_placements_.find(wg_key(dispatch_id, wg_id));
+    if (it == cluster_wg_placements_.end() || it->second.completed)
+      return;
+
+    it->second.completed = true;
+    const uint64_t cluster_key = it->second.cluster_key;
+    const auto peer_wg_ids = it->second.peer_wg_ids;
+    auto barrier_it = cluster_barriers_.find(cluster_key);
+    if (barrier_it != cluster_barriers_.end() && barrier_it->second.member_count != 0) {
+      auto &barriers = barrier_it->second;
+      --barriers.member_count;
+      for (uint32_t index = 0; index < barriers.signaled_workgroups.size(); ++index) {
+        barriers.signaled_workgroups[index].erase(wg_id);
+        if (barriers.member_count == 0 ||
+            barriers.signaled_workgroups[index].size() < barriers.member_count)
+          continue;
+        barriers.signaled_workgroups[index].clear();
+        for (uint32_t peer_wg_id : peer_wg_ids) {
+          auto peer = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
+          if (peer != cluster_wg_placements_.end() && !peer->second.completed && peer->second.cu)
+            resolved_peers[index].emplace_back(peer->second.cu, peer_wg_id);
+        }
+      }
+    }
+
+    const bool all_completed = std::ranges::all_of(peer_wg_ids, [&](uint32_t peer_wg_id) {
+      auto peer = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
+      return peer != cluster_wg_placements_.end() && peer->second.completed;
+    });
+    if (all_completed) {
+      for (uint32_t peer_wg_id : peer_wg_ids) {
+        auto peer = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
+        if (peer != cluster_wg_placements_.end() && peer->second.cu)
+          unpin.emplace_back(peer->second.cu, cluster_key);
+        cluster_wg_placements_.erase(wg_key(dispatch_id, peer_wg_id));
+      }
+      cluster_barriers_.erase(cluster_key);
+    }
+  }
+
+  for (uint32_t index = 0; index < resolved_peers.size(); ++index) {
+    std::vector<Wavefront *> members;
+    const uint8_t completion_bit = static_cast<uint8_t>(kClusterBarrierBit + index);
+    for (auto [cu, peer_wg_id] : resolved_peers[index]) {
+      auto peer_members = cu->complete_barrier(dispatch_id, peer_wg_id, completion_bit);
+      members.insert(members.end(), peer_members.begin(), peer_members.end());
+    }
+    if (!members.empty())
+      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members));
+  }
+
+  release_cluster_lds_pins(unpin);
+}
+
+// The waves halted (and freed) before their pin was released, so reclaim each
+// peer CU's LDS once the whole cluster is done. Runs with
+// cluster_placements_mutex_ released: maybe_reset_lds_alloc() reaches the CU's
+// wave-state lock, which is ordered ahead of it.
+void CommandProcessor::release_cluster_lds_pins(
+    const std::vector<std::pair<ComputeUnitCore *, uint64_t>> &unpin) {
+  for (const auto &[cu, cluster_key] : unpin) {
+    cu->unpin_lds_for_cluster(cluster_key);
+    cu->maybe_reset_lds_alloc();
+  }
+}
+
+void CommandProcessor::erase_cluster_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
+  // maybe_reset_lds_alloc() takes the CU's wave-state lock, so it runs after the
+  // placements lock is dropped -- see cluster_placements_mutex_.
+  std::vector<std::pair<ComputeUnitCore *, uint64_t>> unpin;
+  {
+    std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
+    auto it = cluster_wg_placements_.find(wg_key(dispatch_id, wg_id));
+    if (it == cluster_wg_placements_.end())
+      return;
+    if (it->second.cu)
+      unpin.emplace_back(it->second.cu, it->second.cluster_key);
+    cluster_barriers_.erase(it->second.cluster_key);
+    cluster_wg_placements_.erase(it);
+  }
+  release_cluster_lds_pins(unpin);
+}
+
+void CommandProcessor::erase_cluster_workgroups(uint32_t dispatch_id) {
+  std::vector<std::pair<ComputeUnitCore *, uint64_t>> unpin;
+  {
+    std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
+    for (auto it = cluster_wg_placements_.begin(); it != cluster_wg_placements_.end();) {
+      if ((it->first >> 32) == dispatch_id) {
+        cluster_barriers_.erase(it->second.cluster_key);
+        if (it->second.cu)
+          unpin.emplace_back(it->second.cu, it->second.cluster_key);
+        it = cluster_wg_placements_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  release_cluster_lds_pins(unpin);
+}
+
+std::vector<ClusterLdsTarget>
+CommandProcessor::cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id, uint32_t mcast_mask) {
+  std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
+  std::vector<ClusterLdsTarget> targets;
+  auto src_it = cluster_wg_placements_.find(wg_key(dispatch_id, wg_id));
+  if (src_it == cluster_wg_placements_.end())
+    return targets;
+
+  const auto &src = src_it->second;
+  const uint32_t self_mask = cluster_multicast_rank_mask(src.cluster_rank);
+  // Defensive for direct helper callers; the issue path handles mask 0 locally.
+  if (mcast_mask == 0 || (src.cluster_size <= 1 && (mcast_mask & self_mask) != 0)) {
+    targets.push_back({src.cu, wg_id, src.lds_base, src.cluster_rank});
+    return targets;
+  }
+  if (src.cluster_size <= 1)
+    return targets;
+
+  for (uint32_t rank = 0; rank < src.cluster_size && rank < kClusterMulticastMaskBits; ++rank) {
+    if ((mcast_mask & (1u << rank)) == 0)
+      continue;
+    uint32_t peer_wg_id = src.peer_wg_ids[rank];
+    auto peer_it = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
+    if (peer_it == cluster_wg_placements_.end()) {
+      throw std::runtime_error(std::format(
+          "cluster multicast target is not resident: dispatch={} source_wg={} peer_wg={} rank={}",
+          dispatch_id, wg_id, peer_wg_id, rank));
+    }
+    const auto &peer = peer_it->second;
+    targets.push_back({peer.cu, peer_wg_id, peer.lds_base, peer.cluster_rank});
+  }
+
+  if (targets.empty() && (mcast_mask & self_mask) != 0)
+    targets.push_back({src.cu, wg_id, src.lds_base, src.cluster_rank});
+  return targets;
+}
+
+uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
+  assert(!cus_.empty() && "command processor has no compute units");
+
+  // All waves in one workgroup currently land on one physical CU so the
+  // existing barrier implementation remains local. WGP mode additionally
+  // reserves that CU's sibling and binds the waves to their shared LDS pool.
+  // Query the complete placement before dispatching for all-or-nothing setup.
+  uint32_t dispatched = 0;
+  // Places one workgroup's waves on the chosen CU. Returns false only on an
+  // internal invariant violation: dispatch_wf() returning null after placement was
+  // gated on can_accept_workgroup(). The caller turns that into a hard error rather
+  // than silently dereferencing a null wave in a release build (where the callee's
+  // assert is compiled out).
+  auto dispatch_to_placement =
+      [&](uint32_t local_wg_id, uint32_t global_wg_id,
+          const ShaderProcessorInput::WorkgroupPlacement &placement) -> bool {
+    // Fire the dispatch-execution-begin hook exactly once, on the first workgroup
+    // actually placed on a CU, guarded by the per-dispatch flag. One begin per
+    // dispatch, not per XCD. This cannot be pinned to the XCD that read the
+    // packet: when the grid is smaller than the XCD count that XCD's share may be
+    // empty, so it never places anything. Let whichever XCD places the grid's
+    // first workgroup claim the report. The shared claim must run under the
+    // plugin-group callback lock: otherwise the winner can be descheduled after
+    // claiming while a peer publishes this dispatch's first wave callback.
+    if (!entry.execution_begun) {
+      entry.execution_begun = true;
+      plugin_group_->onAmdgpuDispatchExecutionBeginOnce(entry.dispatch_id, [&]() {
+        return !entry.grid_completion || entry.grid_completion->claim_execution_begin();
+      });
+    }
+    ComputeUnitCore *cu = placement.cu;
+    uint32_t lds_base = placement.lds_base;
+    // Reserve AND fully initialize all waves BEFORE committing WG-completion
+    // bookkeeping. begin_workgroup() installs the WG refcount and
+    // register_cluster_workgroup() installs the LDS pin; both are released only via
+    // release_wf() when the waves halt. Committing them first and then failing
+    // mid-workgroup would orphan the refcount and pin, permanently blocking
+    // maybe_reset_lds_alloc() on this CU. Two failure modes are covered by doing all
+    // fallible work up front: a dispatch_wf() null (placement gating makes this
+    // unreachable, but the assert is compiled out in release), and a throw from
+    // init_wavefront_regs() (malformed kernarg-preload / undersized TTMP SGPR block).
+    // On either, release the reserved-but-uncommitted waves. Use
+    // free_wavefront_resources() rather than halt(): these waves never executed, so
+    // firing halt()'s onAmdgpuWavefrontHalted hook would feed observers a spurious
+    // "completed" wave. free_wavefront_resources() frees the SGPR/VGPR blocks and
+    // resets the slot without the hook or a CP completion notify — and since
+    // begin_workgroup() has not run, there is no active_wgs_ entry / cluster pin to
+    // unwind either. Also reclaim the placement's LDS/WGP reservation symmetrically
+    // with how it was reserved:
+    //   - CU / cluster mode: the SPI (or the direct CU path) advanced the CU's
+    //     next_lds_alloc_ via allocate_lds(); maybe_reset_lds_alloc() rolls it back
+    //     iff the CU is now idle (freeing these waves left no active waves) and
+    //     unpinned. It correctly no-ops when peers of the same dispatch are resident.
+    //   - WGP mode: allocate_workgroup() reserved SPI-side state (wgp.next_lds_alloc,
+    //     wgp.active_workgroups, resident_wgp_workgroups_) that is NOT CU-local, so
+    //     maybe_reset_lds_alloc() cannot reach it; release_wgp_workgroup() is the
+    //     matching release (the same call notify_wg_complete uses on the normal path).
+    // Without the WGP release a failed WGP dispatch would permanently pin that WGP.
+    std::vector<Wavefront *> wg_wavefronts;
+    wg_wavefronts.reserve(entry.wfs_per_workgroup);
+    const auto free_reserved = [&]() {
+      for (auto *claimed : wg_wavefronts)
+        cu->free_wavefront_resources(*claimed);
+      if (entry.wgp_mode) {
+        for (auto *spi : spis_)
+          if (spi->release_wgp_workgroup(entry.dispatch_id, global_wg_id))
+            break;
+      }
+      cu->maybe_reset_lds_alloc();
+    };
+    for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
+      Wavefront *wf = cu->dispatch_wf(global_wg_id, entry.kernel_entry_pc, entry.sgprs_per_wf,
+                                      entry.vgprs_per_wf, entry.kernel_wave_size);
+      if (!wf) {
+        assert(false && "dispatch_wf failed after placement was reserved");
+        free_reserved();
+        return false;
+      }
+      wg_wavefronts.push_back(wf);
+    }
+    for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
+      Wavefront *wf = wg_wavefronts[w];
+      wf->set_lds_base(lds_base);
+      wf->set_lds_size(aligned_lds_bytes_per_workgroup(entry));
+      wf->set_lds(placement.lds);
+      wf->set_dispatch_id(entry.dispatch_id);
+      wf->set_aql_packet_id(entry.aql_packet_id);
+      wf->set_code_load_bias(entry.code_load_bias);
+      wf->set_wave_in_group(w);
+      wf->set_process_id(entry.process_id);
+      wf->set_mode_raw(entry.initial_mode_raw);
+      wf->set_queue_id(entry.queue_id);
+      wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, wf->wf_size()));
+      const uint32_t relative_wg_id = global_wg_id - entry.workgroup_id_offset;
+      const WorkgroupCoord coord = entry.local_wg_coord(relative_wg_id);
+      wf->set_wg_coord(coord.x, coord.y, coord.z);
+      wf->set_cluster_info(entry.cluster_rank_for_flat_wg_id(global_wg_id), entry.cluster_size());
+      try {
+        init_wavefront_regs(cu, wf, entry, global_wg_id, w);
+      } catch (...) {
+        free_reserved();
+        throw;
+      }
+    }
+
+    // All fallible per-wave work succeeded: commit WG bookkeeping and the cluster pin.
+    cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup,
+                        entry.num_named_barriers);
+    register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
+
+    plugin_group_->onAmdgpuWorkgroupDispatched(
+        entry.dispatch_id, global_wg_id, cu->vgpr_allocation_block_size(),
+        cu->sgpr_allocation_block_size(), std::span<Wavefront *>(wg_wavefronts));
+    for (auto *wf : wg_wavefronts)
+      plugin_group_->onAmdgpuWavefrontDispatched(*wf);
+
+    ++entry.dispatched_wgs;
+    ++dispatched;
+    dispatched_workgroups_.fetch_add(1, std::memory_order_relaxed);
+    return true;
+  };
+
+  while (entry.dispatched_wgs < entry.total_wgs) {
+    if (entry.has_workgroup_clusters()) {
+      assert(!entry.wgp_mode && "workgroup clusters are gfx1250-only and use CU mode");
+      // The SPI interface chooses one WG at a time and cannot reserve all peers
+      // in a cluster atomically. Plan clusters directly across the CP-visible CU
+      // list until SPI grows an all-or-nothing cluster placement API.
+      uint32_t cluster_size = entry.cluster_size();
+      assert(entry.dispatched_wgs % cluster_size == 0 &&
+             "clustered dispatch advances by whole clusters");
+      assert(entry.total_wgs - entry.dispatched_wgs >= cluster_size &&
+             "validate_cluster_shape guarantees a complete trailing cluster");
+      // dispatched_wgs counts workgroups; the chunk here is a whole cluster, so
+      // convert to a cluster index before asking the shard for its ordinal.
+      uint32_t cluster_ordinal = entry.chunk_ordinal_for(entry.dispatched_wgs / cluster_size);
+      uint32_t local_wg_id = entry.cluster_base_local_wg_id_for_ordinal(cluster_ordinal);
+      std::vector<PlannedWorkgroup> plan;
+      size_t planned_next_cu = next_cu_;
+      if (!plan_cluster_workgroups(entry, local_wg_id, next_cu_, cus_, plan, planned_next_cu)) {
+        if (!any_active_wavefronts(cus_)) {
+          throw std::runtime_error(
+              std::format("workgroup cluster {}x{}x{} cannot fit in available CU resources",
+                          entry.cluster_size_x, entry.cluster_size_y, entry.cluster_size_z));
+        }
+        break;
+      }
+      next_cu_ = planned_next_cu;
+      // A cluster is all-or-nothing: dispatch_to_placement() commits each peer's WG
+      // bookkeeping (begin_workgroup) and LDS cluster pin (register_cluster_workgroup)
+      // as it succeeds. If a later peer fails (dispatch_wf null or an init_wavefront_regs
+      // throw), the already-committed peers would otherwise keep their refcount and pin
+      // forever, permanently blocking maybe_reset_lds_alloc() on those CUs. Track the
+      // committed peers and roll them back on any failure before propagating the error.
+      std::vector<std::pair<ComputeUnitCore *, uint32_t>> committed_peers;
+      committed_peers.reserve(plan.size());
+      try {
+        for (const auto &wg : plan) {
+          ShaderProcessorInput::WorkgroupPlacement placement{
+              wg.cu, &wg.cu->lds(), wg.cu->allocate_lds(entry.group_segment_fixed_size)};
+          if (!dispatch_to_placement(wg.local_wg_id, wg.global_wg_id, placement))
+            throw std::runtime_error("dispatch_wf failed after cluster placement was reserved");
+          committed_peers.emplace_back(wg.cu, wg.global_wg_id);
+        }
+      } catch (...) {
+        // Roll back the peers committed before the failure (dispatch_to_placement
+        // already unwound its own reserved-but-uncommitted waves). erase_cluster_workgroup
+        // unpins that peer's cluster LDS and drops its placement; abort_workgroup frees
+        // its resident waves and clears the WG refcount without a completion notify.
+        for (const auto &[cu, gwg] : committed_peers) {
+          erase_cluster_workgroup(entry.dispatch_id, gwg);
+          cu->abort_workgroup(entry.dispatch_id, gwg);
+        }
+        throw;
+      }
+      continue;
+    }
+
+    // Unclustered: the chunk is a single workgroup, so dispatched_wgs indexes
+    // the shard's chunks directly and the shard maps that to a grid-wide id.
+    // An unsharded entry maps the ordinal to itself.
+    uint32_t local_wg_id = entry.chunk_ordinal_for(entry.dispatched_wgs);
+    uint32_t global_wg_id = local_wg_id + entry.workgroup_id_offset;
+
+    // SPI selects the CU or sibling-CU WGP based on descriptor mode and
+    // resource availability.
+    std::optional<ShaderProcessorInput::WorkgroupPlacement> placement;
+    if (!spis_.empty()) {
+      for (auto *spi : spis_) {
+        placement = spi->allocate_workgroup(entry, global_wg_id);
+        if (placement)
+          break;
+      }
+    } else if (!entry.wgp_mode) {
+      for (size_t attempt = 0; attempt < cus_.size(); ++attempt) {
+        size_t cu_idx = (next_cu_ + attempt) % cus_.size();
+        if (!entry.allows_cu(cus_[cu_idx]))
+          continue;
+        if (cus_[cu_idx]->can_accept_workgroup(entry.wfs_per_workgroup,
+                                               entry.group_segment_fixed_size)) {
+          auto *cu = cus_[cu_idx];
+          placement = ShaderProcessorInput::WorkgroupPlacement{
+              cu, &cu->lds(), cu->allocate_lds(entry.group_segment_fixed_size)};
+          next_cu_ = (cu_idx + 1) % cus_.size();
+          break;
+        }
+      }
+    }
+
+    if (!placement) {
+      if (!any_active_wavefronts(cus_)) {
+        throw std::runtime_error(
+            std::format("workgroup cannot fit in available {} resources: waves={} LDS={} bytes",
+                        entry.wgp_mode ? "WGP" : "CU", entry.wfs_per_workgroup,
+                        entry.group_segment_fixed_size));
+      }
+      break;
+    }
+
+    if (!dispatch_to_placement(local_wg_id, global_wg_id, *placement))
+      throw std::runtime_error("dispatch_wf failed after workgroup placement was reserved");
+  }
+
+  return dispatched;
+}
+
+// ---------------------------------------------------------------------------
+// Completion notification from CU
+// ---------------------------------------------------------------------------
+
+void CommandProcessor::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id) {
+  util::Logger::cp(
+      [&](auto &os) { os << std::format("WG_COMPLETE d={} wg={}", dispatch_id, wg_id); });
+  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  pending_wg_completions_.push_back({dispatch_id, wg_id});
+  if (dispatch_threads_ <= 1) {
+    drain_pending_wg_completions();
+    if (completion_) {
+      // Without worker fan-out, completion arrives on the CP's engine thread, so
+      // retire promptly while another resident dispatch may wait on this signal.
+      // Parallel workers must defer draining until their fan-out rejoins the CP.
+      completion_->drain_completions(new_queue_states_);
+    }
+  }
+}
+
+// INVARIANT: on_cu_idle() runs on the owning partition's engine thread — it is
+// invoked from CU::execute_quantum() (the CU's own per-partition tick event), so
+// the CU, this CP, and the CUs it dispatches to all share one partition. Dispatch
+// therefore happens inline (same-partition, non-thread-safe path); a
+// schedule_event_now() here would collapse ticks and break causal ordering.
+void CommandProcessor::on_cu_idle() {
+  if (cus_.empty())
+    return;
+
+  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+
+  drain_pending_cluster_barrier_completions();
+  drain_pending_wg_completions();
+  if (completion_)
+    completion_->drain_completions(new_queue_states_);
+
+  // Retire any non-kernel entries (barrier-kind packets) that are now at
+  // the head, then drain again so a dependent kernel behind them can proceed.
+  for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
+    if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
+      continue;
+    auto &qs = new_queue_states_[qi];
+    while (qs.next_dispatch_idx < qs.entries.size()) {
+      auto &e = qs.entries[qs.next_dispatch_idx];
+      if (e.wait_for_predecessors && !barrier_satisfied(qs, qs.next_dispatch_idx))
+        break;
+      if (!e.is_non_kernel())
+        break;
+      e.completed_wgs = e.total_wgs;
+      if (completion_)
+        completion_->complete_non_kernel(e);
+      ++qs.next_dispatch_idx;
+    }
+  }
+  if (completion_)
+    completion_->drain_completions(new_queue_states_);
+
+  // Continue dispatching pending workgroups onto the just-freed CU in this same
+  // tick rather than deferring to a now+1 doorbell event. Deferring routed every
+  // dispatch continuation through the doorbell path; across the many tiny kernels
+  // of an RCCL collective the engine would idle a full tick between steps, adding
+  // latency the host socket layer then paid for. dispatch_workgroups() schedules
+  // the CU's own tick event in the ordinary case. Record quiesced CUs because a
+  // CU containing only debug-halted waves needs an explicit activation when a
+  // newly dispatched wave makes it runnable again.
+  std::vector<bool> was_idle(cus_.size());
+  for (size_t i = 0; i < cus_.size(); ++i)
+    was_idle[i] = cus_[i]->is_idle();
+  for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
+    if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
+      continue;
+    auto &qs = new_queue_states_[qi];
+    if (qs.next_dispatch_idx < qs.entries.size()) {
+      auto &entry = qs.entries[qs.next_dispatch_idx];
+      if (entry.wait_for_predecessors && !barrier_satisfied(qs, qs.next_dispatch_idx))
+        continue;
+      if (!entry.is_non_kernel() && !entry.fully_dispatched()) {
+        uint32_t sent = dispatch_workgroups(entry);
+        if (sent > 0 && entry.fully_dispatched())
+          ++qs.next_dispatch_idx;
+      }
+    }
+  }
+  for (size_t i = 0; i < cus_.size(); ++i) {
+    if (was_idle[i] && !cus_[i]->is_idle())
+      cus_[i]->schedule_work();
+  }
+
+  // The last workgroup of this XCD's share retires here, not in handle_doorbell,
+  // so this is where a fanned-out shard parks to wait for its peers.
+  arm_grid_wait_recheck();
+}
+
+void CommandProcessor::on_cu_pool_ready(ComputeUnitCore *cu) {
+  if (dispatch_threads_ <= 1 || !engine() || !cu->has_runnable_wfs())
+    return;
+
+  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  const simdojo::Tick now = engine()->context(partition_id()).current_tick();
+  // schedule_work() also runs when a new wave joins an already-active CU. Keep
+  // that CU's established due tick, just as the serial driver keeps its queued
+  // tick while executing_, rather than pulling resident work forward.
+  auto due = pooled_due_ticks_.try_emplace(cu, now + 1).first;
+  arm_dispatch_continuation(due->second);
+}
+
+bool CommandProcessor::step() {
+  // Process dispatches across all queues.
+  process_queues();
+  return pending_entries() > 0;
+}
+
+void CommandProcessor::process_queues() {
+  for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
+    if (hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended ||
+        hw_queues_[qi].runtime_suspended)
+      continue;
+    auto &qs = new_queue_states_[qi];
+    while (qs.next_dispatch_idx < qs.entries.size()) {
+      auto &entry = qs.entries[qs.next_dispatch_idx];
+
+      if (entry.wait_for_predecessors && !barrier_satisfied(qs, qs.next_dispatch_idx))
+        break; // Stalled on barrier bit.
+
+      if (entry.is_non_kernel()) {
+        entry.completed_wgs = entry.total_wgs; // 0 == 0, immediately complete.
+        if (completion_)
+          completion_->complete_non_kernel(entry);
+        ++qs.next_dispatch_idx;
+        continue;
+      }
+
+      uint32_t sent = dispatch_workgroups(entry);
+      if (entry.fully_dispatched())
+        ++qs.next_dispatch_idx;
+      if (sent == 0)
+        break; // CU backpressure.
+    }
+  }
+}
+
+bool CommandProcessor::has_runnable_cus() const {
+  for (auto *cu : cus_) {
+    if (cu->has_runnable_wfs())
+      return true;
+  }
+  return false;
+}
+
+void CommandProcessor::refresh_pooled_due_ticks(simdojo::Tick now) {
+  for (auto it = pooled_due_ticks_.begin(); it != pooled_due_ticks_.end();) {
+    if (!it->first->has_runnable_wfs())
+      it = pooled_due_ticks_.erase(it);
+    else
+      ++it;
+  }
+  for (auto *cu : cus_)
+    if (cu->has_runnable_wfs())
+      pooled_due_ticks_.try_emplace(cu, now + 1);
+}
+
+simdojo::Tick CommandProcessor::next_pooled_due_tick(simdojo::Tick now) {
+  refresh_pooled_due_ticks(now);
+  simdojo::Tick next = simdojo::TICK_MAX;
+  for (const auto &[_, tick] : pooled_due_ticks_)
+    next = std::min(next, tick);
+  return next;
+}
+
+FunctionalQuantumResult CommandProcessor::run_active_cus_once(simdojo::Tick now) {
+  refresh_pooled_due_ticks(now);
+  active_cu_scratch_.clear();
+  if (!spis_.empty()) {
+    for (auto *spi : spis_)
+      spi->append_active_cus(active_cu_scratch_);
+  } else {
+    for (auto *cu : cus_) {
+      if (cu->has_runnable_wfs())
+        active_cu_scratch_.push_back(cu);
+    }
+  }
+  std::erase_if(active_cu_scratch_, [&](ComputeUnitCore *cu) {
+    auto due = pooled_due_ticks_.find(cu);
+    return !cu->has_runnable_wfs() || due == pooled_due_ticks_.end() || due->second > now;
+  });
+
+  if (active_cu_scratch_.empty())
+    return {};
+
+  quantum_result_scratch_.resize(active_cu_scratch_.size());
+  uint32_t effective_threads =
+      std::min<uint32_t>(dispatch_threads_, static_cast<uint32_t>(active_cu_scratch_.size()));
+  FunctionalQuantumResult result;
+  if (shared_dispatch_pool_)
+    result =
+        shared_dispatch_pool_->run(active_cu_scratch_, effective_threads, quantum_result_scratch_);
+  else if (effective_threads > 1) {
+    if (!local_dispatch_pool_ || local_dispatch_pool_->thread_count() < effective_threads)
+      local_dispatch_pool_ = std::make_unique<CpuDispatchPool>(effective_threads);
+    result =
+        local_dispatch_pool_->run(active_cu_scratch_, effective_threads, quantum_result_scratch_);
+  } else {
+    quantum_result_scratch_.front() = active_cu_scratch_.front()->run_quantum();
+    result = quantum_result_scratch_.front();
+  }
+
+  for (size_t i = 0; i < active_cu_scratch_.size(); ++i) {
+    auto *cu = active_cu_scratch_[i];
+    if (cu->has_runnable_wfs())
+      pooled_due_ticks_[cu] = now + std::max<uint64_t>(1, quantum_result_scratch_[i].iterations);
+    else
+      pooled_due_ticks_.erase(cu);
+  }
+  return result;
+}
+
+rocr::llvm::amdhsa::kernel_descriptor_t
+CommandProcessor::read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid,
+                                         [[maybe_unused]] bool host_accessible) {
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t kd{};
+  if (memory_)
+    read_gpu_block(kernel_object, &kd, sizeof(kd), vmid);
+  return kd;
+}
+
+/// Scan backward from ptr to find the ELF header (\x7fELF) at a page boundary.
+/// Both ptr and limit must be readable host memory.
+static const uint8_t *find_elf_base(const uint8_t *ptr, const uint8_t *limit) {
+  auto *page = reinterpret_cast<const uint8_t *>(reinterpret_cast<uintptr_t>(ptr) & ~0xFFFULL);
+  for (; page >= limit; page -= 0x1000) {
+    if (page[0] == 0x7f && page[1] == 'E' && page[2] == 'L' && page[3] == 'F')
+      return page;
+  }
+  return nullptr;
+}
+
+void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt,
+                                          const HwQueue &queue, uint64_t pkt_addr,
+                                          uint32_t queue_packet_id, HwQueueState &qs,
+                                          uint64_t aql_packet_id,
+                                          ClusterDispatchShape cluster_shape) {
+  bool host_accessible = queue.host_accessible;
+  using namespace rocr::llvm::amdhsa;
+  kernel_descriptor_t kd =
+      read_kernel_descriptor(pkt.kernel_object, queue.process_id, host_accessible);
+  uint32_t vgpr_gran =
+      AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+  uint32_t sgpr_gran =
+      AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
+  rj_code_arch_t arch = cus_.empty() ? ROCJITSU_CODE_ARCH_CDNA1 : cus_[0]->config().arch;
+  const uint32_t wave_size = kernel_wavefront_size(arch, kd);
+  const auto vgpr_granularity = descriptor_vgpr_count_granule_for_wavefront(arch, wave_size);
+  if (!vgpr_granularity)
+    throw std::runtime_error("unsupported kernel wave size for VGPR descriptor decoding");
+  uint32_t vgprs = (vgpr_gran + 1) * *vgpr_granularity;
+  uint32_t sgprs = sgpr_count_is_descriptor_encoded(arch, sgpr_gran) ? (sgpr_gran + 1) * 8 : 0;
+  uint32_t user_sgprs = kernel_descriptor_user_sgpr_count(arch, kd);
+  uint64_t entry_pc = pkt.kernel_object + static_cast<uint64_t>(kd.kernel_code_entry_byte_offset);
+  uint64_t code_load_bias = 0;
+
+  uint32_t wg_size =
+      static_cast<uint32_t>(pkt.workgroup_size_x) * pkt.workgroup_size_y * pkt.workgroup_size_z;
+  uint32_t wfs_per_wg = (wg_size + wave_size - 1) / wave_size;
+
+  uint32_t num_dims = pkt.setup & 0x3;
+  uint32_t grid_wgs_x =
+      util::ceil_div_or_one(pkt.grid_size_x, static_cast<uint32_t>(pkt.workgroup_size_x));
+  uint32_t grid_wgs_y =
+      util::ceil_div_or_one(pkt.grid_size_y, static_cast<uint32_t>(pkt.workgroup_size_y));
+  uint32_t grid_wgs_z =
+      util::ceil_div_or_one(pkt.grid_size_z, static_cast<uint32_t>(pkt.workgroup_size_z));
+  uint32_t total_wgs = grid_wgs_x * grid_wgs_y * grid_wgs_z;
+
+  DispatchEntry dp{};
+  dp.dispatch_id = allocate_dispatch_id();
+  dp.profiling_start_timestamp = hsa_system_timestamp();
+  dp.queue_id = queue.queue_id;
+  dp.enabled_cus = queue.enabled_cus;
+  dp.queue_packet_id = queue_packet_id;
+  dp.process_id = queue.process_id;
+  dp.aql_packet_id = static_cast<uint32_t>(aql_packet_id);
+  dp.kernel_entry_pc = entry_pc;
+  dp.total_wgs = total_wgs;
+  dp.kind = DispatchPacketKind::Kernel;
+  dp.dispatched_wgs = 0;
+  dp.completed_wgs = 0;
+  dp.wfs_per_workgroup = wfs_per_wg;
+  uint32_t sgpr_limit = cus_.empty() ? 112 : cus_[0]->config().sgprs_per_wf;
+  uint32_t vgpr_limit = cus_.empty() ? 256 : cus_[0]->vgpr_allocation_block_size();
+  uint32_t required_sgprs = sgprs > 0 ? sgprs : sgpr_limit;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+    required_sgprs = std::max(required_sgprs, 34u); // s32 stack pointer, s33 frame pointer
+  dp.sgprs_per_wf = std::min(required_sgprs, sgpr_limit);
+  dp.vgprs_per_wf = std::min(vgprs > 0 ? vgprs : vgpr_limit, vgpr_limit);
+  dp.kernarg_addr = reinterpret_cast<uint64_t>(pkt.kernarg_address);
+  dp.kernarg_size = kd.kernarg_size;
+  dp.num_user_sgprs = user_sgprs;
+  dp.kernel_code_properties = kd.kernel_code_properties;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    const uint32_t named_barrier_blocks =
+        AMDHSA_BITS_GET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT);
+    dp.num_named_barriers = std::min(named_barrier_blocks * 4u, ComputeUnitCore::kMaxNamedBarriers);
+  }
+  dp.kernel_wave_size = wave_size;
+  dp.kernarg_preload = kd.kernarg_preload;
+  dp.initial_mode_raw = initial_mode_from_compute_pgm_rsrc1(kd.compute_pgm_rsrc1, arch);
+  dp.private_segment_fixed_size = std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
+  dp.group_segment_fixed_size = std::max(kd.group_segment_fixed_size, pkt.group_segment_size);
+  dp.wgp_mode = isa_properties(arch).supports_wgp_mode &&
+                AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE) != 0;
+
+  uint64_t lds_capacity = 0;
+  if (dp.wgp_mode) {
+    for (const auto *spi : spis_)
+      lds_capacity = std::max<uint64_t>(lds_capacity, spi->max_wgp_lds_bytes());
+  } else {
+    for (const auto *cu : cus_)
+      lds_capacity =
+          std::max<uint64_t>(lds_capacity, static_cast<uint64_t>(cu->config().lds_size_kb) * 1024u);
+  }
+  const uint64_t aligned_lds =
+      (static_cast<uint64_t>(dp.group_segment_fixed_size) + 255u) & ~uint64_t{255u};
+  if (dp.wgp_mode && lds_capacity == 0) {
+    throw std::runtime_error(
+        "WGP-mode kernel dispatch requires a sibling-CU pair, but none is configured");
+  }
+  if (aligned_lds > lds_capacity) {
+    throw std::runtime_error(std::format(
+        "kernel dispatch requests {} bytes of LDS ({} bytes after alignment) in {} mode, but "
+        "the simulator topology provides at most {} bytes",
+        dp.group_segment_fixed_size, aligned_lds, dp.wgp_mode ? "WGP" : "CU", lds_capacity));
+  }
+
+  // For KFD dispatches, provide pointers the kernel may need via user SGPRs.
+  // The queue_ptr and dispatch_ptr are GPU VAs that the kernel reads via SMEM.
+  if (host_accessible) {
+    dp.dispatch_ptr = pkt_addr;
+    dp.queue_ptr = queue.read_ptr_va - offsetof(amd_queue_t, read_dispatch_id);
+    if (dp.private_segment_fixed_size > 0) {
+      uint64_t scratch_loc_va =
+          dp.queue_ptr + offsetof(amd_queue_t, scratch_backing_memory_location);
+      dp.scratch_backing_addr = read_gpu_u64(scratch_loc_va, queue.process_id);
+      if (dp.scratch_backing_addr == 0 && scratch_resolver_)
+        dp.scratch_backing_addr = scratch_resolver_(queue.process_id);
+
+      // Publish the scratch backing location and COMPUTE_TMPRING_SIZE into the
+      // ABI-stable part of amd_queue_t so rocm-dbgapi can compute each wave's
+      // private (scratch) memory region, letting ROCgdb read scratch-resident
+      // variables. Real CP firmware populates these when it assigns scratch to
+      // the queue; the emulator's ROCr instead sets the backing via
+      // SET_SCRATCH_BACKING_VA and leaves these fields zero, so the CP fills
+      // them here. Field layout per rocdbgapi architecture.cpp
+      // scratch-memory region. The WAVES field is common, while ISA properties
+      // describe the generation-specific WAVESIZE unit and field width.
+      if (dp.scratch_backing_addr != 0 && !cus_.empty()) {
+        uint64_t per_wave_bytes =
+            static_cast<uint64_t>(dp.private_segment_fixed_size) * cus_[0]->wf_size();
+        // setup_wavefront() allocates scratch slots at a 1 KiB boundary. Encode
+        // that actual stride, rather than merely rounding to the register's
+        // unit, so flat_scratch agrees with rocm-dbgapi for every scoreboard
+        // slot after slot zero.
+        const uint64_t per_wave_stride = ((per_wave_bytes + 1023) / 1024) * 1024;
+        const auto properties = isa_properties(arch);
+        const uint32_t wavesize_unit = properties.compute_tmpring_wavesize_granule;
+        assert(wavesize_unit != 0 && properties.compute_tmpring_wavesize_bits != 0);
+        const uint32_t wavesize_field = static_cast<uint32_t>(per_wave_stride / wavesize_unit);
+        uint32_t waves_field = 0;
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+          // gfx12 interprets WAVES as the number of physical scratch slots per
+          // shader engine. The CWSR wave word supplies the SE plus its per-SE
+          // scoreboard slot, so publish the same capacity used by allocation.
+          waves_field = scratch_waves_per_se_;
+        } else {
+          // Older debugger layouts interpret WAVES as a device-wide count and
+          // require it to be divisible by the shader-engine count.
+          uint32_t se = std::max(1u, scratch_wave_divisor_);
+          uint64_t total_waves = static_cast<uint64_t>(total_wgs) * wfs_per_wg;
+          waves_field =
+              static_cast<uint32_t>(((std::max<uint64_t>(1, total_waves) + se - 1) / se) * se);
+        }
+        const uint32_t wavesize_mask =
+            util::mask<uint32_t>(properties.compute_tmpring_wavesize_bits);
+        uint32_t tmpring = (waves_field & 0xFFFu) | ((wavesize_field & wavesize_mask) << 12);
+        memory_->write64(scratch_loc_va, dp.scratch_backing_addr, queue.process_id);
+        memory_->write32(dp.queue_ptr + offsetof(amd_queue_t, compute_tmpring_size), tmpring,
+                         queue.process_id);
+      }
+    }
+  }
+
+  dp.workgroup_id_offset = workgroup_id_offset_;
+  dp.grid_size_x = pkt.grid_size_x;
+  dp.grid_size_y = (num_dims >= 2) ? pkt.grid_size_y : 1;
+  dp.grid_size_z = (num_dims >= 3) ? pkt.grid_size_z : 1;
+  // For WG ID decomposition, use the dispatch dimensionality (setup field).
+  // A 1D dispatch flattens the entire grid into workgroup_id_x.
+  dp.grid_wgs_x = (num_dims <= 1) ? total_wgs : grid_wgs_x;
+  dp.grid_wgs_y = (num_dims >= 2) ? grid_wgs_y : 1;
+  dp.grid_wgs_z = (num_dims >= 3) ? grid_wgs_z : 1;
+  dp.grid_yz_valid = num_dims >= 2;
+  dp.cluster_size_x = nonzero_or_one(cluster_shape.size_x);
+  dp.cluster_size_y = nonzero_or_one(cluster_shape.size_y);
+  dp.cluster_size_z = nonzero_or_one(cluster_shape.size_z);
+  dp.cluster_count_x = cluster_shape.count_x == 0
+                           ? (dp.grid_wgs_x + dp.cluster_size_x - 1) / dp.cluster_size_x
+                           : cluster_shape.count_x;
+  dp.cluster_count_y = cluster_shape.count_y == 0
+                           ? (dp.grid_wgs_y + dp.cluster_size_y - 1) / dp.cluster_size_y
+                           : cluster_shape.count_y;
+  dp.cluster_count_z = cluster_shape.count_z == 0
+                           ? (dp.grid_wgs_z + dp.cluster_size_z - 1) / dp.cluster_size_z
+                           : cluster_shape.count_z;
+  validate_cluster_shape(dp);
+  dp.enable_wg_id_x =
+      AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X);
+  dp.enable_wg_id_y =
+      AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y);
+  dp.enable_wg_id_z =
+      AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z);
+  dp.enable_vgpr_workitem_id = static_cast<uint8_t>(
+      AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID));
+  dp.workgroup_size_x = pkt.workgroup_size_x;
+  dp.workgroup_size_y = pkt.workgroup_size_y;
+  dp.workgroup_size_z = pkt.workgroup_size_z;
+  dp.completion_signal = pkt.completion_signal.handle;
+  dp.host_signal = false;
+  dp.wait_for_predecessors = (pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1;
+
+  // Process AQL acquire fence: invalidate caches so the kernel sees the
+  // latest host/agent writes (kernarg data, input buffers, etc.).
+  // On real hardware the CP issues GL1_INV + GL2_INV for SYSTEM/AGENT scope.
+  // Only this XCD's CUs are reachable from here; a peer XCD's caches belong to
+  // another partition and must not be touched from this thread. The shard carries
+  // the fence instead, and each peer performs the same invalidate on its own thread
+  // when it takes delivery -- see drain_fanout_inbox().
+  uint32_t acquire_scope = (pkt.header >> HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) & 0x3;
+  dp.acquire_invalidate = acquire_scope >= HSA_FENCE_SCOPE_AGENT;
+  if (dp.acquire_invalidate && !cus_.empty()) {
+    // Deliberately the per-CU walk, not the deduplicated flush_gpu_caches(). The
+    // two are equivalent per invocation, but collapsing the repeated sweeps on the
+    // release path caused peer ranks to hang on flags left unpublished in L2, and
+    // that mechanism is still not understood. Until it is, this path -- which
+    // predates fan-out -- keeps exactly the cache behaviour it had, and only the
+    // new peer-side fence in drain_fanout_inbox() uses the collapsed form.
+    for (auto *cu : cus_)
+      cu->flush_all(queue.process_id);
+  }
+
+  std::string kernel_symbol;
+  if (host_accessible && memory_) {
+    auto [host_range_base, host_range_size] =
+        memory_->find_host_range(pkt.kernel_object, queue.process_id);
+    auto *kernel_object_host_ptr = memory_->resolve_host_ptr(pkt.kernel_object, queue.process_id);
+    if (host_range_base != 0 && kernel_object_host_ptr) {
+      auto *host_range_begin = reinterpret_cast<const uint8_t *>(host_range_base);
+      auto *elf_base = find_elf_base(kernel_object_host_ptr, host_range_begin);
+      if (elf_base) {
+        const uint64_t kernel_offset = static_cast<uint64_t>(kernel_object_host_ptr - elf_base);
+        if (pkt.kernel_object >= kernel_offset)
+          code_load_bias = pkt.kernel_object - kernel_offset;
+        uint64_t elf_accessible =
+            host_range_size - static_cast<uint64_t>(elf_base - host_range_begin);
+        kernel_symbol = find_kernel_symbol(kernel_object_host_ptr, elf_base, elf_accessible);
+      }
+    }
+  }
+  dp.code_load_bias = code_load_bias;
+  std::string kernel_name = kernel_display_name(kernel_symbol);
+  ++total_dispatched_;
+
+  KernelDispatchInfo dispatch_info{};
+  dispatch_info.dispatch_id = dp.dispatch_id;
+  dispatch_info.kernel_object = pkt.kernel_object;
+  dispatch_info.entry_pc = entry_pc;
+  dispatch_info.kernel_symbol = kernel_symbol;
+  dispatch_info.kernel_name = kernel_name;
+  dispatch_info.lds_size_bytes = dp.group_segment_fixed_size;
+  dispatch_info.wave_size = wave_size;
+  dispatch_info.code_target =
+      cus_.empty() ? ROCJITSU_CODE_TARGET_INVALID : cus_[0]->config().target;
+  dispatch_info.grid_size_x = pkt.grid_size_x;
+  dispatch_info.grid_size_y = pkt.grid_size_y;
+  dispatch_info.grid_size_z = pkt.grid_size_z;
+  dispatch_info.workgroup_size_x = pkt.workgroup_size_x;
+  dispatch_info.workgroup_size_y = pkt.workgroup_size_y;
+  dispatch_info.workgroup_size_z = pkt.workgroup_size_z;
+  dispatch_info.cluster_size_x = dp.cluster_size_x;
+  dispatch_info.cluster_size_y = dp.cluster_size_y;
+  dispatch_info.cluster_size_z = dp.cluster_size_z;
+  dispatch_info.workgroup_count = total_wgs;
+  dispatch_info.wfs_per_workgroup = wfs_per_wg;
+  dispatch_info.sgprs_per_wf = dp.sgprs_per_wf;
+  dispatch_info.vgprs_per_wf = dp.vgprs_per_wf;
+  plugin_group_->onAmdgpuDispatchPacketProcessed(dispatch_info);
+
+  util::Logger::vm([&](auto &os) {
+    os << std::format("dispatch #{} d={} \"{}\" symbol=\"{}\" grid=[{},{},{}] wg=[{},{},{}] wgs={} "
+                      "lds={} mode={} sgpr={} vgpr={} sig={:#x}",
+                      total_dispatched_, dp.dispatch_id, dispatch_info.kernelNameOrUnknown(),
+                      dispatch_info.kernelSymbolOrUnknown(), pkt.grid_size_x, pkt.grid_size_y,
+                      pkt.grid_size_z, pkt.workgroup_size_x, pkt.workgroup_size_y,
+                      pkt.workgroup_size_z, total_wgs, kd.group_segment_fixed_size,
+                      dp.wgp_mode ? "WGP" : "CU", dp.sgprs_per_wf, dp.vgprs_per_wf,
+                      dp.completion_signal);
+  });
+  util::Logger::cp([&](auto &os) {
+    os << std::format("DISPATCH #{} d={} \"{}\" symbol=\"{}\" wgs={} wfs/wg={} sig={:#x} pid={} "
+                      "ko={:#x} pc={:#x} kernarg={:#x} user_sgprs={}",
+                      total_dispatched_, dp.dispatch_id, dispatch_info.kernelNameOrUnknown(),
+                      dispatch_info.kernelSymbolOrUnknown(), total_wgs, wfs_per_wg,
+                      dp.completion_signal, dp.process_id, pkt.kernel_object, entry_pc,
+                      dp.kernarg_addr, dp.num_user_sgprs);
+    if (memory_) {
+      auto *ko_ptr = memory_->translate_debug(pkt.kernel_object, queue.process_id);
+      auto *pc_ptr = memory_->translate_debug(entry_pc, queue.process_id, sizeof(uint32_t));
+      os << std::format(" ko_mapped={} pc_mapped={} mem={:#x}", ko_ptr != nullptr,
+                        pc_ptr != nullptr, reinterpret_cast<uintptr_t>(memory_));
+      if (pc_ptr) {
+        uint32_t first_word;
+        std::memcpy(&first_word, pc_ptr, sizeof(first_word));
+        os << std::format(" first_inst={:#010x}", first_word);
+      }
+    }
+  });
+
+  if (queue.xcd_fanout)
+    fan_out_dispatch(dp);
+
+  qs.push_entry(std::move(dp));
+}
+
+void CommandProcessor::arm_grid_wait_recheck() {
+  // A shard whose own share is done but whose grid is still running on another
+  // XCD is a stall like any other, and has to be re-armed as one.
+  //
+  // The XCD that retires the grid does call wake_all_xcds(), but that wake
+  // travels the engine's cross-thread async queue, which neither contributes to
+  // LBTS nor counts as outstanding work when the engine tests for termination.
+  // With one partition per XCD, every partition can publish TICK_MAX in the same
+  // epoch the wake is deposited, and the run ends on that before the next epoch
+  // drains it -- so the XCD holding the completion signal never re-drains and
+  // never writes it. Keeping a re-check on this CP's own event queue holds its
+  // partition's next-event time finite for exactly as long as it is waiting,
+  // which leaves the wake an optimization rather than the only thing standing
+  // between the grid retiring and the signal firing.
+  //
+  // Caller must hold hw_queue_mutex_ and must be on this CP's own partition
+  // thread, which is where the re-check is enqueued.
+  for (const auto &qs : new_queue_states_) {
+    if (qs.entries.empty())
+      continue;
+    const auto &head = qs.entries.front();
+    if (head.fully_completed() && !head.grid_fully_completed()) {
+      arm_stall_recheck(engine()->context(partition_id()).current_tick());
+      return;
+    }
+  }
+}
+
+void CommandProcessor::arm_stall_recheck(simdojo::Tick now) {
+  // A doorbell poll thread runs only for queues this CP polls; it re-checks
+  // stall_pending_ at its 100us cadence, so the engine can idle instead of spinning.
+  // Internal test queues have no poll thread — they are driven by engine->run()/
+  // step() — and neither do fan-out replicas, so in both cases the re-check must be
+  // kept alive on the main event queue instead.
+  if (polls_kfd_queues()) {
+    stall_pending_.store(true, std::memory_order_release);
+    return;
+  }
+  // Back the re-check off rather than re-arming on the very next tick. What
+  // actually ends one of these waits is an external event -- a peer's shard, or
+  // the wake the retiring XCD sends -- and each of those resets the backoff, so
+  // the wait still ends promptly. This event only has to keep the partition's
+  // next-event time finite so the engine cannot decide the run is over while a
+  // cross-thread wake is still undelivered (see arm_grid_wait_recheck).
+  //
+  // At one tick it is a spin, and a costly one: with fan-out every peer XCD waits
+  // on the owner's grid, and a peer re-entered this handler once per simulated
+  // tick -- 17M times on a corpus case that needs 24 doorbells without fan-out,
+  // which is where a 12x slowdown came from. Backing off is nearly free in
+  // simulated time: with no other event pending the engine jumps straight to the
+  // re-check, so a longer interval skips idle ticks rather than adding latency.
+  schedule_event(&doorbell_event_, now + stall_recheck_backoff_);
+  stall_recheck_backoff_ = std::min(stall_recheck_backoff_ * 2, kMaxStallRecheckBackoff);
+}
+
+void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdojo::Tick now) {
+  if (!memory_)
+    return;
+  // A replica's work arrives as dispatch shards, not from the ring. Reading the
+  // ring here would also advance a read pointer the owning XCD owns, and its
+  // suspension flags are the owner's copy rather than state this CP maintains.
+  if (queue.fanout_replica)
+    return;
+  // The SDMA doorbell bounds the published byte range. The producer pointer may
+  // already describe a later submission, so it must not extend this range.
+  if (queue.is_sdma) {
+    uint64_t published_bytes;
+    const CopyOutcome doorbell_outcome = read_doorbell(queue, published_bytes);
+    if (doorbell_outcome != CopyOutcome::Complete) {
+      if (doorbell_outcome == CopyOutcome::Unavailable)
+        arm_stall_recheck(now);
+      return;
+    }
+    if (published_bytes == std::numeric_limits<uint64_t>::max())
+      return;
+    const uint64_t read_idx = read_gpu_u64(queue.read_ptr_va, queue.process_id);
+    if (queue.debug_suspended || queue.runtime_suspended) {
+      // Resume must revisit published packets even if the producer writeback
+      // has not advanced. Both suspension reasons share this deferral.
+      queue.debug_work_deferred |= read_idx < published_bytes;
+      return;
+    }
+    util::Logger::cp([&](auto &os) {
+      os << std::format("{}: SDMA_FETCH pid={} qid={} read={} published={} delta={}", name(),
+                        queue.process_id, queue.queue_id, read_idx, published_bytes,
+                        published_bytes - read_idx);
+    });
+    if (read_idx >= published_bytes)
+      return;
+    // ROCr's direct SdmaQueue release-stores its canonical write pointer and
+    // places a release fence before its volatile MMIO doorbell store. Acquire
+    // that write pointer after observing the doorbell to synchronize packet
+    // reads with this producer.
+    // Other producers release-store the doorbell itself and need no writeback.
+    // In either case, only the doorbell determines how many bytes we consume.
+    if (queue.write_ptr_va != 0) {
+      if (queue.write_ptr_va % alignof(uint64_t) != 0)
+        return;
+      uint64_t write_pointer;
+      const CopyOutcome write_pointer_outcome = memory_->atomic_load(
+          queue.write_ptr_va, sizeof(write_pointer), write_pointer, queue.process_id);
+      if (write_pointer_outcome != CopyOutcome::Complete) {
+        if (write_pointer_outcome == CopyOutcome::Unavailable)
+          arm_stall_recheck(now);
+        return;
+      }
+    }
+    process_sdma_ring(queue, read_idx, published_bytes, now);
+    return;
+  }
+
+  if (queue.debug_suspended || queue.runtime_suspended) {
+    // A command-processor event can race a debugger suspension even when this
+    // queue has no new packets. Do not turn that stale event into an endless
+    // resume/event chain: request a resume pass only when packet fetch really
+    // was deferred. The fetch cursor stays ahead of the read pointer when
+    // the debugger holds that pointer at a trapped dispatch.
+    const uint64_t write_idx = read_gpu_u64(queue.write_ptr_va, queue.process_id);
+    const uint64_t read_idx = read_gpu_u64(queue.read_ptr_va, queue.process_id);
+    const uint64_t fetch_idx = std::max(read_idx, queue.fetch_cursor);
+    queue.debug_work_deferred |= fetch_idx < write_idx;
+    return;
+  }
+  if (queue.host_accessible ? (queue.doorbell_base == nullptr) : (queue.doorbell_va == 0))
+    return;
+
+  // Read write and read indices. For KFD queues, pointers are in host memory
+  // and can be read directly. For internal test queues, they're in GpuMemory.
+  uint64_t write_idx = read_gpu_u64(queue.write_ptr_va, queue.process_id);
+  uint64_t read_idx = read_gpu_u64(queue.read_ptr_va, queue.process_id);
+  util::Logger::vm([&](auto &os) {
+    static uint64_t fetch_count = 0;
+    if (write_idx != read_idx && ++fetch_count <= 50)
+      os << std::format("FETCH q={} w={} r={} delta={} sdma={}", queue.queue_id, write_idx,
+                        read_idx, write_idx - read_idx, queue.is_sdma);
+  });
+
+  // AQL doorbell clamping (compute queues only).
+  // Use the CP-private fetch cursor as the authoritative next-packet index. It
+  // normally equals read_ptr_va (the CP is the sole writer of a compute queue's
+  // read pointer), but while the debugger holds read_ptr_va at a trapped
+  // dispatch, the cursor stays ahead so already-dispatched packets are not
+  // re-fetched.
+  read_idx = std::max(read_idx, queue.fetch_cursor);
+  uint64_t process_limit = write_idx;
+  if (queue.host_accessible) {
+    const uint64_t doorbell = queue.last_doorbell;
+    if (doorbell != std::numeric_limits<uint64_t>::max()) {
+      uint64_t doorbell_limit = doorbell + 1;
+      if (doorbell_limit < process_limit)
+        process_limit = doorbell_limit;
+    }
+    if (read_idx >= process_limit)
+      return;
+  } else if (read_idx >= process_limit) {
+    return;
+  }
+
+  constexpr uint32_t AQL_PACKET_SIZE = 64;
+  uint32_t num_slots = queue.ring_size / AQL_PACKET_SIZE;
+
+  while (read_idx < process_limit) {
+    uint32_t slot = static_cast<uint32_t>(read_idx % num_slots);
+    uint64_t pkt_addr = queue.ring_base_va + slot * AQL_PACKET_SIZE;
+
+    hsa_kernel_dispatch_packet_t pkt{};
+    {
+      auto *dst = reinterpret_cast<uint8_t *>(&pkt);
+      for (uint32_t i = 0; i < AQL_PACKET_SIZE; ++i)
+        dst[i] = memory_->read8(pkt_addr + i, queue.process_id);
+    }
+
+    uint8_t pkt_type = pkt.header & 0xFF;
+    util::Logger::cp([&](auto &os) {
+      auto type_name = [](uint8_t t) -> const char * {
+        switch (t) {
+        case 0:
+          return "VENDOR_SPECIFIC";
+        case 1:
+          return "INVALID";
+        case 2:
+          return "KERNEL_DISPATCH";
+        case 3:
+          return "BARRIER_AND";
+        case 5:
+          return "BARRIER_OR";
+        default:
+          return "UNKNOWN";
+        }
+      };
+      os << std::format("PKT q={} slot={} type={}({}) header={:#x} barrier_bit={} read_idx={}",
+                        queue.queue_id, slot, pkt_type, type_name(pkt_type), pkt.header,
+                        (pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1, read_idx);
+    });
+
+    if (pkt_type == HSA_PACKET_TYPE_INVALID) {
+      util::Logger::cp([&](auto &os) {
+        os << std::format("{}: INVALID_RETRY q={} slot={} read_idx={} va={:#x}", name(),
+                          queue.queue_id, slot, read_idx, pkt_addr);
+      });
+      process_limit = read_idx;
+      // The runtime has not finished writing this packet's header. invalid_pending_
+      // mirrors the barrier/dependency stalls' stall_pending_: the KFD poll thread
+      // re-checks at its 100us cadence (both flags gate the same poll-loop nudge).
+      // Unlike those stalls this has no internal-test-queue fallback because a test
+      // writes the whole packet before ringing the doorbell, so a test queue never
+      // observes an in-flight INVALID header (the only writer that leaves one is the
+      // real runtime racing the doorbell, which always has a poll thread).
+      invalid_pending_.store(true, std::memory_order_release);
+      break;
+    }
+
+    if (pkt_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
+      // Leave shader packets in the ring until a CU is enabled. The mask does
+      // not prevent the CP from processing barriers or PM4 IB packets.
+      if (queue.enabled_cus && queue.enabled_cus->empty()) {
+        process_limit = read_idx;
+        break;
+      }
+      process_aql_packet(pkt, queue, pkt_addr, slot, qs, read_idx);
+    } else if (pkt_type == HSA_PACKET_TYPE_BARRIER_AND || pkt_type == HSA_PACKET_TYPE_BARRIER_OR) {
+      constexpr uint32_t DEP_OFF = 8;
+      constexpr uint32_t SIG_OFF = 56;
+      constexpr uint32_t SIG_VAL_OFF = 8;
+      bool is_and = (pkt_type == HSA_PACKET_TYPE_BARRIER_AND);
+
+      // Non-blocking dependency check: if any dependency is unsatisfied,
+      // stop fetching from this queue. The next doorbell event will retry.
+      // This prevents blocking the CP from processing other queues (SDMA)
+      // that may be responsible for satisfying these dependencies.
+      bool deps_satisfied =
+          is_and; // AND: assume true until a dep fails; OR: assume false until one passes
+      bool has_deps = false;
+      for (int dep = 0; dep < 5; ++dep) {
+        uint64_t dep_sig = read_gpu_u64(pkt_addr + DEP_OFF + dep * 8, queue.process_id);
+        if (dep_sig == 0)
+          continue;
+        has_deps = true;
+        auto v = static_cast<int64_t>(read_gpu_u64(dep_sig + SIG_VAL_OFF, queue.process_id));
+        if (v > 0) {
+          if (is_and) {
+            deps_satisfied = false;
+            break;
+          }
+        } else {
+          if (!is_and) {
+            deps_satisfied = true;
+            break;
+          }
+        }
+      }
+      if (!has_deps)
+        deps_satisfied = true;
+      util::Logger::cp([&](auto &os) {
+        os << std::format("BARRIER_DEP q={} type={} deps_ok={} has_deps={}", queue.queue_id,
+                          is_and ? "AND" : "OR", deps_satisfied, has_deps);
+      });
+      if (!deps_satisfied) {
+        // Stall this queue until the dependency signal is satisfied (by an SDMA
+        // queue on this engine, or a peer rank's completion arriving via the
+        // daemon). arm_stall_recheck() re-arms without spinning simulated time.
+        process_limit = read_idx;
+        arm_stall_recheck(now);
+        break;
+      }
+
+      uint64_t sig = 0;
+      sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
+
+      DispatchEntry dp{
+          .dispatch_id = allocate_dispatch_id(),
+          .queue_id = queue.queue_id,
+          .process_id = queue.process_id,
+          .completion_signal = sig,
+          .kind = DispatchPacketKind::NonKernel,
+          .wait_for_predecessors = ((pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+          .blocks_following = true,
+      };
+
+      const bool blocks_following = dp.blocks_following;
+      if (queue.xcd_fanout)
+        replicate_non_kernel_entry(dp);
+      qs.push_entry(std::move(dp));
+      ++read_idx;
+      if (blocks_following) {
+        process_limit = read_idx;
+        break;
+      }
+      continue;
+    } else if (pkt_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
+      AmdExtKernelDispatchPacket ext{};
+      std::memcpy(&ext, &pkt, sizeof(ext));
+      util::Logger::cp([&](auto &os) {
+        os << std::format("VENDOR_PKT q={} amd_format={} dep_sig={:#x}", queue.queue_id,
+                          ext.amd_format, ext.dep_signal.handle);
+      });
+      if (ext.amd_format == kHsaAmdPacketTypeBarrierValue) {
+        AmdBarrierValuePacket barrier{};
+        std::memcpy(&barrier, &pkt, sizeof(barrier));
+
+        bool condition_satisfied = true;
+        if (barrier.signal.handle != 0) {
+          constexpr uint32_t SIG_VAL_OFF = 8;
+          const auto signal_value = std::bit_cast<int64_t>(
+              read_gpu_u64(barrier.signal.handle + SIG_VAL_OFF, queue.process_id));
+          const auto masked_value = signal_value & barrier.mask;
+          switch (barrier.condition) {
+          case HSA_SIGNAL_CONDITION_EQ:
+            condition_satisfied = masked_value == barrier.value;
+            break;
+          case HSA_SIGNAL_CONDITION_NE:
+            condition_satisfied = masked_value != barrier.value;
+            break;
+          case HSA_SIGNAL_CONDITION_LT:
+            condition_satisfied = masked_value < barrier.value;
+            break;
+          case HSA_SIGNAL_CONDITION_GTE:
+            condition_satisfied = masked_value >= barrier.value;
+            break;
+          default:
+            throw std::runtime_error("Unsupported AMD barrier-value condition: " +
+                                     std::to_string(barrier.condition));
+          }
+        }
+
+        if (!condition_satisfied) {
+          // The barrier-value packet stalls this queue until the awaited signal
+          // reaches its target value (written by another queue on this engine or a
+          // peer rank via the daemon). arm_stall_recheck() re-arms the re-check
+          // without spinning simulated time.
+          process_limit = read_idx;
+          arm_stall_recheck(now);
+          break;
+        }
+
+        DispatchEntry dp{
+            .dispatch_id = allocate_dispatch_id(),
+            .queue_id = queue.queue_id,
+            .process_id = queue.process_id,
+            .completion_signal = barrier.completion_signal.handle,
+            .kind = DispatchPacketKind::NonKernel,
+            .wait_for_predecessors = ((barrier.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+            .blocks_following = true,
+        };
+
+        if (queue.xcd_fanout)
+          replicate_non_kernel_entry(dp);
+        qs.push_entry(std::move(dp));
+      } else if (ext.amd_format == kHsaAmdPacketTypeExtKernelDispatch) {
+        if (queue.enabled_cus && queue.enabled_cus->empty()) {
+          process_limit = read_idx;
+          break;
+        }
+        if (ext.dep_signal.handle != 0) {
+          constexpr uint32_t SIG_VAL_OFF = 8;
+          auto v = static_cast<int64_t>(
+              read_gpu_u64(ext.dep_signal.handle + SIG_VAL_OFF, queue.process_id));
+          util::Logger::cp([&](auto &os) {
+            os << std::format("VENDOR_DEP_CHECK q={} dep_sig={:#x} val={}", queue.queue_id,
+                              ext.dep_signal.handle, v);
+          });
+          if (v != 0) {
+            // Vendor kernel-dispatch dependency not yet satisfied: re-arm the
+            // re-check via arm_stall_recheck() without spinning simulated time.
+            process_limit = read_idx;
+            arm_stall_recheck(now);
+            break;
+          }
+        }
+
+        uint32_t grid_size_x = checked_ext_dispatch_grid_size(
+            ext.cluster_count_x, ext.cluster_size_x, ext.workgroup_size_x, "x");
+        uint32_t grid_size_y = checked_ext_dispatch_grid_size(
+            ext.cluster_count_y, ext.cluster_size_y, ext.workgroup_size_y, "y");
+        uint32_t grid_size_z = checked_ext_dispatch_grid_size(
+            ext.cluster_count_z, ext.cluster_size_z, ext.workgroup_size_z, "z");
+
+        hsa_kernel_dispatch_packet_t dispatch{};
+        dispatch.header = ext.header;
+        dispatch.setup = ext.setup;
+        dispatch.workgroup_size_x = ext.workgroup_size_x;
+        dispatch.workgroup_size_y = ext.workgroup_size_y;
+        dispatch.workgroup_size_z = ext.workgroup_size_z;
+        dispatch.grid_size_x = grid_size_x;
+        dispatch.grid_size_y = grid_size_y;
+        dispatch.grid_size_z = grid_size_z;
+        dispatch.private_segment_size = ext.private_segment_size;
+        dispatch.group_segment_size = ext.group_segment_size;
+        dispatch.kernel_object = ext.kernel_object;
+        dispatch.kernarg_address = ext.kernarg_address;
+        dispatch.completion_signal = ext.completion_signal;
+        ClusterDispatchShape cluster_shape{};
+        cluster_shape.count_x = ext.cluster_count_x;
+        cluster_shape.count_y = ext.cluster_count_y;
+        cluster_shape.count_z = ext.cluster_count_z;
+        cluster_shape.size_x = ext.cluster_size_x;
+        cluster_shape.size_y = ext.cluster_size_y;
+        cluster_shape.size_z = ext.cluster_size_z;
+        process_aql_packet(dispatch, queue, pkt_addr, slot, qs, read_idx, cluster_shape);
+      } else if (ext.amd_format == kAmdAqlFormatPm4Ib) {
+        constexpr uint32_t SIG_OFF = 56;
+        const uint64_t sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
+
+        DispatchEntry dp{
+            .dispatch_id = allocate_dispatch_id(),
+            .queue_id = queue.queue_id,
+            .process_id = queue.process_id,
+            .completion_signal = sig,
+            .kind = DispatchPacketKind::NonKernel,
+            .wait_for_predecessors = ((pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+        };
+
+        if (queue.xcd_fanout)
+          replicate_non_kernel_entry(dp);
+        qs.push_entry(std::move(dp));
+      } else {
+        throw std::runtime_error("Unsupported AMD vendor-specific AQL packet format: " +
+                                 std::to_string(ext.amd_format));
+      }
+    }
+
+    ++read_idx;
+  }
+
+  {
+    auto *src = reinterpret_cast<const uint8_t *>(&process_limit);
+    for (uint32_t i = 0; i < sizeof(process_limit); ++i)
+      memory_->write8(queue.read_ptr_va + i, src[i], queue.process_id);
+  }
+  // Advance the CP-private cursor to match. read_ptr_va may subsequently be
+  // lowered by the debugger to hold a trapped dispatch; the cursor is not, so
+  // the next fetch resumes here rather than re-fetching held packets.
+  queue.fetch_cursor = process_limit;
+}
+
+void CommandProcessor::handle_doorbell(simdojo::Tick timestamp) {
+  doorbell_handle_count_.fetch_add(1, std::memory_order_relaxed);
+  handle_doorbell_sync(timestamp);
+}
+
+void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
+  // Release so the doorbell poll thread's acquire-load cannot observe a stale
+  // "pending" after this handler has re-fetched; pairs with the release-stores at
+  // the INVALID-packet and barrier/dependency stall sites. A site that is still
+  // unsatisfied on this pass re-sets its flag below, re-arming the paced re-check.
+  invalid_pending_.store(false, std::memory_order_release);
+  stall_pending_.store(false, std::memory_order_release);
+  std::shared_lock<std::shared_mutex> structure_lock(queue_structure_mutex_);
+  util::Logger::cp(
+      [&](auto &os) { os << std::format("{}: DOORBELL queues={}", name(), hw_queues_.size()); });
+
+  // Take delivery of any shares peer XCDs handed us. Done before the lock so the
+  // inbox mutex stays a leaf; the drain acquires hw_queue_mutex_ itself.
+  drain_fanout_inbox();
+
+  std::unique_lock<std::recursive_mutex> lock(hw_queue_mutex_);
+  size_t entries_before = 0;
+  for (auto &qs : new_queue_states_)
+    entries_before += qs.entries.size();
+
+  // Fetch packets: AQL uses the poll snapshot; SDMA reads its live byte cursor.
+  for (size_t i = 0; i < hw_queues_.size(); ++i)
+    fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
+
+  // Ensure interrupt callback is set on completion tracker.
+  if (completion_ && interrupt_cb_)
+    completion_->set_interrupt_callback(interrupt_cb_);
+
+  size_t entries_after = 0;
+  for (auto &qs : new_queue_states_)
+    entries_after += qs.entries.size();
+  // Any new work restarts the stall re-check at a tight interval. Shard delivery
+  // resets it too, but not every wait here ends with a shard -- a barrier or a
+  // cross-rank dependency is satisfied by a value another partition (or the
+  // daemon) writes, and that arrives as fetched entries rather than as an inbox
+  // hand-off. Without this, a CP that had backed off would stay backed off.
+  if (entries_after != entries_before)
+    stall_recheck_backoff_ = 1;
+  util::Logger::cp([&](auto &os) {
+    os << std::format("{}: FETCHED {} new entries (total={})", name(),
+                      entries_after - entries_before, entries_after);
+  });
+
+  // While the queue mutex is dropped, CU workers append compact completion
+  // records only. The shared structure lock keeps queue/CU storage stable; once
+  // the batch rejoins, the CP thread applies every stateful retirement action.
+  auto run_dispatch_workers = [&]() {
+    if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL || dispatch_threads_ <= 1 ||
+        !has_runnable_cus())
+      return FunctionalQuantumResult{};
+    lock.unlock();
+    // One shared pool and thread budget covers the CP's complete active-CU
+    // batch instead of retaining a separate pool for every SPI.
+    FunctionalQuantumResult result = run_active_cus_once(now);
+    lock.lock();
+    drain_pending_cluster_barrier_completions();
+    drain_pending_wg_completions();
+    if (completion_)
+      completion_->drain_completions(new_queue_states_);
+    return result;
+  };
+
+  // Phase 1: Dispatch-Execute-Complete loop (functional mode). Dispatch all
+  // queues that currently have capacity, then execute at most one active-CU
+  // batch. Returning after that batch lets peer components publish state before
+  // a polling wave is resumed by the CP continuation event.
+  //
+  // Wrapped in a rescan loop. A dependent kernel the host submits *while this
+  // handler is executing* is picked up only by the post-loop re-fetch below;
+  // without re-running the dispatch loop it would be stranded un-dispatched,
+  // blocking in-order completion of the trailing barrier packets and hanging the
+  // waiting host forever (the doorbell that delivered it was already consumed by
+  // scan_doorbells, so no further handle_doorbell fires). This races at any
+  // thread count — the resume paths that would otherwise catch it (on_cu_idle at
+  // T=1, the synchronous pool drain at T>1) have all finished by the time the
+  // late packet arrives — but the window is widest with multi-dispatch IREE
+  // kernels at dispatch thread counts > 1. After each re-fetch we rescan and
+  // re-run this loop when new packets arrived.
+  bool rescan = true;
+  bool first_pass = true;
+  bool yield_to_event_loop = false;
+  while (rescan) {
+    bool progress = true;
+    while (progress && !yield_to_event_loop) {
+      progress = false;
+
+      for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
+        if (hw_queues_[qi].is_sdma || hw_queues_[qi].debug_suspended ||
+            hw_queues_[qi].runtime_suspended)
+          continue;
+        auto &qs = new_queue_states_[qi];
+
+        while (qs.next_dispatch_idx < qs.entries.size()) {
+          auto &entry = qs.entries[qs.next_dispatch_idx];
+
+          if (entry.wait_for_predecessors && !barrier_satisfied(qs, qs.next_dispatch_idx))
+            break;
+
+          if (entry.is_non_kernel()) {
+            entry.completed_wgs = entry.total_wgs;
+            if (completion_)
+              completion_->complete_non_kernel(entry);
+            ++qs.next_dispatch_idx;
+            if (completion_)
+              completion_->drain_completions(new_queue_states_);
+            progress = true;
+            continue;
+          }
+
+          // Dispatch WGs until the entry is fully dispatched or all CUs apply
+          // backpressure. Execution is deferred until every queue gets this
+          // dispatch pass, preventing a polling queue from starving its peers.
+          uint32_t dispatch_id = entry.dispatch_id;
+          bool backpressure = false;
+          for (;;) {
+            if (qs.next_dispatch_idx >= qs.entries.size())
+              break;
+            auto &cur = qs.entries[qs.next_dispatch_idx];
+            if (cur.dispatch_id != dispatch_id)
+              break;
+
+            uint32_t sent = dispatch_workgroups(cur);
+            if (sent > 0)
+              progress = true;
+
+            if (qs.next_dispatch_idx >= qs.entries.size())
+              break;
+            auto &post = qs.entries[qs.next_dispatch_idx];
+            if (post.dispatch_id != dispatch_id)
+              break;
+
+            if (post.fully_dispatched()) {
+              ++qs.next_dispatch_idx;
+              break;
+            }
+            if (sent == 0) {
+              backpressure = true;
+              break;
+            }
+          }
+          if (backpressure)
+            break;
+        }
+        if (yield_to_event_loop)
+          break;
+      }
+
+      if (!yield_to_event_loop) {
+        auto worker_result = run_dispatch_workers();
+        if (worker_result.ran) {
+          progress = true;
+          yield_to_event_loop = true;
+        }
+      }
+    }
+
+    // Final drain: catch any entries that became fully_completed during the
+    // last worker batch.
+    drain_pending_cluster_barrier_completions();
+    drain_pending_wg_completions();
+    if (completion_)
+      completion_->drain_completions(new_queue_states_);
+
+    // A completed batch can free every resident slot while the same dispatch
+    // still owns undispatched workgroups. Refill those slots before yielding,
+    // but leave their execution to the next continuation event so one event
+    // still runs at most one functional quantum per CU.
+    if (yield_to_event_loop) {
+      process_queues();
+      if (completion_)
+        completion_->drain_completions(new_queue_states_);
+    }
+
+    util::Logger::cp([&](auto &os) {
+      size_t remaining = 0;
+      for (auto &qs : new_queue_states_)
+        remaining += qs.entries.size();
+      uint32_t active_cus = 0;
+      for (auto *cu : cus_)
+        if (cu->has_active_wfs())
+          ++active_cus;
+      os << std::format("{}: PHASE1_DONE remaining={} active_cus={}/{}", name(), remaining,
+                        active_cus, cus_.size());
+      for (size_t qi = 0; qi < new_queue_states_.size(); ++qi) {
+        auto &qs = new_queue_states_[qi];
+        if (qs.entries.empty())
+          continue;
+        os << std::format("\n  queue[{}] entries={} next_disp={} implicit_barrier={}", qi,
+                          qs.entries.size(), qs.next_dispatch_idx, qs.implicit_barrier_next);
+        for (size_t ei = 0; ei < qs.entries.size(); ++ei) {
+          auto &e = qs.entries[ei];
+          os << std::format(
+              "\n    [{}] d={} qid={} total_wgs={} disp={} comp={} wait_pred={} sig={:#x} "
+              "non_kern={}",
+              ei, e.dispatch_id, e.queue_id, e.total_wgs, e.dispatched_wgs, e.completed_wgs,
+              e.wait_for_predecessors, e.completion_signal, e.is_non_kernel());
+        }
+      }
+    });
+
+    if (yield_to_event_loop)
+      break;
+
+    // Re-fetch: pick up any packets the host submitted while we were executing
+    // (e.g., barrier packets queued after a kernel dispatch). Process them
+    // immediately so host signal waits see completed barriers before returning.
+    //
+    // Re-fetch SDMA only on the first pass to bound its work during this
+    // compute rescan. SDMA fetches stay within the doorbell-published byte range;
+    // later submissions are picked up by their own doorbell-driven passes.
+    const uint32_t dispatch_id_before_refetch = next_dispatch_id_;
+    for (size_t i = 0; i < hw_queues_.size(); ++i) {
+      if (hw_queues_[i].is_sdma && !first_pass)
+        continue;
+      fetch_from_queue(hw_queues_[i], new_queue_states_[i], now);
+    }
+    first_pass = false;
+    // Process any new non-kernel entries (barriers with total_wgs==0).
+    for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
+      if (hw_queues_[qi].debug_suspended || hw_queues_[qi].runtime_suspended)
+        continue;
+      auto &qs = new_queue_states_[qi];
+      while (qs.next_dispatch_idx < qs.entries.size()) {
+        auto &entry = qs.entries[qs.next_dispatch_idx];
+        if (entry.wait_for_predecessors && !barrier_satisfied(qs, qs.next_dispatch_idx))
+          break;
+        if (!entry.is_non_kernel())
+          break;
+        entry.completed_wgs = entry.total_wgs;
+        if (completion_)
+          completion_->complete_non_kernel(entry);
+        ++qs.next_dispatch_idx;
+      }
+    }
+    if (completion_)
+      completion_->drain_completions(new_queue_states_);
+
+    // Re-run Phase 1 only if the re-fetch actually pulled in NEW packets
+    // (next_dispatch_id_ advances exactly once per fetched packet). Gating on new
+    // packets — rather than "a dispatchable entry still exists" — is what
+    // guarantees termination: a kernel held back by CU backpressure stays
+    // "dispatchable" but creates no new dispatch ids, so it cannot spin the loop.
+    // New arrivals are finite: they are bounded by host submissions, which are
+    // themselves gated on the completion signals we deliver here.
+    rescan = (next_dispatch_id_ != dispatch_id_before_refetch);
+  } // while (rescan)
+
+  arm_grid_wait_recheck();
+
+  // Register as primary on first dispatch (internal test queues only).
+  // KFD queues rely on the VM-level primary registered at rj_vm.cpp.
+  bool kfd = has_kfd_queues();
+  if (!is_primary_ && pending_entries() > 0 && !kfd) {
+    engine()->register_as_primary();
+    is_primary_ = true;
+  }
+
+  if (dispatch_threads_ > 1) {
+    const simdojo::Tick next = next_pooled_due_tick(now);
+    if (next != simdojo::TICK_MAX)
+      arm_dispatch_continuation(next);
+    else
+      cancel_dispatch_continuation();
+  } else {
+    for (size_t i = 0; i < cus_.size(); ++i) {
+      if (!cus_[i]->is_idle()) {
+        if (dispatch_ports_[i]->link())
+          dispatch_ports_[i]->send(std::make_unique<simdojo::Message>(simdojo::MessageHeader{}));
+        else
+          cus_[i]->schedule_work();
+      }
+    }
+  }
+
+  bool all_done = completion_ && completion_->all_complete(new_queue_states_);
+  bool should_release = all_done && is_primary_ && !kfd;
+
+  util::Logger::cp([&](auto &os) {
+    os << std::format("{}: TEARDOWN_CHECK all_done={} kfd={} primary={} release={}", name(),
+                      all_done, kfd, is_primary_.load(), should_release);
+  });
+
+  // CRITICAL: must unlock before stop_doorbell_monitor() — the doorbell poll
+  // thread takes hw_queue_mutex_ in scan_doorbells(); joining while holding
+  // the lock would deadlock.
+  lock.unlock();
+
+  if (should_release) {
+    stop_doorbell_monitor();
+    engine()->primary_release();
+    is_primary_ = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SDMA packet processor
+// ---------------------------------------------------------------------------
+
+/// @brief Resolve a GPU VA to a daemon-accessible host pointer.
+/// @details In daemon mode, the GPU VA belongs to the client process and cannot
+/// be dereferenced directly. The VMID page table maps gpu_va -> daemon_host_ptr,
+/// so we use GpuMemory::resolve_host_ptr() to find the correct address. In local
+/// mode, the GPU VA IS the host VA (identity mapping), so we cast directly.
+/// @returns Host pointer, or nullptr if the VA is not mapped.
+static void *resolve_sdma_ptr(GpuMemory *memory, uint64_t va, uint32_t vmid, size_t size) {
+  if (!memory)
+    return nullptr;
+  return memory->resolve_host_ptr(va, vmid, size);
+}
+
+// SDMA opcodes.
+namespace sdma {
+constexpr uint8_t OP_NOP = 0;
+constexpr uint8_t OP_COPY = 1;
+constexpr uint8_t OP_WRITE = 2;
+constexpr uint8_t OP_FENCE = 5;
+constexpr uint8_t OP_TRAP = 6;
+constexpr uint8_t OP_POLL_REGMEM = 8;
+constexpr uint8_t OP_ATOMIC = 10;
+constexpr uint8_t OP_CONST_FILL = 11;
+constexpr uint8_t OP_TIMESTAMP = 13;
+constexpr uint8_t OP_GCR = 17;
+constexpr uint8_t OP_HDP_FLUSH = 0x26; // GFX9 specific
+
+constexpr uint8_t SUBOP_COPY_LINEAR = 0;
+constexpr uint8_t SUBOP_FENCE_64B = 2;
+constexpr uint8_t SUBOP_POLL_MEM_64B = 5;
+
+// Packet sizes in dwords.
+constexpr uint32_t COPY_LINEAR_SIZE = 7;
+constexpr uint32_t COPY_LINEAR_BROADCAST_SIZE = 9;
+constexpr uint32_t FENCE_SIZE = 4;
+constexpr uint32_t TRAP_SIZE = 2;
+constexpr uint32_t POLL_REGMEM_SIZE = 6;
+constexpr uint32_t ATOMIC_SIZE = 8;
+constexpr uint32_t CONST_FILL_SIZE = 5;
+constexpr uint32_t TIMESTAMP_SIZE = 3;
+constexpr uint32_t GCR_SIZE = 5;
+constexpr uint32_t GCR_GFX1250_SIZE = 6;
+constexpr size_t TRANSFER_SCRATCH_BYTES = GpuMemory::PAGE_SIZE;
+
+// GCR GL2 cache-op control bits. The control dword and bit positions genuinely
+// differ by dialect (the gfx1250 GCR packet is a distinct layout, not a resized
+// legacy packet). Legacy/gfx9-12 pack gcr_control[15:0] into DW2 starting at
+// bit 16 (DW2 low 16 bits hold BaseVA_HI); gfx1250 makes DW2 a full 25-bit base
+// VA and relocates the control field to DW3 starting at bit 0. Only the GL2
+// writeback/invalidate/discard bits matter for the functional GL2 model.
+//   Legacy DW2:  GL2_DISCARD=29, GL2_INV=30, GL2_WB=31  (= gcr_control 13/14/15 + 16)
+//   gfx1250 DW3: GL2_DISCARD=13, GL2_INV=14, GL2_WB=15
+// Layouts and sizes (legacy 5 dwords, gfx1250 6 dwords) match the vendored
+// runtime SDMA GCR packet definitions for each dialect.
+constexpr uint32_t GCR_LEGACY_CONTROL_DW = 2;
+constexpr uint32_t GCR_LEGACY_GL2_DISCARD_BIT = 1u << 29;
+constexpr uint32_t GCR_LEGACY_GL2_INV_BIT = 1u << 30;
+constexpr uint32_t GCR_LEGACY_GL2_WB_BIT = 1u << 31;
+constexpr uint32_t GCR_GFX1250_CONTROL_DW = 3;
+constexpr uint32_t GCR_GFX1250_GL2_DISCARD_BIT = 1u << 13;
+constexpr uint32_t GCR_GFX1250_GL2_INV_BIT = 1u << 14;
+constexpr uint32_t GCR_GFX1250_GL2_WB_BIT = 1u << 15;
+constexpr uint32_t COPY_LINEAR_WAIT_DWORDS = 7;
+constexpr uint32_t COPY_LINEAR_BODY_DWORDS = 6;
+constexpr uint32_t COPY_LINEAR_SIGNAL_DWORDS = 5;
+constexpr uint32_t FENCE_64B_GFX11_PLUS_SIZE = 5;
+constexpr uint32_t POLL_MEM_64B_GFX11_PLUS_SIZE = 8;
+constexpr uint32_t COPY_LINEAR_BROADCAST_FLAG = 1u << 27;
+// NOP_BASE_SIZE intentionally omitted — NOP is handled inline.
+} // namespace sdma
+
+namespace {
+
+bool sdma_compare_u64(uint32_t func, uint64_t value, uint64_t reference) {
+  switch (func) {
+  case 0:
+    return true;
+  case 1:
+    return value < reference;
+  case 2:
+    return value <= reference;
+  case 3:
+    return value == reference;
+  case 4:
+    return value != reference;
+  case 5:
+    return value >= reference;
+  case 6:
+    return value > reference;
+  default:
+    return true;
+  }
+}
+
+} // namespace
+
+void CommandProcessor::flush_gpu_caches() {
+  // Both L1 caches are write-through, so discard their clean snapshots around
+  // direct backing writes. Flush dirty L2 data before the direct write so a
+  // later L2 flush cannot overwrite it.
+  for (auto *cu : cus_)
+    cu->l1_scalar().invalidate_all();
+  for (auto *l2 : l2_caches_)
+    l2->flush_all();
+  for (auto *cu : cus_) {
+    cu->l1_vector().invalidate_all();
+    // A direct backing write may land on code, and the I$ is not coherent with
+    // data writes any more than the hardware one is.
+    cu->instruction_cache().invalidate_all();
+  }
+}
+
+void CommandProcessor::invalidate_gpu_caches() {
+  for (auto *l2 : l2_caches_)
+    l2->invalidate_all();
+  for (auto *cu : cus_) {
+    cu->l1_vector().invalidate_all();
+    cu->instruction_cache().invalidate_all();
+  }
+}
+
+void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx,
+                                         simdojo::Tick now) {
+  // A queue that faulted stays halted. Hardware stops the engine on a VM fault
+  // and leaves it for the driver; resuming here would run the packets queued
+  // behind the faulted one, and a fence among them would publish completion for
+  // a transfer that never happened.
+  if (queue.faulted)
+    return;
+
+  uint32_t ring_mask = (queue.ring_size / sizeof(uint32_t)) - 1;
+
+  uint64_t rpos = read_idx / sizeof(uint32_t);
+  uint64_t wpos = write_idx / sizeof(uint32_t);
+
+  auto dw = [&](uint64_t off) -> uint32_t {
+    uint64_t addr = queue.ring_base_va + (((rpos + off) & ring_mask) * sizeof(uint32_t));
+    return memory_->read32(addr, queue.process_id);
+  };
+
+  // Helper: resolve a GPU VA from an SDMA packet to a host pointer.
+  // In daemon mode, the VA belongs to the client process; we go through the
+  // VMID page table. In local mode, the VA IS the host address.
+  auto resolve = [&](uint64_t va, size_t size = 1) -> void * {
+    return resolve_sdma_ptr(memory_, va, queue.process_id, size);
+  };
+  // A control address that does not resolve is either not mapped yet, which is
+  // worth waiting for, or faulted, which never will be. Retrying the second
+  // re-reports the same violation forever and never drains the queue.
+  auto resolve_control = [&](uint64_t va, size_t size) {
+    const amdgpu::GpuMemory::FaultScope faults;
+    void *ptr = resolve(va, size);
+    return std::pair<void *, bool>{ptr, faults.observed()};
+  };
+  auto copy_linear = [&](uint64_t src_va, std::span<const uint64_t> dst_vas,
+                         uint32_t count) -> amdgpu::CopyOutcome {
+    // has_range_mapping() first, and resolve() only if it says no. Both answer
+    // the same question here, but only one of them reports: resolve() records a
+    // violation against the process for an address it could not translate, and
+    // a mapping whose live extent is merely clipped is exactly such an address.
+    // Asking the non-reporting predicate first means a clipped PTE -- which the
+    // transfer below then services out of sparse backing and completes -- no
+    // longer delivers a memory exception for a packet that succeeded. Where the
+    // predicate says no, the endpoint is genuinely unknown and the branch below
+    // classifies it properly.
+    const bool source_known = memory_->has_range_mapping(src_va, count, queue.process_id) ||
+                              resolve(src_va, count) != nullptr;
+    const bool destinations_known = std::ranges::all_of(dst_vas, [&](uint64_t dst_va) {
+      return memory_->has_range_mapping(dst_va, count, queue.process_id) ||
+             resolve(dst_va, count) != nullptr;
+    });
+    // A pageable host buffer is in neither the page table nor the passthrough
+    // range, so in daemon mode the checks above cannot see it and the transfer
+    // below would read sparse zeroes. copy_block() reaches it through the
+    // client's memory and refuses rather than falling back to sparse, which
+    // leaves the packet pending for retry when the endpoint is truly gone.
+    if (!source_known || !destinations_known) {
+      // copy_block() now separates "not resolvable yet", which is worth
+      // retrying, from "this address does not exist", which never will be. The
+      // violation has already been reported to the process, so retrying a
+      // faulted endpoint would only wedge the queue behind a packet that can
+      // never land.
+      auto worst = amdgpu::CopyOutcome::Complete;
+      for (uint64_t dst_va : dst_vas) {
+        const auto outcome = memory_->copy_block(dst_va, src_va, count, queue.process_id);
+        if (outcome == amdgpu::CopyOutcome::Faulted)
+          return amdgpu::CopyOutcome::Faulted;
+        if (outcome == amdgpu::CopyOutcome::Unavailable)
+          worst = amdgpu::CopyOutcome::Unavailable;
+      }
+      return worst;
+    }
+
+    std::array<uint8_t, sdma::TRANSFER_SCRATCH_BYTES> copy_buffer{};
+    size_t offset = 0;
+    auto outcome = amdgpu::CopyOutcome::Complete;
+    while (offset < count) {
+      const size_t chunk = std::min(copy_buffer.size(), static_cast<size_t>(count) - offset);
+      auto bytes = std::span<uint8_t>(copy_buffer).first(chunk);
+      // This path is reached because the endpoints looked resolvable, and it is
+      // allowed to fall back to sparse backing for GPU memory never written.
+      // A faulted byte is not that, so it has to be told apart here rather than
+      // silently reported as a completed transfer.
+      //
+      // Stop at the first fault rather than recording it and carrying on. A
+      // faulted read leaves the scratch buffer holding zeroes or sparse bytes
+      // that were never in the source, and writing those to the destinations
+      // would replace live data with fabrication -- worse than the transfer not
+      // happening, and invisible to a caller that only learns the packet
+      // faulted.
+      if (memory_->read_block(src_va + offset, bytes, queue.process_id) ==
+          amdgpu::AccessOutcome::Faulted)
+        return amdgpu::CopyOutcome::Faulted;
+      for (uint64_t dst_va : dst_vas) {
+        if (memory_->write_block(dst_va + offset, std::span<const uint8_t>(bytes),
+                                 queue.process_id) == amdgpu::AccessOutcome::Faulted)
+          return amdgpu::CopyOutcome::Faulted;
+      }
+      offset += chunk;
+    }
+    return outcome;
+  };
+  // Publishing the read pointer is what tells the owner which packets are done.
+  // If it cannot be written the queue must stop: leaving a stale value visible
+  // means the next doorbell re-executes copies, fences and atomics that already
+  // ran. Reports whether the queue should keep going.
+  auto write_read_ptr = [&]() -> bool {
+    uint64_t rptr_val = rpos * sizeof(uint32_t);
+    assert((queue.read_ptr_va & (alignof(uint64_t) - 1)) == 0 &&
+           "SDMA queue read pointer must be 64-bit aligned");
+    // Published through the checked atomic store: it keeps the release ordering
+    // the doorbell protocol needs while validating the address, which a pointer
+    // from resolve() does not -- that only proves the page is readable.
+    const bool straddles_page =
+        (queue.read_ptr_va & GpuMemory::PAGE_MASK) + sizeof(rptr_val) > GpuMemory::PAGE_SIZE;
+    // A straddling pointer cannot be one atomic store, so it falls back to the
+    // block write. The two differ in how the store is issued, not in what an
+    // unpublishable read pointer means, so one halt covers both: a queue left
+    // running on a stale pointer replays whatever the owner has not seen retire,
+    // and a straddling pointer is no less stale than an aligned one.
+    const amdgpu::AccessOutcome outcome =
+        straddles_page
+            ? write_gpu_block(queue.read_ptr_va, &rptr_val, sizeof(rptr_val), queue.process_id)
+            : memory_->atomic_store(queue.read_ptr_va, sizeof(rptr_val), rptr_val,
+                                    queue.process_id);
+    if (outcome == amdgpu::AccessOutcome::Faulted) {
+      queue.faulted = true;
+      return false;
+    }
+    return true;
+  };
+  // Publish the unchanged read pointer before retrying a wait/poll packet or an
+  // SDMA packet whose translated VA is not ready yet. This helper must be used
+  // as `return stop_and_retry_current_packet();`: the queue owner still sees the
+  // packet as pending, and continuing this scan would allow the final read-pointer
+  // write below to incorrectly advance past the pending packet.
+  // Halt the queue after a fault: the packet is retired, but nothing behind it
+  // may run, or a later fence would publish completion for a transfer that
+  // never landed.
+  auto fault_sdma_queue = [&](amdgpu::HwQueue &q) { q.faulted = true; };
+  auto stop_current_packet = [&] { static_cast<void>(write_read_ptr()); };
+  auto stop_and_retry_current_packet = [&] {
+    if (!write_read_ptr())
+      return; // The queue faulted publishing its pointer; do not re-arm.
+    // Wait/poll SDMA packet, or a packet whose translated VA is not yet ready:
+    // arm_stall_recheck() re-arms the re-check without spinning simulated time.
+    arm_stall_recheck(now);
+  };
+
+  while (rpos < wpos) {
+    uint32_t header = dw(0);
+    uint8_t op = header & 0xFF;
+    uint8_t sub_op = (header >> 8) & 0xFF;
+    uint32_t pkt_dwords = 0;
+
+    switch (op) {
+    case sdma::OP_NOP: {
+      uint32_t count = (dw(0) >> 16) & 0x3FFF;
+      pkt_dwords = 1 + count;
+      break;
+    }
+    case sdma::OP_COPY: {
+      if (uses_gfx11_plus_sdma_packets() && sub_op == sdma::SUBOP_COPY_LINEAR &&
+          (header & ((1u << 30) | (1u << 31)))) {
+        const bool has_wait = (header & (1u << 30)) != 0;
+        const bool has_signal = (header & (1u << 31)) != 0;
+        // WAIT and SIGNAL blocks are absent, not padded, when their header bit
+        // is clear. Account for those blocks before decoding the shifted body.
+        const uint32_t copy_base = 1 + (has_wait ? sdma::COPY_LINEAR_WAIT_DWORDS : 0);
+        const uint32_t signal_base = copy_base + sdma::COPY_LINEAR_BODY_DWORDS;
+        const uint32_t packet_dwords =
+            signal_base + (has_signal ? sdma::COPY_LINEAR_SIGNAL_DWORDS : 0);
+        if (rpos + packet_dwords > wpos) {
+          rpos = wpos;
+          continue;
+        }
+
+        if (has_wait) {
+          uint32_t wait_func = dw(1) & 0x7;
+          uint64_t wait_addr =
+              (static_cast<uint64_t>(dw(2) & ~0x7u)) | (static_cast<uint64_t>(dw(3)) << 32);
+          uint64_t wait_ref = static_cast<uint64_t>(dw(4)) | (static_cast<uint64_t>(dw(5)) << 32);
+          uint64_t wait_mask = static_cast<uint64_t>(dw(6)) | (static_cast<uint64_t>(dw(7)) << 32);
+          if (wait_addr > 0x1000) {
+            uint64_t wait_value = 0;
+            const auto wait_outcome =
+                memory_->atomic_load(wait_addr, sizeof(uint64_t), wait_value, queue.process_id);
+            if (wait_outcome != amdgpu::CopyOutcome::Complete) {
+              if (wait_outcome == amdgpu::CopyOutcome::Faulted) {
+                fault_sdma_queue(queue);
+                return stop_current_packet();
+              }
+              return stop_and_retry_current_packet();
+            }
+            if (!sdma_compare_u64(wait_func, wait_value & wait_mask, wait_ref)) {
+              return stop_and_retry_current_packet();
+            }
+          }
+        }
+
+        int64_t *signal_ptr = nullptr;
+        uint64_t signal_addr = 0;
+        uint64_t signal_data = 0;
+        bool signal_decrement = false;
+        if (has_signal) {
+          uint32_t signal_op = dw(signal_base) & 0x7F;
+          signal_addr = (static_cast<uint64_t>(dw(signal_base + 1) & ~0x7u)) |
+                        (static_cast<uint64_t>(dw(signal_base + 2)) << 32);
+          signal_data = static_cast<uint64_t>(dw(signal_base + 3)) |
+                        (static_cast<uint64_t>(dw(signal_base + 4)) << 32);
+
+          if (signal_addr > 0x1000 && signal_op == 0x70) {
+            const auto [resolved, faulted] = resolve_control(signal_addr, sizeof(int64_t));
+            signal_ptr = static_cast<int64_t *>(resolved);
+            if (!signal_ptr) {
+              if (faulted) {
+                fault_sdma_queue(queue);
+                return stop_current_packet();
+              }
+              return stop_and_retry_current_packet();
+            }
+            signal_decrement = true;
+          }
+        }
+
+        uint32_t count = (dw(copy_base) & 0x3FFFFFFF) + 1;
+        uint64_t src_va = static_cast<uint64_t>(dw(copy_base + 2)) |
+                          (static_cast<uint64_t>(dw(copy_base + 3)) << 32);
+        uint64_t dst_va = static_cast<uint64_t>(dw(copy_base + 4)) |
+                          (static_cast<uint64_t>(dw(copy_base + 5)) << 32);
+        // Emulated SDMA writes straight to the backing store, bypassing the GPU
+        // caches. Real SDMA does not snoop GL2; coherence is re-established by
+        // the consuming kernel's acquire fence at dispatch. We model that with a
+        // coarse writeback+invalidate that runs BEFORE the direct write: the
+        // writeback publishes any dirty L2 lines so they are not lost, and —
+        // critically — a dirty line overlapping the
+        // destination is written back first, so the subsequent SDMA write
+        // supersedes it instead of being clobbered by a later flush. After the
+        // flush the caches are empty, so the destination re-reads fresh backing.
+        flush_gpu_caches();
+        const std::array destinations = {dst_va};
+        const auto copy_outcome = copy_linear(src_va, destinations, count);
+        if (copy_outcome == amdgpu::CopyOutcome::Unavailable)
+          return stop_and_retry_current_packet();
+        if (copy_outcome == amdgpu::CopyOutcome::Faulted) {
+          rpos += packet_dwords;
+          fault_sdma_queue(queue);
+          return stop_current_packet();
+        }
+
+        // The packet is retired either way -- a faulted endpoint will never
+        // resolve -- but its completion signal says the destination holds the
+        // copied bytes, and after a fault it does not. Publishing it anyway
+        // would hand a waiter stale data and a green light, before the fault
+        // this already reported reaches the runtime.
+        if (signal_decrement && copy_outcome == amdgpu::CopyOutcome::Complete) {
+          if (memory_->atomic_fetch_sub64(signal_addr, static_cast<int64_t>(signal_data),
+                                          queue.process_id) == amdgpu::AccessOutcome::Faulted) {
+            rpos += packet_dwords;
+            fault_sdma_queue(queue);
+            return stop_current_packet();
+          }
+        }
+
+        pkt_dwords = packet_dwords;
+        break;
+      }
+
+      if (rpos + sdma::COPY_LINEAR_SIZE > wpos) {
+        rpos = wpos;
+        continue;
+      }
+      uint32_t count = (dw(1) & 0x3FFFFFF) + 1;
+      uint64_t src_va = static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32);
+      uint64_t dst_va = static_cast<uint64_t>(dw(5)) | (static_cast<uint64_t>(dw(6)) << 32);
+      util::Logger::vm("SDMA COPY: src=", std::hex, src_va, " dst=", dst_va, std::dec,
+                       " count=", count, " (", count / 1024, " KB)");
+      // GFX11+ COPY_LINEAR uses bit 28 for NPD metadata. The two-destination
+      // broadcast form is marked by bit 27 and extends the packet with DW7/DW8.
+      bool is_broadcast_copy = uses_gfx11_plus_sdma_packets()
+                                   ? (header & sdma::COPY_LINEAR_BROADCAST_FLAG) != 0
+                                   : (header & (1u << 28)) != 0;
+      if (is_broadcast_copy) {
+        uint64_t dst2_va = static_cast<uint64_t>(dw(7)) | (static_cast<uint64_t>(dw(8)) << 32);
+        // Flush before the direct write (see COPY_LINEAR_WAITSIGNAL above): a
+        // destination-overlapping dirty L2 line must be written back first so
+        // the SDMA write supersedes it rather than being clobbered afterward.
+        flush_gpu_caches();
+        const std::array destinations = {dst_va, dst2_va};
+        const auto broadcast_outcome = copy_linear(src_va, destinations, count);
+        if (broadcast_outcome == amdgpu::CopyOutcome::Unavailable)
+          return stop_and_retry_current_packet();
+        if (broadcast_outcome == amdgpu::CopyOutcome::Faulted) {
+          rpos += sdma::COPY_LINEAR_BROADCAST_SIZE;
+          fault_sdma_queue(queue);
+          return stop_current_packet();
+        }
+        pkt_dwords = sdma::COPY_LINEAR_BROADCAST_SIZE;
+      } else {
+        flush_gpu_caches();
+        const std::array destinations = {dst_va};
+        const auto linear_outcome = copy_linear(src_va, destinations, count);
+        if (linear_outcome == amdgpu::CopyOutcome::Unavailable)
+          return stop_and_retry_current_packet();
+        if (linear_outcome == amdgpu::CopyOutcome::Faulted) {
+          rpos += sdma::COPY_LINEAR_SIZE;
+          fault_sdma_queue(queue);
+          return stop_current_packet();
+        }
+        pkt_dwords = sdma::COPY_LINEAR_SIZE;
+      }
+      break;
+    }
+    case sdma::OP_FENCE: {
+      if (uses_gfx11_plus_sdma_packets() && sub_op == sdma::SUBOP_FENCE_64B) {
+        if (rpos + sdma::FENCE_64B_GFX11_PLUS_SIZE > wpos) {
+          rpos = wpos;
+          continue;
+        }
+
+        uint64_t addr_va =
+            static_cast<uint64_t>(dw(1) & ~0x7u) | (static_cast<uint64_t>(dw(2)) << 32);
+        uint64_t data = static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32);
+        // Flush before the store so a destination-overlapping dirty line is
+        // published first and the fence write supersedes it.
+        flush_gpu_caches();
+        if (memory_->atomic_store(addr_va, sizeof(uint64_t), data, queue.process_id) ==
+            amdgpu::AccessOutcome::Faulted) {
+          fault_sdma_queue(queue);
+          return stop_current_packet();
+        }
+        pkt_dwords = sdma::FENCE_64B_GFX11_PLUS_SIZE;
+        break;
+      }
+
+      uint64_t addr_va = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
+      uint32_t data = dw(3);
+      flush_gpu_caches();
+      if (memory_->atomic_store(addr_va, sizeof(uint32_t), data, queue.process_id) ==
+          amdgpu::AccessOutcome::Faulted) {
+        fault_sdma_queue(queue);
+        return stop_current_packet();
+      }
+      pkt_dwords = sdma::FENCE_SIZE;
+      break;
+    }
+    case sdma::OP_TRAP: {
+      uint32_t event_id = dw(1) & 0x0FFFFFFF;
+      if (interrupt_cb_)
+        interrupt_cb_(queue.process_id, event_id);
+      pkt_dwords = sdma::TRAP_SIZE;
+      break;
+    }
+    case sdma::OP_POLL_REGMEM: {
+      if (uses_gfx11_plus_sdma_packets() && sub_op == sdma::SUBOP_POLL_MEM_64B) {
+        if (rpos + sdma::POLL_MEM_64B_GFX11_PLUS_SIZE > wpos) {
+          rpos = wpos;
+          continue;
+        }
+
+        uint32_t func = (header >> 28) & 0x7;
+        uint64_t addr = static_cast<uint64_t>(dw(1) & ~0x7u) | (static_cast<uint64_t>(dw(2)) << 32);
+        uint64_t ref = static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32);
+        uint64_t mask = static_cast<uint64_t>(dw(5)) | (static_cast<uint64_t>(dw(6)) << 32);
+        if (addr > 0x1000) {
+          uint64_t val = 0;
+          const auto poll_outcome =
+              memory_->atomic_load(addr, sizeof(uint64_t), val, queue.process_id);
+          if (poll_outcome != amdgpu::CopyOutcome::Complete) {
+            // A poll exists to wait for a condition, so an address that is
+            // merely not mapped yet is what it is waiting for. A faulted one
+            // never becomes true: retrying re-reports the same violation on
+            // every doorbell and the queue never drains.
+            if (poll_outcome == amdgpu::CopyOutcome::Faulted) {
+              fault_sdma_queue(queue);
+              return stop_current_packet();
+            }
+            return stop_and_retry_current_packet();
+          }
+          if (!sdma_compare_u64(func, val & mask, ref)) {
+            return stop_and_retry_current_packet();
+          }
+        }
+        pkt_dwords = sdma::POLL_MEM_64B_GFX11_PLUS_SIZE;
+        break;
+      }
+
+      bool mem_poll = (header >> 31) & 1;
+      bool hdp_flush = (header >> 26) & 1;
+      uint32_t func = (header >> 28) & 0x7;
+      uint64_t addr_va = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
+      uint32_t ref = dw(3);
+      uint32_t mask = dw(4);
+      if (!mem_poll) {
+        // Register poll / HDP flush — no-op in functional sim.
+      } else if (addr_va > 0x1000) {
+        uint64_t polled = 0;
+        const auto poll_outcome =
+            memory_->atomic_load(addr_va, sizeof(uint32_t), polled, queue.process_id);
+        if (poll_outcome != amdgpu::CopyOutcome::Complete) {
+          if (poll_outcome == amdgpu::CopyOutcome::Faulted) {
+            fault_sdma_queue(queue);
+            return stop_current_packet();
+          }
+          return stop_and_retry_current_packet();
+        }
+        auto compare = [func](uint32_t val, uint32_t reference) -> bool {
+          switch (func) {
+          case 0:
+            return true;
+          case 1:
+            return val < reference;
+          case 2:
+            return val <= reference;
+          case 3:
+            return val == reference;
+          case 4:
+            return val != reference;
+          case 5:
+            return val >= reference;
+          case 6:
+            return val > reference;
+          default:
+            return true;
+          }
+        };
+        const auto val = static_cast<uint32_t>(polled);
+        if (!compare(val & mask, ref)) {
+          return stop_and_retry_current_packet();
+        }
+      }
+      (void)hdp_flush;
+      pkt_dwords = sdma::POLL_REGMEM_SIZE;
+      break;
+    }
+    case sdma::OP_ATOMIC: {
+      uint64_t addr_va = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
+      uint64_t src_data = static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32);
+      uint32_t atomic_op = (header >> 25) & 0x7F;
+      // SDMA_ATOMIC_ADD64 = 47
+      if (atomic_op == 47 && addr_va > 0x1000) {
+        // A completion signal is decremented and then announced, so anything
+        // that can refuse has to be settled BEFORE the decrement: once the
+        // value drops, the waiter may already have observed it, and faulting
+        // afterwards leaves a signal that fired with no notification behind it.
+        const bool completes_a_signal = static_cast<int64_t>(src_data) < 0 && interrupt_cb_;
+        uint64_t sig_base = addr_va - 8; // Signal layout: value at offset 8.
+        uint64_t mailbox_ptr = 0;
+        uint32_t event_id = 0;
+        if (completes_a_signal) {
+          // Read exactly, through the checked block API rather than a bare
+          // pointer. A client-owned signal with no page-table entry resolves to
+          // nothing here, and a record clipped by the end of its extent reads
+          // back part fabricated -- neither is a harmless zero. Event zero is
+          // the broadcast that wakes every type-zero event in the process, and
+          // a half-read id names some other event outright.
+          const auto read_metadata = [&](uint64_t va, void *into, size_t bytes) {
+            return memory_->read_block_exact(
+                va, std::span<uint8_t>(static_cast<uint8_t *>(into), bytes), queue.process_id);
+          };
+          if (read_metadata(sig_base + 16, &mailbox_ptr, sizeof(mailbox_ptr)) ==
+                  amdgpu::AccessOutcome::Faulted ||
+              read_metadata(sig_base + 24, &event_id, sizeof(event_id)) ==
+                  amdgpu::AccessOutcome::Faulted) {
+            fault_sdma_queue(queue);
+            return stop_current_packet();
+          }
+        }
+
+        // Flush before the RMW: the fetch_add reads the backing value, so a
+        // dirty overlapping L2 line must be written back first or the atomic
+        // would operate on stale data. The flush also leaves caches empty so
+        // the new value re-reads fresh.
+        flush_gpu_caches();
+        if (memory_->atomic_fetch_add64(addr_va, src_data, queue.process_id) ==
+            amdgpu::AccessOutcome::Faulted) {
+          fault_sdma_queue(queue);
+          return stop_current_packet();
+        }
+
+        if (completes_a_signal) {
+          if (mailbox_ptr != 0) {
+            flush_gpu_caches();
+            if (memory_->atomic_store(mailbox_ptr, sizeof(uint64_t), uint64_t(event_id),
+                                      queue.process_id) == amdgpu::AccessOutcome::Faulted) {
+              fault_sdma_queue(queue);
+              return stop_current_packet();
+            }
+          }
+          // Zero means the id was never read, not "wake everything".
+          if (event_id != 0)
+            interrupt_cb_(queue.process_id, event_id);
+          else
+            util::Logger::vm("SDMA: signal at 0x", std::hex, sig_base, std::dec,
+                             " has no event id; not broadcasting");
+        }
+      }
+      pkt_dwords = sdma::ATOMIC_SIZE;
+      break;
+    }
+    case sdma::OP_CONST_FILL: {
+      uint64_t addr_va = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
+      uint32_t data = dw(3);
+      uint32_t count = (dw(4) & 0x3FFFFFF) + 1;
+      uint32_t fillsize = (header >> 30) & 0x3;
+      // A range that wraps the address space is a malformed packet rather than
+      // one waiting on a mapping: no later state makes it valid, so retrying it
+      // wedges the queue on a packet that can never land.
+      // The fill walks the range itself, so nothing else would report it.
+      if (memory_->check_range(addr_va, count, queue.process_id) ==
+          amdgpu::AccessOutcome::Faulted) {
+        fault_sdma_queue(queue);
+        return stop_current_packet();
+      }
+      // Non-reporting predicate first, as in copy_linear(): resolve() would
+      // otherwise record a violation for a clipped mapping that the fill then
+      // services and completes.
+      const bool destination_known = memory_->has_range_mapping(addr_va, count, queue.process_id) ||
+                                     resolve(addr_va, count) != nullptr;
+      if (!destination_known)
+        return stop_and_retry_current_packet();
+      {
+        // Flush before the fill so a destination-overlapping dirty line is
+        // published first and the fill supersedes it.
+        flush_gpu_caches();
+
+        std::array<uint8_t, sdma::TRANSFER_SCRATCH_BYTES> fill_buffer{};
+        std::array<uint8_t, sizeof(data)> fill_pattern{};
+        std::memcpy(fill_pattern.data(), &data, sizeof(data));
+        size_t offset = 0;
+        while (offset < count) {
+          const uint64_t chunk_va = addr_va + offset;
+          const size_t chunk = std::min(
+              {fill_buffer.size(), static_cast<size_t>(count) - offset,
+               GpuMemory::PAGE_SIZE - static_cast<size_t>(chunk_va & GpuMemory::PAGE_MASK)});
+          if (fillsize == 2) {
+            for (size_t i = 0; i < chunk; ++i)
+              fill_buffer[i] = fill_pattern[(offset + i) % fill_pattern.size()];
+          } else {
+            std::fill_n(fill_buffer.begin(), chunk, static_cast<uint8_t>(data));
+          }
+          if (memory_->has_page_mapping(chunk_va, queue.process_id) &&
+              memory_->write_block(chunk_va, std::span<const uint8_t>(fill_buffer).first(chunk),
+                                   queue.process_id) == amdgpu::AccessOutcome::Faulted) {
+            fault_sdma_queue(queue);
+            return stop_current_packet();
+          }
+          offset += chunk;
+        }
+      }
+      pkt_dwords = sdma::CONST_FILL_SIZE;
+      break;
+    }
+    case sdma::OP_TIMESTAMP: {
+      uint64_t addr_va = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
+      if (addr_va > 0x1000) {
+        auto now = std::chrono::steady_clock::now().time_since_epoch();
+        uint64_t ts = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+        // Flush before the direct store so a dirty cached line overlapping the
+        // timestamp address is published first and the timestamp supersedes it
+        // rather than being clobbered by a later flush (see other direct-write
+        // SDMA ops).
+        flush_gpu_caches();
+        if (memory_->atomic_store(addr_va, sizeof(uint64_t), ts, queue.process_id) ==
+            amdgpu::AccessOutcome::Faulted) {
+          fault_sdma_queue(queue);
+          return stop_current_packet();
+        }
+      }
+      pkt_dwords = sdma::TIMESTAMP_SIZE;
+      break;
+    }
+    case sdma::OP_GCR: {
+      // GCR is the real SDMA cache-maintenance packet. It carries a base/size
+      // range plus separate GL2 writeback / invalidate / discard control bits.
+      // GFX9+ HW services the range at coarse (whole-cache) granularity, so we
+      // ignore the range but honor the control bits: a writeback must publish
+      // dirty L2 lines to backing (flush), while invalidate/discard drop them.
+      // Treating every GCR as an invalidate would silently lose simulator data
+      // that a writeback-only packet was meant to publish.
+      const bool gfx1250 = uses_gfx1250_gcr_packet();
+      const uint32_t control =
+          gfx1250 ? dw(sdma::GCR_GFX1250_CONTROL_DW) : dw(sdma::GCR_LEGACY_CONTROL_DW);
+      const uint32_t wb_bit = gfx1250 ? sdma::GCR_GFX1250_GL2_WB_BIT : sdma::GCR_LEGACY_GL2_WB_BIT;
+      const uint32_t inv_bit =
+          gfx1250 ? sdma::GCR_GFX1250_GL2_INV_BIT : sdma::GCR_LEGACY_GL2_INV_BIT;
+      const uint32_t discard_bit =
+          gfx1250 ? sdma::GCR_GFX1250_GL2_DISCARD_BIT : sdma::GCR_LEGACY_GL2_DISCARD_BIT;
+      const bool gl2_wb = (control & wb_bit) != 0;
+      const bool gl2_inv = (control & (inv_bit | discard_bit)) != 0;
+      if (gl2_wb) {
+        // Any writeback must publish dirty L2 data before it can be dropped. In
+        // the functional model a subsequent re-fetch from backing returns the
+        // same bytes, so the (harmless) invalidate inside flush is kept even for
+        // writeback-without-invalidate requests.
+        flush_gpu_caches();
+      } else if (gl2_inv) {
+        // Invalidate/discard only: drop without writeback.
+        invalidate_gpu_caches();
+      }
+      pkt_dwords = gfx1250 ? sdma::GCR_GFX1250_SIZE : sdma::GCR_SIZE;
+      break;
+    }
+    case sdma::OP_HDP_FLUSH:
+      pkt_dwords = 1;
+      break;
+    case sdma::OP_WRITE: {
+      if (rpos + 4 > wpos) {
+        rpos = wpos;
+        continue;
+      }
+      uint32_t count = (dw(3) & 0x3FFFFFF) + 1;
+      uint64_t addr_va = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
+      if (addr_va > 0x1000 && rpos + 4 + count <= wpos) {
+        // Flush before the write so a destination-overlapping dirty line is
+        // published first and the SDMA write supersedes it.
+        flush_gpu_caches();
+        // The whole range is written, so the whole range has to be validated --
+        // resolving one byte says nothing about the dwords that follow it, which
+        // may cross into a page that does not exist.
+        std::vector<uint32_t> payload(count);
+        for (uint32_t i = 0; i < count; ++i)
+          payload[i] = dw(4 + i);
+        if (memory_->write_block(
+                addr_va,
+                std::as_bytes(std::span<const uint32_t>(payload)).size() == 0
+                    ? std::span<const uint8_t>()
+                    : std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(payload.data()),
+                                               payload.size() * sizeof(uint32_t)),
+                queue.process_id) == amdgpu::AccessOutcome::Faulted) {
+          fault_sdma_queue(queue);
+          return stop_current_packet();
+        }
+      }
+      pkt_dwords = 4 + count;
+      break;
+    }
+    default:
+      // Unknown opcode — stop processing to avoid reading garbage.
+      util::Logger::vm("SDMA: unknown opcode 0x", std::hex, (unsigned)op, std::dec,
+                       " at rpos=", std::dec, rpos);
+      rpos = wpos; // Consume remaining to prevent infinite loop.
+      continue;
+    }
+
+    rpos += pkt_dwords;
+  }
+
+  static_cast<void>(write_read_ptr());
+}
+
+} // namespace amdgpu
+} // namespace rocjitsu

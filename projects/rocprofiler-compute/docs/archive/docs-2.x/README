@@ -1,0 +1,6 @@
+This subdirectory houses the input markup for Omniperf documentation using
+Sphinx. Changes committed here on the main branch will automatically be built
+and pushed live using a Github action.
+
+You can build a local copy of the documentation in this directory using
+"make html" assuming you have the necessary sphinx dependencies installed.

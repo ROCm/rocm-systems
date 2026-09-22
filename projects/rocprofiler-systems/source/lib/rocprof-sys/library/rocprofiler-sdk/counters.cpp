@@ -1,0 +1,235 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "library/rocprofiler-sdk/counters.hpp"
+#include "core/agent_manager.hpp"
+#include "core/demangler.hpp"
+#include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
+#include "library/rocprofiler-sdk/fwd.hpp"
+#include <cstdint>
+
+#include <memory>
+#include <timemory/utility/types.hpp>
+
+#include "logger/debug.hpp"
+
+namespace rocprofsys
+{
+namespace rocprofiler_sdk
+{
+namespace
+{
+void
+metadata_initialize_counter_category()
+{
+    trace_cache::get_metadata_registry().add_string(
+        trait::name<category::rocm_counter_collection>::value);
+}
+
+void
+metadata_initialize_counter_track(const char* name)
+{
+    trace_cache::get_metadata_registry().add_track({ name, std::nullopt, "{}" });
+}
+
+void
+metadata_initialize_counters_pmc(size_t dev_id, const std::string& name,
+                                 const std::string& metric_description)
+{
+    const std::size_t event_code       = 0;
+    const std::size_t instance_id      = 0;
+    const char*       long_description = "";
+    const char*       component        = "";
+    const char*       block            = "";
+    const char*       expression       = "";
+    const auto*       target_arch      = "GPU";
+
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { .type             = agent_type::gpu,
+          .agent_type_index = dev_id,
+          .target_arch      = target_arch,
+          .event_code       = event_code,
+          .instance_id      = instance_id,
+          .name             = name,
+          .symbol           = name,
+          .description      = metric_description,
+          .long_description = long_description,
+          .component        = component,
+          .units            = "Unit Count",
+          .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+          .block            = block,
+          .expression       = expression,
+          .is_constant      = 0,
+          .is_derived       = 0,
+          .extdata          = "{}" });
+}
+}  // namespace
+namespace
+{
+std::string
+get_counter_description(const client_data* tool_data, std::string_view _v)
+{
+    const auto& _info = tool_data->events_info;
+    for(const auto& itr : _info)
+    {
+        if(itr.symbol().starts_with(_v) || itr.short_description().starts_with(_v))
+        {
+            return itr.long_description();
+        }
+    }
+    return std::string{};
+}
+}  // namespace
+
+void
+counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack* _track,
+                          const std::string& track_name, timing_interval _timing,
+                          scope::config _scope) const
+{
+    if(!record.dispatch_data) return;
+
+    const auto& _dispatch_info = record.dispatch_data->dispatch_info;
+    const auto* _kern_sym_data =
+        tool_data->get_kernel_symbol_info(_dispatch_info.kernel_id);
+
+    auto _bundle =
+        counter_bundle_t{ rocprofsys::utility::demangle(_kern_sym_data->kernel_name),
+                          _scope };
+
+    _bundle.push(_dispatch_info.queue_id.handle)
+        .start()
+        .store(record.record_counter.counter_value);
+
+    _bundle.stop().pop(_dispatch_info.queue_id.handle);
+
+    if(_track && _timing.start > 0 && _timing.end > _timing.start)
+    {
+        TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value, *_track,
+                      _timing.start, record.record_counter.counter_value);
+        TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value, *_track,
+                      _timing.end, 0);
+
+        const std::string event_metadata  = "{}";
+        const size_t      stack_id        = 0;
+        const size_t      parent_stack_id = 0;
+        const size_t      correlation_id  = 0;
+        const std::string call_stack      = "{}";
+        const std::string line_info       = "{}";
+        const size_t      agent_handle    = record.record_counter.agent_id.handle;
+        const size_t      value           = record.record_counter.counter_value;
+
+        auto agent = get_agent_manager_instance().get_agent_by_handle(agent_handle);
+
+        trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
+            static_cast<size_t>(
+                category_enum_id<category::rocm_counter_collection>::value),
+            track_name.c_str(), _timing.start, event_metadata.c_str(), stack_id,
+            parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(),
+            static_cast<std::uint32_t>(agent.device_type_index),
+            static_cast<std::uint8_t>(agent.type), track_name.c_str(),
+            static_cast<double>(value), std::nullopt });
+
+        trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
+            static_cast<size_t>(
+                category_enum_id<category::rocm_counter_collection>::value),
+            track_name.c_str(), _timing.end, event_metadata.c_str(), stack_id,
+            parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(),
+            static_cast<std::uint32_t>(agent.device_type_index),
+            static_cast<std::uint8_t>(agent.type), track_name.c_str(),
+            static_cast<double>(0), std::nullopt });
+    }
+}
+
+counter_storage::counter_storage(const client_data* _tool_data, std::uint64_t _devid,
+                                 std::uint32_t _device_type_index, size_t _idx,
+                                 std::string_view _name)
+: tool_data{ _tool_data }
+, device_id{ _devid }
+, device_type_index{ _device_type_index }
+, index{ static_cast<std::int64_t>(_idx) }
+, metric_name{ _name }
+, metric_description{ get_counter_description(_tool_data, metric_name) }
+{
+    auto _metric_name = std::string{ _name };
+    _metric_name =
+        std::regex_replace(_metric_name, std::regex{ "(.*)\\[([0-9]+)\\]" }, "$1_$2");
+    storage_name = fmt::format("rocprof-device-{}-{}", device_id, _metric_name);
+    manager      = tim::manager::instance();
+    storage = std::make_unique<counter_storage_type>(tim::standalone_storage{}, index,
+                                                     storage_name);
+    if(manager)
+    {
+        manager->add_cleanup(storage_name + "cleanup",
+                             [storage_ptr = storage.get(), metric_name = metric_name,
+                              metric_description = metric_description]() {
+                                 if(storage_ptr)
+                                     counter_storage::write(storage_ptr, metric_name,
+                                                            metric_description);
+                             });
+    }
+    else
+    {
+        LOG_WARNING("{} counter_data_tracker is disabled. Can't add cleanup.",
+                    metric_name);
+    }
+
+    {
+        constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_COUNT;
+        track_name           = fmt::format("GPU {} [{}]", _metric_name, device_id);
+        track                = std::make_unique<counter_track_type>(
+            ::perfetto::StaticString(track_name.c_str()));
+
+        metadata_initialize_counter_category();
+        metadata_initialize_counters_pmc(device_id, track_name.c_str(),
+                                         metric_description);
+        metadata_initialize_counter_track(track_name.c_str());
+        track->set_is_incremental(false);
+        track->set_unit(_unit);
+        track->set_unit_multiplier(1);
+    }
+}
+
+void
+counter_storage::operator()(const counter_event& _event, timing_interval _timing,
+                            scope::config _scope) const
+{
+    operation::set_storage<counter_data_tracker>{}(storage.get());
+    _event(tool_data, track.get(), track_name, _timing, _scope);
+}
+
+void
+counter_storage::write_zero(rocprofiler_timestamp_t timestamp) const
+{
+    if(!track || timestamp == 0) return;
+
+    // Write zero to Perfetto trace (for legacy Perfetto)
+    TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value, *track,
+                  timestamp, 0);
+
+    // Write zero to cache (for rocpd database)
+    trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
+        static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value),
+        track_name.c_str(), timestamp, "{}", 0, 0, 0, "{}", "{}", device_type_index,
+        static_cast<std::uint8_t>(agent_type::gpu), track_name.c_str(), 0.0,
+        std::nullopt });
+}
+
+void
+counter_storage::write(counter_storage_type* storage, const std::string& metric_name,
+                       const std::string& metric_description)
+{
+    if(!trait::runtime_enabled<counter_data_tracker>::get())
+    {
+        LOG_WARNING("{} counter_data_tracker is disabled. Can't write storage.",
+                    metric_name);
+        return;
+    }
+
+    operation::set_storage<counter_data_tracker>{}(storage);
+    counter_data_tracker::label()       = metric_name;
+    counter_data_tracker::description() = metric_description;
+    storage->write();
+}
+}  // namespace rocprofiler_sdk
+}  // namespace rocprofsys

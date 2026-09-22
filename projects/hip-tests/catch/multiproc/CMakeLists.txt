@@ -1,0 +1,67 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# Common Tests
+set(TEST_SRC
+  childMalloc.cc
+  hipDeviceComputeCapabilityMproc.cc
+  hipDeviceGetPCIBusIdMproc.cc
+  hipDeviceTotalMemMproc.cc
+  hipGetDeviceAttributeMproc.cc
+  hipGetDeviceCountMproc.cc
+  hipGetDevicePropertiesMproc.cc
+  hipSetGetDeviceMproc.cc
+  hipIpcMemAccessTest.cc
+  hipMallocConcurrencyMproc.cc
+  hipMemCoherencyTstMProc.cc
+  hipIpcEventHandle.cc
+  deviceAllocationMproc.cc
+  hipNoGpuTsts.cc
+  hipMemGetInfoMProc.cc
+)
+
+if(UNIX)
+  if (HIP_PLATFORM MATCHES "amd")
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/dummy_kernel.code
+                      COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH}
+                      --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/dummy_kernel.cpp
+                      -o ${CMAKE_CURRENT_BINARY_DIR}/dummy_kernel.code
+                      -I${HIP_INCLUDE_DIR}
+                      -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/dummy_kernel.cpp
+                      COMMENT "Compiling dummy_kernel.code")
+  else()
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/dummy_kernel.code
+                      COMMAND ${CMAKE_HIP_COMPILER}
+                      --fatbin -x cu ${CMAKE_CURRENT_SOURCE_DIR}/dummy_kernel.cpp
+                      -o ${CMAKE_CURRENT_BINARY_DIR}/dummy_kernel.code
+                      -I${HIP_INCLUDE_DIR}
+                      -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/dummy_kernel.cpp
+                      COMMENT "Compiling dummy_kernel.code")
+  endif()
+  add_custom_target(dummy_kernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/dummy_kernel.code)
+endif()
+set_property(GLOBAL APPEND PROPERTY
+              G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/dummy_kernel.code)
+
+# the last argument linker libraries is required for this test but optional to the function
+if(HIP_PLATFORM MATCHES "nvidia")
+  hip_add_exe_to_target(NAME MultiProc
+                      TEST_SRC ${TEST_SRC}
+                      TEST_TARGET_NAME build_tests
+                      LINKER_LIBS nvrtc)
+  set_target_properties(MultiProc PROPERTIES COMPILE_FLAGS -arch=compute_75)
+elseif(HIP_PLATFORM MATCHES "amd")
+  hip_add_exe_to_target(NAME MultiProc
+                      TEST_SRC ${TEST_SRC}
+                      TEST_TARGET_NAME build_tests
+                      LINKER_LIBS hiprtc::hiprtc)
+endif()
+
+if(UNIX)
+  # Wire dummy_kernel_code to MultiProc directly so `make MultiProc` builds it,
+  # not just `make build_tests`.
+  add_dependencies(MultiProc dummy_kernel_code)
+endif()

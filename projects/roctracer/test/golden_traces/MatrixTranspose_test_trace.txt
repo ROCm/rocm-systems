@@ -1,0 +1,1856 @@
++ LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_test
+# INIT #############################
+# START (99) #############################
+<hipSetDevice id(11)	correlation_id(1) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(1) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(2) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(2) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(3) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(3) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0594a00000)
+<hipMalloc id(6)	correlation_id(4) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(4) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0594400000)
+<hipMemcpy id(141)	correlation_id(5) on-enter pid(1942) tid(1942)> dst(0x7f0594a00000) src(0x7f05957ff010) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(5) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(6) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(6) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(7) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(7) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(8) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(8) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(9) on-enter pid(1942) tid(1942)> dst(0x7f05953fe010) src(0x7f0594400000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(9) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(10) on-enter pid(1942) tid(1942)> ptr(0x7f0594a00000)
+<hipFree id(112)	correlation_id(10) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(11) on-enter pid(1942) tid(1942)> ptr(0x7f0594400000)
+<hipFree id(112)	correlation_id(11) on-exit pid(1942) tid(1942)>
+# START (98) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (97) #############################
+<hipSetDevice id(11)	correlation_id(12) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(12) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(13) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(13) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(14) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(14) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(15) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(15) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(16) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(16) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(17) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(17) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(18) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(18) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(19) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(19) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(20) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(20) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(21) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(21) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(22) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(22) on-exit pid(1942) tid(1942)>
+# START (96) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (95) #############################
+<hipSetDevice id(11)	correlation_id(23) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(23) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(24) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(24) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(25) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(25) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(26) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(26) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(27) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(27) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(28) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(28) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(29) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(29) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(30) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(30) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(31) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(31) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(32) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(32) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(33) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(33) on-exit pid(1942) tid(1942)>
+# START (94) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (93) #############################
+<hipSetDevice id(11)	correlation_id(34) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(34) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(35) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(35) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(36) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(36) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(37) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(37) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(38) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(38) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(39) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(39) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(40) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(40) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(41) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(41) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(42) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(42) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(43) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(43) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(44) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(44) on-exit pid(1942) tid(1942)>
+# START (92) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (91) #############################
+<hipSetDevice id(11)	correlation_id(45) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(45) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(46) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(46) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(47) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(47) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(48) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(48) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(49) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(49) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(50) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(50) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(51) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(51) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(52) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(52) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(53) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(53) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(54) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(54) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(55) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(55) on-exit pid(1942) tid(1942)>
+# START (90) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (89) #############################
+<hipSetDevice id(11)	correlation_id(56) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(56) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(57) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(57) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(58) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(58) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(59) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(59) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(60) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(60) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(61) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(61) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(62) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(62) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(63) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(63) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(64) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(64) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(65) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(65) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(66) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(66) on-exit pid(1942) tid(1942)>
+# START (88) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (87) #############################
+<hipSetDevice id(11)	correlation_id(67) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(67) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(68) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(68) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(69) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(69) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(70) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(70) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(71) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(71) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(72) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(72) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(73) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(73) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(74) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(74) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(75) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(75) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(76) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(76) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(77) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(77) on-exit pid(1942) tid(1942)>
+# START (86) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (85) #############################
+<hipSetDevice id(11)	correlation_id(78) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(78) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(79) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(79) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(80) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(80) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(81) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(81) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(82) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(82) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(83) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(83) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(84) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(84) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(85) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(85) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(86) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(86) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(87) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(87) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(88) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(88) on-exit pid(1942) tid(1942)>
+# START (84) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (83) #############################
+<hipSetDevice id(11)	correlation_id(89) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(89) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(90) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(90) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(91) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(91) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(92) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(92) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(93) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(93) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(94) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(94) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(95) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(95) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(96) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(96) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(97) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(97) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(98) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(98) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(99) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(99) on-exit pid(1942) tid(1942)>
+# START (82) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (81) #############################
+<hipSetDevice id(11)	correlation_id(100) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(100) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(101) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(101) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(102) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(102) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(103) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(103) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(104) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(104) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(105) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(105) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(106) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(106) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(107) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(107) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(108) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(108) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(109) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(109) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(110) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(110) on-exit pid(1942) tid(1942)>
+# START (80) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (79) #############################
+<hipSetDevice id(11)	correlation_id(111) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(111) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(112) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(112) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(113) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(113) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(114) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(114) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(115) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(115) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(116) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(116) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(117) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(117) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(118) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(118) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(119) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(119) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(120) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(120) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(121) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(121) on-exit pid(1942) tid(1942)>
+# START (78) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (77) #############################
+<hipSetDevice id(11)	correlation_id(122) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(122) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(123) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(123) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(124) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(124) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(125) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(125) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(126) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(126) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(127) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(127) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(128) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(128) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(129) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(129) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(130) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(130) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(131) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(131) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(132) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(132) on-exit pid(1942) tid(1942)>
+# START (76) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (75) #############################
+<hipSetDevice id(11)	correlation_id(133) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(133) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(134) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(134) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(135) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(135) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(136) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(136) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(137) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(137) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(138) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(138) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(139) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(139) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(140) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(140) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(141) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(141) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(142) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(142) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(143) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(143) on-exit pid(1942) tid(1942)>
+# START (74) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (73) #############################
+<hipSetDevice id(11)	correlation_id(144) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(144) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(145) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(145) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(146) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(146) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(147) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(147) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(148) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(148) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(149) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(149) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(150) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(150) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(151) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(151) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(152) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(152) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(153) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(153) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(154) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(154) on-exit pid(1942) tid(1942)>
+# START (72) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (71) #############################
+<hipSetDevice id(11)	correlation_id(155) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(155) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(156) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(156) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(157) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(157) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(158) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(158) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(159) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(159) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(160) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(160) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(161) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(161) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(162) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(162) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(163) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(163) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(164) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(164) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(165) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(165) on-exit pid(1942) tid(1942)>
+# START (70) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (69) #############################
+<hipSetDevice id(11)	correlation_id(166) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(166) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(167) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(167) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(168) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(168) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(169) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(169) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(170) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(170) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(171) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(171) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(172) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(172) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(173) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(173) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(174) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(174) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(175) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(175) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(176) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(176) on-exit pid(1942) tid(1942)>
+# START (68) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (67) #############################
+<hipSetDevice id(11)	correlation_id(177) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(177) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(178) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(178) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(179) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(179) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(180) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(180) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(181) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(181) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(182) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(182) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(183) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(183) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(184) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(184) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(185) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(185) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(186) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(186) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(187) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(187) on-exit pid(1942) tid(1942)>
+# START (66) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (65) #############################
+<hipSetDevice id(11)	correlation_id(188) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(188) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(189) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(189) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(190) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(190) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(191) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(191) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(192) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(192) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(193) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(193) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(194) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(194) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(195) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(195) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(196) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(196) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(197) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(197) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(198) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(198) on-exit pid(1942) tid(1942)>
+# START (64) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (63) #############################
+<hipSetDevice id(11)	correlation_id(199) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(199) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(200) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(200) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(201) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(201) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(202) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(202) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(203) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(203) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(204) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(204) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(205) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(205) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(206) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(206) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(207) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(207) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(208) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(208) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(209) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(209) on-exit pid(1942) tid(1942)>
+# START (62) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (61) #############################
+<hipSetDevice id(11)	correlation_id(210) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(210) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(211) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(211) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(212) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(212) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(213) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(213) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(214) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(214) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(215) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(215) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(216) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(216) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(217) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(217) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(218) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(218) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(219) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(219) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(220) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(220) on-exit pid(1942) tid(1942)>
+# START (60) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (59) #############################
+<hipSetDevice id(11)	correlation_id(221) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(221) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(222) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(222) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(223) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(223) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(224) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(224) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(225) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(225) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(226) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(226) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(227) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(227) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(228) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(228) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(229) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(229) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(230) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(230) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(231) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(231) on-exit pid(1942) tid(1942)>
+# START (58) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (57) #############################
+<hipSetDevice id(11)	correlation_id(232) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(232) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(233) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(233) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(234) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(234) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(235) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(235) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(236) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(236) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(237) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(237) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(238) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(238) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(239) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(239) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(240) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(240) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+	Activity records:
+	CopyHostToDevice	correlation_id(5) time_ns(3802689357753439:3802689359820964) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(8) time_ns(3802689360509153:3802689361716015) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(9) time_ns(3802689360494399:3802689363754703) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(16) time_ns(3802689388450536:3802689390236799) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(19) time_ns(3802689390364625:3802689391560377) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(20) time_ns(3802689390339380:3802689392863109) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(27) time_ns(3802689417071348:3802689418929841) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(30) time_ns(3802689419048112:3802689420269199) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(31) time_ns(3802689419022212:3802689421548811) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(38) time_ns(3802689445627269:3802689447410842) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(41) time_ns(3802689447529708:3802689448731388) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(42) time_ns(3802689447504943:3802689450274414) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(49) time_ns(3802689474527623:3802689476262806) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(52) time_ns(3802689476392929:3802689477590017) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(53) time_ns(3802689476368397:3802689478892916) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(60) time_ns(3802689503584638:3802689505372971) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(63) time_ns(3802689505491982:3802689506693367) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(64) time_ns(3802689505467392:3802689508275403) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(71) time_ns(3802689532911395:3802689534557317) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(74) time_ns(3802689534682162:3802689535887548) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(75) time_ns(3802689534658038:3802689537442469) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(82) time_ns(3802689568906171:3802689571083467) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(85) time_ns(3802689571219087:3802689572419288) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(86) time_ns(3802689571196478:3802689573887058) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(93) time_ns(3802689598251069:3802689600026322) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(96) time_ns(3802689600145805:3802689601348525) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(97) time_ns(3802689600123213:3802689602806783) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(104) time_ns(3802689627157203:3802689628927696) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(107) time_ns(3802689629049519:3802689630268684) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(108) time_ns(3802689629026107:3802689631746766) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(115) time_ns(3802689656373389:3802689658143972) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(118) time_ns(3802689658259958:3802689659467419) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(119) time_ns(3802689658237262:3802689660957043) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(126) time_ns(3802689685271863:3802689687039926) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(129) time_ns(3802689687150718:3802689688366032) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(130) time_ns(3802689687128237:3802689689859986) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(137) time_ns(3802689714350448:3802689716112201) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(140) time_ns(3802689716240667:3802689717447388) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(141) time_ns(3802689716218291:3802689718928721) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(148) time_ns(3802689743475113:3802689745210346) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(151) time_ns(3802689745323253:3802689746515752) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(152) time_ns(3802689745300567:3802689747945637) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(159) time_ns(3802689772344187:3802689774110760) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(162) time_ns(3802689774218917:3802689775424898) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(163) time_ns(3802689774197411:3802689776949561) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(170) time_ns(3802689801298091:3802689803069634) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(173) time_ns(3802689803196613:3802689804402742) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(174) time_ns(3802689803174085:3802689805874665) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(181) time_ns(3802689830101304:3802689831827457) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(184) time_ns(3802689831926122:3802689833126473) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(185) time_ns(3802689831904148:3802689834480347) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(192) time_ns(3802689865137593:3802689866899836) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(195) time_ns(3802689867026811:3802689868235755) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(196) time_ns(3802689867002057:3802689869703907) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(203) time_ns(3802689897884796:3802689899652089) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(206) time_ns(3802689899768063:3802689900971081) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(207) time_ns(3802689899745690:3802689902449700) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(214) time_ns(3802689926756559:3802689928481312) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(217) time_ns(3802689928583331:3802689929779831) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(218) time_ns(3802689928561193:3802689931219843) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(225) time_ns(3802689955609923:3802689957386666) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(228) time_ns(3802689957512437:3802689958721530) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(229) time_ns(3802689957490037:3802689960198617) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(236) time_ns(3802689991781141:3802689993558264) device_id(0) queue_id(0) bytes(0x0)
+PASSED!
+<hipFree id(112)	correlation_id(241) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(241) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(242) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(242) on-exit pid(1942) tid(1942)>
+# START (56) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (55) #############################
+<hipSetDevice id(11)	correlation_id(243) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(243) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(244) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(244) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(245) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(245) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(246) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(246) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(247) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(247) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(248) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(248) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(249) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(249) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(250) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(250) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(251) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(251) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(252) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(252) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(253) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(253) on-exit pid(1942) tid(1942)>
+# START (54) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (53) #############################
+<hipSetDevice id(11)	correlation_id(254) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(254) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(255) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(255) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(256) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(256) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(257) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(257) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(258) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(258) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(259) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(259) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(260) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(260) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(261) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(261) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(262) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(262) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(263) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(263) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(264) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(264) on-exit pid(1942) tid(1942)>
+# START (52) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (51) #############################
+<hipSetDevice id(11)	correlation_id(265) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(265) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(266) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(266) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(267) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(267) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(268) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(268) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(269) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(269) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(270) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(270) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(271) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(271) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(272) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(272) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(273) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(273) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(274) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(274) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(275) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(275) on-exit pid(1942) tid(1942)>
+# START (50) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (49) #############################
+<hipSetDevice id(11)	correlation_id(276) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(276) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(277) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(277) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(278) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(278) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(279) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(279) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(280) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(280) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(281) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(281) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(282) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(282) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(283) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(283) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(284) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(284) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(285) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(285) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(286) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(286) on-exit pid(1942) tid(1942)>
+# START (48) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (47) #############################
+<hipSetDevice id(11)	correlation_id(287) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(287) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(288) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(288) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(289) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(289) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(290) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(290) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(291) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(291) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(292) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(292) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(293) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(293) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(294) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(294) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(295) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(295) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(296) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(296) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(297) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(297) on-exit pid(1942) tid(1942)>
+# START (46) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (45) #############################
+<hipSetDevice id(11)	correlation_id(298) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(298) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(299) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(299) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(300) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(300) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(301) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(301) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(302) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(302) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(303) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(303) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(304) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(304) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(305) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(305) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(306) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(306) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(307) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(307) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(308) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(308) on-exit pid(1942) tid(1942)>
+# START (44) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (43) #############################
+<hipSetDevice id(11)	correlation_id(309) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(309) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(310) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(310) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(311) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(311) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(312) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(312) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(313) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(313) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(314) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(314) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(315) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(315) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(316) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(316) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(317) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(317) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(318) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(318) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(319) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(319) on-exit pid(1942) tid(1942)>
+# START (42) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (41) #############################
+<hipSetDevice id(11)	correlation_id(320) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(320) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(321) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(321) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(322) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(322) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(323) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(323) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(324) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(324) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(325) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(325) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(326) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(326) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(327) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(327) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(328) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(328) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(329) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(329) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(330) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(330) on-exit pid(1942) tid(1942)>
+# START (40) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (39) #############################
+<hipSetDevice id(11)	correlation_id(331) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(331) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(332) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(332) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(333) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(333) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(334) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(334) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(335) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(335) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(336) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(336) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(337) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(337) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(338) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(338) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(339) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(339) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(340) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(340) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(341) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(341) on-exit pid(1942) tid(1942)>
+# START (38) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (37) #############################
+<hipSetDevice id(11)	correlation_id(342) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(342) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(343) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(343) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(344) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(344) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(345) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(345) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(346) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(346) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(347) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(347) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(348) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(348) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(349) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(349) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(350) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(350) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(351) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(351) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(352) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(352) on-exit pid(1942) tid(1942)>
+# START (36) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (35) #############################
+<hipSetDevice id(11)	correlation_id(353) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(353) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(354) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(354) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(355) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(355) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(356) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(356) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(357) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(357) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(358) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(358) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(359) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(359) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(360) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(360) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(361) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(361) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(362) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(362) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(363) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(363) on-exit pid(1942) tid(1942)>
+# START (34) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (33) #############################
+<hipSetDevice id(11)	correlation_id(364) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(364) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(365) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(365) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(366) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(366) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(367) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(367) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(368) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(368) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(369) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(369) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(370) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(370) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(371) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(371) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(372) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(372) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(373) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(373) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(374) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(374) on-exit pid(1942) tid(1942)>
+# START (32) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (31) #############################
+<hipSetDevice id(11)	correlation_id(375) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(375) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(376) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(376) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(377) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(377) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(378) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(378) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(379) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(379) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(380) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(380) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(381) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(381) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(382) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(382) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(383) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(383) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(384) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(384) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(385) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(385) on-exit pid(1942) tid(1942)>
+# START (30) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (29) #############################
+<hipSetDevice id(11)	correlation_id(386) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(386) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(387) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(387) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(388) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(388) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(389) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(389) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(390) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(390) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(391) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(391) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(392) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(392) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(393) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(393) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(394) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(394) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(395) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(395) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(396) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(396) on-exit pid(1942) tid(1942)>
+# START (28) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (27) #############################
+<hipSetDevice id(11)	correlation_id(397) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(397) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(398) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(398) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(399) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(399) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(400) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(400) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(401) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(401) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(402) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(402) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(403) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(403) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(404) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(404) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(405) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(405) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(406) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(406) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(407) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(407) on-exit pid(1942) tid(1942)>
+# START (26) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (25) #############################
+<hipSetDevice id(11)	correlation_id(408) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(408) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(409) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(409) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(410) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(410) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(411) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(411) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(412) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(412) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(413) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(413) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(414) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(414) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(415) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(415) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(416) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(416) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(417) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(417) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(418) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(418) on-exit pid(1942) tid(1942)>
+# START (24) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (23) #############################
+<hipSetDevice id(11)	correlation_id(419) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(419) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(420) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(420) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(421) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(421) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(422) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(422) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(423) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(423) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(424) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(424) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(425) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(425) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(426) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(426) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(427) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(427) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(428) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(428) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(429) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(429) on-exit pid(1942) tid(1942)>
+# START (22) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (21) #############################
+<hipSetDevice id(11)	correlation_id(430) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(430) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(431) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(431) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(432) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(432) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(433) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(433) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(434) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(434) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(435) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(435) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(436) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(436) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(437) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(437) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(438) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(438) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(439) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(439) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(440) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(440) on-exit pid(1942) tid(1942)>
+# START (20) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (19) #############################
+<hipSetDevice id(11)	correlation_id(441) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(441) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(442) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(442) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(443) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(443) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(444) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(444) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(445) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(445) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(446) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(446) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(447) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(447) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(448) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(448) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(449) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(449) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(450) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(450) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(451) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(451) on-exit pid(1942) tid(1942)>
+# START (18) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (17) #############################
+<hipSetDevice id(11)	correlation_id(452) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(452) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(453) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(453) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(454) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(454) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(455) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(455) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(456) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(456) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(457) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(457) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(458) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(458) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(459) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(459) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(460) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(460) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(461) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(461) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(462) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(462) on-exit pid(1942) tid(1942)>
+# START (16) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (15) #############################
+<hipSetDevice id(11)	correlation_id(463) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(463) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(464) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(464) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(465) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(465) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(466) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(466) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(467) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(467) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(468) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(468) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(469) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(469) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(470) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(470) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(471) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(471) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+	Activity records:
+	KernelExecution	correlation_id(239) time_ns(3802689993685890:3802689994885798) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(240) time_ns(3802689993663315:3802689996358915) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(247) time_ns(3802690031123922:3802690032889585) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(250) time_ns(3802690033038570:3802690034233145) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(251) time_ns(3802690033000496:3802690035707796) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(258) time_ns(3802690069577877:3802690071673662) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(261) time_ns(3802690071795755:3802690072981885) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(262) time_ns(3802690071790403:3802690074510663) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(269) time_ns(3802690102545660:3802690104304184) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(272) time_ns(3802690104411556:3802690105625243) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(273) time_ns(3802690104389104:3802690107112784) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(280) time_ns(3802690131558935:3802690133335408) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(283) time_ns(3802690133445199:3802690134629107) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(284) time_ns(3802690133422569:3802690136140989) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(291) time_ns(3802690167034608:3802690168657280) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(294) time_ns(3802690168789063:3802690170003787) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(295) time_ns(3802690168766891:3802690171340180) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(302) time_ns(3802690195688289:3802690197344472) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(305) time_ns(3802690197449423:3802690198661481) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(306) time_ns(3802690197424572:3802690200014721) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(313) time_ns(3802690220402982:3802690222055305) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(316) time_ns(3802690222166388:3802690223363482) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(317) time_ns(3802690222141795:3802690224699834) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(324) time_ns(3802690245122495:3802690246784468) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(327) time_ns(3802690246894986:3802690248087932) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(328) time_ns(3802690246871188:3802690249418597) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(335) time_ns(3802690270188291:3802690271814643) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(338) time_ns(3802690271918848:3802690273116387) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(339) time_ns(3802690271894944:3802690274461413) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(346) time_ns(3802690295200996:3802690296850979) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(349) time_ns(3802690296963231:3802690298173955) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(350) time_ns(3802690296939859:3802690299519248) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(357) time_ns(3802690319872949:3802690321555801) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(360) time_ns(3802690321670066:3802690322864493) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(361) time_ns(3802690321646962:3802690324208270) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(368) time_ns(3802690344589472:3802690346255644) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(371) time_ns(3802690346384125:3802690347586552) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(372) time_ns(3802690346359875:3802690348934544) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(379) time_ns(3802690369710317:3802690371360450) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(382) time_ns(3802690371472085:3802690372667105) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(383) time_ns(3802690371447790:3802690374014749) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(390) time_ns(3802690394647852:3802690396291654) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(393) time_ns(3802690396424310:3802690397614441) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(394) time_ns(3802690396399865:3802690398961354) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(401) time_ns(3802690419709788:3802690421361060) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(404) time_ns(3802690421479726:3802690422686154) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(405) time_ns(3802690421455441:3802690424043930) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(412) time_ns(3802690444425501:3802690446087443) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(415) time_ns(3802690446218326:3802690447432754) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(416) time_ns(3802690446193234:3802690448783253) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(423) time_ns(3802690478670644:3802690480440297) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(426) time_ns(3802690480559580:3802690481756379) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(427) time_ns(3802690480534798:3802690483102717) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(434) time_ns(3802690504037312:3802690505956956) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(437) time_ns(3802690506085433:3802690507285787) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(438) time_ns(3802690506036326:3802690508620526) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(445) time_ns(3802690528987496:3802690530655309) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(448) time_ns(3802690530758005:3802690531954211) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(449) time_ns(3802690530733779:3802690533303998) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(456) time_ns(3802690553812080:3802690555470253) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(459) time_ns(3802690555591760:3802690556795225) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(460) time_ns(3802690555567703:3802690558144852) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(467) time_ns(3802690578543713:3802690580188266) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(470) time_ns(3802690580319188:3802690581513467) device_id(0) queue_id(0)
+PASSED!
+<hipFree id(112)	correlation_id(472) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(472) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(473) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(473) on-exit pid(1942) tid(1942)>
+# START (14) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (13) #############################
+<hipSetDevice id(11)	correlation_id(474) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(474) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(475) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(475) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(476) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(476) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(477) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(477) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(478) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(478) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(479) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(479) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(480) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(480) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(481) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(481) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(482) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(482) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(483) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(483) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(484) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(484) on-exit pid(1942) tid(1942)>
+# START (12) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (11) #############################
+<hipSetDevice id(11)	correlation_id(485) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(485) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(486) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(486) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(487) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(487) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(488) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(488) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(489) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(489) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(490) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(490) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(491) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(491) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(492) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(492) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(493) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(493) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(494) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(494) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(495) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(495) on-exit pid(1942) tid(1942)>
+# START (10) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (9) #############################
+<hipSetDevice id(11)	correlation_id(496) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(496) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(497) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(497) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(498) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(498) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(499) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(499) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(500) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(500) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(501) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(501) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(502) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(502) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(503) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(503) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(504) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(504) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(505) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(505) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(506) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(506) on-exit pid(1942) tid(1942)>
+# START (8) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (7) #############################
+<hipSetDevice id(11)	correlation_id(507) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(507) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(508) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(508) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(509) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(509) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(510) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(510) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(511) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(511) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(512) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(512) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(513) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(513) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(514) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(514) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(515) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(515) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(516) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(516) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(517) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(517) on-exit pid(1942) tid(1942)>
+# START (6) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (5) #############################
+<hipSetDevice id(11)	correlation_id(518) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(518) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(519) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(519) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(520) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(520) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(521) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(521) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(522) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(522) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(523) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(523) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(524) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(524) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(525) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(525) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(526) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(526) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(527) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(527) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(528) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(528) on-exit pid(1942) tid(1942)>
+# START (4) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (3) #############################
+<hipSetDevice id(11)	correlation_id(529) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(529) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(530) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(530) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(531) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(531) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(532) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(532) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(533) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(533) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(534) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(534) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(535) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(535) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(536) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(536) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(537) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(537) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(538) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(538) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(539) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(539) on-exit pid(1942) tid(1942)>
+# START (2) #############################
+Device 0 name: Device 687f
+PASSED!
+# START (1) #############################
+<hipSetDevice id(11)	correlation_id(540) on-enter pid(1942) tid(1942)>
+<hipSetDevice id(11)	correlation_id(540) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(541) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(541) on-exit pid(1942) tid(1942)>
+Device 0 name: Device 687f
+<hipMalloc id(6)	correlation_id(542) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
+<hipMalloc id(6)	correlation_id(542) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
+<hipMalloc id(6)	correlation_id(543) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c58) size(0x400000)
+<hipMalloc id(6)	correlation_id(543) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595000000)
+<hipMemcpy id(141)	correlation_id(544) on-enter pid(1942) tid(1942)> dst(0x7f0595600000) src(0x1ec5050) size(0x400000) kind(1)
+<hipMemcpy id(141)	correlation_id(544) on-exit pid(1942) tid(1942)>
+rocTX <"before hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipLaunchKernel pid(1942) tid(1942)">
+<__hipPushCallConfiguration id(46)	correlation_id(545) on-enter pid(1942) tid(1942)>
+<__hipPushCallConfiguration id(46)	correlation_id(545) on-exit pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(546) on-enter pid(1942) tid(1942)>
+<__hipPopCallConfiguration id(171)	correlation_id(546) on-exit pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(547) on-enter pid(1942) tid(1942)>
+<hipLaunchKernel id(56)	correlation_id(547) on-exit pid(1942) tid(1942)>
+rocTX <"after hipLaunchKernel pid(1942) tid(1942)">
+rocTX <"hipMemcpy pid(1942) tid(1942)">
+<hipMemcpy id(141)	correlation_id(548) on-enter pid(1942) tid(1942)> dst(0x22c5060) src(0x7f0595000000) size(0x400000) kind(2)
+<hipMemcpy id(141)	correlation_id(548) on-exit pid(1942) tid(1942)>
+rocTX <"(null) pid(1942) tid(1942)">
+rocTX <"(null) pid(1942) tid(1942)">
+PASSED!
+<hipFree id(112)	correlation_id(549) on-enter pid(1942) tid(1942)> ptr(0x7f0595600000)
+<hipFree id(112)	correlation_id(549) on-exit pid(1942) tid(1942)>
+<hipFree id(112)	correlation_id(550) on-enter pid(1942) tid(1942)> ptr(0x7f0595000000)
+<hipFree id(112)	correlation_id(550) on-exit pid(1942) tid(1942)>
+# START (0) #############################
+Device 0 name: Device 687f
+PASSED!
+	Activity records:
+	CopyDeviceToHost	correlation_id(471) time_ns(3802690580294836:3802690582860815) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(478) time_ns(3802690603644719:3802690605384172) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(481) time_ns(3802690605498779:3802690606691873) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(482) time_ns(3802690605474403:3802690608025671) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(489) time_ns(3802690628687154:3802690630424257) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(492) time_ns(3802690630536595:3802690631732652) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(493) time_ns(3802690630511888:3802690633056366) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(500) time_ns(3802690653798410:3802690655532973) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(503) time_ns(3802690655650838:3802690656850303) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(504) time_ns(3802690655626484:3802690658172622) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(511) time_ns(3802690678637384:3802690680356427) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(514) time_ns(3802690680469261:3802690681658652) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(515) time_ns(3802690680444597:3802690682982646) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(522) time_ns(3802690703868311:3802690705623714) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(525) time_ns(3802690705748741:3802690706940058) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(526) time_ns(3802690705724715:3802690708246093) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(533) time_ns(3802690728935096:3802690730669869) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(536) time_ns(3802690730783327:3802690731977755) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(537) time_ns(3802690730759290:3802690733312349) device_id(0) queue_id(0) bytes(0x0)
+	CopyHostToDevice	correlation_id(544) time_ns(3802690754023772:3802690755760784) device_id(0) queue_id(0) bytes(0x0)
+	KernelExecution	correlation_id(547) time_ns(3802690755876264:3802690757073952) device_id(0) queue_id(0)
+	CopyDeviceToHost	correlation_id(548) time_ns(3802690755851835:3802690758397264) device_id(0) queue_id(0) bytes(0x0)
+# STOP  #############################

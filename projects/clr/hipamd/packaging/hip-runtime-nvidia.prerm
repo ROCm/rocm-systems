@@ -1,0 +1,9 @@
+#!/bin/bash
+
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+if [ -L "/opt/rocm" ] ; then
+   unlink /opt/rocm
+fi

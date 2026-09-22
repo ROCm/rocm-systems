@@ -1,0 +1,24 @@
+# Read the Docs configuration file
+# See https://docs.readthedocs.io/en/stable/config-file/v2.html for details
+
+version: 2
+
+build:
+  os: ubuntu-22.04
+  tools:
+    python: "mambaforge-22.9"
+  jobs:
+    post_create_environment:
+      - projects/rocprofiler-sdk/source/scripts/update-doxygen.sh
+
+conda:
+  environment: projects/rocprofiler-sdk/source/docs/environment.yml
+
+python:
+  install:
+  - requirements: projects/rocprofiler-sdk/source/docs/sphinx/requirements.txt
+
+sphinx:
+  configuration: projects/rocprofiler-sdk/source/docs/conf.py
+
+formats: [htmlzip, pdf, epub]

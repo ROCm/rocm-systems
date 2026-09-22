@@ -1,0 +1,12 @@
+# Based on rocm-docs-core; kept local for stability
+default: true
+MD013: false
+MD024:
+  siblings_only: true
+MD026:
+  punctuation: ".,;:!"
+MD029:
+  style: ordered
+MD033: false
+MD034: false
+MD041: false

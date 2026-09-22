@@ -1,0 +1,200 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <hip_test_common.hh>
+#include <atomic>
+
+// Kernel function
+__global__ void MallcMangdFlgTst(int n, float* x, float* y) {
+  int index = blockIdx.x * blockDim.x + threadIdx.x;
+  int stride = blockDim.x * gridDim.x;
+  for (int i = index; i < n; i += stride) y[i] = x[i] * x[i];
+}
+
+// The following section tests working of hipMallocManaged with flag parameters
+HIP_TEST_CASE(Unit_hipMallocManaged_FlgParam) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  std::atomic<int> DataMismatch{0};
+  bool IfTestPassed = true;
+  float *HmmAG = NULL, *HmmAH1 = NULL, *HmmAH2 = NULL, INIT_VAL = 2.5;
+  int NumDevs = 0, NUM_ELMS = 4096;
+  HIP_CHECK(hipGetDeviceCount(&NumDevs));
+  float *Ad = NULL, *Ah = NULL;
+  Ah = new float[NUM_ELMS];
+  // Testing hipMemAttachGlobal Flag
+  HIP_CHECK(hipMallocManaged(&HmmAG, NUM_ELMS * sizeof(float), hipMemAttachGlobal));
+
+  // Initializing HmmAG memory
+  for (int i = 0; i < NUM_ELMS; i++) {
+    HmmAG[i] = INIT_VAL;
+    Ah[i] = 0;
+  }
+
+  int blockSize = 256;
+  int numBlocks = (NUM_ELMS + blockSize - 1) / blockSize;
+  dim3 dimGrid(numBlocks, 1, 1);
+  dim3 dimBlock(blockSize, 1, 1);
+  hipStream_t strm;
+  for (int i = 0; i < NumDevs; i++) {
+    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipStreamCreate(&strm));
+    HIP_CHECK(hipMalloc(&Ad, NUM_ELMS * sizeof(float)));
+    HIP_CHECK(hipMemset(Ad, 0, NUM_ELMS * sizeof(float)));
+    MallcMangdFlgTst<<<dimGrid, dimBlock, 0, strm>>>(NUM_ELMS, HmmAG, Ad);
+    HIP_CHECK(hipStreamSynchronize(strm));
+    HIP_CHECK(hipMemcpy(Ah, Ad, NUM_ELMS * sizeof(float), hipMemcpyDeviceToHost));
+    for (int j = 0; j < NUM_ELMS; ++j) {
+      if (Ah[j] != (INIT_VAL * INIT_VAL)) {
+        DataMismatch++;
+      }
+    }
+    if (DataMismatch != 0) {
+      WARN("Data Mismatch observed when kernel launched on");
+      WARN(" device: " << i);
+      IfTestPassed = false;
+    }
+    DataMismatch = 0;
+
+    HIP_CHECK(hipFree(Ad));
+    HIP_CHECK(hipStreamDestroy(strm));
+  }
+  delete[] Ah;
+  HIP_CHECK(hipFree(HmmAG));
+
+  DataMismatch = 0;
+  HIP_CHECK(hipMallocManaged(&HmmAH1, NUM_ELMS * sizeof(float), hipMemAttachHost));
+  HIP_CHECK(hipMallocManaged(&HmmAH2, NUM_ELMS * sizeof(float), hipMemAttachHost));
+
+  // Initializing HmmAH memory
+  for (int i = 0; i < NUM_ELMS; i++) {
+    HmmAH1[i] = INIT_VAL;
+    HmmAH2[i] = 0;
+  }
+  for (int i = 0; i < NumDevs; i++) {
+    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipStreamCreate(&strm));
+    HIP_CHECK(hipMemset(HmmAH2, 0, NUM_ELMS * sizeof(float)));
+    MallcMangdFlgTst<<<dimGrid, dimBlock, 0, strm>>>(NUM_ELMS, HmmAH1, HmmAH2);
+    HIP_CHECK(hipStreamSynchronize(strm));
+    for (int j = 0; j < NUM_ELMS; ++j) {
+      if (HmmAH2[j] != (INIT_VAL * INIT_VAL)) {
+        DataMismatch++;
+      }
+    }
+    if (DataMismatch != 0) {
+      WARN("Data Mismatch observed when kernel launched on");
+      WARN(" device: " << i);
+      IfTestPassed = false;
+    }
+    HIP_CHECK(hipStreamDestroy(strm));
+  }
+  HIP_CHECK(hipFree(HmmAH1));
+  HIP_CHECK(hipFree(HmmAH2));
+  REQUIRE(IfTestPassed);
+}
+
+// The following function tests Memory access allocated using hipMallocManaged
+// in multiple streams
+HIP_TEST_CASE(Unit_hipMallocManaged_AccessMultiStream) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  std::atomic<int> DataMismatch{0};
+  bool IfTestPassed = true;
+  float *HmmAG = NULL, *HmmAH1 = NULL, *HmmAH2 = NULL, INIT_VAL = 2.5;
+  int NumStrms = 0, MultiDevice = 0, NUM_ELMS = 4096;
+  HIP_CHECK(hipGetDeviceCount(&MultiDevice));
+  if (MultiDevice >= 2) {
+    HIP_CHECK(hipGetDeviceCount(&NumStrms));
+  } else {
+    NumStrms = 4;
+  }
+  std::vector<hipStream_t> streams(NumStrms);
+  float *Ad = NULL, *Ah = NULL;
+  Ah = new float[NUM_ELMS];
+  for (int i = 0; i < NumStrms; ++i) {
+    if (MultiDevice >= 2) {
+      HIP_CHECK(hipSetDevice(i));
+    }
+    HIP_CHECK(hipStreamCreate(&streams[i]));
+  }
+  HIP_CHECK(hipSetDevice(0));
+  // Testing hipMemAttachGlobal Flag
+  HIP_CHECK(hipMallocManaged(&HmmAG, NUM_ELMS * sizeof(float), hipMemAttachGlobal));
+
+  // Initializing HmmAG memory
+  for (int i = 0; i < NUM_ELMS; i++) {
+    HmmAG[i] = INIT_VAL;
+    Ah[i] = 0;
+  }
+
+  int blockSize = 256;
+  int numBlocks = (NUM_ELMS + blockSize - 1) / blockSize;
+  dim3 dimGrid(numBlocks, 1, 1);
+  dim3 dimBlock(blockSize, 1, 1);
+  for (int i = 0; i < NumStrms; i++) {
+    if (MultiDevice >= 2) {
+      HIP_CHECK(hipSetDevice(i));
+    }
+    HIP_CHECK(hipMalloc(&Ad, NUM_ELMS * sizeof(float)));
+    HIP_CHECK(hipMemset(Ad, 0, NUM_ELMS * sizeof(float)));
+    MallcMangdFlgTst<<<dimGrid, dimBlock, 0, streams[i]>>>(NUM_ELMS, HmmAG, Ad);
+    HIP_CHECK(hipStreamSynchronize(streams[i]));
+    // Validating the results
+    HIP_CHECK(hipMemcpy(Ah, Ad, NUM_ELMS * sizeof(float), hipMemcpyDeviceToHost));
+    for (int j = 0; j < NUM_ELMS; ++j) {
+      if (Ah[j] != (INIT_VAL * INIT_VAL)) {
+        DataMismatch++;
+      }
+    }
+    if (DataMismatch != 0) {
+      WARN("Data Mismatch observed when kernel launched on");
+      WARN(" device: " << i);
+      IfTestPassed = false;
+    }
+    DataMismatch = 0;
+
+    HIP_CHECK(hipFree(Ad));
+  }
+  delete[] Ah;
+  HIP_CHECK(hipFree(HmmAG));
+
+  DataMismatch = 0;
+  HIP_CHECK(hipMallocManaged(&HmmAH1, NUM_ELMS * sizeof(float), hipMemAttachHost));
+  HIP_CHECK(hipMallocManaged(&HmmAH2, NUM_ELMS * sizeof(float), hipMemAttachHost));
+
+  // Initializing HmmAH memory
+  for (int i = 0; i < NUM_ELMS; i++) {
+    HmmAH1[i] = INIT_VAL;
+    HmmAH2[i] = 0;
+  }
+  for (int i = 0; i < NumStrms; i++) {
+    if (MultiDevice >= 2) {
+      HIP_CHECK(hipSetDevice(i));
+    }
+    HIP_CHECK(hipMemset(HmmAH2, 0, NUM_ELMS * sizeof(float)));
+    MallcMangdFlgTst<<<dimGrid, dimBlock, 0, streams[i]>>>(NUM_ELMS, HmmAH1, HmmAH2);
+    HIP_CHECK(hipStreamSynchronize(streams[i]));
+    for (int j = 0; j < NUM_ELMS; ++j) {
+      if (HmmAH2[j] != (INIT_VAL * INIT_VAL)) {
+        DataMismatch++;
+        break;
+      }
+    }
+    if (DataMismatch != 0) {
+      WARN("Data Mismatch observed when kernel launched on");
+      WARN(" device: " << i);
+      IfTestPassed = false;
+    }
+  }
+
+  HIP_CHECK(hipFree(HmmAH1));
+  HIP_CHECK(hipFree(HmmAH2));
+  for (int i = 0; i < NumStrms; ++i) {
+    HIP_CHECK(hipStreamDestroy(streams[i]));
+  }
+  REQUIRE(IfTestPassed);
+}

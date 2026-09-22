@@ -1,0 +1,654 @@
+name: rocprofiler-sdk Continuous Integration
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 7 * * *'
+  push:
+    branches: [ develop ]
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - '.github/actions/rocprofiler-sdk-util/**'
+      - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!projects/rocprofiler-sdk/CODEOWNERS'
+      - '!projects/rocprofiler-sdk/source/docs/**'
+  pull_request:
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - '.github/actions/rocprofiler-sdk-util/**'
+      - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!projects/rocprofiler-sdk/CODEOWNERS'
+      - '!projects/rocprofiler-sdk/source/docs/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Needed to push/pull cached Docker layers + GHCR images
+permissions:
+  contents: read
+  packages: write
+
+env:
+  # TODO(jrmadsen): replace LD_RUNPATH_FLAG, GPU_TARGETS, etc. with internal handling in cmake
+  ROCM_PATH: "/opt/rocm"
+  PYTHON_VENV_PATH: ".venv-rocprofiler-sdk"
+  CMAKE_VERSION_DEB: "4.4.3"
+  CMAKE_VERSION_RPM: "3.28.4"
+  GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
+  PATH: "/usr/bin:$PATH"
+
+  ## Submodule paths required by the rocprofiler-sdk build.
+  SUBMODULE_PATHS: "projects/rocprofiler-sdk projects/aqlprofile projects/rocprofiler-register projects/rocprof-trace-decoder projects/rocr-runtime projects/clr projects/hip"
+
+  ## No tests should be excluded here except for extreme emergencies; tests should only be disabled in CMake
+  ## A task should be assigned directly to fix the issues
+  ## Scratch memory tests need to be fixed for ROCm 7.0 release
+  navi3_EXCLUDE_TESTS_REGEX: ""
+  vega20_EXCLUDE_TESTS_REGEX: ""
+  mi200_EXCLUDE_TESTS_REGEX: ""
+  mi300_EXCLUDE_TESTS_REGEX: ""
+  mi300a_EXCLUDE_TESTS_REGEX: ""
+  mi325_EXCLUDE_TESTS_REGEX: ""
+  mi3xx_EXCLUDE_TESTS_REGEX: ""
+  navi4_EXCLUDE_TESTS_REGEX: ""
+
+  navi3_EXCLUDE_LABEL_REGEX: ""
+  vega20_EXCLUDE_LABEL_REGEX: ""
+  mi200_EXCLUDE_LABEL_REGEX: ""
+  mi300_EXCLUDE_LABEL_REGEX: ""
+  mi300a_EXCLUDE_LABEL_REGEX: ""
+  mi325_EXCLUDE_LABEL_REGEX: ""
+  mi3xx_EXCLUDE_LABEL_REGEX: ""
+  navi4_EXCLUDE_LABEL_REGEX: ""
+
+  GLOBAL_CMAKE_OPTIONS: ""
+  ENABLE_ROCR_BUILD: "true"
+  ENABLE_HIP_CLR_BUILD: "true"
+  ENABLE_ROCPROFILER_REGISTER_BUILD: "true"
+  ENABLE_AQLPROFILE_BUILD: "true"
+  ENABLE_ROCDECODE_BUILD: "true"
+  ENABLE_ROCJPEG_BUILD: "true"
+  ENABLE_HIPFILE_BUILD: "true"
+
+  CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
+
+
+jobs:
+  ci_config:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    name: Load CI config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
+      gfx94x_sandbox_runner: ${{ steps.runner.outputs.gfx94x_sandbox_runner }}
+    steps:
+      - name: Checkout workflow actions
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+          set-safe-directory: true
+
+      - name: Resolve runner labels
+        id: runner
+        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+
+  # -----------------------------------------------------------------------------
+  # Ubuntu / DEB job(s)
+  # -----------------------------------------------------------------------------
+  core-deb:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    needs: ci_config
+    name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        system:
+          # TEMPORARILY DISABLED: navi3/navi4 jobs pending CI stabilization
+          # - { gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx120X' }
+          # - { gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx110X' }
+          - { gpu: 'mi325', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx94X' }
+    runs-on: ${{ needs.ci_config.outputs.gfx94x_runner }}
+    container:
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
+      options:
+        --privileged
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      CORE_EXT_RUNNER: mi325
+      GPU_RUNNER: ${{ matrix.system.gpu }}
+    steps:
+      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            .github/actions/rocprofiler-sdk-util
+            projects/rocprofiler-sdk
+            projects/aqlprofile
+            projects/rocprofiler-register
+            projects/rocprof-trace-decoder
+            projects/rocr-runtime
+            projects/clr
+            projects/hip
+            projects/hrr
+            projects/hipfile
+          submodules: false
+          set-safe-directory: true
+
+      - name: Compute submodule cache key
+        id: submods
+        shell: bash
+        run: |
+          git --version
+          git config --global --add safe.directory '*'
+          git submodule status --recursive -- ${SUBMODULE_PATHS} > .git-submodules-status-raw
+          awk '{print $1,$2}' .git-submodules-status-raw > .git-submodules-status
+          echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          # cache scoped submodule working trees plus their .git/modules gitdirs
+          awk '{print $2}' .git-submodules-status-raw > .git-submodule-paths
+          for p in ${SUBMODULE_PATHS}; do echo ".git/modules/${p}"; done >> .git-submodule-paths
+          { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
+      - name: Restore submodule cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ steps.submods.outputs.paths }}
+          key: submods-scoped-v1-${{ runner.os }}-${{ steps.submods.outputs.hash }}
+          restore-keys: |
+            submods-scoped-v1-${{ runner.os }}-
+
+      - name: Init/Update submodules
+        timeout-minutes: 15
+        continue-on-error: true
+        run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
+
+      - name: Clone ROCDecode
+        uses: actions/checkout@v6
+        with:
+          repository: 'ROCm/rocDecode'
+          ref: 'release/rocm-rel-7.0'
+          set-safe-directory: true
+          path: 'rocDecode'
+
+      - name: Clone ROCJPEG
+        uses: actions/checkout@v6
+        with:
+          repository: 'ROCm/rocJPEG'
+          ref: 'release/rocm-rel-7.0'
+          set-safe-directory: true
+          path: 'rocJPEG'
+
+      - name: Install requirements
+        timeout-minutes: 10
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: |
+          git config --global --add safe.directory '*'
+          apt-get update
+          apt-get install -y g++-11 g++-12 cmake python3-pip python3-venv libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
+          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
+          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+          python3 -m venv --system-site-packages ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --upgrade -r requirements.txt
+          python3 -m pip install --upgrade cmake==${{ env.CMAKE_VERSION_DEB }}
+
+      - name: Build ROCProfiler SDK Dependencies
+        uses: ./.github/actions/rocprofiler-sdk-util
+        with:
+          rocm-path: ${{ env.ROCM_PATH }}
+          python-venv-path: ${{ env.PYTHON_VENV_PATH }}
+          gpu-target: ${{ matrix.system.gpu-target }}
+          compiler-launcher: /usr/bin/ccache
+          enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
+          enable-hip-clr-build: ${{ env.ENABLE_HIP_CLR_BUILD }}
+          enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
+          enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
+          enable-rocdecode-build: ${{ env.ENABLE_ROCDECODE_BUILD }}
+          enable-rocjpeg-build: ${{ env.ENABLE_ROCJPEG_BUILD }}
+          enable-hipfile-build: ${{ env.ENABLE_HIPFILE_BUILD }}
+          enable-rocprof-trace-decoder-build: 'true'
+          ccache-key: ccache-${{ matrix.system.os }}-${{ needs.ci_config.outputs.gfx94x_runner }}-${{ matrix.system.gpu }}
+          ccache-variant: ccache
+
+      - name: Enable PC Sampling
+        if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
+
+      - name: Configure, Build, and Test
+        timeout-minutes: 30
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: |
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
+          LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
+          python3 ./source/scripts/run-ci.py \
+            -B build \
+            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
+            --build-jobs 16 \
+            --mode ${CI_MODE} \
+            --site ${{ needs.ci_config.outputs.gfx94x_runner }} \
+            --gpu-targets ${{ env.GPU_TARGETS }} \
+            --run-attempt ${{ github.run_attempt }} \
+            ${{ matrix.system.ci-flags }} -- \
+            -DROCPROFILER_DEP_ROCMCORE=ON \
+            -DROCPROFILER_BUILD_DOCS=OFF \
+            -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
+            -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk \
+            -DCPACK_GENERATOR='DEB;RPM;TGZ' \
+            -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath ${{ env.ROCM_PATH }})" \
+            -DPython3_EXECUTABLE=$(which python3) \
+            -DROCPROFILER_CLANG_TIDY_EXE=${VIRTUAL_ENV}/bin/clang-tidy \
+            -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
+            ${{ env.GLOBAL_CMAKE_OPTIONS }} \
+            -- \
+            --parallel 4 \
+            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
+            -E  "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
+
+      - name: Install
+        if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
+        timeout-minutes: 10
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: |
+          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
+          cmake --build build --target install --parallel 16
+
+      - name: Build Packaging
+        if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
+        timeout-minutes: 10
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: |
+          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
+          cmake --build build --target package --parallel 16
+
+      - name: Test Install Build
+        if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
+        timeout-minutes: 30
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: |
+          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
+          CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples
+          CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests -DGPU_TARGETS="gfx942" tests
+          export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
+          cmake --build build-samples --target all --parallel 16
+          cmake --build build-tests --target all --parallel 16
+          # scale test parallelism to the runner instead of hard-coding a value
+          CTEST_JOBS=$(( $(nproc) / 4 > 0 ? $(nproc) / 4 : 1 ))
+          ctest --test-dir build-samples --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+          ctest --test-dir build-tests   --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+
+      - name: Install Packages
+        if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
+        timeout-minutes: 5
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: |
+          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          export PATH=${PATH}:/usr/local/sbin:/usr/sbin:/sbin
+          ls -la
+          ls -la ./build
+          dpkg --force-all -i ./build/rocprofiler-sdk-roctx_*.deb
+          dpkg --force-all -i ./build/rocprofiler-sdk-rocpd_*.deb
+          for i in $(ls -S ./build/rocprofiler-sdk*.deb | egrep -v 'roctx|rocpd'); do dpkg --force-all -i ${i}; done;
+
+      - name: Test Installed Packages
+        if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
+        timeout-minutes: 30
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: |
+          export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
+          CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-samples-deb ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/samples
+          CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-tests-deb -DGPU_TARGETS="gfx942" ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/tests
+          cmake --build build-samples-deb --target all --parallel 16
+          cmake --build build-tests-deb --target all --parallel 16
+          # scale test parallelism to the runner instead of hard-coding a value
+          CTEST_JOBS=$(( $(nproc) / 4 > 0 ? $(nproc) / 4 : 1 ))
+          ctest --test-dir build-samples-deb --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+          ctest --test-dir build-tests-deb   --parallel ${CTEST_JOBS} -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+
+      - name: Archive production artifacts
+        if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: installers-deb
+          path: |
+            ${{github.workspace}}/build/*.deb
+            ${{github.workspace}}/build/*.rpm
+            ${{github.workspace}}/build/*.tgz
+
+  # -----------------------------------------------------------------------------
+  # RHEL/SLES (RPM) job(s)
+  # -----------------------------------------------------------------------------
+  core-rpm:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    needs: ci_config
+    name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        system:
+          - { os: 'rhel-8.8', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'rhel-9.5', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'sles-15.6', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+    runs-on: ${{ needs.ci_config.outputs.gfx94x_runner }}
+    container:
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
+      options:
+        --privileged
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      OS_TYPE: ${{ matrix.system.os }}
+      GPU_RUNNER: ${{ matrix.system.gpu }}
+    steps:
+      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            .github/actions/rocprofiler-sdk-util
+            projects/rocprofiler-sdk
+            projects/aqlprofile
+            projects/rocprofiler-register
+            projects/rocprof-trace-decoder
+            projects/rocr-runtime
+            projects/clr
+            projects/hip
+            projects/hrr
+            projects/hipfile
+          submodules: false
+          set-safe-directory: true
+
+      - name: Compute submodule cache key
+        id: submods
+        shell: bash
+        run: |
+          git --version
+          git config --global --add safe.directory '*'
+          git submodule status --recursive -- ${SUBMODULE_PATHS} > .git-submodules-status-raw
+          awk '{print $1,$2}' .git-submodules-status-raw > .git-submodules-status
+          echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          # cache scoped submodule working trees plus their .git/modules gitdirs
+          awk '{print $2}' .git-submodules-status-raw > .git-submodule-paths
+          for p in ${SUBMODULE_PATHS}; do echo ".git/modules/${p}"; done >> .git-submodule-paths
+          { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
+      - name: Restore submodule cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ steps.submods.outputs.paths }}
+          key: submods-scoped-v1-${{ runner.os }}-${{ steps.submods.outputs.hash }}
+          restore-keys: |
+            submods-scoped-v1-${{ runner.os }}-
+
+      - name: Init/Update submodules
+        timeout-minutes: 15
+        continue-on-error: true
+        run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
+
+      - name: Install requirements
+        timeout-minutes: 10
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: |
+          git config --global --add safe.directory '*'
+          python3 -m venv --system-site-packages ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}
+          export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --upgrade -r requirements.txt
+          python3 -m pip install --upgrade cmake==${{ env.CMAKE_VERSION_RPM }}
+
+      - name: Install Curl for RHEL 8.8
+        if: ${{ matrix.system.os == 'rhel-8.8' }}
+        run: |
+          dnf install -y curl
+          ln -s /usr/local/bin/curl /usr/bin/curl
+
+      - name: Build ROCProfiler SDK Dependencies
+        uses: ./.github/actions/rocprofiler-sdk-util
+        with:
+          rocm-path: ${{ env.ROCM_PATH }}
+          python-venv-path: ${{ env.PYTHON_VENV_PATH }}
+          gpu-target: ${{ matrix.system.gpu-target }}
+          compiler-launcher: /usr/local/bin/sccache
+          enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
+          enable-hip-clr-build: ${{ env.ENABLE_HIP_CLR_BUILD }}
+          enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
+          enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
+          enable-hipfile-build: ${{ env.ENABLE_HIPFILE_BUILD }}
+          enable-rocprof-trace-decoder-build: 'true'
+          ccache-key: ccache-${{ matrix.system.os }}-${{ needs.ci_config.outputs.gfx94x_runner }}-${{ matrix.system.gpu }}
+          ccache-variant: sccache
+
+      - name: Enable PC Sampling
+        if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run:
+            echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
+
+      - name: Configure, Build, and Test
+        timeout-minutes: 30
+        shell: bash
+        working-directory: projects/rocprofiler-sdk
+        run: |
+          export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
+          python3 ./source/scripts/run-ci.py -B build \
+            --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
+            --mode ${CI_MODE} \
+            --build-jobs 16 \
+            --site ${{ needs.ci_config.outputs.gfx94x_runner }} \
+            --gpu-targets ${{ env.GPU_TARGETS }} \
+            --run-attempt ${{ github.run_attempt }} \
+            ${{ matrix.system.ci-flags }} \
+            -- \
+            -DROCPROFILER_DEP_ROCMCORE=ON \
+            -DROCPROFILER_BUILD_DOCS=OFF \
+            -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
+            -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
+            -DPython3_EXECUTABLE=$(which python3) \
+            ${{ env.GLOBAL_CMAKE_OPTIONS }} \
+            -- \
+            --parallel 4 \
+            -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
+            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
+
+  sanitizers:
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    needs: ci_config
+    name: ${{ matrix.system.sanitizer }} • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        system:
+          - { sanitizer: 'AddressSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'ThreadSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'LeakSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'UndefinedBehaviorSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+
+    runs-on: ${{ needs.ci_config.outputs.gfx94x_sandbox_runner }}
+    container:
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
+      options:
+        --privileged
+        --cap-add SYS_PTRACE
+        --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+
+    # define this for containers
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      GCC_COMPILER_VERSION: 12
+      GPU_RUNNER: ${{ matrix.system.gpu }}
+
+    steps:
+    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
+      uses: actions/checkout@v6
+      with:
+        sparse-checkout: |
+          .github/actions/rocprofiler-sdk-util
+          projects/rocprofiler-sdk
+          projects/aqlprofile
+          projects/rocprofiler-register
+          projects/rocprof-trace-decoder
+          projects/rocr-runtime
+          projects/clr
+          projects/hip
+          projects/hrr
+          projects/hipfile
+        submodules: false
+        set-safe-directory: true
+
+    - name: Compute submodule cache key
+      id: submods
+      shell: bash
+      run: |
+        git --version
+        git config --global --add safe.directory '*'
+        git submodule status --recursive -- ${SUBMODULE_PATHS} > .git-submodules-status-raw
+        awk '{print $1,$2}' .git-submodules-status-raw > .git-submodules-status
+        echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        # cache scoped submodule working trees plus their .git/modules gitdirs
+        awk '{print $2}' .git-submodules-status-raw > .git-submodule-paths
+        for p in ${SUBMODULE_PATHS}; do echo ".git/modules/${p}"; done >> .git-submodule-paths
+        { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
+    - name: Restore submodule cache
+      uses: actions/cache@v6
+      with:
+        path: |
+          ${{ steps.submods.outputs.paths }}
+        key: submods-scoped-v1-${{ runner.os }}-${{ steps.submods.outputs.hash }}
+        restore-keys: |
+          submods-scoped-v1-${{ runner.os }}-
+
+    - name: Init/Update submodules
+      timeout-minutes: 15
+      continue-on-error: true
+      run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
+
+    - name: Install requirements
+      timeout-minutes: 10
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        git config --global --add safe.directory '*'
+        apt-get update
+        apt-get install -y build-essential cmake python3-pip python3-venv libasan8 libtsan2 software-properties-common clang-15 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config
+        add-apt-repository ppa:ubuntu-toolchain-r/test
+        apt-get update
+        apt-get upgrade -y
+        apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }}
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 100 --slave /usr/bin/g++ g++ /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }} --slave /usr/bin/gcov gcov /usr/bin/gcov-${{ env.GCC_COMPILER_VERSION }}
+        python3 -m venv --system-site-packages ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}
+        source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
+        python3 -m pip install --upgrade pip
+        python3 -m pip install --upgrade -r requirements.txt
+        python3 -m pip install --upgrade cmake==${{ env.CMAKE_VERSION_DEB }}
+
+    - name: Enable PC Sampling
+      if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
+
+    - name: Build ROCProfiler SDK Dependencies
+      uses: ./.github/actions/rocprofiler-sdk-util
+      with:
+        rocm-path: ${{ env.ROCM_PATH }}
+        python-venv-path: ${{ env.PYTHON_VENV_PATH }}
+        gpu-target: ${{ matrix.system.gpu-target }}
+        compiler-launcher: /usr/bin/ccache
+        enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
+        enable-hip-clr-build: ${{ env.ENABLE_HIP_CLR_BUILD }}
+        enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
+        enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
+        enable-hipfile-build: ${{ env.ENABLE_HIPFILE_BUILD }}
+        enable-rocprof-trace-decoder-build: 'true'
+        ccache-key: ccache-${{ matrix.system.os }}-${{ needs.ci_config.outputs.gfx94x_sandbox_runner }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer}}
+        ccache-variant: ccache
+
+    - name: Configure, Build, and Test
+      timeout-minutes: 30
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        sudo sysctl -w vm.mmap_rnd_bits=28
+        source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
+        if [[ -n "${HIP_VISIBLE_DEVICES:-}" ]]; then unset GPU_DEVICE_ORDINAL; fi
+        python3 ./source/scripts/run-ci.py -B build \
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }} \
+          --build-jobs 16 \
+          --mode ${CI_MODE} \
+          --site ${{ needs.ci_config.outputs.gfx94x_sandbox_runner }} \
+          --gpu-targets ${{ env.GPU_TARGETS }} \
+          --memcheck ${{ matrix.system.sanitizer }} \
+          --run-attempt ${{ github.run_attempt }} \
+          -- \
+          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
+          -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}" \
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
+          -DPython3_EXECUTABLE=$(which python3) \
+          ${{ env.GLOBAL_CMAKE_OPTIONS }} \
+          -- \
+          --parallel 4 \
+          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
+          -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"

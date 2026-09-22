@@ -1,0 +1,66 @@
+#
+# rocprofv3 tool tests for collection period
+#
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
+
+project(
+    rocprofiler-sdk-tests-rocprofv3-collection-period
+    LANGUAGES CXX
+    VERSION 0.0.0)
+
+find_package(rocprofiler-sdk REQUIRED)
+
+string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+
+rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
+
+##########################################################################################
+#
+#   Command line input
+#
+##########################################################################################
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-collection-period
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --runtime-trace --summary -d
+        ${CMAKE_CURRENT_BINARY_DIR}/collection-period -o out --output-format csv json
+        pftrace otf2 --log-level warning --collection-period 0:1:1 1:1:2 0.5:0.5:0
+        --collection-period-unit sec -- $<TARGET_FILE:reproducible-runtime> 6000 4
+    DEPENDS reproducible-runtime
+    TIMEOUT 120
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "ROCPROF_COLLECTION_PERIOD_TESTING=true"
+    FIXTURES_SETUP rocprofv3-test-collection-period)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-collection-period
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_results.json
+         --pftrace-input
+         ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_results.pftrace
+         --otf2-input
+         ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_results.otf2
+         --collection-period-input
+         ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_collection_periods.log
+    TIMEOUT 120
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-collection-period)
+
+# Conflict: --selected-regions + --collection-period should fail
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-collection-period-selected-regions-conflict-will-fail
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --selected-regions --collection-period
+        0:1:1 --collection-period-unit sec -- $<TARGET_FILE:reproducible-runtime> 100 1
+    DEPENDS reproducible-runtime
+    TIMEOUT 45
+    LABELS "integration-tests"
+    WILL_FAIL
+    FAIL_REGULAR_EXPRESSION
+        "--selected-regions and --collection-period are mutually exclusive")

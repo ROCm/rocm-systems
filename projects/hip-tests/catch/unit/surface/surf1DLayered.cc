@@ -1,0 +1,287 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
+ * @addtogroup surf1DLayered surf1DLayered
+ * @{
+ * @ingroup SurfaceTest
+ */
+
+#include <hip_array_common.hh>
+#include <hip_test_common.hh>
+#include <hip_texture_helper.hh>
+#include "surf_common.h"
+
+#pragma clang diagnostic ignored "-Wunused-variable"
+#pragma clang diagnostic ignored "-Wunused-parameter"
+
+template <typename T>
+__global__ void surf1DLayeredKernelR(hipSurfaceObject_t surfaceObject, T* outputData, int width) {
+#if !__HIP_NO_IMAGE_SUPPORT
+  int x = blockIdx.x * blockDim.x + threadIdx.x;
+  if (x < width) {
+    surf1DLayeredread(outputData + x, surfaceObject, x * sizeof(T), 0);
+  }
+#endif
+}
+
+template <typename T>
+__global__ void surf1DLayeredKernelW(hipSurfaceObject_t surfaceObject, T* inputData, int width) {
+#if !__HIP_NO_IMAGE_SUPPORT
+  int x = blockIdx.x * blockDim.x + threadIdx.x;
+  if (x < width) {
+    surf1DLayeredwrite(inputData[x], surfaceObject, x * sizeof(T), 0);
+  }
+#endif
+}
+
+template <typename T> __global__ void surf1DLayeredKernelRW(hipSurfaceObject_t surfaceObject,
+                                                            hipSurfaceObject_t outputSurfObj,
+                                                            int width) {
+#if !__HIP_NO_IMAGE_SUPPORT
+  int x = blockIdx.x * blockDim.x + threadIdx.x;
+  if (x < width) {
+    T data;
+    surf1DLayeredread(&data, surfaceObject, x * sizeof(T), 0);
+    surf1DLayeredwrite(data, outputSurfObj, x * sizeof(T), 0);
+  }
+#endif
+}
+
+template <typename T> static void runTestR(const int width) {
+  unsigned int size = width * sizeof(T);
+  T* hData = (T*)malloc(size);
+  memset(hData, 0, size);
+  for (int j = 0; j < width; j++) {
+    initVal(hData[j]);
+  }
+
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc<T>();
+
+  hipArray_t hipArray = nullptr;
+  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, 0, hipArraySurfaceLoadStore));
+
+  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, hData, size, hipMemcpyHostToDevice));
+
+  hipResourceDesc resDesc;
+  memset(&resDesc, 0, sizeof(resDesc));
+  resDesc.resType = hipResourceTypeArray;
+  resDesc.res.array.array = hipArray;
+
+  // Create surface object
+  hipSurfaceObject_t surfaceObject = 0;
+  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc));
+
+  T* hOutputData = nullptr;
+  HIP_CHECK(hipHostMalloc((void**)&hOutputData, size));
+  memset(hOutputData, 0, size);
+
+  dim3 dimBlock(16, 1, 1);
+  dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, 1, 1);
+
+  surf1DLayeredKernelR<T><<<dimGrid, dimBlock>>>(surfaceObject, hOutputData, width);
+
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+
+  for (int j = 0; j < width; j++) {
+    if (!isEqual(hData[j], hOutputData[j])) {
+      printf("Difference [ %d ]:%s ----%s\n", j, getString(hData[j]).c_str(),
+             getString(hOutputData[j]).c_str());
+      REQUIRE(false);
+    }
+  }
+
+  HIP_CHECK(hipDestroySurfaceObject(surfaceObject));
+  HIP_CHECK(hipFreeArray(hipArray));
+  free(hData);
+  HIP_CHECK(hipHostFree(hOutputData));
+}
+
+template <typename T> static void runTestW(const int width) {
+  unsigned int size = width * sizeof(T);
+  T* hData = nullptr;
+  HIP_CHECK(hipHostMalloc((void**)&hData, size));
+  memset(hData, 0, size);
+
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc<T>();
+
+  hipArray_t hipArray = nullptr;
+  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, 0, hipArraySurfaceLoadStore));
+
+  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, hData, size, hipMemcpyHostToDevice));
+
+  hipResourceDesc resDesc;
+  memset(&resDesc, 0, sizeof(resDesc));
+  resDesc.resType = hipResourceTypeArray;
+  resDesc.res.array.array = hipArray;
+
+  // Create surface object
+  hipSurfaceObject_t surfaceObject = 0;
+  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc));
+
+  for (int j = 0; j < width; j++) {
+    initVal(hData[j]);
+  }
+
+  dim3 dimBlock(16, 1, 1);
+  dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, 1, 1);
+
+  surf1DLayeredKernelW<T><<<dimGrid, dimBlock>>>(surfaceObject, hData, width);
+
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+
+  T* hOutputData = (T*)malloc(size);
+  memset(hOutputData, 0, size);
+  HIP_CHECK(hipMemcpyFromArray(hOutputData, hipArray, 0, 0, size, hipMemcpyDeviceToHost));
+
+  for (int j = 0; j < width; j++) {
+    if (!isEqual(hData[j], hOutputData[j])) {
+      printf("Difference [ %d ]:%s ----%s\n", j, getString(hData[j]).c_str(),
+             getString(hOutputData[j]).c_str());
+      REQUIRE(false);
+    }
+  }
+
+  HIP_CHECK(hipDestroySurfaceObject(surfaceObject));
+  HIP_CHECK(hipFreeArray(hipArray));
+  HIP_CHECK(hipHostFree(hData));
+  free(hOutputData);
+}
+
+template <typename T> static void runTestRW(const int width) {
+  unsigned int size = width * sizeof(T);
+  T* hData = (T*)malloc(size);
+  memset(hData, 0, size);
+  for (int j = 0; j < width; j++) {
+    initVal(hData[j]);
+  }
+
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc<T>();
+
+  hipArray_t hipArray = nullptr, hipOutArray = nullptr;
+  HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, 0, hipArraySurfaceLoadStore));
+
+  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, hData, size, hipMemcpyHostToDevice));
+
+  hipResourceDesc resDesc;
+  memset(&resDesc, 0, sizeof(resDesc));
+  resDesc.resType = hipResourceTypeArray;
+  resDesc.res.array.array = hipArray;
+
+  // Create surface object
+  hipSurfaceObject_t surfaceObject = 0;
+  HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc));
+
+  HIP_CHECK(hipMallocArray(&hipOutArray, &channelDesc, width, 0, hipArraySurfaceLoadStore));
+
+  hipResourceDesc resOutDesc;
+  memset(&resOutDesc, 0, sizeof(resOutDesc));
+  resOutDesc.resType = hipResourceTypeArray;
+  resOutDesc.res.array.array = hipOutArray;
+
+  hipSurfaceObject_t outSurfaceObject = 0;
+  HIP_CHECK(hipCreateSurfaceObject(&outSurfaceObject, &resOutDesc));
+
+  dim3 dimBlock(16, 1, 1);
+  dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, 1, 1);
+
+  surf1DLayeredKernelRW<T><<<dimGrid, dimBlock>>>(surfaceObject, outSurfaceObject, width);
+
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+
+  T* hOutputData = (T*)malloc(size);
+  memset(hOutputData, 0, size);
+  HIP_CHECK(hipMemcpyFromArray(hOutputData, hipOutArray, 0, 0, size, hipMemcpyDeviceToHost));
+
+  for (int j = 0; j < width; j++) {
+    if (!isEqual(hData[j], hOutputData[j])) {
+      printf("Difference [ %d ]:%s ----%s\n", j, getString(hData[j]).c_str(),
+             getString(hOutputData[j]).c_str());
+      REQUIRE(false);
+    }
+  }
+
+  HIP_CHECK(hipDestroySurfaceObject(surfaceObject));
+  HIP_CHECK(hipDestroySurfaceObject(outSurfaceObject));
+  HIP_CHECK(hipFreeArray(hipArray));
+  HIP_CHECK(hipFreeArray(hipOutArray));
+  free(hData);
+  free(hOutputData);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Basic test for `surf1DLayeredread` with different types and dimensions.
+ * Test source
+ * ------------------------
+ *    - unit/surface/surf1DLayered.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.7
+ */
+HIP_TEMPLATE_TEST_CASE(Unit_surf1DLayeredread_Positive_Basic, char, unsigned char, short,
+                   unsigned short, int, unsigned int, float) {
+  CHECK_IMAGE_SUPPORT;
+
+  const int width = GENERATE(31, 67, 131, 263);
+  runTestR<vector_type_helper_t<TestType, 0>>(width);
+  runTestR<vector_type_helper_t<TestType, 1>>(width);
+  runTestR<vector_type_helper_t<TestType, 2>>(width);
+  runTestR<vector_type_helper_t<TestType, 4>>(width);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Basic test for `surf1DLayeredwrite` with different types and dimensions.
+ * Test source
+ * ------------------------
+ *    - unit/surface/surf1DLayered.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.7
+ */
+HIP_TEMPLATE_TEST_CASE(Unit_surf1DLayeredwrite_Positive_Basic, char, unsigned char, short,
+                   unsigned short, int, unsigned int, float) {
+  CHECK_IMAGE_SUPPORT;
+
+  const int width = GENERATE(31, 67, 131, 263);
+  runTestW<vector_type_helper_t<TestType, 0>>(width);
+  runTestW<vector_type_helper_t<TestType, 1>>(width);
+  runTestW<vector_type_helper_t<TestType, 2>>(width);
+  runTestW<vector_type_helper_t<TestType, 4>>(width);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Basic test for `surf1DLayeredread` and `surf1DLayeredwrite` together, with different types
+ * and dimensions. Test source
+ * ------------------------
+ *    - unit/surface/surf1DLayered.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.7
+ */
+HIP_TEMPLATE_TEST_CASE(Unit_surf1DLayered_Positive_ReadWrite, char, unsigned char, short,
+                   unsigned short, int, unsigned int, float) {
+  CHECK_IMAGE_SUPPORT;
+
+  const int width = GENERATE(31, 67, 131, 263);
+  runTestRW<vector_type_helper_t<TestType, 0>>(width);
+  runTestRW<vector_type_helper_t<TestType, 1>>(width);
+  runTestRW<vector_type_helper_t<TestType, 2>>(width);
+  runTestRW<vector_type_helper_t<TestType, 4>>(width);
+}
+
+/**
+ * End doxygen group SurfaceTest.
+ * @}
+ */

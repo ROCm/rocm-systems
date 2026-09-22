@@ -1,0 +1,5 @@
+pmc:  SPI_RA_REQ_NO_ALLOC SPI_RA_REQ_NO_ALLOC_CSN
+
+gpu:
+range:
+kernel:

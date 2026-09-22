@@ -1,0 +1,238 @@
+{
+  "system_configurations": {
+    "name": "RCCL CI-PreCheckin",
+    "description": "A port of RCCL Math-CI precheckin pipeline. DISABLED TESTS: AlltoAllv.OutOfPlace removed 2026-08-12 -- hangs on gfx950 (single-rank ncclInt32 OutOfPlace); see AICOMRCCL-1900. Re-add its unit_tests entry once fixed."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-/opt/ompi}"
+  },
+  "env_variables": {
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "NCCL_DEBUG": "WARN",
+    "UT_POW2_GPUS": "1"
+  },
+  "build_configuration": {
+    "cmake_options": {
+      "CMAKE_BUILD_TYPE": "Debug",
+      "ENABLE_CODE_COVERAGE": "ON",
+      "BUILD_TESTS": "ON",
+      "BUILD_LOCAL_GPU_TARGET_ONLY": "ON"
+    },
+    "parallel_jobs": 64,
+    "generator": "Unix Makefiles"
+  },
+  "test_configurations": {
+    "unit_tests": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_DEBUG": ""
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {"name": "AllReduce.InPlace", "description": "AllReduce in-place", "test_filter": "AllReduce.InPlace", "timeout": 300},
+        {"name": "AllReduce.OutOfPlace", "description": "AllReduce out-of-place", "test_filter": "AllReduce.OutOfPlace", "timeout": 300},
+        {"name": "AllGather.InPlace", "description": "AllGather in-place", "test_filter": "AllGather.InPlace", "timeout": 300},
+        {"name": "AllGather.OutOfPlace", "description": "AllGather out-of-place", "test_filter": "AllGather.OutOfPlace", "timeout": 300},
+        {"name": "Broadcast.InPlace", "description": "Broadcast in-place", "test_filter": "Broadcast.InPlace", "timeout": 300},
+        {"name": "Broadcast.OutOfPlace", "description": "Broadcast out-of-place", "test_filter": "Broadcast.OutOfPlace", "timeout": 300},
+        {"name": "Reduce.InPlace", "description": "Reduce in-place", "test_filter": "Reduce.InPlace", "timeout": 300},
+        {"name": "Reduce.OutOfPlace", "description": "Reduce out-of-place", "test_filter": "Reduce.OutOfPlace", "timeout": 300},
+        {"name": "ReduceScatter.InPlace", "description": "ReduceScatter in-place", "test_filter": "ReduceScatter.InPlace", "timeout": 300},
+        {"name": "ReduceScatter.OutOfPlace", "description": "ReduceScatter out-of-place", "test_filter": "ReduceScatter.OutOfPlace", "timeout": 300},
+        {"name": "Gather.InPlace", "description": "Gather in-place", "test_filter": "Gather.InPlace", "timeout": 300},
+        {"name": "Gather.OutOfPlace", "description": "Gather out-of-place", "test_filter": "Gather.OutOfPlace", "timeout": 300},
+        {"name": "Scatter.InPlace", "description": "Scatter in-place", "test_filter": "Scatter.InPlace", "timeout": 300},
+        {"name": "Scatter.OutOfPlace", "description": "Scatter out-of-place", "test_filter": "Scatter.OutOfPlace", "timeout": 300},
+        {"name": "AlltoAll.OutOfPlace", "description": "AlltoAll out-of-place", "test_filter": "AlltoAll.OutOfPlace", "timeout": 300},
+        {"name": "AllReduce.InPlaceGraph", "description": "AllReduce in-place graph-capture path", "test_filter": "AllReduce.InPlaceGraph"},
+        {"name": "AllReduce.ManagedMem", "description": "AllReduce managed-memory path", "test_filter": "AllReduce.ManagedMem"},
+        {"name": "AllReduce.UserBufferRegistration", "description": "AllReduce user-buffer registration path", "test_filter": "AllReduce.UserBufferRegistration"},
+        {"name": "AllReduce.ROCTX", "description": "AllReduce roctx logging path", "test_filter": "AllReduce.ROCTX"},
+        {"name": "AllReduce.BiasFloat32_Sum", "description": "AllReduce reduce-with-bias path (representative)", "test_filter": "AllReduce.BiasFloat32_Sum"},
+        {"name": "SendRecv.SinglePairs", "description": "SendRecv single pairs", "test_filter": "SendRecv.SinglePairs"},
+        {"name": "GroupCall.Identical", "description": "GroupCall identical", "test_filter": "GroupCall.Identical"},
+        {"name": "GroupCall.MultiRootBroadcast", "description": "Multi-root broadcast fallback (AllGatherV disabled)", "test_filter": "GroupCall.MultiRootBroadcast"},
+        {"name": "GroupCall.MultiRootBroadcast_Enabled", "description": "Multi-root broadcast with AllGatherV fusion enabled", "test_filter": "GroupCall.MultiRootBroadcast", "env_variables": {"NCCL_ALLGATHERV_ENABLE": "1"}},
+        {"name": "GroupCall.SingleRootBroadcastDowngrade", "description": "Single-root broadcast BcastPeers==1 downgrade", "test_filter": "GroupCall.SingleRootBroadcastDowngrade"},
+        {"name": "GroupCall.SingleRootBroadcastDowngrade_Enabled", "description": "Single-root broadcast downgrade with AllGatherV enabled", "test_filter": "GroupCall.SingleRootBroadcastDowngrade", "env_variables": {"NCCL_ALLGATHERV_ENABLE": "1"}},
+        {"name": "GroupCall.MultiRootBroadcastConsecutive_Enabled", "description": "Consecutive AllGatherV group calls validates reclaimPlannerState reset", "test_filter": "GroupCall.MultiRootBroadcastConsecutive", "env_variables": {"NCCL_ALLGATHERV_ENABLE": "1"}},
+        {"name": "GroupCall.MixedBroadcastAndAllReduce_Enabled", "description": "Broadcast + AllReduce in same group call with AllGatherV enabled", "test_filter": "GroupCall.MixedBroadcastAndAllReduce", "env_variables": {"NCCL_ALLGATHERV_ENABLE": "1"}},
+        {"name": "GroupCall.MultiRootBroadcastChannelCounts_Enabled", "description": "AllGatherV fusion across pinned channel counts", "test_filter": "GroupCall.MultiRootBroadcastChannelCounts", "env_variables": {"NCCL_ALLGATHERV_ENABLE": "1"}, "timeout": 180},
+        {"name": "GroupCall.MultiRootBroadcastUnalignedSizes_Enabled", "description": "AllGatherV fusion with unaligned buffer sizes", "test_filter": "GroupCall.MultiRootBroadcastUnalignedSizes", "env_variables": {"NCCL_ALLGATHERV_ENABLE": "1"}},
+        {"name": "Standalone.SplitComms_RankCheck", "description": "Verify device assignment for each rank using ncclCommSplit API", "test_filter": "Standalone.SplitComms_RankCheck"},
+        {"name": "Standalone.SplitComms_OneColor", "description": "Creates communicator for each device with same color", "test_filter": "Standalone.SplitComms_OneColor"},
+        {"name": "Standalone.SplitComms_Reduce", "description": "Reduces communicators into fewer ranks", "test_filter": "Standalone.SplitComms_Reduce"},
+        {"name": "Standalone.RegressionTiming", "description": "Verify no timing regression for protocols (LL, LL128, Simple)", "test_filter": "Standalone.RegressionTiming"},
+        {"name": "Standalone.CommCuDevice_Check", "description": "Verify device associated with communicator in single/multi-device scenarios", "test_filter": "Standalone.CommCuDevice_Check"},
+        {"name": "Standalone.SplitComms_RankCheck_Basic_Failure", "description": "Verify ncclCommUserRank fails with invalid communicator handle", "test_filter": "Standalone.SplitComms_RankCheck_Basic_Failure"},
+        {"name": "ProfilerPluginClose.UnusablePluginIsUnloaded", "description": "Verify a profiler plugin exposing no usable interface is unloaded instead of being left mapped", "test_filter": "ProfilerPluginClose.UnusablePluginIsUnloaded"},
+        {"name": "Register.ProcessIsolatedRegisterTests", "description": "Process isolated buffer registration tests", "test_filter": "Register.ProcessIsolatedRegisterTests"},
+        {"name": "DoneEventOrdering.FastPathStreamAlternation", "description": "DoneEventOrdering fast path stream alternation", "test_filter": "DoneEventOrdering.FastPathStreamAlternation", "timeout": 240},
+        {"name": "DoneEventOrdering.PostReinitStreamAlternation", "description": "DoneEventOrdering post-reinit stream alternation", "test_filter": "DoneEventOrdering.PostReinitStreamAlternation", "timeout": 240},
+        {"name": "DoneEventOrdering.SameStreamBaseline", "description": "DoneEventOrdering same stream baseline", "test_filter": "DoneEventOrdering.SameStreamBaseline", "timeout": 240},
+        {"name": "DoneEventOrdering.GroupedPathBaseline", "description": "DoneEventOrdering grouped path baseline", "test_filter": "DoneEventOrdering.GroupedPathBaseline", "timeout": 240},
+        {"name": "DoneEventOrdering.DefaultStreamToNamedStream", "description": "DoneEventOrdering default to named stream", "test_filter": "DoneEventOrdering.DefaultStreamToNamedStream", "timeout": 240},
+        {"name": "DoneEventOrdering.SameStreamThenSwitch", "description": "DoneEventOrdering same stream then switch", "test_filter": "DoneEventOrdering.SameStreamThenSwitch", "timeout": 240},
+        {"name": "Recorder.ParseBinary", "description": "Recorder parse binary tests", "test_filter": "Recorder.ParseBinary", "timeout": 60},
+        {"name": "Recorder.ParseJson", "description": "Recorder parse JSON tests", "test_filter": "Recorder.ParseJson", "timeout": 60},
+        {"name": "Recorder.VerifyMultithread", "description": "Recorder multithread verification tests", "test_filter": "Recorder.VerifyMultithread", "timeout": 60},
+        {"name": "ProxyTraceTestFixture.nonEmptySingleton", "description": "ProxyTrace non-empty singleton test", "test_filter": "ProxyTraceTestFixture.nonEmptySingleton", "timeout": 60},
+        {"name": "ProxyTraceTestFixture.addTraceOp", "description": "ProxyTrace add trace operation test", "test_filter": "ProxyTraceTestFixture.addTraceOp", "timeout": 60},
+        {"name": "ProxyTraceTestFixture.getMapSizeMB", "description": "ProxyTrace get map size test", "test_filter": "ProxyTraceTestFixture.getMapSizeMB", "timeout": 60},
+        {"name": "ProxyTraceTestFixture.updateTraceOp", "description": "ProxyTrace update trace operation test", "test_filter": "ProxyTraceTestFixture.updateTraceOp", "timeout": 60},
+        {"name": "ProxyTraceTestFixture.updateTraceOp2", "description": "ProxyTrace update trace operation test 2", "test_filter": "ProxyTraceTestFixture.updateTraceOp2", "timeout": 60},
+        {"name": "CollTraceUtilsTest.aggregateResultsTest", "description": "CollTrace aggregate results test", "test_filter": "CollTraceUtilsTest.aggregateResultsTest", "timeout": 60},
+        {"name": "CollTraceUtilsTest.EventQueueOperationTest", "description": "CollTrace event queue operation test", "test_filter": "CollTraceUtilsTest.EventQueueOperationTest", "timeout": 60},
+        {"name": "CollTraceUtilsTest.EventQueueMultiThreadTest", "description": "CollTrace event queue multithread test", "test_filter": "CollTraceUtilsTest.EventQueueMultiThreadTest", "timeout": 60},
+        {"name": "CollTraceUtilsTest.getSizeMbTest", "description": "CollTrace get size MB test", "test_filter": "CollTraceUtilsTest.getSizeMbTest", "timeout": 60}
+      ]
+    },
+    "unit_tests_fixtures": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixtures",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 60,
+      "env_variables": {
+        "NCCL_DEBUG": ""
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {"name": "BitOps", "description": "Bit operation utility tests (macros and typed fixtures)", "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash:BitOpsTemplate*"},
+        {"name": "EnqueueCountTests", "description": "Enqueue send/recv count helpers", "test_filter": "EnqueueCountTests.*"},
+        {"name": "MiscTests.Sorter", "description": "Task coll sorter unit test", "test_filter": "MiscTests.Sorter"},
+        {"name": "VersionInfoTests", "description": "HIP/ROCm version string formatting tests", "test_filter": "VersionInfoTests.*"},
+        {"name": "GinDeviceTest", "description": "GIN proxy backend device-leaf tests", "test_filter": "GinDeviceTest.*"},
+        {"name": "DdaCollCommon", "description": "DDA collective common helper tests", "test_filter": "DdaCollCommon.*"}
+      ]
+    },
+    "unit_tests_gdr": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGdr",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "GdrPeerMem", "description": "net_ib peer-memory client sysfs detection (mock memory_peers tree)", "test_filter": "GdrPeerMem.*"}
+      ]
+    },
+    "unit_tests_micro": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicro",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "P2pMicrotests", "description": "Host-only p2p.cc microtests (no GPU, no HIP/RCCL runtime); contributes p2p.cc coverage", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_init": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroInit",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "InitMicrotests", "description": "Host-only init.cc microtests (no GPU, no HIP/RCCL runtime); contributes init.cc coverage", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_init_uncached": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroInit-uncached",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "InitMicrotestsUncached", "description": "Host-only init.cc microtests, HIP_*_UNCACHED_MEMORY arm; covers the preprocessor-gated paths the base binary cannot", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_init_faultinj": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroInit-faultinj",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "InitMicrotestsFaultInj", "description": "Host-only init.cc microtests, ENABLE_FAULT_INJECTION arm (the one that ships); covers the preprocessor-gated paths the base binary cannot", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_enqueue": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroEnqueue",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "EnqueueMicrotests", "description": "Host-only enqueue.cc microtests (no GPU, no HIP/RCCL runtime); contributes enqueue.cc coverage", "test_filter": "*"}
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "RCCL Unit Tests - All Collectives",
+      "description": "Standard RCCL unit tests for all collective operations",
+      "config": "unit_tests",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Unit Tests - Fixtures",
+      "description": "rccl-UnitTestsFixtures (header-level tests including MiscTests.Sorter)",
+      "config": "unit_tests_fixtures",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Unit Tests - GDR Peer-Memory Detection",
+      "description": "rccl-UnitTestsGdr (net_ib memory_peers sysfs scan, CPU-only)",
+      "config": "unit_tests_gdr",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - p2p.cc",
+      "description": "rccl-UnitTestsMicro (host-only p2p.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - init.cc",
+      "description": "rccl-UnitTestsMicroInit (host-only init.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_init",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - init.cc (uncached)",
+      "description": "rccl-UnitTestsMicroInit-uncached (init.cc HIP_*_UNCACHED_MEMORY arm)",
+      "config": "unit_tests_micro_init_uncached",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - init.cc (fault injection)",
+      "description": "rccl-UnitTestsMicroInit-faultinj (init.cc ENABLE_FAULT_INJECTION arm)",
+      "config": "unit_tests_micro_init_faultinj",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - enqueue.cc",
+      "description": "rccl-UnitTestsMicroEnqueue (host-only enqueue.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_enqueue",
+      "enabled": true
+    }
+  ]
+}

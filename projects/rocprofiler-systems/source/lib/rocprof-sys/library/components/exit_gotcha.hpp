@@ -1,0 +1,55 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "common/defines.h"
+#include "core/common.hpp"
+#include "core/timemory.hpp"
+
+#include <timemory/components/base.hpp>
+#include <timemory/components/gotcha/backends.hpp>
+
+#include <cstdint>
+#include <cstdlib>
+
+namespace rocprofsys
+{
+namespace component
+{
+struct exit_gotcha : tim::component::base<exit_gotcha, void>
+{
+    static constexpr size_t gotcha_capacity = 4;
+
+    using gotcha_data  = tim::component::gotcha_data;
+    using exit_func_t  = void (*)(int);
+    using abort_func_t = void (*)();
+
+    // string id for component
+    static std::string label() { return "exit_gotcha"; }
+
+    // generate the gotcha wrappers
+    static void configure();
+    static void shutdown();
+
+    static void start() {}
+    static void stop() {}
+
+    // exit / _Exit / quick_exit
+    void operator()(const gotcha_data&, exit_func_t, int) const;
+    // abort
+    void operator()(const gotcha_data&, abort_func_t) const;
+
+    struct exit_info
+    {
+        bool is_known  = false;
+        bool is_quick  = false;
+        int  exit_code = EXIT_SUCCESS;
+    };
+    static exit_info get_exit_info();
+};
+}  // namespace component
+
+using exit_gotcha_t = tim::component::gotcha<component::exit_gotcha::gotcha_capacity,
+                                             std::tuple<>, component::exit_gotcha>;
+}  // namespace rocprofsys

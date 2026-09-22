@@ -1,0 +1,292 @@
+# HIP Tests
+
+Collection of HIP runtime tests.
+
+## Building tests.
+ Please refer to https://github.com/ROCm/rocm-systems/blob/develop/projects/hip-tests/README.md
+
+## How to write tests
+Tests are declared using ```HIP_TEST_CASE``` (or ```HIP_TEMPLATE_TEST_CASE``` for templated tests). These macros expand to Catch2's ```TEST_CASE``` and ```TEMPLATE_TEST_CASE``` under the hood, automatically injecting tags defined in the YAML configuration (see [Configuration](#configuration)).
+
+```cpp
+HIP_TEST_CASE(Unit_hipMalloc_Positive) {
+  // test body
+}
+
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemset_Positive, int, float, double) {
+  // templated test body
+}
+```
+
+Every test name passed to ```HIP_TEST_CASE``` must have a corresponding entry in the YAML config files under ```catch/config/configs/```. The YAML entry defines the test's level and tags, which are compiled into ```hip_tests_config.hh``` and expanded by the macro at build time.
+
+[Catch2 Tutorial](https://github.com/catchorg/Catch2/blob/v3.8.1/docs/tutorial.md#top)
+
+[Catch2 Detailed Reference](https://github.com/catchorg/Catch2/blob/v3.8.1/docs/Readme.md#top)
+
+## Taking care of existing features
+- Don’t build on platform: EXCLUDE_HIP_PLATFORM, can be done via CMAKE. Adding source in if(HIP_PLATFORM == amd/nvidia).
+- HIPCC_OPTIONS/CLANG Options: Can be done via: set_source_files_properties(src.cc PROPERTIES COMPILE_FLAGS “…”).
+- Additional libraries: Can be done via target_link_libraries()
+- Multiple runs with different args: This can be done by Catch’s Feature: GENERATE(…)
+Running Subtest: ctest –R “...” (Regex to match the subtest name)
+
+## New Features
+- Better CI integration via xunit compatible output
+- hip-tests can be built in SPIRV, where all kernels are compiled in SPIRV, enable with cmake flag `-DENABLE_SPIRV=ON`. By default it's `OFF`.
+- hip-tests can be built with `-Wall -Werror` so that compiler warnings are treated as errors, controlled by the cmake flag `-DHIP_TESTS_ENABLE_WERROR`. It defaults to `OFF` in all cases. 
+
+## Testing Context
+HIP testing framework gives you a context for each test. This context will have useful information about the environment your test is running.
+
+Some useful functions are:
+- `bool isWindows()` : true if os is windows
+- `bool isLinux()` : true if os is linux
+- `bool isAmd()` : true if platform is AMD
+- `bool isNvidia()` : true if platform is NVIDIA
+
+This information can be accessed in any test via using: `TestContext::get().isAmd()`.
+
+## Adding test for a specific platform
+There might be some functionality which is not present on some platforms. Those tests can be hidden inside following macros.
+
+- ```HT_AMD``` is 1 when tests are running on AMD platform and 0 on NVIDIA.
+- ```HT_NVIDIA``` is 1 when tests are running on NVIDIA platform and 0 on AMD
+
+Usage:
+
+```cpp
+#if HT_AMD
+TEST_CASE("hipExtAPIs") {
+  // ...
+}
+#endif
+```
+
+## Configuration
+
+All configuration for the test cases is done through the `hip_tests_config.yaml` file.
+Every test case has its own entry. Currently supported options are:
+- level : Specify to which level the case belongs to (e.g. Level_2 is a standard test)
+- tags : List all Catch2 tags that the case is associated with
+- disabled : List all platforms where the case should be disabled
+The group name is automatically added as a tag for every case.
+Changing the configuration file will retrigger the build, so we have an up to date configuration every time.
+
+Example:
+```yaml
+unit:
+  atomics:
+    Unit_atomicExch_system_Positive_Peer_GPUs:
+      <<: *level_2
+      tags: [multigpu]
+      # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
+      disabled: [amd_wsl]
+```
+will be generated (on an AMD linux machine) as:
+```cpp
+#define Unit_atomicExch_system_Positive_Peer_GPUs "Unit_atomicExch_system_Positive_Peer_GPUs", "[multigpu][level_2][atomics]"
+```
+and on an AMD WSL machine as (skipping the test):
+```cpp
+#define Unit_atomicExch_system_Positive_Peer_GPUs "Unit_atomicExch_system_Positive_Peer_GPUs", "[.]"
+```
+and this macro is expanded in the actual test case definition
+```cpp
+TEMPLATE_TEST_CASE(Unit_atomicExch_system_Positive_Peer_GPUs, int, float, double)
+```
+
+<b>Every newly added test should mandate adding an entry to the configuration file.</b>
+
+## Test Levels and Quick Mode (`level_0`)
+
+Tests are assigned a level in the YAML configuration (`level: 0` through `level: 4`). The level serves two purposes: it controls which tests are **selected** to run (via Catch2 tag filters), and it allows tests to **adjust their behavior** at runtime (e.g., reducing workload at lower levels).
+
+| Level | Use case | Typical runtime |
+|-------|----------|-----------------|
+| `level_0` | Quick smoke tests, emulation environments | Seconds per test |
+| `level_1` | Reserved for future use | — |
+| `level_2` | Standard test suite (default) | Minutes |
+| `level_3` | Reserved for future use | — |
+| `level_4` | Reserved for future use | — |
+
+### Running at a specific level
+
+Use the `HIP_TEST_LEVEL` environment variable:
+
+```bash
+HIP_TEST_LEVEL=level_0 ./MemoryTest1 "Unit_hipMemsetSync"
+```
+
+Or use Catch2 tag filters:
+
+```bash
+./MemoryTest1 "[level_0]"
+```
+
+### Writing level-aware tests with `isQuickLevel()`
+
+Tests that are slow in emulation environments can use `isQuickLevel()` to reduce their workload at `level_0` while preserving full coverage at higher levels. This function returns `true` when the active test level is `level_0` (set via `HIP_TEST_LEVEL` environment variable or `[level_0]` Catch2 tag filter).
+
+```cpp
+#include <hip_test_common.hh>
+
+HIP_TEST_CASE(Unit_hipMemsetSync) {
+  size_t N = isQuickLevel() ? 1024 : (1024 * 1024);
+  // ...
+}
+```
+
+#### Guidelines for `isQuickLevel()` trimming
+
+- **Prefer reducing iteration counts and buffer sizes** over skipping code paths, so the same API surface is exercised with less data.
+- **Call `isQuickLevel()` inside the test function**, not in global/static variable initializers. The test level is detected at runtime by the Catch2 listener, which runs after static initialization.
+- **Use reproducible seeds** when tests involve randomization. Log the seed and allow overriding (e.g., via `HIP_TEST_SEED`) so failures can be replayed.
+
+#### Example: reducing a memset size
+
+```cpp
+size_t numH = isQuickLevel() ? 256 : (1024 * 1024);
+size_t numW = isQuickLevel() ? 256 : (1024 * 1024);
+```
+
+#### Example: reducing GENERATE parameters
+
+```cpp
+auto size = GENERATE(isQuickLevel()
+    ? values({64, 256, 1024})
+    : values({64, 256, 1024, 65536, 1048576}));
+```
+
+## Environment Variables
+- `HT_LOG_ENABLE` : This is for debugging the HIP Test Framework itself. Setting it to 1, all `LogPrintf` will be printed on screen
+
+## Test Macros
+### Single Thread Macros
+These macros are to be used when your test is calling HIP APIs via the main thread.
+
+- `HIP_CHECK` : This macro takes in a HIP API and tests for its result to be either ```hipSuccess``` or ```hipErrorPeerAccessAlreadyEnabled```.
+
+  - Usage: ```HIP_CHECK(hipMalloc(&dPtr, 10));```
+
+- ```HIP_CHECK_ERROR``` : This macro takes in a HIP API and tests its result against a provided result. This can be used when the API is expected to fail with a particular result.
+
+  - Usage: ```HIP_CHECK_ERROR(hipMalloc(&dPtr, 0), hipErrorInvalidValue);```
+
+- ```HIPRTC_CHECK``` : This macro takes in a HIPRTC API and tests its result against HIPRTC_SUCCESS.
+
+  - Usage: ```HIPRTC_CHECK(hiprtcCompileProgram(prog, count, options));```
+
+- ```HIP_ASSERT``` : This macro takes in a bool condition as input and does a ```REQUIRE``` on the condition.
+
+  - Usage: ```HIP_ASSERT(result == 10);```
+
+### Multi Thread Macros
+These macros are to be used when you call HIP APIs in a multi threaded way. They exist because Catch2 ```REQUIRE``` and ```CHECK``` macros can not handle multi threaded calls. To solve this problem, two macros are added: ```HIP_CHECK_THREAD``` and ```REQUIRE_THREAD```, which can be used to check result of HIP APIs and test assertions respectively. The results can be validated after the threads join via ```HIP_CHECK_THREAD_FINALIZE```.
+
+Note: These should be used in ```std::thread``` only. For multi proc guidelines look at [MultiProc Macros](#multi-process-macros) and [SpawnProc Class](#multiproc-management-class)
+
+- ```HIP_CHECK_THREAD``` : This macro takes in a HIP API and tests for its result to be either ```hipSuccess``` or ```hipErrorPeerAccessAlreadyEnabled```. It can also tell other threads if an error has occurred in one of the HIP API and can prematurely stop the threads.
+
+- ```REQUIRE_THREAD``` : This macro takes in a bool condition and tests for its result to be true. If this check fails, it can signal other threads to terminate early.
+
+- ```HIP_CHECK_THREAD_FINALIZE``` : This macro checks for the results logged by ```HIP_CHECK_THREAD```. This needs to be called after the threads have joined.
+
+Please also note that you can not return values in functions calling ```HIP_CHECK_THREAD``` or ```REQUIRE_THREAD``` macro.
+
+  Usage:
+
+  ```cpp
+  auto threadFunc = []() {
+      int *dPtr{nullptr};
+      HIP_CHECK_THREAD(hipMalloc(&dPtr, 10));
+      REQUIRE_THREAD(dPtr != nullptr);
+      // Some other work
+    };
+
+    // Launch threads
+    std::vector<std::thread> threadPool;
+    for(...) {
+        threadPool.emplace_back(std::thread(threadFunc));
+    }
+
+    // Join threads
+    for(auto &i : threadPool) {
+        i.join();
+    }
+
+    // Validate all results
+    HIP_CHECK_THREAD_FINALIZE();
+  ```
+
+### Skipping Tests if certain criteria is not met
+If there arises a condition where certain flag is disabled and due to which a test can not run at that time, the following macro can be of use. It will highlight the test in ctest report as well.
+
+- ```HIP_SKIP_TEST``` : The API takes in an input of the reason as well and prints out the line HIP_SKIP_THIS_TEST. This causes ctest to mark the test as skipped and the test shows up in the report as skipped prompting proper response from the team. Internally uses the Catch2 SKIP macro to actually end the test execution and report the status as skipped. ctest also marks the test as skipped
+
+  Usage:
+
+  ```cpp
+  TEST_CASE("TestOnlyOnXnack") {
+    if(!XNACKEnabled) {
+      HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
+    }
+    // Rest of test functionality
+  }
+  ```
+
+### Multi Process Macros
+These macros are to be called in multi process tests, inside a process which gets spawned. The reasoning is the same, Catch2 does not support multi process checks.
+
+- ```HIPCHECK``` : Same as ```HIP_CHECK``` but will not call Catch2's ```REQUIRE``` on the HIP API. It will print if there is a mismatch and exit the process.
+
+- ```HIPASSERT``` : Same as ```HIP_ASSERT``` but will not call Catch2's ```REQUIRE``` on the HIP API. It will print if there is a mismatch and exit the process.
+
+## MultiProc Management Class
+There is a special interface available for process isolation. ```hip::SpawnProc``` in ```hip_test_process.hh```. Using this interface test can spawn a process and place passing conditions on its return value or its output to stdout. This can be useful for testing printf output.
+Sample Usage:
+```cpp
+hip::SpawnProc proc(<name of exe>, <optional bool value, if output is to be recorded>);
+REQUIRE(0 == proc.run()); // Test of return value of the proc
+REQUIRE(exepctedOutput == proc.getOutput()); // Test on expected output of the process
+```
+The process must be a standalone exe inside the same folder as other tests.
+
+## Enabling New Tests
+Initially, the new tests can be enabled via using ```-DHIP_CATCH_TEST=1```. After porting existing tests, this will be turned on by default.
+
+## Building a single test
+Generate `hip_test_config.hh` before compilation
+```bash
+python3 <HIP_SRC_DIR>/catch/config/parse_config.py <HIP_SRC_DIR>/catch/config/configs <PLATFORM> <OS> <ARCH> <CONFIG_TARGET_DIR>/hip_test_config.hh
+```
+
+```bash
+hipcc -I <HIP_SRC_DIR>/catch/include -I <CONFIG_TARGET_DIR> <HIP_SRC_DIR>/catch/hipTestMain/main.cc <HIP_SRC_DIR>/catch/hipTestMain/hip_test_context.cc -I <CATCH2_INCLUDE_DIR> -L <CATCH2_LIB_DIR> -lCatch2 -I $HIP_PATH/include -O1 -ggdb <PATH_TO_TEST.cc> -o <OUT_FILE_NAME>
+```
+
+## Debugging support
+Catch2 allows multiple ways in which you can debug the test case.
+- `-b` options breaks into a debugger as soon as there is a failure encountered [Catch2 Options Reference](https://github.com/catchorg/Catch2/blob/devel/docs/command-line.md#breaking-into-the-debugger)
+- Catch2 provided [logging macro](https://github.com/catchorg/Catch2/blob/v2.13.6/docs/logging.md#top) that print useful information on test case failure
+- User can also call [CATCH_BREAK_INTO_DEBUGGER](https://github.com/catchorg/Catch2/blob/devel/docs/configuration.md#overriding-catchs-debug-break--b) macro to break at a certain point in a test case.
+- User can also mention filename.cc:__LineNumber__ to break into a test case via gdb.
+
+## External Libs being used
+- [Catch2](https://github.com/catchorg/Catch2) - Testing framework
+- [picojson](https://github.com/kazuho/picojson) - For config file parsing
+- [PyYAML](https://pyyaml.org/) - For config file parsing (Python script)
+
+# Testing Guidelines
+Tests fall in 5 categories and its file name prefix are as follows:
+ - Unit tests (Prefix: Unit_\*API\*_\*Optional Scenario\*, example : Unit_hipMalloc_Negative or Unit_hipMalloc): Unit Tests are simplest test for an API, the target here is to test the API with different types of input and different ways of calling.
+ - Application Behavior Modelling tests (Prefix: ABM_\*Intent\*_\*Optional Scenario\*, example: ABM_ModuleLoadAndRun): ABM tests are used to model a specific use case of HIP APIs, either seen in a customer app or a general purpose app. It mimics the calling behavior seen in aforementioned app.
+ - Stress/Scale tests (Prefix: Stress_\*API\*_\*Intent\*_\*Optional Scenario\*, example: Stress_hipMemset_ExhaustVRAM): These tests are used to see the behavior of HIP APIs in edge scenarios, for example what happens when we have exhausted vram and do a hipMalloc or run many instances of same API in parallel.
+ - Multi Process tests (Prefix: MultiProc_\*API\*_\*Optional Scenario\*, example: MultiProc_hipIPCMemHandle_GetDataFromProc): These tests are multi process tests and will only run on linux. They are used to test HIP APIs in multi process environment
+ - Performance tests(Prefix: Perf_\*Intent\*_\*Optional Scenario\*, example: Perf_DispatchLatency): Performance tests are used to get results of HIP APIs.
+
+# General Guidelines:
+ - Add as many INFO() as you can in tests which prints state of the test, this will help the debugger when the test fails (INFO macro only prints when the test fails)
+ - Check return of each HIP API and fail whenever there is a mismatch with hipSuccess or hiprtcSuccess.
+ - Each Category of test will have its own exe and catch_discover_test macro will be called on it to discover its tests
+ - Optional Scenario in test names are optional. For example you can test all Scenarios of hipMalloc API in one file, you can name the file Unit_hipMalloc, if you are having a file just for negative scenarios you can name it as Unit_hipMalloc_Negative.

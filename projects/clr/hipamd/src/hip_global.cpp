@@ -1,0 +1,267 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "hip_global.hpp"
+
+#include "hip/hip_runtime.h"
+#include "hip_internal.hpp"
+#include "hip_code_object.hpp"
+#include "hip_platform.hpp"
+#include "platform/program.hpp"
+#include <hip/hip_version.h>
+
+HIP_PUBLIC_API const char* amd_dbgapi_get_build_name(void) { return HIP_VERSION_BUILD_NAME; }
+
+HIP_PUBLIC_API const char* amd_dbgapi_get_git_hash() { return HIP_VERSION_GITHASH; }
+
+HIP_PUBLIC_API size_t amd_dbgapi_get_build_id() { return HIP_VERSION_BUILD_ID; }
+
+#ifdef __HIP_ENABLE_PCH
+extern const char __hip_pch_wave32[];
+extern const char __hip_pch_wave64[];
+extern unsigned __hip_pch_wave32_size;
+extern unsigned __hip_pch_wave64_size;
+void __hipGetPCH(const char** pch, unsigned int* size) {
+  hipDeviceProp_t deviceProp;
+  int deviceId;
+  hipError_t error = hipGetDevice(&deviceId);
+  error = hipGetDeviceProperties(&deviceProp, deviceId);
+  if (deviceProp.warpSize == 32) {
+    *pch = __hip_pch_wave32;
+    *size = __hip_pch_wave32_size;
+  } else {
+    *pch = __hip_pch_wave64;
+    *size = __hip_pch_wave64_size;
+  }
+}
+#endif
+namespace hip {
+
+// forward declaration of methods required for managed variables
+hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
+
+// ================================================================================================
+Function::Function(const std::string& name, FatBinaryInfo** modules)
+    : name_(name), modules_(modules) {
+  dFunc_.resize(g_devices.size());
+}
+
+// ================================================================================================
+Function::~Function() {
+  for (auto& kernel : dFunc_) {
+    if (kernel != nullptr) {
+      PlatformState::Instance().UnregisterFuncHandle(asHipFunction(kernel));
+      kernel->release();
+    }
+  }
+}
+
+// ================================================================================================
+amd::Kernel* Function::BuildKernel(hipModule_t hmod) const {
+  amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
+  const amd::Symbol* symbol = program->findSymbol(name_.c_str());
+  guarantee(symbol != nullptr, "Cannot find Symbol with name: %s", name_.c_str());
+  auto* kernel = new amd::Kernel(*program, *symbol, name_);
+  PlatformState::Instance().RegisterFuncHandle(asHipFunction(kernel));
+  return kernel;
+}
+
+// ================================================================================================
+hipError_t Function::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod) {
+  guarantee((dFunc_.size() == g_devices.size()), "dFunc Size mismatch");
+  int dev = ihipGetDevice();
+  if (dFunc_[dev] == nullptr) {
+    dFunc_[dev] = BuildKernel(hmod);
+  }
+  *hfunc = asHipFunction(dFunc_[dev]);
+  return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t Function::GetStatFunc(hipFunction_t* hfunc, int deviceId) {
+  if (deviceId >= static_cast<int>(dFunc_.size())) {
+    return hipErrorNoBinaryForGpu;
+  }
+  if (dFunc_[deviceId] != nullptr) {
+    *hfunc = asHipFunction(dFunc_[deviceId]);
+    return hipSuccess;
+  }
+  std::scoped_lock lock((*modules_)->FatBinaryLock());
+  // Check again after acquiring lock — another thread may have built it
+  if (dFunc_[deviceId] != nullptr) {
+    *hfunc = asHipFunction(dFunc_[deviceId]);
+    return hipSuccess;
+  }
+  hipModule_t hmod = nullptr;
+  IHIP_RETURN_ONFAIL((*modules_)->BuildProgram(deviceId));
+  IHIP_RETURN_ONFAIL((*modules_)->GetModule(deviceId, &hmod));
+  dFunc_[deviceId] = BuildKernel(hmod);
+  *hfunc = asHipFunction(dFunc_[deviceId]);
+  return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t Function::GetStatFuncAttr(hipFuncAttributes* func_attr, int deviceId) {
+  if (modules_ == nullptr || *modules_ == nullptr) {
+    return hipErrorInvalidDeviceFunction;
+  }
+  // Ensure kernel is built for this device (reuses getStatFunc path)
+  hipFunction_t hfunc = nullptr;
+  IHIP_RETURN_ONFAIL(GetStatFunc(&hfunc, deviceId));
+
+  const std::vector<amd::Device*>& devices = amd::Device::getDevices(CL_DEVICE_TYPE_GPU, false);
+  amd::Kernel* kernel = dFunc_[deviceId];
+  auto* device_handle = devices[deviceId];
+  const device::Kernel::WorkGroupInfo* wginfo =
+      kernel->getDeviceKernel(*device_handle)->workGroupInfo();
+  int binaryVersion =
+      device_handle->isa().versionMajor() * 10 + device_handle->isa().versionMinor();
+  func_attr->sharedSizeBytes = static_cast<int>(wginfo->localMemSize_);
+  func_attr->binaryVersion = binaryVersion;
+  func_attr->cacheModeCA = 0;
+  func_attr->constSizeBytes = wginfo->constMemSize_ - 1;
+  func_attr->localSizeBytes = wginfo->privateMemSize_;
+  func_attr->maxDynamicSharedSizeBytes = wginfo->maxDynamicSharedSizeBytes_;
+  func_attr->maxThreadsPerBlock = static_cast<int>(wginfo->size_);
+  func_attr->numRegs = static_cast<int>(wginfo->usedVGPRs_);
+  func_attr->preferredShmemCarveout = wginfo->groupMemCarveout_;
+  func_attr->ptxVersion = binaryVersion;
+  return hipSuccess;
+}
+
+// ================================================================================================
+Var::Var(const std::string& name, DeviceVarKind dVarKind, size_t size, int type, int norm,
+         FatBinaryInfo** modules)
+    : name_(name),
+      dVarKind_(dVarKind),
+      size_(size),
+      type_(type),
+      norm_(norm),
+      modules_(modules),
+      managedVarPtr_(nullptr),
+      align_(0) {
+  dMem_.resize(g_devices.size());
+}
+
+// ================================================================================================
+Var::Var(const std::string& name, DeviceVarKind dVarKind, void* pointer, size_t size,
+         unsigned align, FatBinaryInfo** modules)
+    : name_(name),
+      dVarKind_(dVarKind),
+      size_(size),
+      modules_(modules),
+      managedVarPtr_(pointer),
+      allocFlag_(false),
+      align_(align),
+      type_(0),
+      norm_(0) {
+  dMem_.resize(g_devices.size());
+}
+
+// ================================================================================================
+Var::~Var() {
+  // device_ptr is being removed and its amd::Memory obj is being released during
+  // ihipFree in hip::StatCO::removeFatBinary; however in DynCO path it bypasses ihipFree,
+  // so we check the map first to avoid double-release.
+  for (auto& mem : dMem_) {
+    if (mem != nullptr) {
+      void* ptr = mem->getSvmPtr();
+      if (amd::MemObjMap::FindMemObj(ptr) != nullptr) {
+        amd::MemObjMap::RemoveMemObj(ptr);
+        mem->release();
+      }
+    }
+  }
+  if (shadowVptr != nullptr) {
+    textureReference* texRef = reinterpret_cast<textureReference*>(shadowVptr);
+    (void)ihipUnbindTexture(texRef);
+    delete texRef;
+    shadowVptr = nullptr;
+  }
+  modules_ = nullptr;
+}
+
+// ================================================================================================
+hipError_t Var::GetDeviceVarPtr(amd::Memory** mem, int deviceId) {
+  guarantee((deviceId >= 0), "Invalid DeviceId, less than zero");
+  guarantee((static_cast<size_t>(deviceId) < g_devices.size()),
+            "Invalid DeviceId, greater than no of code objects");
+  guarantee((dMem_.size() == g_devices.size()), "Device Var not initialized to size");
+  *mem = dMem_[deviceId];
+  return hipSuccess;
+}
+
+// ================================================================================================
+static hipError_t createVarMem(amd::Memory** mem_out, const std::string& name,
+                               hipModule_t hmod, int deviceId) {
+  amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
+  device::Program* dev_program = program->getDeviceProgram(*g_devices.at(deviceId)->devices()[0]);
+  guarantee(dev_program != nullptr, "Cannot get Device Program for module: 0x%x", hmod);
+
+  amd::Memory* mem = nullptr;
+  void* device_ptr = nullptr;
+  size_t size = 0;
+  if (!dev_program->createGlobalVarObj(&mem, &device_ptr, &size, name.c_str())) {
+    guarantee(false, "Cannot create GlobalVar Obj for symbol: %s", name.c_str());
+  }
+  // Handle size 0 symbols
+  if (size != 0) {
+    if (mem == nullptr || device_ptr == nullptr) {
+      LogPrintfError("Cannot get memory for creating device Var: %s", name.c_str());
+      guarantee(false, "Cannot get memory for creating device var");
+    }
+    amd::MemObjMap::AddMemObj(device_ptr, mem);
+  }
+  *mem_out = mem;
+  return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t Var::GetDeviceVar(amd::Memory** mem, int deviceId, hipModule_t hmod) {
+  guarantee((deviceId >= 0), "Invalid DeviceId, less than zero");
+  guarantee((static_cast<size_t>(deviceId) < g_devices.size()),
+            "Invalid DeviceId, greater than no of code objects");
+  guarantee((dMem_.size() == g_devices.size()), "Device Var not initialized to size");
+
+  if (dMem_[deviceId] == nullptr) {
+    IHIP_RETURN_ONFAIL(createVarMem(&dMem_[deviceId], name_, hmod, deviceId));
+  }
+
+  *mem = dMem_[deviceId];
+  return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t Var::GetStatDeviceVar(amd::Memory** mem, int deviceId) {
+  guarantee((deviceId >= 0), "Invalid DeviceId, less than zero");
+  guarantee((static_cast<size_t>(deviceId) < g_devices.size()),
+            "Invalid DeviceId, greater than no of code objects");
+  if (dMem_[deviceId] == nullptr) {
+    hipModule_t hmod = nullptr;
+    IHIP_RETURN_ONFAIL((*modules_)->BuildProgram(deviceId));
+    IHIP_RETURN_ONFAIL((*modules_)->GetModule(deviceId, &hmod));
+    IHIP_RETURN_ONFAIL(createVarMem(&dMem_[deviceId], name_, hmod, deviceId));
+  }
+  *mem = dMem_[deviceId];
+  return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t Var::AllocateManagedVarPtr() {
+  void** pointer = static_cast<void**>(managedVarPtr_);
+  // check if it is deffered allocation
+  if (!allocFlag_) {
+    // Allocate managed memory for this var
+    const bool use_host_ptr = true;
+    IHIP_RETURN_ONFAIL(ihipMallocManaged(pointer, size_, align_, use_host_ptr));
+    allocFlag_ = true;
+  }
+  if (dMem_.empty()) {
+    ResizeDVar(g_devices.size());
+  }
+  return hipSuccess;
+}
+};  // namespace hip

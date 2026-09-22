@@ -1,0 +1,72 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+cmake_minimum_required(VERSION 3.21)
+
+if(UNIX)
+  if(NOT DEFINED ROCM_PATH)
+    if(DEFINED ENV{ROCM_PATH})
+      set(ROCM_PATH $ENV{ROCM_PATH} CACHE STRING "ROCM Path")
+    else()
+      set(ROCM_PATH "/opt/rocm" CACHE STRING "Default ROCM installation directory.")
+    endif()
+  endif()
+  # Search for rocm in common locations
+  list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
+endif()
+
+project(module_api LANGUAGES CXX HIP)
+
+# Detect GPU architectures and setup OFFLOAD_ARCH_FLAGS
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../common/DetectGPUArchs.cmake)
+
+# Create the excutable
+if(TARGET build_intro)
+set(EXCLUDE_OPTION EXCLUDE_FROM_ALL)
+else()
+set(EXCLUDE_OPTION)
+endif()
+
+# Mark source files as HIP (they use HIP runtime APIs)
+set_source_files_properties(runKernel.cpp PROPERTIES LANGUAGE HIP)
+set_source_files_properties(launchKernelHcc.cpp PROPERTIES LANGUAGE HIP)
+set_source_files_properties(defaultDriver.cpp PROPERTIES LANGUAGE HIP)
+set_source_files_properties(vcpy_kernel.cpp PROPERTIES LANGUAGE HIP)
+
+add_executable(runKernel.hip.out ${EXCLUDE_OPTION} runKernel.cpp)
+add_executable(launchKernelHcc.hip.out ${EXCLUDE_OPTION} launchKernelHcc.cpp)
+add_executable(defaultDriver.hip.out ${EXCLUDE_OPTION} defaultDriver.cpp)
+
+
+# Generate code object using CMake's HIP language support
+# Note: Build for all detected architectures to support multiple GPUs (like hipcc does)
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code
+  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -x hip --cuda-device-only ${OFFLOAD_ARCH_FLAGS} ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp
+  COMMENT "Generating code object vcpy_kernel.code for ${CMAKE_HIP_ARCHITECTURES}"
+  VERBATIM
+)
+
+add_custom_target(codeobj ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code)
+
+add_dependencies(runKernel.hip.out codeobj)
+add_dependencies(launchKernelHcc.hip.out codeobj)
+add_dependencies(defaultDriver.hip.out codeobj)
+
+target_include_directories(runKernel.hip.out PRIVATE ../../common)
+target_include_directories(launchKernelHcc.hip.out PRIVATE ../../common)
+target_include_directories(defaultDriver.hip.out PRIVATE ../../common)
+
+# Set RPATH so executables can find HIP libraries at runtime
+if(UNIX)
+  set_target_properties(runKernel.hip.out launchKernelHcc.hip.out defaultDriver.hip.out PROPERTIES
+    BUILD_RPATH "${ROCM_PATH}/lib"
+    INSTALL_RPATH "${ROCM_PATH}/lib"
+  )
+endif()
+
+if(TARGET build_intro)
+add_dependencies(build_intro runKernel.hip.out launchKernelHcc.hip.out defaultDriver.hip.out)
+endif()

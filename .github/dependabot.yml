@@ -1,0 +1,122 @@
+version: 2
+updates:
+
+  # Check for updates to GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/aqlprofile/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      aqlprofile-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/rocr-runtime/runtime/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rocr-runtime-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/rocprofiler-compute/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rocprofiler-compute-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/rocprofiler-systems/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rocprofiler-systems-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/rocprofiler-sdk/source/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rocprofiler-sdk-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/rocm-smi-lib/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rocm-smi-lib-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/rocminfo/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rocminfo-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/rdc/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rdc-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/hip/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      hip-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/amdsmi/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      amdsmi-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/rocr-debug-agent/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rocr-debug-agent-docs-dependencies:
+        patterns:
+          - "*"

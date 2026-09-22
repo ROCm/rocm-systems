@@ -1,0 +1,13 @@
+# EditorConfig standardizes spacing in all editors: https://EditorConfig.org
+# Please get a plugin for your editor to match the formatting
+
+# top-most EditorConfig file
+root = true
+
+# Matches multiple files with brace expansion notation
+# Set default charset
+[*.{c,cc,cpp,h,hh,hpp}]
+charset = utf-8
+indent_style = space
+indent_size = 2
+max_line_length = 100

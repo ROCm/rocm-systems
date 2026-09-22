@@ -1,0 +1,26 @@
+  <metric name="GRBM_COUNT" block="GRBM" event="0" descr="Tie High - Count Number of Clocks"></metric>
+  <metric name="GRBM_GUI_ACTIVE" block="GRBM" event="2" descr="The GUI is Active"></metric>
+  <metric name="SQ_WAVES" block="SQ" event="4" descr="Count number of waves sent to SQs. (per-simd, emulated, global)"></metric>
+  <metric name="SQ_INSTS_VALU" block="SQ" event="26" descr="Number of VALU instructions issued. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VMEM_WR" block="SQ" event="27" descr="Number of VMEM write instructions issued (including FLAT). (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VMEM_RD" block="SQ" event="28" descr="Number of VMEM read instructions issued (including FLAT). (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_SALU" block="SQ" event="30" descr="Number of SALU instructions issued. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_SMEM" block="SQ" event="31" descr="Number of SMEM instructions issued. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_FLAT" block="SQ" event="32" descr="Number of FLAT instructions issued. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_FLAT_LDS_ONLY" block="SQ" event="33" descr="Number of FLAT instructions issued that read/wrote only from/to LDS (only works if EARLY_TA_DONE is enabled). (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_LDS" block="SQ" event="34" descr="Number of LDS instructions issued (including FLAT). (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_GDS" block="SQ" event="35" descr="Number of GDS instructions issued. (per-simd, emulated)"></metric>
+  <metric name="SQ_WAIT_INST_LDS" block="SQ" event="61" descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"></metric>
+  <metric name="SQ_ACTIVE_INST_VALU" block="SQ" event="69" descr="Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic). Units in quad-cycles(4 cycles)"></metric>
+  <metric name="SQ_INST_CYCLES_SALU" block="SQ" event="86" descr="Number of cycles needed to execute non-memory read scalar operations. (per-simd, emulated)"></metric>
+  <metric name="SQ_THREAD_CYCLES_VALU" block="SQ" event="89" descr="Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd)"></metric>
+  <metric name="SQ_LDS_BANK_CONFLICT" block="SQ" event="97" descr="Number of cycles LDS is stalled by bank conflicts. (emulated)"></metric>
+  <metric name="TA_TA_BUSY" block="TA" event="15" descr="TA block is busy. Perf_Windowing not supported for this counter."></metric>
+  <metric name="TA_FLAT_READ_WAVEFRONTS" block="TA" event="101" descr="Number of flat opcode reads processed by the TA."></metric>
+  <metric name="TA_FLAT_WRITE_WAVEFRONTS" block="TA" event="102" descr="Number of flat opcode writes processed by the TA."></metric>
+  <metric name="TCC_HIT" block="TCC" event="18" descr="Number of cache hits."></metric>
+  <metric name="TCC_MISS" block="TCC" event="19" descr="Number of cache misses. UC reads count as misses."></metric>
+  <metric name="TCC_MC_RDREQ" block="TCC" event="35" descr="Number of 32-byte reads. The hardware actually does 64-byte reads but the number is adjusted to provide uniformity."></metric>
+  <metric name="TCC_MC_WRREQ" block="TCC" event="26" descr="Number of 32-byte transactions going over the TC_MC_wrreq interface. Atomics may travel over the same interface and are generally classified as write requests."></metric>
+  <metric name="TCC_MC_WRREQ_STALL" block="TCC" event="28" descr="Number of cycles a write request was stalled."></metric>
+  <metric name="TCP_TCP_TA_DATA_STALL_CYCLES" block="TCP" event="3" descr="TCP stalls TA data interface. Now Windowed."></metric>

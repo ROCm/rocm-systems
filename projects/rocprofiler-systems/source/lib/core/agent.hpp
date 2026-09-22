@@ -1,0 +1,60 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <stdexcept>
+#include <string>
+
+namespace rocprofsys
+{
+
+enum class agent_type : std::uint8_t
+{
+    cpu,  ///< Agent type is a CPU
+    gpu,  ///< Agent type is a GPU
+    nic,  ///< Agent type is a NIC
+};
+
+inline const char*
+to_string(agent_type type)
+{
+    switch(type)
+    {
+        case agent_type::gpu: return "GPU";
+        case agent_type::cpu: return "CPU";
+        case agent_type::nic: return "NIC";
+        default: throw std::runtime_error("Invalid agent type.");
+    }
+}
+
+struct agent
+{
+    agent_type    type;
+    std::uint64_t handle;
+    std::uint64_t device_id;
+    std::uint32_t node_id;
+    std::int32_t  logical_node_id;
+    std::int32_t  logical_node_type_id;
+    std::string   name;
+    std::string   model_name;
+    std::string   vendor_name;
+    std::string   product_name;
+
+    size_t device_type_index{
+        0
+    };  // Per-type ID (GPU, CPU) of the agent as they are stored in the agent_manager
+    std::string
+        agent_info;  // JSON formatted serialization of the available agent information
+
+    // PCIe identity + runtime visibility (GPU agents)
+    std::uint32_t location_id{ 0 };  // PCIe BDF (bus/device/function) encoded, from KFD
+    std::uint32_t domain{ 0 };       // PCI domain of the device
+    bool          hip_visible{ true };  // rocprofiler-sdk runtime_visibility.hip estimate
+                                        // (honors ROCR/HIP/CUDA_VISIBLE_DEVICES); true
+                                        // when the SDK cannot report visibility.
+};
+
+}  // namespace rocprofsys

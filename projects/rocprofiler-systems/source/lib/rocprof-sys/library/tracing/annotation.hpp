@@ -1,0 +1,265 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "common/defines.h"
+#include "core/common.hpp"
+#include "core/concepts.hpp"
+#include "core/perfetto.hpp"
+#include "core/state.hpp"
+#include "core/utility.hpp"
+#include "rocprofiler-systems/annotation.h"  // in rocprof-sys-common-api
+#include <cstdint>
+
+#include <timemory/mpl/concepts.hpp>
+#include <timemory/operations/types/get.hpp>
+
+#include "logger/debug.hpp"
+
+#include <type_traits>
+
+namespace rocprofsys
+{
+namespace tracing
+{
+using perfetto_event_context_t = ::perfetto::EventContext;
+
+template <size_t Idx>
+struct annotation_value_type;
+
+template <size_t Idx>
+using annotation_value_type_t = typename annotation_value_type<Idx>::type;
+
+#define ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ENUM, TYPE)                                    \
+    template <>                                                                          \
+    struct annotation_value_type<ENUM>                                                   \
+    {                                                                                    \
+        using type = TYPE;                                                               \
+    };
+
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_CSTR, const char*)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_SIZE_T, size_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_INT16, std::int16_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_INT32, std::int32_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_INT64, std::int64_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_UINT16, std::uint16_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_UINT32, std::uint32_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_UINT64, std::uint64_t)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_FLOAT32, float)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_FLOAT64, double)
+ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ROCPROFSYS_VALUE_VOID_P, void*)
+
+#undef ROCPROFSYS_DEFINE_ANNOTATION_TYPE
+
+template <typename Np, typename Tp>
+    requires(!std::is_same<std::remove_pointer_t<concepts::unqualified_type_t<Np>>,
+                           rocprofsys_annotation_t>::value)
+auto
+add_perfetto_annotation(perfetto_event_context_t& ctx, Np&& _name, Tp&& _val,
+                        std::int64_t _idx = -1)
+{
+    using named_type = std::remove_reference_t<std::remove_cv_t<std::decay_t<Np>>>;
+    using value_type = std::remove_reference_t<std::remove_cv_t<std::decay_t<Tp>>>;
+
+    static_assert(concepts::is_string_type<named_type>::value,
+                  "Error! name is not a string type");
+
+    auto _get_dbg = [&]() {
+        auto* _dbg = ctx.event()->add_debug_annotations();
+        if(_idx >= 0)
+        {
+            auto _arg_name = fmt::format("arg{}-{}", _idx, std::forward<Np>(_name));
+            _dbg->set_name(_arg_name);
+        }
+        else
+        {
+            _dbg->set_name(std::string_view{ std::forward<Np>(_name) }.data());
+        }
+        return _dbg;
+    };
+
+    if constexpr(std::is_same<value_type, std::string_view>::value)
+    {
+        _get_dbg()->set_string_value(_val.data());
+    }
+    else if constexpr(concepts::is_string_type<value_type>::value)
+    {
+        _get_dbg()->set_string_value(std::forward<Tp>(_val));
+    }
+    else if constexpr(std::is_same<value_type, bool>::value)
+    {
+        _get_dbg()->set_bool_value(_val);
+    }
+    else if constexpr(std::is_enum<value_type>::value)
+    {
+        _get_dbg()->set_int_value(static_cast<std::int64_t>(_val));
+    }
+    else if constexpr(std::is_floating_point<value_type>::value)
+    {
+        _get_dbg()->set_double_value(static_cast<double>(_val));
+    }
+    else if constexpr(std::is_integral<value_type>::value)
+    {
+        if constexpr(std::is_unsigned<value_type>::value)
+        {
+            _get_dbg()->set_uint_value(_val);
+        }
+        else
+        {
+            _get_dbg()->set_int_value(_val);
+        }
+    }
+    else if constexpr(std::is_pointer<value_type>::value)
+    {
+        _get_dbg()->set_pointer_value(reinterpret_cast<std::uint64_t>(_val));
+    }
+    else if constexpr(concepts::string_like<value_type>)
+    {
+        _get_dbg()->set_string_value(fmt::format("{}", std::forward<Tp>(_val)));
+    }
+    else
+    {
+        static_assert(std::is_empty<value_type>::value, "Error! unsupported data type");
+    }
+}
+
+template <size_t Idx, size_t... Tail>
+void
+add_perfetto_annotation(perfetto_event_context_t&      ctx,
+                        const rocprofsys_annotation_t& _annotation,
+                        std::index_sequence<Idx, Tail...>)
+{
+    static_assert(Idx > ROCPROFSYS_VALUE_NONE && Idx < ROCPROFSYS_VALUE_LAST,
+                  "Error! index sequence should only contain values which are greater "
+                  "than ROCPROFSYS_VALUE_NONE and less than ROCPROFSYS_VALUE_LAST");
+
+    // in some situations the user might want to short circuit by setting
+    // the name to a null pointer, type to none, or value to a null pointer
+    if(_annotation.name == nullptr || _annotation.type == 0 ||
+       _annotation.value == nullptr)
+        return;
+
+    if(_annotation.type == Idx)
+    {
+        using type = annotation_value_type_t<Idx>;
+        // if the type is a pointer, pass the pointer. otherwise,
+        // cast to pointer of that type and dereference it
+        if constexpr(std::is_pointer<type>::value)
+        {
+            auto _value = reinterpret_cast<type>(_annotation.value);
+            add_perfetto_annotation(ctx, _annotation.name, _value);
+        }
+        else
+        {
+            auto* _value = reinterpret_cast<type*>(_annotation.value);
+            add_perfetto_annotation(ctx, _annotation.name, *_value);
+        }
+    }
+    else
+    {
+        // the first "iteration": check whether annotation type has valid range
+        if constexpr(Idx == ROCPROFSYS_VALUE_NONE + 1)
+        {
+            if(!(_annotation.type > ROCPROFSYS_VALUE_NONE &&
+                 _annotation.type < ROCPROFSYS_VALUE_LAST))
+            {
+                LOG_CRITICAL("Annotation '{}' has an invalid type designation "
+                             "{} which is outside of acceptable range [{}, {}]",
+                             _annotation.name, _annotation.type,
+                             ROCPROFSYS_VALUE_NONE + 1, ROCPROFSYS_VALUE_LAST - 1);
+                ::rocprofsys::state::process::set(
+                    ::rocprofsys::state::process::Finalized);
+                std::exit(1);
+            }
+        }
+
+        if constexpr(sizeof...(Tail) > 0)
+        {
+            add_perfetto_annotation(ctx, _annotation, std::index_sequence<Tail...>{});
+        }
+        else
+        {
+            throw std::runtime_error("Annotation value type is invalid");
+        }
+    }
+}
+
+void
+add_perfetto_annotation(perfetto_event_context_t&      ctx,
+                        const rocprofsys_annotation_t& _annotation);
+}  // namespace tracing
+}  // namespace rocprofsys
+
+#include <timemory/operations/types/annotate.hpp>
+
+namespace tim
+{
+namespace operation
+{
+using perfetto_event_context_t = ::rocprofsys::tracing::perfetto_event_context_t;
+
+template <typename Tp>
+struct annotate<perfetto_event_context_t, Tp>
+{
+    auto operator()(Tp& obj, perfetto_event_context_t& _ctx) const
+    {
+        if constexpr(requires { obj.annotate(_ctx); })
+        {
+            return obj.annotate(_ctx);
+        }
+        else
+        {
+            using value_type = typename Tp::value_type;
+            if constexpr(!std::is_void_v<value_type>)
+            {
+                auto _obj_data = sfinae_data<Tp, decltype(obj.get())>(obj, 0);
+                for(size_t i = 0; i < std::get<0>(_obj_data); ++i)
+                {
+                    auto&& _label = std::get<1>(_obj_data).at(i);
+                    auto&& _value = std::get<2>(_obj_data).at(i);
+                    ::rocprofsys::tracing::add_perfetto_annotation(_ctx, _label, _value);
+                }
+            }
+            (void) _ctx;
+        }
+    }
+
+private:
+    template <typename T, typename DataT>
+    static auto sfinae_data(T& obj, int)
+        -> decltype(std::tuple<size_t, std::vector<std::string>, DataT>(obj.get().size(),
+                                                                        obj.label_array(),
+                                                                        obj.get()))
+    {
+        static_assert(std::is_same<T, Tp>::value, "Error T != Tp");
+        auto _labels = obj.label_array();
+        auto _data   = obj.get();
+        auto _size   = std::min<size_t>(_labels.size(), _data.size());
+        return std::make_tuple(_size, _labels, _data);
+    }
+
+    template <typename T, typename DataT>
+    static auto sfinae_data(T& obj, long)
+    {
+        using strvec_t    = std::vector<std::string>;
+        using datavec_t   = std::vector<DataT>;
+        size_t    _size   = 1;
+        strvec_t  _labels = { obj.get_label() };
+        datavec_t _data   = { obj.get() };
+        return std::tuple<size_t, strvec_t, datavec_t>{ _size, _labels, _data };
+    }
+};
+
+template <typename Tp>
+struct perfetto_annotate : annotate<perfetto_event_context_t, Tp>
+{
+    using base_type = annotate<perfetto_event_context_t, Tp>;
+
+    auto operator()(Tp& obj, perfetto_event_context_t& _ctx) const
+    {
+        return base_type::operator()(obj, _ctx);
+    }
+};
+}  // namespace operation
+}  // namespace tim

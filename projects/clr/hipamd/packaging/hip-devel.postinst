@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+ROCMDIR=@ROCM_PATH@
+HIPINCDIR=$ROCMDIR/@CMAKE_INSTALL_INCLUDEDIR@/hip
+CURRENTDIR=`pwd`
+
+#FILE_REORG_BACKWARD_COMPATIBILITY
+HIPINCDIR=$ROCMDIR/hip/include/hip

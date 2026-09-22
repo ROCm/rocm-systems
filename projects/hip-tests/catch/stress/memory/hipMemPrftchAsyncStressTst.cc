@@ -1,0 +1,97 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+/* Test Case Description:
+   The following test allocates a managed memory and prefetch it in
+   one-to-all and all-to-one fashion followed by kernel launch within available
+   devices*/
+
+#include <hip_test_common.hh>
+
+// Kernel function
+__global__ void MemPrftchAsyncKernel1(int* Hmm, size_t N) {
+  size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
+  size_t stride = blockDim.x * gridDim.x;
+  for (size_t i = offset; i < N; i += stride) {
+    Hmm[i] = Hmm[i] * Hmm[i];
+  }
+}
+
+static void ReleaseResource(int* Hmm, hipStream_t* strm) {
+  HIP_CHECK(hipFree(Hmm));
+  HIP_CHECK(hipStreamDestroy(*strm));
+}
+
+
+/* The following test allocates a managed memory and prefetch it in
+   one-to-all and all-to-one fahsion followed by kernel launch within available
+   devices*/
+HIP_TEST_CASE(Stress_hipMemPrefetchAsyncOneToAll) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+  int *Hmm1 = nullptr, NumDevs, MemSz = (4096 * 4);
+  int InitVal = 123, NumElms = MemSz / 4;
+  bool IfTestPassed = true;
+  HIP_CHECK(hipGetDeviceCount(&NumDevs));
+  HIP_CHECK(hipMallocManaged(&Hmm1, MemSz));
+  for (int i = 0; i < NumElms; ++i) {
+    Hmm1[i] = InitVal;
+  }
+  hipStream_t strm;
+  for (int i = -1; i < NumDevs; ++i) {
+    HIP_CHECK(hipMemPrefetchAsync(Hmm1, MemSz, i, 0));
+    for (int j = -1; j < NumDevs; ++j) {
+      if (i == j) {
+        continue;
+      }
+      if (j != -1) {
+        HIP_CHECK(hipSetDevice(j));
+      }
+      HIP_CHECK(hipStreamCreate(&strm));
+      // Prefetching memory from i to j
+      HIP_CHECK(hipMemPrefetchAsync(Hmm1, MemSz, j, strm));
+      HIP_CHECK(hipStreamSynchronize(strm));
+      MemPrftchAsyncKernel1<<<(NumElms / 32), 32, 0, strm>>>(Hmm1, NumElms);
+      HIP_CHECK(hipStreamSynchronize(strm));
+      // Verifying the result
+      for (int m = 0; m < NumElms; ++m) {
+        if (Hmm1[m] != (InitVal * InitVal)) {
+          IfTestPassed = false;
+        }
+      }
+      if (!IfTestPassed) {
+        ReleaseResource(Hmm1, &strm);
+        INFO("Did not find expected value!");
+        REQUIRE(false);
+      }
+      for (int m = 0; m < NumElms; ++m) {
+        Hmm1[m] = InitVal;
+      }
+      // Prefetching memory from j to i
+      HIP_CHECK(hipMemPrefetchAsync(Hmm1, MemSz, i, strm));
+      HIP_CHECK(hipStreamSynchronize(strm));
+      MemPrftchAsyncKernel1<<<(NumElms / 32), 32, 0, strm>>>(Hmm1, NumElms);
+      HIP_CHECK(hipStreamSynchronize(strm));
+      // Verifying the result
+      for (int m = 0; m < NumElms; ++m) {
+        if (Hmm1[m] != (InitVal * InitVal)) {
+          IfTestPassed = false;
+        }
+      }
+      if (!IfTestPassed) {
+        ReleaseResource(Hmm1, &strm);
+        INFO("Did not find expected value!");
+        REQUIRE(false);
+      }
+      for (int m = 0; m < NumElms; ++m) {
+        Hmm1[m] = InitVal;
+      }
+
+      HIP_CHECK(hipStreamDestroy(strm));
+    }
+  }
+  // Releasing the resources in case all the scenarios passed
+  HIP_CHECK(hipFree(Hmm1));
+}

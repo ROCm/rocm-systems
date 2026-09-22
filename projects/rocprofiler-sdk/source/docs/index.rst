@@ -1,0 +1,85 @@
+.. meta::
+  :description: ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software
+  :keywords: ROCprofiler-SDK tool, ROCprofiler-SDK library, rocprofv3, ROCprofiler-SDK API, ROCprofiler-SDK documentation
+
+.. _index:
+
+********************************
+ROCprofiler-SDK documentation
+********************************
+
+ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software.
+It supports application tracing to provide a big picture of the GPU application execution and kernel counter collection to provide low-level hardware details from the performance counters.
+The ROCprofiler-SDK library provides runtime-independent APIs for tracing runtime calls and asynchronous activities such as GPU kernel dispatches and memory moves. The tracing includes callback APIs for runtime API tracing and activity APIs for asynchronous activity records logging. To learn more, see
+:doc:`What is ROCprofiler-SDK? <what-is-rocprofiler-sdk>`
+
+You can utilize the ROCprofiler-SDK to develop a tool for profiling and tracing HIP applications on ROCm software.
+
+The code is open source and hosted at `<https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk>`_.
+
+.. note::
+
+  The ROCprofiler-SDK repository for ROCm 7.0 and earlier is located at `<https://github.com/ROCm/rocprofiler-sdk>`_.
+
+ROCprofiler-SDK uses a companion library called `AQLprofile <https://rocm.docs.amd.com/projects/aqlprofile/en/latest/index.html>`_, that generates profiling command packets (AQL/PM4) for performance counters and SQ thread trace. For details, see the `AQLprofile docs <https://rocm.docs.amd.com/projects/aqlprofile/en/latest/index.html>`_.
+
+The documentation is structured as follows:
+
+.. grid:: 2
+   :gutter: 3
+
+   .. grid-item-card:: Install
+
+      * :doc:`Install ROCprofiler-SDK <install/install>`
+      * :doc:`Build from source <install/build>`
+
+   .. grid-item-card:: Quick Reference
+
+      * :ref:`quick-guide`
+      * :ref:`cli-options`
+
+   .. grid-item-card:: How to
+
+      * :ref:`using-rocprofv3`
+      * :ref:`rocprofv3-advanced-options`
+      * :ref:`kernel-naming-filtering`
+      * :ref:`rocprofv3-io-options`
+      * :ref:`using-rocprofv3-avail`
+      * :ref:`rocprofv3-process-attachment`
+      * :ref:`using-rocpd-output-format`
+      * :ref:`using-rocprofiler-sdk-roctx`
+      * :ref:`using-rocprofv3-with-mpi`
+      * :ref:`using-rocprofv3-with-openmp`
+      * :ref:`using-pc-sampling`
+      * :ref:`cdna3-cdna4-pc-sampling`
+      * :ref:`using-thread-trace`
+      * :ref:`using-spm`
+      * :ref:`using-kernel-replay`
+      * :ref:`using-kernel-replay-rocprofv3`
+      * :doc:`Samples <how-to/samples>`
+
+   .. grid-item-card:: API reference
+
+      * :doc:`Tool library <api-reference/tool_library>`
+      * :ref:`runtime-intercept-tables`
+      * :doc:`Process attachment <api-reference/process_attachment>`
+      * :doc:`Buffered services <api-reference/buffered_services>`
+      * :doc:`Callback services <api-reference/callback_services>`
+      * :doc:`Counter collection services <api-reference/counter_collection_services>`
+      * :doc:`PC sampling <api-reference/pc_sampling>`
+      * :doc:`ROCprof Trace Decoder <api-reference/thread_trace>`
+      * :doc:`Streaming Performance Monitor (SPM) <api-reference/spm>`
+      * :doc:`Kernel replay (experimental) <api-reference/kernel_replay>`
+      * :doc:`ROCprofiler-SDK API <api-reference/rocprofiler-sdk_api_reference>`
+      * :doc:`ROCTx API <api-reference/rocprofiler-sdk-roctx_api_reference>`
+
+   .. grid-item-card:: Conceptual
+
+      * :ref:`comparing-with-legacy-tools`
+      * :ref:`kernel-replay-conceptual`
+
+To contribute to the documentation, refer to
+`Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
+
+You can find licensing information on the
+`Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.

@@ -1,0 +1,19 @@
+#/bin/bash
+
+set -e
+
+do_ldconfig() {
+    echo /opt/rocm/hsa/lib > /etc/ld.so.conf.d/rocr_tools_legacy.conf && ldconfig
+}
+
+case "$1" in
+   configure)
+       do_ldconfig
+   ;;
+   abort-upgrade|abort-remove|abort-deconfigure)
+       echo "$1"
+   ;;
+   *)
+       exit 0
+   ;;
+esac

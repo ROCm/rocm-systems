@@ -1,0 +1,899 @@
+/******************************************************************************
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * SPDX-License-Identifier: MIT
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to
+ * deal in the Software without restriction, including without limitation the
+ * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ * sell copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ *****************************************************************************/
+
+/**
+ * C wrappers for the rocshmem device API.
+ *
+ * JIT/bitcode consumers (e.g. PyTorch/Triton) need stable, unmangled symbol names.
+ * Each extern "C" function forwards to the corresponding rocshmem:: API.
+ *
+ * (temporary until extern "C" refactor)
+ * Current coverage:
+ * - RMA: put/get/p/g + variants (wave, wg, nbi)
+ * - AMO: standard, extended, bitwise
+ * - Sync: wait_until variants, test
+ * - Signal: put_signal variants
+ *
+ * Intentionally excluded (internal use only):
+ * - Context methods
+ * - Backend dispatchers
+ * - Template functions
+ */
+
+#include <hip/hip_runtime.h>
+#include <rocshmem/rocshmem.hpp>
+
+#define ROCSHMEM_DEVICE_API \
+  __device__ __attribute__((visibility("default")))
+
+// Forward declarations for tile API namespace functions (implemented in rocshmem_tile_gpu.cpp)
+namespace rocshmem {
+  // RMA PUT
+  __device__ int rocshmem_ctx_tile_put_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+  __device__ int rocshmem_ctx_tile_put_wave_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+  __device__ int rocshmem_ctx_tile_put_wg_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+
+  // RMA GET
+  __device__ int rocshmem_ctx_tile_get_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+  __device__ int rocshmem_ctx_tile_get_wave_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+  __device__ int rocshmem_ctx_tile_get_wg_internal(
+      rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe, uint64_t flags);
+
+  // Collective - Allgather
+  __device__ int rocshmem_tile_allgather_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, uint64_t flags);
+  __device__ int rocshmem_tile_allgather_wave_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, uint64_t flags);
+  __device__ int rocshmem_tile_allgather_wg_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, uint64_t flags);
+
+  // Collective - Broadcast
+  __device__ int rocshmem_tile_broadcast_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe_root, uint64_t flags);
+  __device__ int rocshmem_tile_broadcast_wave_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe_root, uint64_t flags);
+  __device__ int rocshmem_tile_broadcast_wg_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int pe_root, uint64_t flags);
+
+  // Reduction - SUM
+  __device__ int rocshmem_tile_sum_reduce_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+  __device__ int rocshmem_tile_sum_reduce_wave_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+  __device__ int rocshmem_tile_sum_reduce_wg_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+
+  // Reduction - MAX
+  __device__ int rocshmem_tile_max_reduce_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+  __device__ int rocshmem_tile_max_reduce_wave_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+  __device__ int rocshmem_tile_max_reduce_wg_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+
+  // Reduction - MIN
+  __device__ int rocshmem_tile_min_reduce_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+  __device__ int rocshmem_tile_min_reduce_wave_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+  __device__ int rocshmem_tile_min_reduce_wg_internal(
+      rocshmem_team_t team, void* dst_data, const void* src_data,
+      const size_t* dst_strides, const size_t* src_strides,
+      const size_t* start_coord, const size_t* boundary,
+      int ndim, size_t element_size, int root, uint64_t flags);
+
+  // Collective wait
+  __device__ int rocshmem_tile_collective_wait_internal(
+      rocshmem_team_t team, uint64_t flags);
+}
+
+extern "C" {
+
+// Bring types into scope for extern "C" functions
+using rocshmem::rocshmem_ctx_t;
+using rocshmem::rocshmem_team_t;
+
+ROCSHMEM_DEVICE_API int rocshmem_my_pe() {
+  return rocshmem::rocshmem_my_pe();
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_n_pes() {
+  return rocshmem::rocshmem_n_pes();
+}
+
+ROCSHMEM_DEVICE_API void *rocshmem_ptr(const void *dest, int pe) {
+  return rocshmem::rocshmem_ptr(dest, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_putmem(void *dest, const void *source,
+                                         size_t nelems, int pe) {
+  rocshmem::rocshmem_putmem(dest, source, nelems, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_putmem_wave(void *dest, const void *source,
+                                              size_t nelems, int pe) {
+  rocshmem::rocshmem_putmem_wave(dest, source, nelems, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_putmem_wg(void *dest, const void *source,
+                                            size_t nelems, int pe) {
+  rocshmem::rocshmem_putmem_wg(dest, source, nelems, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_putmem_nbi(void *dest, const void *source,
+                                             size_t nelems, int pe) {
+  rocshmem::rocshmem_putmem_nbi(dest, source, nelems, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_putmem_nbi_wave(void *dest,
+                                                  const void *source,
+                                                  size_t nelems, int pe) {
+  rocshmem::rocshmem_putmem_nbi_wave(dest, source, nelems, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_putmem_nbi_wg(void *dest,
+                                                const void *source,
+                                                size_t nelems, int pe) {
+  rocshmem::rocshmem_putmem_nbi_wg(dest, source, nelems, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_getmem(void *dest, const void *source,
+                                         size_t nelems, int pe) {
+  rocshmem::rocshmem_getmem(dest, source, nelems, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_getmem_wave(void *dest, const void *source,
+                                              size_t nelems, int pe) {
+  rocshmem::rocshmem_getmem_wave(dest, source, nelems, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_getmem_wg(void *dest, const void *source,
+                                            size_t nelems, int pe) {
+  rocshmem::rocshmem_getmem_wg(dest, source, nelems, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_getmem_nbi(void *dest, const void *source,
+                                             size_t nelems, int pe) {
+  rocshmem::rocshmem_getmem_nbi(dest, source, nelems, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_getmem_nbi_wave(void *dest,
+                                                  const void *source,
+                                                  size_t nelems, int pe) {
+  rocshmem::rocshmem_getmem_nbi_wave(dest, source, nelems, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_getmem_nbi_wg(void *dest,
+                                                const void *source,
+                                                size_t nelems, int pe) {
+  rocshmem::rocshmem_getmem_nbi_wg(dest, source, nelems, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_putmem_signal(void *dest, const void *source,
+                                                size_t nelems,
+                                                uint64_t *sig_addr,
+                                                uint64_t signal, int sig_op,
+                                                int pe) {
+  rocshmem::rocshmem_putmem_signal(dest, source, nelems, sig_addr, signal,
+                                   sig_op, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_putmem_signal_wg(
+    void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe) {
+  rocshmem::rocshmem_putmem_signal_wg(dest, source, nelems, sig_addr, signal,
+                                      sig_op, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_putmem_signal_wave(
+    void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe) {
+  rocshmem::rocshmem_putmem_signal_wave(dest, source, nelems, sig_addr, signal,
+                                        sig_op, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_putmem_signal_nbi(
+    void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe) {
+  rocshmem::rocshmem_putmem_signal_nbi(dest, source, nelems, sig_addr, signal,
+                                       sig_op, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_putmem_signal_nbi_wg(
+    void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe) {
+  rocshmem::rocshmem_putmem_signal_nbi_wg(dest, source, nelems, sig_addr,
+                                          signal, sig_op, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_putmem_signal_nbi_wave(
+    void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe) {
+  rocshmem::rocshmem_putmem_signal_nbi_wave(dest, source, nelems, sig_addr,
+                                            signal, sig_op, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_barrier_all() {
+  rocshmem::rocshmem_barrier_all();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_barrier_all_wg() {
+  rocshmem::rocshmem_barrier_all_wg();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_barrier_all_wave() {
+  rocshmem::rocshmem_barrier_all_wave();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_barrier() {
+  rocshmem::rocshmem_barrier();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_barrier_wave() {
+  rocshmem::rocshmem_barrier_wave();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_barrier_wg() {
+  rocshmem::rocshmem_barrier_wg();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_sync_all() {
+  rocshmem::rocshmem_sync_all();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_sync_all_wg() {
+  rocshmem::rocshmem_sync_all_wg();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_sync_all_wave() {
+  rocshmem::rocshmem_sync_all_wave();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_fence() {
+  rocshmem::rocshmem_fence();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_fence_pe(int pe) {
+  rocshmem::rocshmem_fence(pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_quiet() {
+  rocshmem::rocshmem_quiet();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_pe_quiet(const int *target_pes,
+                                           size_t npes) {
+  rocshmem::rocshmem_pe_quiet(target_pes, npes);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_threadfence_system() {
+  rocshmem::rocshmem_threadfence_system();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_query_thread(int *provided) {
+  rocshmem::rocshmem_query_thread(provided);
+}
+
+ROCSHMEM_DEVICE_API uint64_t rocshmem_signal_fetch(
+    const uint64_t *sig_addr) {
+  return rocshmem::rocshmem_signal_fetch(sig_addr);
+}
+
+ROCSHMEM_DEVICE_API uint64_t rocshmem_signal_fetch_wg(
+    const uint64_t *sig_addr) {
+  return rocshmem::rocshmem_signal_fetch_wg(sig_addr);
+}
+
+ROCSHMEM_DEVICE_API uint64_t rocshmem_signal_fetch_wave(
+    const uint64_t *sig_addr) {
+  return rocshmem::rocshmem_signal_fetch_wave(sig_addr);
+}
+
+// The explicit instantiation pattern pre-compiles all type variants into bitcode,
+// so JIT linkers don't need to instantiate templates at link time.
+#define WRAP_RMA(T, TNAME)                                                     \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_put(                             \
+      T *dest, const T *source, size_t nelems, int pe) {                       \
+    rocshmem::rocshmem_##TNAME##_put(dest, source, nelems, pe);                \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_put_nbi(                         \
+      T *dest, const T *source, size_t nelems, int pe) {                       \
+    rocshmem::rocshmem_##TNAME##_put_nbi(dest, source, nelems, pe);            \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_p(T *dest, T value, int pe) {    \
+    rocshmem::rocshmem_##TNAME##_p(dest, value, pe);                           \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_get(                             \
+      T *dest, const T *source, size_t nelems, int pe) {                       \
+    rocshmem::rocshmem_##TNAME##_get(dest, source, nelems, pe);                \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_get_nbi(                         \
+      T *dest, const T *source, size_t nelems, int pe) {                       \
+    rocshmem::rocshmem_##TNAME##_get_nbi(dest, source, nelems, pe);            \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API T rocshmem_##TNAME##_g(const T *source, int pe) {        \
+    return rocshmem::rocshmem_##TNAME##_g(source, pe);                         \
+  }
+
+WRAP_RMA(float, float)
+WRAP_RMA(double, double)
+WRAP_RMA(char, char)
+WRAP_RMA(signed char, schar)
+WRAP_RMA(short, short)
+WRAP_RMA(int, int)
+WRAP_RMA(long, long)
+WRAP_RMA(long long, longlong)
+WRAP_RMA(unsigned char, uchar)
+WRAP_RMA(unsigned short, ushort)
+WRAP_RMA(unsigned int, uint)
+WRAP_RMA(unsigned long, ulong)
+WRAP_RMA(unsigned long long, ulonglong)
+
+ROCSHMEM_DEVICE_API void rocshmem_int64_p(int64_t *dest, int64_t value,
+                                          int pe) {
+  rocshmem::rocshmem_int64_p(dest, value, pe);
+}
+
+#define WRAP_RMA_SUFFIX(T, TNAME, SUFFIX)                                      \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_put##SUFFIX(                     \
+      T *dest, const T *source, size_t nelems, int pe) {                       \
+    rocshmem::rocshmem_##TNAME##_put##SUFFIX(dest, source, nelems, pe);        \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_put_nbi##SUFFIX(                 \
+      T *dest, const T *source, size_t nelems, int pe) {                       \
+    rocshmem::rocshmem_##TNAME##_put_nbi##SUFFIX(dest, source, nelems, pe);    \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_get##SUFFIX(                     \
+      T *dest, const T *source, size_t nelems, int pe) {                       \
+    rocshmem::rocshmem_##TNAME##_get##SUFFIX(dest, source, nelems, pe);        \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_get_nbi##SUFFIX(                 \
+      T *dest, const T *source, size_t nelems, int pe) {                       \
+    rocshmem::rocshmem_##TNAME##_get_nbi##SUFFIX(dest, source, nelems, pe);    \
+  }
+
+#define WRAP_RMA_EXTENDED(T, TNAME)                                            \
+  WRAP_RMA_SUFFIX(T, TNAME, _wave)                                             \
+  WRAP_RMA_SUFFIX(T, TNAME, _wg)
+
+// clang-format off
+WRAP_RMA_EXTENDED(float, float)
+WRAP_RMA_EXTENDED(double, double)
+WRAP_RMA_EXTENDED(char, char)
+WRAP_RMA_EXTENDED(signed char, schar)
+WRAP_RMA_EXTENDED(short, short)
+WRAP_RMA_EXTENDED(int, int)
+WRAP_RMA_EXTENDED(long, long)
+WRAP_RMA_EXTENDED(long long, longlong)
+WRAP_RMA_EXTENDED(unsigned char, uchar)
+WRAP_RMA_EXTENDED(unsigned short, ushort)
+WRAP_RMA_EXTENDED(unsigned int, uint)
+WRAP_RMA_EXTENDED(unsigned long, ulong)
+WRAP_RMA_EXTENDED(unsigned long long, ulonglong)
+// clang-format on
+
+#define WRAP_AMO_STANDARD(T, TNAME)                                            \
+  ROCSHMEM_DEVICE_API T rocshmem_##TNAME##_atomic_compare_swap(                \
+      T *dest, T cond, T value, int pe) {                                      \
+    return rocshmem::rocshmem_##TNAME##_atomic_compare_swap(                    \
+        dest, cond, value, pe);                                                \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API T rocshmem_##TNAME##_atomic_fetch_inc(                   \
+      T *dest, int pe) {                                                       \
+    return rocshmem::rocshmem_##TNAME##_atomic_fetch_inc(dest, pe);             \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_atomic_inc(T *dest, int pe) {    \
+    rocshmem::rocshmem_##TNAME##_atomic_inc(dest, pe);                         \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API T rocshmem_##TNAME##_atomic_fetch_add(                   \
+      T *dest, T value, int pe) {                                              \
+    return rocshmem::rocshmem_##TNAME##_atomic_fetch_add(dest, value, pe);      \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_atomic_add(                      \
+      T *dest, T value, int pe) {                                              \
+    rocshmem::rocshmem_##TNAME##_atomic_add(dest, value, pe);                  \
+  }
+
+#define WRAP_AMO_EXTENDED(T, TNAME)                                            \
+  ROCSHMEM_DEVICE_API T rocshmem_##TNAME##_atomic_fetch(                       \
+      T *source, int pe) {                                                     \
+    return rocshmem::rocshmem_##TNAME##_atomic_fetch(source, pe);               \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_atomic_set(                      \
+      T *dest, T value, int pe) {                                              \
+    rocshmem::rocshmem_##TNAME##_atomic_set(dest, value, pe);                  \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API T rocshmem_##TNAME##_atomic_swap(                        \
+      T *dest, T value, int pe) {                                              \
+    return rocshmem::rocshmem_##TNAME##_atomic_swap(dest, value, pe);           \
+  }
+
+#define WRAP_AMO_BITWISE(T, TNAME)                                             \
+  ROCSHMEM_DEVICE_API T rocshmem_##TNAME##_atomic_fetch_and(                   \
+      T *dest, T value, int pe) {                                              \
+    return rocshmem::rocshmem_##TNAME##_atomic_fetch_and(dest, value, pe);      \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_atomic_and(                      \
+      T *dest, T value, int pe) {                                              \
+    rocshmem::rocshmem_##TNAME##_atomic_and(dest, value, pe);                  \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API T rocshmem_##TNAME##_atomic_fetch_or(                    \
+      T *dest, T value, int pe) {                                              \
+    return rocshmem::rocshmem_##TNAME##_atomic_fetch_or(dest, value, pe);       \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_atomic_or(                       \
+      T *dest, T value, int pe) {                                              \
+    rocshmem::rocshmem_##TNAME##_atomic_or(dest, value, pe);                   \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API T rocshmem_##TNAME##_atomic_fetch_xor(                   \
+      T *dest, T value, int pe) {                                              \
+    return rocshmem::rocshmem_##TNAME##_atomic_fetch_xor(dest, value, pe);      \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_atomic_xor(                      \
+      T *dest, T value, int pe) {                                              \
+    rocshmem::rocshmem_##TNAME##_atomic_xor(dest, value, pe);                  \
+  }
+
+WRAP_AMO_STANDARD(int, int)
+WRAP_AMO_STANDARD(long, long)
+WRAP_AMO_STANDARD(long long, longlong)
+WRAP_AMO_STANDARD(unsigned int, uint)
+WRAP_AMO_STANDARD(unsigned long, ulong)
+WRAP_AMO_STANDARD(unsigned long long, ulonglong)
+WRAP_AMO_STANDARD(int32_t, int32)
+WRAP_AMO_STANDARD(int64_t, int64)
+WRAP_AMO_STANDARD(uint32_t, uint32)
+WRAP_AMO_STANDARD(uint64_t, uint64)
+WRAP_AMO_STANDARD(size_t, size)
+WRAP_AMO_STANDARD(ptrdiff_t, ptrdiff)
+
+WRAP_AMO_EXTENDED(float, float)
+WRAP_AMO_EXTENDED(double, double)
+WRAP_AMO_EXTENDED(int, int)
+WRAP_AMO_EXTENDED(long, long)
+WRAP_AMO_EXTENDED(long long, longlong)
+WRAP_AMO_EXTENDED(unsigned int, uint)
+WRAP_AMO_EXTENDED(unsigned long, ulong)
+WRAP_AMO_EXTENDED(unsigned long long, ulonglong)
+WRAP_AMO_EXTENDED(int32_t, int32)
+WRAP_AMO_EXTENDED(int64_t, int64)
+WRAP_AMO_EXTENDED(uint32_t, uint32)
+WRAP_AMO_EXTENDED(uint64_t, uint64)
+WRAP_AMO_EXTENDED(size_t, size)
+WRAP_AMO_EXTENDED(ptrdiff_t, ptrdiff)
+
+WRAP_AMO_BITWISE(unsigned int, uint)
+WRAP_AMO_BITWISE(unsigned long, ulong)
+WRAP_AMO_BITWISE(unsigned long long, ulonglong)
+WRAP_AMO_BITWISE(int32_t, int32)
+WRAP_AMO_BITWISE(int64_t, int64)
+WRAP_AMO_BITWISE(uint32_t, uint32)
+WRAP_AMO_BITWISE(uint64_t, uint64)
+
+#define WRAP_PUT_SIGNAL_SUFFIX(T, TNAME, SUFFIX)                               \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_put_signal##SUFFIX(              \
+      T *dest, const T *source, size_t nelems, uint64_t *sig_addr,             \
+      uint64_t signal, int sig_op, int pe) {                                   \
+    rocshmem::rocshmem_##TNAME##_put_signal##SUFFIX(                           \
+        dest, source, nelems, sig_addr, signal, sig_op, pe);                   \
+  }
+
+#define WRAP_PUT_SIGNAL(T, TNAME)                                              \
+  WRAP_PUT_SIGNAL_SUFFIX(T, TNAME, )                                           \
+  WRAP_PUT_SIGNAL_SUFFIX(T, TNAME, _wg)                                        \
+  WRAP_PUT_SIGNAL_SUFFIX(T, TNAME, _wave)                                      \
+  WRAP_PUT_SIGNAL_SUFFIX(T, TNAME, _nbi)                                       \
+  WRAP_PUT_SIGNAL_SUFFIX(T, TNAME, _nbi_wg)                                    \
+  WRAP_PUT_SIGNAL_SUFFIX(T, TNAME, _nbi_wave)
+
+WRAP_PUT_SIGNAL(float, float)
+WRAP_PUT_SIGNAL(double, double)
+WRAP_PUT_SIGNAL(char, char)
+WRAP_PUT_SIGNAL(signed char, schar)
+WRAP_PUT_SIGNAL(short, short)
+WRAP_PUT_SIGNAL(int, int)
+WRAP_PUT_SIGNAL(long, long)
+WRAP_PUT_SIGNAL(long long, longlong)
+WRAP_PUT_SIGNAL(unsigned char, uchar)
+WRAP_PUT_SIGNAL(unsigned short, ushort)
+WRAP_PUT_SIGNAL(unsigned int, uint)
+WRAP_PUT_SIGNAL(unsigned long, ulong)
+WRAP_PUT_SIGNAL(unsigned long long, ulonglong)
+
+#define WRAP_WAIT(T, TNAME)                                                    \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_wait_until(                      \
+      T *ivars, int cmp, T val) {                                              \
+    rocshmem::rocshmem_##TNAME##_wait_until(ivars, cmp, val);                  \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API size_t rocshmem_##TNAME##_wait_until_any(                \
+      T *ivars, size_t nelems, const int *status, int cmp, T val) {            \
+    return rocshmem::rocshmem_##TNAME##_wait_until_any(                        \
+        ivars, nelems, status, cmp, val);                                      \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_wait_until_all(                  \
+      T *ivars, size_t nelems, const int *status, int cmp, T val) {            \
+    rocshmem::rocshmem_##TNAME##_wait_until_all(                               \
+        ivars, nelems, status, cmp, val);                                      \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API size_t rocshmem_##TNAME##_wait_until_some(               \
+      T *ivars, size_t nelems, size_t *indices, const int *status,             \
+      int cmp, T val) {                                                        \
+    return rocshmem::rocshmem_##TNAME##_wait_until_some(                       \
+        ivars, nelems, indices, status, cmp, val);                             \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API size_t rocshmem_##TNAME##_wait_until_any_vector(         \
+      T *ivars, size_t nelems, const int *status, int cmp, T *vals) {          \
+    return rocshmem::rocshmem_##TNAME##_wait_until_any_vector(                 \
+        ivars, nelems, status, cmp, vals);                                     \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_wait_until_all_vector(           \
+      T *ivars, size_t nelems, const int *status, int cmp, T *vals) {          \
+    rocshmem::rocshmem_##TNAME##_wait_until_all_vector(                        \
+        ivars, nelems, status, cmp, vals);                                     \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API size_t rocshmem_##TNAME##_wait_until_some_vector(        \
+      T *ivars, size_t nelems, size_t *indices, const int *status,             \
+      int cmp, T *vals) {                                                      \
+    return rocshmem::rocshmem_##TNAME##_wait_until_some_vector(                \
+        ivars, nelems, indices, status, cmp, vals);                            \
+  }                                                                            \
+  ROCSHMEM_DEVICE_API int rocshmem_##TNAME##_test(                             \
+      T *ivars, int cmp, T val) {                                              \
+    return rocshmem::rocshmem_##TNAME##_test(ivars, cmp, val);                 \
+  }
+
+WRAP_WAIT(float, float)
+WRAP_WAIT(double, double)
+WRAP_WAIT(char, char)
+WRAP_WAIT(signed char, schar)
+WRAP_WAIT(short, short)
+WRAP_WAIT(int, int)
+WRAP_WAIT(long, long)
+WRAP_WAIT(long long, longlong)
+WRAP_WAIT(unsigned char, uchar)
+WRAP_WAIT(unsigned short, ushort)
+WRAP_WAIT(unsigned int, uint)
+WRAP_WAIT(unsigned long, ulong)
+WRAP_WAIT(unsigned long long, ulonglong)
+WRAP_WAIT(uint64_t, uint64)
+// Only support reduce on team = 0 (ROCSHMEM_TEAM_WORLD)
+#define WRAP_REDUCE_OP(T, TNAME, OP)                                           \
+  ROCSHMEM_DEVICE_API int rocshmem_##TNAME##_##OP##_reduce_wg(                 \
+      int team, T *dest, const T *source, int nreduce) {                       \
+    if (team != 0) return rocshmem::ROCSHMEM_ERROR;                            \
+    return rocshmem::rocshmem_ctx_##TNAME##_##OP##_reduce_wg(                  \
+        rocshmem::ROCSHMEM_CTX_DEFAULT,                                        \
+        rocshmem::device::ROCSHMEM_TEAM_WORLD, dest, source, nreduce);         \
+  }
+
+#define WRAP_REDUCE_ARITH(T, TNAME)                                            \
+  WRAP_REDUCE_OP(T, TNAME, sum)                                                \
+  WRAP_REDUCE_OP(T, TNAME, min)                                                \
+  WRAP_REDUCE_OP(T, TNAME, max)                                                \
+  WRAP_REDUCE_OP(T, TNAME, prod)
+
+WRAP_REDUCE_ARITH(short, short)
+WRAP_REDUCE_ARITH(int, int)
+WRAP_REDUCE_ARITH(long, long)
+WRAP_REDUCE_ARITH(long long, longlong)
+WRAP_REDUCE_ARITH(float, float)
+WRAP_REDUCE_ARITH(double, double)
+
+/******************************************************************************
+ *********************** TILE API OPERATIONS ***********************************
+ *****************************************************************************/
+
+// Tile API: Type-erased bitcode interface for tensor operations
+// The namespace implementations (_internal suffix) are in src/rocshmem_tile_gpu.cpp
+// These extern "C" wrappers provide clean names for JIT consumers (PyTorch/Triton)
+
+// RMA PUT operations
+ROCSHMEM_DEVICE_API int rocshmem_ctx_tile_put(
+    rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe, uint64_t flags) {
+  return rocshmem::rocshmem_ctx_tile_put_internal(
+      ctx, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_ctx_tile_put_wave(
+    rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe, uint64_t flags) {
+  return rocshmem::rocshmem_ctx_tile_put_wave_internal(
+      ctx, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_ctx_tile_put_wg(
+    rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe, uint64_t flags) {
+  return rocshmem::rocshmem_ctx_tile_put_wg_internal(
+      ctx, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe, flags);
+}
+
+// RMA GET operations
+ROCSHMEM_DEVICE_API int rocshmem_ctx_tile_get(
+    rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe, uint64_t flags) {
+  return rocshmem::rocshmem_ctx_tile_get_internal(
+      ctx, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_ctx_tile_get_wave(
+    rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe, uint64_t flags) {
+  return rocshmem::rocshmem_ctx_tile_get_wave_internal(
+      ctx, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_ctx_tile_get_wg(
+    rocshmem_ctx_t ctx, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe, uint64_t flags) {
+  return rocshmem::rocshmem_ctx_tile_get_wg_internal(
+      ctx, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe, flags);
+}
+
+// Collective - Allgather
+ROCSHMEM_DEVICE_API int rocshmem_tile_allgather(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, uint64_t flags) {
+  return rocshmem::rocshmem_tile_allgather_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_allgather_wave(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, uint64_t flags) {
+  return rocshmem::rocshmem_tile_allgather_wave_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_allgather_wg(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, uint64_t flags) {
+  return rocshmem::rocshmem_tile_allgather_wg_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, flags);
+}
+
+// Collective - Broadcast
+ROCSHMEM_DEVICE_API int rocshmem_tile_broadcast(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe_root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_broadcast_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe_root, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_broadcast_wave(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe_root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_broadcast_wave_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe_root, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_broadcast_wg(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int pe_root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_broadcast_wg_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, pe_root, flags);
+}
+
+// Collective - SUM Reduce
+ROCSHMEM_DEVICE_API int rocshmem_tile_sum_reduce(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_sum_reduce_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_sum_reduce_wave(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_sum_reduce_wave_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_sum_reduce_wg(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_sum_reduce_wg_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+// Collective - MAX Reduce
+ROCSHMEM_DEVICE_API int rocshmem_tile_max_reduce(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_max_reduce_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_max_reduce_wave(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_max_reduce_wave_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_max_reduce_wg(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_max_reduce_wg_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+// Collective - MIN Reduce
+ROCSHMEM_DEVICE_API int rocshmem_tile_min_reduce(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_min_reduce_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_min_reduce_wave(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_min_reduce_wave_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+ROCSHMEM_DEVICE_API int rocshmem_tile_min_reduce_wg(
+    rocshmem_team_t team, void* dst_data, const void* src_data,
+    const size_t* dst_strides, const size_t* src_strides,
+    const size_t* start_coord, const size_t* boundary,
+    int ndim, size_t element_size, int root, uint64_t flags) {
+  return rocshmem::rocshmem_tile_min_reduce_wg_internal(
+      team, dst_data, src_data, dst_strides, src_strides,
+      start_coord, boundary, ndim, element_size, root, flags);
+}
+
+// Collective Wait
+ROCSHMEM_DEVICE_API int rocshmem_tile_collective_wait(
+    rocshmem_team_t team, uint64_t flags) {
+  return rocshmem::rocshmem_tile_collective_wait_internal(team, flags);
+}
+
+}

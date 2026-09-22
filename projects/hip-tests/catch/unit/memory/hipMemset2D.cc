@@ -1,0 +1,244 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
+ Testcase Scenarios :
+ 1) hipMemset2D api with basic functionality.
+ 2) hipMemset2DAsync api with basic functionality.
+ 3) hipMemset2D api with partial memset and unique width/height.
+*/
+
+
+#include <hip_test_common.hh>
+
+
+// Table with unique width/height and memset values.
+// (width2D, height2D, memsetWidth, memsetHeight)
+typedef std::tuple<int, int, int, int> tupletype;
+
+static constexpr std::initializer_list<tupletype> tableItems{
+    std::make_tuple(20, 20, 20, 20),   std::make_tuple(10, 10, 4, 4),
+    std::make_tuple(100, 100, 20, 40), std::make_tuple(256, 256, 39, 19),
+    std::make_tuple(100, 100, 20, 0),  std::make_tuple(100, 100, 0, 20),
+    std::make_tuple(100, 100, 0, 0),
+};
+
+
+/**
+ * Basic Functionality of hipMemset2D
+ */
+HIP_TEST_CASE(Unit_hipMemset2D_BasicFunctional) {
+
+  constexpr int memsetval = 0x24;
+  constexpr size_t numH = 256;
+  constexpr size_t numW = 256;
+  size_t pitch_A;
+  size_t width = numW * sizeof(char);
+  size_t sizeElements = width * numH;
+  size_t elements = numW * numH;
+  char *A_d, *A_h;
+
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, numH));
+  A_h = reinterpret_cast<char*>(malloc(sizeElements));
+  REQUIRE(A_h != nullptr);
+
+  for (size_t i = 0; i < elements; i++) {
+    A_h[i] = 1;
+  }
+
+  HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, numW, numH));
+  HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, numW, numH, hipMemcpyDeviceToHost));
+
+  for (size_t i = 0; i < elements; i++) {
+    if (A_h[i] != memsetval) {
+      INFO("Memset2D mismatch at index:" << i << " computed:" << A_h[i]
+                                         << " memsetval:" << memsetval);
+      REQUIRE(false);
+    }
+  }
+
+  HIP_CHECK(hipFree(A_d));
+  free(A_h);
+}
+
+
+/**
+ * Basic Functionality of hipMemset2DAsync
+ */
+HIP_TEST_CASE(Unit_hipMemset2DAsync_BasicFunctional) {
+
+  constexpr int memsetval = 0x26;
+  constexpr size_t numH = 256;
+  constexpr size_t numW = 256;
+  size_t pitch_A;
+  size_t width = numW * sizeof(char);
+  size_t sizeElements = width * numH;
+  size_t elements = numW * numH;
+  char *A_d, *A_h;
+
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, numH));
+  A_h = reinterpret_cast<char*>(malloc(sizeElements));
+  REQUIRE(A_h != nullptr);
+
+  for (size_t i = 0; i < elements; i++) {
+    A_h[i] = 1;
+  }
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipMemset2DAsync(A_d, pitch_A, memsetval, numW, numH, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, numW, numH, hipMemcpyDeviceToHost));
+
+  for (size_t i = 0; i < elements; i++) {
+    if (A_h[i] != memsetval) {
+      INFO("Memset2DAsync mismatch at index:" << i << " computed:" << A_h[i]
+                                              << " memsetval:" << memsetval);
+      REQUIRE(false);
+    }
+  }
+
+  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipStreamDestroy(stream));
+  free(A_h);
+}
+
+
+/**
+ * Memset partial buffer with unique Width and Height
+ */
+HIP_TEST_CASE(Unit_hipMemset2D_UniqueWidthHeight) {
+
+  int width2D, height2D;
+  int memsetWidth, memsetHeight;
+  char *A_d, *A_h;
+  size_t pitch_A;
+  constexpr int memsetval = 0x26;
+
+  std::tie(width2D, height2D, memsetWidth, memsetHeight) =
+      GENERATE(table<int, int, int, int>(tableItems));
+
+  size_t width = width2D * sizeof(char);
+  size_t sizeElements = width * height2D;
+
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, height2D));
+
+  A_h = reinterpret_cast<char*>(malloc(sizeElements));
+  REQUIRE(A_h != nullptr);
+
+  for (size_t index = 0; index < sizeElements; index++) {
+    A_h[index] = 'c';
+  }
+
+  INFO("2D Dimension: Width:" << width2D << " Height:" << height2D << " MemsetWidth:" << memsetWidth
+                              << " MemsetHeight:" << memsetHeight);
+
+  HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, memsetWidth, memsetHeight));
+  HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, width2D, height2D, hipMemcpyDeviceToHost));
+
+  for (int row = 0; row < memsetHeight; row++) {
+    for (int column = 0; column < memsetWidth; column++) {
+      if (A_h[(row * width) + column] != memsetval) {
+        INFO("A_h[" << row << "][" << column << "]" << " didnot match " << memsetval);
+        REQUIRE(false);
+      }
+    }
+  }
+
+  HIP_CHECK(hipFree(A_d));
+  free(A_h);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Basic functional testcase for triggering capturehipMemset2DAsync internal
+ *  API to improve code coverage
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemset2D.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
+HIP_TEST_CASE(Unit_hipMemset2DAsync_capturehipMemset2DAsync) {
+  char *A_h, *B_h, *A_d;
+  hipGraph_t graph{nullptr};
+  hipGraphExec_t graphExec{nullptr};
+  int rows, cols;
+  rows = GENERATE(3, 4, 100);
+  cols = GENERATE(3, 4, 100);
+  hipStream_t stream;
+  size_t devPitch;
+
+  A_h = reinterpret_cast<char*>(malloc(sizeof(char) * rows * cols));
+  B_h = reinterpret_cast<char*>(malloc(sizeof(char) * rows * cols));
+  HIP_CHECK(hipStreamCreate(&stream));
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < cols; j++) {
+      A_h[i * cols + j] = 'a';
+    }
+  }
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &devPitch, sizeof(char) * cols, rows));
+  HIP_CHECK(hipMemcpy2D(A_d, devPitch, A_h, sizeof(char) * cols, sizeof(char) * cols, rows,
+                        hipMemcpyHostToDevice));
+
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipMemset2DAsync(A_d, devPitch, 'b', sizeof(char) * cols, rows, stream));
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(graphExec, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  HIP_CHECK(hipMemcpy2D(B_h, sizeof(char) * cols, A_d, devPitch, sizeof(char) * cols, rows,
+                        hipMemcpyDeviceToHost));
+
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < cols; j++) {
+      REQUIRE(B_h[i * cols + j] == 'b');
+    }
+  }
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(A_d));
+  free(A_h);
+  free(B_h);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test hipMemset2D while stream is capturing.
+ * Test source
+ * ------------------------
+ *    - unit/memory/hipMemset2D.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.0
+ */
+HIP_TEST_CASE(Unit_hipMemset2D_Capture) {
+
+  constexpr int memsetval = 0x24;
+  constexpr size_t numH = 256;
+  constexpr size_t numW = 256;
+  size_t pitch_A;
+  size_t width = numW * sizeof(char);
+  void* dst = nullptr;
+
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&dst), &pitch_A, width,
+                          numH));
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemset2D(dst, pitch_A, memsetval, numW, numH), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+
+  HIP_CHECK(hipFree(dst));
+}

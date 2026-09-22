@@ -1,0 +1,66 @@
+{
+    "required_tables": [
+        {
+            "commit": "Validation rules for python-builtin -a/--annotate-trace regression test",
+            "name": "region_args",
+            "required_columns": [
+                "id",
+                "guid",
+                "name",
+                "type",
+                "value"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Verify 'file' annotation reaches rocpd for every profiled region (5+5+10+20+40+80+160+260+220+80+10+5 = 895 slices).",
+                    "error_message": "'file' annotation arg count does not match the total profiled region count.",
+                    "expected_result": 895,
+                    "query": "SELECT COUNT(*) FROM region_args WHERE name = 'file';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify 'line' annotation reaches rocpd for every profiled region.",
+                    "error_message": "'line' annotation arg count does not match the total profiled region count.",
+                    "expected_result": 895,
+                    "query": "SELECT COUNT(*) FROM region_args WHERE name = 'line';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify 'lasti' annotation reaches rocpd for every profiled region.",
+                    "error_message": "'lasti' annotation arg count does not match the total profiled region count.",
+                    "expected_result": 895,
+                    "query": "SELECT COUNT(*) FROM region_args WHERE name = 'lasti';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify 'argcount' annotation reaches rocpd for every profiled region.",
+                    "error_message": "'argcount' annotation arg count does not match the total profiled region count.",
+                    "expected_result": 895,
+                    "query": "SELECT COUNT(*) FROM region_args WHERE name = 'argcount';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify 'nlocals' annotation reaches rocpd for every profiled region.",
+                    "error_message": "'nlocals' annotation arg count does not match the total profiled region count.",
+                    "expected_result": 895,
+                    "query": "SELECT COUNT(*) FROM region_args WHERE name = 'nlocals';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify 'stacksize' annotation reaches rocpd for every profiled region.",
+                    "error_message": "'stacksize' annotation arg count does not match the total profiled region count.",
+                    "expected_result": 895,
+                    "query": "SELECT COUNT(*) FROM region_args WHERE name = 'stacksize';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify 'file' annotation args are typed as string.",
+                    "error_message": "'file' annotation arg type is not 'string' as expected.",
+                    "expected_result": "string",
+                    "query": "SELECT DISTINCT type FROM region_args WHERE name = 'file';"
+                }
+            ]
+        }
+    ]
+}

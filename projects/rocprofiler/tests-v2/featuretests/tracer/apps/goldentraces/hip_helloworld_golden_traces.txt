@@ -1,0 +1,11 @@
+Enabling API Tracing
+Domain(HIP_API_DOMAIN), Function(hipGetDevicePropertiesR0600), Start_Timestamp(611510516147389), End_Timestamp(611510516154633), Correlation_ID(1)
+Domain(HIP_API_DOMAIN), Function(hipMalloc), Start_Timestamp(611510516160324), End_Timestamp(611510516183168), Correlation_ID(2)
+Domain(HIP_API_DOMAIN), Function(hipMalloc), Start_Timestamp(611510516183599), End_Timestamp(611510516189250), Correlation_ID(3)
+Domain(HIP_API_DOMAIN), Function(hipMemcpy), Start_Timestamp(611510516192225), End_Timestamp(611510784335292), Correlation_ID(4)
+Domain(HIP_API_DOMAIN), Function(__hipPushCallConfiguration), Start_Timestamp(611510784338909), End_Timestamp(611510784341915), Correlation_ID(5)
+Domain(HIP_API_DOMAIN), Function(__hipPopCallConfiguration), Start_Timestamp(611510784343228), End_Timestamp(611510784343538), Correlation_ID(6)
+Domain(HIP_API_DOMAIN), Function(hipLaunchKernel), Start_Timestamp(611510784351053), End_Timestamp(611510784872311), Correlation_ID(7)
+Domain(HIP_API_DOMAIN), Function(hipMemcpy), Start_Timestamp(611510784873914), End_Timestamp(611510784891167), Correlation_ID(8)
+Domain(HIP_API_DOMAIN), Function(hipFree), Start_Timestamp(611510784893482), End_Timestamp(611510784902690), Correlation_ID(9)
+Domain(HIP_API_DOMAIN), Function(hipFree), Start_Timestamp(611510784904944), End_Timestamp(611510784907128), Correlation_ID(10)

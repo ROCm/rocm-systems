@@ -1,0 +1,11 @@
+CodeObj,Vaddr,Instruction,Hitcount,Latency,Stall,Idle,Source
+1,5632,"; _Z18looping_lds_kernelv",0,0,0,0,"looping_lds_kernel()"
+1,5632,"s_mov_b32 s2, 32",24,605,581,23267,"../jumping.cpp:38"
+1,5636,"s_getpc_b64 s[0:1]",24,24,0,39,"../jumping.cpp:39"
+1,5640,"s_sub_co_i32 s2, s2, 1",768,55782,55014,12358,"../jumping.cpp:40"
+1,5644,"s_cmp_eq_i32 s2, 0",768,768,0,134,"../jumping.cpp:41"
+1,5648,"s_cbranch_scc1 1",768,768,0,6881,"../jumping.cpp:42"
+1,5652,"s_setpc_b64 s[0:1]",744,744,0,1722,"../jumping.cpp:43"
+1,5656,"s_ttracedata_imm 0x7",24,24,0,273,"../jumping.cpp:45"
+1,5660,"s_endpgm",24,74,0,0,"../jumping.cpp:46"
+1,5664,"s_code_end",0,0,0,0,"../jumping.cpp:46"

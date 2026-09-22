@@ -1,0 +1,23 @@
+{
+global:
+    hiprtcCompileProgram;
+    hiprtcCreateProgram;
+    hiprtcDestroyProgram;
+    hiprtcGetLoweredName;
+    hiprtcGetProgramLog;
+    hiprtcGetProgramLogSize;
+    hiprtcGetCode;
+    hiprtcGetCodeSize;
+    hiprtcGetErrorString;
+    hiprtcAddNameExpression;
+    hiprtcVersion;
+    hiprtcLinkCreate;
+    hiprtcLinkAddFile;
+    hiprtcLinkAddData;
+    hiprtcLinkComplete;
+    hiprtcLinkDestroy;
+    hiprtcGetBitcode;
+    hiprtcGetBitcodeSize;
+local:
+    *;
+};

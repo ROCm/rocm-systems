@@ -1,0 +1,127 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "binary/dwarf_entry.hpp"
+#include "binary/symbol.hpp"
+#include "common/defines.h"
+#include "core/containers/c_array.hpp"
+#include "core/utility.hpp"
+#include "library/causal/components/backtrace.hpp"
+#include "library/causal/components/progress_point.hpp"
+#include "library/causal/data.hpp"
+#include "library/causal/selected_entry.hpp"
+
+#include <timemory/hash/types.hpp>
+#include <timemory/mpl/concepts.hpp>
+#include <timemory/tpls/cereal/cereal.hpp>
+#include <timemory/tpls/cereal/cereal/cereal.hpp>
+#include <timemory/unwind/types.hpp>
+#include <timemory/utility/unwind.hpp>
+
+#include <atomic>
+#include <cstdint>
+#include <unordered_map>
+
+namespace rocprofsys
+{
+namespace causal
+{
+using hash_value_t = ::tim::hash_value_t;
+
+struct experiment
+{
+    using progress_points_t =
+        std::unordered_map<tim::hash_value_t, component::progress_point>;
+    using experiments_t     = std::vector<experiment>;
+    using filename_config_t = settings::compose_filename_config;
+    using period_stats_t    = tim::statistics<std::int64_t>;
+
+    struct sample : unwind::processed_entry
+    {
+        using base_type = unwind::processed_entry;
+
+        sample() = default;
+        sample(const base_type&, std::uint64_t);
+
+        mutable std::uint64_t               count   = 0;
+        std::vector<binary::inlined_symbol> inlines = {};
+
+        bool        operator==(const sample&) const;
+        bool        operator<(const sample&) const;
+        const auto& operator+=(const sample&) const;
+
+        template <typename ArchiveT>
+        void serialize(ArchiveT& ar, const unsigned);
+
+        std::string get_identifier() const;
+    };
+
+    struct record
+    {
+        std::int64_t            startup     = 0;
+        std::uint64_t           runtime     = 0;
+        std::vector<experiment> experiments = {};
+        std::vector<sample>     samples     = {};
+
+        template <typename ArchiveT>
+        void serialize(ArchiveT& ar, const unsigned);
+    };
+
+    static std::string                     label();
+    static std::string                     description();
+    static const std::atomic<experiment*>& get_current_experiment();
+
+    bool        start();
+    bool        wait() const;  // returns false if interrupted
+    bool        stop();
+    std::string as_string() const;
+
+    template <typename ArchiveT>
+    void serialize(ArchiveT& ar, const unsigned version);
+
+    // in nanoseconds
+    static std::uint64_t get_delay();
+    static double        get_delay_scaling();
+    static std::uint32_t get_index();
+    static bool          is_active();
+    static bool          is_selected(std::uint64_t);
+    static bool          is_selected(unwind_addr_t);
+    static bool          is_selected(container::c_array<std::uint64_t>);
+    static void          add_selected();
+    static experiments_t get_experiments();
+
+    template <size_t N>
+    static bool is_selected(std::array<std::uint64_t, N> _v)
+    {
+        return is_selected(container::c_array<std::uint64_t>{ _v.data(), _v.size() });
+    }
+
+    static void                save_experiments();
+    static void                save_experiments(std::string, const filename_config_t&);
+    static std::vector<record> load_experiments(bool _throw_on_err = true);
+    static std::vector<record> load_experiments(std::string, const filename_config_t&,
+                                                bool = true);
+
+    bool              running         = false;
+    std::uint16_t     virtual_speedup = 0;    /// 0-100 in multiples of 5
+    std::uint32_t     index           = 0;    /// experiment number
+    std::uint64_t     sampling_period = 0;    /// period b/t samples [nsec]
+    std::uint64_t     start_time      = 0;    /// start of experiment [nsec]
+    std::uint64_t     end_time        = 0;    /// end of experiment [nsec]
+    std::uint64_t     experiment_time = 0;    /// how long the experiment ran [nsec]
+    std::uint64_t     duration        = 0;    /// runtime - delays [nsec]
+    std::uint64_t     batch_size      = 10;   /// batch factor for experiment/cooloff
+    std::uint64_t     scaling_factor  = 100;  /// scaling factor for experiment time
+    std::uint64_t     sample_delay    = 0;    /// how long to delay [nsec]
+    std::uint64_t     total_delay     = 0;    /// total delays [nsec]
+    std::uint64_t     selected        = 0;    /// num times selected line sampled
+    std::uint64_t     global_delay    = 0;
+    double            delay_scaling   = 0.0;  /// virtual_speedup / 100.
+    selected_entry    selection       = {};   /// which line was selected
+    progress_points_t init_progress   = {};   /// progress points at start
+    progress_points_t fini_progress   = {};   /// progress points at end
+};
+}  // namespace causal
+}  // namespace rocprofsys

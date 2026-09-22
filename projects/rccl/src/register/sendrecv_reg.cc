@@ -1,0 +1,61 @@
+/*************************************************************************
+ * Copyright (c) 2022-2025, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+#include "register.h"
+#include "transport.h"
+#include "checks.h"
+
+ncclResult_t ncclRegisterP2pNetBuffer(
+  struct ncclComm* comm, void* userbuff, size_t size, struct ncclConnector* conn, int* regFlag, void** handle,
+  struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue) {
+  ncclResult_t ret = ncclSuccess;
+
+  *regFlag = 0;
+  if (comm->netDeviceType != NCCL_NET_DEVICE_UNPACK) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    // HIP graph capture plus NCCL proxy-side NET registration deadlocks for
+    // pairwise sendrecv (AllToAll). Fall through to the unregistered capture path.
+    if (comm->planner.persistent && ncclParamGraphRegister()) {
+      INFO(NCCL_REG, "Skipping NET graph registration for buffer %p size %zi under HIP capture", userbuff, size);
+    }
+#else
+    if (comm->planner.persistent && ncclParamGraphRegister()) {
+      ncclNetGraphRegisterBuffer(comm, userbuff, size, &conn, 1, regFlag, handle, cleanupQueue, NULL);
+    }
+#endif
+    if (*regFlag == 0 && ncclParamLocalRegister()) {
+      ncclNetLocalRegisterBuffer(comm, userbuff, size, &conn, 1, regFlag, handle);
+    }
+  }
+  return ret;
+}
+
+ncclResult_t ncclRegisterP2pIpcBuffer(
+  struct ncclComm* comm, void* userbuff, size_t size, int peerRank, int* regFlag, void** regAddr,
+  struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue) {
+  ncclResult_t ret = ncclSuccess;
+  uintptr_t offset = 0;
+  uintptr_t* peerRmtAddrs = NULL;
+
+  *regFlag = 0;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  if (comm->planner.persistent && ncclParamGraphRegister()) {
+    INFO(NCCL_REG, "Skipping IPC graph registration for buffer %p size %zi under HIP capture", userbuff, size);
+  }
+#else
+  if (comm->planner.persistent && ncclParamGraphRegister()) {
+    ncclIpcGraphRegisterBuffer(comm, userbuff, size, &peerRank, 1, NCCL_IPC_SENDRECV, regFlag, &offset, &peerRmtAddrs,
+                               reinterpret_cast<void*>(cleanupQueue), NULL);
+  }
+#endif
+  if (*regFlag == 0 && ncclParamLocalRegister()) {
+    ncclIpcLocalRegisterBuffer(comm, userbuff, size, &peerRank, 1, NCCL_IPC_SENDRECV, regFlag, &offset, &peerRmtAddrs);
+  }
+
+  if (*regFlag) *regAddr = (void*)((uintptr_t)peerRmtAddrs + offset);
+  return ret;
+}

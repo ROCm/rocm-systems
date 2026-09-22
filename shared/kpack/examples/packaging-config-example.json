@@ -1,0 +1,38 @@
+{
+  "primary_shard": "gfx110X_build",
+  "architecture_groups": {
+    "gfx110X": {
+      "display_name": "ROCm gfx110X (RDNA3)",
+      "architectures": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102"
+      ]
+    },
+    "gfx115X": {
+      "display_name": "ROCm gfx115X (RDNA3.5)",
+      "architectures": [
+        "gfx1150",
+        "gfx1151"
+      ]
+    },
+    "gfx120X": {
+      "display_name": "ROCm gfx120X (RDNA4)",
+      "architectures": [
+        "gfx1200",
+        "gfx1201"
+      ]
+    },
+    "gfx90a": {
+      "display_name": "ROCm MI200 Series",
+      "architectures": [
+        "gfx90a"
+      ]
+    }
+  },
+  "validation": {
+    "error_on_duplicate_device_code": true,
+    "verify_generic_artifacts_match": false,
+    "error_on_missing_architecture": false
+  }
+}

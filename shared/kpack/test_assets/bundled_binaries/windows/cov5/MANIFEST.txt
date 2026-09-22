@@ -1,0 +1,38 @@
+Test Bundled Binaries Generated: 2026-01-03 19:42:15.878700
+ROCm Path: C:\src\rocm
+Code Object Version: 5
+Platform: windows
+Compiler:
+
+Bundled Executables (with GPU device code):
+- test_kernel_single.exe: Single architecture (gfx1100)
+- test_kernel_multi.exe: Multiple architectures (gfx1100, gfx1101)
+- test_kernel_compressed.exe: Multiple architectures with compression (if supported)
+- test_kernel_wide.exe: Wide architecture coverage (gfx900,906,908,90a,1100)
+
+Bundled Shared Libraries (with GPU device code):
+- test_kernel_single.dll: Single architecture (gfx1100)
+- test_kernel_multi.dll: Multiple architectures (gfx1100, gfx1101)
+- test_multi_wrapper.dll: RDC build with 2 __CudaFatBinaryWrapper structs (gfx1100)
+
+Host-Only Binaries (NO GPU device code, for negative testing):
+- host_only.exe: Host-only executable
+- host_only.dll: Host-only shared library
+
+Bundled binaries contain HIP kernels (vectorAdd, scalarMultiply) with .hip_fatbin sections.
+Host-only binaries contain only CPU code with no .hip_fatbin sections.
+
+Sources:
+- test_generation/simple_kernel.hip (GPU kernels)
+- test_generation/multi_wrapper_kernel1.hip (RDC kernel 1)
+- test_generation/multi_wrapper_kernel2.hip (RDC kernel 2)
+- test_generation/host_only.cpp (host-only code)
+Build Script: test_generation/build_test_bundles.py
+
+These assets are used to test unbundling functionality across:
+- Executables and shared libraries
+- Uncompressed vs compressed code objects
+- Single vs multiple architectures
+- Different code object versions
+- ELF (Linux) vs PE/COFF (Windows) formats
+- Positive tests (bundled binaries) vs negative tests (host-only binaries)

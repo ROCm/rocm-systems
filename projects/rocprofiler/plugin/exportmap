@@ -1,0 +1,12 @@
+ROCPROFILER_PLUGINS_1.0.0{
+global: rocprofiler_plugin_initialize;
+        rocprofiler_plugin_finalize;
+        rocprofiler_plugin_write_buffer_records;
+        rocprofiler_plugin_write_record;
+        addDecoder;
+        removeDecoder;
+        getInstructionFromAddr;
+        getInstructionFromID;
+        getSymbolName;
+local:  *;
+};

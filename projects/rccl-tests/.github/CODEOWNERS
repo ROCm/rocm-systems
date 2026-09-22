@@ -1,0 +1,6 @@
+* @wenkaidu @gilbertlee-amd @PedramAlizadeh @nusislam @nileshnegi @KawtharShafie @AtlantaPepsi @mberenjk @corey-derochie-amd @mustafabar @thananon @JhaShweta1 @BertanDogancay @rahulvaidya20 @isaki001 @PJAvinash @AbandiGa @Nikhil-Nunna @haripriya-amd @atulkulk @alex-breslow-amd @ddebonis-amd @amd-mengshwu @Kapil-Shyam-Pawar @weilewei @nawrinsu @speriaswamy-amd
+
+# Documentation files
+doc/ @ROCm/rocm-documentation
+*.md @ROCm/rocm-documentation
+*.rst @ROCm/rocm-documentation

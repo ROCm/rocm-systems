@@ -1,0 +1,5 @@
+pmc:  CPF_CPF_STAT_IDLE CPF_CPF_TCIU_IDLE
+
+gpu:
+range:
+kernel:

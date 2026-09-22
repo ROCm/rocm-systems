@@ -1,0 +1,9 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: rccl
+Source: https://github.com/ROCm/rccl
+
+Files: *
+Copyright: (c) 2016-2020, NVIDIA CORPORATION. All rights reserved.
+Modifications Copyright (c) 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
+Modifications Copyright (c) Microsoft Corporation. Licensed under the MIT License.
+License: See LICENSE.txt for license information

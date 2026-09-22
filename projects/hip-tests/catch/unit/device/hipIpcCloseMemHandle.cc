@@ -1,0 +1,116 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <hip_test_common.hh>
+#include <hip_test_process.hh>
+
+/**
+ * @addtogroup hipIpcCloseMemHandle hipIpcCloseMemHandle
+ * @{
+ * @ingroup DeviceTest
+ * `hipIpcCloseMemHandle(void* devPtr)` -
+ * Close memory mapped with hipIpcOpenMemHandle.
+ * Unmaps memory returned by hipIpcOpenMemHandle.
+ * ________________________
+ * Test cases from other modules:
+ *  - @ref Unit_hipIpcMemAccess_Semaphores
+ *  - @ref Unit_hipIpcMemAccess_ParameterValidation
+ */
+
+#if HT_LINUX
+/**
+ * Test Description
+ * ------------------------
+ *  - Checks that memory stays mapped if reference count doesn't reach zero.
+ *  - Checks that memory stays mapped if handle is closed in second process.
+ * Test source
+ * ------------------------
+ *  - unit/device/hipIpcCloseMemHandle.cc
+ * Test requirements
+ * ------------------------
+ *  - Host specific (LINUX)
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_hipIpcCloseMemHandle_Positive_Reference_Counting) {
+  int fd[2];
+  REQUIRE(pipe(fd) == 0);
+
+  // The fork must be performed before the runtime is initialized(so before any API that implicitly
+  // initializes it). The pipe in conjunction with wait is then used to impose total ordering
+  // between parent and child process. Because total ordering is imposed regular CATCH assertions
+  // should be safe to use
+  auto pid = fork();
+  REQUIRE(pid >= 0);
+  if (pid == 0) {  // child
+    REQUIRE(close(fd[1]) == 0);
+
+    hipIpcMemHandle_t handle;
+    REQUIRE(read(fd[0], &handle, sizeof(handle)) >= 0);
+    REQUIRE(close(fd[0]) == 0);
+
+    void *child_ptr1, *child_ptr2;
+    HIP_CHECK(hipIpcOpenMemHandle(&child_ptr1, handle, hipIpcMemLazyEnablePeerAccess));
+    HIP_CHECK(hipIpcOpenMemHandle(&child_ptr2, handle, hipIpcMemLazyEnablePeerAccess));
+
+    REQUIRE(child_ptr1 == child_ptr2);
+
+    HIP_CHECK(hipIpcCloseMemHandle(child_ptr1));
+    hipPointerAttribute_t attributes;
+    HIP_CHECK(hipPointerGetAttributes(&attributes, child_ptr1));
+    HIP_CHECK(hipPointerGetAttributes(&attributes, child_ptr2));
+
+    HIP_CHECK(hipIpcCloseMemHandle(child_ptr2));
+    HIP_CHECK_ERROR(hipPointerGetAttributes(&attributes, child_ptr1), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipPointerGetAttributes(&attributes, child_ptr2), hipErrorInvalidValue);
+
+    exit(0);
+  } else {  // parent
+    REQUIRE(close(fd[0]) == 0);
+
+    void* ptr;
+    hipIpcMemHandle_t handle;
+    HIP_CHECK(hipMalloc(&ptr, 1024));
+    HIP_CHECK(hipIpcGetMemHandle(&handle, ptr));
+
+    REQUIRE(write(fd[1], &handle, sizeof(handle)) >= 0);
+    REQUIRE(close(fd[1]) == 0);
+
+    REQUIRE(wait(NULL) >= 0);
+
+    hipPointerAttribute_t attributes;
+    HIP_CHECK(hipPointerGetAttributes(&attributes, ptr));
+
+    HIP_CHECK(hipFree(ptr));
+  }
+}
+#endif
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Closes the memory handle from the process that has created it.
+ * Test source
+ * ------------------------
+ *  - unit/device/hipIpcCloseMemHandle.cc
+ * Test requirements
+ * ------------------------
+ *  - Host specific
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_hipIpcCloseMemHandle_Negative_Close_In_Originating_Process) {
+  void* ptr;
+  hipIpcMemHandle_t handle;
+  HIP_CHECK(hipMalloc(&ptr, 1024));
+  HIP_CHECK(hipIpcGetMemHandle(&handle, ptr));
+
+  HIP_CHECK_ERROR(hipIpcCloseMemHandle(ptr), hipErrorInvalidValue);
+  HIP_CHECK(hipFree(ptr));
+}
+
+/**
+ * End doxygen group DeviceTest.
+ * @}
+ */

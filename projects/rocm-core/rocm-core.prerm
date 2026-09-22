@@ -1,0 +1,33 @@
+#!/bin/bash
+set -e
+
+do_update_alternatives(){
+    # skip update if program doesn't exist
+    command -v update-alternatives >/dev/null || return 0
+    # Update the /opt/rocm symlink
+    if [[ ${ID_LIKE:-$ID} == "debian" ]] || [[ "$RPM_INSTALL_PREFIX0" == "/opt/rocm-"* ]] ; then
+        update-alternatives --remove "rocm" "@CPACK_PACKAGING_INSTALL_PREFIX@"
+    fi
+
+    if [[ ${ID_LIKE:-$ID} == "debian" ]] ; then
+        update-alternatives --remove "rocmmod@ROCM_VERSION@" "@CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBDIR@/rocmmod"|| true
+    else
+        update-alternatives --remove "rocmmod@ROCM_VERSION@" "$RPM_INSTALL_PREFIX0/@CMAKE_INSTALL_LIBDIR@/rocmmod"|| true
+    fi
+}
+
+if [ -e /etc/os-release ] && source /etc/os-release && [[ ${ID_LIKE:-$ID} == "debian" ]]
+then
+   case "$1" in
+       (remove | upgrade)
+           do_update_alternatives
+       ;;
+       (purge)
+       ;;
+       (*)
+           exit 0
+       ;;
+   esac
+else
+     do_update_alternatives
+fi

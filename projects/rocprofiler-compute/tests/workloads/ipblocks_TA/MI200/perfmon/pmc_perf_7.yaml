@@ -1,0 +1,4 @@
+jobs:
+- pmc:
+  - TA_TA_BUSY_sum
+  - TA_TOTAL_WAVEFRONTS_sum

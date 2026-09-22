@@ -1,0 +1,35 @@
+[metadata]
+name = @PROJECT_NAME@
+url = @PROJECT_HOMEPAGE_URL@
+download_url = @PROJECT_HOMEPAGE_URL@.git
+maintainer = AMD ROCm
+license = MIT
+description = @PROJECT_DESCRIPTION@
+keywords =
+    performance
+    profiling
+    sampling
+    hardware counters
+    timing
+    memory
+    gpu
+    hip
+    rocm
+classifiers =
+    Development Status :: 4 - Beta
+    Environment :: GPU
+    Intended Audience :: Developers
+    Intended Audience :: Science/Research
+    Natural Language :: English
+    License :: OSI Approved :: MIT License
+    Operating System :: POSIX :: Linux
+    Operating System :: Unix
+    Programming Language :: C++
+    Programming Language :: Python :: 3
+    Topic :: Software Development :: Libraries :: Python Modules
+    Topic :: Utilities
+
+[options]
+packages = @PROJECT_NAME@
+zip_safe = false
+include_package_data = false

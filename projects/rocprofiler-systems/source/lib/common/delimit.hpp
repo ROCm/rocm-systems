@@ -1,0 +1,101 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace rocprofsys
+{
+inline namespace common
+{
+namespace
+{
+template <typename ContainerT, typename... Args>
+concept has_emplace_back = requires(ContainerT& _c, Args&&... _args) {
+    _c.emplace_back(std::forward<Args>(_args)...);
+};
+
+template <typename ContainerT, typename... Args>
+    requires has_emplace_back<ContainerT, Args...>
+inline auto
+emplace(ContainerT& _c, Args&&... _args)
+{
+    return _c.emplace_back(std::forward<Args>(_args)...);
+}
+
+template <typename ContainerT, typename... Args>
+    requires(!has_emplace_back<ContainerT, Args...>)
+inline auto
+emplace(ContainerT& _c, Args&&... _args)
+{
+    return _c.emplace(std::forward<Args>(_args)...);
+}
+
+template <typename ContainerT, typename ArgT>
+concept has_reserve = requires(ContainerT& _c, ArgT _arg) { _c.reserve(_arg); };
+
+template <typename ContainerT, typename ArgT>
+    requires has_reserve<ContainerT, ArgT>
+inline bool
+reserve(ContainerT& _c, ArgT _arg)
+{
+    _c.reserve(_arg);
+    return true;
+}
+
+template <typename ContainerT, typename ArgT>
+    requires(!has_reserve<ContainerT, ArgT>)
+inline bool
+reserve(ContainerT&, ArgT)
+{
+    return false;
+}
+
+template <typename ContainerT = std::vector<std::string>>
+inline ContainerT
+delimit(const std::string& line, std::string_view delimiters = "\"',;: ");
+
+template <typename ContainerT>
+inline ContainerT
+delimit(const std::string& line, std::string_view delimiters)
+{
+    ContainerT _result{};
+    size_t     _beginp = 0;  // position that is the beginning of the new string
+    size_t     _delimp = 0;  // position of the delimiter in the string
+    if(reserve(_result, 0))
+    {
+        // tally every character in the line that is one of the delimiters
+        size_t _nmax = 0;
+        for(const char itr : line)
+        {
+            if(delimiters.find(itr) != std::string_view::npos)
+            {
+                ++_nmax;
+            }
+        }
+        reserve(_result, _nmax);
+    }
+    while(_beginp < line.length() && _delimp < line.length())
+    {
+        // find the first character (starting at _delimp) that is not a delimiter
+        _beginp = line.find_first_not_of(delimiters, _delimp);
+        // if no a character after or at _end that is not a delimiter is not found
+        // then we are done
+        if(_beginp == std::string::npos) break;
+        // starting at the position of the new string, find the next delimiter
+        _delimp = line.find_first_of(delimiters, _beginp);
+        std::string _tmp{};
+        // starting at the position of the new string, get the characters
+        // between this position and the next delimiter
+        _tmp = line.substr(_beginp, _delimp - _beginp);
+        // don't add empty strings
+        if(!_tmp.empty()) emplace(_result, _tmp);
+    }
+    return _result;
+}
+}  // namespace
+}  // namespace common
+}  // namespace rocprofsys

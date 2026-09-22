@@ -1,0 +1,388 @@
+- name: bug
+  color: ee0701
+  description: null
+- name: BuildPackaging
+  color: 87d1e5
+  description: CMake and other build related enhancements
+- name: change request
+  color: 37C0A1
+  description: A code change requested by external or internal stakeholders
+- name: CI - Failed
+  color: B60205
+  description: ''
+- name: CI - Pass
+  color: 0E8A16
+  description: ''
+- name: CI - Testing
+  color: FBCA04
+  description: ''
+- name: ci:asan
+  color: 561D33
+  description: ''
+- name: ci:ccache
+  color: FBCA04
+  description: Enable ccache in CI builds
+- name: ci:codecoverage
+  color: bfd4f2
+  description: ''
+- name: ci:debug
+  color: 73CAF8
+  description: ''
+- name: ci:docs-only
+  color: 24D116
+  description: Docs only changes
+- name: ci:extended
+  color: d93f0b
+  description: ''
+- name: ci:gpu:gfx90a
+  color: 12E85E
+  description: ''
+- name: ci:gpu:gfx942
+  color: 6119E7
+  description: ''
+- name: ci:nightly
+  color: 2F1E2B
+  description: ''
+- name: ci:no-ccache
+  color: bfd4f2
+  description: disable ccache
+- name: ci:no-sparse
+  color: C870AE
+  description: Skip testing sparse functionality
+- name: ci:profiling
+  color: 006b75
+  description: ''
+- name: ci:smoke
+  color: 13E349
+  description: ''
+- name: ci:static-libraries
+  color: 54AE5B
+  description: ''
+- name: ci:testonly
+  color: E57E1A
+  description: ''
+- name: clang
+  color: 22DDAA
+  description: ''
+- name: code quality
+  color: F7E574
+  description: ''
+- name: compilation time
+  color: F66750
+  description: ''
+- name: compiler bug
+  color: F13314
+  description: ''
+- name: complexity_high
+  color: bb0099
+  description: ''
+- name: complexity_low
+  color: ffbbcc
+  description: ''
+- name: complexity_middle
+  color: dd88cc
+  description: ''
+- name: correctness
+  color: 3377ff
+  description: ''
+- name: debug
+  color: bfd4f2
+  description: ''
+- name: debugging
+  color: 4444ee
+  description: ''
+- name: DebugHelpers
+  color: 8c0c24
+  description: Code to help with debugging
+- name: dependencies
+  color: 0366d6
+  description: Pull requests that update a dependency file
+- name: Design
+  color: 403df7
+  description: Design change requiring detailed review
+- name: DeviceCodeGen
+  color: 0e8a16
+  description: General device code generator pieces
+- name: documentation
+  color: 5555ff
+  description: ''
+- name: Documentation
+  color: ddc10b
+  description: Documentation
+- name: duplicate
+  color: cfd3d7
+  description: This issue or pull request already exists
+- name: enhancement
+  color: 99ff99
+  description: ''
+- name: envUseHipblasLT
+  color: e99695
+  description: export ROCBLAS_USE_HIPBLASLT=1
+- name: external
+  color: d8587a
+  description: ''
+- name: external contribution
+  color: 6A7916
+  description: Code contribution from users community..
+- name: external_collaborator
+  color: D93F0B
+  description: ''
+- name: Feature Request
+  color: D5CA0F
+  description: ''
+- name: feature request
+  color: 86E277
+  description: New feature or request
+- name: g++
+  color: d4c5f9
+  description: ''
+- name: GFX10Code
+  color: d896f2
+  description: ''
+- name: gfx12
+  color: e99695
+  description: ''
+- name: gfx942
+  color: B40A83
+  description: ''
+- name: gfx94x
+  color: c5def5
+  description: ''
+- name: gfx950
+  color: 006b75
+  description: run CI on gfx950
+- name: GFX9Code
+  color: 44ce84
+  description: Python code generator
+- name: gfxall
+  color: 5319e7
+  description: PRs to develop built using all default gfx targets
+- name: good first issue
+  color: 7057ff
+  description: Good for newcomers
+- name: GTest
+  color: fbca04
+  description: ''
+- name: help wanted
+  color: 084408
+  description: ''
+- name: helpWanted
+  color: 008672
+  description: Extra attention is needed
+- name: hipcc
+  color: 1507A2
+  description: ''
+- name: Hotfix
+  color: 20FF50
+  description: Hotfix to quickly address breakage
+- name: IMPACTS_API
+  color: bb0099
+  description: ''
+- name: IMPACTS_FIND_DB
+  color: eebb11
+  description: ''
+- name: IMPACTS_PERFORMANCE_DB
+  color: ee8811
+  description: ''
+- name: initial iteration time
+  color: 128A0C
+  description: ''
+- name: invalid
+  color: e4e669
+  description: This doesn't seem right
+- name: KTN
+  color: C2E0C6
+  description: KernelTuningNet model updated
+- name: merge conflict
+  color: F9A830
+  description: ''
+- name: needs clarification
+  color: cc0000
+  description: This issue needs additional information before it can be properly addressed
+- name: NoCI
+  color: '000000'
+  description: Don't run CI
+- name: noCI
+  color: e99695
+  description: 'Disable testing on supported CI systems: math libraries CI has this
+    feature enabled..'
+- name: noExtendedCI
+  color: 006b75
+  description: ''
+- name: noHipblasLT
+  color: 1d76db
+  description: Run PR without hipblasLT
+- name: non-miopen-bug
+  color: ee0701
+  description: ''
+- name: noOptimizations
+  color: 34a503
+  description: Disable optimized kernels for small sizes for some routines
+- name: noSolver
+  color: CFE25A
+  description: Run PR without rocSOLVER
+- name: noSolverClients
+  color: EC8EE7
+  description: Build without rocSOLVER clients
+- name: noTensile
+  color: bbe580
+  description: Run PR without Tensile
+- name: noTensileLogic
+  color: B1500E
+  description: ''
+- name: on hold
+  color: FBCA04
+  description: ''
+- name: ON_HOLD
+  color: ccddff
+  description: ''
+- name: performance
+  color: 128A0C
+  description: ''
+- name: Performance Issue
+  color: c5def5
+  description: performance issue due to regression or something fishy
+- name: PerfTest
+  color: f9d0c4
+  description: Performance tests
+- name: post-merge
+  color: 13361A
+  description: For issue tracking after PR merge
+- name: priority
+  color: 8C0BF4
+  description: ''
+- name: quality
+  color: ffbb88
+  description: ''
+- name: question
+  color: 0066aa
+  description: ''
+- name: ReplacementKernel
+  color: 1df4cd
+  description: Individual replacement kernels
+- name: request_for_comments
+  color: '000000'
+  description: See https://en.wikipedia.org/wiki/Request_for_Comments
+- name: runPerformance
+  color: d93f0b
+  description: testing only
+- name: Runtime
+  color: 3167a0
+  description: C++ host code
+- name: sandbox
+  color: D47D0C
+  description: ''
+- name: SolutionSelection
+  color: cda8ff
+  description: Kernel selection logic
+- name: solverBuildtime
+  color: 5319e7
+  description: Link against rocSOLVER at buildtime
+- name: specification
+  color: '000000'
+  description: ''
+- name: Tensor
+  color: fcaf0a
+  description: Tensor contraction related items
+- name: testing
+  color: 3333bb
+  description: ''
+- name: TESTING_CI_PASSED
+  color: FFff00
+  description: ''
+- name: TESTING_PERFORMANCE_REQUIRED
+  color: ccEEcc
+  description: ''
+- name: TestLevel1Only
+  color: B7D6F9
+  description: Tests only Level 1 functions in this PR
+- name: TestLevel2Only
+  color: '794359'
+  description: Tests only Level 2 functions in this PR
+- name: TestLevel3Only
+  color: d93f0b
+  description: Tests only Level 3 functions in this PR
+- name: Tests
+  color: e564ab
+  description: Improvement/additions to tests
+- name: TestTensileOnly
+  color: c5def5
+  description: Runs Tensile only test on this PR
+- name: triaged
+  color: F2B54D
+  description: The issue has been reviewed by a team member and prioritized
+- name: TunaNet
+  color: C2E0C6
+  description: TunaNet model updated
+- name: tuning
+  color: 0cf436
+  description: ''
+- name: tuning_notes
+  color: 0f617a
+  description: Record of events that have taken place during MIOpen tuning
+- name: TuningFiles
+  color: f9f195
+  description: Tuning run related for evaluations and archival
+- name: TuningScripts
+  color: fc7874
+  description: Tuning automation & improvements
+- name: uai
+  color: C5DEF5
+  description: ''
+- name: umbrella_ticket
+  color: '000000'
+  description: ''
+- name: Under Investigation
+  color: 0052CC
+  description: ''
+- name: under investigation
+  color: 5319e7
+  description: ''
+- name: urgency_blocker
+  color: cc2200
+  description: ''
+- name: urgency_high
+  color: ee5500
+  description: ''
+- name: urgency_low
+  color: ffffff
+  description: ''
+- name: urgency_medium
+  color: 4C4F1E
+  description: ''
+- name: urgency_normal
+  color: ffdd77
+  description: ''
+- name: urgency_unknown
+  color: '999999'
+  description: ''
+- name: value_high
+  color: '990099'
+  description: ''
+- name: value_low
+  color: eebbee
+  description: ''
+- name: value_middle
+  color: cc88cc
+  description: ''
+- name: value_unknown
+  color: bbbbbb
+  description: ''
+- name: weekly
+  color: fbca04
+  description: run weekly CI job
+- name: windows
+  color: 4B78AD
+  description: ''
+- name: WIP
+  color: EE8CE7
+  description: ''
+- name: wontfix
+  color: ffffff
+  description: null
+- name: workaround
+  color: '777700'
+  description: ''
+- name: XDLOPS
+  color: bff296
+  description: Python code generator

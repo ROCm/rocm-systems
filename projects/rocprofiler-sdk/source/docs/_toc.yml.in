@@ -1,0 +1,134 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+defaults:
+  numbered: false
+  maxdepth: 4
+
+root: index
+subtrees:
+  - entries:
+    - file: what-is-rocprofiler-sdk
+      title: What is ROCprofiler-SDK?
+  - caption: Install
+    entries:
+    - file: install/install
+      title: Install ROCprofiler-SDK
+    - file: install/build
+      title: Build from source
+  - caption: Quick Reference
+    entries:
+    - file: quick-reference/quick_guide
+      title: Quick reference guide
+    - file: quick-reference/rocprofv3-cli-options
+  - caption: How to
+    entries:
+    - file: how-to/using-rocprofv3
+    - file: how-to/advanced-rocprofv3-options
+    - file: how-to/kernel-naming-filtering
+    - file: how-to/rocprofv3-io-options
+    - file: how-to/using-rocprofv3-avail
+    - file: how-to/using-rocprofv3-process-attachment
+    - file: how-to/using-rocpd-output-format
+    - file: how-to/using-rocprofiler-sdk-roctx
+    - file: how-to/using-rocprofv3-with-mpi
+    - file: how-to/using-rocprofv3-with-openmp
+    - file: how-to/using-pc-sampling
+    - file: how-to/cdna3-cdna4-pc-sampling
+    - file: how-to/using-thread-trace
+    - file: how-to/using-spm
+    - file: how-to/using-kernel-replay
+    - file: how-to/samples
+      title: Samples
+  - caption: API reference
+    entries:
+    - file: api-reference/tool_library
+      title: Tool library
+    - file: api-reference/tool_library_environment
+      title: Tool library environment variables
+    - file: api-reference/intercept_table
+      title: Runtime intercept tables
+    - file: api-reference/process_attachment
+      title: Process attachment
+    - file: api-reference/buffered_services
+      title: Buffered services
+    - file: api-reference/callback_services
+      title: Callback tracing services
+    - file: api-reference/counter_collection_services
+      title: Counter collection services
+    - file: api-reference/pc_sampling
+      title: PC sampling
+    - file: api-reference/thread_trace
+      title: Thread trace and ROCprof Trace Decoder
+    - file: api-reference/spm
+      title: Streaming Performance Monitor (SPM)
+    - file: api-reference/kernel_replay
+      title: Kernel replay (experimental)
+    - file: api-reference/rocprofiler-sdk_api_reference
+      subtrees:
+      - entries:
+        - file: api-reference/rocprofiler-sdk_api/modules
+          subtrees:
+          - entries:
+            - file: api-reference/rocprofiler-sdk_api/modules/agent_information
+            - file: api-reference/rocprofiler-sdk_api/modules/buffer_handling
+            - file: api-reference/rocprofiler-sdk_api/modules/buffer_tracing
+            - file: api-reference/rocprofiler-sdk_api/modules/callback_tracing
+            - file: api-reference/rocprofiler-sdk_api/modules/context_management
+            - file: api-reference/rocprofiler-sdk_api/modules/counter_config
+            - file: api-reference/rocprofiler-sdk_api/modules/counters
+            - file: api-reference/rocprofiler-sdk_api/modules/device_counting_service
+            - file: api-reference/rocprofiler-sdk_api/modules/dispatch_counting_service
+            - file: api-reference/rocprofiler-sdk_api/modules/external_correalation
+            - file: api-reference/rocprofiler-sdk_api/modules/intercept_table
+            - file: api-reference/rocprofiler-sdk_api/modules/internal_threading_management
+            - file: api-reference/rocprofiler-sdk_api/modules/ompt_registration
+            - file: api-reference/rocprofiler-sdk_api/modules/pc_sampling_service
+            - file: api-reference/rocprofiler-sdk_api/modules/thread_trace
+            - file: api-reference/rocprofiler-sdk_api/modules/tool_registration
+        - file: api-reference/rocprofiler-sdk_api/global_data_structures_topics_files
+          subtrees:
+            - entries:
+              - file: api-reference/rocprofiler-sdk_api/global_data_structures_topics_files/global_basic_data_types
+              - file: _doxygen/rocprofiler-sdk/html/topics
+              - file: _doxygen/rocprofiler-sdk/html/annotated
+              - file: _doxygen/rocprofiler-sdk/html/files
+    - file: api-reference/rocprofiler-sdk-roctx_api_reference
+      subtrees:
+      - entries:
+        - file: api-reference/rocprofiler-sdk-roctx_api/roctx_modules
+          subtrees:
+          - entries:
+            - file: api-reference/rocprofiler-sdk-roctx_api/roctx_modules/markers
+            - file: api-reference/rocprofiler-sdk-roctx_api/roctx_modules/ranges
+            - file: api-reference/rocprofiler-sdk-roctx_api/roctx_modules/profiler-control
+            - file: api-reference/rocprofiler-sdk-roctx_api/roctx_modules/naming-utilities
+        - file: api-reference/rocprofiler-sdk-roctx_api/global_roctx_data_structures_topics_files
+          subtrees:
+          - entries:
+            - file: api-reference/rocprofiler-sdk-roctx_api/global_roctx_data_structures_topics_files/global_roctx_basic_data_types
+            - file: _doxygen/roctx/html/topics
+            - file: _doxygen/roctx/html/files
+  - caption: Conceptual
+    entries:
+    - file: conceptual/comparing-with-legacy-tools
+    - file: conceptual/kernel_replay/index
+      title: Kernel replay (experimental)
+      subtrees:
+      - entries:
+        - file: conceptual/kernel_replay/kernel_replay_callback_api
+          title: Callback API and tool configuration
+        - file: conceptual/kernel_replay/kernel_replay_concurrency_and_isolation
+          title: Concurrency and isolation
+        - file: conceptual/kernel_replay/kernel_replay_memory_snapshot
+          title: Memory snapshot and restore
+        - file: conceptual/kernel_replay/kernel_replay_performance
+          title: Performance assessment
+        - file: conceptual/kernel_replay/kernel_replay_testing
+          title: Test coverage
+        - file: conceptual/kernel_replay/kernel_replay_downstream_tools
+          title: Downstream tools
+        - file: conceptual/kernel_replay/kernel_replay_callback_api_design
+          title: Design history
+  - caption: License
+    entries:
+    - file: license

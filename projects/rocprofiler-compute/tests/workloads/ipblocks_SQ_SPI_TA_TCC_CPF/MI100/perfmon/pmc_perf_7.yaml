@@ -1,0 +1,8 @@
+jobs:
+- pmc:
+  - TA_TA_BUSY_sum
+  - TA_TOTAL_WAVEFRONTS_sum
+  - TCC_MISS_sum
+  - TCC_NC_REQ_sum
+  - TCC_NORMAL_EVICT_sum
+  - TCC_NORMAL_WRITEBACK_sum

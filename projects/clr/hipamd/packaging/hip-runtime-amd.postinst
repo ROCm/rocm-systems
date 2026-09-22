@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+ROCMDIR=@ROCM_PATH@
+ROCMCMAKEDIR=$ROCMDIR/@CMAKE_INSTALL_LIBDIR@/cmake
+HIPCMAKEDIR=$ROCMDIR/hip/lib/cmake
+CURRENTDIR=`pwd`
+
+mkdir -p $HIPCMAKEDIR/hip
+mkdir -p $HIPCMAKEDIR/hip-lang
+mkdir -p $HIPCMAKEDIR/hiprtc
+
+HIPTARGETFILES=$(ls -A $ROCMCMAKEDIR/hip | grep  "^hip-targets")
+cd $HIPCMAKEDIR/hip
+for f in $HIPTARGETFILES
+do
+    ln -s -r -f $ROCMCMAKEDIR/hip/$f $(basename $f)
+done
+cd $CURRENTDIR
+
+HIPLANGTARGETFILES=$(ls -A $ROCMCMAKEDIR/hip-lang | grep  "^hip-lang-targets")
+cd $HIPCMAKEDIR/hip-lang
+for f in $HIPLANGTARGETFILES
+do
+    ln -s -r -f $ROCMCMAKEDIR/hip-lang/$f $(basename $f)
+done
+cd $CURRENTDIR
+
+HIPRTCTARGETFILES=$(ls -A $ROCMCMAKEDIR/hiprtc | grep  "^hiprtc-targets")
+cd $HIPCMAKEDIR/hiprtc
+for f in $HIPRTCTARGETFILES
+do
+    ln -s -r -f $ROCMCMAKEDIR/hiprtc/$f $(basename $f)
+done
+cd $CURRENTDIR

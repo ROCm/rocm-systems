@@ -1,0 +1,59 @@
+/*************************************************************************
+ * Copyright (c) 2019-2022, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+#ifndef NCCL_INFO_H_
+#define NCCL_INFO_H_
+
+#include "nccl.h"
+#include "collectives.h"
+#include "core.h"
+#include "utils.h"
+#include "rccl_decision.h"
+
+// Used to pass NCCL call information between functions
+struct ncclInfo {
+  ncclFunc_t coll;
+  const char* opName;
+  // NCCL Coll Args
+  const void* sendbuff;
+  void* recvbuff;
+  size_t count;
+  ncclDataType_t datatype;
+  ncclRedOp_t op;
+  int root; // peer for p2p operations
+  ncclComm_t comm;
+  cudaStream_t stream;
+  // Algorithm details
+  int chunkSteps;
+  int sliceSteps;
+  const void* acc;
+
+  // Optional per-operation metadata (e.g., rocSHMEM collectives, CE AlltoAllv).
+  size_t* sizes;
+
+  bool useDirect;
+  // One-sided ops
+  size_t peerWinOffset;
+  ncclWindow_t peerWin;
+  int sigIdx;
+  int ctx;
+  unsigned int flags;
+  int nDesc;
+  ncclWaitSignalDesc_t* signalDescs;
+  // A config copied from config passed by user so older user config can be safely accessed
+  // during synchronous host scheduling (never at launch/replay).
+  ncclCollConfig_t collConfig;
+  // Implementation decision precomputed by ncclAllReduce_impl() via
+  // rcclSelectAllReduce() and consumed by taskAppend() to avoid recomputing the
+  // CE-vs-kernel choice and graph-capture state. Valid only when decisionValid
+  // is true (false for non-AllReduce collectives and the WithBias path).
+  struct rcclCollDecision decision;
+  bool decisionValid;
+  size_t sizesCount;
+};
+
+#endif

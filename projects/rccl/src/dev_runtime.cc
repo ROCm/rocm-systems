@@ -1,0 +1,2785 @@
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
+
+#include "dev_runtime_internal.h"
+#include "comm.h"
+#include "nccl_device/core_tmp.h"
+#include "nccl_device/gin_barrier.h"
+#include "nccl_device/impl/core__types.h"
+#include "nccl_device/lsa_barrier.h"
+#include "rma/rma.h"
+#include "rma/rma_ce.h"
+#include "device.h"
+#include "sym_kernels.h"
+#include "transport.h"
+#include "group.h"
+#include "nccl_device.h"
+#include "utils.h"
+#if defined(NCCL_OS_WINDOWS)
+#include "gin/gin_host_win_stub.h"
+#else
+#include "gin/gin_host.h"
+#endif
+#ifdef ENABLE_ROCSHMEM_GIN
+#include "gin/gin_host_anvil_sdma.h"
+#endif
+#include "argcheck.h"
+#include <mutex>
+
+int64_t ncclParamEnqueueRearchEnable();
+
+NCCL_PARAM(WinStride, "WIN_STRIDE", -1);
+NCCL_PARAM(EnableVersionCheck, "ENABLE_VERSION_CHECK", 1);
+NCCL_PARAM(ElasticBufferRegister, "ELASTIC_BUFFER_REGISTER", 1);
+NCCL_PARAM(SymReuseSysmemHandles, "SYM_REUSE_SYSMEM_HANDLES", 0);
+NCCL_PARAM(DevApiJit, "DEV_API_JIT", 0);
+
+// Elastic buffers back a symmetric window with CPU memory. Upstream uses the
+// host-NUMA VMM location type, but HIP/CLR has no host-NUMA member and rejects
+// it; RCCL allocates host segments as CU_MEM_LOCATION_TYPE_HOST on AMD (see
+// alloc.h). Treat both as a CPU-backed (sysmem) segment so the elastic-buffer
+// consumer paths recognize AMD host segments.
+static inline bool ncclSymIsHostSegment(CUmemLocationType type) {
+  if (type == CU_MEM_LOCATION_TYPE_HOST_NUMA) return true;
+#if defined(__HIP_PLATFORM_AMD__) && ROCM_VERSION >= 71200
+  if (type == CU_MEM_LOCATION_TYPE_HOST) return true;
+#endif
+  return false;
+}
+
+extern struct ncclDevCommCompat ncclDevCommCompat_v22902, ncclDevCommCompat_v22907, ncclDevCommCompat_v23000,
+  ncclDevCommCompat_v23100;
+
+// The order of entries in the array shouldn't matter (with the exception of the terminating nullptr)
+static struct ncclDevCommCompat* devCommCompat[] = {&ncclDevCommCompat_v22902, &ncclDevCommCompat_v22907,
+                                                    &ncclDevCommCompat_v23000, &ncclDevCommCompat_v23100, nullptr};
+
+// Returns ncclInvalidUsage if the compiled version is greater than the runtime version
+// and NCCL_ENABLE_VERSION_CHECK=0 is not set
+static ncclResult_t getNcclVersionCompat(int version, struct ncclDevCommCompat** devCompatPtr) {
+  *devCompatPtr = nullptr;
+
+  if (version > NCCL_VERSION_CODE && ncclParamEnableVersionCheck()) {
+    char compiledBuf[16], runtimeBuf[16];
+    WARN("NCCL library is too old. This application was compiled with NCCL version %s, but is running with NCCL "
+         "library version %s.",
+         ncclVersionToString(version, compiledBuf, sizeof(compiledBuf)),
+         ncclVersionToString(NCCL_VERSION_CODE, runtimeBuf, sizeof(runtimeBuf)));
+    return ncclInvalidUsage;
+  }
+
+  struct ncclDevCommCompat* devCompat = nullptr;
+  for (int i = 0; devCommCompat[i]; i++) {
+    if (version >= devCommCompat[i]->minVersion && version <= devCommCompat[i]->maxVersion) {
+      devCompat = devCommCompat[i];
+      break;
+    }
+  }
+  if (devCompat == nullptr) {
+    char compiledBuf[16], runtimeBuf[16];
+    WARN("NCCL library is not backwards compatible. This application was compiled with NCCL version %s, but is running "
+         "with NCCL library version %s.",
+         ncclVersionToString(version, compiledBuf, sizeof(compiledBuf)),
+         ncclVersionToString(NCCL_VERSION_CODE, runtimeBuf, sizeof(runtimeBuf)));
+    return ncclInvalidUsage;
+  }
+  *devCompatPtr = devCompat;
+
+  return ncclSuccess;
+}
+
+// Global window map using intrusive address map
+// Uses ncclDevrWindow directly (vidmem as key, next pointer embedded in struct)
+static std::mutex ncclWindowMapMutex;
+static ncclIntruAddressMap<ncclDevrWindow, struct ncclWindow_vidmem*, &ncclDevrWindow::vidmem, &ncclDevrWindow::next>
+  ncclWindowMap;
+static ncclResult_t symWindowDestroy(struct ncclComm* comm, struct ncclWindow_vidmem* winDev, cudaStream_t stream);
+
+struct ncclDevrWindowSorted {
+  uintptr_t userAddr;
+  size_t size;
+  struct ncclDevrWindow* win;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// Helpers at the bottom:
+
+// Find least index such that `arg < sorted[i].key` (least upper bound)
+template <typename Obj, typename Key>
+static int listFindSortedLub(Key Obj::* key, Obj* sorted, int count, Key arg);
+
+template <typename Obj>
+static void listInsert(Obj** list, int* capacity, int* count, int index, Obj val);
+
+template <typename Obj>
+static void listRemove(Obj* list, int* count, int index);
+
+////////////////////////////////////////////////////////////////////////////////
+
+NCCL_PARAM(LsaTeamSize, "LSA_TEAM_SIZE", 0)
+
+// Compute the LSA team size from the comm topology without any side effects.
+int computeLsaSize(struct ncclComm* comm) {
+  if (comm->devrState.bigSize != 0) return comm->devrState.lsaSize;
+
+  // LSA needs to be the same size for all ranks, and it needs to represent
+  // a consecutive set of ranks.
+  int lsaSize = ncclParamLsaTeamSize();
+  if (comm->p2pCrossClique && comm->nvlDomainSize == comm->nRanks) {
+    // Single NVLD: all ranks share memory via fabric handles. Extend LSA to full domain.
+    // Multi-NVLD (with potentially unequal domain sizes) is not yet supported for cross-clique LSA
+    lsaSize = comm->nRanks;
+    INFO(NCCL_INIT, "LSA extended to full NVL domain: lsaSize=%d (cross-clique P2P)", lsaSize);
+  } else {
+    // Standard node-based gcd LSA calculation
+    int nodeSize = 1;
+    for (int r = 1; r < comm->nRanks; r++) {
+      if (comm->rankToNode[r] == comm->rankToNode[r - 1]) {
+        nodeSize += 1;
+      } else {
+        lsaSize = gcd(lsaSize, nodeSize);
+        nodeSize = 1;
+      }
+    }
+    lsaSize = gcd(lsaSize, nodeSize);
+  }
+
+  return lsaSize;
+}
+
+bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) {
+  int lsaSize = computeLsaSize(comm);
+  return lsaSize == comm->nRanks; // Same as comm->nRanks / comm->devrState.lsaSize == 1
+}
+
+ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) {
+  ncclResult_t ret = ncclSuccess;
+  if (comm == nullptr) return ncclInvalidArgument;
+  struct ncclDevrState* devr = &comm->devrState;
+  if (devr->bigSize != 0) return ncclSuccess;
+
+  // LSA needs to be the same size for all ranks, and it needs to represent
+  // a consecutive set of ranks.
+  int lsaSize = computeLsaSize(comm);
+  devr->lsaSize = lsaSize;
+  devr->nLsaTeams = comm->nRanks / devr->lsaSize;
+  devr->lsaSelf = comm->rank % lsaSize;
+
+  devr->cftSize = computeCftSize(comm);
+  devr->cftSelf = comm->rank % devr->cftSize;
+
+  devr->cftMcSize = computeCftMcSize(comm);
+  devr->cftMcSelf = comm->rank % devr->cftMcSize;
+
+  devr->le.baseId = NCCL_LE_ID_INVALID;
+
+  devr->lsaRankList = (int*)malloc(devr->lsaSize * sizeof(int));
+  for (int i = 0; i < devr->lsaSize; i++) {
+    devr->lsaRankList[i] = comm->rank + (i - devr->lsaSelf);
+  }
+
+  // RCCL: shadow pool is used by both sym VMM and IPC backings (rmaTaskAppend
+  // decodes peer windows via ncclShadowPoolToHost). Construct unconditionally;
+  // it's just a small zero-init for the hash table head, see allocator.cc.
+  ncclShadowPoolConstruct(&devr->shadows);
+
+  if (comm->symmetricSupport) {
+    if (comm->peerInfo == nullptr) {
+      INFO(NCCL_INIT, "ncclDevrInitOnce: symmetricSupport set but peerInfo is null");
+      ret = ncclInternalError;
+      goto fail_lsaRankList;
+    }
+    CUmemAllocationProp memProp = {};
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+    memProp.type = hipMemAllocationTypeUncached;
+#else
+    memProp.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+#endif
+    memProp.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    memProp.requestedHandleType = ncclCuMemHandleType;
+    memProp.location.id = comm->cudaDev;
+    CUCHECKGOTO(cuMemGetAllocationGranularity(&devr->granularity, &memProp, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED), ret,
+                fail_lsaRankList);
+
+    devr->bigSize = ncclParamWinStride();
+    if (-devr->bigSize <= 1) {
+      devr->bigSize = 1;
+      for (int r = 0; r < comm->nRanks; ++r) {
+        devr->bigSize = std::max<size_t>(devr->bigSize, comm->peerInfo[r].totalGlobalMem);
+      }
+    }
+    devr->bigSize = alignUp(devr->bigSize, size_t(1) << 32);
+    INFO(NCCL_INIT, "Symmetric VA size=%ldGB", (long)devr->bigSize >> 30);
+
+    ncclSpaceConstruct(&devr->bigSpace);
+  } else {
+    devr->bigSize = 1; // proxy-only: marks devrState as initialized
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    // RCCL: the non-sym (host API) path routes co-located peers through CE/IPC
+    // over the full node-local team, which the gcd-based consecutive LSA
+    // team above cannot represent. Reuse the lsa* fields for this team
+    free(devr->lsaRankList);
+    if (comm->localRanks <= 0 || comm->localRankToRank == nullptr) {
+      // Host-only / mock communicators have no node-local rank map yet.
+      devr->lsaSize = 0;
+      devr->lsaSelf = 0;
+      devr->nLsaTeams = 0;
+      devr->lsaRankList = nullptr;
+      return ncclSuccess;
+    }
+    devr->lsaSize = comm->localRanks;
+    devr->lsaSelf = comm->localRank;
+    devr->nLsaTeams = comm->nRanks / devr->lsaSize;
+
+    devr->lsaRankList = (int*)malloc(devr->lsaSize * sizeof(int));
+    if (devr->lsaRankList == nullptr) {
+      ret = ncclSystemError;
+      goto fail_lsaRankList;
+    }
+
+    for (int i = 0; i < devr->lsaSize; i++) {
+      devr->lsaRankList[i] = comm->localRankToRank[i];
+    }
+#endif
+  }
+  return ncclSuccess;
+
+fail_lsaRankList:
+  free(devr->lsaRankList);
+  return ret;
+}
+
+static void symTeamDestroyAll(struct ncclComm* comm); // Further down
+static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem); // Further down
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm,
+                                           struct ncclWindow_vidmem* winDev); // Further down
+#endif
+
+ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
+  struct ncclDevrState* devr = &comm->devrState;
+  cudaStream_t stream;
+  ncclResult_t ret = ncclSuccess;
+  ncclResult_t fatalRet = ncclSuccess;
+  cudaStreamCaptureMode captureMode = cudaStreamCaptureModeRelaxed;
+  if (devr->bigSize == 0) return ncclSuccess;
+
+  CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
+  CUDACHECKIGNORE(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+
+  while (!ncclIntruQueueEmpty(&devr->regTaskQueue)) {
+    struct ncclDevrRegTask* task = ncclIntruQueueDequeue(&devr->regTaskQueue);
+    free(task);
+  }
+
+  // During abort or any other cases, users might not call deregister API for
+  // symmetric window objects, we need to destroy all remaining window objects
+  // that are not deregistered by user to avoid memory leaks here.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // RCCL: non-sym windows aren't backed by the symmetric VMM machinery, so drain
+  // them through the matching non-sym deregister instead of symWindowDestroy.
+  if (!comm->symmetricSupport) {
+    while (devr->winSortedCount > 0) {
+      int before = devr->winSortedCount;
+      struct ncclDevrWindow* win = devr->winSorted[0].win;
+      NCCLCHECKIGNORE(windowDeregisterNonSym(comm, win->vidmem), ret);
+      // windowDeregisterNonSym only removes the entry on success; drop it on
+      // failure too so abort-time finalize always makes progress.
+      if (devr->winSortedCount >= before) {
+        listRemove(devr->winSorted, &devr->winSortedCount, 0);
+      }
+    }
+  } else
+#endif
+  {
+    while (devr->winSortedCount > 0) {
+      struct ncclDevrWindow* win = devr->winSorted[0].win;
+      NCCLCHECKIGNORE(symWindowDestroy(comm, win->vidmem, stream), ret);
+    }
+    CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+  }
+
+  if (comm->symmetricSupport) {
+    symTeamDestroyAll(comm);
+    { // delete windowTable
+      struct ncclDevCommWindowTable* tableDev = devr->windowTable;
+      while (tableDev != nullptr) {
+        struct ncclDevCommWindowTable* tableHost;
+        if (ncclSuccess != ncclShadowPoolToHost(&devr->shadows, tableDev, &tableHost)) break;
+        struct ncclDevCommWindowTable* next = tableHost->next;
+        ncclShadowPoolFree(&devr->shadows, tableDev, stream);
+        tableDev = next;
+      }
+      CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+    }
+    // Drain memories whose owning windows were never explicitly destroyed
+    // (e.g. resource windows created by ncclDevCommCreate when the caller
+    // skips the matching ncclDevCommDestroy). Without this, every per-rank
+    // cuMemMap slice inside lsaFlatBase is still live when cuMemAddressFree
+    // is called below, and HIP returns hipErrorInvalidValue (AICOMRCCL-835).
+    if (devr->memHead != nullptr) {
+      int leftover = 0;
+      for (struct ncclDevrMemory* m = devr->memHead; m != nullptr; m = m->next) leftover++;
+      INFO(NCCL_INIT, "ncclDevrFinalize: draining %d leftover device-API memory record(s)", leftover);
+    }
+    while (devr->memHead != nullptr) {
+      symMemoryDestroy(comm, devr->memHead);
+    }
+    if (devr->lsaFlatBase != nullptr) {
+      // The drain above unmapped every per-rank slice via symMemoryDestroy,
+      // so this is now expected to succeed. Surface failures instead of
+      // masking with CUCHECKIGNORE — a regression in the drain path should
+      // not be silently swallowed (AICOMRCCL-835).
+      CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
+      CUCHECKGOTO(cuMemAddressFree(flatAddr, devr->lsaSize * devr->bigSize), fatalRet, cleanup);
+    }
+    ncclSpaceDestruct(&devr->bigSpace);
+  }
+
+cleanup:
+  // RCCL: shadows is constructed unconditionally in ncclDevrInitOnce; destruct
+  // is safe whether or not it ever held pages (hbits==0 shortcuts the cleanup).
+  ncclShadowPoolDestruct(&devr->shadows, stream);
+
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
+  CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
+  free(devr->lsaRankList);
+  free(devr->winSorted);
+  return fatalRet;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+// Message layout used for LSA team all-gather (one per rank per segment).
+struct symLsaMessage {
+  union {
+    CUmemGenericAllocationHandle memHandle;
+    CUmemFabricHandle fabricHandle;
+  };
+  CUmemLocationType type;
+  size_t segmentSize;
+};
+
+static ncclResult_t symMemorySetAccessForVASegment(struct ncclComm* comm, symLsaMessage* message, CUdeviceptr addr) {
+  CUmemAccessDesc accessDesc;
+  accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  accessDesc.location.id = comm->cudaDev;
+  accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+  CUCHECK(cuMemSetAccess(addr, message->segmentSize, &accessDesc, 1));
+  return ncclSuccess;
+}
+
+static ncclResult_t symMemoryExportSegmentHandle(struct ncclComm* comm, symLsaMessage* msg,
+                                                 CUmemGenericAllocationHandle memHandle, size_t segmentSize) {
+  ncclResult_t ret = ncclSuccess;
+  CUmemAllocationProp prop;
+  CUCHECKGOTO(cuMemGetAllocationPropertiesFromHandle(&prop, memHandle), ret, fail);
+  msg->type = prop.location.type;
+  msg->segmentSize = segmentSize;
+  if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+    msg->memHandle = memHandle;
+  } else {
+    CUCHECKGOTO(cuMemExportToShareableHandle(&msg->fabricHandle, memHandle, ncclCuMemHandleType, 0), ret, fail);
+  }
+fail:
+  return ret;
+}
+
+static ncclResult_t symMemoryImportAndMapSegmentHandle(struct ncclComm* comm, int r, CUdeviceptr addr,
+                                                       symLsaMessage* msg, CUmemGenericAllocationHandle memHandle,
+                                                       bool reuseLocal) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclDevrState* devr = &comm->devrState;
+  CUmemGenericAllocationHandle impHandle;
+  if (reuseLocal) {
+    impHandle = memHandle;
+  } else {
+    if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+      int fd = -1;
+      NCCLCHECKGOTO(ncclProxyClientGetFdBlocking(comm, devr->lsaRankList[r], msg, &fd), ret, fail);
+      CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, reinterpret_cast<void*>((uintptr_t)fd),
+                                                 ncclCuMemHandleType),
+                  ret, fail);
+      SYSCHECKGOTO(close(fd), "close", ret, fail);
+    } else {
+      CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, (void*)&msg->fabricHandle, ncclCuMemHandleType), ret,
+                  fail);
+    }
+  }
+  CUCHECKGOTO(cuMemMap(addr, msg->segmentSize, 0, impHandle, 0), ret, fail);
+  NCCLCHECKGOTO(symMemorySetAccessForVASegment(comm, msg, addr), ret, fail);
+  if (!reuseLocal) {
+    CUCHECKGOTO(cuMemRelease(impHandle), ret, fail);
+  }
+fail:
+  return ret;
+}
+
+static ncclResult_t symMemoryImportAndMapSegmentsForRank(struct ncclComm* comm, int r, symLsaMessage* messages,
+                                                         int maxSegments, int numSegments,
+                                                         CUmemGenericAllocationHandle* memHandles, size_t bigOffset) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclDevrState* devr = &comm->devrState;
+  uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
+  uintptr_t addr = base + r * devr->bigSize + bigOffset;
+  for (int segment = 0; segment < numSegments; segment++) {
+    symLsaMessage* msg = messages + r * maxSegments + segment;
+    bool reuseLocal = (r == devr->lsaSelf) || (ncclParamSymReuseSysmemHandles() && ncclSymIsHostSegment(msg->type));
+    CUmemGenericAllocationHandle handle = reuseLocal ? memHandles[segment] : (CUmemGenericAllocationHandle)0ULL;
+    NCCLCHECKGOTO(symMemoryImportAndMapSegmentHandle(comm, r, reinterpret_cast<CUdeviceptr>(addr), msg, handle,
+                                                     reuseLocal),
+                  ret, fail);
+    addr += msg->segmentSize;
+  }
+fail:
+  return ret;
+}
+
+static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMemory* mem) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclDevrState* devr = &comm->devrState;
+  symLsaMessage* messages = nullptr;
+  int* segmentCounts = mem->lsaNumSegments;  // filled from global allgather in symMemoryObtain
+  int maxSegments = 0;
+  const int numSegments = mem->numSegments;
+  size_t* segmentSizes = mem->segmentSizes;
+
+  for (int rank = 0; rank < devr->lsaSize; rank++) {
+    maxSegments = std::max(maxSegments, segmentCounts[rank]);
+  }
+
+  NCCLCHECKGOTO(ncclCalloc(&messages, (size_t)devr->lsaSize * maxSegments), ret, fail);
+
+  for (int segment = 0; segment < numSegments; segment++) {
+    symLsaMessage* msg = messages + devr->lsaSelf * maxSegments + segment;
+    NCCLCHECKGOTO(symMemoryExportSegmentHandle(comm, msg, mem->memHandles[segment], segmentSizes[segment]), ret, fail);
+    INFO(NCCL_REG, "[%d] Segment %d, Type : %d, numSegments : %d, Segment size : %ld, memHandle : %lld", devr->lsaSelf,
+         segment, msg->type, numSegments, msg->segmentSize, msg->memHandle);
+  }
+
+  NCCLCHECKGOTO(bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, devr->lsaSelf, devr->lsaSize, messages,
+                                            sizeof(symLsaMessage) * maxSegments),
+                ret, fail);
+
+  if (devr->lsaFlatBase == nullptr) {
+    // Create on first need.
+    CUdeviceptr addr;
+    CUCHECKGOTO(cuMemAddressReserve(&addr, devr->lsaSize * devr->bigSize, NCCL_MAX_PAGE_SIZE, 0, 0), ret, fail);
+    devr->lsaFlatBase = reinterpret_cast<void*>(addr);
+  }
+
+  for (int r = 0; r < devr->lsaSize; r++) {
+    NCCLCHECKGOTO(symMemoryImportAndMapSegmentsForRank(comm, r, messages, maxSegments, segmentCounts[r],
+                                                       mem->memHandles, mem->bigOffset),
+                  ret, fail);
+  }
+  // Ensure everyone has imported my mem handles.
+  NCCLCHECKGOTO(bootstrapIntraNodeBarrier(comm->bootstrap, devr->lsaRankList, devr->lsaSelf, devr->lsaSize, 0xbeef),
+                ret, fail);
+leave:
+  free(messages);
+  return ret;
+fail:
+  goto leave;
+}
+
+static ncclResult_t symBindTeamMemory(struct ncclComm* comm, struct ncclDevrTeam* tm, struct ncclDevrMemory* mem) {
+  if (comm->nvlsSupport && tm->mcBasePtr != nullptr) {
+#if CUDART_VERSION >= 12010
+      // Multimem teams are currently unsupported for memory containing CPU-backed physical segments
+    if (mem->globalHasSysmemSegment) {
+      INFO(NCCL_NVLS, "Skipping bind multicast for maxGlobalNumSegments = %d, big=%lx, team {%d x %d}",
+           mem->maxGlobalNumSegments, mem->bigOffset, tm->team.nRanks, tm->team.stride);
+    } else {
+      INFO(NCCL_NVLS, "Binding multicast memory at big=%lx to team {%d x %d}", mem->bigOffset, tm->team.nRanks,
+           tm->team.stride);
+      CUCHECK(cuMulticastBindAddr(tm->mcHandle, mem->bigOffset, reinterpret_cast<CUdeviceptr>(mem->primaryAddr),
+                                  mem->size, 0));
+    }
+#endif
+  }
+  return ncclSuccess;
+}
+
+static ncclResult_t symUnbindTeamMemory(struct ncclComm* comm, struct ncclDevrTeam* tm, struct ncclDevrMemory* mem) {
+  if (comm->nvlsSupport && tm->mcBasePtr != nullptr && !mem->globalHasSysmemSegment) {
+#if CUDART_VERSION >= 12010
+    CUCHECK(cuMulticastUnbind(tm->mcHandle, comm->cudaDev, mem->bigOffset, mem->size));
+#endif
+  }
+  return ncclSuccess;
+}
+
+// Caller must barrier the team afterward unless *needBarrier == false on return.
+ncclResult_t symTeamObtain(struct ncclComm* comm, struct ncclTeam team, bool multimem, bool cftUc, bool cftMc,
+                           struct ncclDevrTeam** outTeam, bool* needBarrier) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclDevrState* devr = &comm->devrState;
+  struct ncclDevrTeam* t = devr->teamHead;
+  if (needBarrier != nullptr) *needBarrier = false;
+  bool teamIsNew = false;
+
+  while (true) {
+    if (t == nullptr) {
+      teamIsNew = true;
+      t = (struct ncclDevrTeam*)malloc(sizeof(struct ncclDevrTeam) + team.nRanks * sizeof(int));
+      t->team = team;
+      t->mcHandle = 0x0;
+      t->mcBasePtr = nullptr;
+      t->ucLeId = NCCL_LE_ID_INVALID;
+      t->mcLeId = NCCL_LE_ID_INVALID;
+      for (int i = 0; i < team.nRanks; i++) {
+        t->worldRankList[i] = comm->rank + (i - team.rank) * team.stride;
+      }
+      break;
+    } else if (t->team.rank == team.rank && t->team.nRanks == team.nRanks && t->team.stride == team.stride) {
+      bool needsMultimem = multimem && t->mcBasePtr == nullptr;
+      bool needsCft = (cftUc && t->ucLeId == NCCL_LE_ID_INVALID) || (cftMc && t->mcLeId == NCCL_LE_ID_INVALID);
+      if (!needsMultimem && !needsCft) {
+        if (outTeam) *outTeam = t;
+        return ncclSuccess;
+      }
+      break; // Need to enable multimem and/or LEs
+    } else {
+      t = t->next;
+    }
+  }
+
+  if (multimem) {
+    if (!comm->nvlsSupport) {
+      WARN("Multicast support requested for team but none available on system.");
+      ret = ncclInvalidArgument;
+      goto fail;
+    } else {
+#if CUDART_VERSION >= 12010
+      CUmemGenericAllocationHandle mcHandle = 0;
+      CUdeviceptr mcAddr = 0;
+      CUmulticastObjectProp mcProp = {};
+      char shareableHandle[NVLS_HANDLE_SIZE];
+
+      mcProp.numDevices = team.nRanks;
+      mcProp.handleTypes = ncclCuMemHandleType;
+      mcProp.flags = 0;
+      mcProp.size = devr->bigSize;
+      if (team.rank == 0) {
+        NCCLCHECKGOTO(ncclNvlsGroupCreate(comm, &mcProp, team.rank, team.nRanks, &mcHandle, shareableHandle), ret,
+                      fail);
+        NCCLCHECKGOTO(bootstrapIntraNodeBroadcast(comm->bootstrap, t->worldRankList, team.rank, team.nRanks, 0,
+                                                  shareableHandle, NVLS_HANDLE_SIZE),
+                      ret, fail_mcHandle);
+      } else {
+        NCCLCHECKGOTO(bootstrapIntraNodeBroadcast(comm->bootstrap, t->worldRankList, team.rank, team.nRanks, 0,
+                                                  shareableHandle, NVLS_HANDLE_SIZE),
+                      ret, fail);
+        NCCLCHECKGOTO(ncclNvlsGroupConnect(comm, shareableHandle, t->worldRankList[0], &mcHandle), ret, fail);
+      }
+
+      CUCHECKGOTO(cuMulticastAddDevice(mcHandle, comm->cudaDev), ret, fail_mcHandle);
+      CUCHECKGOTO(cuMemAddressReserve(&mcAddr, devr->bigSize, NCCL_MAX_PAGE_SIZE, 0, 0), ret, fail_mcHandle);
+      CUCHECKGOTO(cuMemMap(mcAddr, devr->bigSize, 0, mcHandle, 0), ret, fail_mcHandle_mcAddr);
+      {
+        CUmemAccessDesc accessDesc = {};
+        accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+        accessDesc.location.id = comm->cudaDev;
+        accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+        CUCHECKGOTO(cuMemSetAccess(mcAddr, devr->bigSize, &accessDesc, 1), ret, fail_mcHandle_mcAddr_unmap);
+      }
+      t->mcHandle = mcHandle;
+      t->mcBasePtr = reinterpret_cast<void*>(mcAddr);
+
+      // Bind new team with all existing memories.
+      for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr; mem = mem->next) {
+        NCCLCHECKGOTO(symBindTeamMemory(comm, t, mem), ret, fail_mcHandle_mcAddr_unmap_mems);
+      }
+      if (needBarrier != nullptr) *needBarrier = true;
+
+      if (false) {
+        // Error labels:
+      fail_mcHandle_mcAddr_unmap_mems:
+        for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr; mem = mem->next) {
+          symUnbindTeamMemory(comm, t, mem);
+        }
+      fail_mcHandle_mcAddr_unmap:
+        CUCHECKIGNORE(cuMemUnmap(mcAddr, devr->bigSize));
+        goto fail_mcHandle_mcAddr; // silence unused label warning
+      fail_mcHandle_mcAddr:
+        CUCHECKIGNORE(cuMemAddressFree(mcAddr, devr->bigSize));
+        goto fail_mcHandle; // silence unused label warning
+      fail_mcHandle:
+        CUCHECKIGNORE(cuMemRelease(mcHandle));
+        goto fail; // silence unused label warning
+      }
+#else
+      goto fail; // silence unused label warning
+#endif
+    }
+  }
+
+  if (cftUc && t->ucLeId == NCCL_LE_ID_INVALID) {
+    NCCLCHECKGOTO(symTeamObtainUcLe(comm, t, devr, needBarrier), ret, fail);
+  }
+  if (cftMc && t->mcLeId == NCCL_LE_ID_INVALID) {
+    NCCLCHECKGOTO(symTeamObtainMcLe(comm, t, devr, needBarrier), ret, fail);
+  }
+
+  if (teamIsNew) {
+     // Add to list
+    t->next = devr->teamHead;
+    devr->teamHead = t;
+  }
+  if (outTeam) *outTeam = t;
+  return ret;
+
+fail:
+  if (teamIsNew) free(t);
+  return ret;
+}
+
+static void symTeamDestroyAll(struct ncclComm* comm) {
+  struct ncclDevrState* devr = &comm->devrState;
+  while (devr->teamHead != nullptr) {
+    struct ncclDevrTeam* t = devr->teamHead;
+    devr->teamHead = t->next;
+    bool hasLe = t->mcLeId != NCCL_LE_ID_INVALID;
+    if (t->mcBasePtr != nullptr || hasLe) {
+      for (struct ncclDevrMemory* m = devr->memHead; m != nullptr; m = m->next) {
+        symUnbindTeamMemory(comm, t, m);
+        symUnbindTeamLe(comm, m, t->mcLeId);
+      }
+    }
+    if (t->mcBasePtr != nullptr) {
+      CUdeviceptr mcAddr = reinterpret_cast<CUdeviceptr>(t->mcBasePtr);
+      CUCHECKIGNORE(cuMemUnmap(mcAddr, devr->bigSize));
+      CUCHECKIGNORE(cuMemAddressFree(mcAddr, devr->bigSize));
+      CUCHECKIGNORE(cuMemRelease(t->mcHandle));
+    }
+#if CUDA_VERSION >= 13030
+    if (t->mcLeId != NCCL_LE_ID_INVALID) {
+      // Each rank owns its own local MC reference (created by rank 0, imported by others).
+      CUCHECKIGNORE(cuLogicalEndpointDestroy(t->mcLeId));
+      CUCHECKIGNORE(cuLogicalEndpointIdRelease(t->mcLeId, 1));
+    }
+#endif
+    free(t);
+  }
+
+  struct ncclDevrStateCftUc* cftUc = &devr->le;
+  if (cftUc->baseId != NCCL_LE_ID_INVALID) {
+    ncclCftLeId leUcSelf = cftUc->baseId + devr->cftSelf;
+    for (struct ncclDevrMemory* m = devr->memHead; m != nullptr; m = m->next) {
+      symUnbindTeamLe(comm, m, leUcSelf);
+    }
+#if CUDA_VERSION >= 13030
+    for (int flatRank = 0; flatRank < devr->cftSize; flatRank++) {
+      CUCHECKIGNORE(cuLogicalEndpointDestroy(cftUc->baseId + flatRank));
+    }
+    CUCHECKIGNORE(cuLogicalEndpointIdRelease(cftUc->baseId, devr->cftSize));
+#endif
+    cftUc->baseId = NCCL_LE_ID_INVALID;
+  }
+}
+
+static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrMemory* mem) {
+  ncclResult_t ret = ncclSuccess;
+  int numSegmentsRegistered = 0;
+  size_t offset = 0;
+
+  NCCLCHECKGOTO(ncclDevrVerifySegmentLayouts(mem, comm), ret, fail);
+  NCCLCHECKGOTO(ncclDevrBuildGinSegmentInfos(mem), ret, fail);
+
+  for (int segment = 0; segment < mem->numGinSegments; segment++) {
+    CUmemLocationType cuMemLocType = (CUmemLocationType)mem->ginSegmentInfos[segment].memType;
+    int ptrType = ncclSymIsHostSegment(cuMemLocType) ? NCCL_PTR_HOST : NCCL_PTR_CUDA;
+    NCCLCHECKGOTO(ncclGinRegister(comm, (char*)mem->primaryAddr + offset, mem->ginSegmentInfos[segment].segmentSize,
+                                  mem->ginSegmentInfos[segment].ginHostWins, mem->ginSegmentInfos[segment].ginDevWins,
+                                  mem->winFlags, mem->maxGlobalNumSegments > 1, ptrType),
+                  ret, fail);
+    numSegmentsRegistered++;
+    offset += mem->ginSegmentInfos[segment].segmentSize;
+  }
+
+  // Cache ginWins for the single segment case to avoid additional pointer dereference on the device
+  if (mem->numGinSegments == 1) {
+    for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS; i++) {
+      mem->ginDevWins[i] = mem->ginSegmentInfos[0].ginDevWins[i];
+      mem->ginHostWins[i] = mem->ginSegmentInfos[0].ginHostWins[i];
+    }
+  }
+exit:
+  return ret;
+fail:
+  for (int i = 0; i < numSegmentsRegistered; i++) {
+    ncclGinDeregister(comm, mem->ginSegmentInfos[i].ginHostWins);
+  }
+  free(mem->ginSegmentInfos);
+  mem->ginSegmentInfos = nullptr;
+  goto exit;
+}
+
+static ncclResult_t symMemoryRegisterRma(struct ncclComm* comm, struct ncclDevrMemory* mem) {
+  NCCLCHECK(ncclRmaProxyConnectOnce(comm));
+  if (mem->maxGlobalNumSegments == 1) {
+    NCCLCHECK(ncclRmaProxyRegister(comm, mem->primaryAddr, mem->size, mem->rmaHostWins));
+  }
+  return ncclSuccess;
+}
+
+// On success we take caller's reference on memHandle.
+// Due to multicast binds for each pre-exiting team, this function requires
+// caller do a world barrier before returning to user.
+static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocationHandle* memHandles, int numSegments,
+                                    void* memAddr, size_t size, int winFlags, struct ncclDevrMemory** outMem,
+                                    bool hasSysmemSegment = false) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclDevrState* devr = &comm->devrState;
+  int64_t bigOffset = 0;
+  struct segmentInfo {
+    int numSegments;
+    bool hasSysmemSegment;
+    size_t totalSize;
+    int hostCftMode;
+  };
+  struct segmentInfo* globalSegmentInfo = nullptr;
+  const int globalLsaTeamBaseIdx = devr->lsaSize * (comm->rank / devr->lsaSize);
+  bool ucBound = false;
+
+  struct ncclDevrMemory* mem = nullptr;
+  // New memory.
+  NCCLCHECKGOTO(ncclCalloc(&mem, 1), ret, fail_mem);
+  NCCLCHECKGOTO(ncclCalloc(&mem->memHandles, numSegments), ret, fail_mem);
+  memcpy(mem->memHandles, memHandles, sizeof(*mem->memHandles) * numSegments);
+  mem->primaryAddr = memAddr;
+  mem->size = size;
+  mem->winFlags = winFlags;
+  mem->hasSysmemSegment = hasSysmemSegment;
+  mem->numSegments = numSegments;
+
+  NCCLCHECKGOTO(ncclCalloc(&mem->segmentSizes, numSegments), ret, fail_mem);
+  NCCLCHECKGOTO(ncclCalloc(&globalSegmentInfo, comm->nRanks), ret, fail_mem);
+
+  NCCLCHECKGOTO(ncclDevrPopulateSegmentSizes(mem, numSegments), ret, fail_mem);
+
+  // We need max segments and global sysmem info to selectively disable some features
+  globalSegmentInfo[comm->rank].numSegments = numSegments;
+  globalSegmentInfo[comm->rank].hasSysmemSegment = hasSysmemSegment;
+  globalSegmentInfo[comm->rank].totalSize = size;
+  globalSegmentInfo[comm->rank].hostCftMode = comm->config.hostCftMode;
+  NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, globalSegmentInfo, sizeof(*globalSegmentInfo)), ret, fail_mem);
+  mem->globalHasSysmemSegment = false;
+  for (int r = 0; r < comm->nRanks; r++) {
+    if (mem->maxGlobalNumSegments < globalSegmentInfo[r].numSegments) {
+      mem->maxGlobalNumSegments = globalSegmentInfo[r].numSegments;
+    }
+    if (globalSegmentInfo[r].hasSysmemSegment) mem->globalHasSysmemSegment = true;
+    if (globalSegmentInfo[r].hostCftMode != comm->config.hostCftMode) {
+      WARN("Communicator ranks have mismatched hostCftMode configuration.");
+      ret = ncclInvalidArgument;
+      goto fail_mem;
+    }
+  }
+
+  NCCLCHECKGOTO(ncclCalloc(&mem->lsaNumSegments, devr->lsaSize), ret, fail_mem);
+  mem->lsaMinSize = size;
+  mem->lsaMaxSize = size;
+  for (int r = 0; r < devr->lsaSize; r++) {
+    int rank = globalLsaTeamBaseIdx + r;
+    mem->lsaNumSegments[r] = globalSegmentInfo[rank].numSegments;
+    mem->lsaMinSize = std::min(mem->lsaMinSize, globalSegmentInfo[rank].totalSize);
+    mem->lsaMaxSize = std::max(mem->lsaMaxSize, globalSegmentInfo[rank].totalSize);
+  }
+
+  // Grab offset in the big space. Use lsaMaxSize (max across LSA ranks) to support asymmetric sizes.
+  NCCLCHECKGOTO(ncclSpaceAlloc(&devr->bigSpace, devr->bigSize, mem->lsaMaxSize, devr->granularity, &bigOffset), ret,
+                fail_mem);
+  mem->bigOffset = bigOffset;
+
+  // Map unicast addresses into flat VA space for lsa team.
+  NCCLCHECKGOTO(symMemoryMapLsaTeam(comm, mem), ret, fail_mem_space);
+
+  // If our caller doesn't have a VA then we'll use the LSA mapping.
+  if (mem->primaryAddr == nullptr) {
+    mem->primaryAddr = (char*)devr->lsaFlatBase + devr->lsaSelf * devr->bigSize + mem->bigOffset;
+  }
+
+  if (comm->gpuCftSupport > 0) {
+    ncclTeam_t ucTeam = ncclTeamCft(comm), mcTeam = ncclTeamCftMultimem(comm);
+    if (comm->config.hostCftMode != ncclHostCftDisable) {
+      // Add the UC and MC team to the teamHead list, and create the corresponding LEs.
+      // In case of failure, "enable" will report the error, fallback will skip it.
+      NOWARN(ret = symTeamObtain(comm, ucTeam, /*multimem=*/false, /*uc=*/true, /*mc=*/false, nullptr, nullptr),
+             NCCL_INIT);
+      if (ret != ncclSuccess && comm->config.hostCftMode == ncclHostCftEnable) {
+        WARN("Failed to obtain the UC team");
+        goto fail_mem_space_teams;
+      }
+      ret = ncclSuccess;
+
+      if (comm->nvlsSupport) {
+        NOWARN(ret = symTeamObtain(comm, mcTeam, /*multimem=*/false, /*uc=*/false, /*mc=*/true, nullptr, nullptr),
+               NCCL_INIT);
+        if (ret != ncclSuccess && comm->config.hostCftMode == ncclHostCftEnable) {
+          WARN("Failed to obtain the MC team");
+          goto fail_mem_space_teams;
+        }
+        ret = ncclSuccess;
+      }
+    }
+  }
+
+  // Bind new memory with each existing team.
+  for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
+    NCCLCHECKGOTO(symBindTeamMemory(comm, t, mem), ret, fail_mem_space_teams);
+    if (comm->gpuCftSupport) {
+      // Only bind to the UC once, all teams share the same UC LE.
+      if (t->ucLeId != NCCL_LE_ID_INVALID && !ucBound) {
+        ncclCftLeId_t le = t->ucLeId + t->team.rank * t->team.stride;
+        NCCLCHECKGOTO(symBindTeamLe(comm, mem, le), ret, fail_mem_space_teams);
+        ucBound = true;
+      }
+      // Each team has a different MC LE, bind to all of them.
+      if (t->mcLeId != NCCL_LE_ID_INVALID) {
+        NCCLCHECKGOTO(symBindTeamLe(comm, mem, t->mcLeId), ret, fail_mem_space_teams);
+      }
+    }
+  }
+
+  if (devr->ginEnabled) {
+    NCCLCHECKGOTO(symMemoryRegisterGin(comm, mem), ret, fail_mem_space_teams);
+  } else {
+    // Default to single segment when GIN is not yet enabled.
+    // This will be recomputed in ncclDevrCommCreateInternal when GIN is activated.
+    mem->numGinSegments = 1;
+  }
+
+  // ginEnabled is set in ncclDevrCommCreateInternal, which might not be called for RMA proxy
+  // so we introduce rmaProxyEnabled to track if RMA proxy is enabled
+  devr->rmaProxyEnabled = ncclRmaProxyEnabled(comm);
+  if (devr->rmaProxyEnabled) {
+    NCCLCHECKGOTO(symMemoryRegisterRma(comm, mem), ret, fail_mem_space_teams);
+  }
+
+  // Add to list of mems.
+  mem->next = devr->memHead;
+  devr->memHead = mem;
+
+  *outMem = mem;
+  free(globalSegmentInfo);
+  return ret;
+
+fail_mem_space_teams:
+  for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
+    symUnbindTeamMemory(comm, t, mem);
+    if (ucBound && t->ucLeId != NCCL_LE_ID_INVALID) {
+      ncclCftLeId_t le = t->ucLeId + t->team.rank * t->team.stride;
+      symUnbindTeamLe(comm, mem, le);
+      ucBound = false;
+    }
+    symUnbindTeamLe(comm, mem, t->mcLeId);
+  }
+fail_mem_space:
+  ncclSpaceFree(&devr->bigSpace, bigOffset, mem->lsaMaxSize);
+fail_mem:
+  if (mem != nullptr) {
+    free(mem->memHandles);
+    free(mem->segmentSizes);
+    free(mem->lsaNumSegments);
+  }
+  free(mem);
+  free(globalSegmentInfo);
+// fail:
+  return ret;
+}
+
+static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem) {
+  if (mem != nullptr) {
+    struct ncclDevrState* devr = &comm->devrState;
+    // Idempotent: a window pair or the finalize drain may already have destroyed
+    // this mem. Establish membership before touching it, not after. The unlink
+    // below walks the list unguarded, so a second call on a freed mem would
+    // otherwise repeat every deregister, unmap, cuMemRelease and free in this
+    // function and then run off the end of the list.
+    {
+      struct ncclDevrMemory* cursor = devr->memHead;
+      while (cursor != nullptr && cursor != mem) cursor = cursor->next;
+      if (cursor != mem) return;
+    }
+    if (devr->ginEnabled && mem->ginSegmentInfos != nullptr) {
+      for (int segment = 0; segment < mem->numGinSegments; segment++) {
+        ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
+      }
+    }
+    if (devr->rmaProxyEnabled && mem->maxGlobalNumSegments == 1) {
+      ncclRmaProxyDeregister(comm, mem->rmaHostWins);
+    }
+    ncclCftLeId leUcSelf = devr->le.baseId == NCCL_LE_ID_INVALID ? NCCL_LE_ID_INVALID : devr->le.baseId + devr->cftSelf;
+    symUnbindTeamLe(comm, mem, leUcSelf);
+    for (struct ncclDevrTeam* t = devr->teamHead; t != nullptr; t = t->next) {
+      symUnbindTeamMemory(comm, t, mem);
+      symUnbindTeamLe(comm, mem, t->mcLeId);
+    }
+    for (int r = 0; r < devr->lsaSize; r++) {
+      uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
+      uintptr_t addr = base + r * devr->bigSize + mem->bigOffset;
+      for (int idx = 0; idx < mem->lsaNumSegments[r]; idx++) {
+        CUdeviceptr tmpBase;
+        size_t tmpBaseSize;
+        CUCHECKIGNORE(cuMemGetAddressRange(&tmpBase, &tmpBaseSize, reinterpret_cast<CUdeviceptr>(addr)));
+        CUCHECKIGNORE(cuMemUnmap(reinterpret_cast<CUdeviceptr>(addr), tmpBaseSize));
+        addr = addr + tmpBaseSize;
+      }
+    }
+
+    ncclSpaceFree(&devr->bigSpace, mem->bigOffset, mem->lsaMaxSize);
+    for (int segment = 0; segment < mem->numSegments; segment++) {
+      CUCHECKIGNORE(cuMemRelease(mem->memHandles[segment]));
+    }
+
+    struct ncclDevrMemory** ptr = &devr->memHead;
+    while (*ptr != mem) ptr = &(*ptr)->next;
+    *ptr = mem->next; // Remove from list.
+
+    free(mem->ginSegmentInfos);
+    free(mem->lsaNumSegments);
+    free(mem->segmentSizes);
+    free(mem->memHandles);
+    free(mem);
+  }
+}
+
+static ncclResult_t symWindowTableInitOnce(struct ncclComm* comm, cudaStream_t stream) {
+  struct ncclDevrState* devr = &comm->devrState;
+  struct ncclDevCommWindowTable* tableDev = devr->windowTable;
+  if (tableDev == nullptr) {
+    // Create on first need.
+    NCCLCHECK(ncclShadowPoolAlloc<ncclDevCommWindowTable>(&devr->shadows, &tableDev, nullptr, stream));
+    devr->windowTable = tableDev;
+  }
+  return ncclSuccess;
+}
+
+static ncclResult_t symWindowInitGin(struct ncclDevrState* devr, struct ncclDevrMemory* mem,
+                                     struct ncclWindow_vidmem* winDevHost, cudaStream_t stream) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclSegmentWindow* segmentWindowsDev;
+  NCCLCHECK(ncclDevrAllocAndPopulateSegmentWindows(devr, mem, stream, &segmentWindowsDev));
+  winDevHost->ginMultiSegmentWins = segmentWindowsDev;
+  winDevHost->numSegments = mem->numGinSegments;
+  for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
+    winDevHost->ginWinsDefaultBackend[i] = mem->ginDevWins[i];
+  }
+  return ret;
+}
+
+// On success we take callers reference on `mem`.
+static ncclResult_t symWindowCreate(struct ncclComm* comm, struct ncclDevrMemory* mem, size_t memOffset, void* userPtr,
+                                    size_t userSize, int winFlags, void* localReg, struct ncclWindow_vidmem** outWinDev,
+                                    struct ncclDevrWindow** outWin, cudaStream_t stream) {
+  uintptr_t userAddr = reinterpret_cast<uintptr_t>(userPtr);
+  struct ncclDevrState* devr = &comm->devrState;
+  struct ncclDevrWindow* win;
+
+  win = (struct ncclDevrWindow*)malloc(sizeof(struct ncclDevrWindow));
+  memset(win, 0, sizeof(*win));
+  win->memory = mem;
+  win->size = userSize;
+  win->bigOffset = mem->bigOffset + memOffset;
+  win->winFlags = winFlags;
+  win->localRegHandle = localReg;
+  if (userPtr == nullptr) {
+    // Null means caller has no VA and will use the lsa team flat VA address.
+    win->userPtr = userPtr = (char*)devr->lsaFlatBase + (devr->lsaSelf * devr->bigSize) + mem->bigOffset;
+    userAddr = reinterpret_cast<uintptr_t>(userPtr);
+  } else {
+    win->userPtr = userPtr;
+  }
+
+  struct ncclWindow_vidmem* winDev;
+  struct ncclWindow_vidmem* winDevHost;
+  NCCLCHECK(ncclShadowPoolAlloc(&devr->shadows, &winDev, &winDevHost, stream));
+  win->vidmem = winDev;
+  winDevHost->lsaFlatBase = (char*)devr->lsaFlatBase + win->bigOffset;
+  winDevHost->mcOffset4K = win->bigOffset >> 12;
+  winDevHost->stride4G = devr->bigSize >> 32;
+  winDevHost->lsaRank = devr->lsaSelf;
+  winDevHost->cftFlatRank = devr->cftSelf;
+  winDevHost->worldRank = comm->rank;
+  winDevHost->winHost = (void*)win;
+  winDevHost->ginOffset4K = memOffset >> 12;
+  if (devr->ginEnabled) {
+    NCCLCHECK(symWindowInitGin(devr, mem, winDevHost, stream));
+  }
+  CUDACHECK(cudaMemcpyAsync(winDev, winDevHost, sizeof(struct ncclWindow_vidmem), cudaMemcpyHostToDevice, stream));
+
+  NCCLCHECK(symWindowTableInitOnce(comm, stream)); // ensure devr->windowTable exists
+  struct ncclDevCommWindowTable* tableDev = devr->windowTable;
+  while (true) {
+    struct ncclDevCommWindowTable* tableHost;
+    NCCLCHECK(ncclShadowPoolToHost(&devr->shadows, tableDev, &tableHost));
+    int i = 0;
+    while (i < 32 && tableHost->entries[i].window != nullptr) i += 1;
+    if (i < 32) {
+      tableHost->entries[i].base = userAddr;
+      tableHost->entries[i].size = userSize;
+      tableHost->entries[i].window = winDev;
+      CUDACHECK(cudaMemcpyAsync(&tableDev->entries[i], &tableHost->entries[i], sizeof(tableHost->entries[i]),
+                                cudaMemcpyHostToDevice, stream));
+      break;
+    }
+    if (tableHost->next == nullptr) {
+      NCCLCHECK(ncclShadowPoolAlloc<ncclDevCommWindowTable>(&devr->shadows, &tableHost->next, nullptr, stream));
+      CUDACHECK(cudaMemcpyAsync(&tableDev->next, &tableHost->next, sizeof(tableHost->next), cudaMemcpyHostToDevice,
+                                stream));
+    }
+    tableDev = tableHost->next;
+  }
+
+  { // insert into winSorted[]
+    int i = listFindSortedLub(&ncclDevrWindowSorted::userAddr, devr->winSorted, devr->winSortedCount, userAddr);
+    struct ncclDevrWindowSorted winSort;
+    winSort.userAddr = userAddr;
+    winSort.size = userSize;
+    winSort.win = win;
+    listInsert(&devr->winSorted, &devr->winSortedCapacity, &devr->winSortedCount, i, winSort);
+  }
+
+  if (outWinDev) *outWinDev = winDev;
+  if (outWin) *outWin = win;
+  return ncclSuccess;
+}
+
+static ncclResult_t symWindowDestroy(struct ncclComm* comm, struct ncclWindow_vidmem* winDev, cudaStream_t stream) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclDevrState* devr = &comm->devrState;
+  struct ncclWindow_vidmem* winDevHost;
+  struct ncclDevrWindow* winHost;
+
+  NCCLCHECKGOTO(ncclShadowPoolToHost(&devr->shadows, winDev, &winDevHost), ret, fail);
+  winHost = (struct ncclDevrWindow*)winDevHost->winHost;
+
+  symMemoryDestroy(comm, winHost->memory);
+
+  {
+    struct ncclDevCommWindowTable* tableDev = devr->windowTable;
+    while (true) {
+      struct ncclDevCommWindowTable* tableHost;
+      NCCLCHECKGOTO(ncclShadowPoolToHost(&devr->shadows, tableDev, &tableHost), ret, remove_winSorted);
+      int i = 0;
+      while (i < 32 && tableHost->entries[i].window != winDev) i += 1;
+      if (i < 32) {
+        memset(&tableHost->entries[i], 0, sizeof(tableHost->entries[i]));
+        CUDACHECKGOTO(cudaMemsetAsync(&tableDev->entries[i], 0, sizeof(tableDev->entries[i]), stream), ret,
+                      remove_winSorted);
+        break;
+      }
+      if (tableHost->next == nullptr) break; // Error didn't find window in table
+      tableDev = tableHost->next;
+    }
+  }
+
+  if (winDevHost->ginMultiSegmentWins != nullptr) {
+    NCCLCHECKGOTO(ncclShadowPoolFree(&devr->shadows, winDevHost->ginMultiSegmentWins, stream), ret, remove_winSorted);
+  }
+
+  NCCLCHECKGOTO(ncclShadowPoolFree(&devr->shadows, winDev, stream), ret, remove_winSorted);
+
+  NCCLCHECKGOTO(ncclCommDeregister(comm, winHost->localRegHandle), ret, remove_winSorted);
+
+remove_winSorted:
+  {
+    int i = listFindSortedLub(&ncclDevrWindowSorted::userAddr, devr->winSorted, devr->winSortedCount,
+                              reinterpret_cast<uintptr_t>(winHost->userPtr));
+    i -= 1; // least upper bound is just after ours.
+    listRemove(devr->winSorted, &devr->winSortedCount, i);
+  }
+  // Remove the just deallocated window from the table storing the communicator pointer
+  {
+    std::lock_guard<std::mutex> lock(ncclWindowMapMutex);
+    NCCLCHECKGOTO(ncclIntruAddressMapRemove(&ncclWindowMap, winDev), ret, fail);
+  }
+
+  free(winHost);
+fail:
+  return ret;
+}
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+static void windowCloseIpcPeers(struct ncclComm* comm, struct ncclDevrWindow* win) {
+  if (win->ipcPeerPtrsAllocBase == nullptr) return;
+  int teamSelf = comm->devrState.lsaSelf;
+  for (int r = 0; r < win->ipcPeerCount; r++) {
+    if (r == teamSelf) continue;
+    void* peerAllocBase = win->ipcPeerPtrsAllocBase[r];
+    if (peerAllocBase == nullptr) continue;
+    CUDACHECKIGNORE(cudaIpcCloseMemHandle(peerAllocBase));
+  }
+}
+
+// RCCL: register a non-sym window. Mirrors upstream sym's two-stage shape:
+//   (1) intra-node mapping via cudaIpcOpenMemHandle peer pointers, when
+//       lsaSize > 1.
+//   (2) inter-node MR via ncclRmaProxyRegister, when hostRmaSupport. Same
+//       call upstream issues from symMemoryRegisterRma.
+static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, size_t userSize, int winFlags,
+                                         void* localRegHandle, ncclWindow_t* outWinDev) {
+  struct ExchangeEntry {
+    cudaIpcMemHandle_t handle;
+    uint64_t hostHash;
+    uint64_t pidHash;
+    uintptr_t allocBase;
+    size_t userOffset; // userPtr - allocBase
+    size_t userSize;
+  };
+
+  // Intra-node barrier tag for the non-sym window mapping handshake.
+  static constexpr int kNonSymWindowBarrierTag = 0xbeed;
+
+  struct ncclDevrState* devr = &comm->devrState;
+  int teamSize = devr->lsaSize;
+  int teamSelf = devr->lsaSelf;
+  int* teamRankList = devr->lsaRankList;
+
+  bool doIpc = teamSize > 1;
+  bool doRma = comm->hostRmaSupport && (teamSize < comm->nRanks);
+
+  struct ncclDevrWindow* win = nullptr;
+  cudaStream_t stream = nullptr;
+  struct ncclWindow_vidmem* winDev = nullptr;
+  struct ncclWindow_vidmem* winDevHost = nullptr;
+  ExchangeEntry* peers = nullptr;
+  int openedCount = 0;
+
+  win = (struct ncclDevrWindow*)malloc(sizeof(struct ncclDevrWindow));
+  if (win == nullptr) goto fail;
+
+  memset(win, 0, sizeof(*win));
+  win->memory = nullptr;
+  win->userPtr = userPtr;
+  win->size = userSize;
+  win->winFlags = winFlags;
+  win->localRegHandle = localRegHandle;
+
+  // Stage 1: intra-node mapping (analog of symMemoryMapLsaTeam).
+  if (doIpc) {
+    CUdeviceptr allocBase = 0;
+    size_t allocSize = 0;
+    CUdeviceptr userPtrCu = reinterpret_cast<CUdeviceptr>(userPtr);
+
+    if (CUDA_SUCCESS != cuMemGetAddressRange(&allocBase, &allocSize, userPtrCu)) {
+      WARN("windowRegisterNonSym: cuMemGetAddressRange failed for userPtr=%p", userPtr);
+      goto fail;
+    }
+    size_t userOffset = reinterpret_cast<uintptr_t>(userPtr) - reinterpret_cast<uintptr_t>(allocBase);
+
+    peers = (ExchangeEntry*)calloc(teamSize, sizeof(ExchangeEntry));
+    if (peers == nullptr) goto fail;
+
+    ExchangeEntry* mine = &peers[teamSelf];
+    cudaError_t cerr = cudaIpcGetMemHandle(&mine->handle, reinterpret_cast<void*>(allocBase));
+    if (cerr != cudaSuccess) {
+      WARN("windowRegisterNonSym: cudaIpcGetMemHandle failed: %s", cudaGetErrorString(cerr));
+      goto fail;
+    }
+
+    mine->hostHash = comm->peerInfo[comm->rank].hostHash;
+    mine->pidHash = comm->peerInfo[comm->rank].pidHash;
+    mine->allocBase = reinterpret_cast<uintptr_t>(allocBase);
+    mine->userOffset = userOffset;
+    mine->userSize = userSize;
+
+    if (ncclSuccess !=
+        bootstrapIntraNodeAllGather(comm->bootstrap, teamRankList, teamSelf, teamSize, peers, sizeof(ExchangeEntry))) {
+      WARN("windowRegisterNonSym: bootstrapIntraNodeAllGather failed");
+      goto fail;
+    }
+
+    win->ipcPeerPtrs = (void**)calloc(teamSize, sizeof(void*));
+    win->ipcPeerPtrsAllocBase = (void**)calloc(teamSize, sizeof(void*));
+    if (win->ipcPeerPtrs == nullptr || win->ipcPeerPtrsAllocBase == nullptr) {
+      goto fail;
+    }
+    win->ipcPeerCount = teamSize;
+
+    for (int r = 0; r < teamSize; r++) {
+      bool sameProc = (peers[r].hostHash == peers[teamSelf].hostHash) && (peers[r].pidHash == peers[teamSelf].pidHash);
+      if (r == teamSelf || sameProc) {
+        // Same address space: use the exchanged pointer directly and avoid an
+        // unnecessary IPC import/close pair. Keep AllocBase null for peer
+        // entries so windowCloseIpcPeers does not close a direct pointer.
+        if (r == teamSelf) {
+          win->ipcPeerPtrsAllocBase[r] = reinterpret_cast<void*>(allocBase);
+          win->ipcPeerPtrs[r] = userPtr;
+        } else {
+          win->ipcPeerPtrsAllocBase[r] = nullptr;
+          win->ipcPeerPtrs[r] = reinterpret_cast<void*>(peers[r].allocBase + peers[r].userOffset);
+        }
+      } else {
+        void* peerBase = nullptr;
+        cudaError_t orErr = cudaIpcOpenMemHandle(&peerBase, peers[r].handle, cudaIpcMemLazyEnablePeerAccess);
+        if (orErr != cudaSuccess) {
+          WARN("windowRegisterNonSym: cudaIpcOpenMemHandle for "
+               "teamRank=%d failed: %s",
+               r, cudaGetErrorString(orErr));
+          goto fail;
+        }
+        win->ipcPeerPtrsAllocBase[r] = peerBase;
+        win->ipcPeerPtrs[r] = (char*)peerBase + peers[r].userOffset;
+        openedCount += 1;
+      }
+    }
+  }
+
+  // Stage 2: inter-node MR (analog of symMemoryRegisterRma).
+  if (doRma) {
+    if (ncclSuccess != ncclRmaProxyConnectOnce(comm)) {
+      WARN("windowRegisterNonSym: ncclRmaProxyConnectOnce failed");
+      goto fail;
+    }
+    if (ncclSuccess != ncclRmaProxyRegister(comm, userPtr, userSize, win->rmaHostWins)) {
+      WARN("windowRegisterNonSym: ncclRmaProxyRegister failed");
+      goto fail;
+    }
+  }
+
+  // Stage 3: encode the device-side handle as a shadow pool entry so the
+  // kernel/CE resolves winHost via ncclShadowPoolToHost
+  if (cudaSuccess != cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking)) {
+    WARN("windowRegisterNonSym: cudaStreamCreateWithFlags failed");
+    goto fail;
+  }
+
+  if (ncclSuccess != ncclShadowPoolAlloc(&devr->shadows, &winDev, &winDevHost, stream)) {
+    WARN("windowRegisterNonSym: ncclShadowPoolAlloc failed");
+    goto fail;
+  }
+
+  win->vidmem = winDev;
+  memset(winDevHost, 0, sizeof(*winDevHost));
+  winDevHost->lsaRank = teamSelf;
+  winDevHost->worldRank = comm->rank;
+  winDevHost->winHost = (void*)win;
+
+  if (cudaSuccess != cudaMemcpyAsync(winDev, winDevHost, sizeof(*winDevHost), cudaMemcpyHostToDevice, stream)) {
+    WARN("windowRegisterNonSym: cudaMemcpyAsync (window header) failed");
+    goto fail;
+  }
+
+  {
+    uintptr_t userAddr = reinterpret_cast<uintptr_t>(userPtr);
+    int idx = listFindSortedLub(&ncclDevrWindowSorted::userAddr, devr->winSorted, devr->winSortedCount, userAddr);
+    struct ncclDevrWindowSorted winSort;
+    winSort.userAddr = userAddr;
+    winSort.size = userSize;
+    winSort.win = win;
+    listInsert(&devr->winSorted, &devr->winSortedCapacity, &devr->winSortedCount, idx, winSort);
+  }
+
+  CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
+  stream = nullptr;
+
+  if (doIpc) {
+    // Intra-node sync; sym path uses bootstrapBarrier post-mapping.
+    if (ncclSuccess !=
+        bootstrapIntraNodeBarrier(comm->bootstrap, teamRankList, teamSelf, teamSize, kNonSymWindowBarrierTag)) {
+      WARN("windowRegisterNonSym: bootstrapIntraNodeBarrier failed");
+      // Revert listInsert before falling into shared cleanup.
+      int i = listFindSortedLub(&ncclDevrWindowSorted::userAddr, devr->winSorted, devr->winSortedCount,
+                                reinterpret_cast<uintptr_t>(userPtr));
+      i -= 1;
+      if (i >= 0) listRemove(devr->winSorted, &devr->winSortedCount, i);
+      goto fail;
+    }
+  }
+
+  INFO(NCCL_INIT,
+       "windowRegisterNonSym: backing=%s teamSize=%d nRanks=%d "
+       "userPtr=%p size=%zu opened=%d hostRma=%d",
+       doIpc ? "IPC" : (doRma ? "PROXY" : "LOCAL"), teamSize, comm->nRanks, userPtr, userSize, openedCount, (int)doRma);
+
+  free(peers);
+  *outWinDev = winDev;
+  return ncclSuccess;
+
+fail:
+  if (win != nullptr) {
+    // Undo proxy MR (rmaHostWins[0] is non-null only after register).
+    if (win->rmaHostWins[0] != nullptr) {
+      (void)ncclRmaProxyDeregister(comm, win->rmaHostWins);
+    }
+
+    windowCloseIpcPeers(comm, win);
+
+    // Free the shadow-pool entry if it was allocated
+    if (win->vidmem != nullptr) {
+      if (stream == nullptr) {
+        CUDACHECKIGNORE(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+      }
+      (void)ncclShadowPoolFree(&devr->shadows, win->vidmem, stream);
+    }
+    free(win->ipcPeerPtrs);
+    free(win->ipcPeerPtrsAllocBase);
+    free(win);
+  }
+  if (stream != nullptr) {
+    CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+    CUDACHECKIGNORE(cudaStreamDestroy(stream));
+  }
+  free(peers);
+  // localRegHandle is owned by caller's failure cleanup path.
+  *outWinDev = nullptr;
+  return ncclSystemError;
+}
+#endif
+
+ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr, size_t userSize, int winFlags,
+                                           ncclWindow_t* outWinDev) {
+  ncclResult_t ret = ncclSuccess;
+  CUdeviceptr memAddr = 0;
+  size_t memSize = 0;
+  CUmemGenericAllocationHandle* memHandles = nullptr;
+  size_t memOffset;
+  struct ncclDevrMemory* mem = nullptr;
+  cudaStream_t stream = nullptr;
+  void* localRegHandle = nullptr;
+  struct ncclDevrWindow* winHost = nullptr;
+  int numSegments = 0;
+  size_t offset = 0;
+  bool hasSysmemSegment = false;
+  cudaStreamCaptureMode captureMode = cudaStreamCaptureModeRelaxed;
+
+  CUDACHECK(cudaThreadExchangeStreamCaptureMode(&captureMode));
+
+  NCCLCHECKGOTO(ncclCommRegister(comm, userPtr, userSize, &localRegHandle), ret, fail);
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // RCCL: when sym VMM is unavailable (no cuMem), route through the non-sym
+  // helper which lays out IPC for intra-node and proxy/GIN MR for inter-node
+  if (!comm->symmetricSupport) {
+    NCCLCHECKGOTO(windowRegisterNonSym(comm, userPtr, userSize, winFlags, localRegHandle, outWinDev), ret, fail_locReg);
+    CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
+    return ncclSuccess;
+  }
+#endif
+
+  if (winFlags & NCCL_WIN_COLL_SYMMETRIC) {
+    // Defer symmetric kernel init until at least one window with that flag exists.
+    NCCLCHECKGOTO(ncclSymkInitOnce(comm), ret, fail);
+  }
+
+  // Get underlying cumem base address and number of mapped physical segments that userPtr spans
+  NCCLCHECKGOTO(ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(userPtr), userSize, &memAddr, &memSize,
+                                         &numSegments, &hasSysmemSegment),
+                ret, fail_locReg);
+  NCCLCHECKGOTO(ncclCalloc(&memHandles, numSegments), ret, fail_locReg);
+
+  if (hasSysmemSegment) {
+    if (!ncclParamElasticBufferRegister()) {
+      WARN("VA represented by {userPtr = %p, size = %zu} contains CPU-backed physical segments, but "
+           "NCCL_ELASTIC_BUFFER_REGISTER is set to 0. Please set NCCL_ELASTIC_BUFFER_REGISTER=1 and retry window "
+           "registration",
+           userPtr, userSize);
+      ret = ncclInvalidArgument;
+      goto fail_locReg;
+    }
+#if CUDART_VERSION >= 12080
+    else if (comm->MNNVL) {
+      int multiNodeLsaSupported = 0;
+      CUCHECKGOTO(cuDeviceGetAttribute(&multiNodeLsaSupported, CU_DEVICE_ATTRIBUTE_HOST_NUMA_MULTINODE_IPC_SUPPORTED,
+                                       comm->cudaDev),
+                  ret, fail_locReg);
+      if (!multiNodeLsaSupported) {
+        WARN("VA represented by {userPtr = %p, size = %zu} contains CPU-backed physical segments, but the LSA team "
+             "does not support multi-node IPC on CPU-backed buffers. Please retry by setting NCCL_MNNVL_ENABLE=0",
+             userPtr, userSize);
+        ret = ncclInvalidArgument;
+        goto fail_locReg;
+      }
+    }
+#endif
+  }
+
+  memOffset = reinterpret_cast<uintptr_t>(userPtr) - reinterpret_cast<uintptr_t>(memAddr);
+  if (memOffset % NCCL_WIN_REQUIRED_ALIGNMENT != 0) {
+    WARN("Window address must be suitably aligned.");
+    ret = ncclInvalidArgument;
+    goto fail;
+  }
+
+  // Retain all handles and validate segment location types
+  for (int segment = 0; segment < numSegments; segment++) {
+    size_t baseSendSize;
+    CUCHECK(cuMemGetAddressRange(nullptr, &baseSendSize,
+                                 reinterpret_cast<CUdeviceptr>(reinterpret_cast<char*>(memAddr) + offset)));
+    CUCHECKGOTO(cuMemRetainAllocationHandle(&memHandles[segment], (void*)(reinterpret_cast<char*>(memAddr) + offset)),
+                ret, fail_locReg);
+    CUmemAllocationProp prop;
+    CUCHECKGOTO(cuMemGetAllocationPropertiesFromHandle(&prop, memHandles[segment]), ret, fail_locReg);
+    if (!ncclSymIsHostSegment(prop.location.type) && prop.location.type != CU_MEM_LOCATION_TYPE_DEVICE) {
+      WARN(
+        "Segment %d has unsupported location type %d. Symmetric memory currently only supports "
+        "host (CU_MEM_LOCATION_TYPE_HOST_NUMA, or CU_MEM_LOCATION_TYPE_HOST on AMD) and CU_MEM_LOCATION_TYPE_DEVICE.",
+        segment, (int)prop.location.type);
+      ret = ncclInvalidArgument;
+      goto fail_locReg;
+    }
+    offset += baseSendSize;
+  }
+
+  // Trade cumem handles for ncclDevrMemory*
+  NCCLCHECKGOTO(symMemoryObtain(comm, memHandles, numSegments, (void*)memAddr, memSize, winFlags, &mem,
+                                hasSysmemSegment),
+                ret, fail_locReg_memHandle);
+  memset(memHandles, 0, numSegments * sizeof(*memHandles)); // symMemoryObtain took our reference
+
+  CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
+
+  NCCLCHECKGOTO(symWindowCreate(comm, mem, memOffset, userPtr, userSize, winFlags, localRegHandle, outWinDev, &winHost,
+                                stream),
+                ret, fail_locReg_memHandle_mem_stream);
+  mem = nullptr; // symWindowCreate took our reference
+
+  CUDACHECKGOTO(cudaStreamSynchronize(stream), ret, fail_locReg_memHandle_mem_stream_win);
+
+  // symMemoryObtain and symWindowCreate need a barrier.
+  NCCLCHECKGOTO(bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, 0xbeef), ret,
+                fail_locReg_memHandle_mem_stream_win);
+
+  {
+    std::lock_guard<std::mutex> lock(ncclWindowMapMutex);
+    winHost->comm = comm;
+    winHost->next = nullptr;
+    NCCLCHECKGOTO(ncclIntruAddressMapInsert(&ncclWindowMap, *outWinDev, winHost), ret,
+                  fail_locReg_memHandle_mem_stream_win);
+    INFO(NCCL_ALLOC, "Inserted window %p into address map, ret=%d", *outWinDev, ret);
+  }
+
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
+  free(memHandles);
+  CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
+  return ret;
+
+fail_locReg_memHandle_mem_stream_win:
+  symWindowDestroy(comm, *outWinDev, stream);
+  *outWinDev = nullptr;
+  CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+fail_locReg_memHandle_mem_stream:
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
+  symMemoryDestroy(comm, mem);
+fail_locReg_memHandle:
+  for (int idx = 0; idx < numSegments; idx++) {
+    if (memHandles[idx] != 0x0ULL) {
+      CUCHECKIGNORE(cuMemRelease(memHandles[idx]));
+    }
+  }
+  free(memHandles);
+fail_locReg:
+  ncclCommDeregister(comm, localRegHandle);
+fail:
+  CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
+  *outWinDev = nullptr;
+  return ret;
+}
+
+static ncclResult_t deepCopyDevCommRequirements(struct ncclDevCommRequirements const* src,
+                                                struct ncclDevCommRequirements** dst) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclDevResourceRequirements** dstRes;
+  struct ncclTeamRequirements** dstTeam;
+
+  NCCLCHECK(ncclCalloc(dst, 1));
+  **dst = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+
+  // Copy the entire struct now and update linked lists later.  Because of backwards compatibility, the source may
+  // actually be smaller than the type would imply.
+  memcpy(*dst, src, src->size);
+  (*dst)->resourceRequirementsList = nullptr;
+  (*dst)->teamRequirementsList = nullptr;
+
+  dstRes = &(*dst)->resourceRequirementsList;
+  for (struct ncclDevResourceRequirements* rr = src->resourceRequirementsList; rr != nullptr; rr = rr->next) {
+    NCCLCHECKGOTO(ncclCalloc(dstRes, 1), ret, fail);
+    memcpy(*dstRes, rr, sizeof(struct ncclDevResourceRequirements));
+    (*dstRes)->next = nullptr;
+    dstRes = &(*dstRes)->next;
+  }
+
+  dstTeam = &(*dst)->teamRequirementsList;
+  for (struct ncclTeamRequirements* tr = src->teamRequirementsList; tr != nullptr; tr = tr->next) {
+    NCCLCHECKGOTO(ncclCalloc(dstTeam, 1), ret, fail);
+    memcpy(*dstTeam, tr, sizeof(struct ncclTeamRequirements));
+    (*dstTeam)->next = nullptr;
+    dstTeam = &(*dstTeam)->next;
+  }
+
+exit:
+  return ret;
+fail:
+  freeDevCommRequirements(*dst);
+  *dst = nullptr;
+  goto exit;
+}
+
+void freeDevCommRequirements(struct ncclDevCommRequirements* reqs) {
+  if (reqs) {
+    while (reqs->resourceRequirementsList) {
+      struct ncclDevResourceRequirements* rr_next = reqs->resourceRequirementsList->next;
+      free(reqs->resourceRequirementsList);
+      reqs->resourceRequirementsList = rr_next;
+    }
+
+    while (reqs->teamRequirementsList) {
+      struct ncclTeamRequirements* tr_next = reqs->teamRequirementsList->next;
+      free(reqs->teamRequirementsList);
+      reqs->teamRequirementsList = tr_next;
+    }
+
+    free(reqs);
+  }
+}
+
+bool ncclGinResourcesRequested(struct ncclDevCommRequirements const* reqs) {
+  bool requestedGinResources = reqs->ginSignalCount > 0 || reqs->ginCounterCount > 0 || reqs->barrierCount > 0 ||
+                               reqs->railGinBarrierCount > 0 || reqs->worldGinBarrierCount > 0;
+
+  struct ncclDevResourceRequirements* node = reqs->resourceRequirementsList;
+  while (!requestedGinResources && node != nullptr) {
+    requestedGinResources = node->ginSignalCount > 0 || node->ginCounterCount > 0;
+    node = node->next;
+  }
+
+  return requestedGinResources;
+}
+
+#if defined(NCCL_OS_LINUX)
+#include "nccl_device/gin/gdaki/gin_gdaki_device_host_common.h"
+static void ncclDevCommGdakiDump(void* handle) {
+  struct ncclGinGdakiGPUContext ctx;
+  if (cudaMemcpy(&ctx, handle, sizeof(ctx), cudaMemcpyDeviceToHost) == cudaSuccess) {
+    printf("    GDAKI qp %p companion qp %p sink buffer lkey %x\n", ctx.gdqp, ctx.companion_gdqp, ctx.sink_buffer_lkey);
+    printf("    GDAKI counters %p rkeys %p lkey %x offset %d\n", ctx.counters_table.buffer, ctx.counters_table.rkeys,
+           ctx.counters_table.lkey, ctx.counters_table.offset);
+    printf("    GDAKI signals  %p rkeys %p lkey %x offset %d\n", ctx.signals_table.buffer, ctx.signals_table.rkeys,
+           ctx.signals_table.lkey, ctx.signals_table.offset);
+  }
+}
+
+static void ncclDevCommEfaGdaDump(void* handle) {
+  printf("    EFA_GDA handle %p\n", handle);
+}
+
+#include "nccl_device/gin/proxy/gin_proxy_device_host_common.h"
+static void ncclDevCommProxyDump(void* handle) {
+  ncclGinProxyGpuCtx_t ctx;
+  if (cudaMemcpy(&ctx, handle, sizeof(ctx), cudaMemcpyDeviceToHost) == cudaSuccess) {
+    printf("    PROXY nranks %d queue size %d queues %p\n", ctx.nranks, ctx.queueSize, ctx.queues);
+    printf("    PROXY pis %p cis %p counters %p signals %p\n", ctx.pis, ctx.cis, ctx.counters, ctx.signals);
+  }
+}
+#elif defined(NCCL_OS_WINDOWS)
+static void ncclDevCommGdakiDump(void* handle) {
+  printf("    GDAKI handle %p (detailed dump not available on Windows)\n", handle);
+}
+static void ncclDevCommEfaGdaDump(void* handle) {
+  printf("    EFA_GDA handle %p (detailed dump not available on Windows)\n", handle);
+}
+static void ncclDevCommProxyDump(void* handle) {
+  printf("    PROXY handle %p (detailed dump not available on Windows)\n", handle);
+}
+#endif /* !NCCL_OS_WINDOWS */
+
+void ncclDevCommDump(struct ncclDevComm* devComm) {
+  printf("**** Dev Comm Dump %p ****\n", devComm);
+  printf(" Rank %d/%d CPC32 %d\n", devComm->rank, devComm->nRanks, devComm->nRanks_rcp32);
+  printf(" LSA Rank %d/%d CPC32 %d\n", devComm->lsaRank, devComm->lsaSize, devComm->lsaSize_rcp32);
+  printf(" CFT Rank %d/%d, CFT-MM Rank %d/%d\n", devComm->cftRank, devComm->cftSize, devComm->cftMultimemRank,
+         devComm->cftMultimemSize);
+  printf("\n");
+  printf(" GIN\n");
+  printf("  Connection stride %d\n", devComm->ginConnectionStride);
+  printf("  Context stride %d\n", devComm->ginContextStride);
+  printf("  Connections %d\n", devComm->ginConnectionCount);
+  for (int c = 0; c < devComm->ginConnectionCount; c++) {
+    printf("   [%d] %d %p\n", c, devComm->ginNetDeviceTypes[c], devComm->ginHandles[c]);
+    if (devComm->ginNetDeviceTypes[c] == NCCL_GIN_TYPE_GDAKI) ncclDevCommGdakiDump(devComm->ginHandles[c]);
+    if (devComm->ginNetDeviceTypes[c] == NCCL_GIN_TYPE_EFA_GDA) ncclDevCommEfaGdaDump(devComm->ginHandles[c]);
+    if (devComm->ginNetDeviceTypes[c] == NCCL_GIN_TYPE_PROXY) ncclDevCommProxyDump(devComm->ginHandles[c]);
+  }
+  printf("  Signals  %d shadows %p\n", devComm->ginSignalCount, devComm->ginSignalShadows);
+  printf("  Contexts %d\n", devComm->ginContextCount);
+  printf("\n");
+  printf(" Abort flag %p\n", devComm->abortFlag);
+  printf(" LSA Barriers count %d handle %d\n", devComm->lsaBarrier.nBarriers, devComm->lsaBarrier.bufHandle);
+  printf(" Hybrid Barriers count %d LSA handle %d GIN Rail Barrier signal0 %d GIN World Barrier signal0 %d\n",
+         devComm->hybridLsaBarrier.nBarriers, devComm->hybridLsaBarrier.bufHandle,
+         devComm->hybridRailGinBarrier.signal0, devComm->hybridDenseGinBarrier.signal0);
+  printf(" GIN Rail Barrier signal0 %d\n", devComm->railGinBarrier.signal0);
+  printf(" GIN World Barrier signal0 %d\n", devComm->worldGinBarrier.signal0);
+}
+
+ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCommRequirements* reqs,
+                                        struct ncclDevComm* outDevComm, bool isInternal, uint32_t deviceCodeVersion) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclDevrState* devr = &comm->devrState;
+  struct ncclTeam world = ncclTeamWorld(comm);
+  struct ncclTeam lsa = ncclTeamInnerFactor(world, devr->lsaSize);
+  bool ginActivated = false;
+  struct ncclDevrTeam* tmLsa;
+  ncclTeam_t ucTeam, mcTeam;
+  size_t bufSizeTotal;
+  int nGinContexts = reqs->ginContextCount;
+  int ginSignalTotal = 0, ginCounterTotal = 0;
+  struct ncclDevResourceRequirements* resReqsHead = reqs->resourceRequirementsList;
+  struct ncclDevResourceRequirements lsaBarReq;
+  struct ncclDevResourceRequirements hybridLsaBarrierReq;
+  cudaStream_t stream = nullptr;
+  struct ncclDevResourceRequirements railGinBarrierReq;
+  struct ncclDevResourceRequirements hybridRailGinBarrierReq;
+  struct ncclDevResourceRequirements hybridDenseGinBarrierReq;
+  int ginStride, denseBarrierCount;
+  ncclTeam_t denseGinTeam;
+  struct ncclDevResourceRequirements worldGinBarrierReq;
+  struct ncclDevResourceRequirements cftBarReq;
+  struct ncclDevResourceRequirements cftMcBarReq;
+  CUmemGenericAllocationHandle memHandle = 0x0;
+  struct ncclDevrMemory* mem = nullptr;
+  struct ncclDevrWindow* win = nullptr;
+  struct ncclWindow_vidmem* winHost = nullptr;
+  size_t ginSignalShadowsOffset = 0;
+  size_t ginAnvilNetSignalsOffset = 0;
+  int nGinContextsTotal = 0;
+  void* outDevCommPreserve = nullptr;
+  struct ncclDevComm outDevCommTmp;
+  cudaStreamCaptureMode captureMode = cudaStreamCaptureModeRelaxed;
+  struct ncclDevCommCompat* devCompat;
+  NCCLCHECK(getNcclVersionCompat(deviceCodeVersion, &devCompat));
+
+  // This function always operates on the current version of the ncclDevResourceRequirements structure, thanks
+  // to the deepCopyDevCommRequirements() function, so version checks are not needed.  The data in reqs can also
+  // be changed by this function, which is again OK thanks to the fact that it's not a user-supplied structure.
+  ncclGinConnectionType_t requestedConnectionType = reqs->ginConnectionType;
+
+  if (reqs->ginForceEnable) {
+    INFO(NCCL_INIT, "ginForceEnable set to true, defaulting ginConnectionType to NCCL_GIN_CONNECTION_FULL");
+    INFO(NCCL_INIT, "ginForceEnable is being deprecated in favor of explicitly setting ginConnectionType!");
+    requestedConnectionType = NCCL_GIN_CONNECTION_FULL;
+  }
+
+  bool requestedGinResources = ncclGinResourcesRequested(reqs);
+  if (requestedGinResources && requestedConnectionType == NCCL_GIN_CONNECTION_NONE) {
+    WARN("User requested GIN resources but did not request GIN to be enabled!");
+    return ncclInvalidArgument;
+  }
+
+  if (requestedConnectionType != NCCL_GIN_CONNECTION_NONE) {
+    if (comm->globalGinSupport == NCCL_GIN_CONNECTION_NONE) {
+      WARN("User requested GIN but not all ranks in the communicator support GIN");
+      return ncclInvalidArgument;
+    }
+    if (requestedConnectionType == NCCL_GIN_CONNECTION_FULL) {
+      if (comm->globalGinSupport == NCCL_GIN_CONNECTION_RAIL) {
+        WARN("User requested GIN connection type NCCL_GIN_CONNECTION_FULL but the communicator supports only "
+             "NCCL_GIN_CONNECTION_RAIL");
+        return ncclInvalidArgument;
+      }
+    }
+
+    ginActivated = !devr->ginEnabled;
+    devr->ginEnabled = true;
+  }
+
+  if (reqs->worldGinBarrierCount > 0 && requestedConnectionType == NCCL_GIN_CONNECTION_RAIL) {
+    WARN("Cannot create worldGinBarrier with NCCL_GIN_CONNECTION_RAIL.");
+    return ncclInvalidArgument;
+  }
+
+  if (requestedConnectionType == NCCL_GIN_CONNECTION_CUSTOM_STRIDE && reqs->ginCustomStride == 0) {
+    WARN("Cannot create DevComm with a GIN rank stride of 0. To disable GIN, set reqs->ginConnectionType to "
+         "NCCL_GIN_CONNECTION_NONE.");
+    return ncclInvalidUsage;
+  }
+
+  CUDACHECK(cudaThreadExchangeStreamCaptureMode(&captureMode));
+
+  if (ginActivated) {
+    NCCLCHECKGOTO(ncclGinConnectOnce(comm), ret, fail);
+    // Register all preexisting memories with GIN. Update the windows later when
+    // we have a stream.
+    for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr; mem = mem->next) {
+      NCCLCHECKGOTO(symMemoryRegisterGin(comm, mem), ret, fail);
+    }
+  }
+
+  // If we have a copy callback for backwards compatibility, we use a temporary buffer for the devComm and, once we're
+  // finished, we let the callback copy the data over.
+  if (devCompat && devCompat->devCommCopyNewToOld) {
+    outDevCommPreserve = outDevComm;
+    outDevComm = &outDevCommTmp;
+  }
+
+  memset(outDevComm, 0, sizeof(*outDevComm));
+  outDevComm->ucLeId = NCCL_LE_ID_INVALID;
+  outDevComm->mcLeId = NCCL_LE_ID_INVALID;
+  outDevComm->magic = NCCL_API_MAGIC;
+  outDevComm->version = deviceCodeVersion;
+  outDevComm->rank = comm->rank;
+  outDevComm->nRanks = comm->nRanks;
+  outDevComm->nRanks_rcp32 = idivRcp32(comm->nRanks);
+  outDevComm->lsaRank = devr->lsaSelf;
+  outDevComm->lsaSize = devr->lsaSize;
+  outDevComm->lsaSize_rcp32 = idivRcp32(devr->lsaSize);
+  if (isInternal) outDevComm->abortFlag = comm->abortFlagDev;
+
+  // needBarrier is ignored, the bootstrapBarrier below will barrier regardless
+  NCCLCHECKGOTO(symTeamObtain(comm, lsa, reqs->lsaMultimem, /*uc=*/false, /*mc=*/false, &tmLsa, nullptr), ret, fail);
+  outDevComm->lsaMultimem.mcBasePtr = tmLsa->mcBasePtr;
+
+  ucTeam = ncclTeamCft(comm);
+  mcTeam = ncclTeamCftMultimem(comm);
+  outDevComm->cftRank = ucTeam.rank;
+  outDevComm->cftSize = ucTeam.nRanks;
+  outDevComm->cftMultimemRank = mcTeam.rank;
+  outDevComm->cftMultimemSize = mcTeam.nRanks;
+  outDevComm->cftMultimemSize_rcp32 = idivRcp32(devr->cftMcSize);
+
+  if (comm->gpuCftSupport && (reqs->cftCaps & NCCL_CFT)) {
+    // needBarrier = nullptr, the bootstrapBarrier below will barrier regardless
+    struct ncclDevrTeam* tmCft = nullptr;
+    NCCLCHECKGOTO(symTeamObtain(comm, ucTeam, /*multimem=*/false, /*uc=*/true, /*mc=*/false, &tmCft, nullptr), ret,
+                  fail);
+    if (tmCft != nullptr) outDevComm->ucLeId = tmCft->ucLeId;
+  }
+
+  if (comm->gpuCftSupport && comm->nvlsSupport && (reqs->cftCaps & NCCL_CFT_MULTIMEM)) {
+    // needBarrier = nullptr, the bootstrapBarrier below will barrier regardless
+    struct ncclDevrTeam* tmCft = nullptr;
+    NCCLCHECKGOTO(symTeamObtain(comm, mcTeam, /*multimem=*/false, /*uc=*/false, /*mc=*/true, &tmCft, nullptr), ret,
+                  fail);
+    if (tmCft != nullptr) outDevComm->mcLeId = tmCft->mcLeId;
+  }
+
+  {
+    struct ncclTeamRequirements* tr = reqs->teamRequirementsList;
+    while (tr != nullptr) {
+      if (tr->multimem) {
+        struct ncclDevrTeam* tm = nullptr;
+        // needBarrier is ignored, the bootstrapBarrier below will barrier regardless
+        NCCLCHECKGOTO(symTeamObtain(comm, tr->team, tr->multimem, /*uc=*/false, /*mc=*/false, &tm, nullptr), ret, fail);
+        if (tr->outMultimemHandle != nullptr) tr->outMultimemHandle->mcBasePtr = tm->mcBasePtr;
+      }
+      tr = tr->next;
+    }
+  }
+
+  resReqsHead = reqs->resourceRequirementsList;
+
+  // Initialize resources for the hybrid barrier
+  ncclLsaBarrierCreateRequirement(lsa, reqs->barrierCount, &outDevComm->hybridLsaBarrier, &hybridLsaBarrierReq);
+  hybridLsaBarrierReq.next = resReqsHead;
+  ncclGinBarrierCreateRequirement(comm, ncclTeamRail(comm), reqs->barrierCount, &outDevComm->hybridRailGinBarrier,
+                                  &hybridRailGinBarrierReq);
+  hybridRailGinBarrierReq.next = &hybridLsaBarrierReq;
+
+  ginStride = requestedConnectionType == NCCL_GIN_CONNECTION_CUSTOM_STRIDE ? reqs->ginCustomStride : 1;
+  denseGinTeam = {comm->nRanks / ginStride, comm->rank / ginStride, ginStride};
+  // For RAIL, hybridRailGinBarrier is equivalent to hybridDenseGinBarrier and we don't need to allocate a dense barrier.
+  denseBarrierCount = requestedConnectionType == NCCL_GIN_CONNECTION_RAIL ? 0 : reqs->barrierCount;
+  ncclGinBarrierCreateRequirement(comm, denseGinTeam, denseBarrierCount, &outDevComm->hybridDenseGinBarrier,
+                                  &hybridDenseGinBarrierReq);
+  hybridDenseGinBarrierReq.next = &hybridRailGinBarrierReq;
+  resReqsHead = &hybridDenseGinBarrierReq;
+
+  ncclLsaBarrierCreateRequirement(lsa, reqs->lsaBarrierCount, &outDevComm->lsaBarrier, &lsaBarReq);
+  lsaBarReq.next = resReqsHead;
+  resReqsHead = &lsaBarReq;
+
+  ncclGinBarrierCreateRequirement(comm, ncclTeamRail(comm), reqs->railGinBarrierCount, &outDevComm->railGinBarrier,
+                                  &railGinBarrierReq);
+  railGinBarrierReq.next = resReqsHead;
+  resReqsHead = &railGinBarrierReq;
+
+  ncclGinBarrierCreateRequirement(comm, ncclTeamWorld(comm), reqs->worldGinBarrierCount, &outDevComm->worldGinBarrier,
+                                  &worldGinBarrierReq);
+  worldGinBarrierReq.next = resReqsHead;
+  resReqsHead = &worldGinBarrierReq;
+
+  if (reqs->cftBarrierCount && (reqs->cftCaps & NCCL_CFT)) {
+    ncclCftBarrierCreateRequirement(ucTeam, reqs->cftBarrierCount, &outDevComm->cftBarrier, &cftBarReq);
+    cftBarReq.next = resReqsHead;
+    resReqsHead = &cftBarReq;
+  }
+
+  if (reqs->cftBarrierCount && (reqs->cftCaps & NCCL_CFT_MULTIMEM)) {
+    ncclCftBarrierCreateRequirement(mcTeam, reqs->cftBarrierCount, &outDevComm->cftMultimemBarrier, &cftMcBarReq);
+    cftMcBarReq.next = resReqsHead;
+    resReqsHead = &cftMcBarReq;
+  }
+
+  {
+    struct ncclDevResourceRequirements* rr = resReqsHead;
+    bufSizeTotal = 0;
+    ginSignalTotal = reqs->ginSignalCount;
+    ginCounterTotal = reqs->ginCounterCount;
+    while (rr != nullptr) {
+      bufSizeTotal = alignUp(bufSizeTotal, std::max<size_t>(128, rr->bufferAlign));
+      if (rr->outBufferHandle != nullptr) *rr->outBufferHandle = bufSizeTotal / 128;
+      if (rr->outGinSignalStart != nullptr) *rr->outGinSignalStart = ginSignalTotal;
+      if (rr->outGinCounterStart != nullptr) *rr->outGinCounterStart = ginCounterTotal;
+      bufSizeTotal += rr->bufferSize;
+      ginSignalTotal += rr->ginSignalCount;
+      ginCounterTotal += rr->ginCounterCount;
+      rr = rr->next;
+    }
+    bufSizeTotal = alignUp(bufSizeTotal, 128);
+    ginSignalShadowsOffset = bufSizeTotal;
+    bufSizeTotal += nGinContexts * ginSignalTotal * sizeof(uint64_t); // include signal shadows
+    ginAnvilNetSignalsOffset = bufSizeTotal;
+    if (devr->ginEnabled && ginSignalTotal > 0) {
+      // 2.31 moved ginCommCount into per-backend state; round up to the widest
+      // active backend so every backend's signal shadows stay in range.
+      struct ncclGinState* gs = &comm->sharedRes->ginState;
+      int ginCommCount = 1;
+      for (int b = 0; b < gs->numActiveBackends; b++) {
+        if (gs->backends[b].ginCommCount > ginCommCount) ginCommCount = gs->backends[b].ginCommCount;
+      }
+      nGinContextsTotal = ROUNDUP(nGinContexts, ginCommCount);
+      bufSizeTotal += (size_t)nGinContextsTotal * ginSignalTotal * sizeof(uint64_t);
+    } else {
+      nGinContextsTotal = nGinContexts;
+    }
+    bufSizeTotal = alignUp(bufSizeTotal, devr->granularity);
+  }
+
+  if (devr->ginEnabled) {
+    reqs->ginSignalCount = ginSignalTotal;
+    reqs->ginCounterCount = ginCounterTotal;
+    NCCLCHECKGOTO(ncclGinDevCommSetup(comm, reqs, outDevComm, deviceCodeVersion), ret, fail);
+    // SDMA signal binding is deferred until the resource window is created
+    // (see ncclGinAnvilBindResourceWindowSignals call below).
+  }
+
+  CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
+
+  if (ginActivated) {
+    // Now update the GIN handles in all existing windows. Registration of memories happened above.
+    for (int i = 0; i < devr->winSortedCount; i++) {
+      struct ncclDevrWindow* win = devr->winSorted[i].win;
+      struct ncclWindow_vidmem* winHost;
+      NCCLCHECKGOTO(ncclShadowPoolToHost(&devr->shadows, win->vidmem, &winHost), ret, fail_stream);
+      winHost->ginOffset4K = (win->bigOffset - win->memory->bigOffset) >> 12;
+      NCCLCHECKGOTO(symWindowInitGin(devr, win->memory, winHost, stream), ret, fail_stream);
+      CUDACHECKGOTO(cudaMemcpyAsync(win->vidmem, winHost, sizeof(struct ncclWindow_vidmem), cudaMemcpyHostToDevice,
+                                    stream),
+                    ret, fail_stream);
+    }
+  }
+
+  NCCLCHECKGOTO(symWindowTableInitOnce(comm, stream), ret, fail_stream); // ensure devr->windowTable exists
+  outDevComm->windowTable = devr->windowTable;
+
+  if (bufSizeTotal == 0) {
+    outDevComm->resourceWindow = nullptr;
+    outDevComm->resourceWindow_inlined = {};
+  } else {
+    CUmemAllocationProp memProp = {};
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+    memProp.type = hipMemAllocationTypeUncached;
+#else
+    memProp.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+#endif
+    memProp.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    memProp.requestedHandleType = ncclCuMemHandleType;
+    // We have to assume that if GIN is possible it might be requested in the future,
+    // even on single node.
+    memProp.allocFlags.gpuDirectRDMACapable = comm->sharedRes->ginState.supported ? 1 : 0;
+    memProp.location.id = comm->cudaDev;
+
+    CUCHECKGOTO(cuMemCreate(&memHandle, bufSizeTotal, &memProp, 0), ret, fail_stream);
+
+    NCCLCHECKGOTO(symMemoryObtain(comm, &memHandle, 1, NULL, bufSizeTotal, /*winFlags=*/0, &mem), ret, fail_stream_mem);
+    memHandle = 0x0; // Reference given to symMemoryObtain
+
+    NCCLCHECKGOTO(symWindowCreate( // Requires world barrier afterward.
+                    comm, mem, /*memOffset=*/0, nullptr, bufSizeTotal, /*winFlags=*/0,
+                    /*localReg=*/nullptr, &outDevComm->resourceWindow, &win, stream),
+                  ret, fail_stream_mem);
+    mem = nullptr; // Reference given to symWindowCreate
+    NCCLCHECKGOTO(ncclShadowPoolToHost(&devr->shadows, win->vidmem, &winHost), ret, fail_stream_mem_win);
+    outDevComm->resourceWindow_inlined.lsaFlatBase = winHost->lsaFlatBase;
+    outDevComm->resourceWindow_inlined.stride4G = winHost->stride4G;
+    outDevComm->resourceWindow_inlined.mcOffset4K = winHost->mcOffset4K;
+    outDevComm->ginSignalShadows =
+      (uint64_t*)add4G((char*)winHost->lsaFlatBase + ginSignalShadowsOffset, winHost->lsaRank * winHost->stride4G);
+
+    CUDACHECKGOTO(cudaMemsetAsync(win->userPtr, 0, bufSizeTotal, stream), ret, fail_stream_mem_win);
+  }
+
+  CUDACHECKGOTO(cudaStreamSynchronize(stream), ret, fail_stream_mem_win);
+
+#ifdef ENABLE_ROCSHMEM_GIN
+  // Bind SDMA signal regions after the resource window is created and zeroed.
+  // Must use this devComm's own resource window (win->userPtr), not
+  // devr->winSorted[0] which may belong to a different devComm (e.g. symk).
+  if (devr->ginEnabled && ginSignalTotal > 0 && outDevComm->resourceWindow != nullptr) {
+    NCCLCHECKGOTO(ncclGinAnvilBindResourceWindowSignals(comm, win->userPtr, ginAnvilNetSignalsOffset, nGinContextsTotal,
+                                                        ginSignalTotal),
+                  ret, fail_stream_mem_win);
+  }
+#endif
+
+  NCCLCHECKGOTO(bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, 0xbeef), ret, fail_stream_mem_win);
+  CUDACHECKGOTO(cudaStreamDestroy(stream), ret, fail_stream_mem_win);
+
+  // ncclDevCommDump(outDevComm);
+  if (outDevCommPreserve) {
+    NCCLCHECKGOTO(devCompat->devCommCopyNewToOld(comm, outDevCommPreserve, outDevComm), ret, fail_stream_mem_win);
+  }
+  CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
+  return ret;
+
+fail_stream_mem_win:
+  symWindowDestroy(comm, win->vidmem, stream);
+  CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+fail_stream_mem:
+  if (memHandle != 0x0) {
+    CUCHECKIGNORE(cuMemRelease(memHandle));
+  }
+  symMemoryDestroy(comm, mem);
+fail_stream:
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
+fail:
+  CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
+  return ret;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+struct ncclDevrRegAsyncJob {
+  struct ncclAsyncJob base;
+  struct ncclComm* comm;
+  void* userPtr;
+  size_t userSize;
+  int winFlags;
+  ncclWindow_t* outWinDev;
+};
+
+static void ncclDevrRegAsyncJobFree(void* _job) {
+  delete (struct ncclDevrRegAsyncJob*)_job;
+}
+
+static ncclResult_t ncclDevrWindowRegisterJob(struct ncclAsyncJob* job_) {
+  struct ncclDevrRegAsyncJob* job = (struct ncclDevrRegAsyncJob*)job_;
+  ncclResult_t ret = ncclSuccess;
+
+  CUDACHECKGOTO(cudaSetDevice(job->comm->cudaDev), ret, fail);
+  if (job->comm->hostRmaSupport && !job->comm->rmaState.rmaCeState.initialized) {
+    NCCLCHECKGOTO(ncclRmaCeInit(job->comm), ret, fail);
+  }
+  NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(job->comm, job->userPtr, job->userSize, job->winFlags, job->outWinDev),
+                ret, fail);
+
+exit:
+  return ret;
+fail:
+  goto exit;
+}
+
+struct ncclDevrCommCreateAsyncJob {
+  struct ncclAsyncJob base;
+  struct ncclComm* comm;
+  struct ncclDevCommRequirements* reqs;
+  struct ncclDevComm* outDevComm;
+  uint32_t deviceCodeVersion;
+};
+
+static void ncclDevrCommCreateAsyncJobFree(void* _job) {
+  struct ncclDevrCommCreateAsyncJob* job = (struct ncclDevrCommCreateAsyncJob*)_job;
+  freeDevCommRequirements(job->reqs);
+  delete job;
+}
+
+static ncclResult_t ncclDevrCommCreateJob(struct ncclAsyncJob* job_) {
+  struct ncclDevrCommCreateAsyncJob* job = (struct ncclDevrCommCreateAsyncJob*)job_;
+  ncclResult_t ret = ncclSuccess;
+
+  CUDACHECKGOTO(cudaSetDevice(job->comm->cudaDev), ret, fail);
+  NCCLCHECKGOTO(ncclDevrCommCreateInternal(job->comm, job->reqs, job->outDevComm, /*isInternal=*/false,
+                                           job->deviceCodeVersion),
+                ret, fail);
+
+exit:
+  freeDevCommRequirements(job->reqs);
+  job->reqs = nullptr;
+  return ret;
+fail:
+  goto exit;
+}
+
+NCCL_API(ncclResult_t, ncclCommWindowRegister, ncclComm_t comm, void* buff, size_t size, ncclWindow_t* win,
+         int winFlags);
+ncclResult_t ncclCommWindowRegister_impl(struct ncclComm* comm, void* userPtr, size_t userSize,
+                                         struct ncclWindow_vidmem** outWinDev, int winFlags) {
+  NCCLCHECK(CommCheck(comm, __func__, "comm"));
+  NCCLCHECK(PtrCheck(outWinDev, __func__, "win"));
+  *outWinDev = nullptr;
+  if (userPtr == nullptr || userSize == 0) {
+    WARN("%s: invalid pointer %p / size %zu", __func__, userPtr, userSize);
+    return ncclInvalidArgument;
+  }
+
+  if (!comm->symmetricSupport && !comm->hostRmaSupport) {
+    return ncclSuccess;
+  }
+
+  ncclResult_t ret = ncclSuccess;
+  int saveDev;
+  struct ncclDevrRegTask* task = nullptr;
+  struct ncclRmaCeInitTask* ceTask = nullptr;
+  struct ncclDevrRegAsyncJob* regJob = nullptr;
+
+  CUDACHECK(cudaGetDevice(&saveDev));
+  NCCLCHECK(ncclGroupStartInternal());
+
+  NCCLCHECKGOTO(ncclCommEnsureReady(comm), ret, fail);
+  CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
+
+  NCCLCHECKGOTO(ncclDevrInitOnce(comm), ret, fail);
+
+  if (ncclParamEnqueueRearchEnable()) {
+    NEW_NOTHROW_GOTO(regJob, ncclDevrRegAsyncJob, ret, fail);
+    regJob->comm = comm;
+    regJob->userPtr = userPtr;
+    regJob->userSize = userSize;
+    regJob->winFlags = winFlags;
+    regJob->outWinDev = outWinDev;
+    NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)regJob, ncclDevrWindowRegisterJob, ncclDevrRegAsyncJobFree,
+                                      comm),
+                  ret, fail);
+  } else {
+    NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
+    task->userPtr = userPtr;
+    task->userSize = userSize;
+    task->winFlags = winFlags;
+    task->outWinDev = outWinDev;
+    ncclIntruQueueEnqueue(&comm->devrState.regTaskQueue, task);
+    task = nullptr;
+    ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
+
+    // Initialize RMA CE alongside the first window registration.
+    // RCCL: this mirrors the lazy enqueue in rmaTaskAppend, which fires on the first
+    // ncclPutSignal/Signal/WaitSignal. ncclRmaCeInit is collective (signals window +
+    // bootstrap barrier), so it cannot be called from this non-collective entry point.
+    // RCCL initializes regardless of hostRmaSupport.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    const bool ceInitNeeded = true;
+#else
+    const bool ceInitNeeded = comm->hostRmaSupport;
+#endif
+    if (ceInitNeeded && !comm->rmaState.rmaCeState.initialized &&
+        ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
+      NCCLCHECKGOTO(ncclCalloc(&ceTask, 1), ret, fail);
+      ceTask->comm = comm;
+      ncclIntruQueueEnqueue(&comm->rmaCeInitTaskQueue, ceTask);
+      ceTask = nullptr;
+      ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
+    }
+  }
+
+exit:
+  ncclGroupErrCheck(ret);
+  NCCLCHECK(ncclGroupEndInternal());
+  CUDACHECKIGNORE(cudaSetDevice(saveDev));
+  return ret;
+fail:
+  ncclDevrRegAsyncJobFree(regJob);
+  free(ceTask);
+  free(task);
+  goto exit;
+}
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// RCCL: deregister mirror of windowRegisterNonSym
+static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm, struct ncclWindow_vidmem* winDev) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclDevrState* devr = &comm->devrState;
+  cudaStream_t stream = nullptr;
+  struct ncclDevrWindow* win = nullptr;
+  int winIdx = -1;
+
+  // Decode win from winDev via the shadow pool
+  struct ncclWindow_vidmem* winDevHost = nullptr;
+  NCCLCHECKGOTO(ncclShadowPoolToHost(&devr->shadows, winDev, &winDevHost), ret, fail);
+  win = (struct ncclDevrWindow*)winDevHost->winHost;
+
+  // Locate this window's registration. A stale handle (e.g. a second
+  // deregister of an already-freed window) is no longer in winSorted
+  for (int i = 0; i < devr->winSortedCount; i++) {
+    if (devr->winSorted[i].win == win) {
+      winIdx = i;
+      break;
+    }
+  }
+  if (winIdx < 0) {
+    WARN("ncclCommWindowDeregister: window %p is not registered (already "
+         "deregistered?)",
+         (void*)winDev);
+    ret = ncclInvalidArgument;
+    goto fail;
+  }
+
+  // Undo stage 2: inter-node proxy MR. rmaHostWins[0] is a reliable witness
+  // because ncclRmaProxyRegister fills NCCL_GIN_MAX_CONNECTIONS handles.
+  if (win->rmaHostWins[0] != nullptr) {
+    NCCLCHECKGOTO(ncclRmaProxyDeregister(comm, win->rmaHostWins), ret, fail);
+  }
+
+  // Undo stage 1: intra-node IPC peer mappings.
+  windowCloseIpcPeers(comm, win);
+  free(win->ipcPeerPtrs);
+  free(win->ipcPeerPtrsAllocBase);
+  win->ipcPeerPtrs = nullptr;
+  win->ipcPeerPtrsAllocBase = nullptr;
+
+  // Undo stage 3: shadow pool entry.
+  CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
+  NCCLCHECKGOTO(ncclShadowPoolFree(&devr->shadows, winDev, stream), ret, fail_stream);
+  CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
+  stream = nullptr;
+
+  NCCLCHECKGOTO(ncclCommDeregister(comm, win->localRegHandle), ret, fail);
+  listRemove(devr->winSorted, &devr->winSortedCount, winIdx);
+  free(win);
+  return ncclSuccess;
+
+fail_stream:
+  if (stream != nullptr) {
+    CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+    CUDACHECKIGNORE(cudaStreamDestroy(stream));
+  }
+fail:
+  return ret;
+}
+#endif
+
+NCCL_API(ncclResult_t, ncclCommWindowDeregister, ncclComm_t comm, ncclWindow_t win);
+
+ncclResult_t ncclCommWindowDeregister_impl(struct ncclComm* comm, struct ncclWindow_vidmem* winDev) {
+  ncclResult_t ret = ncclSuccess;
+  int saveDev;
+  cudaStream_t stream;
+  cudaStreamCaptureMode captureMode = cudaStreamCaptureModeRelaxed;
+
+  if (winDev == nullptr) goto exit;
+
+  CUDACHECK(cudaThreadExchangeStreamCaptureMode(&captureMode));
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  if (!comm->symmetricSupport) {
+    NCCLCHECKGOTO(windowDeregisterNonSym(comm, winDev), ret, fail);
+    goto fail; // shared epilogue, restores the capture mode
+  }
+#endif
+  CUDACHECKGOTO(cudaGetDevice(&saveDev), ret, fail);
+  CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
+  CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail_dev);
+  NCCLCHECKGOTO(symWindowDestroy(comm, winDev, stream), ret, fail_dev_stream);
+fail_dev_stream:
+  CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+  CUDACHECKIGNORE(cudaStreamDestroy(stream));
+fail_dev:
+  CUDACHECKIGNORE(cudaSetDevice(saveDev));
+fail:
+  CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
+exit:
+  return ret;
+}
+
+ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, struct ncclDevrWindow** outWin) {
+  struct ncclDevrState* devr = &comm->devrState;
+  uintptr_t userAddr = reinterpret_cast<uintptr_t>(userPtr);
+  int i = listFindSortedLub(&ncclDevrWindowSorted::userAddr, devr->winSorted, devr->winSortedCount, userAddr);
+  if (0 < i && (userAddr - devr->winSorted[i - 1].userAddr < devr->winSorted[i - 1].size)) {
+    *outWin = devr->winSorted[i - 1].win;
+  } else {
+    *outWin = nullptr;
+  }
+  return ncclSuccess;
+}
+
+bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* win) {
+  return win != NULL && win->memory != NULL && win->memory->maxGlobalNumSegments > 1;
+}
+
+bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* win) {
+  return win != NULL && win->memory != NULL && win->memory->globalHasSysmemSegment;
+}
+
+void ncclDevCommCopyLsaData(void* dstRankPtr, void const* srcRankPtr) {
+  memcpy(dstRankPtr, srcRankPtr, offsetof(struct ncclDevComm, railGinBarrier) - offsetof(struct ncclDevComm, rank));
+}
+
+NCCL_API(ncclResult_t, ncclCommQueryProperties, ncclComm_t, ncclCommProperties_t*);
+ncclResult_t ncclCommQueryProperties(ncclComm_t comm, ncclCommProperties_t* props) {
+  NCCLCHECK(CommCheck(comm, __func__, "comm"));
+  NCCLCHECK(PtrCheck(props, __func__, "props"));
+
+  NCCLCHECK(ncclCommEnsureReady(comm));
+
+  if (props->magic != NCCL_API_MAGIC) {
+    WARN("Cannot get communicator properties: ncclCommProperties_t argument must be initialized via "
+         "NCCL_COMM_PROPERTIES_INITIALIZER");
+    return ncclInvalidUsage;
+  }
+
+  struct ncclDevCommCompat* devCompat = nullptr;
+  NCCLCHECK(getNcclVersionCompat(props->version, &devCompat));
+
+  props->rank = comm->rank;
+  props->nRanks = comm->nRanks;
+  props->cudaDev = comm->cudaDev;
+  props->nvmlDev = comm->nvmlDev;
+  props->deviceApiSupport = comm->symmetricSupport;
+  // NVLS multicast isn't available across cliques
+  props->multimemSupport = comm->nvlsSupport && !comm->p2pCrossClique;
+
+  if (props->version > NCCL_VERSION(2, 29, 3)) {
+    props->hostRmaSupport = comm->hostRmaSupport;
+    NCCLCHECK(ncclGetGinType(comm, &props->ginType));
+    NCCLCHECK(ncclGetRailedGinType(comm, &props->railedGinType));
+
+    // Preferring to call ncclDevrInitOnce directly instead to calling ncclTeam* functions because
+    // we can propagate the result of ncclDevrInitOnce back to the caller.
+    NCCLCHECK(ncclDevrInitOnce(comm));
+    props->nLsaTeams = comm->devrState.nLsaTeams;
+  }
+
+  if (props->version >= NCCL_VERSION(2, 31, 0)) {
+    props->commHash = comm->commHash;
+    props->ginMinStride = (comm->globalGinSupport == NCCL_GIN_CONNECTION_FULL) ? 1 : comm->contiguousRanksPerHost;
+    props->ginConnectionType = comm->globalGinSupport;
+    memset(props->ginSupport, 0, sizeof(props->ginSupport));
+    if (comm->globalGinSupport != NCCL_GIN_CONNECTION_NONE) {
+      struct ncclGinState* ginState = &comm->sharedRes->ginState;
+      for (int i = 0; i < ginState->numActiveBackends; i++) {
+        int t = (int)ginState->backends[i].ginType;
+        if (t >= 0 && t < NCCL_GIN_MAX_TYPES) props->ginSupport[t] = true;
+      }
+    }
+    props->devCommRuntimeVersionSize = sizeof(ncclDevComm_t);
+  }
+
+  if (devCompat->commPropertiesFilter) {
+    NCCLCHECK(devCompat->commPropertiesFilter(comm, props));
+  }
+  return ncclSuccess;
+}
+
+NCCL_API(ncclResult_t, ncclDevCommCreate, ncclComm_t comm, ncclDevCommRequirements_t const* reqs,
+         ncclDevComm_t* outDevComm);
+ncclResult_t ncclDevCommCreate(ncclComm_t comm, struct ncclDevCommRequirements const* reqs,
+                               struct ncclDevComm* outDevComm) {
+  NCCLCHECK(CommCheck(comm, __func__, "comm"));
+  NCCLCHECK(PtrCheck(reqs, __func__, "reqs"));
+  if (reqs->magic != NCCL_API_MAGIC) {
+    WARN("Cannot create device communicator: ncclDevCommRequirements_t argument must be initialized via "
+         "NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER");
+    return ncclInvalidUsage;
+  }
+
+  uint32_t deviceCodeVersion = reqs->version;
+  if (ncclParamDevApiJit() == 1 || (reqs->version >= NCCL_VERSION(2, 31, 0) && reqs->useRuntimeVersion)) {
+    deviceCodeVersion = NCCL_VERSION_CODE;
+  }
+
+  // Use compile-time compat for the reqs filter, regardless of device code version.
+  struct ncclDevCommCompat* reqsCompat = nullptr;
+  NCCLCHECK(getNcclVersionCompat(reqs->version, &reqsCompat));
+
+  ncclResult_t ret = ncclSuccess;
+  int saveDev;
+  struct ncclDevrCommCreateTask* task = nullptr;
+  struct ncclDevrCommCreateAsyncJob* createJob = nullptr;
+
+  CUDACHECK(cudaGetDevice(&saveDev));
+  NCCLCHECK(ncclGroupStartInternal());
+
+  if (!comm->symmetricSupport) {
+    WARN("Communicator does not support symmetric memory!");
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
+
+  NCCLCHECKGOTO(ncclCommEnsureReady(comm), ret, fail);
+  CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, fail);
+
+  NCCLCHECKGOTO(ncclDevrInitOnce(comm), ret, fail);
+
+  if (ncclParamEnqueueRearchEnable()) {
+    NEW_NOTHROW_GOTO(createJob, ncclDevrCommCreateAsyncJob, ret, fail);
+    createJob->comm = comm;
+    createJob->outDevComm = outDevComm;
+    createJob->deviceCodeVersion = deviceCodeVersion;
+    createJob->reqs = nullptr;
+    NCCLCHECKGOTO(deepCopyDevCommRequirements(reqs, &createJob->reqs), ret, fail);
+    if (reqsCompat->devCommRequirementsFilter) {
+      NCCLCHECKGOTO(reqsCompat->devCommRequirementsFilter(comm, createJob->reqs), ret, fail);
+    }
+    if (comm->gpuCftSupport == 0 && createJob->reqs->cftCaps != NCCL_CFT_NONE) {
+      WARN("User requested CFT capabilities (cftCaps=0x%x), but not all ranks in the communicator support CFT.",
+           createJob->reqs->cftCaps);
+      ret = ncclInvalidArgument;
+      goto fail;
+    }
+    if (!comm->nvlsSupport && (createJob->reqs->cftCaps & NCCL_CFT_MULTIMEM)) {
+      WARN("User requested CFT multicast capability, but NVLS is disabled or unsupported.");
+      ret = ncclInvalidArgument;
+      goto fail;
+    }
+    // ncclMgmtTaskEnqueue takes ownership of createJob (enqueues on success, frees on
+    // failure), so drop our reference before checking the result to avoid a double free.
+    ret =
+      ncclMgmtTaskEnqueue((struct ncclAsyncJob*)createJob, ncclDevrCommCreateJob, ncclDevrCommCreateAsyncJobFree, comm);
+    createJob = nullptr;
+    NCCLCHECKGOTO(ret, ret, fail);
+  } else {
+    NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
+    // reqs must be deep copied to the task so background threads can safely access it
+    NCCLCHECKGOTO(deepCopyDevCommRequirements(reqs, &task->reqs), ret, fail);
+    if (reqsCompat->devCommRequirementsFilter) {
+      NCCLCHECKGOTO(reqsCompat->devCommRequirementsFilter(comm, task->reqs), ret, fail);
+    }
+    if (comm->gpuCftSupport == 0 && task->reqs->cftCaps != NCCL_CFT_NONE) {
+      WARN("User requested CFT capabilities (cftCaps=0x%x), but not all ranks in the communicator support CFT.",
+           task->reqs->cftCaps);
+      ret = ncclInvalidArgument;
+      goto fail;
+    }
+    if (!comm->nvlsSupport && (task->reqs->cftCaps & NCCL_CFT_MULTIMEM)) {
+      WARN("User requested CFT multicast capability, but NVLS is disabled or unsupported.");
+      ret = ncclInvalidArgument;
+      goto fail;
+    }
+    task->outDevComm = outDevComm;
+    task->deviceCodeVersion = deviceCodeVersion;
+    ncclIntruQueueEnqueue(&comm->devrState.commCreateTaskQueue, task);
+    ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
+  }
+
+exit:
+  ncclGroupErrCheck(ret);
+  NCCLCHECK(ncclGroupEndInternal());
+  CUDACHECKIGNORE(cudaSetDevice(saveDev));
+  return ret;
+fail:
+  if (createJob) {
+    freeDevCommRequirements(createJob->reqs);
+    delete createJob;
+  }
+  if (task) {
+    freeDevCommRequirements(task->reqs);
+    free(task);
+  }
+  goto exit;
+}
+
+NCCL_API(ncclResult_t, ncclDevCommDestroy, ncclComm_t comm, ncclDevComm_t const* devComm);
+ncclResult_t ncclDevCommDestroy(struct ncclComm* comm, struct ncclDevComm const* devComm) {
+  NCCLCHECK(CommCheck(comm, __func__, "comm"));
+  NCCLCHECK(PtrCheck(devComm, __func__, "devComm"));
+  int saveDev;
+  ncclResult_t ret = ncclSuccess;
+  struct ncclDevCommCompat* devCompat = nullptr;
+  ncclDevComm_t devCommTmp;
+
+  if (devComm->magic == NCCL_API_MAGIC) {
+    NCCLCHECK(getNcclVersionCompat(devComm->version, &devCompat));
+  } else {
+    // Unversioned devComm -- must be v22902 or v22907.  v22902 handles devCommDestroy for both.
+    devCompat = &ncclDevCommCompat_v22902;
+  }
+  if (devCompat->devCommCopyOldToNew) {
+    memset(&devCommTmp, 0, sizeof(devCommTmp));
+    devCommTmp.magic = NCCL_API_MAGIC;
+    devCommTmp.version = NCCL_VERSION_CODE;
+    NCCLCHECK(devCompat->devCommCopyOldToNew(comm, &devCommTmp, devComm));
+    devComm = &devCommTmp;
+  }
+
+  CUDACHECK(cudaGetDevice(&saveDev));
+  CUDACHECK(cudaSetDevice(comm->cudaDev)); // This is needed at least for cuMem memory freeing in GDAKI
+
+  if (devComm->resourceWindow != nullptr) {
+    NCCLCHECKGOTO(ncclCommWindowDeregister(comm, devComm->resourceWindow), ret, end);
+  }
+  if (devComm->ginContextCount) {
+    NCCLCHECKGOTO(ncclGinDevCommFree(comm, devComm), ret, end);
+  }
+
+end:
+  CUDACHECKIGNORE(cudaSetDevice(saveDev));
+  return ret;
+}
+
+NCCL_API(ncclResult_t, ncclWinGetUserPtr, ncclComm_t comm, ncclWindow_t win, void** outUserPtr);
+ncclResult_t ncclWinGetUserPtr(struct ncclComm* comm, struct ncclWindow_vidmem* win, void** outUserPtr) {
+  NCCLCHECK(CommCheck(comm, __func__, "comm"));
+  NCCLCHECK(PtrCheck(outUserPtr, __func__, "outUserPtr"));
+
+  if (!comm->symmetricSupport) {
+    INFO(NCCL_INIT, "Symmetric registration is not supported in this communicator.");
+    *outUserPtr = nullptr;
+    return ncclSuccess;
+  }
+
+  NCCLCHECK(PtrCheck(win, __func__, "win"));
+
+  struct ncclDevrWindow* winHost = nullptr;
+  struct ncclWindow_vidmem* winDevHost = nullptr;
+  NCCLCHECK(ncclShadowPoolToHost(&comm->devrState.shadows, win, &winDevHost));
+
+  winHost = (struct ncclDevrWindow*)winDevHost->winHost;
+  if (winHost == nullptr) {
+    WARN("window has a NULL user pointer");
+    return ncclInternalError;
+  }
+
+  *outUserPtr = winHost->userPtr;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclDevrWorldToLsaRank(struct ncclComm* comm, int peerWorldRank, int* peerLsaRank) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  if (!comm->symmetricSupport) {
+    struct ncclDevrState* devr = &comm->devrState;
+    for (int i = 0; i < devr->lsaSize; i++) {
+      if (devr->lsaRankList[i] == peerWorldRank) {
+        *peerLsaRank = i;
+        return ncclSuccess;
+      }
+    }
+    WARN("ncclDevrWorldToLsaRank: world rank %d is not a member of the CE team", peerWorldRank);
+    return ncclInternalError;
+  }
+#endif
+  ncclTeam_t worldTeam = ncclTeamWorld(comm);
+  ncclTeam_t lsaTeam = ncclTeamLsa(comm);
+  if (!ncclTeamRankIsMember(lsaTeam, worldTeam, peerWorldRank)) {
+    WARN("ncclDevrWorldToLsaRank: world rank %d is not a member of the LSA team", peerWorldRank);
+    return ncclInternalError;
+  }
+  *peerLsaRank = ncclTeamRankToTeam(lsaTeam, worldTeam, peerWorldRank);
+  return ncclSuccess;
+}
+
+// Get the corresponding pointer in another lsa rank's symmetric memory window
+ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, int lsaRank,
+                                   void** outPtr) {
+  NCCLCHECK(CommCheck(comm, __func__, "comm"));
+  NCCLCHECK(PtrCheck(outPtr, __func__, "outPtr"));
+
+  struct ncclDevrState* devr = &comm->devrState;
+
+  if (offset >= winHost->size) {
+    return ncclInvalidArgument;
+  }
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // RCCL non-sym: a self-targeted op resolves to the local window base directly.
+  if (!comm->symmetricSupport && lsaRank == devr->lsaSelf) {
+    *outPtr = (void*)((uintptr_t)winHost->userPtr + offset);
+    return ncclSuccess;
+  }
+
+  // RCCL: IPC-backed window has per-peer pointer table (cudaIpcOpenMemHandle
+  // cannot map into a chosen VA, so flat-VA arithmetic does not apply).
+  if (winHost->ipcPeerPtrs != nullptr) {
+    if (lsaRank < 0 || lsaRank >= winHost->ipcPeerCount) {
+      return ncclInvalidArgument;
+    }
+    void* peerBase = winHost->ipcPeerPtrs[lsaRank];
+    if (peerBase == nullptr) {
+      WARN("ncclDevrGetLsaRankPtr: no IPC mapping for lsaRank=%d (same-proc "
+           "cross-thread peer?)",
+           lsaRank);
+      return ncclInternalError;
+    }
+    *outPtr = (void*)((uintptr_t)peerBase + offset);
+    return ncclSuccess;
+  }
+#endif
+
+  // Validate lsaRank is within bounds
+  if (lsaRank < 0 || lsaRank >= devr->lsaSize) {
+    return ncclInvalidArgument;
+  }
+
+  // Calculate the address with offset for the specified lsa rank
+  *outPtr = (void*)((uintptr_t)devr->lsaFlatBase + lsaRank * devr->bigSize + winHost->bigOffset + offset);
+  return ncclSuccess;
+}
+
+// Get the host RMA-proxy MR handle for a specific physical RMA connection.
+// rma_proxy_launch.cc passes this value to ncclRma->iput/iputSignal, whose IB
+// backend expects ncclRmaIbProxyMrHandle. The rmaDevWins arrays contain
+// device-side GIN handles and are not type-compatible with that interface.
+void* ncclDevrGetRmaWin(struct ncclDevrWindow* winHost, int ctx) {
+  if (winHost == nullptr) {
+    return nullptr;
+  }
+  if (ctx < 0 || ctx >= NCCL_GIN_MAX_CONNECTIONS) {
+    return nullptr;
+  }
+  // Non-symmetric proxy path stores handles directly on the window struct
+  // (memory == nullptr in that case); symmetric path goes through memory.
+  if (winHost->memory == nullptr) {
+    return winHost->rmaHostWins[ctx];
+  }
+  return winHost->memory->rmaHostWins[ctx];
+}
+
+// Get the byte offset of a window within its backing memory allocation.
+size_t ncclDevrGetWinOffset(struct ncclDevrWindow* winHost) {
+  if (winHost == nullptr || winHost->memory == nullptr) {
+    return 0;
+  }
+  return winHost->bigOffset - winHost->memory->bigOffset;
+}
+
+// Get the multicast address for a given team
+ncclResult_t ncclDevrGetLsaTeamPtrMC(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset,
+                                     struct ncclTeam lsaTeam, void** outPtr) {
+  if (winHost == nullptr || outPtr == nullptr) return ncclInternalError;
+
+  if (!comm->nvlsSupport) {
+    WARN("Multimem pointer requested but system does not support multimem.");
+    return ncclInvalidUsage;
+  }
+
+  bool needBarrier = false;
+  struct ncclDevrTeam* tm;
+  NCCLCHECK(symTeamObtain(comm, lsaTeam, /*multimem=*/true, /*uc=*/false, /*mc=*/false, &tm, &needBarrier));
+  if (needBarrier) {
+    struct ncclDevrState* devr = &comm->devrState;
+    NCCLCHECK(bootstrapIntraNodeBarrier(comm->bootstrap, devr->lsaRankList, devr->lsaSelf, devr->lsaSize, 0xbeef));
+  }
+
+  // Return the base multicast address for this team with offset
+  *outPtr = (void*)((uintptr_t)tm->mcBasePtr + winHost->bigOffset + offset);
+  return ncclSuccess;
+}
+
+ncclResult_t findCommAndHostWindowFromDeviceWindow(ncclWindow_t devWindow, ncclComm_t* foundComm,
+                                                   ncclDevrWindow** hostWindow) {
+  struct ncclDevrWindow* winHost = nullptr;
+  std::lock_guard<std::mutex> lock(ncclWindowMapMutex);
+  NCCLCHECK(ncclIntruAddressMapFind(&ncclWindowMap, devWindow, &winHost));
+  if (winHost == nullptr) {
+    WARN("Could not find communicator matching window %p (map hbits=%d count=%d)", devWindow, ncclWindowMap.base.hbits,
+         ncclWindowMap.base.count);
+    return ncclInvalidArgument;
+  }
+
+  *foundComm = winHost->comm;
+  *hostWindow = winHost;
+
+  return ncclSuccess;
+}
+
+NCCL_API(ncclResult_t, ncclGetMultimemDevicePointer, ncclWindow_t window, size_t offset, ncclMultimemHandle multimem,
+         void** outPtr);
+ncclResult_t ncclGetMultimemDevicePointer(ncclWindow_t window, size_t offset, ncclMultimemHandle multimem,
+                                          void** outPtr) {
+  NCCLCHECK(PtrCheck(window, __func__, "window"));
+  NCCLCHECK(PtrCheck(outPtr, __func__, "outPtr"));
+  if (multimem.mcBasePtr == nullptr) {
+    WARN("MCBasePtr %p needs to be valid.", multimem.mcBasePtr);
+    return ncclInvalidArgument;
+  }
+
+  ncclComm_t comm = nullptr;
+  struct ncclDevrWindow* winHost = nullptr;
+
+  NCCLCHECK(findCommAndHostWindowFromDeviceWindow(window, &comm, &winHost));
+
+  if (!comm->nvlsSupport) {
+    *outPtr = nullptr;
+    return ncclSuccess;
+  }
+  *outPtr = (void*)((uintptr_t)multimem.mcBasePtr + winHost->bigOffset + offset);
+  return ncclSuccess;
+}
+
+NCCL_API(ncclResult_t, ncclGetLsaMultimemDevicePointer, ncclWindow_t window, size_t offset, void** outPtr);
+ncclResult_t ncclGetLsaMultimemDevicePointer(ncclWindow_t window, size_t offset, void** outPtr) {
+  NCCLCHECK(PtrCheck(window, __func__, "window"));
+  NCCLCHECK(PtrCheck(outPtr, __func__, "outPtr"));
+
+  ncclComm_t comm = nullptr;
+  struct ncclDevrWindow* winHost = nullptr;
+
+  NCCLCHECK(findCommAndHostWindowFromDeviceWindow(window, &comm, &winHost));
+
+  if (comm->nvlsSupport == 0) {
+    *outPtr = nullptr;
+    return ncclSuccess;
+  }
+
+  NCCLCHECK(ncclDevrGetLsaTeamPtrMC(comm, winHost, offset, ncclTeamLsa(comm), outPtr));
+  return ncclSuccess;
+}
+
+NCCL_API(ncclResult_t, ncclGetLsaDevicePointer, ncclWindow_t window, size_t offset, int lsaRank, void** outPtr);
+ncclResult_t ncclGetLsaDevicePointer(ncclWindow_t window, size_t offset, int lsaRank, void** outPtr) {
+  NCCLCHECK(PtrCheck(window, __func__, "window"));
+  NCCLCHECK(PtrCheck(outPtr, __func__, "outPtr"));
+
+  ncclComm_t comm = nullptr;
+  struct ncclDevrState* devr;
+  struct ncclDevrWindow* winHost = nullptr;
+
+  // Get the host version of the device window
+  NCCLCHECK(findCommAndHostWindowFromDeviceWindow(window, &comm, &winHost));
+
+  devr = &comm->devrState;
+  if (lsaRank < 0 || lsaRank >= devr->lsaSize) {
+    WARN("The provided lsaRank %d is not in the valid lsaSize of [0,%d] for the provided window %p.", lsaRank,
+         devr->lsaSize, window);
+    return ncclInvalidArgument; // In this case the user should know what the lsa size is.
+  }
+
+  NCCLCHECK(ncclDevrGetLsaRankPtr(comm, winHost, offset, lsaRank, outPtr));
+
+  return ncclSuccess;
+}
+
+NCCL_API(ncclResult_t, ncclGetPeerDevicePointer, ncclWindow_t window, size_t offset, int peer, void** outPtr);
+ncclResult_t ncclGetPeerDevicePointer(ncclWindow_t window, size_t offset, int peer, void** outPtr) {
+  NCCLCHECK(PtrCheck(window, __func__, "window"));
+  NCCLCHECK(PtrCheck(outPtr, __func__, "outPtr"));
+
+  ncclComm_t comm = nullptr;
+  struct ncclDevrState* devr;
+  struct ncclDevrWindow* winHost = nullptr;
+  int lsaRank;
+  ncclTeam_t worldTeam;
+  ncclTeam_t lsaTeam;
+
+  // Get the host version of the device window
+  NCCLCHECK(findCommAndHostWindowFromDeviceWindow(window, &comm, &winHost));
+  // Validate peer rank is within bounds
+  if (peer < 0 || peer >= comm->nRanks) {
+    WARN("peer %d is not within valid range of ranks %d.", peer, comm->nRanks);
+    return ncclInvalidArgument;
+  }
+
+  devr = &comm->devrState;
+  worldTeam = ncclTeamWorld(comm);
+  lsaTeam = ncclTeamLsa(comm);
+
+  // Convert world rank to LSA team rank
+  lsaRank = ncclTeamRankToTeam(lsaTeam, worldTeam, peer);
+
+  // Validate the converted LSA rank is within bounds
+  if (lsaRank < 0 || lsaRank >= devr->lsaSize) {
+    // We return a nullptr if peer is not reachable. Same as device side
+    *outPtr = nullptr;
+    return ncclSuccess;
+  }
+
+  NCCLCHECK(ncclDevrGetLsaRankPtr(comm, winHost, offset, lsaRank, outPtr));
+
+  return ncclSuccess;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+// Find the least index strictly greater than arg.
+template <typename Obj, typename Key>
+static int listFindSortedLub(Key Obj::* key, Obj* sorted, int count, Key arg) {
+  int lo = 0, hi = count;
+  while (lo + 16 < hi) {
+    int i = (lo + hi) / 2;
+    if (sorted[i].*key <= arg) lo = i + 1;
+    else hi = i;
+  }
+  int i = lo;
+  while (i < hi && sorted[i].*key <= arg) i++;
+  return i;
+}
+
+template <typename Obj>
+static void listInsert(Obj** list, int* capacity, int* count, int index, Obj val) {
+  if (*capacity < *count + 1) {
+    *capacity *= 2;
+    if (*capacity == 0) *capacity = 16;
+    *list = (Obj*)realloc(*list, (*capacity) * sizeof(Obj));
+  }
+  for (int j = *count; j != index; j--) {
+    (*list)[j] = (*list)[j - 1];
+  }
+  (*list)[index] = val;
+  *count += 1;
+}
+
+template <typename Obj>
+static void listRemove(Obj* list, int* count, int index) {
+  for (int i = index; i + 1 < *count; i++) {
+    list[i] = list[i + 1];
+  }
+  *count -= 1;
+}
+
+// Get the LSA flat VA for self rank corresponding to a primary (ncclMemAlloc) address.
+ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr) {
+  uintptr_t a = reinterpret_cast<uintptr_t>(addr);
+  uintptr_t flatBase = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
+  uintptr_t flatEnd = flatBase + (uintptr_t)devr->lsaSize * devr->bigSize;
+
+  // Already in the LSA flat range (resource window case)
+  if (a >= flatBase && a < flatEnd) {
+    *outAddr = addr;
+    return ncclSuccess;
+  }
+
+  // Search memHead for a memory whose primaryAddr matches (ncclMemAlloc case)
+  for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr; mem = mem->next) {
+    uintptr_t mbase = reinterpret_cast<uintptr_t>(mem->primaryAddr);
+    if (a >= mbase && a < mbase + mem->size) {
+      size_t off = a - mbase;
+      *outAddr = (char*)devr->lsaFlatBase + devr->lsaSelf * devr->bigSize + mem->bigOffset + off;
+      return ncclSuccess;
+    }
+  }
+
+  *outAddr = nullptr;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclDevrGetGinAnvilMemLayout(struct ncclDevrState* devr, void* addr, uintptr_t* outLsaFlatBase,
+                                          uint32_t* outStride4G) {
+  if (!devr || !addr || !outLsaFlatBase || !outStride4G) return ncclInvalidArgument;
+  if (devr->lsaFlatBase == nullptr || devr->bigSize == 0) return ncclInvalidArgument;
+
+  uintptr_t a = reinterpret_cast<uintptr_t>(addr);
+  uintptr_t flatBase = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
+
+  for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr; mem = mem->next) {
+    uintptr_t mbase = reinterpret_cast<uintptr_t>(mem->primaryAddr);
+    if (mbase != 0 && a >= mbase && a < mbase + mem->size) {
+      *outLsaFlatBase = flatBase + mem->bigOffset;
+      *outStride4G = static_cast<uint32_t>(devr->bigSize >> 32);
+      return ncclSuccess;
+    }
+    uintptr_t localFlat = flatBase + devr->lsaSelf * devr->bigSize + mem->bigOffset;
+    if (a >= localFlat && a < localFlat + mem->size) {
+      *outLsaFlatBase = flatBase + mem->bigOffset;
+      *outStride4G = static_cast<uint32_t>(devr->bigSize >> 32);
+      return ncclSuccess;
+    }
+  }
+
+  return ncclInvalidArgument;
+}

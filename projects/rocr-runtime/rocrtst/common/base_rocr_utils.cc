@@ -1,0 +1,760 @@
+/*
+ * =============================================================================
+ *   ROC Runtime Conformance Release License
+ * =============================================================================
+ * The University of Illinois/NCSA
+ * Open Source License (NCSA)
+ *
+ * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * All rights reserved.
+ *
+ * Developed by:
+ *
+ *                 AMD Research and AMD ROC Software Development
+ *
+ *                 Advanced Micro Devices, Inc.
+ *
+ *                 www.amd.com
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to
+ * deal with the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ *  - Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimers.
+ *  - Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimers in
+ *    the documentation and/or other materials provided with the distribution.
+ *  - Neither the names of <Name of Development Group, Name of Institution>,
+ *    nor the names of its contributors may be used to endorse or promote
+ *    products derived from this Software without specific prior written
+ *    permission.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ * THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS WITH THE SOFTWARE.
+ *
+ */
+
+/// \file
+/// Utility functions that act on BaseRocR objects.
+
+#include "common/base_rocr_utils.h"
+#include <assert.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <stdexcept>
+#include <string>
+#include "common/base_rocr.h"
+#include "common/helper_funcs.h"
+#include "common/os.h"
+#include "gtest/gtest.h"
+#include "hsa/hsa.h"
+#include "hsa/hsa_ven_amd_loader.h"
+
+namespace rocrtst {
+
+
+#define RET_IF_HSA_UTILS_ERR(err)                                                                  \
+  {                                                                                                \
+    if ((err) != HSA_STATUS_SUCCESS) {                                                             \
+      const char* msg = 0;                                                                         \
+      hsa_status_string(err, &msg);                                                                \
+      EXPECT_EQ(HSA_STATUS_SUCCESS, err) << msg;                                                   \
+      return (err);                                                                                \
+    }                                                                                              \
+  }
+
+#define RET_IF_HSA_UTILS_ERR_RET(err, ret)                                                             \
+  {                                                                                                \
+    if ((err) != HSA_STATUS_SUCCESS) {                                                             \
+      const char* msg = 0;                                                                         \
+      hsa_status_string(err, &msg);                                                                \
+      EXPECT_EQ(HSA_STATUS_SUCCESS, err) << msg;                                                   \
+      return (ret);                                                                                \
+    }                                                                                              \
+  }
+// Clean up some of the common handles and memory used by BaseRocR code, then
+// shut down hsa. Restore HSA_ENABLE_INTERRUPT to original value, if necessary
+hsa_status_t CommonCleanUp(BaseRocR* test) {
+  hsa_status_t err;
+
+  assert(test != nullptr);
+
+  if (nullptr != test->kernarg_buffer()) {
+    err = hsa_amd_memory_pool_free(test->kernarg_buffer());
+    RET_IF_HSA_UTILS_ERR(err);
+    test->set_kernarg_buffer(nullptr);
+  }
+
+  if (nullptr != test->main_queue()) {
+    err = hsa_queue_destroy(test->main_queue());
+    RET_IF_HSA_UTILS_ERR(err);
+    test->set_main_queue(nullptr);
+  }
+
+  if (test->aql().completion_signal.handle != 0) {
+    err = hsa_signal_destroy(test->aql().completion_signal);
+    RET_IF_HSA_UTILS_ERR(err);
+  }
+
+  test->clear_code_object();
+  err = hsa_shut_down();
+  RET_IF_HSA_UTILS_ERR(err);
+
+  // Ensure that HSA is actually closed.
+#ifndef ROCRTST_ASAN
+  // Under ASan, the sanitizer's hsa_init interceptor holds an extra reference
+  // count, so the runtime is still alive here.  Skip this check to avoid
+  // tearing down the runtime while ASan still expects it to be available.
+  hsa_status_t check = hsa_shut_down();
+  if (check != HSA_STATUS_ERROR_NOT_INITIALIZED) {
+    EXPECT_EQ(HSA_STATUS_ERROR_NOT_INITIALIZED, check) << "hsa_init reference count was too high.";
+    return HSA_STATUS_ERROR;
+  }
+#endif
+
+  std::string intr_val;
+
+  if (test->orig_hsa_enable_interrupt() == nullptr) {
+    intr_val = "";
+  } else {
+    intr_val = test->orig_hsa_enable_interrupt();
+  }
+
+  SetEnv("HSA_ENABLE_INTERRUPT", intr_val.c_str());
+
+  return err;
+}
+
+static const char* PROFILE_STR[] = {"HSA_PROFILE_BASE", "HSA_PROFILE_FULL", };
+
+/// Verify that the machine running the test has the required profile.
+/// This function will verify that the execution machine meets any specific
+/// test requirement for a profile (HSA_PROFILE_BASE or HSA_PROFILE_FULL).
+/// \param[in] test Test that provides profile requirements.
+/// \returns bool
+///          - true Machine meets test requirements
+///          - false Machine does not meet test requirements
+bool CheckProfileAndInform(BaseRocR* test) {
+  if (test->verbosity() > 0) {
+    std::cout << "Target HW Profile is "
+              << PROFILE_STR[test->profile()] << std::endl;
+  }
+
+  if (test->requires_profile() == -1) {
+    if (test->verbosity() > 0) {
+      std::cout << "Test can run on any profile. OK." << std::endl;
+    }
+    return true;
+  } else {
+    std::cout << "Test requires " << PROFILE_STR[test->requires_profile()]
+              << ". ";
+
+    if (test->requires_profile() != test->profile()) {
+      std::cout << "Not Running." << std::endl;
+      return false;
+    } else {
+      std::cout << "OK." << std::endl;
+      return true;
+    }
+  }
+}
+
+/// Helper function to process error returned from
+///  iterate function like hsa_amd_agent_iterate_memory_pools
+/// \param[in] Error returned from iterate call
+/// \returns HSA_STATUS_SUCCESS iff iterate call succeeds in finding
+///  what was being searched for
+static hsa_status_t ProcessIterateError(hsa_status_t err) {
+  if (err == HSA_STATUS_INFO_BREAK) {
+    err = HSA_STATUS_SUCCESS;
+  } else if (err == HSA_STATUS_SUCCESS) {
+    // This actually means no pool was found.
+    err = HSA_STATUS_ERROR;
+  }
+  return err;
+}
+
+// Find pools for cpu, gpu and for kernel arguments. These pools have
+// common basic requirements, but are not suitable for all cases. In
+// that case, set cpu_pool(), device_pool() and/or kern_arg_pool()
+// yourself instead of using this function.
+hsa_status_t SetPoolsTypical(BaseRocR* test) {
+  hsa_status_t err;
+  if (test->profile() == HSA_PROFILE_FULL) {
+    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(),
+          rocrtst::FindAPUStandardPool, &test->cpu_pool());
+    RET_IF_HSA_UTILS_ERR(rocrtst::ProcessIterateError(err));
+
+    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(),
+          rocrtst::FindAPUStandardPool, &test->device_pool());
+    RET_IF_HSA_UTILS_ERR(rocrtst::ProcessIterateError(err));
+
+    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(),
+          rocrtst::FindAPUStandardPool, &test->kern_arg_pool());
+    RET_IF_HSA_UTILS_ERR(rocrtst::ProcessIterateError(err));
+
+  } else {
+    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(),
+          rocrtst::FindStandardPool, &test->cpu_pool());
+    RET_IF_HSA_UTILS_ERR(rocrtst::ProcessIterateError(err));
+
+    err = hsa_amd_agent_iterate_memory_pools(*test->gpu_device1(),
+          rocrtst::FindStandardPool, &test->device_pool());
+    RET_IF_HSA_UTILS_ERR(rocrtst::ProcessIterateError(err));
+
+    err = hsa_amd_agent_iterate_memory_pools(*test->cpu_device(),
+          rocrtst::FindKernArgPool, &test->kern_arg_pool());
+    RET_IF_HSA_UTILS_ERR(rocrtst::ProcessIterateError(err));
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
+// Enable interrupts if necessary, and call hsa_init()
+hsa_status_t InitAndSetupHSA(BaseRocR* test) {
+  hsa_status_t err;
+
+  if (test->enable_interrupt()) {
+    SetEnv("HSA_ENABLE_INTERRUPT", "1");
+  }
+
+  err = hsa_init();
+  RET_IF_HSA_UTILS_ERR(err);
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_ven_amd_loader_1_00_pfn_t amd_loader_ext_table = {nullptr};
+
+hsa_status_t GetKernelObjectHostAddress(const void* device, const void** host) {
+  return amd_loader_ext_table.hsa_ven_amd_loader_query_host_address
+      ? amd_loader_ext_table.hsa_ven_amd_loader_query_host_address(device, host)
+      : HSA_STATUS_ERROR;
+}
+
+hsa_status_t EnableMetadataPrefetch(BaseRocR* test, hsa_queue_t* q) {
+  hsa_status_t err = hsa_system_get_major_extension_table(HSA_EXTENSION_AMD_LOADER, 1, sizeof(amd_loader_ext_table),
+                                       &amd_loader_ext_table);
+  RET_IF_HSA_UTILS_ERR(err);
+
+  void* metadata_ring_buffer = nullptr;
+  err = hsa_amd_queue_get_info(q, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER, &metadata_ring_buffer);
+  RET_IF_HSA_UTILS_ERR(err);
+
+  if (!metadata_ring_buffer)
+    return HSA_STATUS_ERROR_INVALID_QUEUE; // Not supported on this device
+
+  uint8_t version_major, version_minor;
+  err = hsa_amd_queue_get_info(q, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MAJOR, &version_major);
+  RET_IF_HSA_UTILS_ERR(err);
+
+  err = hsa_amd_queue_get_info(q, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MINOR, &version_minor);
+  RET_IF_HSA_UTILS_ERR(err);
+
+  test->set_metadata_prefetch_queue_base(metadata_ring_buffer);
+
+  test->set_metadata_prefetch_dispatch_ver(version_major, version_minor);
+  return HSA_STATUS_SUCCESS;
+}
+
+// Attempt to find and set test->cpu_device and test->gpu_device1
+hsa_status_t SetDefaultAgents(BaseRocR* test) {
+  hsa_agent_t gpu_device1;
+  hsa_agent_t cpu_device;
+  hsa_status_t err;
+
+  gpu_device1.handle = 0;
+  err = hsa_iterate_agents(FindGPUDevice, &gpu_device1);
+  RET_IF_HSA_UTILS_ERR(rocrtst::ProcessIterateError(err));
+  test->set_gpu_device1(gpu_device1);
+
+  cpu_device.handle = 0;
+  err = hsa_iterate_agents(FindCPUDevice, &cpu_device);
+  RET_IF_HSA_UTILS_ERR(rocrtst::ProcessIterateError(err));
+  test->set_cpu_device(cpu_device);
+
+  if (0 == gpu_device1.handle) {
+    std::cout << "GPU Device is not Created properly!" << std::endl;
+    RET_IF_HSA_UTILS_ERR(HSA_STATUS_ERROR);
+  }
+
+  if (0 == cpu_device.handle) {
+    std::cout << "CPU Device is not Created properly!" << std::endl;
+    RET_IF_HSA_UTILS_ERR(HSA_STATUS_ERROR);
+  }
+
+  if (test->verbosity() > 0) {
+    char name[64] = {0};
+    err = hsa_agent_get_info(gpu_device1, HSA_AGENT_INFO_NAME, name);
+    RET_IF_HSA_UTILS_ERR(err);
+    std::cout << "The gpu device name is " << name << std::endl;
+  }
+
+  hsa_profile_t profile;
+  err = hsa_agent_get_info(gpu_device1, HSA_AGENT_INFO_PROFILE, &profile);
+  RET_IF_HSA_UTILS_ERR(err);
+  test->set_profile(profile);
+
+  if (!CheckProfileAndInform(test)) {
+    return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+// See if the profile of the target matches any required profile by the
+// test program.
+bool CheckProfile(BaseRocR const* test) {
+  if (test->requires_profile() == -1) {
+    return true;
+  } else {
+    return (test->requires_profile() == test->profile());
+  }
+}
+
+// Get the directory containing the executable
+static std::string GetExecutableDir() {
+  char* path = realpath("/proc/self/exe", nullptr);
+  if (path) {
+    std::string result(path);
+    free(path);
+    size_t last_slash = result.rfind('/');
+    if (last_slash != std::string::npos) {
+      return result.substr(0, last_slash);
+    }
+  }
+  return ".";
+}
+
+// Locate file using local and device named file paths.
+std::string LocateKernelFile(std::string filename, hsa_agent_t agent) {
+  char agent_name[64];
+  std::string obj_file;
+  hsa_status_t err = hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_name);
+  RET_IF_HSA_UTILS_ERR_RET(err, obj_file);
+
+  // Try current directory
+  obj_file = "./" + filename;
+  int file_handle = open(obj_file.c_str(), O_RDONLY);
+  if (file_handle >= 0) {
+    close(file_handle);
+    return obj_file;
+  }
+
+  // The executable directory is only needed for the ../share/rocrtst fallback,
+  // and GetExecutableDir() calls realpath("/proc/self/exe"), so compute it
+  // lazily on first use and cache it across lookups.
+  std::string exe_dir;
+  bool exe_dir_valid = false;
+
+  // Look for the kernel under a directory named after the device. Returns the
+  // matching path, or an empty string if not found.
+  auto try_device_dir = [&](const std::string& dev_name) -> std::string {
+    // Try ./<dev_name>/<filename>
+    std::string path = "./" + dev_name + "/" + filename;
+    int fh = open(path.c_str(), O_RDONLY);
+    if (fh >= 0) {
+      close(fh);
+      return path;
+    }
+    // Try <exe_dir>/../share/rocrtst/<dev_name>/<filename>
+    if (!exe_dir_valid) {
+      exe_dir = GetExecutableDir();
+      exe_dir_valid = true;
+    }
+    path = exe_dir + "/../share/rocrtst/" + dev_name + "/" + filename;
+    fh = open(path.c_str(), O_RDONLY);
+    if (fh >= 0) {
+      close(fh);
+      return path;
+    }
+    return std::string();
+  };
+
+  // Try the ISA name the runtime reports for this agent.
+  obj_file = try_device_dir(agent_name);
+  if (!obj_file.empty()) {
+    return obj_file;
+  }
+
+  // On A0 silicon the runtime reports the "-strict" ISA variant (e.g.
+  // gfx1250-strict), but kernels are compiled and installed under the base
+  // device name (gfx1250). Both are the same ISA version, so the base-named
+  // objects load and run. Fall back to the base name with "-strict" removed.
+  // This only affects "-strict" names; every other device name is unchanged.
+  std::string base_name = agent_name;
+  const std::string kStrictSuffix = "-strict";
+  if (base_name.size() > kStrictSuffix.size() &&
+      base_name.compare(base_name.size() - kStrictSuffix.size(), kStrictSuffix.size(),
+                        kStrictSuffix) == 0) {
+    base_name.erase(base_name.size() - kStrictSuffix.size());
+    obj_file = try_device_dir(base_name);
+    if (!obj_file.empty()) {
+      return obj_file;
+    }
+  }
+
+  throw std::runtime_error("Could not open kernel file: " + filename);
+}
+
+// Locate platform configuration file
+std::string LocateConfigFile() {
+  // Priority 1: Environment variable
+  char* envPath = getenv("ROCRTST_PLATFORM_CONFIG");
+  if (envPath != nullptr) {
+    if (access(envPath, F_OK) == 0) {
+      std::cerr <<
+        "Using platform config file from ROCRTST_PLATFORM_CONFIG: " <<
+                                                            envPath << "\n";
+      return envPath;
+    } else {
+      std::cerr << "ROCRTST_PLATFORM_CONFIG is set to " << envPath
+          << " but file cannot be accessed. Ignoring environment variable.\n";
+    }
+  }
+
+  // Priority 2: Current directory (for development)
+  if (access("./config/platform_config.yaml", F_OK) == 0) {
+    return "./config/platform_config.yaml";
+  }
+
+  // Priority 3: Installed location (matches hsaco pattern)
+  char* path = realpath("/proc/self/exe", nullptr);
+  if (path) {
+    std::string exeDir(path);
+    free(path);
+    size_t last_slash = exeDir.rfind('/');
+    if (last_slash != std::string::npos) {
+      exeDir = exeDir.substr(0, last_slash);
+    }
+
+    std::string installPath =
+        exeDir + "/../share/rocrtst/platform_config.yaml";
+    if (access(installPath.c_str(), F_OK) == 0) {
+      return installPath;
+    }
+  }
+
+  // Fallback: return install path based on executable location
+  std::string exeDir = GetExecutableDir();
+  return exeDir + "/../share/rocrtst/platform_config.yaml";
+}
+
+// Load the specified kernel code from the specified file, inspect and fill
+// in BaseRocR member variables related to the kernel and executable.
+// Required Input BaseRocR member variables:
+// - gpu_device1()
+// - kernel_file_name()
+// - kernel_name()
+//
+// Written BaseRocR member variables:
+//  -kernel_object()
+//  -private_segment_size()
+//  -group_segment_size()
+//  -kernarg_size()
+//  -kernarg_align()
+hsa_status_t LoadKernelFromObjFile(BaseRocR* test, hsa_agent_t* agent) {
+  hsa_status_t err;
+  Kernel kern;
+  std::string kern_name;
+  char agent_name[64];
+  std::string obj_file;
+  CodeObject* obj;
+
+  assert(test != nullptr);
+  if (agent == nullptr) {
+    agent = test->gpu_device1();  // Assume GPU agent for now
+  }
+
+  obj_file = LocateKernelFile(test->kernel_file_name(), *agent);
+  Device *gpu = (Device*)(agent - offsetof(Device, agent));
+  obj = new CodeObject(obj_file, *gpu);
+  test->set_code_object(obj);
+  kern_name = test->kernel_name() + ".kd";
+
+  if(!obj->GetKernel(kern_name, kern)) {
+      ADD_FAILURE();
+      return HSA_STATUS_ERROR;
+  }
+
+  test->set_kernel_object(kern.handle);
+  test->set_private_segment_size(kern.scratch);
+  test->set_group_segment_size(kern.group);
+  test->set_kernarg_size(kern.kernarg_size);
+  assert(kern.kernarg_align >= 16 && "Reported kernarg size is too small.");
+  kern.kernarg_size = (kern.kernarg_size == 0) ? 16 : kern.kernarg_size;
+  test->set_kernarg_align(kern.kernarg_size);
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t CreateQueue(hsa_agent_t device, hsa_queue_t** queue,
+                         uint32_t num_pkts) {
+  hsa_status_t err;
+
+  if (num_pkts == 0) {
+    err = hsa_agent_get_info(device, HSA_AGENT_INFO_QUEUE_MAX_SIZE,
+                             &num_pkts);
+    RET_IF_HSA_UTILS_ERR(err);
+  }
+
+  err = hsa_queue_create(device, num_pkts, HSA_QUEUE_TYPE_MULTI, NULL,
+                         NULL, UINT32_MAX, UINT32_MAX, queue);
+  RET_IF_HSA_UTILS_ERR(err);
+
+  return HSA_STATUS_SUCCESS;
+}
+// Initialize the provided aql packet with standard default values, and
+// values from provided BaseRocR object.
+hsa_status_t InitializeAQLPacket(const BaseRocR* test,
+                         hsa_kernel_dispatch_packet_t* aql) {
+  hsa_status_t err;
+
+  assert(aql != nullptr);
+
+  if (aql == nullptr) {
+    return HSA_STATUS_ERROR;
+  }
+
+  // Initialize Packet type as Invalid
+  // Update packet type to Kernel Dispatch
+  // right before ringing doorbell
+  aql->header = 1;
+
+  aql->setup = 1;
+  aql->workgroup_size_x = 256;
+  aql->workgroup_size_y = 1;
+  aql->workgroup_size_z = 1;
+
+  aql->grid_size_x = (uint64_t) 256;  // manual_input*group_input; workg max sz
+  aql->grid_size_y = 1;
+  aql->grid_size_z = 1;
+
+  aql->private_segment_size = test->private_segment_size();
+
+  aql->group_segment_size = test->group_segment_size();
+
+  // Pin kernel code and the kernel argument buffer to the aql packet->
+  aql->kernel_object = test->kernel_object();
+
+  // aql->kernarg_address may be filled in by AllocAndSetKernArgs() if it is
+  // called before this function, so we don't want overwrite it, therefore
+  // we ignore it in this function.
+
+  if (!aql->completion_signal.handle)
+    err = hsa_signal_create(1, 0, NULL, &aql->completion_signal);
+  else
+    err = HSA_STATUS_SUCCESS;
+
+  return err;
+}
+
+// Initialize the provided aql packet with standard default values, and
+// values from provided BaseRocR object.
+hsa_status_t InitializeMetadataPrefetchPacket(const BaseRocR* test,
+  void* host_kernargs,
+  hsa_kernel_dispatch_packet_t* aql,
+  hsa_amd_metadata_kernel_dispatch_packet_t* metadata) {
+  hsa_status_t err;
+
+  assert(metadata != nullptr);
+  assert(aql != nullptr);
+
+  if (aql == nullptr || metadata == nullptr)
+    return HSA_STATUS_ERROR;
+
+  if (aql->completion_signal.handle) {
+    err = hsa_amd_signal_get_event_id(aql->completion_signal, &metadata->event_id);
+    if (err) return err;
+  }
+
+  /* Fill hsa_amd_metadata_kernel_dispatch_packet->kernel_descriptor fields */
+  /**
+   * https://llvm.org/docs/AMDGPUUsage.html#code-object-v3-kernel-descriptor
+   *
+   * The metadata packet kernel descriptor fields is a subset of the full
+   * kernel descriptor from the AQL packet, from bytes 16 - 64.
+   */
+  const void* host_address;
+  err = GetKernelObjectHostAddress((void*) aql->kernel_object, &host_address);
+  if (err) return err;
+
+  const size_t METADATA_DESCRIPTOR_OFFSET = 16;
+  memcpy(&metadata->kernel_descriptor,
+    (uint8_t*)host_address + METADATA_DESCRIPTOR_OFFSET,
+    sizeof(metadata->kernel_descriptor));
+
+  /* Fill hsa_amd_metadata_kernel_dispatch_packet->kernarg_preload_* fields */
+
+  uint16_t kernarg_preload_length = metadata->kernel_descriptor.kernarg_preload.length;
+  uint16_t kernarg_preload_offset = metadata->kernel_descriptor.kernarg_preload.offset;
+
+  if (kernarg_preload_length) {
+    /* Kernarg preload offset is in dwords */
+    uint8_t* kernarg_preload_address = (uint8_t*)host_kernargs + kernarg_preload_offset * sizeof(uint32_t);
+
+    size_t preload_remain = kernarg_preload_length * sizeof(uint32_t);
+
+    /* Copy kernarg_preload 0-14 */
+    size_t to_copy = std::min(preload_remain, sizeof(metadata->kernarg_preload_0_14));
+    memcpy(metadata->kernarg_preload_0_14, kernarg_preload_address, to_copy);
+
+    preload_remain -= to_copy;
+
+    /* Copy kernarg_preload 15-29 */
+    if (preload_remain > 0) {
+      kernarg_preload_address += to_copy;
+      to_copy = std::min(preload_remain, sizeof(metadata->kernarg_preload_15_29));
+      memcpy(metadata->kernarg_preload_15_29, kernarg_preload_address, to_copy);
+
+      preload_remain -= to_copy;
+    }
+
+    /* Copy kernarg_preload 30-31 */
+    if (preload_remain > 0) {
+      kernarg_preload_address += to_copy;
+      to_copy = std::min(preload_remain, sizeof(metadata->kernarg_preload_30_31));
+      memcpy(metadata->kernarg_preload_30_31, kernarg_preload_address, to_copy);
+
+      // Maximum preload length = 32.
+      assert((preload_remain - to_copy == 0));
+    }
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
+// Copy BaseRocR aql object values to the BaseRocR object queue in the
+// specified queue position (ind)
+hsa_kernel_dispatch_packet_t * WriteAQLToQueue(BaseRocR* test, uint64_t *ind) {
+  assert(test);
+  assert(test->main_queue());
+
+  void *queue_base = test->main_queue()->base_address;
+  const uint32_t queue_mask = test->main_queue()->size - 1;
+  uint64_t que_idx = hsa_queue_add_write_index_relaxed(test->main_queue(), 1);
+  *ind = que_idx;
+
+  hsa_kernel_dispatch_packet_t* staging_aql_packet = &test->aql();
+  hsa_kernel_dispatch_packet_t* queue_aql_packet;
+
+  queue_aql_packet =
+       &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue_base))
+                                                        [que_idx & queue_mask];
+
+  queue_aql_packet->workgroup_size_x = staging_aql_packet->workgroup_size_x;
+  queue_aql_packet->workgroup_size_y = staging_aql_packet->workgroup_size_y;
+  queue_aql_packet->workgroup_size_z = staging_aql_packet->workgroup_size_z;
+  queue_aql_packet->grid_size_x = staging_aql_packet->grid_size_x;
+  queue_aql_packet->grid_size_y = staging_aql_packet->grid_size_y;
+  queue_aql_packet->grid_size_z = staging_aql_packet->grid_size_z;
+  queue_aql_packet->private_segment_size =
+                                     staging_aql_packet->private_segment_size;
+  queue_aql_packet->group_segment_size =
+                                       staging_aql_packet->group_segment_size;
+  queue_aql_packet->kernel_object = staging_aql_packet->kernel_object;
+  queue_aql_packet->kernarg_address = staging_aql_packet->kernarg_address;
+  queue_aql_packet->completion_signal = staging_aql_packet->completion_signal;
+
+  return queue_aql_packet;
+}
+
+void
+WriteAQLToQueueLoc(hsa_queue_t *queue, uint64_t indx,
+                                      hsa_kernel_dispatch_packet_t *aql_pkt) {
+  assert(queue);
+  assert(aql_pkt);
+
+  void *queue_base = queue->base_address;
+  const uint32_t queue_mask = queue->size - 1;
+  hsa_kernel_dispatch_packet_t* queue_aql_packet;
+
+  queue_aql_packet =
+       &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue_base))
+                                                        [indx & queue_mask];
+
+  queue_aql_packet->workgroup_size_x = aql_pkt->workgroup_size_x;
+  queue_aql_packet->workgroup_size_y = aql_pkt->workgroup_size_y;
+  queue_aql_packet->workgroup_size_z = aql_pkt->workgroup_size_z;
+  queue_aql_packet->grid_size_x = aql_pkt->grid_size_x;
+  queue_aql_packet->grid_size_y = aql_pkt->grid_size_y;
+  queue_aql_packet->grid_size_z = aql_pkt->grid_size_z;
+  queue_aql_packet->private_segment_size =
+                                     aql_pkt->private_segment_size;
+  queue_aql_packet->group_segment_size =
+                                       aql_pkt->group_segment_size;
+  queue_aql_packet->kernel_object = aql_pkt->kernel_object;
+  queue_aql_packet->kernarg_address = aql_pkt->kernarg_address;
+  queue_aql_packet->completion_signal = aql_pkt->completion_signal;
+}
+
+// Copy BaseRocR aql object values to the BaseRocR object queue in the
+// specified queue position (ind)
+hsa_amd_metadata_kernel_dispatch_packet_t * WriteMetadataToQueue(BaseRocR* test, const uint64_t ind) {
+  assert(test);
+  assert(test->main_queue());
+  assert(test->metadata_prefetch_queue_base());
+
+  void *queue_base = test->metadata_prefetch_queue_base();
+  const uint32_t queue_mask = test->main_queue()->size - 1;
+
+  hsa_amd_metadata_kernel_dispatch_packet_t* staging_metadata_packet = &test->metadata_prefetch();
+  hsa_amd_metadata_kernel_dispatch_packet_t* queue_metadata_packet =
+       &(reinterpret_cast<hsa_amd_metadata_kernel_dispatch_packet_t*>(queue_base))
+                                                        [ind & queue_mask];
+
+  memcpy(queue_metadata_packet, staging_metadata_packet, sizeof(*queue_metadata_packet));
+
+  return queue_metadata_packet;
+}
+
+// Allocate a buffer in the kern_arg_pool for the kernel arguments and write
+// the arguments to buffer
+hsa_status_t AllocAndSetKernArgs(BaseRocR* test, void* args, size_t arg_size) {
+  void* kern_arg_buf = nullptr;
+  hsa_status_t err;
+  size_t buf_size;
+  size_t req_align;
+  assert(args != nullptr);
+  assert(test != nullptr);
+
+  req_align = test->kernarg_align();
+  // Allocate enough extra space for alignment adjustments if ncessary
+  buf_size = arg_size + (req_align << 1);
+
+  err = hsa_amd_memory_pool_allocate(test->kern_arg_pool(), buf_size, 0,
+                                     reinterpret_cast<void**>(&kern_arg_buf));
+  RET_IF_HSA_UTILS_ERR(err);
+
+  test->set_kernarg_buffer(kern_arg_buf);
+
+  void *adj_kern_arg_buf = rocrtst::AlignUp(kern_arg_buf, req_align);
+
+  assert(arg_size >= test->kernarg_size());
+  assert(((uintptr_t)adj_kern_arg_buf + arg_size) <
+                                        ((uintptr_t)kern_arg_buf + buf_size));
+
+  hsa_agent_t ag_list[2] = {*test->gpu_device1(), *test->cpu_device()};
+  err = hsa_amd_agents_allow_access(2, ag_list, NULL, kern_arg_buf);
+  RET_IF_HSA_UTILS_ERR(err);
+
+  err = hsa_memory_copy(adj_kern_arg_buf, args, arg_size);
+  RET_IF_HSA_UTILS_ERR(err);
+
+  test->aql().kernarg_address = adj_kern_arg_buf;
+
+  return HSA_STATUS_SUCCESS;
+}
+
+#undef RET_IF_HSA_UTILS_ERR
+
+}  // namespace rocrtst

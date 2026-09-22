@@ -1,0 +1,5 @@
+outs:
+- md5: 38d276b596cc21696fff03719fd4ba33
+  size: 28900
+  hash: md5
+  path: metrohash.lib

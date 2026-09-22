@@ -1,0 +1,40 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "common/defines.h"
+#include "core/common.hpp"
+#include "core/components/fwd.hpp"
+#include "library/thread_data.hpp"
+
+#include <timemory/components/base.hpp>
+#include <timemory/mpl/concepts.hpp>
+
+#include <atomic>
+#include <cstdint>
+
+namespace rocprofsys
+{
+namespace causal
+{
+struct delay : comp::empty_base
+{
+    using value_type = void;
+
+    static void         setup();
+    static void         process();
+    static void         credit();
+    static void         preblock();
+    static void         postblock(std::int64_t);
+    static std::int64_t sync();
+
+    static std::atomic<std::int64_t>& get_global();
+    static std::int64_t&              get_local(std::int64_t _tid = threading::get_id());
+    static bool                       is_local_available();
+
+    static std::int64_t  get(std::int64_t _tid = threading::get_id());
+    static std::uint64_t compute_total_delay(std::uint64_t);
+};
+}  // namespace causal
+}  // namespace rocprofsys

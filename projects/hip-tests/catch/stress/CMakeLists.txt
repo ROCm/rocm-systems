@@ -1,0 +1,13 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+add_custom_target(stress_test)
+
+add_subdirectory(memory)
+add_subdirectory(module)
+if(HIP_PLATFORM MATCHES "amd")
+add_subdirectory(printf)
+add_subdirectory(stream)
+endif()
+add_subdirectory(deviceallocation)

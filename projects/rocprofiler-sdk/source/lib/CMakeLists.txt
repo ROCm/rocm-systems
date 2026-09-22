@@ -1,0 +1,33 @@
+#
+#
+#
+rocprofiler_activate_clang_tidy()
+
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "core")
+add_subdirectory(common)
+add_subdirectory(output)
+add_subdirectory(aqlprofile)
+add_subdirectory(rocprofiler-sdk)
+add_subdirectory(rocprofiler-sdk-attach)
+
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "roctx")
+add_subdirectory(rocprofiler-sdk-roctx)
+
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "rocpd")
+add_subdirectory(rocprofiler-sdk-rocpd)
+
+# rocattach is only supported on x86_64 for now
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+    set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "rocattach")
+    add_subdirectory(rocprofiler-sdk-rocattach)
+endif()
+
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "tools")
+add_subdirectory(att-tool)
+add_subdirectory(rocprofiler-sdk-tool)
+
+add_subdirectory(python)
+
+if(ROCPROFILER_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()

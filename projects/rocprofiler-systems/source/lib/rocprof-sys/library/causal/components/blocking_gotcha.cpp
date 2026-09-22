@@ -1,0 +1,327 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "library/causal/components/blocking_gotcha.hpp"
+#include "core/config.hpp"
+#include "core/state.hpp"
+#include "library/causal/components/causal_gotcha.hpp"
+#include "library/causal/delay.hpp"
+#include "library/causal/experiment.hpp"
+#include "library/causal/sampling.hpp"
+#include "library/runtime.hpp"
+
+#include <timemory/components/macros.hpp>
+#include <timemory/hash/types.hpp>
+#include <timemory/process/process.hpp>
+#include <timemory/utility/types.hpp>
+
+#include <atomic>
+#include <cerrno>
+#include <csignal>
+#include <cstdint>
+#include <ctime>
+#include <pthread.h>
+#include <signal.h>
+#include <stdexcept>
+
+#pragma weak pthread_join
+#pragma weak pthread_mutex_lock
+#pragma weak pthread_spin_lock
+#pragma weak pthread_cond_wait
+#pragma weak pthread_rwlock_rdlock
+#pragma weak pthread_rwlock_wrlock
+#pragma weak pthread_tryjoin_np
+#pragma weak pthread_timedjoin_np
+#pragma weak pthread_cond_timedwait
+#pragma weak pthread_rwlock_timedrdlock
+#pragma weak pthread_rwlock_timedwrlock
+#pragma weak pthread_mutex_trylock
+#pragma weak pthread_spin_trylock
+#pragma weak pthread_rwlock_trywrlock
+#pragma weak sigwait
+#pragma weak sigwaitinfo
+#pragma weak sigtimedwait
+#pragma weak sigsuspend
+
+namespace rocprofsys
+{
+namespace causal
+{
+namespace component
+{
+std::string
+blocking_gotcha::label()
+{
+    return "causal_blocking_gotcha";
+}
+
+std::string
+blocking_gotcha::description()
+{
+    return "Handles executing all necessary pauses before the thread performs some "
+           "blocking function";
+}
+
+void
+blocking_gotcha::preinit()
+{
+    configure();
+}
+
+void
+blocking_gotcha::configure()
+{
+    blocking_gotcha_t::get_initializer() = []() {
+        if(!config::get_use_causal()) return;
+
+        // postblock(true)
+        //  - pthread_join
+        //  - pthread_mutex_lock
+        //  - pthread_cond_wait
+        //  - pthread_barrier_wait
+        //  - pthread_rwlock_rdlock
+        //  - pthread_rwlock_wrlock
+
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 0, pthread_join);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 1, pthread_mutex_lock);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 2, pthread_spin_lock);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 3, pthread_cond_wait);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 4, pthread_rwlock_rdlock);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 5, pthread_rwlock_wrlock);
+
+        // postblock(result == 0)
+        //  - pthread_tryjoin_np
+        //  - pthread_timedjoin_np
+        //  - pthread_cond_timedwait
+        //  - pthread_rwlock_timedrdlock
+        //  - pthread_rwlock_timedwrlock
+
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 6, pthread_tryjoin_np);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 7, pthread_timedjoin_np);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 8, pthread_cond_timedwait);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 9, pthread_rwlock_timedrdlock);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 10, pthread_rwlock_timedwrlock);
+
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 11, pthread_mutex_trylock);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 12, pthread_spin_trylock);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 13, pthread_rwlock_trywrlock);
+
+        // postblock(...)
+        //  - sigwait
+        //  - sigwaitinfo
+        //  - sigtimedwait
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 14, sigwait);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 15, sigwaitinfo);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 16, sigtimedwait);
+
+        // other
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 17, sigsuspend);
+    };
+}
+
+// Set to true by shutdown() so that operator() becomes a pass-through
+// immediately, even though the GOTCHA GOT hook is still installed.
+// blocking_gotcha_t::disable() only sets a timemory runtime_enabled flag
+// which the fast_func dispatch path does not check, so we need our own
+// guard to prevent any causal delay logic from running after shutdown.
+static std::atomic<bool> g_shutdown{ false };
+
+void
+blocking_gotcha::shutdown()
+{
+    g_shutdown.store(true, std::memory_order_release);
+    blocking_gotcha_t::disable();
+}
+
+template <size_t Idx, typename Ret, typename... Args>
+    requires(Idx <= blocking_gotcha::indexes::maybe_post_block_max_idx)
+Ret
+blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
+                            Args... _args) const noexcept
+{
+    // Fast shutdown path: if blocking_gotcha has been shut down, skip all
+    // causal delay logic and pass directly to the real function.  The GOT
+    // hook remains installed so this wrapper is still called, but we make
+    // it a zero-overhead passthrough to unblock any threads that would
+    // otherwise be stuck in block_backtrace_samples() or postblock().
+    if(g_shutdown.load(std::memory_order_relaxed))
+    {
+        return (*_func)(_args...);
+    }
+
+    const std::int64_t _delay_value =
+        causal::delay::get_global().load(std::memory_order_relaxed);
+
+    causal::sampling::block_backtrace_samples();
+    auto ret = (*_func)(_args...);
+    causal::sampling::unblock_backtrace_samples();
+
+    if(state::thread::get() < ::rocprofsys::state::thread::Internal)
+    {
+        if constexpr(Idx >= always_post_block_min_idx && Idx <= always_post_block_max_idx)
+        {
+            causal::delay::postblock(_delay_value);
+        }
+        else if constexpr(Idx >= maybe_post_block_min_idx &&
+                          Idx <= maybe_post_block_max_idx)
+        {
+            if(ret == 0)
+            {
+                causal::delay::postblock(_delay_value);
+            }
+        }
+        else
+        {
+            static_assert(Idx > maybe_post_block_max_idx, "Error! bad overload");
+        }
+    }
+
+    return ret;
+}
+
+int
+blocking_gotcha::operator()(gotcha_index<sigwait_idx>,
+                            int (*func)(const sigset_t*,  // NOLINT(misc-include-cleaner)
+                                        int*),
+                            const sigset_t* set_v, int* sig) const noexcept
+{
+    // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
+    if(g_shutdown.load(std::memory_order_relaxed))
+    {
+        return (*func)(set_v, sig);
+    }
+
+    auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
+
+    sigset_t set = *set_v;
+    causal_gotcha::remove_signals(&set);
+    siginfo_t info;  // NOLINT(misc-include-cleaner)
+
+    const std::int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
+
+    auto* _data         = blocking_gotcha_t::at(16);
+    auto  f_sigwaitinfo = reinterpret_cast<decltype(&sigwaitinfo)>(_data->wrappee);
+
+    causal::sampling::block_backtrace_samples();
+    auto ret = (*f_sigwaitinfo)(&set, &info);
+    causal::sampling::unblock_backtrace_samples();
+
+    // Woken up by another thread if the call did not fail and this is waking process
+    if(_active && ret != -1 &&
+       info.si_pid == process::get_id())  // NOLINT(misc-include-cleaner)
+    {
+        causal::delay::postblock(_delay_value);
+    }
+
+    if(ret == -1)
+    {
+        return errno;  // If there was an error, return the error code
+    }
+    else
+    {
+        *sig = ret;  // sig is declared as non-null so skip check
+    }
+
+    return 0;
+}
+
+int
+blocking_gotcha::operator()(gotcha_index<sigwaitinfo_idx>,
+                            int (*_func)(const sigset_t*, siginfo_t*),
+                            const sigset_t* _set_v, siginfo_t* _info_v) const noexcept
+{
+    // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
+    if(g_shutdown.load(std::memory_order_relaxed))
+    {
+        return (*_func)(_set_v, _info_v);
+    }
+
+    auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
+
+    sigset_t set = *_set_v;
+    causal_gotcha::remove_signals(&set);
+    siginfo_t _info;
+
+    const std::int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
+
+    causal::sampling::block_backtrace_samples();
+    auto ret = (*_func)(&set, &_info);
+    causal::sampling::unblock_backtrace_samples();
+
+    // Woken up by another thread if the call did not fail and this is waking process
+    if(_active && ret > 0 && _info.si_pid == process::get_id())
+    {
+        causal::delay::postblock(_delay_value);
+    }
+
+    if(ret > 0 && _info_v)
+    {
+        *_info_v = _info;
+    }
+
+    return ret;
+}
+
+int
+blocking_gotcha::operator()(gotcha_index<sigtimedwait_idx>,
+                            int (*_func)(const sigset_t*, siginfo_t*,
+                                         const struct timespec*),
+                            const sigset_t* _set_v, siginfo_t* _info_v,
+                            const struct timespec* _wait_v) const noexcept
+{
+    // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
+    if(g_shutdown.load(std::memory_order_relaxed))
+    {
+        return (*_func)(_set_v, _info_v, _wait_v);
+    }
+
+    auto _active = state::thread::get() < ::rocprofsys::state::thread::Internal;
+
+    sigset_t set = *_set_v;
+    causal_gotcha::remove_signals(&set);
+    siginfo_t _info;
+
+    const std::int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
+
+    causal::sampling::block_backtrace_samples();
+    auto ret = (*_func)(&set, &_info, _wait_v);
+    causal::sampling::unblock_backtrace_samples();
+
+    // Woken up by another thread if the call did not fail and this is waking process
+    if(_active && ret > 0 && _info.si_pid == process::get_id())
+    {
+        causal::delay::postblock(_delay_value);
+    }
+
+    if(ret > 0 && _info_v)
+    {
+        *_info_v = _info;
+    }
+
+    return ret;
+}
+
+int
+blocking_gotcha::operator()(gotcha_index<sigsuspend_idx>, int (*func)(const sigset_t*),
+                            const sigset_t* _set_v) const noexcept
+{
+    // Fast shutdown path: if blocking_gotcha has been shut down, pass through directly.
+    if(g_shutdown.load(std::memory_order_relaxed))
+    {
+        return (*func)(_set_v);
+    }
+
+    auto _old_set = sigset_t{};
+    int  _sig     = 0;
+    ::sigprocmask(SIG_SETMASK, _set_v, &_old_set);
+    // sigwait is wrapped so no need to block/unblock signals
+    auto ret = ::sigwait(_set_v, &_sig);
+    ::sigprocmask(SIG_SETMASK, &_old_set, nullptr);
+
+    return ret;
+}
+}  // namespace component
+}  // namespace causal
+}  // namespace rocprofsys
+
+TIMEMORY_INVOKE_PREINIT(rocprofsys::causal::component::blocking_gotcha)

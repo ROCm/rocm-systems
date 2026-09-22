@@ -1,0 +1,160 @@
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
+
+#ifndef NCCL_DEVICE_RUNTIME_H_
+#define NCCL_DEVICE_RUNTIME_H_
+#include "nccl.h"
+#include "nccl_device.h"
+#include "nccl_common.h"
+#include "allocator.h"
+#include "bitops.h"
+#include "utils.h"
+
+////////////////////////////////////////////////////////////////////////////////
+// ncclDevr[_]: runtime implements for symmetric API.
+
+struct ncclDevrMemory;
+struct ncclDevrWindow {
+  struct ncclDevrMemory* memory;
+  void* userPtr;
+  size_t size;
+  size_t bigOffset; // Offset in big VA space.
+  int winFlags;
+  void* localRegHandle;
+  struct ncclWindow_vidmem* vidmem; // key for intrusive map
+  struct ncclDevrWindow* next; // next for intrusive map
+  struct ncclComm* comm; // comm for intrusive map window <> comm look up
+  void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS]; // IB MR handles per GIN connection (proxy-only path)
+  ncclGinWindow_t rmaDevWins[NCCL_GIN_MAX_CONNECTIONS]; // device-side GIN window handles (proxy-only path)
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // RCCL: intra-node IPC peer table (NULL when inactive), sized to lsaSize.
+  void** ipcPeerPtrs;
+  void** ipcPeerPtrsAllocBase;
+  int ipcPeerCount;
+#endif
+};
+
+struct ncclDevrWindowSorted;
+struct ncclDevrTeam;
+
+struct ncclDevrRegTask {
+  struct ncclDevrRegTask* next;
+  void* userPtr;
+  size_t userSize;
+  int winFlags;
+  ncclWindow_t* outWinDev;
+};
+
+struct ncclDevrCommCreateTask {
+  struct ncclDevrCommCreateTask* next;
+  struct ncclDevCommRequirements* reqs;
+  struct ncclDevComm* outDevComm;
+  uint32_t deviceCodeVersion;
+};
+
+struct ncclDevrStateCftUc {
+  ncclCftLeId baseId;
+};
+
+struct ncclDevrState {
+  // Like localRank/localRanks except "lsa" ranks must be consecutive in the world
+  // and all lsa subsets have the same number of ranks. If any condition is
+  // false then the lsa team is just the singleton of self.
+  int lsaSelf;
+  int lsaSize;
+  int* lsaRankList;
+  int nLsaTeams;
+
+  int cftSelf;
+  int cftSize;
+  int cftMcSelf;
+  int cftMcSize;
+  struct ncclDevrStateCftUc le;
+
+  size_t granularity; // cuMemGetAllocationGranularity
+  bool ginEnabled;
+  bool rmaProxyEnabled;
+  struct ncclDevrMemory* memHead;
+  struct ncclDevrWindowSorted* winSorted;
+  int winSortedCapacity, winSortedCount;
+  struct ncclDevrTeam* teamHead;
+  size_t bigSize; // size of our big logical space (128GB?)
+  struct ncclSpace bigSpace; // allocates our big VA space.
+  void* lsaFlatBase; // base ptr for all lsa ranks big VA's concatenated together: size = lsaRanks*bigSize
+  struct ncclShadowPool shadows;
+  struct ncclDevCommWindowTable* windowTable;
+
+  struct ncclIntruQueue<struct ncclDevrRegTask, &ncclDevrRegTask::next> regTaskQueue;
+  struct ncclIntruQueue<struct ncclDevrCommCreateTask, &ncclDevrCommCreateTask::next> commCreateTaskQueue;
+};
+
+struct ncclDevCommCompat {
+  int minVersion, maxVersion;
+  ncclResult_t (*commPropertiesFilter)(ncclComm_t comm, struct ncclCommProperties* props);
+  ncclResult_t (*devCommRequirementsFilter)(ncclComm_t comm, ncclDevCommRequirements_t* reqs);
+  ncclResult_t (*devCommCopyNewToOld)(ncclComm_t comm, void* oldDevComm, struct ncclDevComm const* newDevComm);
+  ncclResult_t (*devCommCopyOldToNew)(ncclComm_t comm, struct ncclDevComm* newDevComm, void const* oldDevComm);
+};
+
+// Check if GIN resources have been requested as part of `reqs`.
+bool ncclGinResourcesRequested(struct ncclDevCommRequirements const* reqs);
+
+// Check if there is only one LSA team. This function uses the cached value of comm or computes the
+// value from the comm topology.
+bool ncclDevrIsOneLsaTeam(struct ncclComm* comm);
+
+// Returns the CUDA version supported by CFT on this GPU, or 0 when CFT is unsupported.
+ncclResult_t ncclGpuCftSupport(struct ncclComm* comm, int* gpuCftSupport);
+
+// We assume ncclComm has a `ncclDevrState symState` member.
+ncclResult_t ncclDevrInitOnce(struct ncclComm* comm);
+ncclResult_t ncclDevrFinalize(struct ncclComm* comm);
+
+// If found *outWinHost will be populated and *outWinId >= 0, otherwise *outWinId == -1
+ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, struct ncclDevrWindow** outWin);
+
+ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* ptr, size_t size, int winFlags,
+                                           ncclWindow_t* outWinDev);
+
+ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCommRequirements* reqs,
+                                        struct ncclDevComm* outDevComm, bool isInternal, uint32_t deviceCodeVersion);
+void freeDevCommRequirements(struct ncclDevCommRequirements* reqs);
+
+bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* win);
+bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* win);
+
+// Get the corresponding pointer in another lsa rank's symmetric memory window
+ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, int lsaRank,
+                                   void** outPtr);
+
+// Convert a world rank to an LSA rank.
+ncclResult_t ncclDevrWorldToLsaRank(struct ncclComm* comm, int peerWorldRank, int* peerLsaRank);
+
+// Get the host RMA-proxy MR handle for a physical RMA connection.
+void* ncclDevrGetRmaWin(struct ncclDevrWindow* winHost, int ctx);
+
+// Get the byte offset of a window within its backing memory allocation.
+size_t ncclDevrGetWinOffset(struct ncclDevrWindow* winHost);
+
+// Get the multicast address for a given team
+ncclResult_t ncclDevrGetLsaTeamPtrMC(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset,
+                                     struct ncclTeam lsaTeam, void** outPtr);
+
+// Copies the devComm data from "rank" to "lsaBarrier".  Assumes the same memory layout at source and destination.
+void ncclDevCommCopyLsaData(void* dstRankPtr, void const* srcRankPtr);
+
+// RCCL: Get the LSA flat VA for self rank corresponding to a primary (ncclMemAlloc) address.
+// If addr is already in the LSA flat range, returns addr unchanged.
+// If addr matches a registered memory's primaryAddr, returns lsaFlatBase + lsaSelf*bigSize + bigOffset.
+// outAddr is set to nullptr if addr cannot be resolved.
+ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr);
+
+// RCCL: LSA flat window base + stride for GIN Anvil symmetric registration (ncclGetLsaPointer layout).
+ncclResult_t ncclDevrGetGinAnvilMemLayout(struct ncclDevrState* devr, void* addr, uintptr_t* outLsaFlatBase,
+                                          uint32_t* outStride4G);
+
+#endif

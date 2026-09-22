@@ -1,0 +1,261 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "library/process_sampler.hpp"
+#include "core/config.hpp"
+#include "library/pmc/sampler.hpp"
+#include "library/runtime.hpp"
+#include <cstdint>
+
+#include "logger/debug.hpp"
+
+#include <atomic>
+#include <chrono>
+#include <memory>
+#include <thread>
+#include <vector>
+
+namespace rocprofsys
+{
+namespace process_sampler
+{
+namespace
+{
+using promise_t                                         = std::promise<void>;
+std::unique_ptr<promise_t>             polling_finished = {};
+std::vector<std::unique_ptr<instance>> instances        = {};
+std::atomic<bool>                      sampler_paused{ false };
+
+bool&
+is_initialized()
+{
+    static bool _v = false;
+    return _v;
+}
+
+std::unique_ptr<std::thread>&
+get_thread()
+{
+    static std::unique_ptr<std::thread> _v;
+    return _v;
+}
+
+std::atomic<state::process::State>&
+get_sampler_state()
+{
+    static std::atomic<state::process::State> _v{ state::process::PreInit };
+    return _v;
+}
+
+std::atomic<bool>&
+get_sampler_is_sampling()
+{
+    static std::atomic<bool> _v{ false };
+    return _v;
+}
+}  // namespace
+
+void
+sampler::poll(std::atomic<state::process::State>* _state, nsec_t _interval,
+              promise_t* _ready)
+{
+    threading::offset_this_id(true);
+    threading::set_thread_name("omni.sampler");
+
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+
+    // notify thread started
+    if(_ready) _ready->set_value();
+
+    for(auto& itr : instances)
+        itr->config();
+
+    LOG_DEBUG(
+        "Background process sampling polling at an interval of {:.2f} seconds...",
+        std::chrono::duration_cast<std::chrono::duration<double>>(_interval).count());
+
+    auto duration = config::get_process_sampling_duration();
+    if(duration < 0.0)
+    {
+        duration = config::get_sampling_duration();
+    }
+    const bool has_duration = (duration > 0.0);
+
+    auto       now = std::chrono::steady_clock::now();
+    const auto end = now + std::chrono::duration_cast<std::chrono::nanoseconds>(
+                               std::chrono::duration<double>{ duration });
+    while(_state && _state->load() < state::process::Finalized &&
+          state::process::get() < state::process::Finalized)
+    {
+        std::this_thread::sleep_until(now);
+        if(_state->load() != state::process::Active) continue;
+        if(state::process::get() >= state::process::Finalized) break;
+        if(state::process::get() != state::process::Active) continue;
+
+        for(auto& itr : instances)
+        {
+            itr->flush_pending_pause();
+        }
+
+        if(sampler_paused.load(std::memory_order_relaxed))
+        {
+            now = std::chrono::steady_clock::now() + _interval;
+            continue;
+        }
+        get_sampler_is_sampling().store(true);
+        for(auto& itr : instances)
+            itr->sample();
+        get_sampler_is_sampling().store(false);
+        if(has_duration && now >= end)
+        {
+            break;
+        }
+        now = std::chrono::steady_clock::now() + _interval;
+    }
+
+    // ensure this is always false
+    get_sampler_is_sampling().store(false);
+
+    if(has_duration && now >= end && state::process::get() < state::process::Finalized)
+    {
+        LOG_DEBUG("Background process sampling duration of {:.2f} seconds has elapsed. "
+                  "Shutting down process sampling...",
+                  duration);
+    }
+
+    LOG_DEBUG("Thread sampler polling completed...");
+
+    if(polling_finished) polling_finished->set_value();
+}
+
+void
+sampler::setup()
+{
+    if(!get_use_process_sampling())
+    {
+        LOG_DEBUG("Background sampler is disabled...");
+        return;
+    }
+
+    LOG_DEBUG("Setting up background sampler...");
+
+    // shutdown if already running
+    shutdown();
+
+    LOG_DEBUG("Setting up PMC sampling.");
+    auto& pmc                = instances.emplace_back(std::make_unique<instance>());
+    pmc->setup               = []() { pmc::setup(); };
+    pmc->shutdown            = []() { pmc::shutdown(); };
+    pmc->post_process        = []() { pmc::post_process(); };
+    pmc->config              = []() { pmc::config(); };
+    pmc->sample              = []() { pmc::sample(); };
+    pmc->pause               = []() { pmc::pause(); };
+    pmc->flush_pending_pause = []() { pmc::flush_pending_pause(); };
+
+    for(auto& itr : instances)
+        itr->setup();
+
+    polling_finished = std::make_unique<promise_t>();
+
+    const auto freq     = get_process_sampling_freq();
+    const auto interval = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::duration<double>{ 1.0 / freq });
+
+    ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+
+    set_state(state::process::PreInit);
+    using poll_fn = void (*)(std::atomic<state::process::State>*, nsec_t, promise_t*);
+    get_thread()  = std::make_unique<std::thread>(static_cast<poll_fn>(&poll),
+                                                  &get_sampler_state(), interval, nullptr);
+
+    set_state(state::process::Active);
+}
+
+void
+sampler::shutdown()
+{
+    // set the local sampler state to finalized
+    set_state(state::process::Finalized);
+
+    for(auto& itr : instances)
+    {
+        itr->flush_pending_pause();
+    }
+
+    // shutdown all components
+    for(auto& itr : instances)
+        itr->shutdown();
+
+    auto& _thread = get_thread();
+    if(_thread)
+    {
+        size_t              _nitr     = 0;
+        constexpr size_t    _nitr_max = 100;
+        const std::uint64_t _freq     = (1.0 / get_process_sampling_freq()) * 1.0e3;
+
+        // wait until the sampler is no longer sampling
+        std::this_thread::sleep_for(msec_t{ _freq });
+        while(get_sampler_is_sampling().load())
+        {
+            if(_nitr++ > _nitr_max) break;
+        }
+
+        // during CI, throw an error if polling_finished is not valid
+        if(!polling_finished)
+        {
+            throw std::runtime_error("polling_finished is not valid");
+        }
+        if(polling_finished)
+        {
+            // wait for the thread to finish
+            auto _fut = polling_finished->get_future();
+            _fut.wait_for(msec_t{ 10 * _freq });
+            _thread->join();
+        }
+        else
+        {
+            // cancel the thread and detach
+            std::this_thread::sleep_for(msec_t{ 10 * _freq });
+            pthread_cancel(_thread->native_handle());
+            _thread->detach();
+        }
+        _thread          = std::unique_ptr<std::thread>{ nullptr };
+        polling_finished = std::unique_ptr<promise_t>{};
+    }
+
+    is_initialized() = false;
+}
+
+void
+sampler::pause()
+{
+    sampler_paused.store(true, std::memory_order_relaxed);
+
+    for(auto& itr : instances)
+    {
+        itr->pause();
+    }
+}
+
+void
+sampler::resume()
+{
+    sampler_paused.store(false, std::memory_order_relaxed);
+}
+
+void
+sampler::post_process()
+{
+    for(auto& itr : instances)
+        itr->post_process();
+
+    instances.clear();
+}
+
+void
+sampler::set_state(state_t _state)
+{
+    get_sampler_state().store(_state);
+}
+}  // namespace process_sampler
+}  // namespace rocprofsys

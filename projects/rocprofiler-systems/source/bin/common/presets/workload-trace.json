@@ -1,0 +1,82 @@
+{
+    "domains": {
+        "gpu": {
+            "enabled": true,
+            "metrics": {
+                "busy": {
+                    "enabled": true
+                },
+                "mem_usage": {
+                    "enabled": true
+                },
+                "power": {
+                    "enabled": true
+                },
+                "temp": {
+                    "enabled": true
+                }
+            }
+        },
+        "parallel": {
+            "enabled": true,
+            "runtimes": {
+                "mpi": {
+                    "enabled": true
+                },
+                "rccl": {
+                    "enabled": true
+                }
+            }
+        },
+        "rocm": {
+            "api_domains": {
+                "hip_runtime_api": {
+                    "enabled": true
+                },
+                "kernel_dispatch": {
+                    "enabled": true
+                },
+                "marker_api": {
+                    "enabled": true
+                },
+                "memory_copy": {
+                    "enabled": true
+                },
+                "scratch_memory": {
+                    "enabled": true
+                }
+            },
+            "enabled": true
+        }
+    },
+    "metadata": {
+        "category": "gpu",
+        "cli_flag": "--workload-trace",
+        "description": "General compute workload preset: comprehensive tracing for AI/ML, HPC, and GPU workloads",
+        "name": "workload-trace",
+        "use_case": "AI/ML training, GPU-accelerated HPC, long-running GPU workloads"
+    },
+    "output": {
+        "rocpd_output": {
+            "enabled": true
+        }
+    },
+    "profiling": {
+        "enabled": true
+    },
+    "sampling": {
+        "cpus": {
+            "value": "none"
+        },
+        "enabled": false,
+        "frequency_hz": {
+            "value": 50
+        }
+    },
+    "tracing": {
+        "buffer_size_kb": {
+            "value": 2048000
+        },
+        "enabled": true
+    }
+}

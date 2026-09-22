@@ -1,0 +1,217 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+import argparse
+import logging
+import threading
+from collections.abc import Hashable
+from datetime import datetime
+from enum import Enum
+from typing import Any, Optional
+
+import pandas as pd
+from textual.widgets import TextArea
+
+import config
+from utils import schema
+
+
+class LogLevel(str, Enum):
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+    SUCCESS = "success"
+
+
+class Logger:
+    def __init__(self, output_area: Optional[TextArea] = None) -> None:
+        self.output_area = output_area
+        self._setup_logger()
+
+    def _setup_logger(self) -> None:
+        self.logger = logging.getLogger("app")
+        self.logger.setLevel(logging.INFO)
+
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter(
+                "%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+            )
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+
+    def set_output_area(self, output_area: TextArea) -> None:
+        self.output_area = output_area
+
+    def log(
+        self, message: str, log_level: str = "INFO", update_ui: bool = True
+    ) -> None:
+        level_map = {
+            "INFO": logging.INFO,
+            "SUCCESS": logging.INFO,
+            "WARNING": logging.WARNING,
+            "ERROR": logging.ERROR,
+        }
+        self.logger.log(level_map[log_level], message)
+
+        if (
+            not update_ui
+            or not self.output_area
+            or not hasattr(self.output_area, "text")
+        ):
+            return
+
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        formatted_msg = f"[{timestamp}] [{log_level}] {message}"
+        app = getattr(self.output_area, "app", None)
+
+        if app is None or not hasattr(app, "_thread_id"):
+            # app not ready yet — update immediately (safe during compose)
+            if self.output_area.text:
+                self.output_area.text += "\n" + formatted_msg
+            else:
+                self.output_area.text = formatted_msg
+            return
+
+        # Detect if we are on UI thread
+        in_ui_thread = threading.get_ident() == app._thread_id
+
+        def _apply() -> None:
+            if self.output_area.text:
+                self.output_area.text += "\n" + formatted_msg
+            else:
+                self.output_area.text = formatted_msg
+            self.output_area.cursor_location = (999999, 0)
+
+        if in_ui_thread:
+            _apply()
+        else:
+            app.call_from_thread(_apply)
+
+    def info(self, message: str, update_ui: bool = True) -> None:
+        self.log(message, "INFO", update_ui)
+
+    def success(self, message: str, update_ui: bool = True) -> None:
+        self.log(message, "SUCCESS", update_ui)
+
+    def warning(self, message: str, update_ui: bool = True) -> None:
+        self.log(message, "WARNING", update_ui)
+
+    def error(self, message: str, update_ui: bool = True) -> None:
+        self.log(message, "ERROR", update_ui)
+
+
+def get_top_kernels(
+    runs: dict[str, Any],
+) -> Optional[list[dict[Hashable, Any]]]:
+    """
+    Get top kernels with aggregated stats (one row per kernel).
+
+    Returns a list of records sorted by percent of total time,
+    each containing kernel name, call count, total time, and percent.
+    Returns None if runs is empty or workload has no dfs.
+    Returns empty list if the top kernel dataframe is empty.
+    """
+    if not runs:
+        return None
+
+    base_run = next(iter(runs.values()))
+    if not hasattr(base_run, "dfs"):
+        return None
+
+    top_kernel_df = base_run.dfs.get(1)
+    if top_kernel_df is None:
+        return None
+
+    if top_kernel_df.empty:
+        return []
+
+    # top_kernel_df already contains aggregated per-kernel stats
+    # (Kernel_Name, Count, Total_Time, Percent, etc.)
+    if "Percent" not in top_kernel_df.columns:
+        # If Percent column is missing, return unsorted records
+        return top_kernel_df.to_dict("records")
+
+    result_df = top_kernel_df.sort_values("Percent", ascending=False)
+
+    return result_df.to_dict("records")
+
+
+def process_panels_to_dataframes(
+    args: argparse.Namespace,
+    kernel_df: dict[int, pd.DataFrame],
+    arch_configs: schema.ArchConfig,
+    _profiling_config: dict[str, Any],  # Reserved for future filter_blocks logic
+    _roof_plot: Optional[str] = None,  # Reserved for future roofline support
+) -> dict[str, dict[str, dict[str, Any]]]:
+    result_structure = {}
+    decimal_precision = getattr(args, "decimal", 2) if args else 2
+
+    for panel_id, panel in arch_configs.panel_configs.items():
+        if panel_id in config.HIDDEN_SECTIONS:
+            continue
+
+        section_name = f"{panel_id // 100}. {panel['title']}"
+        section_data = {}
+
+        for data_source in panel["data source"]:
+            for type, table_config in data_source.items():
+                table_id = table_config["id"]
+
+                if (
+                    table_id not in kernel_df
+                    or kernel_df[table_id] is None
+                    or kernel_df[table_id].empty
+                ):
+                    continue
+
+                base_df = kernel_df[table_id]
+
+                df = pd.DataFrame(index=base_df.index)
+
+                for header in list(base_df.columns):
+                    if header in config.HIDDEN_COLUMNS_TUI:
+                        continue
+                    else:
+                        df[header] = base_df[header]
+
+                df = apply_rounding_logic(df, decimal_precision)
+
+                subsection_name = (
+                    f"{table_config['id'] // 100}.{table_config['id'] % 100}"
+                )
+                if table_config.get("title"):
+                    subsection_name += f" {table_config['title']}"
+
+                section_data[subsection_name] = {
+                    "df": df,
+                    "tui_style": (
+                        table_config.get("tui_style")
+                        if type == "metric_table"
+                        else None
+                    ),
+                }
+
+        if section_data:
+            result_structure[section_name] = section_data
+
+    return result_structure
+
+
+def apply_rounding_logic(df: pd.DataFrame, decimal_precision: int) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    df_rounded = df.copy()
+
+    float_cols = df_rounded.select_dtypes(include=["float"]).columns
+    if len(float_cols) > 0:
+        df_rounded[float_cols] = df_rounded[float_cols].round(decimal_precision)
+
+    non_float_cols = df_rounded.select_dtypes(exclude=["float"]).columns
+    for col in non_float_cols:
+        numeric_series = pd.to_numeric(df_rounded[col], errors="coerce")
+        if numeric_series.notna().any():
+            df_rounded[col] = numeric_series.round(decimal_precision)
+
+    return df_rounded

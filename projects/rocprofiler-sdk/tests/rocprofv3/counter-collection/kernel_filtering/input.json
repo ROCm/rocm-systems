@@ -1,0 +1,58 @@
+{
+    "jobs": [
+        {
+            "pmc": [
+                "SQ_WAVES"
+            ],
+            "kernel_include_regex": ".*_kernel",
+            "kernel_exclude_regex": "multiply",
+            "kernel_iteration_range": "[1-2]",
+            "output_file": "out",
+            "output_format": [
+                "csv",
+                "json"
+            ],
+            "truncate_kernels": true
+        },
+        {
+            "pmc": [
+                "GRBM_COUNT"
+            ],
+            "kernel_include_regex": ".*_kernel",
+            "kernel_iteration_range": "[2-3]",
+            "output_file": "out",
+            "output_format": [
+                "csv",
+                "json"
+            ],
+            "truncate_kernels": true
+        },
+        {
+            "pmc": [
+                "GRBM_GUI_ACTIVE"
+            ],
+            "kernel_include_regex": ".*_kernel",
+            "kernel_exclude_regex": "",
+            "output_file": "out",
+            "output_format": [
+                "csv",
+                "json"
+            ],
+            "truncate_kernels": true
+        },
+        {
+            "pmc": [
+                "SQ_WAVES"
+            ],
+            "kernel_include_regex": "divide",
+            "kernel_exclude_regex": "",
+
+            "output_file": "out",
+            "output_format": [
+                "csv",
+                "json"
+            ],
+            "truncate_kernels": true
+        }
+    ]
+}

@@ -1,0 +1,52 @@
+ARG DISTRO=rockylinux
+ARG VERSION=8
+FROM ${DISTRO}:${VERSION}
+
+ENV HOME /root
+ENV SHELL /bin/bash
+ENV BASH_ENV /etc/bash.bashrc
+ENV DEBIAN_FRONTEND noninteractive
+
+WORKDIR /tmp
+SHELL [ "/bin/bash", "-c" ]
+
+ENV PATH /usr/local/bin:${PATH}
+ENV LIBRARY_PATH ${LIBRARY_PATH}:/opt/amdgpu/lib64
+
+RUN yum groupinstall -y "Development Tools" && \
+    yum install -y epel-release && \
+    yum install -y --allowerasing curl dpkg-devel python3-pip wget zlib-devel which && \
+    yum clean all && \
+    python3 -m pip install 'cmake==3.28.4'
+
+ARG ROCM_VERSION=0.0
+ARG AMDGPU_RPM=5.4/rhel/8.7/amdgpu-install-5.4.50400-1.el8.noarch.rpm
+
+RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
+        OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}') && \
+        if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi && \
+        dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir && \
+        yum install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_RPM} && \
+        yum install -y rocm-dev rocm-smi-lib roctracer-dev rocprofiler-dev libpciaccess && \
+        yum clean all; \
+    fi
+
+ARG PYTHON_VERSIONS="6 7 8 9 10 11 12"
+
+RUN wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
+    bash miniconda.sh -b -p /opt/conda && \
+    export PATH="/opt/conda/bin:${PATH}" && \
+    conda config --set always_yes yes --set changeps1 no && \
+    conda update -c defaults -n base conda && \
+    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults -c conda-forge python=3.${i} pip; done && \
+    for i in ${PYTHON_VERSIONS}; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done && \
+    conda clean -a -y && \
+    conda init
+
+RUN if [ "${ROCM_VERSION}" != "0.0" ]; then ln -sf /opt/rocm-${ROCM_VERSION}* /opt/rocm; fi
+
+WORKDIR /home
+ENV LC_ALL C.UTF-8
+SHELL [ "/bin/bash", "--login", "-c" ]
+COPY ./entrypoint-rhel.sh /docker-entrypoint.sh
+ENTRYPOINT [ "/docker-entrypoint.sh" ]

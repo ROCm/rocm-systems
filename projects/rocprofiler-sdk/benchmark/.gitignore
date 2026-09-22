@@ -1,0 +1,10 @@
+# Exclude databases
+*.db
+*.db-journal
+/.rocprofv3/**
+
+# Build directories
+/compile_commands.json
+/build*
+/.cache
+*.vscode

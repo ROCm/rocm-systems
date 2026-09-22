@@ -1,0 +1,4981 @@
+// MIT License
+//
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#define _GNU_SOURCE     1
+#define _DEFAULT_SOURCE 1
+
+#include "att_no_intercept.hpp"
+#include "config.hpp"
+#include "execution_profile.hpp"
+#include "graph_stack.hpp"
+#include "helper.hpp"
+#include "kernel_iteration_filter.hpp"
+#include "stream_stack.hpp"
+
+#include "lib/att-tool/att_lib_wrapper.hpp"
+#include "lib/common/environment.hpp"
+#include "lib/common/filesystem.hpp"
+#include "lib/common/logging.hpp"
+#include "lib/common/regex.hpp"
+#include "lib/common/scope_destructor.hpp"
+#include "lib/common/simple_timer.hpp"
+#include "lib/common/static_object.hpp"
+#include "lib/common/static_tl_object.hpp"
+#include "lib/common/string_entry.hpp"
+#include "lib/common/synchronized.hpp"
+#include "lib/common/units.hpp"
+#include "lib/common/utility.hpp"
+#include "lib/output/buffered_output.hpp"
+#include "lib/output/counter_info.hpp"
+#include "lib/output/csv.hpp"
+#include "lib/output/csv_output_file.hpp"
+#include "lib/output/domain_type.hpp"
+#include "lib/output/generateCSV.hpp"
+#include "lib/output/generateJSON.hpp"
+#include "lib/output/generateOTF2.hpp"
+#include "lib/output/generatePerfetto.hpp"
+#include "lib/output/generateRocpd.hpp"
+#include "lib/output/generateStats.hpp"
+#include "lib/output/metadata.hpp"
+#include "lib/output/output_stream.hpp"
+#include "lib/output/statistics.hpp"
+#include "lib/output/stream_info.hpp"
+#include "lib/output/timestamps.hpp"
+#include "lib/output/tmp_file.hpp"
+#include "lib/output/tmp_file_buffer.hpp"
+
+#include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/buffer_tracing.h>
+#include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/context.h>
+#include <rocprofiler-sdk/defines.h>
+#include <rocprofiler-sdk/dispatch_counting_service.h>
+#include <rocprofiler-sdk/experimental/counters.h>
+#include <rocprofiler-sdk/experimental/kernel_replay.h>
+#include <rocprofiler-sdk/experimental/registration.h>
+#include <rocprofiler-sdk/experimental/spm.h>
+#include <rocprofiler-sdk/experimental/thread_trace.h>
+#include <rocprofiler-sdk/external_correlation.h>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/intercept_table.h>
+#include <rocprofiler-sdk/internal_threading.h>
+#include <rocprofiler-sdk/marker/api_id.h>
+#include <rocprofiler-sdk/ompt/api_id.h>
+#include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/version.h>
+#include <rocprofiler-sdk/cxx/hash.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
+
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+
+#include <pthread.h>
+#include <time.h>
+#include <unistd.h>
+#include <algorithm>
+#include <atomic>
+#include <cassert>
+#include <cerrno>
+#include <chrono>
+#include <csignal>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <fstream>
+#include <future>
+#include <iomanip>
+#include <limits>
+#include <mutex>
+#include <new>
+#include <optional>
+#include <shared_mutex>
+#include <string>
+#include <thread>
+#include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+#include <dlfcn.h>
+#include <linux/futex.h>
+#include <sys/eventfd.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+#if defined(CODECOV) && CODECOV > 0
+extern "C" {
+extern void
+__gcov_dump(void);
+}
+#endif
+
+namespace common = ::rocprofiler::common;
+namespace tool   = ::rocprofiler::tool;
+namespace fs     = ::rocprofiler::common::filesystem;
+
+extern "C" {
+void
+rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
+}
+
+namespace
+{
+// Thread for safe cleanup output generation
+auto output_generation_thread = common::Synchronized<std::optional<std::thread>>{};
+
+// Tracks whether tool_detach produced output for the current attach session.
+// Set true by tool_detach, reset false by tool_attach (new session), read by tool_fini.
+std::atomic<bool> detach_output_generated = false;
+
+using sigaction_t      = struct sigaction;
+using signal_func_t    = sighandler_t (*)(int signum, sighandler_t handler);
+using sigaction_func_t = int (*)(int signum,
+                                 const struct sigaction* __restrict__ act,
+                                 struct sigaction* __restrict__ oldact);
+
+constexpr auto rocprofv3_num_signals     = NSIG;
+constexpr auto rocprofv3_handled_signals = std::array<int, 4>{SIGINT, SIGQUIT, SIGABRT, SIGTERM};
+
+auto destructors = new std::vector<std::function<void()>>{};
+
+template <typename Tp>
+Tp&
+get_dereference(Tp* ptr)
+{
+    return *CHECK_NOTNULL(ptr);
+}
+
+auto
+get_destructors_lock()
+{
+    static auto _mutex = std::mutex{};
+    return std::unique_lock<std::mutex>{_mutex};
+}
+
+template <typename Tp>
+Tp*&
+add_destructor(Tp*& ptr)
+{
+    auto _lk = get_destructors_lock();
+    destructors->emplace_back([&ptr]() {
+        delete ptr;
+        ptr = nullptr;
+    });
+    return ptr;
+}
+
+struct chained_siginfo
+{
+    int                        signo   = 0;
+    sighandler_t               handler = nullptr;
+    std::optional<sigaction_t> action  = {};
+};
+
+auto&
+get_chained_signals()
+{
+    using data_type  = std::array<std::optional<chained_siginfo>, rocprofv3_num_signals>;
+    static auto*& _v = common::static_object<data_type>::construct();
+    return *CHECK_NOTNULL(_v);
+}
+
+bool
+is_handled_signal(int signum)
+{
+    for(auto itr : rocprofv3_handled_signals)
+        if(itr == signum) return true;
+    return false;
+}
+
+struct signal_worker_state
+{
+    int                   eventfd       = -1;   // handler -> worker wakeup fd
+    std::atomic<uint32_t> finalize_done = {};   // worker sets when flush done (futex word)
+    std::atomic<uint32_t> handling      = {0};  // 1 once our handler owns the path
+    std::atomic_flag      finalized     = ATOMIC_FLAG_INIT;  // runs finalize_rocprofv3 once
+    int                   signo         = {0};               // signal handled (0 == normal exit)
+    std::thread           thread        = {};                // the finalization worker
+
+    ~signal_worker_state() { join(); }
+
+    // Join the finalization worker and close the eventfd. Idempotent and self-safe (a call from the
+    // worker itself skips the join). Called from finalize_rocprofv3 (atexit/main teardown) and from
+    // the destructor, so the worker is never left joinable at static destruction
+    void join()
+    {
+        if(thread.joinable() && thread.get_id() != std::this_thread::get_id())
+        {
+            // Wake the worker's blocking read() so it can exit
+            // closing the fd while read() blocks is UB.
+            if(eventfd >= 0)
+            {
+                uint64_t val = 1;
+                if(write(eventfd, &val, sizeof(val)) < 0)
+                    ROCP_WARNING << "signal worker: eventfd wake before join failed: "
+                                 << strerror(errno);
+            }
+            thread.join();
+            if(eventfd >= 0)
+            {
+                if(close(eventfd) < 0)
+                    ROCP_WARNING << "signal worker: close(eventfd) failed: " << strerror(errno);
+                eventfd = -1;
+            }
+        }
+    }
+};
+
+static_assert(std::atomic<uint32_t>::is_always_lock_free,
+              "rocprofv3 signal path requires lock-free finalize_done atomic support");
+
+auto&
+get_signal_worker()
+{
+    static auto*& _v = common::static_object<signal_worker_state>::construct();
+    auto&         sw = *CHECK_NOTNULL(_v);
+    return sw;
+}
+
+struct buffer_ids
+{
+    rocprofiler_buffer_id_t hsa_api_trace           = {};
+    rocprofiler_buffer_id_t hip_api_trace           = {};
+    rocprofiler_buffer_id_t kernel_trace            = {};
+    rocprofiler_buffer_id_t memory_copy_trace       = {};
+    rocprofiler_buffer_id_t memory_allocation_trace = {};
+    rocprofiler_buffer_id_t kfd_trace               = {};
+    rocprofiler_buffer_id_t counter_collection      = {};
+    rocprofiler_buffer_id_t scratch_memory          = {};
+    rocprofiler_buffer_id_t rccl_api_trace          = {};
+    rocprofiler_buffer_id_t pc_sampling_host_trap   = {};
+    rocprofiler_buffer_id_t rocdecode_api_trace     = {};
+    rocprofiler_buffer_id_t rocjpeg_api_trace       = {};
+    rocprofiler_buffer_id_t pc_sampling_stochastic  = {};
+    rocprofiler_buffer_id_t ompt_trace              = {};
+    rocprofiler_buffer_id_t hip_graph_trace         = {};
+    rocprofiler_buffer_id_t rocshmem_api_trace      = {};
+    rocprofiler_buffer_id_t hipfile_api_trace       = {};
+    rocprofiler_buffer_id_t hip_event_trace         = {};
+
+    auto as_array() const
+    {
+        return std::array<rocprofiler_buffer_id_t, 18>{hsa_api_trace,
+                                                       hip_api_trace,
+                                                       kernel_trace,
+                                                       memory_copy_trace,
+                                                       memory_allocation_trace,
+                                                       kfd_trace,
+                                                       counter_collection,
+                                                       scratch_memory,
+                                                       rccl_api_trace,
+                                                       pc_sampling_host_trap,
+                                                       rocdecode_api_trace,
+                                                       rocjpeg_api_trace,
+                                                       pc_sampling_stochastic,
+                                                       ompt_trace,
+                                                       hip_graph_trace,
+                                                       rocshmem_api_trace,
+                                                       hipfile_api_trace,
+                                                       hip_event_trace};
+    }
+    auto pc_sampling_buffers_as_array() const
+    {
+        return std::array<rocprofiler_buffer_id_t, 2>{pc_sampling_host_trap,
+                                                      pc_sampling_stochastic};
+    }
+};
+
+buffer_ids&
+get_buffers()
+{
+    static auto _v = buffer_ids{};
+    return _v;
+}
+
+template <typename Tp>
+Tp*
+as_pointer(Tp&& _val)
+{
+    return new Tp{std::forward<Tp>(_val)};
+}
+
+template <typename Tp, typename... Args>
+Tp*
+as_pointer(Args&&... _args)
+{
+    return new Tp{std::forward<Args>(_args)...};
+}
+
+template <typename Tp>
+Tp*
+as_pointer()
+{
+    return new Tp{};
+}
+
+using targeted_kernels_map_t =
+    std::unordered_map<rocprofiler_kernel_id_t, std::unordered_set<size_t>>;
+using counter_dimension_info_map_t =
+    std::unordered_map<uint64_t, std::vector<rocprofiler_counter_record_dimension_info_t>>;
+using agent_info_map_t      = std::unordered_map<rocprofiler_agent_id_t, rocprofiler_agent_t>;
+using kernel_iteration_t    = std::unordered_map<rocprofiler_kernel_id_t, size_t>;
+using kernel_rename_map_t   = std::unordered_map<uint64_t, uint64_t>;
+using kernel_rename_stack_t = std::stack<uint64_t>;
+using context_id_set_t      = std::unordered_set<rocprofiler_context_id_t>;
+
+auto* tool_metadata          = as_pointer<tool::metadata>(tool::metadata::inprocess{});
+auto  target_kernels         = common::Synchronized<targeted_kernels_map_t>{};
+auto* execution_profile      = as_pointer<common::Synchronized<tool::execution_profile_data>>();
+auto  counter_collection_ctx = rocprofiler_context_id_t{0};
+auto  att_device_context     = rocprofiler_context_id_t{0};
+auto  att_device_trace_id =
+    std::atomic<rocprofiler_dispatch_id_t>{std::numeric_limits<uint64_t>::max()};
+std::mutex att_shader_data;
+
+thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
+thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
+    delete thread_dispatch_rename;
+    thread_dispatch_rename = nullptr;
+}};
+
+// any context that needs to support pause/resume functionality should add itself to this list
+auto pause_resume_contexts = context_id_set_t{};
+
+// Stores stream ids, graph attribution, and kernel region ids for the
+// kernel-rename, hip-stream-display, and hip-graph-display services.
+struct kernel_rename_and_stream_data
+{
+    uint64_t                    region_id     = 0;  // roctx region correlation id
+    rocprofiler_stream_id_t     stream_id     = {.handle = 0};
+    rocprofiler_graph_exec_id_t graph_exec_id = {.handle = 0};
+    rocprofiler_graph_node_id_t graph_node_id = {.handle = 0};
+};
+
+bool
+add_kernel_target(uint64_t _kern_id, const std::unordered_set<size_t>& range)
+{
+    return target_kernels
+        .wlock(
+            [](targeted_kernels_map_t&           _targets_v,
+               uint64_t                          _kern_id_v,
+               const std::unordered_set<size_t>& _range) {
+                return _targets_v.emplace(_kern_id_v, _range);
+            },
+            _kern_id,
+            range)
+        .second;
+}
+
+bool
+is_targeted_kernel(uint64_t                                        _kern_id,
+                   common::Synchronized<kernel_iteration_t, true>& _kernel_iteration)
+{
+    // hold target_kernels around kernel_iteration so the range stays valid; both
+    // are only locked here / in add_kernel_target(), so the nesting is safe
+    return target_kernels.rlock(
+        [&_kernel_iteration](const targeted_kernels_map_t& _targets_v, uint64_t _kern_id_v) {
+            return _kernel_iteration.wlock(
+                [&_targets_v](kernel_iteration_t& _kernel_iter, uint64_t _kernel_id) {
+                    return tool::is_targeted_kernel_iteration(
+                        _kernel_id,
+                        _targets_v,
+                        _kernel_iter,
+                        tool::get_config().advanced_thread_trace);
+                },
+                _kern_id_v);
+        },
+        _kern_id);
+}
+
+auto&
+get_client_ctx()
+{
+    static rocprofiler_context_id_t context_id{0};
+    return context_id;
+}
+
+void
+set_contexts_active(const context_id_set_t& ctxs, const bool start)
+{
+    constexpr auto null_ctx = rocprofiler_context_id_t{.handle = 0};
+    for(auto ctx : ctxs)
+    {
+        if(ctx != null_ctx)
+        {
+            if(start)
+            {
+                ROCPROFILER_CHECK(rocprofiler_start_context(ctx));
+            }
+            else
+            {
+                ROCPROFILER_CHECK(rocprofiler_stop_context(ctx));
+            }
+        }
+    }
+}
+
+void
+flush()
+{
+    constexpr auto null_buffer_id = rocprofiler_buffer_id_t{.handle = 0};
+
+    ROCP_INFO << "flushing buffers...";
+    for(auto itr : get_buffers().as_array())
+    {
+        if(itr > null_buffer_id)
+        {
+            ROCP_INFO << "flushing buffer " << itr.handle;
+            ROCPROFILER_CALL(rocprofiler_flush_buffer(itr), "buffer flush");
+        }
+    }
+    ROCP_INFO << "Buffers flushed";
+}
+
+void
+collection_period_cntrl(std::promise<void>&& _promise, rocprofiler_context_id_t _ctx)
+{
+    bool testing_cp          = tool::get_env("ROCPROF_COLLECTION_PERIOD_TESTING", false);
+    auto log_fname           = get_output_filename(tool::get_config(), "collection_periods", "log");
+    auto output_testing_file = std::ofstream{};
+
+    if(testing_cp)
+    {
+        ROCP_INFO << "collection period test logging enabled: " << log_fname;
+        output_testing_file.open(log_fname);
+    }
+
+    auto log_period = [testing_cp, &output_testing_file](
+                          std::string_view label, auto _func, auto... _args) {
+        ROCP_INFO << "collection period: " << label;
+
+        auto beg = rocprofiler_timestamp_t{};
+        if(testing_cp)
+        {
+            rocprofiler_get_timestamp(&beg);
+        }
+
+        _func(_args...);
+
+        if(testing_cp)
+        {
+            auto end = rocprofiler_timestamp_t{};
+            rocprofiler_get_timestamp(&end);
+            output_testing_file << label << ":" << beg << ":" << end << '\n' << std::flush;
+        }
+    };
+
+    auto sleep_for_nsec = [](auto _value) {
+        if(_value > 0)
+        {
+            std::this_thread::yield();
+            std::this_thread::sleep_for(std::chrono::nanoseconds{_value});
+        }
+    };
+
+    auto periods = tool::get_config().collection_periods;
+    _promise.set_value();  // allow the launching thread to proceed
+    while(!periods.empty())
+    {
+        auto _period = periods.front();
+        periods.pop();
+
+        auto execute_period = [&]() {
+            if(testing_cp) output_testing_file << "--" << '\n';
+
+            log_period("delay", sleep_for_nsec, _period.delay);
+            log_period("start", rocprofiler_start_context, _ctx);
+            log_period("duration", sleep_for_nsec, _period.duration);
+            log_period("stop", rocprofiler_stop_context, _ctx);
+        };
+
+        if(_period.repeat == 0)
+        {
+            execute_period();
+        }
+        else
+        {
+            for(size_t i = 0; i < _period.repeat; ++i)
+            {
+                execute_period();
+            }
+        }
+    }
+}
+
+int
+record_execution_profile(rocprofiler_thread_id_t                            thr_id,
+                         rocprofiler_context_id_t                           ctx_id,
+                         rocprofiler_external_correlation_id_request_kind_t kind,
+                         rocprofiler_tracing_operation_t                    op,
+                         uint64_t /*internal_corr_id*/,
+                         rocprofiler_user_data_t* /*external_corr_id*/,
+                         void* /*user_data*/)
+{
+    auto _record_data = [](tool::execution_profile_data&                      _data,
+                           rocprofiler_thread_id_t                            _thr_id,
+                           rocprofiler_context_id_t                           _ctx_id,
+                           rocprofiler_external_correlation_id_request_kind_t _kind,
+                           rocprofiler_tracing_operation_t                    _op) {
+        _data.category_count[_kind] += 1;
+        _data.category_op_count[_kind].emplace(_op);
+        _data.threads.emplace(_thr_id);
+        _data.contexts.emplace(_ctx_id);
+    };
+
+    if(execution_profile)
+        execution_profile->wlock(std::move(_record_data), thr_id, ctx_id, kind, op);
+
+    return 0;
+}
+
+// Tool-layer external-correlation-id attribution extracted from the per-dispatch
+// payload allocated by set_kernel_rename_and_stream_correlation_id().
+struct ext_attribution_t
+{
+    rocprofiler_stream_id_t     stream_id     = {.handle = 0};
+    rocprofiler_graph_exec_id_t graph_exec_id = {.handle = 0};
+    rocprofiler_graph_node_id_t graph_node_id = {.handle = 0};
+};
+
+template <typename Tp>
+ext_attribution_t
+get_ext_attribution(Tp* _record)
+{
+    auto _attr = ext_attribution_t{};
+    if(_record->correlation_id.external.ptr != nullptr)
+    {
+        // Replace external pointer with the roctx region id for downstream consumers.
+        auto* _ecid_data =
+            static_cast<kernel_rename_and_stream_data*>(_record->correlation_id.external.ptr);
+        _attr.stream_id                        = _ecid_data->stream_id;
+        _attr.graph_exec_id                    = _ecid_data->graph_exec_id;
+        _attr.graph_node_id                    = _ecid_data->graph_node_id;
+        auto _region_id                        = _ecid_data->region_id;
+        _record->correlation_id.external.value = _region_id;
+        delete _ecid_data;
+    }
+    return _attr;
+}
+
+int
+set_kernel_rename_and_stream_correlation_id(rocprofiler_thread_id_t  thr_id,
+                                            rocprofiler_context_id_t ctx_id,
+                                            rocprofiler_external_correlation_id_request_kind_t kind,
+                                            rocprofiler_tracing_operation_t                    op,
+                                            uint64_t                 internal_corr_id,
+                                            rocprofiler_user_data_t* external_corr_id,
+                                            void*                    user_data)
+{
+    // Check whether services are enabled
+    const bool kernel_rename_service_enabled =
+        kind == ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH &&
+        thread_dispatch_rename != nullptr && !thread_dispatch_rename->empty();
+
+    const bool hip_stream_enabled = rocprofiler::tool::stream::stream_stack_not_null();
+    const bool hip_graph_enabled  = rocprofiler::tool::graph::graph_stack_not_null();
+
+    if(!kernel_rename_service_enabled && !hip_stream_enabled && !hip_graph_enabled) return 1;
+
+    auto* _info = new kernel_rename_and_stream_data{};
+
+    // Get value for kernel rename service
+    if(kernel_rename_service_enabled)
+    {
+        _info->region_id = thread_dispatch_rename->top();
+        if(tool_metadata) tool_metadata->add_external_correlation_id(_info->region_id);
+    }
+
+    // Get stream ID from stream HIP display service
+    if(hip_stream_enabled)
+    {
+        _info->stream_id = rocprofiler::tool::stream::get_stream_id();
+    }
+
+    // Only KERNEL_DISPATCH / MEMORY_COPY consume node ordinals.
+    const bool kind_consumes_graph_ordinal =
+        (kind == ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH ||
+         kind == ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY);
+    if(hip_graph_enabled && kind_consumes_graph_ordinal)
+    {
+        if(auto* _g = rocprofiler::tool::graph::current(); _g != nullptr)
+        {
+            _info->graph_exec_id = _g->graph_exec_id;
+            _info->graph_node_id = _g->node_counter;
+            ++_g->node_counter.handle;
+        }
+    }
+
+    // Set the external correlation id service to point to struct
+    external_corr_id->ptr = _info;
+
+    common::consume_args(thr_id, ctx_id, kind, op, internal_corr_id, user_data);
+
+    return 0;
+}
+
+void
+cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
+                       rocprofiler_user_data_t*              user_data,
+                       void*                                 cb_data)
+{
+    static auto    pause_resume_count = std::atomic<int64_t>{0};
+    constexpr auto null_context_id    = rocprofiler_context_id_t{.handle = 0};
+    auto*          ctxs               = static_cast<context_id_set_t*>(cb_data);
+
+    // ensure that ctxs is not nullptr
+    if(ctxs == nullptr)
+    {
+        ROCP_CI_LOG(INFO) << fmt::format(
+            "Control tracing callback invoked with null context set for operation {}",
+            tool_metadata->get_operation_name(record.kind, record.operation));
+        ctxs = &pause_resume_contexts;
+    }
+
+    // determine whether any of the contexts are active so we can properly handle pause/resume
+    uint64_t _active_contexts = 0;
+    for(auto ctx : *ctxs)
+    {
+        if(int active = 0;
+           ctx != null_context_id &&
+           rocprofiler_context_is_active(ctx, &active) == ROCPROFILER_STATUS_SUCCESS && active != 0)
+            _active_contexts++;
+    }
+
+    auto _first_pause_resume = false;
+
+    // setup once flag to track first pause/resume call
+    static auto _once_flag = std::once_flag{};
+    std::call_once(_once_flag, [&]() { _first_pause_resume = true; });
+
+    auto roctx_pause_resume_warning = [&record]() {
+        if(auto* _data =
+               static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
+           _data && _data->args.roctxProfilerPause.tid != 0)
+        {
+            ROCP_INFO_IF(_data->args.roctxProfilerPause.tid !=
+                         static_cast<rocprofiler_thread_id_t>(getpid()))
+                << fmt::format("roctxProfilerPause(tid={}) invoked on thread {}. rocprofv3 "
+                               "does not support thread-local pause/resume (only global "
+                               "pause/resume). Use tid=0 or only call from main thread ({}).",
+                               _data->args.roctxProfilerPause.tid,
+                               common::get_tid(),
+                               getpid());
+        }
+    };
+
+    if(ctxs && record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API)
+    {
+        if(!tool::get_config().collection_periods.empty())
+        {
+            ROCP_WARNING_IF(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+                << "rocprofv3 collection period(s) enabled, ignoring roctxProfilerPause/Resume";
+            return;
+        }
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER &&
+                record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause)
+        {
+            // provide warning if thread id is used since rocprofv3 does not support thread-local
+            // pause/resume
+            roctx_pause_resume_warning();
+
+            // if using the selected regions reference counting, only pause when the count goes to
+            // zero
+            int64_t _ref_count = 0;
+
+            if(!_first_pause_resume)
+            {
+                _ref_count = (tool::get_config().selected_regions_ref_count) ? --pause_resume_count
+                                                                             : int64_t{0};
+            }
+            else if(_first_pause_resume && tool::get_config().selected_regions &&
+                    tool::get_config().selected_regions_ref_count)
+            {
+                ROCP_INFO
+                    << "first call to roctxProfilerPause ignored for selected regions profiling "
+                       "with the selected regions reference counting mode enabled";
+            }
+
+            // only pause if there are active contexts and the ref count is zero
+            if(_active_contexts != 0 && _ref_count == 0)
+                set_contexts_active(*ctxs, false);
+            else if(_ref_count < 0)
+            {
+                ROCP_WARNING << fmt::format(
+                    "roctxProfilerPause called multiple times without matching "
+                    "roctxProfilerResume. # of excess calls to roctxProfilerPause: {}",
+                    std::abs(_ref_count));
+            }
+        }
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT &&
+                record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume)
+        {
+            // provide warning if thread id is used since rocprofv3 does not support thread-local
+            // pause/resume
+            roctx_pause_resume_warning();
+
+            // if using the selected regions reference counting, only resume when the count goes to
+            // positive (was zero)
+            auto _ref_count =
+                (tool::get_config().selected_regions_ref_count) ? pause_resume_count++ : int64_t{0};
+            // only resume if there are no active contexts and the ref count was zero
+            if(_active_contexts == 0 && _ref_count == 0)
+            {
+                if(tool::get_config().selected_regions) att_device_trace_id++;
+                set_contexts_active(*ctxs, true);
+            }
+            else if(_ref_count < 0)
+            {
+                ROCP_WARNING << fmt::format(
+                    "roctxProfilerResume called multiple times without matching "
+                    "roctxProfilerPause. # of excess calls to roctxProfilerResume: {}",
+                    std::abs(_ref_count));
+            }
+        }
+
+        auto ts = rocprofiler_timestamp_t{};
+        rocprofiler_get_timestamp(&ts);
+
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+        {
+            user_data->value = ts;
+        }
+        else
+        {
+            auto marker_record            = rocprofiler_buffer_tracing_marker_api_record_t{};
+            marker_record.size            = sizeof(rocprofiler_buffer_tracing_marker_api_record_t);
+            marker_record.kind            = convert_marker_tracing_kind(record.kind);
+            marker_record.operation       = record.operation;
+            marker_record.thread_id       = record.thread_id;
+            marker_record.correlation_id  = record.correlation_id;
+            marker_record.start_timestamp = user_data->value;
+            marker_record.end_timestamp   = ts;
+            tool::write_ring_buffer(marker_record, domain_type::MARKER);
+        }
+    }
+}
+
+void
+kernel_rename_callback(rocprofiler_callback_tracing_record_t record,
+                       rocprofiler_user_data_t*              user_data,
+                       void*                                 data)
+{
+    if(thread_dispatch_rename == nullptr) return;
+
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API)
+    {
+        auto* marker_data =
+            static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
+        auto add_message = [](std::string_view val) {
+            auto _hash_v = common::add_string_entry(val);
+            return std::string_view{*common::get_string_entry(_hash_v)};
+        };
+
+        if(record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA &&
+           record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT && marker_data->args.roctxMarkA.message)
+        {
+            thread_dispatch_rename->emplace(tool_metadata->add_kernel_rename_val(
+                add_message(marker_data->args.roctxMarkA.message), record.correlation_id.internal));
+        }
+        else if(record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA &&
+                record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER &&
+                marker_data->args.roctxThreadRangeA.message)
+        {
+            thread_dispatch_rename->emplace(tool_metadata->add_kernel_rename_val(
+                add_message(marker_data->args.roctxThreadRangeA.message),
+                record.correlation_id.internal));
+        }
+        else if(record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA &&
+                record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+        {
+            ROCP_FATAL_IF(thread_dispatch_rename->empty())
+                << "roctxRangePop invoked more times than roctxRangePush on thread "
+                << rocprofiler::common::get_tid();
+
+            thread_dispatch_rename->pop();
+        }
+    }
+    else
+    {
+        ROCP_CI_LOG(INFO) << fmt::format(
+            "Unsupported operation for {}",
+            tool_metadata->get_operation_name(record.kind, record.operation));
+    }
+
+    common::consume_args(user_data, data);
+}
+
+// Stores stream IDs onto stack when callback is triggered
+void
+hip_stream_display_callback(rocprofiler_callback_tracing_record_t record,
+                            rocprofiler_user_data_t*              user_data,
+                            void*                                 data)
+{
+    if(record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_STREAM) return;
+    // Extract stream ID from record
+    auto* stream_handle_data =
+        static_cast<rocprofiler_callback_tracing_hip_stream_data_t*>(record.payload);
+    auto stream_id = stream_handle_data->stream_id;
+
+    // STREAM_HANDLE_CREATE and DESTROY are no-ops
+    if(record.operation == ROCPROFILER_HIP_STREAM_CREATE)
+    {
+        ROCP_TRACE
+            << "Entered hip_stream_display_callback function for ROCPROFILER_HIP_STREAM_CREATE";
+    }
+    else if(record.operation == ROCPROFILER_HIP_STREAM_DESTROY)
+    {
+        ROCP_TRACE
+            << "Entered hip_stream_display_callback function for ROCPROFILER_HIP_STREAM_DESTROY";
+    }
+    else if(record.operation == ROCPROFILER_HIP_STREAM_SET)
+    {
+        // Push the stream ID onto the stream stack when before underlying HIP function is called
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+        {
+            ROCP_TRACE << "Entered hip_stream_display_callback function for "
+                          "ROCPROFILER_HIP_STREAM_SET with ROCPROFILER_CALLBACK_PHASE_ENTER";
+            rocprofiler::tool::stream::push_stream_id(stream_id);
+        }
+        // Pop stream ID off of stream stack after underlying HIP function is completed
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+        {
+            ROCP_TRACE << "Entered hip_stream_display_callback function for "
+                          "ROCPROFILER_HIP_STREAM_SET with ROCPROFILER_CALLBACK_PHASE_EXIT";
+            rocprofiler::tool::stream::pop_stream_id();
+        }
+    }
+    else
+    {
+        ROCP_FATAL << "Unsupported operation for ROCPROFILER_HIP_STREAM";
+    }
+    common::consume_args(user_data, data);
+}
+
+// Drives the per-thread graph attribution stack on EXEC_LAUNCH callbacks.
+void
+hip_graph_display_callback(rocprofiler_callback_tracing_record_t record,
+                           rocprofiler_user_data_t*              user_data,
+                           void*                                 data)
+{
+    if(record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH) return;
+
+    auto* payload = static_cast<rocprofiler_callback_tracing_hip_graph_data_t*>(record.payload);
+    if(payload == nullptr) return;
+
+    if(record.operation == ROCPROFILER_HIP_GRAPH_OPERATION_EXEC_LAUNCH)
+    {
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+            rocprofiler::tool::graph::push(payload->graph_exec_id);
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+            rocprofiler::tool::graph::pop();
+    }
+
+    common::consume_args(user_data, data);
+}
+
+// Stores which runtimes have been initialized in metadata
+void
+runtime_initialization_callback(rocprofiler_callback_tracing_record_t record,
+                                rocprofiler_user_data_t*              user_data,
+                                void*                                 data)
+{
+    if(record.kind != ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION) return;
+    ROCP_CI_LOG_IF(WARNING, tool_metadata == nullptr)
+        << fmt::format("tool cannot record runtime initialization for {}",
+                       tool_metadata->get_operation_name(record.kind, record.operation));
+    if(tool_metadata)
+    {
+        tool_metadata->add_runtime_initialization(
+            static_cast<rocprofiler_runtime_initialization_operation_t>(record.operation));
+    }
+    common::consume_args(user_data, data);
+}
+
+void
+dummy_callback_tracing_callback(rocprofiler_callback_tracing_record_t /*record*/,
+                                rocprofiler_user_data_t* /*user_data*/,
+                                void* /*data*/)
+{}
+
+void
+dummy_counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t,
+                                rocprofiler_profile_config_id_t*,
+                                rocprofiler_user_data_t*,
+                                void*)
+{}
+
+void
+dummy_counter_record_callback(rocprofiler_dispatch_counting_service_data_t,
+                              rocprofiler_record_counter_t*,
+                              size_t,
+                              rocprofiler_user_data_t,
+                              void*)
+{}
+
+void
+callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
+                          rocprofiler_user_data_t*              user_data,
+                          void*                                 data)
+{
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API)
+    {
+        auto* marker_data =
+            static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
+
+        auto ts = rocprofiler_timestamp_t{};
+        rocprofiler_get_timestamp(&ts);
+
+        if(record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA)
+        {
+            if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+            {
+                CHECK_NOTNULL(tool_metadata)
+                    ->add_marker_message(record.correlation_id.internal,
+                                         std::string{marker_data->args.roctxMarkA.message});
+
+                auto marker_record      = rocprofiler_buffer_tracing_marker_api_record_t{};
+                marker_record.size      = sizeof(rocprofiler_buffer_tracing_marker_api_record_t);
+                marker_record.kind      = convert_marker_tracing_kind(record.kind);
+                marker_record.operation = record.operation;
+                marker_record.thread_id = record.thread_id;
+                marker_record.correlation_id  = record.correlation_id;
+                marker_record.start_timestamp = ts;
+                marker_record.end_timestamp   = ts;
+                tool::write_ring_buffer(marker_record, domain_type::MARKER);
+            }
+        }
+        else if(record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA)
+        {
+            if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+            {
+                user_data->value = ts;
+
+                if(marker_data->args.roctxThreadRangeA.message)
+                {
+                    CHECK_NOTNULL(tool_metadata)
+                        ->add_marker_message(
+                            record.correlation_id.internal,
+                            std::string{marker_data->args.roctxThreadRangeA.message});
+                }
+            }
+            else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+            {
+                auto marker_record      = rocprofiler_buffer_tracing_marker_api_record_t{};
+                marker_record.size      = sizeof(rocprofiler_buffer_tracing_marker_api_record_t);
+                marker_record.kind      = convert_marker_tracing_kind(record.kind);
+                marker_record.operation = record.operation;
+                marker_record.thread_id = record.thread_id;
+                marker_record.correlation_id  = record.correlation_id;
+                marker_record.start_timestamp = user_data->value;
+                marker_record.end_timestamp   = ts;
+
+                tool::write_ring_buffer(marker_record, domain_type::MARKER);
+            }
+        }
+        else if(record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxProcessRangeA)
+        {
+            if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+            {
+                user_data->value = ts;
+
+                if(marker_data->args.roctxProcessRangeA.message)
+                {
+                    CHECK_NOTNULL(tool_metadata)
+                        ->add_marker_message(
+                            record.correlation_id.internal,
+                            std::string{marker_data->args.roctxProcessRangeA.message});
+                }
+            }
+            else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+            {
+                auto marker_record      = rocprofiler_buffer_tracing_marker_api_record_t{};
+                marker_record.size      = sizeof(rocprofiler_buffer_tracing_marker_api_record_t);
+                marker_record.kind      = convert_marker_tracing_kind(record.kind);
+                marker_record.operation = record.operation;
+                marker_record.thread_id = record.thread_id;
+                marker_record.correlation_id  = record.correlation_id;
+                marker_record.start_timestamp = user_data->value;
+                marker_record.end_timestamp   = ts;
+
+                tool::write_ring_buffer(marker_record, domain_type::MARKER);
+            }
+        }
+        else
+        {
+            if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+            {
+                user_data->value = ts;
+            }
+            else
+            {
+                auto marker_record      = rocprofiler_buffer_tracing_marker_api_record_t{};
+                marker_record.size      = sizeof(rocprofiler_buffer_tracing_marker_api_record_t);
+                marker_record.kind      = convert_marker_tracing_kind(record.kind);
+                marker_record.operation = record.operation;
+                marker_record.thread_id = record.thread_id;
+                marker_record.correlation_id  = record.correlation_id;
+                marker_record.start_timestamp = user_data->value;
+                marker_record.end_timestamp   = ts;
+                tool::write_ring_buffer(marker_record, domain_type::MARKER);
+            }
+        }
+    }
+    else
+    {
+        ROCP_CI_LOG(INFO) << fmt::format(
+            "Unsupported operation for {}",
+            tool_metadata->get_operation_name(record.kind, record.operation));
+    }
+
+    (void) data;
+}
+
+void
+code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
+                             rocprofiler_user_data_t*              user_data,
+                             void*                                 data)
+{
+    auto ts = rocprofiler_timestamp_t{};
+    ROCPROFILER_CALL(rocprofiler_get_timestamp(&ts), "get timestamp");
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
+       record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
+    {
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
+        {
+            auto* obj_data = static_cast<tool::rocprofiler_code_object_info_t*>(record.payload);
+
+            CHECK_NOTNULL(tool_metadata)->add_code_object(*obj_data);
+            if(tool::get_config().pc_sampling_host_trap ||
+               tool::get_config().pc_sampling_stochastic)
+            {
+                CHECK_NOTNULL(tool_metadata)->add_decoder(obj_data);
+            }
+
+            if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY &&
+               tool::get_config().advanced_thread_trace)
+            {
+                const char* gpu_name      = tool_metadata->agents_map.at(obj_data->rocp_agent).name;
+                auto        filename      = fmt::format("{}_code_object_id_{}",
+                                            std::string(gpu_name),
+                                            std::to_string(obj_data->code_object_id));
+                auto        output_stream = get_output_stream(tool::get_config(), filename, ".out");
+                std::string output_filename =
+                    get_output_filename(tool::get_config(), filename, ".out");
+
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                output_stream.stream->write(reinterpret_cast<char*>(obj_data->memory_base),
+                                            obj_data->memory_size);
+                tool_metadata->code_object_load.wlock(
+                    [](auto&                                 data_vec,
+                       std::string                           file_name,
+                       tool::rocprofiler_code_object_info_t* obj_data_v) {
+                        data_vec.push_back({std::move(file_name),
+                                            obj_data_v->code_object_id,
+                                            obj_data_v->load_base,
+                                            obj_data_v->load_size});
+                    },
+                    output_filename,
+                    obj_data);
+            }
+            else if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE &&
+                    tool::get_config().advanced_thread_trace)
+            {
+                const char* gpu_name      = tool_metadata->agents_map.at(obj_data->rocp_agent).name;
+                auto        filename      = fmt::format("{}_code_object_id_{}",
+                                            std::string(gpu_name),
+                                            std::to_string(obj_data->code_object_id));
+                auto        output_stream = get_output_stream(tool::get_config(), filename, ".out");
+                std::string output_filename =
+                    get_output_filename(tool::get_config(), filename, ".out");
+
+                uint8_t*      binary      = nullptr;
+                size_t        buffer_size = 0;
+                std::ifstream code_object_file(obj_data->uri, std::ios::binary | std::ios::ate);
+                if(code_object_file.good())
+                {
+                    buffer_size = code_object_file.tellg();
+                    code_object_file.seekg(0, std::ios::beg);
+                    binary = new(std::nothrow) uint8_t[buffer_size];
+                    if(binary &&
+                       !code_object_file.read(reinterpret_cast<char*>(binary), buffer_size))
+                    {
+                        delete[] binary;
+                        binary = nullptr;
+                    }
+                }
+                // NOLINTBEGIN(performance-no-int-to-ptr)
+                output_stream.stream->write(reinterpret_cast<char*>(obj_data->memory_base),
+                                            obj_data->memory_size);
+                // NOLINTEND(performance-no-int-to-ptr)
+                tool_metadata->code_object_load.wlock(
+                    [](auto&                                 data_vec,
+                       std::string                           file_name,
+                       tool::rocprofiler_code_object_info_t* obj_data_v) {
+                        data_vec.push_back({std::move(file_name),
+                                            obj_data_v->code_object_id,
+                                            obj_data_v->load_base,
+                                            obj_data_v->load_size});
+                    },
+                    output_filename,
+                    obj_data);
+            }
+
+            if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept)
+                tool::att_no_intercept::code_object_load(*obj_data);
+        }
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD)
+        {
+            flush();
+        }
+    }
+
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
+       record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
+    {
+        auto* sym_data = static_cast<tool::rocprofiler_kernel_symbol_info_t*>(record.payload);
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
+        {
+            ROCP_TRACE << fmt::format("adding kernel symbol info for kernel_id={} :: {}",
+                                      sym_data->kernel_id,
+                                      sym_data->kernel_name);
+
+            auto success = CHECK_NOTNULL(tool_metadata)
+                               ->add_kernel_symbol(kernel_symbol_info{
+                                   get_dereference(sym_data),
+                                   [](const char* val) { return tool::format_name(val); }});
+
+            ROCP_WARNING_IF(!success)
+                << "duplicate kernel symbol data for kernel_id=" << sym_data->kernel_id;
+
+            if(success)
+            {
+                // if kernel name is provided by user then by default all kernels in the
+                // application are targeted
+                const auto* kernel_info =
+                    CHECK_NOTNULL(tool_metadata)->get_kernel_symbol(sym_data->kernel_id);
+                auto kernel_filter_include = tool::get_config().kernel_filter_include;
+                auto kernel_filter_exclude = tool::get_config().kernel_filter_exclude;
+                auto kernel_filter_range   = tool::get_config().kernel_filter_range;
+
+                std::string_view include_regex(kernel_filter_include);
+                std::string_view exclude_regex(kernel_filter_exclude);
+                const auto       is_targeted = rocprofiler::common::regex::regex_search(
+                                             kernel_info->formatted_kernel_name, include_regex) &&
+                                         (kernel_filter_exclude.empty() ||
+                                          !rocprofiler::common::regex::regex_search(
+                                              kernel_info->formatted_kernel_name, exclude_regex));
+                if(is_targeted) add_kernel_target(sym_data->kernel_id, kernel_filter_range);
+
+                if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept)
+                    tool::att_no_intercept::kernel_symbol_load(*sym_data, is_targeted);
+            }
+        }
+    }
+
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
+       record.operation == ROCPROFILER_CODE_OBJECT_HOST_KERNEL_SYMBOL_REGISTER)
+    {
+        auto* hst_data = static_cast<rocprofiler_host_kernel_symbol_data_t*>(record.payload);
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
+        {
+            auto success = CHECK_NOTNULL(tool_metadata)
+                               ->add_host_function(host_function_info{
+                                   get_dereference(hst_data),
+                                   [](const char* val) { return tool::format_name(val); }});
+            ROCP_WARNING_IF(!success)
+                << "duplicate host function found for kernel_id=" << hst_data->kernel_id;
+
+            // TODO : kernel filtering for host functions?!
+        }
+    }
+
+    (void) user_data;
+    (void) data;
+}
+
+void
+dummy_buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
+                                rocprofiler_buffer_id_t /*buffer_id*/,
+                                rocprofiler_record_header_t** /*headers*/,
+                                size_t /*num_headers*/,
+                                void* /*user_data*/,
+                                uint64_t /*drop_count*/)
+{}
+
+void
+buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
+                          rocprofiler_buffer_id_t /*buffer_id*/,
+                          rocprofiler_record_header_t** headers,
+                          size_t                        num_headers,
+                          void* /* user_data*/,
+                          uint64_t /*drop_count*/)
+{
+    ROCP_INFO << "Executing buffered tracing callback for " << num_headers << " headers";
+
+    if(!headers) return;
+
+    for(size_t i = 0; i < num_headers; ++i)
+    {
+        auto* header = headers[i];
+
+        if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING)
+        {
+            if(header->kind == ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_kernel_dispatch_record_t*>(
+                    header->payload);
+
+                auto attr = get_ext_attribution(record);
+                tool::write_ring_buffer(
+                    tool::tool_buffer_tracing_kernel_dispatch_ext_record_t{
+                        *record, attr.stream_id, attr.graph_exec_id, attr.graph_node_id},
+                    domain_type::KERNEL_DISPATCH);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_hsa_api_record_t*>(header->payload);
+
+                tool::write_ring_buffer(*record, domain_type::HSA);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_memory_copy_record_t*>(header->payload);
+
+                auto attr = get_ext_attribution(record);
+                tool::write_ring_buffer(
+                    tool::tool_buffer_tracing_memory_copy_ext_record_t{
+                        *record, attr.stream_id, attr.graph_exec_id, attr.graph_node_id},
+                    domain_type::MEMORY_COPY);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_EVENT)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_hip_event_record_t*>(header->payload);
+
+                auto attr = get_ext_attribution(record);
+                tool::write_ring_buffer(
+                    tool::tool_buffer_tracing_hip_event_ext_record_t{*record, attr.stream_id},
+                    domain_type::HIP_EVENT);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_memory_allocation_record_t*>(
+                    header->payload);
+
+                auto attr = get_ext_attribution(record);
+                tool::write_ring_buffer(
+                    tool::tool_buffer_tracing_memory_allocation_ext_record_t{*record,
+                                                                             attr.stream_id},
+                    domain_type::MEMORY_ALLOCATION);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT)
+            {
+                // These events should not have been enabled;
+                // Generate an error in CI so we are aware of it if they are enabled at a later time
+                ROCP_CI_LOG(INFO) << fmt::format(
+                    "dropping KFD event kind: {} :: {}",
+                    header->kind,
+                    tool_metadata->get_kind_name(
+                        static_cast<rocprofiler_buffer_tracing_kind_t>(header->kind)));
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_kfd_event_queue_record_t*>(
+                    header->payload);
+
+                // The only KFD_EVENT_QUEUE operation we want to process is RESTORE_RESCHEDULED.
+                // All others are captured within paired KFD_QUEUE operations
+                if(record->operation != ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED)
+                {
+                    // Generate an error in CI so we are aware of it if other operations are enabled
+                    // at a later time
+                    ROCP_CI_LOG(INFO) << fmt::format(
+                        "dropping KFD EVENT_QUEUE operation: {}",
+                        tool_metadata->get_operation_name(
+                            static_cast<rocprofiler_buffer_tracing_kind_t>(header->kind),
+                            record->operation));
+                }
+                else
+                {
+                    tool::write_ring_buffer(tool::tool_buffer_tracing_kfd_record_t{*record},
+                                            domain_type::KFD);
+                }
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
+            {
+                auto construct_kfd_record = [&header]() -> tool::tool_buffer_tracing_kfd_record_t {
+                    if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU)
+                    {
+                        return tool::tool_buffer_tracing_kfd_record_t{
+                            .record =
+                                *(static_cast<
+                                    rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t*>(
+                                    header->payload))};
+                    }
+                    else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS)
+                    {
+                        return tool::tool_buffer_tracing_kfd_record_t{
+                            .record =
+                                *(static_cast<
+                                    rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t*>(
+                                    header->payload))};
+                    }
+                    else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE)
+                    {
+                        return tool::tool_buffer_tracing_kfd_record_t{
+                            .record = *(
+                                static_cast<rocprofiler_buffer_tracing_kfd_page_migrate_record_t*>(
+                                    header->payload))};
+                    }
+                    else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
+                    {
+                        return tool::tool_buffer_tracing_kfd_record_t{
+                            .record =
+                                *(static_cast<rocprofiler_buffer_tracing_kfd_page_fault_record_t*>(
+                                    header->payload))};
+                    }
+                    else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
+                    {
+                        return tool::tool_buffer_tracing_kfd_record_t{
+                            .record = *(static_cast<rocprofiler_buffer_tracing_kfd_queue_record_t*>(
+                                header->payload))};
+                    }
+
+                    ROCP_CI_LOG(INFO) << fmt::format(
+                        "unsupported KFD kind: {} :: {}",
+                        header->kind,
+                        tool_metadata->get_kind_name(
+                            static_cast<rocprofiler_buffer_tracing_kind_t>(header->kind)));
+
+                    // returns an invalid record via std::monostate
+                    return tool::tool_buffer_tracing_kfd_record_t{};
+                };
+
+                if(auto rec = construct_kfd_record(); rec.valid())
+                    tool::write_ring_buffer(rec, domain_type::KFD);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_scratch_memory_record_t*>(
+                    header->payload);
+
+                tool::write_ring_buffer(*record, domain_type::SCRATCH_MEMORY);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_hip_api_ext_record_t*>(header->payload);
+
+                auto attr = get_ext_attribution(record);
+                tool::write_ring_buffer(
+                    tool::tool_buffer_tracing_hip_api_ext_record_t{*record, attr.stream_id},
+                    domain_type::HIP);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_RCCL_API)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_rccl_api_record_t*>(header->payload);
+
+                tool::write_ring_buffer(*record, domain_type::RCCL);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_OMPT)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_ompt_record_t*>(header->payload);
+
+                tool::write_ring_buffer(*record, domain_type::OMPT);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_ROCDECODE_API_EXT)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t*>(
+                    header->payload);
+
+                tool::write_ring_buffer(*record, domain_type::ROCDECODE);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_ROCJPEG_API)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_rocjpeg_api_record_t*>(header->payload);
+
+                tool::write_ring_buffer(*record, domain_type::ROCJPEG);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_GRAPH)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_hip_graph_record_t*>(header->payload);
+
+                tool::write_ring_buffer(*record, domain_type::HIP_GRAPH);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t*>(
+                    header->payload);
+
+                tool::write_ring_buffer(*record, domain_type::ROCSHMEM);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_hipfile_api_ext_record_t*>(
+                    header->payload);
+
+                tool::write_ring_buffer(*record, domain_type::HIPFILE);
+            }
+            else
+            {
+                ROCP_CI_LOG(WARNING) << fmt::format(
+                    "unsupported ROCPROFILER_BUFFER_CATEGORY_TRACING kind: {} :: {}",
+                    header->kind,
+                    tool_metadata->get_kind_name(
+                        static_cast<rocprofiler_buffer_tracing_kind_t>(header->kind)));
+            }
+        }
+        else
+        {
+            ROCP_CI_LOG(WARNING) << fmt::format(
+                "unsupported category + kind: {} + {}", header->category, header->kind);
+        }
+    }
+}
+
+using counter_vec_t = std::vector<rocprofiler_counter_id_t>;
+using agent_counter_map_t =
+    std::unordered_map<rocprofiler_agent_id_t, std::optional<rocprofiler_counter_config_id_t>>;
+
+auto
+get_gpu_agents()
+{
+    return CHECK_NOTNULL(tool_metadata)->get_gpu_agents();
+}
+
+auto
+get_agent_counter_info()
+{
+    return CHECK_NOTNULL(tool_metadata)->agent_counter_info;
+}
+
+struct agent_profiles
+{
+    std::unordered_map<rocprofiler_agent_id_t, std::atomic<uint64_t>> current_iter;
+    const uint64_t                                                    rotation;
+    const std::unordered_map<rocprofiler_agent_id_t, std::vector<rocprofiler_counter_config_id_t>>
+        profiles;
+};
+
+std::optional<rocprofiler_counter_config_id_t>
+construct_counter_collection_profile(rocprofiler_agent_id_t       agent_id,
+                                     const std::set<std::string>& counters)
+{
+    static const auto gpu_agents_counter_info = get_agent_counter_info();
+    auto              profile                 = std::optional<rocprofiler_counter_config_id_t>{};
+    auto              counters_v              = counter_vec_t{};
+    auto              found_v                 = std::vector<std::string_view>{};
+    auto              not_found_counters_v    = std::vector<std::string_view>{};
+    const auto*       agent_v                 = tool_metadata->get_agent(agent_id);
+    auto              expected_v              = counters.size();
+
+    if(gpu_agents_counter_info.find(agent_id) == gpu_agents_counter_info.end())
+    {
+        return std::nullopt;
+    }
+
+    constexpr auto device_qualifier = std::string_view{":device="};
+    for(const auto& itr : counters)
+    {
+        auto name_v = itr;
+        if(auto pos = std::string::npos; (pos = itr.find(device_qualifier)) != std::string::npos)
+        {
+            name_v        = itr.substr(0, pos);
+            auto dev_id_s = itr.substr(pos + device_qualifier.length());
+
+            ROCP_FATAL_IF(dev_id_s.empty() ||
+                          dev_id_s.find_first_not_of("0123456789") != std::string::npos)
+                << "invalid device qualifier format (':device=N) where N is the "
+                   "GPU "
+                   "id: "
+                << itr;
+
+            auto dev_id_v = std::stol(dev_id_s);
+            // skip this counter if the counter is for a specific device id (which
+            // doesn't this agent's device id)
+            if(dev_id_v != agent_v->gpu_index)
+            {
+                --expected_v;  // is not expected
+                continue;
+            }
+        }
+
+        // search the gpu agent counter info for a counter with a matching name
+        bool counter_found = false;
+        auto counter_vec   = gpu_agents_counter_info.find(agent_id);
+        ROCP_FATAL_IF(counter_vec == gpu_agents_counter_info.end())
+            << "No counter information found for agent " << agent_v->node_id << " (gpu-"
+            << agent_v->gpu_index << ", " << agent_v->name << "). Unable to find counter: " << itr;
+
+        for(const auto& citr : counter_vec->second)
+        {
+            if(name_v == std::string_view{citr.name})
+            {
+                counters_v.emplace_back(citr.id);
+                found_v.emplace_back(itr);
+                counter_found = true;
+            }
+        }
+
+        if(!counter_found) not_found_counters_v.emplace_back(itr);
+    }
+
+    if(expected_v != counters_v.size())
+    {
+        auto requested_counters =
+            fmt::format("{}", fmt::join(counters.begin(), counters.end(), ", "));
+        auto found_counters   = fmt::format("{}", fmt::join(found_v.begin(), found_v.end(), ", "));
+        auto missing_counters = fmt::format(
+            "{}", fmt::join(not_found_counters_v.begin(), not_found_counters_v.end(), ", "));
+        ROCP_WARNING << "Unable to find all counters for agent " << agent_v->node_id << " (gpu-"
+                     << agent_v->gpu_index << ", " << agent_v->name << ") in ["
+                     << requested_counters << "]. Found: [" << found_counters << "]. Missing: ["
+                     << missing_counters << "]";
+    }
+
+    if(!counters_v.empty())
+    {
+        auto profile_v = rocprofiler_counter_config_id_t{};
+        ROCPROFILER_CALL(rocprofiler_create_counter_config(
+                             agent_id, counters_v.data(), counters_v.size(), &profile_v),
+                         "Could not construct profile cfg");
+        profile = profile_v;
+    }
+    return profile;
+}
+
+agent_profiles
+generate_agent_profiles()
+{
+    std::unordered_map<rocprofiler_agent_id_t, std::vector<rocprofiler_counter_config_id_t>>
+                                                                      profiles;
+    std::unordered_map<rocprofiler_agent_id_t, std::atomic<uint64_t>> pos;
+    for(const auto& agent : get_gpu_agents())
+    {
+        for(const auto& counter_set : tool::get_config().counters)
+        {
+            if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+            auto profile = construct_counter_collection_profile(agent->id, counter_set);
+            if(profile.has_value())
+            {
+                profiles[agent->id].push_back(profile.value());
+            }
+        }
+        pos[agent->id] = 0;
+    }
+    return agent_profiles{std::move(pos), tool::get_config().counter_groups_interval, profiles};
+}
+
+// Shared, lazily-built per-agent profile set (one config per counter group). Used by both the
+// non-replay round-robin and the kernel-replay per-dispatch selector so they see identical groups.
+agent_profiles&
+get_agent_profiles()
+{
+    static auto profiles = generate_agent_profiles();
+    return profiles;
+}
+
+// this function creates a rocprofiler profile config on the first entry
+std::optional<rocprofiler_counter_config_id_t>
+get_device_counting_service(rocprofiler_agent_id_t agent_id)
+{
+    auto& agent_profiles = get_agent_profiles();
+
+    auto agent_iter = agent_profiles.current_iter.find(agent_id);
+    if(agent_iter == agent_profiles.current_iter.end())
+    {
+        return std::nullopt;
+    }
+
+    auto my_iter = agent_iter->second.fetch_add(1);
+
+    const auto profiles = agent_profiles.profiles.find(agent_id);
+    if(profiles == agent_profiles.profiles.end())
+    {
+        return std::nullopt;
+    }
+
+    if(profiles->second.empty()) return std::nullopt;
+
+    uint64_t profile_pos = my_iter / agent_profiles.rotation;
+    return profiles->second[profile_pos % profiles->second.size()];
+}
+
+// Kernel replay uses the SDK's authoritative pass index (delivered via the KERNEL_REPLAY PASS
+// callback) as the single source of truth. The counter dispatch callback runs synchronously on the
+// same thread within a pass, so it reads the pass from this thread-local.
+// The (asynchronous) counter record callback receives it through the per-pass user_data. tid and
+// pass are packed together because user_data is a single 64-bit slot -- Linux tids are pid_t
+// (32-bit) and pass counts are small, so this is lossless and preserves the thread id the record
+// still carries.
+thread_local auto tl_current_replay_pass = std::optional<uint64_t>{};
+
+// The two 32-bit fields that share the single 64-bit user_data slot: the enqueuing thread id (a
+// Linux tid, i.e. 32-bit pid_t) and the replay pass index. Modeled as a struct so pack/unpack is a
+// plain field access instead of hand-rolled shifts and masks. The width of each field is asserted
+// below rather than assumed.
+struct replay_user_data_t
+{
+    uint32_t tid  = 0;
+    uint32_t pass = 0;
+};
+
+static_assert(sizeof(replay_user_data_t) == sizeof(uint64_t),
+              "replay_user_data_t must exactly fill the 64-bit user_data slot");
+static_assert(std::is_trivially_copyable<replay_user_data_t>::value,
+              "replay_user_data_t must remain trivially copyable for memcpy pack/unpack");
+// The tid half of the slot cannot truncate: common::get_tid() returns gettid(), whose value is a
+// kernel pid_t. Asserting the width here makes that a compile-time guarantee rather than something
+// the pack path has to test for and report on every dispatch.
+static_assert(sizeof(pid_t) == 4,
+              "kernel replay packs a thread id into a uint32_t field of user_data, which assumes "
+              "the kernel's pid_t is 32-bit");
+
+inline uint64_t
+pack_replay_user_data(uint64_t tid, uint64_t pass_index)
+{
+    // The pass index has no equivalent compile-time bound -- it comes from the SDK at runtime --
+    // so it stays checked. Truncating it would put a pass that was never collected into the
+    // record, and from there into the output, so a broken invariant is reported rather than
+    // packed. ROCP_CI_LOG_IF keeps this fatal under ROCPROFILER_CI and logs at ERROR otherwise.
+    ROCP_CI_LOG_IF(ERROR, (pass_index >> 32) != 0U)
+        << "kernel replay: cannot pack pass=" << pass_index
+        << " into user_data without truncation (tid=" << tid << ")";
+
+    const auto fields =
+        replay_user_data_t{static_cast<uint32_t>(tid), static_cast<uint32_t>(pass_index)};
+    uint64_t value = 0;
+    std::memcpy(&value, &fields, sizeof(value));
+    return value;
+}
+
+inline replay_user_data_t
+unpack_replay_user_data(uint64_t value)
+{
+    auto fields = replay_user_data_t{};
+    // Cast to void* so -Wclass-memaccess does not fire: the member initializers above make the
+    // struct non-trivial, which the warning treats as unsafe to memcpy into. Trivially copyable is
+    // the property this actually needs, and it is asserted above.
+    std::memcpy(static_cast<void*>(&fields), &value, sizeof(fields));
+    return fields;
+}
+
+// Kernel replay group selection: pass i -> counter group i for the dispatch's agent. Stateless --
+// the pass index comes from the SDK (see tl_current_replay_pass), not re-derived here.
+std::optional<rocprofiler_counter_config_id_t>
+get_replay_profile(rocprofiler_agent_id_t agent_id, uint64_t pass_index)
+{
+    auto& agent_profiles = get_agent_profiles();
+
+    const auto profiles = agent_profiles.profiles.find(agent_id);
+    if(profiles == agent_profiles.profiles.end() || profiles->second.empty()) return std::nullopt;
+
+    // SDK contract: replay_pass_count reported exactly profiles->second.size() passes for this
+    // agent, so the pass index must land in [0, #groups). A larger index means the SDK drove more
+    // passes than we asked for; scream, then fall back to the wrapped index so a non-CI build stays
+    // in-bounds.
+    ROCP_CI_LOG_IF(ERROR, pass_index >= profiles->second.size())
+        << "kernel replay: pass_index=" << pass_index
+        << " exceeds counter groups=" << profiles->second.size() << " for agent "
+        << agent_id.handle;
+
+    return profiles->second[pass_index % profiles->second.size()];
+}
+
+// Counter groups configured for an agent, or 0 when the agent has none. Lets the asynchronous
+// record path sanity-check a pass index that arrived through user_data without duplicating the
+// lookup in get_replay_profile. Safe to call from any thread: get_agent_profiles() is built once
+// and the profiles map is read-only afterwards.
+size_t
+get_replay_group_count(rocprofiler_agent_id_t agent_id)
+{
+    const auto& profiles_map = get_agent_profiles().profiles;
+    const auto  profiles     = profiles_map.find(agent_id);
+    return (profiles == profiles_map.end()) ? 0 : profiles->second.size();
+}
+
+int64_t
+get_instruction_index(rocprofiler_pc_t pc)
+{
+    if(pc.code_object_id == ROCPROFILER_CODE_OBJECT_ID_NONE)
+        return -1;
+    else
+        return CHECK_NOTNULL(tool_metadata)->get_instruction_index(pc);
+}
+
+std::set<std::string>
+get_config_perf_counters()
+{
+    auto tool_pmc_counters = std::set<std::string>{};
+    for(const auto& counters_group : tool::config().counters)
+    {
+        for(const auto& counter : counters_group)
+            tool_pmc_counters.emplace(counter);
+    }
+    for(const auto& att_counter : tool::config().att_param_perfcounters)
+    {
+        tool_pmc_counters.emplace(att_counter.counter_name);
+    }
+    for(const auto& spm_counter : rocprofiler::tool::get_config().spm_counters)
+    {
+        tool_pmc_counters.emplace(spm_counter);
+    }
+    return tool_pmc_counters;
+}
+
+}  // namespace
+
+std::vector<rocprofiler_thread_trace_parameter_t>
+get_att_perfcounter_params(rocprofiler_agent_id_t                           agent,
+                           std::vector<rocprofiler::tool::att_perfcounter>& att_perf_counters)
+{
+    std::vector<rocprofiler_thread_trace_parameter_t> _data{};
+    if(att_perf_counters.empty()) return _data;
+
+    static const auto agent_counter_info = get_agent_counter_info();
+
+    if(agent_counter_info.find(agent) == agent_counter_info.end())
+    {
+        return _data;
+    }
+
+    for(const auto& att_perf_counter : att_perf_counters)
+    {
+        bool counter_found = false;
+
+        for(const auto& counter_info_ : agent_counter_info.at(agent))
+        {
+            if(std::string_view(counter_info_.name) != att_perf_counter.counter_name) continue;
+
+            auto param       = rocprofiler_thread_trace_parameter_t{};
+            param.type       = ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER;
+            param.counter_id = counter_info_.id;
+            param.simd_mask  = att_perf_counter.simd_mask;
+            _data.emplace_back(param);
+            counter_found = true;
+            break;
+        }
+
+        ROCP_WARNING_IF(!counter_found)
+            << "Agent " << agent.handle << " counter not found: " << att_perf_counter.counter_name;
+    }
+
+    return _data;
+}
+
+void
+pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
+                     rocprofiler_buffer_id_t /* buffer_id*/,
+                     rocprofiler_record_header_t** headers,
+                     size_t                        num_headers,
+                     void* /*data*/,
+                     uint64_t /* drop_count*/)
+{
+    if(!headers) return;
+
+    // count number of valid VS invalid samples delivered by this callback
+    uint64_t valid_samples_cnt   = 0;
+    uint64_t invalid_samples_cnt = 0;
+
+    for(size_t i = 0; i < num_headers; i++)
+    {
+        auto* cur_header = headers[i];
+
+        if(cur_header == nullptr)
+        {
+            ROCP_CI_LOG(WARNING) << "rocprofiler provided a null pointer to buffer record header. "
+                                    "this should never happen";
+            continue;
+        }
+
+        else if(cur_header->category == ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING)
+        {
+            if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_HOST_TRAP_V0_SAMPLE)
+            {
+                auto* pc_sample = static_cast<rocprofiler_pc_sampling_record_host_trap_v0_t*>(
+                    cur_header->payload);
+
+                auto pc_sample_tool_record =
+                    rocprofiler::tool::rocprofiler_tool_pc_sampling_host_trap_record_t(
+                        *pc_sample, get_instruction_index(pc_sample->pc));
+
+                rocprofiler::tool::write_ring_buffer(pc_sample_tool_record,
+                                                     domain_type::PC_SAMPLING_HOST_TRAP);
+
+                valid_samples_cnt++;
+            }
+            else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_STOCHASTIC_V0_SAMPLE)
+            {
+                auto* pc_sample = static_cast<rocprofiler_pc_sampling_record_stochastic_v0_t*>(
+                    cur_header->payload);
+
+                auto pc_sample_tool_record =
+                    rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t(
+                        *pc_sample, get_instruction_index(pc_sample->pc));
+
+                rocprofiler::tool::write_ring_buffer(pc_sample_tool_record,
+                                                     domain_type::PC_SAMPLING_STOCHASTIC);
+                valid_samples_cnt++;
+            }
+            else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE)
+            {
+                invalid_samples_cnt++;
+            }
+        }
+        else
+        {
+            ROCP_FATAL << "unexpected rocprofiler_record_header_t category + kind";
+        }
+    }
+
+    // sum up number of valid/invalid samples for pc sampling stats
+    tool_metadata->pc_sampling_stats.wlock(
+        [valid_samples_cnt, invalid_samples_cnt](auto& pc_sampling_stats) {
+            pc_sampling_stats.valid_samples += valid_samples_cnt;
+            pc_sampling_stats.invalid_samples += invalid_samples_cnt;
+        });
+}
+
+void
+att_shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
+                         rocprofiler_user_data_t                userdata)
+{
+    auto agent = shader_data.agent;
+    auto se_id = shader_data.shader_engine_id;
+    auto flags = shader_data.flags;
+
+    if((flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL) != 0)
+        ROCP_CI_LOG(WARNING) << "Thread trace buffer full!";
+    std::lock_guard<std::mutex> lock(att_shader_data);
+    std::stringstream           filename;
+    auto dispatch_id = static_cast<rocprofiler_dispatch_id_t>(userdata.value);
+    // If dispatch_id/userdata.value == 0, then we are in device mode and get the trace id
+    // from the global atomic (set by consecutive-kernels or marker-trace logic)
+    if(dispatch_id == 0) dispatch_id = att_device_trace_id.load();
+    filename << fmt::format("{}_shader_engine_{}_{}", agent.handle, se_id, dispatch_id);
+
+    auto        output_stream   = get_output_stream(tool::get_config(), filename.str(), ".att");
+    std::string output_filename = get_output_filename(tool::get_config(), filename.str(), ".att");
+
+    output_stream.stream->write(reinterpret_cast<char*>(shader_data.data), shader_data.data_size);
+    auto key = tool::att_dispatch_agent_key_t{dispatch_id, agent.handle};
+    tool_metadata->att_filenames[key].emplace_back(output_filename);
+}
+
+rocprofiler_thread_trace_control_flags_t
+att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
+                      rocprofiler_queue_id_t /* queue_id  */,
+                      rocprofiler_async_correlation_id_t /* correlation_id */,
+                      rocprofiler_kernel_id_t   kernel_id,
+                      rocprofiler_dispatch_id_t dispatch_id,
+                      void* /*userdata_config*/,
+                      rocprofiler_user_data_t* userdata_shader)
+{
+    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
+    userdata_shader->value       = dispatch_id;
+
+    if(is_targeted_kernel(kernel_id, kernel_iteration))
+        return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
+    return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
+}
+
+void
+att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t record,
+                                         rocprofiler_user_data_t* /*user_data*/,
+                                         void* userdata)
+{
+    using capture_ids_set_t = common::Synchronized<std::unordered_set<rocprofiler_dispatch_id_t>>;
+    if(record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) return;
+    if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT) return;
+
+    ROCP_FATAL_IF(record.payload == nullptr)
+        << fmt::format("Expected record payload to not be null for {}", __FUNCTION__);
+    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
+    auto* rdata = static_cast<rocprofiler_callback_tracing_kernel_dispatch_data_t*>(record.payload);
+    auto  dispatch_id = rdata->dispatch_info.dispatch_id;
+    auto  kernel_id   = rdata->dispatch_info.kernel_id;
+
+    // Keep track of number of consecutive kernels
+    const auto consecutive_kernels = *static_cast<uint64_t*>(CHECK_NOTNULL(userdata));
+
+    static std::atomic<bool> isprofiling{false};
+    static bool              stop_profiling{false};
+    static size_t            num_consecutive_kernels{0};
+    static capture_ids_set_t captured_ids{};
+
+    if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+    {
+        const auto is_target = is_targeted_kernel(kernel_id, kernel_iteration);
+        // Return if kernel is not targeted and we are not profiling currently
+        if(!is_target && !isprofiling.load()) return;
+
+        captured_ids.wlock(
+            [](std::unordered_set<rocprofiler_dispatch_id_t>& _data,
+               const rocprofiler_dispatch_id_t                _dispatch_id,
+               const bool                                     _is_target,
+               const uint64_t                                 _consecutive_kernels) {
+                // Reset consecutive kernel count and start context if not already started
+                if(_is_target) num_consecutive_kernels = 0;
+                // Start context if target and not started already
+                if(_is_target && !isprofiling.load())
+                {
+                    ROCPROFILER_CALL(rocprofiler_start_context(att_device_context),
+                                     "context start");
+                    isprofiling.store(true);
+                }
+                const auto local_count = num_consecutive_kernels++;
+                if(isprofiling && local_count < _consecutive_kernels)
+                {
+                    // Keep track of launched dispatch ids
+                    _data.emplace(_dispatch_id);
+                    // Store lowest dispatch id for shader callback function
+                    if(att_device_trace_id.load() > _dispatch_id)
+                        att_device_trace_id.store(_dispatch_id);
+                }
+                if(local_count >= _consecutive_kernels) stop_profiling = true;
+            },
+            dispatch_id,
+            is_target,
+            consecutive_kernels);
+
+        return;
+    }
+
+    ROCP_CI_LOG_IF(WARNING, record.phase != ROCPROFILER_CALLBACK_PHASE_NONE) << fmt::format(
+        "Expected record phase to be ROCPROFILER_CALLBACK_PHASE_NONE for {}", __FUNCTION__);
+
+    if(!isprofiling) return;
+
+    // Stop profiling if all captured dispatches have finished
+    captured_ids.wlock(
+        [](std::unordered_set<rocprofiler_dispatch_id_t>& _data,
+           rocprofiler_dispatch_id_t                      _dispatch_id) {
+            _data.erase(_dispatch_id);
+            if(!_data.empty() || !stop_profiling) return;
+
+            bool _exp = true;
+            if(!isprofiling.compare_exchange_strong(_exp, false, std::memory_order_relaxed)) return;
+
+            ROCPROFILER_CALL(rocprofiler_stop_context(att_device_context), "context stop");
+            stop_profiling = false;
+            att_device_trace_id.store(std::numeric_limits<uint64_t>::max());
+        },
+        dispatch_id);
+}
+
+void
+counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                          rocprofiler_counter_config_id_t*             config,
+                          rocprofiler_user_data_t*                     user_data,
+                          void* /*callback_data_args*/)
+{
+    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
+
+    auto kernel_id = dispatch_data.dispatch_info.kernel_id;
+    auto agent_id  = dispatch_data.dispatch_info.agent_id;
+
+    if(!is_targeted_kernel(kernel_id, kernel_iteration))
+    {
+        return;
+    }
+    else if(tool::get_config().kernel_replay)
+    {
+        // Under kernel replay every targeted dispatch selects its group deterministically by pass
+        // index: inside a replay pass the SDK publishes current_pass (tl_current_replay_pass); a
+        // non-replayed dispatch (single group) is pass 0. Thread the pass index (+ enqueuing tid)
+        // to the async record callback via user_data so replay_pass reflects the group actually
+        // collected rather than async record arrival order.
+        const auto pass    = tl_current_replay_pass.value_or(0);
+        auto       profile = get_replay_profile(agent_id, pass);
+        // If we're inside a replay pass (pass index published on this thread) the agent must have
+        // counter groups -- that's the reason the SDK is replaying this dispatch. Missing groups
+        // here is a tool/SDK mismatch that would silently drop this pass's data.
+        ROCP_CI_LOG_IF(ERROR, tl_current_replay_pass.has_value() && !profile)
+            << "kernel replay: in replay pass " << pass << " but agent " << agent_id.handle
+            << " has no counter groups configured";
+
+        // Packed unconditionally, ahead of the profile check. Without a profile the SDK collects
+        // nothing for this dispatch and the record callback should not fire, but user_data is the
+        // record path's only source of thread id and pass index, and leaving it at its default
+        // would surface as thread_id 0 with replay_pass 0 if a record ever did arrive.
+        user_data->value = pack_replay_user_data(common::get_tid(), pass);
+        if(profile) *config = *profile;
+    }
+    else if(auto profile = get_device_counting_service(agent_id))
+    {
+        *config          = *profile;
+        user_data->value = common::get_tid();
+    }
+}
+
+// rocprofv3 registers callback dispatch counting (not buffered dispatch counting), so counter
+// records arrive on this path. replay_pass is populated here; the SDK buffered counter callback
+// path is not wired in this tool.
+void
+counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                        rocprofiler_counter_record_t*                record_data,
+                        size_t                                       record_count,
+                        rocprofiler_user_data_t                      user_data,
+                        void* /*callback_data_args*/)
+{
+    static const auto gpu_agents              = get_gpu_agents();
+    static const auto gpu_agents_counter_info = get_agent_counter_info();
+
+    auto counter_record = tool::tool_counter_record_t{};
+
+    // Must call get_ext_attribution before copying dispatch_data (rewrites external corr id).
+    counter_record.stream_id     = get_ext_attribution(&dispatch_data).stream_id;
+    counter_record.dispatch_data = dispatch_data;
+
+    if(tool::get_config().kernel_replay)
+    {
+        // user_data was packed in counter_dispatch_callback (synchronous, pass-ordered), so
+        // replay_pass stays tied to the counter group actually collected for this pass rather than
+        // the order in which async records arrive.
+        const auto replay = unpack_replay_user_data(user_data.value);
+
+        // Both fields are validated before they reach the record, because user_data is opaque to
+        // us on the way back: a record whose dispatch never went through counter_dispatch_callback
+        // arrives with a default-constructed slot that unpacks to a plausible-looking (0, 0), which
+        // would otherwise be written out as a real thread id and a real pass index.
+        const auto group_count = get_replay_group_count(dispatch_data.dispatch_info.agent_id);
+
+        ROCP_CI_LOG_IF(ERROR, replay.tid == 0)
+            << "kernel replay: counter record on agent "
+            << dispatch_data.dispatch_info.agent_id.handle
+            << " unpacked thread id 0, so its user_data was never packed by the dispatch callback";
+
+        ROCP_CI_LOG_IF(ERROR, group_count > 0 && replay.pass >= group_count)
+            << "kernel replay: counter record unpacked pass " << replay.pass << " but agent "
+            << dispatch_data.dispatch_info.agent_id.handle << " has only " << group_count
+            << " counter groups";
+
+        counter_record.thread_id = replay.tid;
+        // Clamped so a pass index that survived the checks above cannot be emitted as a group that
+        // was never collected. With group_count == 0 there is nothing to clamp against, so the
+        // unpacked value is passed through and the log above carries the diagnosis.
+        counter_record.replay_pass = (group_count > 0) ? (replay.pass % group_count) : replay.pass;
+    }
+    else
+    {
+        counter_record.thread_id = user_data.value;
+    }
+
+    auto serialized_records = std::vector<tool::tool_counter_value_t>{};
+    serialized_records.reserve(record_count);
+
+    for(size_t count = 0; count < record_count; ++count)
+    {
+        // Get counter ID from record
+        auto _counter_id = rocprofiler_counter_id_t{};
+        ROCPROFILER_CALL(rocprofiler_query_record_counter_id(record_data[count].id, &_counter_id),
+                         "query record counter id");
+
+        serialized_records.emplace_back(
+            tool::tool_counter_value_t{_counter_id, record_data[count].counter_value});
+    }
+
+    if(!serialized_records.empty())
+    {
+        counter_record.write(serialized_records);
+        tool::write_ring_buffer(counter_record, domain_type::COUNTER_COLLECTION);
+    }
+}
+
+bool
+if_spm_config_match(rocprofiler_agent_id_t           agent_id,
+                    uint64_t                         spm_sample_interval,
+                    rocprofiler_spm_parameter_type_t spm_sample_unit)
+{
+    auto spm_config = CHECK_NOTNULL(tool_metadata)->get_spm_config_info(agent_id);
+    if(!spm_config.empty())
+    {
+        for(auto config : spm_config)
+        {
+            if(config.type == spm_sample_unit &&
+               config.interval.min_interval <= spm_sample_interval &&
+               config.interval.max_interval >= spm_sample_interval)
+                return true;
+        }
+    }
+    return false;
+}
+
+std::optional<rocprofiler_counter_config_id_t>
+get_spm_config(rocprofiler_agent_id_t agent_id)
+{
+    static const auto gpu_agents_counter_info = get_agent_counter_info();
+    using agent_configs_t =
+        std::unordered_map<rocprofiler_agent_id_t, rocprofiler_counter_config_id_t>;
+    static auto agent_configs = common::Synchronized<agent_configs_t, true>{};
+
+    return agent_configs.wlock(
+        [&](auto& _configs) -> std::optional<rocprofiler_counter_config_id_t> {
+            auto itr = _configs.find(agent_id);
+            if(itr != _configs.end()) return itr->second;
+
+            if(!if_spm_config_match(agent_id,
+                                    tool::get_config().spm_sample_interval,
+                                    tool::get_config().spm_sample_interval_unit_value))
+                ROCP_FATAL << "Invalid input parameter\n";
+
+            std::vector<rocprofiler_spm_parameters_t*> input_params{};
+            auto                                       param = rocprofiler_spm_parameters_t{};
+            switch(tool::get_config().spm_sample_interval_unit_value)
+            {
+                case ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES:
+                    param = common::init_public_api_struct(
+                        rocprofiler_spm_parameters_t{},
+                        ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
+                        tool::get_config().spm_sample_interval);
+                    break;
+                case ROCPROFILER_SPM_PARAMETER_TYPE_NONE:
+                case ROCPROFILER_SPM_PARAMETER_TYPE_LAST:
+                default: break;
+            }
+            input_params.push_back(&param);
+            auto expected_counters = std::vector<rocprofiler_counter_id_t>{};
+
+            for(const auto& citr : gpu_agents_counter_info.at(agent_id))
+            {
+                for(const auto& desired_counter : rocprofiler::tool::get_config().spm_counters)
+                {
+                    if(citr.spm_support &&
+                       std::string_view{desired_counter} == std::string_view{citr.name})
+                        expected_counters.emplace_back(citr.id);
+                }
+            }
+
+            auto config = rocprofiler_counter_config_id_t{};
+            ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(agent_id,
+                                                                   expected_counters.data(),
+                                                                   expected_counters.size(),
+                                                                   input_params.data(),
+                                                                   input_params.size(),
+                                                                   &config),
+                             "SPM could not be configured");
+
+            _configs.emplace(agent_id, config);
+            return config;
+        });
+}
+
+void
+spm_dispatch_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispatch_data,
+                      rocprofiler_counter_config_id_t*                        config,
+                      rocprofiler_user_data_t*                                user_data,
+                      void* /*callback_data_args*/)
+{
+    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
+
+    if(!is_targeted_kernel(dispatch_data->dispatch_info.kernel_id, kernel_iteration))
+    {
+        return;
+    }
+    else if(auto profile = get_spm_config(dispatch_data->dispatch_info.agent_id))
+    {
+        *config          = *profile;
+        user_data->value = common::get_tid();
+    }
+}
+
+void
+spm_data_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispatch_data,
+                  const rocprofiler_spm_counter_record_t**                records,
+                  size_t                                                  record_count,
+                  rocprofiler_spm_record_flag_t                           flags,
+                  rocprofiler_user_data_t                                 user_data,
+                  void* /* record_callback_args*/)
+{
+    if((flags & ROCPROFILER_SPM_RECORD_FLAG_DISPATCH_END) != 0)
+    {
+        auto dispatch_data_copy = *dispatch_data;
+        common::consume_args(get_ext_attribution(&dispatch_data_copy));
+        return;
+    }
+
+    if(record_count == 0) return;
+
+    if((flags & ROCPROFILER_SPM_RECORD_FLAG_DATA) != 0)
+    {
+        auto counter_record      = tool::tool_spm_counter_record_t{};
+        counter_record.thread_id = user_data.value;
+
+        if(dispatch_data->correlation_id.external.ptr != nullptr)
+        {
+            auto* ecid = static_cast<kernel_rename_and_stream_data*>(
+                dispatch_data->correlation_id.external.ptr);
+            counter_record.stream_id                    = ecid->stream_id;
+            auto dispatch_copy                          = *dispatch_data;
+            dispatch_copy.correlation_id.external.value = ecid->region_id;
+            counter_record.dispatch_data                = dispatch_copy;
+        }
+        else
+        {
+            counter_record.dispatch_data = *dispatch_data;
+        }
+
+        auto serialized_records = std::vector<tool::tool_spm_counter_value_t>{};
+        for(size_t count = 0; count < record_count; count++)
+        {
+            auto _counter_id = rocprofiler_counter_id_t{};
+            ROCPROFILER_CALL(rocprofiler_query_record_counter_id(records[count]->id, &_counter_id),
+                             "query record counter id");
+            serialized_records.emplace_back(tool::tool_spm_counter_value_t{
+                _counter_id, records[count]->value, records[count]->timestamp, records[count]->id});
+        }
+
+        if(!serialized_records.empty())
+        {
+            counter_record.write(serialized_records);
+            tool::write_ring_buffer(counter_record, domain_type::SPM_COUNTER_COLLECTION);
+        }
+    }
+
+    if((flags & ROCPROFILER_SPM_RECORD_FLAG_DATA_LOSS) != 0)
+    {
+        ROCP_WARNING << fmt::format("SPM data loss in dispatch ID {}",
+                                    dispatch_data->dispatch_info.dispatch_id);
+    }
+}
+rocprofiler_client_finalize_t client_finalizer  = nullptr;
+rocprofiler_client_id_t*      client_identifier = nullptr;
+
+void
+initialize_logging()
+{
+    static auto _once = std::atomic<uint64_t>{0};
+    if(_once++ == 0)
+    {
+        auto logging_cfg = rocprofiler::common::logging_config{.install_failure_handler = true};
+        common::init_logging("ROCPROF", logging_cfg);
+    }
+}
+
+void
+initialize_rocprofv3()
+{
+    ROCP_INFO << "initializing rocprofv3...";
+
+    if(int status = 0;
+       rocprofiler_is_initialized(&status) == ROCPROFILER_STATUS_SUCCESS && status == 0)
+    {
+        ROCPROFILER_CALL(rocprofiler_force_configure(&rocprofiler_configure),
+                         "force configuration");
+    }
+
+    ROCP_FATAL_IF(!client_identifier) << "nullptr to client identifier!";
+    ROCP_FATAL_IF(!client_finalizer && !tool::get_config().list_metrics)
+        << "nullptr to client finalizer!";  // exception for listing metrics
+}
+
+void
+initialize_signal_handler(sigaction_func_t sigaction_func)
+{
+    if(sigaction_func == nullptr) sigaction_func = &sigaction;
+
+    struct sigaction sig_act = {};
+    sigemptyset(&sig_act.sa_mask);
+    // No SA_RESETHAND: a one-shot handler resets the disposition to SIG_DFL the instant it fires,
+    // so a *second* delivery of the same signal (e.g. a chained app handler like LLVM/comgr
+    // re-raising) would land on SIG_DFL and terminate the process mid-flush -> data loss. Keeping
+    // our handler installed routes every re-delivery back through the re-entry guard, which
+    // swallows until the flush completes (finalize_done) and only then escalates. Termination is
+    // guaranteed by the worker restoring the real disposition and re-raising once the flush done.
+    sig_act.sa_flags     = (SA_SIGINFO | SA_NOCLDSTOP);
+    sig_act.sa_sigaction = &rocprofv3_error_signal_handler;
+    for(auto signal_v : rocprofv3_handled_signals)
+    {
+        if(get_chained_signals().at(signal_v))
+        {
+            ROCP_INFO << "Skipping install of signal handler for signal " << signal_v
+                      << " (already wrapped)";
+            continue;
+        }
+
+        ROCP_INFO << "Installing signal handler for signal " << signal_v;
+        if(sigaction_func(signal_v, &sig_act, nullptr) != 0)
+        {
+            auto _errno_v = errno;
+            ROCP_ERROR << "error setting signal handler for " << signal_v
+                       << " :: " << strerror(_errno_v);
+        }
+    }
+}
+
+void
+wait_peer_finished(const pid_t& pid, const pid_t& ppid)
+{
+    auto this_func = std::string_view{__FUNCTION__};
+
+    auto get_peer_pid = [&ppid]() {
+        auto fname    = fmt::format("/proc/{}/task/{}/children", ppid, ppid);
+        auto ifs      = std::ifstream{fname};
+        auto peer_pid = std::vector<pid_t>{};
+        while(ifs)
+        {
+            pid_t val = 0;
+            ifs >> val;
+            if(ifs && !ifs.eof() && val > 0) peer_pid.emplace_back(val);
+        }
+        return peer_pid;
+    };
+
+    auto _peers_pid = get_peer_pid();
+
+    if(_peers_pid.size() <= 1)
+    {
+        ROCP_INFO << fmt::format(
+            "[PPID={}][PID={}] has no peer process and no need to wait ", ppid, pid);
+
+        // if no peer process no need to wait
+        return;
+    }
+
+    ROCP_WARNING << fmt::format("[PPID={}][PID={}] rocprofv3 will wait for all {} peer processes "
+                                "under same parent finished to exit",
+                                ppid,
+                                pid,
+                                _peers_pid.size());
+
+    // Create a POSIX semaphore for synchronization
+    // Processes under the same parent share a same semaphore
+    ROCP_INFO << fmt::format(
+        "[PPID={}][PID={}] Creating existing semaphore in {}", ppid, pid, this_func);
+
+    const std::string _sem_name = "/rocprofv3_sync_pid_" + std::to_string(ppid);
+    auto              guard     = SemaphoreGuard{_sem_name};
+
+    if(!guard.open_or_create())
+    {
+        ROCP_WARNING << fmt::format(
+            "[PPID={}][PID={}] Failed to initialize semaphore, skipping sync", ppid, pid);
+        return;
+    }
+
+    // Signal completion and wait for peers
+    if(sem_post(guard.sem) == -1)
+    {
+        ROCP_WARNING << fmt::format("[PPID={}][PID={}] Failed to signal completion", ppid, pid);
+        return;
+    }
+
+    // Wait for all peers to signal completion
+    int _sem_val = 0;
+    do
+    {
+        if(sem_getvalue(guard.sem, &_sem_val) == -1)
+        {
+            ROCP_WARNING << fmt::format(
+                "[PPID={}][PID={}] failed to wait on semaphore in {}", ppid, pid, this_func);
+        }
+        ROCP_TRACE << fmt::format(
+            "{} shows current sem_pid_group name: {} semaphore value: {}, peer size(): {}",
+            this_func,
+            _sem_name,
+            _sem_val,
+            _peers_pid.size());
+        std::this_thread::yield();
+        std::this_thread::sleep_for(std::chrono::milliseconds{100});
+    } while(static_cast<unsigned long>(_sem_val) < _peers_pid.size());
+}
+
+void
+finalize_rocprofv3(std::string_view context)
+{
+    auto& sw = get_signal_worker();
+    if(sw.finalized.test_and_set(std::memory_order_acq_rel))
+    {
+        ROCP_INFO << "finalize_rocprofv3('" << context << "') ignored: already finalized";
+        return;
+    }
+
+    ROCP_INFO << "invoked: finalize_rocprofv3";
+    if(client_finalizer && client_identifier)
+    {
+        ROCP_INFO << "finalizing rocprofv3: caller='" << context << "'...";
+        client_finalizer(*client_identifier);
+        client_finalizer  = nullptr;
+        client_identifier = nullptr;
+    }
+
+    // Join the worker thread (from atexit / rocprofv3_main; a call from the worker itself no-ops).
+    sw.join();
+}
+
+bool
+if_pc_sample_config_match(rocprofiler_agent_id_t           agent_id,
+                          rocprofiler_pc_sampling_method_t pc_sampling_method,
+                          rocprofiler_pc_sampling_unit_t   pc_sampling_unit,
+                          uint64_t                         pc_sampling_interval)
+{
+    auto pc_sampling_config = CHECK_NOTNULL(tool_metadata)->get_pc_sample_config_info(agent_id);
+    if(!pc_sampling_config.empty())
+    {
+        for(auto config : pc_sampling_config)
+        {
+            if(config.method == pc_sampling_method && config.unit == pc_sampling_unit &&
+               config.min_interval <= pc_sampling_interval &&
+               config.max_interval >= pc_sampling_interval)
+                return true;
+        }
+    }
+    return false;
+}
+
+void
+configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
+                                    uint64_t                        buffer_watermark,
+                                    void*                           tool_data,
+                                    rocprofiler_buffer_tracing_cb_t pc_sampling_cb)
+{
+    auto method = tool::get_config().pc_sampling_method_value;
+    auto unit   = tool::get_config().pc_sampling_unit_value;
+
+    // Find the proper buffer_id based on the method
+    auto* buffer_id = (method == ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP)
+                          ? &get_buffers().pc_sampling_host_trap
+                          : &get_buffers().pc_sampling_stochastic;
+
+    ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
+                                               buffer_size,
+                                               buffer_watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               pc_sampling_cb,
+                                               tool_data,
+                                               buffer_id),
+                     "buffer creation");
+
+    bool config_match_found = false;
+    auto agent_ptr_vec      = get_gpu_agents();
+    for(auto& itr : agent_ptr_vec)
+    {
+        if(if_pc_sample_config_match(
+               itr->id, method, unit, tool::get_config().pc_sampling_interval))
+        {
+            config_match_found = true;
+            int flags          = 0;
+            ROCPROFILER_CALL(
+                rocprofiler_configure_pc_sampling_service(get_client_ctx(),
+                                                          itr->id,
+                                                          method,
+                                                          unit,
+                                                          tool::get_config().pc_sampling_interval,
+                                                          *buffer_id,
+                                                          flags),
+                "configure PC sampling");
+        }
+    }
+    if(!config_match_found)
+    {
+        ROCP_ERROR << "Given PC sampling configuration is not supported on any of the agents."
+                   << "See supported configurations with 'rocprofv3-avail info --pc-sampling'";
+        std::exit(EXIT_FAILURE);
+    }
+}
+
+// Kernel replay: the SDK calls this during CONFIG to learn how many passes to run for a dispatch.
+// The pass count must match the number of counter groups collectable on THIS dispatch's agent --
+// the same per-agent profile list counter_dispatch_callback -> get_replay_profile indexes -- so
+// that pass i maps to group i with no wrap/skip on agents with a different or partial group set
+// (the global --pmc group count can differ per agent). Returning 1 (a single group, or none)
+// disables replay.
+uint64_t
+kernel_replay_pass_count_callback(rocprofiler_kernel_dispatch_info_t dispatch_info,
+                                  rocprofiler_user_data_t /*user_data*/)
+{
+    auto&      agent_profiles = get_agent_profiles();
+    const auto profiles       = agent_profiles.profiles.find(dispatch_info.agent_id);
+    const auto n =
+        (profiles == agent_profiles.profiles.end()) ? size_t{0} : profiles->second.size();
+    return (n == 0) ? 1 : n;
+}
+
+// Kernel replay CONFIG callback: install the pass-count callback during PHASE_ENTER so the SDK can
+// query the number of replay passes for each dispatch.
+void
+kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
+                       rocprofiler_user_data_t* /*user_data*/,
+                       void* /*data*/)
+{
+    if(record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY) return;
+
+    auto* payload = static_cast<rocprofiler_callback_tracing_kernel_replay_data_t*>(record.payload);
+
+    if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
+       record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+    {
+        // Tell the SDK how many passes to run for this dispatch (= counter groups for its agent).
+        payload->replay_pass_count = kernel_replay_pass_count_callback;
+    }
+    else if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS)
+    {
+        // Publish the SDK's authoritative pass index for the counter dispatch callback, which runs
+        // synchronously on this same thread within the pass; clear it once the pass ends so
+        // ordinary dispatches don't observe a stale value.
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+        {
+            // SDK contract: a fixed-count replay (total_passes > 0) numbers passes [0,
+            // total_passes); total_passes == 0 marks an indefinite loop with no upper bound. A pass
+            // outside that range means the SDK drove more passes than it advertised.
+            ROCP_CI_LOG_IF(
+                ERROR, payload->total_passes != 0 && payload->current_pass >= payload->total_passes)
+                << "kernel replay: SDK published current_pass=" << payload->current_pass
+                << " out of range for total_passes=" << payload->total_passes;
+            tl_current_replay_pass = payload->current_pass;
+        }
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+        {
+            // Enter/exit are paired per pass on this thread, so an exit with nothing published
+            // means the SDK emitted PASS phases out of order.
+            ROCP_CI_LOG_IF(ERROR, !tl_current_replay_pass)
+                << "kernel replay: PASS exit without a matching enter on this thread";
+            tl_current_replay_pass.reset();
+        }
+    }
+}
+
+struct real_callbacks_t
+{};
+
+struct dummy_callbacks_t
+{};
+
+constexpr auto use_real_callbacks  = real_callbacks_t{};
+constexpr auto use_dummy_callbacks = dummy_callbacks_t{};
+
+struct tracing_callbacks_t
+{
+    tracing_callbacks_t() = delete;
+
+    tracing_callbacks_t(real_callbacks_t)
+    : code_object_tracing{code_object_tracing_callback}
+    , cntrl_tracing{cntrl_tracing_callback}
+    , kernel_rename{kernel_rename_callback}
+    , hip_stream{hip_stream_display_callback}
+    , hip_graph{hip_graph_display_callback}
+    , callback_tracing{callback_tracing_callback}
+    , buffered_tracing{buffered_tracing_callback}
+    , pc_sampling{pc_sampling_callback}
+    , att_dispatch{att_dispatch_callback}
+    , att_shader_data{att_shader_data_callback}
+    , counter_dispatch{counter_dispatch_callback}
+    , counter_record{counter_record_callback}
+    , att_dispatch_consecutive_kernel{att_dispatch_consecutive_kernel_callback}
+    , kernel_replay{kernel_replay_callback}
+    {}
+
+    explicit tracing_callbacks_t(dummy_callbacks_t)
+    : code_object_tracing{dummy_callback_tracing_callback}
+    , cntrl_tracing{dummy_callback_tracing_callback}
+    , kernel_rename{dummy_callback_tracing_callback}
+    , hip_stream{dummy_callback_tracing_callback}
+    , hip_graph{dummy_callback_tracing_callback}
+    , callback_tracing{dummy_callback_tracing_callback}
+    , buffered_tracing{dummy_buffered_tracing_callback}
+    , pc_sampling{dummy_buffered_tracing_callback}
+    , counter_dispatch{dummy_counter_dispatch_callback}
+    , counter_record{dummy_counter_record_callback}
+    , kernel_replay{dummy_callback_tracing_callback}
+    {}
+
+    const rocprofiler_callback_tracing_cb_t               code_object_tracing             = nullptr;
+    const rocprofiler_callback_tracing_cb_t               cntrl_tracing                   = nullptr;
+    const rocprofiler_callback_tracing_cb_t               kernel_rename                   = nullptr;
+    const rocprofiler_callback_tracing_cb_t               hip_stream                      = nullptr;
+    const rocprofiler_callback_tracing_cb_t               hip_graph                       = nullptr;
+    const rocprofiler_callback_tracing_cb_t               callback_tracing                = nullptr;
+    const rocprofiler_buffer_tracing_cb_t                 buffered_tracing                = nullptr;
+    const rocprofiler_buffer_tracing_cb_t                 pc_sampling                     = nullptr;
+    const rocprofiler_thread_trace_dispatch_callback_t    att_dispatch                    = nullptr;
+    const rocprofiler_thread_trace_shader_data_callback_t att_shader_data                 = nullptr;
+    const rocprofiler_dispatch_counting_service_cb_t      counter_dispatch                = nullptr;
+    const rocprofiler_dispatch_counting_record_cb_t       counter_record                  = nullptr;
+    const rocprofiler_callback_tracing_cb_t               att_dispatch_consecutive_kernel = nullptr;
+    const rocprofiler_callback_tracing_cb_t               kernel_replay                   = nullptr;
+};
+
+auto
+get_tracing_callbacks()
+{
+    // for the benchmarking modes of sdk buffer/callback overhead, we are measuring the cost
+    // of the SDK invoking the callbacks to the tool. We do not want to include the overhead
+    // of the tool doing any work so we use "dummy" callbacks (i.e. functions which just
+    // immediately return)
+    if(tool::get_config().benchmark_mode == tool::config::benchmark::sdk_buffered_overhead ||
+       tool::get_config().benchmark_mode == tool::config::benchmark::sdk_callback_overhead ||
+       tool::get_config().benchmark_mode == tool::config::benchmark::execution_profile)
+    {
+        return tracing_callbacks_t{use_dummy_callbacks};
+    }
+
+    return tracing_callbacks_t{use_real_callbacks};
+}
+
+void
+reset_output_thread(std::optional<std::thread>& thread_ptr)
+{
+    if(thread_ptr.has_value())
+    {
+        ROCP_TRACE << "finalize output thread started...";
+        if(thread_ptr->joinable()) thread_ptr->join();
+        thread_ptr.reset();
+        ROCP_TRACE << "finalize output thread exiting...";
+    }
+}
+
+namespace
+{
+constexpr auto attach_session_file_perms =
+    fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read | fs::perms::others_read;
+
+fs::path
+attach_session_file_path(pid_t target_pid)
+{
+    return fmt::format("/tmp/rocprofv3_attach_{}.session", target_pid);
+}
+
+// Reject symlinks and non-regular files before fstream open
+bool
+is_attach_session_path_safe(const fs::path& path)
+{
+    std::error_code ec;
+    if(!fs::exists(path, ec)) return true;
+    if(ec)
+    {
+        ROCP_WARNING << "Failed to stat attach session file " << path << " :: " << ec.message();
+        return false;
+    }
+    if(fs::is_symlink(path, ec))
+    {
+        ROCP_WARNING << "Refusing attach session path (symlink): " << path;
+        return false;
+    }
+    if(!fs::is_regular_file(path, ec))
+    {
+        ROCP_WARNING << "Refusing attach session path (not a regular file): " << path;
+        return false;
+    }
+    return true;
+}
+
+void
+set_attach_session_file_permissions(const fs::path& path)
+{
+    std::error_code ec;
+    fs::permissions(path, attach_session_file_perms, fs::perm_options::replace, ec);
+    if(ec)
+    {
+        ROCP_WARNING << "Failed to set attach session file permissions on " << path
+                     << " :: " << ec.message();
+    }
+}
+
+bool
+read_attach_session(const fs::path& path, uint64_t& session_out)
+{
+    constexpr auto reattach_overwrite_warning =
+        "If this is a re-attach, output may overwrite a previous session";
+
+    if(!is_attach_session_path_safe(path))
+    {
+        ROCP_WARNING << reattach_overwrite_warning;
+        return false;
+    }
+    if(!fs::exists(path)) return false;
+
+    std::ifstream ifs{path};
+    if(!ifs)
+    {
+        ROCP_WARNING << "Failed to open attach session file for read: " << path << ". "
+                     << reattach_overwrite_warning;
+        return false;
+    }
+
+    uint64_t session = 0;
+    if(!(ifs >> session))
+    {
+        ROCP_WARNING << "Failed to parse attach session file: " << path << ". "
+                     << reattach_overwrite_warning;
+        return false;
+    }
+
+    session_out = session;
+    return true;
+}
+
+bool
+write_attach_session(const fs::path& path, uint64_t session)
+{
+    if(!is_attach_session_path_safe(path)) return false;
+
+    std::ofstream ofs{path, std::ios::trunc};
+    if(!ofs)
+    {
+        ROCP_WARNING << "Failed to open attach session file for write (reattaches may "
+                        "overwrite previous rocprof output): "
+                     << path;
+        return false;
+    }
+
+    ofs << session;
+    if(!ofs.good())
+    {
+        ROCP_WARNING << "Failed to write attach session file (reattaches may "
+                        "overwrite previous rocprof output): "
+                     << path;
+        return false;
+    }
+
+    set_attach_session_file_permissions(path);
+    return true;
+}
+}  // namespace
+
+// Checks for a file in /tmp to see if this is a re-attach to a process that was already profiled,
+// and if so suffixes the output file name with the session number so that previous output files are
+// not overwritten.
+void
+assign_attach_output_session_suffix()
+{
+    const auto instrumented_pid = getpid();
+    const auto session_path     = attach_session_file_path(instrumented_pid);
+
+    auto session = uint64_t{0};
+    if(read_attach_session(session_path, session)) ++session;
+
+    if(!write_attach_session(session_path, session)) return;
+
+    if(session > 0)
+    {
+        auto& cfg       = tool::get_config();
+        cfg.output_file = fmt::format("{}_{}", cfg.output_file, session);
+        ROCP_INFO << "Reattach #" << session << " for PID " << instrumented_pid
+                  << ". Base file name is " << cfg.output_file;
+    }
+}
+
+int
+tool_attach(rocprofiler_client_detach_t /*detach_func*/,
+            rocprofiler_context_id_t* context_ids,
+            uint64_t                  context_ids_length,
+            void* /*tool_data*/)
+{
+    // Reset the detach output flag for this new session. If the process exits during this
+    // attach (without a corresponding tool_detach), tool_fini will see false and generate
+    // output for whatever was captured. tool_detach sets it true when it produces output.
+    detach_output_generated = false;
+
+    // reset any existing output thread from prior tool usage
+    // Only log if previous attachment used async mode (where background thread may still be
+    // running)
+    if(!tool::get_config().attach_output_generation_sync)
+    {
+        ROCP_INFO << "If files are still being written from the last detach, there will be a delay "
+                     "until this process is finished";
+    }
+    ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
+
+    // save the existing config for comparison
+    auto original_config = tool::get_config();
+
+    // reset config for attach (i.e. re-parse environment variables)
+    tool::get_config() = tool::config{};
+
+    // ensure the config has not changed which services were requested.
+    // NOTE: this is a temporary restriction
+    ROCP_FATAL_IF(!tool::is_attach_invariant(tool::get_config(), original_config))
+        << "configuration mismatch between initial tool load and attach. rocprofv3 does not "
+           "support changing the set of enabled tracing services between initial load and attach. "
+           "After the initial attachment, it is recommended to just use `rocprofv3 --pid=<pid> [-o "
+           "<output_file> -d <output_directory> ...]` to attach to a new process.";
+
+    assign_attach_output_session_suffix();
+
+    pid_t instrumented_pid = getpid();   // The process being profiled
+    pid_t parent_pid       = getppid();  // Its parent process
+    ROCP_INFO << "Attach mode: Setting process_id to instrumented PID " << instrumented_pid
+              << " (parent PID: " << parent_pid << ")";
+    // NOLINTNEXTLINE(readability-suspicious-call-argument): parent_pid is correctly the _ppid arg
+    tool_metadata->set_process_id(instrumented_pid, parent_pid);
+
+    for(uint64_t i = 0; i < context_ids_length; ++i)
+    {
+        if(int status = 0;
+           rocprofiler_context_is_active(context_ids[i], &status) == ROCPROFILER_STATUS_SUCCESS &&
+           status == 0)
+        {
+            ROCP_INFO << "Attach mode: starting context ID " << context_ids[i].handle;
+            ROCPROFILER_CALL(rocprofiler_start_context(context_ids[i]),
+                             "failed to start received context");
+        }
+    }
+
+    return 0;
+}
+
+int
+tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
+{
+    static constexpr auto null_context_id = rocprofiler_context_id_t{.handle = 0};
+    static constexpr auto null_buffer_id  = rocprofiler_buffer_id_t{.handle = 0};
+
+    auto _init_timer = common::simple_timer{"[rocprofv3] tool initialization"};
+
+    client_finalizer = fini_func;
+
+    if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept &&
+       !tool::att_no_intercept::is_supported())
+    {
+        ROCP_WARNING << "--att-no-intercept is unavailable: this rocprofv3 build does not include "
+                        "ATT quick-scan support. Falling back to --att.";
+        tool::get_config().att_no_intercept = false;
+    }
+
+    const uint64_t buffer_size      = 16 * common::units::get_page_size();
+    const uint64_t buffer_watermark = 15 * common::units::get_page_size();
+
+    tool_metadata->init(tool::metadata::inprocess_with_counters{get_config_perf_counters()});
+
+    auto create_pause_resume_ctx = [](rocprofiler_context_id_t& ctx, std::string_view msg) {
+        if(ctx == null_context_id)
+        {
+            ROCPROFILER_CALL(rocprofiler_create_context(&ctx),
+                             fmt::format("failed to create {} context", msg));
+            if(ctx != null_context_id) pause_resume_contexts.emplace(ctx);
+        }
+    };
+
+    create_pause_resume_ctx(get_client_ctx(), "tracing");
+
+    auto code_obj_ctx = null_context_id;
+    ROCPROFILER_CALL(rocprofiler_create_context(&code_obj_ctx), "failed to create context");
+
+    auto start_context = [](rocprofiler_context_id_t ctx_id, std::string_view msg) {
+        using benchmark = tool::config::benchmark;
+        // do not start context if we are benchmarking the overhead of a service
+        // being available but unused by any contexts
+        if(tool::get_config().benchmark_mode != benchmark::disabled_contexts_overhead &&
+           ctx_id != null_context_id)
+        {
+            if(tool::get_config().benchmark_mode == benchmark::execution_profile)
+            {
+                ROCPROFILER_CHECK(rocprofiler_configure_external_correlation_id_request_service(
+                    ctx_id, nullptr, 0, record_execution_profile, nullptr));
+            }
+
+            ROCP_INFO << fmt::format("starting {} context...", msg);
+            ROCPROFILER_CHECK(rocprofiler_start_context(ctx_id));
+        }
+    };
+
+    auto callbacks = get_tracing_callbacks();
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_callback_tracing_service(code_obj_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
+                                                       nullptr,
+                                                       0,
+                                                       callbacks.code_object_tracing,
+                                                       nullptr),
+        "code object tracing configure failed");
+
+    start_context(code_obj_ctx, "code object");
+
+    if(tool::get_config().marker_api_trace)
+    {
+        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                             get_client_ctx(),
+                             ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
+                             nullptr,
+                             0,
+                             callbacks.callback_tracing,
+                             nullptr),
+                         "callback tracing service failed to configure");
+    }
+
+    // Register pause/resume control callbacks when using selected_regions or marker tracing
+    if(tool::get_config().marker_api_trace || tool::get_config().selected_regions ||
+       tool::get_config().selected_regions_ref_count)
+    {
+        auto pause_resume_ctx = null_context_id;
+        ROCPROFILER_CALL(rocprofiler_create_context(&pause_resume_ctx), "failed to create context");
+
+        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                             pause_resume_ctx,
+                             ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,
+                             nullptr,
+                             0,
+                             callbacks.cntrl_tracing,
+                             &pause_resume_contexts),
+                         "callback tracing service failed to configure");
+
+        start_context(pause_resume_ctx, "marker pause/resume");
+    }
+
+    struct buffer_service_config
+    {
+        bool                                         option = false;
+        rocprofiler_buffer_tracing_kind_t            kind   = ROCPROFILER_BUFFER_TRACING_NONE;
+        rocprofiler_buffer_id_t&                     buffer_id;
+        std::vector<rocprofiler_tracing_operation_t> operations = {};
+    };
+
+    // Resolve the --ompt-trace category list (forwarded via ROCPROF_OMPT_TRACE_OPERATIONS)
+    // into the explicit operation IDs that rocprofiler_configure_buffer_tracing_service
+    // expects. Contract:
+    //   (a) an empty input string returns an empty vector, i.e. the "all operations" case;
+    //   (b) the SDK interprets num_operations == 0 as "enable every operation in the
+    //       domain", so an empty vector means trace all OMPT ops (no filtering);
+    //   (c) any unknown category token is fatal (ROCP_FATAL aborts the run) rather than
+    //       silently skipped, so a typo can never be misread as the "all operations" case.
+    auto resolve_ompt_ops = [](const std::string& csv) {
+        using ompt_ops_t                 = std::vector<rocprofiler_tracing_operation_t>;
+        static const auto category_table = std::unordered_map<std::string_view, ompt_ops_t>{
+            {"thread", {ROCPROFILER_OMPT_ID_thread_begin, ROCPROFILER_OMPT_ID_thread_end}},
+            {"parallel",
+             {ROCPROFILER_OMPT_ID_parallel_begin,
+              ROCPROFILER_OMPT_ID_parallel_end,
+              ROCPROFILER_OMPT_ID_implicit_task,
+              ROCPROFILER_OMPT_ID_work,
+              ROCPROFILER_OMPT_ID_dispatch,
+              ROCPROFILER_OMPT_ID_reduction,
+              ROCPROFILER_OMPT_ID_masked}},
+            {"task",
+             {ROCPROFILER_OMPT_ID_task_create,
+              ROCPROFILER_OMPT_ID_task_schedule,
+              ROCPROFILER_OMPT_ID_dependences,
+              ROCPROFILER_OMPT_ID_task_dependence}},
+            {"sync",
+             {ROCPROFILER_OMPT_ID_sync_region,
+              ROCPROFILER_OMPT_ID_sync_region_wait,
+              ROCPROFILER_OMPT_ID_flush,
+              ROCPROFILER_OMPT_ID_cancel}},
+            {"mutex",
+             {ROCPROFILER_OMPT_ID_lock_init,
+              ROCPROFILER_OMPT_ID_lock_destroy,
+              ROCPROFILER_OMPT_ID_mutex_acquire,
+              ROCPROFILER_OMPT_ID_mutex_acquired,
+              ROCPROFILER_OMPT_ID_mutex_released,
+              ROCPROFILER_OMPT_ID_nest_lock}},
+            {"target",
+             {ROCPROFILER_OMPT_ID_target_emi,
+              ROCPROFILER_OMPT_ID_target_data_op_emi,
+              ROCPROFILER_OMPT_ID_target_submit_emi}},
+            {"device",
+             {ROCPROFILER_OMPT_ID_device_initialize,
+              ROCPROFILER_OMPT_ID_device_finalize,
+              ROCPROFILER_OMPT_ID_device_load}},
+            {"error", {ROCPROFILER_OMPT_ID_error}},
+        };
+
+        auto ops = ompt_ops_t{};
+        if(csv.empty()) return ops;
+
+        for(const auto& tok : rocprofiler::sdk::parse::tokenize(csv, ", "))
+        {
+            auto it = category_table.find(tok);
+            if(it == category_table.end())
+            {
+                ROCP_FATAL << "unknown OMPT category '" << tok
+                           << "' in ROCPROF_OMPT_TRACE_OPERATIONS; valid categories: thread, "
+                              "parallel, task, sync, mutex, target, device, error";
+            }
+            ops.insert(ops.end(), it->second.begin(), it->second.end());
+        }
+        std::sort(ops.begin(), ops.end());
+        ops.erase(std::unique(ops.begin(), ops.end()), ops.end());
+        return ops;
+    };
+    // Only parse the operation filter when OMPT tracing is actually enabled —
+    // otherwise a stray ROCPROF_OMPT_TRACE_OPERATIONS in the environment would
+    // emit spurious "unknown OMPT category" warnings for an unused feature.
+    auto ompt_ops = tool::get_config().ompt_trace
+                        ? resolve_ompt_ops(tool::get_config().ompt_trace_operations)
+                        : std::vector<rocprofiler_tracing_operation_t>{};
+
+    for(auto&& itr : {buffer_service_config{tool::get_config().kernel_trace,
+                                            ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                            get_buffers().kernel_trace},
+                      buffer_service_config{tool::get_config().memory_copy_trace,
+                                            ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                                            get_buffers().memory_copy_trace},
+                      buffer_service_config{tool::get_config().scratch_memory_trace,
+                                            ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+                                            get_buffers().scratch_memory},
+                      buffer_service_config{tool::get_config().hsa_core_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,
+                                            get_buffers().hsa_api_trace},
+                      buffer_service_config{tool::get_config().hsa_amd_ext_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
+                                            get_buffers().hsa_api_trace},
+                      buffer_service_config{tool::get_config().hsa_image_ext_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API,
+                                            get_buffers().hsa_api_trace},
+                      buffer_service_config{tool::get_config().hsa_finalizer_ext_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API,
+                                            get_buffers().hsa_api_trace},
+                      buffer_service_config{tool::get_config().hip_runtime_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT,
+                                            get_buffers().hip_api_trace},
+                      buffer_service_config{tool::get_config().hip_compiler_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT,
+                                            get_buffers().hip_api_trace},
+                      buffer_service_config{tool::get_config().rccl_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_RCCL_API,
+                                            get_buffers().rccl_api_trace},
+                      buffer_service_config{tool::get_config().memory_allocation_trace,
+                                            ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
+                                            get_buffers().memory_allocation_trace},
+                      buffer_service_config{tool::get_config().rocdecode_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_ROCDECODE_API_EXT,
+                                            get_buffers().rocdecode_api_trace},
+                      buffer_service_config{tool::get_config().rocjpeg_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_ROCJPEG_API,
+                                            get_buffers().rocjpeg_api_trace},
+                      buffer_service_config{tool::get_config().rocshmem_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT,
+                                            get_buffers().rocshmem_api_trace},
+                      buffer_service_config{tool::get_config().hipfile_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT,
+                                            get_buffers().hipfile_api_trace},
+                      // Enable only the ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED operation
+                      // for KFD QUEUE events; all other QUEUE related events are published as range
+                      // records
+                      buffer_service_config{tool::get_config().kfd_queue_trace,
+                                            ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
+                                            get_buffers().kfd_trace,
+                                            {ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED}},
+                      buffer_service_config{tool::get_config().kfd_page_mapping_trace,
+                                            ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+                                            get_buffers().kfd_trace},
+                      buffer_service_config{tool::get_config().kfd_dropped_events_trace,
+                                            ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
+                                            get_buffers().kfd_trace},
+                      buffer_service_config{tool::get_config().kfd_page_migration_trace,
+                                            ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,
+                                            get_buffers().kfd_trace},
+                      buffer_service_config{tool::get_config().kfd_page_mapping_trace,
+                                            ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,
+                                            get_buffers().kfd_trace},
+                      buffer_service_config{tool::get_config().kfd_queue_trace,
+                                            ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,
+                                            get_buffers().kfd_trace},
+                      buffer_service_config{tool::get_config().ompt_trace,
+                                            ROCPROFILER_BUFFER_TRACING_OMPT,
+                                            get_buffers().ompt_trace,
+                                            ompt_ops},
+                      buffer_service_config{tool::get_config().hip_graph_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HIP_GRAPH,
+                                            get_buffers().hip_graph_trace},
+                      buffer_service_config{tool::get_config().hip_event_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
+                                            get_buffers().hip_event_trace}})
+
+    {
+        if(itr.option)
+        {
+            // in sdk callback overhead benchmarking, we don't want to use the buffer services
+            if(tool::get_config().benchmark_mode == tool::config::benchmark::sdk_callback_overhead)
+                continue;
+
+            if(itr.buffer_id == null_buffer_id)
+            {
+                ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
+                                                           buffer_size,
+                                                           buffer_watermark,
+                                                           ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                                           callbacks.buffered_tracing,
+                                                           tool_data,
+                                                           &itr.buffer_id),
+                                 "buffer creation");
+
+                ROCP_FATAL_IF(itr.buffer_id.handle == 0) << "failed to create buffer";
+
+                auto cb_thread = rocprofiler_callback_thread_t{};
+
+                ROCP_INFO << "creating dedicated callback thread for buffer "
+                          << itr.buffer_id.handle;
+                ROCPROFILER_CALL(rocprofiler_create_callback_thread(&cb_thread),
+                                 "creating callback thread");
+
+                ROCP_INFO << "assigning buffer " << itr.buffer_id.handle << " to callback thread "
+                          << cb_thread.handle;
+                ROCPROFILER_CALL(rocprofiler_assign_callback_thread(itr.buffer_id, cb_thread),
+                                 "assigning callback thread");
+            }
+
+            const rocprofiler_tracing_operation_t* operations =
+                (!itr.operations.empty()) ? itr.operations.data() : nullptr;
+            size_t num_operations = itr.operations.size();
+
+            ROCPROFILER_CALL(
+                rocprofiler_configure_buffer_tracing_service(
+                    get_client_ctx(), itr.kind, operations, num_operations, itr.buffer_id),
+                "buffer tracing service configure");
+        }
+    }
+
+    struct callback_service_config
+    {
+        bool                                option   = false;
+        rocprofiler_callback_tracing_kind_t kind     = ROCPROFILER_CALLBACK_TRACING_NONE;
+        rocprofiler_callback_tracing_cb_t   callback = nullptr;
+    };
+
+    for(auto&& itr : {callback_service_config{tool::get_config().kernel_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().memory_copy_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().scratch_memory_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().hsa_core_api_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().hsa_amd_ext_api_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().hsa_image_ext_api_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().hsa_finalizer_ext_api_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().hip_runtime_api_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().hip_compiler_api_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().rccl_api_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_RCCL_API,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().memory_allocation_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().rocdecode_api_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().rocjpeg_api_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().ompt_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_OMPT,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().rocshmem_api_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,
+                                              dummy_callback_tracing_callback},
+                      callback_service_config{tool::get_config().hipfile_api_trace,
+                                              ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,
+                                              dummy_callback_tracing_callback}})
+    {
+        if(itr.option)
+        {
+            // in sdk callback overhead benchmarking, we don't want to use the buffer services
+            if(tool::get_config().benchmark_mode != tool::config::benchmark::sdk_callback_overhead)
+                continue;
+
+            ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                                 get_client_ctx(), itr.kind, nullptr, 0, itr.callback, nullptr),
+                             "callback tracing service failed to configure");
+        }
+    }
+
+    if(tool::get_config().advanced_thread_trace)
+    {
+        auto     global_parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
+        uint64_t target_cu         = tool::get_config().att_param_target_cu;
+        uint64_t simd_select       = tool::get_config().att_param_simd_select;
+        uint64_t buffer_sz         = tool::get_config().att_param_buffer_size;
+        uint64_t shader_mask       = tool::get_config().att_param_shader_engine_mask;
+        uint64_t perfcounter_ctrl  = tool::get_config().att_param_perf_ctrl;
+        bool     exclude_nontarget = tool::get_config().att_param_target_only;
+        auto&    att_perf          = tool::get_config().att_param_perfcounters;
+        bool     att_serialize_all = tool::get_config().att_serialize_all;
+        bool     att_no_detail     = tool::get_config().att_no_detail;
+        bool     att_no_intercept  = tool::get_config().att_no_intercept;
+
+        global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {target_cu}});
+        global_parameters.push_back(
+            {ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {simd_select}});
+        global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {buffer_sz}});
+        global_parameters.push_back(
+            {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {shader_mask}});
+        global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL,
+                                     {static_cast<uint64_t>(att_serialize_all)}});
+        if(att_no_detail)
+            global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL, {1}});
+        if(att_no_intercept)
+            global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS, {6}});
+
+        if(exclude_nontarget)
+        {
+            // Create a bitmask with all ones except at the target_cu
+            global_parameters.push_back(
+                {ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER_EXCLUDE_MASK,
+                 {~(1ul << target_cu)}});
+        }
+
+        if(perfcounter_ctrl != 0 && !att_perf.empty())
+        {
+            global_parameters.push_back(
+                {ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL, {perfcounter_ctrl}});
+        }
+        else if(perfcounter_ctrl != 0 || !att_perf.empty())
+        {
+            ROCP_FATAL << "ATT Perf requires setting both perfcounter_ctrl and perfcounter list!";
+        }
+
+        auto gpu_idx_set = std::set<uint64_t>{};
+
+        for(const auto& entry :
+            rocprofiler::sdk::parse::tokenize(tool::get_config().att_gpu_index, ","))
+        {
+            try
+            {
+                gpu_idx_set.insert(std::stoi(entry));
+            } catch(std::exception& e)
+            {
+                ROCP_FATAL << "Invalid GPU Id string: " << entry << " - " << e.what();
+            }
+        }
+
+        const auto selecting_by_gpuid = !gpu_idx_set.empty();
+
+        // Use device_thread_trace_service when handling consecutive kernels or marker trace
+        const auto handle_consecutive_kernels = tool::get_config().att_consecutive_kernels >= 1;
+        const auto handle_marker_trace        = tool::get_config().selected_regions;
+        rocprofiler_user_data_t user{.value = 0};
+
+        if(att_no_intercept && handle_marker_trace)
+        {
+            ROCP_WARNING << "--selected-regions does not control --att-no-intercept captures; "
+                            "ATT no-intercept will quick-scan device thread-trace chunks after "
+                            "the first code-object upload for each selected GPU agent";
+        }
+
+        if(!att_no_intercept)
+        {
+            ROCP_ERROR_IF(handle_consecutive_kernels && handle_marker_trace)
+                << "selected-regions and att-consecutive-kernels options are mutually exclusive";
+        }
+
+        if(!att_no_intercept && handle_marker_trace)
+        {
+            // Marker-controlled device thread trace:
+            // Context is registered for pause/resume control and starts stopped.
+            // roctxProfilerResume(0) starts it, roctxProfilerPause(0) stops it.
+            // No KERNEL_TRACING overhead.
+            // Initialize trace ID counter to 0 (default is UINT64_MAX for consecutive-kernels
+            // min-tracking).
+            att_device_trace_id.store(0);
+            create_pause_resume_ctx(att_device_context, "advanced thread trace (ATT)");
+        }
+        else if(!att_no_intercept && handle_consecutive_kernels)
+        {
+            // TODO: Fix DeviceThreadTracer to handle remaining thread traces before stopping
+            // contexts so the following call can function correctly with marker trace:
+            // create_pause_resume_ctx(att_device_context, "advanced thread trace (ATT)");
+
+            // Use user data pointer to dispatch id to communicate dispatch ID to shader callback
+            // function
+            ROCPROFILER_CALL(rocprofiler_create_context(&att_device_context), "context creation");
+            ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                                 get_client_ctx(),
+                                 ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                 nullptr,
+                                 0,
+                                 callbacks.att_dispatch_consecutive_kernel,
+                                 static_cast<void*>(&tool::get_config().att_consecutive_kernels)),
+                             "dispatch tracing service configure");
+        }
+
+        if(att_no_intercept)
+            tool::att_no_intercept::configure(callbacks.att_shader_data,
+                                              tool::get_config().kernel_filter_range);
+
+        for(auto& [id, agent] : tool_metadata->agents_map)
+        {
+            if(agent.type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+            if(selecting_by_gpuid && gpu_idx_set.erase(agent.gpu_index) == 0) continue;
+
+            auto agent_params = global_parameters;
+            for(auto& counter : get_att_perfcounter_params(id, att_perf))
+                agent_params.push_back(counter);
+            if(att_no_intercept)
+            {
+                auto trace_config = tool::att_no_intercept::configure_agent(
+                    id, tool::get_config().att_consecutive_kernels);
+                ROCPROFILER_CALL(rocprofiler_configure_device_thread_trace_service(
+                                     trace_config.context,
+                                     id,
+                                     agent_params.data(),
+                                     agent_params.size(),
+                                     tool::att_no_intercept::shader_data_callback,
+                                     trace_config.userdata),
+                                 "thread trace service configure");
+            }
+            else if(!handle_consecutive_kernels && !handle_marker_trace)
+            {
+                ROCPROFILER_CALL(
+                    rocprofiler_configure_dispatch_thread_trace_service(get_client_ctx(),
+                                                                        id,
+                                                                        agent_params.data(),
+                                                                        agent_params.size(),
+                                                                        callbacks.att_dispatch,
+                                                                        callbacks.att_shader_data,
+                                                                        tool_data),
+                    "thread trace service configure");
+            }
+            else
+            {
+                ROCPROFILER_CALL(
+                    rocprofiler_configure_device_thread_trace_service(att_device_context,
+                                                                      agent.id,
+                                                                      agent_params.data(),
+                                                                      agent_params.size(),
+                                                                      callbacks.att_shader_data,
+                                                                      user),
+                    "thread trace service configure");
+            }
+        }
+
+        // Any agent not removed by above loop was not in the agents_map list
+        for(const auto& entry : gpu_idx_set)
+            ROCP_ERROR << "Invalid GPU Device Index: " << entry;
+    }
+
+    const auto defer_counter_start{tool::get_config().selected_regions};
+
+    if(tool::get_config().counter_collection)
+    {
+        create_pause_resume_ctx(counter_collection_ctx, "agent counter collection");
+        ROCPROFILER_CALL(
+            rocprofiler_configure_callback_dispatch_counting_service(counter_collection_ctx,
+                                                                     callbacks.counter_dispatch,
+                                                                     nullptr,
+                                                                     callbacks.counter_record,
+                                                                     nullptr),
+            "Could not setup counting service");
+
+        if(!defer_counter_start) start_context(counter_collection_ctx, "counter collection");
+    }
+
+    if(tool::get_config().spm_counter_collection)
+    {
+        create_pause_resume_ctx(counter_collection_ctx, "SPM counter collection");
+        ROCPROFILER_CALL(
+            rocprofiler_spm_configure_callback_dispatch_service(
+                counter_collection_ctx, spm_dispatch_callback, nullptr, spm_data_callback, nullptr),
+            "Could not setup SPM counting service");
+
+        if(!defer_counter_start) start_context(counter_collection_ctx, "SPM counter collection");
+    }
+
+    auto rename_ctx            = rocprofiler_context_id_t{0};
+    auto marker_core_api_kinds = std::array<rocprofiler_tracing_operation_t, 2>{
+        ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA,
+        ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA,
+    };
+
+    ROCPROFILER_CALL(rocprofiler_create_context(&rename_ctx), "failed to create context");
+
+    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                         rename_ctx,
+                         ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
+                         marker_core_api_kinds.data(),
+                         marker_core_api_kinds.size(),
+                         callbacks.kernel_rename,
+                         nullptr),
+                     "callback tracing service failed to configure");
+
+    start_context(rename_ctx, "kernel rename");
+
+    // Track stream ID information via callback service
+    auto hip_stream_display_ctx = rocprofiler_context_id_t{0};
+
+    ROCPROFILER_CALL(rocprofiler_create_context(&hip_stream_display_ctx),
+                     "failed to create hip stream context");
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_callback_tracing_service(hip_stream_display_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
+                                                       nullptr,
+                                                       0,
+                                                       callbacks.hip_stream,
+                                                       nullptr),
+        "hip stream tracing configure failed");
+
+    start_context(hip_stream_display_ctx, "hip stream");
+
+    // Enable HIP graph attribution whenever any consumer can carry graph-attributed records:
+    // kernel-dispatch / memory-copy / hip-graph tracing. The per-thread stack push/pop is
+    // cheap and the alternative leaves graph_exec_id/graph_node_id empty on KERNEL_DISPATCH
+    // and MEMORY_COPY records even though the data is available.
+    if(tool::get_config().hip_graph_trace || tool::get_config().kernel_trace ||
+       tool::get_config().memory_copy_trace)
+    {
+        auto hip_graph_display_ctx = rocprofiler_context_id_t{0};
+
+        ROCPROFILER_CALL(rocprofiler_create_context(&hip_graph_display_ctx),
+                         "failed to create hip graph context");
+
+        ROCPROFILER_CALL(
+            rocprofiler_configure_callback_tracing_service(hip_graph_display_ctx,
+                                                           ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH,
+                                                           nullptr,
+                                                           0,
+                                                           callbacks.hip_graph,
+                                                           nullptr),
+            "hip graph tracing configure failed");
+
+        start_context(hip_graph_display_ctx, "hip graph");
+    }
+
+    // Track if HIP runtime has been initialized via runtime_intialization service
+    auto runtime_initialization_ctx = rocprofiler_context_id_t{0};
+
+    ROCPROFILER_CALL(rocprofiler_create_context(&runtime_initialization_ctx),
+                     "failed to create runtime initialization context");
+
+    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                         runtime_initialization_ctx,
+                         ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION,
+                         nullptr,
+                         0,
+                         runtime_initialization_callback,
+                         nullptr),
+                     "runtime initialization tracing configure failed");
+
+    start_context(runtime_initialization_ctx, "runtime initialization");
+
+    // Kernel replay: collect every --pmc counter group within a single application run by replaying
+    // each dispatch once per group (device memory is snapshot/restored between passes). The tool
+    // supplies the pass count (= number of groups) via kernel_replay_callback during CONFIG
+    // PHASE_ENTER, and counter_dispatch_callback selects the per-pass group.
+    //
+    // Replay without counter collection degrades to a plain run rather than terminating. tool_init
+    // runs inside the profiled application's process during rocprofiler configuration, so exiting
+    // here would tear the application down mid-initialization and run static destructors and atexit
+    // handlers against a partially-initialized SDK. rocprofv3 rejects this combination before the
+    // application launches, so reaching this point means ROCPROF_KERNEL_REPLAY was set by hand --
+    // skipping replay still produces a usable run, which beats killing the application.
+    if(tool::get_config().kernel_replay && !tool::get_config().counter_collection)
+    {
+        ROCP_ERROR << "ROCPROF_KERNEL_REPLAY requires counter collection "
+                      "(ROCPROF_COUNTER_COLLECTION); continuing without kernel replay";
+    }
+    else if(tool::get_config().kernel_replay)
+    {
+        auto kernel_replay_ctx = rocprofiler_context_id_t{0};
+
+        ROCPROFILER_CALL(rocprofiler_create_context(&kernel_replay_ctx),
+                         "failed to create kernel replay context");
+
+        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                             kernel_replay_ctx,
+                             ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
+                             nullptr,
+                             0,
+                             callbacks.kernel_replay,
+                             nullptr),
+                         "kernel replay tracing configure failed");
+
+        start_context(kernel_replay_ctx, "kernel replay");
+    }
+
+    if(tool::get_config().benchmark_mode != tool::config::benchmark::execution_profile)
+    {
+        auto external_corr_id_request_kinds =
+            std::array<rocprofiler_external_correlation_id_request_kind_t, 5>{
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION,
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_RUNTIME_API,
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_EVENT};
+
+        ROCPROFILER_CALL(rocprofiler_configure_external_correlation_id_request_service(
+                             get_client_ctx(),
+                             external_corr_id_request_kinds.data(),
+                             external_corr_id_request_kinds.size(),
+                             set_kernel_rename_and_stream_correlation_id,
+                             nullptr),
+                         "Could not configure external correlation id request service");
+
+        if(tool::get_config().counter_collection)
+        {
+            auto counter_external_corr_id_request_kinds =
+                std::array<rocprofiler_external_correlation_id_request_kind_t, 1>{
+                    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH};
+
+            ROCPROFILER_CALL(rocprofiler_configure_external_correlation_id_request_service(
+                                 counter_collection_ctx,
+                                 counter_external_corr_id_request_kinds.data(),
+                                 counter_external_corr_id_request_kinds.size(),
+                                 set_kernel_rename_and_stream_correlation_id,
+                                 nullptr),
+                             "Could not configure external correlation id request service");
+        }
+
+        if(tool::get_config().spm_counter_collection && !tool::get_config().counter_collection)
+        {
+            auto spm_external_corr_id_request_kinds =
+                std::array<rocprofiler_external_correlation_id_request_kind_t, 1>{
+                    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH};
+
+            ROCPROFILER_CALL(rocprofiler_configure_external_correlation_id_request_service(
+                                 counter_collection_ctx,
+                                 spm_external_corr_id_request_kinds.data(),
+                                 spm_external_corr_id_request_kinds.size(),
+                                 set_kernel_rename_and_stream_correlation_id,
+                                 nullptr),
+                             "Could not configure external correlation id request service for SPM");
+        }
+    }
+
+    if(tool::get_config().pc_sampling_host_trap)
+    {
+        configure_pc_sampling_on_all_agents(
+            buffer_size, buffer_watermark, tool_data, callbacks.pc_sampling);
+    }
+    else if(tool::get_config().pc_sampling_stochastic)
+    {
+        configure_pc_sampling_on_all_agents(
+            buffer_size, buffer_watermark, tool_data, callbacks.pc_sampling);
+    }
+
+    for(auto itr : get_buffers().pc_sampling_buffers_as_array())
+    {
+        if(itr > null_buffer_id)
+        {
+            auto cb_thread = rocprofiler_callback_thread_t{};
+
+            ROCP_INFO << "creating dedicated callback thread for buffer " << itr.handle;
+            ROCPROFILER_CALL(rocprofiler_create_callback_thread(&cb_thread),
+                             "creating callback thread");
+
+            ROCP_INFO << "assigning buffer " << itr.handle << " to callback thread "
+                      << cb_thread.handle;
+            ROCPROFILER_CALL(rocprofiler_assign_callback_thread(itr, cb_thread),
+                             "assigning callback thread");
+        }
+    }
+
+    // Handle kernel id of zero
+    bool include =
+        rocprofiler::common::regex::regex_search("0", tool::get_config().kernel_filter_include);
+    bool exclude =
+        rocprofiler::common::regex::regex_search("0", tool::get_config().kernel_filter_exclude);
+    if(include && (!exclude || tool::get_config().kernel_filter_exclude.empty()))
+        add_kernel_target(0, tool::get_config().kernel_filter_range);
+
+    ROCP_ERROR_IF(tool::get_config().selected_regions &&
+                  !tool::get_config().collection_periods.empty())
+        << "selected-regions and collection-period options are mutually exclusive";
+
+    if(tool::get_config().benchmark_mode == tool::config::benchmark::disabled_contexts_overhead)
+    {
+        ROCP_INFO << "rocprofv3 is not recording data because the overhead of inactive contexts is "
+                     "being benchmarked";
+    }
+    else if(tool::get_config().selected_regions)
+    {
+        ROCP_WARNING << "rocprofv3 is only recording profiling data within regions of code "
+                        "surrounded by roctxProfilerResume(0)/roctxProfilerPause";
+    }
+    else if(!tool::get_config().collection_periods.empty())
+    {
+        ROCP_INFO << "rocprofv3 will record data during the defined collection period(s)";
+
+        auto _prom = std::promise<void>{};
+        auto _fut  = _prom.get_future();
+        std::thread{collection_period_cntrl, std::move(_prom), get_client_ctx()}.detach();
+        _fut.wait_for(std::chrono::seconds{1});  // wait for a max of 1 second
+    }
+    else
+    {
+        ROCP_INFO << "rocprofv3 will record data starting now";
+
+        start_context(get_client_ctx(), "primary rocprofv3");
+    }
+
+    tool_metadata->set_process_id(getpid(), getppid());
+
+    // set_process_id should set process_start_ns unless it cannot read from /proc/<pid>/stat
+    if(tool_metadata->process_start_ns == 0)
+        rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
+
+    return 0;
+}
+
+void
+api_timestamps_callback(rocprofiler_intercept_table_t table_id,
+                        uint64_t                      lib_version,
+                        uint64_t                      lib_instance,
+                        void** /*tables*/,
+                        uint64_t /*num_tables*/,
+                        void* /*user_data*/)
+{
+    static auto _once = std::once_flag{};
+
+    // compute major/minor/patch version info
+    uint32_t major = lib_version / 10000;
+    uint32_t minor = (lib_version % 10000) / 100;
+    uint32_t patch = lib_version % 100;
+
+    const char* table_name = nullptr;
+    ROCPROFILER_CHECK(rocprofiler_query_intercept_table_name(table_id, &table_name, nullptr));
+
+    ROCP_WARNING_IF(table_id != ROCPROFILER_MARKER_CONTROL_TABLE &&
+                    table_id != ROCPROFILER_MARKER_NAME_TABLE && table_name)
+        << fmt::format("{} version {}.{}.{} initialized (instance={})",
+                       table_name,
+                       major,
+                       minor,
+                       patch,
+                       lib_instance);
+
+    std::call_once(_once, []() {
+        if(CHECK_NOTNULL(tool_metadata)->process_start_ns == 0)
+            rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
+    });
+}
+
+enum class cleanup_mode
+{
+    destroy,
+    reset,
+};
+
+using stats_data_t       = tool::stats_data_t;
+using stats_entry_t      = tool::stats_entry_t;
+using domain_stats_vec_t = tool::domain_stats_vec_t;
+using cleanup_vec_t      = std::vector<std::function<void(cleanup_mode)>>;
+
+struct output_data
+{
+    uint64_t num_output = 0;
+    uint64_t num_bytes  = 0;
+};
+
+void
+generate_config_output(const tool::config& cfg, const tool::metadata& tool_metadata_v)
+{
+    using JSONOutputArchive = ::cereal::PrettyJSONOutputArchive;
+
+    constexpr auto json_prec   = 16;
+    constexpr auto json_indent = JSONOutputArchive::Options::IndentChar::space;
+    auto           json_opts   = JSONOutputArchive::Options{json_prec, json_indent, 2};
+    auto           filename    = std::string_view{"config"};
+
+    auto stream = get_output_stream(cfg, filename, ".json");
+    {
+        auto archive = JSONOutputArchive{*stream.stream, json_opts};
+
+        archive.setNextName("rocprofiler-sdk-tool");
+        archive.startNode();
+        archive.makeArray();
+        archive.startNode();  // first array entry
+
+        auto timestamps =
+            tool::timestamps_t{tool_metadata_v.process_start_ns, tool_metadata_v.process_end_ns};
+
+        auto this_pid = tool_metadata_v.process_id;
+
+        archive.setNextName("metadata");
+        archive.startNode();
+        archive(cereal::make_nvp("pid", this_pid));
+        archive(cereal::make_nvp("init_time", timestamps.app_start_time));
+        archive(cereal::make_nvp("fini_time", timestamps.app_end_time));
+        archive(cereal::make_nvp("config", cfg));
+        archive(cereal::make_nvp("command", common::read_command_line(this_pid)));
+
+        {
+            archive.setNextName("build_spec");
+            archive.startNode();
+            archive(cereal::make_nvp("version_major", ROCPROFILER_VERSION_MAJOR));
+            archive(cereal::make_nvp("version_minor", ROCPROFILER_VERSION_MINOR));
+            archive(cereal::make_nvp("version_patch", ROCPROFILER_VERSION_PATCH));
+            archive(cereal::make_nvp("soversion", ROCPROFILER_SOVERSION));
+            archive(cereal::make_nvp("compiler_id", std::string{ROCPROFILER_COMPILER_ID}));
+            archive(
+                cereal::make_nvp("compiler_version", std::string{ROCPROFILER_COMPILER_VERSION}));
+            archive(cereal::make_nvp("git_describe", std::string{ROCPROFILER_GIT_DESCRIBE}));
+            archive(cereal::make_nvp("git_revision", std::string{ROCPROFILER_GIT_REVISION}));
+            archive(cereal::make_nvp("library_arch", std::string{ROCPROFILER_LIBRARY_ARCH}));
+            archive(cereal::make_nvp("system_name", std::string{ROCPROFILER_SYSTEM_NAME}));
+            archive(
+                cereal::make_nvp("system_processor", std::string{ROCPROFILER_SYSTEM_PROCESSOR}));
+            archive(cereal::make_nvp("system_version", std::string{ROCPROFILER_SYSTEM_VERSION}));
+            archive.finishNode();  // build_spec
+        }
+
+        // save the execution profile
+        if(execution_profile) archive(cereal::make_nvp("profile", execution_profile->get()));
+
+        // save the environment variables
+        {
+            archive.setNextName("environment");
+            archive.startNode();
+            size_t idx = 0;
+            while(true)
+            {
+                const auto* env_entry = environ[idx++];
+                if(!env_entry)
+                    break;
+                else if(std::string_view{env_entry}.find('=') != std::string_view::npos)
+                {
+                    auto _entry = std::string{env_entry};
+                    auto _pos   = _entry.find('=');
+                    auto _name  = _entry.substr(0, _pos);
+                    auto _value = _entry.substr(_pos + 1);
+                    archive(cereal::make_nvp(_name.c_str(), _value));
+                }
+            }
+            archive.finishNode();
+        }
+
+        archive.finishNode();  // metadata
+        archive.finishNode();  // first array entry
+        archive.finishNode();  // rocprofiler-sdk-tool
+    }
+    stream.close();
+}
+
+template <typename Tp, domain_type DomainT>
+void
+generate_output(tool::buffered_output<Tp, DomainT>& output_v,
+                output_data&                        output_data_v,
+                domain_stats_vec_t&                 contributions_v,
+                cleanup_vec_t&                      cleanups_v,
+                bool                                skip_output)
+{
+    cleanups_v.emplace_back([&output_v](cleanup_mode _mode) {
+        switch(_mode)
+        {
+            case cleanup_mode::destroy:
+            {
+                // ROCP_INFO << fmt::format("destroying buffer for {}",
+                //                          get_domain_column_name(DomainT));
+                output_v.destroy();
+                return;
+            }
+            case cleanup_mode::reset:
+            {
+                // ROCP_INFO << fmt::format("resetting buffer for {}",
+                //                          get_domain_column_name(DomainT));
+                output_v.reset();
+                return;
+            }
+        }
+        ROCP_CI_LOG(WARNING) << fmt::format("invalid cleanup mode {}", static_cast<int>(_mode));
+    });
+
+    if(!output_v) return;
+
+    // when benchmarking, we do not generate output
+    if(tool::get_config().benchmark_mode != tool::config::benchmark::none) return;
+
+    // opens temporary file and sets read position to beginning
+    output_v.read();
+
+    if(output_v.get_generator().empty()) return;
+
+    // if it has reached this point, the generator is not empty
+    auto _num_bytes = output_v.get_num_bytes();
+    output_data_v.num_output += 1;
+    output_data_v.num_bytes += _num_bytes;
+
+    // After an attach/detach cycle, stop here — bytes are tallied above so the outer
+    // function can warn if data was left unflushed, but nothing is written.
+    if(skip_output) return;
+
+    // OMPT, rocSHMEM, hipFILE, and HIP_EVENT do not produce direct CSV/stats output. OMPT is
+    // rocpd-only (not emitted to JSON either), while rocSHMEM is emitted directly only to JSON
+    // and rocpd; all rely on `rocpd convert` for CSV/Perfetto/OTF2. HIP_EVENT is handled by
+    // csv.py, the libpyrocpd Perfetto writer, and otf2.py. The record count above is
+    // still tallied so that rocpd/JSON output is produced even when one of these is the only
+    // active trace domain.
+    if constexpr(DomainT != domain_type::OMPT && DomainT != domain_type::ROCSHMEM &&
+                 DomainT != domain_type::HIPFILE && DomainT != domain_type::HIP_EVENT)
+    {
+        if(tool::get_config().stats || tool::get_config().summary_output)
+        {
+            output_v.stats =
+                tool::generate_stats(tool::get_config(), *tool_metadata, output_v.get_generator());
+        }
+
+        if(output_v.stats)
+        {
+            contributions_v.emplace_back(output_v.buffer_type_v, output_v.stats);
+        }
+
+        if(tool::get_config().csv_output && _num_bytes >= tool::get_config().minimum_output_bytes)
+        {
+            tool::generate_csv(
+                tool::get_config(), *tool_metadata, output_v.get_generator(), output_v.stats);
+        }
+    }
+}
+
+void
+generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
+{
+    auto _output_gen_timer = common::simple_timer{"[rocprofv3] output generation"};
+
+    auto kernel_dispatch_output =
+        rocprofiler::tool::kernel_dispatch_buffered_output_ext_t{tool::get_config().kernel_trace};
+    auto hip_graph_output =
+        rocprofiler::tool::hip_graph_buffered_output_t{tool::get_config().hip_graph_trace};
+
+    auto hsa_output = tool::hsa_buffered_output_t{tool::get_config().hsa_core_api_trace ||
+                                                  tool::get_config().hsa_amd_ext_api_trace ||
+                                                  tool::get_config().hsa_image_ext_api_trace ||
+                                                  tool::get_config().hsa_finalizer_ext_api_trace};
+    auto hip_output = tool::hip_buffered_output_t{tool::get_config().hip_runtime_api_trace ||
+                                                  tool::get_config().hip_compiler_api_trace};
+    auto memory_copy_output =
+        tool::memory_copy_buffered_output_ext_t{tool::get_config().memory_copy_trace};
+    auto marker_output = tool::marker_buffered_output_t{tool::get_config().marker_api_trace};
+    auto counters_output =
+        tool::counter_collection_buffered_output_t{tool::get_config().counter_collection};
+    auto spm_counters_output =
+        tool::spm_counter_collection_buffered_output_t{tool::get_config().spm_counter_collection};
+    auto scratch_memory_output =
+        tool::scratch_memory_buffered_output_t{tool::get_config().scratch_memory_trace};
+    auto rccl_output = tool::rccl_buffered_output_t{tool::get_config().rccl_api_trace};
+    auto ompt_output = tool::ompt_buffered_output_t{tool::get_config().ompt_trace};
+    auto memory_allocation_output =
+        tool::memory_allocation_buffered_output_t{tool::get_config().memory_allocation_trace};
+    auto kfd_output = tool::kfd_buffered_output_t{
+        tool::get_config().kfd_page_migration_trace || tool::get_config().kfd_page_mapping_trace ||
+        tool::get_config().kfd_queue_trace || tool::get_config().kfd_dropped_events_trace};
+    auto counters_records_output =
+        tool::counter_records_buffered_output_t{tool::get_config().counter_collection};
+    auto pc_sampling_host_trap_output =
+        tool::pc_sampling_host_trap_buffered_output_t{tool::get_config().pc_sampling_host_trap};
+    auto rocdecode_output =
+        tool::rocdecode_buffered_output_t{tool::get_config().rocdecode_api_trace};
+    auto rocjpeg_output  = tool::rocjpeg_buffered_output_t{tool::get_config().rocjpeg_api_trace};
+    auto rocshmem_output = tool::rocshmem_buffered_output_t{tool::get_config().rocshmem_api_trace};
+    auto hipfile_output  = tool::hipfile_buffered_output_t{tool::get_config().hipfile_api_trace};
+    auto hip_event_output =
+        tool::hip_event_buffered_output_ext_t{tool::get_config().hip_event_trace};
+    auto pc_sampling_stochastic_output =
+        tool::pc_sampling_stochastic_buffered_output_t{tool::get_config().pc_sampling_stochastic};
+
+    auto node_id_sort  = [](const auto& lhs, const auto& rhs) { return lhs.node_id < rhs.node_id; };
+    auto agents_output = CHECK_NOTNULL(tool_metadata)->agents;
+    std::sort(agents_output.begin(), agents_output.end(), node_id_sort);
+
+    auto outdata       = output_data{};
+    auto contributions = domain_stats_vec_t{};
+    auto cleanups      = cleanup_vec_t{};
+
+    auto run_cleanup = [&cleanups, _cleanup_mode]() {
+        for(const auto& itr : cleanups)
+        {
+            if(itr) itr(_cleanup_mode);
+        }
+        cleanups.clear();
+    };
+
+    // Generate the configuration output regardless of whether there is any data
+    // Skip config file output after an attach/detach cycle — detach already wrote it.
+    if(tool::get_config().output_config_file && !skip_output)
+    {
+        generate_config_output(tool::get_config(), *tool_metadata);
+    }
+
+    auto _dtor = common::scope_destructor{run_cleanup};
+
+    generate_output(kernel_dispatch_output, outdata, contributions, cleanups, skip_output);
+    generate_output(hsa_output, outdata, contributions, cleanups, skip_output);
+    generate_output(hip_output, outdata, contributions, cleanups, skip_output);
+    generate_output(memory_copy_output, outdata, contributions, cleanups, skip_output);
+    generate_output(memory_allocation_output, outdata, contributions, cleanups, skip_output);
+    generate_output(kfd_output, outdata, contributions, cleanups, skip_output);
+    generate_output(marker_output, outdata, contributions, cleanups, skip_output);
+    generate_output(rccl_output, outdata, contributions, cleanups, skip_output);
+    generate_output(ompt_output, outdata, contributions, cleanups, skip_output);
+    generate_output(counters_output, outdata, contributions, cleanups, skip_output);
+    generate_output(scratch_memory_output, outdata, contributions, cleanups, skip_output);
+    generate_output(rocdecode_output, outdata, contributions, cleanups, skip_output);
+    generate_output(pc_sampling_host_trap_output, outdata, contributions, cleanups, skip_output);
+    generate_output(rocjpeg_output, outdata, contributions, cleanups, skip_output);
+    generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups, skip_output);
+    generate_output(spm_counters_output, outdata, contributions, cleanups, skip_output);
+    generate_output(hip_graph_output, outdata, contributions, cleanups, skip_output);
+    generate_output(rocshmem_output, outdata, contributions, cleanups, skip_output);
+    generate_output(hipfile_output, outdata, contributions, cleanups, skip_output);
+    generate_output(hip_event_output, outdata, contributions, cleanups, skip_output);
+
+    if(!skip_output && tool::get_config().advanced_thread_trace &&
+       !tool_metadata->att_filenames.empty())
+    {
+        outdata.num_output += 1;
+        cleanups.emplace_back([](cleanup_mode /*_mode*/) { tool_metadata->att_filenames.clear(); });
+    }
+
+    ROCP_INFO << fmt::format("Number of services generating output: {} ({} kB)",
+                             outdata.num_output,
+                             (outdata.num_bytes / 1024));
+
+    // After an attach/detach cycle, all output was already produced by tool_detach. The
+    // per-type calls above tallied any bytes still buffered (data that did not flush before
+    // detach). Warn if any such data exists, then return — _dtor runs all cleanups/destroys.
+    if(skip_output)
+    {
+        if(outdata.num_bytes > 0 || outdata.num_output > 0)
+            ROCP_WARNING << fmt::format(
+                "[rocprofv3] Skipping output generation after attach/detach: {} bytes from {} "
+                "sources "
+                "remain unflushed. This indicates one or more tracers did not "
+                "fully stop after detach; that data is dropped.",
+                outdata.num_bytes,
+                outdata.num_output);
+        return;
+    }
+
+    if(tool::get_config().csv_output && outdata.num_output > 0 &&
+       outdata.num_bytes >= tool::get_config().minimum_output_bytes)
+    {
+        tool::generate_csv(tool::get_config(), *tool_metadata, agents_output);
+    }
+
+    if(tool::get_config().stats && tool::get_config().csv_output && outdata.num_output > 0 &&
+       outdata.num_bytes >= tool::get_config().minimum_output_bytes)
+    {
+        tool::generate_csv(tool::get_config(), *tool_metadata, contributions);
+    }
+
+    if(tool::get_config().json_output && outdata.num_output > 0 &&
+       outdata.num_bytes >= tool::get_config().minimum_output_bytes)
+    {
+        auto json_ar = tool::open_json(tool::get_config());
+
+        json_ar.start_process();
+        tool::write_json(json_ar, tool::get_config(), *tool_metadata, getpid());
+        tool::write_json(json_ar,
+                         tool::get_config(),
+                         *tool_metadata,
+                         contributions,
+                         hip_output.get_generator(),
+                         hsa_output.get_generator(),
+                         kernel_dispatch_output.get_generator(),
+                         memory_copy_output.get_generator(),
+                         counters_output.get_generator(),
+                         marker_output.get_generator(),
+                         scratch_memory_output.get_generator(),
+                         kfd_output.get_generator(),
+                         rccl_output.get_generator(),
+                         memory_allocation_output.get_generator(),
+                         rocdecode_output.get_generator(),
+                         rocjpeg_output.get_generator(),
+                         pc_sampling_host_trap_output.get_generator(),
+                         pc_sampling_stochastic_output.get_generator(),
+                         spm_counters_output.get_generator(),
+                         hip_graph_output.get_generator(),
+                         rocshmem_output.get_generator(),
+                         hipfile_output.get_generator(),
+                         hip_event_output.get_generator());
+        json_ar.finish_process();
+
+        tool::close_json(json_ar);
+    }
+
+    if(tool::get_config().pftrace_output && outdata.num_output > 0 &&
+       outdata.num_bytes >= tool::get_config().minimum_output_bytes)
+    {
+        tool::write_perfetto(tool::get_config(),
+                             *tool_metadata,
+                             agents_output,
+                             hip_output.get_generator(),
+                             hsa_output.get_generator(),
+                             kernel_dispatch_output.get_generator(),
+                             memory_copy_output.get_generator(),
+                             counters_output.get_generator(),
+                             marker_output.get_generator(),
+                             scratch_memory_output.get_generator(),
+                             rccl_output.get_generator(),
+                             memory_allocation_output.get_generator(),
+                             rocdecode_output.get_generator(),
+                             rocjpeg_output.get_generator());
+    }
+
+    if(tool::get_config().rocpd_output && outdata.num_output > 0 &&
+       outdata.num_bytes >= tool::get_config().minimum_output_bytes)
+    {
+        tool::write_rocpd(tool::get_config(),
+                          *tool_metadata,
+                          agents_output,
+                          hip_output.get_generator(),
+                          hsa_output.get_generator(),
+                          kernel_dispatch_output.get_generator(),
+                          memory_copy_output.get_generator(),
+                          marker_output.get_generator(),
+                          memory_allocation_output.get_generator(),
+                          scratch_memory_output.get_generator(),
+                          kfd_output.get_generator(),
+                          rccl_output.get_generator(),
+                          rocdecode_output.get_generator(),
+                          counters_output.get_generator(),
+                          spm_counters_output.get_generator(),
+                          ompt_output.get_generator(),
+                          hip_graph_output.get_generator(),
+                          rocshmem_output.get_generator(),
+                          hipfile_output.get_generator(),
+                          hip_event_output.get_generator());
+    }
+
+    if(tool::get_config().otf2_output && outdata.num_output > 0 &&
+       outdata.num_bytes >= tool::get_config().minimum_output_bytes)
+    {
+        auto hip_elem_data               = hip_output.load_all();
+        auto hsa_elem_data               = hsa_output.load_all();
+        auto kernel_dispatch_elem_data   = kernel_dispatch_output.load_all();
+        auto memory_copy_elem_data       = memory_copy_output.load_all();
+        auto marker_elem_data            = marker_output.load_all();
+        auto scratch_memory_elem_data    = scratch_memory_output.load_all();
+        auto rccl_elem_data              = rccl_output.load_all();
+        auto memory_allocation_elem_data = memory_allocation_output.load_all();
+        auto rocdecode_elem_data         = rocdecode_output.load_all();
+        auto rocjpeg_elem_data           = rocjpeg_output.load_all();
+
+        tool::write_otf2(tool::get_config(),
+                         *tool_metadata,
+                         getpid(),
+                         agents_output,
+                         &hip_elem_data,
+                         &hsa_elem_data,
+                         &kernel_dispatch_elem_data,
+                         &memory_copy_elem_data,
+                         &marker_elem_data,
+                         &scratch_memory_elem_data,
+                         &rccl_elem_data,
+                         &memory_allocation_elem_data,
+                         &rocdecode_elem_data,
+                         &rocjpeg_elem_data);
+    }
+
+    if(tool::get_config().summary_output && outdata.num_output > 0 &&
+       outdata.num_bytes >= tool::get_config().minimum_output_bytes)
+    {
+        tool::generate_stats(tool::get_config(), *tool_metadata, contributions);
+    }
+
+    if(tool::get_config().advanced_thread_trace)
+    {
+        auto decoder = rocprofiler::att_wrapper::ATTDecoder(tool::get_config().att_library_path);
+        ROCP_FATAL_IF(!decoder.valid()) << "Decoder library not found!";
+
+        auto codeobj     = tool_metadata->get_code_object_load_info();
+        auto output_path = tool::format_path(tool::get_config().output_path);
+
+        std::vector<std::string> perf{};
+        for(auto& counter : tool::get_config().att_param_perfcounters)
+        {
+            std::stringstream ss;
+            ss << counter.counter_name;
+
+            if(counter.simd_mask != 0xF) ss << ':' << std::hex << counter.simd_mask;
+
+            perf.emplace_back(ss.str());
+        }
+
+        for(auto& [key, att_files] : tool_metadata->att_filenames)
+        {
+            auto [dispatch_id, agent_handle] = key;
+            std::string formats              = "json,csv";
+
+            auto ui_name = std::stringstream{};
+            ui_name << fmt::format(
+                "ui_output_agent_{}_dispatch_{}", std::to_string(agent_handle), dispatch_id);
+            auto out_path = fmt::format("{}/{}", output_path, ui_name.str());
+            auto in_path  = std::string(".");
+
+            decoder.parse(in_path, out_path, att_files, codeobj, perf, formats);
+        }
+    }
+
+    run_cleanup();
+}
+
+void
+tool_detach(void* /*tool_data*/)
+{
+    detach_output_generated = true;
+
+    auto _detach_timer = common::simple_timer{"[rocprofv3] tool detachment"};
+
+    // Flush all buffers, stop context to ensure in-flight GPU operations complete,
+    // then flush again to capture any final events (same pattern as tool_fini).
+    flush();
+    if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept)
+        tool::att_no_intercept::finalize();
+    rocprofiler_stop_context(get_client_ctx());
+    flush();
+
+    // Capture the fallback end timestamp after shutdown flushes complete so it
+    // reflects when profiling actually stopped.
+    if(tool_metadata->process_end_ns == 0)
+        rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
+
+    // Check configuration to decide between async or sync output generation
+    if(tool::get_config().attach_output_generation_sync)
+    {
+        // Synchronous output generation - complete before returning
+        // This ensures output files are fully written before detach returns
+        ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
+        generate_output(cleanup_mode::reset);
+    }
+    else
+    {
+        // Launch generate output in an async background thread
+        // This allows tool_detach to return immediately without waiting.
+        // The thread will be joined later in tool_attach (for reattachment) or tool_fini
+        ::output_generation_thread.wlock([](auto& thread_ptr) {
+            reset_output_thread(thread_ptr);
+            thread_ptr.emplace([]() {
+                try
+                {
+                    generate_output(cleanup_mode::reset);
+                } catch(const std::exception& e)
+                {
+                    ROCP_ERROR << "Exception in detach cleanup thread: " << e.what();
+                } catch(...)
+                {
+                    ROCP_ERROR << "Unknown exception in detach cleanup thread";
+                }
+            });
+        });
+    }
+}
+
+void
+tool_fini(void* /*tool_data*/)
+{
+    static bool _first = true;
+    if(!_first) return;
+    _first = false;
+
+    client_identifier = nullptr;
+    client_finalizer  = nullptr;
+
+    // Join the cleanup thread if it exists and is active
+    ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
+
+    auto _fini_timer = common::simple_timer{"[rocprofv3] tool finalization"};
+
+    flush();
+    if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept)
+        tool::att_no_intercept::finalize();
+    rocprofiler_stop_context(get_client_ctx());
+    flush();
+
+    // Capture the fallback end timestamp after shutdown flushes complete so it
+    // reflects when profiling actually stopped.
+    if(tool_metadata->process_end_ns == 0)
+        rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
+
+    // If tool_detach ran before us (sync or async — the thread join above ensures it finished),
+    // skip output generation here to avoid overwriting files the detach phase already wrote.
+    const bool skip_output = detach_output_generated;
+
+    generate_output(cleanup_mode::destroy, skip_output);
+
+    if(destructors)
+    {
+        for(const auto& itr : *destructors)
+            itr();
+        delete destructors;
+        destructors = nullptr;
+    }
+
+    // remove the attach arguments file if it exists
+    if(auto attach_args_fname = fmt::format("/tmp/rocprofv3_attach_{}.pkl", getpid());
+       fs::exists(attach_args_fname))
+    {
+        ROCP_INFO << "removing attach arguments file: " << attach_args_fname;
+        fs::remove(attach_args_fname);
+    }
+
+#if defined(CODECOV) && CODECOV > 0
+    __gcov_dump();
+#endif
+}
+
+std::vector<rocprofiler_counter_record_dimension_info_t>
+get_tool_counter_dimension_info()
+{
+    auto _data = get_agent_counter_info();
+    auto _ret  = std::vector<rocprofiler_counter_record_dimension_info_t>{};
+    for(const auto& itr : _data)
+    {
+        for(const auto& iitr : itr.second)
+            for(const auto& ditr : iitr.dimensions)
+                _ret.emplace_back(ditr);
+    }
+
+    auto _sorter = [](const rocprofiler_counter_record_dimension_info_t& lhs,
+                      const rocprofiler_counter_record_dimension_info_t& rhs) {
+        return std::tie(lhs.id, lhs.instance_size) < std::tie(rhs.id, rhs.instance_size);
+    };
+    auto _equiv = [](const rocprofiler_counter_record_dimension_info_t& lhs,
+                     const rocprofiler_counter_record_dimension_info_t& rhs) {
+        return std::tie(lhs.id, lhs.instance_size) == std::tie(rhs.id, rhs.instance_size);
+    };
+
+    std::sort(_ret.begin(), _ret.end(), _sorter);
+    _ret.erase(std::unique(_ret.begin(), _ret.end(), _equiv), _ret.end());
+
+    return _ret;
+}
+
+namespace
+{
+using main_func_t = int (*)(int, char**, char**);
+
+main_func_t&
+get_main_function()
+{
+    static main_func_t user_main = nullptr;
+    return user_main;
+}
+
+signal_func_t&
+get_signal_function()
+{
+    static signal_func_t user_signal = nullptr;
+    return user_signal;
+}
+
+sigaction_func_t&
+get_sigaction_function()
+{
+    static sigaction_func_t user_sigaction = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
+    return user_sigaction;
+}
+
+bool signal_handler_exit =
+    rocprofiler::tool::get_env("ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT", false);
+
+// Read once here because getenv() is not async-signal-safe; <= 0 waits indefinitely.
+int signal_abort_flush_timeout_sec =
+    rocprofiler::tool::get_env("ROCPROF_ABORT_FLUSH_TIMEOUT_SECONDS", 10);
+
+}  // namespace
+
+#define ROCPROFV3_INTERNAL_API __attribute__((visibility("internal")));
+
+std::optional<int>
+wait_pid(pid_t _pid, int _opts = 0)
+{
+    auto this_pid  = getpid();
+    auto this_ppid = getppid();
+    auto this_tid  = common::get_tid();
+    auto this_func = std::string_view{__FUNCTION__};
+
+    ROCP_INFO << fmt::format("[PPID={}][PID={}][TID={}][{}] rocprofv3 waiting for child {}",
+                             this_ppid,
+                             this_pid,
+                             this_tid,
+                             this_func,
+                             _pid);
+
+    int   _status = 0;
+    pid_t _pid_v  = -1;
+    _opts |= WUNTRACED;
+    do
+    {
+        if((_opts & WNOHANG) > 0)
+        {
+            std::this_thread::yield();
+            std::this_thread::sleep_for(std::chrono::milliseconds{100});
+        }
+        _pid_v = waitpid(_pid, &_status, _opts);
+    } while(_pid_v == 0);
+
+    if(_pid_v < 0) return std::nullopt;
+    return _status;
+}
+
+extern "C" {
+void
+rocprofv3_set_main(main_func_t main_func) ROCPROFV3_INTERNAL_API;
+
+int
+diagnose_status(pid_t _pid, int _status)
+{
+    auto this_pid  = getpid();
+    auto this_ppid = getppid();
+    auto this_tid  = common::get_tid();
+    auto this_func = std::string_view{__FUNCTION__};
+
+    bool _normal_exit      = (WIFEXITED(_status) > 0);
+    bool _unhandled_signal = (WIFSIGNALED(_status) > 0);
+    bool _core_dump        = (WCOREDUMP(_status) > 0);
+    bool _stopped          = (WIFSTOPPED(_status) > 0);
+    int  _exit_status      = WEXITSTATUS(_status);
+    int  _stop_signal      = (_stopped) ? WSTOPSIG(_status) : 0;
+    int  _ec               = (_unhandled_signal) ? WTERMSIG(_status) : 0;
+
+    ROCP_TRACE << fmt::format("[PPID={}][PID={}][TID={}][{}] diagnosing status for process {} :: "
+                              "status: {}, normal exit: {}, unhandled signal: {}, core dump: {}, "
+                              "stopped: {}, exit status: {}, stop signal: {}, exit code: {}",
+                              this_ppid,
+                              this_pid,
+                              this_tid,
+                              this_func,
+                              _pid,
+                              _status,
+                              std::to_string(static_cast<int>(_normal_exit)),
+                              std::to_string(static_cast<int>(_unhandled_signal)),
+                              std::to_string(static_cast<int>(_core_dump)),
+                              std::to_string(static_cast<int>(_stopped)),
+                              _exit_status,
+                              _stop_signal,
+                              _ec);
+
+    if(!_normal_exit)
+    {
+        if(_ec == 0) _ec = EXIT_FAILURE;
+        ROCP_INFO << fmt::format(
+            "[PPID={}][PID={}][TID={}][{}] process {} terminated abnormally. exit code: {}",
+            this_ppid,
+            this_pid,
+            this_tid,
+            this_func,
+            _pid,
+            _ec);
+    }
+
+    if(_stopped)
+    {
+        ROCP_INFO << fmt::format(
+            "[PPID={}][PID={}][TID={}][{}] process {} stopped with signal {}. exit code: {}",
+            this_ppid,
+            this_pid,
+            this_tid,
+            this_func,
+            _pid,
+            _stop_signal,
+            _ec);
+    }
+
+    if(_core_dump)
+    {
+        ROCP_INFO << fmt::format("[PPID={}][PID={}][TID={}][{}] process {} terminated and "
+                                 "produced a core dump. exit code: {}",
+                                 this_ppid,
+                                 this_pid,
+                                 this_tid,
+                                 this_func,
+                                 _pid,
+                                 _ec);
+    }
+
+    if(_unhandled_signal)
+    {
+        ROCP_INFO << fmt::format(
+            "[PPID={}][PID={}][TID={}][{}] process {} terminated because it received a signal "
+            "({}) that was not handled. exit code: {}",
+            this_ppid,
+            this_pid,
+            this_tid,
+            this_func,
+            _pid,
+            _ec,
+            _ec);
+    }
+
+    if(!_normal_exit && _exit_status > 0)
+    {
+        if(_exit_status == 127)
+        {
+            ROCP_INFO << fmt::format(
+                "[PPID={}][PID={}][TID={}][{}] execv in process {} failed. exit code: {}",
+                this_ppid,
+                this_pid,
+                this_tid,
+                this_func,
+                _pid,
+                _ec);
+        }
+        else
+        {
+            ROCP_INFO << fmt::format("[PPID={}][PID={}][TID={}][{}] process {} terminated with "
+                                     "a non-zero status. exit code: {}",
+                                     this_ppid,
+                                     this_pid,
+                                     this_tid,
+                                     this_func,
+                                     _pid,
+                                     _ec);
+        }
+    }
+
+    return _ec;
+}
+
+void
+wait_for_children(pid_t this_pid, pid_t this_ppid, uint64_t this_tid, std::string_view context)
+{
+    auto get_children = [&this_pid]() {
+        auto fname    = fmt::format("/proc/{}/task/{}/children", this_pid, this_pid);
+        auto ifs      = std::ifstream{fname};
+        auto children = std::vector<pid_t>{};
+        if(!ifs.is_open())
+        {
+            ROCP_WARNING << "signal worker: failed to open " << fname << ": " << strerror(errno);
+            return children;
+        }
+        while(ifs)
+        {
+            pid_t child_pid = 0;
+            ifs >> child_pid;
+            if(ifs && !ifs.eof() && child_pid > 0) children.emplace_back(child_pid);
+        }
+        return children;
+    };
+
+    auto _children = get_children();
+    ROCP_WARNING << fmt::format(
+        "[PPID={}][PID={}][TID={}][{}] rocprofv3 waiting for {} children to exit",
+        this_ppid,
+        this_pid,
+        this_tid,
+        context,
+        _children.size());
+
+    for(auto itr : _children)
+    {
+        auto status = wait_pid(itr, WUNTRACED | WNOHANG);
+        if(status) diagnose_status(itr, status.value());
+    }
+}
+
+// Reinstall the disposition we wrapped for `signo`: the saved chained handler if any, else
+// SIG_DFL. Uses the real sigaction (bypasses our interceptor).
+void
+restore_signal_disposition(int signo)
+{
+    if(auto& chained = get_chained_signals().at(signo); chained)
+    {
+        if(chained->action)
+        {
+            get_sigaction_function()(signo, &(*chained->action), nullptr);
+        }
+        else
+        {
+            struct sigaction sa = {};
+            sa.sa_handler       = chained->handler ? chained->handler : SIG_DFL;
+            sigemptyset(&sa.sa_mask);
+            get_sigaction_function()(signo, &sa, nullptr);
+        }
+    }
+    else
+    {
+        struct sigaction sa = {};
+        sa.sa_handler       = SIG_DFL;
+        sigemptyset(&sa.sa_mask);
+        get_sigaction_function()(signo, &sa, nullptr);
+    }
+}
+
+void
+signal_finalization_worker()
+{
+    auto& sw = get_signal_worker();
+
+    sigset_t mask;
+    sigemptyset(&mask);
+    for(auto sig : rocprofv3_handled_signals)
+        sigaddset(&mask, sig);
+    pthread_sigmask(SIG_BLOCK, &mask, nullptr);
+
+    // Retry across EINTR: the worker blocks only the handled signals, so any other signal delivered
+    // here (SIGCHLD, SIGALRM, ...) would otherwise abort the read and kill the worker, after which
+    // nothing flushes and every repeat signal is swallowed forever.
+    uint64_t val   = 0;
+    ssize_t  nread = 0;
+    do
+    {
+        nread = read(sw.eventfd, &val, sizeof(val));
+    } while(nread < 0 && errno == EINTR);
+
+    if(nread < 0)
+    {
+        ROCP_WARNING << "signal worker: eventfd read failed: " << strerror(errno);
+        return;
+    }
+
+    auto this_pid  = getpid();
+    auto this_ppid = getppid();
+    auto this_tid  = common::get_tid();
+    auto this_func = std::string_view{__FUNCTION__};
+
+    ROCP_WARNING << fmt::format(
+        "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal {}...",
+        this_ppid,
+        this_pid,
+        this_tid,
+        this_func,
+        sw.signo);
+
+    finalize_rocprofv3(this_func);
+
+    if(tool::get_config().enable_process_sync) wait_peer_finished(this_pid, this_ppid);
+
+    // Signal completion (only the SIGABRT handler path waits on this).
+    sw.finalize_done.store(1u, std::memory_order_release);
+    syscall(SYS_futex, &sw.finalize_done, FUTEX_WAKE, 1, nullptr, nullptr, 0);
+
+    // Re-raise BEFORE reaping children. The app's own handler needs the signal to run its
+    // coordinated shutdown, and that shutdown is what makes the children exit. Reaping first
+    // deadlocks multi-process apps (e.g. tensor-parallel servers) whose worker processes only
+    // exit once the main tells them to. signo == 0 is normal-exit finalization; SIGABRT
+    // terminates itself once its (synchronously waiting) handler returns into abort().
+    if(sw.signo != 0 && sw.signo != SIGABRT)
+    {
+        const bool have_chained = static_cast<bool>(get_chained_signals().at(sw.signo));
+        restore_signal_disposition(sw.signo);
+
+        // Re-raise process-directed (kill, not raise) so it lands on an app thread, not this
+        // worker (which blocks these signals): the chained handler runs, or SIG_DFL exits.
+        if(!have_chained)
+        {
+            // No chained handler: also unblock here so SIG_DFL is guaranteed to terminate.
+            sigset_t unblock{};
+            sigemptyset(&unblock);
+            sigaddset(&unblock, sw.signo);
+            pthread_sigmask(SIG_UNBLOCK, &unblock, nullptr);
+        }
+        kill(getpid(), sw.signo);
+    }
+
+    // Best-effort reap to avoid leaving zombies if the app keeps running (e.g. a chained handler
+    // that returns). We do NOT drive the signal into children -- delivering it to a separate PID
+    // is the app's/OS's job; a child that received the signal finalizes via its own worker.
+    wait_for_children(this_pid, this_ppid, this_tid, this_func);
+
+    ROCP_INFO << fmt::format(
+        "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal... complete",
+        this_ppid,
+        this_pid,
+        this_tid,
+        this_func);
+}
+
+void
+rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
+{
+    (void) info;
+    (void) ucontext;
+
+    auto& sw = get_signal_worker();
+
+    // Our handler being installed means the app doesn't coordinate shutdown.
+    // Well-behaved apps use --disable-signal-handlers (atexit handles everything).
+    //
+    // Re-entry: a second signal arrived while we're still handling the first
+    // (a chained handler re-raising, or a double Ctrl+C).
+    // While the flush is running, swallow it. Delivering it now would cut the
+    // flush short and truncate the profile.
+    // After the flush completes (finalize_done), force SIG_DFL and re-raise.
+    // The worker re-raises on its own once done, so the process still exits.
+    uint32_t expected = 0;
+    if(sw.handling.compare_exchange_strong(expected, 1u, std::memory_order_acquire) == false)
+    {
+        if(sw.finalize_done.load(std::memory_order_acquire) != 0)
+        {
+            struct sigaction _dfl = {};
+            _dfl.sa_handler       = SIG_DFL;
+            sigemptyset(&_dfl.sa_mask);
+            get_sigaction_function()(signo, &_dfl, nullptr);
+
+            sigset_t _unblock{};
+            sigemptyset(&_unblock);
+            sigaddset(&_unblock, signo);
+            pthread_sigmask(SIG_UNBLOCK, &_unblock, nullptr);
+            raise(signo);
+        }
+        return;
+    }
+
+    // For testing: allow quick_exit path
+    if(signal_handler_exit) ::quick_exit(signo);
+
+    // Hand the signal number to the worker (ordered by the eventfd write/read below).
+    sw.signo = signo;
+
+    // Wake the finalization worker: the flush is NOT async-signal-safe, so it runs there.
+    bool worker_notified = false;
+    if(sw.eventfd >= 0)
+    {
+        uint64_t val    = 1;
+        worker_notified = (write(sw.eventfd, &val, sizeof(val)) == sizeof(val));
+    }
+
+    // SIGABRT can't defer: returning lets abort() re-raise SIG_DFL before the worker flushes.
+    // So wait for the flush here, then return into abort(). Unlike the async signals, this can
+    // block on a lock the aborting thread holds as abort() often fires from lock-holding runtime
+    // paths, e.g. heap-corruption detection. Bound the wait with
+    // ROCPROF_ABORT_FLUSH_TIMEOUT_SECONDS and fall through into abort() on expiry: a core dump
+    // beats a hung process. <= 0 waits forever.
+    if(signo == SIGABRT)
+    {
+        if(worker_notified)
+        {
+            // FUTEX_WAIT_BITSET takes an absolute CLOCK_MONOTONIC deadline, so compute it once and
+            // let the kernel track the time remaining across wakeups. <= 0 waits indefinitely.
+            const auto bounded  = (signal_abort_flush_timeout_sec > 0);
+            auto       deadline = timespec{};
+            if(bounded)
+            {
+                clock_gettime(CLOCK_MONOTONIC, &deadline);
+                deadline.tv_sec += signal_abort_flush_timeout_sec;
+            }
+
+            while(sw.finalize_done.load(std::memory_order_acquire) == 0)
+            {
+                if(syscall(SYS_futex,
+                           &sw.finalize_done,
+                           FUTEX_WAIT_BITSET,
+                           0,
+                           bounded ? &deadline : nullptr,
+                           nullptr,
+                           FUTEX_BITSET_MATCH_ANY) == -1 &&
+                   errno == ETIMEDOUT)
+                {
+                    break;
+                }
+            }
+        }
+        return;
+    }
+
+    // Async signals (SIGINT/SIGQUIT/SIGTERM): don't block or re-raise here. Returning lets this
+    // thread resume and release any lock it holds, so the worker's flush can't deadlock against
+    // it; the worker terminates via kill() once the flush is done.
+    if(!worker_notified)
+    {
+        // No worker to hand off to — best-effort terminate on this thread.
+        restore_signal_disposition(signo);
+        sigset_t unblock{};
+        sigemptyset(&unblock);
+        sigaddset(&unblock, signo);
+        pthread_sigmask(SIG_UNBLOCK, &unblock, nullptr);
+        raise(signo);
+    }
+}
+
+int
+rocprofv3_main(int argc, char** argv, char** envp) ROCPROFV3_INTERNAL_API;
+
+sighandler_t
+rocprofv3_signal(int signum, sighandler_t handler) ROCPROFV3_INTERNAL_API;
+
+int
+rocprofv3_sigaction(int signum,
+                    const struct sigaction* __restrict__ act,
+                    struct sigaction* __restrict__ oldact) ROCPROFV3_INTERNAL_API;
+
+rocprofiler_tool_configure_result_t*
+rocprofiler_configure(uint32_t                 version,
+                      const char*              runtime_version,
+                      uint32_t                 priority,
+                      rocprofiler_client_id_t* id)
+{
+    initialize_logging();
+
+    // set the client name
+    id->name = "rocprofv3";
+
+    // store client info
+    client_identifier = id;
+
+    // note that rocprofv3 is not the primary tool
+    ROCP_WARNING_IF(priority > 0) << id->name << " has a priority of " << priority
+                                  << " (not primary tool)";
+
+    // compute major/minor/patch version info
+    uint32_t major = version / 10000;
+    uint32_t minor = (version % 10000) / 100;
+    uint32_t patch = version % 100;
+
+    // ensure these pointers are not leaked
+    add_destructor(tool_metadata);
+    add_destructor(execution_profile);
+
+    // in case main wrapper is not used
+    ::atexit([]() { finalize_rocprofv3("atexit"); });
+
+    tool::get_tmp_file_name_callback() = [](domain_type type) -> std::string {
+        return compose_tmp_file_name(tool::get_config(), type);
+    };
+
+    if(!tool::get_config().extra_counters_contents.empty())
+    {
+        std::string contents(tool::get_config().extra_counters_contents);
+        size_t      length = contents.size();
+        ROCPROFILER_CALL(rocprofiler_load_counter_definition(
+                             contents.c_str(), length, ROCPROFILER_COUNTER_FLAG_APPEND_DEFINITION),
+                         "Loading extra counters");
+    }
+
+    int libs = ROCPROFILER_HSA_TABLE;
+    if(tool::get_config().hip_compiler_api_trace) libs |= ROCPROFILER_HIP_COMPILER_TABLE;
+    if(tool::get_config().hip_runtime_api_trace) libs |= ROCPROFILER_HIP_RUNTIME_TABLE;
+    if(tool::get_config().rccl_api_trace) libs |= ROCPROFILER_RCCL_TABLE;
+    if(tool::get_config().marker_api_trace) libs |= ROCPROFILER_MARKER_CORE_TABLE;
+    if(tool::get_config().rocdecode_api_trace) libs |= ROCPROFILER_ROCDECODE_TABLE;
+    if(tool::get_config().rocjpeg_api_trace) libs |= ROCPROFILER_ROCJPEG_TABLE;
+    if(tool::get_config().rocshmem_api_trace) libs |= ROCPROFILER_ROCSHMEM_TABLE;
+    if(tool::get_config().hipfile_api_trace) libs |= ROCPROFILER_HIPFILE_TABLE;
+
+    ROCPROFILER_CALL(
+        rocprofiler_at_intercept_table_registration(api_timestamps_callback, libs, nullptr),
+        "api registration");
+
+    ROCP_INFO << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
+              << " (" << runtime_version << ")";
+
+    // create configure data using experimental struct with attach/detach support
+    static auto cfg = rocprofiler_tool_configure_result_t{
+        sizeof(rocprofiler_tool_configure_result_t), &tool_init, &tool_fini, nullptr};
+
+    // return pointer to configure data
+    return &cfg;
+}
+
+rocprofiler_tool_configure_attach_result_t*
+rocprofiler_configure_attach(uint32_t /*version*/,
+                             const char* /*runtime_version*/,
+                             uint32_t /*priority*/,
+                             rocprofiler_client_id_t* /*id*/)
+{
+    // This function is called right after rocprofiler_configure with the same parameters.
+    // The data returned is only used when attaching to a running process.
+
+    // create configure data using experimental struct with attach/detach support
+    static auto cfg = rocprofiler_tool_configure_attach_result_t{
+        sizeof(rocprofiler_tool_configure_attach_result_t), &tool_attach, &tool_detach, nullptr};
+
+    // return pointer to configure data
+    return &cfg;
+}
+
+void
+rocprofv3_set_main(main_func_t main_func)
+{
+    get_main_function() = main_func;
+}
+
+#define LOG_FUNCTION_ENTRY(MSG, ...)                                                               \
+    {                                                                                              \
+        ROCP_INFO << fmt::format("[PPID={}][PID={}][TID={}][rocprofv3] {}" MSG,                    \
+                                 getppid(),                                                        \
+                                 getpid(),                                                         \
+                                 rocprofiler::common::get_tid(),                                   \
+                                 __FUNCTION__,                                                     \
+                                 __VA_ARGS__);                                                     \
+    }
+
+sighandler_t
+rocprofv3_signal(int signum, sighandler_t handler)
+{
+    if(!get_signal_function()) get_signal_function() = (signal_func_t) dlsym(RTLD_NEXT, "signal");
+
+    if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0)
+        return get_signal_function()(signum, handler);
+
+    if(!is_handled_signal(signum) || !tool::get_config().enable_signal_handlers)
+        return CHECK_NOTNULL(get_signal_function())(signum, handler);
+
+    // Save the app's disposition (first install only; keep SIG_IGN, skip SIG_DFL). See the detailed
+    // rationale in rocprofv3_sigaction.
+    if(!get_chained_signals().at(signum) && handler != SIG_DFL)
+        get_chained_signals().at(signum) = chained_siginfo{signum, handler, std::nullopt};
+
+    return get_signal_function()(
+        signum, [](int signum_v) { rocprofv3_error_signal_handler(signum_v, nullptr, nullptr); });
+}
+
+int
+rocprofv3_sigaction(int signum,
+                    const struct sigaction* __restrict__ act,
+                    struct sigaction* __restrict__ oldact)
+{
+    if(!get_sigaction_function())
+        get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
+
+    if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0)
+        return get_sigaction_function()(signum, act, oldact);
+
+    if(!is_handled_signal(signum) || !act || !tool::get_config().enable_signal_handlers)
+        return CHECK_NOTNULL(get_sigaction_function())(signum, act, oldact);
+
+    // Save the app's disposition so we can restore it on signal delivery.
+    // Only save the first one registered per signal. Later installs (e.g., LLVM comgr) often
+    // don't chain properly — they clobber the disposition on re-raise. Preserving the app's
+    // disposition ensures the application sees its signal as-if the profiler wasn't there.
+    if(!get_chained_signals().at(signum))
+    {
+        if((act->sa_flags & SA_SIGINFO) == SA_SIGINFO)
+        {
+            if(act->sa_sigaction != &rocprofv3_error_signal_handler)
+                get_chained_signals().at(signum) = chained_siginfo{signum, nullptr, *act};
+        }
+        else
+        {
+            // Save SIG_IGN too (matching signal()): an app that ignores the signal — e.g. a
+            // deliberately un-interruptible process — must still see it ignored after we flush.
+            // SIG_DFL is skipped because an empty entry already restores as SIG_DFL.
+            if(act->sa_handler != SIG_DFL)
+                get_chained_signals().at(signum) = chained_siginfo{signum, nullptr, *act};
+        }
+    }
+
+    struct sigaction _upd_act = *act;
+    // See initialize_signal_handler: no SA_RESETHAND so re-deliveries route back through our
+    // re-entry guard instead of hitting SIG_DFL mid-flush.
+    _upd_act.sa_flags &= ~SA_RESETHAND;
+    _upd_act.sa_flags |= (SA_SIGINFO | SA_NOCLDSTOP);
+    _upd_act.sa_sigaction = &rocprofv3_error_signal_handler;
+
+    return get_sigaction_function()(signum, &_upd_act, oldact);
+}
+
+int
+rocprofv3_main(int argc, char** argv, char** envp)
+{
+    auto convert_to_vec = [](char** inp) {
+        auto        _data = std::vector<std::string_view>{};
+        size_t      n     = 0;
+        const char* p     = nullptr;
+        if(!inp) return _data;
+        do
+        {
+            p = inp[n++];
+            if(p != nullptr) _data.emplace_back(p);
+        } while(p != nullptr);
+        return _data;
+    };
+
+    auto _argv = convert_to_vec(argv);
+    // auto _envp = convect_to_vec(envp);
+
+    LOG_FUNCTION_ENTRY("({}, '{}', ...)", argc, fmt::join(_argv.begin(), _argv.end(), " "));
+
+    initialize_logging();
+
+    initialize_rocprofv3();
+
+    // Resolve dlsym'd function pointers at init time (before interceptors run).
+    if(!get_signal_function()) get_signal_function() = (signal_func_t) dlsym(RTLD_NEXT, "signal");
+    if(!get_sigaction_function())
+        get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
+
+    // fork+exec and spawn children re-init through the normal init path. Plain fork children
+    // re-init worker state via the pthread_atfork handler below. GPU use in a forked child is
+    // illegal (runtime not fork-safe) so it usually dies first, but host-side data like roctx
+    // markers still flushes if reached (covered by a test).
+    {
+        auto& sw   = get_signal_worker();
+        sw.eventfd = eventfd(0, EFD_CLOEXEC);
+        if(sw.eventfd >= 0) sw.thread = std::thread{signal_finalization_worker};
+
+        // Register atfork handler so fork() children get a fresh worker thread.
+        // Without this, fork children inherit the parent's stale eventfd/thread.
+        static bool atfork_registered = false;
+        if(!atfork_registered)
+        {
+            atfork_registered = true;
+            pthread_atfork(nullptr, nullptr, []() {
+                // Child handler: reset stale state and spawn a fresh worker.
+                auto& child_sw = get_signal_worker();
+                if(child_sw.eventfd >= 0 && ::close(child_sw.eventfd) != 0)
+                {
+                    ROCP_WARNING << "signal worker: close(eventfd) after fork failed: "
+                                 << strerror(errno);
+                }
+
+                ::new(static_cast<void*>(&child_sw)) signal_worker_state{};
+                child_sw.eventfd = eventfd(0, EFD_CLOEXEC);
+                if(child_sw.eventfd >= 0) child_sw.thread = std::thread{signal_finalization_worker};
+            });
+        }
+    }
+
+    initialize_signal_handler(get_sigaction_function());
+
+    ROCP_INFO << "rocprofv3: main function wrapper will be invoked...";
+
+    auto _main_timer = std::optional<common::simple_timer>{};
+
+    // should never happen but if it does, don't time
+    if(!_argv.empty())
+        _main_timer = common::simple_timer{
+            fmt::format("[rocprofv3] '{}'", fmt::join(_argv.begin(), _argv.end(), " "))};
+
+    if(tool_metadata && tool_metadata->process_start_ns == 0)
+        rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
+
+    auto ret = CHECK_NOTNULL(get_main_function())(argc, argv, envp);
+
+    if(tool_metadata && tool_metadata->process_end_ns == 0)
+        rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
+
+    ROCP_INFO << "rocprofv3: main function has returned with exit code: " << ret;
+
+    // reset so that it reports the timing
+    if(_main_timer) _main_timer.reset();
+
+    finalize_rocprofv3(__FUNCTION__);
+
+    ROCP_INFO << "rocprofv3 finished. exit code: " << ret;
+    return ret;
+}
+}

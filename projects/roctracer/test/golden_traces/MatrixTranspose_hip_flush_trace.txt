@@ -1,0 +1,815 @@
+0x21fde60 agent cpu
+0x21ff890 agent cpu
+0x2239bd0 agent gpu
+0x223ddf0 agent gpu
+0x2242290 agent gpu
+0x2246740 agent gpu
+6503209724059324
+ROCtracer (35331):
+ROCtracer: trace control flush rate(100000us)
+    HIP-trace(*)
+6503209734529563:6503209734531917 35331:35331 hipGetDevicePropertiesR0600(props={pageableMemoryAccessUsesHostPageTables=0, pageableMemoryAccess=0, concurrentManagedAccess=1, directManagedMemAccessFromHost=0, managedMemory=1, asicRevision=1, isLargeBar=1, cooperativeMultiDeviceUnmatchedSharedMem=1, cooperativeMultiDeviceUnmatchedBlockDim=1, cooperativeMultiDeviceUnmatchedGridDim=1, cooperativeMultiDeviceUnmatchedFunc=1, tccDriver=0, ECCEnabled=0, kernelExecTimeoutEnabled=0, texturePitchAlignment=256, textureAlignment=256, memPitch=2147483647, hdpRegFlushCntl=0x7f1f3948c004, hdpMemFlushCntl=0x7f1f3948c000, maxTexture3D=0x7f1e76c31318, maxTexture2D=0x7f1e76c31310, maxTexture1D=16384, maxTexture1DLinear=2147483647, cooperativeMultiDeviceLaunch=1, cooperativeLaunch=1, integrated=0, gcnArchName="gfx90a:sramecc+:xnack-", gcnArch=910, canMapHostMemory=1, isMultiGpuBoard=0, maxSharedMemoryPerMultiProcessor=65536, pciDeviceID=0, pciBusID=74, pciDomainID=0, concurrentKernels=1, arch={}, clockInstructionRate=1000000, computeMode=0, maxThreadsPerMultiProcessor=2048, l2CacheSize=8388608, multiProcessorCount=104, minor=0, major=9, totalConstMem=2147483647, memoryBusWidth=4096, memoryClockRate=1600000, clockRate=1700000, maxGridSize=0x7f1e76c31198, maxThreadsDim=0x7f1e76c3118c, maxThreadsPerBlock=1024, warpSize=64, regsPerBlock=65536, sharedMemPerBlock=65536, totalGlobalMem=68702699520, name="AMD Instinct MI210"}, device=0) :1
+6503209735378958:6503209735406670 35331:35331 hipMalloc(ptr=0x7f19f7a00000, size=4194304) :2
+6503209735407101:6503209735423080 35331:35331 hipMalloc(ptr=0x7f19f7400000, size=4194304) :3
+6503209978814181:6503209979619458 2:0 CopyHostToDevice:4:35331
+6503209980083977:6503209980169097 2:0 matrixTranspose(float*, float*, int):7:35331
+6503209981680453:6503209984909684 2:0 CopyDeviceToHost:8:35331
+6503209994109180:6503209995685815 2:0 CopyHostToDevice:9:35331
+6503209995761855:6503209995862975 2:0 matrixTranspose(float*, float*, int):12:35331
+6503209995867135:6503209997327251 2:0 CopyDeviceToHost:13:35331
+6503210005717148:6503210007365784 2:0 CopyHostToDevice:14:35331
+6503210007436384:6503210007539904 2:0 matrixTranspose(float*, float*, int):17:35331
+6503210007543584:6503210008994420 2:0 CopyDeviceToHost:18:35331
+6503210017396637:6503210019047993 2:0 CopyHostToDevice:19:35331
+6503210019116193:6503210019222752 2:0 matrixTranspose(float*, float*, int):22:35331
+6503210019226432:6503210020670388 2:0 CopyDeviceToHost:23:35331
+6503209735433059:6503209979689030 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :4
+6503209979696614:6503209979697045 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :5
+6503209979701393:6503209979701654 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :6
+6503209979703096:6503209980073714 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :7
+6503209980087790:6503209985036979 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :8
+6503209994087224:6503209995737275 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :9
+6503209995740781:6503209995741012 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :10
+6503209995741503:6503209995741663 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :11
+6503209995741943:6503209995748686 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :12
+6503209995750359:6503209997440904 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :13
+6503210005702036:6503210007416737 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :14
+6503210007419652:6503210007419802 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :15
+6503210007420093:6503210007420233 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :16
+6503210007420464:6503210007424171 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :17
+6503210007424591:6503210009107362 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :18
+6503210017382250:6503210019098583 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :19
+6503210019099114:6503210019099254 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :20
+6503210019099474:6503210019099595 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :21
+6503210019099845:6503210019104073 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :22
+6503210019104454:6503210020779761 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :23
+6503210029076606:6503210030728121 2:0 CopyHostToDevice:24:35331
+6503210030793281:6503210030895521 2:0 matrixTranspose(float*, float*, int):27:35331
+6503210030899201:6503210032343317 2:0 CopyDeviceToHost:28:35331
+6503210040715328:6503210042368282 2:0 CopyHostToDevice:29:35331
+6503210042440800:6503210042542880 2:0 matrixTranspose(float*, float*, int):32:35331
+6503210042546560:6503210043989715 2:0 CopyDeviceToHost:33:35331
+6503210052371125:6503210054023439 2:0 CopyHostToDevice:34:35331
+6503210054093079:6503210054195158 2:0 matrixTranspose(float*, float*, int):37:35331
+6503210054198838:6503210055644233 2:0 CopyDeviceToHost:38:35331
+6503210064560521:6503210066213955 2:0 CopyHostToDevice:39:35331
+6503210066279755:6503210066381835 2:0 matrixTranspose(float*, float*, int):42:35331
+6503210066385515:6503210067829149 2:0 CopyDeviceToHost:43:35331
+6503210076195679:6503210077863833 2:0 CopyHostToDevice:44:35331
+6503210077934113:6503210078036193 2:0 matrixTranspose(float*, float*, int):47:35331
+6503210078040033:6503210079483188 2:0 CopyDeviceToHost:48:35331
+6503210088352916:6503210090004750 2:0 CopyHostToDevice:49:35331
+6503210090070070:6503210090172149 2:0 matrixTranspose(float*, float*, int):52:35331
+6503210090175669:6503210091618984 2:0 CopyDeviceToHost:53:35331
+6503210100501672:6503210102156066 2:0 CopyHostToDevice:54:35331
+6503210102222026:6503210102324106 2:0 matrixTranspose(float*, float*, int):57:35331
+6503210102327946:6503210103774141 2:0 CopyDeviceToHost:58:35331
+6503210112110867:6503210113766700 2:0 CopyHostToDevice:59:35331
+6503210113844338:6503210113947698 2:0 matrixTranspose(float*, float*, int):62:35331
+6503210113951378:6503210115396771 2:0 CopyDeviceToHost:63:35331
+6503210029060790:6503210030776071 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :24
+6503210030776722:6503210030776813 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :25
+6503210030777083:6503210030777213 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :26
+6503210030777534:6503210030780930 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :27
+6503210030783495:6503210032454133 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :28
+6503210040700588:6503210042424295 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :29
+6503210042424756:6503210042424896 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :30
+6503210042425107:6503210042425237 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :31
+6503210042425457:6503210042428863 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :32
+6503210042432991:6503210044098270 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :33
+6503210052357328:6503210054074643 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :34
+6503210054075114:6503210054075204 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :35
+6503210054075394:6503210054075505 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :36
+6503210054077799:6503210054081145 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :37
+6503210054081536:6503210055752064 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :38
+6503210064546646:6503210066261336 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :39
+6503210066261796:6503210066261907 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :40
+6503210066262137:6503210066262227 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :41
+6503210066264632:6503210066267798 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :42
+6503210066268178:6503210067936813 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :43
+6503210076181475:6503210077915942 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :44
+6503210077916312:6503210077916473 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :45
+6503210077918687:6503210077918827 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :46
+6503210077919047:6503210077922233 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :47
+6503210077922664:6503210079590527 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :48
+6503210088339324:6503210090051840 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :49
+6503210090052241:6503210090052371 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :50
+6503210090054485:6503210090054625 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :51
+6503210090054855:6503210090058121 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :52
+6503210090058462:6503210091724542 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :53
+6503210100488016:6503210102203548 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :54
+6503210102205732:6503210102205872 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :55
+6503210102206082:6503210102206213 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :56
+6503210102206463:6503210102210010 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :57
+6503210102210380:6503210103881750 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :58
+6503210112098009:6503210113825333 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :59
+6503210113828058:6503210113828198 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :60
+6503210113828388:6503210113828519 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :61
+6503210113828889:6503210113832867 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :62
+6503210113833307:6503210115506611 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :63
+6503210123754974:6503210125414806 2:0 CopyHostToDevice:64:35331
+6503210125480606:6503210125582365 2:0 matrixTranspose(float*, float*, int):67:35331
+6503210125585885:6503210127028879 2:0 CopyDeviceToHost:68:35331
+6503210135409161:6503210137061633 2:0 CopyHostToDevice:69:35331
+6503210137127913:6503210137231913 2:0 matrixTranspose(float*, float*, int):72:35331
+6503210137235753:6503210138677786 2:0 CopyDeviceToHost:73:35331
+6503210147599026:6503210149250218 2:0 CopyHostToDevice:74:35331
+6503210149317778:6503210149419538 2:0 matrixTranspose(float*, float*, int):77:35331
+6503210149423378:6503210150866211 2:0 CopyDeviceToHost:78:35331
+6503210159229213:6503210160882006 2:0 CopyHostToDevice:79:35331
+6503210160948285:6503210161050205 2:0 matrixTranspose(float*, float*, int):82:35331
+6503210161053885:6503210162499918 2:0 CopyDeviceToHost:83:35331
+6503210170875401:6503210172542113 2:0 CopyHostToDevice:84:35331
+6503210172609833:6503210172712232 2:0 matrixTranspose(float*, float*, int):87:35331
+6503210172715912:6503210174186746 2:0 CopyDeviceToHost:88:35331
+6503210182557576:6503210184208611 2:0 CopyHostToDevice:89:35331
+6503210184280809:6503210184383369 2:0 matrixTranspose(float*, float*, int):92:35331
+6503210184387049:6503210185831324 2:0 CopyDeviceToHost:93:35331
+6503210194685533:6503210196337527 2:0 CopyHostToDevice:94:35331
+6503210196406687:6503210196508767 2:0 matrixTranspose(float*, float*, int):97:35331
+6503210196512607:6503210197956242 2:0 CopyDeviceToHost:98:35331
+6503210206316372:6503210207967406 2:0 CopyHostToDevice:99:35331
+6503210208037686:6503210208139766 2:0 matrixTranspose(float*, float*, int):102:35331
+6503210208143446:6503210209588201 2:0 CopyDeviceToHost:103:35331
+6503210217934252:6503210219584806 2:0 CopyHostToDevice:104:35331
+6503210219650605:6503210219752205 2:0 matrixTranspose(float*, float*, int):107:35331
+6503210219755885:6503210221203520 2:0 CopyDeviceToHost:108:35331
+6503210123741484:6503210125463969 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :64
+6503210125464811:6503210125464901 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :65
+6503210125465201:6503210125465321 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :66
+6503210125465632:6503210125469068 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :67
+6503210125469589:6503210127137302 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :68
+6503210135395218:6503210137111722 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :69
+6503210137112112:6503210137112263 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :70
+6503210137112493:6503210137112623 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :71
+6503210137112844:6503210137116330 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :72
+6503210137118444:6503210138787510 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :73
+6503210147585037:6503210149301811 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :74
+6503210149302232:6503210149302372 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :75
+6503210149302582:6503210149302702 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :76
+6503210149302913:6503210149306179 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :77
+6503210149308704:6503210150974684 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :78
+6503210159216530:6503210160930018 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :79
+6503210160930449:6503210160930579 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :80
+6503210160930759:6503210160930869 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :81
+6503210160933294:6503210160936600 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :82
+6503210160936991:6503210162608491 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :83
+6503210170862119:6503210172590714 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :84
+6503210172591115:6503210172591235 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :85
+6503210172591436:6503210172591566 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :86
+6503210172595143:6503210172598329 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :87
+6503210172598689:6503210174298051 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :88
+6503210182544005:6503210184262582 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :89
+6503210184263033:6503210184263133 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :90
+6503210184265157:6503210184265297 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :91
+6503210184265538:6503210184268804 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :92
+6503210184269185:6503210185939693 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :93
+6503210194672109:6503210196385186 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :94
+6503210196385617:6503210196385727 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :95
+6503210196390917:6503210196391047 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :96
+6503210196391288:6503210196394534 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :97
+6503210196395065:6503210198065643 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :98
+6503210206302971:6503210208019605 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :99
+6503210208021769:6503210208021919 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :100
+6503210208022109:6503210208022230 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :101
+6503210208022480:6503210208025616 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :102
+6503210208026027:6503210209696425 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :103
+6503210217920678:6503210219631912 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :104
+6503210219634487:6503210219634607 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :105
+6503210219634857:6503210219634977 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :106
+6503210219635208:6503210219638524 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :107
+6503210219639005:6503210221311988 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :108
+6503210229575811:6503210231227325 2:0 CopyHostToDevice:109:35331
+6503210231294245:6503210231396004 2:0 matrixTranspose(float*, float*, int):112:35331
+6503210231399684:6503210232882999 2:0 CopyDeviceToHost:113:35331
+6503210241818168:6503210243474482 2:0 CopyHostToDevice:114:35331
+6503210243540762:6503210243642681 2:0 matrixTranspose(float*, float*, int):117:35331
+6503210243646361:6503210245111276 2:0 CopyDeviceToHost:118:35331
+6503210253536692:6503210255190285 2:0 CopyHostToDevice:119:35331
+6503210255263123:6503210255364883 2:0 matrixTranspose(float*, float*, int):122:35331
+6503210255368723:6503210256818757 2:0 CopyDeviceToHost:123:35331
+6503210265732641:6503210267385274 2:0 CopyHostToDevice:124:35331
+6503210267455393:6503210267557793 2:0 matrixTranspose(float*, float*, int):127:35331
+6503210267561473:6503210269015667 2:0 CopyDeviceToHost:128:35331
+6503210277598192:6503210279249545 2:0 CopyHostToDevice:129:35331
+6503210279319185:6503210279421104 2:0 matrixTranspose(float*, float*, int):132:35331
+6503210279424784:6503210280874338 2:0 CopyDeviceToHost:133:35331
+6503210289260224:6503210290912697 2:0 CopyHostToDevice:134:35331
+6503210290983137:6503210291085217 2:0 matrixTranspose(float*, float*, int):137:35331
+6503210291089057:6503210292533171 2:0 CopyDeviceToHost:138:35331
+6503210300907376:6503210302558730 2:0 CopyHostToDevice:139:35331
+6503210302628049:6503210302730129 2:0 matrixTranspose(float*, float*, int):142:35331
+6503210302733809:6503210304178563 2:0 CopyDeviceToHost:143:35331
+6503210312547809:6503210314201242 2:0 CopyHostToDevice:144:35331
+6503210314267522:6503210314369601 2:0 matrixTranspose(float*, float*, int):147:35331
+6503210314373121:6503210315816595 2:0 CopyDeviceToHost:148:35331
+6503210229562500:6503210231277591 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :109
+6503210231278423:6503210231278513 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :110
+6503210231278803:6503210231278924 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :111
+6503210231279164:6503210231282240 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :112
+6503210231282681:6503210233000296 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :113
+6503210241804135:6503210243524255 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :114
+6503210243524656:6503210243524756 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :115
+6503210243524926:6503210243525046 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :116
+6503210243525277:6503210243528703 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :117
+6503210243530877:6503210245227574 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :118
+6503210253522920:6503210255246977 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :119
+6503210255247438:6503210255247558 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :120
+6503210255247789:6503210255247909 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :121
+6503210255248169:6503210255251365 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :122
+6503210255253920:6503210256939426 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :123
+6503210265719601:6503210267437236 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :124
+6503210267437627:6503210267437747 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :125
+6503210267437968:6503210267438078 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :126
+6503210267440492:6503210267443688 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :127
+6503210267444109:6503210269129916 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :128
+6503210277584437:6503210279300810 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :129
+6503210279301261:6503210279301401 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :130
+6503210279301671:6503210279301792 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :131
+6503210279304346:6503210279307522 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :132
+6503210279307933:6503210280988640 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :133
+6503210289246847:6503210290965093 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :134
+6503210290965514:6503210290965645 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :135
+6503210290967768:6503210290967889 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :136
+6503210290968169:6503210290971425 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :137
+6503210290971806:6503210292641222 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :138
+6503210300894099:6503210302609931 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :139
+6503210302610392:6503210302610492 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :140
+6503210302612446:6503210302612586 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :141
+6503210302612857:6503210302616123 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :142
+6503210302616584:6503210304286501 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :143
+6503210312534909:6503210314249539 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :144
+6503210314251813:6503210314251934 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :145
+6503210314252204:6503210314252324 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :146
+6503210314252585:6503210314255711 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :147
+6503210314256091:6503210315925297 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :148
+6503210324183531:6503210325837284 2:0 CopyHostToDevice:149:35331
+6503210325912842:6503210326015722 2:0 matrixTranspose(float*, float*, int):152:35331
+6503210326019402:6503210327465916 2:0 CopyDeviceToHost:153:35331
+6503210335831961:6503210337492434 2:0 CopyHostToDevice:154:35331
+6503210337580473:6503210337682233 2:0 matrixTranspose(float*, float*, int):157:35331
+6503210337686073:6503210339132907 2:0 CopyDeviceToHost:158:35331
+6503210348021029:6503210349674942 2:0 CopyHostToDevice:159:35331
+6503210349740262:6503210349846021 2:0 matrixTranspose(float*, float*, int):162:35331
+6503210349849701:6503210351297815 2:0 CopyDeviceToHost:163:35331
+6503210359647380:6503210361302893 2:0 CopyHostToDevice:164:35331
+6503210361389813:6503210361491572 2:0 matrixTranspose(float*, float*, int):167:35331
+6503210361495412:6503210362940006 2:0 CopyDeviceToHost:168:35331
+6503210371314691:6503210372968284 2:0 CopyHostToDevice:169:35331
+6503210373048644:6503210373150563 2:0 matrixTranspose(float*, float*, int):172:35331
+6503210373154243:6503210374617877 2:0 CopyDeviceToHost:173:35331
+6503210383017682:6503210384692714 2:0 CopyHostToDevice:174:35331
+6503210384765234:6503210384867634 2:0 matrixTranspose(float*, float*, int):177:35331
+6503210384871474:6503210386314948 2:0 CopyDeviceToHost:178:35331
+6503210394700772:6503210396409404 2:0 CopyHostToDevice:179:35331
+6503210396484162:6503210396586242 2:0 matrixTranspose(float*, float*, int):182:35331
+6503210396589922:6503210398071155 2:0 CopyDeviceToHost:183:35331
+6503210407004395:6503210408654947 2:0 CopyHostToDevice:184:35331
+6503210408726827:6503210408829226 2:0 matrixTranspose(float*, float*, int):187:35331
+6503210408832906:6503210410293660 2:0 CopyDeviceToHost:188:35331
+6503210419220499:6503210420887211 2:0 CopyHostToDevice:189:35331
+6503210420952691:6503210421054931 2:0 matrixTranspose(float*, float*, int):192:35331
+6503210421058611:6503210422501444 2:0 CopyDeviceToHost:193:35331
+6503210324170330:6503210325893976 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :149
+6503210325896952:6503210325897082 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :150
+6503210325897282:6503210325897403 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :151
+6503210325897673:6503210325900849 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :152
+6503210325901390:6503210327573671 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :153
+6503210335818373:6503210337564121 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :154
+6503210337564561:6503210337564702 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :155
+6503210337564932:6503210337565042 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :156
+6503210337565293:6503210337568729 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :157
+6503210337569150:6503210339241812 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :158
+6503210348008101:6503210349724094 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :159
+6503210349724505:6503210349724635 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :160
+6503210349724845:6503210349724975 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :161
+6503210349725196:6503210349728512 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :162
+6503210349731698:6503210351407356 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :163
+6503210359634144:6503210361373791 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :164
+6503210361374241:6503210361374362 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :165
+6503210361374602:6503210361374712 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :166
+6503210361374983:6503210361378219 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :167
+6503210361380343:6503210363048967 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :168
+6503210371301383:6503210373030941 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :169
+6503210373031292:6503210373031402 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :170
+6503210373031572:6503210373031683 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :171
+6503210373033807:6503210373037013 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :172
+6503210373037403:6503210374734290 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :173
+6503210383004048:6503210384746339 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :174
+6503210384746710:6503210384746850 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :175
+6503210384747081:6503210384747211 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :176
+6503210384749806:6503210384752962 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :177
+6503210384753332:6503210386424672 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :178
+6503210394688249:6503210396465866 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :179
+6503210396466266:6503210396466407 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :180
+6503210396468781:6503210396468941 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :181
+6503210396469212:6503210396472748 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :182
+6503210396473209:6503210398185786 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :183
+6503210406990927:6503210408706859 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :184
+6503210408707260:6503210408707390 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :185
+6503210408711929:6503210408712049 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :186
+6503210408712299:6503210408715385 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :187
+6503210408715756:6503210410404919 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :188
+6503210419207635:6503210420934348 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :189
+6503210420937233:6503210420937413 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :190
+6503210420937654:6503210420937764 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :191
+6503210420937995:6503210420941241 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :192
+6503210420941741:6503210422609735 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :193
+6503210430876446:6503210432536598 2:0 CopyHostToDevice:194:35331
+6503210432603198:6503210432705278 2:0 matrixTranspose(float*, float*, int):197:35331
+6503210432708958:6503210434158351 2:0 CopyDeviceToHost:198:35331
+6503210443064391:6503210444714783 2:0 CopyHostToDevice:199:35331
+6503210444781223:6503210444882982 2:0 matrixTranspose(float*, float*, int):202:35331
+6503210444886662:6503210446330776 2:0 CopyDeviceToHost:203:35331
+6503210455262895:6503210456915368 2:0 CopyHostToDevice:204:35331
+6503210456979727:6503210457081807 2:0 matrixTranspose(float*, float*, int):207:35331
+6503210457085487:6503210458529120 2:0 CopyDeviceToHost:208:35331
+6503210466903764:6503210468580717 2:0 CopyHostToDevice:209:35331
+6503210468651475:6503210468753555 2:0 matrixTranspose(float*, float*, int):212:35331
+6503210468757235:6503210470211269 2:0 CopyDeviceToHost:213:35331
+6503210479096990:6503210480748022 2:0 CopyHostToDevice:214:35331
+6503210480817982:6503210480923262 2:0 matrixTranspose(float*, float*, int):217:35331
+6503210480926942:6503210482369935 2:0 CopyDeviceToHost:218:35331
+6503210491251336:6503210492903009 2:0 CopyHostToDevice:219:35331
+6503210492969289:6503210493071368 2:0 matrixTranspose(float*, float*, int):222:35331
+6503210493075048:6503210494517402 2:0 CopyDeviceToHost:223:35331
+6503210502850325:6503210504500558 2:0 CopyHostToDevice:224:35331
+6503210504566518:6503210504668597 2:0 matrixTranspose(float*, float*, int):227:35331
+6503210504672117:6503210506125191 2:0 CopyDeviceToHost:228:35331
+6503210514485314:6503210516095067 2:0 CopyHostToDevice:229:35331
+6503210516162147:6503210516264547 2:0 matrixTranspose(float*, float*, int):232:35331
+6503210516268067:6503210517714100 2:0 CopyDeviceToHost:233:35331
+6503210430863463:6503210432584675 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :194
+6503210432587661:6503210432587821 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :195
+6503210432588061:6503210432588162 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :196
+6503210432588392:6503210432591738 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :197
+6503210432592079:6503210434267126 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :198
+6503210443050897:6503210444765146 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :199
+6503210444765547:6503210444765677 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :200
+6503210444765888:6503210444765988 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :201
+6503210444766228:6503210444769665 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :202
+6503210444770025:6503210446438640 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :203
+6503210455249722:6503210456963611 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :204
+6503210456964182:6503210456964292 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :205
+6503210456964533:6503210456964643 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :206
+6503210456964873:6503210456968250 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :207
+6503210456970354:6503210458636714 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :208
+6503210466890212:6503210468635499 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :209
+6503210468635910:6503210468636070 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :210
+6503210468636301:6503210468636401 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :211
+6503210468636741:6503210468639717 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :212
+6503210468642282:6503210470320454 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :213
+6503210479083366:6503210480800040 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :214
+6503210480800641:6503210480800772 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :215
+6503210480800962:6503210480801072 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :216
+6503210480803306:6503210480806332 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :217
+6503210480806773:6503210482476800 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :218
+6503210491237789:6503210492951458 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :219
+6503210492951989:6503210492952129 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :220
+6503210492952319:6503210492952429 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :221
+6503210492954613:6503210492957589 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :222
+6503210492958020:6503210494624851 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :223
+6503210502837203:6503210504548326 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :224
+6503210504548847:6503210504549008 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :225
+6503210504551382:6503210504551502 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :226
+6503210504551753:6503210504554989 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :227
+6503210504555339:6503210506236838 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :228
+6503210514472503:6503210516142770 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :229
+6503210516143201:6503210516143371 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :230
+6503210516147078:6503210516147228 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :231
+6503210516147439:6503210516150625 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :232
+6503210516151046:6503210517823568 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :233
+6503210526084144:6503210527734376 2:0 CopyHostToDevice:234:35331
+6503210527801776:6503210527908976 2:0 matrixTranspose(float*, float*, int):237:35331
+6503210527912656:6503210529356609 2:0 CopyDeviceToHost:238:35331
+6503210537712303:6503210539363018 2:0 CopyHostToDevice:239:35331
+6503210539438256:6503210539540016 2:0 matrixTranspose(float*, float*, int):242:35331
+6503210539543696:6503210540989091 2:0 CopyDeviceToHost:243:35331
+6503210549357383:6503210551008578 2:0 CopyHostToDevice:244:35331
+6503210551075178:6503210551177417 2:0 matrixTranspose(float*, float*, int):247:35331
+6503210551181257:6503210552624572 2:0 CopyDeviceToHost:248:35331
+6503210560964704:6503210562615579 2:0 CopyHostToDevice:249:35331
+6503210562680419:6503210562782498 2:0 matrixTranspose(float*, float*, int):252:35331
+6503210562786178:6503210564229654 2:0 CopyDeviceToHost:253:35331
+6503210572594266:6503210574246260 2:0 CopyHostToDevice:254:35331
+6503210574317340:6503210574419259 2:0 matrixTranspose(float*, float*, int):257:35331
+6503210574423099:6503210575865295 2:0 CopyDeviceToHost:258:35331
+6503210584215347:6503210585868301 2:0 CopyHostToDevice:259:35331
+6503210585935061:6503210586038421 2:0 matrixTranspose(float*, float*, int):262:35331
+6503210586042101:6503210587484936 2:0 CopyDeviceToHost:263:35331
+6503210596359946:6503210598009861 2:0 CopyHostToDevice:264:35331
+6503210598075660:6503210598177740 2:0 matrixTranspose(float*, float*, int):267:35331
+6503210598181260:6503210599623615 2:0 CopyDeviceToHost:268:35331
+6503210608497171:6503210610150604 2:0 CopyHostToDevice:269:35331
+6503210610222482:6503210610324562 2:0 matrixTranspose(float*, float*, int):272:35331
+6503210610328242:6503210611771396 2:0 CopyDeviceToHost:273:35331
+6503210620107038:6503210621757751 2:0 CopyHostToDevice:274:35331
+6503210621824831:6503210621928830 2:0 matrixTranspose(float*, float*, int):277:35331
+6503210621932670:6503210623375664 2:0 CopyDeviceToHost:278:35331
+6503210526069862:6503210527781697 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :234
+6503210527785755:6503210527785895 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :235
+6503210527786145:6503210527786256 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :236
+6503210527786516:6503210527790173 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :237
+6503210527790564:6503210529465250 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :238
+6503210537697307:6503210539418851 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :239
+6503210539421175:6503210539421345 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :240
+6503210539421556:6503210539421666 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :241
+6503210539421916:6503210539425713 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :242
+6503210539426124:6503210541097394 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :243
+6503210549342877:6503210551058419 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :244
+6503210551058990:6503210551059160 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :245
+6503210551059340:6503210551059450 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :246
+6503210551059671:6503210551062797 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :247
+6503210551063137:6503210552732353 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :248
+6503210560950676:6503210562663613 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :249
+6503210562664013:6503210562664154 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :250
+6503210562664334:6503210562664444 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :251
+6503210562664664:6503210562667860 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :252
+6503210562669824:6503210564336495 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :253
+6503210572580205:6503210574298452 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :254
+6503210574298953:6503210574299083 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :255
+6503210574299384:6503210574299464 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :256
+6503210574301558:6503210574304834 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :257
+6503210574305515:6503210575972046 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :258
+6503210584201108:6503210585916069 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :259
+6503210585916470:6503210585916620 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :260
+6503210585916820:6503210585916920 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :261
+6503210585919225:6503210585922541 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :262
+6503210585922962:6503210587592057 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :263
+6503210596345753:6503210598056696 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :264
+6503210598057127:6503210598057227 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :265
+6503210598059521:6503210598059652 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :266
+6503210598059892:6503210598063068 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :267
+6503210598063459:6503210599729980 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :268
+6503210608484356:6503210610204246 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :269
+6503210610204707:6503210610204847 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :270
+6503210610207372:6503210610207492 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :271
+6503210610207743:6503210610210929 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :272
+6503210610211239:6503210611879683 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :273
+6503210620094470:6503210621806725 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :274
+6503210621809471:6503210621809591 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :275
+6503210621809811:6503210621809921 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :276
+6503210621810162:6503210621813348 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :277
+6503210621813749:6503210623483445 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :278
+6503210631751947:6503210633402499 2:0 CopyHostToDevice:279:35331
+6503210633468619:6503210633571339 2:0 matrixTranspose(float*, float*, int):282:35331
+6503210633575179:6503210635028572 2:0 CopyDeviceToHost:283:35331
+6503210643384375:6503210645036048 2:0 CopyHostToDevice:284:35331
+6503210645100887:6503210645202967 2:0 matrixTranspose(float*, float*, int):287:35331
+6503210645206807:6503210646653001 2:0 CopyDeviceToHost:288:35331
+6503210655533601:6503210657184314 2:0 CopyHostToDevice:289:35331
+6503210657249793:6503210657351073 2:0 matrixTranspose(float*, float*, int):292:35331
+6503210657354753:6503210658798867 2:0 CopyDeviceToHost:293:35331
+6503210667164749:6503210668815462 2:0 CopyHostToDevice:294:35331
+6503210668883822:6503210668995821 2:0 matrixTranspose(float*, float*, int):297:35331
+6503210668999501:6503210670442655 2:0 CopyDeviceToHost:298:35331
+6503210678783507:6503210680434380 2:0 CopyHostToDevice:299:35331
+6503210680506738:6503210680608978 2:0 matrixTranspose(float*, float*, int):302:35331
+6503210680612658:6503210682055652 2:0 CopyDeviceToHost:303:35331
+6503210690383137:6503210692034010 2:0 CopyHostToDevice:304:35331
+6503210692101890:6503210692204129 2:0 matrixTranspose(float*, float*, int):307:35331
+6503210692207809:6503210693651923 2:0 CopyDeviceToHost:308:35331
+6503210701982929:6503210703634282 2:0 CopyHostToDevice:309:35331
+6503210703703121:6503210703804881 2:0 matrixTranspose(float*, float*, int):312:35331
+6503210703808561:6503210705252995 2:0 CopyDeviceToHost:313:35331
+6503210713597280:6503210715247353 2:0 CopyHostToDevice:314:35331
+6503210715314433:6503210715415872 2:0 matrixTranspose(float*, float*, int):317:35331
+6503210715419552:6503210716863506 2:0 CopyDeviceToHost:318:35331
+6503210631738005:6503210633449850 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :279
+6503210633452975:6503210633453126 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :280
+6503210633453326:6503210633453436 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :281
+6503210633453677:6503210633457203 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :282
+6503210633457704:6503210635138311 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :283
+6503210643371151:6503210645085070 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :284
+6503210645085581:6503210645085691 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :285
+6503210645085921:6503210645086021 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :286
+6503210645086262:6503210645089438 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :287
+6503210645089768:6503210646760868 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :288
+6503210655519883:6503210657233431 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :289
+6503210657233942:6503210657234082 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :290
+6503210657234293:6503210657234403 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :291
+6503210657234644:6503210657237799 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :292
+6503210657240424:6503210658906494 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :293
+6503210667151617:6503210668867469 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :294
+6503210668868070:6503210668868200 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :295
+6503210668868421:6503210668868521 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :296
+6503210668868752:6503210668872318 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :297
+6503210668875023:6503210670550541 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :298
+6503210678770185:6503210680488482 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :299
+6503210680489033:6503210680489163 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :300
+6503210680489344:6503210680489454 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :301
+6503210680491758:6503210680494954 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :302
+6503210680495325:6503210682164791 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :303
+6503210690369849:6503210692083578 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :304
+6503210692084099:6503210692084229 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :305
+6503210692084459:6503210692084570 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :306
+6503210692087074:6503210692089970 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :307
+6503210692090330:6503210693760588 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :308
+6503210701969663:6503210703684755 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :309
+6503210703685275:6503210703685386 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :310
+6503210703687610:6503210703687740 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :311
+6503210703687950:6503210703691447 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :312
+6503210703691798:6503210705361635 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :313
+6503210713583945:6503210715295008 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :314
+6503210715295750:6503210715296010 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :315
+6503210715298414:6503210715298545 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :316
+6503210715298785:6503210715302362 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :317
+6503210715302783:6503210716972550 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :318
+6503210725761229:6503210727411622 2:0 CopyHostToDevice:319:35331
+6503210727481582:6503210727583821 2:0 matrixTranspose(float*, float*, int):322:35331
+6503210727587501:6503210729031295 2:0 CopyDeviceToHost:323:35331
+6503210737379900:6503210739031893 2:0 CopyHostToDevice:324:35331
+6503210739103133:6503210739205213 2:0 matrixTranspose(float*, float*, int):327:35331
+6503210739208893:6503210740651887 2:0 CopyDeviceToHost:328:35331
+6503210749014368:6503210750667322 2:0 CopyHostToDevice:329:35331
+6503210750738080:6503210750841440 2:0 matrixTranspose(float*, float*, int):332:35331
+6503210750845120:6503210752288594 2:0 CopyDeviceToHost:333:35331
+6503210760655122:6503210762323595 2:0 CopyHostToDevice:334:35331
+6503210762391475:6503210762493234 2:0 matrixTranspose(float*, float*, int):337:35331
+6503210762497074:6503210763941669 2:0 CopyDeviceToHost:338:35331
+6503210772825794:6503210774477627 2:0 CopyHostToDevice:339:35331
+6503210774541987:6503210774644067 2:0 matrixTranspose(float*, float*, int):342:35331
+6503210774647747:6503210776090901 2:0 CopyDeviceToHost:343:35331
+6503210784455188:6503210786106382 2:0 CopyHostToDevice:344:35331
+6503210786174582:6503210786276981 2:0 matrixTranspose(float*, float*, int):347:35331
+6503210786280661:6503210787727176 2:0 CopyDeviceToHost:348:35331
+6503210796076583:6503210797745696 2:0 CopyHostToDevice:349:35331
+6503210797815176:6503210797922536 2:0 matrixTranspose(float*, float*, int):352:35331
+6503210797926216:6503210799369530 2:0 CopyDeviceToHost:353:35331
+6503210807752537:6503210809406451 2:0 CopyHostToDevice:354:35331
+6503210809473370:6503210809575610 2:0 matrixTranspose(float*, float*, int):357:35331
+6503210809579290:6503210811021324 2:0 CopyDeviceToHost:358:35331
+6503210819961955:6503210821613308 2:0 CopyHostToDevice:359:35331
+6503210821687586:6503210821789666 2:0 matrixTranspose(float*, float*, int):362:35331
+6503210821793506:6503210823265459 2:0 CopyDeviceToHost:363:35331
+6503210725746452:6503210727461493 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :319
+6503210727464579:6503210727464719 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :320
+6503210727464919:6503210727465020 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :321
+6503210727465260:6503210727469738 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :322
+6503210727470340:6503210729141118 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :323
+6503210737366233:6503210739084721 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :324
+6503210739087175:6503210739087315 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :325
+6503210739087516:6503210739087626 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :326
+6503210739087866:6503210739091373 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :327
+6503210739091714:6503210740761150 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :328
+6503210749000702:6503210750721674 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :329
+6503210750722245:6503210750722365 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :330
+6503210750722596:6503210750722696 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :331
+6503210750722976:6503210750726162 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :332
+6503210750726533:6503210752396500 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :333
+6503210760641773:6503210762374967 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :334
+6503210762375528:6503210762375649 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :335
+6503210762375839:6503210762375929 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :336
+6503210762376180:6503210762379365 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :337
+6503210762381499:6503210764049994 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :338
+6503210772812756:6503210774525202 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :339
+6503210774526044:6503210774526184 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :340
+6503210774526364:6503210774526475 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :341
+6503210774526715:6503210774529871 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :342
+6503210774532075:6503210776198065 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :343
+6503210784440993:6503210786156064 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :344
+6503210786156565:6503210786156725 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :345
+6503210786156925:6503210786157026 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :346
+6503210786159190:6503210786162536 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :347
+6503210786162957:6503210787834447 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :348
+6503210796063088:6503210797796694 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :349
+6503210797797265:6503210797797415 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :350
+6503210797797605:6503210797797726 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :351
+6503210797799920:6503210797803066 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :352
+6503210797803526:6503210799476900 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :353
+6503210807737842:6503210809452582 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :354
+6503210809453163:6503210809453333 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :355
+6503210809457191:6503210809457301 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :356
+6503210809457541:6503210809461328 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :357
+6503210809461769:6503210811128370 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :358
+6503210819949250:6503210821668940 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :359
+6503210821669381:6503210821669501 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :360
+6503210821671805:6503210821671925 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :361
+6503210821672176:6503210821675782 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :362
+6503210821676213:6503210823374924 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :363
+6503210831639182:6503210833290854 2:0 CopyHostToDevice:364:35331
+6503210833359214:6503210833460974 2:0 matrixTranspose(float*, float*, int):367:35331
+6503210833464654:6503210834907167 2:0 CopyDeviceToHost:368:35331
+6503210843838007:6503210845490000 2:0 CopyHostToDevice:369:35331
+6503210845559320:6503210845661239 2:0 matrixTranspose(float*, float*, int):372:35331
+6503210845664759:6503210847140072 2:0 CopyDeviceToHost:373:35331
+6503210856092192:6503210857746265 2:0 CopyHostToDevice:374:35331
+6503210857815585:6503210857922944 2:0 matrixTranspose(float*, float*, int):377:35331
+6503210857926624:6503210859369458 2:0 CopyDeviceToHost:378:35331
+6503210867730540:6503210869382533 2:0 CopyHostToDevice:379:35331
+6503210869445933:6503210869548332 2:0 matrixTranspose(float*, float*, int):382:35331
+6503210869552012:6503210870995166 2:0 CopyDeviceToHost:383:35331
+6503210879894966:6503210881556878 2:0 CopyHostToDevice:384:35331
+6503210881622998:6503210881724918 2:0 matrixTranspose(float*, float*, int):387:35331
+6503210881728438:6503210883172871 2:0 CopyDeviceToHost:388:35331
+6503210892050211:6503210893700764 2:0 CopyHostToDevice:389:35331
+6503210893772642:6503210893874562 2:0 matrixTranspose(float*, float*, int):392:35331
+6503210893878402:6503210895320596 2:0 CopyDeviceToHost:393:35331
+6503210903654322:6503210905304715 2:0 CopyHostToDevice:394:35331
+6503210905371635:6503210905473394 2:0 matrixTranspose(float*, float*, int):397:35331
+6503210905477234:6503210906920228 2:0 CopyDeviceToHost:398:35331
+6503210915260834:6503210916913307 2:0 CopyHostToDevice:399:35331
+6503210916982627:6503210917084546 2:0 matrixTranspose(float*, float*, int):402:35331
+6503210917088226:6503210918532980 2:0 CopyDeviceToHost:403:35331
+6503210831626428:6503210833341068 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :364
+6503210833343813:6503210833343983 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :365
+6503210833344173:6503210833344274 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :366
+6503210833344524:6503210833347790 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :367
+6503210833348171:6503210835016245 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :368
+6503210843824752:6503210845541526 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :369
+6503210845543991:6503210845544131 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :370
+6503210845544331:6503210845544431 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :371
+6503210845544662:6503210845547748 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :372
+6503210845548128:6503210847251848 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :373
+6503210856079371:6503210857799601 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :374
+6503210857800082:6503210857800212 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :375
+6503210857800463:6503210857800563 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :376
+6503210857800803:6503210857804099 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :377
+6503210857804530:6503210859477092 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :378
+6503210867717666:6503210869429962 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :379
+6503210869430403:6503210869430503 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :380
+6503210869430704:6503210869430804 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :381
+6503210869431044:6503210869434511 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :382
+6503210869436925:6503210871103376 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :383
+6503210879881967:6503210881607237 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :384
+6503210881607648:6503210881607798 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :385
+6503210881607988:6503210881608089 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :386
+6503210881608389:6503210881611625 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :387
+6503210881613889:6503210883281583 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :388
+6503210892036641:6503210893754166 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :389
+6503210893754617:6503210893754757 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :390
+6503210893755058:6503210893755168 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :391
+6503210893757572:6503210893760788 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :392
+6503210893761279:6503210895428351 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :393
+6503210903641534:6503210905353099 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :394
+6503210905353479:6503210905353590 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :395
+6503210905353810:6503210905353920 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :396
+6503210905356325:6503210905359491 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :397
+6503210905359951:6503210907027193 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :398
+6503210915247620:6503210916964555 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :399
+6503210916964975:6503210916965096 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :400
+6503210916967220:6503210916967330 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :401
+6503210916967570:6503210916970786 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :402
+6503210916971327:6503210918641334 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :403
+6503210926882706:6503210928535339 2:0 CopyHostToDevice:404:35331
+6503210928604339:6503210928706579 2:0 matrixTranspose(float*, float*, int):407:35331
+6503210928710258:6503210930183332 2:0 CopyDeviceToHost:408:35331
+6503210939076416:6503210940698649 2:0 CopyHostToDevice:409:35331
+6503210940766209:6503210940869888 2:0 matrixTranspose(float*, float*, int):412:35331
+6503210940873568:6503210942322002 2:0 CopyDeviceToHost:413:35331
+6503210950657488:6503210952308681 2:0 CopyHostToDevice:414:35331
+6503210952378001:6503210952479761 2:0 matrixTranspose(float*, float*, int):417:35331
+6503210952483441:6503210953926915 2:0 CopyDeviceToHost:418:35331
+6503210962245221:6503210963897215 2:0 CopyHostToDevice:419:35331
+6503210963971653:6503210964073733 2:0 matrixTranspose(float*, float*, int):422:35331
+6503210964077413:6503210965523607 2:0 CopyDeviceToHost:423:35331
+6503210973867413:6503210975517967 2:0 CopyHostToDevice:424:35331
+6503210975583127:6503210975684726 2:0 matrixTranspose(float*, float*, int):427:35331
+6503210975688406:6503210977155560 2:0 CopyDeviceToHost:428:35331
+6503210985723206:6503210987374559 2:0 CopyHostToDevice:429:35331
+6503210987439079:6503210987540998 2:0 matrixTranspose(float*, float*, int):432:35331
+6503210987544678:6503210988989112 2:0 CopyDeviceToHost:433:35331
+6503210997346359:6503210998996752 2:0 CopyHostToDevice:434:35331
+6503210999065112:6503210999167191 2:0 matrixTranspose(float*, float*, int):437:35331
+6503210999170871:6503211000613385 2:0 CopyDeviceToHost:438:35331
+6503211008987272:6503211010637665 2:0 CopyHostToDevice:439:35331
+6503211010703145:6503211010805384 2:0 matrixTranspose(float*, float*, int):442:35331
+6503211010809064:6503211012253658 2:0 CopyDeviceToHost:443:35331
+6503211021150582:6503211022801776 2:0 CopyHostToDevice:444:35331
+6503211022868536:6503211022971415 2:0 matrixTranspose(float*, float*, int):447:35331
+6503211022975255:6503211024420329 2:0 CopyDeviceToHost:448:35331
+6503210926869886:6503210928584566 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :404
+6503210928585858:6503210928586099 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :405
+6503210928588794:6503210928588924 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :406
+6503210928589204:6503210928592420 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :407
+6503210928593132:6503210930294828 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :408
+6503210939062670:6503210940748146 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :409
+6503210940750480:6503210940750600 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :410
+6503210940750791:6503210940750901 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :411
+6503210940751151:6503210940754367 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :412
+6503210940754788:6503210942430186 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :413
+6503210950644370:6503210952359491 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :414
+6503210952361846:6503210952361956 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :415
+6503210952362156:6503210952362267 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :416
+6503210952362487:6503210952365613 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :417
+6503210952366003:6503210954036371 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :418
+6503210962230730:6503210963954958 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :419
+6503210963955459:6503210963955629 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :420
+6503210963955879:6503210963955990 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :421
+6503210963956240:6503210963959747 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :422
+6503210963960197:6503210965633361 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :423
+6503210973853176:6503210975566133 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :424
+6503210975566644:6503210975566804 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :425
+6503210975567064:6503210975567175 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :426
+6503210975567415:6503210975571122 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :427
+6503210975573707:6503210977264983 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :428
+6503210985709475:6503210987422643 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :429
+6503210987423164:6503210987423284 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :430
+6503210987423575:6503210987423685 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :431
+6503210987424015:6503210987427141 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :432
+6503210987429796:6503210989097720 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :433
+6503210997332883:6503210999046261 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :434
+6503210999047083:6503210999047243 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :435
+6503210999047453:6503210999047564 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :436
+6503210999050189:6503210999053144 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :437
+6503210999053505:6503211000719795 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :438
+6503211008973273:6503211010685108 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :439
+6503211010685529:6503211010685669 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :440
+6503211010685929:6503211010686040 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :441
+6503211010688204:6503211010691119 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :442
+6503211010691510:6503211012360636 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :443
+6503211021136903:6503211022849770 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :444
+6503211022850160:6503211022850291 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :445
+6503211022853206:6503211022853326 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :446
+6503211022853537:6503211022856632 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :447
+6503211022857003:6503211024527271 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :448
+6503211033332820:6503211034986574 2:0 CopyHostToDevice:449:35331
+6503211035063412:6503211035165812 2:0 matrixTranspose(float*, float*, int):452:35331
+6503211035169492:6503211036612966 2:0 CopyDeviceToHost:453:35331
+6503211044941734:6503211046592928 2:0 CopyHostToDevice:454:35331
+6503211046660167:6503211046762407 2:0 matrixTranspose(float*, float*, int):457:35331
+6503211046766087:6503211048208921 2:0 CopyDeviceToHost:458:35331
+6503211056554489:6503211058224883 2:0 CopyHostToDevice:459:35331
+6503211058295322:6503211058397242 2:0 matrixTranspose(float*, float*, int):462:35331
+6503211058400922:6503211059843116 2:0 CopyDeviceToHost:463:35331
+6503211068187244:6503211069838117 2:0 CopyHostToDevice:464:35331
+6503211069901357:6503211070004077 2:0 matrixTranspose(float*, float*, int):467:35331
+6503211070007757:6503211071451071 2:0 CopyDeviceToHost:468:35331
+6503211080319837:6503211081970710 2:0 CopyHostToDevice:469:35331
+6503211082034430:6503211082136510 2:0 matrixTranspose(float*, float*, int):472:35331
+6503211082140190:6503211083587344 2:0 CopyDeviceToHost:473:35331
+6503211091935152:6503211093586025 2:0 CopyHostToDevice:474:35331
+6503211093654705:6503211093756625 2:0 matrixTranspose(float*, float*, int):477:35331
+6503211093760465:6503211095204419 2:0 CopyDeviceToHost:478:35331
+6503211103543170:6503211105195483 2:0 CopyHostToDevice:479:35331
+6503211105267041:6503211105368961 2:0 matrixTranspose(float*, float*, int):482:35331
+6503211105372641:6503211106818035 2:0 CopyDeviceToHost:483:35331
+6503211115179760:6503211116830793 2:0 CopyHostToDevice:484:35331
+6503211116900433:6503211117012272 2:0 matrixTranspose(float*, float*, int):487:35331
+6503211117015952:6503211118458626 2:0 CopyDeviceToHost:488:35331
+6503211033319297:6503211035044196 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :449
+6503211035045098:6503211035045208 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :450
+6503211035047342:6503211035047473 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :451
+6503211035047693:6503211035050849 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :452
+6503211035051240:6503211036720235 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :453
+6503211044928008:6503211046641827 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :454
+6503211046644271:6503211046644401 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :455
+6503211046644592:6503211046644692 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :456
+6503211046644922:6503211046648078 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :457
+6503211046648519:6503211048315691 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :458
+6503211056541107:6503211058274482 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :459
+6503211058279040:6503211058279171 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :460
+6503211058279361:6503211058279471 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :461
+6503211058279672:6503211058282968 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :462
+6503211058283699:6503211059949549 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :463
+6503211068173462:6503211069884565 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :464
+6503211069885096:6503211069885226 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :465
+6503211069885487:6503211069885607 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :466
+6503211069885817:6503211069889134 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :467
+6503211069889584:6503211071557778 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :468
+6503211080305903:6503211082017999 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :469
+6503211082018409:6503211082018550 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :470
+6503211082018750:6503211082018860 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :471
+6503211082019111:6503211082022247 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :472
+6503211082024421:6503211083694618 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :473
+6503211091920876:6503211093637910 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :474
+6503211093638371:6503211093638501 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :475
+6503211093638752:6503211093638852 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :476
+6503211093639072:6503211093642469 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :477
+6503211093644693:6503211095310793 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :478
+6503211103529326:6503211105248805 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :479
+6503211105249226:6503211105249376 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :480
+6503211105249607:6503211105249717 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :481
+6503211105251971:6503211105255207 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :482
+6503211105255578:6503211106925876 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :483
+6503211115166119:6503211116881490 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :484
+6503211116881941:6503211116882061 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :485
+6503211116882262:6503211116882372 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :486
+6503211116885498:6503211116888724 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :487
+6503211116889145:6503211118565954 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :488
+6503211127375709:6503211129029622 2:0 CopyHostToDevice:489:35331
+6503211129101662:6503211129204061 2:0 matrixTranspose(float*, float*, int):492:35331
+6503211129207741:6503211130650415 2:0 CopyDeviceToHost:493:35331
+6503211139021580:6503211140676133 2:0 CopyHostToDevice:494:35331
+6503211140742573:6503211140844653 2:0 matrixTranspose(float*, float*, int):497:35331
+6503211140848333:6503211142290686 2:0 CopyDeviceToHost:498:35331
+6503211150658811:6503211152310805 2:0 CopyHostToDevice:499:35331
+6503211152381564:6503211152483644 2:0 matrixTranspose(float*, float*, int):502:35331
+6503211152487164:6503211153938958 2:0 CopyDeviceToHost:503:35331
+6503211127362319:6503211129082529 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :489
+6503211129083321:6503211129083441 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :490
+6503211129086256:6503211129086386 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :491
+6503211129086627:6503211129089923 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :492
+6503211129090444:6503211130757556 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :493
+6503211139008319:6503211140724522 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :494
+6503211140725013:6503211140725163 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :495
+6503211140727227:6503211140727357 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :496
+6503211140727628:6503211140730843 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :497
+6503211140731445:6503211142398517 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :498
+6503211150645472:6503211152362817 35331:35331 hipMemcpy(dst=0x7f19f7a00000, src=0x7f19fc9ff010, sizeBytes=4194304, kind=1) :499
+6503211152365633:6503211152365803 35331:35331 __hipPushCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :500
+6503211152366043:6503211152366144 35331:35331 __hipPopCallConfiguration(gridDim={z=1, y=256, x=256}, blockDim={z=1, y=4, x=4}, sharedMem=0, stream=0) :501
+6503211152366384:6503211152369500 35331:35331 hipLaunchKernel(function_address=0x201010, numBlocks={z=1, y=256, x=256}, dimBlocks={z=1, y=4, x=4}, args=0x7ffc8155e688, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int) :502
+6503211152369901:6503211154050868 35331:35331 hipMemcpy(dst=0x7f19fc5fe010, src=0x7f19f7400000, sizeBytes=4194304, kind=2) :503
+6503211162290811:6503211162359739 35331:35331 hipFree(ptr=0x7f19f7a00000) :504
+6503211162362394:6503211162387610 35331:35331 hipFree(ptr=0x7f19f7400000) :505

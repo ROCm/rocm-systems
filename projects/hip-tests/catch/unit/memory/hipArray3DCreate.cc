@@ -1,0 +1,380 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <limits>
+#include "DriverContext.hh"
+#include "hipArrayCommon.hh"
+#include "hip_array_common.hh"
+#include "hip_test_common.hh"
+
+namespace {
+void checkArrayIsExpected(const hipArray_t array, const HIP_ARRAY3D_DESCRIPTOR& expected_desc) {
+// hipArray3DGetDescriptor doesn't currently exist (EXSWCPHIPT-87)
+#if HT_AMD
+  std::ignore = array;
+  std::ignore = expected_desc;
+#else
+  CUDA_ARRAY3D_DESCRIPTOR queried_desc;
+  cuArray3DGetDescriptor(&queried_desc, (CUarray)array);
+
+  REQUIRE(queried_desc.Width == expected_desc.Width);
+  REQUIRE(queried_desc.Height == expected_desc.Height);
+  REQUIRE(queried_desc.Depth == expected_desc.Depth);
+  REQUIRE(queried_desc.Format == expected_desc.Format);
+  REQUIRE(queried_desc.NumChannels == expected_desc.NumChannels);
+  REQUIRE(queried_desc.Flags == expected_desc.Flags);
+#endif
+}
+
+void testInvalidDescription(HIP_ARRAY3D_DESCRIPTOR desc) {
+  hipArray_t array;
+  HIP_CHECK_ERROR(hipArray3DCreate(&array, &desc), hipErrorInvalidValue);
+}
+}  // namespace
+
+HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_happy, char, uchar2, uint2, int4, short4, float,
+                   float2, float4) {
+  CHECK_IMAGE_SUPPORT
+
+  using vec_info = vector_info<TestType>;
+  DriverContext ctx;
+
+  HIP_ARRAY3D_DESCRIPTOR desc{};
+  desc.Format = vec_info::format;
+  desc.NumChannels = vec_info::size;
+#if HT_AMD
+  desc.Flags = 0;
+#else
+  desc.Flags = GENERATE(0, hipArraySurfaceLoadStore, hipArrayTextureGather);
+#endif
+
+  constexpr size_t size = 64;
+
+  std::vector<hipExtent> extents;
+  extents.reserve(3);
+  extents.push_back({size, size, 0});  // 2D array
+  if (desc.Flags != hipArrayTextureGather) {
+    extents.push_back({size, 0, 0});        // 1D array
+    extents.push_back({size, size, size});  // 3D array
+  };
+
+  for (auto& extent : extents) {
+    desc.Width = extent.width;
+    desc.Height = extent.height;
+    desc.Depth = extent.depth;
+
+    CAPTURE(desc.Width, desc.Height, desc.Depth);
+
+    hipArray_t array;
+    HIP_CHECK(hipArray3DCreate(&array, &desc));
+    checkArrayIsExpected(array, desc);
+    HIP_CHECK(hipArrayDestroy(array));
+  }
+}
+
+HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_MaxTexture, int, uint4, short, ushort2,
+                   unsigned char, float, float4) {
+  CHECK_IMAGE_SUPPORT
+
+  using vec_info = vector_info<TestType>;
+  DriverContext ctx;
+
+  hipArray_t array;
+  HIP_ARRAY3D_DESCRIPTOR desc{};
+  desc.Format = vec_info::format;
+  desc.NumChannels = vec_info::size;
+#if HT_AMD
+  desc.Flags = 0;
+#else
+  desc.Flags = GENERATE(0, hipArraySurfaceLoadStore);
+  if (desc.Flags == hipArraySurfaceLoadStore) {
+    HIP_SKIP_TEST("tracked issue EXSWCPHIPT-58.");
+  }
+#endif
+  CAPTURE(desc.Flags);
+
+  const Sizes sizes(desc.Flags);
+  CAPTURE(sizes.max1D, sizes.max2D, sizes.max3D);
+
+  const size_t s = 64;
+  SECTION("Happy") {
+    // stored in a vector so some values can be ifdef'd out
+    std::vector<hipExtent> extentsToTest{
+        make_hipExtent(sizes.max1D, 0, 0),                              // 1D max
+        make_hipExtent(sizes.max2D[0], s, 0),                           // 2D max width
+        make_hipExtent(s, sizes.max2D[1], 0),                           // 2D max height
+        make_hipExtent(sizes.max2D[0], sizes.max2D[1], 0),              // 2D max
+        make_hipExtent(sizes.max3D[0], s, s),                           // 3D max width
+        make_hipExtent(s, sizes.max3D[1], s),                           // 3D max height
+        make_hipExtent(s, s, sizes.max3D[2]),                           // 3D max depth
+        make_hipExtent(s, sizes.max3D[1], sizes.max3D[2]),              // 3D max height and depth
+        make_hipExtent(sizes.max3D[0], s, sizes.max3D[2]),              // 3D max width and depth
+        make_hipExtent(sizes.max3D[0], sizes.max3D[1], s),              // 3D max width and height
+        make_hipExtent(sizes.max3D[0], sizes.max3D[1], sizes.max3D[2])  // 3D max
+    };
+    const auto extent =
+        GENERATE_COPY(from_range(std::begin(extentsToTest), std::end(extentsToTest)));
+
+    desc.Width = extent.width;
+    desc.Height = extent.height;
+    desc.Depth = extent.depth;
+
+    CAPTURE(desc.Width, desc.Height, desc.Depth);
+
+    {
+      size_t bytesPerElement = desc.NumChannels;
+      switch (desc.Format) {
+        case HIP_AD_FORMAT_SIGNED_INT32:
+        case HIP_AD_FORMAT_UNSIGNED_INT32:
+        case HIP_AD_FORMAT_FLOAT:
+          bytesPerElement *= 4; break;
+        case HIP_AD_FORMAT_SIGNED_INT16:
+        case HIP_AD_FORMAT_UNSIGNED_INT16:
+        case HIP_AD_FORMAT_HALF:
+          bytesPerElement *= 2; break;
+        default:
+          break;
+      }
+      size_t w = desc.Width ? desc.Width : 1;
+      size_t h = desc.Height ? desc.Height : 1;
+      size_t d = desc.Depth ? desc.Depth : 1;
+      size_t estimatedBytes = w * h * d * bytesPerElement;
+      size_t freeMem = 0, totalMem = 0;
+      HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem));
+      if (estimatedBytes > freeMem) {
+        WARN("Skipping allocation of " << (estimatedBytes >> 20)
+             << " MB (free: " << (freeMem >> 20) << " MB)");
+        return;
+      }
+    }
+
+    auto maxArrayCreateError = hipArray3DCreate(&array, &desc);
+    // this can try to alloc many GB of memory, so out of memory is acceptable
+    if (maxArrayCreateError == hipErrorOutOfMemory) return;
+    HIP_CHECK(maxArrayCreateError);
+    checkArrayIsExpected(array, desc);
+    HIP_CHECK(hipArrayDestroy(array));
+  }
+  SECTION("Negative") {
+    std::vector<hipExtent> extentsToTest{
+        make_hipExtent(sizes.max1D + 1, 0, 0),                      // 1D max
+        make_hipExtent(sizes.max2D[0] + 1, s, 0),                   // 2D max width
+        make_hipExtent(s, sizes.max2D[1] + 1, 0),                   // 2D max height
+        make_hipExtent(sizes.max2D[0] + 1, sizes.max2D[1] + 1, 0),  // 2D max
+        make_hipExtent(sizes.max3D[0] + 1, s, s),                   // 3D max width
+        make_hipExtent(s, sizes.max3D[1] + 1, s),                   // 3D max height
+#if !HT_NVIDIA                                                      // leads to hipSuccess on NVIDIA
+        make_hipExtent(s, s, sizes.max3D[2] + 1),                   // 3D max depth
+#endif
+        make_hipExtent(s, sizes.max3D[1] + 1, sizes.max3D[2] + 1),  // 3D max height and depth
+        make_hipExtent(sizes.max3D[0] + 1, s, sizes.max3D[2] + 1),  // 3D max width and depth
+        make_hipExtent(sizes.max3D[0] + 1, sizes.max3D[1] + 1, s),  // 3D max width and height
+        make_hipExtent(sizes.max3D[0] + 1, sizes.max3D[1] + 1, sizes.max3D[2] + 1)  // 3D max
+    };
+    const auto extent =
+        GENERATE_COPY(from_range(std::begin(extentsToTest), std::end(extentsToTest)));
+
+    desc.Width = extent.width;
+    desc.Height = extent.height;
+    desc.Depth = extent.depth;
+
+    CAPTURE(desc.Width, desc.Height, desc.Depth);
+
+    HIP_CHECK_ERROR(hipArray3DCreate(&array, &desc), hipErrorInvalidValue);
+  }
+}
+
+#if HT_NVIDIA
+constexpr std::array<unsigned int, 9> validFlags{
+    0,
+    hipArraySurfaceLoadStore,
+    hipArrayLayered,
+    hipArrayLayered | hipArraySurfaceLoadStore,
+    hipArrayCubemap,
+    hipArrayCubemap | hipArrayLayered,
+    hipArrayCubemap | hipArraySurfaceLoadStore,
+    hipArrayCubemap | hipArrayLayered | hipArraySurfaceLoadStore,
+    hipArrayTextureGather};
+#else
+constexpr std::array<unsigned int, 5> validFlags{
+    0, hipArrayCubemap, hipArrayCubemap | hipArrayLayered,
+    hipArrayCubemap | hipArraySurfaceLoadStore,
+    hipArrayCubemap | hipArrayLayered | hipArraySurfaceLoadStore};
+#endif
+
+constexpr HIP_ARRAY3D_DESCRIPTOR defaultDescriptor(unsigned int flags, size_t size) {
+  HIP_ARRAY3D_DESCRIPTOR desc{};
+  desc.Format = HIP_AD_FORMAT_FLOAT;
+  desc.NumChannels = 4;
+  desc.Flags = flags;
+  desc.Width = size;
+  desc.Height = size;
+  desc.Depth = size;
+
+#if HT_NVIDIA
+  if (flags == hipArrayTextureGather) {
+    desc.Depth = 0;
+  }
+#endif
+  return desc;
+}
+
+// Providing the array pointer as nullptr should return an error
+HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_NullArrayPtr) {
+  CHECK_IMAGE_SUPPORT
+
+  auto desc = defaultDescriptor(0, 64);
+
+  DriverContext ctx;
+  HIP_CHECK_ERROR(hipArray3DCreate(nullptr, &desc), hipErrorInvalidValue);
+}
+
+// Providing the description pointer as nullptr should return an error
+HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_NullDescPtr) {
+  CHECK_IMAGE_SUPPORT
+
+  DriverContext ctx;
+  hipArray_t array;
+  HIP_CHECK_ERROR(hipArray3DCreate(&array, nullptr), hipErrorInvalidValue);
+}
+
+
+// Zero width arrays are not allowed
+HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_ZeroWidth) {
+  CHECK_IMAGE_SUPPORT
+
+  DriverContext ctx;
+
+  unsigned int flags = GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
+  auto desc = defaultDescriptor(flags, 6);
+  desc.Width = 0;
+  CAPTURE(desc.Flags);
+
+  testInvalidDescription(desc);
+}
+
+// Zero height arrays are only allowed for 1D arrays and layered arrays
+HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_ZeroHeight) {
+  CHECK_IMAGE_SUPPORT
+
+  DriverContext ctx;
+
+  unsigned int flags = GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
+  auto desc = defaultDescriptor(flags, 6);
+#if HT_NVIDIA
+  std::array<unsigned int, 2> exceptions{hipArrayLayered,
+                                         hipArrayLayered | hipArraySurfaceLoadStore};
+#else
+  std::array<unsigned int, 0> exceptions{};
+#endif
+  desc.Height = 0;
+
+  if (std::find(std::begin(exceptions), std::end(exceptions), desc.Flags) == std::end(exceptions)) {
+    // flag is not in list of exceptions
+    testInvalidDescription(desc);
+  }
+}
+
+// Arrays must be created with a valid data format
+HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_InvalidFormat) {
+  CHECK_IMAGE_SUPPORT
+
+  DriverContext ctx;
+
+  unsigned int flags = GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
+  auto desc = defaultDescriptor(flags, 6);
+
+  desc.Format = static_cast<hipArray_Format>(0xDEADBEEF);
+  REQUIRE(std::find(std::begin(driverFormats), std::end(driverFormats), desc.Format) ==
+          std::end(driverFormats));
+
+  testInvalidDescription(desc);
+}
+
+// An array must have either 1,2, or 4 channels
+HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_NumChannels) {
+  CHECK_IMAGE_SUPPORT
+
+  DriverContext ctx;
+  unsigned int flags = GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
+  auto desc = defaultDescriptor(flags, 6);
+  desc.NumChannels = GENERATE(0, 3, 5);
+
+  testInvalidDescription(desc);
+}
+
+// Using invalid flags should result in an error
+HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_InvalidFlags) {
+  CHECK_IMAGE_SUPPORT
+
+  DriverContext ctx;
+
+  // FIXME: use the same flags for both tests when the values exist for hip
+#if HT_NVIDIA
+  unsigned int flags = GENERATE(0xDEADBEEF, hipArrayTextureGather | hipArraySurfaceLoadStore,
+                                hipArrayTextureGather | hipArrayCubemap,
+                                hipArrayTextureGather | hipArraySurfaceLoadStore | hipArrayCubemap);
+#else
+  unsigned int flags = 0xDEADBEEF;
+#endif
+
+  CAPTURE(flags);
+
+  auto desc = defaultDescriptor(flags, 6);
+
+
+  REQUIRE(std::find(std::begin(validFlags), std::end(validFlags), desc.Flags) ==
+          std::end(validFlags));
+
+  testInvalidDescription(desc);
+}
+
+
+// hipArray3DCreate should handle the max numeric value gracefully.
+HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_NumericLimit) {
+  CHECK_IMAGE_SUPPORT
+
+  DriverContext ctx;
+
+  unsigned int flags = GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
+  auto desc = defaultDescriptor(flags, std::numeric_limits<size_t>::max());
+
+  testInvalidDescription(desc);
+}
+
+// texture gather arrays may only be 2D
+HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_Negative_Non2DTextureGather, char, uint2, int4,
+                   float2, float4) {
+  CHECK_IMAGE_SUPPORT
+
+#if HT_AMD
+  HIP_SKIP_TEST(HipTest::SkipReason::kTextureGatherUnsupportedAmd);
+#endif
+  using vec_info = vector_info<TestType>;
+  DriverContext ctx;
+
+  HIP_ARRAY3D_DESCRIPTOR desc{};
+  desc.Format = vec_info::format;
+  desc.NumChannels = vec_info::size;
+  desc.Flags = hipArrayTextureGather;
+
+  constexpr size_t size = 64;
+
+  std::array<hipExtent, 2> extents{
+      make_hipExtent(size, 0, 0),        // 1D array
+      make_hipExtent(size, size, size),  // 3D array
+  };
+
+  for (auto& extent : extents) {
+    desc.Width = extent.width;
+    desc.Height = extent.height;
+    desc.Depth = extent.depth;
+
+    CAPTURE(desc.Width, desc.Height, desc.Depth);
+
+    testInvalidDescription(desc);
+  }
+}

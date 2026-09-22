@@ -1,0 +1,71 @@
+#!/bin/bash
+
+set -e
+
+export CODE_COV="ON"
+
+src_path=$(dirname "$(realpath $0)")
+
+mkdir -p ipc && pushd ipc
+$src_path/ipc_single
+popd
+
+mkdir -p ro_net && pushd ro_net
+$src_path/ro_net
+popd
+
+mkdir -p ro_ipc && pushd ro_ipc
+$src_path/ro_ipc
+popd
+
+mkdir -p ./test_output
+export PROFRAW_DIR=./coverage-report/profraw
+mkdir -p $PROFRAW_DIR
+
+# Unit Tests
+LLVM_PROFILE_FILE="$PROFRAW_DIR/ipc_unit-%p.profraw" ../scripts/unit_tests/driver.sh ./ipc/tests/unit_tests/rocshmem_unit_tests all
+
+LLVM_PROFILE_FILE="$PROFRAW_DIR/ro_net-unit-%p.profraw" ../scripts/unit_tests/driver.sh ./ro_net/tests/unit_tests/rocshmem_unit_tests all
+
+LLVM_PROFILE_FILE="$PROFRAW_DIR/ro_ipc-unit-%p.profraw" ../scripts/unit_tests/driver.sh ./ro_ipc/tests/unit_tests/rocshmem_unit_tests all
+
+# Examples coverage
+LLVM_PROFILE_FILE="$PROFRAW_DIR/init_test-%m.profraw"  mpirun -np 4 ./ipc/examples/rocshmem_init_attr_test
+LLVM_PROFILE_FILE="$PROFRAW_DIR/allreduce_test-%m.profraw"  mpirun -np 4 ./ipc/examples/rocshmem_allreduce_test
+
+
+
+# Functional Tests
+LLVM_PROFILE_FILE="$PROFRAW_DIR/ipc-functional-%p.profraw" ../scripts/functional_tests/driver.sh ./ipc/tests/functional_tests/rocshmem_functional_tests all ./test_output/
+LLVM_PROFILE_FILE="$PROFRAW_DIR/ro_net-functional-%p.profraw" ../scripts/functional_tests/driver.sh ./ro_net/tests/functional_tests/rocshmem_functional_tests all ./test_output/
+LLVM_PROFILE_FILE="$PROFRAW_DIR/ro_ipc-functional-%p.profraw" ../scripts/functional_tests/driver.sh ./ro_ipc/tests/functional_tests/rocshmem_functional_tests all ./test_output/
+
+# Coverage Report
+/opt/rocm/llvm/bin/llvm-profdata merge -sparse $PROFRAW_DIR/*.profraw -o ./coverage-report/rocshmem.profdata
+/opt/rocm/llvm/bin/llvm-cov report \
+	-object ./ipc/tests/unit_tests/rocshmem_unit_tests \
+	-object ./ipc/tests/functional_tests/rocshmem_functional_tests \
+	-object ./ipc/examples/rocshmem_init_attr_test \
+	-object ./ipc/examples/rocshmem_allreduce_test \
+	-object ./ro_net/tests/unit_tests/rocshmem_unit_tests \
+	-object ./ro_net/tests/functional_tests/rocshmem_functional_tests \
+	-object ./ro_ipc/tests/unit_tests/rocshmem_unit_tests \
+	-object ./ro_ipc/tests/functional_tests/rocshmem_functional_tests \
+	-instr-profile=./coverage-report/rocshmem.profdata \
+	--ignore-filename-regex=".*test.*"
+
+/opt/rocm/llvm/bin/llvm-cov show \
+	-object ./ipc/tests/unit_tests/rocshmem_unit_tests \
+	-object ./ipc/tests/functional_tests/rocshmem_functional_tests \
+	-object ./ipc/examples/rocshmem_init_attr_test \
+	-object ./ipc/examples/rocshmem_allreduce_test \
+	-object ./ro_net/tests/unit_tests/rocshmem_unit_tests \
+	-object ./ro_net/tests/functional_tests/rocshmem_functional_tests \
+	-object ./ro_ipc/tests/unit_tests/rocshmem_unit_tests \
+	-object ./ro_ipc/tests/functional_tests/rocshmem_functional_tests \
+	-instr-profile=./coverage-report/rocshmem.profdata \
+	--ignore-filename-regex=".*test.*" \
+	-format=html \
+	-output-dir=coverage-report
+cd coverage-report && python3 -m http.server
+

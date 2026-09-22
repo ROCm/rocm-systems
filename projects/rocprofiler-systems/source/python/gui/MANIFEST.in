@@ -1,0 +1,21 @@
+
+# direct include
+
+include README.md
+include requirements.txt
+
+# recursive includes
+
+recursive-include source *
+
+# global exclude
+
+global-exclude *.pyc
+global-exclude *.git*
+global-exclude *__pycache__*
+
+# recursive excludes
+
+recursive-exclude rocprofsys_causal_viewer.egg-info *
+recursive-exclude build *
+recursive-exclude dist *

@@ -1,0 +1,1693 @@
+---
+myst:
+  html_meta:
+    "description lang=en": "Learn how to use the AMD SMI command line tool."
+    "keywords": "api, smi, lib, system, management, interface, example"
+---
+
+# AMD SMI CLI tool usage
+
+This tool is a command line interface (CLI) for manipulating and monitoring the
+`amdgpu` kernel; it is intended to replace and deprecate the existing `rocm_smi`
+CLI tool and `gpuv-smi` tool. The AMD SMI CLI tool uses Ctypes to call the
+`amd_smi_lib` API.
+
+When using the CLI tool, you should have at least one AMD GPU and the driver
+installed.
+
+```{admonition} Disclaimer
+The AMD SMI CLI tool is provided as an example code to aid the development of
+telemetry tools. The [Python](./amdsmi-py-lib) or [C++
+library](./amdsmi-cpp-lib) is recommended as a robust data source.
+```
+
+## Install the CLI Tool and Python library
+
+Refer to the [installation instructions](../install/install.md).
+
+```{note}
+CPU commands (`amd-smi static --smu`, `amd-smi metric --cpu-*`, etc.) require
+the `amd_hsmp` kernel module (with HSMP enabled in BIOS). Without it, CPU
+discovery is skipped (non-fatal). GPU and NIC functionality is unaffected. See
+{ref}`install_amdgpu_driver` for more information.
+```
+
+## Get started
+
+The `amd-smi` command provides system management and monitoring capabilities for
+AMD hardware. When run without arguments, it displays the
+[default summary view](#cli-ex-default) of all GPUs including version
+information, GPU status, and running processes.
+
+When run with `--help`, it reports the available subcommands:
+
+```shell-session
+~$ amd-smi --help
+usage: amd-smi [-h] [--rocm-smi]  ...
+
+AMD System Management Interface | Version: 27.0.0 | ROCm version: 7.14.0 | Platform: Linux Baremetal
+
+options:
+  -h, --help          show this help message and exit
+  --rocm-smi          Display GPU information in ROCm-SMI compatible format
+
+AMD-SMI Commands:
+                      Descriptions:
+    version           Display version information
+    list              List GPU information
+    static            Gets static information about the specified GPU
+    firmware (ucode)  Gets firmware information about the specified GPU
+    bad-pages         Gets bad page information about the specified GPU
+    metric            Gets metric/performance information about the specified GPU
+    process           Lists compute process information running on the specified GPU
+    event             Displays event information for the given GPU
+    topology          Displays topology information of the devices
+    set               Set options for devices
+    reset             Reset options for devices
+    monitor (dmon)    Monitor metrics for target devices
+    xgmi              Displays xgmi information of the devices
+    partition         Displays partition information of the devices
+    ras               Retrieve RAS (CPER) entries from the driver
+```
+
+Example commands:
+
+```shell-session
+amd-smi static --gpu 0
+amd-smi metric
+amd-smi process --gpu 0 1
+amd-smi reset --gpureset --gpu all
+amd-smi --rocm-smi
+```
+
+```{note}
+For command-specific help, use `amd-smi [command] --help` for see more detailed
+usage information. See [Commands](#cmds).
+
+For more detailed version information, use `amd-smi version`.
+
+To display GPU information in the legacy ROCm-SMI format, use `amd-smi --rocm-smi`.
+See [ROCm-SMI compatibility mode](#cli-ex-rocm-smi).
+```
+
+Environment variables:
+
+You can set one or more variables in front of any `amd-smi` invocation. For example:
+
+```shell-session
+AMDSMI_GPU_METRICS_CACHE_MS=200 amd-smi metric
+```
+
+Current Variables:
+
+```{note}
+AMDSMI_GPU_METRICS_CACHE_MS - Controls the internal GPU metrics cache duration (ms). Default 100, set to 0 to disable.
+AMDSMI_ASIC_INFO_CACHE_MS - Controls the internal GPU asic info cache duration (ms). Default 10000, set to 0 to disable.
+```
+
+(cmds)=
+## Commands
+
+The following are the help output for each command, providing quick reference
+details for usage.
+
+(cmd-list)=
+### amd-smi list
+
+Lists GPU information.
+
+```{note}
+`amd-smi list -e` is useful for mapping physical-to-logical GPU IDs.
+The `oam_id` field identifies the physical board slot in multi-GPU OAM chassis.
+The `ID` shown for `--gpu` (0, 1, 2, …) is an enumeration index assigned in discovery
+order, not the device-type value returned by `amdsmi_get_gpu_id()`; `--gpu` also accepts a
+BDF or UUID to select a specific card.
+```
+
+```shell-session
+~$ amd-smi list --help
+usage: amd-smi list [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
+                    [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
+
+Lists all detected devices on the system.
+Lists the BDF, UUID, KFD_ID, NODE_ID, and Partition ID for each GPU and/or CPUs.
+In virtualization environments, it can also list VFs associated to each
+GPU with some basic information for each VF.
+
+List Arguments:
+  -h, --help               show this help message and exit
+  -e, --enumeration        Enumeration mapping to other features.
+                               Includes CARD, RENDER, HSA_ID, HIP_ID, HIP_UUID, and OAM_ID.
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                             all | Selects all devices
+  -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
+                              ID: 0
+                              ID: 1
+                              ID: 2
+                              ID: 3
+                                all | Selects all devices
+  -O, --core CORE [CORE ...]  Select a Core ID from the possible choices:
+                              ID: 0 - 95
+                                all  | Selects all devices
+
+Command Modifiers:
+  --json                       Displays output in JSON format (human readable by default).
+  --csv                        Displays output in CSV format (human readable by default).
+  --file FILE                  Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL             Set the logging level from the possible choices:
+                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+(cmd-static)=
+### amd-smi static
+
+Gets static information about the specified GPU. See the [sample
+output](#cli-ex-static) for `amd-smi static`.
+
+```shell-session
+~$ amd-smi static --help
+usage: amd-smi static [-h] [-g GPU [GPU ...] | -U CPU [CPU ...]] [-a] [-b] [-V] [-d] [-v]
+                      [-c] [-B] [-R] [-r] [-p] [-l] [-P] [-x] [-u] [-s] [-i]
+                      [--json | --csv] [--file FILE] [--loglevel LEVEL]
+
+If no GPU is specified, returns static information for all GPUs on the system.
+If no static argument is provided, all static information will be displayed.
+
+Static Arguments:
+  -h, --help               show this help message and exit
+  -a, --asic               All asic information
+  -b, --bus                All bus information
+  -I, --ifwi               All video bios\IFWI information (if available)
+  -d, --driver             Displays driver version
+  -v, --vram               All vram information
+  -c, --cache              All cache information
+  -B, --board              All board information
+  -R, --process-isolation  The process isolation status
+  -r, --ras                Displays RAS features information;
+                                Sudo may be required for some features
+  -C, --clock [CLOCK ...]  Show one or more valid clock frequency levels. Available options:
+                                SYS, DF, DCEF, SOC, MEM, VCLK0, VCLK1, DCLK0, DCLK1, ALL
+  -p, --partition          Partition information
+  -l, --limit              All limit metric values (i.e. power and thermal limits)
+  -P, --soc-pstate         The available soc pstate policy
+  -x, --xgmi-plpd          The available XGMI per-link power down policy
+  -u, --numa               All numa node information
+
+CPU Arguments:
+  -s, --smu                All SMU FW information
+  -i, --interface-ver      Displays hsmp interface version
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                             all | Selects all devices
+  -U, --cpu CPU [CPU ...]  Select a CPU ID from the possible choices:
+                           ID: 0
+                           ID: 1
+                           ID: 2
+                           ID: 3
+                             all | Selects all devices
+
+Command Modifiers:
+  --json                       Displays output in JSON format (human readable by default).
+  --csv                        Displays output in CSV format (human readable by default).
+  --file FILE                  Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL             Set the logging level from the possible choices:
+                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+(cmd-firmware)=
+### amd-smi firmware
+
+Gets firmware information about the specified GPU.
+
+```shell-session
+~$ amd-smi firmware --help
+usage: amd-smi firmware [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
+                        [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]] [-f]
+
+If no GPU is specified, return firmware information for all GPUs on the system.
+
+Firmware Arguments:
+  -h, --help                   show this help message and exit
+  -f, --ucode-list, --fw-list  All FW list information
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
+                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                 all | Selects all devices
+  -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
+                              ID: 0
+                              ID: 1
+                              ID: 2
+                              ID: 3
+                                all | Selects all devices
+  -O, --core CORE [CORE ...]  Select a Core ID from the possible choices:
+                              ID: 0 - 95
+                                all  | Selects all devices
+
+Command Modifiers:
+  --json                       Displays output in JSON format (human readable by default).
+  --csv                        Displays output in CSV format (human readable by default).
+  --file FILE                  Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL             Set the logging level from the possible choices:
+                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+(cmd-bad-pages)=
+### amd-smi bad-pages
+
+Gets bad page information about the specified GPU.
+
+```shell-session
+~$ amd-smi bad-pages --help
+usage: amd-smi bad-pages [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
+                         [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]] [-p]
+                         [-r] [-u]
+
+If no GPU is specified, return bad page information for all GPUs on the system.
+
+Bad Pages Arguments:
+  -h, --help               show this help message and exit
+  -p, --pending            Displays all pending retired pages
+  -r, --retired            Displays retired pages
+  -u, --un-res             Displays unreservable pages
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                             all | Selects all devices
+  -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
+                              ID: 0
+                              ID: 1
+                              ID: 2
+                              ID: 3
+                                all | Selects all devices
+  -O, --core CORE [CORE ...]  Select a Core ID from the possible choices:
+                              ID: 0 - 95
+                                all  | Selects all devices
+
+Command Modifiers:
+  --json                      Displays output in JSON format (human readable by default).
+  --csv                       Displays output in CSV format (human readable by default).
+  --file FILE                 Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL            Set the logging level from the possible choices:
+                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+(cmd-metric)=
+### amd-smi metric
+
+Gets metrics and performance information about the specified GPU.
+
+```shell-session
+~$ amd-smi metric --help
+usage: amd-smi metric [-h] [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
+                      [-w INTERVAL] [-W TIME] [-i ITERATIONS] [-m] [-u] [-p] [-c] [-t]
+                      [-P] [-e] [-k] [-f] [-C] [-o] [-l] [-x] [-E] [-X] [--cpu-power-metrics]
+                      [--cpu-prochot] [--cpu-freq-metrics] [--cpu-c0-res]
+                      [--cpu-lclk-dpm-level NBIOID] [--cpu-pwr-svi-telemetry-rails]
+                      [--cpu-io-bandwidth IO_BW LINKID_NAME]
+                      [--cpu-xgmi-bandwidth XGMI_BW LINKID_NAME] [--cpu-metrics-ver]
+                      [--cpu-metrics-table] [--cpu-socket-energy] [--cpu-ddr-bandwidth]
+                      [--cpu-temp] [--cpu-dimm-temp-range-rate DIMM_ADDR]
+                      [--cpu-dimm-pow-consumption DIMM_ADDR]
+                      [--cpu-dimm-thermal-sensor DIMM_ADDR] [--core-boost-limit]
+                      [--core-curr-active-freq-core-limit] [--core-energy]
+                      [--json | --csv] [--file FILE] [--loglevel LEVEL]
+
+If no GPU is specified, returns metric information for all GPUs on the system.
+If no metric argument is provided, all metric information will be displayed.
+
+Metric arguments:
+  -h, --help                   show this help message and exit
+  -m, --mem-usage              Memory usage per block
+  -u, --usage                  Displays engine usage information
+  -p, --power                  Current power usage
+  -c, --clock                  Average, max, and current clock frequencies
+  -t, --temperature            Current temperatures
+  -P, --pcie                   Current PCIe speed, width, and replay count
+  -e, --ecc                    Total number of ECC errors
+  -k, --ecc-blocks             Number of ECC errors per block
+  -V, --voltage                GPU voltage
+  -f, --fan                    Current fan speed
+  -C, --voltage-curve          Display voltage curve
+  -o, --overdrive              Current GFX and MEM clock overdrive level
+  -l, --perf-level             Current DPM performance level
+  -x, --xgmi-err               XGMI error information since last read
+  -E, --energy                 Amount of energy consumed
+  -v, --violation              Displays throttle accumulators;
+                                   Only available for MI300 or newer ASICs
+  -X, --partition              Switch temperature, clock, and usage to partition-scoped
+                                   (XCP/AID/MID) data sources; combine with those flags to scope it;
+                                   Only available for MI300 or newer ASICs
+
+Watch Arguments:
+  -w, --watch INTERVAL         Reprint the command in a loop of INTERVAL seconds
+  -W, --watch_time TIME        The total duration of TIME to watch the command
+  -i, --iterations ITERATIONS  The total number of ITERATIONS to repeat the command
+
+CPU Arguments:
+  --cpu-power-metrics                       CPU power metrics
+  --cpu-prochot                             Displays prochot status
+  --cpu-freq-metrics                        Displays currentFclkMemclk frequencies and cclk frequency limit
+  --cpu-c0-res                              Displays C0 residency
+  --cpu-lclk-dpm-level NBIOID               Displays lclk dpm level range. Requires socket ID and NBOID as inputs
+  --cpu-pwr-svi-telemetry-rails             Displays svi based telemetry for all rails
+  --cpu-io-bandwidth IO_BW LINKID_NAME      Displays current IO bandwidth for the selected CPU.
+                                             input parameters are bandwidth type(1) and link ID encodings
+                                             i.e. P2, P3, G0 - G7
+  --cpu-xgmi-bandwidth XGMI_BW LINKID_NAME  Displays current XGMI bandwidth for the selected CPU
+                                             input parameters are bandwidth type(1,2,4) and link ID encodings
+                                             i.e. P2, P3, G0 - G7
+  --cpu-pwr-eff-mode                        Displays current power efficiency mode.
+                                             For Family 1Ah Models 50h-57h onwards and MODE= 4 or 5, displays utilization percentage and PPT limit in Watts.
+  --cpu-metrics-ver                         Displays metrics table version
+  --cpu-metrics-table                       Displays metric table
+  --cpu-socket-energy                       Displays socket energy for the selected CPU socket
+  --cpu-ddr-bandwidth                       Displays per socket max ddr bw, current utilized bw,
+                                             and current utilized ddr bw in percentage
+  --cpu-temp                                Displays cpu socket temperature
+  --cpu-dimm-temp-range-rate DIMM_ADDR      Displays dimm temperature range and refresh rate
+  --cpu-dimm-pow-consumption DIMM_ADDR      Displays dimm power consumption
+  --cpu-dimm-thermal-sensor DIMM_ADDR       Displays dimm thermal sensor
+  --cpu-xgmi-pstate-range                   Displays XGMI pstate range (min and max values) for the selected CPU
+  --cpu-railisofreq-policy                  Displays CPU rail isolated frequency policy
+  --cpu-dfcstate-ctrl                       Displays DFCState control status
+  --cpu-pc6-enable                          Displays PC6 enable control
+  --cpu-cc6-enable                          Displays CC6 enable control
+  --cpu-dimm-sb-reg                         Read DIMM sideband register.Requires DIMM_ADDR, LID(0x2->TS0,0x6->TS1,0x9->PMIC0,0xA->SPDHub),
+                                             REG_OFFSET (hex), REG_SPACE (REGSPACE:0->Volatile,1->NVM)
+  --cpu-tdelta                              Displays CPU thermal delta (TDELTA) value for the selected CPU socket
+  --cpu-svi3-vr-controller-temp TYPE [RAIL_INDEX ...]
+                                            Get SVI3 VR controller temperature. TYPE: 0=HottestRail, 1=IndividualRail.
+                                             If TYPE=1, RAIL_INDEX: (RAIL_INDEX:0->VDDCR_CPU0,1->VDDCR_CPU1,2->VDDCR_SOC,3->VDDIO,4->VDDIO_MEM_S3) must be specified
+  --cpu-enabled-commands                    Displays HSMP enabled commands bit masks (Read/Write EnabledCommandsBitMask0-2)
+  --cpu-sdps-limit                          Displays CPU SDPS limit for the selected CPU socket (in Watts)
+
+CPU Core Arguments:
+  --core-boost-limit                        Get boost limit for the selected cores
+  --core-curr-active-freq-core-limit        Get Current CCLK limit set per Core
+  --core-energy                             Displays core energy for the selected core
+  --core-ccd-power                          Displays CCD (Core Complex Die) power consumption for the selected core
+  --core-floor-limit                        Get floor limit frequency for the selected core (MHz)
+  --core-eff-floor-limit                    Get effective floor limit frequency for the selected core (MHz)
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
+                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                 all | Selects all devices
+  -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
+                              ID: 0
+                              ID: 1
+                              ID: 2
+                              ID: 3
+                                all | Selects all devices
+  -O, --core CORE [CORE ...]  Select a Core ID from the possible choices:
+                              ID: 0 - 95
+                                all  | Selects all devices
+
+Command Modifiers:
+  --json                                    Displays output in JSON format (human readable by default).
+  --csv                                     Displays output in CSV format (human readable by default).
+  --file FILE                               Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL                          Set the logging level from the possible choices:
+                                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+(cmd-process)=
+### amd-smi process
+
+Lists compute process information running on the specified GPU. See the [sample
+output](#cli-ex-process) for `amd-smi process`.
+
+```shell-session
+~$ amd-smi process --help
+usage: amd-smi process [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
+                       [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
+                       [-w INTERVAL] [-W TIME] [-i ITERATIONS] [-G] [-e] [-p PID]
+                       [-n NAME]
+
+If no GPU is specified, returns information for all GPUs on the system.
+If no process argument is provided, all process information will be displayed.
+
+Process arguments:
+Process arguments:
+  -h, --help                   show this help message and exit
+  -G, --general                pid, process name, memory usage
+  -e, --engine                 All engine usages
+  -p, --pid PID                Gets all process information about the specified process based on Process ID
+  -n, --name NAME              Gets all process information about the specified process based on Process Name.
+                               If multiple processes have the same name, information is returned for all of them.
+
+Watch Arguments:
+  -w, --watch INTERVAL         Reprint the command in a loop of INTERVAL seconds
+  -W, --watch_time TIME        The total duration of TIME to watch the command
+  -i, --iterations ITERATIONS  The total number of ITERATIONS to repeat the command
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
+                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                 all | Selects all devices
+  -U, --cpu CPU [CPU ...]      Select a CPU ID from the possible choices:
+                               ID: 0
+                               ID: 1
+                               ID: 2
+                               ID: 3
+                                 all | Selects all devices
+  -O, --core CORE [CORE ...]   Select a Core ID from the possible choices:
+                               ID: 0 - 95
+                                 all  | Selects all devices
+
+Command Modifiers:
+  --json                       Displays output in JSON format (human readable by default).
+  --csv                        Displays output in CSV format (human readable by default).
+  --file FILE                  Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL             Set the logging level from the possible choices:
+                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+(cmd-event)=
+### amd-smi event
+
+Displays event information for the given GPU.
+
+```shell-session
+~$ amd-smi event --help
+usage: amd-smi event [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
+                     [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
+
+If no GPU is specified, returns event information for all GPUs on the system.
+
+Event Arguments:
+  -h, --help                  show this help message and exit
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                all | Selects all devices
+  -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
+                              ID: 0
+                              ID: 1
+                              ID: 2
+                              ID: 3
+                                all | Selects all devices
+  -O, --core CORE [CORE ...]  Select a Core ID from the possible choices:
+                              ID: 0 - 95
+                                all  | Selects all devices
+
+Command Modifiers:
+  --json                      Displays output in JSON format (human readable by default).
+  --csv                       Displays output in CSV format (human readable by default).
+  --file FILE                 Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL            Set the logging level from the possible choices:
+                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+(cmd-topology)=
+### amd-smi topology
+
+Displays topology information of the specified devices.
+
+```shell-session
+~$ amd-smi topology --help
+usage: amd-smi topology [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
+                        [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]] [-a]
+                        [-w] [-o] [-t] [-b]
+
+If no GPU is specified, returns information for all GPUs on the system.
+If no topology argument is provided, all topology information will be displayed.
+
+Topology arguments:
+  -h, --help               show this help message and exit
+  -a, --access             Displays link accessibility between GPUs
+  -w, --weight             Displays relative weight between GPUs
+  -o, --hops               Displays the number of hops between GPUs
+  -t, --link-type          Displays the link type between GPUs
+  -b, --numa-bw            Display max and min bandwidth between nodes
+  -c, --coherent           Display cache coherent (or non-coherent) link capability between nodes
+  -n, --atomics            Display 32 and 64-bit atomic io link capability between nodes
+  -d, --dma                Display P2P direct memory access (DMA) link capability between nodes
+  -z, --bi-dir             Display P2P bi-directional link capability between nodes
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                all | Selects all devices
+  -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
+                              ID: 0
+                              ID: 1
+                              ID: 2
+                              ID: 3
+                                all | Selects all devices
+  -O, --core CORE [CORE ...]  Select a Core ID from the possible choices:
+                              ID: 0 - 95
+                                all  | Selects all devices
+
+Command Modifiers:
+  --json                      Displays output in JSON format (human readable by default).
+  --csv                       Displays output in CSV format (human readable by default).
+  --file FILE                 Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL            Set the logging level from the possible choices:
+                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+#### Interpreting hops and weight
+
+The following descriptions apply to AMD Instinct GPUs up to and including MI355X.
+
+**Hops (`-o, --hops`)** — The hops table reports an *abstracted topology step count*, not
+the number of physical xGMI links between devices. The possible values are:
+
+| Hops | Meaning |
+|------|---------|
+| 1 | The two GPUs are reachable over xGMI, regardless of the number of physical xGMI links on the route. |
+| 2 | The two GPUs communicate over PCIe within the same CPU NUMA node. |
+| 3 | The two GPUs communicate over PCIe across different CPU NUMA nodes. |
+| 4 | Fallback when the inter-CPU io_link weight cannot be read. |
+
+Two GPUs on the same xGMI fabric always report `1`, even when data physically crosses
+multiple xGMI links. To determine the literal number of physical xGMI links between two
+devices, read the value from the `amdgpu` driver:
+
+```bash
+cat /sys/class/drm/card*/device/xgmi_num_hops
+```
+
+**Weight (`-w, --weight`)** — The weight table reports a qualitative cost metric derived
+from the KFD io_link `weight` property (lower = closer/faster), analogous to the NUMA
+distances reported by `numactl`. Each physical xGMI hop contributes 15 to the weight
+(for example, a single-hop xGMI connection has weight 15). PCIe routes are summed across
+segments (GPU→CPU + CPU→CPU + CPU→GPU); each GPU-to-CPU segment is typically 20, while
+the CPU-to-CPU segment uses the actual io_link weight, or a fallback of 10 if that weight
+cannot be read.
+
+(cmd-set)=
+### amd-smi set
+
+Set options for specified devices.
+
+```shell-session
+~$ amd-smi set --help
+usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]) [-f %]
+                   [-l LEVEL] [-P SETPROFILE] [-d SCLKMAX] [-C PARTITION] [-M PARTITION]
+                   [-a MODE] [-o WATTS] [-p POLICY_ID] [-x POLICY_ID] [-R STATUS]
+                   [--cpu-pwr-limit PWR_LIMIT] [--cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH]
+                   [--cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM] [--cpu-pwr-eff-mode MODE [UTIL PPT_LIMIT]]
+                   [--cpu-gmi3-link-width MIN_LW MAX_LW] [--cpu-pcie-link-rate LINK_RATE]
+                   [--cpu-df-pstate-range MAX_PSTATE MIN_PSTATE] [--cpu-enable-apb]
+                   [--cpu-disable-apb DF_PSTATE] [--soc-boost-limit BOOST_LIMIT]
+                   [--core-boost-limit BOOST_LIMIT] [--json | --csv] [--file FILE]
+                   [--loglevel LEVEL] [--cpu-xgmi-pstate-range MIN_PSTATE MAX_PSTATE] [--cpu-railisofreq-policy VALUE]
+                   [--cpu-dfcstate-ctrl VALUE] [--cpu-pc6-enable VALUE] [--cpu-cc6-enable VALUE]
+                   [--cpu-floor-limit FLOOR_LIMIT] [--cpu-msr-floor-limit MSR_FLOOR_LIMIT]
+                   [--core-floor-limit FLOOR_LIMIT] [--core-msr-floor-limit MSR_FLOOR_LIMIT]
+                   [--cpu-dimm-sb-reg DIMM_ADDR LID REG_OFFSET REG_SPACE WRITE_DATA] [--cpu-sdps-limit SDPS_LIMIT]
+
+If no GPU is specified, will select all GPUs on the system.
+A set argument must be provided; Multiple set arguments are accepted.
+Requires 'sudo' privileges.
+
+Set Arguments:
+  -h, --help                                  show this help message and exit
+  -f, --fan %                                 Set GPU fan speed :
+                                                GPU 0: 0-255 or 0-100%
+                                                GPU 1: 20-100 or 0-100%
+  -l, --perf-level LEVEL                      Set one of the following performance levels:
+                                                AUTO, LOW, HIGH, MANUAL, STABLE_STD, STABLE_PEAK, STABLE_MIN_MCLK, STABLE_MIN_SCLK, DETERMINISM
+  -P, --profile PROFILE_LEVEL                 Set power profile level (#) or choose one of available profiles:
+                                                CUSTOM_MASK, VIDEO_MASK, POWER_SAVING_MASK, COMPUTE_MASK, VR_MASK, THREE_D_FULL_SCR_MASK, BOOTUP_DEFAULT
+  -d, --perf-determinism SCLKMAX              Enable performance determinism mode and set GFXCLK softmax limit (in MHz)
+  -C, --compute-partition, --accelerator-partition TYPE/INDEX
+                                              Set one of the following the accelerator TYPE or profile INDEX:
+                                                N/A.
+                                                Use `sudo amd-smi partition --accelerator` to find acceptable values.
+  -M, --memory-partition PARTITION            Set one of the following the memory partition modes:
+                                                NPS1, NPS2, NPS4, NPS8
+  -a, --compute-partition-mem-alloc-mode MODE Set compute partition memory allocation mode (requires sudo):
+                                                CAPPING - each XCP is capped to an even share of partition memory
+                                                ALL     - each XCP may use the full partition memory
+  -o, --power-cap WATTS                       Set power capacity limit:
+                                                min cap: 0 W, max cap: 550 W
+  -p, --soc-pstate POLICY_ID                  Set the GPU soc pstate policy using policy id, an integer. Valid id's include:
+                                                N/A
+  -x, --xgmi-plpd POLICY_ID                   Set the GPU XGMI per-link power down policy using policy id, an integer. Valid id's include:
+                                                N/A
+  -c, --clk-level CLK_TYPE [FREQ_LEVELS ...]  Set one or more sclk (aka gfxclk), mclk, fclk, pcie, or socclk frequency levels.
+                                                Use `amd-smi static --clock` to find acceptable levels.
+  -L, --clk-limit CLK_TYPE LIM_TYPE VALUE     Sets the sclk (aka gfxclk), mclk, or fclk minimum and maximum frequencies.
+                                                ex: amd-smi set -L (sclk | mclk | fclk) (min | max) value
+                                                For mclk and fclk ONLY, a max value is rounded down to the nearest selectable DPM level; sclk is honored exactly.
+  -R, --process-isolation STATUS              Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.
+  --ptl-status STATUS                         Enable or disable the PTL on a GPU processor: 0 for disable and 1 for enable
+  --ptl-format FRMT1,FRMT2                    Set the PTL format on a GPU processor. For example, --ptl-format I8,F32
+
+CPU Arguments:
+  --cpu-pwr-limit PWR_LIMIT                                      Set power limit for the given socket. Input parameter is power limit value.
+  --cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH                      Set max and Min linkwidth. Input parameters are min and max link width values
+  --cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM                    Sets the max and min dpm level on a given NBIO.
+                                                                  Input parameters are die_index, min dpm, max dpm.
+  --cpu-pwr-eff-mode MODE [UTIL PPT_LIMIT] [MODE [UTIL PPT_LIMIT] ...]
+                                                                 Sets the power efficiency mode policy. Input parameters,
+                                                                  MODE(0=HighPerformance, 1=PowerEfficiency, 2=IOPerformance, 3=BalancedMemory, 4=BalancedCore, 5=BalancedCoreMemory),
+                                                                  For Family 1Ah Models 50h-57h onwards, UTIL(%)(0-100) and PPT_limit (in mW) required if MODE= 4 or 5
+  --cpu-gmi3-link-width MIN_LW MAX_LW                            Sets max and min gmi3 link width range
+  --cpu-pcie-link-rate LINK_RATE                                 Sets pcie link rate
+  --cpu-df-pstate-range MAX_PSTATE MIN_PSTATE                    Sets max and min df-pstates
+  --cpu-enable-apb                                               Enables the DF p-state performance boost algorithm
+  --cpu-disable-apb DF_PSTATE                                    Disables the DF p-state performance boost algorithm. Input parameter is DFPstate (0-3)
+  --soc-boost-limit BOOST_LIMIT                                  Sets the boost limit for the given socket. Input parameter is socket BOOST_LIMIT value
+  --cpu-xgmi-pstate-range MIN_PSTATE MAX_PSTATE                  Sets min and max for xgmi pstate range (MAX <= MIN)
+  --cpu-railisofreq-policy VALUE                                 Sets the CPU rail isolated frequency policy. Input parameter is VALUE (0-1)
+  --cpu-dfcstate-ctrl VALUE                                      Sets the DFCState control for the given socket. Input parameter is VALUE (0-1)
+  --cpu-pc6-enable VALUE                                         Sets PC6 enable control. Input parameter is value (0-1)
+  --cpu-cc6-enable VALUE                                         Sets CC6 enable control. Input parameter is value (0-1)
+  --cpu-floor-limit FLOOR_LIMIT                                  Sets the floor limit for the given CPU socket. Input parameter is CPU FLOOR_LIMIT value MHz
+  --cpu-msr-floor-limit MSR_FLOOR_LIMIT                          Sets the CPU MSR floor limit frequency for the given socket. Input parameter is MSR_FLOOR_LIMIT value in MHz
+  --cpu-dimm-sb-reg DIMM_ADDR LID REG_OFFSET REG_SPACE WRITE_DATA
+                                                                 Write data to DIMM sideband register. Requires DIMM_ADDR, LID(0x2->TS0,0x6->TS1,0x9->PMIC0,0xA->SPDHub)
+                                                                  REG_OFFSET (hex), REG_SPACE (REGSPACE:0->Volatile,1->NVM), WRITE_DATA (hex)
+  --cpu-sdps-limit SDPS_LIMIT                                    Set CPU SDPS limit for the given socket. Input parameter is SDPS limit value in milliwatts (mW).
+
+CPU Core Arguments:
+  --core-boost-limit BOOST_LIMIT                                 Sets the boost limit for the given core. Input parameter is core BOOST_LIMIT value
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]                      Select a GPU ID, BDF, or UUID from the possible choices:
+                                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                                 all | Selects all devices
+  -U, --cpu CPU [CPU ...]                                        Select a CPU ID from the possible choices:
+                                                                 ID: 0
+                                                                 ID: 1
+                                                                 ID: 2
+                                                                 ID: 3
+                                                                   all | Selects all devices
+  -O, --core CORE [CORE ...]                                     Select a Core ID from the possible choices:
+                                                                 ID: 0 - 95
+                                                                   all  | Selects all devices
+
+Command Modifiers:
+  --json                                                         Displays output in JSON format (human readable by default).
+  --csv                                                          Displays output in CSV format (human readable by default).
+  --file FILE                                                    Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL                                               Set the logging level from the possible choices:
+                                                                        DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+(cmd-reset)=
+### amd-smi reset
+
+Reset options for specified devices.
+
+```{warning}
+
+* On systems with XGMI/Infinity Fabric (for example, AMD Instinct MI Series), resetting one
+  GPU resets all GPUs in the same XGMI hive. Use `amd-smi xgmi` or `amd-smi topology` to find the XGMI link connected GPUs or check `/sys/class/drm/card*/device/xgmi_info/xgmi_hive_id` to identify GPUs having the same hive id, before issuing a reset.
+
+* On systems where GPUs share an upstream PCIe switch, resetting one GPU may trigger a
+  Secondary Bus Reset (SBR) on the upstream switch port, affecting all GPUs behind the same
+  switch, independent of XGMI hive membership.
+
+* Any process with an open `/dev/kfd` handle will be terminated when a GPU reset occurs,
+  even if that process is not using the GPU being reset. GPU isolation techniques using the
+  environment variables `ROCR_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` do not
+  prevent this.
+
+See [GPU reset behavior on XGMI systems](/conceptual/gpu-reset-behavior.md) for
+more information.
+```
+
+```shell-session
+~$ amd-smi reset --help
+usage: amd-smi reset [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
+                     (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]) [-G] [-c]
+                     [-f] [-p] [-x] [-d] [-C] [-M] [-o] [-l]
+
+If no GPU is specified, will select all GPUs on the system.
+A reset argument must be provided; Multiple reset arguments are accepted.
+Requires 'sudo' privileges.
+
+Reset Arguments:
+  -h, --help               show this help message and exit
+  -G, --gpureset           Reset the specified GPU
+  -c, --clocks             Reset clocks and overdrive to default
+  -f, --fans               Reset fans to automatic (driver) control
+  -p, --profile            Reset power profile back to default
+  -x, --xgmierr            Reset XGMI error counts
+  -d, --perf-determinism   Disable performance determinism
+  -o, --power-cap          Reset power capacity limit to max capable
+  -l, --clean-local-data   Clean up local data in LDS/GPRs on a per partition basis
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                all | Selects all devices
+  -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
+                              ID: 0
+                              ID: 1
+                              ID: 2
+                              ID: 3
+                                all | Selects all devices
+  -O, --core CORE [CORE ...]  Select a Core ID from the possible choices:
+                              ID: 0 - 95
+                                all  | Selects all devices
+
+Command Modifiers:
+  --json                      Displays output in JSON format (human readable by default).
+  --csv                       Displays output in CSV format (human readable by default).
+  --file FILE                 Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL            Set the logging level from the possible choices:
+                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+(cmd-monitor)=
+### amd-smi monitor
+
+Monitor metrics for target devices. See the [sample output](#cli-ex-monitor)
+for `amd-smi monitor`.
+
+```shell-session
+~$ amd-smi monitor --help
+usage: amd-smi monitor [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
+                       [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
+                       [-w INTERVAL] [-W TIME] [-i ITERATIONS] [-p] [-t] [-u] [-m] [-n]
+                       [-d] [-e] [-v] [-r] [-q]
+
+Monitor a target device for the specified arguments.
+If no arguments are provided, all arguments will be enabled.
+Use the watch arguments to run continuously.
+
+Monitor Arguments:
+  -h, --help                   show this help message and exit
+  -p, --power-usage            Monitor power usage and power cap in Watts
+  -t, --temperature            Monitor temperature in Celsius
+  -u, --gfx                    Monitor graphics utilization (%) and clock (MHz)
+  -m, --mem                    Monitor memory utilization (%) and clock (MHz)
+  -n, --encoder                Monitor encoder utilization (%) and clock (MHz)
+  -d, --decoder                Monitor decoder utilization (%) and clock (MHz)
+  -e, --ecc                    Monitor ECC single bit, ECC double bit, and PCIe replay error counts
+  -v, --vram-usage             Monitor memory usage in MB
+  -r, --pcie                   Monitor PCIe bandwidth in Mb/s
+  -q, --process                Enable Process information table below monitor output
+  -V, --violation              Monitor power and thermal violation status (%);
+                                   Only available for MI300 or newer ASICs
+
+Watch Arguments:
+  -w, --watch INTERVAL         Reprint the command in a loop of INTERVAL seconds
+  -W, --watch_time TIME        The total duration of TIME to watch the command
+  -i, --iterations ITERATIONS  The total number of ITERATIONS to repeat the command
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
+                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                 all | Selects all devices
+  -U, --cpu CPU [CPU ...]      Select a CPU ID from the possible choices:
+                               ID: 0
+                               ID: 1
+                               ID: 2
+                               ID: 3
+                                 all | Selects all devices
+  -O, --core CORE [CORE ...]   Select a Core ID from the possible choices:
+                               ID: 0 - 95
+                                 all  | Selects all devices
+
+Command Modifiers:
+  --json                       Displays output in JSON format (human readable by default).
+  --csv                        Displays output in CSV format (human readable by default).
+  --file FILE                  Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL             Set the logging level from the possible choices:
+                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+(cmd-xgmi)=
+### amd-smi xgmi
+
+Displays XGMI information of specified devices.
+
+```shell-session
+~$ amd-smi xgmi --help
+usage: amd-smi xgmi [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
+                    [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]] [-m]
+
+If no GPU is specified, returns information for all GPUs on the system.
+If no xgmi argument is provided, all xgmi information will be displayed.
+
+XGMI arguments:
+  -h, --help               show this help message and exit
+  -m, --metric             Metric XGMI information
+  -l, --link-status        XGMI Link Status information
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                all | Selects all devices
+  -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
+                              ID: 0
+                              ID: 1
+                              ID: 2
+                              ID: 3
+                                all | Selects all devices
+  -O, --core CORE [CORE ...]  Select a Core ID from the possible choices:
+                              ID: 0 - 95
+                                all  | Selects all devices
+
+Command Modifiers:
+  --json                      Displays output in JSON format (human readable by default).
+  --csv                       Displays output in CSV format (human readable by default).
+  --file FILE                 Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL            Set the logging level from the possible choices:
+                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+(cmd-partition)=
+### amd-smi partition
+
+Displays partition information of the devices.
+
+```shell-session
+~$ amd-smi partition --help
+usage: amd-smi partition [-h] [-g GPU [GPU ...]] [-c] [-m] [-a] [--json | --csv]
+                         [--file FILE] [--loglevel LEVEL]
+
+If no GPU is specified, returns information for all GPUs on the system.
+If no partition argument is provided, all partition information will be displayed.
+
+Partition arguments:
+  -h, --help               show this help message and exit
+  -c, --current            display the current partition information
+  -m, --memory             display the current memory partition mode and capabilities
+  -a, --accelerator        display accelerator partition information
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                             all | Selects all devices
+
+Command Modifiers:
+  --json                   Displays output in JSON format (human readable by default).
+  --csv                    Displays output in CSV format (human readable by default).
+  --file FILE              Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL         Set the logging level from the possible choices:
+```
+
+### amd-smi ras
+
+Displays RAS information of specified devices.
+
+```shell-session
+~$ amd-smi ras --help
+usage: amd-smi ras [-h] (--cper | --afid) [--severity SEVERITY [SEVERITY ...]]
+                   [--folder FOLDER] [--file-limit FILE_LIMIT] [--follow]
+                   [--cper-file CPER_FILE] [-g GPU [GPU ...]] [--json | --csv]
+                   [--file FILE] [--overwrite] [--append] [--loglevel LEVEL]
+
+Retrieve and decode RAS (CPER) entries from the kernel driver.
+Supports filtering by severity, exporting to different formats, and continuous monitoring.
+This command accepts options only; no positional arguments are required.
+
+RAS arguments:
+  -h, --help                          show this help message and exit
+  --cper                              Trigger current CPER data retrieval
+  --afid                              Generate an AFID (AMD Field ID) given a CPER record file or folder
+
+CPER Arguments:
+  --severity SEVERITY [SEVERITY ...]  Set the SEVERITY filters from the following:
+                                          nonfatal-uncorrected, fatal, nonfatal-corrected, all
+  --folder FOLDER                     With --cper: folder to dump current CPER report files (created if missing).
+                                          With --afid: existing folder of CPER records to decode.
+  --file-limit FILE_LIMIT             Maximum number of current CPER files in target folder
+                                          Older files beyond limit will be deleted
+  --follow                            Continuously monitor for new CPER entries
+
+AFID Arguments:
+  --cper-file CPER_FILE               Full path of a retrieved CPER record file to generate the AFID
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                all | Selects all devices
+  -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
+                              ID: 0
+                              ID: 1
+                              ID: 2
+                              ID: 3
+                                all | Selects all devices
+  -O, --core CORE [CORE ...]  Select a Core ID from the possible choices:
+                              ID: 0 - 95
+                                all  | Selects all devices
+
+Command Modifiers:
+  --json                      Displays output in JSON format (human readable by default).
+  --csv                       Displays output in CSV format (human readable by default).
+  --file FILE                 Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL            Set the logging level from the possible choices:
+                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+### amd-smi fabric
+
+Displays fabric (UALoE/UALink over Ethernet) information of the devices.
+
+```{note}
+The `fabric` subcommand is registered only when the amdgpu driver is initialized.
+On systems without IFoE/UALoE fabric hardware the fabric queries report `N/A` /
+not supported.
+```
+
+```shell-session
+~$ amd-smi fabric --help
+usage: amd-smi fabric [-h] [-t] [-i] [-g GPU [GPU ...]] [--json | --csv]
+                      [--file FILE] [--loglevel LEVEL]
+
+If no GPU is specified, returns information for all GPUs on the system.
+If no fabric argument is provided, all fabric information will be displayed.
+
+Fabric arguments:
+  -h, --help               show this help message and exit
+  -t, --topology           Display fabric topology data (counters per category, instance, and item)
+  -i, --info               Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                             all | Selects all devices
+
+Command Modifiers:
+  --json                   Displays output in JSON format (human readable by default).
+  --csv                    Displays output in CSV format (human readable by default).
+  --file FILE              Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL         Set the logging level from the possible choices:
+                             DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+### amd-smi node
+
+Gets power and baseboard information for the node. Returns information for
+node 0 (OAM_ID 0) on the system. If no node argument is provided, all node
+information will be displayed.
+
+```shell-session
+~$ amd-smi node --help
+usage: amd-smi node [-h] [-p] [-b] [-G] [-T] [--json | --csv] [--file FILE]
+                     [--loglevel LEVEL]
+
+Node arguments:
+  -h, --help                    show this help message and exit
+  -p, --power-management        Displays power management information
+  -b, --base-board-temps        Displays baseboard temperatures
+  -G, --gtt                     Displays GTT (shared GPU memory) size
+  -T, --tray                    Displays compute tray type and accelerator count
+
+Command Modifiers:
+  --json                        Displays output in JSON format (human readable by default).
+  --csv                         Displays output in CSV format (human readable by default).
+  --file FILE                   Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL              Set the logging level from the possible choices:
+                                   DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+This example shows `amd-smi node --tray` output on a system with a UALoE
+session active:
+
+```shell-session
+~$ amd-smi node --tray
+NODE:
+    TRAY:
+        MAX_ACC_PER_TRAY: 8
+        TRAY_TYPE: HELIOS_P
+```
+
+On systems without UALoE hardware/session, `amdsmi_get_tray_info()` returns
+`AMDSMI_STATUS_NOT_SUPPORTED` and the `TRAY:` block (and the `tray`/
+`max_acc_per_tray`/`tray_type` keys in `--json`/`--csv`) is omitted entirely.
+
+## Interpreting the output
+
+When you run an `amd-smi` command, the tool presents detailed information
+across various categories, each containing specific fields and their current
+values.
+
+(cli-ex-default)=
+### Example output from amd-smi (default)
+
+The following block is example output from running `amd-smi` without any
+subcommand. This is the default view that displays a summary of version
+information, GPU status, and running processes.
+
+```bash
+~$ amd-smi
++------------------------------------------------------------------------------+
+| AMD-SMI            27.0.0                                                    |
+| amdgpu Version:    6.19.4                                                    |
+| ROCm Version:      7.14.0                                                    |
+| Platform:          Linux Baremetal                                           |
+|-------------------------------------+----------------------------------------|
+| BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |
+| GPU  HIP-ID  OAM-ID  Partition-Mode | GFX-Uti    Fan               Mem-Usage |
+|=====================================+========================================|
+| 0000:01:00.0    AMD Instinct MI300A | 0 %      27 °C   0                49 W |
+|   0       0       0        SPX/NPS1 | 6 %        N/A            25/385728 MB |
+|-------------------------------------+----------------------------------------|
+| 0001:01:00.0    AMD Instinct MI300A | 0 %      29 °C   0                42 W |
+|   1       1       1        SPX/NPS1 | 2 %        N/A            25/385728 MB |
+|-------------------------------------+----------------------------------------|
+| 0002:01:00.0    AMD Instinct MI300A | 0 %      30 °C   0                33 W |
+|   2       2       2        SPX/NPS1 | 2 %        N/A            25/385728 MB |
+|-------------------------------------+----------------------------------------|
+| 0003:01:00.0    AMD Instinct MI300A | 0 %      26 °C   0                40 W |
+|   3       3       3        SPX/NPS1 | 2 %        N/A            25/385728 MB |
++-------------------------------------+----------------------------------------+
++------------------------------------------------------------------------------+
+| Processes:                                                                   |
+|  GPU      PID  Process Name     GTT_MEM  VRAM_MEM  MEM_USAGE   CU %     SDMA |
+|==============================================================================|
+|  No running processes found                                                  |
++------------------------------------------------------------------------------+
+```
+
+The default output includes the following sections:
+
+- **Version header**: AMD-SMI version, amdgpu driver version, ROCm version,
+  and platform information.
+- **GPU table** (first row per GPU): BDF address, GPU market name, OAM ID,
+  memory utilization, hotspot temperature, uncorrectable ECC error count, and
+  current/maximum power usage.
+- **GPU table** (second row per GPU): GPU index, HIP ID, OAM ID,
+  partition mode (compute/memory), GFX utilization, fan speed, and VRAM usage.
+- **Process table**: Lists all running GPU processes with GPU ID, PID, process
+  name, GTT memory, VRAM memory, total memory usage, compute unit occupancy
+  percentage, and SDMA usage.
+
+```{note}
+Process Name may require elevated permissions. If running without `sudo`,
+process names may appear as `N/A`.
+```
+
+The default output also supports JSON and CSV formatting:
+
+```shell-session
+amd-smi --json
+amd-smi --csv
+```
+
+(cli-ex-rocm-smi)=
+### Example output from amd-smi --rocm-smi
+
+The `--rocm-smi` flag provides a compatibility mode that displays GPU
+information in a format similar to the legacy `rocm-smi` tool. This is useful
+for users migrating from `rocm-smi` who rely on scripts or workflows that parse
+the original concise output format.
+
+```bash
+~$ amd-smi --rocm-smi
+========================================== ROCm System Management Interface ==========================================
+==================================================== Concise Info ====================================================
+Device  Node  IDs              Temp        Power  Partitions          SCLK   MCLK    Fan  Perf  PwrCap  VRAM%  GPU%  
+              (DID,     GUID)  (Junction)  (Avg)  (Mem, Compute, ID)                                                 
+======================================================================================================================
+0       7     0x74a0,   XXXXX  27.0°C      49.0W  NPS1, SPX, 0        44Mhz  900Mhz  0%   auto  550.0W  0%     2%    
+1       7     0x74a0,   XXXXX  29.0°C      42.0W  NPS1, SPX, 0        42Mhz  900Mhz  0%   auto  550.0W  0%     1%    
+2       7     0x74a0,   XXXXX  30.0°C      33.0W  NPS1, SPX, 0        42Mhz  900Mhz  0%   auto  550.0W  0%     1%    
+3       7     0x74a0,   XXXXX  26.0°C      40.0W  NPS1, SPX, 0        35Mhz  900Mhz  0%   auto  550.0W  0%     1%    
+================================================ End of ROCm SMI Log =================================================
+```
+
+```{note}
+The `--rocm-smi` flag is a top-level option (not a subcommand). It cannot be
+combined with other subcommands. The temperature label (Edge, Junction, or
+Memory) is automatically detected based on the first available sensor.
+```
+
+(cli-output-na)=
+### About N/A values
+
+`N/A` typically indicates that the data for a specific field is either unavailable or irrelevant in the current context for your device and its software environment. The exact reason may vary depending on the field and the GPU. In general, you can interpret `N/A` to mean one of the following:
+
+**Not Applicable**: The feature or parameter does not apply to your specific AMD hardware or its current configuration. Examples include display-related clocks on a headless compute card and partition details when the GPU is not partitioned.
+
+**Not Available**: The information cannot be retrieved by the `amd-smi` tool at this time. This could be due to one of the following reasons:
+
+- The hardware component does not report the specific metric.
+- The currently installed `amdgpu` driver version does not support querying
+  this particular piece of information through `amd-smi-lib`.
+- The `amdgpu` driver reports a newer `gpu_metrics` version than the installed
+  AMD SMI supports. `gpu_metrics` is a versioned structure supplied by the
+  driver, and AMD SMI needs explicit support for each version's layout. When the
+  driver is newer than your AMD SMI (or ROCm) release by a release cycle, AMD SMI
+  can't parse the newer layout, so fields sourced from `gpu_metrics` (violations,
+  `SOCKET_POWER`, engine usage, and so on) read N/A. Upgrade AMD SMI or ROCm to a
+  release that supports your driver's `gpu_metrics` version to resolve this. (ROCm
+  7.13 added support for the dynamic `gpu_metrics` layout introduced in v1.9,
+  which handles current and future versions, so releases from 7.13 onward are no
+  longer affected by this mismatch.)
+
+**Empty Section**: In human-readable output, `N/A` on a section header rather than a
+field means the section has no entries. For example, `RDMA_DEVICES: N/A` under an
+AI-NIC means the NIC reported no RDMA device, which is what you see when `ionic` is
+bound but `ionic_rdma` is not loaded. A header also reads `N/A` when the section's
+query failed and the whole section was replaced by `N/A` rather than left empty, which
+is what `NIC`, `SMU`, and `IFWI` in `amd-smi static` and `FW_LIST` in `amd-smi firmware`
+do. JSON output represents an empty section as an empty object. CSV drops the section's
+columns when no device in the run reports it, and fills them with `N/A` when only some
+do.
+
+(cli-ex-static)=
+### Example output from amd-smi static
+
+The following block is example output from the `amd-smi static` command without additional modifiers.
+
+```bash
+~$ amd-smi static
+CPU: 0
+    SMU:
+        FW_VERSION: 85.103.0
+    INTERFACE_VERSION:
+        PROTO VERSION: 6
+...
+
+GPU: 0
+    ASIC:
+        MARKET_NAME: AMD Instinct MI300A
+        VENDOR_ID: 0x1002
+        VENDOR_NAME: Advanced Micro Devices, Inc. [AMD/ATI]
+        SUBVENDOR_ID: 0x1002
+        DEVICE_ID: 0x74a0
+        SUBSYSTEM_ID: 0x74a0
+        REV_ID: 0x00
+        CHIP_REV_ID: 0x01
+        EXTERNAL_REV_ID: 0x47
+        ASIC_SERIAL: 0xXXXXXXXXXXXXXXXX
+        OAM_ID: 0
+        PHYSICAL_ACC_ID: N/A
+        NUM_COMPUTE_UNITS: 228
+        TARGET_GRAPHICS_VERSION: gfx942
+        FLAGS: 17
+    BUS:
+        BDF: 0000:01:00.0
+        MAX_PCIE_WIDTH: 16
+        MAX_PCIE_SPEED: 32 GT/s
+        PCIE_LEVELS: N/A
+        PCIE_INTERFACE_VERSION: Gen 5
+        SLOT_TYPE: PCIE
+    IFWI:
+        NAME: N/A
+        BUILD_DATE: N/A
+        PART_NUMBER: N/A
+        VERSION: N/A
+    LIMIT:
+        PPT0:
+            MAX_POWER_LIMIT: 550 W
+            MIN_POWER_LIMIT: 0 W
+            SOCKET_POWER_LIMIT: 0 W
+        PPT1:
+            MAX_POWER_LIMIT: N/A
+            MIN_POWER_LIMIT: N/A
+            SOCKET_POWER_LIMIT: N/A
+        SLOWDOWN_EDGE_TEMPERATURE: N/A
+        SLOWDOWN_HOTSPOT_TEMPERATURE: 100 °C
+        SLOWDOWN_VRAM_TEMPERATURE: 105 °C
+        SHUTDOWN_EDGE_TEMPERATURE: N/A
+        SHUTDOWN_HOTSPOT_TEMPERATURE: 110 °C
+        SHUTDOWN_VRAM_TEMPERATURE: 115 °C
+        PTL_STATE: N/A
+        PTL_FORMAT: N/A
+    DRIVER:
+        NAME: amdgpu
+        VERSION: 6.19.4
+        OS_KERNEL_VERSION: 5.15.0-generic
+    BOARD:
+        MODEL_NUMBER: N/A
+        PRODUCT_SERIAL: N/A
+        FRU_ID: N/A
+        PRODUCT_NAME: Aqua Vanjaram [Instinct MI300A]
+        MANUFACTURER_NAME: Advanced Micro Devices, Inc. [AMD/ATI]
+    RAS:
+        EEPROM_VERSION: 0x30000
+        BAD_PAGE_THRESHOLD: N/A
+        BAD_PAGE_THRESHOLD_EXCEEDED: N/A
+        PARITY_SCHEMA: DISABLED
+        SINGLE_BIT_SCHEMA: DISABLED
+        DOUBLE_BIT_SCHEMA: DISABLED
+        POISON_SCHEMA: ENABLED
+        ECC_BLOCK_STATE:
+            UMC: DISABLED
+            SDMA: ENABLED
+            GFX: ENABLED
+            MMHUB: ENABLED
+            ATHUB: DISABLED
+            PCIE_BIF: DISABLED
+            HDP: DISABLED
+            XGMI_WAFL: DISABLED
+            DF: DISABLED
+            SMN: DISABLED
+            SEM: DISABLED
+            MP0: DISABLED
+            MP1: DISABLED
+            FUSE: DISABLED
+            MCA: DISABLED
+            VCN: DISABLED
+            JPEG: DISABLED
+            IH: DISABLED
+            MPIO: DISABLED
+    SOC_PSTATE: N/A
+    XGMI_PLPD: N/A
+    PROFILE: AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported
+    PROCESS_ISOLATION: Disabled
+    NUMA:
+        NODE: 0
+        AFFINITY: 0
+        CPU_AFFINITY:
+            CPU_LIST_0:
+                BITMASK: 0000000000FFFFFF
+                CPU_CORES_AFFINITY: 0-23
+            CPU_LIST_1:
+                BITMASK: 00FFFFFF00000000
+                CPU_CORES_AFFINITY: 96-119
+            CPU_LIST_2:
+                BITMASK: 0000000000000000
+                CPU_CORES_AFFINITY: N/A
+        SOCKET_AFFINITY:
+            CPU_LIST_0:
+                BITMASK: 0000000000FFFFFF
+                CPU_CORES_AFFINITY: 0-23
+            CPU_LIST_1:
+                BITMASK: 00FFFFFF00000000
+                CPU_CORES_AFFINITY: 96-119
+            CPU_LIST_2:
+                BITMASK: 0000000000000000
+                CPU_CORES_AFFINITY: N/A
+    VRAM:
+        TYPE: HBM
+        VENDOR: UNKNOWN
+        SIZE: 96432 MB
+        BIT_WIDTH: 8192
+        MAX_BANDWIDTH: 5325 GB/s
+    CACHE_INFO:
+        CACHE_0:
+            CACHE_ACRONYM: L1D
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 32 KB
+            CACHE_LEVEL: 1
+            MAX_NUM_CU_SHARED: 1
+            NUM_CACHE_INSTANCE: 228
+            TOTAL_CACHE_SIZE: 7296 KB
+        CACHE_1:
+            CACHE_ACRONYM: L1I
+            CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
+            CACHE_SIZE: 64 KB
+            CACHE_LEVEL: 1
+            MAX_NUM_CU_SHARED: 2
+            NUM_CACHE_INSTANCE: 108
+            TOTAL_CACHE_SIZE: 6912 KB
+        CACHE_2:
+            CACHE_ACRONYM: L1I
+            CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
+            CACHE_SIZE: 64 KB
+            CACHE_LEVEL: 1
+            MAX_NUM_CU_SHARED: 1
+            NUM_CACHE_INSTANCE: 12
+            TOTAL_CACHE_SIZE: 768 KB
+        CACHE_3:
+            CACHE_ACRONYM: L1D
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 16 KB
+            CACHE_LEVEL: 1
+            MAX_NUM_CU_SHARED: 2
+            NUM_CACHE_INSTANCE: 108
+            TOTAL_CACHE_SIZE: 1728 KB
+        CACHE_4:
+            CACHE_ACRONYM: L1D
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 16 KB
+            CACHE_LEVEL: 1
+            MAX_NUM_CU_SHARED: 1
+            NUM_CACHE_INSTANCE: 12
+            TOTAL_CACHE_SIZE: 192 KB
+        CACHE_5:
+            CACHE_ACRONYM: L2
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 4096 KB
+            CACHE_LEVEL: 2
+            MAX_NUM_CU_SHARED: 228
+            NUM_CACHE_INSTANCE: 1
+            TOTAL_CACHE_SIZE: 4096 KB
+        CACHE_6:
+            CACHE_ACRONYM: L3
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 262144 KB
+            CACHE_LEVEL: 3
+            MAX_NUM_CU_SHARED: 228
+            NUM_CACHE_INSTANCE: 1
+            TOTAL_CACHE_SIZE: 262144 KB
+    MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)
+    CLOCK:
+        SYS:
+            CURRENT_LEVEL: 0
+            FREQUENCY_LEVELS:
+                LEVEL 0: 44 MHz
+                LEVEL 1: 500 MHz
+                LEVEL 2: 2100 MHz
+        MEM:
+            CURRENT_LEVEL: 0
+            FREQUENCY_LEVELS:
+                LEVEL 0: 900 MHz
+                LEVEL 1: 1100 MHz
+                LEVEL 2: 1200 MHz
+                LEVEL 3: 1300 MHz
+        DF:
+            CURRENT_LEVEL: 0
+            FREQUENCY_LEVELS:
+                LEVEL 0: 1200 MHz
+                LEVEL 1: 1600 MHz
+                LEVEL 2: 1900 MHz
+                LEVEL 3: 2000 MHz
+        SOC:
+            CURRENT_LEVEL: 0
+            FREQUENCY_LEVELS:
+                LEVEL 0: 27 MHz
+                LEVEL 1: 800 MHz
+                LEVEL 2: 1000 MHz
+                LEVEL 3: 1143 MHz
+        DCEF: N/A
+        VCLK0:
+            CURRENT_LEVEL: 0
+            FREQUENCY_LEVELS:
+                LEVEL 0: 0 MHz
+                LEVEL 1: 914 MHz
+        VCLK1: N/A
+        DCLK0:
+            CURRENT_LEVEL: 0
+            FREQUENCY_LEVELS:
+                LEVEL 0: 7 MHz
+                LEVEL 1: 711 MHz
+        DCLK1: N/A
+...
+```
+
+(cli-ex-process)=
+### Example output from amd-smi process
+
+The following block is example output from the `amd-smi process` command without
+additional modifiers. When no GPU is specified, it returns process information
+for all GPUs on the system.
+
+```bash
+~$ amd-smi process
+GPU: 0
+    PROCESS_INFO:
+        NAME: python3
+        PID: 12345
+        MEMORY_USAGE:
+            GTT_MEM: 128.0 MB
+            CPU_MEM: 0.0 B
+            VRAM_MEM: 4.0 GB
+        MEM: 4.13 GB
+        USAGE:
+            GFX: 52345678 ns
+            ENC: 0 ns
+        CU_OCCUPANCY: 114
+        EVICTED_TIME: 0 ms
+
+GPU: 1
+    PROCESS_INFO:
+        No running processes detected
+...
+```
+
+You can filter processes by GPU, PID, or process name:
+
+```shell-session
+amd-smi process --gpu 0
+amd-smi process --pid 12345
+amd-smi process --name python3
+```
+
+Use the `--general` flag to display only pid, process name, and memory usage, or
+`--engine` flag to display engine usage:
+
+```shell-session
+amd-smi process --gpu 0 --general
+amd-smi process --gpu 0 --engine
+```
+
+The `process` command also supports watch mode to continuously display process
+information:
+
+```shell-session
+amd-smi process --watch 2
+amd-smi process --watch 2 --watch_time 60
+amd-smi process --watch 2 --iterations 10
+```
+
+(cli-ex-monitor)=
+### Example output from amd-smi monitor
+
+The following block is example output from the `amd-smi monitor` command without
+additional modifiers. When no arguments are provided, all default monitor
+metrics are enabled.
+
+```bash
+~$ amd-smi monitor
+GPU  XCP  POWER   GPU_T   MEM_T   GFX_CLK   GFX%   MEM%   ENC%   DEC%       GTT_USAGE
+  0    0   49 W   27 °C   29 °C    43 MHz    2 %    0 %    N/A    0 %    0.0/376.7 GB
+  1    0   42 W   29 °C   30 °C    47 MHz    2 %    0 %    N/A    0 %    0.0/376.7 GB
+  2    0   33 W   30 °C   31 °C    49 MHz    2 %    0 %    N/A    0 %    0.0/376.7 GB
+  3    0   40 W   26 °C   28 °C    40 MHz    2 %    0 %    N/A    0 %    0.0/376.7 GB
+```
+
+The final memory column is chosen dynamically per device. On APUs (such as the
+MI300A above), the tool reports the larger of the VRAM and GTT pools, so the
+column header reads `GTT_USAGE`. On discrete GPUs it reports the dedicated VRAM
+pool, so the header reads `VRAM_USAGE`. The example below is from a discrete
+MI300X in `CPX`/`NPS4` mode; only the primary XCP of each partition reports
+per-engine sensors, while the other XCPs share the physical device and report
+`N/A` for those fields:
+
+```bash
+~$ amd-smi monitor
+GPU  XCP  POWER   GPU_T   MEM_T   GFX_CLK   GFX%   MEM%   ENC%   DEC%      VRAM_USAGE
+  0    0  183 W   49 °C   48 °C  1427 MHz    0 %    0 %    N/A    0 %    0.3/192.0 GB
+  1    1    N/A     N/A     N/A       N/A    N/A    N/A    N/A    N/A    0.5/ 48.0 GB
+  2    2    N/A     N/A     N/A       N/A    N/A    N/A    N/A    N/A    0.5/ 48.0 GB
+  3    3    N/A     N/A     N/A       N/A    N/A    N/A    N/A    N/A    0.5/ 48.0 GB
+  4    0  182 W   50 °C   46 °C  1423 MHz    0 %    0 %    N/A    0 %    0.3/192.0 GB
+  5    1    N/A     N/A     N/A       N/A    N/A    N/A    N/A    N/A    0.5/ 48.0 GB
+  6    2    N/A     N/A     N/A       N/A    N/A    N/A    N/A    N/A    0.5/ 48.0 GB
+  7    3    N/A     N/A     N/A       N/A    N/A    N/A    N/A    N/A    0.5/ 48.0 GB
+...
+```
+
+You can select specific metrics to monitor:
+
+```shell-session
+amd-smi monitor --power-usage --temperature
+amd-smi monitor --gfx --mem
+amd-smi monitor --vram-usage --ecc
+amd-smi monitor --pcie
+```
+
+Use the `--process` flag to include a process information table below the
+monitor output:
+
+```shell-session
+amd-smi monitor --process
+```
+
+The `monitor` command supports watch mode for continuous monitoring:
+
+```shell-session
+amd-smi monitor --watch 1
+amd-smi monitor --watch 1 --watch_time 120
+amd-smi monitor --watch 1 --iterations 30
+```
+
+### Listing CPER entries using amd-smi
+
+This example code shows how to list CPER entries for all GPUs into files
+
+```bash
+~$  sudo amd-smi ras --cper --severity all --folder /tmp/cper_dump/
+timestamp            gpu_id  severity             file_name         list of afids
+2000/06/27 10:45:13  0       FATAL                fatal-1.cper      30
+2000/06/27 10:45:13  1       FATAL                fatal-2.cper      30
+2000/06/27 10:45:13  2       FATAL                fatal-3.cper      30
+2000/06/27 10:45:13  3       FATAL                fatal-4.cper      30
+2000/06/27 10:45:13  4       FATAL                fatal-5.cper      30
+2000/06/27 10:45:13  5       FATAL                fatal-6.cper      30
+2000/06/27 10:45:13  6       FATAL                fatal-7.cper      30
+2000/06/27 10:45:13  7       FATAL                fatal-8.cper      30
+```
+
+This example code shows how to list CPER entries for a given GPU into files
+
+```bash
+~$  sudo amd-smi ras --cper --severity all --folder /tmp/cper_dump/ --gpu 1
+timestamp            gpu_id  severity             file_name         list of afids
+2000/06/27 10:45:13  1       FATAL                fatal-1.cper      30
+```
+
+This example code shows how to list CPER entries and their JSON data for a given GPU into files
+
+```bash
+~$  sudo amd-smi ras --cper --severity all --folder /tmp/cper_dump/ --gpu 1 --json
+timestamp            gpu_id  severity             file_name         list of afids
+2000/06/27 10:45:13  1       FATAL                fatal-1.cper      30
+~$ ls -alh /tmp/cper_dump/
+total 12K
+drwxr-xr-x 2 root root   46 Sep 16 21:12 .
+drwxrwxrwt 1 root root 4.0K Sep 16 18:03 ..
+-rw-r--r-- 1 root root  376 Sep 16 21:12 fatal-1.cper
+-rw-r--r-- 1 root root  347 Sep 16 21:12 fatal-1.json
+~$ cat /tmp/cper_dump/fatal-1.json
+{
+  "error_severity": "fatal",
+  "notify_type": "MCE",
+  "timestamp": "2000/06/27 10:45:13",
+  "signature": "CPER",
+  "revision": 256,
+  "signature_end": "0xffffffff",
+  "sec_cnt": 1,
+  "record_length": 376,
+  "platform_id": "111102-G40307-0C",
+  "creator_id": "136c692517001839",
+  "record_id": "f0000031",
+  "flags": 0,
+  "persistence_info": 0
+}
+```
+
+This example code shows how to continuously list CPER entries without exiting
+
+```bash
+~$  sudo amd-smi ras --cper --follow --severity all --folder /tmp/cper_dump
+Press CTRL + C to stop.
+timestamp            gpu_id  severity             file_name         list of afids
+2000/06/27 10:45:13  0       FATAL                fatal-1.cper      30
+2000/06/27 10:45:13  1       FATAL                fatal-2.cper      30
+2000/06/27 10:45:13  2       FATAL                fatal-3.cper      30
+2000/06/27 10:45:13  3       FATAL                fatal-4.cper      30
+2000/06/27 10:45:13  4       FATAL                fatal-5.cper      30
+2000/06/27 10:45:13  5       FATAL                fatal-6.cper      30
+2000/06/27 10:45:13  6       FATAL                fatal-7.cper      30
+2000/06/27 10:45:13  7       FATAL                fatal-8.cper      30
+...
+```
+
+This example code shows how to list CPER entries with a limited number of entries
+
+```bash
+~$  sudo amd-smi ras --cper --severity all --folder /tmp/cper_dump  --file-limit 5
+timestamp            gpu_id  severity             file_name         list of afids
+2000/06/27 10:45:13  0       FATAL                fatal-1.cper      30
+2000/06/27 10:45:13  1       FATAL                fatal-2.cper      30
+2000/06/27 10:45:13  2       FATAL                fatal-3.cper      30
+2000/06/27 10:45:13  3       FATAL                fatal-4.cper      30
+2000/06/27 10:45:13  4       FATAL                fatal-5.cper      30
+```
+
+This example code shows how to list a specific severity of CPER entries only
+
+```bash
+~$  sudo amd-smi ras --cper --severity fatal --folder /tmp/cper_dump/
+timestamp            gpu_id  severity             file_name         list of afids
+2000/06/27 10:45:13  0       FATAL                fatal-1.cper      30
+```
+
+This example code shows how to dump AFID errors in a CPER file
+
+```bash
+~$  sudo amd-smi ras --afid --cper-file /tmp/cper_dump/fatal-1.cper
+```
+
+Refer to
+[amd_smi_cper_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_cper_example.py)
+and
+[amd_smi_afid_example.py](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_afid_example.py)
+for API examples.
+
+## Memory tuning: UMA carveout and GTT
+
+`amd-smi static --mem-carveout` / `amd-smi set --mem-carveout INDEX` and
+`amd-smi node --gtt` / `amd-smi set --gtt GB` / `amd-smi reset --gtt` let
+users inspect and tune the BIOS VRAM carveout and the TTM `pages_limit`
+(shared GTT) respectively. Both features talk directly to kernel UAPI
+interfaces (sysfs / modprobe.d) and do **not** require libdrm.
+
+### Supported ASICs
+
+| Feature | Hardware | Status |
+|---|---|---|
+| `--mem-carveout` (UMA carveout) | Strix and later APUs (gfx1150, gfx1151, gfx1152) whose VBIOS exposes ATCS 0xA | Supported (amdgpu sysfs node) |
+| `--mem-carveout` (UMA carveout) | UEFI-HII APU platforms (e.g. HP ZBook Ultra G1a, Z2 Mini G1a) that expose the carveout through fwupd | Supported (via the fwupd daemon) |
+| `--mem-carveout` (UMA carveout) | Radeon dGPUs, Instinct MI-series (MI100, MI200, MI300, MI300A) | Not supported — reported as `MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)` |
+| `--gtt` (TTM `pages_limit`) | Any amdgpu system, including Instinct MI300A (`amdttm` / `amd-ttm`) and Ryzen APUs (`ttm`) | Supported |
+
+### Prerequisites
+
+- **UMA carveout:** Linux kernel >= 7.0 (upstream commit [`685b711`](https://github.com/torvalds/linux/commit/685b711); some distros backport it to earlier kernels), an APU VBIOS that advertises ATCS 0xA + IGP info table v2.3, root, and a reboot after changing the index.
+- **UMA carveout (UEFI-HII platforms, via fwupd):**AMD SMI library reads and writes the carveout through the fwupd daemon's D-Bus BIOS-settings interface. Reading needs fwupd >= 1.8.4; writing needs fwupd >= 2.1.1 (Ubuntu 26.04+). PolicyKit brokers authorization (no explicit `sudo`) for writes, and a reboot applies the new size.
+- **GTT (TTM `pages_limit`):** root (to write `/etc/modprobe.d/<module>.conf`), optionally `dracut` (the tool will rebuild the initramfs automatically when `dracut` is present), and a reboot to apply the new limit. amd-smi auto-detects the TTM kernel module name (`ttm`, `amdttm`, or `amd-ttm`) and writes the matching `.conf`.
+
+### Troubleshooting: `MEM_CARVEOUT: N/A`
+
+On MI300A (and every non-APU / pre-ATCS-0xA platform) the kernel does not
+create `/sys/class/drm/<card>/device/uma/`, so `amd-smi static --mem-carveout`
+prints
+
+```text
+MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)
+```
+
+On UEFI-HII APU platforms the same knob may still be reachable through fwupd; see
+the fwupd prerequisite above.
+
+This is expected on platforms with no carveout interface. Use `amd-smi node --gtt` /
+`amd-smi set --gtt` to tune shared GPU memory on those platforms instead.

@@ -1,0 +1,160 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+import argparse
+import copy
+from collections import OrderedDict
+from collections.abc import Hashable
+from pathlib import Path
+from typing import Any, Optional
+
+import pandas as pd
+
+from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from rocprof_compute_tui.utils.tui_utils import (
+    get_top_kernels,
+    process_panels_to_dataframes,
+)
+from utils import file_io, parser, schema
+from utils.logger import console_error, console_log, demarcate
+from utils.metrics.evaluation_pipeline import eval_metric
+
+
+class tui_analysis(OmniAnalyze_Base):
+    def __init__(
+        self, args: argparse.Namespace, supported_archs: dict[str, str], path: str
+    ) -> None:
+        super().__init__(args, supported_archs)
+        self.path = path
+        self.args = self.get_args()
+
+    @demarcate
+    def pre_processing(self) -> None:
+        self._profiling_config = file_io.load_profiling_config(self.path)
+        self._runs = self.initalize_runs()
+
+        if self.args.random_port:
+            console_error("--gui flag is required to enable --random-port")
+
+        workload = self._runs[self.path]
+
+        # Initialize per-kernel dataframes
+        self.raw_dfs: dict[str, Any] = {}
+
+        pc_sampling_data = self.load_pc_sampling_tool_data(self.path)
+
+        # No counters collected -- derive scaffolding from the PC sampling
+        # kernel trace and skip metrics calculation.
+        if self.pc_sampling_only():
+            console_log(
+                "analysis",
+                "Only PC sampling and kernel tracing data"
+                " available, metrics calculation will be"
+                " skipped",
+            )
+            self.build_pc_sampling_only_workload(
+                workload, self.path, self.args, pc_sampling_data
+            )
+            return
+
+        # Join results_*.csv.gz source files into pmc_perf.csv.gz if needed
+        self.join_workload_csvs(Path(self.path))
+
+        workload.raw_pmc = file_io.create_df_pmc(
+            self.path,
+            self.args.verbose,
+        )
+
+        kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
+            df_in=workload.raw_pmc,
+            raw_data_dir=self.path,
+            filter_gpu_ids=workload.filter_gpu_ids,
+            filter_dispatch_ids=workload.filter_dispatch_ids,
+            time_unit=self.args.time_unit,
+        )
+        workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+        workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
+
+        parser.load_non_mertrics_table(
+            workload=workload,
+            dir_path=self.path,
+            args=self.args,
+            pc_sampling_tool_data=pc_sampling_data,
+        )
+
+        # Group raw PMC data by kernel name
+        kernel_groups = workload.raw_pmc.groupby("Kernel_Name")
+
+        for kernel_name, group in kernel_groups:
+            # Get all dispatch indices for this kernel
+            dispatch_indices = group.index.tolist()
+
+            # Extract raw PMC data for all dispatches of this kernel
+            kernel_raw_pmc = workload.raw_pmc.loc[dispatch_indices]
+
+            kernel_dfs = copy.deepcopy(workload.dfs)
+
+            # Evaluate metrics aggregated across all dispatches of this kernel
+            gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
+            eval_metric(
+                kernel_dfs,
+                workload.dfs_type,
+                self._arch_configs[gpu_arch].dfs_expressions,
+                workload.sys_info.iloc[0],
+                workload.roofline_peaks,
+                kernel_raw_pmc,
+                self.args.debug,
+            )
+
+            self.raw_dfs[str(kernel_name)] = kernel_dfs
+
+    def initalize_runs(
+        self, normalization_filter: Optional[str] = None
+    ) -> OrderedDict[str, schema.Workload]:
+        sys_info = pd.read_csv(str(Path(self.path) / "sysinfo.csv"))
+        arch = sys_info.iloc[0]["gpu_arch"]
+
+        self.generate_configs(
+            arch,
+            self.args.config_dir,
+            self.args.list_stats,
+            self.args.filter_metrics,
+            sys_info.iloc[0],
+            getattr(self, "_profiling_config", {}),
+        )
+        self.load_options(normalization_filter)
+
+        w = schema.Workload()
+        w.sys_info = (
+            parser.correct_sys_info(
+                self.get_socs()[arch]._mspec, self.args.specs_correction
+            )
+            if self.args.specs_correction
+            else sys_info
+        )
+        w.roofline_peaks = pd.DataFrame()
+        w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
+        w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
+        w.dfs_type = self._arch_configs[arch].dfs_type
+
+        self._runs[self.path] = w
+        return self._runs
+
+    def run_kernel_analysis(self) -> dict[str, dict[str, Any]]:
+        """Generate per-kernel analysis keyed by kernel_name."""
+        arch = list(self._arch_configs.keys())[0]
+
+        # Convert per-kernel raw_dfs to display format
+        result: dict[str, dict[str, Any]] = {}
+        for kernel_name, kernel_dfs in self.raw_dfs.items():
+            result[kernel_name] = process_panels_to_dataframes(
+                self.args,
+                kernel_dfs,
+                self._arch_configs[arch],
+                self._profiling_config,
+            )
+
+        return result
+
+    def run_top_kernel(self) -> Optional[list[dict[Hashable, Any]]]:
+        return get_top_kernels(self._runs)

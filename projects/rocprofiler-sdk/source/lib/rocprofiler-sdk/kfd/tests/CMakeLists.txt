@@ -1,0 +1,219 @@
+# MIT License
+#
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+rocprofiler_deactivate_clang_tidy()
+
+include(GoogleTest)
+
+set(ROCPROFILER_LIB_KFD_EVENTS_TEST_SOURCES parser.cpp)
+
+add_executable(kfd-events-parser)
+
+target_sources(kfd-events-parser PRIVATE ${ROCPROFILER_LIB_KFD_EVENTS_TEST_SOURCES})
+
+target_link_libraries(
+    kfd-events-parser
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET kfd-events-parser
+    SOURCES ${ROCPROFILER_LIB_KFD_EVENTS_TEST_SOURCES}
+    TIMEOUT 45
+    LABELS "unittests;kfd-events"
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+set(ROCPROFILER_LIB_KFD_DLOG_DRAIN_TEST_SOURCES dlog_drain_test.cpp)
+
+add_executable(kfd-dlog-drain)
+
+target_sources(kfd-dlog-drain PRIVATE ${ROCPROFILER_LIB_KFD_DLOG_DRAIN_TEST_SOURCES})
+
+target_link_libraries(
+    kfd-dlog-drain
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET kfd-dlog-drain
+    SOURCES ${ROCPROFILER_LIB_KFD_DLOG_DRAIN_TEST_SOURCES}
+    TIMEOUT 45
+    LABELS "unittests;kfd-dlog"
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+set(ROCPROFILER_LIB_KFD_DLOG_TEST_SOURCES data_structures.cpp)
+
+add_executable(kfd-dlog-data-structures)
+
+target_sources(kfd-dlog-data-structures PRIVATE ${ROCPROFILER_LIB_KFD_DLOG_TEST_SOURCES})
+
+target_link_libraries(
+    kfd-dlog-data-structures
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET kfd-dlog-data-structures
+    SOURCES ${ROCPROFILER_LIB_KFD_DLOG_TEST_SOURCES}
+    TIMEOUT 45
+    LABELS "unittests;kfd-dlog"
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+set(ROCPROFILER_LIB_KFD_POLL_READER_TEST_SOURCES poll_reader_test.cpp)
+
+add_executable(kfd-dlog-poll-reader)
+
+target_sources(kfd-dlog-poll-reader
+               PRIVATE ${ROCPROFILER_LIB_KFD_POLL_READER_TEST_SOURCES})
+
+target_link_libraries(
+    kfd-dlog-poll-reader
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET kfd-dlog-poll-reader
+    SOURCES ${ROCPROFILER_LIB_KFD_POLL_READER_TEST_SOURCES}
+    TIMEOUT 45
+    LABELS "unittests;kfd-dlog"
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+set(ROCPROFILER_LIB_KFD_TOPO_DISCOVERY_TEST_SOURCES topology_discovery_test.cpp)
+
+add_executable(kfd-dlog-topology-discovery)
+
+target_sources(kfd-dlog-topology-discovery
+               PRIVATE ${ROCPROFILER_LIB_KFD_TOPO_DISCOVERY_TEST_SOURCES})
+
+target_link_libraries(
+    kfd-dlog-topology-discovery
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET kfd-dlog-topology-discovery
+    SOURCES ${ROCPROFILER_LIB_KFD_TOPO_DISCOVERY_TEST_SOURCES}
+    TIMEOUT 45
+    LABELS "unittests;kfd-dlog"
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+set(ROCPROFILER_LIB_KFD_DLOG_HUB_TEST_SOURCES dispatch_hub_test.cpp)
+
+add_executable(kfd-dlog-hub)
+
+target_sources(kfd-dlog-hub PRIVATE ${ROCPROFILER_LIB_KFD_DLOG_HUB_TEST_SOURCES})
+
+target_link_libraries(
+    kfd-dlog-hub
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET kfd-dlog-hub
+    SOURCES ${ROCPROFILER_LIB_KFD_DLOG_HUB_TEST_SOURCES}
+    TIMEOUT 45
+    LABELS "unittests;kfd-dlog"
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+set(ROCPROFILER_LIB_KFD_DLOG_HUB_CAP_TEST_SOURCES dispatch_hub_cap_test.cpp)
+
+add_executable(kfd-dlog-hub-cap)
+
+target_sources(kfd-dlog-hub-cap PRIVATE ${ROCPROFILER_LIB_KFD_DLOG_HUB_CAP_TEST_SOURCES})
+
+target_link_libraries(
+    kfd-dlog-hub-cap
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+# Pins the per-GPU hub cap to 1 for the whole binary so register_batch admit/refuse and
+# eligible-only eviction are exercised (the accessor caches its env read once).
+rocprofiler_add_unit_test(
+    TARGET kfd-dlog-hub-cap
+    SOURCES ${ROCPROFILER_LIB_KFD_DLOG_HUB_CAP_TEST_SOURCES}
+    TIMEOUT 45
+    LABELS "unittests;kfd-dlog"
+    ENVIRONMENT
+        "ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_PER_GPU=1;LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+set(ROCPROFILER_LIB_KFD_FEATURE_OFF_TEST_SOURCES feature_off_test.cpp)
+
+add_executable(kfd-dlog-feature-off)
+
+target_sources(kfd-dlog-feature-off
+               PRIVATE ${ROCPROFILER_LIB_KFD_FEATURE_OFF_TEST_SOURCES})
+
+target_link_libraries(
+    kfd-dlog-feature-off
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET kfd-dlog-feature-off
+    SOURCES ${ROCPROFILER_LIB_KFD_FEATURE_OFF_TEST_SOURCES}
+    TIMEOUT 45
+    LABELS "unittests;kfd-dlog"
+    ENVIRONMENT
+        "ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS=0;LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+set(ROCPROFILER_LIB_KFD_CSLD_TEST_SOURCES complete_signal_less_dispatch_test.cpp)
+
+add_executable(kfd-dlog-finalizer)
+
+target_sources(kfd-dlog-finalizer PRIVATE ${ROCPROFILER_LIB_KFD_CSLD_TEST_SOURCES})
+
+target_link_libraries(
+    kfd-dlog-finalizer
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET kfd-dlog-finalizer
+    SOURCES ${ROCPROFILER_LIB_KFD_CSLD_TEST_SOURCES}
+    TIMEOUT 45
+    LABELS "unittests;kfd-dlog"
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

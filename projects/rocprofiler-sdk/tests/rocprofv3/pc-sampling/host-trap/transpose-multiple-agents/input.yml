@@ -1,0 +1,6 @@
+jobs:
+  - kernel_trace: true
+    pc_sampling_unit: "time"
+    pc_sampling_method: "host_trap"
+    pc_sampling_interval: 1
+    agent-index: relative

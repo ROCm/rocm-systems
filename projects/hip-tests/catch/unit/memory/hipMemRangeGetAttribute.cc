@@ -1,0 +1,309 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <hip/hip_runtime_api.h>
+#include <hip_test_common.hh>
+#include <resource_guards.hh>
+#include <utils.hh>
+
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Basic) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, kPageSize);
+
+  int32_t data;
+  HIP_CHECK(hipMemRangeGetAttribute(&data, sizeof(data), hipMemRangeAttributeReadMostly,
+                                    allocation.ptr(), kPageSize));
+
+  REQUIRE(data == 0);
+
+  HIP_CHECK(hipMemAdvise(allocation.ptr(), kPageSize, hipMemAdviseSetReadMostly, 0));
+  HIP_CHECK(hipMemRangeGetAttribute(&data, sizeof(data), hipMemRangeAttributeReadMostly,
+                                    allocation.ptr(), kPageSize));
+
+  REQUIRE(data == 1);
+}
+
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Partial_Range) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, 2 * kPageSize);
+
+  HIP_CHECK(hipMemAdvise(allocation.ptr(), kPageSize, hipMemAdviseSetReadMostly, 0));
+
+  int32_t data;
+  HIP_CHECK(hipMemRangeGetAttribute(&data, sizeof(data), hipMemRangeAttributeReadMostly,
+                                    allocation.ptr(), 2 * kPageSize));
+
+  REQUIRE(data == 0);
+
+  HIP_CHECK(hipMemRangeGetAttribute(&data, sizeof(data), hipMemRangeAttributeReadMostly,
+                                    allocation.ptr(), kPageSize));
+
+  REQUIRE(data == 1);
+}
+
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_Basic) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, kPageSize);
+
+  int32_t data;
+  HIP_CHECK(hipMemRangeGetAttribute(&data, sizeof(data), hipMemRangeAttributePreferredLocation,
+                                    allocation.ptr(), kPageSize));
+
+  REQUIRE(data == hipInvalidDeviceId);
+
+  HIP_CHECK(hipMemAdvise(allocation.ptr(), kPageSize, hipMemAdviseSetPreferredLocation, 0));
+  HIP_CHECK(hipMemRangeGetAttribute(&data, sizeof(data), hipMemRangeAttributePreferredLocation,
+                                    allocation.ptr(), kPageSize));
+
+  REQUIRE(data == 0);
+}
+
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_CPU) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, kPageSize);
+
+  HIP_CHECK(
+      hipMemAdvise(allocation.ptr(), kPageSize, hipMemAdviseSetPreferredLocation, hipCpuDeviceId));
+
+  int32_t data;
+  HIP_CHECK(hipMemRangeGetAttribute(&data, sizeof(data), hipMemRangeAttributePreferredLocation,
+                                    allocation.ptr(), kPageSize));
+
+  REQUIRE(data == hipCpuDeviceId);
+}
+
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_Partial_Range) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, 2 * kPageSize);
+
+  HIP_CHECK(hipMemAdvise(allocation.ptr(), kPageSize, hipMemAdviseSetPreferredLocation, 0));
+
+  int32_t data;
+  HIP_CHECK(hipMemRangeGetAttribute(&data, sizeof(data), hipMemRangeAttributePreferredLocation,
+                                    allocation.ptr(), 2 * kPageSize));
+
+  REQUIRE(data == hipInvalidDeviceId);
+
+  HIP_CHECK(hipMemRangeGetAttribute(&data, sizeof(data), hipMemRangeAttributePreferredLocation,
+                                    allocation.ptr(), kPageSize));
+
+  REQUIRE(data == 0);
+}
+
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Basic) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, kPageSize);
+
+  int32_t data;
+  HIP_CHECK(hipMemRangeGetAttribute(&data, sizeof(data), hipMemRangeAttributeLastPrefetchLocation,
+                                    allocation.ptr(), kPageSize));
+
+  REQUIRE(data == hipInvalidDeviceId);
+
+  HIP_CHECK(hipMemPrefetchAsync(allocation.ptr(), kPageSize, 0));
+  HIP_CHECK(hipMemRangeGetAttribute(&data, sizeof(data), hipMemRangeAttributeLastPrefetchLocation,
+                                    allocation.ptr(), kPageSize));
+
+  REQUIRE(data == 0);
+}
+
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_CPU) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, kPageSize);
+
+  HIP_CHECK(hipMemPrefetchAsync(allocation.ptr(), kPageSize, hipCpuDeviceId));
+
+  int32_t data;
+  HIP_CHECK(hipMemRangeGetAttribute(&data, sizeof(data), hipMemRangeAttributeLastPrefetchLocation,
+                                    allocation.ptr(), kPageSize));
+
+  REQUIRE(data == hipCpuDeviceId);
+}
+
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Partial_Range) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, 2 * kPageSize);
+
+  HIP_CHECK(hipMemPrefetchAsync(allocation.ptr(), kPageSize, 0));
+
+  int32_t data;
+  HIP_CHECK(hipMemRangeGetAttribute(&data, sizeof(data), hipMemRangeAttributeLastPrefetchLocation,
+                                    allocation.ptr(), 2 * kPageSize));
+
+  REQUIRE(data == hipInvalidDeviceId);
+
+  HIP_CHECK(hipMemRangeGetAttribute(&data, sizeof(data), hipMemRangeAttributeLastPrefetchLocation,
+                                    allocation.ptr(), kPageSize));
+
+  REQUIRE(data == 0);
+}
+
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Basic) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, kPageSize);
+
+  std::array<int32_t, 4> data;
+  HIP_CHECK(hipMemRangeGetAttribute(data.data(), sizeof(data), hipMemRangeAttributeAccessedBy,
+                                    allocation.ptr(), kPageSize));
+
+  for (auto device : data) {
+    REQUIRE(device == hipInvalidDeviceId);
+  }
+
+  HIP_CHECK(hipMemAdvise(allocation.ptr(), kPageSize, hipMemAdviseSetAccessedBy, 0));
+  HIP_CHECK(hipMemRangeGetAttribute(data.data(), sizeof(data), hipMemRangeAttributeAccessedBy,
+                                    allocation.ptr(), kPageSize));
+
+  // Use std::find since there is no guaranteed order in which devices will be returned
+  REQUIRE(std::find(cbegin(data), cend(data), 0) != cend(data));
+
+  // All the unused slots should be at the end
+  for (auto it = cbegin(data) + 1; it != cend(data); ++it) {
+    REQUIRE(*it == hipInvalidDeviceId);
+  }
+}
+
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Partial_Range) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, 2 * kPageSize);
+
+  HIP_CHECK(hipMemAdvise(allocation.ptr(), kPageSize, hipMemAdviseSetAccessedBy, 0));
+
+  std::array<int32_t, 4> data;
+  HIP_CHECK(hipMemRangeGetAttribute(data.data(), sizeof(data), hipMemRangeAttributeAccessedBy,
+                                    allocation.ptr(), 2 * kPageSize));
+
+  for (auto device : data) {
+    REQUIRE(device == hipInvalidDeviceId);
+  }
+
+  HIP_CHECK(hipMemRangeGetAttribute(data.data(), sizeof(data), hipMemRangeAttributeAccessedBy,
+                                    allocation.ptr(), kPageSize));
+
+  // Use std::find since there is no guaranteed order in which devices will be returned
+  REQUIRE(std::find(cbegin(data), cend(data), 0) != cend(data));
+
+  // All the unused slots should be at the end
+  for (auto it = cbegin(data) + 1; it != cend(data); ++it) {
+    REQUIRE(*it == hipInvalidDeviceId);
+  }
+}
+
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_AccessedBy_MultiDevice) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  const auto device_count = HipTest::getDeviceCount();
+  if (device_count < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+
+  LinearAllocGuard<void> allocation(LinearAllocs::hipMallocManaged, kPageSize);
+
+  std::vector<int32_t> data(device_count);
+  HIP_CHECK(hipMemRangeGetAttribute(data.data(), sizeof(int32_t) * data.size(),
+                                    hipMemRangeAttributeAccessedBy, allocation.ptr(), kPageSize));
+
+  for (auto device : data) {
+    REQUIRE(device == hipInvalidDeviceId);
+  }
+
+  for (auto device = 0; device < device_count; ++device) {
+    HIP_CHECK(hipMemAdvise(allocation.ptr(), kPageSize, hipMemAdviseSetAccessedBy, device));
+  }
+
+  HIP_CHECK(hipMemRangeGetAttribute(data.data(), sizeof(int32_t) * data.size(),
+                                    hipMemRangeAttributeAccessedBy, allocation.ptr(), kPageSize));
+
+  // Use std::find since there is no guaranteed order in which devices will be returned
+  for (auto device = 0; device < device_count; ++device) {
+    REQUIRE(std::find(cbegin(data), cend(data), device) != cend(data));
+  }
+}
+
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Negative_Parameters) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  int32_t data;
+  LinearAllocGuard<void> managed(LinearAllocs::hipMallocManaged, kPageSize);
+
+  SECTION("data == nullptr") {
+    HIP_CHECK_ERROR(hipMemRangeGetAttribute(nullptr, 4, hipMemRangeAttributeReadMostly,
+                                            managed.ptr(), kPageSize),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("data_size == 0") {
+    HIP_CHECK_ERROR(
+        hipMemRangeGetAttribute(&data, 0, hipMemRangeAttributeReadMostly, managed.ptr(), kPageSize),
+        hipErrorInvalidValue);
+  }
+
+  SECTION("data_size != 4 with hipMemRangeAttributeReadMostly") {
+    HIP_CHECK_ERROR(
+        hipMemRangeGetAttribute(&data, 8, hipMemRangeAttributeReadMostly, managed.ptr(), kPageSize),
+        hipErrorInvalidValue);
+  }
+
+  SECTION("data_size != 4 with hipMemRangeAttributePreferredLocation") {
+    HIP_CHECK_ERROR(hipMemRangeGetAttribute(&data, 8, hipMemRangeAttributePreferredLocation,
+                                            managed.ptr(), kPageSize),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("data_size != 4 with hipMemRangeAttributeLastPrefetchLocation") {
+    HIP_CHECK_ERROR(hipMemRangeGetAttribute(&data, 8, hipMemRangeAttributeLastPrefetchLocation,
+                                            managed.ptr(), kPageSize),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("data_size is not a multiple of 4 with hipMemRangeAttributeAccessedBy") {
+    HIP_CHECK_ERROR(hipMemRangeGetAttribute(&data, 10, hipMemRangeAttributeAccessedBy,
+                                            managed.ptr(), kPageSize),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("invalid attribute") {
+    HIP_CHECK_ERROR(hipMemRangeGetAttribute(&data, 4, static_cast<hipMemRangeAttribute>(999),
+                                            managed.ptr(), kPageSize),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("dev_ptr == nullptr") {
+    HIP_CHECK_ERROR(
+        hipMemRangeGetAttribute(&data, 4, hipMemRangeAttributeReadMostly, nullptr, kPageSize),
+        hipErrorInvalidValue);
+  }
+
+  SECTION("dev_ptr is not managed memory") {
+    LinearAllocGuard<void> non_managed(LinearAllocs::hipMalloc, kPageSize);
+    HIP_CHECK_ERROR(hipMemRangeGetAttribute(&data, 4, hipMemRangeAttributeReadMostly,
+                                            non_managed.ptr(), kPageSize),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("dev_ptr is host pinned memory") {
+    LinearAllocGuard<void> host_pinned(LinearAllocs::hipHostMalloc, kPageSize);
+    HIP_CHECK_ERROR(hipMemRangeGetAttribute(&data, 4, hipMemRangeAttributeReadMostly,
+                                            host_pinned.ptr(), kPageSize),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("count == 0") {
+    HIP_CHECK_ERROR(
+        hipMemRangeGetAttribute(&data, 4, hipMemRangeAttributeReadMostly, managed.ptr(), 0),
+        hipErrorInvalidValue);
+  }
+}

@@ -1,0 +1,5 @@
+---
+# Google C++ style
+BasedOnStyle: Google
+Language: Cpp
+Standard: c++17

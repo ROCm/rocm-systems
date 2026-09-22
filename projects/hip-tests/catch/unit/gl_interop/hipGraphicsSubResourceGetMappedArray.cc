@@ -1,0 +1,138 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <hip_test_common.hh>
+#include <hip/hip_runtime_api.h>
+#include <hip/hip_gl_interop.h>
+
+#include "gl_interop_common.hh"
+
+HIP_TEST_CASE(Unit_hipGraphicsSubResourceGetMappedArray_Positive_Basic) {
+  CHECK_IMAGE_SUPPORT
+
+  GLContextScopeGuard gl_context;
+
+  const int device_count = HipTest::getDeviceCount();
+  unsigned int gl_device_count = 0;
+  std::vector<int> gl_devices(device_count, -1);
+
+  // Initialize GL interop
+  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll));
+  REQUIRE(gl_device_count == 1);
+  REQUIRE(gl_devices.at(0) == 0);
+
+  GLImageObject tex;
+
+  hipGraphicsResource* tex_resource;
+
+  HIP_CHECK(
+      hipGraphicsGLRegisterImage(&tex_resource, tex, GL_TEXTURE_2D, hipGraphicsRegisterFlagsNone));
+
+  HIP_CHECK(hipGraphicsMapResources(1, &tex_resource, 0));
+
+  hipArray_t image_devptr = nullptr;
+  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&image_devptr, tex_resource, 0, 0));
+
+  REQUIRE(image_devptr != nullptr);
+
+  HIP_CHECK(hipGraphicsUnmapResources(1, &tex_resource, 0));
+
+  HIP_CHECK(hipGraphicsUnregisterResource(tex_resource));
+}
+
+HIP_TEST_CASE(Unit_hipGraphicsSubResourceGetMappedArray_Negative_Parameters) {
+  CHECK_IMAGE_SUPPORT
+
+  GLContextScopeGuard gl_context;
+
+  const int device_count = HipTest::getDeviceCount();
+  unsigned int gl_device_count = 0;
+  std::vector<int> gl_devices(device_count, -1);
+
+  // Initialize GL interop
+  HIP_CHECK(hipGLGetDevices(&gl_device_count, gl_devices.data(), device_count, hipGLDeviceListAll));
+  REQUIRE(gl_device_count == 1);
+  REQUIRE(gl_devices.at(0) == 0);
+
+  GLImageObject tex;
+
+  hipGraphicsResource* tex_resource;
+
+  HIP_CHECK(
+      hipGraphicsGLRegisterImage(&tex_resource, tex, GL_TEXTURE_2D, hipGraphicsRegisterFlagsNone));
+
+  HIP_CHECK(hipGraphicsMapResources(1, &tex_resource, 0));
+
+  hipArray_t image_devptr = nullptr;
+
+  SECTION("array == nullptr") {
+    HIP_CHECK_ERROR(hipGraphicsSubResourceGetMappedArray(nullptr, tex_resource, 0, 0), hipErrorInvalidValue);
+  }
+
+  SECTION("non-texture resource") {
+    GLBufferObject vbo;
+    hipGraphicsResource* vbo_resource;
+
+    HIP_CHECK(hipGraphicsGLRegisterBuffer(&vbo_resource, vbo, hipGraphicsRegisterFlagsNone));
+    HIP_CHECK(hipGraphicsMapResources(1, &vbo_resource, 0));
+
+    HIP_CHECK_ERROR(hipGraphicsSubResourceGetMappedArray(&image_devptr, vbo_resource, 0, 0),
+                    hipErrorNotMappedAsArray);
+
+    HIP_CHECK(hipGraphicsUnmapResources(1, &vbo_resource, 0));
+    HIP_CHECK(hipGraphicsUnregisterResource(vbo_resource));
+  }
+
+  SECTION("unregistered resource") {
+    hipGraphicsResource* unregistered_resource;
+    HIP_CHECK(hipGraphicsGLRegisterImage(&unregistered_resource, tex, GL_TEXTURE_2D,
+                                         hipGraphicsRegisterFlagsNone));
+    HIP_CHECK(hipGraphicsUnregisterResource(unregistered_resource));
+    HIP_CHECK_ERROR(
+        hipGraphicsSubResourceGetMappedArray(&image_devptr, unregistered_resource, 0, 0),
+        hipErrorInvalidHandle);
+  }
+
+  SECTION("not mapped resource") {
+    hipGraphicsResource* not_mapped_resource;
+    HIP_CHECK(hipGraphicsGLRegisterImage(&not_mapped_resource, tex, GL_TEXTURE_2D,
+                                         hipGraphicsRegisterFlagsNone));
+    HIP_CHECK_ERROR(hipGraphicsSubResourceGetMappedArray(&image_devptr, not_mapped_resource, 0, 0),
+                    hipErrorNotMapped);
+    HIP_CHECK(hipGraphicsUnregisterResource(not_mapped_resource));
+  }
+
+  SECTION("unmapped resource") {
+    hipGraphicsResource* unmapped_resource;
+
+    HIP_CHECK(hipGraphicsGLRegisterImage(&unmapped_resource, tex, GL_TEXTURE_2D,
+                                         hipGraphicsRegisterFlagsNone));
+
+    HIP_CHECK(hipGraphicsMapResources(1, &unmapped_resource, 0));
+    HIP_CHECK(hipGraphicsUnmapResources(1, &unmapped_resource, 0));
+
+    HIP_CHECK_ERROR(hipGraphicsSubResourceGetMappedArray(&image_devptr, unmapped_resource, 0, 0),
+                    hipErrorNotMapped);
+
+    HIP_CHECK(hipGraphicsUnregisterResource(unmapped_resource));
+  }
+
+  SECTION("invalid arrayIndex") {
+    HIP_CHECK_ERROR(hipGraphicsSubResourceGetMappedArray(&image_devptr, tex_resource,
+                                                         std::numeric_limits<int>::max(), 0),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("invalid mipLevel") {
+    HIP_CHECK_ERROR(hipGraphicsSubResourceGetMappedArray(&image_devptr, tex_resource, 0,
+                                                         std::numeric_limits<int>::max()),
+                    hipErrorInvalidValue);
+  }
+
+  HIP_CHECK(hipGraphicsUnmapResources(1, &tex_resource, 0));
+
+  HIP_CHECK(hipGraphicsUnregisterResource(tex_resource));
+}

@@ -1,0 +1,69 @@
+# Smoke-test recipe for the `race` workload (`mode: fsdp`).
+#
+# `race` is a DISTRIBUTED workload (min_world_size=2), so it MUST be launched
+# under torchrun -- a bare `aorta triage run` starts a single process
+# (WORLD_SIZE=1) and is correctly refused by launch-mode validation. Use the
+# `aorta` console script as torchrun's target (`-m aorta` is NOT a runnable
+# module):
+#
+#   # validate only (no GPUs / no launcher needed):
+#   aorta triage run --recipe recipes/example-fsdp-smoke.yaml --dry-run
+#
+#   # single node, 2 ranks (CX-7 / RCCL smoke; bump to your GPU count):
+#   torchrun --standalone --nproc_per_node=2 $(which aorta) triage run -recipe recipes/example-fsdp-smoke.yaml
+#
+#   # multi-node (e.g. 1 rank/host x 40 hosts -- the AINIC topology):
+#   torchrun --nnodes=40 --nproc_per_node=1 --rdzv-backend=c10d \
+#     --rdzv-endpoint=$MIRAGE_HEAD_ADDR:$MIRAGE_HEAD_PORT $(which aorta) triage run \
+#     --recipe recipes/example-fsdp-smoke.yaml
+#
+# Results are written by rank 0 only (dispatcher gates on RANK), so multi-rank
+# launches don't clobber each other.
+#
+# Runs the simulated-collective FSDP harness in `aorta.race.modes.fsdp`. This
+# is a PUBLIC, non-NDA smoke: it exercises the adapter -> create_reproducer ->
+# real RCCL/NCCL collectives path end-to-end on any GPU box. It is NOT expected
+# to reproduce the AINIC SDC bug on non-AINIC hardware (e.g. CX-7 / RCCL) -- a
+# clean `passed: True` is the expected smoke result; the point is that the
+# workload runs.
+#
+# Iterations are capped small so a smoke finishes in seconds -- the
+# ReproducerConfig defaults (verify_iterations=10000, simulate_compute=True)
+# would otherwise run for many minutes.
+#
+# Workload names resolve at cell-EXECUTION time, not load time: this recipe
+# validates even before `pip install -e .` registers `race`; an unregistered
+# name surfaces as a per-cell error at run time, not a load error.
+schema_version: 1
+
+ticket: EXAMPLE-151
+workload: race
+
+trials: 2
+steps: 100
+
+workload_config:
+  mode: fsdp
+  warmup_iterations: 2
+  verify_iterations: 5
+  simulate_compute: false   # skip GEMM work so the smoke is fast
+  fsdp_shard_size: 100000
+
+confound:
+  threshold: 1.15
+  # Left unset so the baseline auto-resolves to `baseline-local` via the
+  # "first cell starting with baseline-" rule.
+
+cells:
+  - name: baseline-local
+    mitigations: [none]
+    environment: local
+
+  - name: tf32_off-local
+    mitigations: [tf32_off]
+    environment: local
+
+  - name: xnack-local
+    mitigations: [xnack]
+    environment: local
+ 

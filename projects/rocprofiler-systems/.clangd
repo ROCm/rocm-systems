@@ -1,0 +1,29 @@
+CompileFlags:
+  Add:
+    - -Wno-unknown-warning-option
+    - -Wdouble-promotion
+    - -Werror=double-promotion
+    - -Wshadow
+    - -Werror=shadow
+    - -Wextra
+    - -Wpedantic
+    - -Werror=pedantic
+    - -Wstack-usage=524288
+
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None
+  ClangTidy:
+    FastCheckFilter: None
+
+InlayHints:
+  Enabled: Yes
+  ParameterNames: Yes
+  DeducedTypes: Yes
+  Designators: Yes
+
+Hover:
+  ShowAKA: Yes
+
+Completion:
+  AllScopes: Yes

@@ -1,0 +1,239 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+// The University of Illinois/NCSA
+// Open Source License (NCSA)
+//
+// Copyright (c) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
+//
+// Developed by:
+//
+//                 AMD Research and AMD HSA Software Development
+//
+//                 Advanced Micro Devices, Inc.
+//
+//                 www.amd.com
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal with the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
+//
+//  - Redistributions of source code must retain the above copyright notice,
+//    this list of conditions and the following disclaimers.
+//  - Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimers in
+//    the documentation and/or other materials provided with the distribution.
+//  - Neither the names of Advanced Micro Devices, Inc,
+//    nor the names of its contributors may be used to endorse or promote
+//    products derived from this Software without specific prior written
+//    permission.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS WITH THE SOFTWARE.
+//
+////////////////////////////////////////////////////////////////////////////////
+
+#ifndef HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
+#define HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
+
+#include <array>
+#include <climits>
+#include <map>
+#include <memory>
+
+#include "core/inc/amd_aie_agent.h"
+#include "core/inc/driver.h"
+#include "core/inc/memory_region.h"
+
+namespace rocr {
+
+namespace AMD {
+
+/// @brief AMD XDNA Driver for AMD AIE agents.
+///
+/// @details The user-mode driver for AMD AIE that provides APIs for the ROCr core to allocate
+/// memory, manage DMA buffers, allocate queues, and more.
+class XdnaDriver final : public core::Driver {
+  /// @brief BO handle information.
+  struct BOHandle {
+    /// Mapped address.
+    void* vaddr = nullptr;
+    /// Handle returned by xdna. Same value as AMDXDNA_INVALID_BO_HANDLE.
+    uint32_t handle = 0;
+    /// Size in bytes.
+    size_t size = 0;
+
+    constexpr BOHandle() = default;
+    constexpr BOHandle(void* vaddr, uint32_t handle, size_t size)
+        : vaddr{vaddr}, handle{handle}, size{size} {}
+    constexpr bool IsValid() const { return handle != 0; }
+  };
+
+public:
+  XdnaDriver(std::string devnode_name);
+
+  /// @brief Determine if the xdna-driver is present on the system and attempt to open it if found.
+  ///
+  /// @param[out] driver object
+  static hsa_status_t DiscoverDriver(std::unique_ptr<core::Driver>& driver);
+
+  /// @brief Returns the size of the dev heap in bytes.
+  static uint64_t GetDevHeapByteSize();
+
+  hsa_status_t Init() override;
+  hsa_status_t ShutDown() override;
+  hsa_status_t QueryKernelModeDriver(core::DriverQuery query) override;
+  hsa_status_t Open() override;
+  hsa_status_t Close() override;
+  hsa_status_t GetSystemProperties(HsaSystemProperties& sys_props) const override;
+  hsa_status_t GetNodeProperties(HsaNodeProperties& node_props, uint32_t node_id) const override;
+  hsa_status_t GetEdgeProperties(std::vector<HsaIoLinkProperties>& io_link_props,
+                                 uint32_t node_id) const override;
+  hsa_status_t GetMemoryProperties(uint32_t node_id,
+                                   std::vector<HsaMemoryProperties>& mem_props) const override;
+  hsa_status_t GetCacheProperties(uint32_t node_id, uint32_t processor_id,
+                                  std::vector<HsaCacheProperties>& cache_props) const override;
+  hsa_status_t AllocateMemory(const core::MemoryRegion& mem_region,
+                              core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                              uint32_t node_id, core::DriverMemoryHandle* handle) override;
+  hsa_status_t FreeMemory(const core::DriverMemoryHandle& handle) override;
+  hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
+                           HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
+                           uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes, HsaEvent* event,
+                           HsaQueueResource& queue_resource) const override;
+  hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct, HSA::hsa_amd_queue_priority_internal_t priority,
+                           void* queue_addr, uint64_t queue_size, HsaEvent* event) const override;
+  hsa_status_t DestroyQueue(HSA_QUEUEID queue_id) const override;
+
+  /// @brief Create Kernel Mode Queue (KMQ) metadata to dispatch packets in a user-mode access agent
+  /// dispatch queue.
+  ///
+  /// @param[in] queue_size size of the dispatch queue in number of packets
+  /// @param[out] queue_metadata KMQ metadata created for the dispatch queue
+  hsa_status_t CreateKernelModeQueue(size_t queue_size, void** queue_metadata) const;
+
+  /// @brief Destroy the Kernel Mode Queue (KMQ) metadata.
+  ///
+  /// @note This function will also destroy the hardware context associated with the KMQ. Even if
+  /// that fails, the metadata is still considered destroyed and the function will return the error
+  /// from destroying the hardware context.
+  ///
+  /// @param[in] queue_metadata KMQ metadata to be destroyed
+  hsa_status_t DestroyKernelModeQueue(void* queue_metadata) const;
+
+  hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
+                              uint32_t* queue_cu_mask) const override;
+  hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
+                             uint32_t* first_gws) const override;
+  hsa_status_t ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
+                                  core::ShareType type, void* export_handle) override;
+  hsa_status_t ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
+                                  core::ShareType type, void* import_handle,
+                                  void* mem = nullptr) override;
+  hsa_status_t Map(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
+                   size_t size, hsa_access_permission_t perms, uint32_t node_id) override;
+  hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void *mem, size_t offset,
+                     size_t size, uint32_t node_id) override;
+  hsa_status_t CreateShareableHandle(core::DriverMemoryHandle* handle, const core::Agent& agent,
+                                     uint64_t* offset) override;
+  hsa_status_t DestroyMemoryHandle(core::DriverMemoryHandle* handle) override;
+
+  /// @brief Submits packets to the driver for execution.
+  ///
+  /// @note The packets are contiguous in index but not necessarily contiguous in memory.
+  ///
+  /// @param[in] q queue with packets
+  /// @param[in,out] queue_metadata Kernel Mode Queue (KMQ) metadata. It will be updated if the
+  /// driver needs to create a new hardware context.
+  /// @param[in] first_pkt_idx index of the first packet in the queue
+  /// @param[in] num_pkts number of packets in the queue to be submitted. Must be greater than 0.
+  /// @param[in] num_core_tiles number of core tiles in the AIE device
+  /// @param[in] agent agent that owns the queue
+  hsa_status_t SubmitCmdChain(hsa_queue_t& q, void* queue_metadata, uint64_t first_pkt_idx,
+                              uint64_t num_pkts, uint32_t num_core_tiles, const core::Agent& agent);
+
+  hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
+  hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
+  hsa_status_t SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t size_bytes, uint32_t* timeout,
+                                uint32_t* size_copied, void* dest_mem_addr,
+                                bool* is_spm_data_loss) const override;
+  hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
+                              const void* buffer_base, uint64_t buffer_base_size) const override;
+  hsa_status_t GetDeviceHandle(uint32_t node_id, void** device_handle) const override;
+  hsa_status_t GetDeviceFd(uint32_t node_id, int *fd) const override;
+  hsa_status_t GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const override;
+  hsa_status_t GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const override;
+  hsa_status_t GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const override;
+  hsa_status_t AllocateScratchMemory(uint32_t node_id, uint64_t size, void** mem) const override;
+  hsa_status_t AvailableMemory(uint32_t node_id, uint64_t* available_size) const override;
+  hsa_status_t RegisterMemory(void* ptr, uint64_t size, HsaMemFlags mem_flags) const override;
+  hsa_status_t DeregisterMemory(void* ptr) const override;
+  hsa_status_t MakeMemoryResident(const void* mem, size_t size, uint64_t* alternate_va,
+                                  const HsaMemFlags* mem_flags, uint32_t num_nodes,
+                                  const uint32_t* nodes) const override;
+  hsa_status_t MakeMemoryUnresident(const void* mem) const override;
+
+  hsa_status_t IsModelEnabled(bool* enable) const override;
+
+  hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
+
+  hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
+
+ private:
+  /// @brief Destroys @p bo_handle.
+  ///
+  /// @note This function will unmap the virtual address and close the BO, even if the former fails.
+  ///
+  /// @param[in,out] bo_handle BO handle to destroy.
+  hsa_status_t DestroyBOHandle(BOHandle& bo_handle) const;
+
+  /// @brief Queries the driver version and updates internal state.
+  hsa_status_t QueryDriverVersion();
+
+  /// @brief Allocate device accessible heap (dev heap) space.
+  hsa_status_t InitDeviceHeap();
+
+  /// @brief Free device accessible heap (dev heap) space.
+  hsa_status_t FreeDeviceHeap();
+
+  /// @brief Creates a command BO and returns it to @p bo_info.
+  ///
+  /// @param[in] size size of memory to allocate
+  /// @param[out] bo_info allocated BO
+  hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info) const;
+
+  /// @brief Returns true if @p vaddr lies within the dev heap mapping.
+  ///
+  /// Dev heap BOs carve their VA out of the device heap and borrow its mapping, so
+  /// FreeMemory must not unmap them. This lets FreeMemory distinguish those from
+  /// BO_SHAREs (which own an independent mmap) by the VA alone, without the caller
+  /// tracking mapping ownership.
+  bool IsDevHeapVA(const void* vaddr) const;
+
+  /// @brief Device heap BO.
+  ///
+  /// Its mapping is @ref dev_heap_vaddr, which BO_DEV allocations carve their VA out of.
+  uint32_t dev_heap_bo = 0;
+
+  /// @brief The aligned device heap mapping, of size @ref dev_heap_size and alignment
+  /// @ref dev_heap_alignment.
+  void* dev_heap_vaddr = nullptr;
+
+  /// @brief Device heap size in bytes.
+  static constexpr size_t dev_heap_size = 64 * 1024 * 1024;
+
+  /// @brief Device heap alignment in bytes.
+  static constexpr size_t dev_heap_alignment = 64 * 1024 * 1024;
+};
+
+} // namespace AMD
+} // namespace rocr
+
+#endif // header guard

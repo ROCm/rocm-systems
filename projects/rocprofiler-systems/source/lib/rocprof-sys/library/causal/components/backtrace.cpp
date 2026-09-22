@@ -1,0 +1,205 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "library/causal/components/backtrace.hpp"
+#include "core/concepts.hpp"
+#include "core/config.hpp"
+#include "core/state.hpp"
+#include "core/utility.hpp"
+#include "library/causal/data.hpp"
+#include "library/causal/delay.hpp"
+#include "library/causal/experiment.hpp"
+#include "library/perf.hpp"
+#include "library/runtime.hpp"
+#include "library/thread_data.hpp"
+#include "library/thread_info.hpp"
+#include "library/tracing.hpp"
+#include <cstdint>
+
+#include <timemory/components/timing/backends.hpp>
+#include <timemory/components/timing/wall_clock.hpp>
+#include <timemory/mpl/concepts.hpp>
+#include <timemory/mpl/type_traits.hpp>
+#include <timemory/mpl/types.hpp>
+#include <timemory/process/threading.hpp>
+#include <timemory/utility/backtrace.hpp>
+
+#include "logger/debug.hpp"
+
+#include <atomic>
+#include <ctime>
+#include <execinfo.h>
+#include <type_traits>
+
+namespace rocprofsys::causal::component
+{
+namespace
+{
+using ::tim::backtrace::get_unw_signal_frame_stack_raw;
+
+int realtime_signal = 0;
+int cputime_signal  = 0;
+int overflow_signal = 0;
+
+void
+generic_global_init()
+{
+    // do not delete these lines. The thread data needs to be allocated
+    // before it is called in sampler or else a deadlock will occur when
+    // the sample interrupts a malloc call
+    if(realtime_signal + cputime_signal + overflow_signal == 0)
+    {
+        realtime_signal = get_sampling_realtime_signal();
+        cputime_signal  = get_sampling_cputime_signal();
+        overflow_signal = get_sampling_overflow_signal();
+    }
+}
+}  // namespace
+
+void
+overflow::global_init()
+{
+    // do not delete these lines.
+    generic_global_init();
+}
+
+void
+backtrace::global_init()
+{
+    // do not delete these lines.
+    generic_global_init();
+}
+
+void
+overflow::sample(int _sig)
+{
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+
+    static thread_local const auto& _tinfo      = thread_info::get();
+    auto                            _tid        = _tinfo->index_data->sequent_value;
+    auto&                           _perf_event = perf::get_instance(_tid);
+
+    if(!_perf_event) return;
+
+    m_index = causal::experiment::get_index();
+
+    _perf_event->stop();
+
+    for(auto itr : *_perf_event)
+    {
+        if(itr.is_sample())
+        {
+            auto _sample_ip = itr.get_ip();
+            auto _data      = callchain_t{};
+            _data.emplace_back(_sample_ip);
+            for(auto ditr : itr.get_callchain())
+            {
+                if(ditr != _sample_ip) _data.emplace_back(ditr);
+                if(_data.size() == _data.capacity()) break;
+            }
+
+            if(causal::experiment::is_active() && causal::experiment::is_selected(_data))
+            {
+                ++m_selected;
+                causal::experiment::add_selected();
+                causal::delay::get_local() += causal::experiment::get_delay();
+            }
+            else if(!causal::experiment::is_active())
+            {
+                causal::set_current_selection(_data);
+            }
+
+            m_stack.emplace_back(_data);
+        }
+    }
+
+    _perf_event->start();
+
+    if(_sig == cputime_signal) causal::delay::process();
+}
+
+void
+backtrace::sample(int _sig)
+{
+    constexpr size_t       depth        = ::rocprofsys::causal::unwind_depth;
+    constexpr std::int64_t ignore_depth = ::rocprofsys::causal::unwind_offset;
+    constexpr size_t       select_init  = std::numeric_limits<size_t>::max();
+    constexpr size_t select_ival = 5;  // interval at which realtime signal contributes
+
+    // update the last sample for backtrace signal(s) even when in use
+    static thread_local size_t _protect_flag = 0;
+
+    // the select_count is initialized to max so that realtime signal does
+    // not initially set the current selection
+    static thread_local size_t _select_count = select_init;
+    static thread_local size_t _select_zeros = 0;
+
+    if((_protect_flag & 1) == 1 ||
+       ROCPROFSYS_UNLIKELY(!trait::runtime_enabled<causal::component::backtrace>::get()))
+    {
+        return;
+    }
+
+    ++_protect_flag;
+    // on RedHat, the unw_step within get_unw_signal_frame_stack_raw involves a mutex lock
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    m_index                  = causal::experiment::get_index();
+    m_stack                  = get_unw_signal_frame_stack_raw<depth, ignore_depth>();
+
+    auto _set_current_selection = [](auto _stack) {
+        // save the former selection count
+        auto _former_count = _select_count;
+        // get the current selection count
+        _select_count = causal::set_current_selection(_stack);
+        // if the selection count was reduced, reset select zeros.
+        // this typically means that a new experiment was started
+        if(_former_count > _select_count) _select_zeros = 0;
+        // if no PCs were selected, increment the select zeros.
+        // if the cputime signal has not selected a PC in select_ival iterations,
+        // then the realtime signal will start contributing to the current
+        // selection. We generally want only the cputime signal to contribute
+        // because those PCs are in-use (since the thread CPU clock in increasing)
+        if(_select_count == 0) ++_select_zeros;
+    };
+
+    // the batch handler timer delivers a signal according to the thread CPU
+    // clock, ensuring that setting the current selection is preferred when the thread
+    // is active and processing the delays happens only when the thread is active
+    if(_sig == cputime_signal)
+    {
+        if(causal::experiment::is_active())
+            causal::delay::process();
+        else
+            _set_current_selection(m_stack);
+    }
+    else if(_sig == realtime_signal)
+    {
+        if(causal::experiment::is_active() && causal::experiment::is_selected(m_stack))
+        {
+            m_selected = true;
+            causal::experiment::add_selected();
+            causal::delay::get_local() += causal::experiment::get_delay();
+        }
+        else if(!causal::experiment::is_active())
+        {
+            // if no PCs have been selected after at least "select_ival" call-stacks via
+            // the cputime signal, then contribute the call-stack via the realtime signal.
+            // This can be particularly relevant in end-to-end runs targeting a particular
+            // line/function since it is possible that the line/function is situated such
+            // the cputime signal is never delivered when executing the particular
+            // line/function... despite the line/function executing in between the
+            // the cputime signals. This is rare but has been observed
+            //
+            if(_select_count == 0 && _select_zeros >= select_ival)
+                _set_current_selection(m_stack);
+        }
+    }
+    else
+    {
+        throw std::runtime_error(fmt::format("Unhandled signal {}", _sig));
+    }
+
+    ++_protect_flag;
+}
+
+}  // namespace rocprofsys::causal::component

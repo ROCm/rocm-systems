@@ -1,0 +1,404 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#include "library/thread_info.hpp"
+#include "core/common.hpp"
+#include "core/concepts.hpp"
+#include "core/config.hpp"
+#include "core/state.hpp"
+#include "core/utility.hpp"
+#include "library/causal/delay.hpp"
+#include "library/runtime.hpp"
+#include "library/thread_data.hpp"
+#include "library/thread_data_growth.hpp"
+
+#include <timemory/backends/threading.hpp>
+#include <timemory/components/timing/backends.hpp>
+#include <timemory/process/threading.hpp>
+
+#include "logger/debug.hpp"
+
+#include <cstdint>
+
+namespace rocprofsys
+{
+namespace
+{
+auto&
+get_info_data()
+{
+    using thread_data_t = thread_data<std::optional<thread_info>, project::rocprofsys>;
+    static auto& _v     = thread_data_t::instance(construct_on_init{});
+    return _v;
+}
+
+auto&
+get_index_data()
+{
+    using thread_data_t =
+        thread_data<std::optional<thread_index_data>, project::rocprofsys>;
+    static auto& _v = thread_data_t::instance(construct_on_init{});
+    return _v;
+}
+
+// Returns a reference to a per-thread empty optional, used as a safe fallback for
+// out-of-range / uninitialized thread indices instead of throwing from .at().
+template <typename Tp>
+std::optional<Tp>&
+empty_thread_local()
+{
+    static thread_local auto _dummy = std::optional<Tp>{};
+    _dummy.reset();
+    return _dummy;
+}
+
+auto&
+get_info_data(std::int64_t _tid)
+{
+    auto& _v = get_info_data();
+    if(!_v || _tid < 0 || static_cast<size_t>(_tid) >= max_supported_threads)
+        return empty_thread_local<thread_info>();
+    return _v->at(_tid);
+}
+
+auto&
+get_index_data(std::int64_t _tid)
+{
+    auto& _v = get_index_data();
+    if(!_v || _tid < 0 || static_cast<size_t>(_tid) >= max_supported_threads)
+        return empty_thread_local<thread_index_data>();
+    return _v->at(_tid);
+}
+
+auto
+init_index_data(std::int64_t _tid, bool _offset = false)
+{
+    auto& itr = get_index_data(_tid);
+    if(!itr)
+    {
+        threading::offset_this_id(_offset);
+        itr = thread_index_data{};
+
+        if(itr->internal_value != _tid)
+        {
+            throw std::runtime_error(
+                fmt::format("Error! thread_info::init_index_data was called for "
+                            "thread {} on thread {}\n",
+                            _tid, itr->internal_value));
+        }
+        thread_info::initialized_threads.fetch_add(1, std::memory_order_relaxed);
+        LOG_TRACE("Thread {} on PID {} (rank: {}) assigned rocprof-sys TID {} "
+                  "(internal: {})",
+                  itr->system_value, process::get_id(), dmp::rank(), itr->sequent_value,
+                  itr->internal_value);
+    }
+    return itr;
+}
+
+thread_local std::int64_t offset_causal_count = 0;
+const auto                unknown_thread      = std::optional<thread_info>{};
+std::int64_t              peak_num_threads    = max_supported_threads;
+
+// Register callback to allow thread_data containers to query peak_num_threads
+// when they are instantiated, ensuring late-instantiated containers are properly sized.
+const auto peak_num_threads_callback_registered = []() {
+    set_peak_num_threads_callback([]() -> std::int64_t { return peak_num_threads; });
+    return true;
+}();
+}  // namespace
+
+std::atomic<size_t> thread_info::initialized_threads = 0;
+
+std::string
+thread_index_data::as_string() const
+{
+    auto _ss = std::stringstream{};
+    _ss << sequent_value << " [" << fmt::format("{:x}", system_value) << "] (#"
+        << internal_value << ")";
+    return _ss.str();
+}
+
+std::int64_t
+grow_data(std::int64_t _tid)
+{
+    struct data_growth
+    {};
+
+    // Do not grow when _tid is greater than or equal to max_supported_threads
+    if(_tid >= static_cast<std::int64_t>(max_supported_threads))
+    {
+        // if thread limit exceeded, return current peak number of threads
+        return peak_num_threads;
+    }
+
+    // Unreachable code: peak_num_threads is already max_supported_threads,
+    // and _tid >= max_supported_threads returns above. Retained for future use.
+    if(_tid >= peak_num_threads)
+    {
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        const auto_lock_t _lk{ type_mutex<data_growth>() };
+
+        // check again after locking
+        if(_tid >= peak_num_threads)
+        {
+            LOG_WARNING("[{}] Growing thread data from {} to {}...", _tid,
+                        peak_num_threads, peak_num_threads + max_supported_threads);
+
+            for(auto itr : grow_functors())
+            {
+                if(itr)
+                {
+                    std::int64_t _new_capacity = (*itr)(_tid + 1);
+                    LOG_WARNING("[{}] Grew thread data from {} to {}...", _tid,
+                                peak_num_threads, _new_capacity);
+                }
+            }
+            peak_num_threads += max_supported_threads;
+        }
+    }
+
+    return peak_num_threads;
+}
+
+bool
+thread_info::exists()
+{
+    return (get_info_data() != nullptr);
+}
+
+size_t
+thread_info::get_peak_num_threads()
+{
+    return peak_num_threads;
+}
+
+size_t
+thread_info::get_initialized_thread()
+{
+    return initialized_threads.load(std::memory_order_relaxed);
+}
+
+const std::optional<thread_info>&
+thread_info::init(bool _offset)
+{
+    static thread_local bool _once      = false;
+    auto&                    _info_data = get_info_data();
+    auto                     _tid       = utility::get_thread_index();
+
+    if((!_info_data) || (_tid < 0 || static_cast<size_t>(_tid) >= max_supported_threads))
+        return empty_thread_local<thread_info>();
+
+    if(!_once && (_once = true))
+    {
+        grow_data(_tid);
+        threading::offset_this_id(_offset);
+        auto& _info           = _info_data->at(_tid);
+        _info                 = thread_info{};
+        _info->is_offset      = threading::offset_this_id();
+        _info->index_data     = init_index_data(_tid, _info->is_offset);
+        _info->lifetime.first = tim::get_clock_real_now<std::uint64_t, std::nano>();
+
+        const auto _sequent_tid = _info->index_data->sequent_value;
+        _info->causal_count     = (!_info->is_offset && _sequent_tid < peak_num_threads)
+                                      ? &causal::delay::get_local(_sequent_tid)
+                                      : &offset_causal_count;
+
+        if(_info->is_offset) state::thread::set(state::thread::Disabled);
+    }
+
+    return _info_data->at(_tid);
+}
+
+const std::optional<thread_info>&
+thread_info::get()
+{
+    if(!exists()) return empty_thread_local<thread_info>();
+    return get_info_data(utility::get_thread_index());
+}
+
+const std::optional<thread_info>&
+thread_info::get(native_handle_t& _tid)
+{
+    return get(native_handle_t{ _tid });
+}
+
+const std::optional<thread_info>&
+thread_info::get(native_handle_t&& _tid)
+{
+    const auto& _v = get_info_data();
+    if(_v)
+    {
+        for(const auto& itr : *_v)
+        {
+            if(itr && itr->index_data &&
+               pthread_equal(itr->index_data->pthread_value, _tid) == 0)
+                return itr;
+        }
+    }
+
+    if(unknown_thread)
+    {
+        throw std::runtime_error("Unknown thread has been assigned a value");
+    }
+    return unknown_thread;
+}
+
+const std::optional<thread_info>&
+thread_info::get(std::thread::id _tid)
+{
+    const auto& _v = get_info_data();
+    if(_v)
+    {
+        for(const auto& itr : *_v)
+        {
+            if(itr && itr->index_data && itr->index_data->stl_value == _tid) return itr;
+        }
+    }
+
+    if(unknown_thread)
+    {
+        throw std::runtime_error("Unknown thread has been assigned a value");
+    }
+
+    return unknown_thread;
+}
+
+const std::optional<thread_info>&
+thread_info::get(std::int64_t _tid, ThreadIdType _type)
+{
+    if(_type == ThreadIdType::InternalTID)
+        return get_info_data(_tid);
+    else if(_type == ThreadIdType::SystemTID)
+    {
+        const auto& _v = get_info_data();
+        if(_v)
+        {
+            for(const auto& itr : *_v)
+            {
+                if(itr && itr->index_data && itr->index_data->system_value == _tid)
+                    return itr;
+            }
+        }
+    }
+    else if(_type == ThreadIdType::SequentTID)
+    {
+        const auto& _v = get_info_data();
+        if(_v)
+        {
+            for(const auto& itr : *_v)
+            {
+                if(itr && itr->index_data && itr->index_data->sequent_value == _tid)
+                    return itr;
+            }
+        }
+    }
+    else if(_type == ThreadIdType::PthreadID)
+    {
+        throw std::runtime_error(
+            "rocprof-sys does not support thread_info::get(std::int64_t, "
+            "ThreadIdType) with ThreadIdType::PthreadID");
+    }
+    else if(_type == ThreadIdType::StlThreadID)
+    {
+        throw std::runtime_error(
+            "rocprof-sys does not support thread_info::get(std::int64_t, "
+            "ThreadIdType) with ThreadIdType::StlThreadID");
+    }
+
+    if(unknown_thread)
+    {
+        throw std::runtime_error("Unknown thread has been assigned a value");
+    }
+
+    return unknown_thread;
+}
+
+void
+thread_info::set_start(std::uint64_t _ts, bool _force)
+{
+    auto& _v = get_info_data(utility::get_thread_index());
+    if(!_v) init();
+    if(_force || (_ts > 0 && (_v->lifetime.first == 0 || _ts < _v->lifetime.first)))
+        _v->lifetime.first = _ts;
+}
+
+void
+thread_info::set_stop(std::uint64_t _ts)
+{
+    auto  _tid = utility::get_thread_index();
+    auto& _v   = get_info_data(_tid);
+    if(_v)
+    {
+        _v->lifetime.second = _ts;
+        // if the main thread, make sure all child threads have a end lifetime
+        // less than or equal to the main thread end lifetime
+        if(_tid == 0)
+        {
+            for(auto& itr : *get_info_data())
+            {
+                if(itr && itr->index_data && itr->index_data->internal_value != _tid)
+                {
+                    if(itr->lifetime.second > _v->lifetime.second)
+                        itr->lifetime.second = _v->lifetime.second;
+                    else if(itr->lifetime.second == 0)
+                        itr->lifetime.second = _v->lifetime.second;
+                }
+            }
+        }
+    }
+}
+
+std::uint64_t
+thread_info::get_start() const
+{
+    return lifetime.first;
+}
+
+std::uint64_t
+thread_info::get_stop() const
+{
+    return lifetime.second;
+}
+
+bool
+thread_info::is_valid_time(std::uint64_t _ts) const
+{
+    return (_ts >= lifetime.first && _ts <= lifetime.second);
+}
+
+bool
+thread_info::is_valid_lifetime(std::uint64_t _beg, std::uint64_t _end) const
+{
+    return (is_valid_time(_beg) && is_valid_time(_end));
+}
+
+bool
+thread_info::is_valid_lifetime(lifetime_data_t _v) const
+{
+    return (is_valid_time(_v.first) && is_valid_time(_v.second));
+}
+
+thread_info::lifetime_data_t
+thread_info::get_valid_lifetime(lifetime_data_t _v) const
+{
+    if(!is_valid_time(_v.first)) _v.first = lifetime.first;
+    if(!is_valid_time(_v.second)) _v.second = lifetime.second;
+    return _v;
+}
+
+std::string
+thread_info::as_string() const
+{
+    std::stringstream _ss{};
+    _ss << std::boolalpha << "is_offset=" << is_offset;
+    if(index_data)
+    {
+        _ss << ", index_data=(" << index_data->internal_value << ", "
+            << index_data->system_value << ", " << index_data->sequent_value << ", "
+            << index_data->pthread_value << ", " << index_data->stl_value << ")";
+    }
+    if(causal_count) _ss << ", causal count=" << *causal_count;
+    _ss << ", lifetime=(" << lifetime.first << ":" << lifetime.second << ")";
+    return _ss.str();
+}
+}  // namespace rocprofsys

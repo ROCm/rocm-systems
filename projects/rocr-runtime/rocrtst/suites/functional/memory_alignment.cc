@@ -1,0 +1,309 @@
+/*
+ * =============================================================================
+ *   ROC Runtime Conformance Release License
+ * =============================================================================
+ * The University of Illinois/NCSA
+ * Open Source License (NCSA)
+ *
+ * Copyright (c) 2018, Advanced Micro Devices, Inc.
+ * All rights reserved.
+ *
+ * Developed by:
+ *
+ *                 AMD Research and AMD ROC Software Development
+ *
+ *                 Advanced Micro Devices, Inc.
+ *
+ *                 www.amd.com
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to
+ * deal with the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ *  - Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimers.
+ *  - Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimers in
+ *    the documentation and/or other materials provided with the distribution.
+ *  - Neither the names of <Name of Development Group, Name of Institution>,
+ *    nor the names of its contributors may be used to endorse or promote
+ *    products derived from this Software without specific prior written
+ *    permission.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ * THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS WITH THE SOFTWARE.
+ *
+ */
+
+
+#include <fcntl.h>
+#include <algorithm>
+#include <iostream>
+#include <vector>
+#include <memory>
+
+#include "suites/functional/memory_alignment.h"
+#include "common/base_rocr_utils.h"
+#include "common/common.h"
+#include "common/helper_funcs.h"
+#include "common/hsatimer.h"
+#include "common/concurrent_utils.h"
+#include "gtest/gtest.h"
+#include "hsa/hsa.h"
+
+
+static const uint32_t kNumThreads = 4096;
+
+typedef struct control_block {
+    hsa_amd_memory_pool_t* pool;
+    MemoryAlignmentTest* test_obj;
+} cb_t;
+
+// Function to test memory allocations and verify pointer alignment
+// Performs all pool checks and allocations
+void MemoryAlignmentTest::TestPoolAllocationsAlignment(hsa_amd_memory_pool_t pool) {
+  hsa_status_t err;
+
+  // Get pool information
+  rocrtst::pool_info_t pool_i;
+  err = rocrtst::AcquirePoolInfo(pool, &pool_i);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  // Only proceed if allocation is allowed
+  if (!pool_i.alloc_allowed) {
+    return;
+  }
+
+  // Get the allocated alignment size
+  size_t alignment_size = pool_i.alloc_alignment;
+  EXPECT_TRUE(alignment_size);
+
+  // Verifies the alignment attribute is a power of 2
+  if (pool_i.size != 0) {
+    EXPECT_TRUE((alignment_size&&(!(alignment_size&(alignment_size-1)))));
+  }
+
+  // Test with multiple allocation sizes
+  const size_t test_sizes[] = {64, 256, 1024, 4096, 65536};
+  const int num_test_sizes = sizeof(test_sizes) / sizeof(test_sizes[0]);
+
+  for (int i = 0; i < num_test_sizes; ++i) {
+    void* ptr = nullptr;
+    size_t alloc_size = test_sizes[i];
+
+    // Only attempt allocation if the pool has enough space
+    if (pool_i.size > 0 && alloc_size > pool_i.size) {
+      continue;
+    }
+
+    err = hsa_amd_memory_pool_allocate(pool, alloc_size, 0, &ptr);
+    if (err == HSA_STATUS_SUCCESS) {
+      uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+
+      if (verbosity() > 1) {
+        std::cout << "      Allocated " << alloc_size << " bytes at 0x"
+                  << std::hex << addr << std::dec;
+      }
+
+      // Verify the returned pointer is aligned
+      EXPECT_EQ(addr % alignment_size, 0)
+          << "Allocation of size " << alloc_size
+          << " returned pointer 0x" << std::hex << addr << std::dec
+          << " which is not aligned to " << alignment_size;
+
+      if (verbosity() > 1) {
+        if (addr % alignment_size == 0) {
+          std::cout << " - correctly aligned" << std::endl;
+        } else {
+          std::cout << " - MISALIGNED!" << std::endl;
+        }
+      }
+
+      // Free the allocated memory
+      err = hsa_amd_memory_pool_free(ptr);
+      EXPECT_EQ(err, HSA_STATUS_SUCCESS);
+    }
+  }
+}
+
+// Callback function which will call upon when need
+// to allocate memory from the pool in the thread.
+static void CallbackVerifyPoolAlignmendFunc(void *data) {
+  cb_t *cb = reinterpret_cast<cb_t*>(data);
+
+  // Call the member function through the test object pointer
+  // The member function does all pool checks and allocations internally
+  cb->test_obj->TestPoolAllocationsAlignment(*(cb->pool));
+  return;
+}
+
+
+MemoryAlignmentTest::MemoryAlignmentTest(void) :
+    TestBase() {
+  set_num_iteration(10);  // Number of iterations to execute of the main test;
+                          // This is a default value which can be overridden
+                          // on the command line.
+
+  set_title("RocR Memory Alignment Test");
+  set_description(" This test verifies that each memory pool of the agent that"
+  " has HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED alloc memory, It is "
+  " aligned as specified by the HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALIGNMENT,"
+  " the alignment attribute is a power of 2, and that actual memory allocations"
+  " return pointers aligned to the specified alignment value.");
+}
+
+MemoryAlignmentTest::~MemoryAlignmentTest(void) {
+}
+
+// Any 1-time setup involving member variables used in the rest of the test
+// should be done here.
+void MemoryAlignmentTest::SetUp(void) {
+  hsa_status_t err;
+
+  TestBase::SetUp();
+  if (test_skipped_) return;
+
+  err = rocrtst::SetDefaultAgents(this);
+  ASSERT_EQ(HSA_STATUS_SUCCESS, err);
+
+  err = rocrtst::SetPoolsTypical(this);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  return;
+}
+
+void MemoryAlignmentTest::Run(void) {
+  // Compare required profile for this test case with what we're actually
+  // running on
+  if (!rocrtst::CheckProfile(this)) {
+    return;
+  }
+
+  TestBase::Run();
+}
+
+void MemoryAlignmentTest::DisplayTestInfo(void) {
+  TestBase::DisplayTestInfo();
+}
+
+void MemoryAlignmentTest::DisplayResults(void) const {
+  // Compare required profile for this test case with what we're actually
+  // running on
+  if (!rocrtst::CheckProfile(this)) {
+    return;
+  }
+
+  return;
+}
+
+void MemoryAlignmentTest::Close() {
+  // This will close handles opened within rocrtst utility calls and call
+  // hsa_shut_down(), so it should be done after other hsa cleanup
+  TestBase::Close();
+}
+
+
+
+
+static const char kSubTestSeparator[] = "  **************************";
+
+static void PrintMemorySubtestHeader(const char *header) {
+  std::cout << "  *** Memory Functional Subtest: " << header << " ***" << std::endl;
+}
+
+static void PrintAgentNameAndType(hsa_agent_t agent) {
+  hsa_status_t err;
+
+  char ag_name[64];
+  hsa_device_type_t ag_type;
+
+  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, ag_name);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  err = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &ag_type);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  std::cout << "  Agent: " << ag_name << " (";
+  switch (ag_type) {
+    case HSA_DEVICE_TYPE_CPU:
+      std::cout << "CPU)";
+      break;
+    case HSA_DEVICE_TYPE_GPU:
+      std::cout << "GPU)";
+      break;
+    case HSA_DEVICE_TYPE_DSP:
+      std::cout << "DSP)";
+      break;
+    case HSA_DEVICE_TYPE_AIE:
+      std::cout << "AIE)";
+      break;
+    }
+  std::cout << std::endl;
+  return;
+}
+
+
+
+void MemoryAlignmentTest::MemoryPoolAlignment(void) {
+  hsa_status_t err;
+  std::vector<std::shared_ptr<rocrtst::agent_pools_t>> agent_pools;
+
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("MemoryPoolAlignment in Basic func & Stress Test");
+  }
+
+  err = rocrtst::GetAgentPools(&agent_pools);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  auto pool_idx = 0;
+  for (auto a : agent_pools) {
+    for (auto p : a->pools) {
+      if (verbosity() > 0) {
+        std::cout << "  Pool " << pool_idx++ << ":" << std::endl;
+        PrintAgentNameAndType(a->agent);
+      }
+
+      // Test actual memory allocations in the main thread
+      TestPoolAllocationsAlignment(p);
+
+      // Verify alignment in different threads (concurrent stress test)
+      rocrtst::test_group* tg_concurrent = rocrtst::TestGroupCreate(kNumThreads);
+      // The control blocks are used to pass data to the threads
+      uint32_t kk;
+      cb_t cb[kNumThreads];
+      for (kk = 0; kk < kNumThreads; kk++) {
+        cb[kk].pool = &p;
+        cb[kk].test_obj = this;
+        rocrtst::TestGroupAdd(tg_concurrent, &CallbackVerifyPoolAlignmendFunc, &cb[kk], 1);
+      }
+
+      // Create threads for each test
+      rocrtst::TestGroupThreadCreate(tg_concurrent);
+
+      // Start to run tests
+      rocrtst::TestGroupStart(tg_concurrent);
+
+      // Wait all tests finish
+      rocrtst::TestGroupWait(tg_concurrent);
+
+      // Exit all tests
+      rocrtst::TestGroupExit(tg_concurrent);
+
+      // Destroy thread group and cleanup resources
+      rocrtst::TestGroupDestroy(tg_concurrent);
+    }
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "subtest Passed" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}
+

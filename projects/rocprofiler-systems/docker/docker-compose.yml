@@ -1,0 +1,21 @@
+# Usage:
+#   1. Build the image: ./build-docker.sh --distro ubuntu --versions 22.04 --rocm-versions 7.2
+#   2. Export the image tag: export ROCM_PROFILER_IMAGE=<user>/rocprofiler-systems:release-base-ubuntu-22.04-rocm-7.2
+#   3. Run: docker compose run --rm rocm-systems-profiler
+
+services:
+  rocm-systems-profiler:
+    image: ${ROCM_PROFILER_IMAGE:?Set ROCM_PROFILER_IMAGE to the image built by build-docker.sh}
+    pull_policy: never
+    # required to access the GPU
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    security_opt:
+      - seccomp:unconfined  # required for ROCm perf event syscalls and HSA trap handlers
+    volumes:
+      - ../../../:/app  # rocm-systems repository root
+    tty: true
+    stdin_open: true
+    working_dir: /app
+    container_name: ${ROCM_PROFILER_CONTAINER:-rocm-systems-profiler}

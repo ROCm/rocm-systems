@@ -1,0 +1,36 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
+
+project(rocprofiler-systems-python)
+
+set(PYTHON_FILES
+    builtin.py
+    external.py
+    source.py
+    noprofile.py
+    fill.py
+)
+
+find_package(Python3 COMPONENTS Interpreter)
+
+if(Python3_FOUND)
+    set(PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
+
+    foreach(_FILE ${PYTHON_FILES})
+        configure_file(
+            ${PROJECT_SOURCE_DIR}/${_FILE}
+            ${PROJECT_BINARY_DIR}/${_FILE}
+            @ONLY
+        )
+
+        if(ROCPROFSYS_INSTALL_EXAMPLES)
+            install(
+                PROGRAMS ${PROJECT_BINARY_DIR}/${_FILE}
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+                COMPONENT rocprofiler-systems-examples
+            )
+        endif()
+    endforeach()
+endif()

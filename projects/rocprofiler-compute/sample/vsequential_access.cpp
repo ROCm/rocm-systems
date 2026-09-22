@@ -1,0 +1,60 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
+
+/*
+An example code to execute sequential access to explore cache hits/misses in L2 Cache.
+*/
+
+#include <hip/hip_runtime.h>
+#include <iostream>
+#include <assert.h>
+
+#define HIP_ASSERT(x) (assert((x)==hipSuccess))
+
+// Kernel: sequential access, each thread reads/writes an element in order
+__global__ void sequentialAccessKernel(int *d_data, int N)
+{
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < N)
+    {
+        d_data[tid] += 1;
+    }
+}
+
+int main()
+{
+    const int N = 1 << 20; // 1M elements
+    size_t size = N * sizeof(int);
+    // Allocate host memory
+    int *h_data = (int *)malloc(size);
+    std::fill_n(h_data, N, 0);
+
+    // Allocate device memory
+    int *d_data;
+    HIP_ASSERT(hipMalloc(&d_data, size));
+
+    // Copy h_data to device
+    HIP_ASSERT(hipMemcpy(d_data, h_data, size, hipMemcpyHostToDevice));
+
+    // Configure kernel
+    dim3 blockSize(64);
+    dim3 gridSize((N + blockSize.x - 1) / blockSize.x);
+
+    // Repeat the launch so the profile is robust.
+    const int kIters = 30;
+    for (int i = 0; i < kIters; ++i)
+    {
+        hipLaunchKernelGGL(sequentialAccessKernel, gridSize, blockSize, 0, 0, d_data, N);
+    }
+    HIP_ASSERT(hipDeviceSynchronize());
+
+    // Copy back to host
+    HIP_ASSERT(hipMemcpy(h_data, d_data, size, hipMemcpyDeviceToHost));
+
+    // Cleanup
+    HIP_ASSERT(hipFree(d_data));
+    free(h_data);
+
+    std::cout << "SequentialAccess HIP test completed.\n";
+    return 0;
+}

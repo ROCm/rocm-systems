@@ -1,0 +1,114 @@
+Omniperf version: 2.0.0
+Profiler choice: rocprofv2
+Path: /home/colramos/omniperf/tests/workloads/ipblocks_TA/MI300A_A1
+Target: MI300A_A1
+Command: ./tests/vcopy -n 1048576 -b 256 -i 3
+Kernel Selection: None
+Dispatch Selection: None
+Hardware Blocks: ['ta']
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Collecting Performance Counters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+[profiling] Current input file: tests/workloads/ipblocks_TA/MI300A_A1/perfmon/pmc_perf_0.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_CYCLES
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_BUSY_CYCLES
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_BUSY_CU_CYCLES
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_WAVES
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_WAVE_CYCLES
+   |-> [/opt/rocm/bin/rocprofv2] - GRBM_COUNT
+   |-> [/opt/rocm/bin/rocprofv2] - GRBM_GUI_ACTIVE
+   |-> [/opt/rocm/bin/rocprofv2] - TA_TA_BUSY_sum
+   |-> [/opt/rocm/bin/rocprofv2] - TA_BUFFER_WAVEFRONTS_sum
+   |-> [/opt/rocm/bin/rocprofv2] Enabling Counter Collection
+   |-> [/opt/rocm/bin/rocprofv2] vcopy testing on GCD 0
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the CPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the GPU
+[profiling] Current input file: tests/workloads/ipblocks_TA/MI300A_A1/perfmon/pmc_perf_1.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - TA_BUFFER_READ_WAVEFRONTS_sum
+   |-> [/opt/rocm/bin/rocprofv2] - TA_BUFFER_WRITE_WAVEFRONTS_sum
+   |-> [/opt/rocm/bin/rocprofv2] Enabling Counter Collection
+   |-> [/opt/rocm/bin/rocprofv2] vcopy testing on GCD 0
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the CPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the GPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished copying vectors to the GPU
+   |-> [/opt/rocm/bin/rocprofv2] sw thinks it moved 1.000000 KB per wave
+   |-> [/opt/rocm/bin/rocprofv2] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [/opt/rocm/bin/rocprofv2] Launching the  kernel on the GPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished executing kernel
+   |-> [/opt/rocm/bin/rocprofv2] Finished executing kernel
+   |-> [/opt/rocm/bin/rocprofv2] Finished executing kernel
+   |-> [/opt/rocm/bin/rocprofv2] Finished copying the output vector from the GPU to the CPU
+   |-> [/opt/rocm/bin/rocprofv2] Releasing GPU memory
+   |-> [/opt/rocm/bin/rocprofv2] Releasing CPU memory
+   |-> [/opt/rocm/bin/rocprofv2] Results File: "tests/workloads/ipblocks_TA/MI300A_A1/out/pmc_1/results_pmc_perf_1.csv"
+   |-> [/opt/rocm/bin/rocprofv2]
+   |-> [/opt/rocm/bin/rocprofv2] The output path for the following counters: tests/workloads/ipblocks_TA/MI300A_A1/out/pmc_1
+[profiling] Current input file: tests/workloads/ipblocks_TA/MI300A_A1/perfmon/pmc_perf_2.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - TA_BUFFER_ATOMIC_WAVEFRONTS_sum
+   |-> [/opt/rocm/bin/rocprofv2] - TA_BUFFER_TOTAL_CYCLES_sum
+   |-> [/opt/rocm/bin/rocprofv2] Enabling Counter Collection
+   |-> [/opt/rocm/bin/rocprofv2] vcopy testing on GCD 0
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the CPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the GPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished copying vectors to the GPU
+[profiling] Current input file: tests/workloads/ipblocks_TA/MI300A_A1/perfmon/pmc_perf_3.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - TA_BUFFER_COALESCED_READ_CYCLES_sum
+   |-> [/opt/rocm/bin/rocprofv2] - TA_BUFFER_COALESCED_WRITE_CYCLES_sum
+[profiling] Current input file: tests/workloads/ipblocks_TA/MI300A_A1/perfmon/pmc_perf_4.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - TA_ADDR_STALLED_BY_TC_CYCLES_sum
+   |-> [/opt/rocm/bin/rocprofv2] - TA_TOTAL_WAVEFRONTS_sum
+   |-> [/opt/rocm/bin/rocprofv2] Enabling Counter Collection
+   |-> [/opt/rocm/bin/rocprofv2] vcopy testing on GCD 0
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the CPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the GPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished copying vectors to the GPU
+[profiling] Current input file: tests/workloads/ipblocks_TA/MI300A_A1/perfmon/pmc_perf_5.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - TA_ADDR_STALLED_BY_TD_CYCLES_sum
+   |-> [/opt/rocm/bin/rocprofv2] - TA_DATA_STALLED_BY_TC_CYCLES_sum
+   |-> [/opt/rocm/bin/rocprofv2] Enabling Counter Collection
+   |-> [/opt/rocm/bin/rocprofv2] vcopy testing on GCD 0
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the CPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the GPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished copying vectors to the GPU
+   |-> [/opt/rocm/bin/rocprofv2] sw thinks it moved 1.000000 KB per wave
+[profiling] Current input file: tests/workloads/ipblocks_TA/MI300A_A1/perfmon/pmc_perf_6.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - TA_FLAT_WAVEFRONTS_sum
+   |-> [/opt/rocm/bin/rocprofv2] - TA_FLAT_READ_WAVEFRONTS_sum
+   |-> [/opt/rocm/bin/rocprofv2] Enabling Counter Collection
+   |-> [/opt/rocm/bin/rocprofv2] vcopy testing on GCD 0
+[profiling] Current input file: tests/workloads/ipblocks_TA/MI300A_A1/perfmon/pmc_perf_7.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - TA_FLAT_WRITE_WAVEFRONTS_sum
+   |-> [/opt/rocm/bin/rocprofv2] - TA_FLAT_ATOMIC_WAVEFRONTS_sum
+   |-> [/opt/rocm/bin/rocprofv2] Enabling Counter Collection
+   |-> [/opt/rocm/bin/rocprofv2] vcopy testing on GCD 0
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the CPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the GPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished copying vectors to the GPU
+   |-> [/opt/rocm/bin/rocprofv2] sw thinks it moved 1.000000 KB per wave
+   |-> [/opt/rocm/bin/rocprofv2] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [/opt/rocm/bin/rocprofv2] Launching the  kernel on the GPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished executing kernel
+   |-> [/opt/rocm/bin/rocprofv2] Finished executing kernel
+   |-> [/opt/rocm/bin/rocprofv2] Finished executing kernel
+   |-> [/opt/rocm/bin/rocprofv2] Finished copying the output vector from the GPU to the CPU
+   |-> [/opt/rocm/bin/rocprofv2] Releasing GPU memory
+   |-> [/opt/rocm/bin/rocprofv2] Releasing CPU memory
+[profiling] Current input file: tests/workloads/ipblocks_TA/MI300A_A1/perfmon/timestamps.txt
+   |-> [/opt/rocm/bin/rocprofv2] vcopy testing on GCD 0
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the CPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the GPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished copying vectors to the GPU
+   |-> [/opt/rocm/bin/rocprofv2] sw thinks it moved 1.000000 KB per wave
+   |-> [/opt/rocm/bin/rocprofv2] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [/opt/rocm/bin/rocprofv2] Launching the  kernel on the GPU
+[roofline] Roofline temporarily disabled in MI300

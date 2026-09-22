@@ -1,0 +1,295 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "top.hpp"
+#include "os/os.hpp"
+#include "device/device.hpp"
+#include "rocsettings.hpp"
+#include "device/rocm/rocglinterop.hpp"
+
+namespace amd::roc {
+
+// ================================================================================================
+Settings::Settings() {
+  // Initialize the HSA device default settings
+
+  // Set this to true when we drop the flag
+  doublePrecision_ = ::CL_KHR_FP64;
+
+  enableLocalMemory_ = HSA_LOCAL_MEMORY_ENABLE;
+
+  maxWorkGroupSize_ = 1024;
+  preferredWorkGroupSize_ = 256;
+
+  kernargPoolSize_ = HSA_KERNARG_POOL_SIZE;
+
+  // Determine if user is requesting Non-Coherent mode
+  // for system memory. By default system memory is
+  // operates or is programmed to be in Coherent mode.
+  // Users can turn it off for hardware that does not
+  // support this feature naturally
+  char* nonCoherentMode = getenv("OPENCL_USE_NC_MEMORY_POLICY");
+  enableNCMode_ = (nonCoherentMode) ? true : false;
+
+  // Disable image DMA by default (ROCM runtime doesn't support it)
+  imageDMA_ = false;
+
+  stagedXferSize_ = flagIsDefault(GPU_STAGING_BUFFER_SIZE) ? 1 * Mi : GPU_STAGING_BUFFER_SIZE * Mi;
+
+  // Initialize transfer buffer size to 1MB by default
+  xferBufSize_ = 1024 * Ki;
+
+  pinnedXferSize_ = GPU_PINNED_XFER_SIZE * Mi;
+  pinnedMinXferSize_ =
+      flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) ? 64 * Ki : GPU_PINNED_MIN_XFER_SIZE * Mi;
+
+  sdmaCopyThreshold_ = GPU_FORCE_BLIT_COPY_SIZE * Ki;
+
+  // Don't support Denormals for single precision by default
+  singleFpDenorm_ = false;
+
+  apuSystem_ = false;
+
+  // Device enqueuing settings
+  numDeviceEvents_ = 1024;
+  numWaitEvents_ = 8;
+
+  lcWavefrontSize64_ = true;
+  imageBufferWar_ = false;
+
+  sdma_p2p_threshold_ = ROC_P2P_SDMA_SIZE * Ki;
+  hmmFlags_ = (!flagIsDefault(ROC_HMM_FLAGS)) ? ROC_HMM_FLAGS : 0;
+
+  rocr_backend_ = true;
+
+  cpu_wait_for_signal_ = ROC_CPU_WAIT_FOR_SIGNAL;
+  system_scope_signal_ = ROC_SYSTEM_SCOPE_SIGNAL;
+
+  // Use coarse grain system memory for kernel arguments by default (to keep GPU cache)
+  fgs_kernel_arg_ = false;
+  barrier_value_packet_ = false;
+  ext_dispatch_packet_ = false;
+  kernel_arg_impl_ = KernelArgImpl::HostKernelArgs;
+  aql_device_ring_buf_ = false;
+  gwsInitSupported_ = true;
+  limit_blit_wg_ = 16;
+
+  dynamic_queues_ = amd::IS_HIP ? DEBUG_HIP_DYNAMIC_QUEUES : 0;
+  // note: OCL user events don't allow CPU blocking calls in DD mode
+  blocking_blit_ = amd::IS_HIP;
+
+  max_hw_queues_ = GPU_MAX_HW_QUEUES;
+  aql_barrier_opt_ = amd::IS_HIP && DEBUG_CLR_AQL_BARRIER_OPT;
+
+  queue_pipe_dist_ = false;
+}
+
+// ================================================================================================
+bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups,
+                      bool isXgmi, bool isAPU) {
+  uint32_t gfxipMajor = isa.versionMajor();
+  uint32_t gfxipMinor = isa.versionMinor();
+  uint32_t gfxStepping = isa.versionStepping();
+
+  customHostAllocator_ = false;
+
+  // On MI300A staging is two local memcpys (no PCIe leg), so keep 1 MiB threshold.
+  if (isAPU && flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) &&
+      gfxipMajor == 9 && gfxipMinor == 4 && gfxStepping == 2) {
+    pinnedMinXferSize_ = 1 * Mi;
+  }
+
+  if (fullProfile) {
+    pinnedXferSize_ = 0;
+    stagedXferSize_ = 0;
+    xferBufSize_ = 0;
+    apuSystem_ = true;
+  } else {
+    pinnedXferSize_ = std::max(pinnedXferSize_, pinnedMinXferSize_);
+  }
+  enableXNACK_ = enableXNACK;
+
+  // Enable extensions
+  enableExtension(ClKhrByteAddressableStore);
+  enableExtension(ClKhrGlobalInt32BaseAtomics);
+  enableExtension(ClKhrGlobalInt32ExtendedAtomics);
+  enableExtension(ClKhrLocalInt32BaseAtomics);
+  enableExtension(ClKhrLocalInt32ExtendedAtomics);
+  enableExtension(ClKhrInt64BaseAtomics);
+  enableExtension(ClKhrInt64ExtendedAtomics);
+  enableExtension(ClKhr3DImageWrites);
+  enableExtension(ClAmdMediaOps);
+  enableExtension(ClAmdMediaOps2);
+  enableExtension(ClKhrImage2dFromBuffer);
+  enableExtension(ClKhrGlSharing);
+
+  // Enable platform extension
+  enableExtension(ClAmdDeviceAttributeQuery);
+
+  // Enable KHR double precision extension
+  enableExtension(ClKhrFp64);
+  enableExtension(ClKhrSubGroups);
+  enableExtension(ClKhrDepthImages);
+  enableExtension(ClAmdCopyBufferP2P);
+  enableExtension(ClKhrFp16);
+  supportDepthsRGB_ = true;
+
+  enableExtension(ClAmdAssemblyProgram);
+  // enable subnormals for gfx900 and later
+  if (gfxipMajor >= 9) {
+    singleFpDenorm_ = true;
+    enableCoopGroups_ = GPU_ENABLE_COOP_GROUPS & coop_groups;
+    enableCoopMultiDeviceGroups_ = GPU_ENABLE_COOP_GROUPS & coop_groups;
+  }
+
+  if ((gfxipMajor == 9 && gfxipMinor == 0 && gfxStepping == 10) ||
+      ((gfxipMajor == 9 && gfxipMinor >= 4 &&
+        (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2)))) {
+    // Enable Barrier Value packet is only for MI2XX/300
+    barrier_value_packet_ = true;
+    queue_pipe_dist_ = dynamic_queues_ >= 1;
+  }
+
+  if ((gfxipMajor == 9 && gfxipMinor >= 4) ||
+      (gfxipMajor == 12 && gfxipMinor >= 5)) {
+    sdma_swap_supported_ = true;
+  }
+
+  setKernelArgImpl(isa, isXgmi);
+
+  if (gfxipMajor >= 10) {
+     enableWave32Mode_ = true;
+     // Disable wgp mode for gfx1250 and later
+     if (gfxipMajor == 12 && gfxipMinor >= 5) {
+        enableWgpMode_ = false;
+     } else {
+        enableWgpMode_ = GPU_ENABLE_WGP_MODE;
+     }
+     if (gfxipMajor == 10 && gfxipMinor == 1) {
+       // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
+       // TODO: This should be updated when ROCr support custom pitch
+       imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
+     }
+  }
+
+  if (!flagIsDefault(GPU_ENABLE_WAVE32_MODE)) {
+    enableWave32Mode_ = GPU_ENABLE_WAVE32_MODE;
+  }
+
+  lcWavefrontSize64_ = !enableWave32Mode_;
+
+  if (gfxipMajor > 10 || (gfxipMajor == 9 && gfxipMinor >= 4)) {
+    gwsInitSupported_ = false;
+  }
+
+  if (GPU_MIPMAP) {
+    enableExtension(ClKhrMipMapImage);
+    enableExtension(ClKhrMipMapImageWrites);
+  }
+
+  if (gfxipMajor == 12 && gfxipMinor >= 5) {
+    ext_dispatch_packet_ = true;
+    groupMemCarveout_ = true;
+  }
+
+  // SDMA indirect copy uses the gfx1250 wait/signal-indirect SDMA
+  // packet that dereferences a pointer-to-pointer slot before issuing the
+  // copy.
+  if (gfxipMajor == 12 && gfxipMinor == 5) {
+    sdma_indirect_supported_ = true;
+  }
+
+#if defined(_WIN32)
+  if (gfxipMajor >= 11) {
+    // Due to driver limitation,
+    // D3D10/11 sharing extensions are only supported on GFX11 or later,
+    // and D3D9 sharing extension is not supported on any hardware as it is deprecated.
+    enableExtension(ClKhrD3d10Sharing);
+    enableExtension(ClKhrD3d11Sharing);
+    enableExtension(ClAmdPlanarYuv);
+  }
+#endif
+
+  // Override current device settings
+  override();
+
+  return true;
+}
+
+// ================================================================================================
+void Settings::override() {
+  // Limit reported workgroup size
+  if (GPU_MAX_WORKGROUP_SIZE != 0) {
+    preferredWorkGroupSize_ = GPU_MAX_WORKGROUP_SIZE;
+  }
+
+  if (!flagIsDefault(GPU_XFER_BUFFER_SIZE)) {
+    xferBufSize_ = GPU_XFER_BUFFER_SIZE * Ki;
+  }
+
+  if (!flagIsDefault(AMD_GPU_FORCE_SINGLE_FP_DENORM)) {
+    switch (AMD_GPU_FORCE_SINGLE_FP_DENORM) {
+      case 0:
+        singleFpDenorm_ = false;
+        break;
+      case 1:
+        singleFpDenorm_ = true;
+        break;
+      default:
+        break;
+    }
+  }
+  if (!flagIsDefault(GPU_ENABLE_COOP_GROUPS)) {
+    enableCoopGroups_ = GPU_ENABLE_COOP_GROUPS;
+    enableCoopMultiDeviceGroups_ = GPU_ENABLE_COOP_GROUPS;
+  }
+
+  if (!flagIsDefault(ROC_USE_FGS_KERNARG)) {
+    fgs_kernel_arg_ = ROC_USE_FGS_KERNARG;
+  }
+
+  if (!flagIsDefault(DEBUG_CLR_BLIT_KERNARG_OPT)) {
+    kernel_arg_opt_ = DEBUG_CLR_BLIT_KERNARG_OPT;
+  }
+}
+
+// ================================================================================================
+void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi) {
+  const uint32_t gfxipMajor = isa.versionMajor();
+  const uint32_t gfxipMinor = isa.versionMinor();
+  const uint32_t gfxStepping = isa.versionStepping();
+
+  const bool isGfx94x = gfxipMajor == 9 && gfxipMinor >= 4 &&
+                        (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2);
+  const bool isGfx90a = (gfxipMajor == 9 && gfxipMinor == 0 && gfxStepping == 10);
+  const bool isGfx125x = (gfxipMajor == 12) && ((gfxipMinor >= 5));
+
+  auto kernelArgImpl = KernelArgImpl::HostKernelArgs;
+
+  if (isXgmi) {
+    // The XGMI-connected path does not require the manual memory ordering
+    // workarounds that the PCIe connected path requires
+    kernelArgImpl = KernelArgImpl::DeviceKernelArgs;
+  } else if (isGfx94x || isGfx90a || isGfx125x) {
+    // Implement the kernel argument readback workaround
+    // (write all args -> sfence -> write last byte -> mfence -> read last byte)
+    kernelArgImpl = KernelArgImpl::DeviceKernelArgsReadback;
+  }
+
+  // Enable device kernel args by default on gfx94x/gfx125x. Device-memory AQL
+  // ring buffers are controlled separately via DEBUG_CLR_AQL_DEV_QUEUE below.
+  if (isGfx94x || isGfx125x) {
+    kernel_arg_impl_ = kernelArgImpl;
+    kernel_arg_opt_ = true;
+  }
+
+  if (!flagIsDefault(HIP_FORCE_DEV_KERNARG)) {
+    kernel_arg_impl_ = kernelArgImpl & (HIP_FORCE_DEV_KERNARG ? 0xF : 0x0);
+  }
+
+  aql_device_ring_buf_ = (DEBUG_CLR_AQL_DEV_QUEUE > 0);
+}
+}  // namespace amd::roc

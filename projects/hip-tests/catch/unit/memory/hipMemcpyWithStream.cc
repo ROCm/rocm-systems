@@ -1,0 +1,99 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <hip_test_common.hh>
+#include <hip/hip_runtime_api.h>
+#include <memcpy1d_tests_common.hh>
+#include <resource_guards.hh>
+#include <utils.hh>
+
+HIP_TEST_CASE(Unit_hipMemcpy_Positive_Basic) { MemcpyWithDirectionCommonTests<false>(hipMemcpy); }
+
+HIP_TEST_CASE(Unit_hipMemcpy_Positive_Synchronization_Behavior) {
+  using namespace std::placeholders;
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // For transfers from pageable host memory to device memory, a stream sync is performed before
+  // the copy is initiated. The function will return once the pageable buffer has been copied to
+  // the staging memory for DMA transfer to device memory, but the DMA to final destination may
+  // not have completed.
+  // For transfers from pinned host memory to device memory, the function is synchronous with
+  // respect to the host
+  SECTION("Host memory to device memory") {
+    MemcpyHPageabletoDSyncBehavior(std::bind(hipMemcpy, _1, _2, _3, hipMemcpyHostToDevice), true);
+  }
+
+  // For transfers from device to either pageable or pinned host memory, the function returns only
+  // once the copy has completed
+  SECTION("Device memory to host memory") {
+    const auto f = std::bind(hipMemcpy, _1, _2, _3, hipMemcpyDeviceToHost);
+    MemcpyDtoHPageableSyncBehavior(f, true);
+    MemcpyDtoHPinnedSyncBehavior(f, true);
+  }
+
+  // For transfers from device memory to device memory, no host-side synchronization is performed.
+  SECTION("Device memory to device memory") {
+    MemcpyDtoDSyncBehavior(std::bind(hipMemcpy, _1, _2, _3, hipMemcpyDeviceToDevice), false);
+  }
+
+  // For transfers from any host memory to any host memory, the function is fully synchronous with
+  // respect to the host
+  SECTION("Host memory to host memory") {
+    MemcpyHtoHSyncBehavior(std::bind(hipMemcpy, _1, _2, _3, hipMemcpyHostToHost), true);
+  }
+}
+
+HIP_TEST_CASE(Unit_hipMemcpy_Negative_Parameters) {
+  using namespace std::placeholders;
+
+  SECTION("Host to device") {
+    LinearAllocGuard<int> device_alloc(LinearAllocs::hipMalloc, kPageSize);
+    LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, kPageSize);
+    MemcpyWithDirectionCommonNegativeTests(hipMemcpy, device_alloc.ptr(), host_alloc.ptr(),
+                                           kPageSize, hipMemcpyHostToDevice);
+  }
+
+  SECTION("Device to host") {
+    LinearAllocGuard<int> device_alloc(LinearAllocs::hipMalloc, kPageSize);
+    LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, kPageSize);
+    MemcpyWithDirectionCommonNegativeTests(hipMemcpy, host_alloc.ptr(), device_alloc.ptr(),
+                                           kPageSize, hipMemcpyDeviceToHost);
+  }
+
+  SECTION("Host to host") {
+    LinearAllocGuard<int> src_alloc(LinearAllocs::hipHostMalloc, kPageSize);
+    LinearAllocGuard<int> dst_alloc(LinearAllocs::hipHostMalloc, kPageSize);
+    MemcpyWithDirectionCommonNegativeTests(hipMemcpy, dst_alloc.ptr(), src_alloc.ptr(), kPageSize,
+                                           hipMemcpyHostToHost);
+  }
+
+  SECTION("Device to device") {
+    LinearAllocGuard<int> src_alloc(LinearAllocs::hipMalloc, kPageSize);
+    LinearAllocGuard<int> dst_alloc(LinearAllocs::hipMalloc, kPageSize);
+    MemcpyWithDirectionCommonNegativeTests(hipMemcpy, dst_alloc.ptr(), src_alloc.ptr(), kPageSize,
+                                           hipMemcpyDeviceToDevice);
+  }
+}
+
+HIP_TEST_CASE(Unit_hipMemcpyWithStream_Capture) {
+  constexpr size_t kNumElements = 1024;
+
+  LinearAllocGuard<int> host_data(LinearAllocs::malloc, kNumElements * sizeof(int));
+  LinearAllocGuard<int> device_data(LinearAllocs::hipMalloc, kNumElements * sizeof(int));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+
+  HIP_CHECK_ERROR(hipMemcpyWithStream(device_data.ptr(), host_data.ptr(),
+                                      kNumElements * sizeof(int), hipMemcpyHostToDevice, stream),
+                  hipErrorStreamCaptureUnsupported);
+
+  HIP_CHECK_ERROR(hipStreamEndCapture(stream, nullptr), hipErrorStreamCaptureInvalidated);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+}

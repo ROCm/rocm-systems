@@ -1,0 +1,1016 @@
+.. meta::
+   :description: ROCm Systems Profiler system output documentation and reference
+   :keywords: rocprof-sys, rocprofiler-systems, Omnitrace, ROCm, profiler, system output, tracking, visualization, tool, Instinct, accelerator, AMD, rocpd, perfetto, timemory
+
+****************************************************
+Understanding the Systems Profiler output
+****************************************************
+
+The general output form of `ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ is
+``<OUTPUT_PATH>[/<TIMESTAMP>]/[<PREFIX>]<DATA_NAME>[-<OUTPUT_SUFFIX>].<EXT>``.
+
+For example, starting with the following base configuration:
+
+.. code-block:: shell
+
+   export ROCPROFSYS_OUTPUT_PATH=rocprof-sys-example-output
+   export ROCPROFSYS_TIME_OUTPUT=ON
+   export ROCPROFSYS_USE_PID=OFF
+   export ROCPROFSYS_PROFILE=ON
+   export ROCPROFSYS_TRACE=ON
+
+.. code-block:: shell
+
+   $ rocprof-sys-instrument -- ./foo
+   ...
+   [rocprof-sys] Outputting 'rocprof-sys-example-output/perfetto-trace.pftrace'...
+
+   [rocprof-sys] Outputting 'rocprof-sys-example-output/wall-clock.txt'...
+   [rocprof-sys] Outputting 'rocprof-sys-example-output/wall-clock.json'...
+
+If the ``ROCPROFSYS_USE_PID`` option is enabled, then running a non-MPI executable
+with a PID of ``63453`` results in the following output:
+
+.. code-block:: shell
+
+   $ export ROCPROFSYS_USE_PID=ON
+   $ rocprof-sys-instrument -- ./foo
+   ...
+   [rocprof-sys] Outputting 'rocprof-sys-example-output/perfetto-trace-63453.pftrace'...
+
+   [rocprof-sys] Outputting 'rocprof-sys-example-output/wall-clock-63453.txt'...
+   [rocprof-sys] Outputting 'rocprof-sys-example-output/wall-clock-63453.json'...
+
+If ``ROCPROFSYS_TIME_OUTPUT`` is enabled, then a job that started on January 31, 2022 at 12:30 PM
+generates the following:
+
+.. code-block:: shell
+
+   $ export ROCPROFSYS_TIME_OUTPUT=ON
+   $ rocprof-sys-instrument -- ./foo
+   ...
+   [rocprof-sys] Outputting 'rocprof-sys-example-output/2022-01-31_12.30_PM/perfetto-trace-63453.pftrace'...
+
+   [rocprof-sys] Outputting 'rocprof-sys-example-output/2022-01-31_12.30_PM/wall-clock-63453.txt'...
+   [rocprof-sys] Outputting 'rocprof-sys-example-output/2022-01-31_12.30_PM/wall-clock-63453.json'...
+
+Metadata
+========================================
+
+ROCm Systems Profiler outputs a ``metadata.json`` file. This metadata file contains
+information about the settings, environment variables, output files, and info
+about the system and the run, as follows:
+
+* Hardware cache sizes
+* Physical CPUs
+* Hardware concurrency
+* CPU model, frequency, vendor, and features
+* Launch date and time
+* Memory maps (for example, shared libraries)
+* Output files
+* Environment variables
+* Configuration settings
+
+Metadata JSON Sample
+-----------------------------------------------------------------------
+
+.. dropdown:: Sample JSON
+
+   .. code-block:: json
+      :linenos:
+
+      {
+      "rocprofiler-systems": {
+         "metadata": {
+            "info": {
+            "CPU_MODEL": "AMD Ryzen 5 3600 6-Core Processor",
+            "CPU_VENDOR": "AuthenticAMD",
+            "HOME": "/home/rocm-dev",
+            "LAUNCH_DATE": "01/15/25",
+            "LAUNCH_TIME": "16:49",
+            "PWD": "/home/rocm-dev/code/rocprofiler-systems",
+            "ROCPROFSYS_COMPILER_ID": "GNU",
+            "ROCPROFSYS_COMPILER_VERSION": "11.4.0",
+            "ROCPROFSYS_GIT_DESCRIBE": "",
+            "ROCPROFSYS_GIT_REVISION": "3213dc652728f7ed01b62bf55f6af76c43bfcbdb",
+            "ROCPROFSYS_LIBRARY_ARCH": "x86_64-linux-gnu",
+            "ROCPROFSYS_ROCM_VERSION": "6.3.1",
+            "ROCPROFSYS_SYSTEM_NAME": "Linux",
+            "ROCPROFSYS_SYSTEM_PROCESSOR": "x86_64",
+            "ROCPROFSYS_SYSTEM_VERSION": "6.8.0-51-generic",
+            "ROCPROFSYS_VERSION": "1.0.0",
+            "SHELL": "/usr/bin/zsh",
+            "TIMEMORY_API": "tim::project::timemory",
+            "TIMEMORY_GIT_DESCRIBE": "v3.2.0-703-gba3c6486",
+            "TIMEMORY_GIT_REVISION": "ba3c648677b3c6f217abe147ef3198f36239e234",
+            "TIMEMORY_VERSION": "4.0.0rc0",
+            "USER": "rocm-dev",
+            "CPU_FREQUENCY": 1972,
+            "CPU_FEATURES": [
+               "fpu", "vme", "de", "pse", "tsc", "msr", "pae"
+               // ... more features
+            ],
+            "HW_CONCURRENCY": 12,
+            "HW_PHYSICAL_CPU": 6,
+            "HW_L1_CACHE_SIZE": 32768,
+            "HW_L2_CACHE_SIZE": 524288,
+            "HW_L3_CACHE_SIZE": 16777216,
+            "ROCPROFSYS_VERSION_MAJOR": 1,
+            "ROCPROFSYS_VERSION_MINOR": 0,
+            "ROCPROFSYS_VERSION_PATCH": 0,
+            "ROCPROFSYS_ROCM_VERSION_MAJOR": 6,
+            "ROCPROFSYS_ROCM_VERSION_MINOR": 3,
+            "ROCPROFSYS_ROCM_VERSION_PATCH": 1,
+            "memory_maps_files": [
+               "/opt/rocm-6.3.1/lib/libhsa-amd-aqlprofile64.so.1.0.60301",
+               "/opt/rocm-6.3.1/lib/libhsa-runtime64.so.1.14.60301"
+               // ... more files
+            ],
+            "memory_maps": [
+               {
+                  "cereal_class_version": 0,
+                  "load_address": "76005b800000",
+                  "last_address": "76005b81b000",
+                  "permissions": "r---",
+                  "offset": "0",
+                  "device": "",
+                  "inode": 0,
+                  "pathname": "/opt/rocm/lib/libhsa-runtime64.so.1"
+               },
+               {
+                  "load_address": "76005b81b000",
+                  "last_address": "76005b93400d",
+                  "permissions": "r-x-",
+                  "offset": "1b000",
+                  "device": "",
+                  "inode": 0,
+                  "pathname": "/opt/rocm/lib/libhsa-runtime64.so.1"
+               }
+               // ... more mappings
+            ]
+            },
+            "settings": {
+            "cereal_class_version": 2,
+            "ROCPROFSYS_OUTPUT_PREFIX": {
+               "name": "output_prefix",
+               "environ": "ROCPROFSYS_OUTPUT_PREFIX",
+               "description": "Explicitly specify a prefix for all output files",
+               "count": 1,
+               "max_count": -1,
+               "cmdline": ["--rocprofiler-systems-output-prefix"],
+               "categories": [
+                  "filename", "io", "librocprof-sys", "native", "rocprofsys"
+               ],
+               "data_type": "string",
+               "initial": "parallel-overhead-binary-rewrite/",
+               "value": "parallel-overhead-binary-rewrite/",
+               "updated": "config",
+               "enabled": true
+            },
+            // Additional settings can be added here
+            "command_line": [
+               "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/parallel-overhead.inst",
+               "--", "10", "12", "1000"
+            ],
+            "environment": [
+               // Environment variables go here
+            ]
+            },
+            "environment": [
+            {
+               "key": "LD_LIBRARY_PATH",
+               "value": "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/lib:/opt/rocm/lib"
+            },
+            {
+               "key": "LIBRARY_PATH",
+               "value": ""
+            }
+            // ... more environment variables
+            ],
+            "output": {
+            "json": [
+               {
+                  "key": "wall_clock",
+                  "value": [
+                  "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/wall_clock.json"
+                  ]
+               }
+            ],
+            "protobuf": [
+               {
+                  "key": "perfetto",
+                  "value": [
+                  "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/perfetto-trace.pftrace"
+                  ]
+               }
+            ],
+            "text": [
+               {
+                  "key": "wall_clock",
+                  "value": [
+                  "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/wall_clock.txt"
+                  ]
+               }
+            ]
+            }
+         }
+      }
+      }
+
+Configuring the ROCm Systems Profiler output
+============================================
+
+ROCm Systems Profiler includes a core set of options for controlling the format
+and contents of the output files. For additional information, see the guide on
+:doc:`configuring runtime options <./configuring-runtime-options>`.
+
+Core configuration settings
+-----------------------------------
+
+.. csv-table::
+   :header: "Setting", "Value", "Description"
+   :widths: 30, 30, 100
+
+   "``ROCPROFSYS_OUTPUT_PATH``", "Any valid path", "Path to folder where output files should be placed"
+   "``ROCPROFSYS_OUTPUT_PREFIX``", "String", "Useful for multiple runs with different arguments. See the next section on output prefix keys."
+   "``ROCPROFSYS_OUTPUT_FILE``", "Any valid filepath", "Specific location for the Perfetto output file"
+   "``ROCPROFSYS_TIME_OUTPUT``", "Boolean", "Place all output in a timestamped folder, timestamp format controlled via ``ROCPROFSYS_TIME_FORMAT``"
+   "``ROCPROFSYS_TIME_FORMAT``", "String", "See ``strftime`` man pages for valid identifiers"
+   "``ROCPROFSYS_USE_PID``", "Boolean", "Append either the PID or the MPI rank to all output files (before the extension)"
+
+Output prefix keys
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Output prefix keys have many uses but are most helpful when dealing with multiple
+profiling runs or large MPI jobs.
+They are included in ROCm Systems Profiler because they were introduced into Timemory
+for `compile-time-perf <https://github.com/jrmadsen/compile-time-perf>`_.
+They are needed to create different output files for a generic wrapper around
+compilation commands while still
+overwriting the output from the last time a file was compiled.
+
+When doing scaling studies and specifying options via the command line,
+the recommended process is to
+use a common ``ROCPROFSYS_OUTPUT_PATH``, disable ``ROCPROFSYS_TIME_OUTPUT``,
+set ``ROCPROFSYS_OUTPUT_PREFIX="%argt%-"``, and let ROCm Systems Profiler cleanly organize the output.
+
+.. csv-table::
+   :header: "String", "Encoding"
+   :widths: 20, 120
+
+   "``%argv%``", "Entire command-line condensed into a single string"
+   "``%argt%``", "Similar to ``%argv%`` except basename of first command line argument"
+   "``%args%``", "All command line arguments condensed into a single string"
+   "``%tag%``", "Basename of first command line argument"
+   "``%arg<N>%``", "Command line argument at position ``<N>`` (zero indexed), e.g. ``%arg0%`` for first argument"
+   "``%argv_hash%``", "MD5 sum of ``%argv%``"
+   "``%argt_hash%``", "MD5 sum if ``%argt%``"
+   "``%args_hash%``", "MD5 sum of ``%args%``"
+   "``%tag_hash%``", "MD5 sum of ``%tag%``"
+   "``%arg<N>_hash%``", "MD5 sum of ``%arg<N>%``"
+   "``%pid%``", "Process identifier (i.e. ``getpid()``)"
+   "``%ppid%``", "Parent process identifier (i.e. ``getppid()``)"
+   "``%pgid%``", "Process group identifier (i.e. ``getpgid(getpid())``)"
+   "``%psid%``", "Process session identifier  (i.e. ``getsid(getpid())``)"
+   "``%psize%``", "Number of sibling process (from reading ``/proc/<PPID>/tasks/<PPID>/children``)"
+   "``%job%``", "Value of ``SLURM_JOB_ID`` environment variable if exists, else ``0``"
+   "``%rank%``", "Value of ``SLURM_PROCID`` environment variable if exists, else ``MPI_Comm_rank`` (or ``0`` non-mpi)"
+   "``%size%``", "``MPI_Comm_size`` or ``1`` if non-mpi"
+   "``%nid%``", "``%rank%`` if possible, otherwise ``%pid%``"
+   "``%launch_time%``", "Launch date and time (uses ``ROCPROFSYS_TIME_FORMAT``)"
+   "``%env{NAME}%``", "Value of environment variable ``NAME`` (i.e. ``getenv(NAME)``)"
+   "``%cfg{NAME}%``", "Value of configuration variable ``NAME`` (e.g. ``%cfg{ROCPROFSYS_SAMPLING_FREQ}%`` would resolve to sampling frequency)"
+   "``$env{NAME}``", "Alternative syntax to ``%env{NAME}%``"
+   "``$cfg{NAME}``", "Alternative syntax to ``%cfg{NAME}%``"
+   "``%m``", "Shorthand for ``%argt_hash%``"
+   "``%p``", "Shorthand for ``%pid%``"
+   "``%j``", "Shorthand for ``%job%``"
+   "``%r``", "Shorthand for ``%rank%``"
+   "``%s``", "Shorthand for ``%size%``"
+
+.. note::
+
+   In any output prefix key which contains a ``/`` character, the ``/`` characters
+   are replaced with ``_`` and any leading underscores are stripped. For example,
+   an ``%arg0%`` of ``/usr/bin/foo`` translates to ``usr_bin_foo``. Additionally, any ``%arg<N>%`` keys which
+   do not have a command line argument at position ``<N>`` are ignored.
+
+.. _rocprof_sys_rocpd_output:
+
+ROCm Profiling Data (rocpd) output
+=========================================
+
+The ROCm Profiling Data (or ``rocpd``) database is now the default output format for the ROCm Systems Profiler.
+It outputs a SQLite3 database containing all profiling data.
+ROCProfiler-SDK version 1.0.0 or later is required (introduced in ROCm 7.0.0).
+
+You can view and analyze the generated ``rocpd`` files in `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/>`_ tool.
+
+Features
+--------------
+
+The features of ``rocpd`` output format are:
+
+* **Comprehensive Data Model**: Consolidates all profiling artifacts including execution traces, performance counters, hardware metrics, and contextual metadata within a single SQLite3 database file (`.db` extension).
+
+* **Standards-Compliant Access**: Supports querying through industry-standard SQL interfaces including command-line tools (``sqlite3`` CLI), programming language bindings (Python ``sqlite3`` module, C/C++ SQLite API), and database management applications.
+
+* **Advanced Analytics Integration**: Facilitates sophisticated post-processing workflows through custom analytical scripts, automated reporting systems, and integration with third-party visualization and analysis frameworks that provide SQLite3 connectivity.
+
+Generating rocpd output
+-------------------------
+
+The rocpd format is now enabled by default. Simply run the profiler without specifying an output format:
+
+.. code-block:: shell
+
+   rocprof-sys-sample -- ./your_application
+
+To explicitly request other formats (e.g. Perfetto), use ``--output-format``:
+
+.. code-block:: shell
+
+   rocprof-sys-sample --output-format proto -- ./your_application
+
+The ``--output-format`` argument is authoritative and only the listed format(s) are produced.
+Tokens are space- or comma-separated, so you can request multiple formats at once.
+For example, to emit both a Perfetto trace and a ``rocpd`` database, use
+``--output-format proto rocpd``. This argument cannot be combined with
+``--trace``, ``--profile``, ``--flat-profile``, or ``--profile-format`` on the same command line.
+
+See :doc:`configuring runtime options <./configuring-runtime-options>` for additional
+details on setting up the profiling configuration options.
+
+Converting rocpd to alternative formats
+------------------------------------------
+
+ROCm provides a Python module to convert the ``rocpd`` database to alternative
+output formats for specialized analysis and visualization workflows. For example,
+(Open Trace Format 2) OTF2, Perfetto Protocol Buffers (PFTrace), and
+Comma-Separated Values (CSV) tables.
+
+See :doc:`Using rocpd output format <rocprofiler-sdk:how-to/using-rocpd-output-format>` in ROCProfiler-SDK documentation,
+for additional information on these conversion tools.
+
+Native Perfetto output
+========================================
+
+Use the ``ROCPROFSYS_OUTPUT_FILE`` to specify a specific location. If this is an
+absolute path, then all ``ROCPROFSYS_OUTPUT_PATH`` and similar
+settings are ignored. Visit `ui.perfetto.dev <https://ui.perfetto.dev>`_ and open
+this file.
+
+.. important::
+   If you are using a version of ROCm prior to ROCm 6.3.1 and are experiencing problems viewing your
+   trace in the latest version of [Perfetto](http://ui.perfetto.dev), then try using
+   [Perfetto UI v46.0](https://ui.perfetto.dev/v46.0-35b3d9845/#!/).
+
+**Figure 1:** Visualization of a performance graph in Perfetto
+
+.. image:: ../data/rocprof-sys-perfetto.png
+   :alt: Visualization of a performance graph in Perfetto
+   :width: 800
+
+**Figure 2:** Visualization of ROCm data in Perfetto
+
+.. image:: ../data/rocprof-sys-rocm.png
+   :alt: Visualization of ROCm data in Perfetto
+   :width: 800
+
+**Figure 3:** Visualization of ROCm flow data in Perfetto
+
+.. image:: ../data/rocprof-sys-rocm-flow.png
+   :alt: Visualization of ROCm flow data in Perfetto
+   :width: 800
+
+**Figure 4:** Visualization of ROCm GPU metrics in Perfetto
+
+.. image:: ../data/rocprof-sys-gpu-metrics.png
+   :alt: Visualization of ROCm GPU metrics in Perfetto
+   :width: 800
+
+Timemory output
+========================================
+
+Use ``rocprof-sys-avail --components --filename`` to view the base filename for each component, as follows
+
+.. code-block:: shell
+
+   $ rocprof-sys-avail wall_clock -C -f
+   |---------------------------------|---------------|------------------------|
+   |            COMPONENT            |   AVAILABLE   |        FILENAME        |
+   |---------------------------------|---------------|------------------------|
+   | wall_clock                      |     true      | wall_clock             |
+   | sampling_wall_clock             |     true      | sampling_wall_clock    |
+   |---------------------------------|---------------|------------------------|
+
+The ``ROCPROFSYS_COLLAPSE_THREADS`` and ``ROCPROFSYS_COLLAPSE_PROCESSES`` settings are
+only valid when full `MPI support is enabled <../install/install.html#mpi-support-within-rocprof-sys>`_.
+When they are set, Timemory combines the per-thread and per-rank data (respectively) of
+identical call stacks.
+
+The ``ROCPROFSYS_FLAT_PROFILE`` setting removes all call stack hierarchy.
+Using ``ROCPROFSYS_FLAT_PROFILE=ON`` in combination
+with ``ROCPROFSYS_COLLAPSE_THREADS=ON`` is a useful configuration for identifying
+min/max measurements regardless of the calling context.
+The ``ROCPROFSYS_TIMELINE_PROFILE`` setting (with ``ROCPROFSYS_FLAT_PROFILE=OFF``) effectively
+generates similar data to that found
+in Perfetto. Enabling timeline and flat profiling effectively generates
+similar data to ``strace``. However, while Timemory generally
+requires significantly less memory than Perfetto, this is not the case in timeline
+mode, so use this setting with caution.
+
+Timemory text output
+-----------------------------------------------------------------------
+
+Timemory text output files are meant for human consumption (while JSON formats are for analysis),
+so some fields such as the ``LABEL`` might be truncated for readability.
+The truncation settings be changed through the ``ROCPROFSYS_MAX_WIDTH`` setting.
+
+.. note::
+
+   The generation of text output is configurable via ``ROCPROFSYS_TEXT_OUTPUT``.
+
+.. _text-output-example-label:
+
+Timemory text output example
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In the following example, the ``N`` field in ``|N>>>`` is the thread ID. If MPI support is enabled,
+this becomes ``|M|N>>>`` where ``M`` is the rank.
+If ``ROCPROFSYS_COLLAPSE_THREADS=ON`` and ``ROCPROFSYS_COLLAPSE_PROCESSES=ON`` are configured,
+neither the ``M`` nor the ``N`` are present unless the
+component explicitly sets type traits. Type traits specify that the data is only
+relevant per-thread or per-process, such as the ``thread_cpu_clock`` clock component.
+
+.. code-block:: shell
+
+   |--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+   |                                                              REAL-CLOCK TIMER (I.E. WALL-CLOCK TIMER)                                                              |
+   |--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+   |                     LABEL                       | COUNT  | DEPTH  |   METRIC   | UNITS  |   SUM    |   MEAN   |   MIN    |   MAX    |   VAR    | STDDEV   | % SELF |
+   |-------------------------------------------------|--------|--------|------------|--------|----------|----------|----------|----------|----------|----------|--------|
+   | |0>>> openmp-cg.inst                            |      1 |      0 | wall_clock | sec    | 6.100107 | 6.100107 | 6.100107 | 6.100107 | 0.000000 | 0.000000 |   16.7 |
+   | |0>>> |_omp_parallel                            |      1 |      1 | wall_clock | sec    | 5.079807 | 5.079807 | 5.079807 | 5.079807 | 0.000000 | 0.000000 |    0.0 |
+   | |0>>>   |_pthread_create                        |      2 |      2 | wall_clock | sec    | 0.004790 | 0.002395 | 0.002356 | 0.002434 | 0.000000 | 0.000054 |    0.0 |
+   | |2>>>     |_start_thread                        |      1 |      3 | wall_clock | sec    | 5.077748 | 5.077748 | 5.077748 | 5.077748 | 0.000000 | 0.000000 |    0.0 |
+   | |2>>>       |_omp_thread_begin                  |      1 |      4 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>       |_omp_implicit_task                 |      1 |      4 | wall_clock | sec    | 5.077417 | 5.077417 | 5.077417 | 5.077417 | 0.000000 | 0.000000 |    0.0 |
+   | |2>>>         |_main.omp_outlined               |      1 |      5 | wall_clock | sec    | 5.074730 | 5.074730 | 5.074730 | 5.074730 | 0.000000 | 0.000000 |    0.0 |
+   | |2>>>           |_omp_work                      |     10 |      6 | wall_clock | sec    | 0.000453 | 0.000045 | 0.000004 | 0.000213 | 0.000000 | 0.000064 |   41.6 |
+   | |2>>>             |_omp_dispatch                |      6 |      7 | wall_clock | sec    | 0.000003 | 0.000001 | 0.000000 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>             |_main.omp_outlined [loop#0]  |      1 |      7 | wall_clock | sec    | 0.000050 | 0.000050 | 0.000050 | 0.000050 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>             |_main.omp_outlined [loop#12] |      1 |      7 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>             |_main.omp_outlined [loop#1]  |      1 |      7 | wall_clock | sec    | 0.000183 | 0.000183 | 0.000183 | 0.000183 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>             |_main.omp_outlined [loop#2]  |      1 |      7 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>             |_main.omp_outlined [loop#3]  |      1 |      7 | wall_clock | sec    | 0.000014 | 0.000014 | 0.000014 | 0.000014 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>             |_main.omp_outlined [loop#6]  |      1 |      7 | wall_clock | sec    | 0.000005 | 0.000005 | 0.000005 | 0.000005 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>             |_main.omp_outlined [loop#11] |      1 |      7 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>             |_main.omp_outlined [loop#7]  |      1 |      7 | wall_clock | sec    | 0.000005 | 0.000005 | 0.000005 | 0.000005 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>             |_main.omp_outlined [loop#9]  |      1 |      7 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>           |_omp_sync_region               |      8 |      6 | wall_clock | sec    | 0.000212 | 0.000027 | 0.000023 | 0.000046 | 0.000000 | 0.000008 |   55.7 |
+   | |2>>>             |_omp_sync_region_wait        |      8 |      7 | wall_clock | sec    | 0.000094 | 0.000012 | 0.000010 | 0.000024 | 0.000000 | 0.000005 |  100.0 |
+   | |2>>>           |_conj_grad                     |      1 |      6 | wall_clock | sec    | 0.101549 | 0.101549 | 0.101549 | 0.101549 | 0.000000 | 0.000000 |    0.2 |
+   | |2>>>             |_omp_work                    |      6 |      7 | wall_clock | sec    | 0.003838 | 0.000640 | 0.000004 | 0.003671 | 0.000002 | 0.001485 |    3.6 |
+   | |2>>>               |_omp_dispatch              |      4 |      8 | wall_clock | sec    | 0.000002 | 0.000001 | 0.000000 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>               |_conj_grad [loop#0]        |      1 |      8 | wall_clock | sec    | 0.000018 | 0.000018 | 0.000018 | 0.000018 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>               |_conj_grad [loop#1]        |      1 |      8 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>               |_conj_grad [loop#9]        |      1 |      8 | wall_clock | sec    | 0.000002 | 0.000002 | 0.000002 | 0.000002 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>               |_conj_grad [loop#8]        |      1 |      8 | wall_clock | sec    | 0.000013 | 0.000013 | 0.000013 | 0.000013 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>               |_conj_grad [loop#3]        |      1 |      8 | wall_clock | sec    | 0.003641 | 0.003641 | 0.003641 | 0.003641 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>               |_conj_grad [loop#6]        |      1 |      8 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>               |_conj_grad [loop#5]        |      1 |      8 | wall_clock | sec    | 0.000023 | 0.000023 | 0.000023 | 0.000023 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>             |_omp_sync_region             |      6 |      7 | wall_clock | sec    | 0.000386 | 0.000064 | 0.000024 | 0.000152 | 0.000000 | 0.000053 |   29.9 |
+   | |2>>>               |_omp_sync_region_wait      |      6 |      8 | wall_clock | sec    | 0.000271 | 0.000045 | 0.000010 | 0.000131 | 0.000000 | 0.000052 |  100.0 |
+   | |2>>>             |_conj_grad [loop#2]          |      1 |      7 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>             |_conj_grad [loop#7]          |      1 |      7 | wall_clock | sec    | 0.097136 | 0.097136 | 0.097136 | 0.097136 | 0.000000 | 0.000000 |    2.9 |
+   | |2>>>               |_omp_work                  |    125 |      8 | wall_clock | sec    | 0.090726 | 0.000726 | 0.000004 | 0.004120 | 0.000002 | 0.001406 |   99.9 |
+   | |2>>>                 |_omp_dispatch            |    100 |      9 | wall_clock | sec    | 0.000047 | 0.000000 | 0.000000 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>               |_omp_sync_region           |    125 |      8 | wall_clock | sec    | 0.003605 | 0.000029 | 0.000023 | 0.000124 | 0.000000 | 0.000013 |   51.3 |
+   | |2>>>                 |_omp_sync_region_wait    |    125 |      9 | wall_clock | sec    | 0.001755 | 0.000014 | 0.000009 | 0.000094 | 0.000000 | 0.000011 |  100.0 |
+   | |2>>>             |_conj_grad [loop#4]          |      1 |      7 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>           |_main.omp_outlined [loop#5]    |      1 |      6 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>           |_main.omp_outlined [loop#4]    |      1 |      6 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>           |_main.omp_outlined [loop#8]    |      1 |      6 | wall_clock | sec    | 4.972281 | 4.972281 | 4.972281 | 4.972281 | 0.000000 | 0.000000 |    0.1 |
+   | |2>>>             |_conj_grad                   |     50 |      7 | wall_clock | sec    | 4.958576 | 0.099172 | 0.098079 | 0.101557 | 0.000000 | 0.000660 |    0.2 |
+   | |2>>>               |_omp_work                  |    300 |      8 | wall_clock | sec    | 0.182672 | 0.000609 | 0.000004 | 0.003721 | 0.000002 | 0.001290 |    3.3 |
+   | |2>>>                 |_omp_dispatch            |    200 |      9 | wall_clock | sec    | 0.000092 | 0.000000 | 0.000000 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>                 |_conj_grad [loop#0]      |     50 |      9 | wall_clock | sec    | 0.001560 | 0.000031 | 0.000026 | 0.000037 | 0.000000 | 0.000002 |  100.0 |
+   | |2>>>                 |_conj_grad [loop#1]      |     50 |      9 | wall_clock | sec    | 0.000053 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>                 |_conj_grad [loop#9]      |     50 |      9 | wall_clock | sec    | 0.000067 | 0.000001 | 0.000001 | 0.000002 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>                 |_conj_grad [loop#8]      |     50 |      9 | wall_clock | sec    | 0.000630 | 0.000013 | 0.000012 | 0.000016 | 0.000000 | 0.000001 |  100.0 |
+   | |2>>>                 |_conj_grad [loop#3]      |     50 |      9 | wall_clock | sec    | 0.172947 | 0.003459 | 0.003372 | 0.003690 | 0.000000 | 0.000068 |  100.0 |
+   | |2>>>                 |_conj_grad [loop#6]      |     50 |      9 | wall_clock | sec    | 0.000070 | 0.000001 | 0.000001 | 0.000002 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>                 |_conj_grad [loop#5]      |     50 |      9 | wall_clock | sec    | 0.001137 | 0.000023 | 0.000017 | 0.000036 | 0.000000 | 0.000002 |  100.0 |
+   | |2>>>               |_omp_sync_region           |    300 |      8 | wall_clock | sec    | 0.008423 | 0.000028 | 0.000023 | 0.000068 | 0.000000 | 0.000009 |   54.2 |
+   | |2>>>                 |_omp_sync_region_wait    |    300 |      9 | wall_clock | sec    | 0.003860 | 0.000013 | 0.000009 | 0.000053 | 0.000000 | 0.000007 |  100.0 |
+   | |2>>>               |_conj_grad [loop#2]        |     50 |      8 | wall_clock | sec    | 0.000057 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>               |_conj_grad [loop#7]        |     50 |      8 | wall_clock | sec    | 4.759600 | 0.095192 | 0.094130 | 0.097386 | 0.000000 | 0.000630 |    2.9 |
+   | |2>>>                 |_omp_work                |   6250 |      9 | wall_clock | sec    | 4.442086 | 0.000711 | 0.000004 | 0.003788 | 0.000002 | 0.001370 |   99.9 |
+   | |2>>>                   |_omp_dispatch          |   5000 |     10 | wall_clock | sec    | 0.002305 | 0.000000 | 0.000000 | 0.000005 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>                 |_omp_sync_region         |   6250 |      9 | wall_clock | sec    | 0.177916 | 0.000028 | 0.000018 | 0.000262 | 0.000000 | 0.000010 |   53.8 |
+   | |2>>>                   |_omp_sync_region_wait  |   6250 |     10 | wall_clock | sec    | 0.082161 | 0.000013 | 0.000004 | 0.000248 | 0.000000 | 0.000008 |  100.0 |
+   | |2>>>               |_conj_grad [loop#4]        |     50 |      8 | wall_clock | sec    | 0.000058 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>             |_omp_work                    |    200 |      7 | wall_clock | sec    | 0.002753 | 0.000014 | 0.000004 | 0.000032 | 0.000000 | 0.000010 |   98.3 |
+   | |2>>>               |_omp_dispatch              |    100 |      8 | wall_clock | sec    | 0.000046 | 0.000000 | 0.000000 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>             |_omp_sync_region             |    250 |      7 | wall_clock | sec    | 0.006061 | 0.000024 | 0.000023 | 0.000042 | 0.000000 | 0.000003 |   60.0 |
+   | |2>>>               |_omp_sync_region_wait      |    250 |      8 | wall_clock | sec    | 0.002423 | 0.000010 | 0.000009 | 0.000014 | 0.000000 | 0.000000 |  100.0 |
+   | |2>>>         |_omp_sync_region                 |      1 |      5 | wall_clock | sec    | 0.002650 | 0.002650 | 0.002650 | 0.002650 | 0.000000 | 0.000000 |    0.3 |
+   | |2>>>           |_omp_sync_region_wait          |      1 |      6 | wall_clock | sec    | 0.002641 | 0.002641 | 0.002641 | 0.002641 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>     |_start_thread                        |      1 |      3 | wall_clock | sec    | 5.080178 | 5.080178 | 5.080178 | 5.080178 | 0.000000 | 0.000000 |    0.1 |
+   | |1>>>       |_omp_thread_begin                  |      1 |      4 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>       |_omp_implicit_task                 |      1 |      4 | wall_clock | sec    | 5.077434 | 5.077434 | 5.077434 | 5.077434 | 0.000000 | 0.000000 |    0.0 |
+   | |1>>>         |_main.omp_outlined               |      1 |      5 | wall_clock | sec    | 5.074749 | 5.074749 | 5.074749 | 5.074749 | 0.000000 | 0.000000 |    0.0 |
+   | |1>>>           |_omp_work                      |     10 |      6 | wall_clock | sec    | 0.000252 | 0.000025 | 0.000002 | 0.000124 | 0.000000 | 0.000038 |   33.4 |
+   | |1>>>             |_omp_dispatch                |      6 |      7 | wall_clock | sec    | 0.000001 | 0.000000 | 0.000000 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>             |_main.omp_outlined [loop#0]  |      1 |      7 | wall_clock | sec    | 0.000035 | 0.000035 | 0.000035 | 0.000035 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>             |_main.omp_outlined [loop#12] |      1 |      7 | wall_clock | sec    | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>             |_main.omp_outlined [loop#1]  |      1 |      7 | wall_clock | sec    | 0.000113 | 0.000113 | 0.000113 | 0.000113 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>             |_main.omp_outlined [loop#2]  |      1 |      7 | wall_clock | sec    | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>             |_main.omp_outlined [loop#3]  |      1 |      7 | wall_clock | sec    | 0.000010 | 0.000010 | 0.000010 | 0.000010 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>             |_main.omp_outlined [loop#6]  |      1 |      7 | wall_clock | sec    | 0.000003 | 0.000003 | 0.000003 | 0.000003 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>             |_main.omp_outlined [loop#11] |      1 |      7 | wall_clock | sec    | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>             |_main.omp_outlined [loop#7]  |      1 |      7 | wall_clock | sec    | 0.000003 | 0.000003 | 0.000003 | 0.000003 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>             |_main.omp_outlined [loop#9]  |      1 |      7 | wall_clock | sec    | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>           |_omp_sync_region               |      8 |      6 | wall_clock | sec    | 0.000582 | 0.000073 | 0.000028 | 0.000274 | 0.000000 | 0.000082 |    9.5 |
+   | |1>>>             |_omp_sync_region_wait        |      8 |      7 | wall_clock | sec    | 0.000526 | 0.000066 | 0.000022 | 0.000260 | 0.000000 | 0.000080 |  100.0 |
+   | |1>>>           |_conj_grad                     |      1 |      6 | wall_clock | sec    | 0.101518 | 0.101518 | 0.101518 | 0.101518 | 0.000000 | 0.000000 |    0.1 |
+   | |1>>>             |_omp_work                    |      6 |      7 | wall_clock | sec    | 0.002260 | 0.000377 | 0.000002 | 0.002143 | 0.000001 | 0.000865 |    3.1 |
+   | |1>>>               |_omp_dispatch              |      4 |      8 | wall_clock | sec    | 0.000001 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>               |_conj_grad [loop#0]        |      1 |      8 | wall_clock | sec    | 0.000039 | 0.000039 | 0.000039 | 0.000039 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>               |_conj_grad [loop#1]        |      1 |      8 | wall_clock | sec    | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>               |_conj_grad [loop#9]        |      1 |      8 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>               |_conj_grad [loop#8]        |      1 |      8 | wall_clock | sec    | 0.000006 | 0.000006 | 0.000006 | 0.000006 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>               |_conj_grad [loop#3]        |      1 |      8 | wall_clock | sec    | 0.002126 | 0.002126 | 0.002126 | 0.002126 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>               |_conj_grad [loop#6]        |      1 |      8 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>               |_conj_grad [loop#5]        |      1 |      8 | wall_clock | sec    | 0.000014 | 0.000014 | 0.000014 | 0.000014 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>             |_omp_sync_region             |      6 |      7 | wall_clock | sec    | 0.001972 | 0.000329 | 0.000017 | 0.001609 | 0.000000 | 0.000633 |    3.0 |
+   | |1>>>               |_omp_sync_region_wait      |      6 |      8 | wall_clock | sec    | 0.001913 | 0.000319 | 0.000009 | 0.001602 | 0.000000 | 0.000634 |  100.0 |
+   | |1>>>             |_conj_grad [loop#2]          |      1 |      7 | wall_clock | sec    | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>             |_conj_grad [loop#7]          |      1 |      7 | wall_clock | sec    | 0.097191 | 0.097191 | 0.097191 | 0.097191 | 0.000000 | 0.000000 |    1.5 |
+   | |1>>>               |_omp_work                  |    125 |      8 | wall_clock | sec    | 0.054511 | 0.000436 | 0.000002 | 0.002273 | 0.000001 | 0.000849 |  100.0 |
+   | |1>>>                 |_omp_dispatch            |    100 |      9 | wall_clock | sec    | 0.000019 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>               |_omp_sync_region           |    125 |      8 | wall_clock | sec    | 0.041210 | 0.000330 | 0.000011 | 0.002052 | 0.000000 | 0.000584 |    2.6 |
+   | |1>>>                 |_omp_sync_region_wait    |    125 |      9 | wall_clock | sec    | 0.040135 | 0.000321 | 0.000005 | 0.002033 | 0.000000 | 0.000580 |  100.0 |
+   | |1>>>             |_conj_grad [loop#4]          |      1 |      7 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>           |_main.omp_outlined [loop#5]    |      1 |      6 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>           |_main.omp_outlined [loop#4]    |      1 |      6 | wall_clock | sec    | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>           |_main.omp_outlined [loop#8]    |      1 |      6 | wall_clock | sec    | 4.972283 | 4.972283 | 4.972283 | 4.972283 | 0.000000 | 0.000000 |    0.0 |
+   | |1>>>             |_conj_grad                   |     50 |      7 | wall_clock | sec    | 4.958649 | 0.099173 | 0.098081 | 0.101558 | 0.000000 | 0.000661 |    0.1 |
+   | |1>>>               |_omp_work                  |    300 |      8 | wall_clock | sec    | 0.110605 | 0.000369 | 0.000002 | 0.002215 | 0.000001 | 0.000786 |    2.7 |
+   | |1>>>                 |_omp_dispatch            |    200 |      9 | wall_clock | sec    | 0.000038 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>                 |_conj_grad [loop#0]      |     50 |      9 | wall_clock | sec    | 0.001071 | 0.000021 | 0.000020 | 0.000023 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>                 |_conj_grad [loop#1]      |     50 |      9 | wall_clock | sec    | 0.000022 | 0.000000 | 0.000000 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>                 |_conj_grad [loop#9]      |     50 |      9 | wall_clock | sec    | 0.000025 | 0.000001 | 0.000000 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>                 |_conj_grad [loop#8]      |     50 |      9 | wall_clock | sec    | 0.000326 | 0.000007 | 0.000006 | 0.000007 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>                 |_conj_grad [loop#3]      |     50 |      9 | wall_clock | sec    | 0.105352 | 0.002107 | 0.002074 | 0.002198 | 0.000000 | 0.000021 |  100.0 |
+   | |1>>>                 |_conj_grad [loop#6]      |     50 |      9 | wall_clock | sec    | 0.000039 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>                 |_conj_grad [loop#5]      |     50 |      9 | wall_clock | sec    | 0.000719 | 0.000014 | 0.000013 | 0.000017 | 0.000000 | 0.000001 |  100.0 |
+   | |1>>>               |_omp_sync_region           |    300 |      8 | wall_clock | sec    | 0.084256 | 0.000281 | 0.000011 | 0.001618 | 0.000000 | 0.000527 |    3.0 |
+   | |1>>>                 |_omp_sync_region_wait    |    300 |      9 | wall_clock | sec    | 0.081757 | 0.000273 | 0.000005 | 0.001589 | 0.000000 | 0.000523 |  100.0 |
+   | |1>>>               |_conj_grad [loop#2]        |     50 |      8 | wall_clock | sec    | 0.000026 | 0.000001 | 0.000000 | 0.000002 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>               |_conj_grad [loop#7]        |     50 |      8 | wall_clock | sec    | 4.759698 | 0.095194 | 0.094132 | 0.097391 | 0.000000 | 0.000630 |    1.6 |
+   | |1>>>                 |_omp_work                |   6250 |      9 | wall_clock | sec    | 2.699342 | 0.000432 | 0.000002 | 0.002232 | 0.000001 | 0.000837 |  100.0 |
+   | |1>>>                   |_omp_dispatch          |   5000 |     10 | wall_clock | sec    | 0.000934 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>                 |_omp_sync_region         |   6250 |      9 | wall_clock | sec    | 1.983999 | 0.000317 | 0.000010 | 0.001662 | 0.000000 | 0.000554 |    2.7 |
+   | |1>>>                   |_omp_sync_region_wait  |   6250 |     10 | wall_clock | sec    | 1.929991 | 0.000309 | 0.000004 | 0.001648 | 0.000000 | 0.000550 |  100.0 |
+   | |1>>>               |_conj_grad [loop#4]        |     50 |      8 | wall_clock | sec    | 0.000026 | 0.000001 | 0.000000 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>             |_omp_work                    |    200 |      7 | wall_clock | sec    | 0.001422 | 0.000007 | 0.000002 | 0.000017 | 0.000000 | 0.000006 |   98.7 |
+   | |1>>>               |_omp_dispatch              |    100 |      8 | wall_clock | sec    | 0.000018 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>             |_omp_sync_region             |    250 |      7 | wall_clock | sec    | 0.010015 | 0.000040 | 0.000020 | 0.000055 | 0.000000 | 0.000007 |   16.9 |
+   | |1>>>               |_omp_sync_region_wait      |    250 |      8 | wall_clock | sec    | 0.008318 | 0.000033 | 0.000013 | 0.000049 | 0.000000 | 0.000007 |  100.0 |
+   | |1>>>         |_omp_sync_region                 |      1 |      5 | wall_clock | sec    | 0.002662 | 0.002662 | 0.002662 | 0.002662 | 0.000000 | 0.000000 |    0.2 |
+   | |1>>>           |_omp_sync_region_wait          |      1 |      6 | wall_clock | sec    | 0.002657 | 0.002657 | 0.002657 | 0.002657 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>   |_omp_implicit_task                     |      1 |      2 | wall_clock | sec    | 5.074911 | 5.074911 | 5.074911 | 5.074911 | 0.000000 | 0.000000 |    0.0 |
+   | |0>>>     |_main.omp_outlined                   |      1 |      3 | wall_clock | sec    | 5.074855 | 5.074855 | 5.074855 | 5.074855 | 0.000000 | 0.000000 |    0.0 |
+   | |0>>>       |_omp_work                          |     10 |      4 | wall_clock | sec    | 0.000249 | 0.000025 | 0.000002 | 0.000124 | 0.000000 | 0.000037 |   35.1 |
+   | |0>>>         |_omp_dispatch                    |      6 |      5 | wall_clock | sec    | 0.000002 | 0.000000 | 0.000000 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>         |_main.omp_outlined [loop#0]      |      1 |      5 | wall_clock | sec    | 0.000031 | 0.000031 | 0.000031 | 0.000031 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>         |_main.omp_outlined [loop#12]     |      1 |      5 | wall_clock | sec    | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>         |_main.omp_outlined [loop#1]      |      1 |      5 | wall_clock | sec    | 0.000111 | 0.000111 | 0.000111 | 0.000111 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>         |_main.omp_outlined [loop#2]      |      1 |      5 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>         |_main.omp_outlined [loop#3]      |      1 |      5 | wall_clock | sec    | 0.000011 | 0.000011 | 0.000011 | 0.000011 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>         |_main.omp_outlined [loop#6]      |      1 |      5 | wall_clock | sec    | 0.000003 | 0.000003 | 0.000003 | 0.000003 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>         |_main.omp_outlined [loop#11]     |      1 |      5 | wall_clock | sec    | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>         |_main.omp_outlined [loop#7]      |      1 |      5 | wall_clock | sec    | 0.000002 | 0.000002 | 0.000002 | 0.000002 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>         |_main.omp_outlined [loop#9]      |      1 |      5 | wall_clock | sec    | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>       |_omp_sync_region                   |      8 |      4 | wall_clock | sec    | 0.000650 | 0.000081 | 0.000029 | 0.000332 | 0.000000 | 0.000102 |    7.9 |
+   | |0>>>         |_omp_sync_region_wait            |      8 |      5 | wall_clock | sec    | 0.000599 | 0.000075 | 0.000022 | 0.000323 | 0.000000 | 0.000101 |  100.0 |
+   | |0>>>       |_conj_grad                         |      1 |      4 | wall_clock | sec    | 0.101564 | 0.101564 | 0.101564 | 0.101564 | 0.000000 | 0.000000 |    0.1 |
+   | |0>>>         |_omp_work                        |      6 |      5 | wall_clock | sec    | 0.002244 | 0.000374 | 0.000002 | 0.002137 | 0.000001 | 0.000864 |    3.0 |
+   | |0>>>           |_omp_dispatch                  |      4 |      6 | wall_clock | sec    | 0.000001 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>           |_conj_grad [loop#0]            |      1 |      6 | wall_clock | sec    | 0.000036 | 0.000036 | 0.000036 | 0.000036 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>           |_conj_grad [loop#1]            |      1 |      6 | wall_clock | sec    | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>           |_conj_grad [loop#9]            |      1 |      6 | wall_clock | sec    | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>           |_conj_grad [loop#8]            |      1 |      6 | wall_clock | sec    | 0.000008 | 0.000008 | 0.000008 | 0.000008 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>           |_conj_grad [loop#3]            |      1 |      6 | wall_clock | sec    | 0.002118 | 0.002118 | 0.002118 | 0.002118 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>           |_conj_grad [loop#6]            |      1 |      6 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>           |_conj_grad [loop#5]            |      1 |      6 | wall_clock | sec    | 0.000013 | 0.000013 | 0.000013 | 0.000013 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>         |_omp_sync_region                 |      6 |      5 | wall_clock | sec    | 0.002043 | 0.000340 | 0.000029 | 0.001609 | 0.000000 | 0.000623 |    2.0 |
+   | |0>>>           |_omp_sync_region_wait          |      6 |      6 | wall_clock | sec    | 0.002002 | 0.000334 | 0.000023 | 0.001601 | 0.000000 | 0.000622 |  100.0 |
+   | |0>>>         |_conj_grad [loop#2]              |      1 |      5 | wall_clock | sec    | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>         |_conj_grad [loop#7]              |      1 |      5 | wall_clock | sec    | 0.097195 | 0.097195 | 0.097195 | 0.097195 | 0.000000 | 0.000000 |    1.5 |
+   | |0>>>           |_omp_work                      |    125 |      6 | wall_clock | sec    | 0.054617 | 0.000437 | 0.000002 | 0.002348 | 0.000001 | 0.000850 |  100.0 |
+   | |0>>>             |_omp_dispatch                |    100 |      7 | wall_clock | sec    | 0.000020 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>           |_omp_sync_region               |    125 |      6 | wall_clock | sec    | 0.041158 | 0.000329 | 0.000019 | 0.001930 | 0.000000 | 0.000577 |    2.3 |
+   | |0>>>             |_omp_sync_region_wait        |    125 |      7 | wall_clock | sec    | 0.040230 | 0.000322 | 0.000012 | 0.001922 | 0.000000 | 0.000574 |  100.0 |
+   | |0>>>         |_conj_grad [loop#4]              |      1 |      5 | wall_clock | sec    | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>       |_main.omp_outlined [loop#5]        |      1 |      4 | wall_clock | sec    | 0.000001 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>       |_main.omp_outlined [loop#4]        |      1 |      4 | wall_clock | sec    | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>       |_omp_masked                        |      1 |      4 | wall_clock | sec    | 0.000005 | 0.000005 | 0.000005 | 0.000005 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>       |_main.omp_outlined [loop#8]        |      1 |      4 | wall_clock | sec    | 4.972270 | 4.972270 | 4.972270 | 4.972270 | 0.000000 | 0.000000 |    0.1 |
+   | |0>>>         |_omp_masked                      |    150 |      5 | wall_clock | sec    | 0.000450 | 0.000003 | 0.000001 | 0.000007 | 0.000000 | 0.000001 |  100.0 |
+   | |0>>>         |_conj_grad                       |     50 |      5 | wall_clock | sec    | 4.958396 | 0.099168 | 0.098075 | 0.101553 | 0.000000 | 0.000660 |    0.1 |
+   | |0>>>           |_omp_work                      |    300 |      6 | wall_clock | sec    | 0.110576 | 0.000369 | 0.000001 | 0.002217 | 0.000001 | 0.000787 |    2.7 |
+   | |0>>>             |_omp_dispatch                |    200 |      7 | wall_clock | sec    | 0.000039 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>             |_conj_grad [loop#0]          |     50 |      7 | wall_clock | sec    | 0.000950 | 0.000019 | 0.000018 | 0.000020 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>             |_conj_grad [loop#1]          |     50 |      7 | wall_clock | sec    | 0.000022 | 0.000000 | 0.000000 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>             |_conj_grad [loop#9]          |     50 |      7 | wall_clock | sec    | 0.000028 | 0.000001 | 0.000000 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>             |_conj_grad [loop#8]          |     50 |      7 | wall_clock | sec    | 0.000332 | 0.000007 | 0.000006 | 0.000011 | 0.000000 | 0.000001 |  100.0 |
+   | |0>>>             |_conj_grad [loop#3]          |     50 |      7 | wall_clock | sec    | 0.105495 | 0.002110 | 0.002082 | 0.002202 | 0.000000 | 0.000022 |  100.0 |
+   | |0>>>             |_conj_grad [loop#6]          |     50 |      7 | wall_clock | sec    | 0.000044 | 0.000001 | 0.000001 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>             |_conj_grad [loop#5]          |     50 |      7 | wall_clock | sec    | 0.000699 | 0.000014 | 0.000013 | 0.000017 | 0.000000 | 0.000001 |  100.0 |
+   | |0>>>           |_omp_sync_region               |    300 |      6 | wall_clock | sec    | 0.084068 | 0.000280 | 0.000009 | 0.001608 | 0.000000 | 0.000525 |    2.9 |
+   | |0>>>             |_omp_sync_region_wait        |    300 |      7 | wall_clock | sec    | 0.081660 | 0.000272 | 0.000002 | 0.001581 | 0.000000 | 0.000522 |  100.0 |
+   | |0>>>           |_conj_grad [loop#2]            |     50 |      6 | wall_clock | sec    | 0.000024 | 0.000000 | 0.000000 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>           |_conj_grad [loop#7]            |     50 |      6 | wall_clock | sec    | 4.759733 | 0.095195 | 0.094133 | 0.097391 | 0.000000 | 0.000630 |    1.5 |
+   | |0>>>             |_omp_work                    |   6250 |      7 | wall_clock | sec    | 2.704389 | 0.000433 | 0.000002 | 0.002239 | 0.000001 | 0.000838 |  100.0 |
+   | |0>>>               |_omp_dispatch              |   5000 |      8 | wall_clock | sec    | 0.000990 | 0.000000 | 0.000000 | 0.000003 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>             |_omp_sync_region             |   6250 |      7 | wall_clock | sec    | 1.983312 | 0.000317 | 0.000008 | 0.001660 | 0.000000 | 0.000551 |    2.5 |
+   | |0>>>               |_omp_sync_region_wait      |   6250 |      8 | wall_clock | sec    | 1.932873 | 0.000309 | 0.000002 | 0.001652 | 0.000000 | 0.000548 |  100.0 |
+   | |0>>>           |_conj_grad [loop#4]            |     50 |      6 | wall_clock | sec    | 0.000025 | 0.000001 | 0.000000 | 0.000001 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>         |_omp_work                        |    200 |      5 | wall_clock | sec    | 0.001475 | 0.000007 | 0.000002 | 0.000018 | 0.000000 | 0.000006 |   98.7 |
+   | |0>>>           |_omp_dispatch                  |    100 |      6 | wall_clock | sec    | 0.000019 | 0.000000 | 0.000000 | 0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>         |_omp_sync_region                 |    250 |      5 | wall_clock | sec    | 0.009059 | 0.000036 | 0.000028 | 0.000055 | 0.000000 | 0.000006 |   17.7 |
+   | |0>>>           |_omp_sync_region_wait          |    250 |      6 | wall_clock | sec    | 0.007460 | 0.000030 | 0.000021 | 0.000049 | 0.000000 | 0.000006 |  100.0 |
+   | |0>>>     |_omp_sync_region                     |      1 |      3 | wall_clock | sec    | 0.000033 | 0.000033 | 0.000033 | 0.000033 | 0.000000 | 0.000000 |   23.0 |
+   | |0>>>       |_omp_sync_region_wait              |      1 |      4 | wall_clock | sec    | 0.000025 | 0.000025 | 0.000025 | 0.000025 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>> |_c_print_results                         |      1 |      1 | wall_clock | sec    | 0.000012 | 0.000012 | 0.000012 | 0.000012 | 0.000000 | 0.000000 |  100.0 |
+   |--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+
+Timemory JSON output
+-------------------------------------------------------------------------
+
+Timemory represents the data within the JSON output in two forms:
+a flat structure and a hierarchical structure.
+The flat JSON data represents the data similar to the text files, where the hierarchical information
+is represented by the indentation of the ``prefix`` field and the ``depth`` field.
+The hierarchical JSON contains additional information with respect
+to inclusive and exclusive values. However,
+its structure must be processed using recursion. This section of the JSON output supports analysis
+by `hatchet <https://github.com/hatchet/hatchet>`_.
+All the data entries for the flat structure are in a single JSON array. It is easier to
+write a simple Python script for post-processing using this format than with the hierarchical structure.
+
+.. note::
+
+   The generation of flat JSON output is configurable via ``ROCPROFSYS_JSON_OUTPUT``.
+   The generation of hierarchical JSON data is configurable via ``ROCPROFSYS_TREE_OUTPUT``
+
+Timemory JSON output sample
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In the following JSON data, the flat data starts at ``["timemory"]["wall_clock"]["ranks"]``
+and the hierarchical data starts at ``["timemory"]["wall_clock"]["graph"]``.
+To access the name (or prefix) of the nth entry in the flat data layout, use
+``["timemory"]["wall_clock"]["ranks"][0]["graph"][<N>]["prefix"]``. When full MPI
+support is enabled, the per-rank data in flat layout is represented
+as an entry in the ``ranks`` array. In the hierarchical data structure,
+the per-rank data is represented as an entry in the ``mpi`` array. However, ``graph``
+is used in lieu of ``mpi`` when full MPI support is enabled.
+In the hierarchical layout, all data for the process is a child of a dummy
+root node, which has the name ``unknown-hash=0``.
+
+.. code-block:: json
+
+   {
+      "timemory": {
+         "wall_clock": {
+               "properties": {
+                  "cereal_class_version": 0,
+                  "value": 78,
+                  "enum": "WALL_CLOCK",
+                  "id": "wall_clock",
+                  "ids": [
+                     "real_clock",
+                     "virtual_clock",
+                     "wall_clock"
+                  ]
+               },
+               "type": "wall_clock",
+               "description": "Real-clock timer (i.e. wall-clock timer)",
+               "unit_value": 1000000000,
+               "unit_repr": "sec",
+               "thread_scope_only": false,
+               "thread_count": 2,
+               "mpi_size": 1,
+               "upcxx_size": 1,
+               "process_count": 1,
+               "num_ranks": 1,
+               "concurrency": 2,
+               "ranks": [
+                  {
+                     "rank": 0,
+                     "graph_size": 112,
+                     "graph": [
+                           {
+                              "hash": 17481650134347108265,
+                              "prefix": "|0>>> main",
+                              "depth": 0,
+                              "entry": {
+                                 "cereal_class_version": 0,
+                                 "laps": 1,
+                                 "value": 894743517,
+                                 "accum": 894743517,
+                                 "repr_data": 0.894743517,
+                                 "repr_display": 0.894743517
+                              },
+                              "stats": {
+                                 "cereal_class_version": 0,
+                                 "sum": 0.894743517,
+                                 "count": 1,
+                                 "min": 0.894743517,
+                                 "max": 0.894743517,
+                                 "sqr": 0.8005659612135293,
+                                 "mean": 0.894743517,
+                                 "stddev": 0.0
+                              },
+                              "rolling_hash": 17481650134347108265
+                           },
+                           {
+                              "hash": 3455444288293231339,
+                              "prefix": "|0>>> |_read_input",
+                              "depth": 1,
+                              "entry": {
+                                 "laps": 1,
+                                 "value": 9808,
+                                 "accum": 9808,
+                                 "repr_data": 9.808e-06,
+                                 "repr_display": 9.808e-06
+                              },
+                              "stats": {
+                                 "sum": 9.808e-06,
+                                 "count": 1,
+                                 "min": 9.808e-06,
+                                 "max": 9.808e-06,
+                                 "sqr": 9.6196864e-11,
+                                 "mean": 9.808e-06,
+                                 "stddev": 0.0
+                              },
+                              "rolling_hash": 2490350348930787988
+                           },
+                           {
+                              "hash": 8456966793631718807,
+                              "prefix": "|0>>> |_setcoeff",
+                              "depth": 1,
+                              "entry": {
+                                 "laps": 1,
+                                 "value": 922,
+                                 "accum": 922,
+                                 "repr_data": 9.22e-07,
+                                 "repr_display": 9.22e-07
+                              },
+                              "stats": {
+                                 "sum": 9.22e-07,
+                                 "count": 1,
+                                 "min": 9.22e-07,
+                                 "max": 9.22e-07,
+                                 "sqr": 8.50084e-13,
+                                 "mean": 9.22e-07,
+                                 "stddev": 0.0
+                              },
+                              "rolling_hash": 7491872854269275456
+                           },
+                           {
+                              "hash": 6107876127803219007,
+                              "prefix": "|0>>> |_omp_thread_begin",
+                              "depth": 1,
+                              "entry": {
+                                 "laps": 1,
+                                 "value": 896506392,
+                                 "accum": 896506392,
+                                 "repr_data": 0.896506392,
+                                 "repr_display": 0.896506392
+                              },
+                              "stats": {
+                                 "sum": 0.896506392,
+                                 "count": 1,
+                                 "min": 0.896506392,
+                                 "max": 0.896506392,
+                                 "sqr": 0.8037237108968578,
+                                 "mean": 0.896506392,
+                                 "stddev": 0.0
+                              },
+                              "rolling_hash": 5142782188440775656
+                           },
+                           {
+                              "hash": 15402802091993617561,
+                              "prefix": "|0>>>   |_omp_implicit_task",
+                              "depth": 2,
+                              "entry": {
+                                 "laps": 1,
+                                 "value": 896479111,
+                                 "accum": 896479111,
+                                 "repr_data": 0.896479111,
+                                 "repr_display": 0.896479111
+                              },
+                              "stats": {
+                                 "sum": 0.896479111,
+                                 "count": 1,
+                                 "min": 0.896479111,
+                                 "max": 0.896479111,
+                                 "sqr": 0.8036747964593504,
+                                 "mean": 0.896479111,
+                                 "stddev": 0.0
+                              },
+                              "rolling_hash": 2098840206724841601                        },
+                           {
+                              "..." : "... etc. ..."
+                           }
+                     ]
+                  }
+               ],
+               "graph": [
+                  [
+                     {
+                           "cereal_class_version": 0,
+                           "node": {
+                              "hash": 0,
+                              "prefix": "unknown-hash=0",
+                              "tid": [
+                                 0
+                              ],
+                              "pid": [
+                                 2539175
+                              ],
+                              "depth": 0,
+                              "is_dummy": false,
+                              "inclusive": {
+                                 "entry": {
+                                       "laps": 0,
+                                       "value": 0,
+                                       "accum": 0,
+                                       "repr_data": 0.0,
+                                       "repr_display": 0.0
+                                 },
+                                 "stats": {
+                                       "sum": 0.0,
+                                       "count": 0,
+                                       "min": 0.0,
+                                       "max": 0.0,
+                                       "sqr": 0.0,
+                                       "mean": 0.0,
+                                       "stddev": 0.0
+                                 }
+                              },
+                              "exclusive": {
+                                 "entry": {
+                                       "laps": 0,
+                                       "value": -894743517,
+                                       "accum": -894743517,
+                                       "repr_data": -0.894743517,
+                                       "repr_display": -0.894743517
+                                 },
+                                 "stats": {
+                                       "sum": 0.0,
+                                       "count": 0,
+                                       "min": 0.0,
+                                       "max": 0.0,
+                                       "sqr": 0.0,
+                                       "mean": 0.0,
+                                       "stddev": 0.0
+                                 }
+                              }
+                           },
+                           "children": [
+                              {
+                                 "node": {
+                                       "hash": 17481650134347108265,
+                                       "prefix": "main",
+                                       "tid": [
+                                          0
+                                       ],
+                                       "pid": [
+                                          2539175
+                                       ],
+                                       "depth": 1,
+                                       "is_dummy": false,
+                                       "inclusive": {
+                                          "entry": {
+                                             "laps": 1,
+                                             "value": 894743517,
+                                             "accum": 894743517,
+                                             "repr_data": 0.894743517,
+                                             "repr_display": 0.894743517
+                                          },
+                                          "stats": {
+                                             "sum": 0.894743517,
+                                             "count": 1,
+                                             "min": 0.894743517,
+                                             "max": 0.894743517,
+                                             "sqr": 0.8005659612135293,
+                                             "mean": 0.894743517,
+                                             "stddev": 0.0
+                                          }
+                                       },
+                                       "exclusive": {
+                                          "entry": {
+                                             "laps": 1,
+                                             "value": -1773605,
+                                             "accum": -1773605,
+                                             "repr_data": -0.001773605,
+                                             "repr_display": -0.001773605
+                                          },
+                                          "stats": {
+                                             "sum": -0.001773605,
+                                             "count": 1,
+                                             "min": 9.22e-07,
+                                             "max": 0.896506392,
+                                             "sqr": -0.0031577497803754,
+                                             "mean": -0.001773605,
+                                             "stddev": 0.0
+                                          }
+                                       }
+                                 },
+                                 "children": [
+                                       {
+                                          "..." : "... etc. ..."
+                                       }
+                                 ]
+                              }
+                           ]
+                     }
+                  ]
+               ]
+         }
+      }
+   }
+
+Timemory JSON output Python post-processing example
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+   #!/usr/bin/env python3
+
+   import sys
+   import json
+
+
+   def read_json(inp):
+      with open(inp, "r") as f:
+         return json.load(f)
+
+
+   def find_max(data):
+      """Find the max for any function called multiple times"""
+      max_entry = None
+      for itr in data:
+         if itr["entry"]["laps"] == 1:
+               continue
+         if max_entry is None:
+               max_entry = itr
+         else:
+               if itr["stats"]["mean"] > max_entry["stats"]["mean"]:
+                  max_entry = itr
+      return max_entry
+
+
+   def strip_name(name):
+      """Return everything after |_ if it exists"""
+      idx = name.index("|_")
+      return name if idx is None else name[(idx + 2) :]
+
+
+   if __name__ == "__main__":
+
+      input_data = [[x, read_json(x)] for x in sys.argv[1:]]
+
+      for file, data in input_data:
+         for metric, metric_data in data["timemory"].items():
+
+               print(f"[{file}] Found metric: {metric}")
+
+               for n, itr in enumerate(metric_data["ranks"]):
+
+                  max_entry = find_max(itr["graph"])
+                  print(
+                     "[{}] Maximum value: '{}' at depth {} was called {}x :: {:.3f} {} (mean = {:.3e} {})".format(
+                           file,
+                           strip_name(max_entry["prefix"]),
+                           max_entry["depth"],
+                           max_entry["entry"]["laps"],
+                           max_entry["entry"]["repr_data"],
+                           metric_data["unit_repr"],
+                           max_entry["stats"]["mean"],
+                           metric_data["unit_repr"],
+                     )
+                  )
+
+The result of applying this script to the corresponding JSON output from the :ref:`text-output-example-label`
+section is as follows:
+
+.. code-block:: shell
+
+   [openmp-cg.inst-wall_clock.json] Found metric: wall_clock
+   [openmp-cg.inst-wall_clock.json] Maximum value: 'conj_grad' at depth 6 was called 76x :: 10.641 sec (mean = 1.400e-01 sec)

@@ -1,0 +1,973 @@
+# Changelog for ROCm Compute Profiler
+
+Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
+
+
+## ROCm Compute Profiler 3.10.0 for ROCm 10.2.0
+
+### Added
+
+* Added the `LDS Utilization` metric to the gfx115x Memory Chart.
+
+* Added two wave utilization metrics to PC sampling analysis.
+  * `active_thread_percent` is the percent of a wave's lanes that were active at an instruction, so a low value points at control flow divergence. Both sampling methods report it.
+  * `wave_occupancy_percent` is the percent of the machine's wave slots that held a wave. Only stochastic sampling reports it, because a host-trap record carries no wave count.
+  * Both appear in the analyze terminal table and in each kernel's `per_kernel_pc_sampling/` CSV.
+
+* Added the two wave utilization metrics to the analysis database summary view, so `compute_pc_sampling_summary_view` and the `pc_sampling_summary.csv` export carry them alongside the sample counts.
+
+* Added a profile-mode warning on gfx115x when the `AUTO` performance level can gate the perfmon clock and zero PMC counters such as `TCP_REQ`, with a link to the ROCprofiler-SDK `STABLE_STD` workaround.
+
+* Added CLI guidance for viewing the wide memory chart without line wrapping (`less -RS` or `code -`).
+
+* Added Python 3.14 support.
+
+### Changed
+
+* Dispatch IDs now start at 1 instead of 0.
+
+* Renamed the profile-mode dispatch filter to `--kernel-iteration-range`, matching the rocprofv3 option it drives. Update any profile command by replacing `-d/--dispatch` with `--kernel-iteration-range` to select dispatches.
+  * `--dispatch` is no longer accepted in profile-mode.
+  * `-d` is now the short form of `--output-directory` in profile-mode, also matching rocprofv3.
+
+* gfx115x Memory Chart improvements.
+  * Renamed memory chart metric names for more clarity.
+  * Each edge now reports the traffic measured at the interface it represents.
+  * Updated arrows, labels, and the legend in the memory chart to better represent their meaning.
+
+* `--torch-trace` now requires PyTorch 2.13 or 2.14, installed alongside ROCm.
+
+* Redesigned the CDNA (gfx9) Memory Chart with a new Rich-based layout that improves readability in the terminal. Added Non-buffer/Buffer request breakdowns (Read/Write/Atomic wavefronts) and L2-Fabric bandwidth metrics across all CDNA architectures.
+  * gfx908–gfx942: added HBM and remote traffic percentages.
+  * gfx950: added LDS Read/Write/Atomic instruction counts and per-channel bandwidth for HBM, xGMI, and PCIe.
+
+### Removed
+
+* Removed the `--kernel-verbose` analyze option and the kernel name shortener it drove. The option had no effect on any output.
+
+* Removed the Nuitka standalone binary build (`STANDALONEBINARY`, `STANDALONEBINARY_EXTRACT_DIR`), its RHEL 8 docker recipe, and the `--call-binary` pytest option that exercised it.
+
+* Removed the `SKIP_NATIVE_TOOL_BUILD` build option. The counter collection tool is always built, and its sources are no longer installed for runtime compilation.
+
+* Removed the deprecated `Active CUs` metric from the System Speed-of-Light panel and the Memory Chart SVG for all CDNA architectures (gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950). Use `CU Utilization` instead.
+
+### Optimized
+
+* HBM and remote traffic percentages are now more accurate, with all their counters collected in a single profiling pass.
+
+* Analyze mode produces less warning noise. Repeated warnings are de-duplicated, and messages for metrics that evaluate to N/A moved to debug level.
+
+* Improved the profiling failure message when the workload and the profiler load different ROCm installations. The error now points to the PyTorch and `rocm[profiler]` install instructions instead of only showing the LLVM abort.
+
+### Resolved issues
+
+* Fixed the standalone roofline HTML so it always opens with the same axes for a given GPU, which makes two runs comparable. The axes come from the benchmarked bandwidth and compute ceilings, not from the kernels in the run.
+
+* Fixed `L2 Cache (per Channel)` labels to use a `Metric` column and numbered `Channel` row labels in CLI, TUI, and analysis database output.
+
+* Fixed `--set` running the roofline microbenchmark, which is never part of a metric set.
+
+* Fixed PC sampling source snapshots to use canonical paths and include source contents and checksums in analysis exports.
+
+* Fixed false `0` values in the gfx115x Memory Chart; missing counter data now reports `N/A`.
+
+* Fixed `GL2-Fabric Write BW` understating write bandwidth on gfx115x in the System Speed-of-Light and Memory Chart panels.
+
+### Upcoming changes
+
+### Known issues
+
+* On gfx115x, `TCP_REQ*` counters and the `GL0` metrics derived from them can read zero because the perfmon clock is power-gated at the `AUTO` performance level.
+
+## ROCm Compute Profiler 3.9.0 for ROCm 10.1.0
+
+### Added
+
+* Added GPU benchmarking and roofline profiling/analysis support for gfx1153 hardware.
+
+* Added per-kernel PC sampling analysis.
+  * `rocprof-compute analyze --output-format csv` writes each kernel's disassembly under `per_kernel_pc_sampling/`, with the sample and stall counts on every instruction and the source it was compiled from.
+  * The analysis database records the same per-instruction data, so `--output-format db` can be queried for it.
+
+* Added multi-process PC sampling across profile and analyze modes.
+  * Profile mode writes one PID-prefixed `<pid>_ps_file_results.json` per process.
+  * Analyze mode reports every process in a single run, with a `pid` column
+    identifying each one.
+
+* Redesigned the standalone roofline HTML to improve user experience and interactivity.
+
+* Added a profile-mode warning reporting the active compute and memory partition
+  modes on partition-capable accelerators, noting that analysis derives logical
+  XCD, L2 channel, and HBM channel counts from them.
+
+* Added a guide for profiling vLLM workloads and its caveats.
+
+### Changed
+
+* Renamed the PC sampling analysis output: `pc_sampling.csv` is now `pc_sampling_summary.csv`, and the `compute_pc_sampling_view` view is now `compute_pc_sampling_summary_view`.
+
+* ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) are no longer allowed with PC-sampling-only profiling; the run now fails with an error telling the user to drop the ML API tracing flag or add a counter block, since without counters there is nothing to correlate the markers against.
+
+### Removed
+
+* Removed the CSV profile output backend and the `--format-rocprof-output` profile mode option. Profiling now always uses the `rocpd` output format, which was already the default.
+  * Removed the `--join-type` profile mode option, which only affected the CSV output format.
+
+* Removed analyze support for workloads produced by the CSV profile backend. Such workloads are now rejected with an error telling you to re-profile with a current release.
+
+### Optimized
+
+* Reduced profile-mode peak memory when writing counter data on large workloads.
+
+* Profile mode now gzip-compresses large counter CSV artifacts to reduce workload directory size.
+
+### Resolved issues
+
+* Corrected the VGPR allocation label from `RVGPRseq` to `VGPRs` in gfx9 memory charts
+
+### Upcoming changes
+
+### Known issues
+
+## ROCm Compute Profiler 3.8.0 for ROCm 10.0.0
+
+### Added
+
+* Added ``--pc-sampling-rows`` analyze option to cap the PC sampling table at the top N rows (default 10); set ``0`` to show all. Must be non-negative.
+
+* Added ``--overwrite`` profile mode option to explicitly allow replacing existing workload output.
+
+* Improved GPU Benchmarking and Roofline profiling/analysis support for gfx1150/gfx1151/gfx1152 architectures.
+  * gfx11 supports Wave Matrix Multiply Accumulate (WMMA), replacing MFMA operations.
+
+* Added experimental Triton support to ML API tracing. Profile with `--experimental --triton-trace` to emit a ROCTX marker per Triton/Inductor kernel launch attributed to the user call site, and analyze with `--experimental --list-triton-operators` or `--experimental --triton-operator <pattern>` to list or filter Triton operators independently of Torch.
+
+* Added support for GPU metrics on gfx1153 hardware.
+
+### Changed
+
+* Split Python version requirements by mode. Profile mode now runs on Python 3.8+ (standard library only). Analyze mode requires Python 3.9+ and exits with a clear message on older interpreters instead of failing with an import error.
+
+* `--pc-sampling-sorting-type` now defaults to `count` (was `offset`), so the PC sampling table shows the most-sampled instructions first.
+
+* Renamed the `Pct of Peak` / `PoP` analysis column to `Percent of Peak` in analysis output.
+
+* `--torch-trace` now wraps the tensor methods `to`, `cpu`, `cuda`, and `contiguous` by default. Previously these wraps were enabled by setting `ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=1`. Set `ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0` (or `false`, `no`, `off`) to disable them.
+
+* Renamed the torch-trace output files and directory from `torch_trace_*` to `ml_api_trace_*`.
+
+* Profile mode now errors when the target workload directory is non-empty unless `--overwrite` is passed. `--bench-only` likewise requires `--overwrite` before replacing an existing `roofline.csv`.
+
+* Renamed `num_hbm_channels` to `num_memory_channels` in machine specifications to unify memory channel reporting across GPU families.
+
+### Removed
+
+* Removed the multi-node analysis options ``--nodes``, ``--list-nodes`` (analyze mode) and the experimental ``--spatial-multiplexing`` option (profile and analyze modes). These features did not work as expected and will be redesigned in a future release.
+
+### Optimized
+
+### Resolved issues
+
+* The Dual VALU (VOPD) instruction mix metric is now reported for gfx115x in the WGP panel.
+
+* Fixed multi-user roofline benchmarking on shared systems: the per-GPU lock file under `/tmp/rocprof-compute-benchmark/` is now created world-readable/writable (0666) so any user can acquire it, regardless of which user created it first or the active umask. Stale unreadable lock files left by older versions in a sticky `/tmp` cannot be repaired automatically and must be removed manually by their owner or an administrator.
+
+* Fixed CDNA memory chart CLI output to show the numbered `3. Memory Chart` header without repeating the default per-kernel normalization label.
+
+### Upcoming changes
+
+### Known issues
+
+* Workloads profiled with earlier versions must be re-profiled before analysis. The sysinfo schema changed and older workload directories are not compatible.
+
+* CLI mode block 4 Roofline plot's legend will not appear if there are too many kernels to list, in relation to the user's terminal size. Same per-kernel roofline rate metrics and AI plot point details can be read in block 4's preceding tables.
+
+## ROCm Compute Profiler 3.7.0 for ROCm 7.14.0
+
+### Added
+
+* Added ``--bench-only`` profile mode option to run the roofline microbenchmark standalone (without profiling an application or collecting performance counters). No application run is required. Useful for regenerating ``roofline.csv`` in an existing workload directory or running the microbenchmark on systems where only HIP is available but rocprofiler-sdk is not.
+
+* Added LDS arithmetic intensity as a roofline plot point and analysis database field.
+
+* Added backward compatibility for live attach mode to work with older ROCm 7.x.x releases.
+
+* Added support for GPU metrics on gfx1150 and gfx1152 hardware.
+
+* Added roofline benchmarking support for gfx1150 and gfx1152 hardware.
+
+### Changed
+
+* Moved `--gui` and `--tui` analyze options to experimental status. These features now require the `--experimental` flag to be enabled (e.g., `rocprof-compute analyze --experimental --gui`).
+
+* `--output-format csv` in analyze mode now uses the database analysis workflow and produces one CSV per analysis view. Requires `--format-rocprof-output rocpd` and no longer prints the report to the terminal (matching `db` format).
+
+* Changed ratio metric aggregation from `AVG(A/B)` (arithmetic mean of per-dispatch ratios) to `SUM(A)/SUM(B)` (ratio of totals) across all analysis YAML configurations and all GPU architectures. `SUM(A)/SUM(B)` is a weighted average where each dispatch contributes proportionally to its denominator magnitude (duration, access count, cycle count). Single-dispatch workloads are unaffected (mathematically identical). Multi-dispatch workloads with different kernels or varying durations will see corrected values.
+
+* Added operator statistics and per-operator summary table in the analysis output of torch operators profiling. Added the following statistics for every torch operators and its children:
+    * Number of invocations
+    * Number of kernel dispatches
+    * Min/Max/Mean and Total duration of kernel dispatches
+
+* `--torch-trace` now captures backward-pass and nested operators that were previously missed or misattributed. The first run builds and caches a helper under `~/.cache/rocprofiler-compute/`, so it takes longer than later runs.
+
+* Profile workload output folder name for Strix Halo series (gfx1151) is changed from `strix_halo` to `rdna35_halo`
+
+* Unified accumulator handling across profile and analyze so each `_ACCUM`-suffixed counter is preserved instead of collapsing to `SQ_ACCUM_PREV_HIRES`
+
+* Reworded the N/A metric-evaluation warning to "divide-by-zero or empty counter data" (the prior "missing counter data" message could only fire for non-missing causes).
+
+* PC sampling in profile mode now opts in via the `--experimental --pc-sampling` option. Explicit `-b 21` / `--block 21` is no longer accepted on its own.
+
+* PC sampling profiling now emits only `ps_file_results.json`. The per-sample, kernel-trace, and agent-info CSV artifacts are no longer produced or consumed by analysis.
+
+* PC sampling analysis without `-k` now shows the full per-instruction table across all kernels (with a `Kernel_Name` column), identical in schema to the single-kernel view, instead of a collapsed source-line summary.
+
+* `--pc-sampling-interval` now defaults to a method-appropriate value (512 microseconds for `host_trap`, 1048576 cycles for `stochastic`). Stochastic intervals are validated to be a power of 2 and at least 65536; previously invalid values were passed through silently.
+
+### Removed
+
+* ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.
+
+* Removed redundant `if (X != 0) else None` divide-by-zero guards from metric equations across all analysis YAML configurations. Division by zero is already handled by the metric evaluation engine, which returns `"N/A"` for `inf` and `NaN` results.
+
+### Optimized
+
+* Flattened the analyze-mode PMC dataframe to a single-index frame.
+
+* Eliminated "missing counter" warnings during analyze when profile-mode `-b` was used. Analyze now skips metrics outside the selected blocks.
+
+### Resolved issues
+
+* Roofline panel L1/L2 bandwidth and arithmetic intensity on gfx942 and gfx950 now use the correct 128B cache line, matching the values reported in the Speed-of-Light and vL1D/L2 cache panels for the same run. Bandwidth values on these architectures are 2x and AI values are 0.5x compared to prior releases.
+
+* Fixed crash "ROCPROF_OUTPUT_PATH environment variable must be set" that aborted profiling when `ROCPROF_OUTPUT_PATH` was unset or empty (observed when profiling shell-script targets such as `rocprof-compute profile -o /tmp/out -- bash run.sh`). The collector now silently falls back to a documented default instead of aborting.
+
+* Fixed `inf` display for metrics with zero-denominator counters (e.g., L2-Fabric Write Latency when no write requests are issued). The metric evaluation path now catches `inf` scalar results and returns `"N/A"`, consistent with existing `NaN` handling.
+
+* Kernels with missing counter data after iteration multiplexing imputation are now excluded from metrics calculations. A warning at analysis time lists the affected kernels. Their execution times remain visible in Top Stats.
+
+* Fixed empirical roofline benchmark to correctly produce double the Matrix BF16 Gflop/s on gfx90a (AMD Instinct MI200 Series) GPUs.
+
+* PC sampling collection now runs when requested via the `pc_sampling` block alias (`--block pc_sampling`), instead of being silently skipped.
+
+### Upcoming changes
+
+* Roofline support for gfx1153 devices.
+
+### Known issues
+
+* On gfx1151, `TCP_REQ_sum` is zero in single-pass counter collection, so the related `GL0` metrics always reports zero. This will be fixed in a future release.
+
+* On gfx1151, `$max_mclk` is not automatically populated in sysinfo, so the related bandwidth metrics may be incorrect. Use `amd-smi` to obtain the maximum memory clock and provide it via `--specs-correction`.
+
+* In analyze mode, `--nodes` is not suitable for multi-rank analysis. Use `--path` with the rank-specific path (such as, `--path workload/1`) instead of `--path workload --nodes 1`.
+
+## ROCm Compute Profiler 3.6.0 for ROCm 7.13.0
+
+### Added
+
+* Added L2 memory bandwidth derived metrics under `--membw-analysis` to allow L2 memory bandwidth specific profiling and analysis metric block 30.
+
+* Added AMD Strix Halo (gfx1151) support
+  * New memory hierarchy visualization for RDNA 3.5 (gfx115X) in analyze CLI mode.
+
+* Introduced support for MI350P GPU
+
+* ``--view table`` option in analyze mode to force all TTY output to plain tables and ignore ``cli_style`` from YAML config (e.g. mem_chart, Roofline charts render as tables). The ``--view`` argument is reserved for future TTY views (e.g. other chart styles).
+
+* Added EA memory bandwidth derived metrics under `--membw-analysis` to allow EA memory bandwidth specific profiling and analysis metric block 30.
+
+### Changed
+
+* Standalone roofline (`--roof-only` option) in profile mode now creates `roofline.csv` only. HTML roofline charts are generated via `rocprof-compute analyze`. The `calc_ai_profile()` function has been removed; `calc_ai_analyze()` is the single source of truth for arithmetic intensity calculation.
+  * Roofline visualization options (`--sort`, `--mem-level`, `--roofline-data-type`) have moved from profile mode to analyze mode.
+
+* Standardized unit naming in analysis configs and Python utilities: `pct`/`Pct` → `Percent`, `instr` → `Instructions`.
+
+* Profile mode output format:
+  * Profile mode now creates separate counter collection files for each application replay (pmc_perf_*.csv or results_*.csv).
+  * Analyze mode automatically merges these files into a unified pmc_perf.csv containing information from all application replays during pre-processing.
+
+* ROCm Compute Profiler now builds and runs profile mode with vanilla Python without requiring any Python dependencies to be installed via `pip`.
+  * Note that analysis mode will still require Python dependencies and will report any missing packages.
+
+### Removed
+
+* Removed HIP API tracing since it's out-of-scope for ROCm Compute Profiler and the trace files were not being analyzed.
+
+### Optimized
+
+* Filtering for block 21 (`-b 21`) in profile mode, now only performs pc sampling and skips unnecessary counter collection
+  * Filtering for block 21 in analysis mode, now skips metrics calculations and only shows kernel/dispatch/system statisitcs and pc sampling table
+
+### Resolved issues
+
+* Fixed roofline benchmark MFMA FP16/BF16/INT8 peaks for MI 350
+
+* Fixed issue where pc sampling profiling fails with multi-argument commands and live process attachment
+
+### Upcoming changes
+
+* `--path` and `--subpath` options are deprecated and will be removed in a future release.
+* Intermediate CSV generation (`results_*.csv`) from rocpd databases during profiling is deprecated and will be removed in a future release. The analyze step will read `.db` files directly.
+* `--retain-rocpd-output` is deprecated and will be removed in a future release. `.db` files will be retained by default.
+
+### Known issues
+
+* For Strix Halo, the roofline metrics table will have N/A values for "peak" field
+  * This will be fixed by adding empirical benchmark support for Strix Halo in a future release
+
+## ROCm Compute Profiler 3.5.0 for ROCm 7.12.0
+
+### Added
+
+* Native tool to perform counter collection using the ROCprofiler-SDK public API. It is supported starting with ROCm version 7.0.0 and later.
+  * Native tool is now the default method for counter collection.
+  * Native tool for counter collection will not be used under the following conditions:
+    * A specific profiler is provided through the ``ROCPROF`` environment variable.
+    * The ``--no-native-tool`` option is provided, forcing use of the default profiler.
+    * A dynamic attach is performed to profile a running process.
+
+* Iteration multiplexing to collect counters within a single application run.
+
+* The `--torch-trace` option to enable mapping of PyTorch operators to collected counter values during profiling.
+  * This is an experimental feature and requires using the --experimental option.
+
+* Runtime compilation of Roofline benchmarking:
+  * GPU kernels from [rocm-amdgpu-bench](https://github.com/ROCm/rocm-amdgpu-bench) repository have been moved into the ROCm Compute Profiler and are now compiled at runtime using local HIP and HIPRTC Python wrappers.
+  * Roofline binaries compiled from [rocm-amdgpu-bench](https://github.com/ROCm/rocm-amdgpu-bench) repository have been removed, as Roofline runtime compilation performs the equivalent work as the Roofline binaries.
+  * Support for collecting standalone Roofline empirical peaks without running the entire ROCm Compute Profiler's profile mode, through an entry point in [benchmark.py](https://github.com/ROCm/rocm-systems/blob/HEAD/projects/rocprofiler-compute/src/utils/benchmark.py). Running the `benchmark.py` Python file replaces calling the standalone Roofline binary.
+
+* Synced the latest metric descriptions to public-facing documentation.
+  * Updated metric units in the documentation to improve readability.
+
+* ``--output-directory`` option in profile mode to allow parameterized output paths for profiling data.
+
+* Automatic MPI rank detection during profiling, with output directories created per MPI rank.
+
+* `--experimental` flag to enable in‑development experimental features. This flag is required when using any experimental functionality.
+
+  * Use `rocprof-compute --experimental --help` to see currently available experimental features.
+
+* GPU benchmark locking for Roofline benchmarking to prevent concurrent profiling conflicts on the same GPU.
+    * Multiple `rocprof-compute` processes can safely profile on different GPUs in parallel.
+    * Processes attempting to benchmark on the same GPU will wait with user-visible feedback and execute sequentially.
+    * Lock applies specifically to the roofline.csv file generated during benchmarking, not other files generated in profile mode.
+
+* Missing metric descriptions for gfx950 and gfx942 architecture.
+
+* Added `--membw-analysis` under experimental features to allow memory bandwidth specific profiling and analysis with metric block 30.
+
+### Changed
+
+* The default output format for the underlying ROCprofiler-SDK tool has been changed from ``csv`` to ``rocpd``.
+  * If the ROCprofiler-SDK ``rocpd`` public library is not available, the tool will fall back to ``csv`` format.
+
+* Changed the option ``--rocprofiler-sdk-library-path`` to ``--rocprofiler-sdk-tool-path`` to more accurately describe that it selects the path to the ROCprofiler-SDK tool (librocprofiler-sdk-tool.so) and not the library.
+
+* Standalone roofline (--roof-only option) in profile mode now creates HTML file output instead of PDF file output for roofline charts.
+
+* Corrected kernel filtering during Roofline profiling to find substrings instead of requiring full kernel names.
+
+### Removed
+
+* Removed the ``VL1 Lat`` metric for AMD Instinct MI300 Series GPUs, as these GPUs do not support the ``TCP_TCP_LATENCY_sum`` counter.
+
+### Optimized
+
+* Improved the responsiveness of menu and dropdown buttons in TUI analyze mode for a smoother user experience.
+
+### Resolved issues
+
+* Improved VALU FP16 roofline benchmark to achieve peak performance by using vector types for packed math instructions.
+
+* Implemented `NOISE_CLAMP` for L2 cache metrics to handle negative values from multi-pass profiling variance:
+  * Negative values are clamped to 0 (eliminates physically impossible negative counts).
+  * Warnings issued only when relative error exceeds 1% (anomaly detection).
+  * Added FAQ documentation explaining the "Counter variance corrected" warning.
+
+* Corrected the meaning of ``--dispatch`` option in profile mode in ``argparser`` to clarify that it controls which kernel iterations to profile and not which dispatch IDs to profile.
+
+* Corrected peak VALU Roofline profiling and analysis by removing `FP8` VALU and `BF16` VALU benchmarking that was erroneously added during implementation of these datatypes into roofline feature.
+
+* Corrected the functioning of the ``--dispatch`` option to act as a 1-based index and ensure that correct kernel iterations are being profiled.
+
+* Analysis mode bugfixes:
+  * Improved warnings when metrics cannot be calculated due to missing counter data.
+  * Fixed the check to prevent displaying tables with columns full of N/A values.
+  * Improved the detection of empty values when metric evaluation fails due to missing counter data.
+
+* Fixed the issue of missing counter data when profiling workloads that spawn multiple child processes.
+
+* Fixed the issue where the maximum memory clock detected from the ``amd-smi`` interface incorrectly used the max gfx clock.
+
+* Fixed the issue of incorrect values from ``amd-smi`` when some GPU devices were hidden by ROCR or HIP environment variables.
+
+* Removed redundant warnings for compute/memory partition not found for AMD Instinct MI300 series and later GPUs by skipping the partition checks.
+
+* Corrected the formula for metrics related to reads from L2 cache to HBM for AMD Instinct MI350 Series GPUs.
+
+### Upcoming changes
+
+* Move Roofline visualization to analysis mode
+    * Roofline plot files will no longer be generated in profiling mode; Roofline plots will be generated automatically when user runs analysis on a workload. A deprecation warning has been added during profiling mode to notify users of this change.
+
+## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
+
+### Added
+
+* `--list-blocks <arch>` option to general options. It lists the available IP blocks on the specified arch (similar to `--list-metrics`), however cannot be used with `--block`.
+
+* `config_delta/gfx950_diff.yaml` to analysis config YAMLs to track the revision between the gfx9xx GPUs against the latest supported gfx950 GPUs.
+
+* Analysis db features
+  * Adds support for per kernel metrics analysis.
+  * Adds support for dispatch timeline analysis.
+  * Shows duration as median in addition to mean in kernel view.
+
+* Implement AMDGPU driver info and GPU VRAM attributes in system info. section of analysis report.
+
+* Added `CU Utilization` metric to display the percentage of CUs utilized during kernel execution.
+
+### Changed
+
+* `-b/--block` accepts block alias(es). See block aliases using command-line option `--list-blocks <arch>`.
+
+* Analysis configs YAMLs are now managed with the new config management workflow in `tools/config_management/`.
+
+* `amdsmi` python API is used instead of `amd-smi` CLI to query GPU specifications.
+
+* Empty cells replaced with `N/A` for unavailable metrics in analysis.
+
+
+### Deprecated
+
+* `Active CUs` metric has been deprecated and replaced by `CU Utilization`.
+
+### Removed
+
+* Removed `database` mode from ROCm Compute Profiler in favor of other visualization methods, rather than Grafana and MongoDB integration, such as the upcoming Analysis DB-based Visualizer.
+  * Plotly server based standalone GUI
+  * Commandline based Textual User Interface
+
+### Optimized
+
+### Resolved issues
+
+* Fixed sL1D metric values showing up as N/A in memory chart diagram
+
+### Known issues
+
+#### Negative Values in Analyze Mode
+
+Negative counter values occur due to timing mismatches in asynchronous hardware performance counters during multi-pass profiling, which is required due to hardware limitations (e.g., perfmon_config constraints).
+
+An initial fix was implemented to clamp all negative values to zero using MAX(difference, 0), eliminating invalid results but potentially masking significant anomalies.
+
+Negative values, when clamped, typically align with expected results and do not interfere with the overall accuracy or general average output in hardware counter profiling. This is because the variance caused by timing mismatches is typically minimal and does not significantly impact the profiling data.
+
+A proposed long-term solution uses threshold-based clamping, distinguishing between minor noise and significant deviations, with warnings for larger issues.
+
+### Upcoming changes
+
+## ROCm Compute Profiler 3.3.1 for ROCm 7.1.1
+
+### Added
+
+* Add support for PC sampling of multi-kernel applications.
+  * PC Sampling output instructions are displayed with the name of the kernel that individual instruction belongs to.
+  * Single kernel selection is supported so that the PC samples of selected kernel can be displayed.
+
+
+### Changed
+
+* Roofline analysis now runs on GPU 0 by default instead of all GPUs.
+
+### Optimized
+
+* Improved roofline benchmarking by updating the `flops_benchmark` calculation.
+
+* Improved standalone roofline plots in profile mode (PDF output) and analyze mode (CLI and GUI visual plots):
+  * Fixed the peak MFMA/VALU lines being cut off.
+  * Cleaned up the overlapping roofline numeric values by moving them into the side legend.
+  * Added AI points chart with respective values, cache level, and compute/memory bound status.
+  * Added full kernel names to symbol chart.
+
+### Resolved issues
+
+* Resolved existing issues to improve stability.
+
+## ROCm Compute Profiler 3.3.0 for ROCm 7.1.0
+
+### Added
+
+* Dynamic process attachment feature that allows coupling with a workload process, without controlling its start or end.
+  * Use '--attach-pid' to specify the target process ID.
+  * Use '--attach-duration-msec' to specify time duration.
+
+* Add `rocpd` choice for `--format-rocprof-output` option in profile mode
+
+* Add `--retain-rocpd-output` option in profile mode to save large raw rocpd databases in workload directory
+
+* Show description of metrics during analysis
+  * Use `--include-cols Description` to show the Description column, which is excluded by default from the
+  ROCm Compute Profiler CLI output.
+* `--set` filtering option in profile mode to enable single-pass counter collection for predefined subsets of metrics.
+* `--list-sets` filtering option in profile mode to list the sets available for single pass counter collection
+
+* Add missing counters based on register specification which enables missing metrics
+  * Enable SQC_DCACHE_INFLIGHT_LEVEL counter and associated metrics
+  * Enable TCP_TCP_LATENCY counter and associated counter for all GPUs except MI300
+
+* Added interactive metric descriptions in TUI analyze mode
+  * users can now left click on any metric cell to view detailed descriptions in the dedicated `METRIC DESCRIPTION` tab
+
+* Add support for analysis report output as a sqlite database using ``--output-format db`` analysis mode option
+
+* `Compute Throughput` panel to TUI's `High Level Analysis` category with the following metrics:
+  * VALU FLOPs
+  * VALU IOPs
+  * MFMA FLOPs (F8)
+  * MFMA FLOPs (BF16)
+  * MFMA FLOPs (F16)
+  * MFMA FLOPs (F32)
+  * MFMA FLOPs (F64)
+  * MFMA FLOPs (F6F4) (in gfx950)
+  * MFMA IOPs (Int8)
+  * SALU Utilization
+  * VALU Utilization
+  * MFMA Utilization
+  * VMEM Utilization
+  * Branch Utilization
+  * IPC
+
+* `Memory Throughput` panel to TUI's `High Level Analysis` category with the following metrics:
+  * vL1D Cache BW
+  * vL1D Cache Utilization
+  * Theoretical LDS Bandwidth
+  * LDS Utilization
+  * L2 Cache BW
+  * L2 Cache Utilization
+  * L2-Fabric Read BW
+  * L2-Fabric Write BW
+  * sL1D Cache BW
+  * L1I BW
+  * Address Processing Unit Busy
+  * Data-Return Busy
+  * L1I-L2 Bandwidth
+  * sL1D-L2 BW
+
+* Roofline support for Debian 12 and Azure Linux 3.0.
+
+### Changed
+
+* On memory chart, long string of numbers are displayed as scientific notation. It also solves the issue of overflow of displaying long number
+
+* Add notice for change in default output format to `rocpd` in a future release
+  * This is displayed when `--format-rocprof-output rocpd` is not used in profile mode
+
+* When `--format-rocprof-output rocpd` is used, only pmc_perf.csv will be written to workload directory instead of mulitple csv files.
+
+* Improve analysis block based filtering to accept metric id level filtering
+  * This can be used to collect individual metrics from various sections of analysis config
+
+* CLI analysis mode baseline comparison will now only compare common metrics across workloads and will not show Metric ID
+  * Remove metrics from analysis configuration files which are explicitly marked as empty or None
+
+* Changed the basic (default) view of TUI from aggregated analysis data to individual kernel analysis data.
+
+* Update `Unit` of the following `Bandwidth` related metrics to `Gbps` instead of `Bytes per Normalization Unit`
+  * Theoretical Bandwidth (section 1202)
+  * L1I-L2 Bandwidth (section 1303)
+  * sL1D-L2 BW (section 1403)
+  * Cache BW (section 1603)
+  * L1-L2 BW (section 1603)
+  * Read BW (section 1702)
+  * Write and Atomic BW (section 1702)
+  * Bandwidth (section 1703)
+  * Atomic/Read/Write Bandwidth (section 1703)
+  * Atomic/Read/Write Bandwidth - (HBM/PCIe/Infinity Fabric) (section 1706)
+
+* Add `Utilization` to metric name for the following `Bandwidth` related metrics whose `Unit` is `Percent`
+  * Theoretical Bandwidth Utilization (section 1201)
+  * L1I-L2 Bandwidth Utilization (section 1301)
+  * Bandwidth Utilization (section 1301)
+  * Bandwidth Utilization (section 1401)
+  * sL1D-L2 BW Utilization (section 1401)
+  * Bandwidth Utilization (section 1601)
+
+* Update `System Speed-of-Light` panel to `GPU Speed-of-Light` in TUI with the following metrics:
+  * Theoretical LDS Bandwidth
+  * vL1D Cache BW
+  * L2 Cache BW
+  * L2-Fabric Read BW
+  * L2-Fabric Write BW
+  * Kernel Time
+  * Kernel Time (Cycles)
+  * SIMD Utilization
+  * Clock Rate
+
+* Analysis output:
+  * Replace `-o / --output` analyze mode option with `--output-format` and `--output-name`
+    * Add ``--output-format`` analysis mode option to select the output format of the analysis report.
+    * Add ``--output-name`` analysis mode option to override the default file/folder name.
+  * Replace `--save-dfs` analyze mode option with `--output-format csv`
+
+* Command-line options:
+  * `--list-metrics` and `--config-dir` options moved to general command-line options.
+  * * `--list-metrics` option cannot be used without argument (GPU architecture).
+  * `--list-metrics` option do not show number of L2 channels.
+  * `--list-available-metrics` profile mode option to display the metrics available for profiling in current GPU.
+  * `--list-available-metrics` analyze mode option to display the metrics available for analysis.
+  * `--block` option cannot be used with `--list-metrics` and `--list-available-metrics`options.
+
+* Default rocprof interface changed from rocprofv3 to rocprofiler-sdk
+  * Use ROCPROF=rocprofv3 to use rocprofv3 interface
+
+* Roofline analysis now runs on GPU 0 by default instead of all GPUs.
+
+### Removed
+
+* Usage of `rocm-smi` in favor of `amd-smi`.
+* Hardware IP block-based filtering has been removed in favor of analysis report block-based filtering.
+* Removed aggregated analysis view from TUI analyze mode.
+
+### Optimized
+
+* Improved `--time-unit` option in analyze mode to apply time unit conversion across all analysis sections, not just kernel top stats.
+* Improved logic to obtain rocprof supported counters which prevents unnecessary warnings.
+* Improved post-analysis runtime performance by caching and multi-processing.
+
+### Resolved issues
+
+* Fixed an issue of not detecting the memory clock when using `amd-smi`.
+* Fixed standalone GUI crashing.
+* Fixed L2 read/write/atomic bandwidths on AMD Instinct MI350 series accelerators.
+* Update metric names for better alignment between analysis configuration and documentation
+* Fixed an issue where accumulation counters could not be collected on AMD Instinct MI100.
+* Fixed an issue of kernel filtering not working in the roofline chart
+
+### Known issues
+
+* MI300A/X L2-Fabric 64B read counter may display negative values - The rocprof-compute metric 17.6.1 (Read 64B) can report negative values due to incorrect calculation when TCC_BUBBLE_sum + TCC_EA0_RDREQ_32B_sum exceeds TCC_EA0_RDREQ_sum.
+  * A workaround has been implemented using max(0, calculated_value) to prevent negative display values while the root cause is under investigation.
+
+* The profile mode crashes when `--format-rocprof-output json` is selected.
+  * As a workaround, this option should either not be provided or should be set to `csv` instead of `json`. This issue does not affect the profiling results since both `csv` and `json` output formats lead to the same profiling data.
+
+### Upcoming changes
+
+## ROCm Compute Profiler 3.2.3 for ROCm 7.0.0
+
+### Added
+
+#### CDNA4 (AMD Instinct MI350/MI355) support
+
+* Support for AMD Instinct MI350 series GPUs with the addition of the following counters:
+  * VALU co-issue (Two VALUs are issued instructions) efficiency
+  * Stream Processor Instruction (SPI) Wave Occupancy
+  * Scheduler-Pipe Wave Utilization
+  * Scheduler FIFO Full Rate
+  * CPC ADC Utilization
+  * F6F4 data type metrics
+  * Update formula for total FLOPs while taking into account F6F4 ops
+  * LDS STORE, LDS LOAD, LDS ATOMIC instruction count metrics
+  * LDS STORE, LDS LOAD, LDS ATOMIC bandwidth metrics
+  * LDS FIFO full rate
+  * Sequencer -> TA ADDR Stall rates
+  * Sequencer -> TA CMD Stall rates
+  * Sequencer -> TA DATA Stall rates
+  * L1 latencies
+  * L2 latencies
+  * L2 to EA stalls
+  * L2 to EA stalls per channel
+
+* Roofline support for AMD Instinct MI350 series architecture.
+
+#### Textual User Interface (TUI) (beta version)
+
+* Text User Interface (TUI) support for analyze mode
+  * A command line based user interface to support interactive single-run analysis
+  * To launch, use `--tui` option in analyze mode. For example, ``rocprof-compute analyze --tui``.
+
+#### PC Sampling (beta version)
+
+* Stochastic (hardware-based) PC sampling has been enabled for AMD Instinct MI300X series and later accelerators.
+
+* Host-trap PC Sampling has been enabled for AMD Instinct MI200 series and later accelerators.
+
+* Support for sorting of PC sampling by type: offset or count.
+
+* PC Sampling Support on CLI and TUI analysis.
+
+#### Roofline
+
+* Support for Roofline plot on CLI (single run) analysis.
+
+* `FP4` and `FP6` data types have been added for roofline profiling on AMD Instinct MI350 series.
+
+#### rocprofv3 support
+
+* ``rocprofv3`` is supported as the default backend for profiling.
+* Support to obtain performance information for all channels for TCC counters.
+* Support for profiling on AMD Instinct MI 100 using ``rocprofv3``.
+* Deprecation warning for ``rocprofv3`` interface in favor of the ROCprofiler-SDK interface, which directly accesses ``rocprofv3`` C++ tool.
+
+#### Others
+
+* Docker files to package the application and dependencies into a single portable and executable standalone binary file.
+
+* Analysis report based filtering
+  * ``-b`` option in profile mode now also accepts metric id(s) for analysis report based filtering.
+  * ``-b`` option in profile mode also accepts hardware IP block for filtering; however, this filter support will be deprecated soon.
+  * ``--list-metrics`` option added in profile mode to list possible metric id(s), similar to analyze mode.
+
+* Support MEM chart on CLI (single run)
+
+* ``--specs-correction`` option to provide missing system specifications for analysis.
+
+### Changed
+
+* Changed the default ``rocprof`` version to ``rocprofv3``. This is used when environment variable ``ROCPROF`` is not set.
+* Changed ``normal_unit`` default to ``per_kernel``.
+* Decreased profiling time by not collecting unused counters in post-analysis.
+* Updated Dash to >=3.0.0 (for web UI).
+* Changed the condition when Roofline PDFs are generated during general profiling and ``--roof-only`` profiling (skip only when ``--no-roof`` option is present).
+* Updated Roofline binaries:
+  * Rebuild using latest ROCm stack
+  * Minimum OS distribution support minimum for roofline feature is now Ubuntu 22.04, RHEL 8, and SLES15 SP6.
+
+### Removed
+
+* Roofline support for Ubuntu 20.04 and SLES below 15.6
+* Removed support for AMD Instinct MI50 and MI60.
+
+### Optimized
+
+* ROCm Compute Profiler CLI has been improved to better display the GPU architecture analytics
+
+### Resolved issues
+
+* Fixed kernel name and kernel dispatch filtering when using ``rocprofv3``.
+* Fixed an issue of TCC channel counters collection in ``rocprofv3``.
+* Fixed peak FLOPS of `F8`, `I8`, `F16`, and `BF16` on AMD Instinct MI300.
+* Fixed not detecting memory clock issue when using amd-smi
+* Fixed standalone GUI crashing
+* Fixed L2 read/write/atomic bandwidths on AMD Instinct MI350 series.
+
+### Known issues
+
+* On AMD Instinct MI100, accumulation counters are not collected, resulting in the following metrics failing to show up in the analysis: Instruction Fetch Latency, Wavefront Occupancy, LDS Latency
+  * As a workaround, use the environment variable ``ROCPROF=rocprof``, to use ``rocprof v1`` for profiling on AMD Instinct MI100.
+
+* GPU id filtering is not supported when using ``rocprofv3``.
+
+* Analysis of previously collected workload data will not work due to sysinfo.csv schema change.
+  * As a workaround, re-run the profiling operation for the workload and interrupt the process after 10 seconds.
+  Followed by copying the ``sysinfo.csv`` file from the new data folder to the old one.
+  This assumes your system specification hasn't changed since the creation of the previous workload data.
+
+* Analysis of new workloads might require providing shader/memory clock speed using
+``--specs-correction`` operation if amd-smi or rocminfo does not provide clock speeds.
+
+* Memory chart on ROCm Compute Profiler CLI might look corrupted if the CLI width is too narrow.
+
+* Roofline feature is currently not functional on Azure Linux 3.0 and Debian 12.
+
+### Upcoming changes
+
+* ``rocprof v1/v2/v3`` interfaces will be removed in favor of the ROCprofiler-SDK interface, which directly accesses ``rocprofv3`` C++ tool. Using ``rocprof v1/v2/v3`` interfaces will trigger a deprecation warning.
+  * To use ROCprofiler-SDK interface, set environment variable `ROCPROF=rocprofiler-sdk` and optionally provide profile mode option ``--rocprofiler-sdk-library-path /path/to/librocprofiler-sdk.so``. Add ``--rocprofiler-sdk-library-path`` runtime option to choose the path to ROCprofiler-SDK library to be used.
+* Hardware IP block based filtering using ``-b`` option in profile mode will be removed in favor of analysis report block based filtering using ``-b`` option in profile mode.
+* MongoDB database support will be removed, and a deprecation warning has been added to the application interface.
+* Usage of ``rocm-smi`` is deprecated in favor of ``amd-smi``, and a deprecation warning has been added to the application interface.
+
+## ROCm Compute Profiler 3.1.1 for ROCm 6.4.2
+
+### Added
+
+* 8-bit floating point (FP8) metrics support for AMD Instinct MI300 GPUs.
+* Additional data types for roofline: FP8, FP16, BF16, FP32, FP64, I8, I32, I64 (dependent on the GPU architecture).
+* Data type selection option ``--roofline-data-type / -R`` for roofline profiling. The default data type is FP32.
+
+### Changed
+
+* Change dependency from `rocm-smi` to `amd-smi`.
+
+### Resolved issues
+
+* Fixed a crash related to Agent ID caused by the new format of the `rocprofv3` output CSV file.
+
+
+## ROCm Compute Profiler 3.1.0 for ROCm 6.4.0
+
+### Added
+
+* Roofline support for Ubuntu 24.04
+* Experimental support rocprofv3 (not enabled as default)
+
+### Resolved issues
+
+* Fixed PoP of VALU Active Threads
+* Workaround broken mclk for old version of rocm-smi
+
+## ROCm Compute Profiler 3.0.0 for ROCm 6.3.0
+
+### Changed
+
+* Renamed Omniperf to ROCm Compute Profiler (#475)
+
+## Omniperf 2.0.1 for ROCm 6.2.1
+
+### Changed
+
+* enable rocprofv1 for MI300 hardware (#391)
+* refactoring and updating documemtation (#362, #394, #398, #414, #420)
+* branch renaming and workflow updates (#389, #404, #409)
+* bug fix for analysis output
+* add dependency checks on application launch (#393)
+* patch for profiling multi-process/multi-GPU applications (#376, #396)
+* packaging updates (#386)
+* rename CHANGES to CHANGELOG.md (#410)
+* rollback Grafana version in Dockerfile for Angular plugin compatibility (#416)
+* enable CI triggers for Azure CI (#426)
+* add GPU model distinction for MI300 systems (#423)
+* new MAINTAINERS.md guide for omniperf publishing procedures (#402)
+
+### Optimized
+
+* reduced running time of Omniperf when profiling (#384)
+* console logging improvements
+
+## Omniperf 2.0.1 for ROCm 6.2.0
+
+### Added
+
+  * new option to force hardware target via `OMNIPERF_ARCH_OVERRIDE` global (#370)
+  * CI/CD support for MI300 hardware (#373)
+  * support for MI308X hardware (#375)
+
+### Optimized
+
+  * cmake build improvements (#374)
+
+## Omniperf 2.0.0 (17 May 2024)
+
+  * improved logging than spans all modes (#177) (#317) (#335) (#341)
+  * overhauled CI/CD that spans all modes (#179)
+  * extensible SoC classes to better support adding new hardware configs (#180)
+  * --kernel-verbose no longer overwrites kernel names (#193)
+  * general cleanup and improved organization of source code (#200) (#210)
+  * separate requirement files for docs and testing dependencies (#205) (#262) (#358)
+  * add support for MI300 hardware (#231)
+  * upgrade Grafana assets and build script to latest release (#235)
+  * update minimum ROCm and Python requirements (#277)
+  * sort rocprofiler input files prior to profiling (#304)
+  * new --quiet option will suppress verbose output and show a progress bar (#308)
+  * roofline support for Ubuntu 22.04 (#319)
+
+## Omniperf 1.1.0-PR1 (13 Oct 2023)
+
+  * standardize headers to use 'avg' instead of 'mean'
+  * add color code thresholds to standalone gui to match grafana
+  * modify kernel name shortener to use cpp_filt (#168)
+  * enable stochastic kernel dispatch selection (#183)
+  * patch grafana plugin module to address a known issue in the latest version (#186)
+  * enhanced communication between analyze mode kernel flags (#187)
+
+## Omniperf 1.0.10 (22 Aug 2023)
+
+  * critical patch for detection of llvm in rocm installs on SLURM systems
+
+## Omniperf 1.0.9 (17 Aug 2023)
+
+  * add units to L2 per-channel panel (#133)
+  * new quickstart guide for Grafana setup in docs (#135)
+  * more detail on kernel and dispatch filtering in docs (#136, #137)
+  * patch manual join utility for ROCm >5.2.x (#139)
+  * add % of peak values to low level speed-of-light panels (#140)
+  * patch critical bug in Grafana by removing a deprecated plugin (#141)
+  * enhancements to KernelName demangeler (#142)
+  * general metric updates and enhancements (#144, #155, #159)
+  * add min/max/avg breakdown to instruction mix panel (#154)
+
+## Omniperf 1.0.8 (30 May 2023)
+
+  * add `--kernel-names` option to toggle kernelName overlay in standalone roofline plot (#93)
+  * remove unused python modules (#96)
+  * fix empirical roofline calculation for single dispatch workloads (#97)
+  * match color of arithmetic intensity points to corresponding bw lines
+
+  * ux improvements in standalone GUI (#101)
+  * enhanced readability for filtering dropdowns in standalone GUI (#102)
+  * new logfile to capture rocprofiler output (#106)
+  * roofline support for sles15 sp4 and future service packs (#109)
+  * adding dockerfiles for all supported Linux distros
+  * new examples for `--roof-only` and `--kernel` options added to documentation
+
+  * enable cli analysis in Windows (#110)
+  * optional random port number in standalone GUI (#111)
+  * limit length of visible kernelName in `--kernel-names` option (#115)
+  * adjust metric definitions (#117, #130)
+  * manually merge rocprof runs, overriding default rocprofiler implementation (#125)
+  * fixed compatibility issues with Python 3.11 (#131)
+
+## Omniperf 1.0.8-PR2 (17 Apr 2023)
+
+  * ux improvements in standalone GUI (#101)
+  * enhanced readability for filtering dropdowns in standalone GUI (#102)
+  * new logfile to capture rocprofiler output (#106)
+  * roofline support for sles15 sp4 and future service packs (#109)
+  * adding dockerfiles for all supported Linux distros
+  * new examples for `--roof-only` and `--kernel` options added to documentation
+
+## Omniperf 1.0.8-PR1 (13 Mar 2023)
+
+  * add `--kernel-names` option to toggle kernelName overlay in standalone roofline plot (#93)
+  * remove unused python modules (#96)
+  * fix empirical roofline calculation for single dispatch workloads (#97)
+  * match color of arithmetic intensity points to corresponding bw lines
+
+## Omniperf 1.0.7 (21 Feb 2023)
+
+  * update documentation (#52, #64)
+  * improved detection of invalid command line arguments (#58, #76)
+  * enhancements to standalone roofline (#61)
+  * enable Omniperf on systems with X-server (#62)
+  * raise minimum version requirement for rocm (#64)
+  * enable baseline comparison in CLI analysis (#65)
+  * add multi-normalization to new metrics (#68, #81)
+  * support alternative profilers (#70)
+  * add MI100 configs to override rocprofiler's incomplete default (#75)
+  * improve error message when no GPU(s) detected (#85)
+  * separate CI tests by Linux distro and add status badges
+
+## Omniperf 1.0.6 (21 Dec 2022)
+
+  * CI update: documentation now published via github action (#22)
+  * better error detection for incomplete ROCm installs (#56)
+
+## Omniperf 1.0.5 (13 Dec 2022)
+
+  * store application command-line parameters in profiling output (#27)
+  * enable additional normalizations in CLI mode (#30)
+  * add missing ubuntu 20.04 roofline binary to packaging (#34)
+  * update L1 bandwidth metric calculations (#36)
+  * add L1 <-> L2 bandwidth calculation (#37)
+  * documentation updates (#38, #41)
+  * enhanced subprocess logging to identify critical errors in rocprofiler (#50)
+  * maintain git sha in production installs from tarball (#53)
+
+## Omniperf 1.0.4 (11 Nov 2022)
+
+  * update python requirements.txt with minimum versions for numpy and pandas
+  * addition of progress bar indicator in web-based GUI (#8)
+  * reduced default content for web-based GUI to reduce load times (#9)
+  * minor packaging and CI updates
+  * variety of documentation updates
+  * added an optional argument to vcopy.cpp workload example to specify device id
+
+## Omniperf 1.0.3 (07 Nov 2022)
+
+  * initial Omniperf release

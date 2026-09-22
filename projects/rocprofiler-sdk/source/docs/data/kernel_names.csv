@@ -1,0 +1,5 @@
+"Correlation_Id","Dispatch_Id","Agent_Id","Queue_Id","Process_Id","Thread_Id","Grid_Size","Kernel_Name","Workgroup_Size","LDS_Block_Size","Scratch_Size","VGPR_Count","SGPR_Count","Counter_Name","Counter_Value"
+4,4,1,1,36499,36499,1048576,"divide_kernel(float*, float const*, float const*, int, int)",64,0,0,12,16,"SQ_WAVES",16384
+8,8,1,2,36499,36499,1048576,"divide_kernel(float*, float const*, float const*, int, int)",64,0,0,12,16,"SQ_WAVES",16384
+12,12,1,3,36499,36499,1048576,"divide_kernel(float*, float const*, float const*, int, int)",64,0,0,12,16,"SQ_WAVES",16384
+16,16,1,4,36499,36499,1048576,"divide_kernel(float*, float const*, float const*, int, int)",64,0,0,12,16,"SQ_WAVES",16384

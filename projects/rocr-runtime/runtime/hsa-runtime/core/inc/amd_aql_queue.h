@@ -1,0 +1,438 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+// The University of Illinois/NCSA
+// Open Source License (NCSA)
+//
+// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+//
+// Developed by:
+//
+//                 AMD Research and AMD HSA Software Development
+//
+//                 Advanced Micro Devices, Inc.
+//
+//                 www.amd.com
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal with the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
+//
+//  - Redistributions of source code must retain the above copyright notice,
+//    this list of conditions and the following disclaimers.
+//  - Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimers in
+//    the documentation and/or other materials provided with the distribution.
+//  - Neither the names of Advanced Micro Devices, Inc,
+//    nor the names of its contributors may be used to endorse or promote
+//    products derived from this Software without specific prior written
+//    permission.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS WITH THE SOFTWARE.
+//
+////////////////////////////////////////////////////////////////////////////////
+
+#ifndef HSA_RUNTIME_CORE_INC_AMD_HW_AQL_COMMAND_PROCESSOR_H_
+#define HSA_RUNTIME_CORE_INC_AMD_HW_AQL_COMMAND_PROCESSOR_H_
+
+#include "core/inc/runtime.h"
+#include "core/inc/signal.h"
+#include "core/inc/queue.h"
+#include "core/inc/amd_gpu_agent.h"
+#include "core/util/locks.h"
+
+namespace rocr {
+namespace AMD {
+  const uint8_t METADATA_PREFETCH_VERSION_INVALID = 0xFF;
+
+/// @brief Encapsulates HW Aql Command Processor functionality. It
+/// provide the interface for things such as Doorbell register, read,
+/// write pointers and a buffer.
+class AqlQueue : public core::Queue, private core::LocalSignal, public core::DoorbellSignal {
+ public:
+  static __forceinline bool IsType(core::Signal* signal) {
+    return signal->IsType(&rtti_id());
+  }
+
+  static __forceinline bool IsType(core::Queue* queue) { return queue->IsType(&rtti_id()); }
+
+  // Acquires/releases queue resources and requests HW schedule/deschedule.
+  AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_size_pkts,
+           HSAuint32 node_id, ScratchInfo& scratch, core::HsaEventCallback callback, void* err_data,
+           bool metadata_prefetch, uint64_t flags);
+
+  ~AqlQueue();
+
+  /// @brief Queue interfaces
+  hsa_status_t Inactivate() override;
+
+  /// @brief Change the scheduling priority of the queue
+  hsa_status_t SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) override;
+
+  /// @brief Destroy ref counted queue
+  void Destroy() override;
+
+  /// @brief Invoke the per-queue error callback if one is registered
+  /// and it is not the default handler.
+  void InvokeErrorCallback(hsa_status_t error) {
+    if (errors_callback_ != nullptr &&
+        errors_callback_ != core::Queue::DefaultErrorHandler) {
+      errors_callback_(error, public_handle(), errors_data_);
+    }
+  }
+
+  /// @brief Mark this queue as having experienced a VM fault.
+  /// Called by the per-queue ExceptionHandler thread on memory-fault exceptions.
+  void MarkVMFaulted() { vm_faulted_.store(true, std::memory_order_release); }
+
+  /// @brief Check whether this queue has been marked as VM-faulted.
+  bool IsVMFaulted() const { return vm_faulted_.load(std::memory_order_acquire); }
+
+  /// @brief Store the fault address and reason bitmask on this queue.
+  /// Called by VMFaultHandler after it identifies which queues faulted,
+  /// so that hsa_amd_queue_get_info() can report the details.
+  void SetVMFaultDetails(uint64_t address, uint32_t reason) {
+    vm_fault_address_ = address;
+    vm_fault_reason_ = reason;
+  }
+
+  /// @brief Atomically reads the Read index of with Acquire semantics
+  ///
+  /// @return uint64_t Value of read index
+  uint64_t LoadReadIndexAcquire() override;
+
+  /// @brief Atomically reads the Read index of with Relaxed semantics
+  ///
+  /// @return uint64_t Value of read index
+  uint64_t LoadReadIndexRelaxed() override;
+
+  /// @brief Atomically reads the Write index of with Acquire semantics
+  ///
+  /// @return uint64_t Value of write index
+  uint64_t LoadWriteIndexAcquire() override;
+
+  /// @brief Atomically reads the Write index of with Relaxed semantics
+  ///
+  /// @return uint64_t Value of write index
+  uint64_t LoadWriteIndexRelaxed() override;
+
+  /// @brief This operation is illegal
+  void StoreReadIndexRelaxed(uint64_t value) override { assert(false); }
+
+  /// @brief This operation is illegal
+  void StoreReadIndexRelease(uint64_t value) override { assert(false); }
+
+  /// @brief Atomically writes the Write index of with Relaxed semantics
+  ///
+  /// @param value New value of write index to update with
+  void StoreWriteIndexRelaxed(uint64_t value) override;
+
+  /// @brief Atomically writes the Write index of with Release semantics
+  ///
+  /// @param value New value of write index to update with
+  void StoreWriteIndexRelease(uint64_t value) override;
+
+  /// @brief Compares and swaps Write index using Acquire and Release semantics
+  ///
+  /// @param expected Current value of write index
+  ///
+  /// @param value Value of new write index
+  ///
+  /// @return uint64_t Value of write index before the update
+  uint64_t CasWriteIndexAcqRel(uint64_t expected, uint64_t value) override;
+
+  /// @brief Compares and swaps Write index using Acquire semantics
+  ///
+  /// @param expected Current value of write index
+  ///
+  /// @param value Value of new write index
+  ///
+  /// @return uint64_t Value of write index before the update
+  uint64_t CasWriteIndexAcquire(uint64_t expected, uint64_t value) override;
+
+  /// @brief Compares and swaps Write index using Relaxed semantics
+  ///
+  /// @param expected Current value of write index
+  ///
+  /// @param value Value of new write index
+  ///
+  /// @return uint64_t Value of write index before the update
+  uint64_t CasWriteIndexRelaxed(uint64_t expected, uint64_t value) override;
+
+  /// @brief Compares and swaps Write index using Release semantics
+  ///
+  /// @param expected Current value of write index
+  ///
+  /// @param value Value of new write index
+  ///
+  /// @return uint64_t Value of write index before the update
+  uint64_t CasWriteIndexRelease(uint64_t expected, uint64_t value) override;
+
+  /// @brief Updates the Write index using Acquire and Release semantics
+  ///
+  /// @param value Value of new write index
+  ///
+  /// @return uint64_t Value of write index before the update
+  uint64_t AddWriteIndexAcqRel(uint64_t value) override;
+
+  /// @brief Updates the Write index using Acquire semantics
+  ///
+  /// @param value Value of new write index
+  ///
+  /// @return uint64_t Value of write index before the update
+  uint64_t AddWriteIndexAcquire(uint64_t value) override;
+
+  /// @brief Updates the Write index using Relaxed semantics
+  ///
+  /// @param value Value of new write index
+  ///
+  /// @return uint64_t Value of write index before the update
+  uint64_t AddWriteIndexRelaxed(uint64_t value) override;
+
+  /// @brief Updates the Write index using Release semantics
+  ///
+  /// @param value Value of new write index
+  ///
+  /// @return uint64_t Value of write index before the update
+  uint64_t AddWriteIndexRelease(uint64_t value) override;
+
+  /// @brief Set CU Masking
+  ///
+  /// @param num_cu_mask_count size of mask bit array
+  ///
+  /// @param cu_mask pointer to cu mask
+  ///
+  /// @return hsa_status_t
+  hsa_status_t SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* cu_mask) override;
+
+  /// @brief Get CU Masking
+  ///
+  /// @param num_cu_mask_count size of mask bit array
+  ///
+  /// @param cu_mask pointer to cu mask
+  ///
+  /// @return hsa_status_t
+  hsa_status_t GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mask) override;
+
+  // @brief Submits a block of PM4 and waits until it has been executed.
+  void ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b,
+                  hsa_fence_scope_t acquireFence = HSA_FENCE_SCOPE_NONE,
+                  hsa_fence_scope_t releaseFence = HSA_FENCE_SCOPE_NONE,
+                  hsa_signal_t* signal = NULL) override;
+
+  /// @brief Enables/Disables profiling overrides SetProfiling from core::Queue
+  void SetProfiling(bool enabled) override;
+
+  /// @brief Update signal value using Relaxed semantics
+  void StoreRelaxed(hsa_signal_value_t value) override;
+
+  /// @brief Update signal value using Release semantics
+  void StoreRelease(hsa_signal_value_t value) override;
+
+  /// @brief Provide information about the queue
+  hsa_status_t GetInfo(hsa_queue_info_attribute_t attribute, void* value) override;
+
+  /// @brief Enable use of GWS from this queue.
+  hsa_status_t EnableGWS(int gws_slot_count);
+
+  /// @brief Update internal scratch limits based on agent limits. If current allocated scratch are
+  /// larger than new limits, perform async-reclaim.
+  void CheckScratchLimits();
+
+  /// @brief Async reclaim main scratch memory
+  void AsyncReclaimMainScratch();
+
+  /// @brief Async reclaim alternate scratch memory
+  void AsyncReclaimAltScratch();
+
+  /// @brief Get HSA queue ID for core dump filtering
+  HSA_QUEUEID aql_queue_id() const { return queue_id_; }
+
+  /// @brief Halt the queue without destroying it or fencing memory.
+  void Suspend();
+
+  /// @brief Resume the queue.
+  void Resume();
+
+  /// @brief Check if the queue is currently suspended.
+  bool IsSuspended() const { return suspended_; }
+
+ protected:
+  bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
+
+ private:
+  uint32_t ComputeRingBufferMinPkts();
+  uint32_t ComputeRingBufferMaxPkts();
+
+  // (De)allocates and (de)registers ring_buf_.
+  void AllocRegisteredRingBuffer(uint32_t queue_size_pkts);
+
+  /// @brief Frees the queue's packet ring buffer and its queue struct.
+  void FreeQueueMemory();
+
+  /// @brief Abstracts the file handle use for double mapping queues.
+  void CloseRingBufferFD(const char* ring_buf_shm_path, int fd) const;
+  int CreateRingBufferFD(const char* ring_buf_shm_path, uint32_t ring_buf_phys_size_bytes) const;
+
+  /// @brief Define the Scratch Buffer Descriptor and related parameters
+  /// that enable kernel access scratch memory
+  void InitScratchSRD();
+  void FillBufRsrcWord0();
+  void FillBufRsrcWord1();
+  void FillBufRsrcWord1_Gfx11();
+  void FillBufRsrcWord2();
+  void FillBufRsrcWord3();
+  void FillBufRsrcWord3_Gfx10();
+  void FillBufRsrcWord3_Gfx11();
+  void FillBufRsrcWord3_Gfx12();
+  void FillComputeTmpRingSize();
+  void FillAltComputeTmpRingSize();
+  void FillComputeTmpRingSize_Gfx11();
+  void FillComputeTmpRingSize_Gfx12();
+
+  void FreeMainScratchSpace();
+  void FreeAltScratchSpace();
+
+  /// @brief Handle insufficient scratch
+  void HandleInsufficientScratch(hsa_signal_value_t& error_code, hsa_signal_value_t& waitVal,
+                                 bool& changeWait);
+
+  /// @brief Handler for hardware queue events.
+  template <bool HandleExceptions>
+  static bool DynamicQueueEventsHandler(hsa_signal_value_t error_code, void* arg);
+
+  /// @brief Handler for KFD exceptions.
+  static bool ExceptionHandler(hsa_signal_value_t error_code, void* arg);
+
+  /// @brief Fill queue properties
+  void GetInfoProperties(uint8_t value[8]) const;
+
+  // AQL packet ring buffer
+  void* ring_buf_;
+
+  // Size of ring_buf_ allocation.
+  // This may be larger than (amd_queue_.hsa_queue.size * sizeof(AqlPacket)).
+  uint32_t ring_buf_alloc_bytes_;
+
+  // AQL metadata prefetch ring buffer
+  void* ring_buf_metadata_;
+
+  // Size of ring_buf_ allocation.
+  uint32_t ring_buf_metadata_alloc_bytes_;
+
+  // Id of the Queue used in communication with thunk
+  HSA_QUEUEID queue_id_;
+
+  // Indicates if queue is active
+  std::atomic<bool> active_;
+
+  // Handle of agent, which queue is attached to
+  GpuAgent* agent_;
+
+  // Handle of scratch memory descriptor
+  ScratchInfo queue_scratch_;
+
+  AMD::callback_t<core::HsaEventCallback> errors_callback_;
+
+  void* errors_data_;
+
+  // GPU-visible indirect buffer holding PM4 commands.
+  void* pm4_ib_buf_;
+  uint32_t pm4_ib_size_b_;
+  std::mutex pm4_ib_mutex_;
+
+  // Error handler control variable.
+  std::atomic<uint32_t> dynamicScratchState, exceptionState;
+  enum { ERROR_HANDLER_DONE = 1, ERROR_HANDLER_TERMINATE = 2, ERROR_HANDLER_SCRATCH_RETRY = 4 };
+
+  // Queue currently suspended or scheduled
+  bool suspended_;
+
+  // Thunk dispatch and wavefront scheduling priority
+  HSA::hsa_amd_queue_priority_internal_t priority_;
+
+  // Exception notification signal
+  Signal* exception_signal_;
+
+  // Per-queue VM fault state, set by ExceptionHandler and stamped
+  // with address/reason by VMFaultHandler.
+  std::atomic<bool> vm_faulted_{false};
+  uint64_t          vm_fault_address_{0};
+  uint32_t          vm_fault_reason_{0};
+
+  // CU mask lock
+  std::mutex mask_lock_;
+
+  // Mutex to prevent AsyncReclaimScratch and HandleInsufficientScratch from
+  // happening at the same time.
+  std::mutex scratch_lock_;
+
+  // Current CU mask
+  std::vector<uint32_t> cu_mask_;
+
+  class metadata_prefetch_pkt_version {
+    public:
+    metadata_prefetch_pkt_version()
+      : major_(METADATA_PREFETCH_VERSION_INVALID),
+        minor_(METADATA_PREFETCH_VERSION_INVALID) {}
+
+    void set_version(uint8_t major, uint8_t minor) {
+      /* major is 3-bits and minor is 5 bits */
+      assert(major <= 0x7 && minor <= 0x1F);
+      major_ = major;
+      minor_ = minor;
+    }
+
+    uint8_t major_version() { return major_;}
+    uint8_t minor_version() { return minor_;}
+
+    private:
+    uint8_t major_;
+    uint8_t minor_;
+  };
+
+  metadata_prefetch_pkt_version dispatch_version_;
+  metadata_prefetch_pkt_version barrier_version_;
+
+  // Shared event used for queue errors
+  static __forceinline HsaEvent*& queue_event() {
+    static HsaEvent* queue_event_ = nullptr;
+    return queue_event_;
+  }
+  // Queue count - used to ref count queue_event_
+  static __forceinline std::atomic<uint32_t>& queue_count() {
+    // This allocation is meant to last until the last thread has exited.
+    // It is intentionally not freed.
+    static std::atomic<uint32_t>* queue_count_ = new std::atomic<uint32_t>(0);
+    return *queue_count_;
+  }
+
+  // Mutex for queue_event_ manipulation
+std::mutex& queue_lock() {
+  // This allocation is meant to last until the last thread has exited.
+  // It is intentionally not freed.
+  static std::mutex* queue_lock_ = new std::mutex();
+  return *queue_lock_;
+}
+
+  static __forceinline int& rtti_id() {
+    static int rtti_id_ = 0;
+    return rtti_id_;
+  }
+
+  // Forbid copying and moving of this object
+  DISALLOW_COPY_AND_ASSIGN(AqlQueue);
+};
+
+}  // namespace amd
+}  // namespace rocr
+
+#endif  // header guard

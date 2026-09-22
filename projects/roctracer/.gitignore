@@ -1,0 +1,7 @@
+.*
+!.gitignore
+*.o
+*.exe
+*.swp
+*.Po
+build

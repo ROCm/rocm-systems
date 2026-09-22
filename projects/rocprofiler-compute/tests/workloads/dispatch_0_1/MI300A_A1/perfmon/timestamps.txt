@@ -1,0 +1,5 @@
+pmc:
+
+gpu:
+range: 0:2
+kernel:
