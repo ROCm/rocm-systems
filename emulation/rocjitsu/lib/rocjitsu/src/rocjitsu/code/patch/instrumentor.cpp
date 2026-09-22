@@ -651,9 +651,13 @@ namespace {
   });
 }
 
-[[nodiscard]] std::string probe_symbol_list(const std::vector<ProbeCallable> &probes) {
+// The probes whose arguments made a prologue necessary, named so a rejection
+// does not read as an unprompted failure on an otherwise ordinary kernel.
+[[nodiscard]] std::string entry_storage_reader_list(const std::vector<ProbeCallable> &probes) {
   std::string names;
   for (const ProbeCallable &probe : probes) {
+    if (!std::any_of(probe.arg_sources.begin(), probe.arg_sources.end(), reads_entry_storage))
+      continue;
     if (!names.empty())
       names += ", ";
     names += "'" + probe.symbol + "'";
@@ -730,11 +734,13 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
   const auto planned = plan_dbi_entry_prologue(KernelBlockScope(scope), kernel.descriptor, arch_,
                                                *kernel_sgpr_count, reserved, &err);
   if (!planned) {
-    // The planner knows nothing about probes, so on its own its message reads as
-    // "the kernel has no room" and points at the wrong thing.
-    report(error_out,
-           (err + "; the storage must also avoid what " + probe_symbol_list(probes) + " clobbers")
-               .c_str());
+    // Every rejection the planner reports is a property of the kernel, so its
+    // message alone does not say why this kernel was asked to carry a prologue
+    // at all. Naming the readers is what makes the failure actionable, and it
+    // holds for the storage-exhaustion case and the descriptor ones alike.
+    report(
+        error_out,
+        (err + "; the entry prologue is required by " + entry_storage_reader_list(probes)).c_str());
     return std::nullopt;
   }
 
@@ -1128,11 +1134,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   if (!result.errors.empty())
     return result;
 
-  // The kernel-entry prologue. Only kernels whose probes ask for the framework's
-  // entry storage get one, so an ordinary patch never pays for it and never
-  // meets its gates. It is laid out between the probe bodies and the per-site
-  // trampolines, which is what makes the storage defined before any site reads
-  // it regardless of where the anchors fall.
+  // The kernel-entry prologue, planned only for kernels whose probes ask for the
+  // framework's entry storage. It runs before every site because it is anchored
+  // at the kernel entry.
   std::optional<EntryProloguePatch> entry_patch;
   std::optional<uint16_t> entry_storage_base;
   if (probes_read_entry_storage(resolved.probes)) {

@@ -218,9 +218,9 @@ TEST(PlanDbiEntryStorage, FailsClosedWhenTheFloorIsAtOrPastTheAllocation) {
   EXPECT_FALSE(error.empty());
 }
 
-// The allocation bound is the kernel's own, not the cross-ISA allocatable
-// maximum: a kernel that advertises more SGPRs than any target allocates must
-// still not place storage past REGISTER_SET_ALLOCATABLE_SGPRS.
+// The bound is the lower of the kernel's own allocation and the cross-ISA
+// allocatable maximum, so a kernel advertising more SGPRs than any target
+// allocates still cannot place storage past REGISTER_SET_ALLOCATABLE_SGPRS.
 TEST(PlanDbiEntryStorage, ClampsTheBoundToTheAllocatableSgprMaximum) {
   const Kernel kernel(kernel_naming_sgpr(100));
   std::string error;
@@ -272,9 +272,9 @@ TEST(BuildDbiEntryPrologue, PlacesThePayloadPastTheCopiedKernargPrefix) {
   EXPECT_EQ(prologue->payload_byte_offset % kDbiEntryPayloadLayout.alignment, 0u);
 }
 
-// The offsets the caller gets back are the ones encoded in the loads. 1c
-// re-derives the layout and checks it against these, which is only a check if
-// they came from the words rather than from a second call to the same helper.
+// The reported offsets are read out of the emitted words, not from a second call
+// to the layout helper, so a consumer re-deriving the layout is checking the
+// prologue rather than the helper against itself.
 TEST(BuildDbiEntryPrologue, ReportsTheOffsetsItEncoded) {
   const auto prologue = build_dbi_entry_prologue(kernarg_descriptor(/*kernarg_size=*/16), kArch,
                                                  {.persistent_base = 26, .entry_temp_base = 28});
@@ -303,9 +303,9 @@ TEST(BuildDbiEntryPrologue, FailsClosedWithoutAKernargSegmentPointer) {
   EXPECT_FALSE(error.empty());
 }
 
-// A value-initialized DbiEntryStorage names s[0:1] twice. Without a
-// pairs-against-each-other check the second load overwrites the payload pointer
-// with the guest's and the prologue is emitted with no diagnostic.
+// Naming one pair twice makes the second load overwrite the payload pointer with
+// the guest's. The value-initialized case is also caught by the kernarg-overlap
+// check; the second case needs this check specifically.
 TEST(BuildDbiEntryPrologue, FailsClosedOnStoragePairsThatAreNotOneRun) {
   const KD desc = kernarg_descriptor();
   std::string error;
@@ -340,13 +340,13 @@ TEST(BuildDbiEntryPrologue, FailsClosedOnStorageOverlappingTheKernargPair) {
                    .has_value());
 }
 
-// Neither of these rejections is reachable from plan_dbi_entry_storage, which
-// bounds both. They guard the hand-built path.
-TEST(BuildDbiEntryPrologue, FailsClosedOnStoragePastTheSbaseField) {
+// Not reachable from plan_dbi_entry_storage, which bounds the run. This guards
+// the hand-built path.
+TEST(BuildDbiEntryPrologue, FailsClosedOnStoragePastTheSdataField) {
   std::string error;
   EXPECT_FALSE(build_dbi_entry_prologue(
                    kernarg_descriptor(), kArch,
-                   {.persistent_base = kMaxSmemSbase + 2, .entry_temp_base = kMaxSmemSbase + 4},
+                   {.persistent_base = kMaxSmemSdata + 1, .entry_temp_base = kMaxSmemSdata + 3},
                    &error)
                    .has_value());
   EXPECT_FALSE(error.empty());
