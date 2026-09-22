@@ -58,6 +58,7 @@ class Bench_gfx11(benchmark_base.Bench_base):
             "WMMA-F4": super().matrix_f4_bench,
             "WMMA-F6": super().matrix_f6_bench,
             "WMMA-F6F4": super().matrix_f6f4_bench,
+            "WMMA-MXF8": super().matrix_mxf8_bench,
             "WMMA-F8": super().matrix_f8_bench,
             "WMMA-F16": super().matrix_f16_bench,
             "WMMA-BF16": super().matrix_bf16_bench,
