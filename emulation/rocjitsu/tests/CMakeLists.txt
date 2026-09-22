@@ -505,6 +505,7 @@ add_executable(
     gpu_vm_service_test.cpp
     gpu_vm_translation_test.cpp
     config_test.cpp
+    gfx1251_compiled_kernel_test.cpp
     daemon_api_test.cpp
     matmul_test.cpp
     vector_add_test.cpp
@@ -692,6 +693,12 @@ if(HAS_GFX1250_DEVICE_KERNELS)
     target_compile_definitions(
         rocjitsu_tests
         PRIVATE HAS_GFX1250_DEVICE_KERNELS=1
+    )
+endif()
+if(HAS_GFX1251_DEVICE_KERNELS)
+    target_compile_definitions(
+        rocjitsu_tests
+        PRIVATE HAS_GFX1251_DEVICE_KERNELS=1
     )
 endif()
 # The vfio-user backend is optional, so its tests build only when it does.

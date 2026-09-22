@@ -43,7 +43,7 @@
                 "name": "cu0",
                 "type": "compute_unit",
                 "config": [
-                  { "key": "num_wf_slots", "value": "1" },
+                  { "key": "num_wf_slots", "value": "2" },
                   { "key": "sgprs_per_wf", "value": "128" },
                   { "key": "vgprs_per_wf", "value": "32" },
                   { "key": "lds_size_kb", "value": "64" }
