@@ -11,7 +11,7 @@ import pandas as pd
 import yaml
 
 import config
-from utils import csv_compression, schema, utils_analysis
+from utils import csv_compression, native_data, schema, utils_analysis
 from utils.logger import (
     console_debug,
     console_error,
@@ -261,15 +261,19 @@ def load_kernel_short_names(
 def _read_kernel_symbol_csvs(workload_path: str) -> list[pd.DataFrame]:
     """Return the workload's symbol CSVs that hold symbols to read.
 
-    A workload has one shape or the other: lowercase columns from the native
-    tool, capitalized from the rocpd conversion. Renamed so one reader serves
-    both.
+    Prefers the native tool's per-pid files; the rocpd conversion's file is
+    read only when there are none, as in attach mode. Columns are renamed to
+    one shape.
 
     The conversion opens each file before it runs its query, so an extract that
     failed leaves an empty file behind rather than no file.
     """
     symbol_frames = []
-    for symbol_csv_path in sorted(Path(workload_path).glob(KERNEL_SYMBOLS_CSV_GLOB)):
+    artifacts = native_data.find_native_artifacts(Path(workload_path))
+    symbol_csv_paths = [artifact.kernel_symbols for artifact in artifacts] or sorted(
+        Path(workload_path).glob(KERNEL_SYMBOLS_CSV_GLOB)
+    )
+    for symbol_csv_path in symbol_csv_paths:
         try:
             symbols = pd.read_csv(symbol_csv_path)
         except (pd.errors.EmptyDataError, pd.errors.ParserError):
