@@ -292,6 +292,13 @@ struct track_info_t
     size_t       stream_id{};
     track_kind_t category{ track_kind_t::thread };
 
+    // Raw rocpd_info_process.id (FK), as stored in the event tables' pid
+    // column -- distinct from process_info->pid (the OS pid). Only set for
+    // track_kind_t::stream, where it's needed to filter event queries;
+    // process_info->pid can't be used for that since it's the resolved OS
+    // pid, not the FK.
+    size_t db_pid{};
+
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
     std::shared_ptr<thread_info_t>  thread_info;

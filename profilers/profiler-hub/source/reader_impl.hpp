@@ -135,6 +135,13 @@ private:
     void apply_pagination(reader_types::timeline_event_list_t& events,
                           const reader_types::pagination_t&    pagination);
 
+    // Fetches events for the 4 optiq-parity category tracks (agent+queue
+    // and stream), which have no rocpd_track row and so aren't in
+    // m_track_ptr_to_topology/m_track_ptr_to_db_id.
+    [[nodiscard]] reader_types::timeline_event_list_t get_category_track_events(
+        const reader_types::track_info_ptr_t& track,
+        const reader_types::event_filter_t&   filter);
+
     std::unique_ptr<profiler_hub::storage_t>                  m_storage;
     std::shared_ptr<data_storage::sqlite_backend>             m_backend;
     std::shared_ptr<data_storage::schema_v3::read_statements> m_read_statements;

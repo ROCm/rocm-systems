@@ -35,8 +35,16 @@ downstream consumer of the library.
   combining all three operation kinds per stream (optiq discovery parity,
   including its "one stream track per stream, not per event type"
   behavior; previously only thread-based `(nid,pid,tid)` tracks and
-  per-agent PMC tracks were derived). Not yet exposed through the C ABI
-  (`ph_track_t`).
+  per-agent PMC tracks were derived).
+- `c/profiler_hub_types.h`: new `ph_track_category_t` enum;
+  `ph_track_t` gains `category`, `queue_id`, `stream_id` fields (mirrors
+  `reader_types::track_kind_t`). New `ph_process_t`/`ph_process_list_t`;
+  `ph_node_t` gains a `process_list` field.
+- `reader_t::get_events_for_track()` (and `ph_get_track_events()`) now
+  return real events for the 4 optiq-parity category tracks
+  (`kernel_dispatch_agent_queue`/`memory_allocate_agent_queue`/
+  `memory_copy_agent_queue`/`stream`); previously always empty for these.
+  Time-window filtering is supported for these categories too.
 
 ### Changed
 
