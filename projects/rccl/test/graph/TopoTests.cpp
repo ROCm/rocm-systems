@@ -715,10 +715,18 @@ TEST_F(TopoTest, SameDomainNetPaths_Gfx1250PromotesPhysicalDeviceAndPartitions) 
     ASSERT_GE(local, 0);
     ASSERT_NE(gpu->gpu.parent, nullptr);
 
+    const int dev = (int)(gpu->gpu.parent - built->nodes[DEV].nodes);
+
     // The physical device carries the promotion and the partition agrees with it, so the GDR
     // decision and the graph search read the same distance.
     EXPECT_EQ(gpu->gpu.parent->paths[NET][local].type, PATH_PXB);
     EXPECT_EQ(gpu->paths[NET][local].type, PATH_PXB);
+
+    // The NIC's own view has to match. ncclTopoGetLocal(system, NET, n, GPU, ...) and net.localGpu
+    // read NET->GPU when a NIC picks the GPU nearest to it, so a one-directional rewrite would
+    // promote the GPU's view while leaving the NIC still seeing a host-bridge hop.
+    EXPECT_EQ(built->nodes[NET].nodes[local].paths[GPU][g].type, PATH_PXB);
+    EXPECT_EQ(built->nodes[NET].nodes[local].paths[DEV][dev].type, PATH_PXB);
 
     // A NIC in another domain really is across the host bridge and has to stay PHB, otherwise the
     // search loses the locality this rewrite exists to expose.
@@ -726,6 +734,8 @@ TEST_F(TopoTest, SameDomainNetPaths_Gfx1250PromotesPhysicalDeviceAndPartitions) 
       if (n == local) continue;
       EXPECT_EQ(gpu->paths[NET][n].type, PATH_PHB);
       EXPECT_EQ(gpu->gpu.parent->paths[NET][n].type, PATH_PHB);
+      EXPECT_EQ(built->nodes[NET].nodes[n].paths[GPU][g].type, PATH_PHB);
+      EXPECT_EQ(built->nodes[NET].nodes[n].paths[DEV][dev].type, PATH_PHB);
     }
 
     // PXB is below the default netGdrLevel (PATH_P2C), so the promotion has to turn GDR on.
@@ -757,8 +767,12 @@ TEST_F(TopoTest, SameDomainNetPaths_OtherArchKeepsPhb) {
     ASSERT_NE(gpu->gpu.parent, nullptr);
     // Pin the partition entry as well as the physical device's: ncclTopoGdrDistance() reads the
     // parent for a partition, so a rewrite leaking onto the GPU nodes would otherwise go unseen.
+    // Both directions, since nothing else here would catch a leak onto the NIC's own entries.
+    const int dev = (int)(gpu->gpu.parent - built->nodes[DEV].nodes);
     EXPECT_EQ(gpu->gpu.parent->paths[NET][0].type, PATH_PHB);
     EXPECT_EQ(gpu->paths[NET][0].type, PATH_PHB);
+    EXPECT_EQ(built->nodes[NET].nodes[0].paths[GPU][g].type, PATH_PHB);
+    EXPECT_EQ(built->nodes[NET].nodes[0].paths[DEV][dev].type, PATH_PHB);
 
     enum ncclTopoGdrMode mode = ncclTopoGdrModeDisable;
     ASSERT_EQ(ncclTopoCheckGdr(built, gpu->gpu.rank, built->nodes[NET].nodes[0].id, /*read=*/0,
@@ -790,6 +804,8 @@ TEST_F(TopoTest, SameDomainNetPaths_Gfx1250UnpartitionedGpu) {
   ASSERT_NE(gpu->gpu.parent, nullptr);
   EXPECT_EQ(gpu->paths[NET][0].type, PATH_PXB);
   EXPECT_EQ(gpu->gpu.parent->paths[NET][0].type, PATH_PXB);
+  EXPECT_EQ(built->nodes[NET].nodes[0].paths[GPU][0].type, PATH_PXB);
+  EXPECT_EQ(built->nodes[NET].nodes[0].paths[DEV][0].type, PATH_PXB);
 
   enum ncclTopoGdrMode mode = ncclTopoGdrModeDisable;
   ASSERT_EQ(ncclTopoCheckGdr(built, gpu->gpu.rank, built->nodes[NET].nodes[0].id, /*read=*/0, &mode),
