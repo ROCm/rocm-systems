@@ -12,6 +12,7 @@
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/builders/vector_builders.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
@@ -2313,6 +2314,13 @@ bool contains_words(const std::vector<uint32_t> &haystack, std::span<const uint3
 // The SGPR pair the prologue loaded into, recovered from the site that reads it.
 // The argument v_mov names the pair, so the site and the prologue agreeing is
 // what makes the pair meaningful rather than whatever the planner picked.
+//
+// This decodes *argument 0*, not "the storage pair": every argument lands in
+// v[arg_vgpr_base + i] and arg_vgpr_base is 0, so matching vdst 0 finds whichever
+// source the site declared first. Correct only for a point whose first argument
+// is LogBufferPtrLo, which is every caller here. Put another source ahead of it
+// and this silently returns that one's register instead, so the callers pass
+// points built by log_buffer_point().
 std::optional<uint16_t> storage_base_from_argument(const std::vector<uint32_t> &trampoline,
                                                    rj_code_arch_t arch) {
   for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
@@ -2490,11 +2498,18 @@ TEST(InstrumentorEntryPrologue, CaveHoldsThePrologueBetweenTheProbeAndTheTrampol
   EXPECT_NE(std::find(prologue.begin(), prologue.end(), restore_lo), prologue.end());
   EXPECT_NE(std::find(prologue.begin(), prologue.end(), restore_hi), prologue.end());
 
-  // The wait sits ahead of the restore, which overwrites the SBASE both loads
-  // are still in flight against.
+  // The wait sits after both loads and before the restore. The second half is
+  // the subtle one: the restore overwrites the SBASE the loads are still in
+  // flight against, so a wait placed only ahead of the reads below it would be
+  // too late. Both bounds are asserted, since either alone admits a placement
+  // that would not work.
   const uint32_t wait = build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
   const auto wait_it = std::find(prologue.begin(), prologue.end(), wait);
   ASSERT_NE(wait_it, prologue.end()) << "the prologue does not wait for its loads";
+  const auto guest_ptr_load_it =
+      std::search(prologue.begin(), prologue.end(), load_guest_ptr.begin(), load_guest_ptr.end());
+  ASSERT_NE(guest_ptr_load_it, prologue.end());
+  EXPECT_LT(guest_ptr_load_it, wait_it) << "the wait runs before a load it is meant to cover";
   EXPECT_LT(wait_it, std::find(prologue.begin(), prologue.end(), restore_lo));
 
   // The kernel entry reaches all of it: its original s_nop was replaced by a
@@ -2567,12 +2582,16 @@ TEST(InstrumentorEntryPrologue, StorageAvoidsWhatTheProbeBodyClobbers) {
       << ":" << low + 3 << "]";
 }
 
-// Runs are 4 SGPRs on an even base, so a clobber every fourth register leaves no
-// window anywhere in the allocation. Failing closed is the only safe answer: the
-// alternative is storage a probe overwrites between the prologue and the site.
+// Runs are 4 SGPRs on an even base within the fixture's 32-SGPR allocation, so a
+// clobber every fourth register from s3 leaves every candidate base blocked by a
+// clobber. The stride has to reach s31: stopping at s27 leaves s[28:31] clear of
+// the clobbers, and the test would then be passing on the probe's link pair
+// rather than on what it set out to exercise. Failing closed is the only safe
+// answer, since the alternative is storage a probe overwrites between the
+// prologue and the site.
 TEST(InstrumentorEntryPrologue, StorageExhaustedByProbeClobbersFailsClosed) {
   std::vector<uint32_t> body;
-  for (uint16_t sgpr = 3; sgpr < 30; sgpr += 4)
+  for (uint16_t sgpr = 3; sgpr < 32; sgpr += 4)
     body.push_back(clobber_sgpr(sgpr));
   body.push_back(kProbeSetpcS30S31);
 
@@ -2673,6 +2692,9 @@ TEST(InstrumentorKernargRecord, DeclaresTheWrapperThePrologueReadsFrom) {
   EXPECT_EQ(record.payloads.front().alignment, kDbiEntryPayloadLayout.alignment);
 
   // Rebuild from the record's own sizes and alignments, as a consumer would.
+  // This pins the record's *fields*, not the layout function: a producer that
+  // wrote the wrapper size into original_kernarg_size, or the wrong payload
+  // alignment, lands somewhere the prologue does not read from.
   const std::array<KernargExtensionPayloadLayout, 1> payloads{KernargExtensionPayloadLayout{
       .size = record.payloads.front().size, .alignment = record.payloads.front().alignment}};
   const auto rebuilt = make_kernarg_extension_layout(record.original_kernarg_size, payloads);
@@ -2689,6 +2711,35 @@ TEST(InstrumentorKernargRecord, DeclaresTheWrapperThePrologueReadsFrom) {
   ASSERT_TRUE(prologue.has_value());
   EXPECT_EQ(rebuilt->payload_offsets.front(), prologue->payload_byte_offset);
   EXPECT_EQ(rebuilt->original_kernarg_pointer_offset, prologue->original_kernarg_pointer_offset);
+}
+
+// The loader-side reader stops at the first section of this name, so a second
+// record would be silently ignored. The fixture appends one directly rather than
+// instrumenting twice: a second pass never reaches this check, since the entry
+// is a branch by then and the prologue is refused first.
+TEST(InstrumentorKernargRecord, ObjectAlreadyDeclaringAKernargExtensionFailsClosed) {
+  auto target = make_gfx950_kernarg_kernel_elf();
+  AmdGpuCodeObject plain(target.data(), target.size());
+  ASSERT_TRUE(plain.is_valid());
+
+  CodeObjectPatcher patcher(plain);
+  const std::vector<uint8_t> foreign_record(16, 0);
+  ASSERT_TRUE(
+      patcher.append_nonalloc_section(kKernargExtensionMetadataSectionName, foreign_record));
+  const std::vector<uint8_t> with_record = patcher.emit();
+
+  AmdGpuCodeObject obj(with_record.data(), with_record.size());
+  ASSERT_TRUE(obj.is_valid());
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty()) << "a second kernarg record was appended";
+  EXPECT_NE(result.errors.front().find("already carries"), std::string::npos)
+      << result.errors.front();
 }
 
 // A record with no prologue would tell a runtime to build a wrapper the kernel

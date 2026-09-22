@@ -634,23 +634,27 @@ TrampolinePlan make_base_plan(const ResolvedInstrumentationSite &site, rj_code_a
 // Declare the kernarg wrapper the entry prologue reads from, so a runtime can
 // build one without knowing how the prologue was encoded.
 //
-// The re-derived layout is checked against the offsets the prologue baked in,
-// the same agreement check DBT makes for its virtual-LDS extension. It fires
-// only when the two sides see different inputs, such as a kernarg_size that
-// changed between planning and commit.
-bool append_dbi_kernarg_record(CodeObjectPatcher &patcher, const KernelDescriptorInfo &kernel,
-                               uint32_t payload_byte_offset,
-                               uint32_t original_kernarg_pointer_offset, std::string *error_out) {
-  const std::array<KernargExtensionPayloadLayout, 1> payloads{kDbiEntryPayloadLayout};
-  const auto layout = make_kernarg_extension_layout(kernel.descriptor.kernarg_size, payloads);
-  if (!layout || layout->payload_offsets.size() != 1) {
-    report(error_out, "could not lay out the DBI kernarg wrapper for the metadata record");
-    return false;
-  }
-  if (layout->payload_offsets.front() != payload_byte_offset ||
-      layout->original_kernarg_pointer_offset != original_kernarg_pointer_offset) {
-    report(error_out, "the DBI kernarg record disagrees with the offsets the entry prologue "
-                      "encoded; leaving the code object unchanged");
+// The record carries the wrapper's inputs (the guest's kernarg size and the
+// payload's size and alignment) rather than the offsets themselves. A consumer
+// runs make_kernarg_extension_layout over them and lands on the offsets the
+// prologue encoded, because the prologue derived those from the same helper and
+// the same descriptor.
+//
+// An object that already carries this section is refused: the loader-side
+// reader stops at the first match, so a second one would be unreachable. The
+// check reads the input object rather than the patcher, which is sound only
+// because this is the instrumentor's one append_nonalloc_section call.
+bool append_dbi_kernarg_record(CodeObjectPatcher &patcher, const AmdGpuCodeObject &obj,
+                               const KernelDescriptorInfo &kernel, std::string *error_out) {
+  for (const auto &section : obj.all_sections()) {
+    if (section->name() != kKernargExtensionMetadataSectionName)
+      continue;
+    report(error_out, ("the code object already carries a " +
+                       std::string(kKernargExtensionMetadataSectionName) +
+                       " section, and a second one would be unreachable to the loader; "
+                       "instrumenting a code object that already declares a kernarg extension "
+                       "is not supported")
+                          .c_str());
     return false;
   }
 
@@ -811,9 +815,6 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
   return EntryProloguePatch{.anchor_offset = entry_offset,
                             .original_size = entry_size,
                             .storage_base = planned->storage.persistent_base,
-                            .payload_byte_offset = planned->prologue.payload_byte_offset,
-                            .original_kernarg_pointer_offset =
-                                planned->prologue.original_kernarg_pointer_offset,
                             .bytes = std::move(*bytes)};
 }
 
@@ -1475,12 +1476,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     return result;
   }
 
-  // After replace_text: the record lands at EOF, which replace_text would
-  // otherwise shift out from under it.
   if (entry_patch) {
     std::string err;
-    if (!append_dbi_kernarg_record(patcher, kernels.front(), entry_patch->payload_byte_offset,
-                                   entry_patch->original_kernarg_pointer_offset, &err)) {
+    if (!append_dbi_kernarg_record(patcher, obj_, kernels.front(), &err)) {
       result.errors.push_back(std::move(err));
       return result;
     }

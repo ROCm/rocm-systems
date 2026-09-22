@@ -5,7 +5,8 @@
 /// @brief Pins the CP's user-SGPR placement against kernarg_segment_ptr_slot().
 ///
 /// Two independent walks of the AMDHSA user-SGPR enable-bit order decide where a
-/// dispatch's kernarg pointer ends up. CommandProcessor::init_wf writes it, and
+/// dispatch's kernarg pointer ends up. CommandProcessor::init_wavefront_regs
+/// writes it, and
 /// kernarg_segment_ptr_slot() is what the DBI entry prologue reads it from --
 /// baked into an s_load_dwordx2's SBASE at patch time. The CP interleaves its
 /// register writes with the walk, so it cannot call the helper, and nothing else
@@ -53,6 +54,13 @@ constexpr uint32_t kDispatchPtr = kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_
 constexpr uint32_t kQueuePtr = kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR;
 constexpr uint32_t kKernargSegmentPtr = kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR;
 
+// The properties that follow the kernarg pointer. They cannot move it, which is
+// the point: a CP edit that hoisted one of them above the kernarg block would be
+// invisible to a sweep that never sets them.
+constexpr uint32_t kTrailingProperties = kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID |
+                                         kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_FLAT_SCRATCH_INIT |
+                                         kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_SIZE;
+
 struct SlotCase {
   const char *name;
   uint32_t preceding;       ///< Enabled properties ahead of the kernarg pointer.
@@ -61,8 +69,10 @@ struct SlotCase {
 };
 
 // Every combination of the three properties that precede the kernarg pointer.
-// The slot and the count are written out, not summed from a table, so that a
-// change to the ABI order has to be restated here to pass.
+// The slot is written out rather than summed from a table, so a change to the
+// ABI order has to be restated here to pass. The count is weaker: it only feeds
+// pkt.num_user_sgprs, so a count that is too small is caught (the workgroup IDs
+// land on the kernarg slot) while one that is too large is not.
 constexpr SlotCase kCases[] = {
     {"None", 0u, 0u, 2u},
     {"Buffer", kPrivateSegmentBuffer, 4u, 6u},
@@ -72,6 +82,13 @@ constexpr SlotCase kCases[] = {
     {"BufferQueue", kPrivateSegmentBuffer | kQueuePtr, 6u, 8u},
     {"DispatchQueue", kDispatchPtr | kQueuePtr, 4u, 6u},
     {"BufferDispatchQueue", kPrivateSegmentBuffer | kDispatchPtr | kQueuePtr, 8u, 10u},
+    // Trailing properties enabled as well: the slot is unchanged, and the walk
+    // has to keep placing them after the kernarg pointer for that to hold.
+    // dispatch_id (2) + flat_scratch_init (2) + private_segment_size (1) on top
+    // of the eight preceding, so 15 user SGPRs.
+    {"TrailingPropertiesOnly", kTrailingProperties, 0u, 7u},
+    {"AllProperties", kPrivateSegmentBuffer | kDispatchPtr | kQueuePtr | kTrailingProperties, 8u,
+     15u},
 };
 
 class KernargSgprSlot : public ::testing::TestWithParam<SlotCase> {};
@@ -85,8 +102,10 @@ TEST_P(KernargSgprSlot, CommandProcessorWritesThePointerWhereTheHelperNamesIt) {
   EXPECT_EQ(kernarg_segment_ptr_slot(desc), c.expected_slot);
   EXPECT_TRUE(has_kernarg_segment_ptr(desc));
 
-  // The walk is architecture-independent, so one arch exercises it. The kernarg
-  // bytes are never read; only the pointer's placement is under test.
+  // The placement walk reads only enable bits, so one arch exercises it. The
+  // USER_SGPR_COUNT field it is paired with is not arch-neutral (gfx1250 widens
+  // it), but DbiSim writes the generic field and has no gfx1250 config. The
+  // kernarg bytes are never read; only the pointer's placement is under test.
   test::DbiSim sim("cdna3", /*wave_size=*/64);
   sim.set_kernarg(std::vector<uint8_t>(8, 0), properties, c.user_sgpr_count);
 

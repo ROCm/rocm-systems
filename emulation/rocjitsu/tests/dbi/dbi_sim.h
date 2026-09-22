@@ -17,11 +17,17 @@
 /// full register file: the orchestrator's register-ownership gates are exercised
 /// statically, at patch time, and never by execution here.
 ///
-/// The one place the two descriptors must agree is the kernarg segment pointer,
-/// which the DBI entry prologue reads at a slot fixed at patch time from the
-/// patched descriptor's enable bits. set_kernarg() is what makes the synthesized
-/// descriptor carry the same properties word, so the CP writes the pointer where
-/// the prologue expects it rather than where it happens to land.
+/// The kernarg segment pointer is one place the two descriptors do have to
+/// agree, since the DBI entry prologue reads it at a slot fixed at patch time
+/// from the patched descriptor's enable bits. set_kernarg() is what makes the
+/// synthesized descriptor carry the same properties word, so the CP writes the
+/// pointer where the prologue expects it rather than where it happens to land.
+///
+/// Wave size is a place they do **not** agree: the synthesized descriptor never
+/// sets ENABLE_WAVEFRONT_SIZE32, so kernel_wavefront_size() reports 64 and an
+/// RDNA target dispatches Wave64 however its patched ELF was planned. The
+/// wave_size constructor argument only says how many lanes to read back. A test
+/// whose correctness depends on the executing wave size cannot get it here.
 
 #pragma once
 
@@ -106,7 +112,8 @@ public:
   /// SGPRs somewhere no real kernel would read.
   ///
   /// A DbiSim that is never given kernargs leaves the word 0, which takes the
-  /// CP's fallback for internal test dispatches (command_processor.cpp:461).
+  /// CP's fallback for internal test dispatches, the else branch of the enable-bit
+  /// walk in CommandProcessor::init_wavefront_regs.
   /// That path writes nothing when the dispatch carries no kernarg address.
   void set_kernarg(std::vector<uint8_t> bytes,
                    uint32_t properties =

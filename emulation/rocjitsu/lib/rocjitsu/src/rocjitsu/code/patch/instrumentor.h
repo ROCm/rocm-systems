@@ -484,10 +484,6 @@ private:
     uint64_t anchor_offset = 0;
     uint32_t original_size = 0;
     uint16_t storage_base = 0; ///< Persistent pair every later site reads.
-    // The wrapper offsets the prologue words encode as SMEM immediates, carried
-    // so the `.rocjitsu.kernarg` record can be checked against what was emitted.
-    uint32_t payload_byte_offset = 0;
-    uint32_t original_kernarg_pointer_offset = 0;
     TrampolineBytes bytes;
   };
 
