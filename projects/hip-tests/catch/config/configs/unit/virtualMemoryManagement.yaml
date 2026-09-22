@@ -17,6 +17,7 @@ virtualMemoryManagement:
     disabled: [amd_wsl]
   Unit_hipMemRetainAllocationHandle_Capture: *level_2
   Unit_hipMemImportFromShareableHandle_Positive_Basic: *level_2
+  Unit_hipMemImportFromShareableHandle_HostBackedAlloc: *level_2
   Unit_hipMemImportFromShareableHandle_Negative_Parameters: *level_2
   Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl: *level_2
   Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl: *level_2
