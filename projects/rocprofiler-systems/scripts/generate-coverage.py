@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -49,6 +50,96 @@ def find_tool(name: str, required: bool = True) -> Optional[str]:
     return path
 
 
+def scope_filter(dir_scope: Path) -> str:
+    """Build a regex restricting gcovr to files under dir_scope.
+
+    Must start with a literal "/" (no leading "^") so gcovr's FilterOption
+    classifies it as an AbsoluteFilter; a leading "^" makes it a RelativeFilter
+    matched against cwd-relative paths, silently filtering out every file.
+    """
+    escaped = re.sub(r"([.\[\]{}()*+?^$|\\])", r"\\\1", dir_scope.as_posix())
+    return escaped.rstrip("/") + "/"
+
+
+def in_scope(filename: str, source_dir: Path, dir_scope: Path) -> bool:
+    """Re-check containment; never trust gcovr's --filter alone."""
+    path = canonical(filename, source_dir)
+    return path.is_relative_to(dir_scope)
+
+
+def canonical(raw: str, directory: Path) -> Path:
+    path = Path(raw)
+    return (path if path.is_absolute() else directory / path).resolve()
+
+
+class GitError(Exception):
+    """Raised when a git invocation fails."""
+
+
+def git(directory: Path, *args: str) -> bytes:
+    """Use NUL-delimited Git paths; do not parse patch/diff-name output."""
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=directory,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise GitError(f"git failed: {exc}") from exc
+    if proc.returncode:
+        raise GitError(proc.stderr.decode("utf-8", "replace").strip() or "git failed")
+    return proc.stdout
+
+
+def changed_files(source_dir: Path, base: Optional[str]) -> set[Path]:
+    """Files changed vs merge-base(HEAD, base): committed, staged/unstaged, untracked."""
+    root = Path(
+        os.fsdecode(git(source_dir, "rev-parse", "--show-toplevel")).strip()
+    ).resolve()
+    if base is None:
+        try:
+            base = os.fsdecode(
+                git(root, "rev-parse", "--abbrev-ref", "@{upstream}")
+            ).strip()
+        except GitError as exc:
+            raise GitError(
+                "--diff-only needs --base <target-branch> "
+                "when no upstream is configured"
+            ) from exc
+        print(f"Using upstream {base!r} as diff base; pass --base to override.")
+    revision = os.fsdecode(
+        git(root, "rev-parse", "--verify", "--end-of-options", base + "^{commit}")
+    ).strip()
+    merge_base = os.fsdecode(git(root, "merge-base", "HEAD", revision)).strip()
+    print(f"Diff scope: merge-base(HEAD, {base}) = {merge_base[:12]} through working tree")
+    dirty = {
+        canonical(os.fsdecode(p), root)
+        for p in git(
+            root,
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            merge_base,
+            "--",
+        ).split(b"\0")
+        if p
+    }
+    untracked = {
+        canonical(os.fsdecode(p), root)
+        for p in git(root, "ls-files", "--others", "--exclude-standard", "-z").split(
+            b"\0"
+        )
+        if p
+    }
+    return dirty | untracked
+
+
 def run_gcovr(
     *,
     gcov_cmd: str,
@@ -56,6 +147,7 @@ def run_gcovr(
     build_dir: Path,
     output_dir: Path,
     label: str,
+    dir_scope: Path,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -77,6 +169,8 @@ def run_gcovr(
         "--merge-mode-functions=merge-use-line-max",
         "-s",
         "-p",
+        "--filter",
+        scope_filter(dir_scope),
         "--json",
         str(json_path),
         "--xml",
@@ -107,11 +201,21 @@ def load_coverage_json(path: Path) -> dict:
         return json.load(f)
 
 
-def compute_file_coverage(data: dict) -> list[dict]:
+def compute_file_coverage(
+    data: dict,
+    *,
+    source_dir: Path,
+    dir_scope: Path,
+    changed: Optional[set[Path]] = None,
+) -> list[dict]:
     files = []
     for file_data in data.get("files", []):
         filename = file_data.get("filename", "") or file_data.get("file", "")
         if not filename:
+            continue
+        if not in_scope(filename, source_dir, dir_scope):
+            continue
+        if changed is not None and canonical(filename, source_dir) not in changed:
             continue
         lines = file_data.get("lines", [])
         if not lines:
@@ -183,24 +287,40 @@ def coverage_bar(pct: float) -> str:
     return f"{icon} **{pct:.1f}%**"
 
 
+def file_delta_str(f: dict, baseline_by_filename: dict[str, float]) -> str:
+    baseline_pct = baseline_by_filename.get(f["filename"])
+    if baseline_pct is None:
+        return ""
+    delta = f["coverage_pct"] - baseline_pct
+    if round(delta, 2) == 0:
+        return ""
+    sign = "+" if delta >= 0 else ""
+    emoji = "📈" if delta >= 0 else "📉"
+    return f" ({emoji} {sign}{delta:.2f}%)"
+
+
 def generate_markdown(
     *,
-    label: str,
     file_coverages: list[dict],
     totals: dict,
     baseline_totals: Optional[dict],
+    baseline_files: Optional[list[dict]] = None,
     source_dir: Path,
 ) -> str:
+    baseline_by_filename = (
+        {f["filename"]: f["coverage_pct"] for f in baseline_files}
+        if baseline_files
+        else {}
+    )
     lines = []
-    lines.append(f"## Code Coverage: {label}")
-    lines.append("")
 
     delta_str = ""
     if baseline_totals:
         delta = totals["coverage_pct"] - baseline_totals["coverage_pct"]
-        sign = "+" if delta >= 0 else ""
-        emoji = "📈" if delta >= 0 else "📉"
-        delta_str = f" ({emoji} {sign}{delta:.2f}% vs base)"
+        if round(delta, 2) != 0:
+            sign = "+" if delta >= 0 else ""
+            emoji = "📈" if delta >= 0 else "📉"
+            delta_str = f" ({emoji} {sign}{delta:.2f}% vs base)"
 
     lines.append(
         f"**Lines**: {coverage_bar(totals['coverage_pct'])}{delta_str} "
@@ -235,8 +355,10 @@ def generate_markdown(
                     if f.get("total_functions", 0) > 0
                     else "—"
                 )
+                delta_str = file_delta_str(f, baseline_by_filename)
                 lines.append(
-                    f"| {f['coverage_pct']:5.1f}% {f['covered_lines']}/{f['total_lines']} | "
+                    f"| {f['coverage_pct']:5.1f}% {f['covered_lines']}/{f['total_lines']}"
+                    f"{delta_str} | "
                     f"{func_str} | "
                     f"`{rel}` |"
                 )
@@ -282,6 +404,13 @@ def main():
         help="Source directory root",
     )
     parser.add_argument(
+        "--dir",
+        type=Path,
+        default=None,
+        help="Restrict the report to files within this directory "
+        "(default: --source-dir)",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=None,
@@ -300,6 +429,18 @@ def main():
         help="Baseline coverage JSON for delta comparison",
     )
     parser.add_argument(
+        "--diff-only",
+        action="store_true",
+        help="Restrict the report to files changed vs --base (file-level scope)",
+    )
+    parser.add_argument(
+        "--base",
+        type=str,
+        default=None,
+        help="Diff base ref for --diff-only, e.g. origin/develop; "
+        "otherwise uses the configured upstream",
+    )
+    parser.add_argument(
         "--gcov",
         type=str,
         default=None,
@@ -307,18 +448,41 @@ def main():
     )
 
     args = parser.parse_args()
+    if args.base and not args.diff_only:
+        parser.error("--base requires --diff-only")
 
     source_dir = args.source_dir.resolve()
     build_dir = args.build_dir.resolve()
     output_dir = (args.output_dir or source_dir / ".codecov").resolve()
     gcov_cmd = args.gcov or find_tool("gcov")
 
+    dir_scope = (args.dir or source_dir).resolve()
+    if not dir_scope.is_dir():
+        print(f"ERROR: --dir does not exist: {dir_scope}", file=sys.stderr)
+        sys.exit(1)
+    if not dir_scope.is_relative_to(source_dir):
+        print(
+            f"ERROR: --dir {dir_scope} is not inside --source-dir {source_dir}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     gitignore_path = output_dir / ".gitignore"
     if not gitignore_path.exists():
         output_dir.mkdir(parents=True, exist_ok=True)
         gitignore_path.write_text("/*\n")
 
+    changed = None
+    if args.diff_only:
+        try:
+            changed = changed_files(source_dir, args.base)
+        except GitError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Diff-only: {len(changed)} changed file(s)")
+
     print(f"Source dir:  {source_dir}")
+    print(f"Scope dir:   {dir_scope}")
     print(f"Build dir:   {build_dir}")
     print(f"Output dir:  {output_dir}")
     print(f"Label:       {args.label}")
@@ -331,23 +495,29 @@ def main():
         build_dir=build_dir,
         output_dir=output_dir,
         label=args.label,
+        dir_scope=dir_scope,
     )
 
     data = load_coverage_json(json_path)
-    file_coverages = compute_file_coverage(data)
+    file_coverages = compute_file_coverage(
+        data, source_dir=source_dir, dir_scope=dir_scope, changed=changed
+    )
     totals = compute_totals(file_coverages)
 
     baseline_totals = None
+    baseline_files = None
     if args.baseline and args.baseline.exists():
         baseline_data = load_coverage_json(args.baseline)
-        baseline_files = compute_file_coverage(baseline_data)
+        baseline_files = compute_file_coverage(
+            baseline_data, source_dir=source_dir, dir_scope=dir_scope, changed=changed
+        )
         baseline_totals = compute_totals(baseline_files)
 
     md = generate_markdown(
-        label=args.label,
         file_coverages=file_coverages,
         totals=totals,
         baseline_totals=baseline_totals,
+        baseline_files=baseline_files if args.diff_only else None,
         source_dir=source_dir,
     )
 
