@@ -280,6 +280,36 @@ CUSTOM_VARIABLE_ARGS = [
             "[rocprofv3] Fatal error: Invalid rank specification 'abc': not a valid "
             "integer or range\n",
         ),
+        (
+            {"MY_RANK": "0", "MY_SIZE": "abc"},
+            CUSTOM_VARIABLE_ARGS,
+            "[rocprofv3] Fatal error: MPI world size variable MY_SIZE='abc' is not "
+            "an integer\n",
+        ),
+        (
+            {"MY_RANK": "0", "MY_SIZE": "0"},
+            CUSTOM_VARIABLE_ARGS,
+            "[rocprofv3] Fatal error: MPI world size variable MY_SIZE=0 is out of "
+            "range (expected 1 or greater)\n",
+        ),
+        (
+            {"MY_RANK": "0", "MY_SIZE": "-1"},
+            CUSTOM_VARIABLE_ARGS,
+            "[rocprofv3] Fatal error: MPI world size variable MY_SIZE=-1 is out of "
+            "range (expected 1 or greater)\n",
+        ),
+        (
+            {"MY_RANK": "abc", "MY_SIZE": "4"},
+            CUSTOM_VARIABLE_ARGS,
+            "[rocprofv3] Fatal error: MPI rank variable MY_RANK='abc' is not an "
+            "integer\n",
+        ),
+        (
+            {"MY_RANK": "-1", "MY_SIZE": "4"},
+            CUSTOM_VARIABLE_ARGS,
+            "[rocprofv3] Fatal error: MPI rank variable MY_RANK=-1 is out of range "
+            "(expected 0 or greater)\n",
+        ),
     ],
 )
 def test_invalid_mpi_options_fail_before_launch(
