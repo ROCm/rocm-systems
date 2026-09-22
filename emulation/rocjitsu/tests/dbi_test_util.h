@@ -9,8 +9,8 @@
 ///        flag; `make_gfx942_*` (CDNA3), `make_gfx950_*` (CDNA4), and
 ///        `make_gfx1200_*` (RDNA4) are thin wrappers over them.
 ///
-/// Lives at the tests/ root (not a test slice) because it is shared across
-/// tests/patch, tests/dbi, and tests/code. Everything is in namespace
+/// Lives at the tests/ root rather than in one subdirectory because it is shared
+/// across tests/patch, tests/dbi, and tests/code. Everything is in namespace
 /// rocjitsu::test so a TU that needs to both patch (Instrumentor) and execute
 /// (simulator) a code object can share one copy.
 

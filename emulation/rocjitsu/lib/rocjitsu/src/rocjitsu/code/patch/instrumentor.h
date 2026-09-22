@@ -267,11 +267,11 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 // The two inputs come from different owners: `probe_clobbers` is the callee fact
 // from ProbeClobberSummary (probe_clobber.h); `builder_clobbers` is the
 // call-envelope fact the builder's resource plan reports (link pair,
-// target-address pair, SCC temp, ...). That builder plan and its dead-register
-// selection land in a later slice; these helpers take `builder_clobbers` as a
-// plain RegisterSet so the formula and v0 policy are testable now. Combining the
-// two and applying policy is the Instrumentor's job, so it lives here rather
-// than in the callee-only probe_clobber unit.
+// target-address pair, SCC temp, ...). These helpers take `builder_clobbers` as
+// a plain RegisterSet rather than reaching into the builder's plan, so the
+// formula is testable on its own. Combining the two and applying policy is the
+// Instrumentor's job, so it lives here rather than in the callee-only
+// probe_clobber unit.
 //==============================================================================
 
 /// @brief instrument_clobbers = probe body clobbers | builder envelope clobbers.
