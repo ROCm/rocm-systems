@@ -1566,4 +1566,506 @@ TEST_F(TaskPostTuningMicrotest, FillP2pTaskFromRaw_FuncIsNeitherSendNorRecv_Repo
   EXPECT_TRUE(fill.TaskUntouched());
 }
 
+struct TaskPostTuning_NetRegistrationLog {
+  std::vector<struct ncclConnector*> conns;
+  struct ncclComm* comm = nullptr;
+  void* buff = nullptr;
+  size_t bytes = 0;
+  ncclCommCallbackQueue* cleanupQueue = nullptr;
+};
+
+struct TaskPostTuning_IpcRegistrationLog {
+  struct ncclComm* comm = nullptr;
+  void* buff = nullptr;
+  size_t bytes = 0;
+  int peer = kNoScheduledRank;
+  ncclCommCallbackQueue* cleanupQueue = nullptr;
+};
+
+ncclRegisterP2pNetBufferFn TaskPostTuning_RecordNetRegistration(TaskPostTuning_NetRegistrationLog* log, int regFlag,
+                                                                ncclResult_t result) {
+  return [log, regFlag, result](struct ncclComm* comm, void* buff, size_t bytes, struct ncclConnector* conn,
+                                int* regFlagOut, void** handle, ncclCommCallbackQueue* cleanupQueue) {
+    log->conns.push_back(conn);
+    log->comm = comm;
+    log->buff = buff;
+    log->bytes = bytes;
+    log->cleanupQueue = cleanupQueue;
+    *regFlagOut = regFlag;
+    *handle = nullptr;
+    return result;
+  };
+}
+
+ncclRegisterP2pIpcBufferFn TaskPostTuning_RecordIpcRegistration(TaskPostTuning_IpcRegistrationLog* log,
+                                                                ncclResult_t result) {
+  return [log, result](struct ncclComm* comm, void* buff, size_t bytes, int peer, int* regFlagOut, void** regAddr,
+                       ncclCommCallbackQueue* cleanupQueue) {
+    log->comm = comm;
+    log->buff = buff;
+    log->bytes = bytes;
+    log->peer = peer;
+    log->cleanupQueue = cleanupQueue;
+    *regFlagOut = kRegistrationGranted;
+    *regAddr = nullptr;
+    return result;
+  };
+}
+
+class TaskPostTuning_P2pRegister {
+ public:
+  explicit TaskPostTuning_P2pRegister(bool isSendNotRecv = kIsSend)
+    : isSendNotRecv_(isSendNotRecv),
+      channels_(TaskPostTuning_SingleNodeChannels(isSendNotRecv ? kP2pSendRound : kP2pRecvRound, kP2pChannelsPerPeer,
+                                                  kP2pChannels)) {
+    task_ = {};
+    task_.func = isSendNotRecv ? ncclFuncSend : ncclFuncRecv;
+    task_.root = kP2pPeer;
+    task_.buff = buffer_;
+    task_.bytes = kP2pBytes;
+    task_.allowUB = true;
+  }
+
+  TaskPostTuning_P2pScene* scene() { return &p2p_; }
+  struct ncclComm* comm() { return p2p_.comm(); }
+  struct ncclTaskP2p* task() { return &task_; }
+  struct ncclConnector* conn(int part) { return p2p_.Conn(isSendNotRecv_, channels_[part], kP2pPeer); }
+  int parts() const { return static_cast<int>(channels_.size()); }
+
+  std::vector<struct ncclConnector*> AllConns() {
+    std::vector<struct ncclConnector*> conns;
+    for (int part = 0; part < parts(); part++) {
+      conns.push_back(conn(part));
+    }
+    return conns;
+  }
+
+  void UseNetworkTransport() {
+    for (int channelId = 0; channelId < kP2pChannels; channelId++) {
+      for (int peer = 0; peer < kRanks; peer++) {
+        struct ncclConnector* connector = p2p_.Conn(isSendNotRecv_, channelId, peer);
+        connector->transportComm = isSendNotRecv_ ? &netTransport.send : &netTransport.recv;
+        connector->proxyConn.sameProcess = kProxyInThisProcess;
+        connector->conn.flags = NCCL_DIRECT_NIC;
+      }
+    }
+  }
+
+  void UseIpcTransport(int flags) { conn(0)->conn.flags = flags; }
+
+  ncclResult_t Run(int protocol = NCCL_PROTO_SIMPLE) {
+    return postTuneP2pRegisterBuffer(p2p_.comm(), &task_, isSendNotRecv_, protocol);
+  }
+
+ private:
+  TaskPostTuning_P2pScene p2p_;
+  bool isSendNotRecv_;
+  std::vector<int> channels_;
+  struct ncclTaskP2p task_;
+  char buffer_[kP2pBytes] = {};
+};
+
+// Owns the log and the hook so each net site is one line; log_ is declared first so it outlives the hook.
+class TaskPostTuning_P2pNetRegister : public TaskPostTuning_P2pRegister {
+ public:
+  explicit TaskPostTuning_P2pNetRegister(bool isSendNotRecv = kIsSend, int regFlag = kRegistrationGranted,
+                                         ncclResult_t result = ncclSuccess)
+    : TaskPostTuning_P2pRegister(isSendNotRecv),
+      hook_(g_ncclRegisterP2pNetBuffer, TaskPostTuning_RecordNetRegistration(&log_, regFlag, result)) {
+    UseNetworkTransport();
+  }
+
+  const TaskPostTuning_NetRegistrationLog& log() const { return log_; }
+  int calls() const { return hook_.calls; }
+
+ private:
+  TaskPostTuning_NetRegistrationLog log_;
+  ScopedHook<ncclResult_t(struct ncclComm*, void*, size_t, struct ncclConnector*, int*, void**,
+                          ncclCommCallbackQueue*)>
+    hook_;
+};
+
+// postTuneP2pTasks always passes an untuned NCCL_PROTO_UNDEF, so only a direct call reaches the body below.
+TEST_F(TaskPostTuningMicrotest, P2pRegisterBuffer_ProtocolIsNotSimple_RegistersNothing) {
+  for (int protocol : {NCCL_PROTO_UNDEF, NCCL_PROTO_LL, NCCL_PROTO_LL128}) {
+    TaskPostTuning_P2pNetRegister reg;
+
+    EXPECT_EQ(ncclSuccess, reg.Run(protocol)) << "protocol " << protocol;
+
+    EXPECT_EQ(0, reg.calls()) << "protocol " << protocol;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRegisterBuffer_TaskIsNotEligible_RegistersNothing) {
+  const struct {
+    const char* name;
+    void (*apply)(struct ncclTaskP2p*);
+  } kIneligible[] = {
+    {"allowUB", [](struct ncclTaskP2p* task) { task->allowUB = false; }},
+    {"bytes", [](struct ncclTaskP2p* task) { task->bytes = 0; }},
+    {"buff", [](struct ncclTaskP2p* task) { task->buff = nullptr; }},
+    {"self", [](struct ncclTaskP2p* task) { task->root = kP2pRank; }},
+  };
+
+  for (const auto& ineligible : kIneligible) {
+    TaskPostTuning_P2pNetRegister reg;
+    ineligible.apply(reg.task());
+
+    EXPECT_EQ(ncclSuccess, reg.Run()) << ineligible.name;
+
+    EXPECT_EQ(0, reg.calls()) << ineligible.name;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRegisterBuffer_DirectNicSendConnection_RegistersTheBufferOnEveryPartConnection) {
+  TaskPostTuning_P2pNetRegister reg;
+
+  ASSERT_EQ(ncclSuccess, reg.Run());
+
+  EXPECT_EQ(reg.parts(), reg.calls());
+  EXPECT_EQ(reg.AllConns(), reg.log().conns);
+  EXPECT_EQ(reg.comm(), reg.log().comm);
+  EXPECT_EQ(reg.task()->buff, reg.log().buff);
+  EXPECT_EQ(kP2pBytes, reg.log().bytes);
+  EXPECT_EQ(&reg.comm()->planner.collCleanupQueue, reg.log().cleanupQueue);
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRegisterBuffer_DirectNicRecvConnection_RegistersOnTheRecvRoundsConnections) {
+  TaskPostTuning_P2pNetRegister reg(kIsRecv);
+
+  ASSERT_EQ(ncclSuccess, reg.Run());
+
+  EXPECT_EQ(reg.parts(), reg.calls());
+  EXPECT_EQ(reg.AllConns(), reg.log().conns);
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRegisterBuffer_FirstPartDeclinesRegistration_LeavesTheRemainingPartsUnregistered) {
+  TaskPostTuning_P2pNetRegister reg(kIsSend, kRegistrationDeclined);
+
+  ASSERT_EQ(ncclSuccess, reg.Run());
+
+  EXPECT_EQ(1, reg.calls());
+  EXPECT_EQ(std::vector<struct ncclConnector*>{reg.conn(0)}, reg.log().conns);
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRegisterBuffer_NetRegistrationFails_PropagatesTheFailure) {
+  TaskPostTuning_P2pNetRegister reg(kIsSend, kRegistrationGranted, ncclSystemError);
+
+  EXPECT_EQ(ncclSystemError, reg.Run());
+
+  EXPECT_EQ(1, reg.calls());
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRegisterBuffer_NetworkConnectionWithoutDirectNic_RegistersNothing) {
+  TaskPostTuning_P2pNetRegister reg;
+  reg.conn(0)->conn.flags = NCCL_P2P_WRITE | NCCL_P2P_READ;
+
+  EXPECT_EQ(ncclSuccess, reg.Run());
+
+  EXPECT_EQ(0, reg.calls());
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRegisterBuffer_NetworkProxyInAnotherProcess_RegistersNothing) {
+  TaskPostTuning_P2pNetRegister reg;
+  reg.conn(0)->proxyConn.sameProcess = kProxyInAnotherProcess;
+
+  EXPECT_EQ(ncclSuccess, reg.Run());
+
+  EXPECT_EQ(0, reg.calls());
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRegisterBuffer_PxnCarriesTheTransfer_RegistersNothing) {
+  TaskPostTuning_P2pNetRegister reg;
+  reg.comm()->isAllNvlink = 1;
+  reg.comm()->maxLocalRanks = kTwoLocalRanks;
+  ScopedHook pxn(g_pxnDisable, [](struct ncclComm*) { return kPxnEnabled; });
+
+  EXPECT_EQ(ncclSuccess, reg.Run());
+
+  EXPECT_EQ(0, reg.calls());
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRegisterBuffer_PxnCannotCarryTheTransfer_RegistersEveryPartConnection) {
+  const struct {
+    const char* missing;
+    int pxnDisabled;
+    int isAllNvlink;
+    int maxLocalRanks;
+  } kNoPxn[] = {
+    {"pxn disabled", kPxnDisabled, 1, kTwoLocalRanks},
+    {"no nvlink", kPxnEnabled, 0, kTwoLocalRanks},
+    {"single local rank", kPxnEnabled, 1, kOneLocalRank},
+  };
+
+  for (const auto& testCase : kNoPxn) {
+    TaskPostTuning_P2pNetRegister reg;
+    reg.comm()->isAllNvlink = testCase.isAllNvlink;
+    reg.comm()->maxLocalRanks = testCase.maxLocalRanks;
+    const int pxnDisabled = testCase.pxnDisabled;
+    ScopedHook pxn(g_pxnDisable, [pxnDisabled](struct ncclComm*) { return pxnDisabled; });
+
+    ASSERT_EQ(ncclSuccess, reg.Run()) << testCase.missing;
+
+    EXPECT_EQ(reg.parts(), reg.calls()) << testCase.missing;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRegisterBuffer_PeerToPeerConnection_RegistersTheBufferOnceForThatPeer) {
+  for (int flags : {NCCL_P2P_WRITE, NCCL_P2P_READ, NCCL_P2P_WRITE | NCCL_P2P_READ}) {
+    TaskPostTuning_P2pRegister reg;
+    TaskPostTuning_IpcRegistrationLog log;
+    ScopedHook ipc(g_ncclRegisterP2pIpcBuffer, TaskPostTuning_RecordIpcRegistration(&log, ncclSuccess));
+    reg.UseIpcTransport(flags);
+
+    ASSERT_EQ(ncclSuccess, reg.Run()) << "flags " << flags;
+
+    EXPECT_EQ(1, ipc.calls) << "flags " << flags;
+    EXPECT_EQ(reg.comm(), log.comm) << "flags " << flags;
+    EXPECT_EQ(reg.task()->buff, log.buff) << "flags " << flags;
+    EXPECT_EQ(kP2pBytes, log.bytes) << "flags " << flags;
+    EXPECT_EQ(kP2pPeer, log.peer) << "flags " << flags;
+    EXPECT_EQ(&reg.comm()->planner.collCleanupQueue, log.cleanupQueue) << "flags " << flags;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRegisterBuffer_ConnectionWithoutPeerToPeerAccess_RegistersNothing) {
+  TaskPostTuning_P2pRegister reg;
+  TaskPostTuning_IpcRegistrationLog log;
+  ScopedHook ipc(g_ncclRegisterP2pIpcBuffer, TaskPostTuning_RecordIpcRegistration(&log, ncclSuccess));
+  reg.UseIpcTransport(kNoP2pAccess);
+
+  EXPECT_EQ(ncclSuccess, reg.Run());
+
+  EXPECT_EQ(0, ipc.calls);
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRegisterBuffer_PeerToPeerRegistrationFails_PropagatesTheFailure) {
+  TaskPostTuning_P2pRegister reg;
+  TaskPostTuning_IpcRegistrationLog log;
+  ScopedHook ipc(g_ncclRegisterP2pIpcBuffer, TaskPostTuning_RecordIpcRegistration(&log, ncclInvalidUsage));
+  reg.UseIpcTransport(NCCL_P2P_WRITE);
+
+  EXPECT_EQ(ncclInvalidUsage, reg.Run());
+
+  EXPECT_EQ(1, ipc.calls);
+}
+
+class TaskPostTuning_P2pDrive {
+ public:
+  TaskPostTuning_P2pDrive() { ncclIntruQueueConstruct(&queue_); }
+
+  struct ncclTaskTuningInfo* Add(ncclFunc_t func, int peer) {
+    struct ncclTaskTuningInfo* tInfo = p2p_.scene()->NewTuningInfo(p2p_.scene()->NewSendRecv(func, peer));
+    ncclIntruQueueEnqueue(&queue_, tInfo);
+    return tInfo;
+  }
+
+  void MarkEveryChannelConnected() {
+    for (int channelId = 0; channelId < p2p_.comm()->p2pnChannels; channelId++) {
+      for (int peer = 0; peer < kRanks; peer++) {
+        p2p_.Send(channelId, peer)->hasSeen = kConnected;
+        p2p_.Recv(channelId, peer)->hasSeen = kConnected;
+      }
+    }
+  }
+
+  std::vector<struct ncclTaskP2p*> Queued(int peer, bool isSendNotRecv) {
+    struct ncclIntruQueue<struct ncclTaskP2p, &ncclTaskP2p::next>* queue =
+      isSendNotRecv ? &comm()->planner.peers[peer].sendQueue : &comm()->planner.peers[peer].recvQueue;
+    std::vector<struct ncclTaskP2p*> tasks;
+    for (struct ncclTaskP2p* task = ncclIntruQueueHead(queue); task != nullptr; task = task->next) {
+      tasks.push_back(task);
+    }
+    return tasks;
+  }
+
+  TaskPostTuning_P2pScene* scene() { return &p2p_; }
+  struct ncclComm* comm() { return p2p_.comm(); }
+  ncclResult_t Run() { return postTuneP2pTasks(p2p_.comm(), &queue_); }
+
+ private:
+  TaskPostTuning_P2pScene p2p_;
+  TaskTuningInfoQueue queue_;
+};
+
+TEST_F(TaskPostTuningMicrotest, P2pTasks_EmptyQueue_ConnectsNothingAndEnqueuesNothing) {
+  TaskPostTuning_P2pDrive drive;
+  ScopedHook setup(g_ncclTransportP2pSetup,
+                   [](struct ncclComm*, struct ncclTopoGraph*, int, bool*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, drive.Run());
+
+  EXPECT_EQ(0, setup.calls);
+  EXPECT_EQ(0, drive.comm()->planner.nTasksP2p);
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pTasks_FreshPeers_ConnectsOnceThenEnqueuesEachTaskOnItsOwnPeerQueue) {
+  TaskPostTuning_P2pDrive drive;
+  struct ncclComm* seenComm = nullptr;
+  int seenConnIndex = 0;
+  ScopedHook setup(g_ncclTransportP2pSetup, [&](struct ncclComm* comm, struct ncclTopoGraph* graph, int connIndex,
+                                                bool* needsProxy) {
+    seenComm = comm;
+    seenConnIndex = connIndex;
+    EXPECT_EQ(nullptr, graph);
+    EXPECT_EQ(nullptr, needsProxy);
+    return ncclSuccess;
+  });
+  struct ncclTaskTuningInfo* firstSend = drive.Add(ncclFuncSend, kP2pPeer);
+  struct ncclTaskTuningInfo* recv = drive.Add(ncclFuncRecv, kP2pPeer);
+  struct ncclTaskTuningInfo* secondSend = drive.Add(ncclFuncSend, kP2pPeer);
+  // The two sends are otherwise field-identical, so only a distinct size pins the tail-insertion order.
+  firstSend->raw->sendRecv.bytes = kP2pBytes / 2;
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  EXPECT_EQ(1, setup.calls);
+  EXPECT_EQ(drive.comm(), seenComm);
+  EXPECT_EQ(kP2pSetupConnIndex, seenConnIndex);
+  const std::vector<struct ncclTaskP2p*> sent = drive.Queued(kP2pPeer, kIsSend);
+  const std::vector<struct ncclTaskP2p*> received = drive.Queued(kP2pPeer, kIsRecv);
+  ASSERT_EQ(2u, sent.size());
+  ASSERT_EQ(1u, received.size());
+  EXPECT_EQ(ncclFuncSend, sent[0]->func);
+  EXPECT_EQ(ncclFuncSend, sent[1]->func);
+  EXPECT_EQ(ncclFuncRecv, received[0]->func);
+  EXPECT_EQ(kP2pBytes / 2, sent[0]->bytes);
+  EXPECT_EQ(kP2pBytes, sent[1]->bytes);
+  EXPECT_EQ(3, drive.comm()->planner.nTasksP2p);
+  EXPECT_EQ(2, drive.comm()->planner.nTasksP2pSend);
+  EXPECT_EQ(1, drive.comm()->planner.nTasksP2pRecv);
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(
+    drive.scene()->connectSend(kP2pPeer),
+    TaskPostTuning_SingleNodeChannels(kP2pSendRound, kP2pChannelsPerPeer, kP2pChannels)));
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(
+    drive.scene()->connectRecv(kP2pPeer),
+    TaskPostTuning_SingleNodeChannels(kP2pRecvRound, kP2pChannelsPerPeer, kP2pChannels)));
+  EXPECT_EQ(nullptr, firstSend->raw);
+  EXPECT_EQ(nullptr, recv->raw);
+  EXPECT_EQ(nullptr, secondSend->raw);
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pTasks_SeparatePeers_ClaimTheirOwnSendChannelsAndQueues) {
+  TaskPostTuning_P2pDrive drive;
+  const int kOtherPeer = 3;
+  ScopedHook setup(g_ncclTransportP2pSetup,
+                   [](struct ncclComm*, struct ncclTopoGraph*, int, bool*) { return ncclSuccess; });
+  drive.Add(ncclFuncSend, kP2pPeer);
+  drive.Add(ncclFuncSend, kOtherPeer);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  ASSERT_EQ(1u, drive.Queued(kP2pPeer, kIsSend).size());
+  ASSERT_EQ(1u, drive.Queued(kOtherPeer, kIsSend).size());
+  EXPECT_EQ(kP2pPeer, drive.Queued(kP2pPeer, kIsSend)[0]->root);
+  EXPECT_EQ(kOtherPeer, drive.Queued(kOtherPeer, kIsSend)[0]->root);
+  EXPECT_EQ(2, drive.comm()->planner.nTasksP2p);
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(
+    drive.scene()->connectSend(kP2pPeer),
+    TaskPostTuning_SingleNodeChannels(kP2pSendRound, kP2pChannelsPerPeer, kP2pChannels)));
+  // Peer 3 rounds to its own disjoint channel pair, which one base derived for the whole queue would miss.
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(
+    drive.scene()->connectSend(kOtherPeer),
+    TaskPostTuning_SingleNodeChannels((kOtherPeer - kP2pRank + kRanks) % kRanks, kP2pChannelsPerPeer,
+                                      kP2pChannels)));
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(drive.scene()->connectRecv(kP2pPeer), {}));
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(drive.scene()->connectRecv(kOtherPeer), {}));
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pTasks_EveryChannelAlreadyConnected_SkipsTransportSetupAndStillEnqueues) {
+  TaskPostTuning_P2pDrive drive;
+  ScopedHook setup(g_ncclTransportP2pSetup,
+                   [](struct ncclComm*, struct ncclTopoGraph*, int, bool*) { return ncclSuccess; });
+  drive.MarkEveryChannelConnected();
+  drive.Add(ncclFuncSend, kP2pPeer);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  EXPECT_EQ(0, setup.calls);
+  EXPECT_EQ(1u, drive.Queued(kP2pPeer, kIsSend).size());
+  EXPECT_EQ(1, drive.comm()->planner.nTasksP2p);
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pTasks_TransportSetupFails_PropagatesWithoutEnqueueingAnyTask) {
+  TaskPostTuning_P2pDrive drive;
+  ScopedHook setup(g_ncclTransportP2pSetup,
+                   [](struct ncclComm*, struct ncclTopoGraph*, int, bool*) { return ncclSystemError; });
+  struct ncclTaskTuningInfo* tInfo = drive.Add(ncclFuncSend, kP2pPeer);
+
+  EXPECT_EQ(ncclSystemError, drive.Run());
+
+  EXPECT_EQ(1, setup.calls);
+  EXPECT_TRUE(drive.Queued(kP2pPeer, kIsSend).empty());
+  EXPECT_EQ(0, drive.comm()->planner.nTasksP2p);
+  EXPECT_NE(nullptr, tInfo->raw);
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pTasks_PeerOutsideTheCommunicator_RejectsTheGroupBeforeConnecting) {
+  TaskPostTuning_P2pDrive drive;
+  ScopedHook setup(g_ncclTransportP2pSetup,
+                   [](struct ncclComm*, struct ncclTopoGraph*, int, bool*) { return ncclSuccess; });
+  drive.Add(ncclFuncSend, kP2pPeer);
+  drive.Add(ncclFuncSend, kRanks);
+
+  EXPECT_EQ(ncclInvalidArgument, drive.Run());
+
+  EXPECT_EQ(0, setup.calls);
+  EXPECT_EQ(0, drive.comm()->planner.nTasksP2p);
+  EXPECT_TRUE(drive.Queued(kP2pPeer, kIsSend).empty());
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pTasks_LaterTaskIsMalformed_PropagatesAfterEnqueueingTheEarlierOne) {
+  TaskPostTuning_P2pDrive drive;
+  ScopedHook setup(g_ncclTransportP2pSetup,
+                   [](struct ncclComm*, struct ncclTopoGraph*, int, bool*) { return ncclSuccess; });
+  drive.Add(ncclFuncSend, kP2pPeer);
+  drive.Add(ncclFuncAllReduce, kP2pPeer);
+
+  EXPECT_EQ(ncclInternalError, drive.Run());
+
+  EXPECT_EQ(1u, drive.Queued(kP2pPeer, kIsSend).size());
+  EXPECT_EQ(1, drive.comm()->planner.nTasksP2p);
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pTasks_UntunedTasks_CarryNoProtocolAndNeverReachBufferRegistration) {
+  TaskPostTuning_P2pDrive drive;
+  TaskPostTuning_NetRegistrationLog netLog;
+  TaskPostTuning_IpcRegistrationLog ipcLog;
+  ScopedHook setup(g_ncclTransportP2pSetup,
+                   [](struct ncclComm*, struct ncclTopoGraph*, int, bool*) { return ncclSuccess; });
+  ScopedHook net(g_ncclRegisterP2pNetBuffer,
+                 TaskPostTuning_RecordNetRegistration(&netLog, kRegistrationGranted, ncclSuccess));
+  ScopedHook ipc(g_ncclRegisterP2pIpcBuffer, TaskPostTuning_RecordIpcRegistration(&ipcLog, ncclSuccess));
+  for (int channelId : TaskPostTuning_SingleNodeChannels(kP2pSendRound, kP2pChannelsPerPeer, kP2pChannels)) {
+    drive.scene()->Send(channelId, kP2pPeer)->conn.flags = NCCL_P2P_WRITE;
+  }
+  struct ncclTaskTuningInfo* tInfo = drive.Add(ncclFuncSend, kP2pPeer);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  EXPECT_EQ(NCCL_PROTO_UNDEF, tInfo->tuningOut.proto);
+  EXPECT_EQ(0, net.calls);
+  EXPECT_EQ(0, ipc.calls);
+  EXPECT_EQ(1u, drive.Queued(kP2pPeer, kIsSend).size());
+}
+
+// The only test that reaches postTuneP2pRegisterBuffer through the drain, so deleting that call turns it red.
+TEST_F(TaskPostTuningMicrotest, P2pTasks_TunedToSimple_RegistersTheBufferForThePeer) {
+  TaskPostTuning_P2pDrive drive;
+  TaskPostTuning_IpcRegistrationLog ipcLog;
+  ScopedHook setup(g_ncclTransportP2pSetup,
+                   [](struct ncclComm*, struct ncclTopoGraph*, int, bool*) { return ncclSuccess; });
+  ScopedHook ipc(g_ncclRegisterP2pIpcBuffer, TaskPostTuning_RecordIpcRegistration(&ipcLog, ncclSuccess));
+  for (int channelId : TaskPostTuning_SingleNodeChannels(kP2pSendRound, kP2pChannelsPerPeer, kP2pChannels)) {
+    drive.scene()->Send(channelId, kP2pPeer)->conn.flags = NCCL_P2P_WRITE;
+  }
+  struct ncclTaskTuningInfo* tInfo = drive.Add(ncclFuncSend, kP2pPeer);
+  tInfo->tuningOut.proto = NCCL_PROTO_SIMPLE;
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  EXPECT_EQ(1, ipc.calls);
+  EXPECT_EQ(kP2pPeer, ipcLog.peer);
+}
+
 }  // namespace
