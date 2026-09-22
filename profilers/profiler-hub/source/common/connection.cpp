@@ -3,7 +3,7 @@
 
 #include "connection.hpp"
 
-#include "profiler-hub/storage.hpp"
+#include "profiler-hub/cpp/storage.hpp"
 
 #include <string>
 
