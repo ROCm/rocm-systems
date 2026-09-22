@@ -30,6 +30,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -186,19 +187,39 @@ uint64_t physical_wave_key(uint32_t compute_unit_id, uint32_t wavefront_id) {
   return (static_cast<uint64_t>(compute_unit_id) << 32) | wavefront_id;
 }
 
-uint64_t cluster_id(const std::array<uint32_t, 3> &coordinate) {
-  // FFM performs this packing in uint32_t. Preserve its intentional wrapping
-  // before widening to EntityId.
-  uint32_t packed = coordinate[0];
-  packed += coordinate[1] * uint32_t{1000};
-  packed += coordinate[2] * uint32_t{1000000};
-  return packed;
+std::optional<EntityId> cluster_id(const FfmDispatchMetadata &dispatch,
+                                   const std::array<uint32_t, 3> &coordinate) {
+  std::array<uint64_t, 3> workgroup_grid{};
+  for (size_t dimension = 0; dimension < workgroup_grid.size(); ++dimension) {
+    const uint64_t grid_size = dispatch.grid_size[dimension];
+    const uint64_t workgroup_size = dispatch.workgroup_size[dimension];
+    if (grid_size == 0 || workgroup_size == 0)
+      return std::nullopt;
+    workgroup_grid[dimension] = grid_size / workgroup_size + (grid_size % workgroup_size != 0);
+    if (coordinate[dimension] >= workgroup_grid[dimension])
+      return std::nullopt;
+  }
+
+  const uint64_t max = std::numeric_limits<EntityId>::max();
+  if (workgroup_grid[0] > max / workgroup_grid[1])
+    return std::nullopt;
+  const uint64_t xy_stride = workgroup_grid[0] * workgroup_grid[1];
+  if (xy_stride > max / workgroup_grid[2])
+    return std::nullopt;
+
+  // FFM models one workgroup per cluster. Use the dispatch's actual grid
+  // dimensions so every valid coordinate maps densely and uniquely; the old
+  // fixed decimal packing aliased x >= 1000 with the next y row.
+  return coordinate[0] + workgroup_grid[0] * coordinate[1] + xy_stride * coordinate[2];
 }
 
-FfmWaveInfo make_wave_info(uint32_t dispatch_id, const std::array<uint32_t, 3> &coordinate,
-                           uint32_t wave_in_group) {
-  const EntityId cid = cluster_id(coordinate);
-  return FfmWaveInfo{FfmWorkgroupInfo{FfmClusterInfo{FfmDispatchInfo{dispatch_id}, cid}, 0},
+std::optional<FfmWaveInfo> make_wave_info(const FfmDispatchMetadata &dispatch,
+                                          const std::array<uint32_t, 3> &coordinate,
+                                          uint32_t wave_in_group) {
+  const std::optional<EntityId> cid = cluster_id(dispatch, coordinate);
+  if (!cid)
+    return std::nullopt;
+  return FfmWaveInfo{FfmWorkgroupInfo{FfmClusterInfo{dispatch.dispatch_info, *cid}, 0},
                      wave_in_group % 4, wave_in_group};
 }
 
@@ -329,6 +350,46 @@ struct OrderedEvent {
   uint32_t dispatch_id = 0;
   EventPayload payload;
 };
+
+enum class ReplayPhase : uint8_t { Begin, Wave, End };
+
+ReplayPhase replay_phase(const OrderedEvent &event) {
+  if (std::holds_alternative<BeginEvent>(event.payload))
+    return ReplayPhase::Begin;
+  if (std::holds_alternative<EndEvent>(event.payload))
+    return ReplayPhase::End;
+  return ReplayPhase::Wave;
+}
+
+const FfmWaveInfo *event_wave(const OrderedEvent &event) {
+  if (const auto *instruction = std::get_if<InstructionEvent>(&event.payload))
+    return &instruction->wave_info;
+  if (const auto *memory = std::get_if<FfmMemoryAccess>(&event.payload))
+    return &memory->wave_info;
+  if (const auto *tdm = std::get_if<TdmEvent>(&event.payload))
+    return &tdm->wave_info;
+  return nullptr;
+}
+
+bool canonical_replay_less(const OrderedEvent &left, const OrderedEvent &right) {
+  const ReplayPhase left_phase = replay_phase(left);
+  const ReplayPhase right_phase = replay_phase(right);
+  if (left_phase != right_phase)
+    return left_phase < right_phase;
+  if (left.dispatch_id != right.dispatch_id)
+    return left.dispatch_id < right.dispatch_id;
+  if (left_phase != ReplayPhase::Wave)
+    return false;
+
+  const FfmWaveInfo *left_wave = event_wave(left);
+  const FfmWaveInfo *right_wave = event_wave(right);
+  assert(left_wave != nullptr && right_wave != nullptr);
+  return std::tie(left_wave->workgroup_info.cluster_info.cluster_id,
+                  left_wave->workgroup_info.workgroup_id, left_wave->wavegroup_id,
+                  left_wave->wave_id) < std::tie(right_wave->workgroup_info.cluster_info.cluster_id,
+                                                 right_wave->workgroup_info.workgroup_id,
+                                                 right_wave->wavegroup_id, right_wave->wave_id);
+}
 
 struct StagedEvent {
   OrderedEvent event;
@@ -857,25 +918,45 @@ struct PerfsimPlugin::Impl {
     if (!replay_blockers.empty())
       return;
 
-    while (!event_chunks.empty()) {
-      EventChunk chunk = std::move(event_chunks.front());
-      event_chunks.pop_front();
-      assert(chunk.capacity_bytes <= staged_bytes);
-      staged_bytes -= chunk.capacity_bytes;
-      for (StagedEvent &staged : chunk.events) {
-        assert(staged.dynamic_bytes <= staged_bytes);
-        staged_bytes -= staged.dynamic_bytes;
-        OrderedEvent &event = staged.event;
-        const auto iter = dispatches.find(event.dispatch_id);
-        if (iter != dispatches.end() && supported(iter->second) && iter->second.ended) {
-          replay(event);
-          if (config.dispatch_name && iter->second.selected &&
-              std::holds_alternative<EndEvent>(event.payload))
-            write_sink(std::format("[rocjitsu:perfsim] selected dispatch {} replayed\n",
-                                   event.dispatch_id));
-        }
+    size_t event_count = 0;
+    for (const EventChunk &chunk : event_chunks)
+      event_count += chunk.events.size();
+    std::vector<StagedEvent *> replay_order;
+    replay_order.reserve(event_count);
+    for (EventChunk &chunk : event_chunks)
+      for (StagedEvent &event : chunk.events)
+        replay_order.push_back(&event);
+    // The host provides no causal order between callbacks from different
+    // waves, so callback-mutex acquisition order is scheduler-dependent. Give
+    // the backend a canonical cross-wave order instead. stable_sort preserves
+    // each wave's program order and keeps every instruction adjacent to its
+    // memory/TDM records.
+    std::stable_sort(replay_order.begin(), replay_order.end(),
+                     [](const StagedEvent *left, const StagedEvent *right) {
+                       return canonical_replay_less(left->event, right->event);
+                     });
+
+    for (StagedEvent *staged : replay_order) {
+      OrderedEvent &event = staged->event;
+      const auto iter = dispatches.find(event.dispatch_id);
+      if (iter != dispatches.end() && supported(iter->second) && iter->second.ended) {
+        replay(event);
+        if (config.dispatch_name && iter->second.selected &&
+            std::holds_alternative<EndEvent>(event.payload))
+          write_sink(
+              std::format("[rocjitsu:perfsim] selected dispatch {} replayed\n", event.dispatch_id));
       }
     }
+
+    for (const EventChunk &chunk : event_chunks) {
+      assert(chunk.capacity_bytes <= staged_bytes);
+      staged_bytes -= chunk.capacity_bytes;
+      for (const StagedEvent &staged : chunk.events) {
+        assert(staged.dynamic_bytes <= staged_bytes);
+        staged_bytes -= staged.dynamic_bytes;
+      }
+    }
+    event_chunks.clear();
     assert(staged_bytes == 0);
 
     for (auto &[dispatch_id, state] : dispatches) {
@@ -1238,6 +1319,8 @@ void PerfsimPlugin::onInit() { impl_->init(); }
 
 void PerfsimPlugin::onShutdown() { impl_->shutdown(); }
 
+// Recording mutates shared staging and per-wave state. This lock provides
+// mutual exclusion; drain_epoch() independently canonicalizes replay order.
 bool PerfsimPlugin::requires_serial_hot_hooks() const { return true; }
 
 bool PerfsimPlugin::observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const {
@@ -1348,11 +1431,19 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
     return;
   }
 
-  auto state = std::make_unique<PerfsimWavefrontState>();
-  state->dispatch_state = dispatch;
-  state->wave_info = make_wave_info(wf.dispatch_id(), wf.wg_coord(), wf.wave_in_group());
+  const std::optional<FfmWaveInfo> wave_info =
+      make_wave_info(dispatch->metadata, wf.wg_coord(), wf.wave_in_group());
+  if (!wave_info) {
+    impl_->reject(wf.dispatch_id(),
+                  "wavefront coordinate is outside the representable dispatch workgroup grid");
+    return;
+  }
   if (!impl_->observe_workgroup(*dispatch, wf.wg_id()))
     return;
+
+  auto state = std::make_unique<PerfsimWavefrontState>();
+  state->dispatch_state = dispatch;
+  state->wave_info = *wave_info;
   state->compute_unit_id = compute_unit_id;
   state->physical_wavefront_id = wf.wf_id();
   state->rocjitsu_workgroup_id = wf.wg_id();
