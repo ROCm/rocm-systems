@@ -1421,7 +1421,7 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
         // env var forces off --> disabled
         {"DisabledByEnvVar",             16, true,  1ULL << 20,  false, {{"RCCL_HIERARCHICAL_ALLGATHER", "0"}}},
 
-        // ROCM-29579: per-rank lower bound, default 1 KB/rank.
+        // Per-rank lower bound, default 1 KB/rank.
         //
         // CreateMockComm below sets nRanks = 8 * nNodes, so the total gathered
         // size for a given per-rank contribution scales with the job. These
