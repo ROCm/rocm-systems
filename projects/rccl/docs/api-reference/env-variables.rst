@@ -607,3 +607,124 @@ variables are collected in the following table.
         | disabled, events are dropped once a pool is exhausted.
       - | ``0``: Fixed-size pools.
         | ``1``: Pools grow on demand (default).
+
+Algorithm dispatch and tuning (gfx1250 / MI450)
+================================================
+
+The following variables control per-architecture algorithm and protocol dispatch,
+including the DDA fabric tiers, Copy Engine (CE) AllReduce, and the per-architecture
+threshold table introduced for gfx1250.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Environment variable**
+      - **Values**
+
+    * - | ``RCCL_IGNORE_ARCH_TABLE``
+        | Controls whether the per-architecture dispatch table
+          (``rcclArchThresholds``) is used to set DDA, CE, and symmetric-kernel
+          thresholds, or whether pre-table compile-time constants are used instead.
+          When the table is active (``0``), each threshold variable below
+          (``RCCL_DDA_THRESHOLD``, ``RCCL_DDA_LL_THRESHOLD``, etc.) defaults to
+          ``-1`` (unset) and is resolved from the table at runtime; setting any of
+          those variables explicitly still overrides the table.
+      - | ``0``: Use the per-architecture table for threshold defaults.
+        | ``1``: Ignore the table; fall back to pre-table compile-time constants
+          (default). This matches the behavior before the arch table was introduced.
+
+    * - | ``RCCL_DDA_THRESHOLD``
+        | Upper bound in bytes for the DDA VMM/Simple tier per collective.
+          Messages above this size exit DDA and fall through to Ring, CE, or the
+          symmetric kernel. When set to ``-1`` (default), the value is resolved
+          from the per-architecture table (``ddaVmmMax`` field). Set
+          ``RCCL_IGNORE_ARCH_TABLE=0`` for the table to take effect.
+      - | ``-1``: Resolved from the per-arch table at runtime (default).
+        | ``0``: Disable the DDA VMM tier for all collectives.
+        | ``N`` (bytes): Use ``N`` as the VMM tier ceiling for all collectives,
+          overriding the table. Pre-table default: ``134217728`` (128 MiB).
+
+    * - | ``RCCL_DDA_LL_THRESHOLD``
+        | Upper bound in bytes for the DDA LL (low-latency) tier. Messages at or
+          below this size use the LL protocol; larger messages move to LL128 or VMM.
+          When ``-1`` (default), resolved from ``ddaLLMax`` in the arch table.
+      - | ``-1``: Resolved from the per-arch table at runtime (default).
+        | ``0``: Disable the DDA LL tier.
+        | ``N`` (bytes): Use ``N`` as the LL tier ceiling, overriding the table.
+          Pre-table default: ``65536`` (64 KiB).
+
+    * - | ``RCCL_DDA_LL128``
+        | Enables the DDA LL128 protocol tier. When ``-1`` (auto), LL128 is enabled
+          only for architectures whose per-arch table has a non-zero ``ddaLL128Max``
+          entry (currently gfx1250 only). Force to ``1`` to enable on other
+          architectures or ``0`` to disable globally.
+      - | ``-1``: Auto — enabled only when the arch table has non-zero LL128 thresholds
+          (default).
+        | ``0``: Disabled.
+        | ``1``: Force-enabled.
+
+    * - | ``RCCL_DDA_LL128_THRESHOLD``
+        | Upper bound in bytes for the DDA LL128 tier. Messages above this size move
+          to VMM/Simple or Ring. When ``-1`` (default), resolved from ``ddaLL128Max``
+          in the arch table. Has no effect when ``RCCL_DDA_LL128=0``.
+      - | ``-1``: Resolved from the per-arch table at runtime (default).
+        | ``0``: Disable the DDA LL128 tier.
+        | ``N`` (bytes): Use ``N`` as the LL128 tier ceiling, overriding the table.
+          Pre-table default: ``67108864`` (64 MiB).
+
+    * - | ``RCCL_CE_ALLREDUCE``
+        | Enables the Copy Engine (CE) 2-shot AllReduce path. When ``-1`` (auto),
+          CE AllReduce is on by default for gfx1250 communicators that meet all
+          eligibility criteria, and off for all other architectures.
+      - | ``-1``: Auto — enabled on gfx1250, disabled elsewhere (default).
+        | ``0``: Disabled on all architectures.
+        | ``1``: Force-enabled (subject to other eligibility checks such as buffer
+          registration and message size).
+
+    * - | ``RCCL_FORCE_CE_ALLREDUCE``
+        | Bypasses the ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``) requirement for
+          CE AllReduce, allowing CE to run without symmetric window registration.
+          Does not override the staging buffer size cap (``RCCL_CE_AR_MAX_MSG_BYTES``
+          or the arch table ``ceNonRegMax[AR]``); that cap is enforced regardless.
+          When ``-1`` (auto), follows the same gfx1250-default logic as
+          ``RCCL_CE_ALLREDUCE``.
+      - | ``-1``: Auto — same default as ``RCCL_CE_ALLREDUCE`` (default).
+        | ``0``: Disabled.
+        | ``1``: Force-enabled (CTA_POLICY check bypassed).
+
+    * - | ``RCCL_CE_AR_MAX_MSG_BYTES``
+        | Overrides the CE 2-shot AllReduce message size cap. When ``-1`` (default),
+          the cap is read from ``ceNonRegMax[AllReduce]`` in the per-arch table. A
+          null or unknown-arch table restores the pre-table 256 MiB default. This
+          variable sizes the selector only; it does not affect the staging buffer
+          allocation (see ``RCCL_CE_AR_STAGING_BYTES``).
+      - | ``-1``: Resolved from the per-arch table (default).
+        | ``N`` (bytes): Use ``N`` as the 2-shot AllReduce size cap.
+
+    * - | ``RCCL_CE_AR_REG_MAX_MSG_BYTES``
+        | Overrides the CE registered-window AllReduce message size cap. When ``-1``
+          (default), the cap is read from ``ceRegMax[AllReduce]`` in the per-arch
+          table. This is the upper bound for the path where both send and receive
+          buffers are in symmetric windows (``-R 2`` mode in rccl-tests).
+      - | ``-1``: Resolved from the per-arch table (default).
+        | ``N`` (bytes): Use ``N`` as the registered AllReduce size cap.
+
+    * - | ``RCCL_CE_AR_STAGING_BYTES``
+        | Overrides the total allocation size of the CE AllReduce staging buffer
+          (``ceARTmpBuf``). When ``-1`` (default), the buffer is allocated at the
+          compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (16 MiB). Increasing
+          this reduces pipelining overhead for large messages but raises per-rank
+          GPU memory usage. This variable sizes the buffer only; the selector cap
+          is controlled separately by ``RCCL_CE_AR_MAX_MSG_BYTES``.
+      - | ``-1``: Use the compile-time default of 16 MiB (default).
+        | ``N`` (bytes): Allocate an ``N``-byte staging buffer.
+
+    * - | ``RCCL_ALL_TO_ALL_PIVOT_ENABLE``
+        | Enables the Pivot AlltoAll algorithm, which uses a multi-step rotation
+          scheme instead of direct peer-to-peer sends. Requires aligned message sizes
+          and a supported topology. Disabled by default; enable only when the Pivot
+          algorithm is known to outperform the default selection for the target
+          message size and rank count.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
