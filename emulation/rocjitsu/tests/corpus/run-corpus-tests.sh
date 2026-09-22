@@ -13,7 +13,12 @@
 #   --workers N          Number of pytest-xdist workers (default: 8)
 #   --soft-timeout N     Per-test timeout for the first run (default: 30)
 #   --hard-timeout N     Per-test timeout for failed-test reruns (default: 60)
-#   --rerun-timeout N    Overall failed-test rerun budget (default: 1200)
+#   --run-expensive-tests
+#                        Run host-contention-sensitive tests separately
+#   --expensive-workers N
+#                        Workers for the contention-sensitive pass (default: 1)
+#   --expensive-timeout N
+#                        Per-test contention-sensitive timeout (default: 360)
 #   --sanitizer MODE     Launcher instrumentation: none, clang-asan, or gcc-asan
 #   --rerun-failed       Rerun only tests that failed the soft-timeout pass
 #   --warn-perf          Warn about passing tests close to the soft timeout
@@ -26,6 +31,7 @@
 #   .pytest-artifacts/<target>/           Corpus harness logs and artifacts
 #   .pytest-artifacts/junit/<target>.xml  Soft-timeout JUnit report per target
 #   .pytest-cache/<target>/               Pytest cache with the lastfailed list
+#   The expensive pass writes artifacts and cache only; it does not write JUnit.
 
 set -euo pipefail
 
@@ -35,13 +41,16 @@ set -euo pipefail
 worker_count=8
 soft_timeout_seconds=30
 hard_timeout_seconds=60
-rerun_timeout_seconds=1200
+run_expensive=false
+expensive_worker_count=1
+expensive_timeout_seconds=360
 rerun_failed=false
 warn_perf=false
 sanitizer_mode=none
 
 usage() {
-  echo "Usage: $0 [--workers N] [--soft-timeout N] [--hard-timeout N] [--rerun-timeout N]" \
+  echo "Usage: $0 [--workers N] [--soft-timeout N] [--hard-timeout N]" \
+    "[--run-expensive-tests] [--expensive-workers N] [--expensive-timeout N]" \
     "[--sanitizer none|clang-asan|gcc-asan] [--rerun-failed] [--warn-perf]" >&2
 }
 
@@ -82,13 +91,26 @@ while (( $# )); do
       hard_timeout_seconds="$2"
       shift 2
       ;;
-    --rerun-timeout)
+    --run-expensive-tests)
+      run_expensive=true
+      shift
+      ;;
+    --expensive-workers)
       if (( $# < 2 )); then
-        echo "--rerun-timeout requires a value" >&2
+        echo "--expensive-workers requires a value" >&2
         usage
         exit 1
       fi
-      rerun_timeout_seconds="$2"
+      expensive_worker_count="$2"
+      shift 2
+      ;;
+    --expensive-timeout)
+      if (( $# < 2 )); then
+        echo "--expensive-timeout requires a value" >&2
+        usage
+        exit 1
+      fi
+      expensive_timeout_seconds="$2"
       shift 2
       ;;
     --sanitizer)
@@ -126,7 +148,8 @@ numeric_options=(
   "worker_count:--workers"
   "soft_timeout_seconds:--soft-timeout"
   "hard_timeout_seconds:--hard-timeout"
-  "rerun_timeout_seconds:--rerun-timeout"
+  "expensive_worker_count:--expensive-workers"
+  "expensive_timeout_seconds:--expensive-timeout"
 )
 for numeric_option in "${numeric_options[@]}"; do
   numeric_name="${numeric_option%%:*}"
@@ -142,9 +165,22 @@ corpus_test_status=0
 corpus_work_dir="$(pwd -P)"
 junit_dir="${corpus_work_dir}/.pytest-artifacts/junit"
 junit_xml_paths=()
+expensive_tests_config="${ROCJITSU_SOURCE_DIR}/tests/corpus/expensive_tests.json"
+list_test_selectors="${ROCJITSU_SOURCE_DIR}/tests/corpus/list-test-selectors.py"
 
 # A report left by an earlier run would otherwise be reported as this run's.
 rm -rf "${junit_dir}"
+
+if [[ ! -f "${expensive_tests_config}" ||
+      ! -f "${list_test_selectors}" ]]; then
+  echo "Could not resolve the expensive-tests configuration helpers" >&2
+  exit 1
+fi
+if ! python3 "${list_test_selectors}" \
+     "${expensive_tests_config}" --validate; then
+  echo "Could not validate the expensive-tests configuration" >&2
+  exit 1
+fi
 
 # Direct simulator tests must bypass ROCr's built-in translation so every lane,
 # including release, executes the requested architecture semantics unchanged.
@@ -210,12 +246,12 @@ fi
 
 run_pytest() {
   local timeout_seconds="$1"
-  local overall_timeout_seconds="$2"
-  local target_name="$3"
-  local config_path="$4"
-  local skip_config_path="$5"
-  local target_artifact_dir="$6"
-  local target_cache_dir="$7"
+  local target_name="$2"
+  local config_path="$3"
+  local skip_config_path="$4"
+  local target_artifact_dir="$5"
+  local target_cache_dir="$6"
+  local workers="$7"
   shift 7
   # The run-wrapper timeout owns the per-test deadline and preserves the
   # command's captured diagnostics. Foreground mode keeps timeout and its child
@@ -245,21 +281,72 @@ run_pytest() {
     -vv
     -o "cache_dir=${target_cache_dir}"
     --tb=short
-    -n "${worker_count}"
+    -n "${workers}"
     -o "timeout_func_only=true"
     -o "junit_duration_report=call"
   )
-  if (( overall_timeout_seconds > 0 )); then
-    timeout --signal=TERM --kill-after=10s "${overall_timeout_seconds}s" \
-      "${pytest_cmd[@]}" --timeout "${pytest_timeout_seconds}" "$@"
+  "${pytest_cmd[@]}" --timeout "${pytest_timeout_seconds}" "$@"
+}
+
+run_test_pass() {
+  local first_timeout_seconds="$1"
+  local failed_timeout_seconds="$2"
+  local workers="$3"
+  local target_name="$4"
+  local config_path="$5"
+  local skip_config_path="$6"
+  local target_artifact_dir="$7"
+  local target_cache_dir="$8"
+  local junit_xml="$9"
+  local pass_label="${10}"
+  shift 10
+  local junit_args=()
+  if [[ -n "${junit_xml}" ]]; then
+    junit_args=(--junitxml "${junit_xml}")
+  fi
+
+  echo "::group::(${pass_label}) pytest"
+  local first_run_status=0
+  run_pytest "${first_timeout_seconds}" "${target_name}" "${config_path}" \
+    "${skip_config_path}" "${target_artifact_dir}" "${target_cache_dir}" \
+    "${workers}" \
+    "${junit_args[@]}" "$@" || first_run_status=$?
+  if [[ -n "${junit_xml}" && -f "${junit_xml}" ]]; then
+    junit_xml_paths+=("${junit_xml}")
+  fi
+
+  if (( first_run_status == 0 )); then
+    echo "::endgroup::"
+    echo "All (${pass_label}) tests passed."
     return
   fi
-  "${pytest_cmd[@]}" --timeout "${pytest_timeout_seconds}" "$@"
+
+  corpus_test_status=1
+  echo "::endgroup::"
+  echo "::error::Some (${pass_label}) tests failed."
+  echo "::group::(${pass_label}) pytest last-failed summary"
+  pytest -o "cache_dir=${target_cache_dir}" \
+    --cache-show="cache/lastfailed" || true
+  echo "::endgroup::"
+
+  if [[ "${rerun_failed}" == false ]]; then
+    return
+  fi
+
+  # Retry success does not turn CI green.
+  echo "::group::(${pass_label}) pytest rerun failed tests"
+  if run_pytest "${failed_timeout_seconds}" "${target_name}" "${config_path}" \
+       "${skip_config_path}" "${target_artifact_dir}" "${target_cache_dir}" \
+       "${workers}" --last-failed --last-failed-no-failures=none "$@"; then
+    echo "::endgroup::"
+    echo "::warning::Retried (${pass_label}) tests passed."
+    return
+  fi
+  echo "::endgroup::"
 }
 
 for target in "${targets[@]}"; do
   read -r name rocjitsu_config skip_tests_config <<< "${target}"
-  echo "::group::(${name}) pytest"
 
   rocjitsu_config_path="${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}"
   skip_tests_config_path="${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}"
@@ -267,42 +354,36 @@ for target in "${targets[@]}"; do
   cache_dir="${corpus_work_dir}/.pytest-cache/${name}"
   junit_xml="${junit_dir}/${name}.xml"
 
-  # Only the soft-timeout run is configured to output a JUnit XML report.
-  first_run_status=0
-  run_pytest "${soft_timeout_seconds}" 0 "${name}" "${rocjitsu_config_path}" \
+  if ! target_expensive_selectors="$(
+    python3 "${list_test_selectors}" "${expensive_tests_config}" \
+      --target "${name}" --suite cts
+  )"; then
+    echo "Could not read (${name}) expensive-test selectors" >&2
+    exit 1
+  fi
+  normal_selection=()
+  if [[ -n "${target_expensive_selectors}" ]]; then
+    normal_selection=(--exclude-case "${target_expensive_selectors}")
+  fi
+
+  run_test_pass "${soft_timeout_seconds}" "${hard_timeout_seconds}" \
+    "${worker_count}" "${name}" "${rocjitsu_config_path}" \
     "${skip_tests_config_path}" "${artifact_dir}" "${cache_dir}" \
-    --junitxml "${junit_xml}" || first_run_status=$?
-  if [[ -f "${junit_xml}" ]]; then
-    junit_xml_paths+=("${junit_xml}")
-  fi
+    "${junit_xml}" "${name}" \
+    "${normal_selection[@]}"
 
-  if (( first_run_status == 0 )); then
-    echo "::endgroup::"
-    echo "All (${name}) tests passed."
-    continue
+  if [[ "${run_expensive}" == true &&
+        -n "${target_expensive_selectors}" ]]; then
+    expensive_artifact_dir="${corpus_work_dir}/.pytest-artifacts/${name}-expensive"
+    expensive_cache_dir="${corpus_work_dir}/.pytest-cache/${name}-expensive"
+    run_test_pass "${expensive_timeout_seconds}" \
+      "${expensive_timeout_seconds}" "${expensive_worker_count}" "${name}" \
+      "${rocjitsu_config_path}" \
+      "${skip_tests_config_path}" "${expensive_artifact_dir}" \
+      "${expensive_cache_dir}" "" \
+      "${name}: expensive tests" \
+      --case "${target_expensive_selectors}"
   fi
-
-  corpus_test_status=1
-  echo "::endgroup::"
-  echo "::error::Some (${name}) tests failed."
-  echo "::group::(${name}) pytest last-failed summary"
-  pytest -o "cache_dir=${cache_dir}" --cache-show="cache/lastfailed" || true
-  echo "::endgroup::"
-
-  if [[ "${rerun_failed}" == false ]]; then
-    continue
-  fi
-
-  # Retry success does not turn CI green.
-  echo "::group::(${name}) pytest rerun failed tests"
-  if run_pytest "${hard_timeout_seconds}" "${rerun_timeout_seconds}" "${name}" \
-       "${rocjitsu_config_path}" "${skip_tests_config_path}" "${artifact_dir}" \
-       "${cache_dir}" --last-failed --last-failed-no-failures=none; then
-    echo "::endgroup::"
-    echo "::warning::Retried (${name}) tests passed."
-    continue
-  fi
-  echo "::endgroup::"
 done
 
 # The reporting script's return code does not affect the corpus test status.

@@ -59,7 +59,18 @@ exclusion, which prevents partial runs from becoming a develop baseline.
 ## Near-timeout reporting
 
 With `--warn-perf`, `run-corpus-tests.sh` warns about passing tests whose
-runtime approaches the pytest timeout.
+runtime approaches the pytest timeout. That report uses the normal-pass JUnit
+output and the soft timeout. The expensive pass does not write JUnit.
+
+## Expensive simulator tests
+
+`expensive_tests.json` records target- and suite-specific corpus cases that are
+sensitive to host CPU contention, which can result in high runtime overhead.
+They are excluded from the corresponding normal target pass.
+`--run-expensive-tests` runs the applicable cases in a separate pass using
+`--expensive-workers` and the per-test `--expensive-timeout`, retaining their
+coverage without contention from the rest of the target corpus. That pass
+records harness artifacts only.
 
 ## gfx1201 simulator exclusions
 
@@ -77,9 +88,9 @@ per-test timeouts to accommodate the instrumented simulator.
 Each case runs through `env` → `setpriv` → the process supervisor → `timeout` →
 `rocjitsu` → the optional HIP preload helper → the corpus executable. The
 run-wrapper `timeout` owns the per-test deadline and retains command output;
-pytest gets 15 seconds of cleanup headroom as a failsafe. Each target's
-failed-test rerun also has a 20-minute budget in CI, within the 60-minute
-workflow step.
+pytest gets 15 seconds of cleanup headroom as a failsafe. Failed-test reruns use
+the per-test `--hard-timeout`; the 60-minute workflow step is the overall
+failsafe.
 
 Clang sanitizer runs load HIP at child startup through the corpus-only helper.
 This keeps the shared Clang ASan runtime, simulator interposer, and HIP runtime

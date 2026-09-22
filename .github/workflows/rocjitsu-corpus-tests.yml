@@ -83,10 +83,12 @@ jobs:
             enable_expensive_checks: 0
             sanitizer_runtime: STATIC
             run_simulator_corpus: true
-            corpus_worker_limit: 2
+            corpus_worker_limit: 4
             corpus_soft_timeout: 45
             corpus_hard_timeout: 60
-            corpus_rerun_timeout: 60
+            run_expensive_corpus: true
+            corpus_expensive_worker_limit: 2
+            corpus_expensive_timeout: 60
             corpus_sanitizer: none
           - name: asan-ubsan
             allow_failure: true
@@ -104,10 +106,12 @@ jobs:
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
             run_simulator_corpus: true
-            corpus_worker_limit: 1
+            corpus_worker_limit: 4
             corpus_soft_timeout: 180
-            corpus_hard_timeout: 360
-            corpus_rerun_timeout: 360
+            corpus_hard_timeout: 240
+            run_expensive_corpus: true
+            corpus_expensive_worker_limit: 2
+            corpus_expensive_timeout: 180
             corpus_sanitizer: clang-asan
           - name: tsan
             allow_failure: false
@@ -127,7 +131,9 @@ jobs:
             corpus_worker_limit: 16
             corpus_soft_timeout: 0
             corpus_hard_timeout: 0
-            corpus_rerun_timeout: 0
+            run_expensive_corpus: false
+            corpus_expensive_worker_limit: 1
+            corpus_expensive_timeout: 360
             corpus_sanitizer: none
           - name: ubsan-gcc
             allow_failure: true
@@ -146,10 +152,12 @@ jobs:
             c_compiler: gcc
             cxx_compiler: g++
             run_simulator_corpus: true
-            corpus_worker_limit: 1
+            corpus_worker_limit: 4
             corpus_soft_timeout: 180
-            corpus_hard_timeout: 360
-            corpus_rerun_timeout: 360
+            corpus_hard_timeout: 240
+            run_expensive_corpus: true
+            corpus_expensive_worker_limit: 2
+            corpus_expensive_timeout: 180
             corpus_sanitizer: none
 
     steps:
@@ -191,9 +199,11 @@ jobs:
       - name: Install uv
         run: python -m pip install --disable-pip-version-check "uv==${UV_VERSION}"
 
-      - name: Test DBT SHA-pair tooling
+      - name: Test corpus support tooling
         if: matrix.name == 'release'
         run: |
+          python3 \
+            "${ROCJITSU_SOURCE_DIR}/tests/corpus/test-list-test-selectors.py"
           python3 \
             "${ROCJITSU_SOURCE_DIR}/tests/corpus/test-record-gfx1250-dbt-sha-pairs.py"
           python3 \
@@ -417,8 +427,6 @@ jobs:
 
       - name: Run corpus tests
         if: matrix.run_simulator_corpus
-        # Clean runs on this change completed in 4-13 minutes. The sanitizer
-        # rerun budget is capped at 20 minutes within this step-level failsafe.
         timeout-minutes: 60
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
@@ -438,15 +446,24 @@ jobs:
           if (( WORKERS > WORKER_LIMIT )); then
             WORKERS="${WORKER_LIMIT}"
           fi
+          EXPENSIVE_WORKER_LIMIT=${{ matrix.corpus_expensive_worker_limit }}
+          EXPENSIVE_WORKERS="$(nproc)"
+          if (( EXPENSIVE_WORKERS > EXPENSIVE_WORKER_LIMIT )); then
+            EXPENSIVE_WORKERS="${EXPENSIVE_WORKER_LIMIT}"
+          fi
           corpus_test_flags=(
             --workers "${WORKERS}"
             --soft-timeout ${{ matrix.corpus_soft_timeout }}
             --hard-timeout ${{ matrix.corpus_hard_timeout }}
-            --rerun-timeout ${{ matrix.corpus_rerun_timeout }}
+            --expensive-workers "${EXPENSIVE_WORKERS}"
+            --expensive-timeout ${{ matrix.corpus_expensive_timeout }}
             --sanitizer ${{ matrix.corpus_sanitizer }}
             --rerun-failed
             --warn-perf
           )
+          if [[ "${{ matrix.run_expensive_corpus }}" == "true" ]]; then
+            corpus_test_flags+=(--run-expensive-tests)
+          fi
           bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-corpus-tests.sh" "${corpus_test_flags[@]}" || corpus_test_status=$?
           exit "${corpus_test_status}"
 
