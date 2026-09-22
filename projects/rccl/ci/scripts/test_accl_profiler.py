@@ -155,11 +155,33 @@ def _shell_export(name: str, value: str) -> str:
     return f"export {name}={shlex.quote(value)}"
 
 
+def validate_kpack_layout(paths: ArtifactPaths) -> None:
+    """Require both RCCL and rccl-tests archives in a split artifact tree.
+
+    Each kpack-stripped ELF contains its own .rocm_kpack_ref that selects the
+    matching archive. Do not combine the archives in ROCM_KPACK_PATH: that
+    global override can make an architecture-compatible RCCL archive shadow
+    the rccl-tests archive (or vice versa), resulting in hipErrorInvalidImage.
+    """
+    if not paths.kpack_files:
+        return
+
+    names = {path.name for path in paths.kpack_files}
+    required = {"rccl_lib_gfx950.kpack", "rccl_test_gfx950.kpack"}
+    missing = sorted(required - names)
+    if missing:
+        raise FileNotFoundError(
+            "TheRock kpack artifact tree is incomplete; missing: "
+            + ", ".join(missing)
+        )
+
+
 def render_slurm_script(
     paths: ArtifactPaths,
     work_dir: Path,
     config: RunConfig,
 ) -> str:
+    validate_kpack_layout(paths)
     raw_dir = work_dir / "raw"
     test_log_dir = work_dir / "rccl-tests"
     status_file = work_dir / "collective-status.tsv"
@@ -187,7 +209,10 @@ def render_slurm_script(
     lines = [
         "#!/usr/bin/env bash",
         "set -uo pipefail",
-        "unset PYTHONHOME PYTHONPATH VIRTUAL_ENV || true",
+        (
+            "unset PYTHONHOME PYTHONPATH VIRTUAL_ENV "
+            "ROCM_KPACK_PATH ROCM_KPACK_PATH_PREFIX || true"
+        ),
         _shell_export("PATH", ":".join(path_entries)),
         _shell_export("LD_LIBRARY_PATH", ":".join(ld_paths)),
         _shell_export("ROCM_PATH", str(paths.root)),
@@ -197,13 +222,17 @@ def render_slurm_script(
         _shell_export("ACCL_RCCL_LIB", str(paths.rccl_library)),
         _shell_export("ACCL_PLUGIN", str(paths.profiler_plugin)),
         _shell_export("ACCL_PREFLIGHT_BINARY", str(paths.binaries["all_reduce_perf"])),
+        _shell_export(
+            "ACCL_TEST_BINARIES",
+            " ".join(str(paths.binaries[name]) for name in COLLECTIVES),
+        ),
+        _shell_export(
+            "ACCL_KPACK_FILES", " ".join(str(path) for path in paths.kpack_files)
+        ),
+        _shell_export("ACCL_KPACK_COUNT", str(len(paths.kpack_files))),
         _shell_export("ACCL_EXPECT_RCCL_SHA256", sha256_file(paths.rccl_library)),
         _shell_export("ACCL_EXPECT_PLUGIN_SHA256", sha256_file(paths.profiler_plugin)),
     ]
-    if paths.kpack_files:
-        lines.append(
-            _shell_export("ROCM_KPACK_PATH", ":".join(str(path) for path in paths.kpack_files))
-        )
     lines.extend(_shell_export(name, value) for name, value in RUBY_RCCL_ENV.items())
     lines.extend([
         f"mkdir -p {shlex.quote(str(raw_dir))} {shlex.quote(str(test_log_dir))}",
@@ -218,9 +247,33 @@ def render_slurm_script(
         "resolved_rccl=$(ldd \"$ACCL_PREFLIGHT_BINARY\" | awk '\"'\"'/librccl[.]so/{print $3; exit}'\"'\"')",
         "test -n \"$resolved_rccl\"",
         "test \"$(readlink -f \"$resolved_rccl\")\" = \"$(readlink -f \"$ACCL_RCCL_LIB\")\"",
+        "resolved_hip=$(ldd \"$ACCL_PREFLIGHT_BINARY\" | awk '\"'\"'/libamdhip64[.]so/{print $3; exit}'\"'\"')",
+        "test -n \"$resolved_hip\"",
+        (
+            "case \"$(readlink -f \"$resolved_hip\")\" in "
+            "\"$ROCM_PATH\"/*) ;; *) echo \"unexpected HIP runtime: $resolved_hip\" >&2; exit 1 ;; esac"
+        ),
         "test \"$(sha256sum \"$ACCL_RCCL_LIB\" | awk '\"'\"'{print $1}'\"'\"')\" = \"$ACCL_EXPECT_RCCL_SHA256\"",
         "test \"$(sha256sum \"$ACCL_PLUGIN\" | awk '\"'\"'{print $1}'\"'\"')\" = \"$ACCL_EXPECT_PLUGIN_SHA256\"",
         "readelf -Ws \"$ACCL_PLUGIN\" | grep -q '\"'\"' ncclProfiler_v5$'\"'\"'",
+        "if [ \"$ACCL_KPACK_COUNT\" -gt 0 ]; then",
+        "  for kpack in $ACCL_KPACK_FILES; do test -s \"$kpack\"; done",
+        "  readelf -SW \"$ACCL_RCCL_LIB\" | grep -q '\"'\"'[.]rocm_kpack_ref'\"'\"'",
+        "  for binary in $ACCL_TEST_BINARIES; do",
+        "    readelf -SW \"$binary\" | grep -q '\"'\"'[.]rocm_kpack_ref'\"'\"'",
+        "  done",
+        "else",
+        "  if readelf -SW \"$ACCL_RCCL_LIB\" | grep -q '\"'\"'[.]rocm_kpack_ref'\"'\"'; then",
+        "    echo \"librccl.so is kpack-stripped but no kpack archives were fetched\" >&2",
+        "    exit 1",
+        "  fi",
+        "  for binary in $ACCL_TEST_BINARIES; do",
+        "    if readelf -SW \"$binary\" | grep -q '\"'\"'[.]rocm_kpack_ref'\"'\"'; then",
+        "      echo \"$binary is kpack-stripped but no kpack archives were fetched\" >&2",
+        "      exit 1",
+        "    fi",
+        "  done",
+        "fi",
         # Prefer the native rocminfo executable. rocm_agent_enumerator is a
         # Python script, so use an explicit node-local interpreter only as a
         # fallback instead of its /usr/bin/env shebang.
@@ -245,9 +298,10 @@ def render_slurm_script(
         "fi",
         "case \",$archs,\" in *,gfx950,*) ;; *) echo \"unexpected GPU architecture(s): $archs\" >&2; exit 1 ;; esac",
         (
-            "printf '\"'\"'host=%s arch=%s rccl=%s plugin=%s\\n'\"'\"' "
+            "printf '\"'\"'host=%s arch=%s rccl=%s plugin=%s hip=%s kpacks=%s\\n'\"'\"' "
             "\"$host\" \"$archs\" \"$ACCL_EXPECT_RCCL_SHA256\" "
-            "\"$ACCL_EXPECT_PLUGIN_SHA256\""
+            "\"$ACCL_EXPECT_PLUGIN_SHA256\" \"$(readlink -f \"$resolved_hip\")\" "
+            "\"$ACCL_KPACK_COUNT\""
         ),
         "' "
         f"> {shlex.quote(str(preflight_log))} 2>&1 || preflight_rc=$?",
@@ -574,6 +628,14 @@ def build_manifest(
             "profiler": str(paths.profiler_plugin),
             "profiler_sha256": sha256_file(paths.profiler_plugin),
             "report_script": str(paths.report_script),
+            "kpacks": [
+                {
+                    "path": str(path),
+                    "size_bytes": path.stat().st_size,
+                    "sha256": sha256_file(path),
+                }
+                for path in paths.kpack_files
+            ],
         },
         "sweep": {
             "min_bytes": config.min_bytes,
