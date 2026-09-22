@@ -13,6 +13,22 @@ import subprocess
 
 import pytest
 
+_GIN_EXAMPLE_NAME = "librccl-gin-example.so"
+
+
+def _gin_example_so(rccl_install_dir):
+    """Locate the GIN example .so, or return None when it was not built."""
+    candidates = (
+        os.path.join(rccl_install_dir, "plugins", "gin", "example", _GIN_EXAMPLE_NAME),
+        os.path.join(rccl_install_dir, "build", "release", "test", "unit", "plugins", _GIN_EXAMPLE_NAME),
+        os.path.join(rccl_install_dir, "build", "debug", "test", "unit", "plugins", _GIN_EXAMPLE_NAME),
+    )
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+
 class _RmaV15(ctypes.Structure):
     _fields_ = [
         ("name", ctypes.c_char_p),
@@ -237,4 +253,32 @@ def test_rma_example_resolves_by_short_name(paths):
         r"RMA/Plugin: Assigned plugin Example to comm", log
     ), f"RMA example was not assigned to the comm, see {log_file}"
 
+
+@pytest.mark.ext_rma
+@pytest.mark.allreduce
+def test_rma_example_backs_the_gin_proxy(paths):
+    """The adopted RMA plugin must be the backend serving RCCL's GIN proxy."""
+    gin_so = _gin_example_so(paths.RCCL_INSTALL_DIR)
+    if gin_so is None:
+        pytest.skip("librccl-gin-example.so not built; rebuild with -DBUILD_PLUGIN_EXAMPLES=ON")
+
+    rc, log, log_file = _run_all_reduce(
+        paths,
+        {
+            "NCCL_RMA_PLUGIN": paths.RMA_SO,
+            "NCCL_GIN_PLUGIN": gin_so,
+            "NCCL_GIN_ENABLE": "1",
+        },
+        "test_rma_example_backs_the_gin_proxy.log",
+    )
+
+    assert rc == 0, f"all_reduce with the RMA and GIN examples failed, see {log_file}"
+
+    match = re.search(
+        r"GIN/Plugin: Skipping external proxy plugin .*using NCCL GIN proxy over RMA backend (\S+)", log
+    )
+    assert match, f"GIN did not report skipping the external proxy plugin, see {log_file}"
+    assert match.group(1) == "Example", (
+        f"GIN proxy is backed by {match.group(1)!r}, expected the adopted RMA example, see {log_file}"
+    )
 

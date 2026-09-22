@@ -33,12 +33,12 @@ are just examples, custom implementations may make other design decisions.
 
 ### Plugin name and supporting multiple GIN plugins
 
-When NCCL is initialized, it will look for a `libnccl-gin.so` library and
+When RCCL is initialized, it will look for a `librccl-gin.so` library and
 dynamically load it, then look for symbols inside the library.
 
 The `NCCL_GIN_PLUGIN` environment variable allows users to select one or more
-GIN plugins. If set to a bare plugin name such as `mygin`, NCCL can load a
-library named `libnccl-gin-mygin.so`. `NCCL_GIN_PLUGIN` can also be set to a
+GIN plugins. If set to a bare plugin name such as `mygin`, RCCL can load a
+library named `librccl-gin-mygin.so`. `NCCL_GIN_PLUGIN` can also be set to a
 shared library file name or an absolute path to the plugin file. Multiple
 plugins can be specified as a comma-separated list.
 
@@ -46,8 +46,8 @@ For example, any of the following can be used to load a plugin:
 
 ```shell
 export NCCL_GIN_PLUGIN=mygin
-export NCCL_GIN_PLUGIN=libnccl-gin-mygin.so
-export NCCL_GIN_PLUGIN=/path/to/your/plugin/libnccl-gin-mygin.so
+export NCCL_GIN_PLUGIN=librccl-gin-mygin.so
+export NCCL_GIN_PLUGIN=/path/to/your/plugin/librccl-gin-mygin.so
 ```
 
 Set the `LD_LIBRARY_PATH` to include the plugin directory when using a bare name
@@ -359,8 +359,8 @@ the absolute path to the plugin file. Any of the following can work:
 
 ```shell
 export NCCL_GIN_PLUGIN=example
-export NCCL_GIN_PLUGIN=libnccl-gin-example.so
-export NCCL_GIN_PLUGIN=/path/to/nccl/plugins/gin/example/libnccl-gin-example.so
+export NCCL_GIN_PLUGIN=librccl-gin-example.so
+export NCCL_GIN_PLUGIN=/path/to/rccl/plugins/gin/example/librccl-gin-example.so
 ```
 
-NCCL will automatically discover and load the plugin based on the exported symbol names.
+RCCL will automatically discover and load the plugin based on the exported symbol names.

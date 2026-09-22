@@ -14,6 +14,9 @@ RCCL 2.31 incorporates Device API and GIN enhancements from upstream
 NCCL 2.31.2. This page describes those APIs and the limits of the AMD
 host-proxy backend.
 
+To supply a GIN backend rather than consume one, see
+:ref:`using-rccl-gin-plugin`.
+
 ``NCCL_GIN_TYPE`` values for AMD backends are **not compatible with 2.30.7**:
 rocSHMEM GDA moved from 5 to 6 and Anvil SDMA from 6 to 7 because NCCL 2.31
 placed EFA GDA at 5. The IB proxy remains ``NCCL_GIN_TYPE=2``.
