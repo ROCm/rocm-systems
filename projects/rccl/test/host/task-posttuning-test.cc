@@ -2571,4 +2571,279 @@ TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalLaterDescriptorIsInvalid
   EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
 }
 
+
+constexpr size_t kRmaChunkSize = 1ull << 30;
+constexpr size_t kRmaChunkElements = kRmaChunkSize / sizeof(float);
+constexpr size_t kRmaNoChunkOffset = 0;
+constexpr size_t kRmaTailBytes = sizeof(float);
+constexpr int kRmaOtherCtx = 1;
+constexpr int kRmaOtherPeer = 3;
+constexpr int kRmaOtherSigIdx = 1;
+constexpr int kRmaOtherOpCount = 7;
+constexpr int kNoSignalIndex = 0;
+constexpr int kNoPeer = 0;
+
+void TaskPostTuning_ExpectPutChunk(TaskPostTuning_RmaScene* rma, const struct ncclTaskRma& task,
+                                   ncclDataType_t datatype, size_t chunkOffset, size_t chunkBytes,
+                                   ncclSignalMode_t signalMode) {
+  SCOPED_TRACE(chunkOffset);
+  EXPECT_EQ(ncclFuncPutSignal, task.func);
+  EXPECT_EQ(TaskPostTuning_Addr(kRmaSrcWindowBase + kRmaSrcOffset + chunkOffset), task.srcBuff);
+  EXPECT_EQ(kRmaSrcOffset + chunkOffset, task.srcWinOffset);
+  EXPECT_EQ(rma->srcWindow(), task.srcWinHost);
+  EXPECT_EQ(chunkBytes, task.bytes);
+  EXPECT_EQ(chunkBytes / ncclTypeSize(datatype), task.count);
+  EXPECT_EQ(datatype, task.datatype);
+  EXPECT_EQ(kRmaCtx, task.ctx);
+  EXPECT_EQ(kRmaSigIdx, task.signalIdx);
+  EXPECT_EQ(kRmaPeer, task.peer);
+  EXPECT_EQ(kRmaPeerWinOffset + chunkOffset, task.peerWinOffset);
+  EXPECT_EQ(rma->peerWindow(), task.peerWinHost);
+  EXPECT_EQ(signalMode, task.signalMode);
+  EXPECT_EQ(nullptr, task.peers);
+  EXPECT_EQ(nullptr, task.nsignals);
+  EXPECT_EQ(nullptr, task.signalIdxs);
+  EXPECT_EQ(0, task.npeers);
+  EXPECT_EQ(kProfilerEventMask, task.eActivationMask);
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalBelowTheChunkSize_MaterializesOneSignallingTaskFromTheRaw) {
+  TaskPostTuning_RmaScene rma;
+
+  ASSERT_EQ(ncclSuccess, rma.Run(rma.PutSignal()));
+
+  ASSERT_EQ(1u, rma.Tasks(kRmaCtx).size());
+  TaskPostTuning_ExpectPutChunk(&rma, *rma.Tasks(kRmaCtx)[0], ncclFloat32, kRmaNoChunkOffset,
+                                kRmaCount * sizeof(float), NCCL_SIGNAL);
+  EXPECT_EQ(1, rma.AppendedTaskCount());
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalOfAWiderDatatype_ScalesTheByteCountAndRecoversTheElementCount) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.PutSignal();
+  raw.rmaOp.putSignal.datatype = ncclFloat64;
+
+  ASSERT_EQ(ncclSuccess, rma.Run(raw));
+
+  ASSERT_EQ(1u, rma.Tasks(kRmaCtx).size());
+  EXPECT_EQ(kRmaCount * sizeof(double), rma.Tasks(kRmaCtx)[0]->bytes);
+  EXPECT_EQ(kRmaCount, rma.Tasks(kRmaCtx)[0]->count);
+  EXPECT_EQ(ncclFloat64, rma.Tasks(kRmaCtx)[0]->datatype);
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalWithoutAnyData_StillEmitsOneSignallingTask) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.PutSignal();
+  raw.rmaOp.putSignal.count = 0;
+
+  ASSERT_EQ(ncclSuccess, rma.Run(raw));
+
+  ASSERT_EQ(1u, rma.Tasks(kRmaCtx).size());
+  EXPECT_EQ(0u, rma.Tasks(kRmaCtx)[0]->bytes);
+  EXPECT_EQ(0u, rma.Tasks(kRmaCtx)[0]->count);
+  EXPECT_EQ(NCCL_SIGNAL, rma.Tasks(kRmaCtx)[0]->signalMode);
+  EXPECT_EQ(1, rma.AppendedTaskCount());
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalExactlyAtTheChunkSize_StaysASingleSignallingTask) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.PutSignal();
+  raw.rmaOp.putSignal.count = kRmaChunkElements;
+
+  ASSERT_EQ(ncclSuccess, rma.Run(raw));
+
+  ASSERT_EQ(1u, rma.Tasks(kRmaCtx).size());
+  TaskPostTuning_ExpectPutChunk(&rma, *rma.Tasks(kRmaCtx)[0], ncclFloat32, kRmaNoChunkOffset, kRmaChunkSize,
+                                NCCL_SIGNAL);
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalOneElementPastTheChunkSize_SplitsWithTheSignalOnTheLastChunk) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.PutSignal();
+  raw.rmaOp.putSignal.count = kRmaChunkElements + 1;
+
+  ASSERT_EQ(ncclSuccess, rma.Run(raw));
+
+  const std::vector<struct ncclTaskRma*> tasks = rma.Tasks(kRmaCtx);
+  ASSERT_EQ(2u, tasks.size());
+  TaskPostTuning_ExpectPutChunk(&rma, *tasks[0], ncclFloat32, kRmaNoChunkOffset, kRmaChunkSize, NCCL_SIGNAL_NONE);
+  TaskPostTuning_ExpectPutChunk(&rma, *tasks[1], ncclFloat32, kRmaChunkSize, kRmaTailBytes, NCCL_SIGNAL);
+  EXPECT_EQ(2, rma.AppendedTaskCount());
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalAtTwiceTheChunkSize_SplitsIntoTwoFullChunks) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.PutSignal();
+  raw.rmaOp.putSignal.count = 2 * kRmaChunkElements;
+
+  ASSERT_EQ(ncclSuccess, rma.Run(raw));
+
+  const std::vector<struct ncclTaskRma*> tasks = rma.Tasks(kRmaCtx);
+  ASSERT_EQ(2u, tasks.size());
+  TaskPostTuning_ExpectPutChunk(&rma, *tasks[0], ncclFloat32, kRmaNoChunkOffset, kRmaChunkSize, NCCL_SIGNAL_NONE);
+  TaskPostTuning_ExpectPutChunk(&rma, *tasks[1], ncclFloat32, kRmaChunkSize, kRmaChunkSize, NCCL_SIGNAL);
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_Signal_MaterializesOneZeroByteTaskWithoutAnyWindow) {
+  TaskPostTuning_RmaScene rma;
+
+  ASSERT_EQ(ncclSuccess, rma.Run(rma.Signal()));
+
+  ASSERT_EQ(1u, rma.Tasks(kRmaCtx).size());
+  const struct ncclTaskRma& task = *rma.Tasks(kRmaCtx)[0];
+  EXPECT_EQ(ncclFuncSignal, task.func);
+  EXPECT_EQ(kRmaCtx, task.ctx);
+  EXPECT_EQ(kRmaPeer, task.peer);
+  EXPECT_EQ(kRmaSigIdx, task.signalIdx);
+  EXPECT_EQ(NCCL_SIGNAL, task.signalMode);
+  EXPECT_EQ(0u, task.bytes);
+  EXPECT_EQ(0u, task.count);
+  EXPECT_EQ(nullptr, task.srcBuff);
+  EXPECT_EQ(nullptr, task.srcWinHost);
+  EXPECT_EQ(nullptr, task.peerWinHost);
+  EXPECT_EQ(kProfilerEventMask, task.eActivationMask);
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_SignalOnAnotherContext_QueuesOnThatContextsQueueOnly) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.Signal();
+  raw.rmaOp.signal.ctx = kRmaOtherCtx;
+
+  ASSERT_EQ(ncclSuccess, rma.Run(raw));
+
+  EXPECT_TRUE(rma.Tasks(kRmaCtx).empty());
+  ASSERT_EQ(1u, rma.Tasks(kRmaOtherCtx).size());
+  EXPECT_EQ(kRmaOtherCtx, rma.Tasks(kRmaOtherCtx)[0]->ctx);
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_PutSignalThenSignalOnOneContext_QueueInAppendOrder) {
+  TaskPostTuning_RmaScene rma;
+
+  ASSERT_EQ(ncclSuccess, rma.Run(rma.PutSignal()));
+  ASSERT_EQ(ncclSuccess, rma.Run(rma.Signal()));
+
+  const std::vector<struct ncclTaskRma*> tasks = rma.Tasks(kRmaCtx);
+  ASSERT_EQ(2u, tasks.size());
+  EXPECT_EQ(ncclFuncPutSignal, tasks[0]->func);
+  EXPECT_EQ(ncclFuncSignal, tasks[1]->func);
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalOneDescriptor_MaterializesOneTaskOnThatDescriptorsContext) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, kRmaCtx)};
+
+  ASSERT_EQ(ncclSuccess, rma.Run(rma.WaitSignal(&descs)));
+
+  ASSERT_EQ(1u, rma.Tasks(kRmaCtx).size());
+  const struct ncclTaskRma& task = *rma.Tasks(kRmaCtx)[0];
+  EXPECT_EQ(ncclFuncWaitSignal, task.func);
+  EXPECT_EQ(kRmaCtx, task.ctx);
+  EXPECT_EQ(NCCL_SIGNAL, task.signalMode);
+  EXPECT_EQ(kNoSignalIndex, task.signalIdx);
+  EXPECT_EQ(kNoPeer, task.peer);
+  EXPECT_EQ(0u, task.count);
+  EXPECT_EQ(0u, task.bytes);
+  EXPECT_EQ(nullptr, task.srcBuff);
+  EXPECT_EQ(nullptr, task.srcWinHost);
+  EXPECT_EQ(nullptr, task.peerWinHost);
+  ASSERT_EQ(1, task.npeers);
+  EXPECT_EQ(kRmaPeer, task.peers[0]);
+  EXPECT_EQ(kRmaOpCount, task.nsignals[0]);
+  EXPECT_EQ(kRmaSigIdx, task.signalIdxs[0]);
+  EXPECT_EQ(kProfilerEventMask, task.eActivationMask);
+  EXPECT_EQ(1, rma.AppendedTaskCount());
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorsSharingAContext_CollapseIntoOneTaskInOrder) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, kRmaCtx),
+                                             TaskPostTuning_WaitDesc(kRmaOtherPeer, kRmaOtherSigIdx, kRmaCtx)};
+  descs[1].opCnt = kRmaOtherOpCount;
+
+  ASSERT_EQ(ncclSuccess, rma.Run(rma.WaitSignal(&descs)));
+
+  ASSERT_EQ(1u, rma.Tasks(kRmaCtx).size());
+  const struct ncclTaskRma& task = *rma.Tasks(kRmaCtx)[0];
+  ASSERT_EQ(2, task.npeers);
+  EXPECT_EQ(kRmaPeer, task.peers[0]);
+  EXPECT_EQ(kRmaOtherPeer, task.peers[1]);
+  EXPECT_EQ(kRmaOpCount, task.nsignals[0]);
+  EXPECT_EQ(kRmaOtherOpCount, task.nsignals[1]);
+  EXPECT_EQ(kRmaSigIdx, task.signalIdxs[0]);
+  EXPECT_EQ(kRmaOtherSigIdx, task.signalIdxs[1]);
+  EXPECT_EQ(1, rma.AppendedTaskCount());
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorsAcrossContexts_EmitOneTaskPerContextQueue) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, kRmaCtx),
+                                             TaskPostTuning_WaitDesc(kRmaOtherPeer, kRmaOtherSigIdx, kRmaOtherCtx)};
+
+  ASSERT_EQ(ncclSuccess, rma.Run(rma.WaitSignal(&descs)));
+
+  ASSERT_EQ(1u, rma.Tasks(kRmaCtx).size());
+  ASSERT_EQ(1u, rma.Tasks(kRmaOtherCtx).size());
+  ASSERT_EQ(1, rma.Tasks(kRmaCtx)[0]->npeers);
+  ASSERT_EQ(1, rma.Tasks(kRmaOtherCtx)[0]->npeers);
+  EXPECT_EQ(kRmaPeer, rma.Tasks(kRmaCtx)[0]->peers[0]);
+  EXPECT_EQ(kRmaOtherPeer, rma.Tasks(kRmaOtherCtx)[0]->peers[0]);
+  EXPECT_EQ(2, rma.AppendedTaskCount());
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalContextsWithoutADescriptor_GetNoTaskAtAll) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, kRmaCtx)};
+
+  ASSERT_EQ(ncclSuccess, rma.Run(rma.WaitSignal(&descs)));
+
+  for (int ctx = 0; ctx < kNumRmaCtx; ctx++) {
+    EXPECT_EQ(ctx == kRmaCtx ? 1u : 0u, rma.Tasks(ctx).size()) << "ctx " << ctx;
+  }
+  EXPECT_EQ(1, rma.AppendedTaskCount());
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTasks_EmptyQueue_AppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+
+  ASSERT_EQ(ncclSuccess, postTuneRmaTasks(rma.comm(), rma.TuningQueue()));
+
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTasks_QueuedEntries_AppendEachInQueueOrderThenDrainAndReleaseEveryRaw) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma second = rma.Signal();
+  second.rmaOp.signal.ctx = kRmaOtherCtx;
+  struct ncclTaskTuningInfo* first = rma.EnqueueForDrain(rma.PutSignal());
+  struct ncclTaskTuningInfo* last = rma.EnqueueForDrain(second);
+
+  ASSERT_EQ(ncclSuccess, postTuneRmaTasks(rma.comm(), rma.TuningQueue()));
+
+  EXPECT_TRUE(ncclIntruQueueEmpty(rma.TuningQueue()));
+  EXPECT_EQ(nullptr, first->raw);
+  EXPECT_EQ(nullptr, last->raw);
+  ASSERT_EQ(1u, rma.Tasks(kRmaCtx).size());
+  ASSERT_EQ(1u, rma.Tasks(kRmaOtherCtx).size());
+  EXPECT_EQ(ncclFuncPutSignal, rma.Tasks(kRmaCtx)[0]->func);
+  EXPECT_EQ(ncclFuncSignal, rma.Tasks(kRmaOtherCtx)[0]->func);
+  EXPECT_EQ(2, rma.AppendedTaskCount());
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTasks_AppendFailsMidQueue_PropagatesAndLeavesTheRestQueued) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma malformed = rma.PutSignal();
+  malformed.func = ncclFuncAllReduce;
+  struct ncclTaskTuningInfo* first = rma.EnqueueForDrain(rma.PutSignal());
+  struct ncclTaskTuningInfo* failing = rma.EnqueueForDrain(malformed);
+  struct ncclTaskTuningInfo* untouched = rma.EnqueueForDrain(rma.Signal());
+
+  EXPECT_EQ(ncclInternalError, postTuneRmaTasks(rma.comm(), rma.TuningQueue()));
+
+  EXPECT_EQ(nullptr, first->raw);
+  EXPECT_NE(nullptr, failing->raw);
+  EXPECT_EQ(untouched, ncclIntruQueueHead(rma.TuningQueue()));
+  EXPECT_NE(nullptr, untouched->raw);
+  EXPECT_EQ(1, rma.AppendedTaskCount());
+}
+
 }  // namespace
