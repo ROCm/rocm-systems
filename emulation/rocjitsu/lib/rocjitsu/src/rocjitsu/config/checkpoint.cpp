@@ -240,8 +240,10 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
                 ": the wave is in a trap handler or stopped for a debugger, and that state "
                 "is not part of the checkpoint format");
 
-          auto sgprs_vec =
-              builder.CreateVector(cu->sgpr_data(w->sgpr_alloc().base), w->num_sgprs());
+          std::vector<uint32_t> sgprs(w->num_sgprs());
+          cu->sgpr_file().copy_to(w->sgpr_alloc().base, w->num_sgprs(),
+                                  std::as_writable_bytes(std::span(sgprs)));
+          auto sgprs_vec = builder.CreateVector(sgprs);
           auto vgprs_vec = serialize_vgpr_block(builder, *cu, w->vgpr_alloc().base, w->wf_size());
 
           // TTMPs are their own file, so they are not covered by sgprs_vec.
@@ -437,9 +439,12 @@ LoadedConfig restore_checkpoint(const std::string &path) {
           wf->set_wave_sched_mode_raw(wf_state->wave_sched_mode());
           const auto *sgprs = wf_state->sgprs();
           if (sgprs != nullptr) {
+            // Dispatch allocated a logically zero block. Skip zero source
+            // registers to preserve lazy backing for untouched waves.
             for (size_t r = 0; r < sgprs->size() && r < wf->num_sgprs(); ++r) {
-              cu->write_sgpr(wf->sgpr_alloc().base + static_cast<uint32_t>(r),
-                             sgprs->Get(static_cast<unsigned>(r)));
+              const uint32_t value = sgprs->Get(static_cast<unsigned>(r));
+              if (value != 0)
+                cu->write_sgpr(wf->sgpr_alloc().base + static_cast<uint32_t>(r), value);
             }
           }
 

@@ -991,7 +991,7 @@ def gen_vector_div_scale(
         L.extend(vop3_src_mod('s2', 2, has_abs))
     mode = 'f16_f64' if is_f64 else 'f32'
     L.append(
-        f'    const DivisionScaleResult<{fp_type}> scaled = div_scale(s0, s1, s2, wf.fp_round_mode_{mode}(), wf.fp_denorm_mode_{mode}());'
+        f'    const amdgpu::DivisionScaleResult<{fp_type}> scaled = amdgpu::div_scale(s0, s1, s2, wf.fp_round_mode_{mode}(), wf.fp_denorm_mode_{mode}());'
     )
     L.append(f'    const {fp_type} result = scaled.value;')
     L.append('    const bool set_vcc = scaled.post_scale;')
@@ -1171,7 +1171,6 @@ def gen_vector_bitop3(
     Index bit ordering:
       bit 2 = src0, bit 1 = src1, bit 0 = src2
     """
-    nbits = '16' if dtype == 'b16' else '32'
     L = []
     L.append('  uint8_t truth_table = static_cast<uint8_t>')
     L.append('      ((inst_.omod << 6) | (inst_.abs << 3) | inst_.neg);')
@@ -1193,13 +1192,8 @@ def gen_vector_bitop3(
         L.append(
             f'    uint32_t c = amdgpu::RegisterAccess(wf).read_lane({src[2]}, lane);'
         )
-    L.append(f'    uint32_t result = 0;')
-    L.append(f'    for (int i = 0; i < {nbits}; ++i) {{')
-    L.append(
-        '      uint32_t idx = (((a >> i) & 1) << 2) | (((b >> i) & 1) << 1) | ((c >> i) & 1);'
-    )
-    L.append('      result |= ((truth_table >> idx) & 1) << i;')
-    L.append('    }')
+    mask = ' & 0xffffu' if dtype == 'b16' else ''
+    L.append(f'    uint32_t result = amdgpu::bitop3_words(a, b, c, truth_table){mask};')
     if dtype == 'b16' and true16_opsel:
         L.append(
             f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, '

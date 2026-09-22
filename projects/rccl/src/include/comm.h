@@ -254,6 +254,7 @@ struct ncclTaskColl {
   struct ncclDevrWindow* sendWin;
   struct ncclDevrWindow* recvWin;
   ncclSymRegType_t winRegType;
+  rcclSymkExtract symkExtract;
   void*
     ddaUserRecvBuff; // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
   size_t ddaCopyBackBytes; // bytes to copy scratch -> user recvbuff
@@ -817,6 +818,10 @@ struct ncclComm {
     [RCCL_TUNABLE_COLLS][RCCL_CHANNELS_TUNABLE_ENTRIES]
     [3]; // for each collective, set for 5 channel-counts: 32,40,48,56,64, the two values for min/max size-threshold
   struct ncclTuningContext_t tuningContext;
+
+  // Per-arch DDA/CE dispatch thresholds -- populated at comm init from rcclGetArchThresholds().
+  // NULL on architectures without a dedicated threshold table (falls back to env-var params).
+  const struct rcclArchThresholds* archThresholds;
 
   /* This attribute can indicate the states of communicators and return code of
    * asynchronous NCCL operations. */
