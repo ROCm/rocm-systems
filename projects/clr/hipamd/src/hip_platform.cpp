@@ -8,6 +8,7 @@
 #include <hip/texture_types.h>
 #include "hip_platform.hpp"
 #include "hip_internal.hpp"
+#include "hip_launch_validation.hpp"
 #include "platform/command.hpp"
 #include "platform/program.hpp"
 #include "platform/runtime.hpp"
@@ -433,9 +434,12 @@ hipError_t hipLaunchByPtr(const void* hostFunction) {
                                            {device->info().maxWorkGroupSize_,
                                             device->info().localMemSizePerCU_},
                                            0, 0, 0, 1, 1, 1);
-  if (!launch_params.IsValidConfig() ||
-      launch_params.local_.product() > device->info().maxWorkGroupSize_) {
-    HIP_RETURN(hipErrorInvalidValue);
+  static constexpr LaunchErrorRule kRules[] = {
+      {kConfigBits | amd::kBlockExceedsMaxWG, hipErrorInvalidValue},
+  };
+  hipError_t status = MapLaunchViolations(launch_params.violations_, kRules);
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
   }
 
   HIP_RETURN(ihipModuleLaunchKernel(
