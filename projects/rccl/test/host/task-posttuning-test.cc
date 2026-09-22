@@ -2846,4 +2846,519 @@ TEST_F(TaskPostTuningMicrotest, RmaTasks_AppendFailsMidQueue_PropagatesAndLeaves
   EXPECT_EQ(1, rma.AppendedTaskCount());
 }
 
+constexpr int kLegacyRoot = 5;
+constexpr int kLegacyWarps = 11;
+constexpr uint64_t kLegacyScalarArg = 0x3C3C3C3C3C3C3C3Cull;
+constexpr uintptr_t kLegacySendOffset = 0x1100;
+constexpr uintptr_t kLegacyRecvOffset = 0x2200;
+constexpr uintptr_t kLegacySendBase = 0x9A000;
+constexpr uintptr_t kLegacyRecvBase = 0xB4000;
+constexpr uintptr_t kLegacySendRmtAddr = 0xC5000;
+constexpr uintptr_t kLegacyRecvRmtAddr = 0xD6000;
+constexpr uintptr_t kLegacyRegSendBase = 0xE7000;
+constexpr uintptr_t kLegacyRegRecvBase = 0xF8000;
+constexpr int kKernelChannelActivation = ncclProfileKernelCh;
+constexpr int kOtherEventActivation = ~ncclProfileKernelCh;
+constexpr bool kRegistrationNeedsConnect = true;
+constexpr bool kRegistrationNeedsNoConnect = false;
+constexpr unsigned kFlagSet = 1u;
+constexpr unsigned kFlagClear = 0u;
+
+struct TaskPostTuning_CollRegistrationLog {
+  struct ncclComm* comm = nullptr;
+  struct ncclTaskColl* task = nullptr;
+  void** regBufSend = nullptr;
+  void** regBufRecv = nullptr;
+  ncclCommCallbackQueue* cleanupQueue = nullptr;
+  bool needConnectOnEntry = false;
+  int calls = 0;
+};
+
+ncclRegisterCollBuffersFn TaskPostTuning_RecordCollRegistration(TaskPostTuning_CollRegistrationLog* log,
+                                                                bool needConnectOut,
+                                                                ncclResult_t result = ncclSuccess) {
+  return [log, needConnectOut, result](struct ncclComm* comm, struct ncclTaskColl* task, void** regBufSend,
+                                       void** regBufRecv, ncclCommCallbackQueue* cleanupQueue, bool* needConnect) {
+    log->comm = comm;
+    log->task = task;
+    log->regBufSend = regBufSend;
+    log->regBufRecv = regBufRecv;
+    log->cleanupQueue = cleanupQueue;
+    log->needConnectOnEntry = *needConnect;
+    log->calls += 1;
+    *needConnect = needConnectOut;
+    return result;
+  };
+}
+
+class TaskPostTuning_LegacyRegister {
+ public:
+  TaskPostTuning_LegacyRegister() {
+    std::memset(&task_, kPoison, sizeof(task_));
+    std::memset(regBufSend_, 0, sizeof(regBufSend_));
+    std::memset(regBufRecv_, 0, sizeof(regBufRecv_));
+    ncclIntruQueueConstruct(&scene_.comm()->planner.collCleanupQueue);
+  }
+
+  struct ncclComm* comm() { return scene_.comm(); }
+  struct ncclTaskColl* task() { return &task_; }
+  void** regBufSend() { return regBufSend_; }
+  void** regBufRecv() { return regBufRecv_; }
+  bool regNeedConnect() const { return regNeedConnect_; }
+
+  ncclResult_t RunColl() {
+    return postTuneLegacyRegisterCollBuffers(comm(), &task_, regBufSend_, regBufRecv_, &regNeedConnect_);
+  }
+
+  ncclResult_t RunNvls() {
+    return postTuneLegacyRegisterNvlsCollBuffers(comm(), &task_, regBufSend_, regBufRecv_, &regNeedConnect_);
+  }
+
+ private:
+  TaskPrepScene scene_;
+  struct ncclTaskColl task_;
+  void* regBufSend_[NCCL_MAX_LOCAL_RANKS];
+  void* regBufRecv_[NCCL_MAX_LOCAL_RANKS];
+  bool regNeedConnect_ = false;
+};
+
+TEST_F(TaskPostTuningMicrotest, LegacyRegisterCollBuffers_AnyTask_AsksForConnectThenDelegatesToTheCollRegistrar) {
+  TaskPostTuning_LegacyRegister reg;
+  TaskPostTuning_CollRegistrationLog coll;
+  TaskPostTuning_CollRegistrationLog nvls;
+  ScopedHook collHook(g_ncclRegisterCollBuffers,
+                      TaskPostTuning_RecordCollRegistration(&coll, kRegistrationNeedsNoConnect));
+  ScopedHook nvlsHook(g_ncclRegisterCollNvlsBuffers,
+                      TaskPostTuning_RecordCollRegistration(&nvls, kRegistrationNeedsConnect));
+
+  ASSERT_EQ(ncclSuccess, reg.RunColl());
+
+  EXPECT_EQ(1, coll.calls);
+  EXPECT_EQ(0, nvls.calls);
+  EXPECT_TRUE(coll.needConnectOnEntry);
+  EXPECT_EQ(reg.comm(), coll.comm);
+  EXPECT_EQ(reg.task(), coll.task);
+  EXPECT_EQ(reg.regBufSend(), coll.regBufSend);
+  EXPECT_EQ(reg.regBufRecv(), coll.regBufRecv);
+  EXPECT_EQ(&reg.comm()->planner.collCleanupQueue, coll.cleanupQueue);
+  EXPECT_FALSE(reg.regNeedConnect());
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyRegisterCollBuffers_RegistrarFails_PropagatesTheFailure) {
+  TaskPostTuning_LegacyRegister reg;
+  TaskPostTuning_CollRegistrationLog coll;
+  ScopedHook collHook(
+    g_ncclRegisterCollBuffers,
+    TaskPostTuning_RecordCollRegistration(&coll, kRegistrationNeedsConnect, ncclInvalidUsage));
+
+  EXPECT_EQ(ncclInvalidUsage, reg.RunColl());
+
+  EXPECT_EQ(1, coll.calls);
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyRegisterNvlsCollBuffers_AnyTask_AsksForConnectThenDelegatesToTheNvlsRegistrar) {
+  TaskPostTuning_LegacyRegister reg;
+  TaskPostTuning_CollRegistrationLog coll;
+  TaskPostTuning_CollRegistrationLog nvls;
+  ScopedHook collHook(g_ncclRegisterCollBuffers,
+                      TaskPostTuning_RecordCollRegistration(&coll, kRegistrationNeedsConnect));
+  ScopedHook nvlsHook(g_ncclRegisterCollNvlsBuffers,
+                      TaskPostTuning_RecordCollRegistration(&nvls, kRegistrationNeedsNoConnect));
+
+  ASSERT_EQ(ncclSuccess, reg.RunNvls());
+
+  EXPECT_EQ(1, nvls.calls);
+  EXPECT_EQ(0, coll.calls);
+  EXPECT_TRUE(nvls.needConnectOnEntry);
+  EXPECT_EQ(reg.comm(), nvls.comm);
+  EXPECT_EQ(reg.task(), nvls.task);
+  EXPECT_EQ(reg.regBufSend(), nvls.regBufSend);
+  EXPECT_EQ(reg.regBufRecv(), nvls.regBufRecv);
+  EXPECT_EQ(&reg.comm()->planner.collCleanupQueue, nvls.cleanupQueue);
+  EXPECT_FALSE(reg.regNeedConnect());
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyRegisterNvlsCollBuffers_RegistrarFails_PropagatesTheFailure) {
+  TaskPostTuning_LegacyRegister reg;
+  TaskPostTuning_CollRegistrationLog nvls;
+  ScopedHook nvlsHook(
+    g_ncclRegisterCollNvlsBuffers,
+    TaskPostTuning_RecordCollRegistration(&nvls, kRegistrationNeedsConnect, ncclInvalidUsage));
+
+  EXPECT_EQ(ncclInvalidUsage, reg.RunNvls());
+
+  EXPECT_EQ(1, nvls.calls);
+}
+
+const struct ncclDevWorkColl* TaskPostTuning_WorkColl(const struct ncclWorkList* node) {
+  return reinterpret_cast<const struct ncclDevWorkColl*>(node + 1);
+}
+
+const struct ncclDevWorkCollReg* TaskPostTuning_WorkCollReg(const struct ncclWorkList* node) {
+  return reinterpret_cast<const struct ncclDevWorkCollReg*>(node + 1);
+}
+
+// The task carries a distinct pattern in every field the work node copies, so a crossed store dies.
+class TaskPostTuning_LegacyWork {
+ public:
+  TaskPostTuning_LegacyWork() {
+    ncclIntruQueueConstruct(&workQueue_);
+    std::memset(&task_, 0, sizeof(task_));
+    std::memset(regBufSend_, 0, sizeof(regBufSend_));
+    std::memset(regBufRecv_, 0, sizeof(regBufRecv_));
+    task_.func = ncclFuncAllReduce;
+    task_.sendbuff = TaskPostTuning_Addr(kLegacySendBase);
+    task_.recvbuff = TaskPostTuning_Addr(kLegacyRecvBase);
+    task_.sendbuffOffset = kLegacySendOffset;
+    task_.recvbuffOffset = kLegacyRecvOffset;
+    task_.sendbuffRmtAddrs = &sendRmtAddr_;
+    task_.recvbuffRmtAddrs = &recvRmtAddr_;
+    task_.root = kLegacyRoot;
+    task_.nWarps = kLegacyWarps;
+    task_.opDev.scalarArg = kLegacyScalarArg;
+    task_.opDev.scalarArgIsPtr = true;
+    task_.algorithm = NCCL_ALGO_RING;
+    task_.eActivationMask = kKernelChannelActivation;
+    regBufSend_[0] = TaskPostTuning_Addr(kLegacyRegSendBase);
+    regBufRecv_[0] = TaskPostTuning_Addr(kLegacyRegRecvBase);
+    scene_.comm()->isOneRPN = true;
+  }
+
+  struct ncclComm* comm() { return scene_.comm(); }
+  struct ncclTaskColl* task() { return &task_; }
+  void** regBufSend() { return regBufSend_; }
+  void** regBufRecv() { return regBufRecv_; }
+
+  ncclResult_t Run() {
+    return postTuneLegacyEnqueueCollWork(comm(), &comm()->planner, &task_, regBufSend_, regBufRecv_, &workQueue_);
+  }
+
+  std::vector<struct ncclWorkList*> Nodes() {
+    std::vector<struct ncclWorkList*> nodes;
+    for (struct ncclWorkList* node = ncclIntruQueueHead(&workQueue_); node != nullptr; node = node->next) {
+      nodes.push_back(node);
+    }
+    return nodes;
+  }
+
+  const struct ncclDevWorkColl* OnlyColl() {
+    const std::vector<struct ncclWorkList*> nodes = Nodes();
+    EXPECT_EQ(1u, nodes.size());
+    EXPECT_EQ(ncclDevWorkTypeColl, nodes[0]->workType);
+    return TaskPostTuning_WorkColl(nodes[0]);
+  }
+
+ private:
+  TaskPrepScene scene_;
+  struct ncclTaskColl task_;
+  void* regBufSend_[NCCL_MAX_LOCAL_RANKS];
+  void* regBufRecv_[NCCL_MAX_LOCAL_RANKS];
+  uintptr_t sendRmtAddr_ = kLegacySendRmtAddr;
+  uintptr_t recvRmtAddr_ = kLegacyRecvRmtAddr;
+  struct ncclIntruQueue<struct ncclWorkList, &ncclWorkList::next> workQueue_;
+};
+
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_UnregisteredTask_MarshalsEveryFieldIntoAPlainCollWorkNode) {
+  TaskPostTuning_LegacyWork work;
+  ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
+
+  ASSERT_EQ(ncclSuccess, work.Run());
+
+  const std::vector<struct ncclWorkList*> nodes = work.Nodes();
+  ASSERT_EQ(1u, nodes.size());
+  EXPECT_EQ(ncclDevWorkTypeColl, nodes[0]->workType);
+  EXPECT_EQ(static_cast<int>(sizeof(struct ncclDevWorkColl)), nodes[0]->size);
+  const struct ncclDevWorkColl* devWork = TaskPostTuning_WorkColl(nodes[0]);
+  EXPECT_EQ(TaskPostTuning_Addr(kLegacySendBase), devWork->sendbuff);
+  EXPECT_EQ(TaskPostTuning_Addr(kLegacyRecvBase), devWork->recvbuff);
+  EXPECT_EQ(kLegacySendOffset, devWork->sendbuffOffset);
+  EXPECT_EQ(kLegacyRecvOffset, devWork->recvbuffOffset);
+  ASSERT_NE(nullptr, devWork->sendbuffRmtAddrs);
+  ASSERT_NE(nullptr, devWork->recvbuffRmtAddrs);
+  EXPECT_EQ(kLegacySendRmtAddr, *devWork->sendbuffRmtAddrs);
+  EXPECT_EQ(kLegacyRecvRmtAddr, *devWork->recvbuffRmtAddrs);
+  EXPECT_EQ(static_cast<uint32_t>(kLegacyRoot), devWork->root);
+  EXPECT_EQ(static_cast<uint32_t>(kLegacyWarps), devWork->nWarps);
+  EXPECT_EQ(kLegacyScalarArg, devWork->redOpArg);
+  EXPECT_EQ(kFlagSet, devWork->redOpArgIsPtr);
+  EXPECT_EQ(kFlagClear, devWork->regUsed);
+  EXPECT_EQ(kFlagClear, devWork->netRegUsed);
+  EXPECT_EQ(kFlagClear, devWork->profilerEnabled);
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_SingleNodeComm_MarksTheWorkSingleNode) {
+  TaskPostTuning_LegacyWork work;
+  ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
+  work.comm()->nNodes = kSingleNode;
+
+  ASSERT_EQ(ncclSuccess, work.Run());
+
+  EXPECT_EQ(kFlagSet, work.OnlyColl()->oneNode);
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_MultiNodeComm_LeavesTheWorkMarkedMultiNode) {
+  TaskPostTuning_LegacyWork work;
+  ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
+  work.comm()->nNodes = kMultiNode;
+
+  ASSERT_EQ(ncclSuccess, work.Run());
+
+  EXPECT_EQ(kFlagClear, work.OnlyColl()->oneNode);
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_NonNvlsAlgorithm_TakesTheCommsOneRanksPerNodeFlag) {
+  for (int algo : {NCCL_ALGO_RING, NCCL_ALGO_TREE, NCCL_ALGO_PAT, NCCL_ALGO_COLLNET_DIRECT}) {
+    TaskPostTuning_LegacyWork work;
+    ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
+    work.task()->algorithm = algo;
+
+    ASSERT_EQ(ncclSuccess, work.Run()) << "algo " << algo;
+
+    EXPECT_EQ(kFlagSet, work.OnlyColl()->isOneRPN) << "algo " << algo;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_NvlsAlgorithms_LeaveTheOneRanksPerNodeFlagUnset) {
+  for (int algo : {NCCL_ALGO_NVLS, NCCL_ALGO_NVLS_TREE}) {
+    TaskPostTuning_LegacyWork work;
+    ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
+    work.task()->algorithm = algo;
+
+    ASSERT_EQ(ncclSuccess, work.Run()) << "algo " << algo;
+
+    EXPECT_TRUE(work.comm()->isOneRPN) << "algo " << algo;
+    EXPECT_EQ(kFlagClear, work.OnlyColl()->isOneRPN) << "algo " << algo;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_NetRegisteredBuffer_MarksOnlyTheNetRegistrationFlag) {
+  TaskPostTuning_LegacyWork work;
+  ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
+  work.task()->regBufType = NCCL_NET_REG_BUFFER;
+
+  ASSERT_EQ(ncclSuccess, work.Run());
+
+  EXPECT_EQ(kFlagSet, work.OnlyColl()->netRegUsed);
+  EXPECT_EQ(kFlagClear, work.OnlyColl()->regUsed);
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_IpcRegisteredBuffer_MarksOnlyTheLocalRegistrationFlag) {
+  TaskPostTuning_LegacyWork work;
+  ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
+  work.task()->regBufType = NCCL_IPC_REG_BUFFER;
+
+  ASSERT_EQ(ncclSuccess, work.Run());
+
+  EXPECT_EQ(kFlagSet, work.OnlyColl()->regUsed);
+  EXPECT_EQ(kFlagClear, work.OnlyColl()->netRegUsed);
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_ProfilerLoadedAndKernelChannelsRequested_EnablesProfiling) {
+  TaskPostTuning_LegacyWork work;
+  ScopedHook profiler(g_profilerPluginLoaded, [] { return true; });
+
+  ASSERT_EQ(ncclSuccess, work.Run());
+
+  EXPECT_EQ(1, profiler.calls);
+  EXPECT_EQ(kFlagSet, work.OnlyColl()->profilerEnabled);
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_ProfilerAbsentOrKernelChannelsUnrequested_LeavesProfilingOff) {
+  const struct {
+    bool loaded;
+    int activationMask;
+  } kCases[] = {{false, kKernelChannelActivation}, {true, kOtherEventActivation}, {false, kOtherEventActivation}};
+
+  for (const auto& testCase : kCases) {
+    TaskPostTuning_LegacyWork work;
+    ScopedHook profiler(g_profilerPluginLoaded, [&testCase] { return testCase.loaded; });
+    work.task()->eActivationMask = testCase.activationMask;
+
+    ASSERT_EQ(ncclSuccess, work.Run()) << "loaded " << testCase.loaded;
+
+    EXPECT_EQ(kFlagClear, work.OnlyColl()->profilerEnabled) << "loaded " << testCase.loaded;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_NvlsRegisteredBuffer_EmitsARegWorkNodeCarryingTheFirstBuffers) {
+  TaskPostTuning_LegacyWork work;
+  ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
+  work.task()->regBufType = NCCL_NVLS_REG_BUFFER;
+
+  ASSERT_EQ(ncclSuccess, work.Run());
+
+  const std::vector<struct ncclWorkList*> nodes = work.Nodes();
+  ASSERT_EQ(1u, nodes.size());
+  EXPECT_EQ(ncclDevWorkTypeCollReg, nodes[0]->workType);
+  EXPECT_EQ(static_cast<int>(sizeof(struct ncclDevWorkCollReg)), nodes[0]->size);
+  const struct ncclDevWorkCollReg* workReg = TaskPostTuning_WorkCollReg(nodes[0]);
+  EXPECT_EQ(TaskPostTuning_Addr(kLegacyRegSendBase), workReg->dnInputs[0]);
+  EXPECT_EQ(TaskPostTuning_Addr(kLegacyRegRecvBase), workReg->dnOutputs[0]);
+  EXPECT_EQ(TaskPostTuning_Addr(kLegacySendBase), workReg->coll.sendbuff);
+  EXPECT_EQ(TaskPostTuning_Addr(kLegacyRecvBase), workReg->coll.recvbuff);
+  EXPECT_EQ(kFlagSet, workReg->coll.regUsed);
+  EXPECT_EQ(nullptr, workReg->upOutputs[0]);
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_SeveralTasks_AppendEachWorkNodeInCallOrder) {
+  TaskPostTuning_LegacyWork work;
+  ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
+
+  ASSERT_EQ(ncclSuccess, work.Run());
+  work.task()->regBufType = NCCL_NVLS_REG_BUFFER;
+  ASSERT_EQ(ncclSuccess, work.Run());
+  work.task()->regBufType = NCCL_REGULAR_BUFFER;
+  work.task()->root = kLegacyRoot + 1;
+  ASSERT_EQ(ncclSuccess, work.Run());
+
+  const std::vector<struct ncclWorkList*> nodes = work.Nodes();
+  ASSERT_EQ(3u, nodes.size());
+  EXPECT_EQ(ncclDevWorkTypeColl, nodes[0]->workType);
+  EXPECT_EQ(ncclDevWorkTypeCollReg, nodes[1]->workType);
+  EXPECT_EQ(ncclDevWorkTypeColl, nodes[2]->workType);
+  EXPECT_EQ(static_cast<uint32_t>(kLegacyRoot), TaskPostTuning_WorkColl(nodes[0])->root);
+  EXPECT_EQ(static_cast<uint32_t>(kLegacyRoot + 1), TaskPostTuning_WorkColl(nodes[2])->root);
+}
+
+::testing::AssertionResult TaskPostTuning_FlagsSetExactly(const bool* flags, std::initializer_list<int> algos) {
+  for (int algo = 0; algo < NCCL_NUM_ALGORITHMS; algo++) {
+    const bool expected = std::find(algos.begin(), algos.end(), algo) != algos.end();
+    if (flags[algo] != expected) {
+      return ::testing::AssertionFailure() << "flags[" << algo << "] = " << flags[algo];
+    }
+  }
+  return ::testing::AssertionSuccess();
+}
+
+class TaskPostTuning_AlgoConnect {
+ public:
+  TaskPostTuning_AlgoConnect() {
+    std::memset(algoNeedConnect_, 0, sizeof(algoNeedConnect_));
+    scene_.comm()->runtimeConn = true;
+  }
+
+  struct ncclComm* comm() { return scene_.comm(); }
+  const bool* requested() const { return algoNeedConnect_; }
+  const bool* initialized() { return scene_.comm()->initAlgoChannels; }
+  bool needConnect() const { return needConnect_; }
+  void SetNeedConnect(bool value) { needConnect_ = value; }
+
+  ncclResult_t Run(int algorithm, bool regNeedConnect) {
+    return postTuneLegacyRecordAlgoNeedConnect(comm(), algorithm, regNeedConnect, algoNeedConnect_, &needConnect_);
+  }
+
+ private:
+  TaskPrepScene scene_;
+  bool algoNeedConnect_[NCCL_NUM_ALGORITHMS];
+  bool needConnect_ = false;
+};
+
+TEST_F(TaskPostTuningMicrotest, LegacyRecordAlgoNeedConnect_RuntimeConnectionDisabled_RecordsNothing) {
+  TaskPostTuning_AlgoConnect connect;
+  connect.comm()->runtimeConn = false;
+
+  ASSERT_EQ(ncclSuccess, connect.Run(NCCL_ALGO_RING, kRegistrationNeedsConnect));
+
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.requested(), {}));
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.initialized(), {}));
+  EXPECT_FALSE(connect.needConnect());
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyRecordAlgoNeedConnect_AlgorithmAlreadyInitialized_RecordsNothing) {
+  TaskPostTuning_AlgoConnect connect;
+  connect.comm()->initAlgoChannels[NCCL_ALGO_RING] = true;
+
+  ASSERT_EQ(ncclSuccess, connect.Run(NCCL_ALGO_RING, kRegistrationNeedsConnect));
+
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.requested(), {}));
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.initialized(), {NCCL_ALGO_RING}));
+  EXPECT_FALSE(connect.needConnect());
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyRecordAlgoNeedConnect_FreshNonNvlsAlgorithm_MarksItInitializedAndAsksToConnect) {
+  for (int algo : {NCCL_ALGO_TREE, NCCL_ALGO_RING, NCCL_ALGO_COLLNET_DIRECT, NCCL_ALGO_COLLNET_CHAIN,
+                   NCCL_ALGO_NVLS_TREE}) {
+    TaskPostTuning_AlgoConnect connect;
+
+    ASSERT_EQ(ncclSuccess, connect.Run(algo, kRegistrationNeedsNoConnect)) << "algo " << algo;
+
+    EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.requested(), {algo})) << "algo " << algo;
+    EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.initialized(), {algo})) << "algo " << algo;
+    EXPECT_TRUE(connect.needConnect()) << "algo " << algo;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyRecordAlgoNeedConnect_NvlsWithoutARegistrationNeedingConnect_RecordsNothing) {
+  TaskPostTuning_AlgoConnect connect;
+
+  ASSERT_EQ(ncclSuccess, connect.Run(NCCL_ALGO_NVLS, kRegistrationNeedsNoConnect));
+
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.requested(), {}));
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.initialized(), {}));
+  EXPECT_FALSE(connect.needConnect());
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyRecordAlgoNeedConnect_NvlsWithARegistrationNeedingConnect_RecordsIt) {
+  TaskPostTuning_AlgoConnect connect;
+
+  ASSERT_EQ(ncclSuccess, connect.Run(NCCL_ALGO_NVLS, kRegistrationNeedsConnect));
+
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.requested(), {NCCL_ALGO_NVLS}));
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.initialized(), {NCCL_ALGO_NVLS}));
+  EXPECT_TRUE(connect.needConnect());
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyRecordAlgoNeedConnect_NvlsTreeNeedingConnect_AlsoPromotesPlainNvls) {
+  TaskPostTuning_AlgoConnect connect;
+
+  ASSERT_EQ(ncclSuccess, connect.Run(NCCL_ALGO_NVLS_TREE, kRegistrationNeedsConnect));
+
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.requested(), {NCCL_ALGO_NVLS, NCCL_ALGO_NVLS_TREE}));
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.initialized(), {NCCL_ALGO_NVLS, NCCL_ALGO_NVLS_TREE}));
+  EXPECT_TRUE(connect.needConnect());
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyRecordAlgoNeedConnect_NvlsTreeWhenPlainNvlsIsInitialized_DoesNotRePromoteIt) {
+  TaskPostTuning_AlgoConnect connect;
+  connect.comm()->initAlgoChannels[NCCL_ALGO_NVLS] = true;
+
+  ASSERT_EQ(ncclSuccess, connect.Run(NCCL_ALGO_NVLS_TREE, kRegistrationNeedsConnect));
+
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.requested(), {NCCL_ALGO_NVLS_TREE}));
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.initialized(), {NCCL_ALGO_NVLS, NCCL_ALGO_NVLS_TREE}));
+  EXPECT_TRUE(connect.needConnect());
+}
+
+TEST_F(TaskPostTuningMicrotest, LegacyRecordAlgoNeedConnect_CallerAlreadyNeedsConnect_KeepsTheFlagWhenNothingIsRecorded) {
+  TaskPostTuning_AlgoConnect connect;
+  connect.SetNeedConnect(true);
+
+  ASSERT_EQ(ncclSuccess, connect.Run(NCCL_ALGO_NVLS, kRegistrationNeedsNoConnect));
+
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.requested(), {}));
+  EXPECT_TRUE(connect.needConnect());
+}
+
+// enqueue.cc:759-760 connects PAT on demand with runtimeConn off; the rearch guard at :688 dropped that disjunct.
+TEST_F(TaskPostTuningMicrotest, LegacyRecordAlgoNeedConnect_PatWithoutARuntimeConnection_CurrentlyRecordsNothing) {
+  TaskPostTuning_AlgoConnect connect;
+  connect.comm()->runtimeConn = false;
+
+  ASSERT_EQ(ncclSuccess, connect.Run(NCCL_ALGO_PAT, kRegistrationNeedsConnect));
+
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.requested(), {}));
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.initialized(), {}));
+  EXPECT_FALSE(connect.needConnect());
+}
+
+TEST_F(TaskPostTuningMicrotest, DISABLED_LegacyRecordAlgoNeedConnect_PatWithoutARuntimeConnection_AsksToConnect) {
+  TaskPostTuning_AlgoConnect connect;
+  connect.comm()->runtimeConn = false;
+
+  ASSERT_EQ(ncclSuccess, connect.Run(NCCL_ALGO_PAT, kRegistrationNeedsConnect));
+
+  EXPECT_TRUE(TaskPostTuning_FlagsSetExactly(connect.requested(), {NCCL_ALGO_PAT}));
+  EXPECT_TRUE(connect.needConnect());
+}
+
 }  // namespace
