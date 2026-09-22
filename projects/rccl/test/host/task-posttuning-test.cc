@@ -4872,4 +4872,284 @@ TEST_F(TaskPostTuningMicrotest, TaskPostTuning_RmaAndCopyEngineEntriesRejected_S
   EXPECT_FALSE(ncclIntruQueueEmpty(&pipeline.ctq()->ceTaskQueue));
 }
 
+// T2: task_pretuning.cc:36-37 omits NCCL_TUNING_MASK_CE, so ceTaskQueue is always empty even with the gate on.
+constexpr uintptr_t kCeSendBase = 0x510000;
+constexpr uintptr_t kCeRecvBase = 0x620000;
+constexpr int kCeRoot = 2;
+constexpr int kCeFirstIndex = 0;
+constexpr int kCeSecondIndex = 1;
+constexpr size_t kCeElementSize = sizeof(double);
+constexpr int kCeEngineUninitialized = 0;
+constexpr int kCeEngineInitialized = 1;
+
+class TaskPostTuning_CeScene {
+ public:
+  TaskPostTuning_CeScene() {
+    struct ncclComm* comm = scene_.comm();
+    ncclMemoryPoolConstruct(&comm->memPool_ncclTaskColl);
+    ncclIntruQueueConstruct(&comm->planner.collCeTaskQueue);
+    ncclIntruQueueConstruct(&queue_);
+    comm->ceColl.initialized = kCeEngineInitialized;
+  }
+
+  struct ncclComm* comm() { return scene_.comm(); }
+  TaskTuningInfoQueue* queue() { return &queue_; }
+
+  struct ncclRawTask* NewRaw(ncclFunc_t func, ncclDataType_t datatype, int index) {
+    struct ncclRawTask* raw = scene_.NewColl(func, datatype);
+    raw->coll.sendbuff = TaskPostTuning_Addr(kCeSendBase + index);
+    raw->coll.recvbuff = TaskPostTuning_Addr(kCeRecvBase + index);
+    raw->coll.root = kCeRoot + index;
+    return raw;
+  }
+
+  struct ncclTaskTuningInfo* Enqueue(ncclFunc_t func, ncclDataType_t datatype, int index) {
+    struct ncclTaskTuningInfo* tInfo = scene_.NewTuningInfo(NewRaw(func, datatype, index));
+    ncclIntruQueueEnqueue(&queue_, tInfo);
+    return tInfo;
+  }
+
+  ncclResult_t RunAppend(struct ncclRawTask* raw, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin) {
+    return postTuneCeCollTaskAppend(comm(), &raw->coll, sendWin, recvWin);
+  }
+
+  ncclResult_t RunTasks() { return postTuneCeTasks(comm(), &queue_); }
+
+  std::vector<struct ncclTaskColl*> CeTasks() {
+    std::vector<struct ncclTaskColl*> tasks;
+    for (struct ncclTaskColl* task = ncclIntruQueueHead(&comm()->planner.collCeTaskQueue); task != nullptr;
+         task = task->next) {
+      tasks.push_back(task);
+    }
+    return tasks;
+  }
+
+ private:
+  TaskPrepScene scene_;
+  TaskTuningInfoQueue queue_;
+};
+
+TEST_F(TaskPostTuningMicrotest,
+       UnreachableCe_CeCollTaskAppend_AllReduce_MaterializesACollTaskCarryingTheRawFieldsAndBothWindows) {
+  TaskPostTuning_CeScene ce;
+  struct ncclRawTask* raw = ce.NewRaw(ncclFuncAllReduce, ncclFloat64, kCeFirstIndex);
+  raw->coll.opHost = ncclProd;
+  raw->coll.opDev.op = ncclDevProd;
+  struct ncclDevrWindow sendWin{};
+  struct ncclDevrWindow recvWin{};
+
+  ASSERT_EQ(ncclSuccess, ce.RunAppend(raw, &sendWin, &recvWin));
+
+  const std::vector<struct ncclTaskColl*> tasks = ce.CeTasks();
+  ASSERT_EQ(1u, tasks.size());
+  EXPECT_EQ(ncclFuncAllReduce, tasks[0]->func);
+  EXPECT_EQ(TaskPostTuning_Addr(kCeSendBase + kCeFirstIndex), tasks[0]->sendbuff);
+  EXPECT_EQ(TaskPostTuning_Addr(kCeRecvBase + kCeFirstIndex), tasks[0]->recvbuff);
+  EXPECT_EQ(kCount, tasks[0]->count);
+  EXPECT_EQ(kCeRoot + kCeFirstIndex, tasks[0]->root);
+  EXPECT_EQ(ncclFloat64, tasks[0]->datatype);
+  EXPECT_EQ(kCount * kCeElementSize * kAllReduceTrafficPerByte, tasks[0]->trafficBytes);
+  EXPECT_EQ(ncclProd, tasks[0]->opHost);
+  EXPECT_EQ(ncclDevProd, tasks[0]->opDev.op);
+  EXPECT_EQ(kSingleStep, tasks[0]->chunkSteps);
+  EXPECT_EQ(kSingleStep, tasks[0]->sliceSteps);
+  EXPECT_EQ(&sendWin, tasks[0]->sendWin);
+  EXPECT_EQ(&recvWin, tasks[0]->recvWin);
+}
+
+TEST_F(TaskPostTuningMicrotest,
+       UnreachableCe_CeCollTaskAppend_AllGather_RescalesTheCountToBytesAndSwitchesToInt8) {
+  TaskPostTuning_CeScene ce;
+  struct ncclRawTask* raw = ce.NewRaw(ncclFuncAllGather, ncclFloat64, kCeFirstIndex);
+
+  ASSERT_EQ(ncclSuccess, ce.RunAppend(raw, nullptr, nullptr));
+
+  const std::vector<struct ncclTaskColl*> tasks = ce.CeTasks();
+  ASSERT_EQ(1u, tasks.size());
+  EXPECT_EQ(kCount * kCeElementSize, tasks[0]->count);
+  EXPECT_EQ(ncclInt8, tasks[0]->datatype);
+  EXPECT_EQ(kCount * kCeElementSize * kTrafficRanks, tasks[0]->trafficBytes);
+  EXPECT_EQ(kCount, raw->coll.count) << "the raw task must not be rewritten";
+}
+
+TEST_F(TaskPostTuningMicrotest,
+       UnreachableCe_CeCollTaskAppend_Broadcast_RescalesTheCountToBytesAndCountsEachByteOnce) {
+  TaskPostTuning_CeScene ce;
+  struct ncclRawTask* raw = ce.NewRaw(ncclFuncBroadcast, ncclFloat64, kCeFirstIndex);
+
+  ASSERT_EQ(ncclSuccess, ce.RunAppend(raw, nullptr, nullptr));
+
+  const std::vector<struct ncclTaskColl*> tasks = ce.CeTasks();
+  ASSERT_EQ(1u, tasks.size());
+  EXPECT_EQ(kCount * kCeElementSize, tasks[0]->count);
+  EXPECT_EQ(ncclInt8, tasks[0]->datatype);
+  EXPECT_EQ(kCount * kCeElementSize * kSingleTrafficPerByte, tasks[0]->trafficBytes);
+}
+
+TEST_F(TaskPostTuningMicrotest,
+       UnreachableCe_CeCollTaskAppend_ReduceScatter_KeepsTheElementCountAndScalesTrafficByRank) {
+  TaskPostTuning_CeScene ce;
+  struct ncclRawTask* raw = ce.NewRaw(ncclFuncReduceScatter, ncclFloat64, kCeFirstIndex);
+
+  ASSERT_EQ(ncclSuccess, ce.RunAppend(raw, nullptr, nullptr));
+
+  const std::vector<struct ncclTaskColl*> tasks = ce.CeTasks();
+  ASSERT_EQ(1u, tasks.size());
+  EXPECT_EQ(kCount, tasks[0]->count);
+  EXPECT_EQ(ncclFloat64, tasks[0]->datatype);
+  EXPECT_EQ(kCount * kCeElementSize * kTrafficRanks, tasks[0]->trafficBytes);
+}
+
+TEST_F(TaskPostTuningMicrotest, UnreachableCe_CeCollTaskAppend_ProfilerEventMaskSet_CarriesItOntoTheTask) {
+  TaskPostTuning_CeScene ce;
+  struct ncclRawTask* raw = ce.NewRaw(ncclFuncAllReduce, ncclFloat32, kCeFirstIndex);
+  ncclProfilerEventMask = kProfilerEventMask;
+
+  ASSERT_EQ(ncclSuccess, ce.RunAppend(raw, nullptr, nullptr));
+
+  const std::vector<struct ncclTaskColl*> tasks = ce.CeTasks();
+  ASSERT_EQ(1u, tasks.size());
+  EXPECT_EQ(kProfilerEventMask, tasks[0]->eActivationMask);
+  ncclProfilerEventMask = kUnsetEventMask;
+}
+
+TEST_F(TaskPostTuningMicrotest, UnreachableCe_CeCollTaskAppend_SeveralRawTasks_AppendEachOntoTheQueueInCallOrder) {
+  TaskPostTuning_CeScene ce;
+  struct ncclRawTask* first = ce.NewRaw(ncclFuncAllReduce, ncclFloat32, kCeFirstIndex);
+  struct ncclRawTask* second = ce.NewRaw(ncclFuncAllReduce, ncclFloat32, kCeSecondIndex);
+
+  ASSERT_EQ(ncclSuccess, ce.RunAppend(first, nullptr, nullptr));
+  ASSERT_EQ(ncclSuccess, ce.RunAppend(second, nullptr, nullptr));
+
+  const std::vector<struct ncclTaskColl*> tasks = ce.CeTasks();
+  ASSERT_EQ(2u, tasks.size());
+  EXPECT_EQ(kCeRoot + kCeFirstIndex, tasks[0]->root);
+  EXPECT_EQ(kCeRoot + kCeSecondIndex, tasks[1]->root);
+  EXPECT_NE(tasks[0], tasks[1]);
+}
+
+TEST_F(TaskPostTuningMicrotest, UnreachableCe_CeTasks_EmptyQueue_InitializesNothingAndMaterializesNothing) {
+  TaskPostTuning_CeScene ce;
+  ce.comm()->ceColl.initialized = kCeEngineUninitialized;
+  ScopedHook ceInit(g_ncclCeInit, [](struct ncclComm*) { return ncclSuccess; });
+
+  ASSERT_EQ(ncclSuccess, ce.RunTasks());
+
+  EXPECT_EQ(0, ceInit.calls);
+  EXPECT_TRUE(ce.CeTasks().empty());
+}
+
+TEST_F(TaskPostTuningMicrotest,
+       UnreachableCe_CeTasks_QueuedEntries_MaterializeEachInQueueOrderThenDrainTheQueueReleasingEveryRaw) {
+  TaskPostTuning_CeScene ce;
+  struct ncclTaskTuningInfo* first = ce.Enqueue(ncclFuncAllReduce, ncclFloat32, kCeFirstIndex);
+  struct ncclTaskTuningInfo* second = ce.Enqueue(ncclFuncAllReduce, ncclFloat32, kCeSecondIndex);
+
+  ASSERT_EQ(ncclSuccess, ce.RunTasks());
+
+  const std::vector<struct ncclTaskColl*> tasks = ce.CeTasks();
+  ASSERT_EQ(2u, tasks.size());
+  EXPECT_EQ(kCeRoot + kCeFirstIndex, tasks[0]->root);
+  EXPECT_EQ(kCeRoot + kCeSecondIndex, tasks[1]->root);
+  EXPECT_TRUE(ncclIntruQueueEmpty(ce.queue()));
+  EXPECT_EQ(nullptr, first->raw);
+  EXPECT_EQ(nullptr, second->raw);
+}
+
+TEST_F(TaskPostTuningMicrotest, UnreachableCe_CeTasks_QueuedEntry_ResolvesEachBuffersWindowAndHandsBothToTheTask) {
+  TaskPostTuning_CeScene ce;
+  ce.Enqueue(ncclFuncAllReduce, ncclFloat32, kCeFirstIndex);
+  struct ncclDevrWindow sendWin{};
+  struct ncclDevrWindow recvWin{};
+  ScopedHook findWindow(g_devrFindWindow, [&](struct ncclComm*, void const* ptr, struct ncclDevrWindow** out) {
+    *out = ptr == TaskPostTuning_Addr(kCeSendBase + kCeFirstIndex) ? &sendWin : &recvWin;
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(ncclSuccess, ce.RunTasks());
+
+  const std::vector<struct ncclTaskColl*> tasks = ce.CeTasks();
+  ASSERT_EQ(1u, tasks.size());
+  EXPECT_EQ(2, findWindow.calls);
+  EXPECT_EQ(&sendWin, tasks[0]->sendWin);
+  EXPECT_EQ(&recvWin, tasks[0]->recvWin);
+}
+
+TEST_F(TaskPostTuningMicrotest,
+       UnreachableCe_CeTasks_UninitializedCopyEngine_InitializesItBeforeMaterializingAnyTask) {
+  TaskPostTuning_CeScene ce;
+  ce.Enqueue(ncclFuncAllReduce, ncclFloat32, kCeFirstIndex);
+  ce.comm()->ceColl.initialized = kCeEngineUninitialized;
+  struct ncclComm* seen = nullptr;
+  bool queueWasEmptyAtInit = false;
+  ScopedHook ceInit(g_ncclCeInit, [&](struct ncclComm* comm) {
+    seen = comm;
+    queueWasEmptyAtInit = ncclIntruQueueEmpty(&comm->planner.collCeTaskQueue);
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(ncclSuccess, ce.RunTasks());
+
+  EXPECT_EQ(1, ceInit.calls);
+  EXPECT_EQ(ce.comm(), seen);
+  EXPECT_TRUE(queueWasEmptyAtInit);
+  EXPECT_EQ(1u, ce.CeTasks().size());
+}
+
+TEST_F(TaskPostTuningMicrotest,
+       UnreachableCe_CeTasks_CopyEngineInitializationFails_PropagatesWithoutMaterializingAnyTask) {
+  TaskPostTuning_CeScene ce;
+  ce.Enqueue(ncclFuncAllReduce, ncclFloat32, kCeFirstIndex);
+  ce.comm()->ceColl.initialized = kCeEngineUninitialized;
+  ScopedHook ceInit(g_ncclCeInit, [](struct ncclComm*) { return ncclSystemError; });
+
+  EXPECT_EQ(ncclSystemError, ce.RunTasks());
+
+  EXPECT_TRUE(ce.CeTasks().empty());
+  EXPECT_FALSE(ncclIntruQueueEmpty(ce.queue()));
+}
+
+TEST_F(TaskPostTuningMicrotest, UnreachableCe_CeTasks_WindowLookupFails_PropagatesForEitherBuffer) {
+  for (int failingCall : {1, 2}) {
+    TaskPostTuning_CeScene ce;
+    ce.Enqueue(ncclFuncAllReduce, ncclFloat32, kCeFirstIndex);
+    int seen = 0;
+    ScopedHook findWindow(g_devrFindWindow,
+                          [&seen, failingCall](struct ncclComm*, void const*, struct ncclDevrWindow** out) {
+                            if (++seen == failingCall) {
+                              return ncclInvalidUsage;
+                            }
+                            *out = nullptr;
+                            return ncclSuccess;
+                          });
+
+    EXPECT_EQ(ncclInvalidUsage, ce.RunTasks()) << "failingCall = " << failingCall;
+
+    EXPECT_EQ(failingCall, seen) << "must stop at the first failing lookup";
+    EXPECT_TRUE(ce.CeTasks().empty());
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest,
+       UnreachableCe_CeTasks_LaterEntryFailsItsWindowLookup_LeavesTheEarlierOneMaterialized) {
+  TaskPostTuning_CeScene ce;
+  struct ncclTaskTuningInfo* first = ce.Enqueue(ncclFuncAllReduce, ncclFloat32, kCeFirstIndex);
+  ce.Enqueue(ncclFuncAllReduce, ncclFloat32, kCeSecondIndex);
+  ScopedHook findWindow(g_devrFindWindow, [](struct ncclComm*, void const* ptr, struct ncclDevrWindow** out) {
+    if (ptr == TaskPostTuning_Addr(kCeSendBase + kCeSecondIndex)) {
+      return ncclInvalidUsage;
+    }
+    *out = nullptr;
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclInvalidUsage, ce.RunTasks());
+
+  const std::vector<struct ncclTaskColl*> tasks = ce.CeTasks();
+  ASSERT_EQ(1u, tasks.size());
+  EXPECT_EQ(kCeRoot + kCeFirstIndex, tasks[0]->root);
+  EXPECT_EQ(nullptr, first->raw);
+  EXPECT_TRUE(ncclIntruQueueEmpty(ce.queue())) << "the failing entry is dequeued before it is appended";
+}
+
 }  // namespace
