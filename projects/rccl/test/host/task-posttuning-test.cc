@@ -1087,4 +1087,483 @@ TEST_F(TaskPostTuningMicrotest, DISABLED_ApplyTuningToCollTask_TuningEntryLeftAt
   EXPECT_EQ(ncclInternalError, fill.RunApplyTuning());
 }
 
+constexpr bool kIsSend = true;
+constexpr bool kIsRecv = false;
+constexpr int kP2pRank = 1;
+constexpr int kP2pPeer = 2;
+constexpr int kP2pSendRound = 1;
+constexpr int kP2pRecvRound = 3;
+constexpr int kP2pChannels = 8;
+constexpr int kP2pChannelsPerPeer = 2;
+constexpr int kWideP2pChannels = 128;
+constexpr int kWideP2pChannelsPerPeer = 64;
+constexpr int kP2pConnIndex = 1;
+constexpr int kUnusedConnIndex = 0;
+constexpr int kNoChannelShift = 0;
+constexpr int kScheduleSpare = 4;
+constexpr int kNoScheduledRank = -1;
+constexpr int kConnected = 1;
+constexpr int kNotConnected = 0;
+constexpr size_t kP2pBytes = kCount * sizeof(float);
+constexpr int kRegistrationGranted = 1;
+constexpr int kRegistrationDeclined = 0;
+constexpr int kPxnEnabled = 0;
+constexpr int kPxnDisabled = 1;
+constexpr int kBatchDisabled = 0;
+constexpr int kTwoLocalRanks = 2;
+constexpr int kOneLocalRank = 1;
+constexpr int kNoP2pAccess = 0;
+constexpr int kProxyInThisProcess = 1;
+constexpr int kProxyInAnotherProcess = 0;
+constexpr int kP2pSetupConnIndex = 1;
+constexpr uint8_t kPoisonedBase = 0xEE;
+
+bool AllBytesAre(const unsigned char* p, std::size_t n, unsigned char v) {
+  for (std::size_t i = 0; i < n; i++) {
+    if (p[i] != v) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::vector<int> TaskPostTuning_SingleNodeChannels(int base, int nParts, int nChannels) {
+  std::vector<int> channelIds;
+  for (int part = 0; part < nParts; part++) {
+    channelIds.push_back((base * nParts + part) & (nChannels - 1));
+  }
+  return channelIds;
+}
+
+::testing::AssertionResult TaskPostTuning_MaskHasExactly(const struct channelMasks& mask,
+                                                         const std::vector<int>& channelIds) {
+  struct channelMasks expected = {};
+  for (int channelId : channelIds) {
+    expected.masks[channelId / CHANNELS_PER_MASK_WORD] |= 1ULL << (channelId % CHANNELS_PER_MASK_WORD);
+  }
+  for (int word = 0; word < MAXCHANNELS / CHANNELS_PER_MASK_WORD; word++) {
+    if (mask.masks[word] != expected.masks[word]) {
+      return ::testing::AssertionFailure()
+             << "masks[" << word << "] = " << mask.masks[word] << ", expected " << expected.masks[word];
+    }
+  }
+  return ::testing::AssertionSuccess();
+}
+
+constexpr ncclFunc_t kLoweredCollectiveApis[] = {ncclFuncAlltoAll, ncclFuncScatter, ncclFuncGather};
+
+bool TaskPostTuning_IsLoweredCollectiveApi(int collAPI) {
+  for (ncclFunc_t lowered : kLoweredCollectiveApis) {
+    if (collAPI == lowered) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// The schedule is the full permutation init.cc:1498-1503 builds; the spare rounds hold no rank at all.
+class TaskPostTuning_P2pScene {
+ public:
+  explicit TaskPostTuning_P2pScene(int nP2pChannels = kP2pChannels, int nChannelsPerPeer = kP2pChannelsPerPeer)
+    : scene_(kRanks, kP2pRank),
+      schedule_(kRanks + kScheduleSpare),
+      planPeers_(kRanks),
+      connectSend_(kRanks),
+      connectRecv_(kRanks),
+      channelPeers_(static_cast<size_t>(nP2pChannels) * kRanks),
+      peerSlots_(static_cast<size_t>(nP2pChannels) * kRanks) {
+    struct ncclComm* comm = scene_.comm();
+    for (int round = 0; round < kRanks + kScheduleSpare; round++) {
+      schedule_[round].sendRank = round < kRanks ? (kP2pRank + round) % kRanks : kNoScheduledRank;
+      schedule_[round].recvRank = round < kRanks ? (kP2pRank - round + kRanks) % kRanks : kNoScheduledRank;
+    }
+    comm->p2pSchedule = schedule_.data();
+    comm->planner.peers = planPeers_.data();
+    comm->connectSend = connectSend_.data();
+    comm->connectRecv = connectRecv_.data();
+    comm->p2pnChannels = nP2pChannels;
+    comm->p2pnChannelsPerPeer = nChannelsPerPeer;
+    comm->p2pChannelShiftSize = kNoChannelShift;
+    for (int channelId = 0; channelId < nP2pChannels; channelId++) {
+      for (int peer = 0; peer < kRanks; peer++) {
+        peerSlots_[Slot(channelId, peer)] = &channelPeers_[Slot(channelId, peer)];
+      }
+      comm->channels[channelId].peers = &peerSlots_[Slot(channelId, 0)];
+    }
+    ncclMemoryPoolConstruct(&comm->memPool_ncclTaskP2p);
+  }
+
+  struct ncclComm* comm() { return scene_.comm(); }
+  TaskPrepScene* scene() { return &scene_; }
+  ncclComm::P2pSchedulePair& ScheduleAt(int round) { return schedule_[round]; }
+  struct ncclChannelPeer& ChannelPeer(int channelId, int peer) { return channelPeers_[Slot(channelId, peer)]; }
+  struct ncclConnector* Send(int channelId, int peer) { return &ChannelPeer(channelId, peer).send[kP2pConnIndex]; }
+  struct ncclConnector* Recv(int channelId, int peer) { return &ChannelPeer(channelId, peer).recv[kP2pConnIndex]; }
+
+  struct ncclConnector* Conn(bool isSendNotRecv, int channelId, int peer) {
+    return isSendNotRecv ? Send(channelId, peer) : Recv(channelId, peer);
+  }
+
+  const struct channelMasks& connectSend(int peer) const { return connectSend_[peer]; }
+  const struct channelMasks& connectRecv(int peer) const { return connectRecv_[peer]; }
+
+  const struct channelMasks& connect(bool isSendNotRecv, int peer) const {
+    return isSendNotRecv ? connectSend_[peer] : connectRecv_[peer];
+  }
+
+  bool& Seen(bool isSendNotRecv, int peer) {
+    return isSendNotRecv ? planPeers_[peer].sendSeen : planPeers_[peer].recvSeen;
+  }
+
+  std::vector<int> Channels(bool isSendNotRecv, int nParts, int nChannels) const {
+    return TaskPostTuning_SingleNodeChannels(isSendNotRecv ? kP2pSendRound : kP2pRecvRound, nParts, nChannels);
+  }
+
+ private:
+  size_t Slot(int channelId, int peer) const { return static_cast<size_t>(channelId) * kRanks + peer; }
+
+  TaskPrepScene scene_;
+  std::vector<ncclComm::P2pSchedulePair> schedule_;
+  std::vector<ncclKernelPlanner::Peer> planPeers_;
+  std::vector<struct channelMasks> connectSend_;
+  std::vector<struct channelMasks> connectRecv_;
+  std::vector<struct ncclChannelPeer> channelPeers_;
+  std::vector<struct ncclChannelPeer*> peerSlots_;
+};
+
+TEST_F(TaskPostTuningMicrotest, P2pChannelBase_SendSide_TakesTheRoundThatSchedulesThePeerAsASendTarget) {
+  TaskPostTuning_P2pScene p2p;
+  uint8_t base = kPoisonedBase;
+
+  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsSend, &base));
+
+  EXPECT_EQ(kP2pSendRound, base);
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pChannelBase_RecvSide_TakesTheRoundThatSchedulesThePeerAsARecvSource) {
+  TaskPostTuning_P2pScene p2p;
+  uint8_t base = kPoisonedBase;
+
+  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsRecv, &base));
+
+  EXPECT_EQ(kP2pRecvRound, base);
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pChannelBase_EveryPeerInTheSchedule_ResolvesToItsOwnRoundOnEachSide) {
+  TaskPostTuning_P2pScene p2p;
+
+  for (int peer = 0; peer < kRanks; peer++) {
+    uint8_t sendBase = kPoisonedBase;
+    uint8_t recvBase = kPoisonedBase;
+
+    ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), peer, kIsSend, &sendBase)) << "peer " << peer;
+    ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), peer, kIsRecv, &recvBase)) << "peer " << peer;
+
+    EXPECT_EQ((peer - kP2pRank + kRanks) % kRanks, sendBase) << "peer " << peer;
+    EXPECT_EQ((kP2pRank - peer + kRanks) % kRanks, recvBase) << "peer " << peer;
+  }
+}
+
+// Known single-node limit: nNodes is 1, so the returned value, nNodes and p2pChannelShiftSize stay unobservable.
+TEST_F(TaskPostTuningMicrotest, P2pChannelBase_AnyPeer_AsksThisCommForItsEffectiveBatchSetting) {
+  TaskPostTuning_P2pScene p2p;
+  struct ncclComm* seen = nullptr;
+  ScopedHook batchEnable(g_rcclEffectiveP2pBatchEnable, [&seen](struct ncclComm* comm) {
+    seen = comm;
+    return kBatchDisabled;
+  });
+  uint8_t base = kPoisonedBase;
+
+  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsSend, &base));
+
+  EXPECT_EQ(1, batchEnable.calls);
+  EXPECT_EQ(p2p.comm(), seen);
+  EXPECT_EQ(kP2pSendRound, base);
+}
+
+// Harness-only schedule: init.cc:1498-1503 builds p2pSchedule as a full permutation, so production always matches.
+TEST_F(TaskPostTuningMicrotest, P2pChannelBase_HandBuiltScheduleOmittingThePeer_ScansPastTheRankCount) {
+  TaskPostTuning_P2pScene p2p;
+  const int kSpareRound = kRanks + kScheduleSpare - 1;
+  p2p.ScheduleAt(kP2pSendRound).sendRank = kP2pRank;
+  p2p.ScheduleAt(kSpareRound).sendRank = kP2pPeer;
+  uint8_t base = kPoisonedBase;
+
+  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsSend, &base));
+
+  EXPECT_EQ(kSpareRound, base);
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerOutsideTheCommunicator_RejectsItAndMarksNothing) {
+  TaskPostTuning_P2pScene p2p;
+
+  for (int peer : {-1, kRanks}) {
+    bool needPreconnect = false;
+
+    EXPECT_EQ(ncclInvalidArgument, postTuneP2pRecordPreconnect(p2p.comm(), peer, kIsSend, &needPreconnect))
+      << "peer " << peer;
+
+    EXPECT_FALSE(needPreconnect) << "peer " << peer;
+  }
+  EXPECT_FALSE(p2p.comm()->planner.peers[kP2pPeer].sendSeen);
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pPeer), {}));
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerIsThisRank_SucceedsWithoutRecordingTheSide) {
+  TaskPostTuning_P2pScene p2p;
+  bool needPreconnect = false;
+
+  EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pRank, kIsSend, &needPreconnect));
+
+  EXPECT_FALSE(needPreconnect);
+  EXPECT_FALSE(p2p.comm()->planner.peers[kP2pRank].sendSeen);
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pRank), {}));
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_FreshSendPeer_ClaimsItsSendChannelsAndLeavesTheRecvSideAlone) {
+  TaskPostTuning_P2pScene p2p;
+  const std::vector<int> sendChannels =
+    TaskPostTuning_SingleNodeChannels(kP2pSendRound, kP2pChannelsPerPeer, kP2pChannels);
+  bool needPreconnect = false;
+
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, &needPreconnect));
+
+  EXPECT_TRUE(needPreconnect);
+  EXPECT_TRUE(p2p.comm()->planner.peers[kP2pPeer].sendSeen);
+  EXPECT_FALSE(p2p.comm()->planner.peers[kP2pPeer].recvSeen);
+  for (int channelId : sendChannels) {
+    EXPECT_EQ(kConnected, p2p.Send(channelId, kP2pPeer)->hasSeen) << "channel " << channelId;
+    EXPECT_EQ(kConnected, p2p.Send(channelId, kP2pPeer)->p2pOnly) << "channel " << channelId;
+    EXPECT_EQ(kNotConnected, p2p.Recv(channelId, kP2pPeer)->hasSeen) << "channel " << channelId;
+    EXPECT_EQ(kNotConnected, p2p.ChannelPeer(channelId, kP2pPeer).send[kUnusedConnIndex].hasSeen)
+      << "channel " << channelId;
+  }
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pPeer), sendChannels));
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectRecv(kP2pPeer), {}));
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pRank), {}));
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_FreshRecvPeer_ClaimsItsRecvChannelsAndLeavesTheSendSideAlone) {
+  TaskPostTuning_P2pScene p2p;
+  const std::vector<int> recvChannels =
+    TaskPostTuning_SingleNodeChannels(kP2pRecvRound, kP2pChannelsPerPeer, kP2pChannels);
+  bool needPreconnect = false;
+
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsRecv, &needPreconnect));
+
+  EXPECT_TRUE(needPreconnect);
+  EXPECT_TRUE(p2p.comm()->planner.peers[kP2pPeer].recvSeen);
+  EXPECT_FALSE(p2p.comm()->planner.peers[kP2pPeer].sendSeen);
+  for (int channelId : recvChannels) {
+    EXPECT_EQ(kConnected, p2p.Recv(channelId, kP2pPeer)->hasSeen) << "channel " << channelId;
+    EXPECT_EQ(kConnected, p2p.Recv(channelId, kP2pPeer)->p2pOnly) << "channel " << channelId;
+    EXPECT_EQ(kNotConnected, p2p.Send(channelId, kP2pPeer)->hasSeen) << "channel " << channelId;
+    EXPECT_EQ(kNotConnected, p2p.ChannelPeer(channelId, kP2pPeer).recv[kUnusedConnIndex].hasSeen)
+      << "channel " << channelId;
+  }
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectRecv(kP2pPeer), recvChannels));
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pPeer), {}));
+}
+
+// Production duplicates the loop body per side, so each of these runs on the recv copy as well as the send one.
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerAlreadyRecordedOnThatSide_ClaimsNoChannel) {
+  for (bool isSendNotRecv : {kIsSend, kIsRecv}) {
+    TaskPostTuning_P2pScene p2p;
+    p2p.Seen(isSendNotRecv, kP2pPeer) = true;
+    bool needPreconnect = false;
+
+    EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+      << "isSendNotRecv " << isSendNotRecv;
+
+    EXPECT_FALSE(needPreconnect) << "isSendNotRecv " << isSendNotRecv;
+    EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connect(isSendNotRecv, kP2pPeer), {}))
+      << "isSendNotRecv " << isSendNotRecv;
+    for (int channelId : p2p.Channels(isSendNotRecv, kP2pChannelsPerPeer, kP2pChannels)) {
+      EXPECT_EQ(kNotConnected, p2p.Conn(isSendNotRecv, channelId, kP2pPeer)->hasSeen) << "channel " << channelId;
+    }
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerRecordedOnTheOtherSideOnly_StillClaimsThisSide) {
+  TaskPostTuning_P2pScene p2p;
+  p2p.comm()->planner.peers[kP2pPeer].recvSeen = true;
+  bool needPreconnect = false;
+
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, &needPreconnect));
+
+  EXPECT_TRUE(needPreconnect);
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(
+    p2p.connectSend(kP2pPeer), TaskPostTuning_SingleNodeChannels(kP2pSendRound, kP2pChannelsPerPeer, kP2pChannels)));
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_SomeChannelsAlreadyConnected_RequestsOnlyTheRemainingOnes) {
+  for (bool isSendNotRecv : {kIsSend, kIsRecv}) {
+    TaskPostTuning_P2pScene p2p;
+    const std::vector<int> channels = p2p.Channels(isSendNotRecv, kP2pChannelsPerPeer, kP2pChannels);
+    p2p.Conn(isSendNotRecv, channels.front(), kP2pPeer)->hasSeen = kConnected;
+    bool needPreconnect = false;
+
+    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+      << "isSendNotRecv " << isSendNotRecv;
+
+    EXPECT_TRUE(needPreconnect) << "isSendNotRecv " << isSendNotRecv;
+    EXPECT_EQ(kNotConnected, p2p.Conn(isSendNotRecv, channels.front(), kP2pPeer)->p2pOnly);
+    EXPECT_EQ(kConnected, p2p.Conn(isSendNotRecv, channels.back(), kP2pPeer)->p2pOnly);
+    EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connect(isSendNotRecv, kP2pPeer), {channels.back()}))
+      << "isSendNotRecv " << isSendNotRecv;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_EveryChannelAlreadyConnected_RecordsTheSideWithoutAskingForSetup) {
+  TaskPostTuning_P2pScene p2p;
+  for (int channelId : TaskPostTuning_SingleNodeChannels(kP2pSendRound, kP2pChannelsPerPeer, kP2pChannels)) {
+    p2p.Send(channelId, kP2pPeer)->hasSeen = kConnected;
+  }
+  bool needPreconnect = false;
+
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, &needPreconnect));
+
+  EXPECT_FALSE(needPreconnect);
+  EXPECT_TRUE(p2p.comm()->planner.peers[kP2pPeer].sendSeen);
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pPeer), {}));
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_CallerAlreadyNeedsSetup_KeepsTheFlagSetWhenNothingIsClaimed) {
+  TaskPostTuning_P2pScene p2p;
+  for (int channelId : TaskPostTuning_SingleNodeChannels(kP2pSendRound, kP2pChannelsPerPeer, kP2pChannels)) {
+    p2p.Send(channelId, kP2pPeer)->hasSeen = kConnected;
+  }
+  bool needPreconnect = true;
+
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, &needPreconnect));
+
+  EXPECT_TRUE(needPreconnect);
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_ChannelsBeyondTheFirstMaskWord_SetBitsInTheirOwnWord) {
+  for (bool isSendNotRecv : {kIsSend, kIsRecv}) {
+    TaskPostTuning_P2pScene p2p(kWideP2pChannels, kWideP2pChannelsPerPeer);
+    const std::vector<int> channels = p2p.Channels(isSendNotRecv, kWideP2pChannelsPerPeer, kWideP2pChannels);
+    bool needPreconnect = false;
+
+    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+      << "isSendNotRecv " << isSendNotRecv;
+
+    EXPECT_LE(CHANNELS_PER_MASK_WORD, channels.front()) << "isSendNotRecv " << isSendNotRecv;
+    EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connect(isSendNotRecv, kP2pPeer), channels))
+      << "isSendNotRecv " << isSendNotRecv;
+  }
+}
+
+class TaskPostTuning_P2pFill {
+ public:
+  explicit TaskPostTuning_P2pFill(ncclFunc_t func = ncclFuncSend, int peer = kP2pPeer)
+    : tInfo_(p2p_.scene()->NewTuningInfo(p2p_.scene()->NewSendRecv(func, peer))) {
+    std::memset(&task_, kPoison, sizeof(task_));
+  }
+
+  struct ncclComm* comm() { return p2p_.comm(); }
+  struct ncclRawTaskSendRecv* raw() { return &tInfo_->raw->sendRecv; }
+  struct ncclTaskP2p* task() { return &task_; }
+  ncclResult_t Run() { return fillP2pTaskFromRaw(comm(), tInfo_, &task_); }
+
+  bool TaskUntouched() const {
+    return AllBytesAre(reinterpret_cast<const unsigned char*>(&task_), sizeof(task_), kPoison);
+  }
+
+ private:
+  TaskPostTuning_P2pScene p2p_;
+  struct ncclTaskTuningInfo* tInfo_;
+  struct ncclTaskP2p task_;
+};
+
+TEST_F(TaskPostTuningMicrotest, FillP2pTaskFromRaw_Send_CopiesTheRawFieldsAndAllowsUserBuffers) {
+  TaskPostTuning_P2pFill fill;
+  ncclProfilerEventMask = kProfilerEventMask;
+  fill.raw()->collAPI = ncclFuncBroadcast;
+  // The 0xA5 poison already reads true for a bool, so the write is only observable from a seeded false.
+  fill.task()->allowUB = false;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  const struct ncclTaskP2p* task = fill.task();
+  EXPECT_EQ(ncclFuncSend, task->func);
+  EXPECT_EQ(ncclFuncBroadcast, task->collAPI);
+  EXPECT_EQ(fill.raw()->buff, task->buff);
+  EXPECT_EQ(kCount, task->count);
+  EXPECT_EQ(ncclFloat32, task->datatype);
+  EXPECT_EQ(kP2pPeer, task->root);
+  EXPECT_EQ(kP2pBytes, task->bytes);
+  EXPECT_TRUE(task->allowUB);
+  EXPECT_EQ(kProfilerEventMask, task->eActivationMask);
+  EXPECT_EQ(nullptr, task->groupApiEventHandle);
+  EXPECT_EQ(nullptr, task->p2pApiEventHandle);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillP2pTaskFromRaw_Recv_CopiesTheRawFieldsAndAllowsUserBuffers) {
+  TaskPostTuning_P2pFill fill(ncclFuncRecv);
+  fill.raw()->collAPI = ncclFuncBroadcast;
+  fill.task()->allowUB = false;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(ncclFuncRecv, fill.task()->func);
+  EXPECT_EQ(ncclFuncBroadcast, fill.task()->collAPI);
+  EXPECT_EQ(kP2pPeer, fill.task()->root);
+  EXPECT_TRUE(fill.task()->allowUB);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillP2pTaskFromRaw_LoweredCollectiveApis_ForbidUserBuffers) {
+  for (ncclFunc_t collAPI : kLoweredCollectiveApis) {
+    TaskPostTuning_P2pFill fill;
+    fill.raw()->collAPI = collAPI;
+
+    ASSERT_EQ(ncclSuccess, fill.Run()) << "collAPI " << collAPI;
+
+    EXPECT_FALSE(fill.task()->allowUB) << "collAPI " << collAPI;
+    EXPECT_EQ(collAPI, fill.task()->collAPI) << "collAPI " << collAPI;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, FillP2pTaskFromRaw_EveryOtherCollectiveApi_AllowsUserBuffers) {
+  for (int collAPI = 0; collAPI < ncclNumFuncs; collAPI++) {
+    if (TaskPostTuning_IsLoweredCollectiveApi(collAPI)) {
+      continue;
+    }
+    TaskPostTuning_P2pFill fill;
+    fill.raw()->collAPI = static_cast<ncclFunc_t>(collAPI);
+    fill.task()->allowUB = false;
+
+    ASSERT_EQ(ncclSuccess, fill.Run()) << "collAPI " << collAPI;
+
+    EXPECT_TRUE(fill.task()->allowUB) << "collAPI " << collAPI;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, FillP2pTaskFromRaw_PeerOutsideTheCommunicator_RejectsItWithoutWritingTheTask) {
+  for (int peer : {-1, kRanks}) {
+    TaskPostTuning_P2pFill fill(ncclFuncSend, peer);
+
+    EXPECT_EQ(ncclInvalidArgument, fill.Run()) << "peer " << peer;
+
+    EXPECT_TRUE(fill.TaskUntouched()) << "peer " << peer;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, FillP2pTaskFromRaw_PeerIsThisRank_IsAcceptedAndRootedAtThisRank) {
+  TaskPostTuning_P2pFill fill(ncclFuncSend, kP2pRank);
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(kP2pRank, fill.task()->root);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillP2pTaskFromRaw_FuncIsNeitherSendNorRecv_ReportsAnInternalErrorAndWritesNothing) {
+  TaskPostTuning_P2pFill fill(ncclFuncAllReduce);
+
+  EXPECT_EQ(ncclInternalError, fill.Run());
+
+  EXPECT_TRUE(fill.TaskUntouched());
+}
+
 }  // namespace
