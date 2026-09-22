@@ -36,7 +36,7 @@ downstream consumer of the library.
   including its "one stream track per stream, not per event type"
   behavior; previously only thread-based `(nid,pid,tid)` tracks and
   per-agent PMC tracks were derived).
-- `c_interface/profiler_hub_types.h`: new `ph_track_category_t` enum;
+- `c/profiler_hub_types.h`: new `ph_track_category_t` enum;
   `ph_track_t` gains `category`, `queue_id`, `stream_id` fields (mirrors
   `reader_types::track_kind_t`). New `ph_process_t`/`ph_process_list_t`;
   `ph_node_t` gains a `process_list` field.
