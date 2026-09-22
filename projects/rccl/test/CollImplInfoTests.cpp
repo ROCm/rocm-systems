@@ -354,6 +354,15 @@ namespace RcclUnitTesting
           // -- queried with the real registered buffers -- covers the rest.)
           EXPECT_EQ(symk.algoName, "SYM")
             << "symk did not report SYM though dispatch ran SYM\nLOG:\n" << log;
+
+          // Symmetric block count: at least 1 because the model rejects a zero count, at most
+          // ncclSymkMaxBlocks (64, src/include/sym_kernels.h). Device independent, since the model
+          // clamps to that constant and to maxCTAs and never to the CU count. Was -1 before the
+          // model set maxChannels, which is the regression this guards.
+          EXPECT_GE(symk.channels, 1)
+            << "symk reported SYM without a channel count\nLOG:\n" << log;
+          EXPECT_LE(symk.channels, 64)
+            << "symk channel count above ncclSymkMaxBlocks\nLOG:\n" << log;
         }
       }
 
