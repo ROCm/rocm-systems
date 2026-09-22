@@ -750,7 +750,10 @@ class Runtime {
     }
   };
 
-  class AsyncEventsPool : private BaseShared {
+  /// @brief Block pool for AsyncEventItem.  Host-only bookkeeping, so ordinary
+  /// host memory: these blocks belong to no agent's memory region and so need
+  /// not be freed before the agents are.
+  class AsyncEventsPool {
    public:
     AsyncEventsPool() : block_size_(preallocblocks_ * minblock_) {}
     ~AsyncEventsPool() { clear(); }

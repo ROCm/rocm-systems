@@ -212,7 +212,7 @@ class Event : public RuntimeObject {
 
   /*! \brief Notifies current command queue about execution status
    */
-  bool notifyCmdQueue(bool cpu_wait = false);
+  bool notifyCmdQueue(bool cpu_wait = false, bool cross_queue = false);
 
   //! RTTI internal implementation
   virtual ObjectType objectType() const { return ObjectTypeEvent; }
@@ -325,6 +325,7 @@ class Command : public Event {
   std::vector<void*> data_;
   const Event* waitingEvent_;  //!< Waiting event associated with the marker
 
+  bool crossStreamProducer_ = false;
   bool packetCapturing_ = false;       //!< Flag to enable/disable graph gpu packet capture
   std::vector<uint8_t*>* gpuPackets_;  //!< GPU packets captured when graph capturing is enabled
   std::vector<uint8_t*>* gpuMetadataPackets_ = nullptr;  //!< Metadata packets (parallel to gpuPackets_)
@@ -374,6 +375,12 @@ class Command : public Event {
     }
   }
   bool getPktCapturingState() const { return packetCapturing_; }
+
+  //! Declare that another stream will wait on this command's completion.  Must be set before
+  //! enqueue(): the device layer reads it while submitting.
+  void setCrossStreamProducer(bool value) { crossStreamProducer_ = value; }
+
+  bool isCrossStreamProducer() const { return crossStreamProducer_; }
 
   //! Sets AQL capture state, aql packet to capture and where to copy kernArgs.
   //! |metadataPacket|, when non-null, also enables capturing the metadata-prefetch

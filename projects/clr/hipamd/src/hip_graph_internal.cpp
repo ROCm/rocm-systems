@@ -413,6 +413,9 @@ void GraphExecSegmented::BuildSyncPlan() {
 
   auto* device = g_devices[captureDeviceId_]->devices()[0];
 
+  uint32_t n_completion_on_barrier = 0;
+  uint32_t n_completion_on_dispatch = 0;
+
   // PASS 0: Barrier-ROI collapse. Only runs in mode 0 (default) and only when
   // the graph is shallow (max_level<=4). Modes 1 (round-robin) and 2 (DFS)
   // never collapse. When collapse fires, every segment is folded onto stream 0
@@ -593,7 +596,10 @@ void GraphExecSegmented::BuildSyncPlan() {
     const bool completion_signal_needed = (hw_slot >= 0);
 
     auto& lastBatch = segBatch.packet_batches.back();
-    if (last_node_uncaptured && completion_signal_needed) {
+    // A completion signal on a dispatch packet is exposed to queue interceptors that rewrite
+    // dispatch packets; on its own barrier packet it is not.
+    const bool own_barrier_packet = last_node_uncaptured || (DEBUG_CLR_DEVICE_ORDERING_EDGE == 1);
+    if (own_barrier_packet && completion_signal_needed) {
       uint8_t* completion_barrier = device->CreateBarrierPacket();
       sync_plan_.barrier_packets.push_back(completion_barrier);
 
@@ -604,6 +610,7 @@ void GraphExecSegmented::BuildSyncPlan() {
       sync_plan_.patch_list.push_back(
           {completion_barrier, nullptr, hw_slot,
            amd::Device::HwEventPatch::kCompletionSignal});
+      ++n_completion_on_barrier;
     } else if (!lastBatch.dispatchPackets.empty() && completion_signal_needed) {
       // Safe to patch the last kernel dispatch directly
       uint8_t* last_pkt = lastBatch.dispatchPackets.back();
@@ -618,12 +625,20 @@ void GraphExecSegmented::BuildSyncPlan() {
       // the corner case where every node packet in this batch is disabled.
       lastBatch.fallbackBarrier = device->CreateBarrierPacket();
       sync_plan_.barrier_packets.push_back(lastBatch.fallbackBarrier);
+      ++n_completion_on_dispatch;
     }
 
     if (segment.segment_ids_edges.empty()) {
       sync_plan_.leaf_segment_ids.push_back(segment.id);
     }
   }
+
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+          "[hipGraph] SyncPlan: segments=%d hw_events=%d completion_on_barrier=%u "
+          "completion_on_dispatch=%u collapsed=%d device_ordering_edge=%u",
+          sync_plan_.num_segments, sync_plan_.num_hw_events, n_completion_on_barrier,
+          n_completion_on_dispatch, static_cast<int>(collapsed_to_single_stream_),
+          static_cast<uint32_t>(DEBUG_CLR_DEVICE_ORDERING_EDGE));
 
   // Create the per-graph HW event signal pool once at instantiate time
   // (single-threaded here) and pre-create the signals, so the launch hot path
@@ -2932,7 +2947,8 @@ hipError_t Graph::RunOneNode(Node node) {
     // Process child graph separately, since there is no connection
     auto child = reinterpret_cast<hip::ChildGraphNode*>(node)->GetChildGraph();
     if (!reinterpret_cast<hip::ChildGraphNode*>(node)->GetGraphCaptureStatus()) {
-      auto status = child->RunNodes(node->stream_id_, &streams_, &waitList);
+      auto status = child->RunNodes(node->stream_id_, &streams_, &waitList,
+                                    cross_stream_producers_.count(node) != 0);
       if (status != hipSuccess) {
         releaseWaitOrderCommands();
         return status;
@@ -2963,6 +2979,12 @@ hipError_t Graph::RunOneNode(Node node) {
       LogPrintfError("Command creation for node id(%d) failed!", current_id_ + 1);
       releaseWaitOrderCommands();
       return status;
+    }
+    // A command with no completion signal is covered instead by the marker
+    // Event::notifyCmdQueue() adds.
+    const bool cross_stream = cross_stream_producers_.count(node) != 0;
+    for (auto command : node->GetCommands()) {
+      command->setCrossStreamProducer(cross_stream);
     }
     // If a wait was requested, then process the list
     if (node->GetWait() && !waitList.empty()) {
@@ -3012,11 +3034,38 @@ hipError_t Graph::RunOneNode(Node node) {
   return hipSuccess;
 }
 
+// A hint, not an exact set: a missing entry costs a host resident wait, an extra one costs a
+// barrier packet.
+void Graph::FindCrossStreamProducers(int32_t base_stream) {
+  cross_stream_producers_.clear();
+  for (auto node : vertices_) {
+    // The command a consumer of a child graph waits on is the last one the child queued,
+    // which is on the child graph node's own stream.
+    for (auto dep : node->GetDependencies()) {
+      if (dep->stream_id_ != node->stream_id_) {
+        cross_stream_producers_.insert(dep);
+      }
+    }
+    // The join at the bottom of RunNodes() waits on each other stream's last leaf.  Which leaf
+    // that is depends on traversal order, so mark every leaf off the base stream.
+    if (node->GetEdges().empty() && node->stream_id_ != base_stream) {
+      cross_stream_producers_.insert(node);
+    }
+  }
+}
+
 // ================================================================================================
 hipError_t Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* parallel_streams,
-                           const amd::Command::EventWaitList* parent_waitlist) {
+                           const amd::Command::EventWaitList* parent_waitlist,
+                           bool waited_cross_stream) {
   if (parallel_streams != nullptr) {
     streams_ = *parallel_streams;
+  }
+  // Rebuilding this per launch would put a container clear/insert on a path that takes no
+  // lock.  Safe only because a graph has one pending launch at a time.
+  if (cross_stream_base_ != base_stream) {
+    FindCrossStreamProducers(base_stream);
+    cross_stream_base_ = base_stream;
   }
 
   // childgraph node has dependencies on parent graph nodes from other streams
@@ -3081,6 +3130,9 @@ hipError_t Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>*
   // Wait for leafs in the graph's app stream
   if (wait_list.size() > 0) {
     auto end_marker = new amd::Marker(*streams_[base_stream], true, wait_list);
+    // RunOneNode() collects this marker only after the child has been enqueued, so the parent
+    // cannot mark it; the flag comes down from there instead.
+    end_marker->setCrossStreamProducer(waited_cross_stream);
     end_marker->enqueue();
     end_marker->release();
     for (auto command : wait_list) {

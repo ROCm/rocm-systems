@@ -68,6 +68,10 @@ namespace amd::roc {
 
 static constexpr uint16_t kInvalidAql = (HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE);
 
+// ROCr polls a dep_signals[] list on the host, so a device resident value word is a
+// pessimisation there; only a list going straight into an AQL packet may name one.
+static constexpr bool kAqlBarrierDep = true;
+
 static constexpr uint16_t kBarrierPacketHeader =
     (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) | (1 << HSA_PACKET_HEADER_BARRIER) |
     (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
@@ -839,6 +843,7 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   Hsa::signal_silent_store_relaxed(prof_signal->signal_, init_val);
   prof_signal->flags_.done_ = false;
   prof_signal->engine_ = engine_;
+  prof_signal->ReleaseOrderingEdge();
   prof_signal->ResetCachedTiming();
 
   // Release any existing HwEvent before setting new one for the same command
@@ -885,7 +890,8 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
 }
 
 // ================================================================================================
-std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngine engine) {
+std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngine engine,
+                                                                     bool aql_barrier_dep) {
   bool explicit_wait = false;
   // Reset all current waiting signals
   waiting_signals_.clear();
@@ -934,8 +940,16 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
         // Wait on CPU for completion if requested
         CpuWaitForSignal(external_signals_[i]);
       } else {
-        // Add HSA signal for tracking on GPU
-        waiting_signals_.push_back(external_signals_[i]->signal_);
+        // Add HSA signal for tracking on GPU.  A published twin is named only on its own
+        // device: the value word is mapped into one agent's page tables, so a foreign command
+        // processor would take a memory violation rather than a wait.
+        const ProfilingSignal* prof_signal = external_signals_[i];
+        const uint64_t edge = prof_signal->edge_handle_.load(std::memory_order_acquire);
+        hsa_signal_t dep = prof_signal->signal_;
+        if (aql_barrier_dep && (edge != 0) && (prof_signal->edge_owner_ == &gpu_.dev())) {
+          dep.handle = edge;
+        }
+        waiting_signals_.push_back(dep);
       }
     }
   }
@@ -1655,7 +1669,7 @@ void VirtualGPU::adjustHeader(uint16_t& header) {
 
 // ================================================================================================
 void VirtualGPU::dispatchBlockingWait(hsa_kernel_dispatch_packet_t* packet) {
-  auto wait_signals = Barriers().WaitingSignal();
+  auto wait_signals = Barriers().WaitingSignal(HwQueueEngine::Compute, kAqlBarrierDep);
   if (dev().settings().ext_dispatch_packet_ && wait_signals.size() == 1 && packet != nullptr) {
       // The Ext Dispatch Packet supports only one dependent signal
       auto ext_packet = reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(packet);
@@ -2124,17 +2138,22 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
 
   TrackQueueProgress(*finalLastSlot, startIndex + numPackets - 1, pre_patched);
 
+  // submitAccumulate() takes a fresh HwEvent for the segment, and that is the one a consumer
+  // reads; an edge published here would name the signal it is about to stop pointing at.
+  constexpr bool kKeepHwEvent = false;
+  constexpr bool kPublishOrderingEdge = false;
+
   if (blocking) {
     LogInfo("Running serialized as blocking is requested");
     if (!Barriers().WaitCurrent()) {
       LogPrintfError("Failed blocking queue wait with signal [0x%lx]",
                      finalLastSlot->completion_signal.handle);
-      profilingEnd();
+      profilingEnd(kKeepHwEvent, kPublishOrderingEdge);
       return false;
     }
   }
 
-  profilingEnd();
+  profilingEnd(kKeepHwEvent, kPublishOrderingEdge);
   return true;
 }
 
@@ -2172,7 +2191,7 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
 
   if (!skipSignal) {
     // Make sure the wait is issued before queue index reservation
-    auto wait_signals = Barriers().WaitingSignal();
+    auto wait_signals = Barriers().WaitingSignal(HwQueueEngine::Compute, kAqlBarrierDep);
     for (uint32_t i = 0; i < wait_signals.size(); ++i) {
       uint32_t j = i % 5;
       barrier_packet_.dep_signal[j] = wait_signals[i];
@@ -2247,7 +2266,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   // Dependent signal and external signal cant be true at the same time
   assert((resolveDepSignal && (signal.handle != 0)) == false);
   if (resolveDepSignal) {
-    auto wait_signals = Barriers().WaitingSignal();
+    auto wait_signals = Barriers().WaitingSignal(HwQueueEngine::Compute, kAqlBarrierDep);
     if (wait_signals.size() > 0) {
       barrier_value_packet_.signal = wait_signals[0];
       barrier_value_packet_.value = kInitSignalValueOne;
@@ -2871,7 +2890,14 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
  * created for whatever command we are running and calls end() to get the
  * current host timestamp if no signal is available.
  */
-void VirtualGPU::profilingEnd(bool clearHwEvent) {
+void VirtualGPU::profilingEnd(bool clearHwEvent, bool publishOrderingEdge) {
+  // The one point every command passes with its packets already in the ring and its HwEvent
+  // still set.  Not when clearHwEvent is set: the block below releases the HwEvent, which is
+  // a consumer's only route to the edge.
+  if (publishOrderingEdge && !clearHwEvent && command_->isCrossStreamProducer()) {
+    PublishOrderingEdge();
+  }
+
   if (!command_->getPktCapturingState() && command_->profilingInfo().enabled_) {
     if (timestamp_ != nullptr) {
       if (timestamp_->HwProfiling() == false) {
@@ -5253,6 +5279,48 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
 void VirtualGPU::submitNativeFn(amd::NativeFnCommand& cmd) {}
 
 // ================================================================================================
+// Publish a device resident twin of the current command's completion signal, so that a queue
+// which later waits on this event names a value word in its own local memory.  The ordinary
+// completion signal keeps every other role - HwEvent, host waits, profiling timestamps, async
+// handlers - which an edge may not take.  Eligibility is decided by the caller.
+void VirtualGPU::PublishOrderingEdge() {
+  if (!dev().orderingEdgeSignals()) {
+    return;
+  }
+  auto* hw_event = reinterpret_cast<ProfilingSignal*>(command_->HwEvent());
+  if (hw_event == nullptr) {
+    return;
+  }
+  // The edge is decremented by a barrier packet on gpu_queue_ with no dependencies, so it can
+  // only stand in for a completion this queue's own command processor produces.  An SDMA
+  // retired command is not one: its signal and the edge packet are unordered.
+  if (hw_event->engine_ != HwQueueEngine::Compute) {
+    return;
+  }
+  // A marker coalesced onto the previous barrier's HwEvent denotes the same point in the
+  // stream, so the edge already published for it is the right answer.
+  if (hw_event->edge_handle_.load(std::memory_order_relaxed) != 0) {
+    return;
+  }
+  uint32_t slot = 0;
+  hsa_signal_t edge = dev().AcquireOrderingEdge(&slot);
+  if (edge.handle == 0) {
+    return;
+  }
+  // kNopPacketHeader fences at HSA_FENCE_SCOPE_NONE, so no cache state changed - but
+  // dispatchBarrierPacket() sets the dirty flag unconditionally.
+  const bool fence_dirty = isFenceDirty();
+  constexpr bool kSkipSignal = true;
+  dispatchBarrierPacket(kNopPacketHeader, kSkipSignal, edge);
+  setFenceDirty(fence_dirty);
+  // Published only after the packet is in the ring: a consumer that read the handle earlier
+  // would enqueue a dependency on a decrement that has not been asked for yet.
+  hw_event->edge_owner_ = &dev();
+  hw_event->edge_slot_ = slot;
+  hw_event->edge_handle_.store(edge.handle, std::memory_order_release);
+}
+
+// ================================================================================================
 void VirtualGPU::submitMarker(amd::Marker& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
@@ -5315,6 +5383,9 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
           dispatchBarrierPacket(kBarrierPacketHeader, false);
         }
         hasPendingDispatch_ = false;
+      }
+      if (vcmd.profilingInfo().marker_ts_) {
+        PublishOrderingEdge();
       }
     }
     // A record sets the window to its own event and barrier signal; a wait/other

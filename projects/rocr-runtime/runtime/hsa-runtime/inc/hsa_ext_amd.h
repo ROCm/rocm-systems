@@ -84,9 +84,11 @@
  * - 1.30 - hsa_amd_queue_get_info: engine type and SDMA engine ID
  * - 1.31 - hsa_amd_queue_get_info: queue read/write pointer addresses
  * - 1.32 - hsa_amd_svm_discard_and_prefetch_batch_async
+ * - 1.33 - hsa_amd_signal_create_v2, hsa_amd_signal_create_desc_t
+ * - 1.34 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 32
+#define HSA_AMD_INTERFACE_VERSION_MINOR 34
 
 #ifdef __cplusplus
 extern "C" {
@@ -991,6 +993,17 @@ typedef enum hsa_amd_agent_info_s {
    * Use HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED instead.
    */
   HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED = 0xA124,
+  /**
+   * Can this agent be named as the single consumer of a signal created with
+   * ::hsa_amd_signal_create_v2 and
+   * ::HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD?  The caller side conditions
+   * (exactly one consumer, no IPC) are not properties of the agent and are not
+   * reflected here.  The type of this attribute is bool.
+   *
+   * A runtime that predates the feature answers this query with
+   * ::HSA_STATUS_ERROR_INVALID_ARGUMENT, which is a usable negative.
+   */
+  HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED = 0xA125,
 } hsa_amd_agent_info_t;
 
 /**
@@ -1394,6 +1407,150 @@ hsa_status_t HSA_API hsa_amd_signal_create(hsa_signal_value_t initial_value, uin
                                            const hsa_agent_t* consumers, uint64_t attributes,
                                            hsa_signal_t* signal);
 
+/**
+ * @brief Version of the ::hsa_amd_signal_create_desc_t structure.
+ */
+#define HSA_AMD_SIGNAL_CREATE_DESC_VERSION 1
+
+/**
+ * @brief Placement of a signal's value word - the word an agent polls when it
+ * waits on the signal.
+ */
+typedef enum {
+  /**
+   * The signal's value word is allocated in system memory (default).
+   */
+  HSA_AMD_SIGNAL_CREATE_SYSTEM_MEM = 0,
+  /**
+   * The signal's value word is allocated in the local device memory of the
+   * single GPU named in @c consumers[0], for use as a cross queue ordering
+   * edge.  Requires @c num_consumers == 1 and a GPU agent that answers true
+   * to ::HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED.  Not compatible
+   * with ::HSA_AMD_SIGNAL_IPC.  The resulting signal is restricted; see the
+   * restriction list on ::hsa_amd_signal_create_v2.
+   */
+  HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD = (1 << 0),
+} hsa_amd_signal_create_flag_t;
+
+/**
+ * @brief Describes a single signal to create within a batch.
+ *
+ * A zero-initialised descriptor with @c version set requests a signal
+ * identical to one from ::hsa_amd_signal_create with @c num_consumers 0 and
+ * no attributes, because ::HSA_AMD_SIGNAL_CREATE_SYSTEM_MEM is 0.
+ */
+typedef struct hsa_amd_signal_create_desc_s {
+  /** Struct version. Must be HSA_AMD_SIGNAL_CREATE_DESC_VERSION. */
+  uint16_t version;
+  /** Value word placement flags (::hsa_amd_signal_create_flag_t).
+   *  0 = system memory. Undefined bits are rejected. */
+  uint16_t flags;
+  /** Reserved for future common fields. Must be 0. */
+  uint8_t reserved_header[4];
+  /** Initial value of the signal. */
+  hsa_signal_value_t initial_value;
+  /** Signal attributes (::hsa_amd_signal_attribute_t). Undefined bits are
+   *  rejected.  With ::HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD,
+   *  ::HSA_AMD_SIGNAL_IPC is rejected and ::HSA_AMD_SIGNAL_AMD_GPU_ONLY is
+   *  accepted and inert: that placement always creates a busy-wait signal
+   *  with no event mailbox, whether or not the bit is set. */
+  uint64_t attributes;
+  /** Size of @c consumers. 0 indicates that any agent might wait on the
+   *  signal. Must be 1 when
+   *  ::HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD is set. */
+  uint32_t num_consumers;
+  /** Reserved. Must be 0. */
+  uint32_t reserved_count;
+  /** List of agents that might consume (wait on) the signal. Ignored when
+   *  @c num_consumers is 0. */
+  const hsa_agent_t* consumers;
+  /** [out] On success the runtime writes the created signal here. On failure
+   *  its handle is 0. */
+  hsa_signal_t signal;
+  /** Reserved for future fields. Must be 0. */
+  uint8_t reserved[16];
+} hsa_amd_signal_create_desc_t;
+
+/**
+ * @brief Create one or more signals from an array of descriptors, with control
+ * over where each signal's value word is placed.
+ *
+ * @details This is a descriptor based form of ::hsa_amd_signal_create.  With
+ * @c flags left at ::HSA_AMD_SIGNAL_CREATE_SYSTEM_MEM it is equivalent to that
+ * call.  With ::HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD it places the
+ * value word in the local memory of the single GPU that will consume it, for
+ * use as a cross queue ordering edge.
+ *
+ * A barrier-AND packet whose dependency signal is not yet satisfied makes the
+ * consuming GPU's command processor poll the value word.  In host memory, as
+ * for every signal from ::hsa_amd_signal_create, each poll is a read across the
+ * host bus; with the device memory flag the poll is local to @c consumers[0].
+ *
+ * An unrecognised @c version and undefined bits of @c flags or @c attributes
+ * are rejected, not ignored.
+ *
+ * A signal created with ::HSA_AMD_SIGNAL_CREATE_DEVICE_MEM_VALUE_WORD is
+ * restricted:
+ * - the host must not perform an atomic read-modify-write on the value word.
+ *   Such an operation is issued as separate bus transactions and loses the
+ *   command processor's concurrent updates.  The ::hsa_signal_and_relaxed
+ *   family and the other read-modify-write entry points return void, so the
+ *   runtime prints a diagnostic and terminates the process.  Loads and plain
+ *   stores are supported.
+ * - it may not be the completion signal of any asynchronous copy, prefetch or
+ *   discard entry point, nor the subject of ::hsa_amd_signal_value_pointer or
+ *   ::hsa_amd_signal_async_handler.  Each such entry point this runtime
+ *   provides returns ::HSA_STATUS_ERROR_INVALID_SIGNAL on this object.
+ * - it may be named in a dependency list - an AQL packet's dep_signal[], or an
+ *   entry point's dep_signals[] - only by the agent given as @c consumers[0].
+ *   The runtime does not check this.  The value word is mapped into that
+ *   agent's page tables only, so another agent's engine takes a memory
+ *   violation rather than a wait.
+ * - a dependency handed to an asynchronous copy, prefetch or discard entry
+ *   point is polled by the runtime on the host rather than by an engine, which
+ *   reinstates the host bus traffic this object exists to remove.  On gfx90x
+ *   parts carrying the SDMA poll workaround that is true of every SDMA
+ *   dependency.  Prefer an AQL dep_signal[].
+ * - ::hsa_signal_wait_* on this signal spins.  There is no interrupt backed
+ *   form of this object, so ::HSA_WAIT_STATE_BLOCKED does not sleep, and the
+ *   runtime's MWAITX park is suppressed on a device resident value word.  A
+ *   caller that needs to block should wait on an ordinary signal.
+ * - ::HSA_AMD_SIGNAL_IPC is not supported.
+ *
+ * This call does not fall back.  If the machine cannot support the placement
+ * the descriptor fails; query ::HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED
+ * on the intended consumer first.
+ *
+ * On partial failure, signals that were successfully created remain valid and
+ * are the caller's to destroy.  The caller should inspect each
+ * @c descs[i].signal handle - a zero handle indicates that descriptor failed.
+ * The return value reflects the first error encountered.
+ *
+ * @param[in,out] descs Array of signal descriptors. Each descriptor's
+ * @c signal field is an output parameter written by the runtime.
+ *
+ * @param[in] num_descs Number of elements in @p descs. Must be >= 1.
+ *
+ * @retval ::HSA_STATUS_SUCCESS All signals were created successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The runtime failed to allocate
+ * the required resources.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p descs is NULL, @p num_descs
+ * is 0, or for some descriptor: @c version is unrecognised, a @c reserved
+ * field is non-zero, @c flags or @c attributes contains an undefined bit,
+ * @c attributes contains ::HSA_AMD_SIGNAL_IPC together with the device memory
+ * flag, or @c num_consumers is not 1 when the device memory flag is set.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT @p consumers[0] is not a valid GPU
+ * agent, or is a GPU agent that cannot host a signal value word - see
+ * ::HSA_AMD_AGENT_INFO_ORDERING_EDGE_SIGNAL_SUPPORTED.
+ */
+hsa_status_t HSA_API hsa_amd_signal_create_v2(hsa_amd_signal_create_desc_t* descs,
+                                              uint32_t num_descs);
 /**
  * @brief Returns a pointer to the value of a signal.
  *

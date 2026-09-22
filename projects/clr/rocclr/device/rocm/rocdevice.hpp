@@ -81,6 +81,17 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
 
   Flags flags_;
 
+  //! Handle of a device resident twin of signal_, or zero when none was published.  Read
+  //! without this object's lock: the release store in VirtualGPU::PublishOrderingEdge()
+  //! publishes edge_owner_ and edge_slot_ with it.
+  std::atomic<uint64_t> edge_handle_{0};
+  const Device* edge_owner_ = nullptr;  //!< Device whose pool owns edge_slot_
+  uint32_t edge_slot_ = 0;              //!< Index of that slot inside the pool
+
+  //! Returns a published edge slot to its owner's free list.  Callable only where no command
+  //! still holds this object - the destructor, and the re-arm in ActiveSignal().
+  void ReleaseOrderingEdge();
+
   //! Cached timing data - populated when signal completes, avoids repeated HSA calls
   struct CachedTiming {
     uint64_t start_ = 0;   //!< Cached start timestamp from HSA
@@ -665,6 +676,14 @@ class Device : public NullDevice {
   void HiddenHeapAlloc(const VirtualGPU& gpu);
   //! Init hidden heap for device memory allocations
   void HiddenHeapInit(const VirtualGPU& gpu);
+
+  bool orderingEdgeSignals() const { return ordering_edge_signals_; }
+
+  //! Takes a free ordering edge slot, arms it and returns its handle, or {0} if none is
+  //! available.  Never blocks, never allocates and never grows the pool.
+  hsa_signal_t AcquireOrderingEdge(uint32_t* slot) const;
+
+  void ReleaseOrderingEdge(uint32_t slot) const;
   bool isXgmi() const override { return isXgmi_; }
 
   //! SDMA engine allocation for per-stream affinity
@@ -828,6 +847,12 @@ class Device : public NullDevice {
   uint32_t maxSdmaWriteMask_;
   bool isXgmi_;  //!< Flag to indicate if there is XGMI between CPU<->GPU
   bool isAPU_ = false;  //!< Flag to indicate the agent shares physical memory with the CPU
+  bool ordering_edge_signals_ = false;  //!< Agent can host an ordering edge signal value word
+  //! Owned by the device, not by a queue, so that they outlive every command processor that
+  //! can name one.
+  std::vector<hsa_signal_t> edge_signals_;
+  mutable std::vector<uint32_t> edge_free_;  //!< Indices of the slots nobody holds
+  mutable amd::Monitor edge_pool_lock_;      //!< Serialises the two lines above
   bool pm4_emulation_ = false;  //!< Flag to indicate if PM4 emulation is enabled
   uint32_t numHwPipes_;  //!< Number of hardware pipes
 

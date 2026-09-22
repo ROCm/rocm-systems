@@ -471,6 +471,36 @@ class GpuAgent : public GpuAgentInt {
   /// did not request a specific engine, rotating round-robin across all engines.
   uint32_t NextSdmaUserQueueEngineId();
 
+  bool SupportsOrderingEdgeSignal() const { return OrderingEdgeSignalRegion() != nullptr; }
+
+  /// @brief The device local memory region an ordering edge signal's ABI block
+  /// is allocated from, or nullptr if this agent has none.
+  const core::MemoryRegion* OrderingEdgeSignalRegion() const;
+
+  // ---- Ordering edge signal slab -------------------------------------------
+
+  /// @brief Size of one slab block.  Not a tuning constant: KFD charges VRAM
+  /// availability in 2 MiB units per device local allocation whatever the size,
+  /// so a smaller block reserves exactly as much and holds less.
+  static constexpr size_t kOrderingEdgeBlockSize = 2 * 1024 * 1024;
+
+  /// @brief Slot stride in bytes.  128 == sizeof(SharedSignal); signal.cpp
+  /// static_asserts the constraints any other value must satisfy.
+  static constexpr size_t kOrderingEdgeDefaultStride = 128;
+
+  /// @brief Take one ordering edge signal slot -- storage for one SharedSignal
+  /// ABI block -- from this agent's slab.  Returns nullptr on failure, writing
+  /// HSA_STATUS_ERROR_INVALID_AGENT through @p why when this agent has no region
+  /// such a block can live in and HSA_STATUS_ERROR_OUT_OF_RESOURCES when the
+  /// allocation failed.  The storage is NOT constructed; the caller placement
+  /// news into it.
+  void* AcquireOrderingEdgeSlot(hsa_status_t* why);
+
+  /// @brief Return a slot to the free list.  The storage stays mapped while the
+  /// agent lives, so a command processor still polling a retired value word reads
+  /// a mapped page; a stale handle aliases a live slot instead of faulting.
+  void ReleaseOrderingEdgeSlot(void* slot);
+
   /// @brief Force a WC flush on PCIe devices by doing a write and then read-back
   __forceinline void PcieWcFlush(void *ptr, size_t size) const {
     if (!xgmi_cpu_gpu_) {
@@ -766,6 +796,23 @@ class GpuAgent : public GpuAgentInt {
   hsa_amd_hdp_flush_t HDP_flush_ = {nullptr, nullptr};
 
  private:
+  // ---- Ordering edge signal slab -------------------------------------------
+  struct OrderingEdgeSlab {
+    std::mutex lock;
+    std::vector<char*> blocks;
+    std::vector<uint32_t> free_slots;
+  };
+  OrderingEdgeSlab edge_slab_;
+
+  // @brief Add one block to the slab and push its slots onto the free list.
+  // Caller holds edge_slab_.lock.  Returns INVALID_AGENT when this agent has no
+  // region such a block can live in, OUT_OF_RESOURCES when the allocation failed.
+  hsa_status_t GrowOrderingEdgeSlab();
+
+  // @brief Free every slab block.  Called from ~GpuAgent only, and before this
+  // agent's memory regions are torn down.
+  void DestroyOrderingEdgeSlab();
+
   // @brief Query the driver to get the region list owned by this agent.
   void InitRegionList();
 
