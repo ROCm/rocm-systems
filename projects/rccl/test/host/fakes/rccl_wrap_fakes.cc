@@ -81,8 +81,8 @@ bool rcclIsArchSupportedForFunc(struct ncclTaskColl*, char const*) {
   return g_rcclIsArchSupportedForFunc;
 }
 
-bool g_rcclCeAllReduceAllowed = false;
-bool rcclCeAllReduceAllowed(struct ncclComm*) { return g_rcclCeAllReduceAllowed; }
+bool g_rcclCeArGraphSafe = false;
+bool rcclCeArGraphSafe(struct ncclComm*) { return g_rcclCeArGraphSafe; }
 int g_rcclCeAllReduceGraphLatchTickCalls = 0;
 bool g_rcclCeAllReduceGraphLatchTickLastCapturing = false;
 void rcclCeAllReduceGraphLatchTick(struct ncclComm*, bool ceCapturing) {
@@ -152,7 +152,7 @@ void ResetRcclWrapFakes() {
   g_rcclOverrideProtocolResult = ncclSuccess;
   g_rcclOverrideAlgorithmCalls = 0;
   g_rcclOverrideProtocolCalls = 0;
-  g_rcclCeAllReduceAllowed = false;
+  g_rcclCeArGraphSafe = false;
   g_rcclCeAllReduceGraphLatchTickCalls = 0;
   g_rcclCeAllReduceGraphLatchTickLastCapturing = false;
   g_rcclWarpSpeedSupported = false;
