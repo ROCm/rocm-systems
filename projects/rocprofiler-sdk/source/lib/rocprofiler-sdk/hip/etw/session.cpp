@@ -59,10 +59,23 @@ constexpr ULONG session_flush_timer_s = 1;
 
 constexpr DWORD process_trace_join_timeout_ms = 10000;
 
+constexpr ULONG provider_enable_timeout_ms = 10000;
+
+constexpr DWORD attach_timeout_ms = 5000;
+
 void WINAPI
 event_record_callback(PEVENT_RECORD event_record)
 {
     handle_event(event_record);
+}
+
+// ETW invokes this as soon as ProcessTrace has attached to the session, which is the earliest
+// point at which the provider's events reach this process.
+ULONG WINAPI
+buffer_callback(PEVENT_TRACE_LOGFILEW logfile)
+{
+    if(logfile && logfile->Context) ::SetEvent(static_cast<HANDLE>(logfile->Context));
+    return TRUE;
 }
 
 std::wstring
@@ -114,15 +127,19 @@ public:
 private:
     rocprofiler_status_t    open();
     void                    close();
+    void                    close_trace();
     EVENT_TRACE_PROPERTIES* properties();
 
     std::mutex             m_mutex      = {};
     uint32_t               m_ref_count  = 0;
     std::wstring           m_name       = {};
     std::vector<std::byte> m_properties = {};
-    TRACEHANDLE            m_session    = 0;
-    TRACEHANDLE            m_trace      = INVALID_PROCESSTRACE_HANDLE;
-    std::thread            m_thread     = {};
+    // ProcessTrace reads this back out of the handle, so it has to outlive open().
+    EVENT_TRACE_LOGFILEW m_logfile  = {};
+    HANDLE               m_attached = nullptr;
+    TRACEHANDLE          m_session  = 0;
+    TRACEHANDLE          m_trace    = INVALID_PROCESSTRACE_HANDLE;
+    std::thread          m_thread   = {};
 };
 
 EVENT_TRACE_PROPERTIES*
@@ -163,25 +180,26 @@ trace_session::open()
 
     auto process_id = static_cast<ULONG>(::GetCurrentProcessId());
 
-    auto pid_filter = EVENT_FILTER_DESCRIPTOR{};
-    pid_filter.Ptr  = reinterpret_cast<ULONGLONG>(&process_id);
-    pid_filter.Size = sizeof(process_id);
-    pid_filter.Type = EVENT_FILTER_TYPE_PID;
+    // No kernel-side EVENT_FILTER_TYPE_PID scope filter: it caps at eight processes, it was
+    // measured here to stall the enable and cost the first event of the trace, and the decode
+    // callback has to re-check EVENT_HEADER::ProcessId regardless.
+    auto params    = ENABLE_TRACE_PARAMETERS{};
+    params.Version = ENABLE_TRACE_PARAMETERS_VERSION_2;
 
-    auto params             = ENABLE_TRACE_PARAMETERS{};
-    params.Version          = ENABLE_TRACE_PARAMETERS_VERSION_2;
-    params.EnableFilterDesc = &pid_filter;
-    params.FilterDescCount  = 1;
-
+    // A non-zero timeout makes the enable synchronous: it returns only once every already
+    // running provider has processed the notification. Without it a short-lived application can
+    // finish its HIP calls before the provider observes that anyone is listening.
     error = ::EnableTraceEx2(m_session,
                              &provider_guid,
                              EVENT_CONTROL_CODE_ENABLE_PROVIDER,
                              TRACE_LEVEL_VERBOSE,
                              0,
                              0,
-                             0,
+                             provider_enable_timeout_ms,
                              &params);
-    if(error != ERROR_SUCCESS)
+    // ERROR_TIMEOUT only means some provider callback was slow to acknowledge; the provider is
+    // enabled either way.
+    if(error != ERROR_SUCCESS && error != ERROR_TIMEOUT)
     {
         close();
         return map_control_error(error, "EnableTraceEx2");
@@ -189,12 +207,16 @@ trace_session::open()
 
     set_process_filter(process_id);
 
-    auto logfile                = EVENT_TRACE_LOGFILEW{};
-    logfile.LoggerName          = m_name.data();
-    logfile.ProcessTraceMode    = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD;
-    logfile.EventRecordCallback = &event_record_callback;
+    m_attached = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
 
-    m_trace = ::OpenTraceW(&logfile);
+    m_logfile                     = EVENT_TRACE_LOGFILEW{};
+    m_logfile.LoggerName          = m_name.data();
+    m_logfile.ProcessTraceMode    = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD;
+    m_logfile.EventRecordCallback = &event_record_callback;
+    m_logfile.BufferCallback      = &buffer_callback;
+    m_logfile.Context             = m_attached;
+
+    m_trace = ::OpenTraceW(&m_logfile);
     if(m_trace == INVALID_PROCESSTRACE_HANDLE)
     {
         auto open_error = ::GetLastError();
@@ -208,7 +230,31 @@ trace_session::open()
             << "ProcessTrace returned " << error_v;
     }};
 
+    // Real-time delivery only starts once ProcessTrace has attached, so returning before that
+    // loses the events of an application that finishes its work in the interim.
+    if(m_attached != nullptr)
+    {
+        ROCP_CI_LOG_IF(WARNING,
+                       ::WaitForSingleObject(m_attached, attach_timeout_ms) != WAIT_OBJECT_0)
+            << "the ETW consumer did not attach within " << attach_timeout_ms
+            << " ms; the beginning of the trace may be missing";
+    }
+
     return ROCPROFILER_STATUS_SUCCESS;
+}
+
+void
+trace_session::close_trace()
+{
+    if(m_trace == INVALID_PROCESSTRACE_HANDLE) return;
+
+    // A real-time session reports ERROR_CTX_CLOSE_PENDING when ProcessTrace has yet to drain;
+    // that is the documented success path, not a failure.
+    auto error = ::CloseTrace(m_trace);
+    ROCP_WARNING_IF(error != ERROR_SUCCESS && error != ERROR_CTX_CLOSE_PENDING)
+        << "CloseTrace failed with " << error;
+
+    m_trace = INVALID_PROCESSTRACE_HANDLE;
 }
 
 void
@@ -227,22 +273,24 @@ trace_session::close()
         m_session = 0;
     }
 
-    if(m_trace != INVALID_PROCESSTRACE_HANDLE)
-    {
-        // A real-time session reports ERROR_CTX_CLOSE_PENDING when ProcessTrace has yet to
-        // drain; that is the documented success path, not a failure.
-        auto error = ::CloseTrace(m_trace);
-        ROCP_WARNING_IF(error != ERROR_SUCCESS && error != ERROR_CTX_CLOSE_PENDING)
-            << "CloseTrace failed with " << error;
-
-        m_trace = INVALID_PROCESSTRACE_HANDLE;
-    }
-
     if(m_thread.joinable())
     {
         auto* handle = static_cast<HANDLE>(m_thread.native_handle());
 
-        if(::WaitForSingleObject(handle, process_trace_join_timeout_ms) == WAIT_OBJECT_0)
+        // Stopping the session is what hands the flushed buffers to ProcessTrace, and
+        // ProcessTrace returns on its own once it has delivered them. Waiting for that before
+        // CloseTrace is what keeps the tail of the trace; closing first truncates it.
+        auto exited =
+            (::WaitForSingleObject(handle, process_trace_join_timeout_ms) == WAIT_OBJECT_0);
+
+        if(!exited)
+        {
+            close_trace();
+            exited =
+                (::WaitForSingleObject(handle, process_trace_join_timeout_ms) == WAIT_OBJECT_0);
+        }
+
+        if(exited)
         {
             m_thread.join();
         }
@@ -254,6 +302,14 @@ trace_session::close()
                                  << process_trace_join_timeout_ms << " ms; detaching";
             m_thread.detach();
         }
+    }
+
+    close_trace();
+
+    if(m_attached != nullptr)
+    {
+        ::CloseHandle(m_attached);
+        m_attached = nullptr;
     }
 
     m_properties.clear();

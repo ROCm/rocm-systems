@@ -149,11 +149,31 @@ get_pending_order()
     return _v;
 }
 
+// TraceLogging leaves EVENT_DESCRIPTOR zeroed, so hip_api_enter and hip_api_exit are
+// indistinguishable by id/version/opcode. What does distinguish them is the self-describing
+// metadata blob ETW attaches to every event, which is a verbatim copy of a static structure in
+// the provider and therefore identical across all events of one type. Hashing it yields exactly
+// one cache entry per event type. Returns 0 when the event carries no TraceLogging metadata,
+// which read_event_schema then rejects.
 uint64_t
-get_schema_key(const EVENT_DESCRIPTOR& desc)
+get_schema_key(const EVENT_RECORD* event_record)
 {
-    return (static_cast<uint64_t>(desc.Id) << 32U) | (static_cast<uint64_t>(desc.Version) << 16U) |
-           static_cast<uint64_t>(desc.Opcode);
+    for(auto i = 0U; i < event_record->ExtendedDataCount; ++i)
+    {
+        const auto& item = event_record->ExtendedData[i];  // NOLINT
+
+        if(item.ExtType != EVENT_HEADER_EXT_TYPE_EVENT_SCHEMA_TL) continue;
+
+        const auto* data = reinterpret_cast<const uint8_t*>(item.DataPtr);
+        auto        hash = uint64_t{0xcbf29ce484222325};
+
+        for(auto j = 0U; j < item.DataSize; ++j)
+            hash = (hash ^ data[j]) * uint64_t{0x100000001b3};  // NOLINT
+
+        return hash;
+    }
+
+    return 0;
 }
 
 event_schema
@@ -349,7 +369,7 @@ handle_event(const EVENT_RECORD* event_record)
     if(event_record->EventHeader.ProcessId != get_process_filter()) return;
 
     auto& schemas = get_schemas();
-    auto  key     = get_schema_key(event_record->EventHeader.EventDescriptor);
+    auto  key     = get_schema_key(event_record);
     auto  itr     = schemas.find(key);
 
     if(itr == schemas.end()) itr = schemas.emplace(key, read_event_schema(event_record)).first;

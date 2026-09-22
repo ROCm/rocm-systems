@@ -391,6 +391,18 @@ stop_context(rocprofiler_context_id_t idx)
         const context* _expected = itr.load(std::memory_order_acquire);
         if(_expected && _expected->context_idx == idx.handle)
         {
+            // Draining has to happen while the context is still in the active array: the ETW
+            // consumer delivers the tail of the trace during teardown, and those records are
+            // emplaced against whichever contexts are active at that moment. Refcounted and a
+            // no-op off Windows.
+            if(_expected->is_tracing_one_of(ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
+                                            ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
+                                            ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
+                                            ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API))
+            {
+                rocprofiler::hip::etw::stop_session();
+            }
+
             bool success = itr.compare_exchange_strong(_expected, nullptr);
 
             if(success)
@@ -424,14 +436,6 @@ stop_context(rocprofiler_context_id_t idx)
                     rocprofiler::pc_sampling::stop_service(_expected);
                 }
 #endif
-
-                if(_expected->is_tracing_one_of(ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
-                                                ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
-                                                ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
-                                                ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API))
-                {
-                    rocprofiler::hip::etw::stop_session();
-                }
 
                 return ROCPROFILER_STATUS_SUCCESS;
             }
