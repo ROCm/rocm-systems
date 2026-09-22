@@ -1019,7 +1019,6 @@ bool Vop3::has_encoded_literal32() const {
   case 647:
   case 648:
   case 649:
-  case 865:
     return inst_.src0 == 255;
   case 1:
   case 2:
@@ -1263,6 +1262,7 @@ bool Vop3::has_encoded_literal32() const {
   case 830:
   case 833:
   case 834:
+  case 865:
   case 866:
   case 867:
   case 868:
@@ -1355,6 +1355,8 @@ bool Vop3::has_encoded_literal32() const {
   case 622:
   case 623:
     return inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255;
+  case 864:
+    return inst_.src1 == 255;
   case 603:
   case 604:
     return inst_.src1 == 255 || inst_.src2 == 255;

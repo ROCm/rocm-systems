@@ -44,7 +44,7 @@ from amdisa.fieldless_policy import (
     fieldless_policy,
     operand_participates,
 )
-from amdisa.semantics import InstructionSemantics, SemanticsSpec
+from amdisa.semantics import F32_TO_INTEGER_DTYPES, InstructionSemantics, SemanticsSpec
 from amdisa.isa_profile import DppOpcodeRule
 
 from amdisa.codegen.config import CodegenConfig
@@ -182,6 +182,7 @@ _LITERAL_CAPABLE_OPERAND_TYPES = frozenset(
         'OPR_SREG_LITERAL',
         'OPR_SSRC',
         'OPR_SSRC_NOLDS',
+        'OPR_SSRC_LANESEL',
     }
 )
 
@@ -419,6 +420,9 @@ class CodeGenerator:
         self.shared_plan = shared_plan
         # Keyed by (mnemonic, enc_name) to avoid cross-encoding conflicts.
         self._shared_execute_bodies: dict[tuple[str, str], tuple] = {}
+        # Preflight must see scalar candidates even when a local SIMD probe
+        # later replaces the shared call for this ISA.
+        self._shared_execute_candidates: dict[tuple[str, str], tuple] = {}
         # Canonical fixed encoding value per fieldless operand type, computed
         # lazily from the spec's selectors on first use (see
         # _fieldless_canonical_value).
@@ -937,6 +941,47 @@ class CodeGenerator:
             and opnd.name == 'src2'
             and opnd.operand_type == 'OPR_SRC_VGPR_OR_INLINE'
         )
+
+    @staticmethod
+    def _sdwa_result_format(sem: InstructionSemantics | None) -> str:
+        """Return the C++ result format for numerical SDWA output modifiers.
+
+        Conversion types may describe both source and destination, or omit the
+        type for byte conversions. Their mnemonic explicitly names the result
+        format. Integer-destination conversions can use CLAMP for an exception
+        control, so the floating source type must not enable output modifiers.
+        """
+        # FP8/BF8 expansion uses SDWA only for source register/byte selection.
+        # CDNA3 section 7.2 and CDNA4 section 7.3 ignore the other SDWA fields.
+        if sem and sem.name in ('V_CVT_F32_FP8', 'V_CVT_F32_BF8'):
+            return 'amdgpu::sdwa::ResultFormat::NONE'
+        if sem and (conversion := re.match(r'^V_CVT_(F16|F32)_', sem.name)):
+            return f'amdgpu::sdwa::ResultFormat::{conversion.group(1)}'
+        if sem and sem.operation in (
+            'frexp_exp_f32',
+            'frexp_exp_f16',
+            'cvt_norm_i16_f16',
+            'cvt_norm_u16_f16',
+        ):
+            return 'amdgpu::sdwa::ResultFormat::NONE'
+        if sem and (
+            sem.name == 'V_PK_FMAC_F16'
+            or sem.semantic_class == 'vector_cvt_pkrtz_f16_f32'
+        ):
+            return 'amdgpu::sdwa::ResultFormat::PK_F16'
+        suffix = {'f16': 'F16', 'f32': 'F32'}.get(
+            sem.data_type if sem else None, 'NONE'
+        )
+        return f'amdgpu::sdwa::ResultFormat::{suffix}'
+
+    @staticmethod
+    def _apply_sdwa_f16_omod(body: str, instruction: str) -> str:
+        """Apply SDWA OMOD at the F16 producer, before result narrowing."""
+        body = body.replace(
+            'util::f32_to_f16_mode(',
+            f'amdgpu::sdwa::round_f16_result({instruction}, wf, ',
+        )
+        return body
 
     @staticmethod
     def _sdwa_source_modifier_format(
@@ -2476,6 +2521,10 @@ class CodeGenerator:
                   amdgpu::RegisterAccess(wf).write_lane(*y_.dst, lane, y_result32);
               }
             ''')
+        execute_impl_body = (
+            f'  if (amdgpu::try_execute_vopd_simd<{str(has_vopd3).lower()}>(x_, y_, wf)) return;\n'
+            + execute_impl_body
+        )
         vopd_execute_slot_cases = join_cases(
             vopd_execute_slot_cases, vopd3_execute_slot_cases
         )
@@ -2615,13 +2664,7 @@ class CodeGenerator:
             }
 
             uint32_t Vopd::bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table) {
-              uint32_t result = 0;
-              for (uint32_t bit = 0; bit < 32; ++bit) {
-                uint32_t idx = (((src0 >> bit) & 1u) << 2) |
-                               (((src1 >> bit) & 1u) << 1);
-                result |= ((truth_table >> idx) & 1u) << bit;
-              }
-              return result;
+              return amdgpu::bitop3_words(src0, src1, uint32_t{0}, static_cast<uint8_t>(truth_table));
             }
             @VOPD3_F64_HELPERS@
 
@@ -6163,21 +6206,32 @@ class CodeGenerator:
                     and dtype in ('b16', 'u16')
                 )
                 is_float_op = dtype in ('f16', 'f32', 'f64', 'bf16')
+                is_integer_to_f32 = cls == 'vector_unary' and dtype in (
+                    'f32_i32',
+                    'f32_u32',
+                    'f32_ubyte0',
+                    'f32_ubyte1',
+                    'f32_ubyte2',
+                    'f32_ubyte3',
+                )
+                is_f32_to_integer = (
+                    cls == 'vector_unary' and dtype in F32_TO_INTEGER_DTYPES
+                )
                 if (
                     is_vop3
-                    and is_float_op
+                    and (is_float_op or is_integer_to_f32 or is_f32_to_integer)
                     and not is_true16_mov
                     and cls != 'pseudo_scalar_unary'
                 ):
                     from amdisa.sema_enrich import enrich_block
 
-                    ef = {'neg'}
-                    if has_abs:
+                    ef = set() if is_integer_to_f32 else {'neg'}
+                    if has_abs and not is_integer_to_f32:
                         ef.add('abs')
                     inst_fields = getattr(self, '_current_inst_fields', set())
-                    if 'clamp' in inst_fields:
+                    if 'clamp' in inst_fields and not is_f32_to_integer:
                         ef.add('clamp')
-                    if 'omod' in inst_fields:
+                    if 'omod' in inst_fields and not is_f32_to_integer:
                         ef.add('omod')
                     sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
                 # Preserve 6470's scalar_saveexec -> b64 dtype fix. Per-operand
@@ -6500,7 +6554,7 @@ class CodeGenerator:
                         'amdgpu::fp_mode::effective_f16_omod(\n'
                         '        wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod)'
                         if is_vop3
-                        else '0u'
+                        else 'amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::F16>(*this, wf)'
                     )
                     clamp = 'inst_.clamp' if is_vop3 else 'false'
                     return (
@@ -9338,6 +9392,14 @@ class CodeGenerator:
             vop3p_local_simd_probe_line,
         )
 
+        if self.isa_spec.profile.generated_dir_name == 'cdna5':
+            mixed = {
+                'v_fma_mix_f32': 'F32',
+                'v_fma_mixlo_f16': 'F16_LO',
+                'v_fma_mixhi_f16': 'F16_HI',
+            }.get(inst.mnemonic)
+            if mixed:
+                return f'  ROCJITSU_TRY_SIMD_FUSED_MIX({mixed});'
         return vop3p_local_simd_probe_line(
             f'{inst.mnemonic}_{enc_key}',
             self.isa_spec.profile.vop3p_opsel_fields,
@@ -9592,6 +9654,9 @@ class CodeGenerator:
             lo = enum_values[pattern.min_enum]
             hi = enum_values[pattern.max_enum]
             intervals.append((min(lo, hi), max(lo, hi)))
+
+        if operand_type == 'OPR_SSRC_LANESEL':
+            intervals.extend(self.isa_spec.profile.extra_lane_selector_intervals)
 
         merged: list[tuple[int, int]] = []
         for lo, hi in sorted(intervals):
@@ -10497,6 +10562,76 @@ class CodeGenerator:
                             f'if (reinterpret_cast<const {factory_op_encoding}*>(inst)->seg != '
                             f'{inst.required_flat_segment}u) [[unlikely]] return emit_error.emit() '
                             f'<< "{inst.name} requires its GLOBAL segment";'
+                        )
+
+                    # Public LLVM defines gfx1251's F64 WMMA as a wave32
+                    # v16x16 destination/accumulator tuple and v4 A/B tuples.
+                    # The low OPSEL bits and NEG_HI A/B bits are reserved for
+                    # this profile; OPSEL[2]/OPSEL_HI_2 are the only matrix
+                    # reuse hints. VISrc_512_f64 admits the standard integer
+                    # and FP64 inline-selector ranges.
+                    if inst.name == 'V_WMMA_F64_16X16X4_F64':
+                        raw_inst = (
+                            f'reinterpret_cast<const {factory_op_encoding}*>(inst)'
+                        )
+                        factory_validation_parts.append(
+                            f'if (({raw_inst}->opsel & 0x3u) != 0u || '
+                            f'{raw_inst}->opsel_hi != 3u) '
+                            f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                            'F64 WMMA element layout";'
+                        )
+                        factory_validation_parts.append(
+                            f'if ({raw_inst}->clamp != 0u || '
+                            f'({raw_inst}->neg_hi & 0x3u) != 0u) '
+                            f'[[unlikely]] return emit_error.emit() << "{inst.name} has unsupported '
+                            'modifier bits";'
+                        )
+                        factory_validation_parts.append(
+                            f'if ({raw_inst}->vdst > 240u) '
+                            f'[[unlikely]] return emit_error.emit() << "{inst.name} has a vdst '
+                            'register tuple that exceeds the selector range";'
+                        )
+                        factory_validation_parts.append(
+                            f'if (({raw_inst}->vdst & 1u) != 0u) '
+                            f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                            'vdst register tuple alignment";'
+                        )
+                        for src_name in ('src0', 'src1'):
+                            # Keep the src0 DPP markers alive until the common
+                            # DPP validation below so malformed extension forms
+                            # receive the intended diagnostic. Every other A/B
+                            # operand must be a four-register VGPR tuple.
+                            dpp_exclusion = ''
+                            if src_name == 'src0':
+                                dpp_exclusion = (
+                                    f'!({raw_inst}->src0 == amdgpu::SRC_DPP || '
+                                    f'amdgpu::dpp::is_src_dpp8({raw_inst}->src0)) && '
+                                )
+                            factory_validation_parts.append(
+                                f'if ({dpp_exclusion}({raw_inst}->{src_name} < 256u || '
+                                f'{raw_inst}->{src_name} > 508u)) '
+                                f'[[unlikely]] return emit_error.emit() << "{inst.name} has a '
+                                f'{src_name} register tuple outside the selector range";'
+                            )
+                            factory_validation_parts.append(
+                                f'if ({dpp_exclusion}({raw_inst}->{src_name} & 1u) != 0u) '
+                                f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                                f'{src_name} register tuple alignment";'
+                            )
+                        valid_inline = (
+                            f'({raw_inst}->src2 >= 128u && {raw_inst}->src2 <= 208u) || '
+                            f'({raw_inst}->src2 >= 240u && {raw_inst}->src2 <= 248u)'
+                        )
+                        factory_validation_parts.append(
+                            f'if (!({valid_inline}) && '
+                            f'({raw_inst}->src2 < 256u || {raw_inst}->src2 > 496u)) '
+                            f'[[unlikely]] return emit_error.emit() << "{inst.name} requires a '
+                            'legal inline accumulator or 16-register VGPR tuple";'
+                        )
+                        factory_validation_parts.append(
+                            f'if (!({valid_inline}) && ({raw_inst}->src2 & 1u) != 0u) '
+                            f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                            'src2 register tuple alignment";'
                         )
 
                     # LLVM's public gfx1251 profiles define the packed U64 and
@@ -12003,24 +12138,23 @@ class CodeGenerator:
                                         '    wf.set_vcc_raw(dpp_old_vcc_);\n'
                                         '  }\n'
                                     )
-                        _apply_float_sdwa_clamp = bool(
-                            sem and sem.data_type in ('f16', 'f32', 'f64')
-                        )
-                        _clamp_template_arg = (
-                            'true' if _apply_float_sdwa_clamp else 'false'
-                        )
+                        _result_format = self._sdwa_result_format(sem)
                         _local_body = body
+                        if _result_format == 'amdgpu::sdwa::ResultFormat::F16':
+                            _local_body = self._apply_sdwa_f16_omod(
+                                _local_body, '*this'
+                            )
                         _local_body = re.sub(
                             r'amdgpu::RegisterAccess\(wf\)\.write_lane\(\s*'
                             r'([A-Za-z_][A-Za-z0-9_]*),\s*lane,\s*',
-                            rf'amdgpu::sdwa::write_lane<{_clamp_template_arg}>'
+                            rf'amdgpu::sdwa::write_lane<{_result_format}>'
                             r'(*this, wf, \1, lane, ',
                             _local_body,
                         )
                         _local_body = re.sub(
                             r'amdgpu::RegisterAccess\(wf\)\.write_lane64\(\s*'
                             r'([A-Za-z_][A-Za-z0-9_]*),\s*lane,\s*',
-                            rf'amdgpu::sdwa::write_lane64<{_clamp_template_arg}>'
+                            rf'amdgpu::sdwa::write_lane64<{_result_format}>'
                             r'(*this, wf, \1, lane, ',
                             _local_body,
                         )
@@ -12050,6 +12184,10 @@ class CodeGenerator:
                         _portable_probe = self._can_force_shared_simd_probe(
                             inst, enc.enc_name
                         )
+                        if not body_throws and (can_share or _portable_probe):
+                            self._shared_execute_candidates[
+                                (inst.mnemonic, enc.enc_name)
+                            ] = (inst, sem, body, enc.enc_name, body_true16_vop3)
                         _local_true16_probe = self._true16_vop3_local_simd_probe(
                             inst,
                             sem,
@@ -12060,7 +12198,47 @@ class CodeGenerator:
                             inst, enc.enc_name
                         )
                         assert not (_local_true16_probe and _renamed_vop3p_probe)
-                        _local_simd_probe = _local_true16_probe or _renamed_vop3p_probe
+                        from amdisa.codegen.execute.simd_codegen import (
+                            local_coverage_probe,
+                        )
+
+                        _coverage_probe = (
+                            local_coverage_probe(
+                                f'{inst.mnemonic}_{enc.enc_name.lower().replace("enc_", "")}',
+                                true16_vop3=self._uses_true16_vop3_execute(
+                                    inst, enc.enc_name
+                                ),
+                                e32=(
+                                    self.isa_spec.profile.uses_packed_16bit_e32_source_selectors
+                                    and enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2')
+                                    and any(op.size == 16 for op in inst.operands)
+                                ),
+                                e32_half_dst=any(
+                                    op.is_output and op.size == 16
+                                    for op in inst.operands
+                                ),
+                                e32_half_inputs=sum(
+                                    1 << i
+                                    for i, name in enumerate(('src0', 'vsrc1'))
+                                    if any(
+                                        op.name == name and op.size == 16
+                                        for op in inst.operands
+                                    )
+                                ),
+                                cmpx_writes_vcc=self.isa_spec.profile.cmpx_writes_vcc,
+                                result_writer=_mask_result_writer,
+                            )
+                            if self.generated_dir_name in ('cdna5', 'cdna4', 'rdna4')
+                            else None
+                        )
+                        if _coverage_probe:
+                            can_share = False
+                            _portable_probe = False
+                        _local_simd_probe = (
+                            _coverage_probe
+                            or _local_true16_probe
+                            or _renamed_vop3p_probe
+                        )
                         _local_simd_probe_body = ''
                         _local_scalar_body = _local_body
                         _local_execute_body = _local_scalar_body
@@ -13342,6 +13520,17 @@ class CodeGenerator:
             prefixed_body = _re.sub(
                 r'(?<!\.)(?<!\w)mnemonic\(\)', 'inst.mnemonic()', prefixed_body
             )
+            if self._sdwa_result_format(sem) == 'amdgpu::sdwa::ResultFormat::F16':
+                prefixed_body = self._apply_sdwa_f16_omod(prefixed_body, 'inst')
+            if sem.data_type == 'f16':
+                for result_format in ('F16', 'PK_F16'):
+                    helper = (
+                        'amdgpu::sdwa::output_modifier<'
+                        f'amdgpu::sdwa::ResultFormat::{result_format}>'
+                    )
+                    prefixed_body = prefixed_body.replace(
+                        f'{helper}(*this, wf)', f'{helper}(inst, wf)'
+                    )
             prefixed_body = prefixed_body.replace(
                 'amdgpu::vop3_fp8_decode_e5m3(*this)',
                 'amdgpu::vop3_fp8_decode_e5m3(inst)',
@@ -13349,19 +13538,17 @@ class CodeGenerator:
             prefixed_body = _re.sub(
                 r'\s*\(void\)wf;\s*(?://[^\n]*)?\n?', '\n', prefixed_body
             )
-            clamp_template_arg = (
-                'true' if sem.data_type in ('f16', 'f32', 'f64') else 'false'
-            )
+            result_format = self._sdwa_result_format(sem)
             prefixed_body = _re.sub(
                 r'amdgpu::RegisterAccess\(wf\)\.write_lane\(\s*'
                 r'(inst\.[A-Za-z_][A-Za-z0-9_]*),\s*lane,\s*',
-                rf'sdwa::write_lane<{clamp_template_arg}>' r'(inst, wf, \1, lane, ',
+                rf'sdwa::write_lane<{result_format}>' r'(inst, wf, \1, lane, ',
                 prefixed_body,
             )
             prefixed_body = _re.sub(
                 r'amdgpu::RegisterAccess\(wf\)\.write_lane64\(\s*'
                 r'(inst\.[A-Za-z_][A-Za-z0-9_]*),\s*lane,\s*',
-                rf'sdwa::write_lane64<{clamp_template_arg}>' r'(inst, wf, \1, lane, ',
+                rf'sdwa::write_lane64<{result_format}>' r'(inst, wf, \1, lane, ',
                 prefixed_body,
             )
             prefixed_body = prefixed_body.replace(
@@ -14046,6 +14233,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
             case_lines = []
             ref_case_lines = []
+            # Some XML lane-selector ranges stop at 63. Match the inline 64
+            # qualification used by validation and execution for these profiles.
+            if opnd_sel.operand_type == 'OPR_SSRC_LANESEL' and any(
+                lo <= 192 <= hi
+                for lo, hi in self.isa_spec.profile.extra_lane_selector_intervals
+            ):
+                case_lines.append('if (encoding_value_ == 192u) return "64";')
             for pattern in opnd_sel.name_patterns:
                 if pattern.kind == OperandNamePattern.REG_RANGE:
                     case_lines.append(

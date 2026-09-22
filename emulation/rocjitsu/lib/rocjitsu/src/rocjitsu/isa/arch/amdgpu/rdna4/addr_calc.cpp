@@ -11,6 +11,7 @@
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <optional>
@@ -50,6 +51,12 @@ void init_vector_mem_state(amdgpu::Wavefront &wf, amdgpu::VectorMemState &d) {
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
 }
+
+bool buffer_range_exceeds(uint64_t offset, uint32_t payload, uint64_t bound) {
+  return offset > bound || payload > bound - offset;
+}
+
+bool vbuffer_is_format_op(uint32_t op) { return op <= 15 || op == 38 || op == 39; }
 
 } // namespace
 
@@ -179,17 +186,23 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   // GFX12 VBUFFER: rsrc is the first SGPR in the 4-dword resource descriptor,
   // soffset is a 7-bit SGPR/null selector, and ioffset is a signed immediate.
   auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  d.lane_mask = exec;
-  d.exec_mask = exec;
+  init_vector_mem_state(wf, d);
+  uint64_t exec = d.exec_mask;
   const uint32_t sb_sel = inst.rsrc;
   if (!amdgpu::scalar_selector_range_is_backed(wf, sb_sel, 4)) {
     amdgpu::reject_vector_memory_access(d);
     return;
   }
-  uint64_t base_addr =
-      (static_cast<uint64_t>(amdgpu::read_scalar_selector(wf, sb_sel + 1) & 0xFFFF) << 32) |
-      amdgpu::read_scalar_selector(wf, sb_sel);
+  uint32_t srd0 = amdgpu::read_scalar_selector(wf, sb_sel);
+  uint32_t srd1 = amdgpu::read_scalar_selector(wf, sb_sel + 1);
+  uint32_t num_records = amdgpu::read_scalar_selector(wf, sb_sel + 2);
+  uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
+  uint64_t base_addr = (static_cast<uint64_t>(srd1 & 0xFFFF) << 32) | srd0;
+  constexpr std::array<uint32_t, 4> kStrideMultipliers = {1, 4, 8, 32};
+  uint32_t raw_stride = (srd1 >> 16) & 0x3FFF;
+  uint32_t stride = raw_stride * kStrideMultipliers[(srd3 >> 18) & 0x3];
+  uint32_t swizzle_enable = srd1 >> 30;
+  uint32_t oob_select = (srd3 >> 28) & 0x3;
   amdgpu::RegisterAccess regs(cu);
   auto soffset = read_optional_sreg_m0(inst.soffset, wf);
   if (!soffset) {
@@ -199,6 +212,13 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   uint32_t soffset_val = *soffset;
   int64_t ioff = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   assert(!inst.idxen && "Vbuffer idxen not yet supported");
+  assert(d.elem_size != 0 && d.num_elems != 0);
+  const bool per_component =
+      d.num_elems > 1 && d.atomic_op == amdgpu::AtomicOp::NONE && !vbuffer_is_format_op(inst.op);
+  d.element_lane_masks.clear();
+  if (per_component)
+    d.element_lane_masks.assign(d.num_elems, exec);
+  d.lane_mask = 0;
   std::optional<amdgpu::RegisterAccess::VgprReadRegion> voffset_region;
   if (inst.offen)
     voffset_region.emplace(regs.read_vgpr_region(wf.vgpr_alloc().base + inst.vaddr, 1, exec));
@@ -210,7 +230,30 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
       voffset = voffset_region->lane(0, lane);
     }
     uint32_t offset_part = amdgpu::addr_calc::buffer_offset_part(voffset, ioff);
+    bool any_in_bounds = true;
+    if (oob_select == 3) {
+      any_in_bounds = false;
+      const uint32_t components = per_component ? d.num_elems : 1;
+      const uint32_t payload = per_component ? d.elem_size : d.elem_size * d.num_elems;
+      const uint64_t reduced_num_records =
+          soffset_val < num_records ? num_records - soffset_val : 0;
+      for (uint32_t elem = 0; elem < components; ++elem) {
+        const uint64_t component_offset = static_cast<uint64_t>(offset_part) + elem * d.elem_size;
+        const bool oob = swizzle_enable != 0 && stride != 0
+                             ? reduced_num_records == 0 ||
+                                   buffer_range_exceeds(component_offset, payload, stride)
+                             : buffer_range_exceeds(component_offset, payload, reduced_num_records);
+        if (oob && per_component)
+          d.element_lane_masks[elem] &= ~(uint64_t{1} << lane);
+        any_in_bounds |= !oob;
+      }
+    }
+    if (!any_in_bounds) {
+      d.per_lane_addr[lane] = 0;
+      continue;
+    }
     d.per_lane_addr[lane] = base_addr + offset_part + soffset_val;
+    d.lane_mask |= uint64_t{1} << lane;
   }
 }
 

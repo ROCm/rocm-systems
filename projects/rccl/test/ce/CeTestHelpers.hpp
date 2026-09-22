@@ -115,7 +115,7 @@ inline hipError_t ceFillRankScalarFloat(void* buf, size_t nElem, int rank)
 
 // True when NCCL logs indicate the CE AllReduce pipeline ran.
 // Match the execution INFO lines from ncclCeAllReduce(), not the
-// "Skipping CE AllReduce: ..." WARN that rcclUseCeAllReduce() emits
+// "Skipping CE AllReduce: ..." WARN that rcclUseCeAr2Shot() emits
 // when nNodes > 1 (that substring used to fail multi-node EightRanks).
 inline bool ceLogShowsAllReducePath(const std::string& log)
 {
