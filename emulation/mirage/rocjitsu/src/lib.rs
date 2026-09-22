@@ -242,25 +242,23 @@ impl Rocjitsu {
     ) -> Result<InjectionDef> {
         let def = ctx.emulator();
         let config = kmd_config(def, &ctx.runtime_dir)?;
-        // A node container mounts the session's scratch directory and
-        // nothing else, so a config [`kmd_config`] left where it lies is
-        // a host path nothing inside the container can open. Refusing
-        // here names the combination; letting it through produces an
-        // interposer that cannot read its own configuration, inside a
-        // container, with nothing saying why — which is the failure mode
-        // this whole check exists to stop shipping.
-        if ctx.profile.containerize.is_some() && !config.starts_with(&ctx.runtime_dir) {
+        // A node container sees the session's scratch directory, not
+        // arbitrary host files a supplied config names. This checks both
+        // halves: the config itself when `kmd_config` had to leave it
+        // where it lay, and a `dbt_guest.simulator_config` that a
+        // successfully copied config still points at outside the
+        // session. Checking only `config` misses the second one.
+        if ctx.profile.containerize.is_some()
+            && let Some(unreachable) = container_unreachable_config_path(&config, &ctx.runtime_dir)?
+        {
             return Err(MirageError::Other(format!(
                 "rocjitsu: the drop-in config {} cannot be used in a \
-                 containerised session. mirage copies a supplied config into \
-                 the session so the container can reach it, and this one it \
-                 cannot copy without changing what it means: mirage could not \
-                 parse it (rocjitsu also accepts comments, trailing commas and \
-                 unquoted field names) and it names a \
-                 `dbt_guest.simulator_config` beside itself. Run it without \
-                 `--image`, or write the config as strict JSON with an \
-                 absolute `dbt_guest.simulator_config`.",
-                config.display()
+                 containerised session because it depends on {}, which is \
+                 outside the session and is not mounted into the container. \
+                 Run it without `--image`, or use a self-contained config \
+                 with no external `dbt_guest.simulator_config`.",
+                config.display(),
+                unreachable.display(),
             )));
         }
         let emulated_isa = std::fs::read(&config)
@@ -817,8 +815,9 @@ fn spread_thread_allocations_over_gpus(
 enum SimConfig {
     /// A config file of the user's own, named by the drop-in `--config`
     /// option. Already on disk; mirage reads it and copies it into the
-    /// session — byte for byte but for the reference
-    /// [`pin_external_references`] pins — and never writes to it.
+    /// session when it can preserve the meaning of its references —
+    /// byte for byte but for the reference [`pin_external_references`]
+    /// pins — and never writes to the original.
     ///
     /// Always absolute: [`absolute_supplied_config`] settles that at the
     /// boundary, because everything downstream reads this path from
@@ -1126,6 +1125,71 @@ pub fn kmd_config(def: &EmulatorDef, session_dir: &std::path::Path) -> Result<Pa
 /// JSON pointer to the one field in a rocjitsu `SimulationConfig` that
 /// names another file relative to the config's own directory.
 const SIMULATOR_CONFIG_POINTER: &str = "/dbt_guest/simulator_config";
+
+/// A config or one of its dependencies that a node container cannot
+/// open at the host path recorded in the config.
+///
+/// The supervisor bind-mounts `session_dir` at its own host path because
+/// rocjitsu's discovery file and config contents are not rewritten for a
+/// container. A config [`kmd_config`] leaves elsewhere is therefore
+/// unreachable. A config copied under `session_dir` can still name an
+/// external `dbt_guest.simulator_config`; pinning a relative reference
+/// makes that dependency absolute but does not make it part of the
+/// session or mount it.
+///
+/// The dependency exists only when DBT guest mode is enabled with its
+/// simulator backend. `simulator_config` is ignored for a disabled or
+/// hardware-backed DBT block, so those are not rejected merely for
+/// carrying an unused value.
+///
+/// A relative reference is resolved exactly as rocjitsu resolves it:
+/// beside the config that contains it. Empty means the same config and
+/// therefore introduces no dependency.
+fn container_unreachable_config_path(
+    config: &std::path::Path,
+    session_dir: &std::path::Path,
+) -> Result<Option<PathBuf>> {
+    if !config.starts_with(session_dir) {
+        return Ok(Some(config.to_path_buf()));
+    }
+    let bytes = std::fs::read(config).map_err(|e| MirageError::io(config.to_path_buf(), e))?;
+    let parsed: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
+        MirageError::Other(format!(
+            "rocjitsu: could not inspect materialised config {} for \
+             container-visible references: {e}",
+            config.display()
+        ))
+    })?;
+    let dbt = parsed.pointer("/dbt_guest");
+    let enabled = dbt
+        .and_then(|dbt| dbt.get("enabled"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let simulator_backend = dbt
+        .and_then(|dbt| dbt.get("execution_backend"))
+        .is_some_and(|backend| {
+            backend.as_str() == Some("simulator") || backend.as_u64() == Some(1)
+        });
+    if !enabled || !simulator_backend {
+        return Ok(None);
+    }
+    let Some(reference) = parsed
+        .pointer(SIMULATOR_CONFIG_POINTER)
+        .and_then(serde_json::Value::as_str)
+        .filter(|path| !path.is_empty())
+    else {
+        return Ok(None);
+    };
+    let reference = std::path::Path::new(reference);
+    let resolved = if reference.is_absolute() {
+        reference.to_path_buf()
+    } else {
+        config
+            .parent()
+            .map_or_else(|| reference.to_path_buf(), |parent| parent.join(reference))
+    };
+    Ok((!resolved.starts_with(session_dir)).then_some(resolved))
+}
 
 /// A drop-in `--config`'s external reference, pinned to where it was
 /// written rather than to where the copy lands.
@@ -1772,6 +1836,18 @@ mod tests {
         }
     }
 
+    fn containerise(ctx: &mut SessionContext) {
+        ctx.profile.containerize = Some(ContainerizedDef {
+            provider: None,
+            image: "rocm/dev-ubuntu-24.04:latest".to_string(),
+            mounts: Vec::new(),
+            ports: Vec::new(),
+            devices: Vec::new(),
+            groups: Vec::new(),
+            hacks: Vec::new(),
+        });
+    }
+
     /// The interposer this backend would preload, stood in for by a file
     /// that merely exists.
     ///
@@ -2206,21 +2282,106 @@ mod tests {
             tmp.path(),
             "unpinnable-in-container",
         );
-        containerised.profile.containerize = Some(ContainerizedDef {
-            provider: None,
-            image: "rocm/dev-ubuntu-24.04:latest".to_string(),
-            mounts: Vec::new(),
-            ports: Vec::new(),
-            devices: Vec::new(),
-            groups: Vec::new(),
-            hacks: Vec::new(),
-        });
+        containerise(&mut containerised);
         let err = Rocjitsu
             .injection_def_with(&containerised, stand_in_interposer(tmp.path()))
             .expect_err("a config the container cannot reach must be refused")
             .to_string();
         assert!(err.contains("containerised session"), "{err}");
         assert!(err.contains("--image"), "{err}");
+    }
+
+    /// Copying the top-level config into the session does not make files
+    /// it names visible in a node container.
+    ///
+    /// A relative `dbt_guest.simulator_config` is pinned to an absolute
+    /// host path before the copy, and an already-absolute one stays as
+    /// written. Both still point outside the session scratch directory,
+    /// which is the only path mounted at the same spelling inside the
+    /// container. Reject both rather than starting an interposer that
+    /// cannot read the simulator configuration.
+    #[test]
+    fn a_containerised_config_cannot_name_host_only_files() {
+        let _g = mirage_core::paths::test_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(tmp.path());
+
+        let user_dir = tmp.path().join("configs");
+        std::fs::create_dir_all(&user_dir).unwrap();
+        let simulator = user_dir.join("gfx942_cdna3_kmd.json");
+        std::fs::write(&simulator, b"{}").unwrap();
+
+        for (session, reference) in [
+            (
+                "relative-external-in-container",
+                simulator
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            (
+                "absolute-external-in-container",
+                simulator.display().to_string(),
+            ),
+        ] {
+            let config = user_dir.join(format!("{session}.json"));
+            let value = serde_json::json!({
+                "dbt_guest": {
+                    "enabled": true,
+                    "execution_backend": "simulator",
+                    "simulator_config": reference,
+                }
+            });
+            std::fs::write(&config, serde_json::to_vec(&value).unwrap()).unwrap();
+
+            let mut def = def_with_gpus(1);
+            def.options.insert(
+                "config".to_string(),
+                SimpleValue::String(config.display().to_string()),
+            );
+            let mut ctx = ctx_for(def, tmp.path(), session);
+            containerise(&mut ctx);
+
+            let err = Rocjitsu
+                .injection_def_with(&ctx, stand_in_interposer(tmp.path()))
+                .expect_err("an external simulator config is not mounted")
+                .to_string();
+            assert!(err.contains(&simulator.display().to_string()), "{err}");
+            assert!(err.contains("self-contained config"), "{err}");
+        }
+    }
+
+    /// `simulator_config` is not a dependency unless the DBT guest
+    /// simulator backend is active.
+    #[test]
+    fn unused_simulator_config_does_not_refuse_a_container() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join(RJ_CONFIG_NAME);
+        let external = tmp.path().parent().unwrap().join("host.json");
+
+        for dbt in [
+            serde_json::json!({
+                "enabled": false,
+                "execution_backend": "simulator",
+                "simulator_config": external,
+            }),
+            serde_json::json!({
+                "enabled": true,
+                "execution_backend": "hardware",
+                "simulator_config": external,
+            }),
+        ] {
+            std::fs::write(
+                &config,
+                serde_json::to_vec(&serde_json::json!({"dbt_guest": dbt})).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                container_unreachable_config_path(&config, tmp.path()).unwrap(),
+                None
+            );
+        }
     }
 
     /// Nothing may read a session's configuration before bring-up has
