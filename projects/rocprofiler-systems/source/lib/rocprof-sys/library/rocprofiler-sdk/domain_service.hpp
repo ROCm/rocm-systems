@@ -91,19 +91,19 @@ public:
 
     void resume()
     {
-        auto ctx = context();
-        if(SdkBackend::context_is_valid(ctx) && !SdkBackend::context_is_active(ctx))
+        if(SdkBackend::context_is_valid(m_context) &&
+           !SdkBackend::context_is_active(m_context))
         {
-            SdkBackend::start_context(ctx);
+            SdkBackend::start_context(m_context);
         }
     }
 
     void pause()
     {
-        auto ctx = context();
-        if(SdkBackend::context_is_valid(ctx) && SdkBackend::context_is_active(ctx))
+        if(SdkBackend::context_is_valid(m_context) &&
+           SdkBackend::context_is_active(m_context))
         {
-            SdkBackend::stop_context(ctx);
+            SdkBackend::stop_context(m_context);
         }
     }
 
