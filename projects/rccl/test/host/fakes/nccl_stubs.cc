@@ -207,7 +207,7 @@ const char* rcclGitHash = "microtest";
 // under test writes them and no test assigns them. Give one a seam the moment a
 // test starts scripting it, because an unrestored global that a test DOES write
 // is an order-dependent flake.
-// ncclCudaDriverVersionCache is scripted (the RMA append path gates on >= 12050), so it is reset below.
+// ncclCudaDriverVersionCache and ncclProfilerEventMask are scripted by tests, so both are reset below.
 int ncclCudaDriverVersionCache = kDefaultCudaDriverVersion;  // src/misc/cudawrap.cc
 bool ncclCudaLaunchBlocking = false;          // src/misc/cudawrap.cc
 int ncclProfilerEventMask = 0;                // src/profiler.cc
@@ -259,5 +259,6 @@ void ResetNcclStubs() {
   g_rocmVersionPatch = 0;
   g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
   ncclCudaDriverVersionCache = kDefaultCudaDriverVersion;
+  ncclProfilerEventMask = 0;
   ncclDevFuncNameToId.clear();
 }

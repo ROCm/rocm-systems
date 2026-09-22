@@ -38,6 +38,34 @@ constexpr float kNoTimeUs = 0.0f;
 constexpr float kIgnoredEstimateUs = NCCL_TUNING_IGNORE;
 constexpr int kInvalidTuning = 0;
 constexpr int kNeverTunedEntries = 3;
+constexpr int kCommMinCTAs = 2;
+constexpr int kCommMaxCTAs = 16;
+constexpr int kCommNvlsCTAs = 6;
+constexpr int kCommCgaClusterSize = 3;
+constexpr int kSourceEnv = 7;
+constexpr int kSourcePerCall = 5;
+constexpr int kSourceComm = 2;
+constexpr int kResetMinCTAs = 1;
+constexpr int kMaxCtasEnv = 9;
+constexpr int kMaxCtasPerCallBelowComm = 5;
+constexpr int kMaxCtasPerCallAboveComm = 20;
+constexpr int kRejectedMaxCtas = 0;
+constexpr int kRawRoot = 3;
+constexpr uint64_t kRawScalarArg = 0x5A5A5A5A5A5A5A5Aull;
+constexpr int kProfilerEventMask = 0x2A;
+constexpr uint32_t kStampedDevFuncId = 37;
+constexpr uint32_t kUnresolvedDevFuncId = 0;
+constexpr int kTunedMaxChannels = 9;
+constexpr int kTunedWarps = 6;
+constexpr uint64_t kRingSimpleAlgBit = 1ull << 5;
+constexpr uint64_t kAutomaticAlgMask = 0;
+constexpr int kLlTrafficMultiplier = 4;
+constexpr int kSingleNode = 1;
+constexpr int kMultiNode = 2;
+constexpr int kUnsetChannels = 0;
+constexpr char kUnknownAlgSelection[] = "NOT_AN_ALGORITHM";
+constexpr char kRingSimpleAlgSelection[] = "RING_SIMPLE";
+constexpr char kAllReduceOnlyAlgSelection[] = "TREE_SIMPLE";
 
 void* TaskPostTuning_Addr(uintptr_t address) {
   return reinterpret_cast<void*>(address);
@@ -164,6 +192,93 @@ void TaskPostTuning_ExpectSingleTraffic(TaskPostTuning_TrafficFn traffic) {
 void TaskPostTuning_ExpectAlltoAllvGdaTraffic(TaskPostTuning_TrafficFn traffic) {
   EXPECT_EQ(kSingleTrafficPerByte, traffic(ncclFuncAlltoAllvGda, kTrafficRanks));
   EXPECT_EQ(kSingleTrafficPerByte, traffic(ncclFuncAlltoAllvGda, kWideTrafficRanks));
+}
+
+std::function<int64_t(const char*, int64_t)> TaskPostTuning_ParamOverride(const char* wanted, int64_t value) {
+  return [wanted, value](const char* env, int64_t deft) -> int64_t {
+    return std::strcmp(env, wanted) == 0 ? value : deft;
+  };
+}
+
+// Mirrors ncclDevFuncId's general-collective key (device.h); AllReduce never takes the special-cased branches.
+uint64_t TaskPostTuning_DevFuncKey(int coll, int devRedOp, int type, int algo, int proto) {
+  return (static_cast<uint64_t>(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
+         (static_cast<uint64_t>(algo & RCCL_FUNC_ID_MASK) << RCCL_ALGO_SHIFT) |
+         (static_cast<uint64_t>(proto & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT) |
+         (static_cast<uint64_t>(devRedOp & RCCL_FUNC_ID_MASK) << RCCL_REDOP_SHIFT) |
+         (static_cast<uint64_t>(type & RCCL_FUNC_ID_MASK) << RCCL_DTYPE_SHIFT);
+}
+
+void TaskPostTuning_StampDevFuncId(int algo, int proto) {
+  ncclDevFuncNameToId[TaskPostTuning_DevFuncKey(ncclFuncAllReduce, ncclDevSum, ncclFloat32, algo, proto)] =
+    kStampedDevFuncId;
+}
+
+void TaskPostTuning_SetTunerOutput(struct ncclTuningResult_t* out, int algo, int proto) {
+  out->valid = kTunedValid;
+  out->timeUs = kTunedTimeUs;
+  out->algo = algo;
+  out->proto = proto;
+  out->maxChannels = kTunedMaxChannels;
+  out->nWarps = kTunedWarps;
+}
+
+// One raw coll task, a poisoned destination, and a comm whose CTA config carries valid values throughout.
+class TaskPostTuning_CollFill {
+ public:
+  explicit TaskPostTuning_CollFill(ncclFunc_t func = ncclFuncAllReduce, ncclDataType_t datatype = ncclFloat32)
+    : tInfo_(scene_.NewTuningInfo(scene_.NewColl(func, datatype))) {
+    const ncclCollConfig_t unsetConfig = NCCL_COLLCONFIG_INITIALIZER;
+    std::memset(&task_, kPoison, sizeof(task_));
+    tInfo_->raw->coll.collConfig = unsetConfig;
+    scene_.comm()->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+    scene_.comm()->config.minCTAs = kCommMinCTAs;
+    scene_.comm()->config.maxCTAs = kCommMaxCTAs;
+    scene_.comm()->config.nvlsCTAs = kCommNvlsCTAs;
+    scene_.comm()->config.cgaClusterSize = kCommCgaClusterSize;
+  }
+
+  struct ncclComm* comm() { return scene_.comm(); }
+  struct ncclRawTaskColl* raw() { return &tInfo_->raw->coll; }
+  ncclCollConfig_t* config() { return &tInfo_->raw->coll.collConfig; }
+  struct ncclTuningResult_t* tuningOut() { return &tInfo_->tuningOut; }
+  struct ncclTaskColl* task() { return &task_; }
+
+  ncclResult_t Run() { return fillCollTaskFromRaw(comm(), tInfo_, &task_); }
+  ncclResult_t RunApplyTuning() { return applyTuningToCollTask(comm(), tInfo_, &task_); }
+
+ private:
+  TaskPrepScene scene_;
+  struct ncclTaskTuningInfo* tInfo_;
+  struct ncclTaskColl task_;
+};
+
+struct TaskPostTuning_ConfigOption {
+  const char* env;
+  int ncclCollConfig_t::*perCall;
+  int ncclConfig_t::*comm;
+  int ncclTaskColl::*task;
+  int lowerBound;
+  int upperBound;
+};
+
+const TaskPostTuning_ConfigOption kTaskPostTuning_ConfigOptions[] = {
+  {"MIN_CTAS", &ncclCollConfig_t::minCTAs, &ncclConfig_t::minCTAs, &ncclTaskColl::minCTAs, 1, MAXCHANNELS},
+  {"NVLS_NCHANNELS", &ncclCollConfig_t::nvlsCTAs, &ncclConfig_t::nvlsCTAs, &ncclTaskColl::nvlsCTAs, 1, MAXCHANNELS},
+  {"CGA_CLUSTER_SIZE", &ncclCollConfig_t::cgaClusterSize, &ncclConfig_t::cgaClusterSize,
+   &ncclTaskColl::cgaClusterSize, 0, NCCL_MAX_CGA_CLUSTER_SIZE},
+};
+
+// The comm's CTA cap is maxed so that no probe value can trip the separate min > max reset.
+int TaskPostTuning_ResolvedConfigOption(const TaskPostTuning_ConfigOption& option, int64_t envValue,
+                                        int perCallValue, int commValue) {
+  TaskPostTuning_CollFill fill;
+  ScopedHook param(g_loadParam, TaskPostTuning_ParamOverride(option.env, envValue));
+  fill.comm()->config.maxCTAs = MAXCHANNELS;
+  (fill.comm()->config).*option.comm = commValue;
+  fill.config()->*option.perCall = perCallValue;
+  EXPECT_EQ(ncclSuccess, fill.Run()) << option.env;
+  return fill.task()->*option.task;
 }
 
 class TaskPostTuningMicrotest : public TaskPrepFakesFixture {};
@@ -534,6 +649,442 @@ TEST_F(TaskPostTuningMicrotest, Simulation_NeverTunedP2pAndRmaEntries_CurrentlyO
   EXPECT_EQ(ncclSuccess, postTuningSimulation(scene.comm(), &ctq, &sim));
 
   EXPECT_FLOAT_EQ(kFirstTunedTimeUs + kNeverTunedEntries * kIgnoredEstimateUs, sim.estimatedTime);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_AllReduce_CopiesTheRawFieldsAndDerivesTheDependentOnes) {
+  TaskPostTuning_CollFill fill;
+  ncclProfilerEventMask = kProfilerEventMask;
+  fill.raw()->root = kRawRoot;
+  fill.raw()->opHost = ncclProd;
+  fill.raw()->opDev.op = ncclDevProd;
+  fill.raw()->opDev.scalarArg = kRawScalarArg;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  const struct ncclTaskColl* task = fill.task();
+  EXPECT_EQ(ncclFuncAllReduce, task->func);
+  EXPECT_EQ(fill.raw()->sendbuff, task->sendbuff);
+  EXPECT_EQ(fill.raw()->recvbuff, task->recvbuff);
+  EXPECT_EQ(kCount, task->count);
+  EXPECT_EQ(kRawRoot, task->root);
+  EXPECT_EQ(ncclFloat32, task->datatype);
+  EXPECT_EQ(ncclProd, task->opHost);
+  EXPECT_EQ(ncclDevProd, task->opDev.op);
+  EXPECT_EQ(kRawScalarArg, task->opDev.scalarArg);
+  EXPECT_EQ(kCount * sizeof(float) * kAllReduceTrafficPerByte, task->trafficBytes);
+  EXPECT_EQ(ALLREDUCE_CHUNKSTEPS, task->chunkSteps);
+  EXPECT_EQ(ALLREDUCE_SLICESTEPS, task->sliceSteps);
+  EXPECT_EQ(kProfilerEventMask, task->eActivationMask);
+  EXPECT_EQ(nullptr, task->groupApiEventHandle);
+  EXPECT_EQ(nullptr, task->collApiEventHandle);
+  EXPECT_EQ(1, task->forceAlgSelection);
+  EXPECT_EQ(kAutomaticAlgMask, task->algMask);
+  EXPECT_FALSE(task->aggIsolate);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_PoisonedDestination_ClearsTheFieldsTheRawDoesNotSupply) {
+  TaskPostTuning_CollFill fill;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  const struct ncclTaskColl* task = fill.task();
+  EXPECT_EQ(nullptr, task->next);
+  EXPECT_EQ(nullptr, task->acc);
+  EXPECT_EQ(nullptr, task->sizes);
+  EXPECT_EQ(0u, task->opCount);
+  EXPECT_EQ(0, task->regBufType);
+  EXPECT_EQ(0u, task->nChannels);
+  EXPECT_EQ(nullptr, task->sendWin);
+  EXPECT_EQ(nullptr, task->recvWin);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_AllGather_RescalesTheCountToBytesAndSwitchesToInt8) {
+  TaskPostTuning_CollFill fill(ncclFuncAllGather);
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(kCount * sizeof(float), fill.task()->count);
+  EXPECT_EQ(ncclInt8, fill.task()->datatype);
+  EXPECT_EQ(kCount * sizeof(float) * kRanks, fill.task()->trafficBytes);
+  EXPECT_EQ(kCount, fill.raw()->count);
+  EXPECT_EQ(ncclFloat32, fill.raw()->datatype);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_Broadcast_RescalesTheCountToBytesAndCountsEachByteOnce) {
+  TaskPostTuning_CollFill fill(ncclFuncBroadcast);
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(kCount * sizeof(float), fill.task()->count);
+  EXPECT_EQ(ncclInt8, fill.task()->datatype);
+  EXPECT_EQ(kCount * sizeof(float) * kSingleTrafficPerByte, fill.task()->trafficBytes);
+  EXPECT_EQ(BROADCAST_CHUNKSTEPS, fill.task()->chunkSteps);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_ReduceScatter_KeepsTheElementCountAndScalesTrafficByRank) {
+  TaskPostTuning_CollFill fill(ncclFuncReduceScatter);
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(kCount, fill.task()->count);
+  EXPECT_EQ(ncclFloat32, fill.task()->datatype);
+  EXPECT_EQ(kCount * sizeof(float) * kRanks, fill.task()->trafficBytes);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_PerCallCtaPolicy_OverridesTheCommPolicyAndIsolatesTheTask) {
+  TaskPostTuning_CollFill fill;
+  fill.config()->CTAPolicy = NCCL_CTA_POLICY_ZERO;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(NCCL_CTA_POLICY_ZERO, fill.task()->CTAPolicy);
+  EXPECT_TRUE(fill.task()->aggIsolate);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_PerCallCtaPolicyAsksForZeroAndEfficiency_KeepsOnlyZero) {
+  TaskPostTuning_CollFill fill;
+  fill.config()->CTAPolicy = NCCL_CTA_POLICY_ZERO | NCCL_CTA_POLICY_EFFICIENCY;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(NCCL_CTA_POLICY_ZERO, fill.task()->CTAPolicy);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_EnvCtaPolicyOverride_IgnoresThePerCallPolicyAndDoesNotIsolate) {
+  TaskPostTuning_CollFill fill;
+  g_envCtaPolicy = NCCL_CTA_POLICY_EFFICIENCY;
+  fill.comm()->config.CTAPolicy = NCCL_CTA_POLICY_EFFICIENCY;
+  fill.config()->CTAPolicy = NCCL_CTA_POLICY_ZERO;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY, fill.task()->CTAPolicy);
+  EXPECT_FALSE(fill.task()->aggIsolate);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_UnsetPerCallCtaPolicy_InheritsTheCommPolicyAndDoesNotIsolate) {
+  TaskPostTuning_CollFill fill;
+  fill.comm()->config.CTAPolicy = NCCL_CTA_POLICY_EFFICIENCY;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY, fill.task()->CTAPolicy);
+  EXPECT_FALSE(fill.task()->aggIsolate);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_PerCallConfigBoundsTheCtaCount_IsolatesTheTaskFromAggregation) {
+  TaskPostTuning_CollFill fill;
+  fill.config()->minCTAs = kSourcePerCall;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_TRUE(fill.task()->aggIsolate);
+  EXPECT_EQ(NCCL_CTA_POLICY_DEFAULT, fill.task()->CTAPolicy);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_NoPerCallConfigAtAll_LeavesTheTaskAggregatable) {
+  TaskPostTuning_CollFill fill;
+  fill.config()->size = 0;
+  fill.config()->minCTAs = kSourcePerCall;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_FALSE(fill.task()->aggIsolate);
+  EXPECT_EQ(kSourcePerCall, fill.task()->minCTAs);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_ConfigOptionEnvInBounds_WinsOverThePerCallAndCommValues) {
+  for (const TaskPostTuning_ConfigOption& option : kTaskPostTuning_ConfigOptions) {
+    EXPECT_EQ(kSourceEnv, TaskPostTuning_ResolvedConfigOption(option, kSourceEnv, kSourcePerCall, kSourceComm))
+      << option.env;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_ConfigOptionEnvAtEitherBound_IsAccepted) {
+  for (const TaskPostTuning_ConfigOption& option : kTaskPostTuning_ConfigOptions) {
+    EXPECT_EQ(option.lowerBound,
+              TaskPostTuning_ResolvedConfigOption(option, option.lowerBound, kSourcePerCall, kSourceComm))
+      << option.env;
+    EXPECT_EQ(option.upperBound,
+              TaskPostTuning_ResolvedConfigOption(option, option.upperBound, kSourcePerCall, kSourceComm))
+      << option.env;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_ConfigOptionEnvOutOfBounds_FallsBackToThePerCallValue) {
+  for (const TaskPostTuning_ConfigOption& option : kTaskPostTuning_ConfigOptions) {
+    EXPECT_EQ(kSourcePerCall,
+              TaskPostTuning_ResolvedConfigOption(option, option.lowerBound - 1, kSourcePerCall, kSourceComm))
+      << option.env;
+    EXPECT_EQ(kSourcePerCall,
+              TaskPostTuning_ResolvedConfigOption(option, option.upperBound + 1, kSourcePerCall, kSourceComm))
+      << option.env;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_ConfigOptionPerCallInBounds_WinsOverTheCommValue) {
+  for (const TaskPostTuning_ConfigOption& option : kTaskPostTuning_ConfigOptions) {
+    EXPECT_EQ(kSourcePerCall, TaskPostTuning_ResolvedConfigOption(option, NCCL_CONFIG_UNDEF_INT, kSourcePerCall,
+                                                                  kSourceComm))
+      << option.env;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_ConfigOptionPerCallOutOfBounds_FallsBackToTheCommValue) {
+  for (const TaskPostTuning_ConfigOption& option : kTaskPostTuning_ConfigOptions) {
+    EXPECT_EQ(kSourceComm, TaskPostTuning_ResolvedConfigOption(option, NCCL_CONFIG_UNDEF_INT, option.lowerBound - 1,
+                                                               kSourceComm))
+      << option.env;
+    EXPECT_EQ(kSourceComm, TaskPostTuning_ResolvedConfigOption(option, NCCL_CONFIG_UNDEF_INT, option.upperBound + 1,
+                                                               kSourceComm))
+      << option.env;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_ConfigOptionUnsetEverywhere_TakesTheCommValue) {
+  for (const TaskPostTuning_ConfigOption& option : kTaskPostTuning_ConfigOptions) {
+    EXPECT_EQ(kSourceComm, TaskPostTuning_ResolvedConfigOption(option, NCCL_CONFIG_UNDEF_INT, NCCL_CONFIG_UNDEF_INT,
+                                                               kSourceComm))
+      << option.env;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_MaxCtasEnvInBounds_WinsOverThePerCallAndCommValues) {
+  TaskPostTuning_CollFill fill;
+  ScopedHook param(g_loadParam, TaskPostTuning_ParamOverride("MAX_CTAS", kMaxCtasEnv));
+  fill.config()->maxCTAs = kMaxCtasPerCallBelowComm;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(kMaxCtasEnv, fill.task()->maxCTAs);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_MaxCtasEnvOutOfBounds_FallsBackToThePerCallValue) {
+  TaskPostTuning_CollFill fill;
+  ScopedHook param(g_loadParam, TaskPostTuning_ParamOverride("MAX_CTAS", MAXCHANNELS + 1));
+  fill.config()->maxCTAs = kMaxCtasPerCallBelowComm;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(kMaxCtasPerCallBelowComm, fill.task()->maxCTAs);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_MaxCtasPerCallBelowTheCommCap_TakesThePerCallValue) {
+  TaskPostTuning_CollFill fill;
+  fill.config()->maxCTAs = kMaxCtasPerCallBelowComm;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(kMaxCtasPerCallBelowComm, fill.task()->maxCTAs);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_MaxCtasPerCallAboveTheCommCap_ClampsToTheCommValue) {
+  TaskPostTuning_CollFill fill;
+  fill.config()->maxCTAs = kMaxCtasPerCallAboveComm;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(kCommMaxCTAs, fill.task()->maxCTAs);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_MaxCtasClampedBelowItsLowerBound_FallsBackToTheCommValue) {
+  TaskPostTuning_CollFill fill;
+  fill.config()->maxCTAs = kRejectedMaxCtas;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(kCommMaxCTAs, fill.task()->maxCTAs);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_MaxCtasUnsetEverywhere_TakesTheCommValue) {
+  TaskPostTuning_CollFill fill;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(kCommMaxCTAs, fill.task()->maxCTAs);
+  EXPECT_EQ(kCommMinCTAs, fill.task()->minCTAs);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_MinCtasAboveMaxCtas_ResetsMinCtasToOne) {
+  TaskPostTuning_CollFill fill;
+  fill.comm()->config.minCTAs = kCommMaxCTAs + 1;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(kResetMinCTAs, fill.task()->minCTAs);
+  EXPECT_EQ(kCommMaxCTAs, fill.task()->maxCTAs);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_MinCtasEqualToMaxCtas_LeavesMinCtasAlone) {
+  TaskPostTuning_CollFill fill;
+  fill.comm()->config.minCTAs = kCommMaxCTAs;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(kCommMaxCTAs, fill.task()->minCTAs);
+  EXPECT_EQ(kCommMaxCTAs, fill.task()->maxCTAs);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_RecognisedAlgSelection_NarrowsTheTaskAlgMaskAndIsolatesTheTask) {
+  TaskPostTuning_CollFill fill;
+  fill.config()->algSelection = kRingSimpleAlgSelection;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(kRingSimpleAlgBit, fill.task()->algMask);
+  EXPECT_TRUE(fill.task()->aggIsolate);
+  EXPECT_EQ(1, fill.task()->forceAlgSelection);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_UnparsableAlgSelectionForcedOn_FailsWithoutNarrowingTheMask) {
+  TaskPostTuning_CollFill fill;
+  fill.config()->algSelection = kUnknownAlgSelection;
+
+  EXPECT_EQ(ncclInvalidArgument, fill.Run());
+
+  EXPECT_EQ(kAutomaticAlgMask, fill.task()->algMask);
+  EXPECT_EQ(ncclFuncAllReduce, fill.task()->func);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_UnparsableAlgSelectionForcedOff_FallsBackToAutomaticSelection) {
+  TaskPostTuning_CollFill fill;
+  fill.config()->algSelection = kUnknownAlgSelection;
+  fill.config()->forceAlgSelection = 0;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(kAutomaticAlgMask, fill.task()->algMask);
+  EXPECT_EQ(0, fill.task()->forceAlgSelection);
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_AlgSelectionValidForAnotherCollective_FailsForThisCollective) {
+  TaskPostTuning_CollFill fill(ncclFuncAllGather);
+  fill.config()->algSelection = kAllReduceOnlyAlgSelection;
+
+  EXPECT_EQ(ncclInvalidArgument, fill.Run());
+
+  EXPECT_EQ(kAutomaticAlgMask, fill.task()->algMask);
+  EXPECT_EQ(ncclFuncAllGather, fill.task()->func);
+}
+
+TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_ValidTunerOutput_AppliesItAndResolvesTheDeviceFunction) {
+  TaskPostTuning_CollFill fill;
+  fill.raw()->opDev.op = ncclDevProd;
+  TaskPostTuning_SetTunerOutput(fill.tuningOut(), NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  ncclDevFuncNameToId[TaskPostTuning_DevFuncKey(ncclFuncAllReduce, ncclDevProd, ncclFloat32, NCCL_ALGO_RING,
+                                                NCCL_PROTO_SIMPLE)] = kStampedDevFuncId;
+
+  ASSERT_EQ(ncclSuccess, fill.RunApplyTuning());
+
+  const struct ncclTaskColl* task = fill.task();
+  EXPECT_EQ(NCCL_ALGO_RING, task->algorithm);
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, task->protocol);
+  EXPECT_EQ(kTunedMaxChannels, task->nMaxChannels);
+  EXPECT_EQ(kTunedWarps, task->nWarps);
+  EXPECT_EQ(kStampedDevFuncId, task->devFuncId);
+  EXPECT_EQ(0u, task->isNvls);
+  EXPECT_EQ(0u, task->isCollnet);
+  EXPECT_EQ(kCount * sizeof(float) * kAllReduceTrafficPerByte, task->trafficBytes);
+}
+
+TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_EveryAlgorithm_SetsTheNvlsAndCollnetFlagsThatAlgorithmNeeds) {
+  const struct {
+    int algo;
+    int nNodes;
+    bool isOneRPN;
+    unsigned isNvls;
+    unsigned isCollnet;
+  } kCases[] = {
+    {NCCL_ALGO_NVLS, kSingleNode, true, 1u, 0u},
+    {NCCL_ALGO_NVLS, kMultiNode, true, 1u, 1u},
+    {NCCL_ALGO_NVLS_TREE, kSingleNode, true, 1u, 0u},
+    {NCCL_ALGO_NVLS_TREE, kMultiNode, true, 1u, 0u},
+    {NCCL_ALGO_PAT, kSingleNode, true, 0u, 0u},
+    {NCCL_ALGO_PAT, kMultiNode, false, 1u, 0u},
+    {NCCL_ALGO_COLLNET_CHAIN, kMultiNode, true, 0u, 1u},
+    {NCCL_ALGO_COLLNET_DIRECT, kMultiNode, true, 0u, 1u},
+    {NCCL_ALGO_TREE, kMultiNode, true, 0u, 0u},
+    {NCCL_ALGO_RING, kSingleNode, false, 0u, 0u},
+  };
+
+  for (const auto& testCase : kCases) {
+    TaskPostTuning_CollFill fill;
+    fill.comm()->nNodes = testCase.nNodes;
+    fill.comm()->isOneRPN = testCase.isOneRPN;
+    TaskPostTuning_SetTunerOutput(fill.tuningOut(), testCase.algo, NCCL_PROTO_SIMPLE);
+    TaskPostTuning_StampDevFuncId(testCase.algo, NCCL_PROTO_SIMPLE);
+
+    ASSERT_EQ(ncclSuccess, fill.RunApplyTuning()) << "algo " << testCase.algo;
+
+    EXPECT_EQ(testCase.isNvls, fill.task()->isNvls)
+      << "algo " << testCase.algo << " nNodes " << testCase.nNodes << " isOneRPN " << testCase.isOneRPN;
+    EXPECT_EQ(testCase.isCollnet, fill.task()->isCollnet)
+      << "algo " << testCase.algo << " nNodes " << testCase.nNodes << " isOneRPN " << testCase.isOneRPN;
+    EXPECT_EQ(kStampedDevFuncId, fill.task()->devFuncId) << "algo " << testCase.algo;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_LatencyProtocol_QuadruplesTheTrafficEstimate) {
+  TaskPostTuning_CollFill fill;
+  TaskPostTuning_SetTunerOutput(fill.tuningOut(), NCCL_ALGO_RING, NCCL_PROTO_LL);
+  TaskPostTuning_StampDevFuncId(NCCL_ALGO_RING, NCCL_PROTO_LL);
+
+  ASSERT_EQ(ncclSuccess, fill.RunApplyTuning());
+
+  EXPECT_EQ(kCount * sizeof(float) * kAllReduceTrafficPerByte * kLlTrafficMultiplier, fill.task()->trafficBytes);
+  EXPECT_EQ(kStampedDevFuncId, fill.task()->devFuncId);
+}
+
+TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_EveryOtherProtocol_LeavesTheTrafficEstimateAlone) {
+  for (int proto : {NCCL_PROTO_LL128, NCCL_PROTO_SIMPLE}) {
+    TaskPostTuning_CollFill fill;
+    TaskPostTuning_SetTunerOutput(fill.tuningOut(), NCCL_ALGO_RING, proto);
+    TaskPostTuning_StampDevFuncId(NCCL_ALGO_RING, proto);
+
+    ASSERT_EQ(ncclSuccess, fill.RunApplyTuning()) << "proto " << proto;
+
+    EXPECT_EQ(kCount * sizeof(float) * kAllReduceTrafficPerByte, fill.task()->trafficBytes) << "proto " << proto;
+    EXPECT_EQ(kStampedDevFuncId, fill.task()->devFuncId) << "proto " << proto;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_TunerMarkedTheEntryInvalid_ReportsAnInternalError) {
+  TaskPostTuning_CollFill fill;
+  TaskPostTuning_SetTunerOutput(fill.tuningOut(), NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  fill.tuningOut()->valid = kInvalidTuning;
+
+  EXPECT_EQ(ncclInternalError, fill.RunApplyTuning());
+
+  EXPECT_EQ(ncclFuncAllReduce, fill.task()->func);
+  EXPECT_EQ(kUnsetChannels, fill.task()->nMaxChannels);
+  EXPECT_EQ(kUnresolvedDevFuncId, fill.task()->devFuncId);
+}
+
+TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_FillRejectsTheConfig_PropagatesWithoutApplyingTheTunerOutput) {
+  TaskPostTuning_CollFill fill;
+  fill.config()->algSelection = kUnknownAlgSelection;
+  TaskPostTuning_SetTunerOutput(fill.tuningOut(), NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+
+  EXPECT_EQ(ncclInvalidArgument, fill.RunApplyTuning());
+
+  EXPECT_EQ(kUnsetChannels, fill.task()->nMaxChannels);
+  EXPECT_EQ(kUnresolvedDevFuncId, fill.task()->devFuncId);
+}
+
+TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_TuningEntryLeftAtItsInitValue_CurrentlyPassesTheValidityGate) {
+  TaskPostTuning_CollFill fill;
+
+  EXPECT_EQ(ncclSuccess, fill.RunApplyTuning());
+
+  EXPECT_EQ(NCCL_TUNING_ENTRY_INIT_VALUE, fill.tuningOut()->valid);
+  EXPECT_EQ(NCCL_ALGO_UNDEF, fill.task()->algorithm);
+  EXPECT_EQ(NCCL_PROTO_UNDEF, fill.task()->protocol);
+}
+
+TEST_F(TaskPostTuningMicrotest, DISABLED_ApplyTuningToCollTask_TuningEntryLeftAtItsInitValue_ReportsAnInternalError) {
+  TaskPostTuning_CollFill fill;
+
+  EXPECT_EQ(ncclInternalError, fill.RunApplyTuning());
 }
 
 }  // namespace
