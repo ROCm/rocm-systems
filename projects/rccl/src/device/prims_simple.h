@@ -8,7 +8,7 @@
 
 #include "rccl_metadata.h"
 #include "network/unpack/unpack.h"
-#include <cassert>
+#include "rccl_dev_assert.h"
 
 enum primsMode {
   primsModeDefault = 0,
@@ -708,7 +708,7 @@ public:
         8; // Allows for all roles (WaitRecv/WaitSend/PostRecv/PostSend) within a single warp
     static_assert(MaxSend <= ThreadPerSync && MaxRecv <= ThreadPerSync, "Not enough threads to cover all peers");
 
-    assert(2 * (nrecv + nsend) <= nthreads); // Ensure no thread is assigned more than one role.
+    RCCL_DEV_ASSERT(2 * (nrecv + nsend) <= nthreads); // Ensure no thread is assigned more than one role.
     // Coverity assumes that index will equal tid based on the line below, but it doesn't consider the setting
     // of flags.  This results in multiple false positive overruns being reported here and in all_reduce.h.
     // Unfortunately, we've been unsuccessful in trying to silence them with a single directive here so

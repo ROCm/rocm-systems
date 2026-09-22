@@ -69,6 +69,7 @@ set(SRC_FILES
   device/prims_ll.h
   device/prims_ll128.h
   device/prims_simple.h
+  device/rccl_dev_assert.h
   device/rccl_metadata.h
   device/reduce.h
   device/reduce_kernel.h
@@ -1146,6 +1147,10 @@ if(CUMEM_DMABUF_EXPORT_ENABLED)
 endif()
 
 ## Set RCCL compile options
+# Do not rely on the toolchain to supply NDEBUG for non-Debug builds: without it
+# device asserts expand to HIP hostcall and kernels then need PCIe atomics.
+target_compile_definitions(rccl PRIVATE $<$<NOT:$<CONFIG:Debug>>:NDEBUG>)
+
 if (HAVE_PARALLEL_JOBS)
   target_compile_options(rccl PRIVATE -parallel-jobs=12)
 endif()
