@@ -222,7 +222,7 @@ TEST_F(GdrFlushTest, RepeatedFlush_NoFaultBurst) {
 // fault. That case never compiled: gdrSupported() does not exist, and
 // RunRecvFlushBurst has no forceWrite parameter. If a production forceWrite
 // hook is added, restore the case (skip with gdrPtrSupport(), three-arg burst
-// plus the hook) rather than leaving the regression untested.
+// ForcedScratchpadWrite_ReproducesFault removed: forcing the flush fault needs a production hook that does not exist.
 
 }  // namespace
 
