@@ -297,7 +297,12 @@ class TestOpenMPFortran(RocprofsysTest):
         ],
     )
     @pytest.mark.gpu
-    def test_offload(self, mode, ompt_target_env):
+    def test_offload(self, mode, ompt_target_env, gpu_info):
+        if gpu_info._is_gfx1250:
+            pytest.skip(
+                "Fortran OpenMP target offload is not yet supported on gfx1250: "
+                "amdflang generates invalid GPU instructions for this architecture"
+            )
         env = ompt_target_env.copy()
         env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
 
