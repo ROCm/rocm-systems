@@ -1,16 +1,17 @@
 # Profile support and operations
 
 Load this reference only when selecting hardware-specific settings,
-troubleshooting a collection, or maintaining the skill.
+troubleshooting a collection, handling an explicit raw-output request, or
+maintaining the skill.
 
 ## Support matrix
 
 | Area | Supported scope | Validation source |
 |---|---|---|
 | OS | Linux distributions supported by the matching ROCm release | ROCm system requirements |
-| GPUs | `gfx908`, `gfx90a`, `gfx940`, `gfx941`, `gfx942`, `gfx950`, `gfx1150`–`gfx1153`, `gfx1250` | Shipped profile/analysis configs |
+| GPUs | `gfx908`, `gfx90a`, `gfx940`, `gfx941`, `gfx942`, `gfx950`, `gfx1150`–`gfx1153` | Shipped profile/analysis configs |
 | Applications | HIP/ROCm executables and MPI/multi-process applications | Profile integration tests |
-| Annotations | ROCTX markers and ranges through `libroctx64.so` | Marker-trace tests |
+| Annotations | ROCTx markers injected by experimental PyTorch tracing | Torch-trace tests |
 | Collection APIs | rocprofiler-sdk through `rocprof-compute`; rocpd backend | Profile/unit tests |
 | PyTorch | Experimental operator trace with PyTorch 2.13 or 2.14 | Torch-trace coverage tests |
 | Triton | Experimental operator trace; version support follows installed release help | Triton integration tests |
@@ -39,14 +40,14 @@ rocprofv3-avail info --pc-sampling
   collector validates device-specific minimums and reports an actionable
   error.
 - The user must have access to the GPU device nodes and performance counters.
-- ROCTX annotation requires headers and `libroctx64.so` from the matching ROCm
-  installation.
+- PyTorch tracing requires PyTorch 2.13 or 2.14 installed with ROCm from the
+  same TheRock package index.
 
 ## Detailed collection options
 
 ### Metric sets
 
-There is no `--single-pass` flag. Use a topic-focused metric set:
+Use a topic-focused metric set:
 
 ```bash
 rocprof-compute profile --list-sets
@@ -76,21 +77,23 @@ Do not hardcode an interval for unknown hardware. Query valid configurations
 with `rocprofv3-avail info --pc-sampling`. Stochastic intervals are cycles and
 must be powers of two; host-trap intervals are microseconds.
 
-### ROCTX
+### PyTorch operator tracing
 
-ROCTX is captured automatically when the application links `libroctx64.so`.
+ROCTx marker attribution is supported through experimental PyTorch tracing.
+Do not instruct users to add arbitrary ROCTx ranges to HIP applications.
 
-```cpp
-#include <roctx.h>
-
-roctxRangePush("gemm_compute_phase");
-hipLaunchKernelGGL(my_gemm_kernel, grid, block, 0, stream, ...);
-hipDeviceSynchronize();
-roctxRangePop();
+```bash
+rocprof-compute profile \
+    --experimental \
+    --torch-trace \
+    --name <name> \
+    -- python <script.py>
 ```
 
-After profiling, use `analyze --list-stats` and select the 1-based dispatch
-IDs enclosed by the range.
+Read the
+[Torch operator mapping documentation](../../../docs/how-to/profile/mode.rst)
+before using this feature. It is the source of truth for installation,
+supported versions, output files, overhead controls, and limitations.
 
 ### Retaining raw rocpd
 
@@ -113,8 +116,7 @@ needed.
 - `--device` chooses a GPU only for standalone roofline microbenchmarks. Use
   `HIP_VISIBLE_DEVICES` to constrain an application profile.
 - Do not use removed options such as profile `--path`, `--kernel-names`,
-  `--single-pass`, `--list-devices`, `--timeout`, or
-  `--format-rocprof-output`.
+  `--list-devices`, `--timeout`, or `--format-rocprof-output`.
 - Multi-pass profiling replays the application. Avoid it for nondeterministic
   or destructive workloads unless replay is safe; use a metric set as the
   named fallback.

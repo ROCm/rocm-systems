@@ -1,6 +1,6 @@
 ---
 name: rocprofiler-compute-profile
-description: Profiles an AMD GPU workload with rocprofiler-compute (rocprof-compute profile). Use when the user asks to profile, benchmark, measure, or collect hardware performance counters for a HIP/ROCm kernel or application on AMD Instinct GPUs or supported client APUs — including ROCTX-annotated apps, roofline collection, and experimental PC sampling.
+description: Profiles an AMD GPU workload with rocprofiler-compute (rocprof-compute profile). Use when the user asks to profile, benchmark, measure, or collect hardware performance counters for a HIP/ROCm kernel or application on AMD Instinct GPUs or supported client APUs — including roofline collection, experimental PyTorch operator tracing, and experimental PC sampling.
 ---
 
 # Skill: Profile an AMD GPU Workload with rocprofiler-compute
@@ -26,18 +26,16 @@ not be available during analysis.
 
 ## 1. Understand rocprofiler-compute
 
-**rocprofiler-compute** (formerly Omniperf) is AMD's system-level GPU
-performance analysis tool. It collects hardware performance counters through
-multiple profiling passes and writes a workload directory that analyze mode
-reads.
+**rocprofiler-compute** is AMD's GPU kernel-level performance analysis tool.
+Use it to fine-tune individual HIP kernels and maximize hardware utilization.
 
 | Concept | Detail |
 |---|---|
 | CLI | `rocprof-compute` |
 | Profile backends | **Perfmon counters** (multi-pass, architecture-level); **PC sampling** (experimental, instruction-level stall samples) |
 | Multi-pass | Replays the workload, collecting different counter groups each pass |
-| Output format | Profile mode **always uses rocpd**. There is no `--format-rocprof-output`. Analyze consumes the workload directory (converted CSVs plus optional retained `.db`) |
-| Supported HW | Instinct MI100, MI200 (MI210/MI250/MI250X), MI300A/MI300X/MI325X, MI350/MI355X, MI455X; client APUs (Strix, Strix Halo, Krackan, Gorgon) |
+| Output | Use profile mode's default output. Discuss format details only when the user requests a specific downstream format or raw data |
+| Supported HW | Instinct MI100, MI200 (MI210/MI250/MI250X), MI300A/MI300X/MI325X, MI350/MI355X; client APUs (Strix, Strix Halo, Krackan, Gorgon) |
 | ROCm | Use the tool paired with the installed ROCm release; ROCm 10.2 uses rocprofiler-compute 3.10 |
 
 Do not invent flags. If unsure, run `rocprof-compute profile --help`.
@@ -146,10 +144,9 @@ rocprof-compute profile \
 Limit iterations with `--kernel-iteration-range` (1-based, e.g. `1` or
 `3:5`).
 
-### 4e. Single-pass topic sets (not `--single-pass`)
+### 4e. Focused topic sets
 
-There is no `--single-pass` flag. For a faster, topic-focused collection,
-use the named fallback:
+For a faster, topic-focused collection, use the named fallback:
 
 ```bash
 rocprof-compute profile --list-sets
@@ -165,31 +162,31 @@ PC sampling is experimental and hardware-dependent. Load
 configuration, and avoid hardcoding an interval. Prefer stochastic when
 supported; use `host_trap` as the named sampling fallback.
 
-### 4g. ROCTX annotation (range-level attribution)
+### 4g. PyTorch operator tracing
 
-ROCTX markers/ranges are captured automatically when the application links
-`libroctx64.so`. No extra profile flag is required.
+rocprofiler-compute supports ROCTx marker attribution through its experimental
+PyTorch tracing feature. Do not describe arbitrary user-authored ROCTx ranges
+as supported.
 
 ```bash
 rocprof-compute profile \
+    --experimental \
+    --torch-trace \
     --name <workload_name> \
-    -- <your_annotated_app>
+    -- python <script.py>
 ```
 
-Use ROCTX when the same kernel runs in different logical phases (for
-example forward vs backward). Analyze by listing dispatches with
-`--list-stats` and filtering `-d` / `--dispatch` (1-based) for the range.
-Load `references/support-and-operations.md` for the annotation example and
-experimental framework-trace boundaries.
+Before using this option, read the
+[Torch operator mapping documentation](../../docs/how-to/profile/mode.rst).
+It defines supported PyTorch versions, installation requirements, output,
+analysis commands, overhead, and current limitations.
 
-### 4h. Produce / retain rocpd output
+### 4h. Output handling
 
-Profile mode **always** captures through rocpd. Converted
-`results_*.csv` / `pmc_perf.csv` land in the workload directory for analyze.
-
-Raw database retention is optional and currently uses the deprecated
-`--retain-rocpd-output`; load the reference before using it. Analyze `csv`
-and `db` reports require a rocpd-collected workload.
+Use the default profile output and pass its workload directory directly to
+analyze. Do not add or enumerate format options unless the user requests a
+specific export or raw database. For such a request, load the output details
+in `references/support-and-operations.md` or the analyze skill.
 
 ## 5. Validate profiling output
 
@@ -227,4 +224,4 @@ rocprof-compute --list-blocks <arch>
 
 ## 9. Related skill
 
-- `skills/analyze/SKILL.md` — interpret counters, ROCTX ranges, stalls, and emit txt/csv/db reports
+- `skills/analyze/SKILL.md` — interpret counters, PyTorch operators, stalls, and emit txt/csv/db reports

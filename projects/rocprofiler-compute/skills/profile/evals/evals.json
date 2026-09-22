@@ -15,18 +15,27 @@
       "skill_should_trigger": true,
       "prompt": "profile only the gemm kernels in my ROCm app",
       "expected_behavior": [
-        "uses rocprof-compute profile with -k / --kernel, not --kernel-names",
-        "does not invent --single-pass"
+        "uses rocprof-compute profile with -k / --kernel, not --kernel-names"
       ]
     },
     {
-      "id": "roctx-annotated-app",
+      "id": "pytorch-operator-tracing",
       "skill_should_trigger": true,
-      "prompt": "my HIP code has ROCTX ranges around the forward and backward passes; profile it so I can attribute counters to those ranges",
+      "prompt": "profile my PyTorch application and attribute GPU counters to its operators",
       "expected_behavior": [
-        "explains ROCTX is captured automatically when linking libroctx64",
-        "profiles with rocprof-compute profile without a special ROCTX flag",
-        "points to analyze --list-stats and --dispatch for range attribution"
+        "refers to the project Torch tracing documentation",
+        "uses --experimental --torch-trace",
+        "checks the documented PyTorch installation and version requirements"
+      ]
+    },
+    {
+      "id": "generic-roctx-ranges-unsupported",
+      "skill_should_trigger": true,
+      "prompt": "profile the custom ROCTx ranges in my HIP application with rocprof-compute",
+      "expected_behavior": [
+        "does not claim support for arbitrary user-authored ROCTx range attribution",
+        "explains that ROCTx attribution is supported through experimental PyTorch torch tracing",
+        "refers to the Torch tracing documentation when the workload is PyTorch"
       ]
     },
     {

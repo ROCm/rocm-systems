@@ -8,10 +8,10 @@ likely bottleneck, or when selecting hardware-specific metrics.
 | Area | Supported scope | Validation source |
 |---|---|---|
 | OS | Linux distributions supported by the matching ROCm release | ROCm system requirements |
-| GPUs | `gfx908`, `gfx90a`, `gfx940`, `gfx941`, `gfx942`, `gfx950`, `gfx1150`–`gfx1153`, `gfx1250` | Shipped analysis configs |
+| GPUs | `gfx908`, `gfx90a`, `gfx940`, `gfx941`, `gfx942`, `gfx950`, `gfx1150`–`gfx1153` | Shipped analysis configs |
 | Inputs | Workloads from the matching `rocprof-compute profile` version | Analyze integration tests |
 | Reports | Terminal, text, per-view CSV, SQLite analysis database | Analyze unit/integration tests |
-| APIs | HIP kernels, ROCTX ranges, rocpd data, MPI/multi-process identity | Parser/profile tests |
+| APIs | HIP kernels, PyTorch operator traces, rocpd data, MPI/multi-process identity | Parser/profile tests |
 | Frameworks | Kernel analysis for ROCm frameworks; PyTorch 2.13/2.14 and Triton attribution are experimental | Framework-trace tests |
 | PC sampling | Hardware/configuration dependent and experimental | PC-sampling tests |
 
@@ -85,12 +85,16 @@ enough samples.
 CSV output writes per-kernel annotated disassembly below
 `per_kernel_pc_sampling/`; database output stores equivalent views.
 
-## ROCTX and multi-process analysis
+## PyTorch operator and multi-process analysis
 
-`--list-stats` shows markers and dispatches. Select the 1-based dispatch IDs
-inside the desired range and analyze with `--dispatch`. For multi-process or
-MPI workloads, retain process/rank identity and compare like-for-like ranges;
-do not aggregate away load imbalance before inspection.
+ROCTx attribution is supported through workloads collected with experimental
+`--torch-trace`. Follow the
+[PyTorch operator analysis documentation](../../../docs/how-to/analyze/cli.rst)
+for `--list-torch-operators` and `--torch-operator`. Do not infer support for
+arbitrary user-authored ROCTx ranges.
+
+For multi-process or MPI workloads, retain process/rank identity and compare
+like-for-like kernels; do not aggregate away load imbalance before inspection.
 
 ## Known issues and safeguards
 

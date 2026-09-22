@@ -47,12 +47,23 @@
       ]
     },
     {
-      "id": "roctx-range-analysis",
+      "id": "pytorch-operator-analysis",
       "skill_should_trigger": true,
-      "prompt": "analyze only the ROCTX range named gemm_compute_phase in this workload",
+      "prompt": "show which PyTorch operators launched the slow GPU kernels in this torch-trace workload",
       "expected_behavior": [
-        "uses --list-stats to find dispatches in the range",
-        "filters with -d / --dispatch (1-based)"
+        "refers to the project PyTorch operator analysis documentation",
+        "uses --experimental --list-torch-operators before filtering",
+        "uses --torch-operator only after listing captured operators"
+      ]
+    },
+    {
+      "id": "generic-roctx-range-analysis-unsupported",
+      "skill_should_trigger": true,
+      "prompt": "show metrics for the custom ROCTx range in this HIP workload",
+      "expected_behavior": [
+        "does not claim support for arbitrary user-authored ROCTx range attribution",
+        "explains that operator attribution requires an experimental PyTorch torch-trace workload",
+        "offers kernel or dispatch filtering for the existing workload"
       ]
     },
     {

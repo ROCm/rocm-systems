@@ -12,7 +12,8 @@ until both trigger evaluation and representative GPU workflows pass.
 | Helper script syntax | Pass | Pass |
 | Recommended workflow on supported GPU | Pending | Pending |
 | Named fallback on supported GPU | Pending | Pending |
-| ROCTX range workflow | Pending | Pending |
+| PyTorch operator trace workflow | Pending | Pending |
+| Generic user-authored ROCTx boundary documented | Pass | Pass |
 | rocpd CSV/database report workflow | N/A | Pending |
 | Tested build | Pending | Pending |
 | Tested GPU/firmware | Pending | Pending |
@@ -29,7 +30,7 @@ For each release, record:
   distribution;
 - trigger-evaluation results;
 - commands and outcomes for the recommended and fallback workflows;
-- ROCTX attribution result;
+- PyTorch operator attribution result;
 - generated output formats and workload validation result;
 - known failures, unsupported configurations, and linked issues.
 

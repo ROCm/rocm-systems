@@ -2,12 +2,12 @@
 
 User-facing Agent Skills for **profiling** and **analyzing** AMD GPU workloads
 with `rocprof-compute`. They teach an AI agent how to collect hardware
-counters (rocpd), attribute ROCTX ranges, find occupancy / memory / stall
-bottlenecks, and emit txt/csv/db reports.
+counters, attribute PyTorch operators from experimental torch-trace workloads,
+find occupancy / memory / stall bottlenecks, and emit reports.
 
 | Skill | When to use |
 |---|---|
-| [profile/SKILL.md](profile/SKILL.md) | Collect counters, roofline, ROCTX, experimental PC sampling |
+| [profile/SKILL.md](profile/SKILL.md) | Collect counters, roofline, experimental PyTorch traces, experimental PC sampling |
 | [analyze/SKILL.md](analyze/SKILL.md) | Interpret a workload directory and produce reports |
 
 Each skill directory contains `SKILL.md`, `skill-card.md`, `references/` for

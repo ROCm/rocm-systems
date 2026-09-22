@@ -2,7 +2,7 @@
 
 ## Description
 
-Analyzes rocprofiler-compute workload directories to identify occupancy, memory, and instruction-stall bottlenecks, attribute ROCTX ranges, and write stdout/txt/csv/db reports from rocpd-collected profiles.
+Analyzes rocprofiler-compute workload directories to identify occupancy, memory, and instruction-stall bottlenecks, attribute PyTorch operators from experimental torch-trace workloads, and write reports.
 
 ## Owner
 
