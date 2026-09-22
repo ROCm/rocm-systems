@@ -145,10 +145,11 @@ AdapterConfig parse_config(const char *config_json) {
 
   const auto dispatch_name = config["dispatch_name"];
   if (!dispatch_name.IsNull()) {
-    if (!dispatch_name.IsString() || dispatch_name.AsString().size() == 0) {
-      throw std::invalid_argument("Perfsim plugin 'dispatch_name' must be a non-empty string");
-    }
-    result.dispatch_name.emplace(dispatch_name.AsString().c_str(), dispatch_name.AsString().size());
+    if (!dispatch_name.IsString())
+      throw std::invalid_argument("Perfsim plugin 'dispatch_name' must be a string");
+    if (dispatch_name.AsString().size() != 0)
+      result.dispatch_name.emplace(dispatch_name.AsString().c_str(),
+                                   dispatch_name.AsString().size());
   }
 
   const auto max_staged_bytes = config["max_staged_bytes"];
@@ -639,7 +640,7 @@ struct PerfsimPlugin::Impl {
 
     std::vector<uint32_t> incomplete_dispatches;
     for (const auto &[dispatch_id, state] : dispatches)
-      if (state.selected && state.begun && !state.ended)
+      if (state.begun && !state.ended)
         incomplete_dispatches.push_back(dispatch_id);
     for (uint32_t dispatch_id : incomplete_dispatches)
       reject(dispatch_id, "dispatch was incomplete at plugin shutdown");
@@ -688,15 +689,10 @@ struct PerfsimPlugin::Impl {
 
   DispatchState *active_dispatch(uint32_t dispatch_id) {
     auto iter = dispatches.find(dispatch_id);
-    if (iter == dispatches.end() || !iter->second.selected || !supported(iter->second) ||
-        !iter->second.begun || iter->second.ended)
+    if (iter == dispatches.end() || !supported(iter->second) || !iter->second.begun ||
+        iter->second.ended)
       return nullptr;
     return &iter->second;
-  }
-
-  bool intentionally_unselected(uint32_t dispatch_id) const {
-    const auto iter = dispatches.find(dispatch_id);
-    return iter != dispatches.end() && iter->second.metadata_seen && !iter->second.selected;
   }
 
   bool observe_workgroup(DispatchState &dispatch, uint32_t workgroup_id) const {
@@ -714,7 +710,7 @@ struct PerfsimPlugin::Impl {
     if (!config.max_observed_workgroups)
       return false;
     const auto iter = dispatches.find(dispatch_id);
-    return iter != dispatches.end() && iter->second.metadata_seen && iter->second.selected &&
+    return iter != dispatches.end() && iter->second.metadata_seen &&
            !iter->second.observed_workgroups.contains(workgroup_id);
   }
 
@@ -761,7 +757,7 @@ struct PerfsimPlugin::Impl {
 
   bool can_stage(uint32_t dispatch_id, size_t bytes) {
     const auto iter = dispatches.find(dispatch_id);
-    if (iter == dispatches.end() || !iter->second.selected || !supported(iter->second))
+    if (iter == dispatches.end() || !supported(iter->second))
       return false;
     if (bytes > config.max_staged_bytes || staged_bytes > config.max_staged_bytes - bytes) {
       reject(dispatch_id,
@@ -879,9 +875,13 @@ struct PerfsimPlugin::Impl {
         staged_bytes -= staged.dynamic_bytes;
         OrderedEvent &event = staged.event;
         const auto iter = dispatches.find(event.dispatch_id);
-        if (iter != dispatches.end() && iter->second.selected && supported(iter->second) &&
-            iter->second.ended)
+        if (iter != dispatches.end() && supported(iter->second) && iter->second.ended) {
           replay(event);
+          if (config.dispatch_name && iter->second.selected &&
+              std::holds_alternative<EndEvent>(event.payload))
+            write_sink(std::format("[rocjitsu:perfsim] selected dispatch {} replayed\n",
+                                   event.dispatch_id));
+        }
       }
     }
     assert(staged_bytes == 0);
@@ -947,8 +947,6 @@ struct PerfsimPlugin::Impl {
   void memory_access(const amdgpu::MemoryAccessObservation &access,
                      PerfsimWavefrontState *wave_hint = nullptr) {
     if (!wave_hint) {
-      if (intentionally_unselected(access.dispatch_id))
-        return;
       if (intentionally_unobserved(access.dispatch_id, access.workgroup_id))
         return;
     }
@@ -1162,8 +1160,6 @@ struct PerfsimPlugin::Impl {
   void tensor_dma_memory_access(const amdgpu::TensorDmaMemoryAccessObservation &access,
                                 PerfsimWavefrontState *wave_hint = nullptr) {
     if (!wave_hint) {
-      if (intentionally_unselected(access.dispatch_id))
-        return;
       if (intentionally_unobserved(access.dispatch_id, access.workgroup_id))
         return;
     }
@@ -1273,9 +1269,8 @@ void PerfsimPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &in
   state.metadata_seen = true;
   state.selected =
       !impl_->config.dispatch_name || state.dispatch_name == *impl_->config.dispatch_name;
-  if (!state.selected)
-    return;
-  impl_->dispatch_name_matched = true;
+  if (state.selected)
+    impl_->dispatch_name_matched = true;
   if (const auto reason = validate_dispatch(info))
     impl_->reject(info.dispatch_id, *reason);
 }
@@ -1290,7 +1285,7 @@ void PerfsimPlugin::onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
   }
   state.begun = true;
   state.ended = false;
-  if (!state.selected || !Impl::supported(state))
+  if (!Impl::supported(state))
     return;
   impl_->replay_blockers.insert(dispatch_id);
   impl_->record_event({dispatch_id, BeginEvent{state.metadata}});
@@ -1313,11 +1308,11 @@ void PerfsimPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
     impl_->reject(dispatch_id, "dispatch ended more than once");
     return;
   }
-  if (state.selected && state.live_waves != 0)
+  if (state.live_waves != 0)
     impl_->reject(dispatch_id, "dispatch ended with live wavefronts");
   state.ended = true;
   impl_->replay_blockers.erase(dispatch_id);
-  if (state.selected && Impl::supported(state))
+  if (Impl::supported(state))
     impl_->record_event({dispatch_id, EndEvent{state.metadata}});
   impl_->drain_epoch(/*shutdown=*/false);
 }
@@ -1357,8 +1352,6 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
     return;
   }
 
-  if (impl_->intentionally_unselected(wf.dispatch_id()))
-    return;
   DispatchState *dispatch = impl_->active_dispatch(wf.dispatch_id());
   if (!dispatch) {
     impl_->reject(wf.dispatch_id(), "wavefront dispatched outside an active dispatch");
@@ -1388,8 +1381,6 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
 }
 
 void PerfsimPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
-  if (impl_->intentionally_unselected(wf.dispatch_id()))
-    return;
   if (impl_->intentionally_unobserved(wf.dispatch_id(), wf.wg_id()))
     return;
   const uint32_t compute_unit_id = static_cast<uint32_t>(wf.cu().id());
@@ -1443,8 +1434,7 @@ void PerfsimPlugin::record_instruction(uint64_t pc, const Instruction &inst, amd
   PerfsimWavefrontState *wave = wavefront_state<PerfsimWavefrontState>(wf);
   if (!wave) {
     const auto dispatch_iter = impl_->dispatches.find(wf.dispatch_id());
-    if (dispatch_iter != impl_->dispatches.end() &&
-        (!dispatch_iter->second.selected || !Impl::supported(dispatch_iter->second)))
+    if (dispatch_iter != impl_->dispatches.end() && !Impl::supported(dispatch_iter->second))
       return;
     if (impl_->intentionally_unobserved(wf.dispatch_id(), wf.wg_id()))
       return;
