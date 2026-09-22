@@ -370,7 +370,12 @@ if(_deps_met)
   # Option to build test binaries during the main build (without running them)
   option(BUILD_TESTS "Build test binaries and install to share/${PROJECT_NAME}/bin" OFF)
 
-  if(BUILD_TESTS)
+  # Not supported on Windows: the nested ExternalProject builds assume a
+  # single-config generator (CMAKE_BUILD_TYPE, an unsuffixed executable directly
+  # in BINARY_DIR) and $ORIGIN install RPATHs, none of which hold for the
+  # Visual Studio generator. Build the samples from share/rocdecode/samples
+  # instead, as documented in the install guide.
+  if(BUILD_TESTS AND NOT WIN32)
     include(ExternalProject)
     set(ROCDECODE_TEST_BIN_DIR ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/bin)
     set(ROCDECODE_STAGE_DIR ${CMAKE_BINARY_DIR}/stage)
