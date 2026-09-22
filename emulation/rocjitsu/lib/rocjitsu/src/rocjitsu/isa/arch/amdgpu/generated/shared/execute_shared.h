@@ -11555,7 +11555,8 @@ inline void execute_v_fma_mixhi_f16_vop3p([[maybe_unused]] Inst &inst,
     float result = a * b + c;
     if (inst.inst_.clamp)
       result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_f16_mode(result, wf.fp16_ovfl());
+    uint16_t h = amdgpu::pseudo_scalar::round_f16_result(result, wf.fp_round_mode_f16_f64(), 0,
+                                                         false, wf.fp16_ovfl(), false);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(inst.vdst, wf, lane, 0x8u, h);
   }
 }
@@ -11598,7 +11599,8 @@ inline void execute_v_fma_mixlo_f16_vop3p([[maybe_unused]] Inst &inst,
     float result = a * b + c;
     if (inst.inst_.clamp)
       result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_f16_mode(result, wf.fp16_ovfl());
+    uint16_t h = amdgpu::pseudo_scalar::round_f16_result(result, wf.fp_round_mode_f16_f64(), 0,
+                                                         false, wf.fp16_ovfl(), false);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(inst.vdst, wf, lane, 0u, h);
   }
 }
@@ -13515,7 +13517,8 @@ inline void execute_v_mad_mixhi_f16_vop3p([[maybe_unused]] Inst &inst,
     float result = a * b + c;
     if (inst.inst_.clamp)
       result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_f16_mode(result, wf.fp16_ovfl());
+    uint16_t h = amdgpu::pseudo_scalar::round_f16_result(result, wf.fp_round_mode_f16_f64(), 0,
+                                                         false, wf.fp16_ovfl(), false);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(inst.vdst, wf, lane, 0x8u, h);
   }
 }
@@ -13558,7 +13561,8 @@ inline void execute_v_mad_mixlo_f16_vop3p([[maybe_unused]] Inst &inst,
     float result = a * b + c;
     if (inst.inst_.clamp)
       result = amdgpu::clamp_floating_result(result, wf);
-    uint16_t h = util::f32_to_f16_mode(result, wf.fp16_ovfl());
+    uint16_t h = amdgpu::pseudo_scalar::round_f16_result(result, wf.fp_round_mode_f16_f64(), 0,
+                                                         false, wf.fp16_ovfl(), false);
     ::rocjitsu::amdgpu::write_vop3_true16_dst(inst.vdst, wf, lane, 0u, h);
   }
 }

@@ -28,6 +28,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
+#include "util/simd_test_hooks.h"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -37,6 +38,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 #include <vector>
 using namespace rocjitsu;
@@ -182,6 +184,45 @@ std::array<uint32_t, 2> packed_words(rj_code_arch_t arch, uint16_t op, uint8_t c
     return {};
   }
 }
+// MIXLO/MIXHI take F32 inputs with the default selectors. Multiplying by
+// inline 1.0 and adding inline zero isolates the final F16 conversion.
+std::array<uint32_t, 2> mixed_half_words(rj_code_arch_t arch, bool high) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::build_vop3p(high ? cdna1::kVMadMixhiF16Vop3p : cdna1::kVMadMixloF16Vop3p,
+                              {.vdst = 6, .src0 = 256, .src1 = 242, .src2 = 128});
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::build_vop3p(high ? cdna2::kVMadMixhiF16Vop3p : cdna2::kVMadMixloF16Vop3p,
+                              {.vdst = 6, .src0 = 256, .src1 = 242, .src2 = 128});
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::build_vop3p(high ? cdna3::kVMadMixhiF16Vop3p : cdna3::kVMadMixloF16Vop3p,
+                              {.vdst = 6, .src0 = 256, .src1 = 242, .src2 = 128});
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::build_vop3p(high ? cdna4::kVMadMixhiF16Vop3p : cdna4::kVMadMixloF16Vop3p,
+                              {.vdst = 6, .src0 = 256, .src1 = 242, .src2 = 128});
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return cdna5::build_vop3p(high ? cdna5::kVFmaMixhiF16Vop3p : cdna5::kVFmaMixloF16Vop3p,
+                              {.vdst = 6, .src0 = 256, .src1 = 242, .src2 = 128});
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::build_vop3p(high ? rdna1::kVFmaMixhiF16Vop3p : rdna1::kVFmaMixloF16Vop3p,
+                              {.vdst = 6, .src0 = 256, .src1 = 242, .src2 = 128});
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::build_vop3p(high ? rdna2::kVFmaMixhiF16Vop3p : rdna2::kVFmaMixloF16Vop3p,
+                              {.vdst = 6, .src0 = 256, .src1 = 242, .src2 = 128});
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::build_vop3p(high ? rdna3::kVFmaMixhiF16Vop3p : rdna3::kVFmaMixloF16Vop3p,
+                              {.vdst = 6, .src0 = 256, .src1 = 242, .src2 = 128});
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::build_vop3p(high ? rdna3_5::kVFmaMixhiF16Vop3p : rdna3_5::kVFmaMixloF16Vop3p,
+                                {.vdst = 6, .src0 = 256, .src1 = 242, .src2 = 128});
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::build_vop3p(high ? rdna4::kVFmaMixhiF16Vop3p : rdna4::kVFmaMixloF16Vop3p,
+                              {.vdst = 6, .src0 = 256, .src1 = 242, .src2 = 128});
+  default:
+    throw std::runtime_error("Unsupported mixed F16 architecture");
+  }
+}
+
 std::array<uint32_t, 1> unary_words(rj_code_arch_t arch, size_t op) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1: {
@@ -575,4 +616,89 @@ TEST(ValuFloatingPolicy, Rdna4F32DotInlineSourcesReplicateBothHalves) {
     EXPECT_EQ(machine.run(words, 0), 0x40000000u);
   }
 }
+class MixedHalfRounding : public testing::TestWithParam<std::tuple<rj_code_arch_t, bool>> {
+protected:
+  void SetUp() override {
+    saved_force_scalar_ = util::force_scalar();
+    util::set_force_scalar_for_testing(std::get<1>(GetParam()));
+  }
+  void TearDown() override { util::set_force_scalar_for_testing(saved_force_scalar_); }
+
+private:
+  bool saved_force_scalar_ = false;
+};
+
+TEST_P(MixedHalfRounding, HonorsModeAndPreservesOtherLanesAndHalf) {
+  const auto arch = std::get<0>(GetParam());
+  amdgpu::GpuMemory memory("mixed_half_memory");
+  amdgpu::L2Cache cache("mixed_half_cache");
+  cache.set_backing_memory(&memory);
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = arch;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("mixed_half", config, &memory, &cache);
+  auto decoder = Decoder::create(arch);
+  auto *wave = cu->dispatch_wf(0, 0, 106, 256);
+  const uint32_t base = wave->vgpr_alloc().base;
+  constexpr uint32_t seed = 0x12345678;
+  struct Case {
+    uint32_t input;
+    // Nearest even, toward +infinity, toward -infinity, toward zero.
+    std::array<uint16_t, 4> expected;
+  };
+  constexpr std::array<Case, 12> cases = {{
+      {0x3f801800, {0x3c01, 0x3c01, 0x3c00, 0x3c00}}, // above the midpoint
+      {0xbf801800, {0xbc01, 0xbc00, 0xbc01, 0xbc00}},
+      {0x3f801000, {0x3c00, 0x3c01, 0x3c00, 0x3c00}}, // tie to even
+      {0xbf801000, {0xbc00, 0xbc00, 0xbc01, 0xbc00}},
+      {0x47800000, {0x7c00, 0x7c00, 0x7bff, 0x7bff}}, // finite overflow
+      {0xc7800000, {0xfc00, 0xfbff, 0xfc00, 0xfbff}},
+      {0x7f800000, {0x7c00, 0x7c00, 0x7c00, 0x7c00}}, // true infinity
+      {0xff800000, {0xfc00, 0xfc00, 0xfc00, 0xfc00}},
+      {0x33000000, {0x0000, 0x0001, 0x0000, 0x0000}}, // subnormal tie to zero
+      {0xb3000000, {0x8000, 0x8000, 0x8001, 0x8000}},
+      {0x3f800000, {0x3c00, 0x3c00, 0x3c00, 0x3c00}}, // exact
+      {0xbf800000, {0xbc00, 0xbc00, 0xbc00, 0xbc00}},
+  }};
+  for (bool high : {false, true}) {
+    const auto words = mixed_half_words(arch, high);
+    auto decoded = decoder->decode(words.data());
+    ASSERT_FALSE(decoded.failed());
+    std::unique_ptr<Instruction> inst(std::move(decoded).value());
+    for (uint32_t round = 0; round < 4; ++round) {
+      for (bool overflow : {false, true}) {
+        // Use a different F32 round mode to check the F16 mode selection.
+        wave->set_mode_raw(0xf0 | (round << 2) | ((round + 1) % 4) | (uint32_t(overflow) << 23));
+        for (uint64_t exec : {~uint64_t{0}, uint64_t{0xa5a5a5a5a5a5a5a5}}) {
+          wave->set_exec(exec);
+          for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+            cu->write_vgpr(base, lane, cases[lane % cases.size()].input);
+            cu->write_vgpr(base + 6, lane, seed);
+          }
+          ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+          for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+            const auto &c = cases[lane % cases.size()];
+            uint16_t half = c.expected[round];
+            if (overflow && (c.input & 0x7fffffff) == 0x47800000)
+              half = (c.input >> 16 & 0x8000) | 0x7bff;
+            uint32_t expected =
+                high ? (seed & 0xffff) | (uint32_t(half) << 16) : (seed & 0xffff0000) | half;
+            if (!(exec >> lane & 1))
+              expected = seed;
+            EXPECT_EQ(cu->read_vgpr(base + 6, lane), expected)
+                << "high=" << high << " round=" << round << " overflow=" << overflow
+                << " exec=" << std::hex << exec << " input=" << c.input << " lane=" << lane;
+          }
+        }
+      }
+    }
+  }
+  wave->halt();
+}
+
+INSTANTIATE_TEST_SUITE_P(AllTargets, MixedHalfRounding,
+                         testing::Combine(testing::ValuesIn(kAllArchitectures), testing::Bool()));
 } // namespace

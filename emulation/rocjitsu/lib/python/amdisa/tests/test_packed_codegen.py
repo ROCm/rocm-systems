@@ -533,7 +533,8 @@ def test_gfx1250_mad_mixlo_f16_uses_helper_and_fma():
 
     assert 'read_fma_mix_source_f32(src0, wf, lane' in cpp
     assert 'std::fma(a, b, c)' in cpp
-    assert 'util::f32_to_f16_mode(result, wf.fp16_ovfl())' in cpp
+    assert 'amdgpu::pseudo_scalar::round_f16_result(' in cpp
+    assert 'wf.fp_round_mode_f16_f64(), 0, false, wf.fp16_ovfl(), false' in cpp
 
 
 def test_mad_mixhi_f16_uses_true16_high_write():

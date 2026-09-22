@@ -3682,6 +3682,11 @@ template <FmaMixDst DstMode, bool Fused = false, typename Inst>
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
+  if constexpr (DstMode != FmaMixDst::F32) {
+    // The vector narrowing helper only implements round-to-nearest-even.
+    if (wf.fp_round_mode_f16_f64() != 0)
+      return false;
+  }
 
 #if defined(__clang__) && defined(__FMA__)
   if constexpr (!Fused && DstMode == FmaMixDst::F32) {
