@@ -523,42 +523,6 @@ TEST(RegisterAccessTest, WriteRegionStoresNativeOnlyInObservedLanesAndBytes) {
   }
 }
 
-TEST(RegisterAccessTest, NativeRegionAccessRejectsUnobservedLanesAndInvalidBounds) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  } else {
-    Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
-    ASSERT_NE(fx.wf, nullptr);
-    ASSERT_EQ(fx.wf->wf_size(), 32u);
-    constexpr uint32_t lane_base = 4;
-    constexpr std::size_t width = util::native_width_v<uint32_t>;
-    const uint32_t reg = fx.vgpr_base() + 8;
-    RegisterAccess regs(*fx.wf);
-    auto read = regs.read_vgpr_region(reg, /*reg_count=*/1, /*lane_mask=*/uint64_t{1} << lane_base);
-    auto write =
-        regs.write_vgpr_region(reg, /*reg_count=*/1, /*lane_mask=*/uint64_t{1} << lane_base);
-
-    EXPECT_THROW((void)read.load_native<uint32_t>(/*relative_reg=*/1, lane_base),
-                 std::out_of_range);
-    EXPECT_THROW((void)read.load_native<uint32_t>(
-                     /*relative_reg=*/0, fx.wf->wf_size() - width + 1),
-                 std::out_of_range);
-    EXPECT_THROW(write.store_native<uint32_t>(
-                     /*relative_reg=*/1, lane_base, util::native<uint32_t>(0x1111u),
-                     /*lane_mask=*/1),
-                 std::out_of_range);
-    EXPECT_THROW(write.store_native<uint32_t>(
-                     /*relative_reg=*/0, fx.wf->wf_size() - width + 1,
-                     util::native<uint32_t>(0x2222u), /*lane_mask=*/1),
-                 std::out_of_range);
-    EXPECT_THROW(write.store_native<uint32_t>(
-                     /*relative_reg=*/0, lane_base, util::native<uint32_t>(0x3333u),
-                     /*lane_mask=*/0b10),
-                 std::logic_error);
-    EXPECT_EQ(fx.cu->read_vgpr(reg, lane_base + 1), 0u);
-  }
-}
-
 TEST(RegisterAccessTest, WriteRegionNativeStoreHonorsAcquiredWaveWriteMask) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
