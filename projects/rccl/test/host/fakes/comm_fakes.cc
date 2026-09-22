@@ -9,6 +9,7 @@
 // comm/util globals, and the pure-instrumentation recorder / nvtx no-ops.
 
 #include "nccl.h"
+#include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM defaults this stands in for
 #include "comm.h"      // also pulls recorder.h (no include guard)
 #include "utils.h"
 #include "roctx.h"
@@ -44,6 +45,16 @@ void ResetCommFakes() {
 // --- Comm globals (real in init.cc) ---------------------------------------
 enum ncclLaunchMode ncclParamLaunchMode = ncclLaunchModeParallel;
 
+// The per-launch resource params init.cc declares. collTaskAppend resolves the
+// task's CTA counts through them (env > per-call > comm), so they are referenced
+// from outside init.cc and the redirected NCCL_PARAM does not cover them. Same
+// env names and defaults as init.cc, routed through g_loadParam so a fixture can
+// script the env-override arm of NCCL_CONFIG_SET.
+int64_t ncclParamMinCTAs() { return g_loadParam("MIN_CTAS", NCCL_CONFIG_UNDEF_INT); }          // init.cc:2667
+int64_t ncclParamMaxCTAs() { return g_loadParam("MAX_CTAS", NCCL_CONFIG_UNDEF_INT); }          // init.cc:2666
+int64_t ncclParamNvlsChannels() { return g_loadParam("NVLS_NCHANNELS", NCCL_CONFIG_UNDEF_INT); }  // init.cc:135
+int64_t ncclParamCGAClusterSize() { return g_loadParam("CGA_CLUSTER_SIZE", NCCL_CONFIG_UNDEF_INT); }  // init.cc:2664
+
 // ncclThreadSignalLocalInstance is owned by src/misc/utils.cc, not init.cc, and
 // lives in utils_fakes.cc: the init and enqueue targets compile the real
 // utils.cc as an oracle TU, so a copy here is a duplicate symbol for them.
@@ -57,5 +68,8 @@ roctx_scoped_range_in::roctx_scoped_range_in(const char*) noexcept {}
 roctx_scoped_range_in::~roctx_scoped_range_in() {}
 
 thread_local ncclProfilerApiState_t ncclProfilerApiState = {};
+ncclResult_t ncclProfilerStartGroupApiEvent(struct ncclInfo*, bool) { return ncclSuccess; }
 ncclResult_t ncclProfilerRecordGroupApiEventState(ncclProfilerEventState_t) { return ncclSuccess; }
 ncclResult_t ncclProfilerStopGroupApiEvent() { return ncclSuccess; }
+ncclResult_t ncclProfilerStartCollApiEvent(struct ncclInfo*, bool) { return ncclSuccess; }
+ncclResult_t ncclProfilerStopCollApiEvent() { return ncclSuccess; }

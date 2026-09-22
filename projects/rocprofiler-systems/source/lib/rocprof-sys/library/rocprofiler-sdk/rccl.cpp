@@ -240,9 +240,9 @@ cache_rccl_comm_data_events(std::uint32_t rccl_device_idx, size_t bytes,
 
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
         static_cast<size_t>(category_enum_id<category::comm_data>::value), Track::label,
-        timestamp_ns, event_metadata.c_str(), stack_id, parent_stack_id, correlation_id,
+        timestamp_ns, event_metadata, stack_id, parent_stack_id, correlation_id,
         call_stack, line_info, rccl_device_idx,
-        static_cast<std::uint8_t>(agent_type::gpu), pmc_label.c_str(),
+        static_cast<std::uint8_t>(agent_type::gpu), pmc_label,
         static_cast<double>(cumulative), std::nullopt });
 }
 

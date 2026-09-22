@@ -4,6 +4,8 @@
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
 #include <functional>
@@ -23,6 +25,11 @@ struct CapturedTensorDmaAccess {
   uint32_t wavefront_id = 0;
   uint32_t process_id = 0;
   uint32_t element_size_bytes = 0;
+  uint32_t tile_dim0 = 0;
+  uint32_t tile_dim1 = 0;
+  uint32_t data_size = 0;
+  int64_t tensor_dim0_stride = 0;
+  int64_t tensor_dim1_stride = 0;
   bool is_load = true;
   std::vector<uint64_t> addresses;
 };
@@ -49,6 +56,11 @@ public:
         .wavefront_id = access.wavefront_id,
         .process_id = access.process_id,
         .element_size_bytes = access.element_size_bytes,
+        .tile_dim0 = access.tile_dim0,
+        .tile_dim1 = access.tile_dim1,
+        .data_size = access.data_size,
+        .tensor_dim0_stride = access.tensor_dim0_stride,
+        .tensor_dim1_stride = access.tensor_dim1_stride,
         .is_load = access.is_load,
         .addresses = {},
     });
@@ -81,6 +93,31 @@ void write_tensor_dma_d0(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wf, uin
   write_wave_sgpr(cu, wf, reg + 2, static_cast<uint32_t>(global_addr));
   write_wave_sgpr(cu, wf, reg + 3,
                   static_cast<uint32_t>((global_addr >> 32) & 0x01ffffffu) | 0x80000000u);
+}
+
+TEST(TensorDmaMemoryAccessObservationTest, PreservesLegacyPositionalInitialization) {
+  const std::array<uint64_t, 2> addresses{0x1000, 0x1004};
+  const amdgpu::TensorDmaMemoryAccessObservation access{"tensor_load_to_lds",
+                                                        0x2000,
+                                                        1,
+                                                        2,
+                                                        3,
+                                                        4,
+                                                        5,
+                                                        6,
+                                                        4,
+                                                        false,
+                                                        std::span<const uint64_t>(addresses)};
+
+  EXPECT_FALSE(access.is_load);
+  std::array<uint64_t, 2> copied_addresses{};
+  ASSERT_TRUE(access.addresses.copy_to(copied_addresses));
+  EXPECT_EQ(copied_addresses, addresses);
+  EXPECT_EQ(access.tile_dim0, 0u);
+  EXPECT_EQ(access.tile_dim1, 0u);
+  EXPECT_EQ(access.data_size, 0u);
+  EXPECT_EQ(access.tensor_dim0_stride, 0);
+  EXPECT_EQ(access.tensor_dim1_stride, 0);
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaDescriptorReadPropagatesFailure) {
@@ -202,7 +239,20 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationReportsCompletedDenseLoadAndStore
   constexpr uint32_t kTileCols = 3;
   constexpr uint32_t kTileRows = 3;
   constexpr uint32_t kGlobalRowStride = 4;
+  constexpr uint32_t kGlobalPlaneStride = 7;
   constexpr uint32_t kBarrierLdsAddr = 128;
+
+  KfdProcess process(kProcessId);
+  std::array<uint32_t, kGlobalRowStride * kTensorRows> load_storage{};
+  std::array<uint32_t, kGlobalRowStride * kTensorRows> store_storage{};
+  process.map_pages(kLoadGlobal, load_storage.data(), sizeof(load_storage));
+  process.map_pages(kStoreGlobal, store_storage.data(), sizeof(store_storage));
+  amdgpu::LegacyGpuVmAdapter legacy_vm(sim.soc->gpu_vm(), sim.soc->memory());
+  const amdgpu::AddressSpaceHandle address_space =
+      legacy_vm.register_address_space(kProcessId, &process.page_table_, &process.page_table_mutex_,
+                                       process.page_table_generation());
+  ASSERT_TRUE(address_space);
+  wf->set_address_space(address_space);
 
   write_tensor_dma_d0(*cu, *wf, 0, kLoadGlobal);
   write_tensor_dma_d0(*cu, *wf, 8, kStoreGlobal);
@@ -214,11 +264,12 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationReportsCompletedDenseLoadAndStore
   write_wave_sgpr(*cu, *wf, 17, kGlobalRowStride);
   for (uint32_t reg = 18; reg < 28; ++reg)
     write_wave_sgpr(*cu, *wf, reg, 0);
+  // D1 word 6 contains stride-0[47:32] followed by stride-1[15:0].
+  write_wave_sgpr(*cu, *wf, 18, kGlobalPlaneStride << 16);
 
   for (uint32_t row = 0; row < kTensorRows; ++row) {
     for (uint32_t col = 0; col < kTensorCols; ++col) {
-      const uint64_t address = kLoadGlobal + (row * kGlobalRowStride + col) * sizeof(uint32_t);
-      write_global_u32(*sim.memory, address, 0x81000000u + row * 0x100u + col);
+      load_storage[row * kGlobalRowStride + col] = 0x81000000u + row * 0x100u + col;
     }
   }
   cu->lds().write64(wf->lds_base() + kBarrierLdsAddr, 0);
@@ -252,6 +303,13 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationReportsCompletedDenseLoadAndStore
   EXPECT_EQ(load_access.wavefront_id, kWavefrontId);
   EXPECT_EQ(load_access.process_id, kProcessId);
   EXPECT_EQ(load_access.element_size_bytes, sizeof(uint32_t));
+  EXPECT_EQ(load_access.tile_dim0, kTileCols);
+  EXPECT_EQ(load_access.tile_dim1, kTileRows);
+  EXPECT_EQ(load_access.data_size, 2u);
+  EXPECT_EQ(load_access.tensor_dim0_stride,
+            static_cast<int64_t>(kGlobalRowStride * sizeof(uint32_t)));
+  EXPECT_EQ(load_access.tensor_dim1_stride,
+            static_cast<int64_t>(kGlobalPlaneStride * sizeof(uint32_t)));
   EXPECT_TRUE(load_access.is_load);
   EXPECT_EQ(load_access.addresses, (std::vector<uint64_t>{kLoadGlobal, kLoadGlobal + 4,
                                                           kLoadGlobal + 16, kLoadGlobal + 20}));
@@ -268,10 +326,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationReportsCompletedDenseLoadAndStore
     if (access.is_load)
       return;
     store_was_complete_at_callback =
-        read_global_u32(*sim.memory, kStoreGlobal + 0) == 0x82000000u &&
-        read_global_u32(*sim.memory, kStoreGlobal + 4) == 0x82000001u &&
-        read_global_u32(*sim.memory, kStoreGlobal + 16) == 0x82000003u &&
-        read_global_u32(*sim.memory, kStoreGlobal + 20) == 0x82000004u;
+        store_storage[0] == 0x82000000u && store_storage[1] == 0x82000001u &&
+        store_storage[4] == 0x82000003u && store_storage[5] == 0x82000004u;
   };
 
   const std::array<uint32_t, 3> store_words = {0xd0714001u, 0x7c000000u, 0x18140c08u};
@@ -283,10 +339,18 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationReportsCompletedDenseLoadAndStore
   const auto &store_access = observer.accesses[1];
   EXPECT_EQ(store_access.mnemonic, "tensor_store_from_lds");
   EXPECT_EQ(store_access.element_size_bytes, sizeof(uint32_t));
+  EXPECT_EQ(store_access.tile_dim0, kTileCols);
+  EXPECT_EQ(store_access.tile_dim1, kTileRows);
+  EXPECT_EQ(store_access.data_size, 2u);
+  EXPECT_EQ(store_access.tensor_dim0_stride,
+            static_cast<int64_t>(kGlobalRowStride * sizeof(uint32_t)));
+  EXPECT_EQ(store_access.tensor_dim1_stride,
+            static_cast<int64_t>(kGlobalPlaneStride * sizeof(uint32_t)));
   EXPECT_FALSE(store_access.is_load);
   EXPECT_EQ(store_access.addresses, (std::vector<uint64_t>{kStoreGlobal, kStoreGlobal + 4,
                                                            kStoreGlobal + 16, kStoreGlobal + 20}));
   EXPECT_TRUE(store_was_complete_at_callback);
+  EXPECT_TRUE(legacy_vm.unregister_address_space(address_space));
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaObservationPreservesGatherOrderAndDuplicates) {
@@ -328,6 +392,12 @@ TEST(Gfx1250ExecutionTest, TensorDmaObservationPreservesGatherOrderAndDuplicates
   EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
 
   ASSERT_EQ(observer.accesses.size(), 1u);
+  EXPECT_EQ(observer.accesses[0].tile_dim0, kCols);
+  EXPECT_EQ(observer.accesses[0].tile_dim1, kIndices.size());
+  EXPECT_EQ(observer.accesses[0].data_size, 2u);
+  EXPECT_EQ(observer.accesses[0].tensor_dim0_stride,
+            static_cast<int64_t>(kCols * sizeof(uint32_t)));
+  EXPECT_EQ(observer.accesses[0].tensor_dim1_stride, 0);
   EXPECT_EQ(observer.accesses[0].addresses,
             (std::vector<uint64_t>{kGlobal + 16, kGlobal + 20, kGlobal, kGlobal + 4, kGlobal + 16,
                                    kGlobal + 20}));
@@ -430,13 +500,22 @@ TEST(Gfx1250ExecutionTest, TensorDmaUsesWaveProcessPageTable) {
   std::array<uint32_t, kElements> store_storage{};
   process.map_pages(kLoadGlobal, load_storage.data(), sizeof(load_storage));
   process.map_pages(kStoreGlobal, store_storage.data(), sizeof(store_storage));
-  sim.memory->register_process(kProcessId, &process.page_table_, &process.page_table_mutex_,
-                               process.page_table_generation());
+  amdgpu::LegacyGpuVmAdapter legacy_vm(sim.soc->gpu_vm(), sim.soc->memory());
+  const amdgpu::AddressSpaceHandle address_space =
+      legacy_vm.register_address_space(kProcessId, &process.page_table_, &process.page_table_mutex_,
+                                       process.page_table_generation());
+  ASSERT_TRUE(address_space);
+  wf->set_address_space(address_space);
 
   // The same GPU VA intentionally resolves to different storage for VMID zero
   // and for the dispatched process. Tensor DMA must use the wave's process ID.
   EXPECT_EQ(sim.memory->read32(kLoadGlobal), 0u);
-  EXPECT_EQ(sim.memory->read32(kLoadGlobal, kProcessId), kLoadValues[0]);
+  const auto access = sim.soc->gpu_vm().snapshot(address_space);
+  ASSERT_TRUE(access);
+  uint32_t translated_value = 0;
+  ASSERT_EQ(access->read(kLoadGlobal, std::as_writable_bytes(std::span(&translated_value, 1))),
+            amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(translated_value, kLoadValues[0]);
 
   write_tensor_dma_d0(*cu, *wf, 0, kLoadGlobal);
   write_wave_sgpr(*cu, *wf, 12, 2u << 16);        // i32 elements.
@@ -465,7 +544,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaUsesWaveProcessPageTable) {
   store->execute(*store, wf);
   EXPECT_EQ(store_storage, kStoreValues);
 
-  sim.memory->unregister_process(kProcessId);
+  EXPECT_TRUE(legacy_vm.unregister_address_space(address_space));
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaD2CopiesGlobalAndLds) {

@@ -10,8 +10,10 @@
 #define RCCL_TEST_HOST_NCCL_STUBS_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "nccl.h"
@@ -38,9 +40,6 @@ extern std::function<ncclResult_t(struct ncclComm*)> g_ncclTunerPluginUnload;
 
 // src/misc/mem_manager.cc: commFree releases the single-node size arrays here.
 extern std::function<ncclResult_t(void*)> g_ncclMemFree;
-
-// src/symmetric.cc: commFree tears down symmetric-memory resources here.
-extern std::function<ncclResult_t(struct ncclComm*)> g_ncclSymkFinalize;
 
 // The public entry point commFree recurses through for hierarchical sub-communicators.
 extern std::function<ncclResult_t(ncclComm_t)> g_ncclCommDestroy;
@@ -70,6 +69,12 @@ extern int g_getROCmVersionResult;
 extern unsigned int g_rocmVersionMajor;
 extern unsigned int g_rocmVersionMinor;
 extern unsigned int g_rocmVersionPatch;
+
+// src/plugin/profiler.cc: no profiler plugin loaded in a host-only binary by default.
+extern std::function<bool()> g_profilerPluginLoaded;
+
+// Generated device-function table (src/device/generate.py); empty default matches a miss (-1, with a WARN).
+extern std::unordered_map<uint64_t, int> ncclDevFuncNameToId;
 
 void ResetNcclStubs();
 
