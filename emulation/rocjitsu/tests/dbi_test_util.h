@@ -156,11 +156,14 @@ inline uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
 // `wrap_symtab_range` sets the .symtab sh_offset so sh_offset + sh_size overflows;
 // `kd_crosses_section` shrinks the .rodata sh_size below sizeof(KD) so the 64-byte `.kd`
 // descriptor extends past its owning section into the adjacent one.
+// `kernarg_segment_ptr` enables ENABLE_SGPR_KERNARG_SEGMENT_PTR with USER_SGPR_COUNT = 2 and
+// records `kernarg_size`, which is what the DBI entry prologue requires of a kernel.
 inline std::vector<uint8_t> make_amdgpu_kernel_elf(
     const std::vector<uint32_t> &text_words, uint32_t private_bytes, uint32_t granulated_sgpr_count,
     uint32_t e_flags, uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0,
     bool unterminated_kd_name = false, bool wrap_section_header_table = false,
-    bool wrap_symtab_range = false, bool kd_crosses_section = false, bool wave32 = false) {
+    bool wrap_symtab_range = false, bool kd_crosses_section = false, bool wave32 = false,
+    bool kernarg_segment_ptr = false, uint32_t kernarg_size = 0) {
   namespace kd = rocr::llvm::amdhsa;
   using KD = kd::kernel_descriptor_t;
 
@@ -251,6 +254,16 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(
   if (wave32) {
     AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
                     1);
+  }
+  // The kernarg pointer is the only enabled user-SGPR property, so it occupies
+  // s[0:1] and USER_SGPR_COUNT is 2. Both halves matter: the prologue reads the
+  // pointer out of the slot the enable bits imply, and it treats the user-SGPR
+  // count as the floor its reserved storage must sit above.
+  if (kernarg_segment_ptr) {
+    AMDHSA_BITS_SET(desc.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+    desc.kernarg_size = kernarg_size;
   }
   std::memcpy(image.data() + rodata_offset, &desc, sizeof(desc));
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
@@ -358,6 +371,21 @@ inline std::vector<uint8_t> make_gfx1200_wave32_kernel_elf(const std::vector<uin
                                 /*unterminated_kd_name=*/false,
                                 /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/false,
                                 /*kd_crosses_section=*/false, /*wave32=*/true);
+}
+
+// Target ELF for any of the three DBI-supported ISAs whose descriptor advertises a
+// kernarg segment pointer. The entry prologue rejects a kernel without one, so this
+// is the only builder here that reaches the splice rather than a rejection path.
+inline std::vector<uint8_t> make_kernarg_kernel_elf(const std::vector<uint32_t> &text_words,
+                                                    uint32_t private_bytes, uint32_t e_flags,
+                                                    uint32_t kernarg_size, bool wave32 = false,
+                                                    uint32_t granulated_sgpr_count = 3) {
+  return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count, e_flags,
+                                /*granulated_vgpr_count=*/0, /*accum_offset=*/0,
+                                /*unterminated_kd_name=*/false,
+                                /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/false,
+                                /*kd_crosses_section=*/false, wave32,
+                                /*kernarg_segment_ptr=*/true, kernarg_size);
 }
 
 // gfx950 target ELF whose `.kd` symbol name runs to the end of its string table
