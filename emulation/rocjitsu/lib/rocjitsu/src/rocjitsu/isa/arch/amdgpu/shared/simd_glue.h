@@ -23,9 +23,11 @@
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "simdojo/components/vector_reg.h"
+#include "util/data_types.h"
 #include "util/simd.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cassert>
 #include <cmath>
@@ -806,6 +808,307 @@ inline PkF32Halves read_pkf32_halves(const RegisterAccess::OperandReadPair32View
                                      uint32_t lane_base) {
   return {op.template load_lo_native<float>(lane_base),
           op.template load_hi_native<float>(lane_base)};
+}
+
+/// Low-precision and wide-side formats used by the gfx1250 scaled packed
+/// conversion family.  Each native SIMD lane represents one emulated GPU lane;
+/// the packed elements remain ordinary vector values within that lane.
+enum class MxfpFormat { Fp4E2m1, Fp6E2m3, Bf6E3m2, Fp8E4m3, Bf8E5m2 };
+enum class MxfpWideFormat { F32, F16, Bf16 };
+enum class MxfpDirection { Unpack, Pack };
+
+template <MxfpFormat Format>
+inline constexpr uint32_t mxfp_format_bits_v = [] {
+  if constexpr (Format == MxfpFormat::Fp4E2m1)
+    return 4u;
+  if constexpr (Format == MxfpFormat::Fp6E2m3 || Format == MxfpFormat::Bf6E3m2)
+    return 6u;
+  return 8u;
+}();
+
+/// Multiply a decoded MX value by its E8M0 scale with deterministic NaN
+/// precedence.  C++ leaves the payload and sign selected by a floating-point
+/// operation implementation-defined; keeping the decoded value first makes
+/// scalar and packed host execution bit-identical on every host ISA.
+inline constexpr bool is_f32_nan_bits(uint32_t bits) {
+  return (bits & 0x7f800000u) == 0x7f800000u && (bits & 0x007fffffu) != 0;
+}
+
+inline float scale_mxfp_scalar(float value, float scale) {
+  const uint32_t value_bits = std::bit_cast<uint32_t>(value);
+  const uint32_t scale_bits = std::bit_cast<uint32_t>(scale);
+  if (is_f32_nan_bits(value_bits))
+    return std::bit_cast<float>(value_bits | 0x00400000u);
+  if (is_f32_nan_bits(scale_bits))
+    return std::bit_cast<float>(scale_bits | 0x00400000u);
+  return value * scale;
+}
+
+/// Divide a wide MX input by its F32 scale with the same deterministic NaN
+/// policy as unpack scaling. Invalid zero/zero and infinity/infinity divisions
+/// produce the positive canonical quiet NaN.
+inline float divide_mxfp_scalar(float value, float scale) {
+  const uint32_t value_bits = std::bit_cast<uint32_t>(value);
+  const uint32_t scale_bits = std::bit_cast<uint32_t>(scale);
+  if (is_f32_nan_bits(value_bits))
+    return std::bit_cast<float>(value_bits | 0x00400000u);
+  if (is_f32_nan_bits(scale_bits))
+    return std::bit_cast<float>(scale_bits | 0x00400000u);
+  const uint32_t value_magnitude = value_bits & 0x7fffffffu;
+  const uint32_t scale_magnitude = scale_bits & 0x7fffffffu;
+  if ((value_magnitude == 0u && scale_magnitude == 0u) ||
+      (value_magnitude == 0x7f800000u && scale_magnitude == 0x7f800000u))
+    return std::bit_cast<float>(0x7fc00000u);
+  return value / scale;
+}
+
+#if __has_include(<experimental/simd>)
+template <MxfpFormat Format>
+  requires(util::has_stdx_simd)
+inline util::native<float> decode_mxfp_simd(util::native<uint32_t> code) {
+  if constexpr (Format == MxfpFormat::Fp4E2m1)
+    return util::fp4_e2m1_to_f32_simd(code);
+  else if constexpr (Format == MxfpFormat::Fp6E2m3)
+    return util::fp6_e2m3_to_f32_simd(code);
+  else if constexpr (Format == MxfpFormat::Bf6E3m2)
+    return util::bf6_e3m2_to_f32_simd(code);
+  else if constexpr (Format == MxfpFormat::Fp8E4m3)
+    return util::fp8_e4m3_to_f32_simd(code);
+  else
+    return util::bf8_e5m2_to_f32_simd(code);
+}
+
+/// Host packed multiply instructions do not promise the deterministic NaN
+/// precedence used by the architectural reference. Repair exceptional lanes
+/// with integer masks so the optimizer cannot reselect the NaN operand.
+template <MxfpFormat Format>
+inline util::native<float> scale_mxfp_unpack_simd(util::native<uint32_t> code,
+                                                  util::native<float> scale) {
+  using U = util::native<uint32_t>;
+  using F = util::native<float>;
+  const F decoded = decode_mxfp_simd<Format>(code);
+  const U decoded_bits = std::bit_cast<U>(decoded);
+  const U scale_bits = std::bit_cast<U>(scale);
+  const auto decoded_nan = ((decoded_bits & U(0x7f800000u)) == U(0x7f800000u)) &&
+                           ((decoded_bits & U(0x007fffffu)) != U(0u));
+  const auto scale_nan =
+      ((scale_bits & U(0x7f800000u)) == U(0x7f800000u)) && ((scale_bits & U(0x007fffffu)) != U(0u));
+  // Match the scalar helper even when floating-point exceptions are enabled:
+  // do not execute the arithmetic on a NaN lane before repairing its bits.
+  const auto nan = decoded_nan || scale_nan;
+  U safe_decoded_bits = decoded_bits;
+  U safe_scale_bits = scale_bits;
+  util::stdx::where(nan, safe_decoded_bits) = U(0x3f800000u);
+  util::stdx::where(nan, safe_scale_bits) = U(0x3f800000u);
+  U result_bits =
+      std::bit_cast<U>(std::bit_cast<F>(safe_decoded_bits) * std::bit_cast<F>(safe_scale_bits));
+  util::stdx::where(scale_nan, result_bits) = scale_bits | U(0x00400000u);
+  util::stdx::where(decoded_nan, result_bits) = decoded_bits | U(0x00400000u);
+  return std::bit_cast<F>(result_bits);
+}
+
+inline util::native<float> divide_mxfp_pack_simd(util::native<float> value,
+                                                 util::native<float> scale) {
+  using U = util::native<uint32_t>;
+  using F = util::native<float>;
+  const U value_bits = std::bit_cast<U>(value);
+  const U scale_bits = std::bit_cast<U>(scale);
+  const U value_magnitude = value_bits & U(0x7fffffffu);
+  const U scale_magnitude = scale_bits & U(0x7fffffffu);
+  const auto value_nan =
+      ((value_bits & U(0x7f800000u)) == U(0x7f800000u)) && ((value_bits & U(0x007fffffu)) != U(0u));
+  const auto scale_nan =
+      ((scale_bits & U(0x7f800000u)) == U(0x7f800000u)) && ((scale_bits & U(0x007fffffu)) != U(0u));
+  const auto invalid = ((value_magnitude == U(0u)) && (scale_magnitude == U(0u))) ||
+                       ((value_magnitude == U(0x7f800000u)) && (scale_magnitude == U(0x7f800000u)));
+  // The scalar helper branches around NaN and invalid divisions. Sanitize the
+  // same lanes here so vector evaluation cannot raise an extra FE_INVALID.
+  const auto exceptional = value_nan || scale_nan || invalid;
+  U safe_value_bits = value_bits;
+  U safe_scale_bits = scale_bits;
+  util::stdx::where(exceptional, safe_value_bits) = U(0x3f800000u);
+  util::stdx::where(exceptional, safe_scale_bits) = U(0x3f800000u);
+  U result_bits =
+      std::bit_cast<U>(std::bit_cast<F>(safe_value_bits) / std::bit_cast<F>(safe_scale_bits));
+  util::stdx::where(invalid, result_bits) = U(0x7fc00000u);
+  util::stdx::where(scale_nan, result_bits) = scale_bits | U(0x00400000u);
+  util::stdx::where(value_nan, result_bits) = value_bits | U(0x00400000u);
+  return std::bit_cast<F>(result_bits);
+}
+
+template <MxfpFormat Format, bool Stochastic>
+  requires(util::has_stdx_simd)
+inline util::native<uint32_t> encode_mxfp_simd(util::native<float> value,
+                                               util::native<uint32_t> seed, bool fp16_ovfl) {
+  if constexpr (Format == MxfpFormat::Fp4E2m1) {
+    if constexpr (Stochastic)
+      return util::f32_to_fp4_e2m1_sr_simd(value, seed);
+    else
+      return util::f32_to_fp4_e2m1_rne_simd(value);
+  } else if constexpr (Format == MxfpFormat::Fp6E2m3) {
+    if constexpr (Stochastic)
+      return util::f32_to_fp6_e2m3_sr_simd(value, seed);
+    else
+      return util::f32_to_fp6_e2m3_rne_simd(value);
+  } else if constexpr (Format == MxfpFormat::Bf6E3m2) {
+    if constexpr (Stochastic)
+      return util::f32_to_bf6_e3m2_sr_simd(value, seed);
+    else
+      return util::f32_to_bf6_e3m2_rne_simd(value);
+  } else if constexpr (Format == MxfpFormat::Fp8E4m3) {
+    if constexpr (Stochastic)
+      return util::f32_to_fp8_e4m3_sr_mode_simd(value, seed, fp16_ovfl);
+    else
+      return util::f32_to_fp8_e4m3_rne_mode_simd(value, fp16_ovfl);
+  } else {
+    if constexpr (Stochastic)
+      return util::f32_to_bf8_e5m2_sr_mode_simd(value, seed, fp16_ovfl);
+    else
+      return util::f32_to_bf8_e5m2_rne_mode_simd(value, fp16_ovfl);
+  }
+}
+
+/// SIMD implementation of the gfx1250 V_CVT_SCALE* packed conversion family.
+/// Source words, the scale, and the optional SR seed are snapshotted for a
+/// native lane chunk before any destination write, preserving overlapping
+/// VGPR semantics.  The generated scalar body remains the fallback and the
+/// bit-exact oracle.
+template <MxfpFormat Format, MxfpWideFormat WideFormat, uint32_t Count, MxfpDirection Direction,
+          bool Stochastic>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool
+try_execute_mxfp_cvt_scale_simd(Wavefront &wf, uint32_t dst_base, uint32_t src_base,
+                                const Operand &scale_operand, const Operand &seed_operand,
+                                uint32_t scale_byte) {
+  assert(scale_byte < 4u);
+  if (simd_force_scalar() || !scale_operand.simd_capable() ||
+      (Stochastic && !seed_operand.simd_capable()))
+    return false;
+
+  static_assert(Count == 8 || Count == 16);
+  constexpr uint32_t LowBits = mxfp_format_bits_v<Format>;
+  constexpr uint32_t LowWords = (Count * LowBits + 31u) / 32u;
+  constexpr uint32_t WideWords = WideFormat == MxfpWideFormat::F32 ? Count : Count / 2u;
+  constexpr uint32_t SrcWords = Direction == MxfpDirection::Unpack ? LowWords : WideWords;
+  constexpr uint32_t DstWords = Direction == MxfpDirection::Unpack ? WideWords : LowWords;
+  constexpr uint32_t CodeMask = (1u << LowBits) - 1u;
+  using U = util::native<uint32_t>;
+  using F = util::native<float>;
+  constexpr uint32_t W = static_cast<uint32_t>(U::size());
+
+  const uint64_t exec = wf.exec();
+  if (exec == 0)
+    return true;
+  if (wf.wf_size() % W != 0)
+    return false;
+
+  RegisterAccess regs(wf);
+  // A denied physical range is already a fully handled no-op in the scalar
+  // implementation. Do not fall through and repeat observations lane by lane.
+  if (!regs.owns_vgpr_range(src_base, SrcWords) || !regs.owns_vgpr_range(dst_base, DstWords))
+    return true;
+
+  auto scale = regs.read_operand(scale_operand, exec);
+  std::optional<RegisterAccess::OperandReadView> seed;
+  if constexpr (Stochastic)
+    seed.emplace(regs.read_operand(seed_operand, exec));
+  auto source = regs.read_vgpr_region(src_base, SrcWords, exec);
+  auto destination = regs.write_vgpr_region(dst_base, DstWords, exec);
+
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  for (uint32_t lane_base = 0; lane_base < wf.wf_size(); lane_base += W) {
+    const uint64_t chunk = (exec >> lane_base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const uint64_t write_chunk = (destination.lane_mask() >> lane_base) & chunk_full;
+
+    // Snapshot every input register before a possibly overlapping write.
+    std::array<U, SrcWords> src_words;
+    for (uint32_t word = 0; word < SrcWords; ++word)
+      src_words[word] = source.template load_native<uint32_t>(word, lane_base);
+    const U scale_bits = scale.template load_native<uint32_t>(lane_base);
+    const F scale_value = Direction == MxfpDirection::Unpack
+                              ? util::e8m0_to_f32_simd((scale_bits >> (scale_byte * 8u)) & 0xffu)
+                              : std::bit_cast<F>(scale_bits);
+    U lane_seed(0u);
+    if constexpr (Stochastic)
+      lane_seed = seed->template load_native<uint32_t>(lane_base);
+
+    if constexpr (Direction == MxfpDirection::Unpack) {
+      auto unpack_element = [&](uint32_t index) {
+        const uint32_t bit = index * LowBits;
+        const uint32_t word = bit / 32u;
+        const uint32_t shift = bit & 31u;
+        U code = src_words[word] >> shift;
+        if (shift + LowBits > 32u)
+          code |= src_words[word + 1u] << (32u - shift);
+        return scale_mxfp_unpack_simd<Format>(code & U(CodeMask), scale_value);
+      };
+
+      if constexpr (WideFormat == MxfpWideFormat::F32) {
+        for (uint32_t index = 0; index < Count; ++index)
+          destination.template store_native<float>(index, lane_base, unpack_element(index),
+                                                   write_chunk);
+      } else {
+        for (uint32_t word = 0; word < WideWords; ++word) {
+          const F lo_value = unpack_element(word * 2u);
+          const F hi_value = unpack_element(word * 2u + 1u);
+          U lo;
+          U hi;
+          if constexpr (WideFormat == MxfpWideFormat::F16) {
+            lo = util::f32_to_f16_mode_simd(lo_value, wf.fp16_ovfl());
+            hi = util::f32_to_f16_mode_simd(hi_value, wf.fp16_ovfl());
+          } else {
+            lo = util::f32_to_bf16_rne_mode_simd(lo_value, wf.fp16_ovfl());
+            hi = util::f32_to_bf16_rne_mode_simd(hi_value, wf.fp16_ovfl());
+          }
+          destination.template store_native<uint32_t>(word, lane_base,
+                                                      (lo & U(0xffffu)) | (hi << 16), write_chunk);
+        }
+      }
+    } else {
+      std::array<U, DstWords> dst_words;
+      for (U &word : dst_words)
+        word = U(0u);
+
+      auto wide_element = [&](uint32_t index) -> F {
+        if constexpr (WideFormat == MxfpWideFormat::F32)
+          return std::bit_cast<F>(src_words[index]);
+        else {
+          const U raw = src_words[index / 2u] >> ((index & 1u) * 16u);
+          if constexpr (WideFormat == MxfpWideFormat::F16)
+            return util::f16_to_f32_simd(raw);
+          else
+            return util::bf16_to_f32_simd(raw);
+        }
+      };
+
+      for (uint32_t index = 0; index < Count; ++index) {
+        const F value = divide_mxfp_pack_simd(wide_element(index), scale_value);
+        const U code =
+            encode_mxfp_simd<Format, Stochastic>(value, lane_seed, wf.fp16_ovfl()) & U(CodeMask);
+        const uint32_t bit = index * LowBits;
+        const uint32_t word = bit / 32u;
+        const uint32_t shift = bit & 31u;
+        dst_words[word] |= code << shift;
+        if (shift + LowBits > 32u)
+          dst_words[word + 1u] |= code >> (32u - shift);
+        if constexpr (Stochastic)
+          lane_seed = util::prng_advance_simd(lane_seed);
+      }
+      for (uint32_t word = 0; word < DstWords; ++word)
+        destination.template store_native<uint32_t>(word, lane_base, dst_words[word], write_chunk);
+    }
+  }
+  return true;
+}
+#endif
+
+template <MxfpFormat Format, MxfpWideFormat WideFormat, uint32_t Count, MxfpDirection Direction,
+          bool Stochastic>
+[[nodiscard]] bool try_execute_mxfp_cvt_scale_simd(Wavefront &, uint32_t, uint32_t, const Operand &,
+                                                   const Operand &, uint32_t) {
+  return false;
 }
 
 /// In-vector f32 sign flip (neg modifier): XOR the sign bit. Bit-exact to the

@@ -142,6 +142,15 @@ class RegisterAccess {
     return effective_lane_mask;
   }
 
+  static void check_native_region_bounds(uint32_t relative_reg, uint32_t reg_count,
+                                         uint32_t lane_base, std::size_t lane_count,
+                                         uint32_t wave_size, const char *view_name) {
+    if (relative_reg >= reg_count)
+      throw std::out_of_range(std::string(view_name) + " relative VGPR outside region");
+    if (lane_base > wave_size || lane_count > wave_size - lane_base)
+      throw std::out_of_range(std::string(view_name) + " lane window exceeds wave size");
+  }
+
 public:
   class OperandReadView {
   public:
@@ -768,6 +777,31 @@ public:
       return lo | (hi << 32);
     }
 
+    /// @brief Load one native-SIMD lane chunk from a register in this region.
+    /// @details A denied or unobserved region produces zeros, matching lane()
+    /// and lanes(). Partial-byte regions mask unobserved bytes before returning.
+    template <typename T>
+    [[nodiscard]] util::native<T> load_native(uint32_t relative_reg, uint32_t lane_base) const {
+      static_assert(sizeof(T) == sizeof(uint32_t), "load_native expects 32-bit lanes");
+      constexpr std::size_t W = util::native_width_v<T>;
+      RegisterAccess::check_native_region_bounds(relative_reg, reg_count_, lane_base, W, wf_size_,
+                                                 "VgprReadRegion");
+
+      const uint32_t *data =
+          !valid_ || !observed_
+              ? zero_lanes_.data()
+              : reinterpret_cast<const uint32_t *>(cu_->raw_vgpr_data(base_ + relative_reg));
+      auto bits = ConstVgprStorage(data, wf_size_).template simd_load<uint32_t>(lane_base);
+#if __has_include(<experimental/simd>)
+      if (byte_mask_ != rocjitsu::ExecutionPlugin::kFullByteMask)
+        bits &= util::broadcast<uint32_t>(RegisterAccess::byte_bit_mask(byte_mask_));
+#endif
+      if constexpr (std::is_same_v<T, uint32_t>)
+        return bits;
+      else
+        return std::bit_cast<util::native<T>>(bits);
+    }
+
     /// @brief Snapshot dword registers into lane-major memory.
     /// @details The region acquisition has already reported one plugin read per
     /// register. This copies only selected lanes without repeating ownership
@@ -859,6 +893,39 @@ public:
     void set_linear_word(uint32_t linear_index, uint32_t value) const {
       assert(wf_size_ != 0 && "VgprWriteRegion is empty");
       set_lane(linear_index / wf_size_, linear_index % wf_size_, value);
+    }
+
+    /// @brief Store one native-SIMD lane chunk into a register in this region.
+    /// @param lane_mask Chunk-relative mask; bit zero names @p lane_base.
+    /// @details The store is rejected if it names a lane outside the mask
+    /// observed when the region was acquired. A denied region remains a no-op.
+    template <typename T>
+    void store_native(uint32_t relative_reg, uint32_t lane_base, util::native<T> value,
+                      uint64_t lane_mask) const {
+      static_assert(sizeof(T) == sizeof(uint32_t), "store_native expects 32-bit lanes");
+      constexpr std::size_t W = util::native_width_v<T>;
+      RegisterAccess::check_native_region_bounds(relative_reg, reg_count_, lane_base, W, wf_size_,
+                                                 "VgprWriteRegion");
+      lane_mask = RegisterAccess::checked_store_lane_mask(lane_mask_, lane_base, W, lane_mask,
+                                                          "VgprWriteRegion");
+      if (!cu_)
+        return;
+
+      VgprStorage storage(reg_data(relative_reg), wf_size_);
+      if (byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask) {
+        storage.template simd_store<T>(lane_base, value, lane_mask);
+        return;
+      }
+
+      alignas(util::native<T>) uint32_t values[W];
+      util::blit_to_buffer<T>(values, value);
+      const uint32_t bit_mask = RegisterAccess::byte_bit_mask(byte_mask_);
+      for (std::size_t lane = 0; lane < W; ++lane) {
+        if ((lane_mask & (uint64_t{1} << lane)) == 0)
+          continue;
+        uint32_t &destination = storage[lane_base + lane];
+        destination = (destination & ~bit_mask) | (values[lane] & bit_mask);
+      }
     }
 
   private:

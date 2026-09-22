@@ -22,6 +22,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
+#include <iterator>
 #include <random>
 #include <string>
 #include <thread>
@@ -703,6 +705,365 @@ TEST(UtilSimd, F32ToF16Mode_VectorMatchesScalar_Sweep) {
                              << std::bit_cast<uint32_t>(in[i]);
       }
     }
+  }
+}
+
+TEST(UtilSimd, F32ToBf16Rne_VectorMatchesScalar_Sweep) {
+  SKIP_IF_NO_SIMD();
+  using F = util::native<float>;
+  using U = util::native<uint32_t>;
+  constexpr std::size_t W = F::size();
+  for (uint64_t base = 0; base < 0x1'0000'0000ULL; base += 997ULL * W) {
+    alignas(F) float in[W];
+    for (std::size_t lane = 0; lane < W; ++lane)
+      in[lane] = std::bit_cast<float>(static_cast<uint32_t>(base + 997ULL * lane));
+    U result = util::f32_to_bf16_rne_simd(F(in, util::stdx::element_aligned));
+    alignas(U) uint32_t out[W];
+    result.copy_to(out, util::stdx::element_aligned);
+    for (std::size_t lane = 0; lane < W; ++lane)
+      ASSERT_EQ(out[lane], util::f32_to_bf16_rne(in[lane]))
+          << "f32=0x" << std::hex << std::bit_cast<uint32_t>(in[lane]);
+  }
+}
+
+TEST(UtilSimd, F32ToBf16RneMode_VectorMatchesScalar_Sweep) {
+  SKIP_IF_NO_SIMD();
+  using F = util::native<float>;
+  using U = util::native<uint32_t>;
+  constexpr std::size_t W = F::size();
+  for (bool fp16_ovfl : {false, true}) {
+    for (uint64_t base = 0; base < 0x1'0000'0000ULL; base += 997ULL * W) {
+      alignas(F) float in[W];
+      for (std::size_t lane = 0; lane < W; ++lane)
+        in[lane] = std::bit_cast<float>(static_cast<uint32_t>(base + 997ULL * lane));
+      U result = util::f32_to_bf16_rne_mode_simd(F(in, util::stdx::element_aligned), fp16_ovfl);
+      alignas(U) uint32_t out[W];
+      result.copy_to(out, util::stdx::element_aligned);
+      for (std::size_t lane = 0; lane < W; ++lane)
+        ASSERT_EQ(out[lane], util::f32_to_bf16_rne_mode(in[lane], fp16_ovfl))
+            << "fp16_ovfl=" << fp16_ovfl << " f32=0x" << std::hex
+            << std::bit_cast<uint32_t>(in[lane]);
+    }
+  }
+}
+
+TEST(UtilSimd, F32ToBf16Rne_VectorMatchesScalar_EdgeGrid) {
+  SKIP_IF_NO_SIMD();
+  using F = util::native<float>;
+  using U = util::native<uint32_t>;
+  constexpr std::size_t W = F::size();
+  // Exact RNE ties with even/odd retained LSBs, both sides of a tie,
+  // finite-to-Inf rounding, signed IEEE specials, and NaNs whose only payload
+  // bit is discarded by BF16 truncation.
+  constexpr uint32_t bits[] = {
+      0x0000'0000u, 0x8000'0000u, 0x3F80'7FFFu, 0x3F80'8000u, 0x3F80'8001u, 0x3F81'8000u,
+      0xBF80'8000u, 0xBF81'8000u, 0x7F7F'7FFFu, 0x7F7F'8000u, 0xFF7F'8000u, 0x7F80'0000u,
+      0xFF80'0000u, 0x7F80'0001u, 0xFF80'0001u, 0x7F81'0000u, 0x7FC0'0000u, 0xFFC1'2345u,
+  };
+  for (bool fp16_ovfl : {false, true}) {
+    for (std::size_t base = 0; base < std::size(bits); base += W) {
+      alignas(F) float in[W];
+      for (std::size_t lane = 0; lane < W; ++lane)
+        in[lane] = std::bit_cast<float>(bits[(base + lane) % std::size(bits)]);
+      const F value(in, util::stdx::element_aligned);
+      const U result = fp16_ovfl ? util::f32_to_bf16_rne_mode_simd(value, true)
+                                 : util::f32_to_bf16_rne_simd(value);
+      alignas(U) uint32_t out[W];
+      result.copy_to(out, util::stdx::element_aligned);
+      for (std::size_t lane = 0; lane < W; ++lane) {
+        const uint32_t expected = fp16_ovfl ? util::f32_to_bf16_rne_mode(in[lane], true)
+                                            : util::f32_to_bf16_rne(in[lane]);
+        ASSERT_EQ(out[lane], expected) << "fp16_ovfl=" << fp16_ovfl << " f32=0x" << std::hex
+                                       << std::bit_cast<uint32_t>(in[lane]);
+      }
+    }
+  }
+}
+
+template <uint32_t CodeCount, typename ScalarFn, typename SimdFn>
+void expect_low_precision_decode_exhaustive(ScalarFn scalar_fn, SimdFn simd_fn) {
+  using U = util::native<uint32_t>;
+  using F = util::native<float>;
+  constexpr std::size_t W = U::size();
+  for (uint32_t base = 0; base < CodeCount; base += static_cast<uint32_t>(W)) {
+    alignas(U) uint32_t in[W];
+    for (std::size_t lane = 0; lane < W; ++lane)
+      in[lane] = ((base + static_cast<uint32_t>(lane)) % CodeCount) | 0xA5A5'0000u;
+    F result = simd_fn(U(in, util::stdx::element_aligned));
+    alignas(F) float out[W];
+    result.copy_to(out, util::stdx::element_aligned);
+    for (std::size_t lane = 0; lane < W; ++lane) {
+      const float expected = scalar_fn(static_cast<uint8_t>(in[lane]));
+      ASSERT_EQ(std::bit_cast<uint32_t>(out[lane]), std::bit_cast<uint32_t>(expected))
+          << "code=0x" << std::hex << in[lane] << " lane=" << std::dec << lane;
+    }
+  }
+}
+
+TEST(UtilSimd, E8m0ToF32_VectorMatchesScalar_Exhaustive) {
+  SKIP_IF_NO_SIMD();
+  expect_low_precision_decode_exhaustive<256>(util::e8m0_to_f32, util::e8m0_to_f32_simd);
+}
+
+TEST(UtilSimd, Fp4E2m1ToF32_VectorMatchesScalar_Exhaustive) {
+  SKIP_IF_NO_SIMD();
+  // Sweep the entire low byte, not just the 16 canonical codes: bits 4..7
+  // must be ignored exactly as in the scalar extractor.
+  expect_low_precision_decode_exhaustive<256>(util::fp4_e2m1_to_f32, util::fp4_e2m1_to_f32_simd);
+}
+
+TEST(UtilSimd, Fp6E2m3ToF32_VectorMatchesScalar_Exhaustive) {
+  SKIP_IF_NO_SIMD();
+  expect_low_precision_decode_exhaustive<256>(util::fp6_e2m3_to_f32, util::fp6_e2m3_to_f32_simd);
+}
+
+TEST(UtilSimd, Bf6E3m2ToF32_VectorMatchesScalar_Exhaustive) {
+  SKIP_IF_NO_SIMD();
+  expect_low_precision_decode_exhaustive<256>(util::bf6_e3m2_to_f32, util::bf6_e3m2_to_f32_simd);
+}
+
+TEST(UtilSimd, Fp8E4m3ToF32_VectorMatchesScalar_Exhaustive) {
+  SKIP_IF_NO_SIMD();
+  expect_low_precision_decode_exhaustive<256>(util::fp8_e4m3_to_f32, util::fp8_e4m3_to_f32_simd);
+}
+
+TEST(UtilSimd, Bf8E5m2ToF32_VectorMatchesScalar_Exhaustive) {
+  SKIP_IF_NO_SIMD();
+  expect_low_precision_decode_exhaustive<256>(util::bf8_e5m2_to_f32, util::bf8_e5m2_to_f32_simd);
+}
+
+template <typename ScalarFn, typename SimdFn>
+void expect_mx_narrow_values(const std::vector<float> &values, ScalarFn scalar_fn, SimdFn simd_fn) {
+  using F = util::native<float>;
+  using U = util::native<uint32_t>;
+  constexpr std::size_t W = F::size();
+  ASSERT_FALSE(values.empty());
+  for (std::size_t base = 0; base < values.size(); base += W) {
+    alignas(F) float in[W];
+    for (std::size_t lane = 0; lane < W; ++lane)
+      in[lane] = values[(base + lane) % values.size()];
+    U result = simd_fn(F(in, util::stdx::element_aligned));
+    alignas(U) uint32_t out[W];
+    result.copy_to(out, util::stdx::element_aligned);
+    for (std::size_t lane = 0; lane < W; ++lane) {
+      const uint32_t expected = scalar_fn(in[lane]);
+      ASSERT_EQ(out[lane], expected) << "f32=0x" << std::hex << std::bit_cast<uint32_t>(in[lane])
+                                     << " lane=" << std::dec << lane;
+    }
+  }
+}
+
+template <uint32_t LastPositiveCode, typename DecodeFn>
+std::vector<float> make_mx_narrow_boundary_values(DecodeFn decode,
+                                                  std::initializer_list<float> extras = {}) {
+  std::vector<float> values;
+  auto add_both_signs = [&](float v) {
+    const uint32_t bits = std::bit_cast<uint32_t>(v) & 0x7FFF'FFFFu;
+    values.push_back(std::bit_cast<float>(bits));
+    values.push_back(std::bit_cast<float>(bits | 0x8000'0000u));
+  };
+
+  // Exact representable values and every RNE decision boundary. The adjacent
+  // values around each midpoint distinguish below/tie/above, including the
+  // zero-to-smallest-subnormal tie.
+  for (uint32_t code = 0; code <= LastPositiveCode; ++code)
+    add_both_signs(decode(static_cast<uint8_t>(code)));
+  for (uint32_t code = 0; code < LastPositiveCode; ++code) {
+    const float lo = decode(static_cast<uint8_t>(code));
+    const float hi = decode(static_cast<uint8_t>(code + 1u));
+    const float midpoint = (lo + hi) * 0.5f;
+    add_both_signs(std::nextafter(midpoint, 0.0f));
+    add_both_signs(midpoint);
+    add_both_signs(std::nextafter(midpoint, std::numeric_limits<float>::infinity()));
+  }
+  for (float value : extras)
+    add_both_signs(value);
+
+  // Raw IEEE classes and payloads that are not generated by the finite grid.
+  constexpr uint32_t special_bits[] = {
+      0x0000'0001u, 0x007F'FFFFu, 0x0080'0000u, 0x7F7F'FFFFu, 0x7F80'0000u,
+      0xFF80'0000u, 0x7FC0'0000u, 0xFFC1'2345u, 0x7F80'0001u, 0xFF80'0001u,
+  };
+  for (uint32_t bits : special_bits)
+    values.push_back(std::bit_cast<float>(bits));
+  return values;
+}
+
+template <typename ScalarFn, typename SimdFn>
+void expect_mx_rne_stride_sweep(ScalarFn scalar_fn, SimdFn simd_fn) {
+  using F = util::native<float>;
+  using U = util::native<uint32_t>;
+  constexpr std::size_t W = F::size();
+  // Same prime-stride strategy as the established f32->f16 SIMD guard: about
+  // 4.3M samples spanning every exponent, sign, and a broad mantissa set.
+  for (uint64_t base = 0; base < 0x1'0000'0000ULL; base += 997ULL * W) {
+    alignas(F) float in[W];
+    for (std::size_t lane = 0; lane < W; ++lane)
+      in[lane] = std::bit_cast<float>(static_cast<uint32_t>(base + 997ULL * lane));
+    U result = simd_fn(F(in, util::stdx::element_aligned));
+    alignas(U) uint32_t out[W];
+    result.copy_to(out, util::stdx::element_aligned);
+    for (std::size_t lane = 0; lane < W; ++lane)
+      ASSERT_EQ(out[lane], static_cast<uint32_t>(scalar_fn(in[lane])))
+          << "f32=0x" << std::hex << std::bit_cast<uint32_t>(in[lane]);
+  }
+}
+
+template <typename ScalarFn, typename SimdFn>
+void expect_mx_sr_values(const std::vector<float> &values, ScalarFn scalar_fn, SimdFn simd_fn) {
+  using F = util::native<float>;
+  using U = util::native<uint32_t>;
+  constexpr std::size_t W = F::size();
+  constexpr uint32_t seeds[] = {
+      0u, 0xFFFF'FFFFu, 0x8000'0000u, 0x7FFF'FFFFu, 0xAAAA'AAAAu, 0x5555'5555u, 0x1234'5678u,
+  };
+  for (std::size_t seed_offset = 0; seed_offset < std::size(seeds); ++seed_offset) {
+    for (std::size_t base = 0; base < values.size(); base += W) {
+      alignas(F) float in[W];
+      alignas(U) uint32_t seed[W];
+      for (std::size_t lane = 0; lane < W; ++lane) {
+        in[lane] = values[(base + lane) % values.size()];
+        seed[lane] = seeds[(seed_offset + lane) % std::size(seeds)];
+      }
+      U result = simd_fn(F(in, util::stdx::element_aligned), U(seed, util::stdx::element_aligned));
+      alignas(U) uint32_t out[W];
+      result.copy_to(out, util::stdx::element_aligned);
+      for (std::size_t lane = 0; lane < W; ++lane)
+        ASSERT_EQ(out[lane], static_cast<uint32_t>(scalar_fn(in[lane], seed[lane])))
+            << "f32=0x" << std::hex << std::bit_cast<uint32_t>(in[lane]) << " seed=0x"
+            << seed[lane];
+    }
+  }
+}
+
+template <typename ScalarFn, typename SimdFn>
+void expect_mx_sr_random_sweep(ScalarFn scalar_fn, SimdFn simd_fn, uint32_t rng_seed) {
+  using F = util::native<float>;
+  using U = util::native<uint32_t>;
+  constexpr std::size_t W = F::size();
+  std::mt19937 rng(rng_seed);
+  for (int iter = 0, n = sweep_iters(); iter < n; ++iter) {
+    alignas(F) float in[W];
+    alignas(U) uint32_t seed[W];
+    for (std::size_t lane = 0; lane < W; ++lane) {
+      in[lane] = std::bit_cast<float>(static_cast<uint32_t>(rng()));
+      switch ((iter + static_cast<int>(lane)) & 3) {
+      case 0:
+        seed[lane] = 0u;
+        break;
+      case 1:
+        seed[lane] = 0xFFFF'FFFFu;
+        break;
+      default:
+        seed[lane] = rng();
+        break;
+      }
+    }
+    U result = simd_fn(F(in, util::stdx::element_aligned), U(seed, util::stdx::element_aligned));
+    alignas(U) uint32_t out[W];
+    result.copy_to(out, util::stdx::element_aligned);
+    for (std::size_t lane = 0; lane < W; ++lane)
+      ASSERT_EQ(out[lane], static_cast<uint32_t>(scalar_fn(in[lane], seed[lane])))
+          << "iter=" << iter << " lane=" << lane << " f32=0x" << std::hex
+          << std::bit_cast<uint32_t>(in[lane]) << " seed=0x" << seed[lane];
+  }
+}
+
+TEST(UtilSimd, MxNarrowRne_VectorMatchesScalar_BoundaryGrid) {
+  SKIP_IF_NO_SIMD();
+  const auto fp4 = make_mx_narrow_boundary_values<7>(util::fp4_e2m1_to_f32, {7.0f, 100.0f});
+  expect_mx_narrow_values(fp4, util::f32_to_fp4_e2m1_rne, util::f32_to_fp4_e2m1_rne_simd);
+
+  const auto fp6 = make_mx_narrow_boundary_values<31>(util::fp6_e2m3_to_f32, {8.0f, 100.0f});
+  expect_mx_narrow_values(fp6, util::f32_to_fp6_e2m3_rne, util::f32_to_fp6_e2m3_rne_simd);
+
+  const auto bf6 = make_mx_narrow_boundary_values<31>(util::bf6_e3m2_to_f32, {30.0f, 100.0f});
+  expect_mx_narrow_values(bf6, util::f32_to_bf6_e3m2_rne, util::f32_to_bf6_e3m2_rne_simd);
+
+  const auto fp8 = make_mx_narrow_boundary_values<126>(
+      util::fp8_e4m3_to_f32,
+      {449.0f, 464.0f, std::nextafter(464.0f, std::numeric_limits<float>::infinity()), 500.0f});
+  expect_mx_narrow_values(fp8, util::f32_to_fp8_e4m3_rne, util::f32_to_fp8_e4m3_rne_simd);
+
+  const auto bf8 = make_mx_narrow_boundary_values<123>(
+      util::bf8_e5m2_to_f32,
+      {60000.0f, 61440.0f, std::nextafter(61440.0f, std::numeric_limits<float>::infinity()),
+       70000.0f});
+  expect_mx_narrow_values(bf8, util::f32_to_bf8_e5m2_rne, util::f32_to_bf8_e5m2_rne_simd);
+
+  expect_mx_narrow_values(
+      fp8, [](float v) { return util::f32_to_fp8_e4m3_rne_mode(v, true); },
+      [](util::native<float> v) { return util::f32_to_fp8_e4m3_rne_mode_simd(v, true); });
+  expect_mx_narrow_values(
+      bf8, [](float v) { return util::f32_to_bf8_e5m2_rne_mode(v, true); },
+      [](util::native<float> v) { return util::f32_to_bf8_e5m2_rne_mode_simd(v, true); });
+}
+
+TEST(UtilSimd, MxNarrowRne_VectorMatchesScalar_DeterministicSweep) {
+  SKIP_IF_NO_SIMD();
+  expect_mx_rne_stride_sweep(util::f32_to_fp4_e2m1_rne, util::f32_to_fp4_e2m1_rne_simd);
+  expect_mx_rne_stride_sweep(util::f32_to_fp6_e2m3_rne, util::f32_to_fp6_e2m3_rne_simd);
+  expect_mx_rne_stride_sweep(util::f32_to_bf6_e3m2_rne, util::f32_to_bf6_e3m2_rne_simd);
+  expect_mx_rne_stride_sweep(util::f32_to_fp8_e4m3_rne, util::f32_to_fp8_e4m3_rne_simd);
+  expect_mx_rne_stride_sweep(util::f32_to_bf8_e5m2_rne, util::f32_to_bf8_e5m2_rne_simd);
+}
+
+TEST(UtilSimd, MxNarrowSr_VectorMatchesScalar_BoundaryGrid) {
+  SKIP_IF_NO_SIMD();
+  const auto fp4 = make_mx_narrow_boundary_values<7>(util::fp4_e2m1_to_f32, {7.0f, 100.0f});
+  expect_mx_sr_values(fp4, util::f32_to_fp4_e2m1_sr, util::f32_to_fp4_e2m1_sr_simd);
+
+  const auto fp6 = make_mx_narrow_boundary_values<31>(util::fp6_e2m3_to_f32, {8.0f, 100.0f});
+  expect_mx_sr_values(fp6, util::f32_to_fp6_e2m3_sr, util::f32_to_fp6_e2m3_sr_simd);
+
+  const auto bf6 = make_mx_narrow_boundary_values<31>(util::bf6_e3m2_to_f32, {30.0f, 100.0f});
+  expect_mx_sr_values(bf6, util::f32_to_bf6_e3m2_sr, util::f32_to_bf6_e3m2_sr_simd);
+
+  const auto fp8 = make_mx_narrow_boundary_values<126>(
+      util::fp8_e4m3_to_f32,
+      {449.0f, 464.0f, std::nextafter(464.0f, std::numeric_limits<float>::infinity()), 500.0f});
+  expect_mx_sr_values(fp8, util::f32_to_fp8_e4m3_sr, util::f32_to_fp8_e4m3_sr_simd);
+  expect_mx_sr_values(
+      fp8, [](float v, uint32_t s) { return util::f32_to_fp8_e4m3_sr_mode(v, s, true); },
+      [](util::native<float> v, util::native<uint32_t> s) {
+        return util::f32_to_fp8_e4m3_sr_mode_simd(v, s, true);
+      });
+
+  const auto bf8 = make_mx_narrow_boundary_values<123>(
+      util::bf8_e5m2_to_f32,
+      {60000.0f, 61440.0f, std::nextafter(61440.0f, std::numeric_limits<float>::infinity()),
+       70000.0f});
+  expect_mx_sr_values(bf8, util::f32_to_bf8_e5m2_sr, util::f32_to_bf8_e5m2_sr_simd);
+  expect_mx_sr_values(
+      bf8, [](float v, uint32_t s) { return util::f32_to_bf8_e5m2_sr_mode(v, s, true); },
+      [](util::native<float> v, util::native<uint32_t> s) {
+        return util::f32_to_bf8_e5m2_sr_mode_simd(v, s, true);
+      });
+}
+
+TEST(UtilSimd, MxNarrowSr_VectorMatchesScalar_DeterministicSweep) {
+  SKIP_IF_NO_SIMD();
+  expect_mx_sr_random_sweep(util::f32_to_fp4_e2m1_sr, util::f32_to_fp4_e2m1_sr_simd, 0xF4E2'0001u);
+  expect_mx_sr_random_sweep(util::f32_to_fp6_e2m3_sr, util::f32_to_fp6_e2m3_sr_simd, 0xF6E2'0003u);
+  expect_mx_sr_random_sweep(util::f32_to_bf6_e3m2_sr, util::f32_to_bf6_e3m2_sr_simd, 0xBF63'0002u);
+  expect_mx_sr_random_sweep(util::f32_to_fp8_e4m3_sr, util::f32_to_fp8_e4m3_sr_simd, 0xF8E4'0003u);
+  expect_mx_sr_random_sweep(util::f32_to_bf8_e5m2_sr, util::f32_to_bf8_e5m2_sr_simd, 0xBF85'0002u);
+}
+
+TEST(UtilSimd, PrngAdvance_VectorMatchesScalar_DeterministicSweep) {
+  SKIP_IF_NO_SIMD();
+  using U = util::native<uint32_t>;
+  constexpr std::size_t W = U::size();
+  std::mt19937 rng(0x197u);
+  for (int iter = 0, n = sweep_iters(); iter < n; ++iter) {
+    alignas(U) uint32_t in[W];
+    for (std::size_t lane = 0; lane < W; ++lane)
+      in[lane] = rng();
+    U result = util::prng_advance_simd(U(in, util::stdx::element_aligned));
+    alignas(U) uint32_t out[W];
+    result.copy_to(out, util::stdx::element_aligned);
+    for (std::size_t lane = 0; lane < W; ++lane)
+      ASSERT_EQ(out[lane], util::prng_advance(in[lane])) << "seed=0x" << std::hex << in[lane];
   }
 }
 

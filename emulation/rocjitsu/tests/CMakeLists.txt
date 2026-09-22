@@ -604,6 +604,7 @@ add_executable(
     util_result_test.cpp
     util_unique_handle_test.cpp
     util_simd_test.cpp
+    mxfp_cvt_simd_test.cpp
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
