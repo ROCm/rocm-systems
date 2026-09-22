@@ -186,6 +186,7 @@ def add_general_group(
             "   Triton trace (--triton-trace, --list-triton-operators, "
             "--triton-operator)\n"
             "   ML API trace (--ml-api-trace)\n"
+            "   Memory Bandwidth Analysis (--membw-analysis, profile only)\n"
             "   PC Sampling (--pc-sampling, --pc-sampling-method, "
             "--pc-sampling-interval)\n"
         ),
