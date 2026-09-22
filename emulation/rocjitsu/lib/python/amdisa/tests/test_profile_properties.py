@@ -29,6 +29,7 @@ from amdisa.isa_profile import (
     CdnaProfile,
     Cdna5Profile,
     DppOpcodeRule,
+    DppCtrlDialect,
     MatrixLayout,
     MemoryCoherencyModel,
     Rdna1Profile,
@@ -39,6 +40,30 @@ from amdisa.isa_profile import (
     SwmmacLayout,
     WaveStateLayout,
 )
+
+
+@pytest.mark.parametrize(
+    (
+        'profile',
+        'renders_halves',
+        'opsel_field',
+        'vop3p_hi_high_field',
+        'dpp_dialect',
+    ),
+    [
+        (CdnaProfile(), False, 'op_sel', 'op_sel_hi_2', DppCtrlDialect.GFX9),
+        (Rdna4Profile(), True, 'opsel', 'opsel_hi_2', DppCtrlDialect.GFX10_PLUS),
+        (Cdna5Profile(), True, 'opsel', 'opsel_hi_2', DppCtrlDialect.GFX10_PLUS),
+    ],
+)
+def test_vop3_disassembly_profile(
+    profile, renders_halves, opsel_field, vop3p_hi_high_field, dpp_dialect
+):
+    assert profile.uses_true16_vop3_opsel
+    assert profile.renders_true16_vop3_operands is renders_halves
+    assert profile.vop3_opsel_field == opsel_field
+    assert profile.vop3p_opsel_hi_high_field == vop3p_hi_high_field
+    assert profile.dpp_ctrl_dialect == dpp_dialect
 
 
 @pytest.mark.parametrize(
@@ -627,6 +652,9 @@ def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     assert 'apply_gpr_idx(wf, *off, amdgpu::VgprMsbRole::Dst)' not in operand_exec_cpp
     assert 'execution_backend_registered_' not in operand_exec_cpp
     assert 'rocjitsu/vm/amdgpu/compute_unit.h' in operand_exec_cpp
+    assert 'RegisterAccess(wf.cu())' not in operand_exec_cpp
+    assert 'RegisterAccess(wf)' in operand_exec_cpp
+    assert 'owns_vgpr_range(wf, reg, 1)' in operand_exec_cpp
 
 
 def test_gfx1250_instruction_execution_backend_is_dense_and_scoped(tmp_path):

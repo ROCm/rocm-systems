@@ -4,6 +4,8 @@
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
 #include "checkpoint_generated.h"
@@ -87,7 +89,10 @@ void restore_vgpr_block_into_zeroed_storage(amdgpu::ComputeUnitCore &cu, uint32_
 /// @brief Serialize the SoC configuration into a FlatBuffer SimulationConfig.
 flatbuffers::Offset<fb::SimulationConfig>
 serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
-                 const simdojo::SimulationEngine::Config &engine_config) {
+                 const simdojo::SimulationEngine::Config &engine_config,
+                 uint32_t cpu_dispatch_threads, uint32_t cpu_thread_budget,
+                 std::span<const ExecutionThreadChoice> thread_allocations,
+                 bool legacy_auto_dispatch, int32_t async_helper_threads) {
   auto arch_str = builder.CreateString(arch_to_string(soc.arch()));
   auto exec_mode_str = builder.CreateString(
       soc.exec_mode() == simdojo::ExecMode::CLOCKED ? "clocked" : "functional");
@@ -107,8 +112,14 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
       num_cus = se->num_compute_units();
       if (num_cus > 0) {
         const auto &cu_cfg = se->compute_unit(0)->config();
+        // Store an explicit zero even though it is the stable wire default. It
+        // means unbounded for a new checkpoint, while field absence remains the
+        // legacy signal that restore should use ComputeUnitCore's native default.
+        builder.ForceDefaults(true);
         fb_cu = fb::CreateComputeUnitConfig(builder, cu_cfg.num_wf_slots, cu_cfg.sgprs_per_wf,
-                                            cu_cfg.vgprs_per_wf, cu_cfg.lds_size_kb);
+                                            cu_cfg.vgprs_per_wf, cu_cfg.lds_size_kb,
+                                            cu_cfg.functional_quantum);
+        builder.ForceDefaults(false);
       }
     }
   }
@@ -118,8 +129,22 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
   auto fb_gpu = fb::CreateAmdgpuConfig(builder, num_xcds, num_iods, fb_xcd);
   auto fb_vm = fb::CreateVirtualMachineConfig(builder, arch_str, fb_gpu);
 
-  return fb::CreateSimulationConfig(builder, engine_config.max_ticks, engine_config.num_threads,
-                                    exec_mode_str, fb_vm);
+  std::vector<flatbuffers::Offset<fb::ExecutionThreadChoice>> choices;
+  for (const auto &choice : thread_allocations)
+    choices.push_back(
+        fb::CreateExecutionThreadChoice(builder, choice.engines, choice.dispatch, choice.helpers));
+  flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<fb::ExecutionThreadChoice>>>
+      fb_choices;
+  if (!legacy_auto_dispatch)
+    fb_choices = builder.CreateVector(choices);
+  // Preserve automatic requests, including zero engines/budget.
+  // Field absence continues to identify legacy serial-dispatch checkpoints.
+  builder.ForceDefaults(true);
+  auto result = fb::CreateSimulationConfig(
+      builder, engine_config.max_ticks, engine_config.num_threads, exec_mode_str, fb_vm, 0, 0,
+      cpu_dispatch_threads, cpu_thread_budget, fb_choices, async_helper_threads);
+  builder.ForceDefaults(false);
+  return result;
 }
 
 /// @brief Reconstruct a VirtualMachine::Config from a stored FlatBuffer config.
@@ -150,6 +175,12 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
           cu_cfg.sgprs_per_wf = cu->sgprs_per_wf();
           cu_cfg.vgprs_per_wf = cu->vgprs_per_wf();
           cu_cfg.lds_size_kb = cu->lds_size_kb();
+          // An absent field is a legacy checkpoint. Keep Config's native
+          // default instead of changing the FlatBuffers wire default: changing
+          // a scalar default makes old and new schemas non-conforming, and an
+          // old omitted zero would otherwise be reinterpreted as 1024.
+          if (flatbuffers::IsFieldPresent(cu, fb::ComputeUnitConfig::VT_FUNCTIONAL_QUANTUM))
+            cu_cfg.functional_quantum = cu->functional_quantum();
         }
       }
     }
@@ -168,7 +199,10 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
 } // namespace
 
 void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
-                     const simdojo::SimulationEngine::Config &engine_config) {
+                     const simdojo::SimulationEngine::Config &engine_config,
+                     uint32_t cpu_dispatch_threads, uint32_t cpu_thread_budget,
+                     std::span<const ExecutionThreadChoice> thread_allocations,
+                     bool legacy_auto_dispatch, int32_t async_helper_threads) {
   flatbuffers::FlatBufferBuilder builder(1024 * 1024);
 
   // Serialize compute unit states across all XCDs and their shader engines.
@@ -182,7 +216,7 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
           const auto *w = cu->wf(i);
           // Only checkpoint active (non-halted) wavefronts. Idle slots
           // have no register allocations and nothing meaningful to save.
-          if (w->is_halted())
+          if (!w || w->is_halted())
             continue;
 
           // The record holds the architectural registers and the TTMPs, but
@@ -206,8 +240,10 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
                 ": the wave is in a trap handler or stopped for a debugger, and that state "
                 "is not part of the checkpoint format");
 
-          auto sgprs_vec =
-              builder.CreateVector(cu->sgpr_data(w->sgpr_alloc().base), w->num_sgprs());
+          std::vector<uint32_t> sgprs(w->num_sgprs());
+          cu->sgpr_file().copy_to(w->sgpr_alloc().base, w->num_sgprs(),
+                                  std::as_writable_bytes(std::span(sgprs)));
+          auto sgprs_vec = builder.CreateVector(sgprs);
           auto vgprs_vec = serialize_vgpr_block(builder, *cu, w->vgpr_alloc().base, w->wf_size());
 
           // TTMPs are their own file, so they are not covered by sgprs_vec.
@@ -234,7 +270,8 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
 
         auto name = builder.CreateString(cu->name());
         auto wfs_vec = builder.CreateVector(wf_offsets);
-        auto cus = fb::CreateComputeUnitState(builder, name, wfs_vec, 0);
+        auto cus = fb::CreateComputeUnitState(builder, name, wfs_vec, 0,
+                                              cu->config().functional_quantum, true);
         cu_offsets.push_back(cus);
       }
     }
@@ -259,7 +296,11 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
   auto cu_vec = builder.CreateVector(cu_offsets);
   auto pages_vec = builder.CreateVector(page_offsets);
   auto mem_state = fb::CreateGpuMemoryState(builder, pages_vec);
-  auto config_offset = serialize_config(builder, soc, engine_config);
+  auto config_offset = serialize_config(builder, soc, engine_config, cpu_dispatch_threads,
+                                        cpu_thread_budget, thread_allocations,
+                                        legacy_auto_dispatch && cpu_dispatch_threads == 0 &&
+                                            cpu_thread_budget == 0 && thread_allocations.empty(),
+                                        async_helper_threads);
 
   auto checkpoint =
       fb::CreateSimulationCheckpoint(builder, tick, config_offset, cu_vec, cp_offset, mem_state);
@@ -300,6 +341,46 @@ LoadedConfig restore_checkpoint(const std::string &path) {
   engine_config.max_ticks = fb_config->max_ticks();
   engine_config.num_threads = fb_config->num_threads();
 
+  LoadedConfig result;
+  result.exec_mode = vm_config.soc.exec_mode;
+  result.requested_engine_threads = engine_config.num_threads;
+  result.cpu_dispatch_threads =
+      flatbuffers::IsFieldPresent(fb_config, fb::SimulationConfig::VT_CPU_DISPATCH_THREADS)
+          ? fb_config->cpu_dispatch_threads()
+          : 1u;
+  result.cpu_thread_budget = fb_config->cpu_thread_budget();
+  result.async_helper_threads =
+      flatbuffers::IsFieldPresent(fb_config, fb::SimulationConfig::VT_ASYNC_HELPER_THREADS)
+          ? fb_config->async_helper_threads()
+          : 0;
+  result.legacy_auto_dispatch =
+      !fb_config->thread_allocations() && result.cpu_dispatch_threads == 0;
+  if (fb_config->thread_allocations())
+    for (const auto *choice : *fb_config->thread_allocations())
+      result.thread_allocations.push_back(
+          {choice->num_threads(), choice->cpu_dispatch_threads(), choice->async_helper_threads()});
+  const auto &xcd = vm_config.soc.xcd;
+  const uint32_t capacity = xcd.num_shader_engines * xcd.shader_engine.num_compute_units;
+  const uint32_t host_threads = amdgpu::available_host_threads();
+  result.execution_threads = resolve_execution_threads(
+      {result.cpu_thread_budget, result.requested_engine_threads, result.cpu_dispatch_threads,
+       result.async_helper_threads},
+      host_threads, vm_config.soc.num_xcds, std::span(&capacity, 1),
+      configured_async_mma_supported(vm_config.soc.arch), result.thread_allocations,
+      result.exec_mode == simdojo::ExecMode::CLOCKED);
+  // Before allocation tables, explicit zero selected a dispatch-only host
+  // budget. An absent vector identifies that policy; a present empty vector
+  // intentionally selects the new serial fallback.
+  if (result.legacy_auto_dispatch && result.exec_mode == simdojo::ExecMode::FUNCTIONAL) {
+    auto budgets = resolve_cpu_dispatch_thread_budgets(0, host_threads, 1);
+    result.execution_threads.dispatch = {std::min(budgets.front(), std::max(capacity, 1u))};
+  }
+  if (!engine_config.num_threads)
+    engine_config.num_threads = result.execution_threads.engines;
+
+  result.async_resources = make_async_execution_resources(result.execution_threads.helpers);
+  vm_config.soc.xcd.shader_engine.compute_unit.async_resources = result.async_resources;
+
   // Rebuild the SoC root expected by LoadedConfig and create_from_loaded().
   auto soc = std::make_unique<SoC>("gpu_soc", vm_config.soc);
   auto *soc_ptr = soc.get();
@@ -332,6 +413,8 @@ LoadedConfig restore_checkpoint(const std::string &path) {
       if (!cu_state)
         continue;
       auto *cu = all_cus[i];
+      if (cu_state->functional_quantum_present())
+        cu->set_functional_quantum(cu_state->functional_quantum());
       if (auto *wf_states = cu_state->wavefronts()) {
         for (auto *wf_state : *wf_states) {
           uint32_t num_sgprs =
@@ -356,9 +439,12 @@ LoadedConfig restore_checkpoint(const std::string &path) {
           wf->set_wave_sched_mode_raw(wf_state->wave_sched_mode());
           const auto *sgprs = wf_state->sgprs();
           if (sgprs != nullptr) {
+            // Dispatch allocated a logically zero block. Skip zero source
+            // registers to preserve lazy backing for untouched waves.
             for (size_t r = 0; r < sgprs->size() && r < wf->num_sgprs(); ++r) {
-              cu->write_sgpr(wf->sgpr_alloc().base + static_cast<uint32_t>(r),
-                             sgprs->Get(static_cast<unsigned>(r)));
+              const uint32_t value = sgprs->Get(static_cast<unsigned>(r));
+              if (value != 0)
+                cu->write_sgpr(wf->sgpr_alloc().base + static_cast<uint32_t>(r), value);
             }
           }
 
@@ -404,9 +490,7 @@ LoadedConfig restore_checkpoint(const std::string &path) {
   }
 
   // Return the same root shape as the JSON configuration loader.
-  LoadedConfig result;
   result.engine_config = engine_config;
-  result.exec_mode = vm_config.soc.exec_mode;
   result.build_result.root = std::move(soc);
   result.build_result.memory = mem_ptr;
   return result;

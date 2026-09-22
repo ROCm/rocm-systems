@@ -4,8 +4,7 @@
 /// @file simulation.h
 /// @brief SimulationEngine and PartitionContext for single- and multi-threaded PDES execution.
 
-#ifndef SIMDOJO_SIM_SIMULATION_H_
-#define SIMDOJO_SIM_SIMULATION_H_
+#pragma once
 
 #include "simdojo/sim/event_queue.h"
 #include "simdojo/sim/pacing_controller.h"
@@ -278,6 +277,17 @@ public:
   /// @param message Optional message payload (ownership transferred).
   void schedule_event_now(Event *event, std::unique_ptr<Message> message = nullptr);
 
+  /// @brief Enqueue an event from any thread one tick after the current simulation time.
+  ///
+  /// @details Thread-safe. Use this for level-triggered retries that must wake an
+  /// idle engine but must not repeatedly outrank already-scheduled local work at
+  /// the following tick. External causality events such as a new doorbell should
+  /// continue to use @ref schedule_event_now. The timestamp saturates at
+  /// @ref TICK_MAX rather than wrapping to zero.
+  /// @param event Reusable event descriptor.
+  /// @param message Optional message payload (ownership transferred).
+  void schedule_event_next_tick(Event *event, std::unique_ptr<Message> message = nullptr);
+
   /// @brief Deposit an event into another partition's cross-partition inbox.
   /// @param src_partition Source partition ID (selects the incoming queue).
   /// @param dst_partition Destination partition ID.
@@ -338,6 +348,17 @@ private:
   /// @details Computes the new global LBTS from all partitions' local_next values,
   /// updates current_time_, runs service callbacks, and checks termination.
   void barrier_completion();
+
+  /// @brief Sleep out an epoch in which every partition published TICK_MAX.
+  ///
+  /// @details Called from @ref barrier_completion, so every other worker is
+  /// parked in the barrier for its duration. Returns as soon as an async event
+  /// is pending or the run is done, and in any case within a millisecond so
+  /// termination keeps being re-checked.
+  void idle_wait_quiescent();
+
+  /// @brief Whether any partition has undrained async events.
+  bool any_async_pending() const;
 
   /// @brief Call initialize() on all components across all partitions.
   void initialize_components();
@@ -521,5 +542,3 @@ private:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_SIM_SIMULATION_H_

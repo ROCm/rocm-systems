@@ -22,6 +22,10 @@ on:
         description: 'Teams webhook URL for test summary notifications'
         type: string
         default: ''
+      madengine_nodes:
+        description: 'Number of SLURM nodes for MADEngine workloads'
+        type: string
+        default: '2'
 
 permissions:
   contents: read
@@ -103,6 +107,7 @@ jobs:
       test_scope: ${{ needs.setup.outputs.test_scope }}
       notify_email: ${{ inputs.notify_email || 'collectives-ci@amd.com' }}
       notify_webhook: ${{ inputs.notify_webhook }}
+      madengine_nodes: ${{ inputs.madengine_nodes || '2' }}
       cmake_options: >
         -DTHEROCK_ENABLE_ALL=OFF
         -DTHEROCK_BUILD_TESTING=ON

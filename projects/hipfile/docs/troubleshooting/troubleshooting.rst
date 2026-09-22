@@ -25,7 +25,7 @@ fallback path instead.
   MOUNTPOINT  FSTYPE          DEVICE  BACKING  O_DIRECT  HIPFILE
   /           ext4 (ordered)  nvme0n1  nvme     yes       yes
   /home       xfs             nvme1n1  nvme     yes       yes
-  /data       ext4 (ordered)  dm-0     lvm      yes       no
+  /data       ext4 (ordered)  dm-0     lvm      yes       yes
 
   AIS support in:
           Kernel P2PDMA support   : True
@@ -49,6 +49,7 @@ uses one of the following storage configurations:
 * raw NVMe block device (without multipathing)
 * ext4 on an NVMe block device mounted with ``data=ordered``
 * xfs on an NVMe block device
+* an LVM logical volume whose physical volumes are all local NVMe
 
 If the target file or device is backed by any other storage configuration,
 hipFile uses the fallback path.

@@ -6,6 +6,7 @@
 *.profraw
 *.profdata
 /coverage/
+compile_commands.json
 build*/
 /build*
 install*/
@@ -19,10 +20,12 @@ junits/
 /plugins/net/ib_sharp/build/
 /plugins/net/example/*.so
 /plugins/mixed/example/*.so
+/plugins/tuner/model_demo/*.so
 /plugins/net/mock/*.so
 tags
 *.swp
 .cache/
+*.log
 
 # Visual Studio Code
 .vscode

@@ -32,8 +32,9 @@ concurrency:
 
 env:
   ROCM_PATH: "/opt/rocm"
-  PYTHON_VENV_PATH: "rocprofiler-sdk"
-  PYTHON_VENV_ACTIVATE: "rocprofiler-sdk/bin/activate"
+  PYTHON_VENV_PATH: ".venv-rocprofiler-sdk"
+  CMAKE_VERSION_DEB: "4.4.3"
+  CMAKE_VERSION_RPM: "3.28.4"
   GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
 
   mi325_EXCLUDE_TESTS_REGEX: ""
@@ -181,6 +182,7 @@ jobs:
             projects/rocr-runtime
             projects/clr
             projects/hip
+            projects/hrr
           submodules: false
           set-safe-directory: true
 
@@ -210,22 +212,24 @@ jobs:
       - name: Init/Update submodules
         run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
-      - name: Install requirements (venv)
+      - name: Install requirements
         timeout-minutes: 10
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
           git config --global --add safe.directory '*'
-          python3 -m venv ${{ env.PYTHON_VENV_PATH }}
-          source ${{ env.PYTHON_VENV_ACTIVATE }}
+          python3 -m venv --system-site-packages ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}
           export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
           python3 -m pip install --upgrade pip
           python3 -m pip install --upgrade -r requirements.txt
+          python3 -m pip install --upgrade cmake==${{ env.CMAKE_VERSION_RPM }}
 
       - name: Build ROCProfiler SDK Dependencies (installs trace-decoder under test)
         uses: ./.github/actions/rocprofiler-sdk-util
         with:
           rocm-path: ${{ env.ROCM_PATH }}
+          python-venv-path: ${{ env.PYTHON_VENV_PATH }}
           gpu-target: ${{ matrix.system.gpu-target }}
           compiler-launcher: /usr/local/bin/sccache
           enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
@@ -241,8 +245,8 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          source ${{ env.PYTHON_VENV_ACTIVATE }}
-          export PATH=~/.local/bin:/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+          export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
           python3 ./source/scripts/run-ci.py -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-trace-decoder-core \
             --mode ${CI_MODE} \

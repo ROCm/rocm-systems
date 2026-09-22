@@ -11,6 +11,9 @@
 #include "graph/xml.h"
 #include "gtest/gtest.h"
 
+#include "../common/ProcessIsolatedTestRunner.hpp"
+
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -153,6 +156,92 @@ protected:
       EXPECT_EQ(xmlSetAttrInt(gpu, "mlopart", mloPart), ncclSuccess);
     }
     return gpu;
+  }
+
+  // <pci class="0x060400"> — a PCIe switch. Endpoints under two of these nested
+  // below a common switch are PATH_PXB apart, the rail-local GPU/NIC shape on an
+  // 8-GPU MI300X node.
+  struct ncclXmlNode* addPciBridge(struct ncclXmlNode* parent, const char* busId) {
+    struct ncclXmlNode* pci = nullptr;
+    EXPECT_EQ(xmlAddNode(xml, parent, "pci", &pci), ncclSuccess);
+    EXPECT_EQ(xmlSetAttr(pci, "busid", busId), ncclSuccess);
+    EXPECT_EQ(xmlSetAttr(pci, "class", "0x060400"), ncclSuccess);
+    EXPECT_EQ(xmlSetAttrInt(pci, "link_width", 16), ncclSuccess);
+    EXPECT_EQ(xmlSetAttr(pci, "link_speed", "16.0 GT/s PCIe"), ncclSuccess);
+    return pci;
+  }
+
+  // <pci class="0x020700"><nic><net gdr="1"/></nic></pci> — a GDR-capable IB HCA.
+  struct ncclXmlNode* addNic(struct ncclXmlNode* parent, const char* busId, int dev,
+                             int gdr = 1) {
+    struct ncclXmlNode* pci = nullptr;
+    EXPECT_EQ(xmlAddNode(xml, parent, "pci", &pci), ncclSuccess);
+    EXPECT_EQ(xmlSetAttr(pci, "busid", busId), ncclSuccess);
+    EXPECT_EQ(xmlSetAttr(pci, "class", "0x020700"), ncclSuccess);
+    EXPECT_EQ(xmlSetAttrInt(pci, "link_width", 16), ncclSuccess);
+    EXPECT_EQ(xmlSetAttr(pci, "link_speed", "16.0 GT/s PCIe"), ncclSuccess);
+    struct ncclXmlNode* nic = nullptr;
+    EXPECT_EQ(xmlAddNode(xml, pci, "nic", &nic), ncclSuccess);
+    struct ncclXmlNode* net = nullptr;
+    EXPECT_EQ(xmlAddNode(xml, nic, "net", &net), ncclSuccess);
+    EXPECT_EQ(xmlSetAttrInt(net, "dev", dev), ncclSuccess);
+    EXPECT_EQ(xmlSetAttrInt(net, "speed", 200000), ncclSuccess);
+    EXPECT_EQ(xmlSetAttrInt(net, "gdr", gdr), ncclSuccess);
+    return pci;
+  }
+
+  // A node of a single rail, the shape the MLO-partition cases need.
+  struct ncclTopoSystem* buildRailSystem(uint64_t host, int nGpus, bool partitioned) {
+    addRail(addSystemCpu(host), /*rail=*/0, nGpus, partitioned);
+    return buildSystem(host);
+  }
+
+  // ncclTopoGetSystemFromXml() leaves netGdrLevel zeroed; initTransportsRank() is what
+  // arms the "use the default level" sentinel, so do the same before computing paths.
+  struct ncclTopoSystem* buildSystem(uint64_t host) {
+    struct ncclTopoSystem* built = nullptr;
+    EXPECT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+    if (built) built->netGdrLevel = -2;
+    return built;
+  }
+
+  // XGMI link entries name their peer by bus id, so a caller that links two rails needs this.
+  static void railGpuBusId(int rail, char* busId, size_t len) {
+    snprintf(busId, len, "0000:%02x:00.0", 0x0c + rail * 0x10);
+  }
+
+  // One rail of a rail-optimised node: a GPU carrying nGpus HIP devices and a NIC, on separate legs
+  // of their own PCIe switch, which puts a GPU at PATH_PXB from the NIC of its rail and at PATH_PHB
+  // from any other one. GPU and NIC of a rail share the dev index, which is what marks them a pair.
+  // With partitioned=true the HIP devices are CPX partitions (mlopart 0..nGpus-1).
+  // Returns the GPU's pci node, to attach <xgmi> entries below it.
+  struct ncclXmlNode* addRail(struct ncclXmlNode* cpu, int rail, int nGpus = 1,
+                              bool partitioned = false) {
+    const int busBase = 0x0b + rail * 0x10;
+    char switchBus[32], gpuLegBus[32], nicLegBus[32], gpuBus[32], nicBus[32];
+    snprintf(switchBus, sizeof(switchBus), "0000:%02x:00.0", busBase);
+    snprintf(gpuLegBus, sizeof(gpuLegBus), "0000:%02x:01.0", busBase);
+    snprintf(nicLegBus, sizeof(nicLegBus), "0000:%02x:02.0", busBase);
+    railGpuBusId(rail, gpuBus, sizeof(gpuBus));
+    snprintf(nicBus, sizeof(nicBus), "0000:%02x:00.0", busBase + 2);
+
+    struct ncclXmlNode* pciSwitch = addPciBridge(cpu, switchBus);
+    struct ncclXmlNode* gpuPci =
+        addGpuPci(addPciBridge(pciSwitch, gpuLegBus), gpuBus, "gfx942", /*rank=*/rail, /*dev=*/rail,
+                  partitioned ? 0 : NCCL_TOPO_UNDEF);
+    for (int p = 1; p < nGpus; p++) {
+      addGpuUnderPci(gpuPci, "gfx942", /*rank=*/rail + p, /*dev=*/rail + p,
+                     partitioned ? p : NCCL_TOPO_UNDEF);
+    }
+    addNic(addPciBridge(pciSwitch, nicLegBus), nicBus, /*dev=*/rail);
+    return gpuPci;
+  }
+
+  struct ncclTopoSystem* buildSystemWithPaths(uint64_t host) {
+    struct ncclTopoSystem* built = buildSystem(host);
+    if (built == nullptr) return nullptr;
+    EXPECT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+    return built;
   }
 
   static struct ncclTopoLink* findLink(struct ncclTopoNode* from,
@@ -495,6 +584,237 @@ TEST_F(TopoTest, GetSystemFromXml_CpxEightMlopartsUnderPhysicalPci) {
   }
 
   ncclTopoFree(built);
+}
+
+// GDR for an MLOPart partition is a property of the physical GPU: every CPX partition is a HIP
+// logical device behind one PCI function, so a NIC one switch away is PATH_PXB for all of them and
+// GDR must be enabled for all of them. Before the rework ncclTopoCheckGdr() refused GDR to any
+// partition, and ncclTopoComputePaths() then diverted those GPU<->NET paths through the local CPU,
+// degrading PXB to PHB on exactly the entries parseRomeSystem() matches its gdrLevel presets on.
+TEST_F(TopoTest, CheckGdr_CpxPartitionsUsePhysicalGpuDistance) {
+  struct ncclTopoSystem* built = buildRailSystem(0xd0, NCCL_TOPO_MLOPART_DEV_MAX, /*partitioned=*/true);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  ASSERT_EQ(built->nodes[GPU].count, NCCL_TOPO_MLOPART_DEV_MAX);
+  ASSERT_EQ(built->nodes[NET].count, 1);
+
+  const int64_t netId = built->nodes[NET].nodes[0].id;
+  for (int p = 0; p < NCCL_TOPO_MLOPART_DEV_MAX; p++) {
+    struct ncclTopoNode* gpu = built->nodes[GPU].nodes + p;
+    SCOPED_TRACE(testing::Message() << "partition " << p << " mlopart " << gpu->gpu.mloPart);
+    enum ncclTopoGdrMode mode = ncclTopoGdrModeDisable;
+    ASSERT_EQ(ncclTopoCheckGdr(built, gpu->gpu.rank, netId, /*read=*/0, &mode), ncclSuccess);
+    EXPECT_NE(mode, ncclTopoGdrModeDisable);
+    // The decision must leave the rail-local hop alone rather than divert it through the CPU,
+    // and it must agree with the physical device's own distance to the same NIC.
+    ASSERT_NE(gpu->gpu.parent, nullptr);
+    EXPECT_EQ(gpu->paths[NET][0].type, PATH_PXB);
+    EXPECT_EQ(gpu->paths[NET][0].type, gpu->gpu.parent->paths[NET][0].type);
+  }
+
+  ncclTopoFree(built);
+}
+
+// A partition's own GPU->NET entry is not evidence about the hardware: ncclTopoComputePaths()
+// rewrites it through the local CPU whenever some earlier decision refused GDR. The physical
+// device is still one switch from the NIC, so the GDR verdict must be read from the parent DEV
+// node and stay unchanged. Diverting the entry by hand stands in for that rewrite.
+TEST_F(TopoTest, CheckGdr_MloPartIgnoresDivertedPartitionPath) {
+  struct ncclTopoSystem* built = buildRailSystem(0xd1, NCCL_TOPO_MLOPART_DEV_MAX, /*partitioned=*/true);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  ASSERT_EQ(built->nodes[NET].count, 1);
+
+  const int64_t netId = built->nodes[NET].nodes[0].id;
+  struct ncclTopoNode* gpu = built->nodes[GPU].nodes + 3;
+  ASSERT_NE(gpu->gpu.parent, nullptr);
+  ASSERT_NE(gpu->gpu.mloPart, NCCL_TOPO_UNDEF);
+
+  enum ncclTopoGdrMode mode = ncclTopoGdrModeDisable;
+  ASSERT_EQ(ncclTopoCheckGdr(built, gpu->gpu.rank, netId, /*read=*/0, &mode), ncclSuccess);
+  ASSERT_NE(mode, ncclTopoGdrModeDisable) << "precondition: GDR is on before the path is diverted";
+
+  gpu->paths[NET][0].type = PATH_PHB;
+  ASSERT_EQ(ncclTopoCheckGdr(built, gpu->gpu.rank, netId, /*read=*/0, &mode), ncclSuccess);
+  EXPECT_NE(mode, ncclTopoGdrModeDisable);
+  EXPECT_EQ(gpu->gpu.parent->paths[NET][0].type, PATH_PXB);
+
+  ncclTopoFree(built);
+}
+
+// The parent-DEV lookup is scoped to partitions. An ordinary GPU keeps reading its own entry, so
+// a diverted path still means no GDR and the non-partitioned behaviour is left alone.
+TEST_F(TopoTest, CheckGdr_NonMloPartGpuStillUsesOwnPath) {
+  struct ncclTopoSystem* built = buildRailSystem(0xd2, /*nGpus=*/1, /*partitioned=*/false);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  ASSERT_EQ(built->nodes[GPU].count, 1);
+  ASSERT_EQ(built->nodes[NET].count, 1);
+
+  const int64_t netId = built->nodes[NET].nodes[0].id;
+  struct ncclTopoNode* gpu = built->nodes[GPU].nodes;
+  ASSERT_EQ(gpu->gpu.mloPart, NCCL_TOPO_UNDEF);
+
+  enum ncclTopoGdrMode mode = ncclTopoGdrModeDisable;
+  ASSERT_EQ(ncclTopoCheckGdr(built, gpu->gpu.rank, netId, /*read=*/0, &mode), ncclSuccess);
+  ASSERT_NE(mode, ncclTopoGdrModeDisable) << "precondition: GDR is on before the path is diverted";
+
+  gpu->paths[NET][0].type = PATH_PHB;
+  ASSERT_EQ(ncclTopoCheckGdr(built, gpu->gpu.rank, netId, /*read=*/0, &mode), ncclSuccess);
+  EXPECT_EQ(mode, ncclTopoGdrModeDisable);
+
+  ncclTopoFree(built);
+}
+
+// The ring search caps the GPU-to-NIC path type it accepts with this helper (ROCM-30906), so on a
+// rail-optimised node the answer has to be the switch-local NIC and not the NIC of another rail.
+TEST_F(TopoTest, GpuMaxLocalNetPath_RailSystemStopsAtTheLocalNic) {
+  const uint64_t host = 0xe0;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  addRail(cpu, /*rail=*/0);
+  addRail(cpu, /*rail=*/1);
+
+  struct ncclTopoSystem* built = buildSystemWithPaths(host);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+  ASSERT_EQ(built->nodes[NET].count, 2);
+
+  // Keyed on the dev index the two nodes of a rail share, so the case stays about rail identity
+  // whatever order the GPUs and the NICs were appended in.
+  for (int g = 0; g < built->nodes[GPU].count; g++) {
+    struct ncclTopoLinkList* paths = built->nodes[GPU].nodes[g].paths[NET];
+    for (int n = 0; n < built->nodes[NET].count; n++) {
+      SCOPED_TRACE(testing::Message() << "gpu " << g << " net " << n);
+      const bool ownRail = built->nodes[NET].nodes[n].net.dev == built->nodes[GPU].nodes[g].gpu.dev;
+      EXPECT_EQ(paths[n].type, ownRail ? PATH_PXB : PATH_PHB);
+    }
+  }
+
+  int maxPath = PATH_DIS;
+  ASSERT_EQ(ncclTopoGetGpuMaxLocalNetPath(built, &maxPath), ncclSuccess);
+  EXPECT_EQ(maxPath, PATH_PXB);
+
+  ncclTopoFree(built);
+}
+
+// The cap holds for the whole node, so the GPU with the worst of the local NICs sets it: here one
+// GPU shares a switch with a NIC and the other reaches both NICs across the CPU only.
+TEST_F(TopoTest, GpuMaxLocalNetPath_GpuOffTheRailsWidensTheBound) {
+  const uint64_t host = 0xe1;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  addRail(cpu, /*rail=*/0);
+  addGpuPci(cpu, "0000:1c:00.0", "gfx942", /*rank=*/1, /*dev=*/1);
+
+  struct ncclTopoSystem* built = buildSystemWithPaths(host);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+  ASSERT_EQ(built->nodes[NET].count, 1);
+
+  int maxPath = PATH_DIS;
+  ASSERT_EQ(ncclTopoGetGpuMaxLocalNetPath(built, &maxPath), ncclSuccess);
+  EXPECT_EQ(maxPath, PATH_PHB);
+
+  ncclTopoFree(built);
+}
+
+// A relay entry has to raise the answer even where every GPU has a nearer NIC of its own, or a
+// search bounded by it would never reach the step at which relays are accepted. The relay is
+// written by hand, the way CheckGdr_MloPartIgnoresDivertedPartitionPath stands in for a diverted
+// path, because PXN is off by default in this tree and NCCL_PARAM caches that per process.
+TEST_F(TopoTest, GpuMaxLocalNetPath_RelayRaisesTheBoundToPxn) {
+  const uint64_t host = 0xe2;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  addRail(cpu, /*rail=*/0);
+  addRail(cpu, /*rail=*/1);
+
+  struct ncclTopoSystem* built = buildSystemWithPaths(host);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+  ASSERT_EQ(built->nodes[NET].count, 2);
+
+  for (int g = 0; g < built->nodes[GPU].count; g++) {
+    struct ncclTopoLinkList* paths = built->nodes[GPU].nodes[g].paths[NET];
+    SCOPED_TRACE(testing::Message() << "gpu " << g);
+    for (int n = 0; n < built->nodes[NET].count; n++)
+      if (paths[n].type == PATH_PHB) paths[n].type = PATH_PXN;
+    EXPECT_EQ(std::min(paths[0].type, paths[1].type), PATH_PXB);
+    EXPECT_EQ(std::max(paths[0].type, paths[1].type), PATH_PXN);
+  }
+
+  int maxPath = PATH_DIS;
+  ASSERT_EQ(ncclTopoGetGpuMaxLocalNetPath(built, &maxPath), ncclSuccess);
+  EXPECT_EQ(maxPath, PATH_PXN);
+
+  ncclTopoFree(built);
+}
+
+// With no NIC in the system a GPU never gets a paths[NET] array at all, since those are allocated
+// as the search from each NIC reaches a node. The answer then has to be PATH_LOC, where PATH_DIS
+// would leave the ring search with no bound whatsoever.
+TEST_F(TopoTest, GpuMaxLocalNetPath_NodeWithoutNicsBoundsNothing) {
+  const uint64_t host = 0xe3;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  addGpuPci(cpu, "0000:0c:00.0", "gfx942", /*rank=*/0, /*dev=*/0);
+
+  struct ncclTopoSystem* built = buildSystemWithPaths(host);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[GPU].count, 1);
+  ASSERT_EQ(built->nodes[NET].count, 0);
+
+  int maxPath = PATH_DIS;
+  ASSERT_EQ(ncclTopoGetGpuMaxLocalNetPath(built, &maxPath), ncclSuccess);
+  EXPECT_EQ(maxPath, PATH_LOC);
+
+  ncclTopoFree(built);
+}
+
+// The ring graph of a two-rail node has to come out on the NIC of each GPU (ROCM-30906). The
+// search widens the GPU-to-NIC path type before it tries the two-NIC form of a ring, so without a
+// cap it settles on PATH_PHB, where both legs fit on one NIC and the second GPU loses GDR.
+TEST_F(TopoTest, RingSearch_TwoRailNode_StaysOnTheLocalNicPathType) {
+  // NCCL_CROSS_NIC decides whether the cap applies at all and NCCL_PARAM caches it for the whole
+  // process, so the body runs in a child with the default value pinned.
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "RingSearch_TwoRailNode_StaysOnTheLocalNicPathType",
+      [this]() {
+        const uint64_t host = 0xe4;
+        struct ncclXmlNode* cpu = addSystemCpu(host);
+        struct ncclXmlNode* gpu0 = addRail(cpu, /*rail=*/0);
+        struct ncclXmlNode* gpu1 = addRail(cpu, /*rail=*/1);
+
+        // A ring needs a way from GPU to GPU the cap admits as well, which XGMI is and PCIe is not.
+        char gpu0Bus[32], gpu1Bus[32];
+        railGpuBusId(0, gpu0Bus, sizeof(gpu0Bus));
+        railGpuBusId(1, gpu1Bus, sizeof(gpu1Bus));
+        addGpuLink(gpu0, gpu1Bus, /*count=*/8);
+        addGpuLink(gpu1, gpu0Bus, /*count=*/8);
+
+        struct ncclTopoSystem* built = buildSystemWithPaths(host);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2);
+        ASSERT_EQ(built->nodes[NET].count, 2);
+
+        // Two nodes of two GPUs, which is what makes the search look for net legs at all.
+        built->nRanks = 2 * built->nodes[GPU].count;
+        built->inter = 1;
+
+        struct ncclTopoGraph ring;
+        memset(&ring, 0, sizeof(ring));
+        ring.id = 0;
+        ring.pattern = NCCL_TOPO_PATTERN_RING;
+        ring.minChannels = 1;
+        ring.maxChannels = MAXCHANNELS / 2;
+
+        ASSERT_EQ(ncclTopoSearchInit(built), ncclSuccess);
+        ASSERT_EQ(ncclTopoCompute(built, &ring), ncclSuccess);
+        // Both legs of the ring on the NIC of their own GPU: the only form the cap leaves, and one
+        // no preset order can produce, unlike typeInter which starts at PATH_PXB.
+        EXPECT_EQ(ring.crossNic, 2);
+        EXPECT_EQ(ring.typeInter, PATH_PXB);
+
+        ncclTopoFree(built);
+      },
+      {{"NCCL_CROSS_NIC", "2"}});
 }
 
 #else // !(__HIP_PLATFORM_AMD__ || __HIPCC__)
