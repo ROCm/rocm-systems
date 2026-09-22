@@ -253,10 +253,6 @@ typedef struct {
 	/* specifies the alignment size as PAGE_SIZE * 2^alignment_order */
 	uint32_t alignment_order;
 
-	/* DEBUG/TEMPORARY: whether to perform the SVM host unregister. Off by
-	 * default, so deregistration stays the no-op it was until the path has
-	 * more mileage; HSA_SVM_HOST_UNREGISTER_DEBUG opts in.
-	 */
 	/* Effective state of the host unregister path, resolved on first use:
 	 * -1 unknown, 0 off, 1 on. HSA_SVM_HOST_UNREGISTER_DEBUG forces it
 	 * either way; with the variable unset the XNACK mode decides, which is
@@ -264,6 +260,12 @@ typedef struct {
 	 * svm_host_unregister_on().
 	 */
 	int svm_host_unregister;
+
+	/* DEBUG/TEMPORARY: hand the NO_ACCESS revoke to a worker thread instead
+	 * of issuing it on the deregistering thread. HSA_SVM_HOST_UNREGISTER_ASYNC
+	 * opts in, and only does anything when the path above is on.
+	 */
+	bool svm_host_unregister_async;
 } svm_t;
 
 /*
@@ -302,6 +304,27 @@ struct svm_api_range {
 #define SVM_API_GPU_MASK_BITS (sizeof(uint64_t) * 8)
 typedef struct svm_api_range svm_api_range_t;
 
+/*
+ * One deferred NO_ACCESS. The deregistering thread computes the ranges and the
+ * GPUs exactly as the synchronous path does and queues them here; the worker
+ * issues the ioctls.
+ *
+ * Ordering against a later grant for the same pages is what makes this safe.
+ * The synchronous path gets that from holding svm_api_mutex across both, which
+ * a worker cannot do without serializing everything again, so instead the
+ * queue is part of the ordering: before a register or a map touches a range,
+ * svm_revoke_sync_locked() cancels any queued revoke the new registration
+ * fully covers, and waits out anything else that overlaps. A revoke can
+ * therefore never land on pages a live registration has since been granted.
+ */
+struct svm_revoke_work {
+	struct svm_revoke_work *next;
+	void *addr;
+	uint64_t size;
+	uint64_t gpu_mask;
+	bool gpu_all;
+};
+
 struct hsa_kfd_fmm_context
 {
 	/* The other apertures are specific to each GPU. gpu_mem_t manages GPU
@@ -328,6 +351,19 @@ struct hsa_kfd_fmm_context
 	rbtree_t svm_api_range_tree;
 	pthread_mutex_t svm_api_mutex;
 	uint64_t svm_api_max_extent;
+
+	/* Deferred revoke queue, also under svm_api_mutex. svm_revoke_inflight
+	 * is the item whose ioctl is running with the mutex dropped, so it
+	 * still counts as pending for overlap purposes.
+	 */
+	struct svm_revoke_work *svm_revoke_head;
+	struct svm_revoke_work *svm_revoke_tail;
+	struct svm_revoke_work *svm_revoke_inflight;
+	pthread_cond_t svm_revoke_queued;	/* work arrived, or stop asked */
+	pthread_cond_t svm_revoke_retired;	/* an item finished */
+	pthread_t svm_revoke_thread;
+	bool svm_revoke_running;
+	bool svm_revoke_stop;
 
 	/* On APU, for memory allocated on the system memory that GPU doesn't
 	 * access via GPU driver, they are not managed by GPUVM. cpuvm_aperture
@@ -386,10 +422,19 @@ int hsakmt_kfdcontext_init_fmm_context(HsaKFDContext *ctx)
 	ctx->fmm_context->svm.disable_cache = false;
 	ctx->fmm_context->svm.alignment_order = 0;
 	ctx->fmm_context->svm.svm_host_unregister = -1;
+	ctx->fmm_context->svm.svm_host_unregister_async = false;
 
 	rbtree_init(&ctx->fmm_context->svm_api_range_tree);
 	pthread_mutex_init(&ctx->fmm_context->svm_api_mutex, NULL);
 	ctx->fmm_context->svm_api_max_extent = 0;
+
+	ctx->fmm_context->svm_revoke_head = NULL;
+	ctx->fmm_context->svm_revoke_tail = NULL;
+	ctx->fmm_context->svm_revoke_inflight = NULL;
+	ctx->fmm_context->svm_revoke_running = false;
+	ctx->fmm_context->svm_revoke_stop = false;
+	pthread_cond_init(&ctx->fmm_context->svm_revoke_queued, NULL);
+	pthread_cond_init(&ctx->fmm_context->svm_revoke_retired, NULL);
 
 	/* Initialize cpuvm_aperture */
 	ctx->fmm_context->cpuvm_aperture = init_aperture;
@@ -1593,6 +1638,209 @@ static HSAKMT_STATUS fmm_unregister_mem_svm_api(HsaKFDContext *ctx,
 	return ret;
 }
 
+static bool svm_ranges_overlap(void *a_start, uint64_t a_size,
+			       void *b_start, uint64_t b_size)
+{
+	HSAuint64 a = (HSAuint64)a_start, b = (HSAuint64)b_start;
+
+	return a < b + b_size && b < a + a_size;
+}
+
+static bool svm_range_covers(void *outer_start, uint64_t outer_size,
+			     void *inner_start, uint64_t inner_size)
+{
+	HSAuint64 o = (HSAuint64)outer_start, i = (HSAuint64)inner_start;
+
+	return i >= o && i + inner_size <= o + outer_size;
+}
+
+/*
+ * Make the deferred queue safe for a registration or a grant of
+ * [address, address + size): cancel the queued revokes it fully covers, since
+ * the range is live again and the pages would only have been re-granted, and
+ * wait out anything else that overlaps rather than letting it land afterwards.
+ *
+ * Called with svm_api_mutex held; the wait drops it.
+ */
+static void svm_revoke_sync_locked(struct hsa_kfd_fmm_context *fmm_ctx,
+				   void *address, uint64_t size)
+{
+	struct svm_revoke_work *prev, *w, *next;
+	bool wait;
+
+	if (!fmm_ctx->svm.svm_host_unregister_async)
+		return;
+
+	do {
+		wait = false;
+
+		prev = NULL;
+		w = fmm_ctx->svm_revoke_head;
+		while (w) {
+			next = w->next;
+
+			if (!svm_ranges_overlap(address, size, w->addr, w->size)) {
+				prev = w;
+				w = next;
+				continue;
+			}
+			if (!svm_range_covers(address, size, w->addr, w->size)) {
+				/* Partial overlap: trimming it would be exact
+				 * but this is rare, so let the worker finish
+				 * it first instead.
+				 */
+				wait = true;
+				break;
+			}
+
+			if (prev)
+				prev->next = next;
+			else
+				fmm_ctx->svm_revoke_head = next;
+			if (fmm_ctx->svm_revoke_tail == w)
+				fmm_ctx->svm_revoke_tail = prev;
+			free(w);
+			w = next;
+		}
+
+		if (fmm_ctx->svm_revoke_inflight &&
+		    svm_ranges_overlap(address, size,
+				       fmm_ctx->svm_revoke_inflight->addr,
+				       fmm_ctx->svm_revoke_inflight->size))
+			wait = true;
+
+		if (wait)
+			pthread_cond_wait(&fmm_ctx->svm_revoke_retired,
+					  &fmm_ctx->svm_api_mutex);
+	} while (wait);
+}
+
+static void *svm_revoke_worker(void *arg)
+{
+	HsaKFDContext *ctx = arg;
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	struct svm_revoke_work *w;
+
+	pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+	while (true) {
+		while (!fmm_ctx->svm_revoke_head && !fmm_ctx->svm_revoke_stop)
+			pthread_cond_wait(&fmm_ctx->svm_revoke_queued,
+					  &fmm_ctx->svm_api_mutex);
+
+		w = fmm_ctx->svm_revoke_head;
+		if (!w) {
+			if (fmm_ctx->svm_revoke_stop)
+				break;
+			continue;
+		}
+
+		fmm_ctx->svm_revoke_head = w->next;
+		if (!fmm_ctx->svm_revoke_head)
+			fmm_ctx->svm_revoke_tail = NULL;
+		fmm_ctx->svm_revoke_inflight = w;
+
+		/* The ioctl runs without the mutex so registrations of other
+		 * ranges are not blocked behind it; overlapping ones wait in
+		 * svm_revoke_sync_locked() on svm_revoke_inflight.
+		 */
+		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+		fmm_unregister_mem_svm_api(ctx, w->addr, w->size,
+					   w->gpu_mask, w->gpu_all);
+		pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+
+		fmm_ctx->svm_revoke_inflight = NULL;
+		free(w);
+		pthread_cond_broadcast(&fmm_ctx->svm_revoke_retired);
+	}
+	pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+
+	return NULL;
+}
+
+/* Called with svm_api_mutex held. Returns false if the caller should just
+ * issue the revoke itself.
+ */
+static bool svm_revoke_enqueue_locked(HsaKFDContext *ctx, void *addr, uint64_t size,
+				      uint64_t gpu_mask, bool gpu_all)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	struct svm_revoke_work *w;
+
+	if (!fmm_ctx->svm_revoke_running) {
+		if (pthread_create(&fmm_ctx->svm_revoke_thread, NULL,
+				   svm_revoke_worker, ctx)) {
+			pr_debug("failed to start the SVM revoke worker: %s\n",
+				 strerror(errno));
+			return false;
+		}
+		fmm_ctx->svm_revoke_running = true;
+	}
+
+	w = malloc(sizeof(*w));
+	if (!w)
+		return false;
+
+	w->next = NULL;
+	w->addr = addr;
+	w->size = size;
+	w->gpu_mask = gpu_mask;
+	w->gpu_all = gpu_all;
+
+	if (fmm_ctx->svm_revoke_tail)
+		fmm_ctx->svm_revoke_tail->next = w;
+	else
+		fmm_ctx->svm_revoke_head = w;
+	fmm_ctx->svm_revoke_tail = w;
+
+	pthread_cond_signal(&fmm_ctx->svm_revoke_queued);
+
+	return true;
+}
+
+/* Drain the queue and stop the worker. Safe to call when it never started. */
+static void svm_revoke_worker_stop(HsaKFDContext *ctx)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	pthread_t thread;
+
+	pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+	if (!fmm_ctx->svm_revoke_running) {
+		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+		return;
+	}
+	fmm_ctx->svm_revoke_stop = true;
+	thread = fmm_ctx->svm_revoke_thread;
+	pthread_cond_broadcast(&fmm_ctx->svm_revoke_queued);
+	pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+
+	pthread_join(thread, NULL);
+
+	pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+	fmm_ctx->svm_revoke_running = false;
+	fmm_ctx->svm_revoke_stop = false;
+	pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
+}
+
+/* After fork the worker does not exist in the child, so drop the queue it
+ * would have drained instead of trying to join a thread that is gone.
+ */
+static void svm_revoke_worker_reset(struct hsa_kfd_fmm_context *fmm_ctx)
+{
+	struct svm_revoke_work *w, *next;
+
+	for (w = fmm_ctx->svm_revoke_head; w; w = next) {
+		next = w->next;
+		free(w);
+	}
+	free(fmm_ctx->svm_revoke_inflight);
+
+	fmm_ctx->svm_revoke_head = NULL;
+	fmm_ctx->svm_revoke_tail = NULL;
+	fmm_ctx->svm_revoke_inflight = NULL;
+	fmm_ctx->svm_revoke_running = false;
+	fmm_ctx->svm_revoke_stop = false;
+}
+
 static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 						  void *address,
 					      uint64_t size, HsaMemFlags flags)
@@ -1640,6 +1888,7 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 	 */
 	if (svm_host_unregister_on(ctx)) {
 		pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+		svm_revoke_sync_locked(fmm_ctx, (void *)aligned_addr, aligned_size);
 		tracked = svm_api_range_get_locked(fmm_ctx, address, (void *)aligned_addr,
 						   aligned_size, size);
 		pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
@@ -3492,6 +3741,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 	char *disableCache, *pagedUserptr, *pagedSvm, *checkUserptr, *guardPagesStr, *reserveSvm;
 	char *maxVaAlignStr, *mfmaHighPrecisionModeStr, *svmHostUnregisterStr;
+	char *svmHostUnregisterAsyncStr;
 	unsigned int guardPages = 1;
 	uint64_t svm_base = 0, svm_limit = 0;
 	uint32_t svm_alignment = 0, mfma_high_precision_mode = 0;
@@ -3544,6 +3794,13 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	svmHostUnregisterStr = getenv("HSA_SVM_HOST_UNREGISTER_DEBUG");
 	fmm_ctx->svm.svm_host_unregister = svmHostUnregisterStr ?
 		!!strcmp(svmHostUnregisterStr, "0") : -1;
+
+	/* Not gated on the path being on here: that is resolved later, and
+	 * every use of this sits behind svm_host_unregister_on() already.
+	 */
+	svmHostUnregisterAsyncStr = getenv("HSA_SVM_HOST_UNREGISTER_ASYNC");
+	fmm_ctx->svm.svm_host_unregister_async =
+		(svmHostUnregisterAsyncStr && strcmp(svmHostUnregisterAsyncStr, "0"));
 
 	mfmaHighPrecisionModeStr = getenv("HSA_HIGH_PRECISION_MODE");
 	mfma_high_precision_mode = (mfmaHighPrecisionModeStr &&
@@ -3874,6 +4131,11 @@ void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx)
 	rbtree_node_t *n;
 
 	release_mmio(ctx);
+
+	/* Let the deferred revokes drain before the tracking they came from
+	 * goes away.
+	 */
+	svm_revoke_worker_stop(ctx);
 
 	/* Free any SVM-API ranges that were never explicitly deregistered.
 	 * The kernel reclaims the underlying SVM ranges on process teardown,
@@ -4256,6 +4518,8 @@ static HSAKMT_STATUS _fmm_map_to_gpu_userptr(HsaKFDContext *ctx,
 			 * and the GPUs granted here are recorded for the revoke.
 			 */
 			pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
+			svm_revoke_sync_locked(fmm_ctx, svm_addr,
+					       PAGE_ALIGN_UP(page_offset + size));
 			ret = fmm_map_mem_svm_api(ctx, svm_addr,
 						  PAGE_ALIGN_UP(page_offset + size),
 						  nodes_to_map,
@@ -5137,10 +5401,23 @@ HSAKMT_STATUS hsakmt_fmm_deregister_memory(HsaKFDContext *ctx, void *address)
 			pthread_mutex_lock(&fmm_ctx->svm_api_mutex);
 			nr = svm_api_range_put_locked(fmm_ctx, address, &rr,
 						      &gpu_mask, &gpu_all);
-			for (i = 0; i < nr; i++)
+			for (i = 0; i < nr; i++) {
+				/* Asynchronous mode hands the ioctl to the
+				 * worker and returns; the queue keeps it
+				 * ordered against a later grant for the same
+				 * pages. Fall back to issuing it here if the
+				 * worker or the queue entry cannot be had.
+				 */
+				if (fmm_ctx->svm.svm_host_unregister_async &&
+				    svm_revoke_enqueue_locked(ctx, rr[i].addr,
+							      rr[i].size,
+							      gpu_mask, gpu_all))
+					continue;
+
 				fmm_unregister_mem_svm_api(ctx, rr[i].addr,
 							   rr[i].size,
 							   gpu_mask, gpu_all);
+			}
 			pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
 			free(rr);
 			return HSAKMT_STATUS_SUCCESS;
@@ -5504,6 +5781,11 @@ void hsakmt_fmm_clear_all_mem(HsaKFDContext *ctx)
 	uint32_t i;
 	
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+
+	/* This runs in the child after a fork, where the revoke worker does
+	 * not exist and its queue describes the parent's ranges.
+	 */
+	svm_revoke_worker_reset(fmm_ctx);
 	/* Close render node FDs. The child process needs to open new ones */
 	for (i = 0; i <= DRM_LAST_RENDER_NODE - DRM_FIRST_RENDER_NODE; i++) {
 
