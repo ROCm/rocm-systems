@@ -15,8 +15,11 @@ from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from utils.mem_chart_common import strip_ansi
 from utils.tty import (
     _render_membw_guidance,
+    build_continuation_indent,
     convert_time_columns,
+    format_args_variant_lines,
     format_duration,
+    format_node_args,
     format_node_stats,
     format_table_output,
     has_time_data,
@@ -852,6 +855,105 @@ def test_show_call_tree_folds_identical_sibling_leaves(capsys):
     assert output.count("aten::addmm") == 1
     assert "calls: 2" in output
     assert parent.children == [first, second]
+
+
+def test_format_node_args_present() -> None:
+    node = CallTreeNode(
+        name="aten::mm",
+        args_invocations={"(self=float32[2x2])": {"1@m.py:1", "2@m.py:1"}},
+    )
+    assert format_node_args(node) == " args=(self=float32[2x2])"
+
+
+def test_format_node_args_absent() -> None:
+    assert format_node_args(CallTreeNode(name="aten::mm")) == ""
+    empty_parens = CallTreeNode(name="aten::mm", args_invocations={"()": set()})
+    assert format_node_args(empty_parens) == ""
+
+
+def test_format_args_variant_lines_orders_by_call_count() -> None:
+    node = CallTreeNode(
+        name="aten::mm",
+        args_invocations={
+            "(self=float32[2x2])": {"1@m.py:1"},
+            "(self=float32[4x4])": {"2@m.py:1", "3@m.py:1"},
+        },
+    )
+    assert format_args_variant_lines(node) == [
+        "args variants:",
+        "  2 calls  (self=float32[4x4])",
+        "  1 call   (self=float32[2x2])",
+    ]
+
+
+def test_format_args_variant_lines_empty_below_two_variants() -> None:
+    assert format_args_variant_lines(CallTreeNode(name="aten::mm")) == []
+    single = CallTreeNode(
+        name="aten::mm", args_invocations={"(self=float32[2x2])": {"1@m.py:1"}}
+    )
+    assert format_args_variant_lines(single) == []
+
+
+def test_format_args_variant_lines_caps_variant_count() -> None:
+    node = CallTreeNode(
+        name="aten::mm",
+        args_invocations={
+            f"(self=float32[{index}x{index}])": {str(index)} for index in range(7)
+        },
+    )
+    lines = format_args_variant_lines(node)
+    assert lines[0] == "args variants:"
+    assert len(lines) == 7
+    assert lines[-1] == "  ... 2 more variants"
+
+
+def test_format_args_variant_lines_omits_counts_without_invocation_ids() -> None:
+    node = CallTreeNode(
+        name="aten::mm",
+        args_invocations={
+            "(self=float32[2x2])": set(),
+            "(self=float32[4x4])": set(),
+        },
+    )
+    assert format_args_variant_lines(node) == [
+        "args variants:",
+        "    (self=float32[2x2])",
+        "    (self=float32[4x4])",
+    ]
+
+
+def test_print_operator_node_shows_args(capsys) -> None:
+    node = CallTreeNode(
+        name="aten::mm", args_invocations={"(self=float32[2x2])": {"1@m.py:1"}}
+    )
+    node.kernels["kernel_gemm"] = KernelStats(launches=1, total_duration_ns=1000.0)
+    print_operator_node(node)
+    output = capsys.readouterr().out
+    assert "aten::mm" in output
+    assert "args=(self=float32[2x2])" in output
+
+
+def test_print_operator_node_shows_args_variants_block(capsys) -> None:
+    node = CallTreeNode(
+        name="aten::mm",
+        args_invocations={
+            "(self=float32[2x2])": {"1@m.py:1"},
+            "(self=float32[4x4])": {"2@m.py:1", "3@m.py:1"},
+        },
+    )
+    node.kernels["kernel_gemm"] = KernelStats(launches=1, total_duration_ns=1000.0)
+    print_operator_node(node)
+    output = capsys.readouterr().out
+    assert "args=" not in output
+    assert "args variants:" in output
+    assert "2 calls  (self=float32[4x4])" in output
+    assert "1 call   (self=float32[2x2])" in output
+
+
+def test_build_continuation_indent_keeps_pipes() -> None:
+    assert build_continuation_indent("   |  └─ ", "   |  ") == "   |     "
+    assert build_continuation_indent("   |  ", "   |  ") == "   |  "
+    assert build_continuation_indent("└─ ", "") == "   "
 
 
 def test_show_call_tree_does_not_fold_roots_across_threads(capsys):

@@ -23,10 +23,12 @@ from utils.logger import console_error, console_log, console_warning
 from utils.mem_chart_common import format_mem_chart_heading, strip_ansi
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.utils_analysis import (
+    ARGS_DISPLAY_MAX_VARIANTS,
     NS_TO_MS,
     CallTreeNode,
     build_operator_summary,
     fold_identical_sibling_subtrees,
+    format_operator_args,
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
@@ -387,6 +389,46 @@ def format_node_stats(node: CallTreeNode) -> str:
     )
 
 
+def format_node_args(node: CallTreeNode) -> str:
+    """Return the leading-space args=... segment for a single blob."""
+    variants = node.args_variants
+    if len(variants) != 1:
+        return ""
+    args_blob, _call_count = variants[0]
+    formatted_args = format_operator_args(args_blob)
+    return f" args={formatted_args}" if formatted_args else ""
+
+
+def format_args_variant_call_count(call_count: int) -> str:
+    """Return the call-count label for one args variant."""
+    if call_count <= 0:
+        return ""
+    return f"{call_count} call" if call_count == 1 else f"{call_count} calls"
+
+
+def format_args_variant_lines(node: CallTreeNode) -> list[str]:
+    """Return the args variants block, most frequent first."""
+    variants = node.args_variants
+    if len(variants) < 2:
+        return []
+
+    shown_variants = variants[:ARGS_DISPLAY_MAX_VARIANTS]
+    call_count_labels = [
+        format_args_variant_call_count(call_count) for _, call_count in shown_variants
+    ]
+    label_width = max(len(label) for label in call_count_labels)
+    lines = ["args variants:"]
+    lines.extend(
+        f"  {label:<{label_width}}  {format_operator_args(args_blob)}"
+        for label, (args_blob, _) in zip(call_count_labels, shown_variants)
+    )
+    hidden_variant_count = len(variants) - len(shown_variants)
+    if hidden_variant_count:
+        plural = "" if hidden_variant_count == 1 else "s"
+        lines.append(f"  ... {hidden_variant_count} more variant{plural}")
+    return lines
+
+
 def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
     """Pick wrap width based on terminal size to avoid terminal hard-wrap artifacts."""
     terminal_cols = shutil.get_terminal_size((max_width, 20)).columns
@@ -394,11 +436,20 @@ def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
     return min(safe_width, max_width)
 
 
+def build_continuation_indent(prefix: str, continuation_prefix: str) -> str:
+    """Return the wrapped-line indent under prefix."""
+    if not continuation_prefix:
+        return " " * len(prefix)
+    padding = max(len(prefix) - len(continuation_prefix), 0)
+    return continuation_prefix + " " * padding
+
+
 def print_wrapped_tree_line(
     prefix: str,
     body: str,
     width: Optional[int] = None,
     break_long_words: bool = False,
+    continuation_prefix: str = "",
 ) -> None:
     """Print a tree line and wrap continuation lines to preserve indentation."""
     effective_width = get_tree_wrap_width() if width is None else width
@@ -407,7 +458,7 @@ def print_wrapped_tree_line(
             body,
             width=effective_width,
             initial_indent=prefix,
-            subsequent_indent=" " * len(prefix),
+            subsequent_indent=build_continuation_indent(prefix, continuation_prefix),
             break_long_words=break_long_words,
             break_on_hyphens=False,
         )
@@ -442,15 +493,7 @@ def print_wrapped_kernel_line(
         print(f"{prefix}{suffix}")
         return
 
-    # Build continuation with vertical pipes from parent levels
-    # Preserve parent pipes but replace branch character with spaces
-    if len(continuation_prefix) > 0:
-        # continuation_prefix has pipes, add spaces for branch chars
-        spaces_needed = len(prefix) - len(continuation_prefix)
-        continuation = continuation_prefix + " " * spaces_needed
-    else:
-        # No parent pipes, just use spaces matching the prefix
-        continuation = " " * len(prefix)
+    continuation = build_continuation_indent(prefix, continuation_prefix)
 
     for i, chunk in enumerate(wrapped_name):
         if i == 0:
@@ -476,7 +519,14 @@ def show_call_tree(call_trees: dict[str, list[CallTreeNode]]) -> None:
     for i, root in enumerate(roots):
         if i > 0:
             print(f"\n{'- ' * 40}")
-        print(f"\n{_operator_display_name(root)} {format_node_stats(root)}")
+        heading = (
+            f"{_operator_display_name(root)}{format_node_args(root)} "
+            f"{format_node_stats(root)}"
+        )
+        print()
+        print_wrapped_tree_line("", heading)
+        for variant_line in format_args_variant_lines(root):
+            print_wrapped_tree_line("", variant_line)
         for child in root.children:
             print_operator_node(child)
 
@@ -566,22 +616,33 @@ def print_operator_node(
     branch_char = "└─ " if is_last else "├─ "
     node_prefix = f"{indent}{branch_char}"
 
+    if is_last:
+        new_parent_pipes = parent_pipes + "   "  # 3 spaces
+    else:
+        new_parent_pipes = parent_pipes + "|  "  # pipe + 2 spaces
+
+    args_segment = format_node_args(node)
     if is_branching:
         print_wrapped_tree_line(
-            node_prefix, f"{_operator_display_name(node)} {format_node_stats(node)}"
+            node_prefix,
+            f"{_operator_display_name(node)}{args_segment} {format_node_stats(node)}",
+            continuation_prefix=new_parent_pipes,
         )
     else:
         if len(node.invocation_ids) > 0:
             suffix = f" (calls: {node.call_count})"
         else:
             suffix = ""
-        print_wrapped_tree_line(node_prefix, f"{_operator_display_name(node)}{suffix}")
+        print_wrapped_tree_line(
+            node_prefix,
+            f"{_operator_display_name(node)}{args_segment}{suffix}",
+            continuation_prefix=new_parent_pipes,
+        )
 
-    # Build new parent_pipes for children
-    if is_last:
-        new_parent_pipes = parent_pipes + "   "  # 3 spaces
-    else:
-        new_parent_pipes = parent_pipes + "|  "  # pipe + 2 spaces
+    for variant_line in format_args_variant_lines(node):
+        print_wrapped_tree_line(
+            new_parent_pipes, variant_line, continuation_prefix=new_parent_pipes
+        )
 
     # Process child nodes
     children = fold_identical_sibling_subtrees(node.children)
