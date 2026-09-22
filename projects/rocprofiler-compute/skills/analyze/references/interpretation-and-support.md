@@ -108,5 +108,5 @@ do not aggregate away load imbalance before inspection.
 
 ## Excluded workflows
 
-This skill does not cover Windows, offline/air-gapped setup, GUIs/IDEs,
-non-public NPI data, CUDA tools, or generating/replacing kernel source code.
+This skill does not cover Windows, offline/air-gapped setup, GUIs/IDEs, CUDA
+tools, or generating/replacing kernel source code.

@@ -13,7 +13,7 @@ profile, hand off to `skills/analyze/SKILL.md`.
 available and whose execution can be replayed safely.
 
 **Do not use this skill for:** CUDA tools, Windows, GUI/IDE workflows,
-offline setup, non-public NPI data, or kernel generation. Use the
+offline setup, or kernel generation. Use the
 rocprofiler-sdk PC-sampling skill when the user specifically needs standalone
 `rocprofv3` sampling rather than rocprofiler-compute.
 

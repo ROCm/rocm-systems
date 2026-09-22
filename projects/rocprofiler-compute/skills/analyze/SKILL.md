@@ -14,8 +14,8 @@ rocprofiler-compute when the user needs kernel selection, metric
 interpretation, ROCTX attribution, comparison, or machine-readable reports.
 
 **Do not use this skill for:** system-wide CPU/network tracing, CUDA tools,
-Windows, GUI/IDE workflows, offline setup, non-public NPI data, or generating
-kernel source. Use ROCm Systems Profiler for system/MPI timeline bottlenecks
+Windows, GUI/IDE workflows, offline setup, or generating kernel source. Use
+ROCm Systems Profiler for system/MPI timeline bottlenecks
 before handing identified GPU kernels to this skill.
 
 **Recommended path:** validate the workload, find the hottest kernel, run the
