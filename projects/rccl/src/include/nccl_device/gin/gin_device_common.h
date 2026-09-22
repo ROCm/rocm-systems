@@ -49,7 +49,8 @@
 #endif
 #endif
 
-// GIN rocshmem device templates (GDA, SDMA) gate on ENABLE_ROCSHMEM_GIN.
+// GIN rocSHMEM GDA device templates. ENABLE_ROCSHMEM_GIN is library-wide;
+// Anvil-SDMA does not follow this default (opt-in per TU below).
 #ifndef NCCL_GIN_ROCSHMEM_GDA_ENABLE
 #if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM_GIN)
 #define NCCL_GIN_ROCSHMEM_GDA_ENABLE 1
@@ -59,11 +60,11 @@
 #endif
 
 #ifndef NCCL_GIN_ANVIL_SDMA_ENABLE
-#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM_GIN)
-#define NCCL_GIN_ANVIL_SDMA_ENABLE 1
-#else
+// Opt-in only. ENABLE_ROCSHMEM_GIN is a library-wide host flag; if this
+// defaults to 1, every DeviceLinker TU that includes gin__funcs.h pulls
+// rocSHMEM anvil_device.hpp and hits RCCL_POISON_HIP_ATOMICS. GIN-SDMA
+// kernels pass -DNCCL_GIN_ANVIL_SDMA_ENABLE=1 on their own TUs.
 #define NCCL_GIN_ANVIL_SDMA_ENABLE 0
-#endif
 #endif
 
 // Test seam for the system-scope fence issued by the HIP GIN Put/PutValue
