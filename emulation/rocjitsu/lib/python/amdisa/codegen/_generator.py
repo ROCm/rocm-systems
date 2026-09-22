@@ -7693,7 +7693,7 @@ class CodeGenerator:
                 'amdgpu::InstructionExecutionError::UnimplementedInstruction);'
             )
 
-        # ── Graphics-only stubs (no-ops in compute simulation) ───────────
+        # ── Graphics exports and interpolation ─────────────────────────
         if cls == 'export':
             if self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4'):
                 return (

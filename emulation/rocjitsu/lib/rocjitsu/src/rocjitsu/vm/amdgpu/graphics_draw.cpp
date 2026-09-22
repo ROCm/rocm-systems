@@ -273,6 +273,8 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
     throw std::runtime_error("graphics user clip planes are not implemented");
   if (context_[0x1b] & (1u << 6)) // DB_SHADER_CONTROL.KILL_ENABLE
     throw std::runtime_error("graphics fragment discard is not implemented");
+  if (context_[0x1b] & (1u << 12)) // DB_SHADER_CONTROL.DEPTH_BEFORE_SHADER
+    throw std::runtime_error("graphics early fragment tests are not implemented");
   const uint32_t polygon_mode = (context_[0x207] >> 3) & 3;
   if (polygon_mode && (polygon_mode != 1 || ((context_[0x207] >> 5) & 63) != (2 | (2 << 3))))
     throw std::runtime_error("graphics point or line polygon modes are not implemented");
@@ -439,21 +441,22 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
     std::rotate(screen.begin(), screen.begin() + origin, screen.end());
     const double interpolation_area = edge(screen[0], screen[1], screen[2].x, screen[2].y);
     const float inverse_area = raster::truncate_float(1.0 / interpolation_area);
-    const raster::Plane plane_i{raster::truncate_float((screen[2].y - screen[0].y) * inverse_area),
-                                raster::truncate_float((screen[0].x - screen[2].x) * inverse_area)};
-    const raster::Plane plane_j{raster::truncate_float((screen[0].y - screen[1].y) * inverse_area),
-                                raster::truncate_float((screen[1].x - screen[0].x) * inverse_area)};
+    const auto plane = [&](float a, float b, float c) {
+      return raster::Plane{
+          raster::plane_gradient(screen[2].y - screen[0].y, screen[0].y - screen[1].y,
+                                 double(b) - a, double(c) - a, inverse_area),
+          raster::plane_gradient(screen[0].x - screen[2].x, screen[1].x - screen[0].x,
+                                 double(b) - a, double(c) - a, inverse_area),
+          a};
+    };
+    const raster::Plane plane_i = plane(0, 1, 0);
+    const raster::Plane plane_j = plane(0, 0, 1);
     const float iw0 = 1.0f / static_cast<float>(screen[0].w);
     const float iw1 = 1.0f / static_cast<float>(screen[1].w);
     const float iw2 = 1.0f / static_cast<float>(screen[2].w);
-    const raster::Plane plane_iw{raster::truncate_float(double(plane_i.dx) * iw1),
-                                 raster::truncate_float(double(plane_i.dy) * iw1)};
-    const raster::Plane plane_jw{raster::truncate_float(double(plane_j.dx) * iw2),
-                                 raster::truncate_float(double(plane_j.dy) * iw2)};
-    const raster::Plane plane_rw{
-        raster::truncate_float(plane_i.dx * (double(iw1) - iw0) + plane_j.dx * (double(iw2) - iw0)),
-        raster::truncate_float(plane_i.dy * (double(iw1) - iw0) + plane_j.dy * (double(iw2) - iw0)),
-        iw0};
+    const raster::Plane plane_iw = plane(0, iw1, 0);
+    const raster::Plane plane_jw = plane(0, 0, iw2);
+    const raster::Plane plane_rw = plane(iw0, iw1, iw2);
     const bool rectangle = primitive_type_ == kRectangleList;
     const int min_x = std::max(left, int(std::floor(std::min({v[0].x, v[1].x, v[2].x}))));
     const int min_y = std::max(top, int(std::floor(std::min({v[0].y, v[1].y, v[2].y}))));
@@ -522,7 +525,9 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
               inside &= e > 0 || (e == 0 && top_left);
             }
           }
-          f.covered = inside && f.x >= left && f.x < right && f.y >= top && f.y < bottom;
+          const bool sample_enabled = (context_[0x30e + (f.y & 1)] >> (16 * (f.x & 1))) & 1;
+          f.covered =
+              inside && sample_enabled && f.x >= left && f.x < right && f.y >= top && f.y < bottom;
           covered |= f.covered;
         }
         if (!covered)

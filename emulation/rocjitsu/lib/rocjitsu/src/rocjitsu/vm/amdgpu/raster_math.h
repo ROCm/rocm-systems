@@ -17,6 +17,14 @@ inline float truncate_float(double value) {
   return result;
 }
 
+// Setup truncates the weighted numerator before scaling by reciprocal area.
+// Weighting already-divided barycentric gradients changes the low bits.
+inline float plane_gradient(double edge1, double edge2, double delta1, double delta2,
+                            float inverse_area) {
+  const float numerator = truncate_float(edge1 * delta1 + edge2 * delta2);
+  return truncate_float(double(numerator) * inverse_area);
+}
+
 // Physical RDNA3/4 perspective interpolation rounds the product using the
 // input exponents, then normalizes it with truncation. A carry into another
 // exponent therefore discards a bit after rounding. Midpoints round away

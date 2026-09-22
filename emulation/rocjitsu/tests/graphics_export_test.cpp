@@ -165,6 +165,30 @@ TEST(GraphicsRasterMathTest, InterpolationMatchesPhysicalRdna4QuadInputs) {
   }
 }
 
+TEST(GraphicsRasterMathTest, WeightedGradientsMatchPhysicalInterpolationPlanes) {
+  // Gradients recovered from raw pull-model values across rotating cube faces.
+  // The last two cases exercise cancellation in the reciprocal-W numerator.
+  struct Case {
+    double edge1, edge2, delta1, delta2;
+    float inverse_area;
+    uint32_t expected;
+  };
+  const Case cases[] = {
+      {48.63671875, -55.8359375, 0x1.996342p-3, 0, -0x1.9c6a64p-12f, 0xbb7a9a10},
+      {49.96484375, -54.25, 0x1.7b0c18p-3, 0, -0x1.7b9fap-12f, 0xbb5b698e},
+      {49.96484375, -54.25, 0, 0x1.6edff4p-3, -0x1.7b9fap-12f, 0x3b66945d},
+      {-28.57421875, 22.65234375, 0, 0x1.6e6aecp-3, -0x1.3dd3a6p-10f, 0xbba1033e},
+      {42.9609375, 6.41796875, 0x1.b7dd2ap-3, 0, -0x1.413274p-12f, 0xbb393b23},
+      {59.9140625, -67.0390625, 0, 0x1.683f6ap-3, -0x1.413274p-12f, 0x3b6cba88},
+      {49.25, 1.0859375, -0x1.8a7f8p-9, -0x1.6ce818p-5, -0x1.2d795ap-12f, 0x386d1582},
+      {48.63671875, -55.8359375, -0x1.52c248p-5, -0x1.35102p-4, -0x1.9c6a64p-12f, 0xba6304d6},
+  };
+  for (const auto &test : cases)
+    EXPECT_EQ(std::bit_cast<uint32_t>(amdgpu::raster::plane_gradient(
+                  test.edge1, test.edge2, test.delta1, test.delta2, test.inverse_area)),
+              test.expected);
+}
+
 TEST(GraphicsRasterMathTest, SubpixelQuantizationRoundsMidpointsToEven) {
   for (double value : {0.0, 17.0, -17.0}) {
     EXPECT_EQ(amdgpu::raster::round_subpixel(value + 0.5 / 256), value);
@@ -226,6 +250,7 @@ TEST_P(GraphicsExportTest, RectangleCoverageAndUnsupportedRasterStates) {
     uint32_t color_control = 0xcc0010;
     uint32_t polygon_mode = 0;
     uint32_t samples = 0;
+    uint32_t sample_coverage = 15;
     std::array<float, 4> depth_bias{};
     bool depth_only = false;
     float depth = 0;
@@ -238,6 +263,12 @@ TEST_P(GraphicsExportTest, RectangleCoverageAndUnsupportedRasterStates) {
       {.name = "fractional coverage", .extent = 0.625f, .full_scissor = true},
       {.name = "rasterizer discard", .outcome = Outcome::Empty, .clip_control = 1u << 22},
       {.name = "fragment discard", .outcome = Outcome::Reject, .shader_control = 1u << 6},
+      {.name = "early fragment tests", .outcome = Outcome::Reject, .shader_control = 1u << 12},
+      {.name = "sample disabled", .outcome = Outcome::Empty, .sample_coverage = 0},
+      {.name = "sample at even x and y", .sample_coverage = 1},
+      {.name = "sample at odd x and even y", .sample_coverage = 2},
+      {.name = "sample at even x and odd y", .sample_coverage = 4},
+      {.name = "sample at odd x and y", .sample_coverage = 8},
       {.name = "fully clipped", .outcome = Outcome::Empty, .depth = 2},
       {.name = "partially clipped",
        .outcome = Outcome::Reject,
@@ -318,6 +349,10 @@ TEST_P(GraphicsExportTest, RectangleCoverageAndUnsupportedRasterStates) {
     state.context_registers[gfx12 ? 0x216 : 0x202] = test.color_control;
     state.context_registers[gfx12 ? 0x207 : 0x205] = test.polygon_mode;
     state.context_registers[0x2f8] = test.samples;
+    state.context_registers[0x30e] =
+        (test.sample_coverage & 1) | ((test.sample_coverage & 2) << 15);
+    state.context_registers[0x30f] =
+        ((test.sample_coverage & 4) >> 2) | ((test.sample_coverage & 8) << 13);
     for (uint32_t i = 0; i < test.depth_bias.size(); ++i)
       state.context_registers[0x2e0 + i] = std::bit_cast<uint32_t>(test.depth_bias[i]);
     if (test.depth_only) {
@@ -354,8 +389,8 @@ TEST_P(GraphicsExportTest, RectangleCoverageAndUnsupportedRasterStates) {
     wave_->set_wg_coord(0, 0, 0);
     wave_->set_graphics_stage(draw);
     draw->initialize(*wave_, 0, 0);
-    EXPECT_EQ(std::popcount(wave_->exec()), 4);
-    // Include helper lanes in exports; only the four covered fragments may write.
+    EXPECT_EQ(std::popcount(wave_->exec()), std::popcount(test.sample_coverage));
+    // Include helper lanes in exports; only covered fragments may write.
     for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
       draw->export_lane(*wave_, lane, 0, 3, {0x00003c00, 0x3c000000, 0, 0});
     EXPECT_FALSE(draw->advance(memory_, 0));
@@ -364,8 +399,11 @@ TEST_P(GraphicsExportTest, RectangleCoverageAndUnsupportedRasterStates) {
         const auto address = gfx12 ? amdgpu::gfx12_image_offset(x, y, 4, 4, 3)
                                    : amdgpu::gfx11_image_offset(x, y, 4, 4, 26);
         ASSERT_TRUE(address);
+        const bool sample_enabled = test.sample_coverage & (1u << ((x & 1) + 2 * (y & 1)));
         EXPECT_EQ(memory_.read32(0x100000 + *address),
-                  !test.depth_only && x >= 1 && x < 3 && y >= 1 && y < 3 ? 0xff0000ffu : 0u)
+                  !test.depth_only && sample_enabled && x >= 1 && x < 3 && y >= 1 && y < 3
+                      ? 0xff0000ffu
+                      : 0u)
             << x << "," << y;
       }
   }
@@ -682,6 +720,7 @@ TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
     bool disable_clamp;
     float expected;
     uint16_t expected_d16;
+    bool disable_samples = false;
   };
   constexpr Case cases[] = {
       {"zero depth", 0, 1, 0, 0, 1, false, 0, 0},
@@ -689,6 +728,7 @@ TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
       {"far depth unclamped", 2, 0.5f, 0.25f, 0.25f, 0.75f, true, 1.25f, 65535},
       {"near depth clamped", -2, 0.5f, 0.25f, 0.25f, 0.75f, false, 0.25f, 16384},
       {"near depth unclamped", -2, 0.5f, 0.25f, 0.25f, 0.75f, true, -0.75f, 0},
+      {"sample disabled", 0, 1, 0, 0, 1, false, 0, 0, true},
   };
   for (const auto &test : cases) {
     SCOPED_TRACE(test.name);
@@ -703,6 +743,8 @@ TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
         state.context_registers[0x1c] = 6 | (comparison << 4);
         state.context_registers[0x198] = 2;
         state.context_registers[0x2f9] = 0x2d;
+        state.context_registers[0x30e] = state.context_registers[0x30f] =
+            test.disable_samples ? 0 : 0xffffffffu;
         state.context_registers[0x205] = 0x43f;
         state.context_registers[0x10f] = state.context_registers[0x110] =
             state.context_registers[0x111] = state.context_registers[0x112] =
@@ -743,13 +785,15 @@ TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
                              std::bit_cast<uint32_t>(1.0f)});
         draw->export_lane(*wave_, 0, 20, 1,
                           {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
-        ASSERT_TRUE(draw->advance(memory_, 0));
+        const auto dispatch = draw->advance(memory_, 0);
+        ASSERT_EQ(bool(dispatch), !test.disable_samples);
         // Depth-only clears have no fragment exports; fixed-function Z still writes.
-        EXPECT_FALSE(draw->advance(memory_, 0));
+        if (dispatch)
+          EXPECT_FALSE(draw->advance(memory_, 0));
         const float expected = bytes == 2 ? test.expected_d16 / 65535.0f : test.expected;
         const bool comparisons[] = {false,        expected < 1,  expected == 1, expected <= 1,
                                     expected > 1, expected != 1, expected >= 1, true};
-        const bool pass = comparisons[comparison];
+        const bool pass = !test.disable_samples && comparisons[comparison];
         const uint32_t expected_bits =
             bytes == 2 ? test.expected_d16 : std::bit_cast<uint32_t>(expected);
         for (uint32_t y = 0; y < 4; ++y)
