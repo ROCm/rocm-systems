@@ -30,12 +30,20 @@ static_assert(sizeof(__hip_uint64_t) * CHAR_BIT == 64);
 #else
 #define HIP_ENABLE_GFX950_OCP_BUILTINS 0
 #endif
-#if defined(__gfx1250__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
 #define HIP_ENABLE_GFX1250_OCP_BUILTINS 1
 #else
 #define HIP_ENABLE_GFX1250_OCP_BUILTINS 0
 #endif
-#if !defined(__gfx950__) and !defined(__gfx1250__)
+#if defined(__gfx1250__)
+#define HIP_ENABLE_GFX1250_BLOCK16_BUILTINS 1
+#else
+// gfx1250-strict does not have the block16 convert ops, so the fp4/fp6 ->
+// f16/bf16/f32 unpack builtins are unavailable there even though the rest of
+// the gfx1250 OCP builtins are supported.
+#define HIP_ENABLE_GFX1250_BLOCK16_BUILTINS 0
+#endif
+#if !defined(__gfx950__) and !defined(__gfx1250__) and !defined(__gfx1250_strict__)
 #define HIP_ENABLE_HOST_OCP_CONVERSIONS 1
 #else
 #define HIP_ENABLE_HOST_OCP_CONVERSIONS 0
@@ -536,7 +544,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp4x2_storage_t __amd_cvt_floatx2_to_fp4x2_s
  */
 __OCP_FP_HOST_DEVICE_STATIC__ __amd_floatx2_storage_t __amd_cvt_fp4x2_to_floatx2_scale(
     const __amd_fp4x2_storage_t val, const __amd_fp4_interpretation_t, const __amd_scale_t scale) {
-#if HIP_ENABLE_GFX1250_OCP_BUILTINS
+#if HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
   union {
     unsigned int ui32;
     __amd_fp4x2_storage_t fp4x2[4];
@@ -1178,7 +1186,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_bf16x8_storage_t __amd_cvt_fp8x8_to_bf16x8_s
 __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp16x32_storage_t __amd_cvt_fp6x32_to_fp16x32_scale(
     const __amd_fp6x32_storage_t in, const __amd_fp6_interpretation_t interpret,
     const __amd_scale_t scale) {
-#if HIP_ENABLE_GFX1250_OCP_BUILTINS
+#if HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
   static_assert(sizeof(__amd_fp16x32_storage_t) == sizeof(__amd_fp16x16_storage_t[2]));
   static_assert(sizeof(__amd_fp6x32_storage_t) == sizeof(unsigned int[8]));
   static_assert(sizeof(__amd_fp6x16_storage_t) == sizeof(unsigned int[4]));
@@ -1238,7 +1246,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp16x32_storage_t __amd_cvt_fp6x32_to_fp16x3
 __OCP_FP_HOST_DEVICE_STATIC__ __amd_bf16x32_storage_t __amd_cvt_fp6x32_to_bf16x32_scale(
     const __amd_fp6x32_storage_t in, const __amd_fp6_interpretation_t interpret,
     const __amd_scale_t scale) {
-#if HIP_ENABLE_GFX1250_OCP_BUILTINS
+#if HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
   static_assert(sizeof(__amd_bf16x32_storage_t) == sizeof(__amd_bf16x16_storage_t[2]));
   static_assert(sizeof(__amd_fp6x32_storage_t) == sizeof(unsigned int[8]));
   static_assert(sizeof(__amd_fp6x16_storage_t) == sizeof(unsigned int[4]));
@@ -1289,7 +1297,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_bf16x32_storage_t __amd_cvt_fp6x32_to_bf16x3
 __OCP_FP_HOST_DEVICE_STATIC__ __amd_floatx32_storage_t __amd_cvt_fp6x32_to_floatx32_scale(
     const __amd_fp6x32_storage_t val, const __amd_fp6_interpretation_t interpret,
     const __amd_scale_t scale) {
-#if HIP_ENABLE_GFX1250_OCP_BUILTINS
+#if HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
   static_assert(sizeof(__amd_floatx32_storage_t) == sizeof(__amd_floatx16_storage_t[2]));
   static_assert(sizeof(__amd_fp6x32_storage_t) == sizeof(unsigned int[8]));
   static_assert(sizeof(__amd_fp6x16_storage_t) == sizeof(unsigned int[4]));
@@ -1345,7 +1353,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_floatx32_storage_t __amd_cvt_fp6x32_to_float
  */
 __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp16x2_storage_t __amd_cvt_fp4x2_to_fp16x2_scale(
     const __amd_fp4x2_storage_t in, const __amd_fp4_interpretation_t, const __amd_scale_t scale) {
-#if HIP_ENABLE_GFX1250_OCP_BUILTINS
+#if HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
   static_assert(sizeof(__amd_fp16x2_storage_t[4]) == sizeof(__amd_fp16x8_storage_t));
   static_assert(sizeof(__amd_fp4x2_storage_t[4]) == sizeof(unsigned int));
   union {
@@ -1379,7 +1387,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp16x2_storage_t __amd_cvt_fp4x2_to_fp16x2_s
  */
 __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp16x8_storage_t __amd_cvt_fp4x8_to_fp16x8_scale(
     const __amd_fp4x8_storage_t in, const __amd_fp4_interpretation_t, const __amd_scale_t scale) {
-#if HIP_ENABLE_GFX1250_OCP_BUILTINS
+#if HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
   return __builtin_amdgcn_cvt_scale_pk8_f16_fp4((unsigned int)in, __amd_scale_e8m0(scale), 0);
 #elif HIP_ENABLE_GFX950_OCP_BUILTINS
   static_assert(sizeof(__amd_fp4x2_storage_t[4]) == sizeof(unsigned int));
@@ -1426,7 +1434,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp16x8_storage_t __amd_cvt_fp4x8_to_fp16x8_s
  */
 __OCP_FP_HOST_DEVICE_STATIC__ __amd_bf16x2_storage_t __amd_cvt_fp4x2_to_bf16x2_scale(
     const __amd_fp4x2_storage_t in, const __amd_fp4_interpretation_t, const __amd_scale_t scale) {
-#if HIP_ENABLE_GFX1250_OCP_BUILTINS
+#if HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
   static_assert(sizeof(__amd_bf16x2_storage_t[4]) == sizeof(__amd_bf16x8_storage_t));
   static_assert(sizeof(__amd_fp4x2_storage_t[4]) == sizeof(unsigned int));
   union {
@@ -1460,7 +1468,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_bf16x2_storage_t __amd_cvt_fp4x2_to_bf16x2_s
  */
 __OCP_FP_HOST_DEVICE_STATIC__ __amd_bf16x8_storage_t __amd_cvt_fp4x8_to_bf16x8_scale(
     const __amd_fp4x8_storage_t in, const __amd_fp4_interpretation_t, const __amd_scale_t scale) {
-#if HIP_ENABLE_GFX1250_OCP_BUILTINS
+#if HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
   return __builtin_amdgcn_cvt_scale_pk8_bf16_fp4((unsigned int)in, __amd_scale_e8m0(scale), 0);
 #elif HIP_ENABLE_GFX950_OCP_BUILTINS
   static_assert(sizeof(__amd_fp4x2_storage_t[4]) == sizeof(unsigned int));
@@ -1507,7 +1515,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_bf16x8_storage_t __amd_cvt_fp4x8_to_bf16x8_s
  */
 __OCP_FP_HOST_DEVICE_STATIC__ __amd_floatx8_storage_t __amd_cvt_fp4x8_to_floatx8_scale(
     const __amd_fp4x8_storage_t val, const __amd_fp4_interpretation_t, const __amd_scale_t scale) {
-#if HIP_ENABLE_GFX1250_OCP_BUILTINS
+#if HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
   union {
     __amd_fp4x8_storage_t fp4x8;
     unsigned int ui32;
@@ -2203,7 +2211,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x16_storage_t __amd_cvt_floatx16_to_fp6x1
 __OCP_FP_HOST_DEVICE_STATIC__ __amd_floatx16_storage_t __amd_cvt_fp6x16_to_floatx16_scale(
     const __amd_fp6x16_storage_t val, const __amd_fp6_interpretation_t interpret,
     const __amd_scale_t scale) {
-#if HIP_ENABLE_GFX1250_OCP_BUILTINS
+#if HIP_ENABLE_GFX1250_OCP_BUILTINS && HIP_ENABLE_GFX1250_BLOCK16_BUILTINS
   return interpret == __AMD_OCP_E2M3
       ? __builtin_amdgcn_cvt_scale_pk16_f32_fp6(val, __amd_scale_e8m0(scale), 0)
       : __builtin_amdgcn_cvt_scale_pk16_f32_bf6(val, __amd_scale_e8m0(scale), 0);
