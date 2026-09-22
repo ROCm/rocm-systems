@@ -41,29 +41,30 @@ class PassMarkerMismatchError(MlApiTraceError):
         )
 
 
-class ForwardThreadNotFoundError(MlApiTraceError):
-    """No OS thread has T_Tid equal to the unlocated tree's usable F_Tid."""
+class LauncherThreadNotFoundError(MlApiTraceError):
+    """No call-tree thread matches the unlocated tree's launcher_thread_id."""
 
     def __init__(
         self,
         operator_name: str,
         thread_id: str,
         start_timestamp: float,
-        f_tid: str,
+        launcher_thread_id: str,
     ) -> None:
         self.operator_name = operator_name
         self.thread_id = thread_id
         self.start_timestamp = start_timestamp
-        self.f_tid = f_tid
+        self.launcher_thread_id = launcher_thread_id
         super().__init__(
-            "Forward thread not found for "
+            "Launcher thread not found for "
             f"Operator_Name={operator_name} Thread_Id={thread_id} "
-            f"Start_Timestamp={start_timestamp} F_Tid={f_tid}"
+            f"Start_Timestamp={start_timestamp} "
+            f"launcher_thread_id={launcher_thread_id}"
         )
 
 
-class UncorrelatedForwardIntervalError(MlApiTraceError):
-    """The forward thread exists but no marker interval contains this tree."""
+class UncorrelatedLauncherIntervalError(MlApiTraceError):
+    """The launcher thread exists but no marker interval contains this tree."""
 
     def __init__(
         self,
@@ -71,20 +72,19 @@ class UncorrelatedForwardIntervalError(MlApiTraceError):
         thread_id: str,
         start_timestamp: float,
         end_timestamp: float,
-        f_tid: str,
-        forward_thread_id: str,
+        launcher_thread_id: str,
     ) -> None:
         self.operator_name = operator_name
         self.thread_id = thread_id
         self.start_timestamp = start_timestamp
         self.end_timestamp = end_timestamp
-        self.f_tid = f_tid
-        self.forward_thread_id = forward_thread_id
+        self.launcher_thread_id = launcher_thread_id
         super().__init__(
-            "Uncorrelated forward interval for "
+            "Uncorrelated launcher interval for "
             f"Operator_Name={operator_name} Thread_Id={thread_id} "
-            f"Start_Timestamp={start_timestamp} End_Timestamp={end_timestamp} "
-            f"F_Tid={f_tid} forward Thread_Id={forward_thread_id}"
+            f"Start_Timestamp={start_timestamp} "
+            f"End_Timestamp={end_timestamp} "
+            f"launcher_thread_id={launcher_thread_id}"
         )
 
 

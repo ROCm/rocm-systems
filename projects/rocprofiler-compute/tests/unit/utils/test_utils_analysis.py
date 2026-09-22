@@ -15,13 +15,13 @@ import utils.utils_analysis as utils_analysis
 from utils.ml_api_trace_errors import (
     MissingSourceLocationError,
     OverlappingMarkerRangeError,
-    UncorrelatedForwardIntervalError,
+    UncorrelatedLauncherIntervalError,
 )
 from utils.utils_analysis import (
     CallTreeNode,
     KernelStats,
     NodeRollup,
-    attach_unlocated_trees_by_forward_thread,
+    attach_unlocated_trees_by_launcher_thread,
     build_operator_summary,
     fold_identical_sibling_subtrees,
     format_operator_args,
@@ -990,7 +990,6 @@ def test_attach_defers_missing_source_and_grafts_other_roots():
         backend="torch",
         start_timestamp=0.0,
         end_timestamp=100.0,
-        t_tid="1",
     )
     backward.invocation_ids.add("bw")
     detach = CallTreeNode(
@@ -1005,7 +1004,6 @@ def test_attach_defers_missing_source_and_grafts_other_roots():
         backend="torch",
         start_timestamp=11.0,
         end_timestamp=19.0,
-        f_tid="1",
     )
     child.invocation_ids.add("bw_op")
     engine = CallTreeNode(
@@ -1013,11 +1011,12 @@ def test_attach_defers_missing_source_and_grafts_other_roots():
         backend="torch",
         start_timestamp=10.0,
         end_timestamp=20.0,
+        launcher_thread_id="9081",
     )
     engine.invocation_ids.add("eval")
     engine.children = [child]
     forest = {"9081": [backward, detach], "9247": [engine]}
-    errors = attach_unlocated_trees_by_forward_thread(forest)
+    errors = attach_unlocated_trees_by_launcher_thread(forest)
     assert len(errors) == 1
     assert isinstance(errors[0], MissingSourceLocationError)
     assert errors[0].operator_name == "aten::detach"
@@ -1034,7 +1033,6 @@ def test_attach_defers_uncorrelated_interval_and_keeps_worker_root():
         backend="torch",
         start_timestamp=0.0,
         end_timestamp=10.0,
-        t_tid="1",
     )
     backward.invocation_ids.add("bw")
     child = CallTreeNode(
@@ -1042,7 +1040,6 @@ def test_attach_defers_uncorrelated_interval_and_keeps_worker_root():
         backend="torch",
         start_timestamp=51.0,
         end_timestamp=59.0,
-        f_tid="1",
     )
     child.invocation_ids.add("sum_bw")
     engine = CallTreeNode(
@@ -1050,13 +1047,14 @@ def test_attach_defers_uncorrelated_interval_and_keeps_worker_root():
         backend="torch",
         start_timestamp=50.0,
         end_timestamp=60.0,
+        launcher_thread_id="14444",
     )
     engine.invocation_ids.add("eval")
     engine.children = [child]
     forest = {"14444": [backward], "14611": [engine]}
-    errors = attach_unlocated_trees_by_forward_thread(forest)
+    errors = attach_unlocated_trees_by_launcher_thread(forest)
     assert len(errors) == 1
-    assert isinstance(errors[0], UncorrelatedForwardIntervalError)
+    assert isinstance(errors[0], UncorrelatedLauncherIntervalError)
     assert engine in forest["14611"]
     assert engine not in backward.children
 
