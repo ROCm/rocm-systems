@@ -46,7 +46,10 @@ set(early-multi-late-overlap-env
     "ROCPROFILER_TOOL_CONTEXTS=HIP_API_BUFFERED,HSA_API_BUFFERED,KERNEL_DISPATCH_BUFFERED,MEMORY_COPY_BUFFERED,MARKER_API_BUFFERED"
     "ROCPROFILER_TOOL_OUTPUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/early-multi-late-overlap-tool-a.json"
     "ROCPROFILER_TOOL_LATE_OUTPUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/early-multi-late-overlap-tool-b.json"
-    "ROCPROFILER_TOOL_DISABLE_PERFETTO=1")
+    "ROCPROFILER_TOOL_DISABLE_PERFETTO=1"
+    # TEMPORARY DIAGNOSTIC -- revert once the teardown segfault is root-caused. See
+    # early-hip-late-memcpy for the rationale.
+    "ROCPROFILER_FAILURE_SIGNAL_HANDLER=1")
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py)
 
