@@ -6,6 +6,35 @@ include_guard(GLOBAL)
 
 set(_hrr_codegen_module_dir "${CMAKE_CURRENT_LIST_DIR}")
 
+function(hrr_verify_generated_files)
+  foreach(kind HEADER CAPTURE PLAYBACK)
+    set(generated "${GENERATED_${kind}}")
+    set(expected "${EXPECTED_${kind}}")
+
+    if(NOT EXISTS "${generated}")
+      message(FATAL_ERROR "HRR code generation did not produce ${generated}")
+    endif()
+    if(NOT EXISTS "${expected}")
+      message(FATAL_ERROR "HRR checked-in generated file is missing: ${expected}")
+    endif()
+
+    execute_process(
+      COMMAND "${CMAKE_COMMAND}" -E compare_files "${generated}" "${expected}"
+      RESULT_VARIABLE compare_result)
+    if(NOT compare_result EQUAL 0)
+      message(FATAL_ERROR
+        "HRR generated ${kind} file is stale: ${expected}\n"
+        "Run from the repository root to update checked-in generated files:\n"
+        "  python3 projects/hrr/tools/gen_hrr_api_args.py --check-hrr-coverage")
+    endif()
+  endforeach()
+endfunction()
+
+if(HRR_CODEGEN_VERIFY)
+  hrr_verify_generated_files()
+  return()
+endif()
+
 function(hrr_add_codegen_check)
   cmake_parse_arguments(ARG
     ""
@@ -47,12 +76,12 @@ function(hrr_add_codegen_check)
       "-DEXPECTED_CAPTURE=${expected_capture}"
       "-DGENERATED_PLAYBACK=${playback}"
       "-DEXPECTED_PLAYBACK=${expected_playback}"
-      -P "${_hrr_codegen_module_dir}/HrrCodegenVerify.cmake"
+      -DHRR_CODEGEN_VERIFY=ON
+      -P "${_hrr_codegen_module_dir}/HrrCodegen.cmake"
     DEPENDS
       "${generator}"
       "${api_trace}"
       "${public_header}"
-      "${_hrr_codegen_module_dir}/HrrCodegenVerify.cmake"
       "${expected_header}"
       "${expected_capture}"
       "${expected_playback}"
