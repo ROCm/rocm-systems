@@ -156,10 +156,14 @@ def roctx_wrapper(
     func: Callable[..., Any],
     name: Optional[str] = None,
     backend: str = "",
+    *,
+    publish_launcher_tid: bool = False,
 ) -> Callable[..., Any]:
     """Wrap func so each call emits a ROCTX range. Idempotent.
 
     A non-empty backend attributes the scope to that backend.
+    When publish_launcher_tid is true, also publish launcher OS tid for
+    autograd workers for the duration of the range.
     """
     if getattr(func, "_roctx_wrapped", False):
         return func
@@ -175,7 +179,13 @@ def roctx_wrapper(
             args=format_wrap_args(args, kwargs),
         )
         try:
-            return func(*args, **kwargs)
+            if publish_launcher_tid:
+                torch_trace_collector.push_launcher_tid()
+            try:
+                return func(*args, **kwargs)
+            finally:
+                if publish_launcher_tid:
+                    torch_trace_collector.pop_launcher_tid()
         finally:
             _pop_scope()
 
@@ -592,28 +602,12 @@ def install_tensor_backward_wrapper() -> None:
     torch = _STATE.torch
     if getattr(torch.Tensor.backward, "_roctx_wrapped", False):
         return
-
-    original_backward = torch.Tensor.backward
-
-    def backward_with_roctx(
-        self: object,
-        *args: Any,
-        **kwargs: Any,
-    ) -> object:
-        location = core.resolve_user_caller_location()
-        _push_scope(
-            "torch.Tensor.backward",
-            location,
-            backend=_BACKEND_NAME,
-            args=format_wrap_args((self, *args), kwargs),
-        )
-        try:
-            return original_backward(self, *args, **kwargs)
-        finally:
-            _pop_scope()
-
-    backward_with_roctx._roctx_wrapped = True
-    torch.Tensor.backward = backward_with_roctx
+    torch.Tensor.backward = roctx_wrapper(
+        torch.Tensor.backward,
+        "torch.Tensor.backward",
+        backend=_BACKEND_NAME,
+        publish_launcher_tid=True,
+    )
     console_log("ml api trace", "Wrapped torch.Tensor.backward with ROCTX markers")
 
 
@@ -706,6 +700,8 @@ def wrap_module_function(
     module: object,
     attr_name: str,
     marker_name: str,
+    *,
+    publish_launcher_tid: bool = False,
 ) -> bool:
     """Replace module.attr_name with a ROCTX-wrapped version. Never raises."""
     fn = getattr(module, attr_name, None)
@@ -717,6 +713,7 @@ def wrap_module_function(
         fn,
         marker_name,
         backend=_BACKEND_NAME,
+        publish_launcher_tid=publish_launcher_tid,
     )
     try:
         setattr(module, attr_name, wrapped)
@@ -730,6 +727,7 @@ def wrap_module_function(
 
 
 EXTRA_STRUCTURAL_WRAPS = (
+    ("torch.autograd", "backward", "torch.autograd.backward"),
     ("torch.autograd", "grad", "torch.autograd.grad"),
     ("torch.autograd.functional", "hessian", "torch.autograd.functional.hessian"),
     ("torch.autograd.functional", "jacobian", "torch.autograd.functional.jacobian"),
@@ -767,6 +765,11 @@ EXTRA_STRUCTURAL_WRAPS = (
     ("torch", "empty", "torch.empty"),
     ("torch", "tensor", "torch.tensor"),
 )
+
+_LAUNCHER_TID_STRUCTURAL_WRAPS = frozenset({
+    ("torch.autograd", "backward"),
+    ("torch.autograd", "grad"),
+})
 
 
 # Tensor methods often used as entry points (e.g. output.argmax(dim=1)).
@@ -929,7 +932,14 @@ def install_extra_structural_wrappers() -> None:
             module = importlib.import_module(module_path)
         except Exception:
             continue
-        if wrap_module_function(module, attr_name, marker_name):
+        if wrap_module_function(
+            module,
+            attr_name,
+            marker_name,
+            publish_launcher_tid=(
+                (module_path, attr_name) in _LAUNCHER_TID_STRUCTURAL_WRAPS
+            ),
+        ):
             wrapped.append(marker_name)
 
     install_tensor_method_wrappers()

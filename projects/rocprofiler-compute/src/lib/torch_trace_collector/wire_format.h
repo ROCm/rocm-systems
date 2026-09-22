@@ -40,6 +40,7 @@ inline std::string build_range_name(std::string_view name,
                                     std::string_view seqNr,
                                     std::string_view tid,
                                     std::string_view ftid,
+                                    std::string_view ltid,
                                     std::string_view scope,
                                     std::string_view args,
                                     std::string_view backend)
@@ -53,6 +54,8 @@ inline std::string build_range_name(std::string_view name,
     out += tid;
     out += "|ftid=";
     out += ftid;
+    out += "|ltid=";
+    out += ltid;
     out += "|scope=";
     out += scope;
     out += "|args=";

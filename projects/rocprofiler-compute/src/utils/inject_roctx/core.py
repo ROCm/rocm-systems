@@ -133,11 +133,13 @@ def compose_marker(
     seqNr: str = "n/a",
     tid: str = "n/a",
     ftid: str = "n/a",
+    ltid: str = "n/a",
     scope: str = "n/a",
 ) -> str:
     full = (
         f"{encode_marker_name(marker)}:{context}"
-        f"|seqNr={seqNr}|tid={tid}|ftid={ftid}|scope={scope}|args={args}"
+        f"|seqNr={seqNr}|tid={tid}|ftid={ftid}|ltid={ltid}"
+        f"|scope={scope}|args={args}"
     )
     if backend:
         full = f"{full}|{backend}"
