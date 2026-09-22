@@ -20,7 +20,7 @@
 
 namespace rocjitsu::amdgpu {
 
-/// Prepare GFX11/12 1D and 2D transfers; mip levels require linear 1D storage.
+/// Prepare GFX11/12 single-sample 1D and 2D image transfers.
 inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t resource,
                                    uint32_t data, std::array<uint32_t, 3> coords, uint32_t dim,
                                    uint32_t mask, bool d16, bool unsupported_flags,
@@ -56,22 +56,16 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   if ((type != 8 && type != 9 && type != 13) || (dim == 0 && type != 8) ||
       (type == 8 && (height != 1 || swizzle)) || (r[4] >> 16) || !bytes ||
       first_level > last_level || last_level > max_level ||
-      (max_level && (type != 8 || swizzle || sample || r[4])) ||
+      (max_level && (type == 13 || sample || r[4] || compressed)) ||
       (!d.is_load &&
        (d.image_srgb || (mask != 15 && !(mask == 1 && format >= 20 && format <= 22)))))
     return unsupported();
-  // AddrLib lays out linear mip levels from smallest to largest. Slice
-  // allocation uses a 256-byte row alignment on both generations, including
-  // GFX12 whose texel-address row alignment is only 128 bytes. Allocation
-  // rounds mip extents up; accessible texel extents below round down.
-  uint64_t mip_offset = 0;
-  for (uint32_t level = first_level + 1; level <= max_level; ++level) {
-    const uint64_t row_bytes = ((uint64_t{width} + (uint64_t{1} << level) - 1) >> level) * bytes;
-    const uint64_t rows = (uint64_t{height} + (uint64_t{1} << level) - 1) >> level;
-    mip_offset += ((row_bytes + 255) & ~uint64_t{255}) * rows;
-  }
-  width = std::max(1u, width >> first_level);
-  height = std::max(1u, height >> first_level);
+  const auto mip =
+      image_mip_layout(gfx12, swizzle, bytes, width, height, max_level + 1, first_level);
+  if (!mip)
+    return unsupported();
+  width = mip->width;
+  height = mip->height;
   bool normalized = true;
   if (sample) {
     if (dim != 1 || !d.is_load)
@@ -110,10 +104,10 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
       (dim != 0 && coords[1] >= wf.num_vgprs()) || (dim == 5 && coords[2] >= wf.num_vgprs()))
     return unsupported();
   const uint64_t base =
-      addr_calc::buffer_virtual_address(((uint64_t{r[1] & 255} << 32) | r[0]) << 8) + mip_offset;
+      addr_calc::buffer_virtual_address(((uint64_t{r[1] & 255} << 32) | r[0]) << 8) + mip->offset;
   const uint32_t pitch_field = r[4] & (gfx12 ? 0xffff : 0x3fff);
   // Word 4 describes the last accessible layer for arrays, not custom pitch.
-  const uint32_t pitch = type == 9 && swizzle == 0 && pitch_field ? pitch_field + 1 : width;
+  const uint32_t pitch = type == 9 && swizzle == 0 && pitch_field ? pitch_field + 1 : mip->pitch;
   if (compressed) {
     const bool depth = swizzle == 24 || swizzle == 28;
     if (type != 9 || max_level ||
@@ -149,8 +143,9 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
       return unsupported();
     if (x >= width || y >= height)
       continue;
-    const auto address = gfx12 ? gfx12_image_address(base, x, y, pitch, bytes, swizzle)
-                               : gfx11_image_address(base, x, y, pitch, bytes, swizzle);
+    const auto address =
+        gfx12 ? gfx12_image_address(base, x + mip->tail_x, y + mip->tail_y, pitch, bytes, swizzle)
+              : gfx11_image_address(base, x + mip->tail_x, y + mip->tail_y, pitch, bytes, swizzle);
     if (!address)
       return unsupported();
     d.per_lane_addr[lane] = *address;

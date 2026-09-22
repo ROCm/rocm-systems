@@ -495,6 +495,44 @@ TEST(GraphicsImageAddressTest, MatchesGfx11AddrLibWithPipeXorAndAlignedLinearPit
   EXPECT_FALSE(amdgpu::gfx11_image_offset(64, 0, 64, 4, 26));
 }
 
+TEST(GraphicsImageAddressTest, MipAddressesMatchAddrLibAtOddSizesAndTailTransitions) {
+  // Independent AddrLib addresses of the last accessible texel of each view.
+  struct Case {
+    bool gfx12;
+    uint32_t swizzle, bytes, width, height, levels, level;
+    uint64_t expected;
+  };
+  constexpr Case cases[] = {
+      {false, 0, 4, 129, 33, 8, 2, 4988},          {true, 0, 4, 129, 33, 8, 2, 4988},
+      {false, 2, 8, 200, 180, 8, 2, 29960},        {true, 1, 8, 200, 180, 8, 2, 29960},
+      {false, 22, 2, 200, 180, 8, 2, 9026},        {true, 2, 2, 200, 180, 8, 2, 11074},
+      {false, 24, 1, 200, 180, 8, 3, 49508},       {false, 28, 2, 512, 512, 10, 3, 208382},
+      {false, 27, 4, 200, 180, 8, 1, 121628},      {true, 3, 4, 200, 180, 8, 1, 124188},
+      {false, 27, 4, 200, 180, 8, 2, 52868},       {true, 3, 4, 200, 180, 8, 2, 47492},
+      {false, 31, 16, 4093, 2049, 12, 4, 1011168}, {true, 4, 16, 4093, 2049, 12, 4, 1048544},
+      {false, 30, 4, 512, 512, 10, 9, 1536},       {true, 4, 4, 512, 512, 10, 9, 1536},
+  };
+  for (const auto &c : cases) {
+    SCOPED_TRACE(testing::Message() << c.gfx12 << "," << c.swizzle << "," << c.level);
+    const auto mip =
+        amdgpu::image_mip_layout(c.gfx12, c.swizzle, c.bytes, c.width, c.height, c.levels, c.level);
+    ASSERT_TRUE(mip);
+    const auto image_address = c.gfx12 ? amdgpu::gfx12_image_address : amdgpu::gfx11_image_address;
+    EXPECT_EQ(image_address(mip->offset, mip->tail_x + mip->width - 1,
+                            mip->tail_y + mip->height - 1, mip->pitch, c.bytes, c.swizzle),
+              c.expected);
+  }
+  for (bool gfx12 : {false, true}) {
+    EXPECT_FALSE(amdgpu::image_mip_layout(gfx12, 0, 4, 64, 64, 0, 0));
+    EXPECT_FALSE(amdgpu::image_mip_layout(gfx12, 0, 4, 64, 64, 8, 0));
+    EXPECT_FALSE(amdgpu::image_mip_layout(gfx12, 0, 4, 64, 64, 7, 7));
+    EXPECT_FALSE(amdgpu::image_mip_layout(gfx12, 0, 4, 0, 64, 1, 0));
+    EXPECT_FALSE(amdgpu::image_mip_layout(gfx12, 0, 4, 65537, 64, 1, 0));
+    EXPECT_FALSE(amdgpu::image_mip_layout(gfx12, 18, 4, 64, 64, 7, 0));
+    EXPECT_FALSE(amdgpu::image_mip_layout(gfx12, 0, 3, 64, 64, 7, 0));
+  }
+}
+
 TEST_P(GraphicsExportTest, HardwareImageLoadReadsTiledUintChannelsAndPacksD16) {
   if (GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
     GTEST_SKIP() << "RDNA4 image transfer encoding";
@@ -748,6 +786,132 @@ TEST_P(GraphicsExportTest, LinearMipLevelsUseReverseAllocationOrder) {
       for (uint32_t c = 0; c < 4; ++c)
         EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), std::bit_cast<uint32_t>(float(level + c)));
     }
+  }
+}
+
+// AddrLib offsets for the last texel of all eight 200x180 RGBA8 mip levels.
+constexpr uint32_t kMipLastTexelOffsets[2][8] = {
+    // GFX11
+    {333692, 121628, 52868, 12680, 26676, 1220, 536, 8960},
+    // GFX12
+    {365692, 124188, 47492, 20104, 9012, 4292, 2072, 1536},
+};
+
+TEST_P(GraphicsExportTest, TiledMipTransfersUseViewBoundsAndIndependentBackingOffsets) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint32_t base = 0x400000;
+  for (uint32_t level = 0; level < 8; ++level) {
+    SCOPED_TRACE(level);
+    const uint32_t width = std::max(1u, 200u >> level), height = std::max(1u, 180u >> level);
+    std::array<uint32_t, 8> descriptor{base >> 8,
+                                       (46u << (gfx12 ? 17 : 20)) | (3u << 30) |
+                                           (7u << (gfx12 ? 12 : 16)),
+                                       49u | (179u << 14),
+                                       (9u << 28) | ((gfx12 ? 3u : 27u) << 20) | 0xfac,
+                                       0,
+                                       0,
+                                       0,
+                                       0};
+    if (gfx12) {
+      descriptor[1] |= level << 25;
+      descriptor[3] |= 7u << 15;
+    } else {
+      descriptor[3] |= (level << 12) | (7u << 16);
+    }
+    for (uint32_t r = 0; r < descriptor.size(); ++r)
+      wave_->debug_write_sgpr(8 + r, descriptor[r]);
+    wave_->set_exec(15);
+    for (uint32_t lane = 0; lane < 4; ++lane) {
+      wave_->debug_write_vgpr(2, lane, lane == 1 ? width : lane == 3 ? ~0u : width - 1);
+      wave_->debug_write_vgpr(3, lane, lane == 2 ? height : height - 1);
+    }
+    const uint32_t address = base + kMipLastTexelOffsets[gfx12][level];
+    memory_.write32(address, 0x44332211);
+    amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
+    for (bool store : {false, true}) {
+      std::array<uint32_t, 4> words{};
+      if (gfx12) {
+        const auto inst = rdna4::build_vimage(
+            store ? 6 : 0,
+            {.dim = 1, .dmask = 15, .vdata = 8, .rsrc = 8, .vaddr0 = 2, .vaddr1 = 3});
+        std::copy(inst.begin(), inst.end(), words.begin());
+      } else {
+        const auto inst = rdna3::build_mimg(
+            store ? 6 : 0, {.dim = 1, .dmask = 15, .vaddr = 2, .vdata = 8, .srsrc = 2});
+        std::copy(inst.begin(), inst.end(), words.begin());
+      }
+      auto decoded = decoder_->decode(words.data());
+      ASSERT_FALSE(decoded.failed());
+      auto instruction = std::move(decoded).value();
+      ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
+      ASSERT_FALSE(wave_->instruction_execution_failed());
+      ASSERT_NE(instruction->data(), nullptr);
+      const auto *transfer = instruction->data_as<amdgpu::VectorMemState>();
+      EXPECT_EQ(transfer->per_lane_addr[0], address);
+      EXPECT_EQ(transfer->lane_mask, 1u);
+      pipeline.issue(instruction.release(), *wave_);
+      if (!store) {
+        for (uint32_t c = 0; c < 4; ++c) {
+          EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), 0x11u * (c + 1));
+          for (uint32_t lane = 1; lane < 4; ++lane)
+            EXPECT_EQ(wave_->debug_read_vgpr(8 + c, lane), 0u);
+          wave_->debug_write_vgpr(8 + c, 0, 0x80u + c);
+        }
+      }
+    }
+    cu_->l1_vector().flush_all();
+    cache_.flush_all();
+    EXPECT_EQ(memory_.read32(address), 0x83828180u);
+  }
+}
+
+TEST_P(GraphicsExportTest, ColorAttachmentWritesSelectedMipAndPreservesOtherLevels) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint32_t base = 0x400000;
+  for (uint32_t level = 0; level < 8; ++level) {
+    SCOPED_TRACE(level);
+    const uint32_t width = std::max(1u, 200u >> level), height = std::max(1u, 180u >> level);
+    for (uint32_t offset : kMipLastTexelOffsets[gfx12])
+      memory_.write32(base + offset, 0x12345678);
+    amdgpu::Pm4QueueState state;
+    state.num_instances = 1;
+    state.uconfig_registers[0x242] = 17;
+    auto &context = state.context_registers;
+    context[gfx12 ? 0x3b0 : 0x31c] = 10;
+    context[gfx12 ? 0x31e : 0x3b0] = gfx12 ? 179 | (199 << 16) : 179 | (199 << 14) | (7u << 28);
+    context[gfx12 ? 0x31f : 0x3b8] = gfx12 ? (3u << 15) | (7u << 19) : 27u << 14;
+    context[gfx12 ? 0x31a : 0x31b] = gfx12 ? level : level << 26;
+    context[0x318] = base >> 8;
+    context[gfx12 ? 0x214 : 0x8e] = 15;
+    context[gfx12 ? 0x195 : 0x1c5] = 4;
+    context[gfx12 ? 0x198 : 0x1b4] = 2;
+    context[0x2f9] = 0x2d;
+    context[gfx12 ? 0x205 : 0x206] = 0x43f;
+    context[gfx12 ? 0x216 : 0x202] = 0xcc0010;
+    context[0x10f] = context[0x110] = std::bit_cast<uint32_t>(width / 2.0f);
+    context[0x111] = context[0x112] = std::bit_cast<uint32_t>(height / 2.0f);
+    context[0x113] = context[gfx12 ? 0x116 : 0xb5] = std::bit_cast<uint32_t>(1.0f);
+    context[0x90] = (width - 1) | ((height - 1) << 16);
+    context[0x91] = width | (height << 16);
+    context[0x30e] = context[0x30f] = 0xffffffff;
+    auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
+    for (uint32_t i = 0; i < 3; ++i)
+      draw->export_lane(*wave_, i, 12, 15,
+                        {std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
+                         std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f), 0,
+                         std::bit_cast<uint32_t>(1.0f)});
+    draw->export_lane(*wave_, 0, 20, 1,
+                      {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
+    ASSERT_TRUE(draw->advance(*access_));
+    wave_->set_wg_coord(0, 0, 0);
+    wave_->set_graphics_stage(draw);
+    draw->initialize(*wave_, 0, 0);
+    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+      draw->export_lane(*wave_, lane, 0, 3, {0x00003c00, 0x3c000000, 0, 0});
+    EXPECT_FALSE(draw->advance(*access_));
+    for (uint32_t mip = 0; mip < 8; ++mip)
+      EXPECT_EQ(memory_.read32(base + kMipLastTexelOffsets[gfx12][mip]),
+                mip == level ? 0xff0000ffu : 0x12345678u);
   }
 }
 
