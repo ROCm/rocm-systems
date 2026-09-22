@@ -38,6 +38,7 @@
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_socket.h"
 #include "amd_smi/impl/amd_smi_system.h"
+#include "amd_smi/impl/amd_smi_temp_testing.h"
 #include "amd_smi/impl/nic/amd_smi_ainic_device.h"
 #include "amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h"
 #include "amd_smi/impl/scoped_fd.h"
@@ -1643,6 +1644,17 @@ amdsmi_status_t amdsmi_get_gpu_cache_info(amdsmi_processor_handle processor_hand
   return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t smi_amdgpu_plx_temp_from_metrics(const amdsmi_gpu_metrics_t& metrics,
+                                                 int64_t* temperature) {
+  // A max-value reading is the not-applicable sentinel (e.g. an APU with no
+  // PLX/VRSOC sensor); surface it as unsupported instead of a bogus reading.
+  if (metrics.temperature_vrsoc == std::numeric_limits<uint16_t>::max()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  *temperature = metrics.temperature_vrsoc;
+  return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
                                        amdsmi_temperature_type_t sensor_type,
                                        amdsmi_temperature_metric_t metric, int64_t* temperature) {
@@ -1664,13 +1676,7 @@ amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
     amdsmi_gpu_metrics_t metric_info;
     auto r_status = amdsmi_get_gpu_metrics_info(processor_handle, &metric_info);
     if (r_status != AMDSMI_STATUS_SUCCESS) return r_status;
-    // A max-value reading is the not-applicable sentinel (e.g. an APU with no
-    // PLX/VRSOC sensor); surface it as unsupported instead of a bogus reading.
-    if (metric_info.temperature_vrsoc == std::numeric_limits<uint16_t>::max()) {
-      return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-    *temperature = metric_info.temperature_vrsoc;
-    return r_status;
+    return smi_amdgpu_plx_temp_from_metrics(metric_info, temperature);
   }
   amdsmi_status_t amdsmi_status = rsmi_wrapper(
       rsmi_dev_temp_metric_get, processor_handle, 0, static_cast<uint32_t>(sensor_type),
@@ -3776,7 +3782,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(
       // std::cout << ss.str() << std::endl;
       LOG_DEBUG(ss);
     }  // END resources loop
-  }    // END profile loop
+  }  // END profile loop
 
   int res_ind = 0;
   for (uint32_t i = 0; i < profile_config->num_profiles; i++) {
