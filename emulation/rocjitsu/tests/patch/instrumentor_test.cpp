@@ -10,6 +10,8 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/patch/entry_prologue.h"
+#include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
@@ -2273,9 +2275,8 @@ TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) 
 //
 // A probe asking for the framework's entry storage makes the instrumentor
 // synthesize a site at the kernel entry that defines it. These cover the gates
-// that refuse a kernel the prologue could not cover. Acceptance needs a
-// descriptor carrying ENABLE_SGPR_KERNARG_SEGMENT_PTR, which no fixture builds
-// yet.
+// that refuse a kernel the prologue could not cover, plus the `.rocjitsu.kernarg`
+// record the successful path declares.
 //==============================================================================
 
 namespace {
@@ -2289,6 +2290,17 @@ InstrumentationPoint log_buffer_point(const AmdGpuCodeObject &probe_obj, uint64_
   pt.probe_symbol = "rj_test_probe";
   pt.probe_args = {{ProbeArgSource::LogBufferPtrLo, 0}};
   return pt;
+}
+
+// Not payload-aligned, so the wrapper offset is a value only this layout
+// produces rather than a round number anything could.
+constexpr uint32_t kTestKernargSize = 20;
+
+// gfx950 kernel whose descriptor advertises a kernarg segment pointer, so the
+// prologue's success path is reachable. Entry at .text offset 0.
+std::vector<uint8_t> make_gfx950_kernarg_kernel_elf() {
+  return test::make_kernarg_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0,
+                                       EF_AMDGPU_MACH_AMDGCN_GFX950, kTestKernargSize);
 }
 
 } // namespace
@@ -2394,6 +2406,83 @@ TEST(InstrumentorEntryPrologue, OrdinaryProbeCallLeavesTheEntryAlone) {
   const std::vector<uint32_t> text = section_words(patched, ".text");
   ASSERT_FALSE(text.empty());
   EXPECT_EQ(text[0], 0xBF800000u) << "the kernel entry must still hold its original s_nop";
+}
+
+// A runtime builds its wrapper from the record alone, so the layout the record
+// implies must be the one the prologue encoded as immediates.
+TEST(InstrumentorKernargRecord, DeclaresTheWrapperThePrologueReadsFrom) {
+  auto target = make_gfx950_kernarg_kernel_elf();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instr.add_point(log_buffer_point(probe_obj, /*anchor_offset=*/4));
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint8_t> bytes =
+      test::section_bytes(patched, kKernargExtensionMetadataSectionName);
+  ASSERT_FALSE(bytes.empty()) << "no .rocjitsu.kernarg section was appended";
+
+  const auto parsed = parse_kernarg_extension_metadata(bytes);
+  ASSERT_TRUE(parsed.has_value());
+  ASSERT_EQ(parsed->size(), 1u);
+  const KernargExtensionMetadata &record = parsed->front();
+  EXPECT_EQ(record.kernel_name, "test_kernel");
+  EXPECT_EQ(record.variant_name, kDbiKernargVariantName);
+  EXPECT_EQ(record.original_kernarg_size, kTestKernargSize);
+  ASSERT_EQ(record.payloads.size(), 1u);
+  EXPECT_EQ(record.payloads.front().name, kDbiEntryPayloadName);
+  EXPECT_EQ(record.payloads.front().size, kDbiEntryPayloadLayout.size);
+  EXPECT_EQ(record.payloads.front().alignment, kDbiEntryPayloadLayout.alignment);
+
+  // Rebuild from the record's own sizes and alignments, as a consumer would.
+  const std::array<KernargExtensionPayloadLayout, 1> payloads{KernargExtensionPayloadLayout{
+      .size = record.payloads.front().size, .alignment = record.payloads.front().alignment}};
+  const auto rebuilt = make_kernarg_extension_layout(record.original_kernarg_size, payloads);
+  ASSERT_TRUE(rebuilt.has_value());
+  ASSERT_EQ(rebuilt->payload_offsets.size(), 1u);
+
+  const Section *text = obj.text_sections().front();
+  const auto kernels = scan_kernel_descriptors(
+      {reinterpret_cast<const uint8_t *>(obj.image_data()), obj.image_size()},
+      text->sectionOffset(), text->size());
+  ASSERT_EQ(kernels.size(), 1u);
+  const auto prologue = build_dbi_entry_prologue(kernels.front().descriptor,
+                                                 ROCJITSU_CODE_ARCH_CDNA4, DbiEntryStorage{8, 10});
+  ASSERT_TRUE(prologue.has_value());
+  EXPECT_EQ(rebuilt->payload_offsets.front(), prologue->payload_byte_offset);
+  EXPECT_EQ(rebuilt->original_kernarg_pointer_offset, prologue->original_kernarg_pointer_offset);
+}
+
+// A record with no prologue would tell a runtime to build a wrapper the kernel
+// never reads through.
+TEST(InstrumentorKernargRecord, OrdinaryProbeCallDeclaresNothing) {
+  auto target = make_gfx950_kernarg_kernel_elf();
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 4;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args = {probe_arg_imm(1)};
+  instr.add_point(pt);
+
+  auto result = instr.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  EXPECT_TRUE(test::section_bytes(patched, kKernargExtensionMetadataSectionName).empty());
 }
 
 // An inline nop has nowhere to put arguments.

@@ -13,6 +13,7 @@
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
 #include "rocjitsu/code/patch/error_report.h"
+#include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
@@ -28,6 +29,7 @@
 #include <array>
 #include <cstring>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -629,6 +631,47 @@ TrampolinePlan make_base_plan(const ResolvedInstrumentationSite &site, rj_code_a
   return plan;
 }
 
+// Declare the kernarg wrapper the entry prologue reads from, so a runtime can
+// build one without knowing how the prologue was encoded.
+//
+// The re-derived layout is checked against the offsets the prologue baked in,
+// the same agreement check DBT makes for its virtual-LDS extension. It fires
+// only when the two sides see different inputs, such as a kernarg_size that
+// changed between planning and commit.
+bool append_dbi_kernarg_record(CodeObjectPatcher &patcher, const KernelDescriptorInfo &kernel,
+                               uint32_t payload_byte_offset,
+                               uint32_t original_kernarg_pointer_offset, std::string *error_out) {
+  const std::array<KernargExtensionPayloadLayout, 1> payloads{kDbiEntryPayloadLayout};
+  const auto layout = make_kernarg_extension_layout(kernel.descriptor.kernarg_size, payloads);
+  if (!layout || layout->payload_offsets.size() != 1) {
+    report(error_out, "could not lay out the DBI kernarg wrapper for the metadata record");
+    return false;
+  }
+  if (layout->payload_offsets.front() != payload_byte_offset ||
+      layout->original_kernarg_pointer_offset != original_kernarg_pointer_offset) {
+    report(error_out, "the DBI kernarg record disagrees with the offsets the entry prologue "
+                      "encoded; leaving the code object unchanged");
+    return false;
+  }
+
+  const KernargExtensionMetadata extension{
+      .kernel_name = kernel.kernel_name,
+      .variant_name = std::string(kDbiKernargVariantName),
+      .original_kernarg_size = kernel.descriptor.kernarg_size,
+      .payloads = {{
+          .size = kDbiEntryPayloadLayout.size,
+          .alignment = kDbiEntryPayloadLayout.alignment,
+          .name = std::string(kDbiEntryPayloadName),
+      }},
+  };
+  const std::vector<uint8_t> bytes = serialize_kernarg_extension_metadata(std::span{&extension, 1});
+  if (!patcher.append_nonalloc_section(kKernargExtensionMetadataSectionName, bytes)) {
+    report(error_out, "failed to append the .rocjitsu.kernarg section");
+    return false;
+  }
+  return true;
+}
+
 } // namespace
 
 TrampolinePlan make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arch,
@@ -768,6 +811,9 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
   return EntryProloguePatch{.anchor_offset = entry_offset,
                             .original_size = entry_size,
                             .storage_base = planned->storage.persistent_base,
+                            .payload_byte_offset = planned->prologue.payload_byte_offset,
+                            .original_kernarg_pointer_offset =
+                                planned->prologue.original_kernarg_pointer_offset,
                             .bytes = std::move(*bytes)};
 }
 
@@ -1427,6 +1473,17 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   if (!patcher.replace_text(new_text)) {
     result.errors.emplace_back("failed to replace .text with the instrumented code");
     return result;
+  }
+
+  // After replace_text: the record lands at EOF, which replace_text would
+  // otherwise shift out from under it.
+  if (entry_patch) {
+    std::string err;
+    if (!append_dbi_kernarg_record(patcher, kernels.front(), entry_patch->payload_byte_offset,
+                                   entry_patch->original_kernarg_pointer_offset, &err)) {
+      result.errors.push_back(std::move(err));
+      return result;
+    }
   }
 
   // Emit and build patch summaries.
