@@ -351,7 +351,7 @@ make -C plugins/gin/example
 Set the `LD_LIBRARY_PATH` to include the example plugin directory:
 
 ```shell
-export LD_LIBRARY_PATH=/path/to/nccl/plugins/gin/example:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/path/to/rccl/plugins/gin/example:$LD_LIBRARY_PATH
 ```
 
 Set `NCCL_GIN_PLUGIN` to either the plugin name, the shared library file name, or
