@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <barrier>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -412,6 +413,80 @@ TEST_F(PerfsimPluginTest, GpuCompilerSimV13StagesUntilDispatchIsAccepted) {
   EXPECT_NE(line_with_prefix(trace, "begin 43 "), trace.size());
   EXPECT_NE(line_with_prefix(trace, "instruction 43 "), trace.size());
   EXPECT_NE(line_with_prefix(trace, "end 43 "), trace.size());
+}
+
+TEST_F(PerfsimPluginTest, CanonicalizesConcurrentWaveInstructionOrder) {
+  WaveFixture fixture(4);
+
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin = std::make_unique<PerfsimPlugin>(plugin_config().c_str());
+  EXPECT_TRUE(plugin->requires_serial_hot_hooks());
+  ASSERT_TRUE(group.add(std::move(plugin)));
+  group.onInit();
+
+  KernelDispatchInfo info = dispatch_info(46);
+  group.onAmdgpuDispatchPacketProcessed(info);
+  group.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+  std::array<Wavefront *, 4> waves{};
+  for (uint32_t i = 0; i < waves.size(); ++i) {
+    waves[i] = &fixture.wave(info.dispatch_id, i, {i, 0, 0}, 0);
+    group.onAmdgpuWavefrontDispatched(*waves[i]);
+  }
+
+  constexpr uint32_t kRounds = 8;
+  const std::array<uint32_t, 1> add_words{0x7E000200};
+  SyntheticInstruction add("v_add_f32", add_words);
+  for (uint32_t round = 0; round < kRounds; ++round) {
+    std::barrier start(static_cast<std::ptrdiff_t>(waves.size()));
+    std::vector<std::thread> workers;
+    for (uint32_t i = 0; i < waves.size(); ++i) {
+      workers.emplace_back([&, i]() {
+        start.arrive_and_wait();
+        const uint32_t rank = (i + waves.size() - round % waves.size()) % waves.size();
+        std::this_thread::sleep_for(std::chrono::milliseconds(rank));
+        group.onAmdgpuBeforeExecuteInstruction(0x4000 + i * 0x100 + round * 4, add, *waves[i]);
+      });
+    }
+    for (auto &worker : workers)
+      worker.join();
+  }
+
+  const std::array<uint32_t, 1> end_words{0xBF810000};
+  SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+  std::vector<std::thread> workers;
+  for (uint32_t i = 0; i < waves.size(); ++i)
+    workers.emplace_back(
+        [&, i]() { group.onAmdgpuBeforeExecuteInstruction(0x5000 + i * 4, end, *waves[i]); });
+  for (auto &worker : workers)
+    worker.join();
+
+  for (Wavefront *wave : waves)
+    group.onAmdgpuWavefrontHalted(*wave);
+  group.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+  group.onShutdown();
+
+  const auto trace = lines(read_file(trace_.path()));
+  size_t cursor = line_with_prefix(trace, "begin 46 ");
+  ASSERT_LT(cursor, trace.size());
+  ++cursor;
+  for (uint32_t wave = 0; wave < waves.size(); ++wave) {
+    for (uint32_t instruction = 0; instruction < kRounds; ++instruction) {
+      const uint64_t pc = 0x4000 + wave * 0x100 + instruction * 4;
+      const std::string prefix = "instruction 46 " + std::to_string(wave) + " 0 0 0 " +
+                                 std::to_string(instruction) + " " + std::to_string(pc) + " ";
+      ASSERT_LT(cursor, trace.size());
+      EXPECT_TRUE(trace[cursor].starts_with(prefix)) << "trace line " << cursor;
+      ++cursor;
+    }
+    const std::string end_prefix = "instruction 46 " + std::to_string(wave) + " 0 0 0 " +
+                                   std::to_string(kRounds) + " " +
+                                   std::to_string(0x5000 + wave * 4) + " ";
+    ASSERT_LT(cursor, trace.size());
+    EXPECT_TRUE(trace[cursor].starts_with(end_prefix)) << "trace line " << cursor;
+    ++cursor;
+  }
+  ASSERT_LT(cursor, trace.size());
+  EXPECT_TRUE(trace[cursor].starts_with("end 46 "));
 }
 
 TEST_F(PerfsimPluginTest, ReclaimsFaultAbortedWaveStateBeforePhysicalSlotReuse) {
@@ -1636,14 +1711,14 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchWhenFlatAtomicResolvesToScratch) {
   EXPECT_EQ(line_with_prefix(trace, "end 12 "), trace.size());
 }
 
-TEST_F(PerfsimPluginTest, ReplaysInterleavedDispatchesAsOneGloballyOrderedEpoch) {
+TEST_F(PerfsimPluginTest, CanonicalizesInterleavedDispatchEpoch) {
   WaveFixture fixture;
   setenv("ROCJITSU_PERFSIM_FAKE_MODE", "gpucsim_name", 1);
   const std::string config = plugin_config();
   PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
 
-  for (uint32_t id : {21u, 22u}) {
+  for (uint32_t id : {22u, 21u}) {
     plugin.onAmdgpuDispatchPacketProcessed(dispatch_info(id));
     plugin.onAmdgpuDispatchExecutionBegin(id);
   }
@@ -1654,14 +1729,14 @@ TEST_F(PerfsimPluginTest, ReplaysInterleavedDispatchesAsOneGloballyOrderedEpoch)
 
   const std::array<uint32_t, 1> words{0xBF810000};
   SyntheticInstruction end("s_endpgm", words, PROGRAM_TERMINATOR);
-  plugin.onAmdgpuBeforeExecuteInstruction(0x3000, end, first);
   plugin.onAmdgpuBeforeExecuteInstruction(0x4000, end, second);
-  plugin.onAmdgpuWavefrontHalted(first);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x3000, end, first);
   plugin.onAmdgpuWavefrontHalted(second);
-  plugin.onAmdgpuDispatchExecutionEnd(21);
+  plugin.onAmdgpuWavefrontHalted(first);
+  plugin.onAmdgpuDispatchExecutionEnd(22);
   const auto partial_trace = lines(read_file(trace_.path()));
   EXPECT_EQ(line_with_prefix(partial_trace, "begin "), partial_trace.size());
-  plugin.onAmdgpuDispatchExecutionEnd(22);
+  plugin.onAmdgpuDispatchExecutionEnd(21);
   plugin.onShutdown();
 
   const auto trace = lines(read_file(trace_.path()));

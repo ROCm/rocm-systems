@@ -30,6 +30,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -329,6 +330,46 @@ struct OrderedEvent {
   uint32_t dispatch_id = 0;
   EventPayload payload;
 };
+
+enum class ReplayPhase : uint8_t { Begin, Wave, End };
+
+ReplayPhase replay_phase(const OrderedEvent &event) {
+  if (std::holds_alternative<BeginEvent>(event.payload))
+    return ReplayPhase::Begin;
+  if (std::holds_alternative<EndEvent>(event.payload))
+    return ReplayPhase::End;
+  return ReplayPhase::Wave;
+}
+
+const FfmWaveInfo *event_wave(const OrderedEvent &event) {
+  if (const auto *instruction = std::get_if<InstructionEvent>(&event.payload))
+    return &instruction->wave_info;
+  if (const auto *memory = std::get_if<FfmMemoryAccess>(&event.payload))
+    return &memory->wave_info;
+  if (const auto *tdm = std::get_if<TdmEvent>(&event.payload))
+    return &tdm->wave_info;
+  return nullptr;
+}
+
+bool canonical_replay_less(const OrderedEvent &left, const OrderedEvent &right) {
+  const ReplayPhase left_phase = replay_phase(left);
+  const ReplayPhase right_phase = replay_phase(right);
+  if (left_phase != right_phase)
+    return left_phase < right_phase;
+  if (left.dispatch_id != right.dispatch_id)
+    return left.dispatch_id < right.dispatch_id;
+  if (left_phase != ReplayPhase::Wave)
+    return false;
+
+  const FfmWaveInfo *left_wave = event_wave(left);
+  const FfmWaveInfo *right_wave = event_wave(right);
+  assert(left_wave != nullptr && right_wave != nullptr);
+  return std::tie(left_wave->workgroup_info.cluster_info.cluster_id,
+                  left_wave->workgroup_info.workgroup_id, left_wave->wavegroup_id,
+                  left_wave->wave_id) < std::tie(right_wave->workgroup_info.cluster_info.cluster_id,
+                                                 right_wave->workgroup_info.workgroup_id,
+                                                 right_wave->wavegroup_id, right_wave->wave_id);
+}
 
 struct StagedEvent {
   OrderedEvent event;
@@ -857,25 +898,45 @@ struct PerfsimPlugin::Impl {
     if (!replay_blockers.empty())
       return;
 
-    while (!event_chunks.empty()) {
-      EventChunk chunk = std::move(event_chunks.front());
-      event_chunks.pop_front();
-      assert(chunk.capacity_bytes <= staged_bytes);
-      staged_bytes -= chunk.capacity_bytes;
-      for (StagedEvent &staged : chunk.events) {
-        assert(staged.dynamic_bytes <= staged_bytes);
-        staged_bytes -= staged.dynamic_bytes;
-        OrderedEvent &event = staged.event;
-        const auto iter = dispatches.find(event.dispatch_id);
-        if (iter != dispatches.end() && supported(iter->second) && iter->second.ended) {
-          replay(event);
-          if (config.dispatch_name && iter->second.selected &&
-              std::holds_alternative<EndEvent>(event.payload))
-            write_sink(std::format("[rocjitsu:perfsim] selected dispatch {} replayed\n",
-                                   event.dispatch_id));
-        }
+    size_t event_count = 0;
+    for (const EventChunk &chunk : event_chunks)
+      event_count += chunk.events.size();
+    std::vector<StagedEvent *> replay_order;
+    replay_order.reserve(event_count);
+    for (EventChunk &chunk : event_chunks)
+      for (StagedEvent &event : chunk.events)
+        replay_order.push_back(&event);
+    // The host provides no causal order between callbacks from different
+    // waves, so callback-mutex acquisition order is scheduler-dependent. Give
+    // the backend a canonical cross-wave order instead. stable_sort preserves
+    // each wave's program order and keeps every instruction adjacent to its
+    // memory/TDM records.
+    std::stable_sort(replay_order.begin(), replay_order.end(),
+                     [](const StagedEvent *left, const StagedEvent *right) {
+                       return canonical_replay_less(left->event, right->event);
+                     });
+
+    for (StagedEvent *staged : replay_order) {
+      OrderedEvent &event = staged->event;
+      const auto iter = dispatches.find(event.dispatch_id);
+      if (iter != dispatches.end() && supported(iter->second) && iter->second.ended) {
+        replay(event);
+        if (config.dispatch_name && iter->second.selected &&
+            std::holds_alternative<EndEvent>(event.payload))
+          write_sink(
+              std::format("[rocjitsu:perfsim] selected dispatch {} replayed\n", event.dispatch_id));
       }
     }
+
+    for (const EventChunk &chunk : event_chunks) {
+      assert(chunk.capacity_bytes <= staged_bytes);
+      staged_bytes -= chunk.capacity_bytes;
+      for (const StagedEvent &staged : chunk.events) {
+        assert(staged.dynamic_bytes <= staged_bytes);
+        staged_bytes -= staged.dynamic_bytes;
+      }
+    }
+    event_chunks.clear();
     assert(staged_bytes == 0);
 
     for (auto &[dispatch_id, state] : dispatches) {
@@ -1238,6 +1299,8 @@ void PerfsimPlugin::onInit() { impl_->init(); }
 
 void PerfsimPlugin::onShutdown() { impl_->shutdown(); }
 
+// Recording mutates shared staging and per-wave state. This lock provides
+// mutual exclusion; drain_epoch() independently canonicalizes replay order.
 bool PerfsimPlugin::requires_serial_hot_hooks() const { return true; }
 
 bool PerfsimPlugin::observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const {
