@@ -22,6 +22,7 @@ build_verbose=false
 clean_build=true
 cmake_only=false
 run_clang_tidy=false
+nccl_filter=false
 dump_asm=false
 enable_code_coverage=false
 enable_full_coverage=false
@@ -81,6 +82,7 @@ function display_help()
     echo "       --cmake-options         Pass additional CMake options (e.g. --cmake-options \"-DFOO=BAR -DBAZ=ON\")"
     echo "       --cmake-only            Stop after running CMake (configure only; no build). Useful for generating compile_commands.json"
     echo "       --clang-tidy            Run clang-tidy over RCCL host sources using the generated compile_commands.json, then exit"
+    echo "       --nccl-filter           With --clang-tidy, drop findings on lines still owned entirely by upstream NCCL (keep only RCCL-modified code)"
     echo "       --debug                 Build debug library"
     echo "       --debug-fast            Build debug library with lto optimization disabled (fast build times)"
     echo "    -d|--dependencies          Install RCCL dependencies"
@@ -152,7 +154,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,all_unrolls,amdgpu_targets:,clang-tidy,cmake-only,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable-full-coverage,enable_backtrace,enable-mpi-tests,enable-rccl-ep-tests,enable-tdm-simple,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,all_unrolls,amdgpu_targets:,clang-tidy,cmake-only,cmake-options:,nccl-filter,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable-full-coverage,enable_backtrace,enable-mpi-tests,enable-rccl-ep-tests,enable-tdm-simple,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -173,6 +175,7 @@ while true; do
          --cmake-options)            custom_cmake_options=${2};                                                                        shift 2 ;;
          --cmake-only)               cmake_only=true;                                                                                  shift ;;
          --clang-tidy)               run_clang_tidy=true;                                                                              shift ;;
+         --nccl-filter)              nccl_filter=true;                                                                                 shift ;;
          --debug)                    build_release=false;                                                                              shift ;;
          --debug-fast)               build_release=false; debug_fast=true;                                                             shift ;;
     -d | --dependencies)             install_dependencies=true;                                                                        shift ;;
@@ -618,8 +621,25 @@ if [[ "${run_clang_tidy}" == true ]]; then
         exit 0
     fi
     echo "  ${#tidy_sources[@]} translation unit(s) to analyse."
-    "${clang_tidy_bin}" -p "${PWD}" --quiet "${tidy_sources[@]}"
-    tidy_status=$?
+    if [[ "${nccl_filter}" == true ]]; then
+        # Restrict findings to RCCL-owned lines: pipe clang-tidy output through
+        # the ownership filter, which drops diagnostics on lines still owned
+        # entirely by upstream NCCL (see maint/clang-tidy-nccl-filter.py).
+        repo_root=$(git rev-parse --show-toplevel)
+        rccl_src="$(cd ../../src && pwd)"
+        hipify_src="${PWD}/hipify/src"
+        echo "=== Filtering out NCCL-owned findings (keeping RCCL-modified code) ==="
+        set -o pipefail
+        "${clang_tidy_bin}" -p "${PWD}" --quiet "${tidy_sources[@]}" 2>&1 \
+            | python3 ../../maint/clang-tidy-nccl-filter.py \
+                --repo-root "${repo_root}" \
+                --rccl-src "${rccl_src}" \
+                --hipify-src "${hipify_src}"
+        tidy_status=$?
+    else
+        "${clang_tidy_bin}" -p "${PWD}" --quiet "${tidy_sources[@]}"
+        tidy_status=$?
+    fi
     echo "=== clang-tidy finished (exit ${tidy_status}) ==="
     exit "${tidy_status}"
 fi
