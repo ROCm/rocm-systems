@@ -507,10 +507,11 @@ __device__ __forceinline__ void ginReduceScatterBody(ncclWindow_t sendwin, size_
   // rank write to publish and no memset race to fence -- the same reasoning that
   // makes the AllGather LSA pull tier entry-only. The entry barrier already
   // guarantees every peer's sendbuff is filled before any read; a rank that
-  // finishes early cannot corrupt what a slow peer still reads (sendbuff is never
-  // written by the kernel), and the next collective's entry barrier resynchronizes
-  // before sendbuff is re-read. In the looped timed kernel each iteration's entry
-  // barrier is itself a full inter-iteration sync, so entry-only stays lockstep.
+  // finishes early cannot corrupt what a slow peer still reads (rank R writes only
+  // slice R, which no peer reads; in-place, sendbuff IS recvbuff), and the next
+  // collective's entry barrier resynchronizes before sendbuff is re-read. In the
+  // looped timed kernel each iteration's entry barrier is itself a full
+  // inter-iteration sync, so entry-only stays lockstep.
 }
 
 // -D 3 kernel: one ReduceScatter. sdmaThreshold/scratch args retained for ABI.

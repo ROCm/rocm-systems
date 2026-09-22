@@ -20,8 +20,8 @@
 //     ReduceAvg_Base<T, integral> does.
 //
 // mulsum / PreMulSum is intentionally NOT supported (deferred); the dispatch
-// macro (SPECIALIZE_REDUCE_KERNEL in common.h) returns nullptr for it, and fp8
-// prod is excluded there too.
+// macro (SPECIALIZE_REDUCE_KERNEL in reduce_scatter.cu) returns nullptr for it,
+// and fp8 prod is excluded there too.
 //
 // This header is device-only: include it AFTER common.h (which pulls in rccl.h
 // for __half / hip_bfloat16 and rccl_float8.h for the fp8 types) so all element
