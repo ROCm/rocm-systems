@@ -334,7 +334,8 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
           const float value = std::bit_cast<float>(values[i]);
           const float linear =
               value <= 0.04045f ? value / 12.92f : std::pow((value + 0.055f) / 1.055f, 2.4f);
-          values[i] = std::bit_cast<uint32_t>(linear);
+          // RDNA3/4 texture decoding rounds sRGB channels to BF16 precision.
+          values[i] = std::bit_cast<uint32_t>(util::bf16_to_f32(util::f32_to_bf16_rne(linear)));
         }
       }
     }

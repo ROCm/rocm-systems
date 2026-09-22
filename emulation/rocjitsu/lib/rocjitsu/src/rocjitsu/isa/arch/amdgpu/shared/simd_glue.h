@@ -3621,6 +3621,9 @@ inline util::native<float> fma_mix_mul_add(util::native<float> a, util::native<f
 template <FmaMixDst DstMode, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_fma_mix_simd(Inst &inst, Wavefront &wf) {
+  if constexpr (DstMode != FmaMixDst::F32)
+    if (wf.fp_round_mode_f16_f64() != 0)
+      return false;
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;

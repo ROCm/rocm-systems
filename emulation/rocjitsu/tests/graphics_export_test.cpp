@@ -16,6 +16,7 @@
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
+#include "rocjitsu/vm/amdgpu/raster_math.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <gtest/gtest.h>
@@ -107,6 +108,70 @@ protected:
   }
 };
 
+TEST_P(GraphicsExportTest, HalfInterpolationResultsHonorRoundingMode) {
+  constexpr uint16_t positive[] = {0x3c01, 0x3c01, 0x3c00, 0x3c00};
+  constexpr uint16_t negative[] = {0xbc01, 0xbc00, 0xbc01, 0xbc00};
+  wave_->set_exec(0x7fffffff);
+  for (uint32_t mode = 0; mode < 4; ++mode) {
+    wave_->set_mode_raw(mode << 2);
+    for (bool high : {false, true}) {
+      for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
+        // Halfway between the half-precision midpoint and its upper neighbor.
+        wave_->debug_write_vgpr(3, lane, 0x3f801800u | ((lane & 1) << 31));
+        wave_->debug_write_vgpr(6, lane, 0x12345678);
+      }
+      const uint8_t opcode = high ? 34 : 33;
+      if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4)
+        run(rdna4::build_vop3p(opcode, {.vdst = 6, .src0 = 259, .src1 = 242, .src2 = 128}));
+      else if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5)
+        run(rdna3_5::build_vop3p(opcode, {.vdst = 6, .src0 = 259, .src1 = 242, .src2 = 128}));
+      else
+        run(rdna3::build_vop3p(opcode, {.vdst = 6, .src0 = 259, .src1 = 242, .src2 = 128}));
+      for (uint32_t lane = 0; lane < 31; ++lane) {
+        const uint32_t half = lane & 1 ? negative[mode] : positive[mode];
+        EXPECT_EQ(cu_->read_vgpr(wave_->vgpr_alloc().base + 6, lane),
+                  high ? (half << 16) | 0x5678 : 0x12340000 | half)
+            << "mode=" << mode << " high=" << high << " lane=" << lane;
+      }
+      EXPECT_EQ(cu_->read_vgpr(wave_->vgpr_alloc().base + 6, 31), 0x12345678u);
+    }
+  }
+}
+
+TEST(GraphicsRasterMathTest, InterpolationMatchesPhysicalRdna4QuadInputs) {
+  // Raw float bits captured with GL_AMD_shader_explicit_vertex_parameter.
+  // Both ordinary and near-edge quads exercise opposite gradient signs and
+  // cancellation during the shared-exponent addition of two pixel offsets.
+  struct Case {
+    double area, edge_x, edge_y, x, y;
+    std::array<uint32_t, 4> expected;
+  };
+  const Case cases[] = {
+      {33600, -160, 0, -2.5, -149.5, {0x3c430c30, 0x3bea0ea0, 0x3c430c30, 0x3bea0ea0}},
+      {33600, 0, -210, -2.5, -149.5, {0x3f6f3332, 0x3f6f3332, 0x3f6d9999, 0x3f6d9999}},
+      {31500, 40, -210, 119.5, -29.5, {0x3eb26324, 0x3eb30994, 0x3eaef954, 0x3eaf9fc4}},
+      {31500, 120, 157.5, 119.5, -29.5, {0x3e9d8fd7, 0x3e9f8329, 0x3ea01f33, 0x3ea21285}},
+      {31500, 40, -210, 5.5, -1.5, {0x3c8b224a, 0x3c958956, 0x3c290a8e, 0x3c3dd8a6}},
+      {31500, 120, 157.5, 5.5, -1.5, {0x3c5c675e, 0x3c8d68d5, 0x3c972971, 0x3cb65e97}},
+      {29400, 160, -52.5, 115.5, 80.5, {0x3ef83a82, 0x3efb03d3, 0x3ef75074, 0x3efa19c5}},
+      {29400, -80, 210, 115.5, 80.5, {0x3e857c56, 0x3e8417ae, 0x3e892490, 0x3e87bfe8}},
+  };
+  for (const auto &test : cases) {
+    const float inverse_area = amdgpu::raster::truncate_float(1.0 / test.area);
+    const amdgpu::raster::Plane plane{amdgpu::raster::truncate_float(test.edge_x * inverse_area),
+                                      amdgpu::raster::truncate_float(test.edge_y * inverse_area)};
+    for (uint32_t lane = 0; lane < 4; ++lane)
+      EXPECT_EQ(std::bit_cast<uint32_t>(plane.at_quad(test.x, test.y, lane)), test.expected[lane]);
+  }
+}
+
+TEST(GraphicsRasterMathTest, SubpixelQuantizationRoundsMidpointsToEven) {
+  for (double value : {0.0, 17.0, -17.0}) {
+    EXPECT_EQ(amdgpu::raster::round_subpixel(value + 0.5 / 256), value);
+    EXPECT_EQ(amdgpu::raster::round_subpixel(value + 1.5 / 256), value + 2.0 / 256);
+  }
+}
+
 TEST_P(GraphicsExportTest, ParameterLoadUsesQuadMaskAndPrimitiveOffsets) {
   // Quad two starts a second primitive; attribute one follows both records of attr0.
   wave_->set_m0(128 | (1u << 17));
@@ -148,6 +213,7 @@ TEST_P(GraphicsExportTest, RectangleRunsFragmentWavesAndWritesOnlyCoveredPixels)
   state.context_registers[0x214] = 15;
   state.context_registers[0x195] = 4;
   state.context_registers[0x198] = 2;
+  state.context_registers[0x2f9] = 0x2d;
   state.context_registers[0x205] = 0x43f;
   state.context_registers[0x10f] = state.context_registers[0x110] = state.context_registers[0x111] =
       state.context_registers[0x112] = std::bit_cast<uint32_t>(2.0f);
@@ -315,8 +381,8 @@ TEST_P(GraphicsExportTest, HardwareSampleClampsCoordinatesAndConvertsSrgb) {
   amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
   pipeline.issue(instruction.release(), *wave_);
   EXPECT_FLOAT_EQ(std::bit_cast<float>(wave_->debug_read_vgpr(8, 0)), 1.0f);
-  EXPECT_NEAR(std::bit_cast<float>(wave_->debug_read_vgpr(9, 0)), 0.215861f, 0.000001f);
-  EXPECT_NEAR(std::bit_cast<float>(wave_->debug_read_vgpr(10, 0)), 0.0512695f, 0.000001f);
+  EXPECT_EQ(wave_->debug_read_vgpr(9, 0), 0x3e5d0000u);
+  EXPECT_EQ(wave_->debug_read_vgpr(10, 0), 0x3d520000u);
   EXPECT_FLOAT_EQ(std::bit_cast<float>(wave_->debug_read_vgpr(11, 0)), 128.0f / 255.0f);
   EXPECT_EQ(wave_->debug_read_vgpr(10, 1), 0xdeadbeef);
   EXPECT_EQ(wave_->debug_read_vgpr(8, 2), 0);
@@ -336,6 +402,7 @@ TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
       state.context_registers[8] = state.context_registers[10] = 0x2000;
       state.context_registers[0x1c] = 6 | (comparison << 4);
       state.context_registers[0x198] = 2;
+      state.context_registers[0x2f9] = 0x2d;
       state.context_registers[0x205] = 0x43f;
       state.context_registers[0x10f] = state.context_registers[0x110] =
           state.context_registers[0x111] = state.context_registers[0x112] =

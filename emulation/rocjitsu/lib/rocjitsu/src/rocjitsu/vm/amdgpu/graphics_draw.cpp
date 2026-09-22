@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/image_address.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/raster_math.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/log.h"
@@ -224,6 +225,8 @@ DispatchEntry GraphicsDraw::fragment_dispatch() const {
 void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
   if (arch_ != ROCJITSU_CODE_ARCH_RDNA4)
     throw std::runtime_error("graphics rasterization currently requires RDNA4");
+  if (context_[0x2f9] != 0x2d)
+    throw std::runtime_error("unsupported graphics pixel center or subpixel rounding");
   const uint32_t info = context_[0x3b0];
   const uint32_t attrib = context_[0x31b], attrib2 = context_[0x31e], attrib3 = context_[0x31f];
   color_format_ = context_[0x195];
@@ -310,7 +313,7 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
     struct Point {
       double x, y, w, z;
     };
-    std::array<Point, 3> v{};
+    std::array<Point, 3> v{}, screen{};
     for (uint32_t k = 0; k < 3; ++k) {
       indices[k] = (primitives_[p] >> (9 * k)) & 511;
       if (indices[k] >= vertex_count_)
@@ -322,8 +325,10 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
       if (!std::isfinite(w) || w <= 0 || !std::isfinite(x) || !std::isfinite(y)) {
         throw std::runtime_error("graphics homogeneous clipping is not implemented");
       }
-      v[k] = {std::round((x / w * sx + ox) * 256) / 256, std::round((y / w * sy + oy) * 256) / 256,
-              w, std::bit_cast<float>(position[2]) / w};
+      screen[k] = {x / w * sx + ox, y / w * sy + oy, w, std::bit_cast<float>(position[2]) / w};
+      v[k] = {raster::round_subpixel(screen[k].x), raster::round_subpixel(screen[k].y), screen[k].w,
+              screen[k].z};
+      screen[k] = v[k];
       if (!std::isfinite(v[k].x) || !std::isfinite(v[k].y) || std::abs(v[k].x) > (1 << 20) ||
           std::abs(v[k].y) > (1 << 20))
         throw std::runtime_error("graphics vertex exceeds supported raster coordinates");
@@ -337,6 +342,40 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
     const bool front = (area < 0) != bool(context_[0x207] & 4);
     if ((front && (context_[0x207] & 1)) || (!front && (context_[0x207] & 2)))
       continue;
+    // Choose the smallest W, then the leftmost vertex. Equal-W axis-aligned
+    // right triangles use the corner joining the two axis-aligned edges.
+    uint32_t origin = 0;
+    for (uint32_t k = 1; k < 3; ++k)
+      if (screen[k].w < screen[origin].w ||
+          (screen[k].w == screen[origin].w &&
+           (screen[k].x < screen[origin].x ||
+            (screen[k].x == screen[origin].x && screen[k].y < screen[origin].y))))
+        origin = k;
+    for (uint32_t k = 0; k < 3; ++k) {
+      const auto &a = screen[k], &b = screen[(k + 1) % 3], &c = screen[(k + 2) % 3];
+      if (a.w == b.w && a.w == c.w && ((a.x == b.x && a.y == c.y) || (a.y == b.y && a.x == c.x)))
+        origin = k;
+    }
+    std::rotate(indices.begin(), indices.begin() + origin, indices.end());
+    std::rotate(v.begin(), v.begin() + origin, v.end());
+    std::rotate(screen.begin(), screen.begin() + origin, screen.end());
+    const double interpolation_area = edge(screen[0], screen[1], screen[2].x, screen[2].y);
+    const float inverse_area = raster::truncate_float(1.0 / interpolation_area);
+    const raster::Plane plane_i{raster::truncate_float((screen[2].y - screen[0].y) * inverse_area),
+                                raster::truncate_float((screen[0].x - screen[2].x) * inverse_area)};
+    const raster::Plane plane_j{raster::truncate_float((screen[0].y - screen[1].y) * inverse_area),
+                                raster::truncate_float((screen[1].x - screen[0].x) * inverse_area)};
+    const float iw0 = 1.0f / static_cast<float>(screen[0].w);
+    const float iw1 = 1.0f / static_cast<float>(screen[1].w);
+    const float iw2 = 1.0f / static_cast<float>(screen[2].w);
+    const raster::Plane plane_iw{raster::truncate_float(double(plane_i.dx) * iw1),
+                                 raster::truncate_float(double(plane_i.dy) * iw1)};
+    const raster::Plane plane_jw{raster::truncate_float(double(plane_j.dx) * iw2),
+                                 raster::truncate_float(double(plane_j.dy) * iw2)};
+    const raster::Plane plane_rw{
+        raster::truncate_float(plane_i.dx * (double(iw1) - iw0) + plane_j.dx * (double(iw2) - iw0)),
+        raster::truncate_float(plane_i.dy * (double(iw1) - iw0) + plane_j.dy * (double(iw2) - iw0)),
+        iw0};
     const bool rectangle = primitive_type_ == kRectangleList;
     const int min_x = std::max(left, int(std::floor(std::min({v[0].x, v[1].x, v[2].x}))));
     const int min_y = std::max(top, int(std::floor(std::min({v[0].y, v[1].y, v[2].y}))));
@@ -380,11 +419,12 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
           f.x = x + (q & 1);
           f.y = y + (q >> 1);
           const double px = f.x + 0.5, py = f.y + 0.5;
-          const double b1 = edge(v[2], v[0], px, py) / area;
-          const double b2 = edge(v[0], v[1], px, py) / area;
-          const double rw = (1 - b1 - b2) / v[0].w + b1 / v[1].w + b2 / v[2].w;
-          f.i = b1 / v[1].w / rw;
-          f.j = b2 / v[2].w / rw;
+          const double b1 = plane_i.at_quad(x + 0.5 - screen[0].x, y + 0.5 - screen[0].y, q);
+          const double b2 = plane_j.at_quad(x + 0.5 - screen[0].x, y + 0.5 - screen[0].y, q);
+          const double dx = x + 0.5 - screen[0].x, dy = y + 0.5 - screen[0].y;
+          const float w = 1.0f / plane_rw.at_quad(dx, dy, q);
+          f.i = plane_iw.at_quad(dx, dy, q) * w;
+          f.j = plane_jw.at_quad(dx, dy, q) * w;
           f.z = ((1 - b1 - b2) * v[0].z + b1 * v[1].z + b2 * v[2].z) *
                     std::bit_cast<float>(context_[0x113]) +
                 std::bit_cast<float>(context_[0x114]);
