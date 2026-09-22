@@ -58,6 +58,7 @@ ncclResult_t IbCastBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend)
   }
   baseComm->nqps = -1;
   baseComm->splitDataOnQps = ncclParamIbCastSplitDataOnQps();
+  baseComm->optRecvCompletion = false;
   baseComm->nDataQps = -1;
   baseComm->isSend = isSend;
   baseComm->ready = 0;
