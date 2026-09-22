@@ -1364,6 +1364,22 @@ TEST_P(GraphicsExportTest, HardwareSampleFiltersAndAddressesRgba8) {
        0.25f,
        {0, std::bit_cast<uint32_t>(5.5f / 255), std::bit_cast<uint32_t>(125.0f / 255),
         std::bit_cast<uint32_t>(32.0f / 255)}},
+      {"unorm normalization boundary",
+       2,
+       true,
+       false,
+       0,
+       0.25f + 151.0f / 512,
+       0.25f,
+       {0x3f170000, 0x3e488080, 0x3f5df6f7, 0x3ecc4c4c}},
+      {"unorm two-axis normalization boundary",
+       2,
+       true,
+       false,
+       0,
+       0.25f + 5.0f / 512,
+       0.25f + 1.0f / 512,
+       {0x3cb48080, 0x3d4da121, 0x3f796a83, 0x3e8403f4}},
       {"srgb texel center",
        2,
        true,
@@ -1569,7 +1585,7 @@ TEST_P(GraphicsExportTest, SampleLodUsesMipViewsDerivativesAndBias) {
   }
 }
 
-TEST_P(GraphicsExportTest, SrgbTrilinearUsesDistinctWeightsForNonuniformMipLevels) {
+TEST_P(GraphicsExportTest, TrilinearUsesDistinctWeightsForNonuniformMipLevels) {
   for (bool translated : {false, true}) {
     SCOPED_TRACE(translated);
     if (translated) {
@@ -1579,86 +1595,117 @@ TEST_P(GraphicsExportTest, SrgbTrilinearUsesDistinctWeightsForNonuniformMipLevel
       ASSERT_TRUE(address_space);
       wave_->set_address_space(address_space);
     }
-    const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
-    for (uint32_t level = 0; level < 3; ++level) {
-      const auto mip = amdgpu::image_mip_layout(gfx12, 0, 4, 7, 5, 3, level);
-      ASSERT_TRUE(mip);
-      for (uint32_t y = 0; y < mip->height; ++y)
-        for (uint32_t x = 0; x < mip->width; ++x) {
-          const auto address =
-              gfx12 ? amdgpu::gfx12_image_address(0x100000 + mip->offset, x, y, mip->pitch, 4, 0)
-                    : amdgpu::gfx11_image_address(0x100000 + mip->offset, x, y, mip->pitch, 4, 0);
-          ASSERT_TRUE(address);
-          const uint32_t color = (17 * x + 31 * y + 53 * level) |
-                                 ((13 * x + 47 * y + 19 * level) << 8) |
-                                 ((11 * x + 23 * y + 29 * level) << 16) | 0xff000000;
-          memory_.write32(*address, color);
-        }
-    }
-    const std::array<uint32_t, 8> descriptor{0x1000,
-                                             (66u << (gfx12 ? 17 : 20)) | (2u << 30) |
-                                                 (2u << (gfx12 ? 12 : 16)),
-                                             1 | (4u << 14),
-                                             (9u << 28) | 0xfac | (2u << (gfx12 ? 15 : 16)),
-                                             0,
-                                             0,
-                                             0,
-                                             0};
-    for (uint32_t r = 0; r < descriptor.size(); ++r)
-      wave_->debug_write_sgpr(8 + r, descriptor[r]);
-    wave_->debug_write_sgpr(4, 2 | (2 << 3) | (2 << 6));
-    wave_->debug_write_sgpr(5, 512u << (gfx12 ? 13 : 12));
-    wave_->debug_write_sgpr(6, (1 << 20) | (1 << 22) | (2 << 26));
-    wave_->debug_write_sgpr(7, 0);
-    wave_->set_exec(1);
-    struct Case {
-      uint32_t index;
-      std::array<uint32_t, 4> expected;
-    };
-    // Physical gfx1100 and gfx1201 results for UV=(index%256,index/256)/256,
-    // LOD=(index%513)/256. All eight taps contribute at the interior coordinates.
-    const Case cases[] = {
-        {343, {0x3da6ca8a, 0x3c5f2280, 0x3cd123dc, 0x3f800000}},
-        {6764, {0x3d122bb4, 0x3c6a7780, 0x3c6a0f81, 0x3f800000}},
-        {18374, {0x3e011439, 0x3cb9adb7, 0x3d1f1fdd, 0x3f800000}},
-        {32467, {0x3e557300, 0x3e40d053, 0x3db0d1b7, 0x3f800000}},
-        {49141, {0x3e2372b6, 0x3d62df4e, 0x3d58d6c0, 0x3f800000}},
-    };
-    for (const auto &test : cases) {
-      SCOPED_TRACE(test.index);
-      wave_->debug_write_vgpr(0, 0, std::bit_cast<uint32_t>((test.index % 256) / 256.0f));
-      wave_->debug_write_vgpr(1, 0, std::bit_cast<uint32_t>((test.index / 256) / 256.0f));
-      wave_->debug_write_vgpr(2, 0, std::bit_cast<uint32_t>((test.index % 513) / 256.0f));
-      std::array<uint32_t, 4> words{};
-      if (gfx12) {
-        const auto encoded = rdna4::build_vsample(29, {.dim = 1,
-                                                       .dmask = 15,
-                                                       .vdata = 4,
-                                                       .rsrc = 8,
-                                                       .samp = 4,
-                                                       .vaddr0 = 0,
-                                                       .vaddr1 = 1,
-                                                       .vaddr2 = 2});
-        std::copy(encoded.begin(), encoded.end(), words.begin());
-      } else {
-        const auto encoded = rdna3::build_mimg(
-            29, {.dim = 1, .dmask = 15, .vaddr = 0, .vdata = 4, .srsrc = 2, .ssamp = 1});
-        std::copy(encoded.begin(), encoded.end(), words.begin());
+    for (bool srgb : {false, true}) {
+      SCOPED_TRACE(srgb);
+      // The host refills backing memory directly between image fixtures.
+      cu_->l1_vector().invalidate_all();
+      cache_.invalidate_all();
+      const uint32_t width = srgb ? 7 : 13, height = srgb ? 5 : 9, levels = srgb ? 3 : 4;
+      const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+      for (uint32_t level = 0; level < levels; ++level) {
+        const auto mip = amdgpu::image_mip_layout(gfx12, 0, 4, width, height, levels, level);
+        ASSERT_TRUE(mip);
+        for (uint32_t y = 0; y < mip->height; ++y)
+          for (uint32_t x = 0; x < mip->width; ++x) {
+            const auto address =
+                gfx12 ? amdgpu::gfx12_image_address(0x100000 + mip->offset, x, y, mip->pitch, 4, 0)
+                      : amdgpu::gfx11_image_address(0x100000 + mip->offset, x, y, mip->pitch, 4, 0);
+            ASSERT_TRUE(address);
+            uint32_t color = (17 * x + 31 * y + 53 * level) |
+                             ((13 * x + 47 * y + 19 * level) << 8) |
+                             ((11 * x + 23 * y + 29 * level) << 16) | 0xff000000;
+            if (!srgb) {
+              color = (x + 13 * y + 117 * level) * 1664525u + 1013904223u;
+              color ^= color >> 16;
+              color *= 2246822519u;
+            }
+            memory_.write32(*address, color);
+          }
       }
-      auto decoded = decoder_->decode(words.data());
-      ASSERT_FALSE(decoded.failed());
-      auto instruction = std::move(decoded).value();
-      ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
-      ASSERT_FALSE(wave_->instruction_execution_failed());
-      ASSERT_NE(instruction->data(), nullptr);
-      const auto *state = instruction->data_as<amdgpu::VectorMemState>();
-      ASSERT_NE(state->image_sample, nullptr);
-      EXPECT_EQ(state->image_sample->tap_count, 8u);
-      amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
-      pipeline.issue(instruction.release(), *wave_);
-      for (uint32_t c = 0; c < 4; ++c) {
-        const auto actual = wave_->debug_read_vgpr(4 + c, 0);
-        EXPECT_EQ(actual, test.expected[c]) << c;
+      const std::array<uint32_t, 8> descriptor{
+          0x1000,
+          ((srgb ? 66u : 42u) << (gfx12 ? 17 : 20)) | (((width - 1) & 3) << 30) |
+              ((levels - 1) << (gfx12 ? 12 : 16)),
+          ((width - 1) >> 2) | ((height - 1) << 14),
+          (9u << 28) | 0xfac | ((levels - 1) << (gfx12 ? 15 : 16)),
+          0,
+          0,
+          0,
+          0};
+      for (uint32_t r = 0; r < descriptor.size(); ++r)
+        wave_->debug_write_sgpr(8 + r, descriptor[r]);
+      wave_->debug_write_sgpr(4, 2 | (2 << 3) | (2 << 6));
+      wave_->debug_write_sgpr(5, ((levels - 1) * 256) << (gfx12 ? 13 : 12));
+      wave_->debug_write_sgpr(6, (1 << 20) | (1 << 22) | (2 << 26));
+      wave_->debug_write_sgpr(7, 0);
+      wave_->set_exec(1);
+      struct Case {
+        uint32_t index;
+        std::array<uint32_t, 4> expected;
+      };
+      // Physical gfx1100 and gfx1201 results for UV=(index%256,index/256)/256,
+      // LOD=(index%513)/256. All eight taps contribute at the interior coordinates.
+      const std::array<Case, 5> srgb_cases{{
+          {343, {0x3da6ca8a, 0x3c5f2280, 0x3cd123dc, 0x3f800000}},
+          {6764, {0x3d122bb4, 0x3c6a7780, 0x3c6a0f81, 0x3f800000}},
+          {18374, {0x3e011439, 0x3cb9adb7, 0x3d1f1fdd, 0x3f800000}},
+          {32467, {0x3e557300, 0x3e40d053, 0x3db0d1b7, 0x3f800000}},
+          {49141, {0x3e2372b6, 0x3d62df4e, 0x3d58d6c0, 0x3f800000}},
+      }};
+      // Independent hardware captures use pseudorandom RGBA texels and exercise
+      // rounding of each weighted mip before the final texel-value rounding.
+      const std::array<Case, 5> unorm_cases{{
+          {239, {0x3e83a808, 0x3eecb969, 0x3f113f6f, 0x3e9cd8d9}},
+          {612, {0x3e86c6a7, 0x3ed3f7c8, 0x3ef3c9fa, 0x3ec74959}},
+          {1344, {0x3f0acd1d, 0x3ef5b707, 0x3f3414c5, 0x3f18ab03}},
+          {1769, {0x3eda8d2d, 0x3ebf60f1, 0x3f24469f, 0x3effae4e}},
+          {2099, {0x3ed0b6e7, 0x3ee7aacb, 0x3ed90a0a, 0x3f18b8c1}},
+      }};
+      for (const auto &test : srgb ? srgb_cases : unorm_cases) {
+        SCOPED_TRACE(test.index);
+        wave_->debug_write_vgpr(0, 0, std::bit_cast<uint32_t>((test.index % 256) / 256.0f));
+        wave_->debug_write_vgpr(1, 0, std::bit_cast<uint32_t>((test.index / 256) / 256.0f));
+        wave_->debug_write_vgpr(2, 0, std::bit_cast<uint32_t>((test.index % 513) / 256.0f));
+        if (!srgb) {
+          uint32_t seed = test.index * 1664525u + 1013904223u;
+          seed ^= seed >> 16;
+          seed *= 2246822519u;
+          wave_->debug_write_vgpr(0, 0, std::bit_cast<uint32_t>((seed & 1023) / 512.0f - 0.5f));
+          wave_->debug_write_vgpr(1, 0,
+                                  std::bit_cast<uint32_t>(((seed >> 10) & 1023) / 512.0f - 0.5f));
+          wave_->debug_write_vgpr(2, 0, std::bit_cast<uint32_t>(((seed >> 20) % 2049) / 512.0f));
+        }
+        std::array<uint32_t, 4> words{};
+        if (gfx12) {
+          const auto encoded = rdna4::build_vsample(29, {.dim = 1,
+                                                         .dmask = 15,
+                                                         .vdata = 4,
+                                                         .rsrc = 8,
+                                                         .samp = 4,
+                                                         .vaddr0 = 0,
+                                                         .vaddr1 = 1,
+                                                         .vaddr2 = 2});
+          std::copy(encoded.begin(), encoded.end(), words.begin());
+        } else {
+          const auto encoded = rdna3::build_mimg(
+              29, {.dim = 1, .dmask = 15, .vaddr = 0, .vdata = 4, .srsrc = 2, .ssamp = 1});
+          std::copy(encoded.begin(), encoded.end(), words.begin());
+        }
+        auto decoded = decoder_->decode(words.data());
+        ASSERT_FALSE(decoded.failed());
+        auto instruction = std::move(decoded).value();
+        ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
+        ASSERT_FALSE(wave_->instruction_execution_failed());
+        ASSERT_NE(instruction->data(), nullptr);
+        const auto *state = instruction->data_as<amdgpu::VectorMemState>();
+        ASSERT_NE(state->image_sample, nullptr);
+        EXPECT_EQ(state->image_sample->tap_count, 8u);
+        amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
+        pipeline.issue(instruction.release(), *wave_);
+        for (uint32_t c = 0; c < 4; ++c) {
+          const auto actual = wave_->debug_read_vgpr(4 + c, 0);
+          EXPECT_EQ(actual, test.expected[c]) << c;
+        }
       }
     }
   }

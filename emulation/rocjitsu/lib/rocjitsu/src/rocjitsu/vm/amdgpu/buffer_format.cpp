@@ -384,12 +384,29 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
         double filtered = filter_level(0);
         if (d.image_sample->tap_count == 8) {
           const double fraction = d.image_sample->mip_fractions[lane];
-          filtered = filtered * (1 - fraction) + filter_level(1) * fraction;
+          if (unorm8) {
+            // Each weighted mip retains nineteen fractional texel-value bits
+            // before the two contributions are added.
+            filtered = (round_even(filtered * (1 - fraction) * 524288) +
+                        round_even(filter_level(1) * fraction * 524288)) /
+                       524288;
+          } else {
+            filtered = filtered * (1 - fraction) + filter_level(1) * fraction;
+          }
         }
         // RGBA8 filtering retains thirteen fractional texel-value bits.
-        if (unorm8)
-          filtered = round_even(filtered * 8192) / (8192 * 255);
-        else if (filtered > 0) {
+        if (unorm8) {
+          // Normalization expands the fixed-point value by byte replication.
+          // Convert its 34 fractional bits to FP32 with midpoints rounded up.
+          const uint64_t numerator = uint64_t(round_even(filtered * 8192)) << 13;
+          uint64_t normalized = numerator + (numerator >> 8) + (numerator >> 16) +
+                                (numerator >> 24) + (numerator >> 32);
+          const uint32_t shift =
+              std::bit_width(normalized) > 24 ? std::bit_width(normalized) - 24 : 0;
+          if (shift)
+            normalized = (normalized + (uint64_t{1} << (shift - 1))) >> shift;
+          filtered = std::ldexp(double(normalized), int(shift) - 34);
+        } else if (filtered > 0) {
           // The sRGB filter rounds its normalized result to 29 significant
           // bits before conversion to FP32. This intermediate rounding can
           // turn a value on either side of an FP32 midpoint into an exact tie.
