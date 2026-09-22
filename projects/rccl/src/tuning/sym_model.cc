@@ -15,6 +15,81 @@
 
 NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+RCCL_PARAM(SymModel, "SYM_MODEL", 0)
+
+enum rcclSymkColl {
+  rcclSymkColl_AllReduce = 0,
+  rcclSymkColl_AllGather = 1,
+  rcclSymkColl_ReduceScatter = 2,
+  rcclSymkColl_Count = 3
+};
+enum rcclSymkProto {
+  rcclSymkProto_LL = 0,
+  rcclSymkProto_Simple = 1,
+  rcclSymkProto_Count = 2
+};
+
+struct rcclSymkTuningModel {
+  double baseLat[rcclSymkColl_Count][rcclSymkProto_Count];
+  double smBw[rcclSymkColl_Count][rcclSymkProto_Count];
+  double peakBw[rcclSymkColl_Count];
+  double llBusFactor[rcclSymkColl_Count];
+  double withinPeakFactor[rcclSymkColl_Count][rcclSymkProto_Count];
+};
+
+static constexpr struct rcclSymkTuningModel rcclSymkTuningModel_0 = {
+  .baseLat = {
+             //         LL     Simple
+    /* AR */ {11.0, 19.5},
+    /* AG */ {8.5, 13.0},
+    /* RS */ {11.0, 15.0},
+  },
+  .smBw = {{25.0, 5.0}, {22.0, 5.0}, {10.0, 20.0}},
+  .peakBw = {800.0, 1200.0, 1200.0},
+  // The higher, the more conservative the model (less LL usage, more ST usage)
+  .llBusFactor = {12.0, 4.0, 3.0},
+  // The higher, the more conservative the model (less CTAs)
+  .withinPeakFactor = {{1.100, 1.005}, {1.015, 1.015}, {1.025, 1.005}}
+};
+
+static constexpr struct rcclSymkTuningModel rcclSymkTuningModel_1 = {
+  .baseLat = {
+             //         LL     Simple
+    /* AR */ {11.0, 19.5},
+    /* AG */ {8.5, 13.0},
+    /* RS */ {11.0, 13.0},
+  },
+  .smBw = {{25.0, 5.0}, {22.0, 5.0}, {25.0, 20.0}},
+  .peakBw = {800.0, 1200.0, 1200.0},
+  // The higher, the more conservative the model (less LL usage, more ST usage)
+  .llBusFactor = {12.0, 4.0, 9.0},
+  // The higher, the more conservative the model (less CTAs)
+  .withinPeakFactor = {{1.100, 1.005}, {1.015, 1.015}, {1.025, 1.025}}
+};
+
+static constexpr struct rcclSymkTuningModel rcclSymkTuningModels[] = {rcclSymkTuningModel_0, rcclSymkTuningModel_1};
+static constexpr int rcclSymkTuningModelCount = int(sizeof(rcclSymkTuningModels) / sizeof(rcclSymkTuningModels[0]));
+
+static int rcclSymkTuningModelIndex() {
+  static int s_cache = -1;
+  if (s_cache < 0) {
+    int64_t env = rcclParamSymModel();
+    if (env < 0 || env >= rcclSymkTuningModelCount) {
+      INFO(NCCL_ENV, "RCCL_SYM_MODEL %ld is out of range [0, %d); using RCCL_SYM_MODEL 0", (long)env,
+           rcclSymkTuningModelCount);
+      // Use default model
+      // We can have model selection logic here in the future
+      s_cache = 0;
+    } else {
+      // Respect user setting
+      s_cache = (int)env;
+    }
+  }
+  return s_cache;
+}
+#endif
+
 #define NCCL_NVLINK_BW_IDX_HOPPER 0
 #define NCCL_NVLINK_BW_IDX_BLACKWELL 1
 #define NCCL_NVLINK_BW_IDX_NUM 2
@@ -262,6 +337,19 @@ static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
   bool isRS = ncclSymkRSKernelMask() >> k & 1;
   constexpr double GBps = (1 << 30) / 1.e6;
   double baseLat, smBw, peakBw;
+  double withinPeakFactor = 1.025;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  {
+    int c = isAR ? rcclSymkColl_AllReduce : isAG ? rcclSymkColl_AllGather : rcclSymkColl_ReduceScatter;
+    int p = isLL ? rcclSymkProto_LL : rcclSymkProto_Simple;
+    const struct rcclSymkTuningModel& m = rcclSymkTuningModels[rcclSymkTuningModelIndex()];
+    baseLat = m.baseLat[c][p];
+    smBw = m.smBw[c][p] * GBps;
+    peakBw = m.peakBw[c] * GBps;
+    withinPeakFactor = m.withinPeakFactor[c][p];
+    if (isLL) busBytes *= m.llBusFactor[c] / LL_BusFactor;
+  }
+#else
   if (comm->cudaArch < 1000) {
     baseLat = isLL ? 4.5 : 7.8;
     smBw = isAR ? 65 * GBps : 44 * GBps;
@@ -280,6 +368,7 @@ static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
       if (k != ncclSymkKernelId_AllGather_TmaSTMC) peakBw *= 1.07;
     }
   }
+#endif
 
   // maxCTAs/minCTAs are resolved (env > per-call > comm) at task-append time.
   nMaxBlocks = std::min<int>(nMaxBlocks, input->maxCTAs);
@@ -322,7 +411,7 @@ static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
   *timeUs = model(busBytes, baseLat, nMaxBlocks, smBw, busMultiplier, peakBw);
   for (int bn = nMinBlocks; bn < nMaxBlocks; bn += (bn == 1) ? 1 : 2) {
     double time = model(busBytes, baseLat, bn, smBw, busMultiplier, peakBw);
-    if (time <= 1.025 * (*timeUs)) {
+    if (time <= withinPeakFactor * (*timeUs)) {
       *nBlocks = bn;
       *timeUs = time;
       break;
@@ -381,13 +470,14 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
 
   tuning->timeUs = kTime * (1.0f + smPenalty * kBlocks);
   tuning->nChannels = kBlocks;
-  // LL kernels size their slots and iterations for ncclSymkMaxThreads. Convert
-  // that thread count using the runtime wave size; other symmetric kernels keep
-  // the upstream 16-warp launch.
-  if (rcclSymkKernelIdIsLL(tuning->symKernelId)) {
-    tuning->nWarps = ncclSymkMaxThreads / inputs->comm->WarpSize;
-  } else {
-    tuning->nWarps = 16;
-  }
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // rcclSymKGetInfo reports this field and nothing set it after the 2.31 sync, so nchannels read -1.
+  tuning->maxChannels = kBlocks;
+  // Every symmetric kernel sizes itself for ncclSymkMaxThreads, not just LL, so convert
+  // that thread count with the runtime wave size instead of keeping the 16-warp launch.
+  tuning->nWarps = ncclSymkMaxThreads / inputs->comm->WarpSize;
+#else
+  tuning->nWarps = 16;
+#endif
   return ret;
 }
