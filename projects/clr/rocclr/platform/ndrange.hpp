@@ -12,10 +12,6 @@
 #include <limits>
 
 namespace amd {
-class Device;
-}  // namespace amd
-
-namespace amd {
 
 /*! \addtogroup Runtime
  *  @{
@@ -106,6 +102,13 @@ enum LaunchViolation : uint16_t {
   kSharedMemOverflow   = 1u << 8,  //!< sharedMemBytes does not fit uint32_t (PR-B)
 };
 
+//! The device limits LaunchParams needs, passed explicitly so this header stays self-contained
+//! (amd::Device is only forward-declared here).
+struct LaunchDeviceLimits {
+  size_t maxWorkGroupSize;     //!< Device::Info::maxWorkGroupSize_
+  uint32_t localMemSizePerCU;  //!< Device::Info::localMemSizePerCU_
+};
+
 //! Stucture to store launch parameters.
 struct LaunchParams {
   NDRange32 global_;         //!< Total number of work-items in N-dims (matches AQL grid_size)
@@ -113,11 +116,12 @@ struct LaunchParams {
   NDRange8 cluster_;         //!< Cluster dims (matches AQL cluster_size, max 255)
   NDRange32 grid_;           //!< Total number of workgroups in grid in N-dims
   uint32_t sharedMemBytes_;  //!< Shared Memory bytes
+  LaunchDeviceLimits limits_;  //!< Device limits needed for launch-config validation
   bool hipParams_;           //!< If this is launched through hipParams_
   uint16_t violations_;      //!< Bitmask of LaunchViolation bits detected for this config.
 
   LaunchParams(size_t globalX, size_t globalY, size_t globalZ, uint32_t localX, uint32_t localY,
-               uint32_t localZ, uint32_t sharedMemBytes, const Device& device,
+               uint32_t localZ, size_t sharedMemBytes, const LaunchDeviceLimits& limits,
                uint32_t clusterX = 1, uint32_t clusterY = 1, uint32_t clusterZ = 1,
                uint32_t gridX = 1, uint32_t gridY = 1, uint32_t gridZ = 1, bool hipParams = false)
       : global_(static_cast<uint32_t>(globalX), static_cast<uint32_t>(globalY),
@@ -127,7 +131,8 @@ struct LaunchParams {
         cluster_(static_cast<uint8_t>(clusterX), static_cast<uint8_t>(clusterY),
                  static_cast<uint8_t>(clusterZ)),
         grid_(gridX, gridY, gridZ),
-        sharedMemBytes_(sharedMemBytes),
+        sharedMemBytes_(static_cast<uint32_t>(sharedMemBytes)),
+        limits_(limits),
         hipParams_(hipParams),
         violations_(kLaunchOk) {
     // Deliberately test the narrowed global_ member (not the raw size_t params) so this bit
@@ -208,15 +213,15 @@ struct LaunchParams {
 struct HIPLaunchParams : public LaunchParams {
 
   HIPLaunchParams(uint32_t gridX, uint32_t gridY, uint32_t gridZ, uint32_t blockX,
-                  uint32_t blockY, uint32_t blockZ, uint32_t sharedMemBytes, const Device& device,
-                  uint32_t globalX_remainder = 0, uint32_t globalY_remainder = 0,
-                  uint32_t globalZ_remainder = 0, uint32_t clusterX = 1,
-                  uint32_t clusterY = 1, uint32_t clusterZ = 1)
+                  uint32_t blockY, uint32_t blockZ, size_t sharedMemBytes,
+                  const LaunchDeviceLimits& limits, uint32_t globalX_remainder = 0,
+                  uint32_t globalY_remainder = 0, uint32_t globalZ_remainder = 0,
+                  uint32_t clusterX = 1, uint32_t clusterY = 1, uint32_t clusterZ = 1)
                   : LaunchParams(static_cast<size_t>(gridX) * blockX + globalX_remainder,
                                  static_cast<size_t>(gridY) * blockY + globalY_remainder,
                                  static_cast<size_t>(gridZ) * blockZ + globalZ_remainder,
-                                 blockX, blockY, blockZ, sharedMemBytes, device, clusterX, clusterY,
-                                 clusterZ, gridX, gridY, gridZ, true /*hipParams*/) {}
+                                 blockX, blockY, blockZ, sharedMemBytes, limits, clusterX,
+                                 clusterY, clusterZ, gridX, gridY, gridZ, true /*hipParams*/) {}
 };
 
 //! A container for the local and global worksizes.
