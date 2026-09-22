@@ -185,15 +185,35 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
       (primitive_type_ != kTriangleList && primitive_type_ != kTriangleStrip &&
        primitive_type_ != kRectangleList))
     throw std::runtime_error("unsupported graphics primitive, vertex count, or instance count");
-  color_max_mip_ = (context_[0x31f] >> 19) & 31;
-  color_mip_ = context_[0x31a] & 31;
+  const auto &ctx = state.context_registers;
+  for (uint32_t target = 0; target < colors_.size(); ++target) {
+    auto &color = colors_[target];
+    const uint32_t dst = 0x318 + 9 * target;
+    if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+      color.max_mip = (ctx[dst + 7] >> 19) & 31;
+      color.mip = ctx[dst + 2] & 31;
+      continue;
+    }
+    // GFX11 color blocks have fifteen registers; GFX12 blocks have nine.
+    // Always read the original snapshot because the two layouts overlap.
+    const uint32_t src = 0x318 + 15 * target;
+    if (ctx[src + 6] & (1u << 22))
+      color.metadata = addr_calc::buffer_virtual_address(
+          ((uint64_t{ctx[0x3a8 + target] & 255} << 32) | ctx[src + 13]) << 8);
+    context_[dst] = ctx[src];
+    context_[dst + 1] = ctx[src + 3];
+    context_[dst + 2] = 0;
+    context_[dst + 3] = ctx[src + 5];
+    const uint32_t attrib2 = ctx[0x3b0 + target];
+    context_[dst + 6] = (attrib2 & 0x3fff) | (((attrib2 >> 14) & 0x3fff) << 16);
+    context_[dst + 7] = ctx[0x3b8 + target];
+    context_[0x3b0 + target] = ctx[src + 4];
+    color.max_mip = attrib2 >> 28;
+    color.mip = (ctx[src + 3] >> 26) & 15;
+  }
   if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
     // Normalize relocated registers into the GFX12 slots used below. Read the
     // original snapshot because several source and destination slots overlap.
-    const auto &ctx = state.context_registers;
-    if (ctx[0x31e] & (1u << 22))
-      color_metadata_ =
-          addr_calc::buffer_virtual_address(((uint64_t{ctx[0x3a8] & 255} << 32) | ctx[0x325]) << 8);
     if ((ctx[0x200] & 2) && (ctx[0x10] & (1u << 29))) {
       if ((ctx[0x11] & 1) || !(ctx[0x2af] & (1u << 18)))
         throw std::runtime_error("unsupported GFX11 stencil or unaligned HTILE surface");
@@ -213,17 +233,10 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
                                   {0x207, 0x205},
                                   {0x206, 0x207},
                                   {0x214, 0x8e},
-                                  {0x216, 0x202},
-                                  {0x319, 0x31b},
-                                  {0x31b, 0x31d},
-                                  {0x31f, 0x3b8},
-                                  {0x3b0, 0x31c}})
+                                  {0x215, 0x8f},
+                                  {0x216, 0x202}})
       context_[dst] = ctx[src];
     context_[0x19] = (ctx[3] >> 16) & 1; // DISABLE_VIEWPORT_CLAMP
-    context_[0x31a] = 0;
-    context_[0x31e] = (ctx[0x3b0] & 0x3fff) | (((ctx[0x3b0] >> 14) & 0x3fff) << 16);
-    color_max_mip_ = ctx[0x3b0] >> 28;
-    color_mip_ = (ctx[0x31b] >> 26) & 15;
     for (uint32_t i = 0; i < 32; ++i)
       context_[0x199 + i] = ctx[0x191 + i];
     sh_[0x31] = ((ctx[0x1b1] >> 1) & 31) | ((ctx[0x1b6] & 63) << 11);
@@ -396,15 +409,15 @@ void GraphicsDraw::export_lane(Wavefront &wave, uint32_t lane, uint32_t target, 
         fragments_.at(wave.wg_coord()[0]).lanes[lane].z = std::bit_cast<float>(values[0]);
       return;
     }
-    if (target != 0) {
+    if (target >= colors_.size()) {
       wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
       return;
     }
-    auto &f = fragments_.at(wave.wg_coord()[0]).lanes[lane];
+    auto &exported = fragments_.at(wave.wg_coord()[0]).lanes[lane].exports[target];
     for (uint32_t i = 0; i < 4; ++i)
       if (mask & (1u << i))
-        f.color[i] = values[i];
-    f.mask |= mask;
+        exported.values[i] = values[i];
+    exported.mask |= mask;
     return;
   }
   if (target == 12 && lane < vertex_count_) {
@@ -459,6 +472,76 @@ DispatchEntry GraphicsDraw::fragment_dispatch() const {
   return dp;
 }
 
+void GraphicsDraw::prepare_colors() {
+  const bool gfx12 = arch_ == ROCJITSU_CODE_ARCH_RDNA4;
+  const uint32_t color_control = context_[0x216];
+  const uint32_t color_mode = (color_control >> 4) & 7;
+  color_enabled_ = (context_[0x214] & context_[0x215]) != 0 && color_mode != 0;
+  if (color_enabled_ &&
+      (color_mode != 1 || ((color_control >> 16) & 255) != 0xcc || (color_control & 8)))
+    throw std::runtime_error("unsupported graphics color mode, logic operation, or degamma");
+  width_ = height_ = 0;
+  uint32_t export_index = 0;
+  for (uint32_t target = 0; target < colors_.size(); ++target) {
+    auto &color = colors_[target];
+    const uint32_t shader_mask = (context_[0x215] >> (4 * target)) & 15;
+    // Shader exports and their format nibbles omit holes in CB_SHADER_MASK.
+    // CB_TARGET_MASK can disable writes without removing a shader export slot.
+    color.export_index = export_index;
+    color.export_format = (context_[0x195] >> (4 * export_index)) & 15;
+    export_index += shader_mask != 0;
+    color.write_mask = color_enabled_ ? (context_[0x214] >> (4 * target)) & shader_mask : 0;
+    if (!color.write_mask)
+      continue;
+    const uint32_t block = 0x318 + 9 * target;
+    const uint32_t info = context_[0x3b0 + target];
+    const uint32_t attrib = context_[block + 3], attrib2 = context_[block + 6],
+                   attrib3 = context_[block + 7];
+    util::Logger::cp("graphics target ", target, " info=", std::hex, info, " attrib=", attrib, ",",
+                     attrib2, ",", attrib3, " export=", color.export_format,
+                     " mask=", color.write_mask, std::dec);
+    const uint32_t data_format = info & 31, number_format = (info >> 8) & 7;
+    color.srgb = number_format == kNumberSrgb;
+    color.memory_format = color_buffer_format(data_format, number_format);
+    color.bytes = buffer_format_bytes(color.memory_format);
+    const uint32_t layer_bits = gfx12 ? 14 : 13, layer_mask = (1u << layer_bits) - 1;
+    const uint32_t view = context_[block + 1];
+    color.first_layer = view & layer_mask;
+    color.last_layer = (view >> layer_bits) & layer_mask;
+    if (!color.memory_format || (color.srgb && color.export_format != 4) || (info & (3u << 11)) ||
+        (attrib & (gfx12 ? ~0u : ~0x30u)) || ((attrib3 >> 24) & 3) > 1 ||
+        (attrib3 & (1u << layer_bits)) || (context_[block + 2] & ~31u) ||
+        color.first_layer > color.last_layer || color.last_layer > (attrib3 & layer_mask) ||
+        (view & (gfx12 ? 0xf0000000u : 0xc0000000u)) ||
+        (color.export_format != 4 && color.export_format != 7 && color.export_format != 9))
+      throw std::runtime_error("unsupported graphics color state");
+    color.blend = context_[0x1e0 + target];
+    if ((color.blend & kBlendEnable) &&
+        (color.srgb || color.memory_format != kBufRgba8Unorm || !supported_blend(color.blend) ||
+         ((color.blend & kBlendSeparateAlpha) && !supported_blend(color.blend >> 16))))
+      throw std::runtime_error("unsupported graphics blend operation or integer attachment");
+    color.swizzle = gfx12 ? (attrib3 >> 15) & 7 : (attrib3 >> 14) & 31;
+    color.pipe_aligned = attrib3 & (1u << 30);
+    const auto mip = image_mip_layout(gfx12, color.swizzle, color.bytes, (attrib2 >> 16) + 1,
+                                      (attrib2 & 0xffff) + 1, color.max_mip + 1, color.mip);
+    if (!mip || (color.metadata && color.max_mip))
+      throw std::runtime_error("unsupported graphics color mip layout");
+    color.width = mip->width;
+    color.height = mip->height;
+    if (width_ && (width_ != color.width || height_ != color.height))
+      throw std::runtime_error("graphics color attachment extents must match");
+    width_ = color.width;
+    height_ = color.height;
+    color.pitch = mip->pitch;
+    color.slice_size = mip->slice_size;
+    color.tail_x = mip->tail_x;
+    color.tail_y = mip->tail_y;
+    color.base = addr_calc::buffer_virtual_address(
+                     ((uint64_t{context_[0x390 + target] & 255} << 32) | context_[block]) << 8) +
+                 mip->offset;
+  }
+}
+
 void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
   const bool gfx12 = arch_ == ROCJITSU_CODE_ARCH_RDNA4;
   const uint32_t clip_control = context_[0x204];
@@ -480,63 +563,12 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
     throw std::runtime_error("graphics multisample rasterization is not implemented");
   if (context_[0x2f9] != 0x2d)
     throw std::runtime_error("unsupported graphics pixel center or subpixel rounding");
-  const uint32_t info = context_[0x3b0];
-  const uint32_t attrib = context_[0x31b], attrib2 = context_[0x31e], attrib3 = context_[0x31f];
-  color_format_ = context_[0x195];
-  util::Logger::cp("graphics target info=", std::hex, info, " attrib=", attrib, ",", attrib2, ",",
-                   attrib3, " export=", color_format_, " inputs=", context_[0x198],
-                   " mask=", context_[0x214], " depth=", context_[0x1c], std::dec);
-  const uint32_t data_format = info & 31, number_format = (info >> 8) & 7;
-  color_srgb_ = number_format == kNumberSrgb;
-  memory_format_ = color_buffer_format(data_format, number_format);
-  color_bytes_ = buffer_format_bytes(memory_format_);
-  const uint32_t layer_bits = gfx12 ? 14 : 13, layer_mask = (1u << layer_bits) - 1;
-  const uint32_t view = context_[0x319];
-  color_first_layer_ = view & layer_mask;
-  color_last_layer_ = (view >> layer_bits) & layer_mask;
-  const uint32_t color_depth = attrib3 & layer_mask;
-  const uint32_t color_control = context_[0x216];
-  const uint32_t color_mode = (color_control >> 4) & 7;
-  color_enabled_ = context_[0x214] != 0 && color_mode != 0;
-  if (color_enabled_ &&
-      (color_mode != 1 || ((color_control >> 16) & 255) != 0xcc || (color_control & 8)))
-    throw std::runtime_error("unsupported graphics color mode, logic operation, or degamma");
+  prepare_colors();
   depth_control_ = context_[0x1c];
   if (depth_control_ & ~0x76u)
     throw std::runtime_error("unsupported graphics stencil or depth bounds test");
-  if (color_enabled_ &&
-      (!memory_format_ || (number_format == kNumberSrgb && color_format_ != 4) ||
-       (info & (3u << 11)) || (attrib & (gfx12 ? ~0u : ~0x30u)) || ((attrib3 >> 24) & 3) > 1 ||
-       (attrib3 & (1u << layer_bits)) || (context_[0x31a] & ~31u) ||
-       color_first_layer_ > color_last_layer_ || color_last_layer_ > color_depth ||
-       (view & (gfx12 ? 0xf0000000u : 0xc0000000u)) || (context_[0x214] & ~15u) ||
-       (color_format_ != 4 && color_format_ != 7 && color_format_ != 9)))
-    throw std::runtime_error("unsupported graphics color state");
-  const uint32_t blend = context_[0x1e0];
-  if (color_enabled_ && (blend & kBlendEnable) &&
-      (number_format == kNumberSrgb || memory_format_ != kBufRgba8Unorm ||
-       !supported_blend(blend) || ((blend & kBlendSeparateAlpha) && !supported_blend(blend >> 16))))
-    throw std::runtime_error("unsupported graphics blend operation or integer attachment");
   if ((context_[0x198] & ~0x8f7fu) || (context_[0x197] & ~context_[0x198]))
     throw std::runtime_error("unsupported graphics fragment inputs");
-  width_ = (attrib2 >> 16) + 1;
-  height_ = (attrib2 & 0xffff) + 1;
-  swizzle_ = gfx12 ? (attrib3 >> 15) & 7 : (attrib3 >> 14) & 31;
-  if (color_enabled_) {
-    const auto mip = image_mip_layout(gfx12, swizzle_, color_bytes_, width_, height_,
-                                      color_max_mip_ + 1, color_mip_);
-    if (!mip || (color_metadata_ && color_max_mip_))
-      throw std::runtime_error("unsupported graphics color mip layout");
-    width_ = mip->width;
-    height_ = mip->height;
-    color_pitch_ = mip->pitch;
-    color_slice_size_ = mip->slice_size;
-    color_tail_x_ = mip->tail_x;
-    color_tail_y_ = mip->tail_y;
-    color_base_ = addr_calc::buffer_virtual_address(
-                      ((uint64_t{context_[0x390] & 255} << 32) | context_[0x318]) << 8) +
-                  mip->offset;
-  }
 
   if (depth_control_ & 2) {
     const uint32_t zinfo = context_[6];
@@ -644,8 +676,11 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
     const uint32_t provoking = (context_[0x207] & (1u << 19)) ? 2 : 0;
     const uint32_t relative_layer =
         (context_[0x206] & (1u << 18)) ? layer_viewport_[indices[provoking]] & 0xffff : 0;
-    if (color_enabled_ && relative_layer > color_last_layer_ - color_first_layer_)
+    if (color_enabled_ && std::none_of(colors_.begin(), colors_.end(), [&](const auto &color) {
+          return color.write_mask && relative_layer <= color.last_layer - color.first_layer;
+        }))
       continue;
+    // Depth still has a single slice; color attachments have independent array views.
     if ((depth_control_ & 2) && relative_layer)
       throw std::runtime_error("graphics layered depth attachments are not implemented");
     if (outside_near == 3 || outside_far == 3)
@@ -777,7 +812,7 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       }
     }
     FragmentWave batch;
-    batch.color_layer = color_first_layer_ + relative_layer;
+    batch.relative_layer = relative_layer;
     batch.parameters = parameters;
     uint32_t used = 0;
     for (int y = min_y & ~1; y < max_y; y += 2) {
@@ -830,7 +865,7 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
         if (used == fragment_wave_size_) {
           fragments_.push_back(std::move(batch));
           batch = FragmentWave{};
-          batch.color_layer = color_first_layer_ + relative_layer;
+          batch.relative_layer = relative_layer;
           batch.parameters = parameters;
           used = 0;
         }
@@ -846,16 +881,18 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       (!std::isfinite(depth_min) || !std::isfinite(depth_max) || depth_min > depth_max))
     throw std::runtime_error("unsupported graphics viewport depth range");
   if (!attachments_prepared_) {
-    if (color_enabled_ && color_metadata_) {
-      const uint32_t block_bits = 8 - std::countr_zero(color_bytes_);
+    for (const auto &color : colors_) {
+      if (!color.write_mask || !color.metadata)
+        continue;
+      const uint32_t block_bits = 8 - std::countr_zero(color.bytes);
       const uint32_t block_width = 1u << ((block_bits + 1) / 2);
       const uint32_t block_height = 1u << (block_bits / 2);
-      for (uint32_t layer = color_first_layer_; layer <= color_last_layer_; ++layer)
-        for (uint32_t y = 0; y < height_; y += block_height)
-          for (uint32_t x = 0; x < width_; x += block_width)
-            materialize_gfx11_dcc(memory, color_base_, *color_metadata_, x, y, width_, height_,
-                                  color_bytes_, swizzle_, attrib3 & (1u << 30), layer,
-                                  color_slice_size_);
+      for (uint32_t layer = color.first_layer; layer <= color.last_layer; ++layer)
+        for (uint32_t y = 0; y < color.height; y += block_height)
+          for (uint32_t x = 0; x < color.width; x += block_width)
+            materialize_gfx11_dcc(memory, color.base, *color.metadata, x, y, color.width,
+                                  color.height, color.bytes, color.swizzle, color.pipe_aligned,
+                                  layer, color.slice_size);
     }
     if ((depth_control_ & 2) && depth_metadata_) {
       uint32_t bits = depth_clear_;
@@ -933,60 +970,68 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
                                     depth_bytes_}) != VmAccessOutcome::Complete)
           throw std::runtime_error("graphics depth write failed");
       }
-      if (!color_enabled_ || !f.mask)
-        continue;
-      std::array<uint32_t, 4> components = f.color;
-      if (color_format_ == 4 || color_format_ == 7) {
-        if (f.mask != 3)
-          throw std::runtime_error("unsupported packed graphics color export mask");
-        for (uint32_t c = 0; c < 4; ++c) {
-          const uint16_t half = f.color[c / 2] >> (16 * (c % 2));
-          components[c] =
-              color_format_ == 7 ? half : std::bit_cast<uint32_t>(util::f16_to_f32(half));
+      for (uint32_t target = 0; target < colors_.size(); ++target) {
+        const auto &color = colors_[target];
+        if (!color.write_mask)
+          continue;
+        const auto &exported = f.exports[color.export_index];
+        if (!exported.mask || batch.relative_layer > color.last_layer - color.first_layer)
+          continue;
+        std::array<uint32_t, 4> components = exported.values;
+        if (color.export_format == 4 || color.export_format == 7) {
+          if (exported.mask != 3)
+            throw std::runtime_error("unsupported packed graphics color export mask");
+          for (uint32_t c = 0; c < 4; ++c) {
+            const uint16_t half = exported.values[c / 2] >> (16 * (c % 2));
+            components[c] =
+                color.export_format == 7 ? half : std::bit_cast<uint32_t>(util::f16_to_f32(half));
+          }
+        } else if (exported.mask != 15) {
+          throw std::runtime_error("unsupported graphics color export mask");
         }
-      } else if (f.mask != 15) {
-        throw std::runtime_error("unsupported graphics color export mask");
+        const uint64_t layer_base =
+            image_layer_base(arch_ == ROCJITSU_CODE_ARCH_RDNA4, color.base, color.slice_size,
+                             color.first_layer + batch.relative_layer, color.bytes, color.swizzle);
+        const auto address = image_address(layer_base, f.x + color.tail_x, f.y + color.tail_y,
+                                           color.pitch, color.bytes, color.swizzle);
+        if (!address)
+          throw std::runtime_error("graphics color address is unsupported");
+        std::array<uint8_t, 16> previous{}, bytes{};
+        const uint32_t blend = color.blend, write_mask = color.write_mask;
+        if (((blend & kBlendEnable) || write_mask != 15) &&
+            memory.read(*address, std::as_writable_bytes(std::span{previous}.first(color.bytes))) !=
+                VmAccessOutcome::Complete)
+          throw std::runtime_error("graphics color read failed");
+        if (blend & kBlendEnable) {
+          std::array<float, 4> source{}, destination{}, constant{};
+          for (uint32_t c = 0; c < 4; ++c) {
+            source[c] = std::clamp(std::bit_cast<float>(components[c]), 0.0f, 1.0f);
+            destination[c] = previous[c] / 255.0f;
+            constant[c] = std::clamp(std::bit_cast<float>(context_[0x105 + c]), 0.0f, 1.0f);
+            // Color blending truncates constants to twelve significant bits.
+            constant[c] = std::bit_cast<float>(std::bit_cast<uint32_t>(constant[c]) & ~0xfffu);
+          }
+          for (uint32_t c = 0; c < 4; ++c) {
+            const uint32_t control = c == 3 && (blend & kBlendSeparateAlpha) ? blend >> 16 : blend;
+            components[c] =
+                std::bit_cast<uint32_t>(blend_component(control, c, source, destination, constant));
+          }
+        }
+        pack_buffer_format(color.memory_format, 0xfac, components,
+                           std::span{bytes}.first(color.bytes));
+        if (color.srgb)
+          for (uint32_t c = 0; c < 3; ++c)
+            bytes[c] = srgb_color_byte(std::bit_cast<float>(components[c]));
+        // Accepted color formats have four equally sized components.
+        const uint32_t component_bytes = color.bytes / 4;
+        for (uint32_t c = 0; c < 4; ++c)
+          if (!(write_mask & (1u << c)))
+            std::copy_n(previous.begin() + c * component_bytes, component_bytes,
+                        bytes.begin() + c * component_bytes);
+        if (memory.write(*address, std::as_bytes(std::span{bytes}.first(color.bytes))) !=
+            VmAccessOutcome::Complete)
+          throw std::runtime_error("graphics color write failed");
       }
-      const uint64_t layer_base =
-          image_layer_base(arch_ == ROCJITSU_CODE_ARCH_RDNA4, color_base_, color_slice_size_,
-                           batch.color_layer, color_bytes_, swizzle_);
-      const auto address = image_address(layer_base, f.x + color_tail_x_, f.y + color_tail_y_,
-                                         color_pitch_, color_bytes_, swizzle_);
-      if (!address)
-        throw std::runtime_error("graphics color address is unsupported");
-      std::array<uint8_t, 16> previous{}, bytes{};
-      const uint32_t blend = context_[0x1e0], write_mask = context_[0x214];
-      if (((blend & kBlendEnable) || write_mask != 15) &&
-          memory.read(*address, std::as_writable_bytes(std::span{previous}.first(color_bytes_))) !=
-              VmAccessOutcome::Complete)
-        throw std::runtime_error("graphics color read failed");
-      if (blend & kBlendEnable) {
-        std::array<float, 4> source{}, destination{}, constant{};
-        for (uint32_t c = 0; c < 4; ++c) {
-          source[c] = std::clamp(std::bit_cast<float>(components[c]), 0.0f, 1.0f);
-          destination[c] = previous[c] / 255.0f;
-          constant[c] = std::clamp(std::bit_cast<float>(context_[0x105 + c]), 0.0f, 1.0f);
-          // Color blending truncates constants to twelve significant bits.
-          constant[c] = std::bit_cast<float>(std::bit_cast<uint32_t>(constant[c]) & ~0xfffu);
-        }
-        for (uint32_t c = 0; c < 4; ++c) {
-          const uint32_t control = c == 3 && (blend & kBlendSeparateAlpha) ? blend >> 16 : blend;
-          components[c] =
-              std::bit_cast<uint32_t>(blend_component(control, c, source, destination, constant));
-        }
-      }
-      pack_buffer_format(memory_format_, 0xfac, components, std::span{bytes}.first(color_bytes_));
-      if (color_srgb_)
-        for (uint32_t c = 0; c < 3; ++c)
-          bytes[c] = srgb_color_byte(std::bit_cast<float>(components[c]));
-      const uint32_t component_bytes = color_bytes_ / 4;
-      for (uint32_t c = 0; c < 4; ++c)
-        if (!(write_mask & (1u << c)))
-          std::copy_n(previous.begin() + c * component_bytes, component_bytes,
-                      bytes.begin() + c * component_bytes);
-      if (memory.write(*address, std::as_bytes(std::span{bytes}.first(color_bytes_))) !=
-          VmAccessOutcome::Complete)
-        throw std::runtime_error("graphics color write failed");
     }
   }
 }

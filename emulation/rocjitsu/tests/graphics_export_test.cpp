@@ -403,6 +403,7 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
     state.context_registers[0x31f] = 3 << 15;
     state.context_registers[0x318] = 0x1000;
     state.context_registers[0x214] = 15;
+    state.context_registers[0x215] = 15;
     state.context_registers[0x195] = 4;
     state.context_registers[0x198] = test.inputs;
     state.context_registers[0x2f9] = 0x2d;
@@ -418,6 +419,7 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
       state.context_registers[0x3b8] = 26 << 14;
       state.context_registers[0x31e] = 0;
       state.context_registers[0x8e] = 15;
+      state.context_registers[0x8f] = 15;
       state.context_registers[0x1c5] = 4;
       state.context_registers[0x1b4] = test.inputs;
       state.context_registers[0x206] = 0x43f;
@@ -549,88 +551,93 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
 TEST_P(GraphicsExportTest, ArrayAttachmentViewsSelectProvokingVertexAndPreserveOtherLayers) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   const auto image_address = gfx12 ? amdgpu::gfx12_image_address : amdgpu::gfx11_image_address;
-  for (uint32_t first : {0u, 2u})
-    for (bool enabled : {false, true})
-      for (bool last_provoking : {false, true})
-        for (uint32_t exported : {1u, 3u}) {
-          SCOPED_TRACE(testing::Message()
-                       << "first=" << first << ", enabled=" << enabled
-                       << ", last_provoking=" << last_provoking << ", exported=" << exported);
-          amdgpu::Pm4QueueState state;
-          state.num_instances = 1;
-          state.uconfig_registers[0x242] = 4;
-          auto &context = state.context_registers;
-          context[gfx12 ? 0x3b0 : 0x31c] = 10;
-          context[gfx12 ? 0x31e : 0x3b0] = gfx12 ? 15 | (15 << 16) : 15 | (15 << 14);
-          context[gfx12 ? 0x31f : 0x3b8] = (gfx12 ? 3u << 15 : 26u << 14) | 4;
-          context[gfx12 ? 0x319 : 0x31b] = first | ((first + 2) << (gfx12 ? 14 : 13));
-          context[0x318] = 0x1000;
-          context[gfx12 ? 0x214 : 0x8e] = 15;
-          context[gfx12 ? 0x195 : 0x1c5] = 9;
-          context[gfx12 ? 0x198 : 0x1b4] = 2;
-          context[0x2f9] = 0x2d;
-          context[gfx12 ? 0x205 : 0x206] = 0x43f;
-          context[gfx12 ? 0x206 : 0x207] = enabled ? 1u << 18 : 0;
-          context[gfx12 ? 0x207 : 0x205] = last_provoking ? 1u << 19 : 0;
-          context[gfx12 ? 0x216 : 0x202] = 0xcc0010;
-          context[0x10f] = context[0x110] = context[0x111] = context[0x112] =
-              std::bit_cast<uint32_t>(8.0f);
-          context[0x91] = gfx12 ? 15 | (15 << 16) : 16 | (16 << 16);
-          context[0x30e] = context[0x30f] = 0xffffffff;
-          // One 64KiB block per slice on both chosen layouts; inspect every texel.
-          for (uint32_t layer = 0; layer < 5; ++layer)
-            for (uint32_t y = 0; y < 16; ++y)
-              for (uint32_t x = 0; x < 16; ++x) {
-                const uint64_t base =
-                    amdgpu::image_layer_base(gfx12, 0x100000, 65536, layer, 4, gfx12 ? 3 : 26);
-                const auto address = image_address(base, x, y, 16, 4, gfx12 ? 3 : 26);
-                memory_.write32(*address, 0xdeadbeef);
-              }
-          auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
-          for (uint32_t i = 0; i < 3; ++i) {
-            draw->export_lane(*wave_, i, 12, 15,
-                              {std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
-                               std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f), 0,
-                               std::bit_cast<uint32_t>(1.0f)});
-            draw->export_lane(*wave_, i, 13, 4, {0, 0, i == 2 ? exported : 0, 0});
-          }
-          draw->export_lane(*wave_, 0, 20, 1,
-                            {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
-          const uint32_t relative_layer = enabled && last_provoking ? exported : 0;
-          auto dispatch = draw->advance(*access_);
-          if (relative_layer > 2)
-            EXPECT_FALSE(dispatch);
-          else {
-            ASSERT_TRUE(dispatch);
-            EXPECT_GT(dispatch->grid_wgs_x, 1u);
-            for (uint32_t workgroup = 0; workgroup < dispatch->grid_wgs_x; ++workgroup) {
-              wave_->set_wg_coord(workgroup, 0, 0);
-              wave_->set_graphics_stage(draw);
-              draw->initialize(*wave_, workgroup, 0);
-              for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
-                draw->export_lane(*wave_, lane, 0, 15, {0x3f800000, 0, 0, 0x3f800000});
-            }
-            EXPECT_FALSE(draw->advance(*access_));
-          }
-          uint32_t changed = 0;
-          for (uint32_t layer = 0; layer < 5; ++layer)
-            for (uint32_t y = 0; y < 16; ++y)
-              for (uint32_t x = 0; x < 16; ++x) {
-                const uint64_t base =
-                    amdgpu::image_layer_base(gfx12, 0x100000, 65536, layer, 4, gfx12 ? 3 : 26);
-                const auto address = image_address(base, x, y, 16, 4, gfx12 ? 3 : 26);
-                const auto value = memory_.read32(*address);
-                if (value != 0xdeadbeef) {
-                  ++changed;
-                  EXPECT_EQ(layer, first + relative_layer);
-                  EXPECT_EQ(value, 0xff0000ffu);
+  for (uint32_t target : {0u, 7u})
+    for (uint32_t first : {0u, 2u})
+      for (bool enabled : {false, true})
+        for (bool last_provoking : {false, true})
+          for (uint32_t exported : {1u, 3u}) {
+            SCOPED_TRACE(testing::Message()
+                         << "target=" << target << ", first=" << first << ", enabled=" << enabled
+                         << ", last_provoking=" << last_provoking << ", exported=" << exported);
+            amdgpu::Pm4QueueState state;
+            state.num_instances = 1;
+            state.uconfig_registers[0x242] = 4;
+            auto &context = state.context_registers;
+
+            const uint32_t block = 0x318 + (gfx12 ? 9 : 15) * target;
+            context[gfx12 ? 0x3b0 + target : block + 4] = 10;
+            context[gfx12 ? block + 6 : 0x3b0 + target] = gfx12 ? 15 | (15 << 16) : 15 | (15 << 14);
+            context[gfx12 ? block + 7 : 0x3b8 + target] = (gfx12 ? 3u << 15 : 26u << 14) | 4;
+            context[gfx12 ? block + 1 : block + 3] = first | ((first + 2) << (gfx12 ? 14 : 13));
+            context[block] = 0x1000;
+            context[gfx12 ? 0x214 : 0x8e] = 15u << (4 * target);
+            context[gfx12 ? 0x215 : 0x8f] = 15u << (4 * target);
+            context[gfx12 ? 0x195 : 0x1c5] = 9;
+            context[gfx12 ? 0x198 : 0x1b4] = 2;
+            context[0x2f9] = 0x2d;
+            context[gfx12 ? 0x205 : 0x206] = 0x43f;
+            context[gfx12 ? 0x206 : 0x207] = enabled ? 1u << 18 : 0;
+            context[gfx12 ? 0x207 : 0x205] = last_provoking ? 1u << 19 : 0;
+            context[gfx12 ? 0x216 : 0x202] = 0xcc0010;
+            context[0x10f] = context[0x110] = context[0x111] = context[0x112] =
+                std::bit_cast<uint32_t>(8.0f);
+            context[0x91] = gfx12 ? 15 | (15 << 16) : 16 | (16 << 16);
+            context[0x30e] = context[0x30f] = 0xffffffff;
+            // One 64KiB block per slice on both chosen layouts; inspect every texel.
+            for (uint32_t layer = 0; layer < 5; ++layer)
+              for (uint32_t y = 0; y < 16; ++y)
+                for (uint32_t x = 0; x < 16; ++x) {
+                  const uint64_t base =
+                      amdgpu::image_layer_base(gfx12, 0x100000, 65536, layer, 4, gfx12 ? 3 : 26);
+                  const auto address = image_address(base, x, y, 16, 4, gfx12 ? 3 : 26);
+                  memory_.write32(*address, 0xdeadbeef);
                 }
+
+            auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
+            for (uint32_t i = 0; i < 3; ++i) {
+              draw->export_lane(*wave_, i, 12, 15,
+                                {std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
+                                 std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f), 0,
+                                 std::bit_cast<uint32_t>(1.0f)});
+              draw->export_lane(*wave_, i, 13, 4, {0, 0, i == 2 ? exported : 0, 0});
+            }
+            draw->export_lane(*wave_, 0, 20, 1,
+                              {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
+            const uint32_t relative_layer = enabled && last_provoking ? exported : 0;
+            auto dispatch = draw->advance(*access_);
+            if (relative_layer > 2)
+              EXPECT_FALSE(dispatch);
+            else {
+              ASSERT_TRUE(dispatch);
+              EXPECT_GT(dispatch->grid_wgs_x, 1u);
+              for (uint32_t workgroup = 0; workgroup < dispatch->grid_wgs_x; ++workgroup) {
+                wave_->set_wg_coord(workgroup, 0, 0);
+                wave_->set_graphics_stage(draw);
+                draw->initialize(*wave_, workgroup, 0);
+                for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+                  draw->export_lane(*wave_, lane, 0, 15, {0x3f800000, 0, 0, 0x3f800000});
               }
-          if (relative_layer <= 2)
-            EXPECT_GT(changed, 32u);
-          else
-            EXPECT_EQ(changed, 0u);
-        }
+              EXPECT_FALSE(draw->advance(*access_));
+            }
+            uint32_t changed = 0;
+            for (uint32_t layer = 0; layer < 5; ++layer)
+              for (uint32_t y = 0; y < 16; ++y)
+                for (uint32_t x = 0; x < 16; ++x) {
+                  const uint64_t base =
+                      amdgpu::image_layer_base(gfx12, 0x100000, 65536, layer, 4, gfx12 ? 3 : 26);
+                  const auto address = image_address(base, x, y, 16, 4, gfx12 ? 3 : 26);
+                  const auto value = memory_.read32(*address);
+                  if (value != 0xdeadbeef) {
+                    ++changed;
+                    EXPECT_EQ(layer, first + relative_layer);
+                    EXPECT_EQ(value, 0xff0000ffu);
+                  }
+                }
+            if (relative_layer <= 2)
+              EXPECT_GT(changed, 32u);
+            else
+              EXPECT_EQ(changed, 0u);
+          }
 }
 
 TEST_P(GraphicsExportTest, IndexedDrawPreservesVertexIndicesAndLocalConnectivity) {
@@ -683,10 +690,12 @@ TEST_P(GraphicsExportTest, TriangleAndRectangleListsKeepTrailingVerticesWithoutC
       context[gfx12 ? 0x3b0 : 0x31c] = 10;
       context[0x318] = 0x1000;
       context[gfx12 ? 0x214 : 0x8e] = 15;
+      context[gfx12 ? 0x215 : 0x8f] = 15;
       context[gfx12 ? 0x195 : 0x1c5] = 9;
       // Cull these primitives so advance returns the
       // next vertex group, allowing us to inspect every invocation and primitive.
       context[gfx12 ? 0x207 : 0x205] = 3;
+
       auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), vertices);
       uint32_t invocations = 0, primitives = 0, groups = 0;
       do {
@@ -1309,6 +1318,7 @@ TEST_P(GraphicsExportTest, ColorBlendingPreservesMasksAndUsesSeparateAlpha) {
     context[gfx12 ? 0x31f : 0x3b8] = gfx12 ? 3u << 15 : 26u << 14;
     context[0x318] = 0x1000;
     context[gfx12 ? 0x214 : 0x8e] = test.mask;
+    context[gfx12 ? 0x215 : 0x8f] = 15;
     context[gfx12 ? 0x195 : 0x1c5] = test.export_format;
     context[gfx12 ? 0x198 : 0x1b4] = 2;
     context[0x2f9] = 0x2d;
@@ -1325,6 +1335,7 @@ TEST_P(GraphicsExportTest, ColorBlendingPreservesMasksAndUsesSeparateAlpha) {
     context[0x91] = gfx12 ? 0 : 1 | (1 << 16);
     context[0x30e] = context[0x30f] = 0xffffffff;
     memory_.write32(0x100000, 0xff40bf80);
+
     auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
     for (uint32_t i = 0; i < 3; ++i)
       draw->export_lane(*wave_, i, 12, 15,
@@ -1482,6 +1493,7 @@ TEST_P(GraphicsExportTest, WideColorAttachmentsWriteFullTexelsAndPreserveMaskedC
       context[gfx12 ? 0x31f : 0x3b8] = 0;
       context[0x318] = 0x1000;
       context[gfx12 ? 0x214 : 0x8e] = write_mask;
+      context[gfx12 ? 0x215 : 0x8f] = 15;
       context[gfx12 ? 0x195 : 0x1c5] = test.export_format;
       context[gfx12 ? 0x198 : 0x1b4] = 2;
       context[0x2f9] = 0x2d;
@@ -1493,6 +1505,7 @@ TEST_P(GraphicsExportTest, WideColorAttachmentsWriteFullTexelsAndPreserveMaskedC
       context[0x30e] = context[0x30f] = 0xffffffff;
       for (uint32_t offset = 0; offset <= test.bytes; offset += 4)
         memory_.write32(0x100000 + offset, 0xcccccccc);
+
       auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
       for (uint32_t i = 0; i < 3; ++i)
         draw->export_lane(*wave_, i, 12, 15,
@@ -1522,6 +1535,145 @@ TEST_P(GraphicsExportTest, WideColorAttachmentsWriteFullTexelsAndPreserveMaskedC
   }
 }
 
+TEST_P(GraphicsExportTest, MultipleAttachmentsKeepFormatsMasksAndBlendStateIndependent) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  for (bool disabled_first : {false, true})
+    for (bool sparse : {false, true}) {
+      for (bool blend : {false, true}) {
+        SCOPED_TRACE(testing::Message() << "sparse=" << sparse << " disabled_first="
+                                        << disabled_first << " blend=" << blend);
+        const std::array<uint32_t, 3> targets =
+            sparse ? std::array<uint32_t, 3>{1, 3, 7} : std::array<uint32_t, 3>{0, 1, 2};
+        const std::array<uint32_t, 3> bytes{4, 8, 16};
+        const std::array<uint32_t, 3> formats{10u, 12u | (7u << 8), 14u | (7u << 8)};
+        const std::array<uint32_t, 3> export_formats{4u, 4u, 9u};
+        const std::array<uint32_t, 3> masks{disabled_first ? 0u : 15u, 5, 10};
+        const std::array<std::array<uint32_t, 4>, 3> expected{
+            std::array<uint32_t, 4>{blend || disabled_first ? 0xccccccccu : 0xff0000ffu},
+            std::array<uint32_t, 4>{0xcccc3400, 0xcccc3a00},
+            std::array<uint32_t, 4>{0xcccccccc, 0x40400000, 0xcccccccc, 0x40a00000}};
+        amdgpu::Pm4QueueState state;
+        state.num_instances = 1;
+        state.uconfig_registers[0x242] = 17;
+        auto &context = state.context_registers;
+        for (uint32_t i = 0; i < targets.size(); ++i) {
+          const uint32_t target = targets[i], block = 0x318 + (gfx12 ? 9 : 15) * target;
+          context[block] = 0x1000 + 0x100 * i;
+          context[gfx12 ? 0x3b0 + target : block + 4] = formats[i];
+          context[gfx12 ? block + 6 : 0x3b0 + target] = gfx12 ? 3 | (3 << 16) : 3 | (3 << 14);
+          context[gfx12 ? 0x214 : 0x8e] |= masks[i] << (4 * target);
+          context[gfx12 ? 0x195 : 0x1c5] |= export_formats[i] << (4 * i);
+          context[gfx12 ? 0x215 : 0x8f] |= 15u << (4 * target);
+          // ZERO * source + ONE * destination on only the first target.
+          context[0x1e0 + target] = blend && i == 0 ? (1u << 30) | (1 << 8) : 0;
+          for (uint32_t offset = 0; offset <= bytes[i]; offset += 4)
+            memory_.write32(0x100000 + 0x10000 * i + offset, 0xcccccccc);
+        }
+        context[gfx12 ? 0x198 : 0x1b4] = 2;
+        context[0x2f9] = 0x2d;
+        context[gfx12 ? 0x205 : 0x206] = 0x43f;
+        context[gfx12 ? 0x216 : 0x202] = 0xcc0010;
+        context[0x10f] = context[0x110] = context[0x111] = context[0x112] =
+            std::bit_cast<uint32_t>(2.0f);
+        context[0x91] = gfx12 ? 0 : 1 | (1 << 16);
+        context[0x30e] = context[0x30f] = 0xffffffff;
+        // LESS plus a depth write must run once, before all color attachments.
+        context[gfx12 ? 0x1c : 0x200] = 6 | (1 << 4);
+        context[gfx12 ? 5 : 7] = 3 | (3 << 16);
+        context[gfx12 ? 6 : 0x10] = 3 | ((gfx12 ? 3 : 24) << 4);
+        context[gfx12 ? 8 : 0x12] = context[gfx12 ? 10 : 0x14] = 0x2000;
+        context[gfx12 ? 0x116 : 0xb5] = std::bit_cast<uint32_t>(1.0f);
+        context[0x113] = std::bit_cast<uint32_t>(1.0f);
+        memory_.write32(0x200000, std::bit_cast<uint32_t>(1.0f));
+        auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
+        for (uint32_t i = 0; i < 3; ++i)
+          draw->export_lane(*wave_, i, 12, 15,
+                            {std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
+                             std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f),
+                             std::bit_cast<uint32_t>(0.5f), std::bit_cast<uint32_t>(1.0f)});
+        draw->export_lane(*wave_, 0, 20, 1,
+                          {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
+        ASSERT_TRUE(draw->advance(*access_));
+        wave_->set_wg_coord(0, 0, 0);
+        wave_->set_graphics_stage(draw);
+        draw->initialize(*wave_, 0, 0);
+        for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
+          draw->export_lane(*wave_, lane, 0, 3, {0x00003c00, 0x3c000000});
+          draw->export_lane(*wave_, lane, 1, 3, {0x38003400, 0x3c003a00});
+          draw->export_lane(*wave_, lane, 2, 15, {0x40000000, 0x40400000, 0x40800000, 0x40a00000});
+        }
+        EXPECT_FALSE(draw->advance(*access_));
+        EXPECT_EQ(memory_.read32(0x200000), std::bit_cast<uint32_t>(0.5f));
+        for (uint32_t i = 0; i < targets.size(); ++i) {
+          for (uint32_t word = 0; word < bytes[i] / 4; ++word)
+            EXPECT_EQ(memory_.read32(0x100000 + 0x10000 * i + 4 * word), expected[i][word])
+                << "target " << targets[i] << " word " << word;
+          EXPECT_EQ(memory_.read32(0x100000 + 0x10000 * i + bytes[i]), 0xcccccccc);
+        }
+      }
+    }
+}
+
+TEST_P(GraphicsExportTest, MultipleAttachmentViewsClipLayersIndependently) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  amdgpu::Pm4QueueState state;
+  state.num_instances = 1;
+  state.uconfig_registers[0x242] = 17;
+  auto &context = state.context_registers;
+  const std::array<uint32_t, 2> targets{0, 7};
+  const std::array<uint32_t, 2> views{0, 1 | (3u << (gfx12 ? 14 : 13))};
+  for (uint32_t i = 0; i < targets.size(); ++i) {
+    const uint32_t target = targets[i], block = 0x318 + (gfx12 ? 9 : 15) * target;
+    context[block] = (0x100000 + i * 0x100000) >> 8;
+    context[gfx12 ? 0x3b0 + target : block + 4] = 10;
+    context[gfx12 ? block + 6 : 0x3b0 + target] = gfx12 ? 3 | (3 << 16) : 3 | (3 << 14);
+    context[gfx12 ? block + 7 : 0x3b8 + target] = (gfx12 ? 3u << 15 : 26u << 14) | 3;
+    // Target 0 has one layer; target 7 starts at layer 1 and has three layers.
+    context[gfx12 ? block + 1 : block + 3] = views[i];
+    context[gfx12 ? 0x214 : 0x8e] |= 15u << (4 * target);
+    context[gfx12 ? 0x215 : 0x8f] |= 15u << (4 * target);
+    context[gfx12 ? 0x195 : 0x1c5] |= 4u << (4 * i);
+    for (uint32_t layer = 0; layer < 4; ++layer)
+      memory_.write32(
+          amdgpu::image_layer_base(gfx12, 0x100000 + i * 0x100000, 65536, layer, 4, gfx12 ? 3 : 26),
+          0xcccccccc);
+  }
+  context[gfx12 ? 0x198 : 0x1b4] = 2;
+  context[0x2f9] = 0x2d;
+  context[gfx12 ? 0x205 : 0x206] = 0x43f;
+  context[gfx12 ? 0x206 : 0x207] = 1u << 18;
+  context[gfx12 ? 0x216 : 0x202] = 0xcc0010;
+  context[0x10f] = context[0x110] = context[0x111] = context[0x112] = std::bit_cast<uint32_t>(2.0f);
+  context[0x91] = gfx12 ? 0 : 1 | (1 << 16);
+  context[0x30e] = context[0x30f] = 0xffffffff;
+  auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
+  for (uint32_t i = 0; i < 3; ++i) {
+    draw->export_lane(*wave_, i, 12, 15,
+                      {std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
+                       std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f), 0,
+                       std::bit_cast<uint32_t>(1.0f)});
+    draw->export_lane(*wave_, i, 13, 4, {0, 0, 1, 0});
+  }
+  draw->export_lane(*wave_, 0, 20, 1,
+                    {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
+  ASSERT_TRUE(draw->advance(*access_));
+  wave_->set_wg_coord(0, 0, 0);
+  wave_->set_graphics_stage(draw);
+  draw->initialize(*wave_, 0, 0);
+  for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
+    draw->export_lane(*wave_, lane, 0, 3, {0x00003c00, 0x3c000000});
+    draw->export_lane(*wave_, lane, 1, 3, {0x3c000000, 0x3c000000});
+  }
+  EXPECT_FALSE(draw->advance(*access_));
+  for (uint32_t i = 0; i < targets.size(); ++i)
+    for (uint32_t layer = 0; layer < 4; ++layer) {
+      const uint64_t address =
+          amdgpu::image_layer_base(gfx12, 0x100000 + i * 0x100000, 65536, layer, 4, gfx12 ? 3 : 26);
+      EXPECT_EQ(memory_.read32(address), targets[i] == 7 && layer == 2 ? 0xff00ff00 : 0xcccccccc)
+          << "target " << targets[i] << " layer " << layer;
+    }
+}
+
 TEST_P(GraphicsExportTest, ColorAttachmentWritesSelectedMipAndPreservesOtherLevels) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   constexpr uint32_t base = 0x400000;
@@ -1540,6 +1692,7 @@ TEST_P(GraphicsExportTest, ColorAttachmentWritesSelectedMipAndPreservesOtherLeve
     context[gfx12 ? 0x31a : 0x31b] = gfx12 ? level : level << 26;
     context[0x318] = base >> 8;
     context[gfx12 ? 0x214 : 0x8e] = 15;
+    context[gfx12 ? 0x215 : 0x8f] = 15;
     context[gfx12 ? 0x195 : 0x1c5] = 4;
     context[gfx12 ? 0x198 : 0x1b4] = 2;
     context[0x2f9] = 0x2d;
@@ -1551,6 +1704,7 @@ TEST_P(GraphicsExportTest, ColorAttachmentWritesSelectedMipAndPreservesOtherLeve
     context[0x90] = (width - 1) | ((height - 1) << 16);
     context[0x91] = (width - gfx12) | ((height - gfx12) << 16);
     context[0x30e] = context[0x30f] = 0xffffffff;
+
     auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
     for (uint32_t i = 0; i < 3; ++i)
       draw->export_lane(*wave_, i, 12, 15,
@@ -2217,6 +2371,7 @@ TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
             const uint32_t value = bytes == 2 ? 65535 : std::bit_cast<uint32_t>(1.0f);
             memory_.write_block(*address, {reinterpret_cast<const uint8_t *>(&value), bytes});
           }
+        state.context_registers[gfx12 ? 0x215 : 0x8f] = 15;
         auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
         for (uint32_t i = 0; i < 3; ++i)
           draw->export_lane(*wave_, i, 12, 15,
@@ -2401,102 +2556,111 @@ TEST_P(GraphicsExportTest, MetadataAttachmentsPreserveDrawsAndRejectedState) {
       {.name = "inverted depth range", .min_depth = 1, .max_depth = 0, .reject = true},
       {.name = "fragment scratch", .scratch = true, .reject = true},
   };
-  for (bool aligned : {true, false}) {
-    for (const auto &test : cases) {
-      SCOPED_TRACE(aligned ? "pipe-aligned DCC" : "unaligned DCC");
-      SCOPED_TRACE(test.name);
-      constexpr uint32_t width = 17, height = 13;
-      constexpr uint64_t color_base = 0x200000, dcc = 0x100000;
-      constexpr uint64_t depth_base = 0x400000, htile = 0x300000;
-      for (uint32_t i = 0; i < 16384; ++i)
-        memory_.write8(dcc + i, 0xff);
-      for (uint32_t y = 0; y < height; y += 8) {
-        for (uint32_t x = 0; x < width; x += 8) {
-          memory_.write8(
-              *amdgpu::gfx11_metadata_address(dcc, x, y, width, height, 4, 27, false, aligned), 8);
-          memory_.write32(*amdgpu::gfx11_metadata_address(htile, x, y, width, height, 4, 24, true),
-                          0x55555550);
+  for (uint32_t target : {0u, 7u})
+    for (bool aligned : {true, false}) {
+      for (const auto &test : cases) {
+        SCOPED_TRACE(testing::Message() << "target=" << target << ", pipe_aligned=" << aligned);
+        SCOPED_TRACE(test.name);
+        constexpr uint32_t width = 17, height = 13;
+        constexpr uint64_t color_base = 0x200000, dcc = 0x100000;
+        constexpr uint64_t depth_base = 0x400000, htile = 0x300000;
+        for (uint32_t i = 0; i < 16384; ++i)
+          memory_.write8(dcc + i, 0xff);
+        for (uint32_t y = 0; y < height; y += 8) {
+          for (uint32_t x = 0; x < width; x += 8) {
+            memory_.write8(
+                *amdgpu::gfx11_metadata_address(dcc, x, y, width, height, 4, 27, false, aligned),
+                8);
+            memory_.write32(
+                *amdgpu::gfx11_metadata_address(htile, x, y, width, height, 4, 24, true),
+                0x55555550);
+          }
         }
-      }
-      for (uint32_t y = 0; y < height; ++y) {
-        for (uint32_t x = 0; x < width; ++x) {
-          memory_.write32(*amdgpu::gfx11_image_address(color_base, x, y, width, 4, 27), 0x12345678);
-          memory_.write32(*amdgpu::gfx11_image_address(depth_base, x, y, width, 4, 24), 0x12345678);
+        for (uint32_t y = 0; y < height; ++y) {
+          for (uint32_t x = 0; x < width; ++x) {
+            memory_.write32(*amdgpu::gfx11_image_address(color_base, x, y, width, 4, 27),
+                            0x12345678);
+            memory_.write32(*amdgpu::gfx11_image_address(depth_base, x, y, width, 4, 24),
+                            0x12345678);
+          }
         }
+        amdgpu::Pm4QueueState state;
+        state.num_instances = 1;
+        state.uconfig_registers[0x242] = 17;
+        auto &context = state.context_registers;
+
+        const uint32_t block = 0x318 + 15 * target;
+        context[block + 4] = 10;
+        context[0x3b0 + target] = (height - 1) | ((width - 1) << 14);
+        context[0x3b8 + target] = (27 << 14) | (uint32_t(aligned) << 30);
+        context[block + 6] = 1u << 22;
+        context[block + 13] = dcc >> 8;
+        context[block] = color_base >> 8;
+        context[0x8e] = 15u << (4 * target);
+        context[0x8f] = 15u << (4 * target);
+        context[0x1c5] = 4;
+        context[0x1b4] = 2;
+        context[0x2f9] = 0x2d;
+        context[0x206] = test.valid_viewport ? 0x43f : 0;
+        context[0x202] = 0xcc0010;
+        context[0x10f] = context[0x110] = std::bit_cast<uint32_t>(width / 2.0f);
+        context[0x111] = context[0x112] = std::bit_cast<uint32_t>(height / 2.0f);
+        context[0x113] = std::bit_cast<uint32_t>(1.0f);
+        context[0xb4] = std::bit_cast<uint32_t>(test.min_depth);
+        context[0xb5] = std::bit_cast<uint32_t>(test.max_depth);
+        state.sh_registers[0xb] = test.scratch;
+        context[0x90] = 16 | (8 << 16);
+        context[0x91] = 17 | (9 << 16);
+        context[0x30e] = context[0x30f] = 0xffffffff;
+        context[0x200] = 6 | (1 << 4); // Depth test LESS and write enabled.
+        context[7] = (width - 1) | ((height - 1) << 16);
+        context[0x10] = 3 | (24 << 4) | (1u << 29); // D32 with HTILE.
+        context[0x12] = context[0x14] = depth_base >> 8;
+        context[0x2af] = 1u << 18;
+        context[5] = htile >> 8;
+        context[0xb] = std::bit_cast<uint32_t>(0.375f);
+
+        auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
+        for (uint32_t i = 0; i < 3; ++i)
+          draw->export_lane(*wave_, i, 12, 15,
+                            {std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
+                             std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f),
+                             std::bit_cast<uint32_t>(0.25f), std::bit_cast<uint32_t>(1.0f)});
+        draw->export_lane(*wave_, 0, 20, 1, {(1u << 10) | (2u << 20), 0, 0, 0});
+        const auto color_address = *amdgpu::gfx11_image_address(color_base, 16, 8, width, 4, 27);
+        const auto depth_address = *amdgpu::gfx11_image_address(depth_base, 16, 8, width, 4, 24);
+        const auto color_key =
+            *amdgpu::gfx11_metadata_address(dcc, 16, 8, width, height, 4, 27, false, aligned);
+        const auto depth_key =
+            *amdgpu::gfx11_metadata_address(htile, 16, 8, width, height, 4, 24, true);
+        if (test.reject) {
+          EXPECT_THROW(draw->advance(*access_), std::runtime_error);
+          EXPECT_EQ(memory_.read32(color_address), 0x12345678u);
+          EXPECT_EQ(memory_.read32(depth_address), 0x12345678u);
+          EXPECT_EQ(memory_.read8(color_key), 8);
+          EXPECT_EQ(memory_.read32(depth_key), 0x55555550u);
+          continue;
+        }
+        ASSERT_TRUE(draw->advance(*access_));
+        EXPECT_EQ(memory_.read32(color_address), 0xff000000u);
+        EXPECT_EQ(memory_.read32(depth_address), std::bit_cast<uint32_t>(0.375f));
+        EXPECT_EQ(memory_.read8(color_key), 0xff);
+        EXPECT_EQ(memory_.read32(depth_key), 0xfffc000fu);
+        wave_->set_wg_coord(0, 0, 0);
+        wave_->set_graphics_stage(draw);
+        draw->initialize(*wave_, 0, 0);
+        for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+          draw->export_lane(*wave_, lane, 0, 3, {0x00003c00, 0x3c000000, 0, 0});
+        EXPECT_FALSE(draw->advance(*access_));
+        EXPECT_EQ(memory_.read32(color_address), 0xff0000ffu);
+        EXPECT_EQ(memory_.read32(depth_address), std::bit_cast<uint32_t>(0.25f));
+        amdgpu::materialize_gfx11_dcc(*access_, color_base, dcc, 16, 8, width, height, 4, 27,
+                                      aligned);
+        amdgpu::materialize_gfx11_htile(*access_, depth_base, htile, 16, 8, width, height, 4, 24);
+        EXPECT_EQ(memory_.read32(color_address), 0xff0000ffu);
+        EXPECT_EQ(memory_.read32(depth_address), std::bit_cast<uint32_t>(0.25f));
       }
-      amdgpu::Pm4QueueState state;
-      state.num_instances = 1;
-      state.uconfig_registers[0x242] = 17;
-      auto &context = state.context_registers;
-      context[0x31c] = 10;
-      context[0x3b0] = (height - 1) | ((width - 1) << 14);
-      context[0x3b8] = (27 << 14) | (uint32_t(aligned) << 30);
-      context[0x31e] = 1u << 22;
-      context[0x325] = dcc >> 8;
-      context[0x318] = color_base >> 8;
-      context[0x8e] = 15;
-      context[0x1c5] = 4;
-      context[0x1b4] = 2;
-      context[0x2f9] = 0x2d;
-      context[0x206] = test.valid_viewport ? 0x43f : 0;
-      context[0x202] = 0xcc0010;
-      context[0x10f] = context[0x110] = std::bit_cast<uint32_t>(width / 2.0f);
-      context[0x111] = context[0x112] = std::bit_cast<uint32_t>(height / 2.0f);
-      context[0x113] = std::bit_cast<uint32_t>(1.0f);
-      context[0xb4] = std::bit_cast<uint32_t>(test.min_depth);
-      context[0xb5] = std::bit_cast<uint32_t>(test.max_depth);
-      state.sh_registers[0xb] = test.scratch;
-      context[0x90] = 16 | (8 << 16);
-      context[0x91] = 17 | (9 << 16);
-      context[0x30e] = context[0x30f] = 0xffffffff;
-      context[0x200] = 6 | (1 << 4); // Depth test LESS and write enabled.
-      context[7] = (width - 1) | ((height - 1) << 16);
-      context[0x10] = 3 | (24 << 4) | (1u << 29); // D32 with HTILE.
-      context[0x12] = context[0x14] = depth_base >> 8;
-      context[0x2af] = 1u << 18;
-      context[5] = htile >> 8;
-      context[0xb] = std::bit_cast<uint32_t>(0.375f);
-      auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
-      for (uint32_t i = 0; i < 3; ++i)
-        draw->export_lane(*wave_, i, 12, 15,
-                          {std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
-                           std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f),
-                           std::bit_cast<uint32_t>(0.25f), std::bit_cast<uint32_t>(1.0f)});
-      draw->export_lane(*wave_, 0, 20, 1, {(1u << 10) | (2u << 20), 0, 0, 0});
-      const auto color_address = *amdgpu::gfx11_image_address(color_base, 16, 8, width, 4, 27);
-      const auto depth_address = *amdgpu::gfx11_image_address(depth_base, 16, 8, width, 4, 24);
-      const auto color_key =
-          *amdgpu::gfx11_metadata_address(dcc, 16, 8, width, height, 4, 27, false, aligned);
-      const auto depth_key =
-          *amdgpu::gfx11_metadata_address(htile, 16, 8, width, height, 4, 24, true);
-      if (test.reject) {
-        EXPECT_THROW(draw->advance(*access_), std::runtime_error);
-        EXPECT_EQ(memory_.read32(color_address), 0x12345678u);
-        EXPECT_EQ(memory_.read32(depth_address), 0x12345678u);
-        EXPECT_EQ(memory_.read8(color_key), 8);
-        EXPECT_EQ(memory_.read32(depth_key), 0x55555550u);
-        continue;
-      }
-      ASSERT_TRUE(draw->advance(*access_));
-      EXPECT_EQ(memory_.read32(color_address), 0xff000000u);
-      EXPECT_EQ(memory_.read32(depth_address), std::bit_cast<uint32_t>(0.375f));
-      EXPECT_EQ(memory_.read8(color_key), 0xff);
-      EXPECT_EQ(memory_.read32(depth_key), 0xfffc000fu);
-      wave_->set_wg_coord(0, 0, 0);
-      wave_->set_graphics_stage(draw);
-      draw->initialize(*wave_, 0, 0);
-      for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
-        draw->export_lane(*wave_, lane, 0, 3, {0x00003c00, 0x3c000000, 0, 0});
-      EXPECT_FALSE(draw->advance(*access_));
-      EXPECT_EQ(memory_.read32(color_address), 0xff0000ffu);
-      EXPECT_EQ(memory_.read32(depth_address), std::bit_cast<uint32_t>(0.25f));
-      amdgpu::materialize_gfx11_dcc(*access_, color_base, dcc, 16, 8, width, height, 4, 27,
-                                    aligned);
-      amdgpu::materialize_gfx11_htile(*access_, depth_base, htile, 16, 8, width, height, 4, 24);
-      EXPECT_EQ(memory_.read32(color_address), 0xff0000ffu);
-      EXPECT_EQ(memory_.read32(depth_address), std::bit_cast<uint32_t>(0.25f));
     }
-  }
 }
 
 INSTANTIATE_TEST_SUITE_P(Rdna, GraphicsExportTest,
