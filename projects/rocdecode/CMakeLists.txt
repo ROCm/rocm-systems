@@ -482,6 +482,12 @@ if(_deps_met)
       rocdecode_add_test_ext(videodecodergb   ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeRGB)
       rocdecode_add_test_ext(videodecodemem   ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeMem)
     endif()
+  elseif(BUILD_TESTS)
+    # Reached only when BUILD_TESTS=ON and WIN32, which the branch above excludes.
+    message(WARNING "BUILD_TESTS=ON is ignored on Windows: no test binaries will be built "
+                    "or installed to ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/bin. "
+                    "Build the samples from ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples "
+                    "after installing instead -- see the install guide.")
   endif()
 
   # make test with CTest
