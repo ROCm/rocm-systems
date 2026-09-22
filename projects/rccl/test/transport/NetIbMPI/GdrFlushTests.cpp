@@ -217,6 +217,13 @@ TEST_F(GdrFlushTest, RepeatedFlush_NoFaultBurst) {
         EXPECT_EQ(flush, ncclSuccess) << "no flush in the burst may raise a QP async-fatal";
 }
 
+// The NCCL v2.31.2-1 sync added ForcedScratchpadWrite_ReproducesFault: force the
+// removed scratchpad RDMA_WRITE on a dma-buf flush QP and expect the flush to
+// fault. That case never compiled: gdrSupported() does not exist, and
+// RunRecvFlushBurst has no forceWrite parameter. If a production forceWrite
+// hook is added, restore the case (skip with gdrPtrSupport(), three-arg burst
+// plus the hook) rather than leaving the regression untested.
+
 }  // namespace
 
 #endif  // MPI_TESTS_ENABLED
