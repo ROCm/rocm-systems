@@ -1870,11 +1870,13 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         isBaseKernelDispatch ||
         (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
          amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
-    // A segmented graph's cross-stream dependencies are BARRIER_AND packets. They
-    // carry the timing of the wait they perform, so report them alongside the
-    // dispatches instead of dropping their signal.
+    // A segmented graph's cross-stream dependencies are BARRIER_AND/OR or vendor
+    // BARRIER_VALUE packets.  They carry the timing of the wait they perform,
+    // so report them alongside the dispatches instead of dropping their signal.
     const bool isBarrier = (pktType == HSA_PACKET_TYPE_BARRIER_AND) ||
-                           (pktType == HSA_PACKET_TYPE_BARRIER_OR);
+                           (pktType == HSA_PACKET_TYPE_BARRIER_OR) ||
+                           (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+                            amdFormat == HSA_AMD_PACKET_TYPE_BARRIER_VALUE);
     if (timestamp_ != nullptr) {
       // Read the pre-patched completion signal from the host-side flat buffer, not
       // from |pkt|: on the NT path |pkt| is the write-combining ring slot, which
@@ -1967,9 +1969,11 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         }
       }
     } else if ((needKernelNamesReported || needBarriersReported) && packetSignal != nullptr &&
-               (pktType == HSA_PACKET_TYPE_BARRIER_AND || pktType == HSA_PACKET_TYPE_BARRIER_OR)) {
-      // Cross-stream sync in a segmented graph is a BARRIER_AND/OR; without a slot
-      // of its own the wait it performs never reaches the timeline.
+               (pktType == HSA_PACKET_TYPE_BARRIER_AND || pktType == HSA_PACKET_TYPE_BARRIER_OR ||
+                (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+                 amdFormat == HSA_AMD_PACKET_TYPE_BARRIER_VALUE))) {
+      // Cross-stream sync in a segmented graph arrives as a BARRIER_AND/OR or vendor
+      // BARRIER_VALUE packet; without a slot of its own the wait never reaches the timeline.
       packetSignal->dispatch_slot_ = vcmd->addBarrierDispatch(index());
     } else if (kLogBatch && pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
                amdFormat == HSA_AMD_PACKET_TYPE_BARRIER_VALUE) {
