@@ -3,14 +3,9 @@
 
 """Build the analyze counter frame from the native tool's per-pid artifacts.
 
-The native tool writes three files per process per counter set: the counters,
-one row per dispatch per counter; the dispatches, one row each; and the kernel
-symbols, one row per kernel. They are joined here rather than at profile time,
-so profile mode only moves files and never reads them back.
-
-Join keys are ``(pid, dispatch_id)`` for counters to dispatches and
-``(pid, kernel_id)`` for dispatches to symbols. Both ids are only unique within
-a process, and the pid comes from the filename.
+Counters join dispatches on ``(pid, dispatch_id)``, dispatches join kernel
+symbols on ``(pid, kernel_id)``. Both ids are only unique within a process, and
+the pid comes from the filename.
 """
 
 import csv
@@ -70,10 +65,8 @@ class NativeArtifacts:
 def find_native_artifacts(workload_dir: Path) -> list[NativeArtifacts]:
     """Return the complete per-pid artifact sets in workload_dir.
 
-    Sorted by counter set then pid, because the dispatch ids analyze hands out
-    follow the order rows are read in. A set missing one of its three files is
-    skipped with a warning: it cannot be joined, and dropping it is better than
-    reporting a process with no counters.
+    Sorted by counter set then pid: the ids handed out below follow read order.
+    An incomplete set cannot be joined, so it is skipped with a warning.
     """
     found: dict[tuple[str, int], dict[str, Path]] = {}
     for path in workload_dir.glob(f"*.csv{csv_compression.GZIP_SUFFIX}"):
@@ -113,10 +106,8 @@ def _read_keyed_rows(path: Path, key_column: str) -> dict[str, dict[str, str]]:
 def _sum_counter_instances(counters_path: Path) -> dict[tuple[str, str], float]:
     """Total each counter per dispatch, across the counter's instances.
 
-    The tool records one row per hardware instance of a counter, which is what
-    the rocpd view sums at read time. Rows for one dispatch are not guaranteed
-    to be adjacent, so the totals are accumulated over the whole file. The
-    result holds one entry per output row, not one per input row.
+    Accumulated over the whole file, since rows for one dispatch need not be
+    adjacent. The result holds one entry per output row.
     """
     totals: dict[tuple[str, str], float] = {}
     with csv_compression.open_gzip_csv_read(counters_path) as infile:
@@ -166,10 +157,8 @@ def _join_process(artifacts: NativeArtifacts) -> Iterator[dict]:
 def write_counter_frame(workload_dir: Path, output_path: Path) -> int:
     """Join the native artifacts in workload_dir into output_path.
 
-    Returns the number of counter rows written. Dispatch and kernel ids are
-    reassigned per counter set, the way profile mode reassigns them for the
-    rocpd path, so that the separate runs one counter set each can be lined up
-    with one another afterwards.
+    Returns the rows written. Dispatch and kernel ids are reassigned per
+    counter set, as profile mode does for the rocpd path, so the sets line up.
     """
     artifacts = find_native_artifacts(workload_dir)
     if not artifacts:
