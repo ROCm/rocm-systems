@@ -1188,7 +1188,7 @@ The preceding command collects both counter groups in a single run of ``<applica
 
    - JSON counter records include a ``replay_pass`` field. CSV ``counter_collection.csv`` does **not** add a ``Replay_Pass`` column; passes of a dispatch share ``Dispatch_Id`` and are distinguished by ``Counter_Name``.
 
-   - Only coarse-grained device allocations (and module-scope ``__device__`` / ``__constant__`` variables) are restored. Unified, managed, and ``hipMallocAsync`` memory are not. Snapshot is a full in-memory copy; dirty-page hashing is not implemented in this version.
+   - Only coarse-grained device allocations and writable module-scope ``__device__`` variables are restored. Read-only ``__constant__`` symbols are excluded because kernels cannot mutate them and restore must not write to protected pages. Unified, managed, and ``hipMallocAsync`` memory are not. Snapshot is a full in-memory copy; dirty-page hashing is not implemented in this version.
 
    - HIP graph launches are not replayed (warn once, run once).
 

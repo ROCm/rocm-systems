@@ -77,7 +77,9 @@ what makes snapshots agent-scoped.
 captures two categories:
 
 1. **Tracked allocations** owned by `agent`, as filtered above.
-2. **Module-scope `__device__` and `__constant__` variables** visible to `agent`.
+2. **Writable module-scope `__device__` variables** visible to `agent`. Read-only
+   `__constant__` symbols are excluded because kernels cannot mutate them and restoring them can
+   write to protected pages.
 
 Capture is a plain device-to-host copy through `hsa_memory_copy`, taken from rocprofiler's captured
 HSA table so it uses the original, un-wrapped function.
@@ -88,15 +90,16 @@ Module-scope variables are not `hipMalloc` allocations. They live in the loaded 
 segment, so the allocation tracker never sees them — yet a kernel that mutates a `__device__` global
 would leak that mutation into the next pass. `snap()` therefore discovers them separately: it
 iterates the loaded code objects and, for each one, calls `hsa_executable_iterate_agent_symbols` for
-the replaying agent, collecting symbols of kind `HSA_SYMBOL_KIND_VARIABLE` along with their device
-address and size. Symbols with a zero address or size are skipped, as is anything larger than 1 GiB
-(a sanity cap).
+the replaying agent, collecting writable symbols of kind `HSA_SYMBOL_KIND_VARIABLE` along with
+their device address and size. `HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_IS_CONST` symbols are skipped.
+Symbols with a zero address or size are also skipped, as is anything larger than 1 GiB (a sanity
+cap).
 
 Iterating for a specific agent naturally scopes the walk to executables loaded on that agent —
 others yield no symbols — which matches `snap()`'s per-agent contract.
 
-This discovery must run at snapshot time rather than at executable-load time, because constant memory
-is not necessarily populated when the executable loads.
+This discovery runs at snapshot time so it sees the current set of loaded executables and writable
+module variables.
 
 ## Failure handling: an incomplete snapshot declines replay
 
