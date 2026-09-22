@@ -2709,7 +2709,10 @@ resume()
     }
     start_context(g_tool_data->get_main_contexts());
 
-    g_domain_service->resume();
+    if(g_domain_service != nullptr)
+    {
+        g_domain_service->resume();
+    }
 }
 
 void
@@ -2721,7 +2724,10 @@ pause()
     }
     stop_context(g_tool_data->get_main_contexts());
 
-    g_domain_service->pause();
+    if(g_domain_service != nullptr)
+    {
+        g_domain_service->pause();
+    }
 
     flush_counter_tracks_to_zero(0);
 }
