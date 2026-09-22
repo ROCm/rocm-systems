@@ -9,6 +9,7 @@
 
 #include "accl_profiler.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <limits.h>
 #include <stddef.h>
@@ -38,7 +39,10 @@ static inline const char* safeStr(const char* s) { return s ? s : ""; }
 static size_t acclParseMinSize(const char* env, int* bad) {
   *bad = 0;
   const char* p = env;
-  while (*p == ' ' || *p == '\t') {
+  // isspace, not just ' ' and '\t': strtoull skips the whole whitespace class,
+  // so a leading '\n' or '\v' would otherwise walk past the sign check below
+  // and let "-1" through as ULLONG_MAX without setting ERANGE.
+  while (isspace((unsigned char)*p)) {
     p++;
   }
   // An all-blank value is the usual shell idiom for "off", not a typo, so it
@@ -59,7 +63,7 @@ static size_t acclParseMinSize(const char* env, int* bad) {
     *bad = 1;
     return 0;
   }
-  while (*end == ' ' || *end == '\t') {
+  while (isspace((unsigned char)*end)) {
     end++;
   }
   if (*end != '\0') {
