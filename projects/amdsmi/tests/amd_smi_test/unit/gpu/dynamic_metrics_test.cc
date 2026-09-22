@@ -9,9 +9,11 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <vector>
 
+#include "amd_smi/impl/amd_smi_temp_testing.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
 #include "test_common.h"
@@ -250,6 +252,7 @@ TEST(GpuUnit, GPUMetricVersionSupportClassification) {
 namespace {
 
 using ApuMetrics = amd::smi::AMDApuMetrics_v24_t;
+using ApuMetricsV30 = amd::smi::AMDApuMetrics_v30_t;
 
 // Declared table sizes of the APU revisions the v2.4 layout covers: each
 // revision stops at a different field, so its declared size is the offset of
@@ -293,17 +296,22 @@ class FakeMetricsDevice {
   std::filesystem::path root_;
 };
 
-// A full v2.4-sized blob whose every metric byte carries the filler, with a
+// A full table-sized blob whose every metric byte carries the filler, with a
 // header declaring only `declared_size` bytes. The reader is expected to honor
 // the declared size, so bytes past it must never reach the metrics table.
-auto BuildApuMetricsBlob(uint8_t content_revision, uint16_t declared_size) -> std::vector<uint8_t> {
-  std::vector<uint8_t> blob(sizeof(ApuMetrics), kFillerByte);
+auto BuildMetricsBlob(std::size_t table_size, uint8_t format_revision, uint8_t content_revision,
+                      uint16_t declared_size) -> std::vector<uint8_t> {
+  std::vector<uint8_t> blob(table_size, kFillerByte);
   amd::smi::AMDGpuMetricsHeader_v1_t header{};
   header.m_structure_size = declared_size;
-  header.m_format_revision = 2;
+  header.m_format_revision = format_revision;
   header.m_content_revision = content_revision;
   std::memcpy(blob.data(), &header, sizeof(header));
   return blob;
+}
+
+auto BuildApuMetricsBlob(uint8_t content_revision, uint16_t declared_size) -> std::vector<uint8_t> {
+  return BuildMetricsBlob(sizeof(ApuMetrics), 2, content_revision, declared_size);
 }
 
 }  // namespace
@@ -411,4 +419,69 @@ TEST(GpuUnit, UnsupportedMetricRevisionReportsNotSupported) {
       << "the copy stage cannot tell an unsupported revision apart, which is why callers "
          "stop on the setup status instead";
   EXPECT_EQ(metrics.apu_metrics, nullptr);
+}
+
+// v3.0 is a different layout, not a v2.x prefix, and it reaches the caller
+// through the same unified object. Read a real v3.0 blob end to end so the
+// classification is backed by an actual read: v3.0 fields must carry the
+// device data and the v2.4-only fields must stay not-applicable.
+TEST(GpuUnit, APUMetricsV30ReadsThroughTheSameUnifiedObject) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("v3_0");
+  fake_device.WriteMetrics(
+      BuildMetricsBlob(sizeof(ApuMetricsV30), 3, 0, static_cast<uint16_t>(sizeof(ApuMetricsV30))));
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+
+  const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
+  ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ASSERT_NE(metrics.apu_metrics, nullptr);
+  const auto& apu = *metrics.apu_metrics;
+
+  EXPECT_EQ(metrics.common_header.format_revision, 3);
+  EXPECT_EQ(metrics.common_header.content_revision, 0);
+
+  // Shared with v2.x, plus fields only v3.0 defines.
+  EXPECT_EQ(apu.temperature_gfx, kFilled16);
+  EXPECT_EQ(apu.average_gfx_activity, kFilled16);
+  EXPECT_EQ(apu.temperature_skin, kFilled16);
+  EXPECT_EQ(apu.average_vcn_activity, kFilled16);
+  EXPECT_EQ(apu.average_ipu_power, kFilled16);
+  EXPECT_EQ(apu.average_apu_power, kFilled32);
+  EXPECT_EQ(apu.throttle_residency_prochot, kFilled32);
+  EXPECT_EQ(apu.time_filter_alphavalue, kFilled32);
+
+  // v2.4-only fields have no v3.0 source, so they stay not-applicable.
+  EXPECT_EQ(apu.average_mm_activity, UINT16_MAX);
+  EXPECT_EQ(apu.temperature_l3[0], UINT16_MAX);
+  EXPECT_EQ(apu.fan_pwm, UINT16_MAX);
+  EXPECT_EQ(apu.average_cpu_voltage, UINT16_MAX);
+  EXPECT_EQ(apu.indep_throttle_status, UINT64_MAX);
+
+  // PLX temperature is read out of gpu_metrics, and an APU has no such sensor,
+  // so the reading stays at the sentinel that makes the query unsupported.
+  EXPECT_EQ(metrics.temperature_vrsoc, UINT16_MAX);
+}
+
+// PLX temperature is sourced from gpu_metrics, so a device without that sensor
+// reports the not-applicable sentinel rather than an error. Reading it back as
+// a temperature would hand the caller a bogus 65535 C, so the query has to come
+// back unsupported instead.
+TEST(GpuUnit, PlxTemperatureSentinelReportsNotSupported) {
+  PRINT_VERBOSITY();
+
+  amdsmi_gpu_metrics_t metric_info{};
+  int64_t temperature = -1;
+
+  metric_info.temperature_vrsoc = std::numeric_limits<uint16_t>::max();
+  EXPECT_EQ(smi_amdgpu_plx_temp_from_metrics(metric_info, &temperature),
+            AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(temperature, -1) << "an unsupported reading must leave the output untouched";
+
+  // A device that does report the sensor still gets its reading through.
+  metric_info.temperature_vrsoc = 42;
+  EXPECT_EQ(smi_amdgpu_plx_temp_from_metrics(metric_info, &temperature), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(temperature, 42);
 }
