@@ -39,6 +39,7 @@ struct acclProxyStepInfo {
   uint64_t tsStartUs;
   uint64_t tsStopUs;
   uint64_t lastStateTs;
+  int      prevState;    // -1 until the first state-entry notification
   // Accumulated time in each proxy step state (us)
   uint64_t gpuWaitUs;
   uint64_t peerWaitUs;
@@ -161,8 +162,12 @@ struct acclCommContext {
   int         refCount;
   uint64_t    droppedCollectives;   // never allocated a slot: pool was full
   uint64_t    leakedCollectives;    // allocated but never finalized; freed by the drain
+  uint64_t    droppedProxyOps;
+  uint64_t    droppedProxySteps;
+  uint64_t    overflowProxyOps;
   int         poolExhaustedWarned;  // one-shot guard for the pool-exhaustion WARN
   uint64_t    commHash;
+  size_t      minMsgSize;            // ACCL_PROFILER_MIN_SIZE_BYTES for this communicator
   int         rank;
   int         nRanks;
   int         nNodes;

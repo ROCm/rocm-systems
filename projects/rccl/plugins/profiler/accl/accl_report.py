@@ -51,6 +51,23 @@ class Record:
     kernel_events: list = field(default_factory=list)
 
 
+def drop_warmup(records: List[Record], warmup: int) -> List[Record]:
+    """Drop the first N samples per rank, collective and size, in sequence order."""
+    if warmup <= 0:
+        return records
+    groups = defaultdict(list)
+    for i, record in enumerate(records):
+        groups[(record.rank, record.coll, record.msg_size)].append(i)
+    dropped = set()
+    for (rank, coll, size), indices in groups.items():
+        indices.sort(key=lambda i: (records[i].sn, i))
+        dropped.update(indices[:warmup])
+        if len(indices) <= warmup:
+            print(f"WARNING: warmup={warmup} consumed every record for "
+                  f"rank {rank} {coll} {fmt_size(size)}.", file=sys.stderr)
+    return [record for i, record in enumerate(records) if i not in dropped]
+
+
 def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
     records = []
     with open(filepath, encoding="utf-8") as f:
@@ -69,8 +86,6 @@ def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
 
             sn = cp.get('coll_sn', 0)
             n_ranks = hdr.get('n_ranks', 1)
-            if sn < warmup:
-                continue
 
             decomp = cp.get('decomposition', {})
             records.append(Record(
@@ -99,6 +114,7 @@ def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
                 n_send_ops=decomp.get('n_send_ops', 0),
                 n_recv_ops=decomp.get('n_recv_ops', 0),
             ))
+    records = drop_warmup(records, warmup)
     if not records and warmup > 0:
         print(f"WARNING: 0 records after filtering warmup={warmup}. "
               f"File may have fewer than {warmup} iterations.",
@@ -141,10 +157,16 @@ def print_drop_warnings(summaries: List[dict]):
         return
     total_dropped = sum(s.get('dropped_collectives', 0) for s in summaries)
     total_leaked = sum(s.get('leaked_collectives', 0) for s in summaries)
-    if total_dropped > 0 or total_leaked > 0:
+    dropped_ops = sum(s.get('dropped_proxy_ops', 0) for s in summaries)
+    dropped_steps = sum(s.get('dropped_proxy_steps', 0) for s in summaries)
+    overflow_ops = sum(s.get('overflow_proxy_ops', 0) for s in summaries)
+    if (total_dropped or total_leaked or dropped_ops or dropped_steps or overflow_ops
+            or any(not s.get('complete', True) for s in summaries)):
         print(f"\n*** WARNING: profiling data is INCOMPLETE — {total_dropped} collectives "
               f"dropped (pool exhausted, pool_size={summaries[0].get('pool_size', '?')}), "
               f"{total_leaked} slots leaked (teardown-skipped kernel events). "
+              f"{dropped_ops} proxy ops dropped, {dropped_steps} proxy steps dropped, "
+              f"{overflow_ops} proxy ops discarded. "
               f"Do not compare these numbers against a full run. ***\n", file=sys.stderr)
 
 

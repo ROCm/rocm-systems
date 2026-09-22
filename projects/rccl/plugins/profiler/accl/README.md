@@ -55,18 +55,28 @@ Per-collective JSONL records with timing decomposition:
 (`NCCL_MAX_NCHANNELS=256`) reports `0`. The plugin promotes a reported `0` to 256,
 so the two fields differ only in that wrapped case.
 
+Proxy GPU/peer waits are averaged over send ops; flush/GPU-receive waits over
+receive ops. `proxy_network_us` is the sum of the send and receive means.
+Absent directions contribute zero. These costs can overlap and are not an
+exclusive decomposition of elapsed wall time.
+
 The last line of every file is a summary, written on every clean finalize:
 
 ```json
 {"summary": {"dropped_collectives": 0, "leaked_collectives": 0,
+             "dropped_proxy_ops": 0, "dropped_proxy_steps": 0,
+             "overflow_proxy_ops": 0,
              "pool_size": 256, "complete": true}}
 ```
 
 - `dropped_collectives` — never got a pool slot because the pool was full.
 - `leaked_collectives` — got a slot but never completed, because RCCL's teardown
   drain skipped some of their kernel-channel events; reclaimed at finalize.
-- `complete` — false if either counter is non-zero. **A file with no summary line
-  at all means the process did not reach finalize**, so its data is also suspect.
+- `dropped_proxy_ops` / `dropped_proxy_steps` — events lost because their pool was full.
+- `overflow_proxy_ops` — completed ops discarded at the per-collective storage limit.
+- `complete` — false if any loss counter is non-zero or an earlier write failed.
+  **A file with no summary line is also incomplete**: finalize may not have run,
+  or writing the summary may have failed.
   `accl_report.py` warns on stderr in both cases; do not compare an incomplete run
   against a full one.
 

@@ -9,7 +9,7 @@ import pytest
 sys.path.insert(
     0, os.path.join(os.path.dirname(__file__), "..", "plugins", "profiler", "accl")
 )
-from accl_report import parse_jsonl, fmt_size  # noqa: E402
+from accl_report import parse_jsonl, fmt_size, print_drop_warnings  # noqa: E402
 
 
 def _make_record(sn, rank=0, n_ranks=8, exec_us=100.0):
@@ -106,3 +106,34 @@ def test_fmt_size_fractional():
 def test_fmt_size_small():
     assert fmt_size(0) == "0B"
     assert fmt_size(1) == "1B"
+
+
+def test_warmup_is_per_rank_collective_and_size():
+    lines = []
+    expected = set()
+    for rank in (0, 1):
+        for coll in ("AllReduce", "Broadcast"):
+            for size in (1024, 4096):
+                for sn in (102, 100, 101):  # Completion order differs from sequence order.
+                    row = json.loads(_make_record(sn, rank=rank))
+                    row["coll_perf"].update(coll=coll, coll_msg_size_bytes=size)
+                    lines.append(json.dumps(row))
+                expected.add((rank, coll, size, 102))
+    path = _write_jsonl(lines)
+    try:
+        actual = parse_jsonl(path, warmup=2)
+        assert len(actual) == len(expected)
+        assert {(r.rank, r.coll, r.msg_size, r.sn) for r in actual} == expected
+    finally:
+        os.unlink(path)
+
+
+@pytest.mark.parametrize("field", ["dropped_proxy_ops", "dropped_proxy_steps", "overflow_proxy_ops"])
+def test_proxy_only_loss_warns(field, capsys):
+    print_drop_warnings([{field: 1, "pool_size": 256, "complete": False}])
+    assert "INCOMPLETE" in capsys.readouterr().err
+
+
+def test_complete_false_without_known_loss_counter_warns(capsys):
+    print_drop_warnings([{"complete": False}])
+    assert "INCOMPLETE" in capsys.readouterr().err
