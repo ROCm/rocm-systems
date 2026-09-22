@@ -124,6 +124,11 @@ if(CLR_BUILD_HIP)
         add_compile_definitions(BUILD_STATIC_LIBS)
     endif()
 endif()
+
+# Applies the host sanitizer flags to this scope, so it has to sit below BUILD_SHARED_LIBS,
+# which selects the sanitizer runtime linkage.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/CLRSanitizers.cmake")
+
 if((CLR_BUILD_HIP AND HIP_PLATFORM STREQUAL "amd") OR CLR_BUILD_OCL)
     add_subdirectory(rocclr)
 elseif(HIP_PLATFORM STREQUAL "amd")

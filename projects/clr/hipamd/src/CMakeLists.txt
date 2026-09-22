@@ -7,34 +7,6 @@ include(GNUInstallDirs)
 set(VERSION_MAJOR_AMDHIP ${HIP_VERSION_MAJOR})
 set(VERSION_MINOR_AMDHIP ${HIP_VERSION_MINOR})
 
-if(NOT DEFINED THEROCK_SANITIZER)
-  set(THEROCK_SANITIZER)
-endif()
-
-if(ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
-  message(STATUS "Building with sanitizer")
-  set(ASAN_LINKER_FLAGS "-fsanitize=address")
-  set(ASAN_COMPILER_FLAGS "-fno-omit-frame-pointer -fsanitize=address")
-
-  if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    if(BUILD_SHARED_LIBS)
-      set(ASAN_COMPILER_FLAGS "${ASAN_COMPILER_FLAGS} -shared-libsan")
-      set(ASAN_LINKER_FLAGS "${ASAN_LINKER_FLAGS} -shared-libsan")
-    else()
-      set(ASAN_LINKER_FLAGS "${ASAN_LINKER_FLAGS} -static-libsan")
-    endif()
-  endif()
-
-  # If its being built by TheRock, CMAKE_<LANG>_FLAGS should have the sanitizer flags
-  # If not, we append it.
-  if(ADDRESS_SANITIZER)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${ASAN_COMPILER_FLAGS}")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ASAN_COMPILER_FLAGS}")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${ASAN_LINKER_FLAGS} -s -Wl,--build-id=sha1")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${ASAN_LINKER_FLAGS} -Wl,--build-id=sha1")
-  endif()
-endif()
-
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error=deprecated-declarations")

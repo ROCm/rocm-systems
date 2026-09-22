@@ -21,7 +21,6 @@ if (HIP_PLATFORM MATCHES "nvidia")
   set(CMAKE_HIP_COMPILER ${CUDAToolkit_NVCC_EXECUTABLE})
 endif()
 
-option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
 option(BUILD_UNIT_TESTS "Build unit tests" ON)
 option(BUILD_PERF_TESTS "Build perf tests" OFF)
@@ -122,33 +121,9 @@ if(NOT WIN32)
   endif() # end BUILD_SHARED_LIBS
 endif() # end win32
 
-# Address sanitizer options
-if(NOT DEFINED THEROCK_SANITIZER)
-  set(THEROCK_SANITIZER)
-endif()
-
-set(ASAN_CONFIG_DEF)
-set(HIP_TESTS_ASAN_ENABLED OFF)
-if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
-  set(HIP_TESTS_ASAN_ENABLED ON)
-  message(STATUS "Building catch tests with Address Sanitizer options")
-  # If user is building hip-tests standalone (without TheRock) and wants to turn on sanitizer
-  # We append the flags manually, otherwise we use TheRock's CXX flags which already should have
-  # `-fsanitize=address` in it.
-  if(ENABLE_ADDRESS_SANITIZER)
-    # We support clang for this
-    if (NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR NOT CMAKE_HIP_COMPILER_ID STREQUAL "Clang")
-      message(WARNING "CXX and HIP compiler are not Clang, sanitizer build might fail")
-    endif()
-
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
-  endif()
-  set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address -shared-libasan")
-  add_compile_definitions(ENABLE_ADDRESS_SANITIZER)
-  set(ASAN_CONFIG_DEF "-DENABLE_ADDRESS_SANITIZER")
-endif()
+# Resolves ENABLE_SANITIZER and applies the sanitizer flags to this scope. Must sit after
+# before GPU_TARGETS is consumed, it rewrites that to xnack+.
+include(cmake/hip-tests-sanitizers.cmake)
 
 string(REPLACE "." ";" VERSION_LIST ${HIP_VERSION})
 list(GET VERSION_LIST 0 HIP_VERSION_MAJOR)
@@ -324,10 +299,13 @@ list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
 # -fsanitize=address does not work with SPIR-V targets so keep a SPIR-V-specific
 # copy of the device build flags.
 set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH})
-if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+if(NOT ENABLE_SANITIZER STREQUAL "OFF")
   list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-fsanitize=address")
   list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-fno-omit-frame-pointer")
   list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-shared-libasan")
+  if(ENABLE_SANITIZER STREQUAL "HOST_ASAN")
+    list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV EXCLUDE REGEX "-Xarch_host")
+  endif()
 endif()
 
 # ASan is not supported by SPIR-V, so ASan-related device flags must be dropped in those cases.

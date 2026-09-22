@@ -45,7 +45,7 @@ if (NOT WIN32)
   find_package(Threads REQUIRED)
   target_link_libraries(ocltst PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
   # ASAN with -shared-libsan requires explicit pthread linkage
-  if(THEROCK_SANITIZER MATCHES "ASAN" OR ENABLE_ADDRESS_SANITIZER)
+  if(NOT ENABLE_SANITIZER STREQUAL "OFF")
     target_link_options(ocltst PRIVATE -lpthread)
   endif()
 endif()

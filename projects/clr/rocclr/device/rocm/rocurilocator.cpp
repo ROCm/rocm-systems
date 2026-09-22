@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 #include "rocurilocator.hpp"
 #include <sstream>
 
@@ -137,5 +136,4 @@ UriLocator::UriInfo UriLocator::lookUpUri(uint64_t device_pc) {
   return UriInfo{"", 0};
 }
 }  // namespace amd::roc
-#endif
-#endif
+#endif  // DEVICE_ADDRESS_SANITIZER

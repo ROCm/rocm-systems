@@ -12,10 +12,8 @@
 #include <atomic>
 #include <cstddef>
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 #include "device/devurilocator.hpp"
-#endif
 #endif
 
 namespace amd {
@@ -234,14 +232,12 @@ class HostcallBuffer {
   void setDevice(const amd::Device* dptr) { device_ = dptr; };
 #endif  // USE_NEW_HOSTCALL_IMPL
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
  private:
   device::UriLocator* uri_locator;
 
  public:
   void setUriLocator(device::UriLocator* uri_l) { uri_locator = uri_l; };
-#endif
 #endif
 };
 

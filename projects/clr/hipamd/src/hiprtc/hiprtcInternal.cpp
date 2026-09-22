@@ -57,10 +57,8 @@ RTCCompileProgram::RTCCompileProgram(std::string name_) : hip::RTCProgram(name_)
   compile_options_.push_back("-fms-extensions");
   compile_options_.push_back("-fms-compatibility");
 #endif
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   compile_options_.push_back("-fsanitize=address");
-#endif
 #endif
   AppendCompileOptions();
 }

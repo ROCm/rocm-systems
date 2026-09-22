@@ -812,10 +812,8 @@ bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKe
   if (device->settings().kernel_arg_opt_) {
     opt += " -Wb,-amdgpu-kernarg-preload-count=8 ";
   }
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   opt += " -fsanitize=address ";
-#endif
 #endif
   if ((retval = program_->build(devices, opt.c_str(), nullptr, nullptr, GPU_DUMP_BLIT_KERNELS)) !=
       CL_SUCCESS) {
@@ -908,11 +906,9 @@ bool Device::init() {
 
 // ================================================================================================
 void Device::tearDown() {
-#if defined(__linux__) && defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   // Scan for device-side leaks before ~Device frees the heap slabs.
   reportAllDeviceMemoryLeaks();
-#endif
 #endif
   if (devices_ != nullptr) {
     for (uint i = 0; i < devices_->size(); ++i) {
@@ -1406,8 +1402,7 @@ void Device::RemoveHostcallMemory(amd::Memory* memory) {
 void Device::ClearHostcallMemories() { hostcall_allocated_memories_.clear(); }
 
 // ================================================================================================
-#if defined(__linux__) && defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 
 extern "C" void __asan_report_nonself_leak(uint64_t alloc_pc, uint64_t alloc_size,
                                            int device_id, const char* device_name,
@@ -1596,8 +1591,7 @@ void Device::reportAllDeviceMemoryLeaks() {
   }
 }
 
-#endif
-#endif
+#endif  // DEVICE_ADDRESS_SANITIZER
 
 // ================================================================================================
 void Device::AddDevMemObj(const void* k, amd::Memory* memObj) {

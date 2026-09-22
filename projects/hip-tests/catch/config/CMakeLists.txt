@@ -44,7 +44,7 @@ file(GLOB HIP_TESTS_UNIT_CONFIGS CONFIGURE_DEPENDS ${HIP_TESTS_CONFIGS_DIR}/unit
 # When building with Address Sanitizer, pass --asan so the parser skips test
 # cases that list 'asan' in their 'disabled' field.
 set(CONFIG_ASAN_FLAG)
-if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+if(NOT ENABLE_SANITIZER STREQUAL "OFF")
     set(CONFIG_ASAN_FLAG "--asan")
 endif()
 

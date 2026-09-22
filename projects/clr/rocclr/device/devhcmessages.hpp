@@ -59,11 +59,9 @@ enum ServiceID {
   SERVICE_FUNCTION_CALL = 1,
   SERVICE_PRINTF = 2,
   SERVICE_DEVMEM = 3
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   ,
   SERVICE_SANITIZER = 4
-#endif
 #endif
 };
 
