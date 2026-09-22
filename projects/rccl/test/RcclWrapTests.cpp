@@ -1432,7 +1432,7 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
         {"Bootstrap_32Nodes_8BPerRank",     32, true, 8ULL * 256,          false, {}},
         // Boundary, 16 nodes = 128 ranks: 128 KB gathered is exactly 1 KB/rank.
         {"Enabled_16Nodes_At1KBPerRank",    16, true, 1024ULL * 128,       true,  {}},
-        {"Disabled_16Nodes_Under1KBPerRank",16, true, 1024ULL * 128 - 128, false, {}},
+        {"Disabled_16Nodes_Under1KBPerRank", 16, true, 1024ULL * 128 - 128, false, {}},
         // The floor is tunable, and 0 restores the previous upper-bound-only gate.
         {"MinBytesPerRankZeroRestoresOldGate", 16, true, 8ULL * 128,       true,
          {{"RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK", "0"}}},

@@ -3050,7 +3050,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         INFO(NCCL_INIT, "Hierarchical collectives: non-compact rank ordering, skipping hierarchical algorithms");
       } else {
         comm->hierarchicalEligible = true;
-        INFO(NCCL_INIT, "Hierarchical collectives: eligible, deferring sub-communicator setup to first use");
+        INFO(NCCL_INIT,
+             "Hierarchical collectives: topology eligible; deferring sub-communicator setup until enabled first use");
       }
     }
   }
@@ -3135,12 +3136,17 @@ ncclResult_t rcclEnsureHierarchicalComms(struct ncclComm* comm) {
   const char* patEnableEnv = nullptr;
   bool userDisabledPat = false;
   size_t tempBufSize = 0;
+  const int parentBlocking = comm->config.blocking;
   comm->hierarchicalInitAttempted = true;
   comm->hierarchicalInitResult = ncclInternalError;
 
   int node_id = comm->rankToNode[comm->rank];
   int local_rank = comm->rankToLocalRank[comm->rank];
 
+  // The resources are needed before this collective can return. Force the
+  // internal splits to complete synchronously even when the parent communicator
+  // was configured as non-blocking, then restore the user's parent setting.
+  comm->config.blocking = 1;
   NCCLCHECKGOTO(ncclCommSplit(comm, node_id, local_rank, &comm->hierarchicalIntraComm, NULL), res, fail);
   // honor user input if user explicitly disables PAT
   patEnableEnv = ncclGetEnv("NCCL_PAT_ENABLE");
@@ -3159,6 +3165,7 @@ ncclResult_t rcclEnsureHierarchicalComms(struct ncclComm* comm) {
   INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) initialized",
        comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
 exit:
+  comm->config.blocking = parentBlocking;
   comm->forcePatEnable = false;
   comm->hierarchicalInitResult = res;
   return res;

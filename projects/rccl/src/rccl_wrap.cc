@@ -21,11 +21,13 @@ THE SOFTWARE.
 */
 
 #include "rccl_common.h"
+#include "bootstrap.h"
 #include "comm.h"
 #include "graph/topo.h"
 #include "enqueue.h"
 #include <algorithm>
 #include <cstdint>
+#include <vector>
 #include "debug.h"
 #include "net.h"
 #include "amdsmi_wrap.h"
@@ -1111,6 +1113,22 @@ bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
   return rcclHierarchicalAllGatherEligible(comm, msgSize) && comm->hierarchicalCommsInitialized;
 }
 
+static ncclResult_t rcclAllRanksReadyForHierarchicalInit(struct ncclComm* comm, bool localReady, bool* allReady) {
+  *allReady = localReady;
+  if (comm->nRanks < 2 || comm->bootstrap == nullptr) return ncclSuccess;
+
+  std::vector<uint8_t> flags((size_t)comm->nRanks, 0);
+  flags[(size_t)comm->rank] = localReady ? 1 : 0;
+  NCCLCHECK(bootstrapAllGather(comm->bootstrap, flags.data(), sizeof(uint8_t)));
+  for (int r = 0; r < comm->nRanks; r++) {
+    if (flags[(size_t)r] == 0) {
+      *allReady = false;
+      return ncclSuccess;
+    }
+  }
+  return ncclSuccess;
+}
+
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   // Check if user explicitly disabled direct AllGather
   static int userDirectAllGatherInput = rcclParamDirectAllGatherDisable();
@@ -1621,8 +1639,10 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // use a hierarchy initialized by an earlier call.
     bool useHierarchical = false;
     if (ncclGroupDepth == 0 && rcclHierarchicalAllGatherEligible(comm, msgSize)) {
-      if (!query && !ceCapturing && !comm->hierarchicalCommsInitialized) {
-        NCCLCHECK(rcclEnsureHierarchicalComms(comm));
+      if (!query && !comm->hierarchicalCommsInitialized) {
+        bool allRanksReady = false;
+        NCCLCHECK(rcclAllRanksReadyForHierarchicalInit(comm, /*localReady=*/!ceCapturing, &allRanksReady));
+        if (allRanksReady) NCCLCHECK(rcclEnsureHierarchicalComms(comm));
       }
       useHierarchical = comm->hierarchicalCommsInitialized;
     }

@@ -51,6 +51,7 @@
 #include "../common/ProcessIsolatedTestRunner.hpp"  // RUN_ISOLATED_TEST
 #include "ScopedHook.h"                              // RAII install/restore for g_loadParam et al.
 #include "fakes/env_fakes.h"                         // SetMicroEnv/SetMicroEnvAbsent/ClearMicroEnv
+#include "fakes/dev_runtime_micro_fakes.h"           // g_devrBootstrapAllGather
 #include "fakes/wrap_fakes.h"                        // rccl_wrap.cc's dependency seams
 #include "graph/topo.h"                              // ncclTopoSystem/ncclTopoNode (MakeCommWithArch)
 
@@ -1900,6 +1901,7 @@ TEST(WrapMicrotest, SetP2pNetChunkSize_EnvPresentReturnsInvalid) {
 TEST(WrapMicrotest, UseHierarchicalAllGather_FewerThan8NodesReturnsFalse) {
   ncclComm* comm = MakeZeroedComm();
   comm->nNodes = 7;
+  comm->nRanks = 8;
   EXPECT_FALSE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/1024));
   DeleteCommWithArch(comm);
 }
@@ -1907,6 +1909,7 @@ TEST(WrapMicrotest, UseHierarchicalAllGather_FewerThan8NodesReturnsFalse) {
 TEST(WrapMicrotest, UseHierarchicalAllGather_NotInitializedReturnsFalse) {
   ncclComm* comm = MakeZeroedComm();
   comm->nNodes = 8;
+  comm->nRanks = 8;
   comm->hierarchicalCommsInitialized = false;
   EXPECT_FALSE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/1024));
   DeleteCommWithArch(comm);
@@ -1915,6 +1918,7 @@ TEST(WrapMicrotest, UseHierarchicalAllGather_NotInitializedReturnsFalse) {
 TEST(WrapMicrotest, UseHierarchicalAllGather_WithinThresholdReturnsTrue) {
   ncclComm* comm = MakeZeroedComm();
   comm->nNodes = 8; // rcclHierarchicalTempBufferSize(8, true, false) == 32MiB
+  comm->nRanks = 8;
   comm->hierarchicalCommsInitialized = true;
   // Exactly at the threshold: distinguishes the guard's <= from a plain <.
   EXPECT_TRUE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/1ull << 25));
@@ -1924,6 +1928,7 @@ TEST(WrapMicrotest, UseHierarchicalAllGather_WithinThresholdReturnsTrue) {
 TEST(WrapMicrotest, UseHierarchicalAllGather_AboveThresholdReturnsFalse) {
   ncclComm* comm = MakeZeroedComm();
   comm->nNodes = 8;
+  comm->nRanks = 8;
   comm->hierarchicalCommsInitialized = true;
   EXPECT_FALSE(rcclUseHierarchicalAllGather(comm, /*msgSize=*/(1ull << 25) + 1)); // > 32MiB
   DeleteCommWithArch(comm);
@@ -4284,6 +4289,36 @@ TEST(WrapMicrotestIsolated, SelectAllGather_InitializationFailurePropagates) {
       });
 }
 
+TEST(WrapMicrotestIsolated, SelectAllGather_RankDisagreementDefersInitialization) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_RankDisagreementDefersInitialization",
+      []() {
+        ScopedHook ensure(g_ensureHierarchicalComms, [](ncclComm*) { return ncclSuccess; });
+        ScopedHook agreement(g_devrBootstrapAllGather, [](void*, void* data, int bytes) {
+          EXPECT_EQ((int)sizeof(uint8_t), bytes);
+          auto* flags = static_cast<uint8_t*>(data);
+          flags[0] = 1;
+          flags[1] = 0;
+          return ncclSuccess;
+        });
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 8;
+        comm->nRanks = 8;
+        comm->rank = 0;
+        comm->bootstrap = reinterpret_cast<void*>(0x1);
+        comm->hierarchicalEligible = true;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/256, ncclFloat32, /*stream=*/nullptr,
+                                      /*query=*/false, /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ(1, agreement.calls);
+        EXPECT_EQ(0, ensure.calls);
+        EXPECT_FALSE(comm->hierarchicalCommsInitialized);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, SelectAllGather_CaptureDoesNotInitializeHierarchy) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllGather_CaptureDoesNotInitializeHierarchy",
@@ -4312,6 +4347,34 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CaptureDoesNotInitializeHierarchy) {
       });
 }
 
+TEST(WrapMicrotestIsolated, SelectAllGather_CaptureReusesInitializedHierarchy) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_CaptureReusesInitializedHierarchy",
+      []() {
+        ScopedHook ensure(g_ensureHierarchicalComms, [](ncclComm*) { return ncclSuccess; });
+        ScopedHook graphProbe(g_cudaGetCapturingGraph, [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+          *graph = ncclCudaGraphNone(mode);
+#if ROCM_VERSION >= 60100
+          graph->graphId = 1;
+#endif
+          return ncclSuccess;
+        });
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nNodes = 8;
+        comm->nRanks = 8;
+        comm->hierarchicalEligible = true;
+        comm->hierarchicalCommsInitialized = true;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/256, ncclFloat32, /*stream=*/nullptr,
+                                      /*query=*/false, /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ(0, ensure.calls);
+        EXPECT_EQ(1, graphProbe.calls);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, SelectAllGather_InsideGroupExcludesHierarchical) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllGather_InsideGroupExcludesHierarchical",
@@ -4323,7 +4386,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_InsideGroupExcludesHierarchical) {
         ncclGroupDepth = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess,
-                  rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32, /*stream=*/nullptr,
+                  rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/256, ncclFloat32, /*stream=*/nullptr,
                                       /*query=*/false, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);

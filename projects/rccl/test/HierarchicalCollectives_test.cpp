@@ -7,18 +7,17 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
-#include <memory>
 #include <string>
 #include <unordered_map>
 
-#include "common/MockComm.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
+#include "comm.h"
 #include "rccl_common.h"
 
 namespace RcclUnitTesting
 {
 
-TEST(Rcclwrap, HierarchicalAllGatherLazyInitGuards)
+TEST(HierarchicalCollectives, LazyInitGuards)
 {
     const std::unordered_map<std::string, std::string> env = {
         {"RCCL_HIERARCHICAL_ALLGATHER", "1"},
@@ -33,52 +32,6 @@ TEST(Rcclwrap, HierarchicalAllGatherLazyInitGuards)
                 .withTimeout(std::chrono::seconds(60))
         );
     };
-
-    registerCase("BelowMinimumDoesNotAttemptInitialization", []()
-    {
-        ncclComm_t          comm = nullptr;
-        auto                topo = std::make_unique<ncclTopoSystem>();
-        struct ncclTopoNode gpu;
-        CreateMockComm(comm, *topo, gpu, "gfx942", /*nRanks=*/128);
-        comm->nNodes = 16;
-        comm->hierarchicalEligible = true;
-
-        EXPECT_FALSE(rcclHierarchicalAllGatherEligible(comm, 8ULL * comm->nRanks));
-        EXPECT_FALSE(rcclUseHierarchicalAllGather(comm, 8ULL * comm->nRanks));
-        EXPECT_FALSE(comm->hierarchicalInitAttempted);
-        EXPECT_FALSE(comm->hierarchicalCommsInitialized);
-        CleanupMockComm(comm);
-    });
-
-    registerCase("ReportingPredicateDoesNotInitialize", []()
-    {
-        ncclComm_t          comm = nullptr;
-        auto                topo = std::make_unique<ncclTopoSystem>();
-        struct ncclTopoNode gpu;
-        CreateMockComm(comm, *topo, gpu, "gfx942", /*nRanks=*/128);
-        comm->nNodes = 16;
-        comm->hierarchicalEligible = true;
-
-        EXPECT_TRUE(rcclHierarchicalAllGatherEligible(comm, 1024ULL * comm->nRanks));
-        EXPECT_FALSE(rcclUseHierarchicalAllGather(comm, 1024ULL * comm->nRanks));
-        EXPECT_FALSE(comm->hierarchicalInitAttempted);
-        EXPECT_FALSE(comm->hierarchicalCommsInitialized);
-        CleanupMockComm(comm);
-    });
-
-    registerCase("InitializedHierarchySelectsAtMinimum", []()
-    {
-        ncclComm_t          comm = nullptr;
-        auto                topo = std::make_unique<ncclTopoSystem>();
-        struct ncclTopoNode gpu;
-        CreateMockComm(comm, *topo, gpu, "gfx942", /*nRanks=*/128);
-        comm->nNodes = 16;
-        comm->hierarchicalEligible = true;
-        comm->hierarchicalCommsInitialized = true;
-
-        EXPECT_TRUE(rcclUseHierarchicalAllGather(comm, 1024ULL * comm->nRanks));
-        CleanupMockComm(comm);
-    });
 
     registerCase("EnsureNotEligibleIsNoOp", []()
     {
