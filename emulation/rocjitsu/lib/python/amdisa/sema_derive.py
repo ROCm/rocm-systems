@@ -1140,7 +1140,13 @@ class _VectorUnary(_ScalarDeriver):
             'cvt_norm_i16_f16',
             'cvt_norm_u16_f16',
         ):
-            src0 = _src(0)
+            # Normalized conversions take a decoded float for ABS/NEG enrichment;
+            # packed FP8/BF8 conversions still take register bits.
+            src0 = (
+                _cast(_src(0, SemaType.F16), SemaType.F16)
+                if op in ('cvt_norm_i16_f16', 'cvt_norm_u16_f16')
+                else _src(0)
+            )
             body = _assign(
                 _cast(_dst(0), SemaType.B32),
                 SemaNode(

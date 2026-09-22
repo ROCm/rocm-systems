@@ -3415,7 +3415,8 @@ void VCvtNormI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
               static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
           if (std::isnan(s))
             return 0u;
-          float scaled = std::clamp(s * 32767.0f, -32768.0f, 32767.0f);
+          double scaled =
+              util::rndne_scalar(std::clamp(static_cast<double>(s) * 32767.0, -32767.0, 32767.0));
           return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(scaled)));
         }());
   }
@@ -3447,7 +3448,8 @@ RJ_NOINLINE void VCvtNormI16F16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf
               static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
           if (std::isnan(s))
             return 0u;
-          float scaled = std::clamp(s * 32767.0f, -32768.0f, 32767.0f);
+          double scaled =
+              util::rndne_scalar(std::clamp(static_cast<double>(s) * 32767.0, -32767.0, 32767.0));
           return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(scaled)));
         }());
   }
@@ -3469,7 +3471,8 @@ void VCvtNormU16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
               static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
           if (std::isnan(s))
             return 0u;
-          float scaled = std::clamp(s * 65535.0f, 0.0f, 65535.0f);
+          double scaled =
+              util::rndne_scalar(std::clamp(static_cast<double>(s) * 65535.0, 0.0, 65535.0));
           return static_cast<uint32_t>(static_cast<uint16_t>(scaled));
         }());
   }
@@ -3501,7 +3504,8 @@ RJ_NOINLINE void VCvtNormU16F16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf
               static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
           if (std::isnan(s))
             return 0u;
-          float scaled = std::clamp(s * 65535.0f, 0.0f, 65535.0f);
+          double scaled =
+              util::rndne_scalar(std::clamp(static_cast<double>(s) * 65535.0, 0.0, 65535.0));
           return static_cast<uint32_t>(static_cast<uint16_t>(scaled));
         }());
   }

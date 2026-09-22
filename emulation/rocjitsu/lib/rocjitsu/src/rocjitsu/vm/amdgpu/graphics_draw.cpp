@@ -35,8 +35,8 @@ constexpr uint32_t kNumberUnorm = 0, kNumberUint = 4, kNumberSint = 5, kNumberSr
                    kNumberFloat = 7;
 constexpr uint32_t kBufRgba8Unorm = 42, kBufRgba16Unorm = 51, kBufRgba32Uint = 61;
 
-constexpr uint32_t kExportFp16Abgr = 4, kExportUnorm16Abgr = 5, kExportUint16Abgr = 7,
-                   kExport32Abgr = 9;
+constexpr uint32_t kExportFp16Abgr = 4, kExportUnorm16Abgr = 5, kExportSnorm16Abgr = 6,
+                   kExportUint16Abgr = 7, kExportSint16Abgr = 8, kExport32Abgr = 9;
 
 // CB color formats use separate data and number fields; pack_buffer_format uses
 // the combined GFX11 buffer format table.
@@ -518,7 +518,8 @@ void GraphicsDraw::prepare_colors() {
         color.first_layer > color.last_layer || color.last_layer > (attrib3 & layer_mask) ||
         (view & (gfx12 ? 0xf0000000u : 0xc0000000u)) ||
         (color.export_format != kExportFp16Abgr && color.export_format != kExportUnorm16Abgr &&
-         color.export_format != kExportUint16Abgr && color.export_format != kExport32Abgr))
+         color.export_format != kExportSnorm16Abgr && color.export_format != kExportUint16Abgr &&
+         color.export_format != kExportSint16Abgr && color.export_format != kExport32Abgr))
       throw std::runtime_error("unsupported graphics color state");
     color.blend = context_[0x1e0 + target];
     if ((color.blend & kBlendEnable) &&
@@ -984,7 +985,8 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
           continue;
         std::array<uint32_t, 4> components = exported.values;
         if (color.export_format == kExportFp16Abgr || color.export_format == kExportUnorm16Abgr ||
-            color.export_format == kExportUint16Abgr) {
+            color.export_format == kExportSnorm16Abgr || color.export_format == kExportUint16Abgr ||
+            color.export_format == kExportSint16Abgr) {
           if (exported.mask != 3)
             throw std::runtime_error("unsupported packed graphics color export mask");
           for (uint32_t c = 0; c < 4; ++c) {
@@ -993,6 +995,12 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
               components[c] = half;
             else if (color.export_format == kExportUnorm16Abgr)
               components[c] = std::bit_cast<uint32_t>(half / 65535.0f);
+            else if (color.export_format == kExportSnorm16Abgr)
+              components[c] =
+                  std::bit_cast<uint32_t>(std::max(static_cast<int16_t>(half) / 32767.0f, -1.0f));
+            else if (color.export_format == kExportSint16Abgr)
+              components[c] =
+                  static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(half)));
             else
               components[c] = std::bit_cast<uint32_t>(util::f16_to_f32(half));
           }

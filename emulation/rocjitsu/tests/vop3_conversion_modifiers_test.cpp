@@ -494,4 +494,82 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedRoundsOnceAndSaturatesSymmetr
   }
 }
 
+TEST_P(Vop3ConversionModifierTest, UnaryNormalizedHalfRoundsOnceAndAppliesModifiers) {
+  struct Case {
+    uint16_t input, unorm_magnitude, snorm_magnitude;
+  };
+  // Physical RDNA3/4 witnesses: exact halves, saturation, infinities and NaN.
+  // For 0x3801, FP32 scaling creates a false midpoint: 32799.49951171875 -> 32799.5.
+  constexpr Case cases[] = {
+      {0x0000, 0, 0},           {0x0001, 0, 0},           {0x3800, 0x8000, 0x4000},
+      {0x3801, 0x801f, 0x400f}, {0xb801, 0x801f, 0x400f}, {0x3c00, 0xffff, 0x7fff},
+      {0xbc00, 0xffff, 0x7fff}, {0x3c01, 0xffff, 0x7fff}, {0xbc01, 0xffff, 0x7fff},
+      {0x7c00, 0xffff, 0x7fff}, {0xfc00, 0xffff, 0x7fff}, {0x7e01, 0, 0}};
+  const bool early_rdna =
+      GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool preserve_high = !gfx9() && !early_rdna;
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("unary_normalized_memory");
+    amdgpu::L2Cache l2("unary_normalized_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = gfx9() ? 102 : 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("unary_normalized", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+    ASSERT_NE(wf, nullptr);
+    const auto vb = wf->vgpr_alloc().base;
+    for (bool vop3 : {false, true}) {
+      for (bool signed_result : {false, true}) {
+        // GFX9 uses VOP1 77 / VOP3 397; later encodings use VOP1 99 / VOP3 483.
+        // The unsigned opcode follows the signed one.
+        const uint32_t opcode =
+            (vop3 ? (gfx9() ? 397u : 483u) : (gfx9() ? 77u : 99u)) + !signed_result;
+        for (uint32_t modifiers = 0; modifiers < (vop3 ? 4u : 1u); ++modifiers) {
+          const uint32_t abs_mask = modifiers & 1u;
+          const uint32_t neg_mask = modifiers >> 1;
+          const uint32_t words[] = {
+              vop3 ? ((gfx9() ? 0xd0000002u : 0xd4000002u) | (opcode << 16) | (abs_mask << 8))
+                   : (0x7e000100u | (2u << 17) | (opcode << 9)),
+              256u | (neg_mask << 29)};
+          std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+          ASSERT_NE(inst, nullptr);
+          for (uint32_t mode : {0u, 0x5u, 0xau, 0xfu}) {
+            wf->set_mode_raw(mode);
+            for (uint64_t exec : {wf->wf_size() == 64 ? ~0ull : 0xffffffffull, 0x55ull}) {
+              SCOPED_TRACE(testing::Message()
+                           << "scalar=" << force_scalar << " vop3=" << vop3
+                           << " signed=" << signed_result << " abs_mask=" << abs_mask
+                           << " neg_mask=" << neg_mask << " mode=" << mode << " exec=" << exec);
+              wf->set_exec(exec);
+              for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+                cu->write_vgpr(vb, lane, 0xdead0000u | cases[lane % std::size(cases)].input);
+                cu->write_vgpr(vb + 2, lane, 0xabcd1234);
+              }
+              ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+              for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+                const auto &c = cases[lane % std::size(cases)];
+                const bool negative = ((c.input & 0x8000) != 0 && !abs_mask) ^ (neg_mask != 0);
+                const uint16_t low =
+                    signed_result
+                        ? static_cast<uint16_t>(negative ? -c.snorm_magnitude : c.snorm_magnitude)
+                        : (negative ? 0 : c.unorm_magnitude);
+                const uint32_t expected = low | (preserve_high ? 0xabcd0000u : 0);
+                EXPECT_EQ(cu->read_vgpr(vb + 2, lane),
+                          exec & (1ull << lane) ? expected : 0xabcd1234u)
+                    << "lane=" << lane << " input=" << c.input;
+              }
+            }
+          }
+        }
+      }
+    }
+    wf->halt();
+  }
+}
+
 } // namespace

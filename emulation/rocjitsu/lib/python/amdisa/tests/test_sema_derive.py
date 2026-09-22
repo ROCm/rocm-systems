@@ -17,6 +17,7 @@ from amdisa.sema_ast import (
     SemaType,
 )
 from amdisa.sema_derive import derive_sema_block
+from amdisa.sema_enrich import enrich_block
 from amdisa.codegen.execute.sema_lower import (
     LoweringContext,
     OperandBinding,
@@ -805,10 +806,10 @@ class TestDeriveVectorUnary:
     @pytest.mark.parametrize(
         ('name', 'enc', 'op', 'scale'),
         [
-            ('V_CVT_NORM_I16_F16', 'ENC_VOP1', 'cvt_norm_i16_f16', '32767.0f'),
-            ('V_CVT_NORM_I16_F16', 'ENC_VOP3', 'cvt_norm_i16_f16', '32767.0f'),
-            ('V_CVT_NORM_U16_F16', 'ENC_VOP1', 'cvt_norm_u16_f16', '65535.0f'),
-            ('V_CVT_NORM_U16_F16', 'ENC_VOP3', 'cvt_norm_u16_f16', '65535.0f'),
+            ('V_CVT_NORM_I16_F16', 'ENC_VOP1', 'cvt_norm_i16_f16', '32767.0'),
+            ('V_CVT_NORM_I16_F16', 'ENC_VOP3', 'cvt_norm_i16_f16', '32767.0'),
+            ('V_CVT_NORM_U16_F16', 'ENC_VOP1', 'cvt_norm_u16_f16', '65535.0'),
+            ('V_CVT_NORM_U16_F16', 'ENC_VOP3', 'cvt_norm_u16_f16', '65535.0'),
         ],
     )
     def test_cvt_norm_i16_u16_f16_lowers_to_scaled_saturating_convert(
@@ -827,6 +828,26 @@ class TestDeriveVectorUnary:
         assert 'std::isnan' in cpp
         assert 'std::clamp' in cpp
         assert scale in cpp
+        assert 'util::rndne_scalar' in cpp
+        assert 'static_cast<double>(s)' in cpp
+        assert '-32768' not in cpp
+
+    @pytest.mark.parametrize('suffix', ['I16', 'U16'])
+    @pytest.mark.parametrize('has_abs', [False, True])
+    def test_cvt_norm_i16_u16_f16_modifiers_precede_rounding(self, suffix, has_abs):
+        sem = derive_semantics(f'V_CVT_NORM_{suffix}_F16', 'ENC_VOP3')
+        fields = {'neg', 'clamp', 'omod'}
+        if has_abs:
+            fields.add('abs')
+        block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
+        cpp = lower_sema_block(block)
+        assert cpp.index('util::f16_to_f32') < cpp.index('sv = -sv')
+        assert cpp.index('sv = -sv') < cpp.index('util::rndne_scalar')
+        assert ('std::fabs(sv)' in cpp) == has_abs
+        if has_abs:
+            assert cpp.index('std::fabs(sv)') < cpp.index('sv = -sv')
+        assert 'inst_.omod' not in cpp
+        assert 'inst_.clamp' not in cpp
 
     @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
     def test_cos_bf16_lowers_through_shared_transcendental(self, enc):
