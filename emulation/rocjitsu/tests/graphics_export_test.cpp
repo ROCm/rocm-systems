@@ -634,9 +634,9 @@ TEST_P(GraphicsExportTest, LinearMipLevelsUseReverseAllocationOrder) {
     descriptor[2] = 11; // Full level-zero width is 48 texels.
     if (gfx12) {
       descriptor[1] |= level << 25;
-      descriptor[3] |= level << 15;
+      descriptor[3] |= 3u << 15;
     } else {
-      descriptor[3] |= (level << 12) | (level << 16);
+      descriptor[3] |= (level << 12) | (3u << 16);
     }
     for (uint32_t r = 0; r < descriptor.size(); ++r)
       wave_->debug_write_sgpr(8 + r, descriptor[r]);

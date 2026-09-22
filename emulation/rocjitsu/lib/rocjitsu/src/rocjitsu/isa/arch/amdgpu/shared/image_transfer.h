@@ -50,8 +50,8 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
     return unsupported(); // GFX11 DCC decoding is not implemented.
   const uint32_t bytes = buffer_format_bytes(format);
   const uint32_t max_level = gfx12 ? (r[1] >> 12) & 31 : (r[1] >> 16) & 15;
-  const uint32_t first_level = gfx12 ? (r[3] >> 15) & 31 : (r[3] >> 12) & 15;
-  const uint32_t last_level = gfx12 ? (r[1] >> 25) & 31 : (r[3] >> 16) & 15;
+  const uint32_t first_level = gfx12 ? (r[1] >> 25) & 31 : (r[3] >> 12) & 15;
+  const uint32_t last_level = gfx12 ? (r[3] >> 15) & 31 : (r[3] >> 16) & 15;
   const bool sample = sampler != ~0u;
   if ((type != 8 && type != 9 && type != 13) || (dim == 0 && type != 8) ||
       (type == 8 && (height != 1 || swizzle)) || (r[4] >> 16) || !bytes ||
