@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <tuple>
 #include <utility>
 
 namespace rocjitsu {
@@ -36,7 +37,7 @@ std::optional<DbiEntryStorage> plan_dbi_entry_storage(KernelBlockScope blocks, c
   // index that looks available.
   if (floor >= bound) {
     if (error_out != nullptr)
-      *error_out = "kernel names SGPRs up to s" + std::to_string(floor) + " and allocates " +
+      *error_out = "kernel and its ABI reach s" + std::to_string(floor) + ", and it allocates " +
                    std::to_string(kernel_sgpr_count) + ", leaving no room for the " +
                    std::to_string(kDbiEntryStorageRegisters) + " SGPRs the entry prologue reserves";
     return std::nullopt;
@@ -91,17 +92,20 @@ std::optional<DbiEntryPrologue> build_dbi_entry_prologue(const KD &desc, rj_code
                 "prologue has no pointer to load the DBI payload through");
   }
 
-  const std::array<std::pair<const char *, uint16_t>, 3> pairs{{
-      {"kernarg segment", *kernarg_base},
-      {"persistent storage", storage.persistent_base},
-      {"entry temp storage", storage.entry_temp_base},
+  // The kernarg pair is the loads' address operand and the storage pairs are
+  // their destinations, so the two ride different SMEM fields with different
+  // widths. Checked against the field each one actually occupies.
+  const std::array<std::tuple<const char *, uint16_t, uint16_t, const char *>, 3> pairs{{
+      {"kernarg segment", *kernarg_base, kMaxSmemSbase, "address"},
+      {"persistent storage", storage.persistent_base, kMaxSmemSdata, "data"},
+      {"entry temp storage", storage.entry_temp_base, kMaxSmemSdata, "data"},
   }};
-  for (const auto &[name, base] : pairs) {
+  for (const auto &[name, base, limit, field] : pairs) {
     if ((base % 2) != 0)
       return fail(std::string(name) + " pair base s" + std::to_string(base) + " is not even");
-    if (base > kMaxSmemSbase) {
-      return fail(std::string(name) + " pair base s" + std::to_string(base) +
-                  " exceeds the SMEM address field");
+    if (base > limit) {
+      return fail(std::string(name) + " pair base s" + std::to_string(base) + " exceeds the SMEM " +
+                  field + " field");
     }
   }
 

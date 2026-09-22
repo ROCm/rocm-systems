@@ -25,9 +25,6 @@ namespace rocjitsu {
 
 /// @brief SGPRs the entry prologue reserves: a persistent pair plus an
 ///        entry-only temporary pair, allocated as one aligned run.
-///
-/// @details Sizing the run at four rather than two is what keeps the guest
-/// kernarg restore removable without re-opening storage selection.
 inline constexpr uint8_t kDbiEntryStorageRegisters = 4;
 
 /// @brief SGPR pairs the DBI entry prologue owns for the life of the kernel.
@@ -38,7 +35,8 @@ struct DbiEntryStorage {
 
 /// @brief Lowest SGPR index above everything the kernel's own code and ABI name:
 ///        @ref explicit_ordinary_sgpr_bound folded with the descriptor's
-///        user-SGPR block and its enabled workgroup-ID system SGPRs.
+///        user-SGPR block and its enabled system SGPRs (workgroup IDs and
+///        workgroup info).
 ///
 /// @details Deliberately not COMPUTE_PGM_RSRC1's SGPR count. That is an
 /// allocation total whose tail can hold VCC, flat scratch, XNACK and granularity
@@ -73,9 +71,9 @@ inline constexpr KernargExtensionPayloadLayout kDbiEntryPayloadLayout{.size = 8,
 /// @brief Prologue words plus the wrapper offsets they encode.
 ///
 /// @details The offsets are returned rather than recomputed by consumers because
-/// they are baked into @ref words as immediates. The producer of the
-/// `.rocjitsu.kernarg` record and this prologue must agree, and re-deriving the
-/// layout at the other end is only a check if there is something to check against.
+/// they are baked into @ref words as immediates, so whoever writes the matching
+/// `.rocjitsu.kernarg` record has something to check against. Writing that record
+/// is deferred; no Instrumentor path emits one yet.
 struct DbiEntryPrologue {
   std::vector<uint32_t> words;
   uint32_t payload_byte_offset = 0;             ///< Wrapper offset of the DBI payload.

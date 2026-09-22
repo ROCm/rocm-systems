@@ -128,7 +128,7 @@ struct TrampolinePlan {
   uint16_t link_pair_base = 30;  ///< Return-link pair, derived from the probe cc.
   uint16_t arg_vgpr_base = 0;    ///< First argument VGPR, derived from the probe ABI.
   uint16_t target_pair_base = 0; ///< Dead even SGPR pair holding the probe address.
-  bool preserve_scc = true;      ///< v0 preserves SCC across target materialization.
+  bool preserve_scc = true;      ///< Preserve SCC across target materialization.
   uint16_t scc_temp = 0;         ///< Dead SGPR holding saved SCC across the call.
 
   // Special-state preservation: set by the orchestrator when the probe body

@@ -2273,9 +2273,9 @@ TEST(InstrumentorProbePatch, ArgumentsWithoutASingleKernelDescriptorFailClosed) 
 //
 // A probe asking for the framework's entry storage makes the instrumentor
 // synthesize a site at the kernel entry that defines it. These cover the gates
-// that refuse a kernel the prologue could not cover; the acceptance path needs a
-// descriptor carrying ENABLE_SGPR_KERNARG_SEGMENT_PTR, which arrives with the
-// simulator fixtures.
+// that refuse a kernel the prologue could not cover. Acceptance needs a
+// descriptor carrying ENABLE_SGPR_KERNARG_SEGMENT_PTR, which no fixture builds
+// yet.
 //==============================================================================
 
 namespace {
@@ -2308,8 +2308,8 @@ TEST(InstrumentorEntryPrologue, KernelWithoutAKernargPointerFailsClosed) {
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("ENABLE_SGPR_KERNARG_SEGMENT_PTR"), std::string::npos)
       << result.errors.front();
-  // The diagnostic names the probes the storage had to avoid, so it does not read
-  // as a plain "this kernel has no room".
+  // The diagnostic names the probe that required a prologue. Without it the
+  // rejection reads as unprompted, since nothing in the point asked for one.
   EXPECT_NE(result.errors.front().find("rj_test_probe"), std::string::npos)
       << result.errors.front();
 }
