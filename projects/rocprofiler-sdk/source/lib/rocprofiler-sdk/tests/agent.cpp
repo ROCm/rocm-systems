@@ -25,6 +25,7 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/platform/agent.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tests/details/agent.hpp"
 
@@ -315,6 +316,8 @@ struct LocalTopologyExpectedAgent
     uint32_t                 gfx_target_version;
     uint32_t                 max_waves_per_simd;
     uint32_t                 cu_per_simd_array;
+    uint32_t                 cwsr_size;
+    uint32_t                 ctl_stack_size;
     // uint32_t                 mem_banks_count;
     // uint32_t                 io_links_count;
     // uint32_t                 wave_front_size;
@@ -331,19 +334,19 @@ const int ExpectedAgentsCount{7};
 
 const std::array<LocalTopologyExpectedAgent, ExpectedAgentsCount> kLocalTopologyExpectedAgents = {{
     // Node 0: CPU (from data/topology/nodes/0/properties)
-    {ROCPROFILER_AGENT_TYPE_CPU, 24, 0, 0, 0, 0},
+    {ROCPROFILER_AGENT_TYPE_CPU, 24, 0, 0, 0, 0, 0, 0},
     // Node 1: GPU gfx906 (simd_count/simd_per_cu=60, array_count/simd_arrays_per_engine=4)
-    {ROCPROFILER_AGENT_TYPE_GPU, 0, 240, 90006, 10, 16},
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 240, 90006, 10, 16, 0, 0},
     // Node 2: GPU gfx1102
-    {ROCPROFILER_AGENT_TYPE_GPU, 0, 56, 110002, 16, 8},
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 56, 110002, 16, 8, 0, 0},
     // Node 3: GPU gfx1032
-    {ROCPROFILER_AGENT_TYPE_GPU, 0, 64, 100302, 16, 8},
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 64, 100302, 16, 8, 0, 0},
     // Node 4: GPU gfx942 (num_shader_banks = array_count/simd_arrays_per_engine = 32/1)
-    {ROCPROFILER_AGENT_TYPE_GPU, 0, 1216, 90402, 8, 10},
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 1216, 90402, 8, 10, 23203840, 12288},
     // Node 5: GPU gfx950
-    {ROCPROFILER_AGENT_TYPE_GPU, 0, 1024, 90500, 8, 9},
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 1024, 90500, 8, 9, 22687744, 12288},
     // Node 6: GPU gfx1201 (num_shader_banks = 8/2 = 4)
-    {ROCPROFILER_AGENT_TYPE_GPU, 0, 128, 120001, 16, 8},
+    {ROCPROFILER_AGENT_TYPE_GPU, 0, 128, 120001, 16, 8, 30699520, 28672},
 }};
 
 void
@@ -361,6 +364,10 @@ expect_agent_matches_local_topology(const rocprofiler_agent_t*        actual,
     EXPECT_EQ(actual->gfx_target_version, expected.gfx_target_version) << msg("gfx_target_version");
     EXPECT_EQ(actual->max_waves_per_simd, expected.max_waves_per_simd) << msg("max_waves_per_simd");
     EXPECT_EQ(actual->cu_per_simd_array, expected.cu_per_simd_array) << msg("cu_per_simd_array");
+    const auto* internal = rocprofiler::agent::get_agent_info(actual->id);
+    ASSERT_NE(internal, nullptr);
+    EXPECT_EQ(internal->cwsr_size, expected.cwsr_size) << msg("cwsr_size");
+    EXPECT_EQ(internal->ctl_stack_size, expected.ctl_stack_size) << msg("ctl_stack_size");
     // EXPECT_EQ(actual->mem_banks_count, expected.mem_banks_count) << msg("mem_banks_count");
     // EXPECT_EQ(actual->io_links_count, expected.io_links_count) << msg("io_links_count");
     // EXPECT_EQ(actual->wave_front_size, expected.wave_front_size) << msg("wave_front_size");

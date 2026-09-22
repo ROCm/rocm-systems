@@ -120,7 +120,7 @@ $(WRAPPER_HEADER): nccl_device_wrapper.h
 	@echo "Copying nccl_device_wrapper.h -> $@"
 	cp -f $< $@
 
-$(UNOPTIMIZED_BC): $(LLVM_SRC) check_hipify
+$(UNOPTIMIZED_BC): $(LLVM_SRC) $(WRAPPER_HEADER) check_hipify
 	@mkdir -p $(OBJDIR)
 	@echo "Generating unoptimized LLVM bitcode for $(BITCODE_LIB_ARCH)..."
 	$(CLANG) $(CLANG_FLAGS) $(LLVM_SRC) -o $@

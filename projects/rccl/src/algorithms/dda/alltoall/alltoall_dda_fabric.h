@@ -26,7 +26,8 @@ __launch_bounds__(512)
 #endif
   __global__ void ddaAllToAllFabric(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                                     int selfRank, int nRanks, FabricGpuBarrier barrier) {
-  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  // Release-acquire barrier ensures the stream-ordered scratch write is visible to peers.
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
   // use uint4 to do 16-byte loads to maximize memory efficiency. We assume
   // that count % countPerThread == 0, enforced before kernel launch.
@@ -46,8 +47,8 @@ __launch_bounds__(512)
 #pragma unroll kUnroll
     for (int r = 0; r < nRanksEff; ++r) {
       int srcRank = r;
-      int srcIdx = idx + selfRank * idxEnd;
-      int destIdx = idx + r * idxEnd;
+      size_t srcIdx = idx + selfRank * idxEnd;
+      size_t destIdx = idx + r * idxEnd;
       *reinterpret_cast<uint4*>(&recvbuff[destIdx]) = reinterpret_cast<const uint4*>(&ipcbuffs[srcRank][srcIdx])[0];
     }
   }

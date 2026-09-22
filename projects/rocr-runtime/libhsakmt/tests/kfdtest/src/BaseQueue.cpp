@@ -51,7 +51,8 @@ HSAKMT_STATUS BaseQueue::Create(unsigned int NodeId, unsigned int size, HSAuint6
     memset(&m_Resources, 0, sizeof(m_Resources));
 
     m_QueueBuf = new HsaMemoryBuffer(size, NodeId, true/*zero*/, false/*local*/, true/*exec*/,
-                        /*isScratch */ false, /* isReadOnly */false, /* isUncached */true);
+                        /*isScratch */ false, /* isReadOnly */false, /* isUncached */true,
+                        /* NonPaged */ true);
 
     if (type == HSA_QUEUE_COMPUTE_AQL) {
         m_Resources.Queue_read_ptr_aql = &pointers[0];
