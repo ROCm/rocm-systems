@@ -452,7 +452,6 @@ struct mock_sdk
     using kernel_dispatch_record               = testing::kernel_dispatch_record;
     using memory_copy_record                   = testing::memory_copy_record;
     using async_correlation_id_t               = testing::async_correlation_id_t;
-    using correlation_id_t                     = testing::correlation_id_t;
     using memory_alloc_record                  = testing::memory_alloc_record;
     using scratch_memory_record                = testing::scratch_memory_record;
     using stream_id                            = testing::stream_id;

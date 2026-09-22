@@ -91,8 +91,7 @@ struct backend
 #if ROCPROFILER_VERSION >= 10401
     using async_correlation_id_t = Wrapper::async_correlation_id_t;
 #endif
-    using correlation_id_t = Wrapper::correlation_id_t;
-    using stream_id_t      = Wrapper::stream_id;
+    using stream_id_t = Wrapper::stream_id;
 #if ROCPROFILER_VERSION >= 600
     using memory_allocation_record_t = Wrapper::memory_alloc_record;
 #endif
