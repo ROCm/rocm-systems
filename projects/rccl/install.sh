@@ -20,6 +20,8 @@ build_static=false
 build_tests=false
 build_verbose=false
 clean_build=true
+cmake_only=false
+run_clang_tidy=false
 dump_asm=false
 enable_code_coverage=false
 enable_full_coverage=false
@@ -77,6 +79,8 @@ function display_help()
     echo "       --all_unrolls           Build every unroll factor (1,2,4,8,16,32) for the targeted GPU arch(es) instead of the per-arch default set"
     echo "       --amdgpu_targets        Only compile for specified GPU architecture(s). For multiple targets, separate by ';' (builds for all supported GPU architectures by default)"
     echo "       --cmake-options         Pass additional CMake options (e.g. --cmake-options \"-DFOO=BAR -DBAZ=ON\")"
+    echo "       --cmake-only            Stop after running CMake (configure only; no build). Useful for generating compile_commands.json"
+    echo "       --clang-tidy            Run clang-tidy over RCCL host sources using the generated compile_commands.json, then exit"
     echo "       --debug                 Build debug library"
     echo "       --debug-fast            Build debug library with lto optimization disabled (fast build times)"
     echo "    -d|--dependencies          Install RCCL dependencies"
@@ -148,7 +152,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,all_unrolls,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable-full-coverage,enable_backtrace,enable-mpi-tests,enable-rccl-ep-tests,enable-tdm-simple,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,all_unrolls,amdgpu_targets:,clang-tidy,cmake-only,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable-full-coverage,enable_backtrace,enable-mpi-tests,enable-rccl-ep-tests,enable-tdm-simple,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,sqtt-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -167,6 +171,8 @@ while true; do
          --all_unrolls)              build_all_unrolls=true;                                                                           shift ;;
          --amdgpu_targets)           build_amdgpu_targets=${2};                                                                        shift 2 ;;
          --cmake-options)            custom_cmake_options=${2};                                                                        shift 2 ;;
+         --cmake-only)               cmake_only=true;                                                                                  shift ;;
+         --clang-tidy)               run_clang_tidy=true;                                                                              shift ;;
          --debug)                    build_release=false;                                                                              shift ;;
          --debug-fast)               build_release=false; debug_fast=true;                                                             shift ;;
     -d | --dependencies)             install_dependencies=true;                                                                        shift ;;
@@ -248,8 +254,10 @@ case "${OS_ID}" in
   ;;
 esac
 
-# CMake build options; starts with toolchain info
-cmake_common_options="--toolchain=toolchain-linux.cmake"
+# CMake build options; starts with toolchain info.
+# Always export a compile_commands.json so that tooling (clang-tidy, editors,
+# language servers) has an up-to-date compilation database for the host code.
+cmake_common_options="--toolchain=toolchain-linux.cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
 
 # throw error code after running a command in the install script
 check_exit_code( )
@@ -576,6 +584,51 @@ fi
 # ${ONLY_FUNCS} is a debug-only feature
 ${cmake_executable} ${cmake_common_options} -DONLY_FUNCS="${ONLY_FUNCS}" ../../.
 check_exit_code "$?"
+
+# compile_commands.json is emitted into the build directory. Symlink it back to
+# the source root so tools that look for it there (clang-tidy, editors) find it.
+if [[ -f "${PWD}/compile_commands.json" ]]; then
+    ln -sf "${PWD}/compile_commands.json" ../../compile_commands.json
+fi
+
+# Run clang-tidy over the RCCL host sources, then exit. Uses the .clang-tidy
+# config at the source root and the compile_commands.json just generated.
+if [[ "${run_clang_tidy}" == true ]]; then
+    clang_tidy_bin="${CLANG_TIDY:-clang-tidy}"
+    if ! hash "${clang_tidy_bin}" &>/dev/null; then
+        echo "ERROR: ${clang_tidy_bin} not found on PATH. Set CLANG_TIDY to override."
+        exit 1
+    fi
+    # RCCL host sources are hipified into build/<type>/hipify/src as part of the
+    # build. The compilation database references those hipified paths, so they
+    # must exist before clang-tidy runs. Generate them via the hipify_all
+    # target (fast, no GPU compilation) rather than requiring a full build.
+    echo "=== Generating hipified host sources (hipify_all) ==="
+    ${build_system} -j ${num_parallel_jobs} hipify_all
+    check_exit_code "$?"
+    echo "=== Running ${clang_tidy_bin} over RCCL host sources ==="
+    # Analyse RCCL's own host translation units from the compilation database.
+    mapfile -t tidy_sources < <(
+        grep -oP '"file": *"\K[^"]+' "${PWD}/compile_commands.json" \
+            | grep -E '/hipify/src/.*\.(cc|cpp|cxx)$' \
+            | sort -u
+    )
+    if [[ "${#tidy_sources[@]}" -eq 0 ]]; then
+        echo "WARNING: no RCCL host sources found in compile_commands.json to analyse."
+        exit 0
+    fi
+    echo "  ${#tidy_sources[@]} translation unit(s) to analyse."
+    "${clang_tidy_bin}" -p "${PWD}" --quiet "${tidy_sources[@]}"
+    tidy_status=$?
+    echo "=== clang-tidy finished (exit ${tidy_status}) ==="
+    exit "${tidy_status}"
+fi
+
+# Stop here if only a CMake configure was requested.
+if [[ "${cmake_only}" == true ]]; then
+    echo "--cmake-only specified; stopping after CMake configure."
+    exit 0
+fi
 
 # Enable verbose output from the build system
 if [[ "${build_verbose}" == true ]]; then
