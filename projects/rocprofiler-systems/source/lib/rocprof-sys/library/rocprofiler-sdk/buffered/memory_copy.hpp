@@ -85,6 +85,14 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record, void* data)
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
+inline constexpr external_correlation_domain_definition<SdkBackend>
+    k_memory_copy_stream_correlation = external_correlation_domain_definition<SdkBackend>{
+        .kind       = SdkBackend::EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
+        .on_request = Externals::request_stream_correlation_id,
+    };
+
+template <policies::domain_service::backend   SdkBackend,
+          policies::domain_service::externals Externals>
 inline constexpr buffered_domain_definition<SdkBackend> k_memory_copy =
     buffered_domain_definition<SdkBackend>{
         .meta =
@@ -98,7 +106,8 @@ inline constexpr buffered_domain_definition<SdkBackend> k_memory_copy =
             buffered_callback_dispatcher<SdkBackend,
                                          typename SdkBackend::memory_copy_record_t,
                                          on_memory_copy<SdkBackend, Externals>>::callback,
-        .on_configure = on_memory_copy_configure<Externals>
+        .on_configure           = on_memory_copy_configure<Externals>,
+        .correlation_dependency = &k_memory_copy_stream_correlation<SdkBackend, Externals>
     };
 
 }  // namespace rocprofsys::domains::buffered

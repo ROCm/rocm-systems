@@ -190,6 +190,20 @@ struct backend
         Wrapper::BUFFER_TRACING_MEMORY_ALLOCATION;
 #endif
 
+    // ─── External correlation request kind constants ────────────────────────────
+    static constexpr external_correlation_request_kind_t
+        EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH =
+            Wrapper::EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH;
+    static constexpr external_correlation_request_kind_t
+        EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY =
+            Wrapper::EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY;
+
+#if ROCPROFILER_VERSION >= 600
+    static constexpr external_correlation_request_kind_t
+        EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION =
+            Wrapper::EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION;
+#endif
+
 #if ROCPROFILER_VERSION >= 10202
     static constexpr buffer_tracing_kind_t BUFFER_TRACING_KFD_PAGE_FAULT =
         Wrapper::BUFFER_TRACING_KFD_PAGE_FAULT;

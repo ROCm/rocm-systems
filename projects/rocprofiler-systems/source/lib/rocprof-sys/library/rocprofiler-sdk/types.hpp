@@ -90,21 +90,37 @@ using callback_tracing_cb_t =
 
 using configure_cb_t = void (*)();
 
+/// A domain's dependency on the rocprofiler-sdk external-correlation-id-request
+/// service: which request kind it owns, and the callback that answers it. A
+/// buffered/callback domain that sets this as its `correlation_dependency`
+/// gets it auto-configured by domain_service against the same context used
+/// for the domain itself -- see domain_service::configure_buffered/callback.
+template <typename SdkBackend>
+struct external_correlation_domain_definition
+{
+    typename SdkBackend::external_correlation_request_kind_t  kind;
+    typename SdkBackend::external_correlation_id_request_cb_t on_request;
+};
+
 template <typename SdkBackend>
 struct buffered_domain_definition
 {
     domain_descriptor               meta;
     buffer_tracing_cb_t<SdkBackend> on_records;
-    buffer_properties               buffer = k_default_buffer_properties;
-    configure_cb_t                  on_configure;
+    buffer_properties               buffer       = k_default_buffer_properties;
+    configure_cb_t                  on_configure = nullptr;
+    const external_correlation_domain_definition<SdkBackend>* correlation_dependency =
+        nullptr;
 };
 
 template <typename SdkBackend>
 struct callback_domain_definition
 {
-    domain_descriptor                 meta;
-    callback_tracing_cb_t<SdkBackend> on_record;
-    configure_cb_t                    on_configure;
+    domain_descriptor                                         meta;
+    callback_tracing_cb_t<SdkBackend>                         on_record;
+    configure_cb_t                                            on_configure = nullptr;
+    const external_correlation_domain_definition<SdkBackend>* correlation_dependency =
+        nullptr;
 };
 
 struct domain_configuration

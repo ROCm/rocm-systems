@@ -184,6 +184,18 @@ using rocprofiler_sdk::wrapper;
 
 using production_backend = backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>;
 
+// Populates a kernel-dispatch/memory-copy/memory-allocation record's external
+// correlation id with the HIP stream and roctx-region correlation stashed by
+// the kernel-rename/hip-stream-display service (see roctx_client and
+// tool_hip_stream_callback). Defined further down (needs stream_id_top());
+// forward-declared so external_dependencies can expose it to the buffered
+// domains as their external-correlation-id-request dependency.
+int
+set_kernel_rename_and_stream_correlation_id(
+    rocprofiler_thread_id_t, rocprofiler_context_id_t,
+    rocprofiler_external_correlation_id_request_kind_t, rocprofiler_tracing_operation_t,
+    std::uint64_t, rocprofiler_user_data_t*, void*);
+
 struct external_dependencies
 {
     using agent_t         = ::rocprofsys::agent;
@@ -388,6 +400,12 @@ struct external_dependencies
 
         kernel_dispatch_bundle_data.pop();
     }
+
+    // External-correlation-id-request dependency shared by the kernel_dispatch,
+    // memory_copy, and memory_allocation buffered domains (see each domain's
+    // correlation_dependency): supplies get_stream_id()'s stream/region data.
+    static constexpr auto request_stream_correlation_id =
+        &set_kernel_rename_and_stream_correlation_id;
 
     // Single source of truth is core/trace_cache/cacheable.hpp's ABSOLUTE constant;
     // kfd_events.hpp never includes that header, so the value is surfaced here.
@@ -2104,15 +2122,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     // Control context for marker-based region filtering and pause/resume (always-on)
     ROCPROFILER_CALL(rocprofiler_create_context(&_data->control_ctx));
 
-    auto external_corr_id_request_kinds =
-        std::array<rocprofiler_external_correlation_id_request_kind_t, 3>{
-            ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
-            ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
-#if(ROCPROFILER_VERSION >= 600)
-            ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION
-#endif
-        };
-
     // Insert the default stream and queue info to ensure that the default entry exists
     {
         trace_cache::get_metadata_registry().add_stream(0);
@@ -2145,11 +2154,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
                 _data));
         }
     }
-
-    ROCPROFILER_CALL(rocprofiler_configure_external_correlation_id_request_service(
-        _data->primary_ctx, external_corr_id_request_kinds.data(),
-        external_corr_id_request_kinds.size(),
-        set_kernel_rename_and_stream_correlation_id, _data));
 
 #if(ROCPROFILER_VERSION >= 700)
     if((_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) > 0) ||
