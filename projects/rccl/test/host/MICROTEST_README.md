@@ -100,6 +100,17 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     channel/warp-selection, and tuning-ID helpers without a GPU. This TU
     defines `ncclParamNthreads` and `ncclParamLl128Nthreads`; do not duplicate
     them in `fakes/tuning_fakes.cc`.
+  - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
+    `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
+    memory-registration fallback behind the sysfs peer-memory scan: the result
+    for every failure point, the registration entry point and access flags per
+    relaxed-ordering setting, and that only acquired resources are released
+    (MR before its PD and buffer). `hipMalloc`/`hipFree` go through
+    `fakes/hip_fakes.cc`; the verbs PD/MR wrappers through
+    `fakes/ibvwrap_fakes.cc`. The expected flags are pinned to both
+    `transport/net_ib*/reg.cc` copies by configure-time `rccl_assert_source_line`
+    checks in `CMakeLists.txt`, so a flag change in `reg.cc` fails the configure
+    until the probe and the test are updated to match.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file
@@ -276,6 +287,7 @@ symbol.
 | `src/mem_manager.cc` | `fakes/mem_manager_fakes.cc` |
 | `src/misc/amdsmi_wrap.cc` | `fakes/amdsmi_fakes.cc` |
 | `src/misc/api_trace.cc` (`NCCL_API` dispatch) | `fakes/api_trace_fakes.cc` |
+| `src/misc/ibvwrap.cc` (PD / MR registration wrappers) | `fakes/ibvwrap_fakes.cc` |
 | `src/misc/kernel_config.cc` | `fakes/kernel_config_fakes.cc` |
 | `src/misc/param.cc` + `getenv` interposition | `fakes/env_fakes.cc` |
 | `src/misc/rocmwrap.cc` | `fakes/rocmwrap_fakes.cc` |

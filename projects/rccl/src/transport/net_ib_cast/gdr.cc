@@ -19,7 +19,7 @@ extern int64_t ncclParamIbCastPciRelaxedOrdering();
 #define KNL_MODULE_LOADED(a) ((access(a, F_OK) == -1) ? 0 : 1)
 static int IbCastGdrModuleLoaded = 0; // 1 = true, 0 = false
 // Set when a platform-specific override (e.g. Hyper-V below) forces GDR off despite a present peermem client.
-static int IbCastGdrBlacklisted = 0; // 1 = true, 0 = false
+static int IbCastGdrBlocklisted = 0; // 1 = true, 0 = false
 static void ibGdrSupportInitOnce() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (rcclParamIbCastForceEnableGdrdma() == 1) {
@@ -34,13 +34,13 @@ static void ibGdrSupportInitOnce() {
     if (ncclIbScanDefaultPeerMemClients()) IbCastGdrModuleLoaded = 1;
 
     char strValue[MAX_STR_LEN];
-    ncclOsTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue, sizeof(strValue));
-    if (strncmp("Hyper-V UEFI Release", strValue, 20) == 0) {
+    ncclResult_t rc = ncclOsTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue, sizeof(strValue));
+    if (rc == ncclSuccess && strncmp("Hyper-V UEFI Release", strValue, 20) == 0) {
       int roMode = ncclParamIbCastPciRelaxedOrdering();
-      ncclOsTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue, sizeof(strValue));
-      if (strcmp(strValue, "1") == 0 && roMode == 0) {
+      rc = ncclOsTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue, sizeof(strValue));
+      if (rc == ncclSuccess && strcmp(strValue, "1") == 0 && roMode == 0) {
         IbCastGdrModuleLoaded = 0;
-        IbCastGdrBlacklisted = 1;
+        IbCastGdrBlocklisted = 1;
       }
     }
   }
@@ -58,7 +58,7 @@ ncclResult_t IbCastGdrSupport() {
   std::call_once(once, ibGdrSupportInitOnce);
   if (IbCastGdrModuleLoaded) return ncclSuccess;
   // Don't probe past a deliberate safety override.
-  if (IbCastGdrBlacklisted) return ncclSystemError;
+  if (IbCastGdrBlocklisted) return ncclSystemError;
 
   static std::once_flag probeOnce;
   static bool probeResult = false;
