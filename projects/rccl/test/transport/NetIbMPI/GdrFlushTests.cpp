@@ -235,11 +235,11 @@ TEST_F(GdrFlushTest, ForcedScratchpadWrite_ReproducesFault) {
     if (!scratchpadFlushEnabled())
         GTEST_SKIP() << "Requires the scratchpad flush enabled (RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=1)";
     AssertInitAndGetDevices(nullptr);
-    if (!gdrSupported()) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
+    if (!(gdrPtrSupport() & NCCL_PTR_CUDA)) GTEST_SKIP() << "GDR (NCCL_PTR_CUDA) not supported on this device";
 
     ncclResult_t forced = ncclSuccess;
     RunRecvFlushBurst(/*iterations=*/1, /*verifyData=*/false,
-                      /*forceWrite=*/true, &forced);
+                      &forced);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_NE(forced, ncclSuccess)
             << "forced scratchpad RDMA_WRITE on a dma-buf buffer should fault the flush QP";

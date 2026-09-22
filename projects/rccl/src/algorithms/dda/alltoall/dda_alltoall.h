@@ -10,6 +10,8 @@
 
 #include "nccl.h"
 
+#include <cstdint>
+
 struct ncclComm;
 
 /**
@@ -23,6 +25,13 @@ bool ncclAllToAllDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recv
  */
 ncclResult_t ncclAllToAllDdaIpc(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                 ncclComm* comm, cudaStream_t stream);
+
+// Total CTAs (grid blocks) each DDA alltoall launcher would use for the given
+// operands. Mirrors the launch grid math so reporting reflects real occupancy.
+uint32_t ncclAllToAllDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
+uint32_t ncclAllToAllDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
+uint32_t ncclAllToAllDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
+uint32_t ncclAllToAllDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
 
 /**
  * Check if DDA alltoall is eligible for the fabric/VMM path (runtime nRanks

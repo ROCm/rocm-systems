@@ -12,7 +12,7 @@
 #include "comm.h"
 #include "debug.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
-#include "param.h"
+#include "rccl_common.h"
 
 #include <cuda_runtime.h>
 
@@ -160,7 +160,7 @@ bool ncclAllGatherDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
   if ((reinterpret_cast<uintptr_t>(sendbuff) % 16) != 0 || (reinterpret_cast<uintptr_t>(recvbuff) % 16) != 0) {
     return false;
   }
-  if (perRankBytes * (size_t)comm->nRanks > (size_t)rcclParamDdaLL128Threshold()) {
+  if (perRankBytes * (size_t)comm->nRanks > rcclDdaLL128Threshold(comm, ncclFuncAllGather)) {
     return false;
   }
   // Derived from the scratch allocation

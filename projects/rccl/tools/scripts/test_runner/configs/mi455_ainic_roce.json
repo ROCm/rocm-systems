@@ -1304,6 +1304,26 @@
           "name": "CeAlltoAllEligibilityTest",
           "description": "CE AlltoAll eligibility gating tests matching taskAppend (CTA_POLICY_ZERO, sysmem, capture, group depth)",
           "test_filter": "CeAlltoAllEligibilityTest.*"
+        },
+        {
+          "name": "RcclAlltoAllDecision",
+          "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
+          "test_filter": "RcclAlltoAllDecision.*"
+        },
+        {
+          "name": "RcclCeAr2ShotMax",
+          "description": "CE AllReduce 2-shot arch threshold upper-bound tests",
+          "test_filter": "RcclCeAr2ShotMax.*"
+        },
+        {
+          "name": "RcclCeArGrownBuffer",
+          "description": "CE AllReduce grown-buffer (ceRegMax) eligibility tests",
+          "test_filter": "RcclCeArGrownBuffer.*"
+        },
+        {
+          "name": "SkipPresetTopoMatching",
+          "description": "SkipPreset arch topology matching and threshold lookup tests",
+          "test_filter": "SkipPresetTopoMatching.*"
         }
       ]
     },
