@@ -46,7 +46,10 @@ stop_service(const context::context*)
 
 rocprofiler_status_t flush_internal_agent_buffers(rocprofiler_buffer_id_t)
 {
-    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    // rocprofiler_flush_buffer() calls this before draining the buffer itself, so returning
+    // an error here would break flushing for every tool, not just PC sampling ones. With no
+    // service to configure there is nothing to drain, which is success.
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 }  // namespace pc_sampling
 }  // namespace rocprofiler
