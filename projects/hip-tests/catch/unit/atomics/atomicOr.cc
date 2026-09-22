@@ -20,7 +20,9 @@
 // Helper function to run atomicOr tests for same address (single kernel)
 template <typename TestType>
 static void runAtomicOrSameAddressTest() {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kOr>(
           1, sizeof(TestType));
@@ -31,10 +33,12 @@ static void runAtomicOrSameAddressTest() {
 // Helper function to run atomicOr tests for adjacent addresses (single kernel)
 template <typename TestType>
 static void runAtomicOrAdjacentAddressesTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
       Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kOr>(
           warp_size, sizeof(TestType));
@@ -45,11 +49,13 @@ static void runAtomicOrAdjacentAddressesTest() {
 // Helper function to run atomicOr tests for scattered addresses (single kernel)
 template <typename TestType>
 static void runAtomicOrScatteredAddressesTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Scattered address " << current) {
       Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kOr>(
           warp_size, cache_line_size);
@@ -60,7 +66,9 @@ static void runAtomicOrScatteredAddressesTest() {
 // Helper function to run atomicOr tests for same address (multiple kernels)
 template <typename TestType>
 static void runAtomicOrMultiKernelSameAddressTest() {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       Bitwise::SingleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kOr>(
           2, 1, sizeof(TestType));
@@ -71,10 +79,12 @@ static void runAtomicOrMultiKernelSameAddressTest() {
 // Helper function to run atomicOr tests for adjacent addresses (multiple kernels)
 template <typename TestType>
 static void runAtomicOrMultiKernelAdjacentAddressesTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
       Bitwise::SingleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kOr>(
           2, warp_size, sizeof(TestType));
@@ -85,11 +95,13 @@ static void runAtomicOrMultiKernelAdjacentAddressesTest() {
 // Helper function to run atomicOr tests for scattered addresses (multiple kernels)
 template <typename TestType>
 static void runAtomicOrMultiKernelScatteredAddressesTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Scattered address " << current) {
       Bitwise::SingleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kOr>(
           2, warp_size, cache_line_size);

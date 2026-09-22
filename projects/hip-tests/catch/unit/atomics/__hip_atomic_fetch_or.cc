@@ -17,7 +17,9 @@
 // Helper function to run __hip_atomic_fetch_or tests for WAVEFRONT scope, same address
 template <typename TestType>
 static void runHipAtomicFetchOrWavefrontSameAddressTest() {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kBuiltinOr,
                                             __HIP_MEMORY_SCOPE_WAVEFRONT>(1, sizeof(TestType));
@@ -28,10 +30,12 @@ static void runHipAtomicFetchOrWavefrontSameAddressTest() {
 // Helper function to run __hip_atomic_fetch_or tests for WAVEFRONT scope, adjacent addresses
 template <typename TestType>
 static void runHipAtomicFetchOrWavefrontAdjacentAddressesTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
       Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kBuiltinOr,
                                             __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size,
@@ -43,11 +47,13 @@ static void runHipAtomicFetchOrWavefrontAdjacentAddressesTest() {
 // Helper function to run __hip_atomic_fetch_or tests for WAVEFRONT scope, scattered addresses
 template <typename TestType>
 static void runHipAtomicFetchOrWavefrontScatteredAddressesTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Scattered address " << current) {
       Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kBuiltinOr,
                                             __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size,
@@ -59,7 +65,9 @@ static void runHipAtomicFetchOrWavefrontScatteredAddressesTest() {
 // Helper function to run __hip_atomic_fetch_or tests for WORKGROUP scope, same address
 template <typename TestType>
 static void runHipAtomicFetchOrWorkgroupSameAddressTest() {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kBuiltinOr,
                                             __HIP_MEMORY_SCOPE_WORKGROUP>(1, sizeof(TestType));
@@ -70,10 +78,12 @@ static void runHipAtomicFetchOrWorkgroupSameAddressTest() {
 // Helper function to run __hip_atomic_fetch_or tests for WORKGROUP scope, adjacent addresses
 template <typename TestType>
 static void runHipAtomicFetchOrWorkgroupAdjacentAddressesTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
       Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kBuiltinOr,
                                             __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size,
@@ -85,11 +95,13 @@ static void runHipAtomicFetchOrWorkgroupAdjacentAddressesTest() {
 // Helper function to run __hip_atomic_fetch_or tests for WORKGROUP scope, scattered addresses
 template <typename TestType>
 static void runHipAtomicFetchOrWorkgroupScatteredAddressesTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Scattered address " << current) {
       Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kBuiltinOr,
                                             __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size,
