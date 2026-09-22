@@ -212,10 +212,12 @@ SIMD-width vector register with per-element access.
 ### Register-file storage
 
 The functional GPU model provisions vector-register storage for every fixed
-wavefront slot in each simulated compute unit. Slots are independent of
-hardware occupancy: a wave that uses many registers still occupies one
-simulator slot, and register pressure does not reduce the number of admitted
-waves. For the shipped gfx942 configuration, the vector backing has the
+wavefront slot in each simulated compute unit. Each admitted wave occupies
+one simulator slot, but admission also reserves physical register capacity
+per SIMD, including architecture-specific allocation rounding. Register
+pressure can therefore leave slots unused: on gfx942, a 253-VGPR allocation
+rounds to 256 of the 512 VGPRs per SIMD, allowing two waves per SIMD and eight
+per CU. For the shipped gfx942 configuration, the vector backing has the
 following dimensions:
 
 | Quantity                  | Value                                      |
@@ -238,11 +240,10 @@ its logical zero value through shared immutable backing without allocating a
 chunk. That read-only handle is an ephemeral value observation, not a persistent
 storage identity, and need not observe a later write through another handle.
 
-This is a functional storage model, not a model of a physical register file.
-In particular, filling all 32 simulator slots with high-pressure waves can
-represent an occupancy that hardware could not admit. That distinction is
-important when interpreting memory measurements or using register pressure to
-approximate hardware throughput.
+These dimensions describe backing storage, not the number of waves that
+physical register limits allow to be resident. Storage is provisioned per slot;
+the separate SIMD reservation model constrains admission. Neither storage size
+nor admitted wave count alone predicts hardware throughput.
 
 #### Representative workloads
 
@@ -271,6 +272,11 @@ unchanged to measurement precision for MFMA (+0.1%). The result is a smaller
 end-to-end runtime improvement even as peak RSS falls by 58.5%.
 
 #### Worst-case saturation validation
+
+This historical 32-slot saturation example used the previous admission model,
+which did not enforce physical SIMD register capacity. It validates backing
+storage behavior; its residency is not achievable with the current model for
+this high-register-pressure workload.
 
 The qualified gfx942 saturation workload was measured on 2026-08-10 from
 rocjitsu revision `49e6ddafeb9fd8cadda1c78b891466fd498ec676`. The
