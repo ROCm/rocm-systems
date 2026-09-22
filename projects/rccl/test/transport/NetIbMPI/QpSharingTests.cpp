@@ -98,6 +98,7 @@ TEST_F(NetIbMPITest, QpShareAlgoLayoutSweep) {
 
     QpShareRefModel model(ngroups);
     std::vector<QpShareConn> cs;
+    SCOPE_EXIT(if (!cs.empty()) CloseAll(cs));
 
     // One at a time, re-checking every live comm after each create. Stops at the
     // first divergence: the same wrong layout re-reported for every remaining
@@ -106,8 +107,9 @@ TEST_F(NetIbMPITest, QpShareAlgoLayoutSweep) {
         if (OpenConns(1, model, cs, "algo sweep") != 1) break;
         const std::vector<void*> mine = MineOf(cs);
         const std::string stage = Stage("after create", c);
-        if (!ExpectQpShareLayout(mine, stage.c_str()) ||
-            !ExpectQpSharePlacement(mine, PlacesOf(cs), stage.c_str())) break;
+        const bool layoutOk = ExpectQpShareLayout(mine, stage.c_str()) &&
+                              ExpectQpSharePlacement(mine, PlacesOf(cs), stage.c_str());
+        if (!RankAgree(layoutOk)) break;
     }
 
     ReportQpShareCoverage("algo_layout_sweep", static_cast<int>(cs.size()),
@@ -123,8 +125,9 @@ TEST_F(NetIbMPITest, QpShareAlgoLayoutSweep) {
         MPI_Barrier(MPI_COMM_WORLD);
         const std::vector<void*> mine = MineOf(cs);
         const std::string stage = Stage("after destroy", c);
-        if (!ExpectQpShareLayout(mine, stage.c_str()) ||
-            !ExpectQpSharePlacement(mine, PlacesOf(cs), stage.c_str())) break;
+        const bool layoutOk = ExpectQpShareLayout(mine, stage.c_str()) &&
+                              ExpectQpSharePlacement(mine, PlacesOf(cs), stage.c_str());
+        if (!RankAgree(layoutOk)) break;
     }
 
     CloseAll(cs);
@@ -161,6 +164,7 @@ TEST_F(NetIbMPITest, QpShareAlgoChurnLayout) {
 
     QpShareRefModel model(ngroups);
     std::vector<QpShareConn> cs;
+    SCOPE_EXIT(if (!cs.empty()) CloseAll(cs));
     int observedSpread = 0;
 
     // Deterministic and rank-identical: the decision depends only on `step` and
@@ -182,8 +186,9 @@ TEST_F(NetIbMPITest, QpShareAlgoChurnLayout) {
         observedSpread = std::max(observedSpread, model.Spread());
         const std::vector<void*> mine = MineOf(cs);
         const std::string stage = Stage("churn step", step);
-        if (!ExpectQpShareLayout(mine, stage.c_str()) ||
-            !ExpectQpSharePlacement(mine, PlacesOf(cs), stage.c_str())) break;
+        const bool layoutOk = ExpectQpShareLayout(mine, stage.c_str()) &&
+                              ExpectQpSharePlacement(mine, PlacesOf(cs), stage.c_str());
+        if (!RankAgree(layoutOk)) break;
     }
 
     ReportQpShareCoverage("algo_churn_layout", static_cast<int>(cs.size()),
@@ -216,6 +221,7 @@ TEST_F(NetIbMPITest, QpShareDataAllConnsTransfer) {
 
     QpShareRefModel model(ngroups);
     std::vector<QpShareConn> cs;
+    SCOPE_EXIT(if (!cs.empty()) CloseAll(cs));
 
     const int established = OpenConns(nconns, model, cs, "data all conns");
     const std::vector<void*> mine = MineOf(cs);
@@ -285,6 +291,7 @@ TEST_F(NetIbMPITest, QpShareDataUnsharedGroups) {
 
     QpShareRefModel model(ngroups);
     std::vector<QpShareConn> cs;
+    SCOPE_EXIT(if (!cs.empty()) CloseAll(cs));
 
     const int established = OpenConns(nconns, model, cs, "data unshared groups");
     const std::vector<void*> mine = MineOf(cs);
@@ -365,6 +372,7 @@ TEST_F(NetIbMPITest, QpShareDataFlushRouting) {
 
     QpShareRefModel model(ngroups);
     std::vector<QpShareConn> cs;
+    SCOPE_EXIT(if (!cs.empty()) CloseAll(cs));
     const int established = OpenConns(nconns, model, cs, "data flush routing");
     const std::vector<void*> mine = MineOf(cs);
     ExpectQpShareLayout(mine, "flush conns established");
@@ -403,6 +411,19 @@ TEST_F(NetIbMPITest, QpShareDataFlushRouting) {
         std::vector<DeviceBufferAutoGuard> bufGuards;
         bufGuards.reserve(established);
         std::vector<void*> mhandles(established, nullptr);
+        // Deregister whatever succeeded before bufGuards frees the underlying
+        // device memory on scope exit -- otherwise an early ASSERT_TRUE return
+        // below (this rank's own failure, or the peer's) leaves live MRs
+        // pointing at freed GPU memory. Idempotent: the explicit dereg loop
+        // near the end of this block nulls each handle after use.
+        SCOPE_EXIT(
+            for (int c = 0; c < established; c++) {
+                if (mhandles[c]) {
+                    EXPECT_EQ(DeregisterMemory(mine[c], mhandles[c]), ncclSuccess);
+                    mhandles[c] = nullptr;
+                }
+            }
+        );
         bool setupOk = true;
         for (int c = 0; c < established && setupOk; c++) {
             if (hipMalloc(&devBufs[c], kSz) != hipSuccess) {
@@ -483,8 +504,9 @@ TEST_F(NetIbMPITest, QpShareDataFlushRouting) {
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
-        for (int c = 0; c < established; c++)
-            EXPECT_EQ(DeregisterMemory(mine[c], mhandles[c]), ncclSuccess);
+        // Deregistration itself happens in the SCOPE_EXIT guard above -- this
+        // barrier just keeps it rank-synchronized before CloseAll tears the
+        // connections down.
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -515,6 +537,7 @@ TEST_F(NetIbMPITest, QpShareStressManyConns) {
 
     QpShareRefModel model(ngroups);
     std::vector<QpShareConn> cs;
+    SCOPE_EXIT(if (!cs.empty()) CloseAll(cs));
     const int established = OpenConns(nconns, model, cs, "stress many conns");
     const std::vector<void*> mine = MineOf(cs);
     ExpectQpShareLayout(mine, "stress conns established");
@@ -593,8 +616,10 @@ TEST_F(NetIbMPITest, QpShareStressSharedRqSaturation) {
 
     QpShareRefModel model(ngroups);
     std::vector<QpShareConn> cs;
+    SCOPE_EXIT(if (!cs.empty()) CloseAll(cs));
     const int established = OpenConns(nconns, model, cs, "stress rq saturation");
     const std::vector<void*> mine = MineOf(cs);
+    ExpectQpShareLayout(mine, "rq saturation conns established");
     ReportQpShareCoverage("stress_rq_saturation", established,
                           established > 0 ? MaxObservedSharingDepth(mine) : 0,
                           model.Spread());
@@ -703,10 +728,18 @@ TEST_F(NetIbMPITest, QpShareStressConnectionChurn) {
         }
         void* mh = nullptr;
         bool regOk = (RegisterMemory((rank == 0) ? r : s, buf.data(), sz, NCCL_PTR_HOST, &mh) == ncclSuccess);
+        // Covers the RankAgree assertion below: without it, a peer-only
+        // failure leaves this rank's freshly-opened connection (and MR, if
+        // registration succeeded) never torn down.
+        auto warmupGuard = makeScopeGuard([&]() {
+            if (mh) DeregisterMemory((rank == 0) ? r : s, mh);
+            CloseCastConnection(l, s, r);
+        });
         if (!regOk) ADD_FAILURE() << "RegisterMemory failed during warmup";
         ASSERT_TRUE(RankAgree(regOk)) << "RegisterMemory failed on one rank only during warmup";
         DoSendRecv(s, r, buf.data(), buf.data(), sz, /*tag=*/599, mh, mh, /*seed=*/0);
         MPI_Barrier(MPI_COMM_WORLD);
+        warmupGuard.dismiss();
         TeardownConnection(r, l, s, mh);
     }
 
@@ -730,6 +763,12 @@ TEST_F(NetIbMPITest, QpShareStressConnectionChurn) {
         void* comm = (rank == 0) ? r : s;
         void* mh   = nullptr;
         bool regOk = (RegisterMemory(comm, buf.data(), sz, NCCL_PTR_HOST, &mh) == ncclSuccess);
+        // Same leak risk as the warmup block above: a peer-only failure must
+        // not strand this rank's connection/MR past the RankAgree assertion.
+        auto iterGuard = makeScopeGuard([&]() {
+            if (mh) DeregisterMemory(comm, mh);
+            CloseCastConnection(l, s, r);
+        });
         if (!regOk) ADD_FAILURE() << "RegisterMemory failed at churn iteration " << iter;
         ASSERT_TRUE(RankAgree(regOk)) << "RegisterMemory failed on one rank only at iteration " << iter;
 
@@ -747,6 +786,7 @@ TEST_F(NetIbMPITest, QpShareStressConnectionChurn) {
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
+        iterGuard.dismiss();
         TeardownConnection(r, l, s, mh);
 
         if (checkpoint) {
@@ -807,10 +847,18 @@ TEST_F(NetIbMPITest, QpShareStressBatchCreateDestroy) {
         }
         void* mh = nullptr;
         bool regOk = (RegisterMemory((rank == 0) ? r : s, buf.data(), sz, NCCL_PTR_HOST, &mh) == ncclSuccess);
+        // Covers the RankAgree assertion below: without it, a peer-only
+        // failure leaves this rank's freshly-opened connection (and MR, if
+        // registration succeeded) never torn down.
+        auto warmupGuard = makeScopeGuard([&]() {
+            if (mh) DeregisterMemory((rank == 0) ? r : s, mh);
+            CloseCastConnection(l, s, r);
+        });
         if (!regOk) ADD_FAILURE() << "RegisterMemory failed during warmup";
         ASSERT_TRUE(RankAgree(regOk)) << "RegisterMemory failed on one rank only during warmup";
         DoSendRecv(s, r, buf.data(), buf.data(), sz, /*tag=*/699, mh, mh, /*seed=*/0);
         MPI_Barrier(MPI_COMM_WORLD);
+        warmupGuard.dismiss();
         TeardownConnection(r, l, s, mh);
     }
 
@@ -838,11 +886,16 @@ TEST_F(NetIbMPITest, QpShareStressBatchCreateDestroy) {
                 regOk = false;
             }
         }
-        if (!RankAgree(regOk)) broke = true;
+        // Must gate on the cross-rank agreed result, not the raw local one:
+        // if only the peer's registration failed, this rank's local regOk
+        // stays true and it would otherwise enter DoSendRecv alone while the
+        // peer skips it, hanging on the mismatched collective.
+        const bool regOkAgreed = RankAgree(regOk);
+        if (!regOkAgreed) broke = true;
 
         peakDepth  = std::max(peakDepth, model.PeakLoad());
         peakSpread = std::max(peakSpread, model.Spread());
-        for (int c = 0; c < live && regOk; c++) {
+        for (int c = 0; c < live && regOkAgreed; c++) {
             DoSendRecv(cs[c].send, cs[c].recv, buf.data(), buf.data(), sz,
                        /*tag=*/c, mhandles[c], mhandles[c], batch * perBatch + c);
         }
