@@ -245,11 +245,14 @@ TEST(PowerProfileParse, ClassicNoMarkerReportsUnknownWithoutAbort) {
             RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT | RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK);
 }
 
-TEST(PowerProfileParse, ClassicMultipleMarkersKeepFirst) {
+TEST(PowerProfileParse, ClassicMultipleMarkersKeepLast) {
+  // The driver marks exactly one profile current; a table with several markers
+  // is malformed. The classic path keeps the last marker seen, matching this
+  // path's long-standing release behavior (unchanged here).
   rsmi_power_profile_status_t status{};
   EXPECT_EQ(amd::smi::ParsePowerProfileMode(Lines(kClassicMultiMarker), &status, nullptr),
             RSMI_STATUS_SUCCESS);
-  EXPECT_EQ(status.current, RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT);
+  EXPECT_EQ(status.current, RSMI_PWR_PROF_PRST_POWER_SAVING_MASK);
 }
 
 TEST(PowerProfileParse, ClassicNavi21RealCapture) {
@@ -262,6 +265,26 @@ TEST(PowerProfileParse, ClassicNavi21RealCapture) {
   EXPECT_EQ(ind_map[RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT], 0u);
   EXPECT_EQ(ind_map[RSMI_PWR_PROF_PRST_CUSTOM_MASK], 6u);
   EXPECT_EQ(status.num_profiles, static_cast<uint32_t>(lines.size() - 1));
+}
+
+// A first line that only starts with digits but is not a contiguous 0..N-1
+// index run is not the transposed layout; is_transposed_power_profile_mode()
+// must fall through to the classic parser rather than misread it. Here the
+// first line puts two indices in a row with no name between them, so it is
+// treated as a classic header and the two following rows are parsed per-line.
+constexpr char kDigitFirstNonMonotonic[] =
+    "0 1 5 9 spurious digit-first header\n"
+    "  0   BOOTUP_DEFAULT:    0 0 1\n"
+    "  1   COMPUTE*:          0 0 1\n";
+
+TEST(PowerProfileParse, DigitFirstButNonMonotonicIsClassic) {
+  rsmi_power_profile_status_t status{};
+  EXPECT_EQ(amd::smi::ParsePowerProfileMode(Lines(kDigitFirstNonMonotonic), &status, nullptr),
+            RSMI_STATUS_SUCCESS);
+  EXPECT_EQ(status.num_profiles, 2u);
+  EXPECT_EQ(status.current, RSMI_PWR_PROF_PRST_COMPUTE_MASK);
+  EXPECT_EQ(status.available_profiles,
+            RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT | RSMI_PWR_PROF_PRST_COMPUTE_MASK);
 }
 
 }  // namespace

@@ -188,8 +188,8 @@ static void od_value_pair_str_to_range(std::string in_line, rsmi_range_t* rg) {
 
 /**
  * Maps a pp_power_profile_mode mode name (e.g. "BOOTUP_DEFAULT") to its preset
- * mask, or RSMI_PWR_PROF_PRST_INVALID when the name is not one amd-smi models
- * (e.g. "WINDOW_3D", which has no rsmi preset mask).
+ * mask, or RSMI_PWR_PROF_PRST_INVALID for any name this build does not model
+ * (e.g. a profile a future driver adds before amd-smi grows a preset for it).
  */
 static rsmi_power_profile_preset_masks_t power_prof_name_to_mask(const std::string& mode) {
   static const std::unordered_map<std::string, rsmi_power_profile_preset_masks_t> mode_map{
@@ -1425,19 +1425,38 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
   CATCH
 }
 
-// The transposed SMU 13.0.x pp_power_profile_mode layout lists every profile on
-// its first line, which begins with a profile index (a digit). The classic
-// layout's first line is a text column header (e.g. "PROFILE_INDEX(NAME) ..."
-// or "NUM MODE_NAME ..."), so a purely-numeric first token identifies the
-// transposed layout.
+// The transposed SMU 13.0.x pp_power_profile_mode layout numbers every profile
+// sequentially starting at 0 on its first line (the driver emits the complete
+// run 0..N-1 -- see smu_v13_0_7_get_power_profile_mode()), interleaved with the
+// profile names. The classic layout's first line is instead a text column
+// header (e.g. "PROFILE_INDEX(NAME) ..." or "NUM MODE_NAME ..."). Requiring
+// that monotonic 0..N-1 index run (N >= 2), rather than just "the first token
+// is a digit", keeps other digit-first layouts this parser was not written for
+// from being misread as transposed.
 static bool is_transposed_power_profile_mode(const std::string& first_line) {
   std::istringstream fs(first_line);
   std::string tok;
-  if (!(fs >> tok)) {
-    return false;
+  uint32_t expected_idx = 0;
+  bool saw_name_since_idx = true;  // an index and its name must alternate
+  while (fs >> tok) {
+    const bool all_digits =
+        !tok.empty() &&
+        std::all_of(tok.begin(), tok.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+    if (all_digits) {
+      // A real profile index is small and equals the next expected value; an
+      // over-long or out-of-sequence digit run is some other layout.
+      if (tok.size() > 9 || !saw_name_since_idx ||
+          static_cast<uint32_t>(std::stoul(tok)) != expected_idx) {
+        return false;
+      }
+      ++expected_idx;
+      saw_name_since_idx = false;
+    } else if (tok.find_first_not_of('*') != std::string::npos) {
+      // A profile name (a standalone '*' current marker is ignored here).
+      saw_name_since_idx = true;
+    }
   }
-  return !tok.empty() &&
-         std::all_of(tok.begin(), tok.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+  return expected_idx >= 2;
 }
 
 // Parses the transposed layout's first line, e.g.
@@ -1458,7 +1477,7 @@ static void parse_transposed_power_profile_line(
   // "* "/" "), so a name shorter than 14 chars pushes the '*' into its own
   // whitespace-delimited token (e.g. "COMPUTE       * "). Remember the profile
   // so a trailing standalone '*' can be attributed to it. INVALID means the last
-  // name had no rsmi mask (e.g. WINDOW_3D) or none has been seen yet.
+  // name had no rsmi mask (an unmodeled name) or none has been seen yet.
   rsmi_power_profile_preset_masks_t last_mask = RSMI_PWR_PROF_PRST_INVALID;
 
   while (fs >> tok) {
@@ -1516,11 +1535,15 @@ namespace amd::smi {
 // Handles both driver layouts: the classic one (text header on the first line,
 // one profile per line with the '*' current marker on the profile's own line)
 // and the transposed SMU 13.0.x one (every profile and the '*' on the first
-// line, e.g. gfx1102). The driver always flags exactly one profile current, so
-// a correctly parsed table populates p->current. It is left at
-// RSMI_PWR_PROF_PRST_INVALID ("current unknown") only when the active profile
-// has no rsmi preset (e.g. WINDOW_3D) or the table carries no marker at all;
-// either way the parsed profiles are still returned and the call never aborts.
+// line, e.g. gfx1102). The driver marks exactly one profile current, so a table
+// whose active profile maps to a known rsmi preset populates p->current. The
+// field is left RSMI_PWR_PROF_PRST_INVALID ("current unknown") when the active
+// profile's name has no rsmi preset in this build. A table with no marker at
+// all is not expected from a healthy driver -- it implies a parse miss or a
+// truncated sysfs read -- but it is likewise surfaced as SUCCESS with the
+// parsed profiles and current INVALID rather than aborting the caller. These
+// two "current unknown" outcomes (unmodeled active profile vs. no marker at
+// all) are not currently distinguishable to the caller.
 rsmi_status_t ParsePowerProfileMode(
     const std::vector<std::string>& lines, rsmi_power_profile_status_t* p,
     std::map<rsmi_power_profile_preset_masks_t, uint32_t>* ind_map) {
@@ -1560,8 +1583,10 @@ rsmi_status_t ParsePowerProfileMode(
       (*ind_map)[prof] = prof_ind;
     }
     p->available_profiles |= prof;
-    // The driver should mark at most one profile current; keep the first.
-    if (current && p->current == RSMI_PWR_PROF_PRST_INVALID) {
+    // The driver marks exactly one profile current. If a malformed table marks
+    // several, keep the last (this classic path's long-standing behavior); a
+    // healthy driver never exercises this.
+    if (current) {
       p->current = prof;
     }
   }
