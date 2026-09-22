@@ -10,6 +10,7 @@ AllToAll is intentionally excluded. Its current fallback is represented as
 grouped P2P Send/Recv tasks, while the ACCL plugin currently correlates only
 collective event parents. That work belongs in a separate RCCL/profiler ticket.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -25,7 +26,6 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -65,8 +65,50 @@ RUBY_RCCL_ENV = {
     "NCCL_IB_TC": "104",
     "NCCL_IB_QPS_PER_CONNECTION": "4",
     "NCCL_SOCKET_IFNAME": "fenic0",
+    "NCCL_IGNORE_CPU_AFFINITY": "1",
     "HSA_NO_SCRATCH_RECLAIM": "1",
 }
+
+# Keep this aligned with the Ruby/Thor2 multi-node RCCL configuration in
+# tools/scripts/test_runner/configs/mi355x_thor2_roce.json. Open MPI uses SSH
+# only to start ranks inside the Slurm allocation; RCCL data traffic still uses
+# the eight bnxt_re devices selected above.
+RUBY_MPI_ARGS = (
+    "--mca",
+    "pml",
+    "ob1",
+    "--mca",
+    "btl",
+    "^openib",
+    "--mca",
+    "plm_rsh_no_tree_spawn",
+    "1",
+    "--mca",
+    "oob_tcp_if_include",
+    "10.190.0.0/16",
+    "--mca",
+    "btl_tcp_if_include",
+    "10.190.0.0/16",
+    "--mca",
+    "plm_rsh_agent",
+    "ssh -p 2224 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -q",
+    "--bind-to",
+    "none",
+)
+
+MPI_FORWARDED_ENV = (
+    "PATH",
+    "LD_LIBRARY_PATH",
+    "ROCM_PATH",
+    "HIP_PATH",
+    "NCCL_PROFILER_PLUGIN",
+    "ACCL_PROFILER_MIN_SIZE_BYTES",
+    "ACCL_PROFILER_OUTPUT_DIR",
+    "ACCL_EXPECT_RANKS",
+    "ACCL_GPUS_PER_NODE",
+    *RUBY_RCCL_ENV,
+    "NCCL_DEBUG",
+)
 
 
 def _raise_keyboard_interrupt(signum, _frame) -> None:
@@ -78,6 +120,7 @@ def _raise_keyboard_interrupt(signum, _frame) -> None:
 class ArtifactPaths:
     root: Path
     rccl_library: Path
+    mpi_launcher: Path
     profiler_plugin: Path
     report_script: Path
     binaries: dict[str, Path]
@@ -132,12 +175,12 @@ def discover_artifacts(artifact_dir: Path) -> ArtifactPaths:
         raise FileNotFoundError(f"Artifact directory does not exist: {root}")
 
     binaries = {
-        binary: _find_artifact(root, f"bin/{binary}", binary)
-        for binary in COLLECTIVES
+        binary: _find_artifact(root, f"bin/{binary}", binary) for binary in COLLECTIVES
     }
     return ArtifactPaths(
         root=root,
         rccl_library=_find_artifact(root, "lib/librccl.so", "librccl.so"),
+        mpi_launcher=_find_artifact(root, "bin/mpirun", "mpirun"),
         profiler_plugin=_find_artifact(
             root, "lib/librccl-profiler-accl.so", "librccl-profiler-accl.so"
         ),
@@ -153,6 +196,30 @@ def discover_artifacts(artifact_dir: Path) -> ArtifactPaths:
 
 def _shell_export(name: str, value: str) -> str:
     return f"export {name}={shlex.quote(value)}"
+
+
+def _mpi_command(
+    paths: ArtifactPaths,
+    config: RunConfig,
+    program: list[str] | str,
+) -> str:
+    """Render the Ruby Open MPI launch used by the RCCL multi-node suites."""
+    mpi_prefix = paths.mpi_launcher.parent.parent
+    command = [
+        str(paths.mpi_launcher),
+        "--prefix",
+        str(mpi_prefix),
+        "-np",
+        str(config.ranks),
+    ]
+    rendered = shlex.join(command) + ' --host "$ACCL_MPI_HOSTS"'
+    rendered += " " + shlex.join(RUBY_MPI_ARGS)
+    rendered += " " + " ".join(f"-x {shlex.quote(name)}" for name in MPI_FORWARDED_ENV)
+    if isinstance(program, list):
+        inner = "ulimit -l unlimited 2>/dev/null; set -f; exec " + shlex.join(program)
+    else:
+        inner = program
+    return rendered + " bash -c " + shlex.quote(inner)
 
 
 def validate_kpack_layout(paths: ArtifactPaths) -> None:
@@ -171,8 +238,7 @@ def validate_kpack_layout(paths: ArtifactPaths) -> None:
     missing = sorted(required - names)
     if missing:
         raise FileNotFoundError(
-            "TheRock kpack artifact tree is incomplete; missing: "
-            + ", ".join(missing)
+            "TheRock kpack artifact tree is incomplete; missing: " + ", ".join(missing)
         )
 
 
@@ -187,8 +253,12 @@ def render_slurm_script(
     status_file = work_dir / "collective-status.tsv"
     preflight_log = work_dir / "preflight.log"
     lib_dir = paths.rccl_library.parent
+    mpi_root = paths.mpi_launcher.parent.parent
     sysdeps_dir = paths.root / "lib" / "rocm_sysdeps" / "lib"
     ld_paths = [str(lib_dir)]
+    mpi_lib_dir = mpi_root / "lib"
+    if mpi_lib_dir.is_dir() and mpi_lib_dir.resolve() != lib_dir.resolve():
+        ld_paths.append(str(mpi_lib_dir.resolve()))
     if sysdeps_dir.is_dir():
         ld_paths.append(str(sysdeps_dir.resolve()))
 
@@ -200,6 +270,11 @@ def render_slurm_script(
     # libraries it needs.
     path_entries = [
         str(paths.root / "bin"),
+        *(
+            [str(paths.mpi_launcher.parent)]
+            if paths.mpi_launcher.parent.resolve() != (paths.root / "bin").resolve()
+            else []
+        ),
         "/usr/bin",
         "/bin",
         "/usr/sbin",
@@ -219,8 +294,14 @@ def render_slurm_script(
         _shell_export("HIP_PATH", str(paths.root)),
         _shell_export("NCCL_PROFILER_PLUGIN", str(paths.profiler_plugin)),
         _shell_export("ACCL_PROFILER_MIN_SIZE_BYTES", "0"),
+        _shell_export("ACCL_PROFILER_OUTPUT_DIR", str(raw_dir / "mpi-preflight")),
+        _shell_export("NCCL_DEBUG", "WARN"),
         _shell_export("ACCL_RCCL_LIB", str(paths.rccl_library)),
         _shell_export("ACCL_PLUGIN", str(paths.profiler_plugin)),
+        _shell_export("ACCL_MPIRUN", str(paths.mpi_launcher)),
+        _shell_export("ACCL_EXPECT_NODES", str(config.nodes)),
+        _shell_export("ACCL_EXPECT_RANKS", str(config.ranks)),
+        _shell_export("ACCL_GPUS_PER_NODE", str(config.gpus_per_node)),
         _shell_export("ACCL_PREFLIGHT_BINARY", str(paths.binaries["all_reduce_perf"])),
         _shell_export(
             "ACCL_TEST_BINARIES",
@@ -234,124 +315,186 @@ def render_slurm_script(
         _shell_export("ACCL_EXPECT_PLUGIN_SHA256", sha256_file(paths.profiler_plugin)),
     ]
     lines.extend(_shell_export(name, value) for name, value in RUBY_RCCL_ENV.items())
-    lines.extend([
-        f"mkdir -p {shlex.quote(str(raw_dir))} {shlex.quote(str(test_log_dir))}",
-        f": > {shlex.quote(str(status_file))}",
-        "preflight_rc=0",
-        (
-            f"srun --nodes={config.nodes} --ntasks={config.nodes} --ntasks-per-node=1 "
-            "--kill-on-bad-exit=1 bash -c '"
-        ),
-        "set -eu",
-        "host=$(hostname -s)",
-        "resolved_rccl=$(ldd \"$ACCL_PREFLIGHT_BINARY\" | awk '\"'\"'/librccl[.]so/{print $3; exit}'\"'\"')",
-        "test -n \"$resolved_rccl\"",
-        "test \"$(readlink -f \"$resolved_rccl\")\" = \"$(readlink -f \"$ACCL_RCCL_LIB\")\"",
-        "resolved_hip=$(ldd \"$ACCL_PREFLIGHT_BINARY\" | awk '\"'\"'/libamdhip64[.]so/{print $3; exit}'\"'\"')",
-        "test -n \"$resolved_hip\"",
-        (
-            "case \"$(readlink -f \"$resolved_hip\")\" in "
-            "\"$ROCM_PATH\"/*) ;; *) echo \"unexpected HIP runtime: $resolved_hip\" >&2; exit 1 ;; esac"
-        ),
-        "test \"$(sha256sum \"$ACCL_RCCL_LIB\" | awk '\"'\"'{print $1}'\"'\"')\" = \"$ACCL_EXPECT_RCCL_SHA256\"",
-        "test \"$(sha256sum \"$ACCL_PLUGIN\" | awk '\"'\"'{print $1}'\"'\"')\" = \"$ACCL_EXPECT_PLUGIN_SHA256\"",
-        "readelf -Ws \"$ACCL_PLUGIN\" | grep -q '\"'\"' ncclProfiler_v5$'\"'\"'",
-        "if [ \"$ACCL_KPACK_COUNT\" -gt 0 ]; then",
-        "  for kpack in $ACCL_KPACK_FILES; do test -s \"$kpack\"; done",
-        "  readelf -SW \"$ACCL_RCCL_LIB\" | grep -q '\"'\"'[.]rocm_kpack_ref'\"'\"'",
-        "  for binary in $ACCL_TEST_BINARIES; do",
-        "    readelf -SW \"$binary\" | grep -q '\"'\"'[.]rocm_kpack_ref'\"'\"'",
-        "  done",
-        "else",
-        "  if readelf -SW \"$ACCL_RCCL_LIB\" | grep -q '\"'\"'[.]rocm_kpack_ref'\"'\"'; then",
-        "    echo \"librccl.so is kpack-stripped but no kpack archives were fetched\" >&2",
-        "    exit 1",
-        "  fi",
-        "  for binary in $ACCL_TEST_BINARIES; do",
-        "    if readelf -SW \"$binary\" | grep -q '\"'\"'[.]rocm_kpack_ref'\"'\"'; then",
-        "      echo \"$binary is kpack-stripped but no kpack archives were fetched\" >&2",
-        "      exit 1",
-        "    fi",
-        "  done",
-        "fi",
-        # Prefer the native rocminfo executable. rocm_agent_enumerator is a
-        # Python script, so use an explicit node-local interpreter only as a
-        # fallback instead of its /usr/bin/env shebang.
-        "if [ -x \"$ROCM_PATH/bin/rocminfo\" ]; then",
-        (
-            "  archs=$(\"$ROCM_PATH/bin/rocminfo\" 2>/dev/null | sed -n "
-            "'\"'\"'s/.*Name:[[:space:]]*\\(gfx[0-9a-f]*\\).*/\\1/p'\"'\"' "
-            "| sort -u | paste -sd, -)"
-        ),
-        "elif [ -x /usr/bin/python3 ] && [ -f \"$ROCM_PATH/bin/rocm_agent_enumerator\" ]; then",
-        "  archs=$(/usr/bin/python3 \"$ROCM_PATH/bin/rocm_agent_enumerator\" | sort -u | paste -sd, -)",
-        "elif [ -x /usr/local/bin/python3 ] && [ -f \"$ROCM_PATH/bin/rocm_agent_enumerator\" ]; then",
-        "  archs=$(/usr/local/bin/python3 \"$ROCM_PATH/bin/rocm_agent_enumerator\" | sort -u | paste -sd, -)",
-        "elif command -v rocminfo >/dev/null 2>&1; then",
-        (
-            "  archs=$(rocminfo 2>/dev/null | sed -n "
-            "'\"'\"'s/.*Name:[[:space:]]*\\(gfx[0-9a-f]*\\).*/\\1/p'\"'\"' "
-            "| sort -u | paste -sd, -)"
-        ),
-        "else",
-        "  archs=",
-        "fi",
-        "case \",$archs,\" in *,gfx950,*) ;; *) echo \"unexpected GPU architecture(s): $archs\" >&2; exit 1 ;; esac",
-        (
-            "printf '\"'\"'host=%s arch=%s rccl=%s plugin=%s hip=%s kpacks=%s\\n'\"'\"' "
-            "\"$host\" \"$archs\" \"$ACCL_EXPECT_RCCL_SHA256\" "
-            "\"$ACCL_EXPECT_PLUGIN_SHA256\" \"$(readlink -f \"$resolved_hip\")\" "
-            "\"$ACCL_KPACK_COUNT\""
-        ),
-        "' "
-        f"> {shlex.quote(str(preflight_log))} 2>&1 || preflight_rc=$?",
-        "if [ \"$preflight_rc\" -ne 0 ]; then",
-        f"  printf '%s\\t%s\\n' preflight \"$preflight_rc\" >> {shlex.quote(str(status_file))}",
-    ])
+    lines.extend(
+        [
+            f"mkdir -p {shlex.quote(str(raw_dir))} {shlex.quote(str(test_log_dir))}",
+            f": > {shlex.quote(str(status_file))}",
+            f": > {shlex.quote(str(preflight_log))}",
+            "preflight_rc=0",
+            (
+                'mpi_host_lines=$(scontrol show hostnames "$SLURM_JOB_NODELIST" '
+                f"2>> {shlex.quote(str(preflight_log))}) || preflight_rc=$?"
+            ),
+            "mpi_host_count=0",
+            "mpi_hosts=",
+            'if [ "$preflight_rc" -eq 0 ]; then',
+            "  while IFS= read -r host; do",
+            '    [ -n "$host" ] || continue',
+            "    mpi_host_count=$((mpi_host_count + 1))",
+            '    mpi_hosts="${mpi_hosts:+${mpi_hosts},}${host}:${ACCL_GPUS_PER_NODE}"',
+            '  done <<< "$mpi_host_lines"',
+            '  if [ "$mpi_host_count" -ne "$ACCL_EXPECT_NODES" ]; then',
+            (
+                "    printf 'expected %s Slurm hosts, found %s: %s\\n' "
+                '"$ACCL_EXPECT_NODES" "$mpi_host_count" "$mpi_host_lines" >> '
+                f"{shlex.quote(str(preflight_log))}"
+            ),
+            "    preflight_rc=1",
+            "  fi",
+            "fi",
+            'export ACCL_MPI_HOSTS="$mpi_hosts"',
+            (
+                "printf 'mpi_launcher=%s mpi_hosts=%s ranks=%s\\n' "
+                '"$ACCL_MPIRUN" "$ACCL_MPI_HOSTS" "$ACCL_EXPECT_RANKS" >> '
+                f"{shlex.quote(str(preflight_log))}"
+            ),
+            'if [ "$preflight_rc" -eq 0 ]; then',
+            (
+                f'  "$ACCL_MPIRUN" --version >> {shlex.quote(str(preflight_log))} '
+                "2>&1 || preflight_rc=$?"
+            ),
+            "fi",
+            'if [ "$preflight_rc" -eq 0 ]; then',
+            (
+                f"  srun --nodes={config.nodes} --ntasks={config.nodes} --ntasks-per-node=1 "
+                "--kill-on-bad-exit=1 bash -c '"
+            ),
+            "set -eu",
+            "host=$(hostname -s)",
+            "resolved_rccl=$(ldd \"$ACCL_PREFLIGHT_BINARY\" | awk '\"'\"'/librccl[.]so/{print $3; exit}'\"'\"')",
+            'test -n "$resolved_rccl"',
+            'test "$(readlink -f "$resolved_rccl")" = "$(readlink -f "$ACCL_RCCL_LIB")"',
+            "resolved_hip=$(ldd \"$ACCL_PREFLIGHT_BINARY\" | awk '\"'\"'/libamdhip64[.]so/{print $3; exit}'\"'\"')",
+            'test -n "$resolved_hip"',
+            (
+                'case "$(readlink -f "$resolved_hip")" in '
+                '"$ROCM_PATH"/*) ;; *) echo "unexpected HIP runtime: $resolved_hip" >&2; exit 1 ;; esac'
+            ),
+            'test "$(sha256sum "$ACCL_RCCL_LIB" | awk \'"\'"\'{print $1}\'"\'"\')" = "$ACCL_EXPECT_RCCL_SHA256"',
+            'test "$(sha256sum "$ACCL_PLUGIN" | awk \'"\'"\'{print $1}\'"\'"\')" = "$ACCL_EXPECT_PLUGIN_SHA256"',
+            "readelf -Ws \"$ACCL_PLUGIN\" | grep -q '\"'\"' ncclProfiler_v5$'\"'\"'",
+            'if [ "$ACCL_KPACK_COUNT" -gt 0 ]; then',
+            '  for kpack in $ACCL_KPACK_FILES; do test -s "$kpack"; done',
+            "  readelf -SW \"$ACCL_RCCL_LIB\" | grep -q '\"'\"'[.]rocm_kpack_ref'\"'\"'",
+            "  for binary in $ACCL_TEST_BINARIES; do",
+            "    readelf -SW \"$binary\" | grep -q '\"'\"'[.]rocm_kpack_ref'\"'\"'",
+            "  done",
+            "else",
+            "  if readelf -SW \"$ACCL_RCCL_LIB\" | grep -q '\"'\"'[.]rocm_kpack_ref'\"'\"'; then",
+            '    echo "librccl.so is kpack-stripped but no kpack archives were fetched" >&2',
+            "    exit 1",
+            "  fi",
+            "  for binary in $ACCL_TEST_BINARIES; do",
+            "    if readelf -SW \"$binary\" | grep -q '\"'\"'[.]rocm_kpack_ref'\"'\"'; then",
+            '      echo "$binary is kpack-stripped but no kpack archives were fetched" >&2',
+            "      exit 1",
+            "    fi",
+            "  done",
+            "fi",
+            # Prefer the native rocminfo executable. rocm_agent_enumerator is a
+            # Python script, so use an explicit node-local interpreter only as a
+            # fallback instead of its /usr/bin/env shebang.
+            'if [ -x "$ROCM_PATH/bin/rocminfo" ]; then',
+            (
+                '  archs=$("$ROCM_PATH/bin/rocminfo" 2>/dev/null | sed -n '
+                "'\"'\"'s/.*Name:[[:space:]]*\\(gfx[0-9a-f]*\\).*/\\1/p'\"'\"' "
+                "| sort -u | paste -sd, -)"
+            ),
+            'elif [ -x /usr/bin/python3 ] && [ -f "$ROCM_PATH/bin/rocm_agent_enumerator" ]; then',
+            '  archs=$(/usr/bin/python3 "$ROCM_PATH/bin/rocm_agent_enumerator" | sort -u | paste -sd, -)',
+            'elif [ -x /usr/local/bin/python3 ] && [ -f "$ROCM_PATH/bin/rocm_agent_enumerator" ]; then',
+            '  archs=$(/usr/local/bin/python3 "$ROCM_PATH/bin/rocm_agent_enumerator" | sort -u | paste -sd, -)',
+            "elif command -v rocminfo >/dev/null 2>&1; then",
+            (
+                "  archs=$(rocminfo 2>/dev/null | sed -n "
+                "'\"'\"'s/.*Name:[[:space:]]*\\(gfx[0-9a-f]*\\).*/\\1/p'\"'\"' "
+                "| sort -u | paste -sd, -)"
+            ),
+            "else",
+            "  archs=",
+            "fi",
+            'case ",$archs," in *,gfx950,*) ;; *) echo "unexpected GPU architecture(s): $archs" >&2; exit 1 ;; esac',
+            (
+                "printf '\"'\"'host=%s arch=%s rccl=%s plugin=%s hip=%s kpacks=%s\\n'\"'\"' "
+                '"$host" "$archs" "$ACCL_EXPECT_RCCL_SHA256" '
+                '"$ACCL_EXPECT_PLUGIN_SHA256" "$(readlink -f "$resolved_hip")" '
+                '"$ACCL_KPACK_COUNT"'
+            ),
+            (
+                "' "
+                f">> {shlex.quote(str(preflight_log))} 2>&1 || preflight_rc=$?"
+            ),
+            "fi",
+            'if [ "$preflight_rc" -eq 0 ]; then',
+            "  "
+            + _mpi_command(
+                paths,
+                config,
+                (
+                    'test "${OMPI_COMM_WORLD_SIZE:-}" = "$ACCL_EXPECT_RANKS"; '
+                    'test "${OMPI_COMM_WORLD_LOCAL_SIZE:-}" = "$ACCL_GPUS_PER_NODE"; '
+                    'test "${OMPI_COMM_WORLD_LOCAL_RANK:-}" -lt "$ACCL_GPUS_PER_NODE"; '
+                    "printf 'mpi_host=%s rank=%s local_rank=%s world=%s local_size=%s\\n' "
+                    '"$(hostname -s)" "$OMPI_COMM_WORLD_RANK" '
+                    '"$OMPI_COMM_WORLD_LOCAL_RANK" "$OMPI_COMM_WORLD_SIZE" '
+                    '"$OMPI_COMM_WORLD_LOCAL_SIZE"'
+                ),
+            )
+            + f" >> {shlex.quote(str(preflight_log))} 2>&1 || preflight_rc=$?",
+            "fi",
+            'if [ "$preflight_rc" -ne 0 ]; then',
+            f"  printf '%s\\t%s\\n' preflight \"$preflight_rc\" >> {shlex.quote(str(status_file))}",
+        ]
+    )
     for binary in COLLECTIVES:
         lines.append(
             f"  printf '%s\\t%s\\n' {shlex.quote(binary)} 125 >> "
             f"{shlex.quote(str(status_file))}"
         )
-    lines.extend([
-        "  exit \"$preflight_rc\"",
-        "fi",
-        f"printf '%s\\t%s\\n' preflight 0 >> {shlex.quote(str(status_file))}",
-        "overall_rc=0",
-    ])
+    lines.extend(
+        [
+            '  exit "$preflight_rc"',
+            "fi",
+            f"printf '%s\\t%s\\n' preflight 0 >> {shlex.quote(str(status_file))}",
+            "overall_rc=0",
+        ]
+    )
 
     for index, binary in enumerate(COLLECTIVES):
         output_dir = raw_dir / binary
         log_file = test_log_dir / f"{binary}.log"
         debug_level = "INFO" if index == 0 else "WARN"
-        command = [
-            "srun",
-            f"--nodes={config.nodes}",
-            f"--ntasks={config.ranks}",
-            f"--ntasks-per-node={config.gpus_per_node}",
-            "--kill-on-bad-exit=0",
+        program = [
             str(paths.binaries[binary]),
-            "-b", config.min_bytes,
-            "-e", config.max_bytes,
-            "-f", str(config.step_factor),
-            "-g", "1",
-            "-n", str(config.iterations),
-            "-w", str(config.warmup_iterations),
+            "-b",
+            config.min_bytes,
+            "-e",
+            config.max_bytes,
+            "-f",
+            str(config.step_factor),
+            "-g",
+            "1",
+            "-n",
+            str(config.iterations),
+            "-w",
+            str(config.warmup_iterations),
         ]
-        lines.extend([
-            f"mkdir -p {shlex.quote(str(output_dir))}",
-            _shell_export("ACCL_PROFILER_OUTPUT_DIR", str(output_dir)),
-            _shell_export("NCCL_DEBUG", debug_level),
-            f"echo 'Running {binary} with ACCL profiler'",
-            f"{' '.join(shlex.quote(part) for part in command)} 2>&1 | tee {shlex.quote(str(log_file))}",
-            "collective_rc=${PIPESTATUS[0]}",
-            (
-                f"printf '%s\\t%s\\n' {shlex.quote(binary)} \"$collective_rc\" >> "
-                f"{shlex.quote(str(status_file))}"
-            ),
-            "if [ \"$collective_rc\" -ne 0 ]; then overall_rc=1; fi",
-        ])
-    lines.extend(["exit \"$overall_rc\"", ""])
+        lines.extend(
+            [
+                f"mkdir -p {shlex.quote(str(output_dir))}",
+                _shell_export("ACCL_PROFILER_OUTPUT_DIR", str(output_dir)),
+                _shell_export("NCCL_DEBUG", debug_level),
+                f"echo 'Running {binary} with ACCL profiler'",
+                f"{_mpi_command(paths, config, program)} 2>&1 | tee {shlex.quote(str(log_file))}",
+                "collective_rc=${PIPESTATUS[0]}",
+                (
+                    f"printf '%s\\t%s\\n' {shlex.quote(binary)} \"$collective_rc\" >> "
+                    f"{shlex.quote(str(status_file))}"
+                ),
+                'if [ "$collective_rc" -ne 0 ]; then overall_rc=1; fi',
+            ]
+        )
+    lines.extend(['exit "$overall_rc"', ""])
     return "\n".join(lines)
 
 
@@ -413,8 +556,13 @@ def wait_for_slurm_job(job_id: str, timeout_minutes: int) -> tuple[str, str]:
     for _ in range(6):
         result = subprocess.run(
             [
-                "sacct", "--noheader", "--parsable2", "--allocations",
-                "--jobs", job_id, "--format=State,ExitCode",
+                "sacct",
+                "--noheader",
+                "--parsable2",
+                "--allocations",
+                "--jobs",
+                job_id,
+                "--format=State,ExitCode",
             ],
             capture_output=True,
             text=True,
@@ -469,7 +617,9 @@ def validate_collective_output(
             try:
                 objects.append(json.loads(line))
             except json.JSONDecodeError as exc:
-                raise ValueError(f"Malformed JSON in {path}:{line_number}: {exc}") from exc
+                raise ValueError(
+                    f"Malformed JSON in {path}:{line_number}: {exc}"
+                ) from exc
 
         if not objects:
             raise ValueError(f"Profiler output has no JSON objects: {path}")
@@ -508,9 +658,13 @@ def validate_collective_output(
                     f"expected {expected_ranks}"
                 )
             decomposition = coll_perf.get("decomposition")
-            if not isinstance(decomposition, dict) or not DECOMPOSITION_FIELDS.issubset(decomposition):
+            if not isinstance(decomposition, dict) or not DECOMPOSITION_FIELDS.issubset(
+                decomposition
+            ):
                 missing = DECOMPOSITION_FIELDS - set(decomposition or {})
-                raise ValueError(f"Missing decomposition fields in {path}: {sorted(missing)}")
+                raise ValueError(
+                    f"Missing decomposition fields in {path}: {sorted(missing)}"
+                )
             kernel_events = obj.get("event_trace_ts", {}).get("kernel_events")
             if not isinstance(kernel_events, list) or not kernel_events:
                 raise ValueError(f"Missing kernel events in {path}")
@@ -574,9 +728,12 @@ def generate_reports(paths: ArtifactPaths, work_dir: Path, warmup: int) -> list[
                 sys.executable,
                 str(paths.report_script),
                 "single",
-                "--input", str(raw_dir),
-                "--warmup", str(warmup),
-                "--output", str(output),
+                "--input",
+                str(raw_dir),
+                "--warmup",
+                str(warmup),
+                "--output",
+                str(output),
             ],
             capture_output=True,
             text=True,
@@ -625,6 +782,7 @@ def build_manifest(
             "root": str(paths.root),
             "librccl": str(paths.rccl_library),
             "librccl_sha256": sha256_file(paths.rccl_library),
+            "mpi_launcher": str(paths.mpi_launcher),
             "profiler": str(paths.profiler_plugin),
             "profiler_sha256": sha256_file(paths.profiler_plugin),
             "report_script": str(paths.report_script),
@@ -726,12 +884,16 @@ def main() -> int:
         )
         log.info(
             "Slurm job %s completed: state=%s exit_code=%s",
-            job_id, slurm_state, slurm_exit_code,
+            job_id,
+            slurm_state,
+            slurm_exit_code,
         )
     except (KeyboardInterrupt, SystemExit):
         cancel_slurm_job(job_id)
         raise
-    except Exception as exc:  # Preserve artifacts and manifest on infrastructure errors.
+    except (
+        Exception
+    ) as exc:  # Preserve artifacts and manifest on infrastructure errors.
         cancel_slurm_job(job_id)
         slurm_state = "ERROR"
         errors.append(str(exc))
