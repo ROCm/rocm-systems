@@ -4,15 +4,17 @@
 /// @file message.h
 /// @brief Message types and queues for inter-component communication over links.
 
-#ifndef SIMDOJO_SIM_MESSAGE_H_
-#define SIMDOJO_SIM_MESSAGE_H_
+#pragma once
 
 #include "simdojo/sim/sim_types.h"
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -24,6 +26,18 @@ enum class MessageOp : uint8_t {
   READ,     ///< Memory read request.
   WRITE,    ///< Memory write request.
   RESPONSE, ///< Memory read/write response.
+  ATOMIC,   ///< Indivisible memory mutation request.
+};
+
+/// @brief Mutation carried by a synchronous functional atomic request.
+using MemoryAtomicMutation = std::function<void(std::span<std::byte>)>;
+
+/// @brief Completion status for a synchronous functional-mode request.
+enum class MessageStatus : uint8_t {
+  Complete,
+  Unavailable,
+  Faulted,
+  Malformed,
 };
 
 /// @brief Common header for all messages sent over links.
@@ -39,6 +53,9 @@ struct MessageHeader {
   MessageOp op = MessageOp::NONE; ///< Operation type.
   uint8_t mtype = 0;              ///< Memory type (Mtype enum, unused for non-memory ops).
   uint32_t vmid = 0;              ///< VMID for address translation in daemon mode.
+  /// Optional caller-owned completion sink. Its lifetime follows the payload:
+  /// both must remain valid until a functional request returns.
+  MessageStatus *completion_status = nullptr;
 };
 
 /// @brief Simulation message sent over links between components.
@@ -172,5 +189,3 @@ private:
 };
 
 } // namespace simdojo
-
-#endif // SIMDOJO_SIM_MESSAGE_H_

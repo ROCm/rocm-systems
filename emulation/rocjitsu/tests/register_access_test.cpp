@@ -484,9 +484,7 @@ TEST(RegisterAccessTest, MaskedLaneWritePreservesBytesWithoutSyntheticRead) {
 
   cdna4::Operand destination(32, cdna4::OperandType::OPR_VGPR, 11);
   RegisterAccess(*fx.wf).write_lane_masked(destination, /*lane=*/3, /*value=*/0x00003300u,
-                                           /*update_byte_mask=*/0b0010,
-                                           /*observed_byte_mask=*/0b0010,
-                                           /*post_transform=*/nullptr);
+                                           /*byte_mask=*/0b0010);
 
   EXPECT_TRUE(fx.plugin->reads.empty());
   ASSERT_EQ(fx.plugin->writes.size(), 1u);
