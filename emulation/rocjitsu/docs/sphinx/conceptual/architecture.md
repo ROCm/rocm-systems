@@ -100,14 +100,23 @@ ISA-specific traits.
 
 Models the GPU hardware pipeline as simdojo components:
 
--   **Command processor** --- Monitors doorbells, fetches AQL packets,
-    parses kernel descriptors, and dispatches workgroups to compute
-    units. Handles SDMA packets.
+-   **Command processor** --- Monitors compute doorbells, owns AQL and the
+    supported PM4 compute queues, parses kernel descriptors, and dispatches
+    workgroups to compute units. SDMA queues belong to the SoC scheduler.
 -   **Compute unit** --- Executes wavefronts, managing SGPR/VGPR
     register files, LDS, and scratch memory.
--   **GPU memory** --- VRAM model with per-process VMID page tables and
-    support for both passthrough mode and daemon-mode shared `memfd`
-    mappings.
+-   **GPU VM** --- Frontend-neutral address-space identity, translation,
+    permissions, invalidation epochs, and generation-checked queue bindings.
+    Legacy KFD and PCI/VFIO queues retain the same immutable access snapshots.
+-   **GPU memory** --- Sparse physical backing bytes. Translation, process
+    mappings, and transport ownership live in the GPU VM and its frontend
+    adapters.
+-   **SDMA scheduler** --- SoC-owned queue scheduler and worker shared by KFD
+    and PCI/MES front ends. Ring consumers retain cursors, retry state, and
+    packet continuation independently from the command processor.
+-   **PCI/VFIO adapters** --- PCI configuration, BAR/MMIO, DMA, interrupt, and
+    transport-session lifetime. They adapt guest operations into the shared GPU
+    VM, queue registry, command processor, MES, and SDMA services.
 -   **Cache hierarchy** --- L1 vector cache, L1 scalar cache, L2 cache,
     and memory-side cache with MTYPE awareness.
 -   **Execution plugins** --- Pluggable hooks for runtime analysis. See

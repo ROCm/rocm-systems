@@ -55,6 +55,12 @@ VirtualMachine::VirtualMachine(std::vector<std::unique_ptr<SoC>> socs,
   driver_ = std::make_unique<SimulatedKfd>(ptrs, std::move(gpu_ids), daemon_mode);
 }
 
-VirtualMachine::~VirtualMachine() = default;
+VirtualMachine::~VirtualMachine() {
+  // Drain frontend-owned processes, queues, and debugger state before the core
+  // queue services close their registries and detach command processors.
+  driver_.reset();
+  for (SoC *soc : socs_)
+    soc->release_vm_resources();
+}
 
 } // namespace rocjitsu

@@ -625,6 +625,7 @@ if(BUILD_TESTS)
       AllocTests.cpp
       ParamTests.cpp
       ParameterApiTests.cpp
+      CollConfigTests.cpp
       EnvPluginTests.cpp
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
@@ -879,6 +880,7 @@ if(BUILD_TESTS)
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
       NChannelsPerNetPeerMPITests.cpp
+      MaxP2pPeersMPITests.cpp
       RegistrationMPITests.cpp
       HostApiMPITests.cpp
       HostApiCustomGinPluginMPITests.cpp

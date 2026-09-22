@@ -1241,6 +1241,11 @@
           "test_filter": "ParameterApiTests.*:ParameterApiTypedTests*"
         },
         {
+          "name": "CollConfigTests",
+          "description": "Per-collective ncclCollConfig_t validation tests",
+          "test_filter": "CollConfigTests.*:CollConfigTypedTests*"
+        },
+        {
           "name": "ArgCheck",
           "description": "Argument validation tests",
           "test_filter": "ArgCheckTest.*"
@@ -1304,6 +1309,26 @@
           "name": "CeAlltoAllEligibilityTest",
           "description": "CE AlltoAll eligibility gating tests matching taskAppend (CTA_POLICY_ZERO, sysmem, capture, group depth)",
           "test_filter": "CeAlltoAllEligibilityTest.*"
+        },
+        {
+          "name": "RcclAlltoAllDecision",
+          "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
+          "test_filter": "RcclAlltoAllDecision.*"
+        },
+        {
+          "name": "RcclCeAr2ShotMax",
+          "description": "CE AllReduce 2-shot arch threshold upper-bound tests",
+          "test_filter": "RcclCeAr2ShotMax.*"
+        },
+        {
+          "name": "RcclCeArGrownBuffer",
+          "description": "CE AllReduce grown-buffer (ceRegMax) eligibility tests",
+          "test_filter": "RcclCeArGrownBuffer.*"
+        },
+        {
+          "name": "SkipPresetTopoMatching",
+          "description": "SkipPreset arch topology matching and threshold lookup tests",
+          "test_filter": "SkipPresetTopoMatching.*"
         }
       ]
     },
@@ -2549,7 +2574,7 @@
         {
           "name": "CE_Internal_Init",
           "description": "ncclCeInit lifecycle: allocates sync window; ncclCeFinalize tears it down; double-fini is safe; independent state per comm",
-          "test_filter": "CeInternalMPITest.InitSetsWindowPointers:CeInternalMPITest.FiniNullsPointers:CeInternalMPITest.DoubleFiniIsSafe:CeInternalMPITest.IndependentCeStatePerComm:CeInternalMPITest.FiniAfterZeroCollectives"
+          "test_filter": "CeInternalMPITest.InitSetsWindowPointers:CeInternalMPITest.FiniNullsPointers:CeInternalMPITest.DoubleFiniIsSafe:CeInternalMPITest.IndependentCeStatePerComm:CeInternalMPITest.FiniAfterZeroCollectives:CeInternalMPITest.FreeBatchOpsParamsIsIdempotent"
         },
         {
           "name": "CE_Internal_Sync",
