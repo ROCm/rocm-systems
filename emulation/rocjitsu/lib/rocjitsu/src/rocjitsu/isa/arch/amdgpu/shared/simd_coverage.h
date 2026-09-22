@@ -255,6 +255,26 @@ template <bool Extended, typename Slot>
   };
   if (!capable(x) || !capable(y))
     return false;
+  // Each arithmetic slot must match its own MODE precision before either
+  // slot reads operands. Other policies use the mode-aware scalar executor.
+  auto is_arithmetic = [](const Slot &slot) {
+    return slot.op <= 7 || (Extended && (slot.op == 19 || (slot.op >= 32 && slot.op <= 34)));
+  };
+  auto matches_mode = [&](const Slot &slot) {
+    if (!is_arithmetic(slot))
+      return true;
+    const bool f64 = Extended && slot.op >= 32;
+    return fp_mode::native_arithmetic_matches(
+        f64 ? wf.fp_round_mode_f16_f64() : wf.fp_round_mode_f32(),
+        f64 ? wf.fp_denorm_mode_f16_f64() : wf.fp_denorm_mode_f32());
+  };
+  if (!matches_mode(x) || !matches_mode(y))
+    return false;
+  // Matching controls still permit arithmetic to raise host exception flags.
+  // Preserve the caller's environment just as the scalar arithmetic path does.
+  std::optional<fp_mode::ScopedEnvironment> environment;
+  if (is_arithmetic(x) || is_arithmetic(y))
+    environment.emplace(0);
   struct Results {
     alignas(util::native<uint32_t>) uint32_t words[64]{};
     alignas(util::native<uint64_t>) uint64_t pairs[64]{};

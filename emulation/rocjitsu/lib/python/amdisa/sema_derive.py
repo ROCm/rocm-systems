@@ -1044,6 +1044,17 @@ class _VectorUnary(_ScalarDeriver):
         op = sem.operation
         dtype = sem.data_type
 
+        if op == 'frexp_exp_f32' and dtype == 'f32':
+            src0 = _cast(_src(0, SemaType.F32), SemaType.F32)
+            result = SemaNode(
+                SemaNodeKind.CALL,
+                ty=SemaType.U32,
+                call_name='frexp_exp_f32',
+                children=(_id('frexp_exp_f32'), src0),
+            )
+            body = _assign(_cast(_dst(0), SemaType.U32), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
         if op == 'frexp_exp_f32' and dtype == 'f64':
             src0 = _cast(_src(0, SemaType.F64), SemaType.F64)
             result = SemaNode(
