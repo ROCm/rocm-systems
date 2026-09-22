@@ -2863,6 +2863,9 @@ constexpr bool kRegistrationNeedsConnect = true;
 constexpr bool kRegistrationNeedsNoConnect = false;
 constexpr unsigned kFlagSet = 1u;
 constexpr unsigned kFlagClear = 0u;
+constexpr int kRegisteredUserBuffer = 1;
+constexpr uint32_t kRegisteredDevFuncId = 64;
+constexpr uint32_t kUnregisteredDevFuncId = 65;
 
 struct TaskPostTuning_CollRegistrationLog {
   struct ncclComm* comm = nullptr;
@@ -3218,6 +3221,41 @@ TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_SeveralTasks_AppendEachWor
   EXPECT_EQ(ncclDevWorkTypeColl, nodes[2]->workType);
   EXPECT_EQ(static_cast<uint32_t>(kLegacyRoot), TaskPostTuning_WorkColl(nodes[0])->root);
   EXPECT_EQ(static_cast<uint32_t>(kLegacyRoot + 1), TaskPostTuning_WorkColl(nodes[2])->root);
+}
+
+uint64_t TaskPostTuning_RegVariantDevFuncKey(int algo, int proto, int regMode) {
+  return TaskPostTuning_DevFuncKey(ncclFuncAllReduce, ncclDevSum, ncclFloat32, algo, proto) |
+         (static_cast<uint64_t>(regMode & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
+}
+
+// enqueue.cc:546-556 re-picks the device function once registration is known; task_posttuning.cc has no equivalent.
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_RegisteredLl128Collective_CurrentlyKeepsThePlaceholderFunction) {
+  TaskPostTuning_LegacyWork work;
+  ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
+  ncclDevFuncNameToId[TaskPostTuning_RegVariantDevFuncKey(NCCL_ALGO_RING, NCCL_PROTO_LL128, kRegisteredUserBuffer)] =
+    kRegisteredDevFuncId;
+  work.task()->protocol = NCCL_PROTO_LL128;
+  work.task()->regBufType = NCCL_IPC_REG_BUFFER;
+  work.task()->devFuncId = kUnregisteredDevFuncId;
+
+  ASSERT_EQ(ncclSuccess, work.Run());
+
+  EXPECT_EQ(kFlagSet, work.OnlyColl()->regUsed);
+  EXPECT_EQ(kUnregisteredDevFuncId, work.task()->devFuncId);
+}
+
+TEST_F(TaskPostTuningMicrotest, DISABLED_LegacyEnqueueCollWork_RegisteredLl128Collective_ReselectsTheRegisteredFunction) {
+  TaskPostTuning_LegacyWork work;
+  ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
+  ncclDevFuncNameToId[TaskPostTuning_RegVariantDevFuncKey(NCCL_ALGO_RING, NCCL_PROTO_LL128, kRegisteredUserBuffer)] =
+    kRegisteredDevFuncId;
+  work.task()->protocol = NCCL_PROTO_LL128;
+  work.task()->regBufType = NCCL_IPC_REG_BUFFER;
+  work.task()->devFuncId = kUnregisteredDevFuncId;
+
+  ASSERT_EQ(ncclSuccess, work.Run());
+
+  EXPECT_EQ(kRegisteredDevFuncId, work.task()->devFuncId);
 }
 
 ::testing::AssertionResult TaskPostTuning_FlagsSetExactly(const bool* flags, std::initializer_list<int> algos) {
