@@ -549,7 +549,7 @@ def test_vop3_pack_and_pknorm_f16_use_true16_source_halves():
     assert 'read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1)' in pknorm
     assert 'float s0 = std::bit_cast<float>' not in pknorm
     assert 'auto cvt_i16 = [](float f) -> int16_t {' in pknorm
-    assert 'util::round_to_nearest_even(std::clamp(f * 32767.0f' in pknorm
+    assert 'util::rndne_scalar(std::clamp(static_cast<double>(f) * 32767.0' in pknorm
 
 
 def test_true16_special_vop3_simd_routes_use_true16_glue():
@@ -562,8 +562,8 @@ def test_true16_special_vop3_simd_routes_use_true16_glue():
     assert simd_probe_line('v_pack_b32_f16_vop3').startswith(
         '  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC'
     )
-    assert simd_probe_line('v_cvt_pk_norm_i16_f16_vop3').startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC'
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC' in simd_probe_line(
+        'v_cvt_pk_norm_i16_f16_vop3'
     )
     div_fixup = simd_probe_line('v_div_fixup_f16_vop3')
     assert 'if (!wf.fp16_ovfl())' not in div_fixup
@@ -601,3 +601,31 @@ def test_packed_rtz_vop3_modifiers_precede_conversion(has_abs):
     for source in (0, 1):
         assert f'if (inst_.neg & (1u << {source})) s{source} = -s{source};' in cpp
         assert cpp.index(f's{source} = -s{source}') < cpp.index('util::f32_to_f16_rtz')
+
+
+@pytest.mark.parametrize('dtype', ['f32', 'f16'])
+@pytest.mark.parametrize('op', ['u16', 'i16'])
+@pytest.mark.parametrize('has_abs', [False, True])
+def test_normalized_conversion_modifiers_and_single_rounding(dtype, op, has_abs):
+    cpp = gen_vector_cvt_pk(
+        ['vdst'],
+        ['src0', 'src1'],
+        'vector_cvt_pknorm',
+        op,
+        dtype=dtype,
+        is_vop3=True,
+        has_abs=has_abs,
+    )
+    assert ('std::fabs(s0)' in cpp) == has_abs
+    assert ('std::fabs(s1)' in cpp) == has_abs
+    assert 'if (inst_.neg & (1u << 0)) s0 = -s0;' in cpp
+    assert 'if (inst_.neg & (1u << 1)) s1 = -s1;' in cpp
+    assert 'util::rndne_scalar(std::clamp(static_cast<double>(f)' in cpp
+    for source in (0, 1):
+        negation = cpp.index(f's{source} = -s{source}')
+        assert negation < cpp.index('util::rndne_scalar')
+        if has_abs:
+            assert cpp.index(f'std::fabs(s{source})') < negation
+    for prefix in (['pk_norm', 'pknorm'] if dtype == 'f32' else ['pk_norm']):
+        probe = simd_probe_line(f'v_cvt_{prefix}_{op}_{dtype}_vop3')
+        assert probe.startswith('  if (!(inst.inst_.abs | inst.inst_.neg)) {')

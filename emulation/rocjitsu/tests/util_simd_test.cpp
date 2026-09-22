@@ -29,6 +29,12 @@
 
 namespace {
 
+struct RestoreEnvironment {
+  std::fenv_t saved;
+  RestoreEnvironment() { std::fegetenv(&saved); }
+  ~RestoreEnvironment() { std::fesetenv(&saved); }
+};
+
 // Toolchain-guard sweep length. The bit-exactness guards below were validated
 // over a 250k-iteration full-range sweep, but running that on every CI build
 // adds significant wall time (5 sweeps x 250k x SIMD width). Default to a
@@ -947,21 +953,21 @@ TEST(UtilSimd, CubeMa_F32_BitExact) {
 int16_t scalar_cvt_pknorm_i16(float f) {
   if (std::isnan(f))
     return 0;
-  float scaled = std::clamp(f * 32767.0f, -32768.0f, 32767.0f);
-  float lower = std::floor(scaled);
-  float fraction = scaled - lower;
-  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
-    lower += 1.0f;
+  double scaled = std::clamp(static_cast<double>(f) * 32767.0, -32767.0, 32767.0);
+  double lower = std::floor(scaled);
+  double fraction = scaled - lower;
+  if (fraction > 0.5 || (fraction == 0.5 && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    lower += 1.0;
   return static_cast<int16_t>(lower);
 }
 uint16_t scalar_cvt_pknorm_u16(float f) {
   if (std::isnan(f))
     return 0;
-  float scaled = std::clamp(f * 65535.0f, 0.0f, 65535.0f);
-  float lower = std::floor(scaled);
-  float fraction = scaled - lower;
-  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
-    lower += 1.0f;
+  double scaled = std::clamp(static_cast<double>(f) * 65535.0, 0.0, 65535.0);
+  double lower = std::floor(scaled);
+  double fraction = scaled - lower;
+  if (fraction > 0.5 || (fraction == 0.5 && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    lower += 1.0;
   return static_cast<uint16_t>(lower);
 }
 
@@ -1005,11 +1011,7 @@ template <typename Float> void check_rndne_host_independence() {
   std::mt19937_64 rng(0x11939);
   for (unsigned i = 0; i < 2048; ++i)
     inputs.push_back(static_cast<Bits>(rng()));
-  struct RestoreEnvironment {
-    std::fenv_t saved;
-    RestoreEnvironment() { std::fegetenv(&saved); }
-    ~RestoreEnvironment() { std::fesetenv(&saved); }
-  } restore_environment;
+  RestoreEnvironment restore_environment;
   ASSERT_EQ(std::fesetround(FE_TONEAREST), 0);
   std::vector<Bits> expected;
   for (Bits bits : inputs) {
@@ -1069,6 +1071,37 @@ TEST(UtilSimd, CvtPkNormI16_F32_BitExact) {
                 static_cast<uint16_t>(scalar_cvt_pknorm_i16(fv)))
           << "i16 f=" << fv << " lane=" << i;
       EXPECT_EQ(static_cast<uint16_t>(ru[i]), scalar_cvt_pknorm_u16(fv)) << "u16 f=" << fv;
+    }
+  }
+}
+
+TEST(UtilSimd, PackedNormalizedThresholdsIgnoreHostRounding) {
+  SKIP_IF_NO_SIMD();
+  using V = util::native<float>;
+  RestoreEnvironment restore_environment;
+  // Generate the neighborhood in nearest mode, then evaluate under every mode.
+  ASSERT_EQ(std::fesetround(FE_TONEAREST), 0);
+  std::vector<float> inputs;
+  for (int i = 0; i < 65536; ++i) {
+    for (float center : {float((i + 0.5) / 65535), float((i - 32768 + 0.5) / 32767)}) {
+      inputs.push_back(std::nextafter(center, -std::numeric_limits<float>::infinity()));
+      inputs.push_back(center);
+      inputs.push_back(std::nextafter(center, std::numeric_limits<float>::infinity()));
+    }
+  }
+  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    ASSERT_EQ(std::fesetround(mode), 0);
+    SCOPED_TRACE(mode);
+    for (size_t base = 0; base < inputs.size(); base += V::size()) {
+      V f([&](auto lane) { return inputs[(base + lane) % inputs.size()]; });
+      const auto signed_result = util::cvt_pknorm_i16_f32_simd(f);
+      const auto unsigned_result = util::cvt_pknorm_u16_f32_simd(f);
+      for (size_t lane = 0; lane < V::size(); ++lane) {
+        EXPECT_EQ(static_cast<int32_t>(signed_result[lane]), scalar_cvt_pknorm_i16(f[lane]))
+            << "input bits=" << std::bit_cast<uint32_t>(float(f[lane]));
+        EXPECT_EQ(static_cast<uint32_t>(unsigned_result[lane]), scalar_cvt_pknorm_u16(f[lane]))
+            << "input bits=" << std::bit_cast<uint32_t>(float(f[lane]));
+      }
     }
   }
 }

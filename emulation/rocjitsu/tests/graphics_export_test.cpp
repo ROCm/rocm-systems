@@ -506,10 +506,10 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
         // Pull I/W, J/W, 1/W; linear I/J; position XYZW; packed XY.
         const uint32_t x = 1 + covered_index % 2, y = 1 + covered_index / 2;
         // Screen vertices are (0,0), (0,4), (4,0), with W={1,2,4}.
-        // Every intermediate below is dyadic and exactly representable.
+        // Barycentric and reciprocal-W values below are exactly representable.
         const float b1 = (y + 0.5f) / 4, b2 = (x + 0.5f) / 4;
         const float rw = 1 - b1 - b2 + b1 / 2 + b2 / 4;
-        const float expected[] = {b1 / 2, b2 / 4, rw, b1, b2, x + 0.5f, y + 0.5f, 0, rw};
+        const float expected[] = {b1 / 2, b2 / 4, rw, b1, b2, x + 0.5f, y + 0.5f, 0, 1.0f / rw};
         for (uint32_t reg = 0; reg < 9; ++reg)
           EXPECT_EQ(wave_->debug_read_vgpr(reg, lane), std::bit_cast<uint32_t>(expected[reg]))
               << "register=" << reg << " lane=" << lane;
@@ -1453,6 +1453,21 @@ TEST_P(GraphicsExportTest, WideColorAttachmentsWriteFullTexelsAndPreserveMaskedC
        .mask = 3,
        .exported = {0xdc00bc00, 0xbc000400},
        .expected = {0x00000000}},
+      // Packed UNORM16 exports retain every channel bit, including endpoints.
+      {.data_format = 12,
+       .number_format = 0,
+       .export_format = 5,
+       .bytes = 8,
+       .mask = 3,
+       .exported = {0x00010000, 0xfffffffe},
+       .expected = {0x00010000, 0xfffffffe}},
+      {.data_format = 12,
+       .number_format = 0,
+       .export_format = 5,
+       .bytes = 8,
+       .mask = 3,
+       .exported = {0x7fff8000, 0xabc12345},
+       .expected = {0x7fff8000, 0xabc12345}},
       {.data_format = 12,
        .number_format = 0,
        .export_format = 4,

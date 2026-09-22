@@ -1108,25 +1108,32 @@ inline native<float> round_to_nearest_even_simd(native<float> value) {
   return lower;
 }
 
-/// Normalized f32->int16 / ->uint16 pack-convert lanes (back v_cvt_pk[_]norm_*).
-/// Scalar: `isnan(f) ? 0 : static_cast<intN>(round_to_nearest_even(clamp(f * K, lo, hi)))`. The
-/// NaN->0 blend is done in the FLOAT domain (so the mask type matches) before the int conversion,
-/// avoiding any float-mask -> int-mask conversion. The caller masks &0xFFFF when packing. i16:
-/// K=32767, clamp
-/// [-32768,32767]; u16: K=65535, clamp [0,65535].
-inline native<int32_t> cvt_pknorm_i16_f32_simd(native<float> f) {
-  native<float> p = f * native<float>(32767.0f);
-  stdx::where(p < native<float>(-32768.0f), p) = native<float>(-32768.0f);
-  stdx::where(p > native<float>(32767.0f), p) = native<float>(32767.0f);
-  stdx::where(stdx::isnan(f), p) = native<float>(0.0f);
-  return stdx::static_simd_cast<native<int32_t>>(round_to_nearest_even_simd(p));
+/// Round a normalized value scaled by 32767 or 65535 to the nearest integer,
+/// with ties to even. Clamp inputs to [minimum, 1] and convert NaNs to zero.
+/// An FP32 product can round onto an integer midpoint. The FMA residual
+/// distinguishes these false ties so the conversion rounds only once.
+inline native<float> round_normalized_simd(native<float> f, float scale, float minimum) {
+  using F = native<float>;
+  stdx::where(f < F(minimum), f) = F(minimum);
+  stdx::where(f > F(1.0f), f) = F(1.0f);
+  stdx::where(stdx::isnan(f), f) = F(0.0f);
+  const F product = f * F(scale);
+  const F residual = stdx::fma(f, F(scale), -product);
+  const F lower = stdx::floor(product);
+  const auto midpoint = product == lower + F(0.5f);
+  F rounded = rndne_simd(product);
+  stdx::where(midpoint && (residual < F(0.0f)), rounded) = lower;
+  stdx::where(midpoint && (residual > F(0.0f)), rounded) = lower + F(1.0f);
+  return rounded;
 }
+
+/// Convert to signed normalized integers in [-32767, 32767]; NaNs become zero.
+inline native<int32_t> cvt_pknorm_i16_f32_simd(native<float> f) {
+  return stdx::static_simd_cast<native<int32_t>>(round_normalized_simd(f, 32767.0f, -1.0f));
+}
+/// Convert to unsigned normalized integers in [0, 65535]; NaNs become zero.
 inline native<uint32_t> cvt_pknorm_u16_f32_simd(native<float> f) {
-  native<float> p = f * native<float>(65535.0f);
-  stdx::where(p < native<float>(0.0f), p) = native<float>(0.0f);
-  stdx::where(p > native<float>(65535.0f), p) = native<float>(65535.0f);
-  stdx::where(stdx::isnan(f), p) = native<float>(0.0f);
-  return stdx::static_simd_cast<native<uint32_t>>(round_to_nearest_even_simd(p));
+  return stdx::static_simd_cast<native<uint32_t>>(round_normalized_simd(f, 65535.0f, 0.0f));
 }
 
 /// Vector port of the f32 `std::frexp` mantissa over raw float bits. Returns the

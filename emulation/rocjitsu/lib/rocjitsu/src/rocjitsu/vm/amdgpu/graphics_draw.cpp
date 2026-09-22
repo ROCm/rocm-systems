@@ -35,6 +35,9 @@ constexpr uint32_t kNumberUnorm = 0, kNumberUint = 4, kNumberSint = 5, kNumberSr
                    kNumberFloat = 7;
 constexpr uint32_t kBufRgba8Unorm = 42, kBufRgba16Unorm = 51, kBufRgba32Uint = 61;
 
+constexpr uint32_t kExportFp16Abgr = 4, kExportUnorm16Abgr = 5, kExportUint16Abgr = 7,
+                   kExport32Abgr = 9;
+
 // CB color formats use separate data and number fields; pack_buffer_format uses
 // the combined GFX11 buffer format table.
 uint32_t color_buffer_format(uint32_t data_format, uint32_t number_format) {
@@ -346,8 +349,9 @@ void GraphicsDraw::initialize(Wavefront &wave, uint32_t workgroup, uint32_t wave
           put(f.linear_j);
         }
       }
+      // POS_W_FLOAT supplies W; PERSP_PULL_MODEL above supplies 1/W.
       const std::array<float, 4> position{float(f.x) + 0.5f, float(f.y) + 0.5f, f.z,
-                                          f.pull_model[2]};
+                                          1.0f / f.pull_model[2]};
       for (uint32_t component = 0; component < 4; ++component)
         if (context_[0x198] & (1u << (8 + component)))
           put(position[component]);
@@ -508,12 +512,13 @@ void GraphicsDraw::prepare_colors() {
     const uint32_t view = context_[block + 1];
     color.first_layer = view & layer_mask;
     color.last_layer = (view >> layer_bits) & layer_mask;
-    if (!color.memory_format || (color.srgb && color.export_format != 4) || (info & (3u << 11)) ||
-        (attrib & (gfx12 ? ~0u : ~0x30u)) || ((attrib3 >> 24) & 3) > 1 ||
+    if (!color.memory_format || (color.srgb && color.export_format != kExportFp16Abgr) ||
+        (info & (3u << 11)) || (attrib & (gfx12 ? ~0u : ~0x30u)) || ((attrib3 >> 24) & 3) > 1 ||
         (attrib3 & (1u << layer_bits)) || (context_[block + 2] & ~31u) ||
         color.first_layer > color.last_layer || color.last_layer > (attrib3 & layer_mask) ||
         (view & (gfx12 ? 0xf0000000u : 0xc0000000u)) ||
-        (color.export_format != 4 && color.export_format != 7 && color.export_format != 9))
+        (color.export_format != kExportFp16Abgr && color.export_format != kExportUnorm16Abgr &&
+         color.export_format != kExportUint16Abgr && color.export_format != kExport32Abgr))
       throw std::runtime_error("unsupported graphics color state");
     color.blend = context_[0x1e0 + target];
     if ((color.blend & kBlendEnable) &&
@@ -978,13 +983,18 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
         if (!exported.mask || batch.relative_layer > color.last_layer - color.first_layer)
           continue;
         std::array<uint32_t, 4> components = exported.values;
-        if (color.export_format == 4 || color.export_format == 7) {
+        if (color.export_format == kExportFp16Abgr || color.export_format == kExportUnorm16Abgr ||
+            color.export_format == kExportUint16Abgr) {
           if (exported.mask != 3)
             throw std::runtime_error("unsupported packed graphics color export mask");
           for (uint32_t c = 0; c < 4; ++c) {
             const uint16_t half = exported.values[c / 2] >> (16 * (c % 2));
-            components[c] =
-                color.export_format == 7 ? half : std::bit_cast<uint32_t>(util::f16_to_f32(half));
+            if (color.export_format == kExportUint16Abgr)
+              components[c] = half;
+            else if (color.export_format == kExportUnorm16Abgr)
+              components[c] = std::bit_cast<uint32_t>(half / 65535.0f);
+            else
+              components[c] = std::bit_cast<uint32_t>(util::f16_to_f32(half));
           }
         } else if (exported.mask != 15) {
           throw std::runtime_error("unsupported graphics color export mask");

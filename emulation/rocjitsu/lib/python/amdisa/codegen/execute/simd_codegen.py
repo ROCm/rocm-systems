@@ -1762,7 +1762,7 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
     # them on the (correct) scalar path. Only the int-domain twins
     # v_cvt_pk_i16_i32 / v_cvt_pk_u16_u32 above are safe to route through this glue.
     # Normalized f32 pack-converts. src read as raw f32 (bit_cast), scale by K,
-    # clamp, isnan->0, truncate, pack 16|16. Helpers in util/simd.h.
+    # clamp, isnan->0, round once to nearest-even, pack 16|16. Helpers in util/simd.h.
     'v_cvt_pknorm_i16_f32_vop3': (
         'uint32_t',
         '[](auto a, auto b) {'
@@ -2542,6 +2542,16 @@ def _indent_probe(probe: str) -> str:
     return '\n'.join(('  ' + line) if line else line for line in probe.splitlines())
 
 
+_PACKED_NORMALIZED_VOP3 = (
+    'v_cvt_pknorm_i16_f32_vop3',
+    'v_cvt_pknorm_u16_f32_vop3',
+    'v_cvt_pk_norm_i16_f32_vop3',
+    'v_cvt_pk_norm_u16_f32_vop3',
+    'v_cvt_pk_norm_i16_f16_vop3',
+    'v_cvt_pk_norm_u16_f16_vop3',
+)
+
+
 _PACKED_RTZ_VOP3 = ('v_cvt_pkrtz_f16_f32_vop3', 'v_cvt_pk_rtz_f16_f32_vop3')
 
 
@@ -2882,13 +2892,21 @@ def simd_probe_line(
     spec3bin16 = SIMD_VOP3_BINARY_TRUE16_SRC.get(template_name)
     if spec3bin16 is not None:
         cpp_t, cpp_op = spec3bin16
-        return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC({cpp_t}, {cpp_op});'
+        probe = f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC({cpp_t}, {cpp_op});'
+        if template_name in _PACKED_NORMALIZED_VOP3:
+            # Raw-word glue cannot apply floating source modifiers; use the scalar body.
+            return _unmodified_vop3_src_probe(probe)
+        return probe
     spec3binx = SIMD_VOP3_BINARY_INT_EXTRA.get(template_name)
     if spec3binx is not None:
         if true16_vop3:
             return None
         cpp_t, cpp_op = spec3binx
-        return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});'
+        probe = f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});'
+        if template_name in _PACKED_NORMALIZED_VOP3:
+            # Raw-word glue cannot apply floating source modifiers; use the scalar body.
+            return _unmodified_vop3_src_probe(probe)
+        return probe
     # VOP3-only f32 binary (no VOP2 twin): IEEE maximum/minimum. Per-source
     # abs/neg + result omod/clamp applied by the f32 binary glue.
     spec3binf32 = SIMD_VOP3_BINARY_FP32.get(template_name)
