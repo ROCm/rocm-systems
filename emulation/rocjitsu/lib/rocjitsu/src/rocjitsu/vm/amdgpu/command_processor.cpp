@@ -1344,8 +1344,11 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
         return QueuePrepareCloseStatus::Faulted;
       retry_close = queue->read_pointer_journal.publication_pending() ||
                     queue->publication_retry_pending || queue->idle_publication.active() ||
-                    queue->scratch_request.active() || queue->scratch_reclaim.active() ||
-                    !queue->entries.empty();
+                    // After delivery, ROCr owns the scratch request and may suspend the queue
+                    // while allocating backing. Only an unfinished notification publication
+                    // must delay that removal.
+                    queue->scratch_request.publication_pending() ||
+                    queue->scratch_reclaim.active() || !queue->entries.empty();
     }
     if (!retry_close) {
       queue_id = queue->queue_id;
