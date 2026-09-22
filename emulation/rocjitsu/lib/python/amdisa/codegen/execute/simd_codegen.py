@@ -740,7 +740,7 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     'v_cvt_f32_f16_vop1': (
         'uint32_t',
         'float32_t',
-        '[](auto a) { return util::f16_to_f32_simd(a); }',
+        '[&wf](auto a) { return ::rocjitsu::amdgpu::cvt_f32_f16_mode_simd(a, wf); }',
     ),
     'v_cvt_f16_f32_vop1': (
         'float32_t',
@@ -3021,10 +3021,11 @@ def simd_probe_line(
                 'v_cvt_flr_i32_f32',
                 'v_cvt_nearest_i32_f32',
                 'v_cvt_floor_i32_f32',
+                'v_cvt_i16_f16',
+                'v_cvt_u16_f16',
             ):
                 # The VOP1 shortcut does not apply floating source modifiers.
-                # F16 results also use uint32_t storage, but must reach the
-                # mode-aware half-conversion probe below.
+                # Modified F32/F16 inputs use the scalar conversion body.
                 return f'  if (!inst.inst_.abs && !inst.inst_.neg) {{\n{probe}\n  }}'
             if base in (
                 'v_cvt_f32_i32',

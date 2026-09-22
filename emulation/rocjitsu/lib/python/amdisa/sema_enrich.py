@@ -51,6 +51,9 @@ _NO_DST_MODIFIER_INSTRUCTIONS = frozenset(
         'V_CVT_F16_FP8',
         'V_CVT_NORM_I16_F16',
         'V_CVT_NORM_U16_F16',
+        'V_CVT_I16_F16',
+        'V_CVT_U16_F16',
+        'V_CVT_F32_F16',
     }
 )
 

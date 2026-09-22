@@ -225,6 +225,25 @@ inline uint16_t round_exact_to_bf16(ExactF64Sum sum, uint32_t round_mode) {
 
 } // namespace detail
 
+/// @brief Whether a floating conversion quiets signaling NaNs on this target.
+inline bool conversion_quiets_nan(rj_code_arch_t arch, bool ieee_mode) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 || ieee_mode;
+}
+
+/// @brief Apply V_CVT_F32_F16 policy to an already decoded and modified half.
+/// @details Raw half decoding preserves signaling NaNs and subnormals; the
+/// instruction applies MODE input flushing and target-specific NaN quieting.
+inline uint32_t cvt_f32_f16(float source, rj_code_arch_t arch, uint32_t denorm_mode,
+                            bool ieee_mode) {
+  uint32_t bits = std::bit_cast<uint32_t>(source);
+  const uint32_t magnitude = bits & 0x7fffffffu;
+  if (!(denorm_mode & 1u) && magnitude < 0x38800000u)
+    return bits & 0x80000000u;
+  if (conversion_quiets_nan(arch, ieee_mode) && magnitude > 0x7f800000u)
+    bits |= 0x00400000u;
+  return bits;
+}
+
 /// @brief Return the OMOD value supported by an ordinary floating-point result.
 inline uint32_t effective_omod(rj_code_arch_t arch, uint32_t denorm_mode, bool ieee_mode,
                                uint32_t omod) {

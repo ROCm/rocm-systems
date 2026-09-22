@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -258,8 +259,8 @@ void VCvtF32F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   }
   auto &inst = *this;
   if (amdgpu::try_execute_words_simd<1, true, false, 1>(inst, wf, [&](auto a) {
-        return std::bit_cast<util::native<uint32_t>>(([](auto a) {
-          return util::f16_to_f32_simd(a);
+        return std::bit_cast<util::native<uint32_t>>(([&wf](auto a) {
+          return ::rocjitsu::amdgpu::cvt_f32_f16_mode_simd(a, wf);
         })(std::bit_cast<util::native<uint32_t>>(a)));
       }))
     return;
@@ -269,8 +270,9 @@ void VCvtF32F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         *this, wf, vdst, lane,
-        std::bit_cast<uint32_t>(util::f16_to_f32(
-            static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)))));
+        amdgpu::fp_mode::cvt_f32_f16(util::f16_to_f32(static_cast<uint16_t>(
+                                         amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                                     wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode()));
   }
 }
 
@@ -292,8 +294,8 @@ RJ_NOINLINE void VCvtF32F16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
   if (amdgpu::try_execute_words_simd<1, true, false, 1>(inst, wf, [&](auto a) {
-        return std::bit_cast<util::native<uint32_t>>(([](auto a) {
-          return util::f16_to_f32_simd(a);
+        return std::bit_cast<util::native<uint32_t>>(([&wf](auto a) {
+          return ::rocjitsu::amdgpu::cvt_f32_f16_mode_simd(a, wf);
         })(std::bit_cast<util::native<uint32_t>>(a)));
       }))
     return;
@@ -303,8 +305,9 @@ RJ_NOINLINE void VCvtF32F16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         *this, wf, vdst, lane,
-        std::bit_cast<uint32_t>(util::f16_to_f32(
-            static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)))));
+        amdgpu::fp_mode::cvt_f32_f16(util::f16_to_f32(static_cast<uint16_t>(
+                                         amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                                     wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode()));
   }
   dpp_write_mask_scope_.restore();
 }

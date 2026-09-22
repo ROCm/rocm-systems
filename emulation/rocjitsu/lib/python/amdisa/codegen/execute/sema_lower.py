@@ -1290,6 +1290,8 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     # generic generated scalar F16 arithmetic is gated out in CodeGenerator.
     'cvt_f16_f32': 'util::f32_to_f16_mode(std::bit_cast<float>(static_cast<uint32_t>({0})), wf.fp16_ovfl())',
     'cvt_f32_f16': 'std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>({0})))',
+    # VALU applies MODE policy; keep the existing raw SALU conversion separate.
+    'cvt_f32_f16_valu': 'amdgpu::fp_mode::cvt_f32_f16({0}, wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode())',
     'cvt_f32_bf16': 'std::bit_cast<uint32_t>(util::bf16_to_f32(static_cast<uint16_t>({0})))',
     'cvt_f32_fp8': 'std::bit_cast<uint32_t>(util::fp8_e4m3_to_f32(static_cast<uint8_t>({0})))',
     'cvt_f32_bf8': 'std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(static_cast<uint8_t>({0})))',
@@ -1310,11 +1312,12 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'cvt_f32_f64': 'std::bit_cast<uint32_t>(static_cast<float>(std::bit_cast<double>(static_cast<uint64_t>({0}))))',
     'cvt_f16_u16': 'util::f32_to_f16_mode(static_cast<float>(static_cast<uint16_t>({0})), wf.fp16_ovfl())',
     'cvt_f16_i16': 'util::f32_to_f16_mode(static_cast<float>(static_cast<int16_t>({0} & 0xFFFF)), wf.fp16_ovfl())',
-    'cvt_u16_f16': '[&]() -> uint32_t {{ float s = util::f16_to_f32(static_cast<uint16_t>({0}));'
+    # Decoded floats include ABS/NEG; integer conversion truncates toward zero.
+    'cvt_u16_f16': '[&]() -> uint32_t {{ float s = {0};'
     ' if (std::isnan(s) || s < 0.0f) return 0u;'
     ' if (s >= 65536.0f) return static_cast<uint32_t>(UINT16_MAX);'
     ' return static_cast<uint32_t>(static_cast<uint16_t>(s)); }}()',
-    'cvt_i16_f16': '[&]() -> uint32_t {{ float s = util::f16_to_f32(static_cast<uint16_t>({0}));'
+    'cvt_i16_f16': '[&]() -> uint32_t {{ float s = {0};'
     ' if (std::isnan(s)) return 0u;'
     ' if (s >= 32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MAX));'
     ' if (s < -32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MIN));'

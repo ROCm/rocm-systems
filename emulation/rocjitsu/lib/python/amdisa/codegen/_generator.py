@@ -44,7 +44,12 @@ from amdisa.fieldless_policy import (
     fieldless_policy,
     operand_participates,
 )
-from amdisa.semantics import F32_TO_INTEGER_DTYPES, InstructionSemantics, SemanticsSpec
+from amdisa.semantics import (
+    F16_INPUT_CONVERSION_DTYPES,
+    F32_TO_INTEGER_DTYPES,
+    InstructionSemantics,
+    SemanticsSpec,
+)
 from amdisa.isa_profile import DppOpcodeRule
 
 from amdisa.codegen.config import CodegenConfig
@@ -6225,9 +6230,17 @@ class CodeGenerator:
                 is_f32_to_integer = (
                     cls == 'vector_unary' and dtype in F32_TO_INTEGER_DTYPES
                 )
+                is_f16_input_conversion = (
+                    cls == 'vector_unary' and dtype in F16_INPUT_CONVERSION_DTYPES
+                )
                 if (
                     is_vop3
-                    and (is_float_op or is_integer_to_f32 or is_f32_to_integer)
+                    and (
+                        is_float_op
+                        or is_integer_to_f32
+                        or is_f32_to_integer
+                        or is_f16_input_conversion
+                    )
                     and not is_true16_mov
                     and cls != 'pseudo_scalar_unary'
                 ):
@@ -6357,27 +6370,6 @@ class CodeGenerator:
                             f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, (({selector_read} >> lane) & 1) ? src1_value : src0_value);\n'
                             '  }\n'
                         )
-                if (
-                    inst.name == 'V_CVT_F32_F16'
-                    and is_true16_vop3
-                    and src_ops
-                    and dst_ops
-                ):
-                    return (
-                        '  uint64_t exec = wf.exec();\n'
-                        '  const uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);\n'
-                        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {\n'
-                        '    if (!(exec & (1ULL << lane)))\n'
-                        '      continue;\n'
-                        f'    uint32_t raw = ::rocjitsu::amdgpu::read_vop3_true16_src({src_ops[0]}, wf, lane, opsel, 0);\n'
-                        '    float src = util::f16_to_f32(static_cast<uint16_t>(raw));\n'
-                        '    if (inst_.abs & (1u << 0))\n'
-                        '      src = std::fabs(src);\n'
-                        '    if (inst_.neg & (1u << 0))\n'
-                        '      src = -src;\n'
-                        f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, std::bit_cast<uint32_t>(src));\n'
-                        '  }\n'
-                    )
                 true16_special_vop3_ops = {
                     'V_ASHRREV_I16': (
                         2,

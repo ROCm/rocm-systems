@@ -849,6 +849,27 @@ class TestDeriveVectorUnary:
         assert 'inst_.omod' not in cpp
         assert 'inst_.clamp' not in cpp
 
+    @pytest.mark.parametrize('suffix', ['I16', 'U16', 'F32'])
+    @pytest.mark.parametrize('has_abs', [False, True])
+    def test_cvt_i16_u16_f32_f16_modifiers_precede_conversion(self, suffix, has_abs):
+        sem = derive_semantics(f'V_CVT_{suffix}_F16', 'ENC_VOP3')
+        fields = {'neg', 'clamp', 'omod'}
+        if has_abs:
+            fields.add('abs')
+        block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
+        cpp = lower_sema_block(block)
+        assert cpp.index('util::f16_to_f32') < cpp.index('sv = -sv')
+        assert ('std::fabs(sv)' in cpp) == has_abs
+        if has_abs:
+            assert cpp.index('std::fabs(sv)') < cpp.index('sv = -sv')
+        assert 'inst_.omod' not in cpp
+        assert 'inst_.clamp' not in cpp
+        if suffix == 'F32':
+            assert 'wf.fp_denorm_mode_f16_f64()' in cpp
+            assert 'wf.ieee_mode()' in cpp
+        else:
+            assert cpp.index('sv = -sv') < cpp.index('std::isnan(s)')
+
     @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
     def test_cos_bf16_lowers_through_shared_transcendental(self, enc):
         sem = derive_semantics('V_COS_BF16', enc)

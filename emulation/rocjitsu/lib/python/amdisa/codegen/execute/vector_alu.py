@@ -18,7 +18,7 @@ from amdisa.codegen.execute.vop3_modifiers import (
     vop3_dst_mod,
     vop3_dst_mod_f64,
 )
-from amdisa.semantics import F32_TO_INTEGER_DTYPES
+from amdisa.semantics import F16_INPUT_CONVERSION_DTYPES, F32_TO_INTEGER_DTYPES
 
 
 def _read_vop3_true16_src(opnd: str, opsel: str, src_idx: int) -> str:
@@ -156,8 +156,8 @@ def gen_vector_unary(
                 f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, util::f32_to_f16_mode(s, wf.fp16_ovfl()));'
             ),
             'f32_f16': (
-                f'    uint32_t raw = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);\n'
-                f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(raw))));'
+                f'    float s = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)));\n'
+                f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, amdgpu::fp_mode::cvt_f32_f16(s, wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode()));'
             ),
             'f16_u16': (
                 f'    uint16_t s = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));\n'
@@ -196,7 +196,9 @@ def gen_vector_unary(
         }
         if dtype in cvt_map:
             body = cvt_map[dtype]
-            if is_vop3 and dtype in F32_TO_INTEGER_DTYPES:
+            if is_vop3 and dtype in (
+                F32_TO_INTEGER_DTYPES | F16_INPUT_CONVERSION_DTYPES
+            ):
                 source, rest = body.split('\n', 1)
                 L.append(source)
                 L.extend(vop3_src_mod('s', 0, has_abs))

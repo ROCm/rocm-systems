@@ -572,4 +572,111 @@ TEST_P(Vop3ConversionModifierTest, UnaryNormalizedHalfRoundsOnceAndAppliesModifi
   }
 }
 
+TEST_P(Vop3ConversionModifierTest, HalfInputConversionsApplyModifiersAndMode) {
+  struct Case {
+    uint16_t half;
+    uint32_t widened;
+    uint16_t unsigned_value, signed_positive, signed_negative;
+  };
+  // Raw outputs from physical gfx1100/gfx1201, including signaling NaNs.
+  constexpr Case cases[] = {
+      {0x0000, 0x00000000, 0, 0, 0},
+      {0x0001, 0x33800000, 0, 0, 0},
+      {0x03ff, 0x387fc000, 0, 0, 0},
+      {0x0400, 0x38800000, 0, 0, 0},
+      {0x3e00, 0x3fc00000, 1, 1, 0xffff},
+      {0x47c0, 0x40f80000, 7, 7, 0xfff9},
+      {0x77ff, 0x46ffe000, 32752, 32752, 0x8010},
+      {0x7800, 0x47000000, 32768, 32767, 0x8000},
+      {0x7bff, 0x477fe000, 65504, 32767, 0x8000},
+      {0x7c00, 0x7f800000, 65535, 32767, 0x8000},
+      {0x7c01, 0x7f802000, 0, 0, 0},
+      {0x7e01, 0x7fc02000, 0, 0, 0},
+  };
+  const bool early_rdna =
+      GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool preserve_half = !early_rdna && !gfx9();
+  const bool always_quiet =
+      GetParam() == ROCJITSU_CODE_ARCH_RDNA4 || GetParam() == ROCJITSU_CODE_ARCH_CDNA5;
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("half_input_memory");
+    amdgpu::L2Cache l2("half_input_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = gfx9() ? 102 : 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("half_input", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+    ASSERT_NE(wf, nullptr);
+    const auto vb = wf->vgpr_alloc().base;
+    for (bool vop3 : {false, true}) {
+      for (uint32_t kind = 0; kind < 3; ++kind) {
+        const bool floating = kind == 2;
+        // Unsigned/signed VOP1 opcodes 59/60 on GFX9, 82/83 on later targets.
+        const uint32_t vop1_op = floating ? 11u : (gfx9() ? 59u : 82u) + kind;
+        const uint32_t opcode = vop1_op + (vop3 ? (gfx9() ? 320u : 384u) : 0u);
+        for (uint32_t half = 0;
+             half < (vop3 && !early_rdna && (floating || preserve_half) ? 2u : 1u); ++half) {
+          for (uint32_t modifiers = 0; modifiers < (vop3 ? 4u : 1u); ++modifiers) {
+            const uint32_t abs_mask = modifiers & 1u;
+            const uint32_t neg_mask = modifiers >> 1;
+            const uint32_t opsel = half | (!floating ? half << 3 : 0u);
+            const uint32_t words[] = {vop3 ? ((gfx9() ? 0xd0000002u : 0xd4000002u) |
+                                              (opcode << 16) | (abs_mask << 8) | (opsel << 11))
+                                           : (0x7e000100u | (2u << 17) | (opcode << 9)),
+                                      256u | (neg_mask << 29)};
+            std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+            ASSERT_NE(inst, nullptr);
+            for (uint32_t mode : {0u, 0x20fu, 0x40u, 0x24fu, 0x80u, 0x28fu, 0xc0u, 0x2cfu}) {
+              wf->set_mode_raw(mode);
+              for (uint64_t exec : {wf->wf_size() == 64 ? ~0ull : 0xffffffffull, 0x55ull}) {
+                SCOPED_TRACE(testing::Message()
+                             << "scalar=" << force_scalar << " vop3=" << vop3 << " kind=" << kind
+                             << " half=" << half << " abs_mask=" << abs_mask
+                             << " neg_mask=" << neg_mask << " mode=" << mode << " exec=" << exec);
+                wf->set_exec(exec);
+                for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+                  const uint32_t input =
+                      cases[(lane / 2) % std::size(cases)].half | ((lane & 1u) << 15);
+                  cu->write_vgpr(vb, lane, half ? (input << 16) | 0xdead : input | 0xdead0000u);
+                  cu->write_vgpr(vb + 2, lane, 0xabcd1234u);
+                }
+                ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+                for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+                  const auto &c = cases[(lane / 2) % std::size(cases)];
+                  const bool negative = ((lane & 1u) && !abs_mask) ^ (neg_mask != 0);
+                  uint32_t expected;
+                  if (floating) {
+                    expected = c.widened;
+                    if (!(mode & 0x40u) && c.half < 0x0400u)
+                      expected = 0;
+                    if ((always_quiet || (mode & 0x200u)) && c.half > 0x7c00u)
+                      expected |= 0x00400000u;
+                    expected |= negative ? 0x80000000u : 0;
+                  } else {
+                    const uint32_t value = kind == 0
+                                               ? (negative ? 0 : c.unsigned_value)
+                                               : (negative ? c.signed_negative : c.signed_positive);
+                    expected = preserve_half
+                                   ? (half ? (value << 16) | 0x1234u : value | 0xabcd0000u)
+                                   : value;
+                  }
+                  EXPECT_EQ(cu->read_vgpr(vb + 2, lane),
+                            exec & (1ull << lane) ? expected : 0xabcd1234u)
+                      << "lane=" << lane << " input=" << c.half;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    wf->halt();
+  }
+}
+
 } // namespace

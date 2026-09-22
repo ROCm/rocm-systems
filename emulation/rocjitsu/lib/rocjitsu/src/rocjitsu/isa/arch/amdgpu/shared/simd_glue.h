@@ -1494,6 +1494,18 @@ template <typename Inst, typename CvtOp>
   return false;
 }
 
+/// @brief Apply V_CVT_F32_F16 policy before widening a SIMD batch.
+inline util::native<float> cvt_f32_f16_mode_simd(util::native<uint32_t> raw, const Wavefront &wf) {
+  using U = util::native<uint32_t>;
+  raw &= U(0xffffu);
+  const U magnitude = raw & U(0x7fffu);
+  if (!(wf.fp_denorm_mode_f16_f64() & 1u))
+    util::stdx::where(magnitude < U(0x0400u), raw) = raw & U(0x8000u);
+  if (fp_mode::conversion_quiets_nan(wf.cu().arch(), wf.ieee_mode()))
+    util::stdx::where(magnitude > U(0x7c00u), raw) = raw | U(0x0200u);
+  return util::f16_to_f32_simd(raw);
+}
+
 /// VOP3 v_cvt_f32_f16 fast path. The generic form reads the low f16 half and
 /// writes the full f32 dword, matching non-true16 scalar write_lane semantics.
 /// The true16 form selects src0 with op_sel[0] before widening; the destination
@@ -1523,7 +1535,7 @@ template <bool True16, typename Inst>
       raw = select_vop3_true16_src(raw, opsel, 0);
     else
       raw = raw & util::broadcast<T>(0xffffu);
-    const auto src = apply_vop3_src_mod_f32<0>(util::f16_to_f32_simd(raw), abs, neg);
+    const auto src = apply_vop3_src_mod_f32<0>(cvt_f32_f16_mode_simd(raw, wf), abs, neg);
     dst.template store_native<T>(base, std::bit_cast<util::native<T>>(src), chunk);
   }
   return true;
