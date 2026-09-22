@@ -13,14 +13,13 @@ from tests.integration import common as integration_common
 from tests.integration.common import (
     CSVS,
     config,
-    is_gfx115x_soc,
     num_devices,
     num_kernels,
     validate,
 )
 
 
-def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute, soc):
+def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute):
     """
     Test multi-rank profiling of a non-MPI application.
 
@@ -40,19 +39,7 @@ def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute
         file_dict = integration_common.check_csv_files(
             str(rank_dir), num_devices, num_kernels
         )
-        if soc == "MI100":
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif soc == "MI200":
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif "MI300" in soc:
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif "MI350" in soc:
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif is_gfx115x_soc():
-            assert sorted(list(file_dict.keys())) == CSVS
-        else:
-            print(f"Testing isn't supported yet for {soc}")
-            assert 0
+        assert sorted(list(file_dict.keys())) == CSVS
 
         validate(
             inspect.stack()[0][3],
@@ -65,7 +52,6 @@ def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute
 
 def test_multi_rank_profiling_mpi_comm(
     binary_handler_profile_rocprof_compute,
-    soc,
 ):
     """
     Test multi-rank profiling of an MPI application.
@@ -98,19 +84,7 @@ def test_multi_rank_profiling_mpi_comm(
             str(rank_dir), num_devices, num_kernels
         )
 
-        if soc == "MI100":
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif soc == "MI200":
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif "MI300" in soc:
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif "MI350" in soc:
-            assert sorted(list(file_dict.keys())) == CSVS
-        elif is_gfx115x_soc():
-            assert sorted(list(file_dict.keys())) == CSVS
-        else:
-            print(f"Testing isn't supported yet for {soc}")
-            assert 0
+        assert sorted(list(file_dict.keys())) == CSVS
 
         validate(
             inspect.stack()[0][3],
