@@ -158,7 +158,7 @@ reader_t::impl::build_timeline_events(
     for(const auto& result : results)
     {
         reader_types::timeline_event_t event;
-        event.unique_identifier = { result.id, type };
+        event.unique_identifier = { .id = result.id, .type = type };
         event.start_timestamp   = result.start_timestamp;
         event.end_timestamp     = result.end_timestamp;
 
@@ -556,10 +556,7 @@ reader_t::impl::get_counter_events_for_track(reader_types::track_info_ptr_t     
     for(const auto& result : results)
     {
         events.push_back(reader_types::counter_timeline_event_t{
-            .timestamp = result.timestamp,
-            .value     = result.value,
-            .track     = track,
-        });
+            .timestamp = result.timestamp, .value = result.value, .track = track });
     }
 
     return events;

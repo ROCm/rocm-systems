@@ -6,7 +6,6 @@
 #include "backends/sqlite_backend.hpp"
 
 #include "debug.hpp"
-#include "profiler-hub/cpp/reader_types.hpp"
 
 #include <cstddef>
 #include <functional>
@@ -14,6 +13,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 #include "queries/select/table_select_query.hpp"
 
@@ -303,8 +303,8 @@ struct time_range_result
 struct track_key_count_result
 {
     size_t                nid{};
-    std::optional<size_t> pid{};
-    std::optional<size_t> tid{};
+    std::optional<size_t> pid;
+    std::optional<size_t> tid;
     size_t                count{};
 };
 
@@ -918,7 +918,7 @@ private:
 
     void initialize_track_event_count_statements()
     {
-        auto make_key_count_stmt = [&](const std::string& table) {
+        auto make_key_count_stmt = [&](const std::string_view table) {
             auto q = queries::select::table_select_query{}
                          .select("nid", "pid", "tid", "COUNT(*) AS count")
                          .from(fmt::format("{}_{}", table, m_uuid))
@@ -943,7 +943,7 @@ private:
 
     void initialize_track_category_statements()
     {
-        auto make_agent_queue_stmt = [&](const std::string& table) {
+        auto make_agent_queue_stmt = [&](const std::string_view table) {
             auto q = queries::select::table_select_query{}
                          .select("nid", "agent_id", "queue_id", "COUNT(*) AS count")
                          .from(fmt::format("{}_{}", table, m_uuid))
@@ -958,7 +958,7 @@ private:
                     &track_agent_queue_count_result::count);
         };
 
-        auto make_stream_stmt = [&](const std::string& table) {
+        auto make_stream_stmt = [&](const std::string_view table) {
             auto q = queries::select::table_select_query{}
                          .select("nid", "pid", "stream_id", "COUNT(*) AS count")
                          .from(fmt::format("{}_{}", table, m_uuid))
@@ -1626,7 +1626,7 @@ private:
 
     void initialize_event_id_statements()
     {
-        auto make_event_id_stmt = [&](const std::string& table) {
+        auto make_event_id_stmt = [&](const std::string_view table) {
             auto q =
                 fmt::format("SELECT E.id, E.category_id, E.stack_id, E.parent_stack_id, "
                             "E.correlation_id, E.call_stack, E.line_info, E.extdata "
@@ -1656,9 +1656,9 @@ private:
 
     void initialize_correlated_event_statements()
     {
-        auto make_correlated_stmt = [&](const std::string& table,
-                                        const std::string& alias,
-                                        const std::string& display_name_col) {
+        auto make_correlated_stmt = [&](const std::string_view table,
+                                        const std::string_view alias,
+                                        const std::string_view display_name_col) {
             auto q =
                 fmt::format("SELECT {a}.id, {a}.start, {a}.end, {dn}, E.category_id, "
                             "{a}.nid, {a}.pid, {a}.tid, S.track_id "
@@ -1697,12 +1697,12 @@ private:
 
     void initialize_count_statements()
     {
-        auto make_count_stmt = [&](const std::string& table) {
+        auto make_count_stmt = [&](const std::string_view table) {
             auto q = fmt::format("SELECT COUNT(*) FROM {}_{}", table, m_uuid);
             return m_backend->create_read_statement_executor<count_result>(
                 q, &count_result::count);
         };
-        auto make_count_time_filtered_stmt = [&](const std::string& table) {
+        auto make_count_time_filtered_stmt = [&](const std::string_view table) {
             auto q = fmt::format(
                 "SELECT COUNT(*) FROM {}_{} WHERE start <= ? AND \"end\" >= ?",
                 table,
@@ -1728,7 +1728,7 @@ private:
 
     void initialize_time_range_statements()
     {
-        auto make_time_range_stmt = [&](const std::string& table) {
+        auto make_time_range_stmt = [&](const std::string_view table) {
             auto q = fmt::format("SELECT MIN(start), MAX(end) FROM {}_{}", table, m_uuid);
             return m_backend->create_read_statement_executor<time_range_result>(
                 q, &time_range_result::min_start, &time_range_result::max_end);
