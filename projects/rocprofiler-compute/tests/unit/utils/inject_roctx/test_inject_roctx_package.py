@@ -305,6 +305,7 @@ def test_triton_backend_registers_framework_root(monkeypatch):
     from utils.inject_roctx._backends import triton as triton_backend
 
     monkeypatch.setattr(triton_backend, "_resolve_triton", lambda: True)
+    monkeypatch.setattr(triton_backend.core, "ensure_python_tier", lambda: True)
     monkeypatch.setattr(triton_backend, "patch_triton_launcher", lambda: None)
 
     fake_triton = types.ModuleType("triton")
