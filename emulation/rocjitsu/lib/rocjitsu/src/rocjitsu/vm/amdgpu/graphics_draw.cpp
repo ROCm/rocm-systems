@@ -36,6 +36,8 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
       (primitive_type_ != kTriangleList && primitive_type_ != kTriangleStrip &&
        primitive_type_ != kRectangleList))
     throw std::runtime_error("unsupported graphics primitive, vertex count, or instance count");
+  color_max_mip_ = (context_[0x31f] >> 19) & 31;
+  color_mip_ = context_[0x31a] & 31;
   if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
     // Normalize relocated registers into the GFX12 slots used below. Read the
     // original snapshot because several source and destination slots overlap.
@@ -69,8 +71,8 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
     context_[0x19] = (ctx[3] >> 16) & 1; // DISABLE_VIEWPORT_CLAMP
     context_[0x31a] = 0;
     context_[0x31e] = (ctx[0x3b0] & 0x3fff) | (((ctx[0x3b0] >> 14) & 0x3fff) << 16);
-    if (ctx[0x3b0] >> 28)
-      throw std::runtime_error("graphics color mip levels are not implemented");
+    color_max_mip_ = ctx[0x3b0] >> 28;
+    color_mip_ = (ctx[0x31b] >> 26) & 15;
     for (uint32_t i = 0; i < 32; ++i)
       context_[0x199 + i] = ctx[0x191 + i];
     sh_[0x31] = ((ctx[0x1b1] >> 1) & 31) | ((ctx[0x1b6] & 63) << 11);
@@ -312,14 +314,30 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
     throw std::runtime_error("unsupported graphics stencil or depth bounds test");
   if (color_enabled_ &&
       ((info & 31) != 10 || (((info >> 8) & 31) != 0 && ((info >> 8) & 31) != 4) ||
-       (attrib & (gfx12 ? ~0u : ~0x30u)) || (attrib3 & (gfx12 ? 0xf83fffu : 0x3fffu)) ||
-       context_[0x31a] || context_[0x319] || (context_[0x1e0] & (1u << 30)) ||
+       (attrib & (gfx12 ? ~0u : ~0x30u)) || (attrib3 & 0x3fffu) || (context_[0x31a] & ~31u) ||
+       (context_[0x319] & (gfx12 ? ~0u : ~(15u << 26))) || (context_[0x1e0] & (1u << 30)) ||
        context_[0x214] != 15 || (color_format_ != 4 && color_format_ != 7 && color_format_ != 9)))
     throw std::runtime_error("unsupported graphics color or blend state");
   if (context_[0x198] != 2)
     throw std::runtime_error("unsupported graphics fragment inputs");
   width_ = (attrib2 >> 16) + 1;
   height_ = (attrib2 & 0xffff) + 1;
+  swizzle_ = gfx12 ? (attrib3 >> 15) & 7 : (attrib3 >> 14) & 31;
+  if (color_enabled_) {
+    const auto mip =
+        image_mip_layout(gfx12, swizzle_, 4, width_, height_, color_max_mip_ + 1, color_mip_);
+    if (!mip || (color_metadata_ && color_max_mip_))
+      throw std::runtime_error("unsupported graphics color mip layout");
+    width_ = mip->width;
+    height_ = mip->height;
+    color_pitch_ = mip->pitch;
+    color_tail_x_ = mip->tail_x;
+    color_tail_y_ = mip->tail_y;
+    color_base_ = addr_calc::buffer_virtual_address(
+                      ((uint64_t{context_[0x390] & 255} << 32) | context_[0x318]) << 8) +
+                  mip->offset;
+  }
+
   if (depth_control_ & 2) {
     const uint32_t zinfo = context_[6];
     depth_width_ = (context_[5] & 0xffff) + 1;
@@ -349,12 +367,6 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
   }
   if (width_ > 4096 || height_ > 4096)
     throw std::runtime_error("graphics render target exceeds supported dimensions");
-  swizzle_ = gfx12 ? (attrib3 >> 15) & 7 : (attrib3 >> 14) & 31;
-  if (!(gfx12 ? gfx12_image_offset(0, 0, width_, 4, swizzle_)
-              : gfx11_image_offset(0, 0, width_, 4, swizzle_)))
-    throw std::runtime_error("unsupported graphics surface layout");
-  color_base_ = addr_calc::buffer_virtual_address(
-      ((uint64_t{context_[0x390] & 255} << 32) | context_[0x318]) << 8);
   fragment_wave_size_ = (context_[0x190] & (1u << 15)) ? 32 : 64;
   const uint32_t attributes = (sh_[0x31] >> 11) & 63;
   if (attributes > 32 || (sh_[0x31] >> 17))
@@ -660,7 +672,8 @@ void GraphicsDraw::write_outputs(GpuMemory &memory, uint32_t process_id) {
       }
       std::array<uint8_t, 4> bytes{};
       pack_buffer_format(memory_format_, 0xfac, components, bytes);
-      const auto address = image_address(color_base_, f.x, f.y, width_, 4, swizzle_);
+      const auto address = image_address(color_base_, f.x + color_tail_x_, f.y + color_tail_y_,
+                                         color_pitch_, 4, swizzle_);
       if (!address || memory.write_block(*address, bytes, process_id) != AccessOutcome::Complete)
         throw std::runtime_error("graphics color write failed");
     }

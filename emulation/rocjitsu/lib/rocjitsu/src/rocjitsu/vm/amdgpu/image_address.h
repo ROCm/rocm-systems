@@ -12,6 +12,19 @@
 
 namespace rocjitsu::amdgpu {
 
+/// Block-size log2 for a validated swizzle mode; zero denotes linear storage.
+inline uint32_t image_block_log2(bool gfx12, uint32_t swizzle) {
+  if (!swizzle)
+    return 0;
+  if (gfx12)
+    return swizzle == 4 ? 18 : 4 * swizzle + 4;
+  if (swizzle == 2)
+    return 8;
+  if (swizzle == 6 || swizzle == 22)
+    return 12;
+  return swizzle >= 28 ? 18 : 16;
+}
+
 /// GFX12 non-MSAA, single-level 2D surface addressing.
 /// The bit patterns match AddrLib's gfx12SwizzlePattern.h for 1xAA 2D blocks.
 inline std::optional<uint64_t> gfx12_image_offset(uint32_t x, uint32_t y, uint32_t width,
@@ -33,7 +46,7 @@ inline std::optional<uint64_t> gfx12_image_offset(uint32_t x, uint32_t y, uint32
   uint32_t element_log2 = 0;
   while ((1u << element_log2) < bytes)
     ++element_log2;
-  const uint32_t block_log2 = swizzle == 4 ? 18 : 4 * swizzle + 4;
+  const uint32_t block_log2 = image_block_log2(true, swizzle);
   uint32_t x_bits = 0, y_bits = 0, offset = 0;
   for (uint32_t bit = 0; bit < block_log2; ++bit) {
     const int selector = patterns[element_log2][bit];
@@ -59,7 +72,7 @@ inline std::optional<uint64_t> gfx12_image_address(uint64_t base, uint32_t x, ui
     return std::nullopt;
   if (!swizzle)
     return base + *offset;
-  const uint32_t block_log2 = swizzle == 4 ? 18 : 4 * swizzle + 4;
+  const uint32_t block_log2 = image_block_log2(true, swizzle);
   const uint64_t block_mask = (uint64_t{1} << block_log2) - 1;
   return (base & ~block_mask) + (*offset ^ (base & block_mask));
 }
@@ -86,7 +99,7 @@ inline std::optional<uint64_t> gfx11_image_offset(uint32_t x, uint32_t y, uint32
   const bool render = swizzle == 24 || swizzle == 27 || swizzle == 28 || swizzle == 31;
   if ((!display && !render) || ((swizzle == 24 || swizzle == 28) && bytes == 16))
     return std::nullopt;
-  const uint32_t block_log2 = swizzle >= 28 ? 18 : 16;
+  const uint32_t block_log2 = image_block_log2(false, swizzle);
   // Low and high halves select XOR inputs from x and y respectively. Bits
   // above the block dimensions also participate in pipe/bank selection.
   static constexpr uint32_t masks[4][5][18] = {
@@ -185,12 +198,86 @@ inline std::optional<uint64_t> gfx11_image_address(uint64_t base, uint32_t x, ui
     return std::nullopt;
   if (!swizzle)
     return base + *offset;
-  const uint32_t block_log2 = swizzle == 2                      ? 8
-                              : (swizzle == 6 || swizzle == 22) ? 12
-                              : swizzle >= 28                   ? 18
-                                                                : 16;
+  const uint32_t block_log2 = image_block_log2(false, swizzle);
   const uint64_t block_mask = (uint64_t{1} << block_log2) - 1;
   return (base & ~block_mask) + (*offset ^ (base & block_mask));
+}
+
+/// Accessible mip extents, allocation offset and packed-tail origin.
+struct ImageMipLayout {
+  uint64_t offset = 0;
+  uint32_t width = 0, height = 0, pitch = 0;
+  uint32_t tail_x = 0, tail_y = 0;
+};
+
+/// Single-sample 2D mip allocation for the layouts supported above. The offset
+/// is block aligned; tail coordinates must pass through the swizzle equation.
+inline std::optional<ImageMipLayout> image_mip_layout(bool gfx12, uint32_t swizzle, uint32_t bytes,
+                                                      uint32_t width, uint32_t height,
+                                                      uint32_t levels, uint32_t level) {
+  if (!width || !height || width > 65536 || height > 65536 || !levels || level >= levels ||
+      levels > uint32_t(std::bit_width(std::max(width, height))) ||
+      !(gfx12 ? gfx12_image_offset(0, 0, width, bytes, swizzle)
+              : gfx11_image_offset(0, 0, width, bytes, swizzle)))
+    return std::nullopt;
+  const uint32_t element_log2 = std::countr_zero(bytes);
+  const uint32_t block_log2 = image_block_log2(gfx12, swizzle);
+  const uint32_t block_width = swizzle ? 1u << ((block_log2 - element_log2 + 1) / 2) : 256 / bytes;
+  const uint32_t block_height = swizzle ? 1u << ((block_log2 - element_log2) / 2) : 1;
+  const auto align = [](uint32_t value, uint32_t alignment) {
+    return (value + alignment - 1) & ~(alignment - 1);
+  };
+  // Storage extents round up at odd sizes; accessible texel extents round down.
+  const auto allocation_extent = [](uint32_t value, uint32_t mip) {
+    return (value + (1u << mip) - 1) >> mip;
+  };
+  ImageMipLayout out{.width = std::max(1u, width >> level),
+                     .height = std::max(1u, height >> level),
+                     .pitch = width};
+  if (levels == 1)
+    return out;
+  out.pitch = align(allocation_extent(width, level), block_width);
+  const uint32_t micro_width = 1u << ((8 - element_log2 + 1) / 2);
+  const uint32_t micro_height = 1u << ((8 - element_log2) / 2);
+  uint32_t tail_width = block_width / 2, tail_height = block_height;
+  // GFX11 Z swizzles use the 32-bit depth threshold for smaller elements too.
+  if (!gfx12 && (swizzle == 24 || swizzle == 28) && bytes < 4) {
+    tail_width /= micro_width / 8;
+    tail_height /= micro_height / 8;
+  }
+  const uint32_t max_tail_levels = block_log2 > 8 ? block_log2 - 4 : 0;
+  uint32_t first_tail = levels;
+  for (uint32_t mip = 0; mip < levels; ++mip) {
+    if (allocation_extent(width, mip) <= tail_width &&
+        allocation_extent(height, mip) <= tail_height && levels - mip <= max_tail_levels) {
+      first_tail = mip;
+      break;
+    }
+  }
+  if (level >= first_tail) {
+    const uint32_t slot = max_tail_levels - 1 - (level - first_tail);
+    const uint32_t tail = slot > 6 ? 16u << slot : slot << 8;
+    // Tail slots describe a grid of 256-byte microtiles, before pipe/bank XOR.
+    for (uint32_t bit = 0; bit < 6; ++bit) {
+      out.tail_x |= ((tail >> (9 + 2 * bit)) & 1u) << bit;
+      out.tail_y |= ((tail >> (8 + 2 * bit)) & 1u) << bit;
+    }
+    out.tail_x *= micro_width;
+    out.tail_y *= micro_height;
+    out.pitch = block_width;
+  } else {
+    // Small mips precede large mips; a packed tail occupies one whole block.
+    if (first_tail < levels)
+      out.offset = uint64_t{1} << block_log2;
+    for (uint32_t mip = level + 1; mip < first_tail; ++mip)
+      out.offset += uint64_t{align(allocation_extent(width, mip), block_width)} *
+                    align(allocation_extent(height, mip), block_height) * bytes;
+  }
+  // GFX12 linear storage still allocates 256-byte rows, but addresses pixels
+  // with a 128-byte row pitch.
+  if (gfx12 && !swizzle)
+    out.pitch = align(allocation_extent(width, level), 128 / bytes);
+  return out;
 }
 
 } // namespace rocjitsu::amdgpu
