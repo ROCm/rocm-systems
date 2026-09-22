@@ -1815,15 +1815,13 @@ void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t 
                                     c_modifier);
         }
       for (uint32_t row = 0; row < M; ++row)
-        stage_f32_extracts<false>(
-            reads.a, s0, &Abuf[row * K], K, ea, [&](uint32_t k) {
-              return gfx12_wmma_a_input_loc(wave_size, M, K, row, k, a_bits, b_bits);
-            });
+        stage_f32_extracts<false>(reads.a, s0, &Abuf[row * K], K, ea, [&](uint32_t k) {
+          return gfx12_wmma_a_input_loc(wave_size, M, K, row, k, a_bits, b_bits);
+        });
       for (uint32_t k = 0; k < K; ++k)
-        stage_f32_extracts<false>(
-            reads.b, s1, &Bbuf[k * stride], N, eb, [&](uint32_t col) {
-              return gfx12_wmma_b_input_loc(wave_size, N, K, col, k, a_bits, b_bits);
-            });
+        stage_f32_extracts<false>(reads.b, s1, &Bbuf[k * stride], N, eb, [&](uint32_t col) {
+          return gfx12_wmma_b_input_loc(wave_size, N, K, col, k, a_bits, b_bits);
+        });
       wmma_simd_matmul<float>(M, N, K, W, stride, Abuf, Bbuf, Cbuf);
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
@@ -2050,13 +2048,13 @@ void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, ui
                                     c_modifier);
         }
       for (uint32_t row = 0; row < M; ++row)
-        stage_f32_extracts(
-            reads.a, s0, &Abuf[row * K], K, ea,
-            [&](uint32_t k) { return wmma_block_scaled_a_input_loc(M, K, row, k, a_bits); });
+        stage_f32_extracts(reads.a, s0, &Abuf[row * K], K, ea, [&](uint32_t k) {
+          return wmma_block_scaled_a_input_loc(M, K, row, k, a_bits);
+        });
       for (uint32_t k = 0; k < K; ++k)
-        stage_f32_extracts(
-            reads.b, s1, &Bbuf[k * stride], N, eb,
-            [&](uint32_t col) { return wmma_block_scaled_b_input_loc(N, K, col, k, b_bits); });
+        stage_f32_extracts(reads.b, s1, &Bbuf[k * stride], N, eb, [&](uint32_t col) {
+          return wmma_block_scaled_b_input_loc(N, K, col, k, b_bits);
+        });
       for (uint32_t row = 0; row < M; ++row) {
         const uint64_t a_scale_word =
             scale_a_word(wmma_a_scale_lane(M, K, row, matrix_a_scale, a_bits, b_bits));

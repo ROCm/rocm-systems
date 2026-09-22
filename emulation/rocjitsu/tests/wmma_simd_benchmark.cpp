@@ -264,39 +264,33 @@ uint32_t packed_reg_count(uint32_t elements, uint32_t bits) {
 std::unique_ptr<Instruction> decode_mxfp_wmma(Decoder &decoder, const MxfpBenchmarkFormat &a,
                                               const MxfpBenchmarkFormat &b,
                                               uint32_t prefix_op = 0) {
-  auto matrix = cdna5::build_vop3p(
-      cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
-      {.vdst = S2_OFF,
-       .opsel = static_cast<uint8_t>(a.selector),
-       .src0 = 256 + S0_OFF,
-       .src1 = 256 + S1_OFF,
-       .src2 = 128,
-       .opsel_hi = static_cast<uint8_t>(b.selector & 0x3u)});
+  auto matrix = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
+                                   {.vdst = S2_OFF,
+                                    .opsel = static_cast<uint8_t>(a.selector),
+                                    .src0 = 256 + S0_OFF,
+                                    .src1 = 256 + S1_OFF,
+                                    .src2 = 128,
+                                    .opsel_hi = static_cast<uint8_t>(b.selector & 0x3u)});
   if ((b.selector & 0x4u) != 0)
     matrix[0] |= 1u << 14;
   if (prefix_op == 0)
     return std::unique_ptr<Instruction>(decode_valid(decoder, matrix.data()));
 
   const auto prefix = cdna5::build_vop3p(
-      prefix_op,
-      {.src0 = 256 + SCALE_A_OFF, .src1 = 256 + SCALE_B_OFF, .src2 = 256});
+      prefix_op, {.src0 = 256 + SCALE_A_OFF, .src1 = 256 + SCALE_B_OFF, .src2 = 256});
   const std::array<uint32_t, 4> words = {prefix[0], prefix[1], matrix[0], matrix[1]};
   return std::unique_ptr<Instruction>(decode_valid(decoder, words.data()));
 }
 
 std::unique_ptr<Instruction> decode_fp4_32x16_wmma(Decoder &decoder, uint32_t prefix_op = 0) {
-  const auto matrix = cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
-                                        {.vdst = S2_OFF,
-                                         .src0 = 256 + S0_OFF,
-                                         .src1 = 256 + S1_OFF,
-                                         .src2 = 128,
-                                         .opsel_hi = 3});
+  const auto matrix = cdna5::build_vop3p(
+      cdna5::kVWmmaF3232x16x128F4Vop3p,
+      {.vdst = S2_OFF, .src0 = 256 + S0_OFF, .src1 = 256 + S1_OFF, .src2 = 128, .opsel_hi = 3});
   if (prefix_op == 0)
     return std::unique_ptr<Instruction>(decode_valid(decoder, matrix.data()));
 
   const auto prefix = cdna5::build_vop3p(
-      prefix_op,
-      {.src0 = 256 + SCALE_A_OFF, .src1 = 256 + SCALE_B_OFF, .src2 = 256});
+      prefix_op, {.src0 = 256 + SCALE_A_OFF, .src1 = 256 + SCALE_B_OFF, .src2 = 256});
   const std::array<uint32_t, 4> words = {prefix[0], prefix[1], matrix[0], matrix[1]};
   return std::unique_ptr<Instruction>(decode_valid(decoder, words.data()));
 }
@@ -319,9 +313,7 @@ void bench_mxfp_arithmetic(const char *label, BenchFixture &fx, Instruction &ins
                            uint32_t out_regs) {
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.wf, nullptr);
-  auto run = [&] {
-    ASSERT_TRUE(fx.cu->execute_instruction(&instruction, *fx.wf).succeeded());
-  };
+  auto run = [&] { ASSERT_TRUE(fx.cu->execute_instruction(&instruction, *fx.wf).succeeded()); };
 
   util::set_force_scalar_for_testing(true);
   run();
@@ -696,10 +688,8 @@ TEST(WmmaSimdBenchmark, MxfpArithmeticAllFormats) {
 
   for (const auto &a : kMxfpFormats) {
     for (const auto &b : kMxfpFormats) {
-      for (const auto &[prefix_op, family] :
-           std::array<std::pair<uint32_t, std::string_view>, 3>{{{0, "dense"},
-                                                                 {0x35, "scale32"},
-                                                                 {0x3a, "scale16"}}}) {
+      for (const auto &[prefix_op, family] : std::array<std::pair<uint32_t, std::string_view>, 3>{
+               {{0, "dense"}, {0x35, "scale32"}, {0x3a, "scale16"}}}) {
         BenchFixture fx;
         seed_mxfp_arithmetic(fx, a, b, 16, 16);
         auto instruction = decode_mxfp_wmma(*decoder, a, b, prefix_op);
@@ -712,10 +702,8 @@ TEST(WmmaSimdBenchmark, MxfpArithmeticAllFormats) {
   }
 
   const MxfpBenchmarkFormat &fp4 = kMxfpFormats.back();
-  for (const auto &[prefix_op, family] :
-       std::array<std::pair<uint32_t, std::string_view>, 3>{{{0, "dense"},
-                                                             {0x35, "scale32"},
-                                                             {0x3a, "scale16"}}}) {
+  for (const auto &[prefix_op, family] : std::array<std::pair<uint32_t, std::string_view>, 3>{
+           {{0, "dense"}, {0x35, "scale32"}, {0x3a, "scale16"}}}) {
     BenchFixture fx;
     seed_mxfp_arithmetic(fx, fp4, fp4, 32, 16);
     auto instruction = decode_fp4_32x16_wmma(*decoder, prefix_op);

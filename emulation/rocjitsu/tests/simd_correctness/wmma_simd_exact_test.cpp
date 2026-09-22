@@ -104,10 +104,10 @@ struct MxfpFormat {
 };
 
 constexpr std::array<MxfpFormat, 5> kMxfpFormats = {{{0, Fmt::FP8, "fp8"},
-                                                      {1, Fmt::BF8, "bf8"},
-                                                      {2, Fmt::RAW6, "fp6"},
-                                                      {3, Fmt::RAW6, "bf6"},
-                                                      {4, Fmt::RAW4, "fp4"}}};
+                                                     {1, Fmt::BF8, "bf8"},
+                                                     {2, Fmt::RAW6, "fp6"},
+                                                     {3, Fmt::RAW6, "bf6"},
+                                                     {4, Fmt::RAW4, "fp4"}}};
 
 void run_mxfp_case(const char *label, const MxfpFormat &a, const MxfpFormat &b,
                    const std::function<void(WmmaFixture &, uint32_t)> &kernel) {
@@ -420,9 +420,8 @@ TEST(WmmaSimdExact, MxfpAllFormatPairs) {
       const bool dispatched = amdgpu::dispatch_matrix_fmt_pair(
           a.selector, b.selector, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
             run_mxfp_case(label.c_str(), a, b, [&](WmmaFixture &fx, uint32_t ca) {
-              amdgpu::exec_wmma_f32_mixed(
-                  *fx.cu, 16, 16, 128, a_bits, b_bits, fx.vbase + ACC, fx.vbase + S0,
-                  fx.vbase + S1, fx.vbase + ACC, ea, eb, ca);
+              amdgpu::exec_wmma_f32_mixed(*fx.cu, 16, 16, 128, a_bits, b_bits, fx.vbase + ACC,
+                                          fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, ea, eb, ca);
             });
           });
       ASSERT_TRUE(dispatched);
@@ -436,8 +435,8 @@ TEST(WmmaSimdExact, MxfpScaledAllFormatPairs) {
   for (bool scale16 : {false, true})
     for (const auto &a : kMxfpFormats)
       for (const auto &b : kMxfpFormats) {
-        const std::string label = std::string("wmma_f32_mxfp_scaled") +
-                                  (scale16 ? "16_" : "32_") + a.name + "_" + b.name;
+        const std::string label =
+            std::string("wmma_f32_mxfp_scaled") + (scale16 ? "16_" : "32_") + a.name + "_" + b.name;
         SCOPED_TRACE(label);
         const bool dispatched = amdgpu::dispatch_matrix_fmt_pair(
             a.selector, b.selector, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
