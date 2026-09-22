@@ -1419,7 +1419,6 @@ if(EXISTS "${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
   )
 
   target_compile_definitions(rccl-UnitTestsMicroSymKernels PRIVATE
-    __HIP_PLATFORM_AMD__
     NCCL_OS_LINUX
     ROCM_VERSION=70000
     USE_AMDSMI
@@ -1429,6 +1428,8 @@ if(EXISTS "${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
     SYM_KERNELS_HOST_CC_PATH="${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc"
     SYM_KERNELS_CC_PATH="${RCCL_HIPIFY_DIR}/src/sym_kernels.cc"
   )
+
+  rccl_apply_hip_requirements(rccl-UnitTestsMicroSymKernels)
 
   target_link_options(rccl-UnitTestsMicroSymKernels PRIVATE -no-hip-rt -Wl,--gc-sections)
   target_link_libraries(rccl-UnitTestsMicroSymKernels PRIVATE

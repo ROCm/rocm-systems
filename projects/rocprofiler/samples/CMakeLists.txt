@@ -162,8 +162,7 @@ install(TARGETS tracer_hip_hsa
                 COMPONENT samples)
 
 # Build HIP/HSA Trace with async output api trace data Sample
-set_source_files_properties(tracer/sample_async.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT
-                                                               1)
+set_source_files_properties(tracer/sample_async.cpp PROPERTIES LANGUAGE HIP)
 rocprofiler_sample_add_executable(tracer_hip_hsa_async tracer/sample_async.cpp
                                   ${ROCPROFILER_UTIL_SRC_FILES})
 target_include_directories(

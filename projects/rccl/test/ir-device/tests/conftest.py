@@ -179,14 +179,16 @@ def _build_test_binary():
         "-x", "hip",
         f"--offload-arch={ARCH}", "-O0",
         "-D__HIP_PLATFORM_AMD__=1",
-        f"-I{os.path.join(ROCM_PATH, 'include')}",
         # Source wrapper first: cmake -DEMIT_LLVM_IR=OFF does not restage
         # build/include/nccl_device_wrapper.h, so a generated copy can be stale.
+        # ROCm system headers come after project-specific includes so freshly
+        # hipified headers in HIPIFY_INC take precedence over installed copies.
         f"-I{IR_DIR}",
         f"-I{HIPIFY_INC}",
         f"-I{os.path.join(HIPIFY_INC, 'nccl_device')}",
         f"-I{GENERATED_INC}",
         f"-I{gtest_inc}",
+        f"-I{os.path.join(ROCM_PATH, 'include')}",
         IR_TEST_SRC,
         "-Xoffload-linker", BITCODE,
         "-Xoffload-linker", "-plugin-opt=-amdgpu-internalize-symbols=false",
@@ -262,13 +264,13 @@ def _build_gin_mpi_binary():
         "-x", "hip",
         f"--offload-arch={ARCH}", "-O0",
         "-D__HIP_PLATFORM_AMD__=1",
-        f"-I{os.path.join(ROCM_PATH, 'include')}",
         f"-I{MPI_INC}",
         f"-I{IR_DIR}",
         f"-I{HIPIFY_INC}",
         f"-I{os.path.join(HIPIFY_INC, 'nccl_device')}",
         f"-I{GENERATED_INC}",
         f"-I{gtest_inc}",
+        f"-I{os.path.join(ROCM_PATH, 'include')}",
         GIN_MPI_TEST_SRC,
         "-Xoffload-linker", BITCODE,
         "-Xoffload-linker", "-plugin-opt=-amdgpu-internalize-symbols=false",
