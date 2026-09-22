@@ -138,9 +138,10 @@ static constexpr LaunchErrorRule kLaunchByPtrRules[] = {
 };
 
 //! The checks ihipLaunchKernel_validate applies on behalf of every entry point.
+//! kSharedMemOverflow is deliberately absent, to prevent an API break
 static constexpr LaunchErrorRule kValidateRules[] = {
     {kZeroGlobal | kZeroBlock, hipErrorInvalidConfiguration},
-    {kSharedMemExceedsMax | kSharedMemOverflow, hipErrorInvalidValue},
+    {kSharedMemExceedsMax, hipErrorInvalidValue},
     {kBlockExceedsMaxWG, hipErrorInvalidConfiguration},
 };
 
