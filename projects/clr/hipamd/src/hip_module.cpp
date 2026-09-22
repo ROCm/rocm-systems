@@ -391,21 +391,20 @@ bool UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Kernel* k
                                  amd::LaunchParams& launch_params) {
 
   const amd::Device& device = stream->vdev()->device();
-  amd::device::Kernel* devKernel = const_cast<device::Kernel*>(kernel->getDeviceKernel(device));
+  const device::Kernel* devKernel = kernel->getDeviceKernel(device);
+  const size_t clusterSize0 = devKernel->getClusterSize(0);
+  const size_t clusterSize1 = devKernel->getClusterSize(1);
+  const size_t clusterSize2 = devKernel->getClusterSize(2);
   // If cluster size from device kernel is > 1, then we need to update the cluster params.
-  if (devKernel->getClusterSize(0) > 1 || devKernel->getClusterSize(1) > 1 ||
-      devKernel->getClusterSize(2) > 1) {
-    if (!launch_params.UpdateClusterLaunchParams(devKernel->getClusterSize(0),
-                                                 devKernel->getClusterSize(1),
-                                                 devKernel->getClusterSize(2))) {
+  if (clusterSize0 > 1 || clusterSize1 > 1 || clusterSize2 > 1) {
+    if (!launch_params.UpdateClusterLaunchParams(clusterSize0, clusterSize1, clusterSize2)) {
       LogPrintfError("This is not a valid Cluster Launch, please recheck parameters"
                      "global[0]: %d, global[1]: %d, global[2]: %d, local[0]: %d, local[1]: %d,"
                      "local[2] :%d, numClusters[0]: %d, numClusters[1]: %d, numClusters[2]: %d",
                       launch_params.global_[0], launch_params.grid_[1],
                       launch_params.global_[2], launch_params.local_[0],
                       launch_params.local_[1], launch_params.local_[2],
-                      devKernel->getClusterSize(0), devKernel->getClusterSize(1),
-                      devKernel->getClusterSize(2));
+                      clusterSize0, clusterSize1, clusterSize2);
       return false;
     }
   }
