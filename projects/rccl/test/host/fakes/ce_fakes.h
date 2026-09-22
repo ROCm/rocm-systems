@@ -26,8 +26,6 @@ extern bool g_hierCeAvailable;
 extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                           struct ncclDevrWindow*, struct ncclDevrWindow*)>
     g_ceAvailable;
-// Seam for ncclHierCeAvailable. The bool above is only the default return value;
-// the hook is the stand-in that ASSERT_HOOK_MATCHES_PROD can check against prod.
 extern std::function<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                           struct ncclDevrWindow*, struct ncclDevrWindow*)>
     g_hierCeAvailableFn;

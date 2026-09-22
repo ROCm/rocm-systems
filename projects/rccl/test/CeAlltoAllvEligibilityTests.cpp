@@ -160,6 +160,11 @@ TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_LsaTeamSmallerThanCommRejected)
                                        ncclDevSum,
                                        ncclFloat32,
                                        ncclSymSendRegRecvNonreg));
+    EXPECT_FALSE(ncclCeScratchAvailable(mockComm_.get(),
+                                        ncclFuncAlltoAllv,
+                                        ncclDevSum,
+                                        ncclFloat32,
+                                        ncclSymSendRegRecvReg));
     EXPECT_TRUE(ncclCeAvailable(mockComm_.get(),
                                 ncclFuncAlltoAllv,
                                 ncclDevSum,
@@ -422,7 +427,7 @@ TEST_F(CeAlltoAllEligibilityTest, UnequalRanksPerNode_HierUnavailable)
     if (!isCeRuntimeDriverSupported())
         GTEST_SKIP() << "CE driver not in supported range";
 
-    mockComm_.configureHierEligible(/*nNodes=*/2, /*localRanks=*/4);
+    mockComm_.configureHierEligible(/*nNodes=*/8, /*localRanks=*/4);
     mockComm_.comm.maxLocalRanks = mockComm_.comm.devrState.lsaSize + 1;
     EXPECT_FALSE(ncclHierCeAvailable(mockComm_.get(),
                                      ncclFuncAlltoAll,

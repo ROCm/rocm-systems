@@ -65,8 +65,6 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t func, int op, ncclDat
                          struct ncclDevrWindow* recvWin) {
   return g_hierCeAvailableFn(comm, func, op, type, regType, sendWin, recvWin);
 }
-// Ill-formed if a drifted extra overload exists alongside the production signature.
-[[maybe_unused]] static auto* const kNcclHierCeAvailable = &ncclHierCeAvailable;
 
 void ResetCeFakes() {
   g_ceImplemented = false;
