@@ -44,9 +44,9 @@ extern int64_t ncclParamWinEnable();
 
 // Elastic buffers back a symmetric window with CPU memory. Upstream uses the
 // host-NUMA VMM location type, but HIP/CLR has no host-NUMA member and rejects
-// it; RCCL allocates host segments as CU_MEM_LOCATION_TYPE_HOST on AMD (see
-// alloc.h). Treat both as a CPU-backed (sysmem) segment so the elastic-buffer
-// consumer paths recognize AMD host segments.
+// it; RCCL allocates host segments as hipMemLocationTypeHost on AMD (see
+// alloc.h). Each platform recognizes only its own host location type as a
+// CPU-backed (sysmem) segment, so elastic-buffer consumers see AMD host segments.
 static inline bool ncclSymIsHostSegment(CUmemLocationType type) {
 #if defined(__HIP_PLATFORM_AMD__)
 #if NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
