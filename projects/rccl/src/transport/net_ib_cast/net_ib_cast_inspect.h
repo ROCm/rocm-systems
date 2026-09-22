@@ -55,6 +55,22 @@ ncclResult_t ncclIbCastTestGetPlaneIndex(int devPlane, int16_t* count, int16_t* 
 int ncclIbCastTestGidSameSubnet(const uint8_t localGid[16], const uint8_t remoteGid[16], int prefixLen);
 int ncclIbCastTestSubnetMatchesAny(const uint8_t localGid[16], const uint8_t* remoteGids, int nRemote, int prefixLen);
 
+/* GRH (global route header) state per active QP, read back from the driver.
+ * isGlobal is queried from the live QP via ibv_query_qp (ah_attr.is_global), so
+ * it reflects what the driver actually programmed at RTR, not just intent.
+ * linkLayer is the rtrAttr.linkLayer used to configure the QP. */
+struct ncclIbCastGrhState {
+  int      nqps;
+  uint8_t  linkLayer[NCCL_IB_MAX_QPS];  /* IBV_LINK_LAYER_ETHERNET (RoCE) / _INFINIBAND */
+  uint8_t  isGlobal[NCCL_IB_MAX_QPS];   /* ah_attr.is_global read back from the QP */
+  bool     queryOk[NCCL_IB_MAX_QPS];    /* false if ibv_query_qp failed for this QP */
+  uint32_t qpNum[NCCL_IB_MAX_QPS];      /* ibv_qp.qp_num for CI diagnostics */
+};
+
+/* Copy per-QP GRH state out of a connected send or recv comm.
+ * Returns ncclInvalidArgument on null pointers. */
+ncclResult_t ncclIbCastGetGrhState(void* sendComm, struct ncclIbCastGrhState* out);
+
 /* ── Resiliency state introspection (requires ENABLE_FAULT_INJECTION) ── */
 #ifdef ENABLE_FAULT_INJECTION
 

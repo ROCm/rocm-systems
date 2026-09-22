@@ -103,7 +103,8 @@ Examples:
         self.parser.add_argument(
             '--coverage-report',
             action='store_true',
-            help="Generate code coverage report from profraw files"
+            help="Generate code coverage report; includes device coverage on "
+                 "ROCm 7.15+ and falls back to host-only on older releases"
         )
         self.parser.add_argument(
             '--build-dir',

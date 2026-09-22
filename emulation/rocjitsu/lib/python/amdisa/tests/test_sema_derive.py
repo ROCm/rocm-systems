@@ -1699,11 +1699,11 @@ class TestDeriveVectorTernary:
         assert SemaNodeKind.MUL in all_kinds
         assert SemaNodeKind.ADD in all_kinds
 
-    def test_lowers_to_std_fma(self):
+    def test_lowers_to_mode_aware_fma(self):
         sem = _FakeSem('V_FMA_F32', 'vector_ternary', 'fma', 'f32')
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'std::fma(' in cpp
+        assert 'fp_mode::Arithmetic::FMA' in cpp
 
     def test_add_minmax_i32_u32_intrinsically_saturates_add_before_selection(self):
         cases = [
@@ -2528,8 +2528,8 @@ class TestDerivePacked:
         [
             ('add', 'packed_add_bf16'),
             ('mul', 'packed_mul_bf16'),
-            ('min', 'f32_to_bf16_rne'),
-            ('max', 'f32_to_bf16_rne'),
+            ('min', 'packed_select_bf16'),
+            ('max', 'packed_select_bf16'),
         ],
     )
     def test_pk_binop_bf16_generator_uses_bf16_helpers(self, operation, helper):
@@ -2649,6 +2649,40 @@ class TestDerivePacked:
         assert sem.operation == 'lshl_add'
         assert sem.data_type == 'u64'
 
+    def test_pk_u64_add_sub_have_distinct_binary_semantics(self):
+        for name, operation in (
+            ('V_PK_ADD_NC_U64', 'add'),
+            ('V_PK_SUB_NC_U64', 'sub'),
+        ):
+            sem = derive_semantics(name, 'ENC_VOP3P')
+
+            assert sem is not None
+            assert sem.semantic_class == 'pk_binop_u64'
+            assert sem.operation == operation
+            assert sem.data_type == 'u64'
+
+    def test_pk_f64_basic_arithmetic_has_distinct_binary_semantics(self):
+        for name, operation in (
+            ('V_PK_ADD_F64', 'add'),
+            ('V_PK_MUL_F64', 'mul'),
+            ('V_PK_MAX_NUM_F64', 'max_num'),
+            ('V_PK_MIN_NUM_F64', 'min_num'),
+        ):
+            sem = derive_semantics(name, 'ENC_VOP3P')
+
+            assert sem is not None
+            assert sem.semantic_class == 'pk_binop_f64'
+            assert sem.operation == operation
+            assert sem.data_type == 'f64'
+
+    def test_pk_f64_fma_has_fused_ternary_semantics(self):
+        sem = derive_semantics('V_PK_FMA_F64', 'ENC_VOP3P')
+
+        assert sem is not None
+        assert sem.semantic_class == 'pk_ternary_f64'
+        assert sem.operation == 'fma'
+        assert sem.data_type == 'f64'
+
     def test_pk_mov_b32(self):
         sem = _FakeSem('V_PK_MOV_B32', 'pk_mov_b32')
         block = derive_sema_block(sem)
@@ -2740,13 +2774,14 @@ class TestDeriveMfma:
     @pytest.mark.parametrize(
         'name',
         [
+            'V_WMMA_F64_16X16X4_F64',
             'V_WMMA_BF16F32_16X16X32_BF16',
             'V_WMMA_F32_16X16X128_F8F6F4',
             'V_WMMA_F32_32X16X128_F4',
             'V_SWMMAC_BF16F32_16X16X64_BF16',
         ],
     )
-    def test_gfx1250_low_precision_wmma_derives_mfma(self, name):
+    def test_cdna5_wmma_profiles_derive_mfma(self, name):
         sem = derive_semantics(name, 'ENC_VOP3P')
         assert sem is not None
         assert sem.semantic_class == 'mfma'
@@ -3224,3 +3259,33 @@ class TestDeriveFlatLoadD16:
         assert sem is not None
         assert sem.semantic_class == 'flat_load'
         assert sem.d16_hi and not sem.d16_lo
+
+
+@pytest.mark.parametrize(
+    ('name', 'encoding', 'width', 'source_dwords'),
+    [
+        ('DS_CMPST_F32', 'ENC_DS', 4, 2),
+        ('DS_CMPST_RTN_F64', 'ENC_DS', 8, 4),
+        ('DS_CMPSTORE_RTN_F32', 'ENC_DS', 4, 2),
+        ('DS_CMPSTORE_F64', 'ENC_DS', 8, 4),
+        ('GLOBAL_ATOMIC_CMPSWAP_F32', 'ENC_FLAT', 4, 2),
+        ('GLOBAL_ATOMIC_CMPSWAP_F64', 'ENC_FLAT', 8, 4),
+        ('BUFFER_ATOMIC_FCMPSWAP', 'ENC_MUBUF', 4, 2),
+        ('BUFFER_ATOMIC_FCMPSWAP_X2', 'ENC_MUBUF', 8, 4),
+    ],
+)
+def test_floating_compare_swap_retains_type_and_payload(
+    name, encoding, width, source_dwords
+):
+    semantics = derive_semantics(name, encoding)
+    assert semantics.operation == 'fcmpswap'
+    assert semantics.elem_size == width
+    assert semantics.num_elems == source_dwords
+
+
+@pytest.mark.parametrize('encoding', ['ENC_DS', 'ENC_VDS'])
+def test_conditional_exchange_has_one_qword_payload(encoding):
+    semantics = derive_semantics('DS_CONDXCHG32_RTN_B64', encoding)
+    assert semantics.operation == 'condxchg32'
+    assert semantics.elem_size == 8
+    assert semantics.num_elems == 2
