@@ -28,7 +28,7 @@ struct track_description
 // Helper function to create enabled_metrics value from bit positions
 // See enabled_metrics definition in pmc/collectors/gpu/types.hpp for bit position
 // documentation
-inline constexpr std::uint32_t
+constexpr std::uint32_t
 make_metric_value(std::initializer_list<std::uint8_t> bit_positions)
 {
     std::uint32_t value = 0;

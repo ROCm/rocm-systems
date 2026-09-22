@@ -12,13 +12,26 @@
 // moving those is a larger change than this one. Everything else this TU owns is
 // here, so the subsystem now lives in two files rather than four.
 
-#include "nccl.h"
-#include "strongstream.h"
+#include "strongstream_stubs.h"
 
 #include "fail_loud.h"
+#include "nccl.h"
+#include "signature-drift.h"
+#include "strongstream.h"
 
-ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph*, hipStream_t, int) {
-  FailLoudUnfaked("strongstream_stubs", "ncclCudaGetCapturingGraph");
+ASSERT_HOOK_MATCHES_PROD(g_cudaGetCapturingGraph, ncclCudaGetCapturingGraph);
+#undef ASSERT_HOOK_MATCHES_PROD
+
+struct ncclCudaContext;
+
+static ncclResult_t DefaultCudaGetCapturingGraph(struct ncclCudaGraph* graph, hipStream_t, int graphUsageMode) {
+  if (graph) *graph = ncclCudaGraphNone(graphUsageMode);
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclCudaGraph*, hipStream_t, int)> g_cudaGetCapturingGraph =
+    DefaultCudaGetCapturingGraph;
+ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph* graph, hipStream_t stream, int graphUsageMode) {
+  return g_cudaGetCapturingGraph(graph, stream, graphUsageMode);
 }
 ncclResult_t ncclCudaGraphAddDestructor(struct ncclCudaGraph, hipHostFn_t, void*) {
   FailLoudUnfaked("strongstream_stubs", "ncclCudaGraphAddDestructor");
@@ -32,3 +45,23 @@ ncclResult_t ncclStrongStreamAcquiredWorkStream(struct ncclCudaGraph, struct ncc
 }
 // Benign teardown: commFree reaches this on a happy-path destroy.
 ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream*) { return ncclSuccess; }
+
+ncclResult_t g_ncclStrongStreamResult = ncclSuccess;
+ncclResult_t ncclStrongStreamConstruct(struct ncclStrongStream*) { return g_ncclStrongStreamResult; }
+ncclResult_t ncclStrongStreamSynchronize(struct ncclStrongStream*) { return g_ncclStrongStreamResult; }
+
+// Controllable (was fail-loud in nccl_stubs.cc).
+ncclResult_t g_ncclCudaContextTrackResult = ncclSuccess;
+int g_ncclCudaContextTrackCalls = 0;
+ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out, int, uint64_t) {
+  g_ncclCudaContextTrackCalls++;
+  if (out) *out = nullptr;
+  return g_ncclCudaContextTrackResult;
+}
+
+void ResetStrongStreamStubs() {
+  g_cudaGetCapturingGraph = DefaultCudaGetCapturingGraph;
+  g_ncclStrongStreamResult = ncclSuccess;
+  g_ncclCudaContextTrackResult = ncclSuccess;
+  g_ncclCudaContextTrackCalls = 0;
+}

@@ -88,6 +88,9 @@ std::string cuMemReason() {
   const char* cumem = std::getenv("NCCL_CUMEM_ENABLE");
   if (!cumem || std::strcmp(cumem, "1") != 0)
     return "Symmetric memory required (NCCL_CUMEM_ENABLE=1)";
+  extern int ncclCuMemRuntimeSupported();
+  if (!ncclCuMemRuntimeSupported())
+    return "Symmetric memory not supported on this platform (cuMem requires kernel dma-buf/P2PDMA support)";
   return "";
 }
 

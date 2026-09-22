@@ -231,7 +231,7 @@ metadata_initialize_backtrace_metrics_pmc(size_t dev_id, const char* _units,
 
     apply_for_all_thread_names<Category>(_tid, [&](const std::string& _track_name) {
         trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::CPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, _track_name,
+            { agent_type::cpu, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, _track_name,
               trait::name<Category>::value, trait::name<Category>::description,
               LONG_DESCRIPTION, COMPONENT, _units, trace_cache::ABSOLUTE, BLOCK,
               EXPRESSION, 0, 0, "{}" });
@@ -263,7 +263,7 @@ cache_backtrace_metrics_events(const std::uint32_t device_id, std::uint64_t time
         trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
             static_cast<size_t>(category_enum_id<Category>::value), _track_name,
             timestamp_ns, event_metadata, stack_id, parent_stack_id, correlation_id,
-            call_stack, line_info, device_id, static_cast<std::uint8_t>(agent_type::CPU),
+            call_stack, line_info, device_id, static_cast<std::uint8_t>(agent_type::cpu),
             _track_name, _value, _system_tid });
     };
 

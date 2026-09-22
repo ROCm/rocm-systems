@@ -1,8 +1,11 @@
 /*************************************************************************
- * Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef EVENT_H_
 #define EVENT_H_
@@ -16,10 +19,17 @@
 #include "queue.h"
 #include <cuda_runtime.h>
 
-#define MAX_CHANNELS                     128 // Match RCCL's MAXCHANNELS
+// CE timing modes
+typedef enum {
+  CE_TIMING_CPU = 0,
+  CE_TIMING_GPU = 1
+} CeTimingMode_t;
+
+#define MAX_CHANNELS                     256 // RCCL MAXCHANNELS
 #define MAX_STEPS                        1024
 #define MAX_OPS                          16 // Up to 64K ranks for PAT
 #define MAX_EVENTS_PER_REQ               (8)
+#define MAX_KERNEL_PHASES                3  // initial_sync, compute, final_sync (v7)
 
 struct proxyOp;
 struct proxyStep;
@@ -48,6 +58,21 @@ struct netPlugin {
   struct proxyStep* parent;
 };
 
+struct kernelCh;
+
+// v7 kernel barrier phase sub-event (child of a kernelCh)
+struct kernelPhase {
+  uint64_t type;                    // ncclProfileKernelPhase; must be first (handle dispatch reads *(uint64_t*))
+  uint8_t channelId;
+  uint8_t phaseId;                  // 0=initial_sync, 1=compute, 2=final_sync
+  const char* phaseName;
+  uint64_t startGpuClk;
+  uint64_t stopGpuClk;
+  double startTs;
+  double stopTs;
+  struct kernelCh* parent;
+};
+
 struct kernelCh {
   uint64_t type;
   uint8_t channelId;
@@ -56,6 +81,7 @@ struct kernelCh {
   double stopTs;
   uint64_t startGpuClk;
   uint64_t stopGpuClk;
+  struct kernelPhase phases[MAX_KERNEL_PHASES]; // v7: per-phase timing, indexed by phaseId
 };
 
 #define PROXY_STEP_SEND_GPU_WAIT 0
@@ -133,6 +159,8 @@ struct collective {
   const char* algo;
   const char* proto;
   int nWarps;
+  const char* kernelVariant;        // v7: symmetric-kernel variant (NULL for non-sym)
+  bool isSymColl;                   // v7: symmetric collective flag
   struct proxyOp op[MAX_CHANNELS][2*MAX_OPS];
   int nProxyOps[MAX_CHANNELS];
   struct kernelCh kernel[MAX_CHANNELS];
@@ -168,6 +196,7 @@ struct collApi {
   struct context* ctx;              // profiler context
   int collApiId;
   int refCount;
+  int credited;                     // pool credit already returned for this slot
   cudaStream_t stream;
   const char* func;
   size_t count;
@@ -187,6 +216,7 @@ struct p2pApi {
   struct context* ctx;              // profiler context
   int p2pApiId;
   int refCount;
+  int credited;                     // pool credit already returned for this slot
   const char* func;
   cudaStream_t stream;
   size_t count;
@@ -202,11 +232,107 @@ struct p2pApi {
 struct kernelLaunch {
   uint64_t type;
   struct groupApi* parent;
+  struct context* ctx;              // profiler context
   cudaStream_t stream;
   int kernelLaunchId;
   double startTs;
   double stopTs;
   struct kernelLaunch* next;
+};
+
+// CE event structures
+struct ceColl {
+  struct taskEventBase base;  // Must be first for task event queue (uses base.next)
+  struct collApi* parent;
+  struct context* ctx;        // owning context; parent may be NULL for root CE events
+  int ceCollId;
+  uint64_t seqNumber;
+  size_t count;
+  const char* datatype;
+  int root;
+  const char* syncStrategy;
+  cudaStream_t stream;
+  uint64_t eventId;
+  int timingMode;
+  // Timing fields:
+  // - cpuStartTime/cpuStopTime: Captured using CLOCK_MONOTONIC (via gettime()), units: microseconds (double)
+  // - cpuDuration: Always CPU-measured time difference (cpuStopTime - cpuStartTime), units: microseconds (double)
+  // - elapsedTime: Final reported timing, units: microseconds (uint64_t)
+  //   * If timingMode==CE_TIMING_GPU: GPU-measured time from cudaEventElapsedTime (converted from ms to us)
+  //   * If timingMode==CE_TIMING_CPU: Same as cpuDuration (CPU-measured)
+  double cpuStartTime;
+  double cpuStopTime;
+  double cpuDuration;
+  uint64_t elapsedTime;
+  // Child events (CeSync and CeBatch)
+  struct taskEventBase* eventHead;
+  struct taskEventBase* eventTail;
+  // Plugin-managed CUDA events for timing
+  cudaEvent_t startEvent;
+  cudaEvent_t stopEvent;
+  bool startCompleted;
+  bool stopCompleted;
+  bool stopRecorded;  // cudaEventRecord(stopEvent) has run; query is unsafe before this
+  bool pollerLinked;  // on the poller list; relinking would cycle it
+  struct ceColl* pollerNext;  // For poller tracking list (separate from base.next)
+};
+
+struct ceSync {
+  struct taskEventBase base;  // For parent CeColl's event queue
+  struct ceColl* parent;
+  struct context* ctx;        // owning context; parent may be NULL for root CE events
+  int ceSyncId;
+  bool isComplete;
+  uint64_t seqNumber;
+  int nRanks;
+  cudaStream_t stream;
+  uint64_t eventId;
+  int timingMode;
+  // Timing fields: See ceColl struct for detailed clock/unit documentation
+  // - cpuStartTime/cpuStopTime: CLOCK_MONOTONIC, microseconds (double)
+  // - cpuDuration: CPU-measured (cpuStopTime - cpuStartTime), microseconds (double)
+  // - elapsedTime: GPU or CPU-measured depending on timingMode, microseconds (uint64_t)
+  double cpuStartTime;
+  double cpuStopTime;
+  double cpuDuration;
+  uint64_t elapsedTime;
+  // Plugin-managed CUDA events for timing
+  cudaEvent_t startEvent;
+  cudaEvent_t stopEvent;
+  bool startCompleted;
+  bool stopCompleted;
+  bool stopRecorded;  // cudaEventRecord(stopEvent) has run; query is unsafe before this
+  bool pollerLinked;  // on the poller list; relinking would cycle it
+  struct ceSync* pollerNext;  // For poller tracking list
+};
+
+struct ceBatch {
+  struct taskEventBase base;  // For parent CeColl's event queue
+  struct ceColl* parent;
+  struct context* ctx;        // owning context; parent may be NULL for root CE events
+  int ceBatchId;
+  int numOps;
+  size_t totalBytes;
+  bool useIntraSync;
+  cudaStream_t stream;
+  uint64_t eventId;
+  int timingMode;
+  // Timing fields: See ceColl struct for detailed clock/unit documentation
+  // - cpuStartTime/cpuStopTime: CLOCK_MONOTONIC, microseconds (double)
+  // - cpuDuration: CPU-measured (cpuStopTime - cpuStartTime), microseconds (double)
+  // - elapsedTime: GPU or CPU-measured depending on timingMode, microseconds (uint64_t)
+  double cpuStartTime;
+  double cpuStopTime;
+  double cpuDuration;
+  uint64_t elapsedTime;
+  // Plugin-managed CUDA events for timing
+  cudaEvent_t startEvent;
+  cudaEvent_t stopEvent;
+  bool startCompleted;
+  bool stopCompleted;
+  bool stopRecorded;  // cudaEventRecord(stopEvent) has run; query is unsafe before this
+  bool pollerLinked;  // on the poller list; relinking would cycle it
+  struct ceBatch* pollerNext;  // For poller tracking list
 };
 
 struct groupApi {
@@ -226,12 +352,23 @@ struct groupApi {
   struct groupApi* next;
 };
 
+// CE event poller tracking
+struct ceEventList {
+  struct ceColl* ceCollHead;
+  struct ceSync* ceSyncHead;
+  struct ceBatch* ceBatchHead;
+  pthread_mutex_t mutex;
+};
+
 // arrays for different event objects
 struct context {
   const char* commName;
   uint64_t commHash;
   int nranks;
   int rank;
+
+  // CE event tracking for poller
+  struct ceEventList ceEvents;
 
   int groupApiPoolSize;
   int groupApiPoolBase;
@@ -272,6 +409,29 @@ struct context {
   int proxyCtrlPoolBase;
   int proxyCtrlPoolIndex;
   struct proxyCtrl* proxyCtrlPool;
+
+  // CE event pools
+  int ceCollPoolSize;
+  int ceCollPoolBase;
+  int ceCollPoolIndex;
+  struct ceColl* ceCollPool;
+
+  int ceSyncPoolSize;
+  int ceSyncPoolBase;
+  int ceSyncPoolIndex;
+  struct ceSync* ceSyncPool;
+
+  int ceBatchPoolSize;
+  int ceBatchPoolBase;
+  int ceBatchPoolIndex;
+  struct ceBatch* ceBatchPool;
+
+  // Set during communicator teardown to stop accepting new event updates.
+  int finalizing;
+
+  // CE events dropped because their ring slot was still held by the poller.
+  // Reported once at finalize so a gap in the trace is not silent.
+  int ceDroppedEvents;
 };
 
 template <typename T>
@@ -298,6 +458,35 @@ inline struct taskEventBase* taskEventQueueDequeue(T* obj) {
   obj->eventHead = obj->eventHead->next;
   if (obj->eventHead == NULL) obj->eventTail = NULL;
   return tmp;
+}
+
+// Unlink a specific child, not just the head: CE children complete out of order
+// and the poller returns the slot to the ring without going through resetTaskEvents.
+template <typename T>
+inline void taskEventQueueUnlink(T* obj, struct taskEventBase* event) {
+  if (obj == NULL || event == NULL) return;
+  struct taskEventBase* prev = NULL;
+  struct taskEventBase* cur = obj->eventHead;
+  while (cur) {
+    if (cur == event) {
+      if (prev) prev->next = cur->next;
+      else obj->eventHead = cur->next;
+      if (obj->eventTail == cur) obj->eventTail = prev;
+      cur->next = NULL;
+      return;
+    }
+    prev = cur;
+    cur = cur->next;
+  }
+}
+
+// updateEvent() and the groupApi wrap both release an API event, so the credit
+// must be idempotent or base outruns index and the ring always allocates.
+template <typename T>
+inline void creditApiPoolOnce(T* obj, int* poolBase) {
+  if (__atomic_exchange_n(&obj->credited, 1, __ATOMIC_RELAXED) == 0) {
+    __atomic_fetch_add(poolBase, 1, __ATOMIC_RELAXED);
+  }
 }
 
 template <typename T>

@@ -50,8 +50,9 @@ permissions:
 env:
   # TODO(jrmadsen): replace LD_RUNPATH_FLAG, GPU_TARGETS, etc. with internal handling in cmake
   ROCM_PATH: "/opt/rocm"
-  PYTHON_VENV_PATH: "rocprofiler-sdk"
-  PYTHON_VENV_ACTIVATE: "rocprofiler-sdk/bin/activate"
+  PYTHON_VENV_PATH: ".venv-rocprofiler-sdk"
+  CMAKE_VERSION_DEB: "4.4.3"
+  CMAKE_VERSION_RPM: "3.28.4"
   GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
 
@@ -156,6 +157,7 @@ jobs:
             projects/rocr-runtime
             projects/clr
             projects/hip
+            projects/hrr
             projects/hipfile
           submodules: false
           set-safe-directory: true
@@ -211,16 +213,20 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
           apt-get update
-          apt-get install -y g++-11 g++-12 cmake python3-pip libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
+          apt-get install -y g++-11 g++-12 cmake python3-pip python3-venv libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
-          python3 -m pip install -U --user -r requirements.txt
-          python3 -m pip install -U --user cmake==4.4.3
+          python3 -m venv --system-site-packages ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --upgrade -r requirements.txt
+          python3 -m pip install --upgrade cmake==${{ env.CMAKE_VERSION_DEB }}
 
       - name: Build ROCProfiler SDK Dependencies
         uses: ./.github/actions/rocprofiler-sdk-util
         with:
           rocm-path: ${{ env.ROCM_PATH }}
+          python-venv-path: ${{ env.PYTHON_VENV_PATH }}
           gpu-target: ${{ matrix.system.gpu-target }}
           compiler-launcher: /usr/bin/ccache
           enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
@@ -245,8 +251,9 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
-          PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH \
           python3 ./source/scripts/run-ci.py \
             -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
@@ -263,6 +270,7 @@ jobs:
             -DCPACK_GENERATOR='DEB;RPM;TGZ' \
             -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath ${{ env.ROCM_PATH }})" \
             -DPython3_EXECUTABLE=$(which python3) \
+            -DROCPROFILER_CLANG_TIDY_EXE=${VIRTUAL_ENV}/bin/clang-tidy \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
             ${{ env.GLOBAL_CMAKE_OPTIONS }} \
             -- \
@@ -273,19 +281,23 @@ jobs:
       - name: Install
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
         timeout-minutes: 10
+        shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
           export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
           cmake --build build --target install --parallel 16
 
       - name: Build Packaging
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
         timeout-minutes: 10
+        shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
           export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
           cmake --build build --target package --parallel 16
 
       - name: Test Install Build
@@ -295,7 +307,8 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
           CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples
           CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests -DGPU_TARGETS="gfx942" tests
           export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
@@ -313,7 +326,7 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
           export PATH=${PATH}:/usr/local/sbin:/usr/sbin:/sbin
           ls -la
           ls -la ./build
@@ -328,7 +341,8 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run: |
           export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$HOME/.local/bin:$PATH
+          export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
           CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-samples-deb ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/samples
           CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-tests-deb -DGPU_TARGETS="gfx942" ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/tests
           cmake --build build-samples-deb --target all --parallel 16
@@ -389,6 +403,7 @@ jobs:
             projects/rocr-runtime
             projects/clr
             projects/hip
+            projects/hrr
             projects/hipfile
           submodules: false
           set-safe-directory: true
@@ -421,18 +436,18 @@ jobs:
         continue-on-error: true
         run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
-      - name: Install requirements (venv)
+      - name: Install requirements
         timeout-minutes: 10
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
           git config --global --add safe.directory '*'
-          python3 -m venv ${{ env.PYTHON_VENV_PATH }}
-          source ${{ env.PYTHON_VENV_ACTIVATE }}
+          python3 -m venv --system-site-packages ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}
           export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
           python3 -m pip install --upgrade pip
           python3 -m pip install --upgrade -r requirements.txt
-          python3 -m pip install --upgrade cmake==3.28.4
+          python3 -m pip install --upgrade cmake==${{ env.CMAKE_VERSION_RPM }}
 
       - name: Install Curl for RHEL 8.8
         if: ${{ matrix.system.os == 'rhel-8.8' }}
@@ -444,6 +459,7 @@ jobs:
         uses: ./.github/actions/rocprofiler-sdk-util
         with:
           rocm-path: ${{ env.ROCM_PATH }}
+          python-venv-path: ${{ env.PYTHON_VENV_PATH }}
           gpu-target: ${{ matrix.system.gpu-target }}
           compiler-launcher: /usr/local/bin/sccache
           enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
@@ -467,8 +483,8 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          source ${{ env.PYTHON_VENV_ACTIVATE }}
-          export PATH=~/.local/bin:/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+          export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+          source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
           python3 ./source/scripts/run-ci.py -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
             --mode ${CI_MODE} \
@@ -536,6 +552,7 @@ jobs:
           projects/rocr-runtime
           projects/clr
           projects/hip
+          projects/hrr
           projects/hipfile
         submodules: false
         set-safe-directory: true
@@ -575,14 +592,17 @@ jobs:
       run: |
         git config --global --add safe.directory '*'
         apt-get update
-        apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common clang-15 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config
+        apt-get install -y build-essential cmake python3-pip python3-venv libasan8 libtsan2 software-properties-common clang-15 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config
         add-apt-repository ppa:ubuntu-toolchain-r/test
         apt-get update
         apt-get upgrade -y
         apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }}
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 100 --slave /usr/bin/g++ g++ /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }} --slave /usr/bin/gcov gcov /usr/bin/gcov-${{ env.GCC_COMPILER_VERSION }}
-        python3 -m pip install -U --user -r requirements.txt
-        python3 -m pip install -U --user cmake==4.4.3
+        python3 -m venv --system-site-packages ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}
+        source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
+        python3 -m pip install --upgrade pip
+        python3 -m pip install --upgrade -r requirements.txt
+        python3 -m pip install --upgrade cmake==${{ env.CMAKE_VERSION_DEB }}
 
     - name: Enable PC Sampling
       if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
@@ -594,6 +614,7 @@ jobs:
       uses: ./.github/actions/rocprofiler-sdk-util
       with:
         rocm-path: ${{ env.ROCM_PATH }}
+        python-venv-path: ${{ env.PYTHON_VENV_PATH }}
         gpu-target: ${{ matrix.system.gpu-target }}
         compiler-launcher: /usr/bin/ccache
         enable-rocr-build: ${{ env.ENABLE_ROCR_BUILD }}
@@ -611,7 +632,7 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run: |
         sudo sysctl -w vm.mmap_rnd_bits=28
-        export PATH="$HOME/.local/bin:$PATH"
+        source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate
         if [[ -n "${HIP_VISIBLE_DEVICES:-}" ]]; then unset GPU_DEVICE_ORDINAL; fi
         python3 ./source/scripts/run-ci.py -B build \
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }} \
