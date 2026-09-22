@@ -53,6 +53,13 @@ static inline uint32_t ncclIbGetConnectCaps(const char* devName, size_t len) {
   return trailer.magic == NCCL_IB_CONNECT_CAPS_MAGIC ? trailer.caps : 0;
 }
 
+// A multi-segment registration is only usable if the peer can parse the
+// per-segment CTS side table. Single-segment buffers keep the legacy wire
+// format, so they are accepted whatever the peer advertised.
+static inline bool ncclIbDeclineMultiSegRegistration(uint32_t peerCaps, int nSegments) {
+  return nSegments > 1 && (peerCaps & NCCL_IB_CAP_MULTISEG) == 0;
+}
+
 // Return the index of the segment that fully contains [addr, addr+len), or -1
 // if addr is outside every segment or the range straddles a segment boundary
 // (which the classic single-rkey wire protocol cannot express).
@@ -228,3 +235,5 @@ static inline int ncclIbSplitTransfer(int nLocal, const uint64_t* localSegVA, co
 static inline size_t ncclIbBytesRemainingInSegment(uintptr_t segPtr, uintptr_t segBase, size_t segSize) {
   return (segBase == 0) ? segSize : segSize - (segPtr - segBase);
 }
+
+#endif // NCCL_NET_IB_MULTISEG_H_

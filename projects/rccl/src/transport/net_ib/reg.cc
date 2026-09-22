@@ -118,14 +118,12 @@ ncclResult_t ncclIbRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, si
          NCCL_IB_MAX_SEGMENTS);
     return ncclInvalidUsage;
   }
-  if (nSeg > 1) {
-    uint32_t peerCaps =
-      base->isSend ? ((struct ncclIbSendComm*)comm)->peerCaps : ((struct ncclIbRecvComm*)comm)->peerCaps;
-    if ((peerCaps & NCCL_IB_CAP_MULTISEG) == 0) {
-      INFO(NCCL_NET | NCCL_REG,
-           "NET/IB: peer does not advertise multi-segment CTS side table; declining %d-segment registration", nSeg);
-      return ncclInvalidUsage;
-    }
+  uint32_t peerCaps =
+    base->isSend ? ((struct ncclIbSendComm*)comm)->peerCaps : ((struct ncclIbRecvComm*)comm)->peerCaps;
+  if (ncclIbDeclineMultiSegRegistration(peerCaps, nSeg)) {
+    INFO(NCCL_NET | NCCL_REG,
+         "NET/IB: peer does not advertise multi-segment CTS side table; declining %d-segment registration", nSeg);
+    return ncclInvalidUsage;
   }
   struct ncclIbMrHandle* mhandleWrapper = NULL;
   NCCLCHECK(ncclCalloc(&mhandleWrapper, 1));

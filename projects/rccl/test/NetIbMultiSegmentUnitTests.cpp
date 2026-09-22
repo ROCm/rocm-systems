@@ -82,6 +82,23 @@ TEST(NetIbMultiSeg, ConnectCapabilitiesTruncatesNameThatFillsTrailer) {
               NCCL_IB_CAP_MULTISEG);
 }
 
+// A peer that never advertised NCCL_IB_CAP_MULTISEG cannot parse the
+// per-segment CTS side table, so multi-segment registration must be declined.
+// Every MPI test connects two same-build peers, so only a unit test reaches it.
+TEST(NetIbMultiSeg, MultiSegRegistrationDeclinedWithoutPeerCapability) {
+    EXPECT_TRUE(ncclIbDeclineMultiSegRegistration(0u, 4));
+    EXPECT_TRUE(ncclIbDeclineMultiSegRegistration(~NCCL_IB_CAP_MULTISEG, 4));
+}
+
+TEST(NetIbMultiSeg, MultiSegRegistrationAcceptedWithPeerCapability) {
+    EXPECT_FALSE(ncclIbDeclineMultiSegRegistration(NCCL_IB_CAP_MULTISEG, 4));
+}
+
+TEST(NetIbMultiSeg, SingleSegmentRegistrationNeverDeclined) {
+    EXPECT_FALSE(ncclIbDeclineMultiSegRegistration(0u, 1));
+    EXPECT_FALSE(ncclIbDeclineMultiSegRegistration(NCCL_IB_CAP_MULTISEG, 1));
+}
+
 // === Segment selection and uniformity helpers ===============================
 
 TEST(NetIbMultiSeg, StartOfEachSegmentMapsToThatSegment) {
