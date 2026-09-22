@@ -155,6 +155,13 @@ struct registry_state
     stable_context_vec_t registry =
         stable_context_vec_t{reserve_size_t{stable_context_vec_t::chunk_size}};
     published_snapshot_t published = {};
+    // Contexts whose client has deregistered. They are unreachable through the registry and the
+    // snapshot, but they are not destroyed here: get_registered_contexts() and
+    // get_active_contexts() hand out raw pointers that outlive the snapshot they were read from,
+    // and those pointers are spread across every tracing service. Holding the last reference until
+    // static teardown gives them the lifetime they had when the registry stored the contexts
+    // by value, which is the lifetime all of those callers were written against.
+    std::vector<context_ptr_t> retired = {};
 };
 
 registry_state*
@@ -176,6 +183,13 @@ get_published_snapshot()
 {
     auto* _state = get_registry_state();
     return (_state) ? &_state->published : nullptr;
+}
+
+std::vector<context_ptr_t>*
+get_retired_contexts()
+{
+    auto* _state = get_registry_state();
+    return (_state) ? &_state->retired : nullptr;
 }
 
 context_snapshot_ptr_t
@@ -747,10 +761,6 @@ deregister_client_contexts(rocprofiler_client_id_t client_id)
 {
     if(!get_registered_contexts_impl()) return;
 
-    // Outlives the lock below so the contexts are destroyed without it held: a context destructor
-    // calls back into HSA, which is not something to do underneath the registry mutex.
-    auto _retired = std::vector<context_ptr_t>{};
-
     {
         // Mutates the registry, so it needs the same lock allocate_context() takes.
         auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
@@ -769,10 +779,14 @@ deregister_client_contexts(rocprofiler_client_id_t client_id)
                 {
                     if(bitr && bitr->context_id == itr->context_idx) bitr.reset();
                 }
-                // Moved rather than reset: dropping the registry's reference here would destroy
-                // the context under the lock, and a reader holding an older snapshot still needs
-                // it to stay alive until that snapshot is released.
-                _retired.emplace_back(std::move(itr));
+                // Moved to the retired list rather than reset: dropping the registry's reference
+                // here would destroy the context while dispatch and completion paths may still
+                // hold raw pointers to it, which is what made the anytime-tool-config tests
+                // segfault when one tool finalized while another tool's kernels were in flight.
+                if(auto* _retired = get_retired_contexts())
+                    _retired->emplace_back(std::move(itr));
+                else
+                    itr.reset();
             }
         }
 

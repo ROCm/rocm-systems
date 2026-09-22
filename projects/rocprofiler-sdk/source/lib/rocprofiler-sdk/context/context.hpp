@@ -262,10 +262,11 @@ using context_filter_t = bool (*)(const context*);
 inline bool
 default_context_filter(const context* val);
 
-// These read the published snapshot and then drop it, so the pointers they return outlive the
-// guarantee that the contexts are alive. That is fine for callers that cannot overlap with
-// deregister_client_contexts(); anything on a dispatch or completion path should hold a
-// registered_contexts_snapshot for as long as it uses the pointers.
+// These read the published snapshot and then drop it, so the pointers they return outlive it. The
+// contexts themselves stay alive regardless: deregister_client_contexts() retires a context out of
+// the registry without destroying it, so a pointer obtained here stays dereferenceable until
+// static teardown. Which contexts are reachable is still a snapshot-in-time answer, so a caller
+// that needs a stable set across a long operation should hold a registered_contexts_snapshot.
 context_array_t&
 get_registered_contexts(context_array_t& data, context_filter_t filter = default_context_filter);
 
