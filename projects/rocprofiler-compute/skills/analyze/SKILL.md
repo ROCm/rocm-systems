@@ -15,7 +15,8 @@ interpretation, experimental PyTorch operator attribution from a torch-trace
 workload, comparison, or machine-readable reports.
 
 **Do not use this skill for:** system-wide CPU/network tracing, CUDA tools,
-Windows, GUI/IDE workflows, offline setup, or generating kernel source. Use
+Windows, GUI/IDE workflows, or generating kernel source. Offline
+post-analysis of a collected workload directory is in scope. Use
 ROCm Systems Profiler for system/MPI timeline bottlenecks
 before handing identified GPU kernels to this skill.
 

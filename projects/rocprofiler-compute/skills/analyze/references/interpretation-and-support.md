@@ -112,5 +112,6 @@ like-for-like kernels; do not aggregate away load imbalance before inspection.
 
 ## Excluded workflows
 
-This skill does not cover Windows, offline/air-gapped setup, GUIs/IDEs, CUDA
-tools, or generating/replacing kernel source code.
+This skill does not cover Windows, GUIs/IDEs, CUDA tools, or
+generating/replacing kernel source code. Offline post-analysis of a collected
+workload directory is in scope.

@@ -12,13 +12,15 @@ profile, hand off to `skills/analyze/SKILL.md`.
 **Use this skill for:** Linux HIP/ROCm applications whose launch command is
 available and whose execution can be replayed safely.
 
-**Do not use this skill for:** CUDA tools, Windows, GUI/IDE workflows,
-offline setup, or kernel generation. Use the
-rocprofiler-sdk PC-sampling skill when the user specifically needs standalone
-`rocprofv3` sampling rather than rocprofiler-compute.
+**Do not use this skill for:** CUDA tools, Windows, GUI/IDE workflows, or
+kernel generation. Offline post-analysis of an existing workload is supported
+through the analyze skill. Use the rocprofiler-sdk PC-sampling skill when the
+user specifically needs standalone `rocprofv3` sampling rather than
+rocprofiler-compute.
 
-**Recommended path:** verify the environment, run a full counter profile with
-roofline, validate the workload, then invoke the analyze skill.
+**Recommended path:** verify the environment, validate the workload, run a
+System Speed-of-Light partial collection, then a full counter profile with
+roofline, then invoke the analyze skill.
 
 **Fallback — focused metric set:** when replay cost is too high, list metric
 sets and collect the smallest relevant set. State that uncollected panels will
@@ -32,7 +34,7 @@ Use it to fine-tune individual HIP kernels and maximize hardware utilization.
 | Concept | Detail |
 |---|---|
 | CLI | `rocprof-compute` |
-| Profile backends | **Perfmon counters** (multi-pass, architecture-level); **PC sampling** (experimental, instruction-level stall samples) |
+| Profile sources | **Perfmon counters** (multi-pass, architecture-level); **PC sampling** (experimental, instruction-level stall samples) |
 | Multi-pass | Replays the workload, collecting different counter groups each pass |
 | Output | Use profile mode's default output. Discuss format details only when the user requests a specific downstream format or raw data |
 | Supported HW | Instinct MI100, MI200 (MI210/MI250/MI250X), MI300A/MI300X/MI325X, MI350/MI355X; client APUs (Strix, Strix Halo, Krackan, Gorgon) |
@@ -66,6 +68,29 @@ skills/profile/scripts/check-environment.sh
 The helper only reports readiness; it does not install or change anything.
 Also confirm the application run is representative and safe to replay.
 
+For a short run, execute the application once and confirm it completes. If it
+is too long to finish, do not wait for completion and do not invent a
+profiler timeout. `--timeout` is not a profile option. Ask for a shorter
+command that still launches the same kernels, such as fewer iterations or a
+smaller problem. That shorter command is what later passes replay.
+
+If the process is already running, attach for a bounded interval instead of
+replaying it to completion:
+
+```bash
+rocprof-compute profile \
+    --name <workload_name> \
+    --no-roof \
+    --attach-pid <pid> \
+    --attach-duration-msec <milliseconds>
+```
+
+Attach implies `--no-native-tool`. `--kernel-iteration-range` selects which
+kernel launches are measured; it does not stop the process. A full multi-pass
+profile multiplies the runtime of whatever command is replayed, so keep a
+long application on the Speed-of-Light pass or a metric set unless the user
+accepts that cost.
+
 ## 4. Run the profiler
 
 Profile mode requires `--name` (unless `--output-directory` fully specifies
@@ -74,7 +99,26 @@ the destination) and the application after `--`.
 Default output directory is `./workloads`. The workload is written under
 `./workloads/<name>/%gpumodel%` (or `%rank%` with MPI).
 
-### 4a. Basic profiling (all kernels, roofline included)
+Follow this order:
+
+1. Verify the environment with `skills/profile/scripts/check-environment.sh`.
+2. Validate the workload. Run it once when that run is short. When it is too
+   long to finish, use the shorter command or attach duration from section 3.
+3. Collect System Speed-of-Light only. Use a distinct workload name so the
+   later full profile does not overwrite it.
+
+```bash
+rocprof-compute profile \
+    --name <workload_name>_sol \
+    --no-roof \
+    -b sol \
+    -- <your_app_command_and_args>
+```
+
+4. Run the full counter profile with roofline in section 4a.
+5. Validate that full profile, then follow `skills/analyze/SKILL.md`.
+
+### 4a. Full counter profile with roofline
 
 ```bash
 rocprof-compute profile \

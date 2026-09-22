@@ -137,5 +137,6 @@ needed.
 
 ## Excluded workflows
 
-This skill does not cover Windows, offline/air-gapped setup, GUIs/IDEs, CUDA
-tools, or generating/replacing kernel source code.
+This skill does not cover Windows, GUIs/IDEs, CUDA tools, or
+generating/replacing kernel source code. Offline post-analysis of a workload
+that was already collected is supported through the analyze skill.
