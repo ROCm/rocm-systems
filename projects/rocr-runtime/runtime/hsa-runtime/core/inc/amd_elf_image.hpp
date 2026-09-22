@@ -223,6 +223,11 @@ namespace elf {
     Image* NewElf32Image();
     Image* NewElf64Image();
 
+    // Returns the in-memory extent of the ELF image at `buffer`.
+    // When `buffer_size` is non-zero it is the allocation length and section
+    // headers are validated against it. When `buffer_size` is 0 (deprecated
+    // pointer-only load APIs) only ELF-header fields are used; the section
+    // table is not walked.
     uint64_t ElfSize(const void* buffer, size_t buffer_size);
 
     std::string GetNoteString(uint32_t s_size, const char* s);

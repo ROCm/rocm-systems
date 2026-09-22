@@ -1291,6 +1291,7 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     if (!elf_data) {
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
+    // Header-only discovery: section table is not walked without a bound.
     code_object_size = amd::elf::ElfSize(elf_data, 0);
     if (code_object_size == 0) {
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;

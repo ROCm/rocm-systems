@@ -1476,6 +1476,7 @@ namespace elf {
     bool GElfImage::initAsBuffer(const void* buffer, size_t size)
     {
       if (size == 0) {
+        // Header-only discovery: do not walk section headers without a bound.
         size = ElfSize(buffer, 0);
         if (size == 0) {
           out << "Error: failed to determine buffer size" << std::endl;
@@ -1828,6 +1829,16 @@ namespace elf {
     Image* NewElf32Image() { return new GElfImage(ELFCLASS32); }
     Image* NewElf64Image() { return new GElfImage(ELFCLASS64); }
 
+    namespace {
+    bool ElfOffsetAdd(uint64_t offset, uint64_t length, uint64_t* end) {
+      if (length > ~uint64_t(0) - offset) {
+        return false;
+      }
+      *end = offset + length;
+      return true;
+    }
+    }  // namespace
+
     uint64_t ElfSize(const void* emi, size_t buffer_size)
     {
       if (emi == NULL) {
@@ -1844,45 +1855,54 @@ namespace elf {
         return 0;
       }
 
-      // The loop indexes shdr[i] with sizeof(Elf64_Shdr) stride.
+      // Section-header indexing uses sizeof(Elf64_Shdr) stride.
       if (ehdr->e_shentsize != sizeof(Elf64_Shdr)) {
-        return 0;
-      }
-
-      if (bounded && ehdr->e_shoff >= buffer_size) {
         return 0;
       }
 
       uint64_t shdr_table_size =
           static_cast<uint64_t>(ehdr->e_shentsize) * static_cast<uint64_t>(ehdr->e_shnum);
-      if (bounded && shdr_table_size > buffer_size - ehdr->e_shoff) {
+      uint64_t table_end = 0;
+      if (!ElfOffsetAdd(ehdr->e_shoff, shdr_table_size, &table_end)) {
+        return 0;
+      }
+
+      // Deprecated pointer-only load APIs pass buffer_size == 0. e_shoff is not
+      // trustworthy without an allocation bound, so do not index the section
+      // table. The extent is the header-described section-table span.
+      if (!bounded) {
+        return table_end;
+      }
+
+      if (ehdr->e_shoff >= buffer_size) {
+        return 0;
+      }
+      if (shdr_table_size > buffer_size - ehdr->e_shoff) {
         return 0;
       }
 
       const Elf64_Shdr *shdr = (const Elf64_Shdr*)((const char*)emi + ehdr->e_shoff);
 
       uint64_t max_offset = ehdr->e_shoff;
-      uint64_t total_size = max_offset + shdr_table_size;
+      uint64_t total_size = table_end;
 
       for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
-        if (bounded) {
-          uint64_t shdr_entry_offset =
-              static_cast<uint64_t>(ehdr->e_shoff) +
-              static_cast<uint64_t>(i) * sizeof(Elf64_Shdr);
-          if (shdr_entry_offset + sizeof(Elf64_Shdr) > buffer_size) {
-            return 0;
-          }
+        uint64_t shdr_entry_offset =
+            static_cast<uint64_t>(ehdr->e_shoff) +
+            static_cast<uint64_t>(i) * sizeof(Elf64_Shdr);
+        if (shdr_entry_offset + sizeof(Elf64_Shdr) > buffer_size) {
+          return 0;
         }
 
         uint64_t cur_offset = static_cast<uint64_t>(shdr[i].sh_offset);
         if (max_offset < cur_offset) {
           max_offset = cur_offset;
           total_size = max_offset;
-          if (bounded && cur_offset >= buffer_size) {
+          if (cur_offset >= buffer_size) {
             return 0;
           }
           if (SHT_NOBITS != shdr[i].sh_type) {
-            if (bounded && shdr[i].sh_size > buffer_size - cur_offset) {
+            if (shdr[i].sh_size > buffer_size - cur_offset) {
               return 0;
             }
             total_size += static_cast<uint64_t>(shdr[i].sh_size);
