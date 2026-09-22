@@ -202,31 +202,6 @@ struct external_dependencies
         return ::rocprofsys::get_agent_manager_instance();
     }
 
-    static void add_string(std::string_view value)
-    {
-        trace_cache::get_metadata_registry().add_string(value);
-    }
-
-    static void add_thread_info(const thread_info_t& info)
-    {
-        trace_cache::get_metadata_registry().add_thread_info(info);
-    }
-
-    static void add_track(const track_t& info)
-    {
-        trace_cache::get_metadata_registry().add_track(info);
-    }
-
-    static void add_pmc_info(const pmc_info_t& info)
-    {
-        trace_cache::get_metadata_registry().add_pmc_info(info);
-    }
-
-    static void buffer_storage_store(kfd_sample_t&& sample)
-    {
-        trace_cache::get_buffer_storage().store(sample);
-    }
-
     static std::int32_t get_pid() { return static_cast<std::int32_t>(::getpid()); }
     static std::int32_t get_ppid() { return static_cast<std::int32_t>(::getppid()); }
 
@@ -290,21 +265,6 @@ struct external_dependencies
     static void tracing_pop_timemory(CategoryT, std::string_view name)
     {
         tracing::pop_timemory(CategoryT{}, name);
-    }
-
-    static void metadata_add_string(std::string_view value)
-    {
-        trace_cache::get_metadata_registry().add_string(value);
-    }
-
-    static void metadata_add_thread_info(const thread_info_t& info)
-    {
-        trace_cache::get_metadata_registry().add_thread_info(info);
-    }
-
-    static void buffer_storage_store(region_sample&& sample)
-    {
-        trace_cache::get_buffer_storage().store(sample);
     }
 
     static bool check_backtrace_operations(rocprofiler_callback_tracing_kind_t kind,

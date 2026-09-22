@@ -31,6 +31,8 @@ concept externals =
         typename Externals::agent_type_t;
         typename Externals::agent_manager_t;
         typename Externals::region_sample;
+        typename Externals::metadata_registry_t;
+        typename Externals::buffer_storage_t;
         typename Externals::rocm_hip_api_category;
         typename Externals::rocm_hsa_api_category;
         typename Externals::rocm_rocjpeg_api_category;
@@ -157,11 +159,13 @@ concept externals =
     requires(std::string_view text, Externals::thread_info_t thread_info,
              Externals::track_t track, Externals::pmc_info_t pmc_info,
              Externals::kfd_sample_t sample) {
-        { Externals::add_string(text) };
-        { Externals::add_thread_info(thread_info) };
-        { Externals::add_track(track) };
-        { Externals::add_pmc_info(pmc_info) };
-        { Externals::buffer_storage_store(std::move(sample)) };
+        { Externals::get_metadata_registry() };
+        { Externals::get_metadata_registry().add_string(text) };
+        { Externals::get_metadata_registry().add_thread_info(thread_info) };
+        { Externals::get_metadata_registry().add_track(track) };
+        { Externals::get_metadata_registry().add_pmc_info(pmc_info) };
+        { Externals::get_buffer_storage() };
+        { Externals::get_buffer_storage().store(std::move(sample)) };
         { Externals::get_pid() } -> std::convertible_to<std::int32_t>;
         { Externals::get_ppid() } -> std::convertible_to<std::int32_t>;
         {
@@ -184,9 +188,9 @@ concept externals =
            { Externals::get_use_timemory() } -> std::convertible_to<bool>;
            { Externals::tracing_push_timemory(hip_category, text) };
            { Externals::tracing_pop_timemory(hip_category, text) };
-           { Externals::metadata_add_string(text) };
-           { Externals::metadata_add_thread_info(thread_info) };
-           { Externals::buffer_storage_store(std::move(sample)) };
+           { Externals::get_metadata_registry().add_string(text) };
+           { Externals::get_metadata_registry().add_thread_info(thread_info) };
+           { Externals::get_buffer_storage().store(std::move(sample)) };
        };
 
 }  // namespace rocprofsys::policies::domain_service

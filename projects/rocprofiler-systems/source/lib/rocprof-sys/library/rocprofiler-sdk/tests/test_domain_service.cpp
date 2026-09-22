@@ -49,8 +49,10 @@ using domains::test_support::externals;
 using domains::test_support::g_buffer_table;
 using domains::test_support::g_callback_table;
 using domains::test_support::g_externals_mock;
+using domains::test_support::g_metadata_registry_mock;
 using domains::test_support::g_mock;
 using domains::test_support::gmock_externals;
+using domains::test_support::gmock_metadata_registry;
 using domains::test_support::gmock_sdk_backend;
 using domains::test_support::mock_sdk;
 
@@ -75,6 +77,8 @@ protected:
     {
         g_mock           = std::make_unique<StrictMock<gmock_sdk_backend>>();
         g_externals_mock = std::make_unique<StrictMock<gmock_externals>>();
+        g_metadata_registry_mock =
+            std::make_unique<StrictMock<gmock_metadata_registry>>();
         g_buffer_table   = {};
         g_callback_table = {};
     }
@@ -83,6 +87,7 @@ protected:
     {
         g_mock.reset();
         g_externals_mock.reset();
+        g_metadata_registry_mock.reset();
     }
 
     // Every production on_configure() body calls add_string(category_name) followed by
@@ -91,7 +96,7 @@ protected:
     void expect_on_configure_ran(std::string_view category_name)
     {
         InSequence seq;
-        EXPECT_CALL(*g_externals_mock, add_string(Eq(category_name))).Times(1);
+        EXPECT_CALL(*g_metadata_registry_mock, add_string(Eq(category_name))).Times(1);
         EXPECT_CALL(*g_externals_mock,
                     get_agents_by_type(Eq(externals::k_agent_type_gpu)))
             .Times(1)
