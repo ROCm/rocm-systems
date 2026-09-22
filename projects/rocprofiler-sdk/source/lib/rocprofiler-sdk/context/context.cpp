@@ -162,6 +162,12 @@ struct registry_state
     // static teardown gives them the lifetime they had when the registry stored the contexts
     // by value, which is the lifetime all of those callers were written against.
     std::vector<context_ptr_t> retired = {};
+    // Context ids whose stop is in progress. stop_context() releases get_contexts_mutex() across
+    // the GPU drain, so for that window the context is still in the active array with no lock
+    // held. This set is what keeps start_context() and a second stop_context() from acting on
+    // that half-stopped state. Guarded by get_contexts_mutex().
+    std::unordered_set<uint64_t> stopping = {};
+    std::condition_variable      cv       = {};
 };
 
 registry_state*
@@ -262,22 +268,23 @@ lookup_registered_context(uint64_t handle)
     return _snapshot->slots[_idx];
 }
 
-// Context ids whose stop is in progress. stop_context() releases get_contexts_mutex() across the
-// GPU drain, so for that window the context is still in the active array with no lock held. This
-// set is what keeps start_context() and a second stop_context() from acting on that half-stopped
-// state. Guarded by get_contexts_mutex().
-std::unordered_set<uint64_t>&
+// Both live in registry_state rather than being function-local statics of their own. A tool's
+// finalizer runs stop_context() during teardown, by which point a plain function-local static may
+// already have been destroyed -- and reading a destroyed unordered_set means hashing into freed
+// bucket memory. registry_state is torn down by common::destroy_static_objects() instead, at a
+// point the SDK controls, and these accessors return null once that has happened.
+std::unordered_set<uint64_t>*
 get_stopping_contexts()
 {
-    static auto _v = std::unordered_set<uint64_t>{};
-    return _v;
+    auto* _state = get_registry_state();
+    return (_state) ? &_state->stopping : nullptr;
 }
 
-std::condition_variable&
+std::condition_variable*
 get_contexts_cv()
 {
-    static auto _v = std::condition_variable{};
-    return _v;
+    auto* _state = get_registry_state();
+    return (_state) ? &_state->cv : nullptr;
 }
 
 }  // namespace
@@ -288,7 +295,13 @@ get_contexts_cv()
 void
 wait_for_stopping_contexts(std::unique_lock<std::mutex>& _lk)
 {
-    get_contexts_cv().wait(_lk, []() { return get_stopping_contexts().empty(); });
+    auto* _cv = get_contexts_cv();
+    if(!_cv) return;
+
+    _cv->wait(_lk, []() {
+        const auto* _stopping = get_stopping_contexts();
+        return (!_stopping) ? true : _stopping->empty();
+    });
 }
 
 std::mutex&
@@ -620,15 +633,15 @@ stop_context(rocprofiler_context_id_t idx)
         if(!slot) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
         _owner = get_registered_context_slot(idx.handle);
-        get_stopping_contexts().emplace(idx.handle);
+        if(auto* _stopping = get_stopping_contexts()) _stopping->emplace(idx.handle);
     }
 
     auto _unclaim = common::scope_destructor{[&idx]() {
         {
             auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
-            get_stopping_contexts().erase(idx.handle);
+            if(auto* _stopping = get_stopping_contexts()) _stopping->erase(idx.handle);
         }
-        get_contexts_cv().notify_all();
+        if(auto* _cv = get_contexts_cv()) _cv->notify_all();
     }};
 
     // Phase two, unlocked: the service teardowns below call hsa::queue_controller_sync(), an
