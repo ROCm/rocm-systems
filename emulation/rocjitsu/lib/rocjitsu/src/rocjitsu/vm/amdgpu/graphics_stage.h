@@ -16,6 +16,8 @@ class GraphicsStage {
 public:
   virtual ~GraphicsStage() = default;
   virtual void initialize(Wavefront &wave, uint32_t workgroup, uint32_t wave_index) = 0;
+  /// Pixel validity accompanies exports even when no color components are enabled.
+  virtual void export_mask(Wavefront &wave, uint64_t mask) = 0;
   virtual void export_lane(Wavefront &wave, uint32_t lane, uint32_t target, uint32_t mask,
                            const std::array<uint32_t, 4> &values) = 0;
 };

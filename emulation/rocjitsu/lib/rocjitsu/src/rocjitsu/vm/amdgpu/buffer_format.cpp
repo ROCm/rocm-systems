@@ -389,6 +389,13 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
         // RGBA8 filtering retains thirteen fractional texel-value bits.
         if (unorm8)
           filtered = round_even(filtered * 8192) / (8192 * 255);
+        else if (filtered > 0) {
+          // The sRGB filter rounds its normalized result to 29 significant
+          // bits before conversion to FP32. This intermediate rounding can
+          // turn a value on either side of an FP32 midpoint into an exact tie.
+          const double scale = std::ldexp(1.0, 28 - std::ilogb(filtered));
+          filtered = round_even(filtered * scale) / scale;
+        }
         values[c] = std::bit_cast<uint32_t>(static_cast<float>(filtered));
       }
     }

@@ -24,6 +24,7 @@ public:
                std::vector<uint32_t> indices = {});
   DispatchEntry vertex_dispatch() const;
   void initialize(Wavefront &wave, uint32_t workgroup, uint32_t wave_index) override;
+  void export_mask(Wavefront &wave, uint64_t mask) override;
   void export_lane(Wavefront &wave, uint32_t lane, uint32_t target, uint32_t mask,
                    const std::array<uint32_t, 4> &values) override;
   /// Advance only after the preceding shader dispatch has retired and caches are flushed.
@@ -62,6 +63,7 @@ private:
   uint32_t fragment_wave_size_ = 0;
   uint32_t color_format_ = 0;
   uint32_t memory_format_ = 0;
+  uint32_t color_bytes_ = 0;
   uint32_t width_ = 0, height_ = 0, swizzle_ = 0;
   uint64_t color_base_ = 0;
   uint32_t color_max_mip_ = 0, color_mip_ = 0;

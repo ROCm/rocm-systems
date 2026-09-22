@@ -21,7 +21,114 @@
 namespace rocjitsu::amdgpu {
 namespace {
 constexpr uint32_t kTriangleList = 4, kTriangleStrip = 6, kRectangleList = 17;
+// Factors 13-16 select the unsupported second-source export.
+constexpr uint32_t kBlendZero = 0, kBlendOne = 1, kBlendSrcColor = 2, kBlendInvSrcColor = 3,
+                   kBlendSrcAlpha = 4, kBlendInvSrcAlpha = 5, kBlendDstAlpha = 6,
+                   kBlendInvDstAlpha = 7, kBlendDstColor = 8, kBlendInvDstColor = 9,
+                   kBlendSrcAlphaSaturate = 10, kBlendConstantColor = 11,
+                   kBlendInvConstantColor = 12, kBlendConstantAlpha = 17,
+                   kBlendInvConstantAlpha = 18;
+constexpr uint32_t kBlendAdd = 0, kBlendSubtract = 1, kBlendMin = 2, kBlendMax = 3,
+                   kBlendReverseSubtract = 4;
+constexpr uint32_t kBlendSeparateAlpha = 1u << 29, kBlendEnable = 1u << 30;
+constexpr uint32_t kNumberUnorm = 0, kNumberUint = 4, kNumberSint = 5, kNumberFloat = 7;
+constexpr uint32_t kBufRgba8Unorm = 42, kBufRgba16Unorm = 51, kBufRgba32Uint = 61;
+
+// CB color formats use separate data and number fields; pack_buffer_format uses
+// the combined GFX11 buffer format table.
+uint32_t color_buffer_format(uint32_t data_format, uint32_t number_format) {
+  switch (data_format) {
+  case 10: // COLOR_8_8_8_8; NUMBER_SRGB (6) has no corresponding buffer encoding.
+    if (number_format == kNumberUnorm || number_format == kNumberUint ||
+        number_format == kNumberSint)
+      return kBufRgba8Unorm + number_format;
+    break;
+  case 12: // COLOR_16_16_16_16
+    if (number_format <= kNumberSint || number_format == kNumberFloat)
+      // FLOAT follows SINT in the buffer table, skipping NUMBER_SRGB.
+      return kBufRgba16Unorm + (number_format == kNumberFloat ? kNumberSint + 1 : number_format);
+    break;
+  case 14: // COLOR_32_32_32_32
+    if (number_format == kNumberUint || number_format == kNumberSint ||
+        number_format == kNumberFloat)
+      return kBufRgba32Uint + (number_format == kNumberFloat ? kNumberSint - kNumberUint + 1
+                                                             : number_format - kNumberUint);
+    break;
+  }
+  return 0;
 }
+
+bool supported_blend(uint32_t control) {
+  const uint32_t operation = (control >> 5) & 7;
+  const auto supported_factor = [](uint32_t value) {
+    return value <= kBlendInvConstantColor || value == kBlendConstantAlpha ||
+           value == kBlendInvConstantAlpha;
+  };
+  return operation <= kBlendReverseSubtract &&
+         (operation == kBlendMin || operation == kBlendMax ||
+          (supported_factor(control & 31) && supported_factor((control >> 8) & 31)));
+}
+
+float blend_factor(uint32_t factor, uint32_t component, const std::array<float, 4> &source,
+                   const std::array<float, 4> &destination, const std::array<float, 4> &constant) {
+  switch (factor) {
+  case kBlendZero:
+    return 0;
+  case kBlendOne:
+    return 1;
+  case kBlendSrcColor:
+    return source[component];
+  case kBlendInvSrcColor:
+    return 1 - source[component];
+  case kBlendSrcAlpha:
+    return source[3];
+  case kBlendInvSrcAlpha:
+    return 1 - source[3];
+  case kBlendDstAlpha:
+    return destination[3];
+  case kBlendInvDstAlpha:
+    return 1 - destination[3];
+  case kBlendDstColor:
+    return destination[component];
+  case kBlendInvDstColor:
+    return 1 - destination[component];
+  case kBlendSrcAlphaSaturate:
+    return component == 3 ? 1 : std::min(source[3], 1 - destination[3]);
+  case kBlendConstantColor:
+    return constant[component];
+  case kBlendInvConstantColor:
+    return 1 - constant[component];
+  case kBlendConstantAlpha:
+    return constant[3];
+  case kBlendInvConstantAlpha:
+    return 1 - constant[3];
+  default:
+    throw std::runtime_error("unsupported graphics blend factor");
+  }
+}
+
+float blend_component(uint32_t control, uint32_t component, const std::array<float, 4> &source,
+                      const std::array<float, 4> &destination,
+                      const std::array<float, 4> &constant) {
+  const uint32_t operation = (control >> 5) & 7;
+  if (operation == kBlendMin)
+    return std::min(source[component], destination[component]);
+  if (operation == kBlendMax)
+    return std::max(source[component], destination[component]);
+  const float source_term =
+      source[component] * blend_factor(control & 31, component, source, destination, constant);
+  const float destination_term =
+      destination[component] *
+      blend_factor((control >> 8) & 31, component, source, destination, constant);
+  if (operation == kBlendSubtract)
+    return source_term - destination_term;
+  if (operation == kBlendReverseSubtract)
+    return destination_term - source_term;
+  if (operation == kBlendAdd)
+    return source_term + destination_term;
+  throw std::runtime_error("unsupported graphics blend operation");
+}
+} // namespace
 
 GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint32_t vertices,
                            std::vector<uint32_t> indices)
@@ -230,11 +337,20 @@ void GraphicsDraw::initialize(Wavefront &wave, uint32_t workgroup, uint32_t wave
   }
 }
 
+void GraphicsDraw::export_mask(Wavefront &wave, uint64_t mask) {
+  if (!fragment_stage_)
+    return;
+  auto &batch = fragments_.at(wave.wg_coord()[0]);
+  for (uint32_t lane = 0; lane < fragment_wave_size_; ++lane)
+    batch.lanes[lane].covered &= (mask & (uint64_t{1} << lane)) != 0;
+}
+
 void GraphicsDraw::export_lane(Wavefront &wave, uint32_t lane, uint32_t target, uint32_t mask,
                                const std::array<uint32_t, 4> &values) {
   if (fragment_stage_) {
-    if (target == 8 && mask == 1) {
-      fragments_.at(wave.wg_coord()[0]).lanes[lane].z = std::bit_cast<float>(values[0]);
+    if (target == 8 && !(mask & ~1u)) {
+      if (mask)
+        fragments_.at(wave.wg_coord()[0]).lanes[lane].z = std::bit_cast<float>(values[0]);
       return;
     }
     if (target != 0) {
@@ -309,8 +425,6 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
     throw std::runtime_error("graphics user clip planes are not implemented");
   if (sh_[0xb] & 1) // SPI_SHADER_PGM_RSRC2_PS.SCRATCH_EN
     throw std::runtime_error("fragment scratch is not implemented");
-  if (context_[0x1b] & (1u << 6)) // DB_SHADER_CONTROL.KILL_ENABLE
-    throw std::runtime_error("graphics fragment discard is not implemented");
   if (context_[0x1b] & (1u << 12)) // DB_SHADER_CONTROL.DEPTH_BEFORE_SHADER
     throw std::runtime_error("graphics early fragment tests are not implemented");
   const uint32_t polygon_mode = (context_[0x207] >> 3) & 3;
@@ -329,7 +443,9 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
   util::Logger::cp("graphics target info=", std::hex, info, " attrib=", attrib, ",", attrib2, ",",
                    attrib3, " export=", color_format_, " inputs=", context_[0x198],
                    " mask=", context_[0x214], " depth=", context_[0x1c], std::dec);
-  memory_format_ = ((info >> 8) & 7) == 4 ? 46 : 42;
+  const uint32_t data_format = info & 31, number_format = (info >> 8) & 7;
+  memory_format_ = color_buffer_format(data_format, number_format);
+  color_bytes_ = buffer_format_bytes(memory_format_);
   const uint32_t color_control = context_[0x216];
   const uint32_t color_mode = (color_control >> 4) & 7;
   color_enabled_ = context_[0x214] != 0 && color_mode != 0;
@@ -340,19 +456,24 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
   if (depth_control_ & ~0x76u)
     throw std::runtime_error("unsupported graphics stencil or depth bounds test");
   if (color_enabled_ &&
-      ((info & 31) != 10 || (((info >> 8) & 31) != 0 && ((info >> 8) & 31) != 4) ||
-       (attrib & (gfx12 ? ~0u : ~0x30u)) || (attrib3 & 0x3fffu) || (context_[0x31a] & ~31u) ||
-       (context_[0x319] & (gfx12 ? ~0u : ~(15u << 26))) || (context_[0x1e0] & (1u << 30)) ||
-       context_[0x214] != 15 || (color_format_ != 4 && color_format_ != 7 && color_format_ != 9)))
-    throw std::runtime_error("unsupported graphics color or blend state");
+      (!memory_format_ || (info & (3u << 11)) || (attrib & (gfx12 ? ~0u : ~0x30u)) ||
+       (attrib3 & 0x3fffu) || (context_[0x31a] & ~31u) ||
+       (context_[0x319] & (gfx12 ? ~0u : ~(15u << 26))) || (context_[0x214] & ~15u) ||
+       (color_format_ != 4 && color_format_ != 7 && color_format_ != 9)))
+    throw std::runtime_error("unsupported graphics color state");
+  const uint32_t blend = context_[0x1e0];
+  if (color_enabled_ && (blend & kBlendEnable) &&
+      (memory_format_ != kBufRgba8Unorm || !supported_blend(blend) ||
+       ((blend & kBlendSeparateAlpha) && !supported_blend(blend >> 16))))
+    throw std::runtime_error("unsupported graphics blend operation or integer attachment");
   if ((context_[0x198] & ~0x8f7fu) || (context_[0x197] & ~context_[0x198]))
     throw std::runtime_error("unsupported graphics fragment inputs");
   width_ = (attrib2 >> 16) + 1;
   height_ = (attrib2 & 0xffff) + 1;
   swizzle_ = gfx12 ? (attrib3 >> 15) & 7 : (attrib3 >> 14) & 31;
   if (color_enabled_) {
-    const auto mip =
-        image_mip_layout(gfx12, swizzle_, 4, width_, height_, color_max_mip_ + 1, color_mip_);
+    const auto mip = image_mip_layout(gfx12, swizzle_, color_bytes_, width_, height_,
+                                      color_max_mip_ + 1, color_mip_);
     if (!mip || (color_metadata_ && color_max_mip_))
       throw std::runtime_error("unsupported graphics color mip layout");
     width_ = mip->width;
@@ -415,10 +536,21 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
   if (context_[0x205] != 0x43f || !std::isfinite(sx) || !std::isfinite(sy) || !std::isfinite(ox) ||
       !std::isfinite(oy))
     throw std::runtime_error("unsupported graphics viewport transform");
-  const int left = std::max(0, int(context_[0x90] & 0x7fff));
-  const int top = std::max(0, int((context_[0x90] >> 16) & 0x7fff));
-  const int right = std::min(int(width_), int(context_[0x91] & 0x7fff));
-  const int bottom = std::min(int(height_), int((context_[0x91] >> 16) & 0x7fff));
+  const uint32_t scissor_mask = gfx12 ? 0xffff : 0x7fff;
+  int left = std::max(0, int(context_[0x90] & scissor_mask));
+  int top = std::max(0, int((context_[0x90] >> 16) & scissor_mask));
+  // GFX12 changed the bottom-right scissor bounds from exclusive to inclusive.
+  int right = std::min(int(width_), int(context_[0x91] & scissor_mask) + int(gfx12));
+  int bottom = std::min(int(height_), int((context_[0x91] >> 16) & scissor_mask) + int(gfx12));
+  if (context_[0x292] & 2) { // PA_SC_MODE_CNTL_0.VPORT_SCISSOR_ENABLE
+    const bool window_offset = !gfx12 && !(context_[0x94] & (1u << 31));
+    const int x_offset = window_offset ? int16_t(context_[0x80]) : 0;
+    const int y_offset = window_offset ? int16_t(context_[0x80] >> 16) : 0;
+    left = std::max(left, int(context_[0x94] & scissor_mask) + x_offset);
+    top = std::max(top, int((context_[0x94] >> 16) & scissor_mask) + y_offset);
+    right = std::min(right, int(context_[0x95] & scissor_mask) + x_offset + int(gfx12));
+    bottom = std::min(bottom, int((context_[0x95] >> 16) & scissor_mask) + y_offset + int(gfx12));
+  }
   for (uint32_t p = 0; p < primitive_count(); ++p) {
     if (primitives_[p] & (1u << 31))
       continue;
@@ -652,11 +784,15 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       (!std::isfinite(depth_min) || !std::isfinite(depth_max) || depth_min > depth_max))
     throw std::runtime_error("unsupported graphics viewport depth range");
   if (!attachments_prepared_) {
-    if (color_enabled_ && color_metadata_)
-      for (uint32_t y = 0; y < height_; y += 8)
-        for (uint32_t x = 0; x < width_; x += 8)
-          materialize_gfx11_dcc(memory, color_base_, *color_metadata_, x, y, width_, height_, 4,
-                                swizzle_, attrib3 & (1u << 30));
+    if (color_enabled_ && color_metadata_) {
+      const uint32_t block_bits = 8 - std::countr_zero(color_bytes_);
+      const uint32_t block_width = 1u << ((block_bits + 1) / 2);
+      const uint32_t block_height = 1u << (block_bits / 2);
+      for (uint32_t y = 0; y < height_; y += block_height)
+        for (uint32_t x = 0; x < width_; x += block_width)
+          materialize_gfx11_dcc(memory, color_base_, *color_metadata_, x, y, width_, height_,
+                                color_bytes_, swizzle_, attrib3 & (1u << 30));
+    }
     if ((depth_control_ & 2) && depth_metadata_) {
       uint32_t bits = depth_clear_;
       if (depth_bytes_ == 2) {
@@ -747,12 +883,39 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
       } else if (f.mask != 15) {
         throw std::runtime_error("unsupported graphics color export mask");
       }
-      std::array<uint8_t, 4> bytes{};
-      pack_buffer_format(memory_format_, 0xfac, components, bytes);
       const auto address = image_address(color_base_, f.x + color_tail_x_, f.y + color_tail_y_,
-                                         color_pitch_, 4, swizzle_);
-      if (!address ||
-          memory.write(*address, std::as_bytes(std::span{bytes})) != VmAccessOutcome::Complete)
+                                         color_pitch_, color_bytes_, swizzle_);
+      if (!address)
+        throw std::runtime_error("graphics color address is unsupported");
+      std::array<uint8_t, 16> previous{}, bytes{};
+      const uint32_t blend = context_[0x1e0], write_mask = context_[0x214];
+      if (((blend & kBlendEnable) || write_mask != 15) &&
+          memory.read(*address, std::as_writable_bytes(std::span{previous}.first(color_bytes_))) !=
+              VmAccessOutcome::Complete)
+        throw std::runtime_error("graphics color read failed");
+      if (blend & kBlendEnable) {
+        std::array<float, 4> source{}, destination{}, constant{};
+        for (uint32_t c = 0; c < 4; ++c) {
+          source[c] = std::clamp(std::bit_cast<float>(components[c]), 0.0f, 1.0f);
+          destination[c] = previous[c] / 255.0f;
+          constant[c] = std::clamp(std::bit_cast<float>(context_[0x105 + c]), 0.0f, 1.0f);
+          // Color blending truncates constants to twelve significant bits.
+          constant[c] = std::bit_cast<float>(std::bit_cast<uint32_t>(constant[c]) & ~0xfffu);
+        }
+        for (uint32_t c = 0; c < 4; ++c) {
+          const uint32_t control = c == 3 && (blend & kBlendSeparateAlpha) ? blend >> 16 : blend;
+          components[c] =
+              std::bit_cast<uint32_t>(blend_component(control, c, source, destination, constant));
+        }
+      }
+      pack_buffer_format(memory_format_, 0xfac, components, std::span{bytes}.first(color_bytes_));
+      const uint32_t component_bytes = color_bytes_ / 4;
+      for (uint32_t c = 0; c < 4; ++c)
+        if (!(write_mask & (1u << c)))
+          std::copy_n(previous.begin() + c * component_bytes, component_bytes,
+                      bytes.begin() + c * component_bytes);
+      if (memory.write(*address, std::as_bytes(std::span{bytes}.first(color_bytes_))) !=
+          VmAccessOutcome::Complete)
         throw std::runtime_error("graphics color write failed");
     }
   }

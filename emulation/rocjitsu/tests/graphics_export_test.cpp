@@ -38,6 +38,7 @@ public:
   };
   std::vector<Export> exports;
   void initialize(amdgpu::Wavefront &, uint32_t, uint32_t) override {}
+  void export_mask(amdgpu::Wavefront &, uint64_t) override {}
   void export_lane(amdgpu::Wavefront &, uint32_t lane, uint32_t target, uint32_t mask,
                    const std::array<uint32_t, 4> &values) override {
     exports.push_back({lane, target, mask, values});
@@ -301,16 +302,18 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
     bool triangle = false;
     uint32_t expected_coverage = 0;
     bool passthrough = false;
+    bool viewport_scissor = false;
   };
   const Case cases[] = {
       {.name = "integer coverage"},
+      {.name = "viewport scissor", .expected_coverage = 0x440, .viewport_scissor = true},
       {.name = "unequal W and explicit vertex parameters", .inputs = 0x8f28, .passthrough = true},
       {.name = "position z and packed coordinates", .inputs = 0x8402},
       {.name = "unsupported line stipple input", .outcome = Outcome::Reject, .inputs = 0x80},
       {.name = "unsupported ancillary input", .outcome = Outcome::Reject, .inputs = 0x2000},
       {.name = "fractional coverage", .extent = 0.625f, .full_scissor = true},
       {.name = "rasterizer discard", .outcome = Outcome::Empty, .clip_control = 1u << 22},
-      {.name = "fragment discard", .outcome = Outcome::Reject, .shader_control = 1u << 6},
+      {.name = "fragment discard enabled", .shader_control = 1u << 6},
       {.name = "early fragment tests", .outcome = Outcome::Reject, .shader_control = 1u << 12},
       {.name = "sample disabled", .outcome = Outcome::Empty, .sample_coverage = 0},
       {.name = "sample at even x and y", .sample_coverage = 1},
@@ -408,7 +411,7 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
         state.context_registers[0x111] = state.context_registers[0x112] =
             std::bit_cast<uint32_t>(2.0f);
     state.context_registers[0x90] = 1 | (1 << 16);
-    state.context_registers[0x91] = 3 | (3 << 16);
+    state.context_registers[0x91] = (3 - gfx12) | ((3 - gfx12) << 16);
     if (!gfx12) {
       state.context_registers[0x31c] = 10;
       state.context_registers[0x3b0] = 3 | (3 << 14);
@@ -422,7 +425,7 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
     }
     if (test.full_scissor) {
       state.context_registers[0x90] = 0;
-      state.context_registers[0x91] = 4 | (4 << 16);
+      state.context_registers[0x91] = (4 - gfx12) | ((4 - gfx12) << 16);
     }
     state.context_registers[0x204] = test.clip_control;
     state.context_registers[gfx12 ? 0x1b : 0x203] = test.shader_control;
@@ -457,6 +460,11 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
           memory_.write32(0x400000 + k * 16 + c * 4,
                           std::bit_cast<uint32_t>(float(10 + k * 4 + c)));
     }
+    if (test.viewport_scissor) {
+      state.context_registers[0x292] = 2;
+      state.context_registers[0x94] = 2 | (1 << 16);
+      state.context_registers[0x95] = (3 - gfx12) | ((3 - gfx12) << 16);
+    }
     const float extent = test.extent;
     auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
     for (uint32_t i = 0; i < 3; ++i) {
@@ -485,8 +493,9 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
     wave_->set_wg_coord(0, 0, 0);
     wave_->set_graphics_stage(draw);
     draw->initialize(*wave_, 0, 0);
-    EXPECT_EQ(std::popcount(wave_->exec()), test.triangle ? std::popcount(test.expected_coverage)
-                                                          : std::popcount(test.sample_coverage));
+    EXPECT_EQ(std::popcount(wave_->exec()), (test.triangle || test.viewport_scissor)
+                                                ? std::popcount(test.expected_coverage)
+                                                : std::popcount(test.sample_coverage));
     uint32_t covered_index = 0;
     for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
       if (!(wave_->exec() & (uint64_t{1} << lane)))
@@ -527,8 +536,9 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
                                    : amdgpu::gfx11_image_offset(x, y, 4, 4, 26);
         ASSERT_TRUE(address);
         const bool sample_enabled = test.sample_coverage & (1u << ((x & 1) + 2 * (y & 1)));
-        const bool covered = test.triangle ? (test.expected_coverage & (1u << (y * 4 + x)))
-                                           : x >= 1 && x < 3 && y >= 1 && y < 3;
+        const bool covered = (test.triangle || test.viewport_scissor)
+                                 ? (test.expected_coverage & (1u << (y * 4 + x)))
+                                 : x >= 1 && x < 3 && y >= 1 && y < 3;
         EXPECT_EQ(memory_.read32(0x100000 + *address),
                   !test.depth_only && sample_enabled && covered ? 0xff0000ffu : 0u)
             << x << "," << y;
@@ -1005,6 +1015,185 @@ TEST_P(GraphicsExportTest, TiledMipTransfersUseViewBoundsAndIndependentBackingOf
   }
 }
 
+TEST_P(GraphicsExportTest, ColorBlendingPreservesMasksAndUsesSeparateAlpha) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  struct Case {
+    uint32_t blend, mask, expected;
+    bool reject = false;
+    bool constant_boundary = false;
+    uint32_t number_format = 0;
+  };
+  constexpr uint32_t enabled = 1u << 30, separate = 1u << 29;
+  const Case cases[] = {
+      {0, 5, 0xff40bf80},
+      {enabled | 4 | (5 << 8), 15, 0xbf407f80},
+      {enabled | separate | 4 | (5 << 8) | (1 << 16), 15, 0x80407f80},
+      {enabled | (2 << 5), 15, 0x80404080},
+      {enabled | (3 << 5), 15, 0xff40bf80},
+      {enabled | 11, 15, 0x40201020},
+      {enabled | 10, 15, 0x80000000},
+      {.blend = enabled | 13, .mask = 15, .expected = 0, .reject = true},
+      {.blend = enabled | (5 << 5), .mask = 15, .expected = 0, .reject = true},
+      {.blend = enabled | 1, .mask = 15, .expected = 0, .reject = true, .number_format = 4},
+      {.blend = enabled | 11, .mask = 5, .expected = 0xff20bf20},
+      {.blend = enabled | separate | 11 | (17 << 16),
+       .mask = 15,
+       .expected = 0x9f6a3500,
+       .constant_boundary = true},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.blend);
+    amdgpu::Pm4QueueState state;
+    state.num_instances = 1;
+    state.uconfig_registers[0x242] = 17;
+    auto &context = state.context_registers;
+    context[gfx12 ? 0x3b0 : 0x31c] = 10 | (test.number_format << 8);
+    context[gfx12 ? 0x31e : 0x3b0] = gfx12 ? 3 | (3 << 16) : 3 | (3 << 14);
+    context[gfx12 ? 0x31f : 0x3b8] = gfx12 ? 3u << 15 : 26u << 14;
+    context[0x318] = 0x1000;
+    context[gfx12 ? 0x214 : 0x8e] = test.mask;
+    context[gfx12 ? 0x195 : 0x1c5] = 9;
+    context[gfx12 ? 0x198 : 0x1b4] = 2;
+    context[0x2f9] = 0x2d;
+    context[gfx12 ? 0x205 : 0x206] = 0x43f;
+    context[gfx12 ? 0x216 : 0x202] = 0xcc0010;
+    context[0x1e0] = test.blend;
+    const float constants[] = {0.25f, 0.25f, 0.5f, 0.5f};
+    const uint32_t boundary[] = {0x3b008081, 0x3e56d6d7, 0x3ed5d5d6, 0x3f202020};
+    for (uint32_t c = 0; c < 4; ++c)
+      context[0x105 + c] =
+          test.constant_boundary ? boundary[c] : std::bit_cast<uint32_t>(constants[c]);
+    context[0x10f] = context[0x110] = context[0x111] = context[0x112] =
+        std::bit_cast<uint32_t>(2.0f);
+    context[0x91] = gfx12 ? 0 : 1 | (1 << 16);
+    context[0x30e] = context[0x30f] = 0xffffffff;
+    memory_.write32(0x100000, 0xff40bf80);
+    auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
+    for (uint32_t i = 0; i < 3; ++i)
+      draw->export_lane(*wave_, i, 12, 15,
+                        {std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
+                         std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f), 0,
+                         std::bit_cast<uint32_t>(1.0f)});
+    draw->export_lane(*wave_, 0, 20, 1,
+                      {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
+    if (test.reject) {
+      EXPECT_THROW(draw->advance(*access_), std::runtime_error);
+      EXPECT_EQ(memory_.read32(0x100000), 0xff40bf80);
+      continue;
+    }
+    ASSERT_TRUE(draw->advance(*access_));
+    wave_->set_wg_coord(0, 0, 0);
+    wave_->set_graphics_stage(draw);
+    draw->initialize(*wave_, 0, 0);
+    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+      draw->export_lane(
+          *wave_, lane, 0, 15,
+          test.constant_boundary
+              ? std::array<uint32_t, 4>{0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000}
+              : std::array<uint32_t, 4>{0x3f000000, 0x3e800000, 0x3e800000, 0x3f000000});
+    EXPECT_FALSE(draw->advance(*access_));
+    EXPECT_EQ(memory_.read32(0x100000), test.expected);
+  }
+}
+
+TEST_P(GraphicsExportTest, WideColorAttachmentsWriteFullTexelsAndPreserveMaskedChannels) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  struct Case {
+    uint32_t data_format, number_format, export_format, bytes, mask;
+    std::array<uint32_t, 4> exported, expected;
+  };
+  const Case cases[] = {
+      {.data_format = 12,
+       .number_format = 0,
+       .export_format = 4,
+       .bytes = 8,
+       .mask = 3,
+       .exported = {0x38003400, 0x3c003a00},
+       .expected = {0x80004000, 0xffffbfff}},
+      {.data_format = 12,
+       .number_format = 7,
+       .export_format = 4,
+       .bytes = 8,
+       .mask = 3,
+       .exported = {0x38003400, 0x3c003a00},
+       .expected = {0x38003400, 0x3c003a00}},
+      {.data_format = 12,
+       .number_format = 4,
+       .export_format = 7,
+       .bytes = 8,
+       .mask = 3,
+       .exported = {0x45670123, 0xcdef89ab},
+       .expected = {0x45670123, 0xcdef89ab}},
+      {.data_format = 14,
+       .number_format = 7,
+       .export_format = 9,
+       .bytes = 16,
+       .mask = 15,
+       .exported = {0x3e800000, 0x3f000000, 0x3f400000, 0x3f800000},
+       .expected = {0x3e800000, 0x3f000000, 0x3f400000, 0x3f800000}},
+      {.data_format = 14,
+       .number_format = 4,
+       .export_format = 9,
+       .bytes = 16,
+       .mask = 15,
+       .exported = {0x12345678, 0x87654321, 0x0fedcba9, 0x9abcdef0},
+       .expected = {0x12345678, 0x87654321, 0x0fedcba9, 0x9abcdef0}},
+  };
+  for (const auto &test : cases) {
+    for (uint32_t write_mask : {5u, 15u}) {
+      SCOPED_TRACE(test.data_format);
+      SCOPED_TRACE(test.number_format);
+      SCOPED_TRACE(write_mask);
+      amdgpu::Pm4QueueState state;
+      state.num_instances = 1;
+      state.uconfig_registers[0x242] = 17;
+      auto &context = state.context_registers;
+      context[gfx12 ? 0x3b0 : 0x31c] = test.data_format | (test.number_format << 8);
+      context[gfx12 ? 0x31e : 0x3b0] = gfx12 ? 3 | (3 << 16) : 3 | (3 << 14);
+      // Linear targets cover the RGBA32F linear-image clear CTS regression.
+      context[gfx12 ? 0x31f : 0x3b8] = 0;
+      context[0x318] = 0x1000;
+      context[gfx12 ? 0x214 : 0x8e] = write_mask;
+      context[gfx12 ? 0x195 : 0x1c5] = test.export_format;
+      context[gfx12 ? 0x198 : 0x1b4] = 2;
+      context[0x2f9] = 0x2d;
+      context[gfx12 ? 0x205 : 0x206] = 0x43f;
+      context[gfx12 ? 0x216 : 0x202] = 0xcc0010;
+      context[0x10f] = context[0x110] = context[0x111] = context[0x112] =
+          std::bit_cast<uint32_t>(2.0f);
+      context[0x91] = gfx12 ? 0 : 1 | (1 << 16);
+      context[0x30e] = context[0x30f] = 0xffffffff;
+      for (uint32_t offset = 0; offset <= test.bytes; offset += 4)
+        memory_.write32(0x100000 + offset, 0xcccccccc);
+      auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
+      for (uint32_t i = 0; i < 3; ++i)
+        draw->export_lane(*wave_, i, 12, 15,
+                          {std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
+                           std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f), 0,
+                           std::bit_cast<uint32_t>(1.0f)});
+      draw->export_lane(*wave_, 0, 20, 1,
+                        {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
+      ASSERT_TRUE(draw->advance(*access_));
+      wave_->set_wg_coord(0, 0, 0);
+      wave_->set_graphics_stage(draw);
+      draw->initialize(*wave_, 0, 0);
+      for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+        draw->export_lane(*wave_, lane, 0, test.mask, test.exported);
+      EXPECT_FALSE(draw->advance(*access_));
+      for (uint32_t byte = 0; byte < test.bytes; ++byte) {
+        const uint32_t component = byte / (test.bytes / 4);
+        const uint8_t expected =
+            write_mask & (1u << component) ? test.expected[byte / 4] >> (8 * (byte % 4)) : 0xcc;
+        uint8_t actual = 0;
+        ASSERT_EQ(access_->read(0x100000 + byte, {reinterpret_cast<std::byte *>(&actual), 1}),
+                  amdgpu::VmAccessOutcome::Complete);
+        EXPECT_EQ(actual, expected) << byte;
+      }
+      EXPECT_EQ(memory_.read32(0x100000 + test.bytes), 0xcccccccc);
+    }
+  }
+}
+
 TEST_P(GraphicsExportTest, ColorAttachmentWritesSelectedMipAndPreservesOtherLevels) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   constexpr uint32_t base = 0x400000;
@@ -1032,7 +1221,7 @@ TEST_P(GraphicsExportTest, ColorAttachmentWritesSelectedMipAndPreservesOtherLeve
     context[0x111] = context[0x112] = std::bit_cast<uint32_t>(height / 2.0f);
     context[0x113] = context[gfx12 ? 0x116 : 0xb5] = std::bit_cast<uint32_t>(1.0f);
     context[0x90] = (width - 1) | ((height - 1) << 16);
-    context[0x91] = width | (height << 16);
+    context[0x91] = (width - gfx12) | ((height - gfx12) << 16);
     context[0x30e] = context[0x30f] = 0xffffffff;
     auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
     for (uint32_t i = 0; i < 3; ++i)
@@ -1469,9 +1658,7 @@ TEST_P(GraphicsExportTest, SrgbTrilinearUsesDistinctWeightsForNonuniformMipLevel
       pipeline.issue(instruction.release(), *wave_);
       for (uint32_t c = 0; c < 4; ++c) {
         const auto actual = wave_->debug_read_vgpr(4 + c, 0);
-        // The final sRGB mip blend still differs from hardware by one ULP on
-        // some inputs. Keep that explicit bound; alpha must match exactly.
-        EXPECT_LE(std::abs(int64_t(actual) - test.expected[c]), c == 3 ? 0 : 1) << c;
+        EXPECT_EQ(actual, test.expected[c]) << c;
       }
     }
   }
@@ -1481,11 +1668,13 @@ TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   struct Case {
     const char *name;
-    float vertex_z, scale, offset, minimum, maximum;
-    bool disable_clamp;
-    float expected;
-    uint16_t expected_d16;
+    float vertex_z = 0, scale = 1, offset = 0, minimum = 0, maximum = 1;
+    bool disable_clamp = false;
+    float expected = 0;
+    uint16_t expected_d16 = 0;
     bool disable_samples = false;
+    bool fragment_export = false;
+    uint64_t export_mask = ~uint64_t{0};
   };
   constexpr Case cases[] = {
       {"zero depth", 0, 1, 0, 0, 1, false, 0, 0},
@@ -1493,7 +1682,10 @@ TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
       {"far depth unclamped", 2, 0.5f, 0.25f, 0.25f, 0.75f, true, 1.25f, 65535},
       {"near depth clamped", -2, 0.5f, 0.25f, 0.25f, 0.75f, false, 0.25f, 16384},
       {"near depth unclamped", -2, 0.5f, 0.25f, 0.25f, 0.75f, true, -0.75f, 0},
-      {"sample disabled", 0, 1, 0, 0, 1, false, 0, 0, true},
+      {.name = "sample disabled", .disable_samples = true},
+      {.name = "zero-component export", .fragment_export = true},
+      {.name = "discard all pixels", .fragment_export = true, .export_mask = 0},
+      {.name = "discard odd columns", .fragment_export = true, .export_mask = 0x5555555555555555},
   };
   for (const auto &test : cases) {
     SCOPED_TRACE(test.name);
@@ -1522,7 +1714,7 @@ TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
             test.disable_clamp ? (gfx12 ? 1u : 1u << 16) : 0;
         state.context_registers[0x204] = (1u << 26) | (1u << 27);
         state.context_registers[0x90] = 1 | (1 << 16);
-        state.context_registers[0x91] = 3 | (3 << 16);
+        state.context_registers[0x91] = (3 - gfx12) | ((3 - gfx12) << 16);
         if (!gfx12) {
           state.context_registers[7] = (3 << 16) | 3;
           state.context_registers[0x10] = (bytes == 2 ? 1 : 3) | (24 << 4);
@@ -1552,9 +1744,17 @@ TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
                           {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
         const auto dispatch = draw->advance(*access_);
         ASSERT_EQ(bool(dispatch), !test.disable_samples);
-        // Depth-only clears have no fragment exports; fixed-function Z still writes.
-        if (dispatch)
+        // A zero-component export still carries pixel validity for late depth.
+        if (dispatch) {
+          if (test.fragment_export) {
+            wave_->set_wg_coord(0, 0, 0);
+            wave_->set_graphics_stage(draw);
+            draw->initialize(*wave_, 0, 0);
+            wave_->set_exec(wave_->exec() & test.export_mask);
+            execute(0, 0);
+          }
           EXPECT_FALSE(draw->advance(*access_));
+        }
         const float expected = bytes == 2 ? test.expected_d16 / 65535.0f : test.expected;
         const bool comparisons[] = {false,        expected < 1,  expected == 1, expected <= 1,
                                     expected > 1, expected != 1, expected >= 1, true};
@@ -1568,7 +1768,9 @@ TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
             uint32_t actual = 0;
             ASSERT_EQ(access_->read(*address, {reinterpret_cast<std::byte *>(&actual), bytes}),
                       amdgpu::VmAccessOutcome::Complete);
-            const bool changed = pass && x >= 1 && x < 3 && y >= 1 && y < 3;
+            const bool survives =
+                !test.fragment_export || (test.export_mask & (uint64_t{1} << (x & 1)));
+            const bool changed = pass && survives && x >= 1 && x < 3 && y >= 1 && y < 3;
             EXPECT_EQ(actual, changed      ? expected_bits
                               : bytes == 2 ? 65535
                                            : std::bit_cast<uint32_t>(1.0f))

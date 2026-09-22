@@ -90,8 +90,13 @@ bool Wavefront::fail_pm4_submission() {
 
 void Wavefront::export_graphics(uint32_t target, uint32_t mask,
                                 const std::array<uint32_t, 4> &sources, bool row) {
-  if (!exec() || (status_raw() & (1u << 18)))
+  if (status_raw() & (1u << 18))
     return;
+  if (!exec()) {
+    if (graphics_stage_)
+      graphics_stage_->export_mask(*this, 0);
+    return;
+  }
   if (!graphics_stage_ || row) {
     report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
     return;
@@ -101,6 +106,7 @@ void Wavefront::export_graphics(uint32_t target, uint32_t mask,
       report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
       return;
     }
+  graphics_stage_->export_mask(*this, exec());
   for (uint32_t lane = 0; lane < wf_size(); ++lane) {
     if (!(exec() & (uint64_t{1} << lane)))
       continue;
