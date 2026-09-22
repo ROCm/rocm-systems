@@ -392,11 +392,12 @@ TEST(RegisterAccessTest, ReadRegionCopiesDwordsToLaneMajorStorage) {
   EXPECT_TRUE(std::ranges::all_of(masked_lane, [](uint8_t byte) { return byte == 0xAA; }));
 }
 
-// GCC 14+ inlines copy_dwords_lane_major and flags the memcpy as out-of-bounds,
+// GCC 13+ inlines copy_dwords_lane_major and flags the memcpy as out-of-bounds,
 // not realizing the exception guard makes it unreachable. Suppress the false positive.
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Warray-bounds"
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
 #endif
 TEST(RegisterAccessTest, ReadRegionRejectsInvalidLaneMajorCopyBounds) {
   Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,

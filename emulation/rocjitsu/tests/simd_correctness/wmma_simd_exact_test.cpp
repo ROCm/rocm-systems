@@ -25,6 +25,7 @@ using namespace mma_exact;
 constexpr uint32_t WF = 32;
 constexpr uint32_t S0 = 0, S1 = 32, ACC = 64, INDEX = 96;
 constexpr uint32_t IN_REGS = 16, ACC_REGS = 8, INDEX_REGS = 4;
+constexpr uint32_t M32_OUTPUT_REGS = 16;
 constexpr uint32_t INDEX_KEY = 0;
 constexpr uint32_t CONST_ONE = 0x3F800000u;
 constexpr uint32_t SCALE_A = 100, SCALE_B = 104;
@@ -408,9 +409,10 @@ TEST(WmmaSimdExact, ScaledMixed) {
   });
 }
 
-// Every gfx1250 MXFP selector pair uses the same arithmetic SIMD staging
+// Every gfx1250 MXFP selector pair uses the same mixed arithmetic staging
 // helper. Exercise all 25 combinations with varied raw payloads so mixed bit
-// widths, matrix gathers, and each vector decoder are checked end to end.
+// widths and matrix gathers are checked end to end. FP4/FP6/BF6 also cover
+// vector decode; generic FP8/BF8 decoding intentionally remains scalar.
 TEST(WmmaSimdExact, MxfpAllFormatPairs) {
   SKIP_IF_NO_SIMD();
   for (const auto &a : kMxfpFormats)
@@ -459,5 +461,48 @@ TEST(WmmaSimdExact, MxfpScaledAllFormatPairs) {
         ASSERT_TRUE(dispatched);
         if (testing::Test::HasFatalFailure())
           return;
+      }
+}
+
+TEST(WmmaSimdExact, MxfpScaledF4M32) {
+  SKIP_IF_NO_SIMD();
+  for (bool scale16 : {false, true})
+    for (bool destructive_overlap : {false, true})
+      for (uint32_t seed : {11u, 22u, 33u, 44u}) {
+        const std::string label = std::string("wmma_f32_mxfp_scaled") + (scale16 ? "16" : "32") +
+                                  "_32x16x128_fp4" + (destructive_overlap ? "_overlap" : "");
+        SCOPED_TRACE(::testing::Message() << label << " seed=" << seed
+                                          << " destructive_overlap=" << destructive_overlap);
+
+        WmmaFixture fx;
+        ASSERT_NE(fx.wf, nullptr);
+        const uint32_t dst = destructive_overlap ? S0 : ACC;
+        auto reseed_state = [&] {
+          fx.seed(S0, IN_REGS, Fmt::RAW4, Mode::RandomInt, seed + 1);
+          fx.seed(S1, IN_REGS, Fmt::RAW4, Mode::RandomInt, seed + 2);
+          fx.seed(ACC, M32_OUTPUT_REGS, Fmt::F32, Mode::RandomInt, seed + 3);
+          seed_mxfp_scales(fx, SCALE_A, seed + 4);
+          seed_mxfp_scales(fx, SCALE_B, seed + 5);
+        };
+        auto kernel = [&](uint32_t const_acc) {
+          auto scale_word = [&fx](uint32_t off, uint32_t lane) {
+            return static_cast<uint64_t>(fx.cu->read_vgpr(fx.vbase + off, lane)) |
+                   (static_cast<uint64_t>(fx.cu->read_vgpr(fx.vbase + off + 1, lane)) << 32);
+          };
+          auto sa = [&](uint32_t lane) { return scale_word(SCALE_A, lane); };
+          auto sb = [&](uint32_t lane) { return scale_word(SCALE_B, lane); };
+          amdgpu::exec_wmma_f32_scaled_mixed(
+              *fx.cu, 32, 16, 128, 4, 4, fx.vbase + dst, fx.vbase + S0, fx.vbase + S1,
+              fx.vbase + ACC, amdgpu::extract_fp4, amdgpu::extract_fp4, const_acc, sa, sb,
+              /*matrix_a_scale=*/0, /*matrix_b_scale=*/0,
+              /*matrix_a_scale_fmt=*/0, /*matrix_b_scale_fmt=*/0, scale16);
+        };
+        for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, CONST_ONE}) {
+          expect_bit_exact(
+              label.c_str(), Mode::RandomInt, fx, reseed_state, [&] { kernel(const_acc); }, dst,
+              M32_OUTPUT_REGS);
+          if (testing::Test::HasFatalFailure())
+            return;
+        }
       }
 }

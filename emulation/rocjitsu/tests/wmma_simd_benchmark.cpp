@@ -249,16 +249,54 @@ constexpr std::array<MxfpBenchmarkFormat, 5> kMxfpFormats = {{{0, 8, 0x38, "fp8"
                                                               {3, 6, 0x0c, "bf6"},
                                                               {4, 4, 0x02, "fp4"}}};
 
-constexpr uint32_t repeat_low_code(uint32_t code, uint32_t bits) {
+// Return one DWORD slice of a lane's continuous packed-element bitstream.
+// Six-bit elements cross VGPR boundaries, so their phase advances by 32 bits
+// for each successive register. Four- and eight-bit elements divide a DWORD
+// evenly and therefore produce the same word for every register.
+constexpr uint32_t repeated_packed_code_word(uint32_t code, uint32_t bits, uint32_t reg) {
   uint32_t word = 0;
-  for (uint32_t shift = 0; shift < 32; shift += bits)
-    word |= code << shift;
+  const uint64_t first_bit = static_cast<uint64_t>(reg) * 32u;
+  for (uint32_t bit = 0; bit < 32; ++bit) {
+    const uint32_t code_bit = static_cast<uint32_t>((first_bit + bit) % bits);
+    word |= ((code >> code_bit) & 1u) << bit;
+  }
   return word;
 }
+
+constexpr bool repeated_packed_code_round_trips(uint32_t code, uint32_t bits, uint32_t elements) {
+  const uint32_t mask = (1u << bits) - 1u;
+  for (uint32_t element = 0; element < elements; ++element) {
+    const uint32_t first_bit = element * bits;
+    const uint32_t reg = first_bit / 32u;
+    const uint32_t shift = first_bit % 32u;
+    const uint64_t words =
+        repeated_packed_code_word(code, bits, reg) |
+        (static_cast<uint64_t>(repeated_packed_code_word(code, bits, reg + 1)) << 32);
+    if (((words >> shift) & mask) != code)
+      return false;
+  }
+  return true;
+}
+
+static_assert(repeated_packed_code_word(0x02, 4, 7) == 0x22222222u);
+static_assert(repeated_packed_code_word(0x38, 8, 7) == 0x38383838u);
+static_assert(repeated_packed_code_word(0x08, 6, 0) == 0x08208208u);
+static_assert(repeated_packed_code_word(0x08, 6, 1) == 0x82082082u);
+static_assert(repeated_packed_code_word(0x08, 6, 2) == 0x20820820u);
+static_assert(repeated_packed_code_word(0x0c, 6, 1) == 0xc30c30c3u);
+static_assert(repeated_packed_code_round_trips(0x08, 6, 16));
+static_assert(repeated_packed_code_round_trips(0x0c, 6, 16));
 
 uint32_t packed_reg_count(uint32_t elements, uint32_t bits) {
   return static_cast<uint32_t>((static_cast<uint64_t>(elements) * bits + WF_SIZE * 32u - 1u) /
                                (WF_SIZE * 32u));
+}
+
+void seed_repeated_packed_code(BenchFixture &fx, uint32_t off, uint32_t elements, uint32_t code,
+                               uint32_t bits) {
+  const uint32_t regs = packed_reg_count(elements, bits);
+  for (uint32_t reg = 0; reg < regs; ++reg)
+    fx.seed_words(off + reg, 1, repeated_packed_code_word(code, bits, reg));
 }
 
 std::unique_ptr<Instruction> decode_mxfp_wmma(Decoder &decoder, const MxfpBenchmarkFormat &a,
@@ -297,8 +335,8 @@ std::unique_ptr<Instruction> decode_fp4_32x16_wmma(Decoder &decoder, uint32_t pr
 
 void seed_mxfp_arithmetic(BenchFixture &fx, const MxfpBenchmarkFormat &a,
                           const MxfpBenchmarkFormat &b, uint32_t M, uint32_t N) {
-  fx.seed_words(S0_OFF, packed_reg_count(M * 128u, a.bits), repeat_low_code(a.one_code, a.bits));
-  fx.seed_words(S1_OFF, packed_reg_count(N * 128u, b.bits), repeat_low_code(b.one_code, b.bits));
+  seed_repeated_packed_code(fx, S0_OFF, M * 128u, a.one_code, a.bits);
+  seed_repeated_packed_code(fx, S1_OFF, N * 128u, b.one_code, b.bits);
   fx.seed_words(S2_OFF, (M * N) / WF_SIZE, 0u);
   fx.seed_words(SCALE_A_OFF, 2, 0x7f7f7f7fu);
   fx.seed_words(SCALE_B_OFF, 2, 0x7f7f7f7fu);
