@@ -60,7 +60,7 @@ jobs:
       timeout_minutes: 240
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
-      therock_ref: ${{ inputs.therock_ref }}
+      therock_ref: ${{ inputs.therock_ref || 'release/bkc/therock-10.2-20260922' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
   # ext-plugins suite on ruby: builds RCCL, a UCX-enabled OpenMPI, rccl-tests and
@@ -81,7 +81,7 @@ jobs:
       non_gating: true
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
-      therock_ref: ${{ inputs.therock_ref }}
+      therock_ref: ${{ inputs.therock_ref || 'release/bkc/therock-10.2-20260922' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
   # GIN suite (WIP) on Tensorwave. Failures show red with logs on this job.
@@ -103,7 +103,7 @@ jobs:
       non_gating: true
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
-      therock_ref: ${{ inputs.therock_ref }}
+      therock_ref: ${{ inputs.therock_ref || 'release/bkc/therock-10.2-20260922' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
   # Gates GIN on build/infra failures only; test failures stay non-gating (red
