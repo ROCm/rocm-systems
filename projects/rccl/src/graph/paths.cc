@@ -864,7 +864,7 @@ static bool rcclPathOverride(struct ncclTopoSystem* system, uint64_t distance) {
   }
 }
 
-// Rewrite GPU<->NIC paths of type `fromType` to `toType` when the two devices share a PCI domain.
+// Rewrite DEV/GPU <-> NET paths of type `fromType` to `toType` when the two devices share a PCI domain.
 // Keyed on the physical device (DEV node), not on the GPU partitions layered on top of it: reaching a
 // NIC is a property of the PCI function, and ncclTopoGdrDistance reads the DEV path for partitioned
 // GPUs. Rewriting only the partitions leaves that decision on the original distance, and the no-GDR
