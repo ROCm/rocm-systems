@@ -2599,6 +2599,13 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // (globalRmaProxySupport) has no all-P2P symmetric window, and enqueue.cc has a
   // dedicated non-symmetric hostRma path for it. The numRmaCtx gate is upstream 2.31's.
   comm->hostRmaSupport = comm->config.numRmaCtx > 0 && (isOneLsaTeams || comm->globalRmaProxySupport);
+  // Every input to both derivations; the conditional block below only fires on failure.
+  INFO(NCCL_INIT | NCCL_NET,
+       "GIN/RMA support: ginConnection %d hostRma %d (ginTypeMask 0x%lx mloPart %d nicFused %d crossNic %d "
+       "railable %d rmaPlugin %d cuMemGdr %d oneLsaTeam %d numRmaCtx %d)",
+       comm->globalGinSupport, comm->hostRmaSupport, (unsigned long)globalGinTypeBitMask, comm->hasMloPart,
+       globalNicFused, globalCrossNicSupport, comm->contiguousRanksPerHost != INT_MAX, globalRmaPluginSupport,
+       globalCuMemGdrSupport, isOneLsaTeams, comm->config.numRmaCtx);
   if (!comm->symmetricSupport || comm->globalGinSupport == NCCL_GIN_CONNECTION_NONE) {
     INFO(NCCL_INIT,
          "symmetricSupport %d, cuMemEnable %d, globalGinSupport %d, globalNicFused %d, cuMemGdrSupport %d, "
