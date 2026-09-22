@@ -34,8 +34,14 @@
 #include "nccl.h"
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM defaults this floor stands in for
 #include "os.h"
+#include "profiler.h"
 
 #include "nccl_stubs.h"
+
+#include "signature-drift.h"
+ASSERT_HOOK_MATCHES_PROD(g_ncclProfilerPluginFinalize, ncclProfilerPluginFinalize);
+ASSERT_HOOK_MATCHES_PROD(g_ncclProfilerThreadDestroy,  ncclProfilerThreadDestroy);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 struct ncclAsyncJob;
 struct ncclChannel;
@@ -105,10 +111,6 @@ ncclResult_t ncclProfilerThreadCreate(struct ncclComm* comm, struct ncclComm* pa
 static ncclResult_t DefaultNcclProfilerThreadDestroy(struct ncclComm*) { return ncclSuccess; }
 std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerThreadDestroy = DefaultNcclProfilerThreadDestroy;
 ncclResult_t ncclProfilerThreadDestroy(struct ncclComm* comm) { return g_ncclProfilerThreadDestroy(comm); }
-#include "signature-drift.h"
-ASSERT_HOOK_MATCHES_PROD(g_ncclProfilerPluginFinalize, ncclProfilerPluginFinalize);
-ASSERT_HOOK_MATCHES_PROD(g_ncclProfilerThreadDestroy,  ncclProfilerThreadDestroy);
-#undef ASSERT_HOOK_MATCHES_PROD
 // src/plugin/profiler.cc:871. Not fail-loud: ncclPrepareTasks:601 reaches this on
 // a happy path, and "no profiler plugin loaded" is the truth for a host-only
 // binary that links no plugin, not a steering choice.
