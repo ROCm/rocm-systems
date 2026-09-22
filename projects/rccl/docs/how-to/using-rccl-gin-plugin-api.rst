@@ -35,8 +35,9 @@ backend the communicator adopted, so the way to put a custom network behind prox
 GIN is to write an RMA plugin. See :ref:`using-rccl-rma-plugin` for the v15
 interface, compatibility behavior and loading instructions.
 
-When the plugin is adopted, RCCL reports it and then names it as the backend
-serving proxy GIN:
+When the RMA plugin is adopted, RCCL reports the first line below. If an external
+proxy-type GIN plugin is also selected through ``NCCL_GIN_PLUGIN``, RCCL skips it
+in favor of the built-in proxy and reports the second line:
 
 .. code-block:: shell
 

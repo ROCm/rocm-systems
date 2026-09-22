@@ -22,6 +22,10 @@ def _gin_example_so(rccl_install_dir):
         os.path.join(rccl_install_dir, "plugins", "gin", "example", _GIN_EXAMPLE_NAME),
         os.path.join(rccl_install_dir, "build", "release", "test", "unit", "plugins", _GIN_EXAMPLE_NAME),
         os.path.join(rccl_install_dir, "build", "debug", "test", "unit", "plugins", _GIN_EXAMPLE_NAME),
+        os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "..",
+                         "plugins", "gin", "example", _GIN_EXAMPLE_NAME)
+        ),
     )
     for path in candidates:
         if os.path.exists(path):
