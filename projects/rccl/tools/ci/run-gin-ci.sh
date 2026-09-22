@@ -22,7 +22,7 @@
 #   GIN_PYTEST_TIMEOUT Wall-clock cap for pytest matrix entries (default: 1800s)
 #   GIN_PYTEST_HW_CASES  Broadcast mpirun cases under -k GinSdma (default: 9).
 #                  Offline parser/tier guards do not launch and are not counted.
-#   GIN_PYTEST_RS_HW_CASES  ReduceScatter GinSdma mpirun cases (default: 11).
+#   GIN_PYTEST_RS_HW_CASES  ReduceScatter GinSdma mpirun cases (default: 15).
 #   RCCL_TESTS_BCAST_GIN_TYPE / RCCL_TESTS_RS_GIN_TYPE
 #                  NCCL_GIN_TYPE for Broadcast / ReduceScatter pytest (default: 6)
 #   RCCL_TESTS_{BCAST,RS}_TIMEOUT_S / RCCL_TESTS_{BCAST,RS}_CONN_RETRIES
@@ -43,9 +43,9 @@ GIN_PYTEST_TIMEOUT="${GIN_PYTEST_TIMEOUT:-1800s}"
 # Hardware launches selected by rccl-gin-bcast-pytest (-k GinSdma): 6 segmented
 # (2 sizes x 3 dtypes) + scatter-allgather + 2 hang guards.
 GIN_PYTEST_HW_CASES="${GIN_PYTEST_HW_CASES:-9}"
-# Hardware launches in test_ReduceScatterGinSdma.py: 8 CTA-ladder (4 sizes/ops x
-# 2 dtypes) + 3 hang-guard dtypes.
-GIN_PYTEST_RS_HW_CASES="${GIN_PYTEST_RS_HW_CASES:-11}"
+# Hardware launches in test_ReduceScatterGinSdma.py: 12 CTA-ladder
+# (6 size/op pairs x 2 dtypes) + 3 hang-guard dtypes.
+GIN_PYTEST_RS_HW_CASES="${GIN_PYTEST_RS_HW_CASES:-15}"
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 WORKDIR="$(cd "${script_dir}/../../../.." && pwd)"

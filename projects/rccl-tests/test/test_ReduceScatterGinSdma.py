@@ -24,10 +24,12 @@
 # tier LSA read-reduce (no gin.put / SDMA put tier), so these focus on:
 #   * bit-exact datacheck across the size-adaptive CTA ladder (32 vs 48 CTAs),
 #   * multiple reduction ops and integer/floating dtypes, and
-#   * a large (2 GiB total) completion guard so a hang fails fast.
+#   * a large (2 GiB total at NP=8) completion guard so a hang fails fast.
 #
-# -b/-e are the per-rank output-slice byte sizes (recvbuff chunk); total moved
-# bytes per iteration is slice * NP * sizeof(dtype) for the algorithm bandwidth.
+# -b/-e are the TOTAL send-buffer bytes. ReduceScatterGetCollByteCount divides
+# that count by nranks to get the per-rank output slice, so a 256 MiB/rank
+# case must pass -b = 256 MiB * NP (2 GiB at NP=8). The helpers below do that
+# conversion; callers pass the per-rank slice.
 #
 # Requires an 8x MI355X (or similar) node, an MPI launcher, and a GIN-capable
 # RCCL build with rocSHMEM linked into reduce_scatter_perf. Skipped unless
@@ -90,12 +92,17 @@ _rs_skip = pytest.mark.skipif(
            "a GIN-capable (e.g. 8x MI355X) node to enable.")
 
 _CONN_GATE_RE = re.compile(r"LSA signal connectivity gate failed|unhandled system error", re.I)
-_DATA_FAIL_RE = re.compile(r"Wrong|mismatch|check.*fail|Out of bounds values\s*:\s*[1-9]", re.I)
+_DATA_FAIL_RE = re.compile(
+    r"#wrong\s*=\s*[1-9]|mismatch|check.*fail|Out of bounds values\s*:\s*[1-9]", re.I)
 
 
 def _launch_rs_gin_sdma(request, per_rank_bytes, dtype, op):
-    """Launch reduce_scatter_perf -D 3 at a fixed per-rank output-slice size."""
-    size = str(int(per_rank_bytes))
+    """Launch reduce_scatter_perf -D 3 at a fixed per-rank output-slice size.
+
+    -b is the total send buffer, not the slice, so multiply by RS_NP.
+    """
+    total_bytes = int(per_rank_bytes) * RS_NP
+    size = str(total_bytes)
     gin_env = []
     for kv in ["NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE={}".format(RS_GIN_TYPE),
                "NCCL_CUMEM_ENABLE=1", "RCCL_ENABLE_INTRANET=1",
@@ -136,9 +143,9 @@ def _launch_rs_gin_sdma(request, per_rank_bytes, dtype, op):
             pass
         out, _ = proc.communicate()
         pytest.fail(
-            "ReduceScatter GIN-SDMA HANG: no completion within {}s at {} B/rank, "
-            "dtype={}, op={}. Output tail:\n{}".format(
-                RS_TIMEOUT_S, size, dtype, op, (out or "")[-2000:]))
+            "ReduceScatter GIN-SDMA HANG: no completion within {}s at {} B total "
+            "({} B/rank), dtype={}, op={}. Output tail:\n{}".format(
+                RS_TIMEOUT_S, size, per_rank_bytes, dtype, op, (out or "")[-2000:]))
     print(out)
     return proc.returncode, out
 
@@ -172,6 +179,8 @@ def _run_rs_gin_sdma(request, per_rank_bytes, dtype, op):
 @pytest.mark.parametrize("per_rank_mib,op", [
     (1, "sum"),
     (4, "sum"),
+    (4, "avg"),
+    (4, "prod"),
     (8, "min"),
     (8, "max"),
 ])
@@ -185,6 +194,9 @@ def test_ReduceScatterGinSdmaCtaLadder(request, per_rank_mib, op, dtype):
 @_rs_skip
 @pytest.mark.parametrize("dtype", ["int32", "int64", "half"])
 def test_ReduceScatterGinSdma2GiBTotalHangGuard(request, dtype):
-    # 256 MiB/rank * 8 ranks = 2 GiB total; exercises the grid-stride 8-way path.
+    # 256 MiB/rank * NP. At NP=8 that is the 2 GiB total the single-tier
+    # argument is measured against, and it takes the 8-way grid-stride path.
+    if RS_NP < 8:
+        pytest.skip("2 GiB total / 8-way path needs RS_NP >= 8 (got {})".format(RS_NP))
     rc, _ = _run_rs_gin_sdma(request, 256 * MiB, dtype, "sum")
     assert rc == 0, "ReduceScatter 2 GiB-total datacheck failed (dtype={})".format(dtype)

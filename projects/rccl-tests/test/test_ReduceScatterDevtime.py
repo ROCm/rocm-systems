@@ -50,7 +50,7 @@ import pytest
 
 KiB = 1024
 MiB = 1024 * KiB
-SMOKE_BYTES = 4 * MiB  # per-rank slice; 32 MiB total @ 8 ranks -> mid-band CTAs
+SMOKE_BYTES = 32 * MiB  # -b is the total, not the per-rank slice. Mid CTA band is [8 MiB, 48 MiB).
 
 path = os.path.dirname(os.path.abspath(__file__))
 executable = os.environ.get(
