@@ -147,6 +147,8 @@ const char* ncclProtoToString(int proto) {
     return "LL128";
   case NCCL_PROTO_SIMPLE:
     return "SIMPLE";
+  case NCCL_PROTO_NAN:
+    return "NAN";
   default:
     return "Unknown";
   }

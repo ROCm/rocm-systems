@@ -976,7 +976,7 @@ TEST(WrapMicrotest, FakeTableDrift_StringTableCountsMatchProduction) {
   EXPECT_EQ(7, NCCL_NUM_ALGORITHMS)
       << "NCCL_NUM_ALGORITHMS changed -- update ncclAlgoToString's switch in "
          "fakes/collectives_fakes.cc to match collectives.cc:116, then update this count";
-  EXPECT_EQ(3, NCCL_NUM_PROTOCOLS)
+  EXPECT_EQ(4, NCCL_NUM_PROTOCOLS)
       << "NCCL_NUM_PROTOCOLS changed -- update ncclProtoToString's switch in "
          "fakes/collectives_fakes.cc to match collectives.cc:137, then update this count";
   EXPECT_EQ(19, ncclNumFuncs)

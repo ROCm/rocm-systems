@@ -229,6 +229,19 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define NCCL_LL128_SHMEM_ELEMS_PER_THREAD 8
 #define NCCL_LL128_SHMEM_SIZE (NCCL_LL128_SHMEM_ELEMS_PER_THREAD * NCCL_LL128_MAX_NTHREADS)
 
+/* NaN-flag protocol (src/device/prims_nan.h). There is no flag lane: a slice has
+ * arrived once none of its elements read back as NaN. The receive FIFO therefore
+ * has to sit at a NaN sentinel whenever it is free, and the receiver restores that
+ * sentinel over every slice it consumes before releasing the slot's credit.
+ *
+ * The sentinel is all-ones bytes for every supported dtype rather than a per-dtype
+ * NaN, because one buffer is shared by collectives of different dtypes: a slot left
+ * holding two bf16 NaNs (0x7FC07FC0) reads back as a finite float. All-ones is NaN
+ * under f16, bf16, f32 and f64 alike, so the invariant survives a dtype change. */
+#define NCCL_NAN_ELEMS_PER_THREAD 8
+#define NCCL_NAN_MAX_NTHREADS NCCL_LL128_MAX_NTHREADS
+#define NCCL_NAN_SENTINEL64 0xFFFFFFFFFFFFFFFFull
+
 #define NCCL_P2P_WRITE 0x01
 #define NCCL_P2P_READ 0x02
 #define NCCL_DIRECT_NIC 0x04
@@ -518,7 +531,9 @@ __device__ constexpr int ncclProtoGrainSize(int proto) {
          proto == NCCL_PROTO_LL128  ? WARP_SIZE * NCCL_LL128_SHMEM_ELEMS_PER_THREAD / NCCL_LL128_LINEELEMS *
                                         NCCL_LL128_DATAELEMS * sizeof(uint64_t) :
          proto == NCCL_PROTO_SIMPLE ? 512 :
-                                      -1;
+         // Every wire word is payload, so a warp's slice is its whole register set.
+         proto == NCCL_PROTO_NAN ? WARP_SIZE * NCCL_NAN_ELEMS_PER_THREAD * sizeof(uint64_t) :
+                                   -1;
 }
 
 template <typename Int>

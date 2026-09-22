@@ -865,6 +865,15 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_TREE, NCCL_PROTO_LL> {
   }
 };
 
+// NaN-flag protocol (prims_nan.h). runRing needs no changes: its direct* calls
+// fall through PrimitivesWithoutDirect to the plain variants, same as LL128.
+template <typename T, typename RedOp>
+struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_NAN> {
+  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
+    runRing<T, RedOp, ProtoNaN, RCCL_METADATA_EMPTY>(tid, nthreads, work);
+  }
+};
+
 template <typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL128> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {

@@ -2723,6 +2723,28 @@ static void initCollCostTable(float** collCostTable) {
   }
 }
 
+// The NaN-flag protocol (src/device/prims_nan.h) is opt-in and narrow. It never
+// competes on cost: readiness is "no element is NaN", which is only meaningful for
+// floating-point data and hangs outright if the user's data contains a real NaN.
+// So it is unreachable unless the caller names it via NCCL_PROTO, and even then
+// only for the one path that has kernels: AllReduce over a ring, intra-node,
+// float dtypes. Keep the dtype list in sync with nan_tys in device/generate.py.
+static bool nanProtoUsable(struct ncclComm* comm, struct ncclTaskColl* info, int algo, int userProtoInput) {
+  if (!userProtoInput) return false;
+  if (algo != NCCL_ALGO_RING) return false;
+  if (info->func != ncclFuncAllReduce) return false;
+  if (comm->nNodes != 1) return false;
+  switch (info->datatype) {
+  case ncclFloat16:
+  case ncclBfloat16:
+  case ncclFloat32:
+  case ncclFloat64:
+    return true;
+  default:
+    return false;
+  }
+}
+
 // numPipeOps: number of pipelined ops. Can be greater than 1 in aggregation mode. Used to adjust latency.
 static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes,
                                         int collNetSupport, int nvlsSupport, int numPipeOps, int userAlgoInput,
@@ -2778,6 +2800,10 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
     }
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
       if (p == NCCL_PROTO_LL128 && !(comm->topo->type & RCCL_TOPO_XGMI_ALL) && !userProtoInput) {
+        table[a][p] = NCCL_ALGO_PROTO_IGNORE;
+        continue;
+      }
+      if (p == NCCL_PROTO_NAN && !nanProtoUsable(comm, info, a, userProtoInput)) {
         table[a][p] = NCCL_ALGO_PROTO_IGNORE;
         continue;
       }
@@ -3040,15 +3066,26 @@ rccl_static ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl*
     NCCLCHECK(ncclRegLocalIsValid(regRecvBuf, &isRecvValid));
     regBuff = (regSendBuf && regRecvBuf && isSendValid && isRecvValid) ||
               (ncclCudaGraphValid(comm->planner.capturingGraph) && ncclParamGraphRegister());
-    NCCLCHECK(comm->tuner->getCollInfo(comm->tunerContext, info->func, nBytes, numPipeOps, (float**)collCostTable,
-                                       NCCL_NUM_ALGORITHMS, NCCL_NUM_PROTOCOLS, regBuff, &nMaxChannels));
+    // Tuner plugins are compiled against NCCL_NUM_PROTOCOLS_V5 and cast the table
+    // to that stride, so pass a narrowed copy rather than our wider one.
+    float pluginCostTable[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS_V5];
+    for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++)
+      for (int p = 0; p < NCCL_NUM_PROTOCOLS_V5; p++) pluginCostTable[a][p] = collCostTable[a][p];
+    NCCLCHECK(comm->tuner->getCollInfo(comm->tunerContext, info->func, nBytes, numPipeOps, (float**)pluginCostTable,
+                                       NCCL_NUM_ALGORITHMS, NCCL_NUM_PROTOCOLS_V5, regBuff, &nMaxChannels));
+    for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++)
+      for (int p = 0; p < NCCL_NUM_PROTOCOLS_V5; p++) collCostTable[a][p] = pluginCostTable[a][p];
     NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float**)collCostTable, simInfo));
   } else {
     NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float**)collCostTable, simInfo));
     // override algo, tree doesn't work with fewer than 64 bytes
     size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
-    if (!userAlgoInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 &&
-        (info->func == ncclFuncAllReduce) && sizePerRank >= 64 && sizePerRank <= 262144) {
+    // This hardcode names a protocol, so it has to stand down when the caller
+    // named one too -- otherwise NCCL_PROTO=<x> silently lands on Tree/LL here.
+    static int userProtoInput = -2;
+    if (userProtoInput == -2) userProtoInput = ncclGetEnv("NCCL_PROTO") ? 1 : 0;
+    if (!userAlgoInput && !userProtoInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") &&
+        comm->nNodes == 1 && (info->func == ncclFuncAllReduce) && sizePerRank >= 64 && sizePerRank <= 262144) {
       info->algorithm = NCCL_ALGO_TREE;
       info->protocol = NCCL_PROTO_LL;
     }

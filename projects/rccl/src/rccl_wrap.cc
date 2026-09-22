@@ -412,7 +412,10 @@ void rcclUpdateThreadThreshold(struct ncclComm* comm, size_t const& nBytes, stru
     userChannelControlInput = !inputStr ? 0 : 1;
   }
 
-  if (!userChannelControlInput && comm->nNodes >= 2 &&
+  // minMaxLLRange only has rows for the latency protocols (NCCL_NUM_PROTOCOLS - 1),
+  // so Simple and anything added after it index past the end.
+  if (!userChannelControlInput && comm->nNodes >= 2 && info->protocol >= 0 &&
+      info->protocol < NCCL_NUM_PROTOCOLS - 1 &&
       (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather)) {
     auto tunableIndex = rcclGetTunableIndex(info->func);
     auto tunedThreshold = comm->minMaxLLRange[tunableIndex][info->protocol][RCCL_PROTOCOL_THREAD_THRESHOLD_IDX];
@@ -2380,6 +2383,13 @@ void rcclSetDefaultBuffSizes(struct ncclComm* comm, int defaultBuffSizes[]) {
   defaultBuffSizes[NCCL_PROTO_LL128] =
     rcclLL128ElemsPerThreadFromArch(comm->archName) * maxNthreads[NCCL_PROTO_LL128] * NCCL_STEPS * sizeof(uint64_t);
   defaultBuffSizes[NCCL_PROTO_SIMPLE] = (1 << 22); /* 4MiB */
+  // NaN protocol: every thread owns NCCL_NAN_ELEMS_PER_THREAD words per step, all
+  // payload. Sized off the hard NCCL_MAX_NTHREADS cap rather than a per-protocol
+  // max, because rcclOptThreadBlockSize can raise a kernel's thread count after
+  // the fact and a step slot smaller than nthreads*ELEMS_PER_THREAD words would
+  // let a warp's slice run off the end of the FIFO.
+  defaultBuffSizes[NCCL_PROTO_NAN] =
+    NCCL_NAN_ELEMS_PER_THREAD * NCCL_MAX_NTHREADS * NCCL_STEPS * sizeof(uint64_t);
 }
 
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount) {

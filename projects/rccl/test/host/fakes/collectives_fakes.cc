@@ -69,13 +69,14 @@ const char* ncclProtoToString(int proto) {
     case NCCL_PROTO_LL: return "LL";
     case NCCL_PROTO_LL128: return "LL128";
     case NCCL_PROTO_SIMPLE: return "SIMPLE";
+    case NCCL_PROTO_NAN: return "NAN";
     default: return "Unknown";
   }
 }
 
 // Same failure mode as ncclAlgoToString: a new enumerator silently logs as the
 // default arm. Protocols get the same guard.
-static_assert(NCCL_NUM_PROTOCOLS == 3,
+static_assert(NCCL_NUM_PROTOCOLS == 4,
               "ncclProtoToString above must name every protocol; add the new case");
 const char* ncclDatatypeToString(ncclDataType_t type) {
   switch (type) {
