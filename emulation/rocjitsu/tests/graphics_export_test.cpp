@@ -202,7 +202,7 @@ TEST_P(GraphicsExportTest, ParameterLoadUsesQuadMaskAndPrimitiveOffsets) {
 
 TEST_P(GraphicsExportTest, RectangleRunsFragmentWavesAndWritesOnlyCoveredPixels) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
-  for (uint32_t scenario = 0; scenario < 6; ++scenario) {
+  for (uint32_t scenario = 0; scenario < 10; ++scenario) {
     SCOPED_TRACE(scenario);
     for (uint32_t y = 0; y < 4; ++y)
       for (uint32_t x = 0; x < 4; ++x) {
@@ -246,6 +246,21 @@ TEST_P(GraphicsExportTest, RectangleRunsFragmentWavesAndWritesOnlyCoveredPixels)
       state.context_registers[0x204] = 1u << 22;
     if (scenario == 3)
       state.context_registers[gfx12 ? 0x1b : 0x203] = 1u << 6;
+    state.context_registers[gfx12 ? 0x216 : 0x202] = 0xcc0010;
+    if (scenario == 6) // ROP3_CLEAR is not a plain copy.
+      state.context_registers[gfx12 ? 0x216 : 0x202] = 0x10;
+    if (scenario == 7) { // CB_DISABLE preserves color during a depth-only draw.
+      state.context_registers[gfx12 ? 0x216 : 0x202] = 0;
+      state.context_registers[gfx12 ? 0x1c : 0x200] = 6 | (7 << 4);
+      state.context_registers[gfx12 ? 5 : 7] = (3 << 16) | 3;
+      state.context_registers[gfx12 ? 6 : 0x10] = 3 | ((gfx12 ? 3 : 24) << 4);
+      state.context_registers[gfx12 ? 8 : 0x12] = 0x2000;
+      state.context_registers[gfx12 ? 10 : 0x14] = 0x2000;
+    }
+    if (scenario == 8)
+      state.context_registers[gfx12 ? 0x216 : 0x202] = 0xcc0020;
+    if (scenario == 9)
+      state.context_registers[gfx12 ? 0x216 : 0x202] = 0xcc0018;
     const float extent = scenario == 1 ? 0.625f : 1.0f;
     auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
     for (uint32_t i = 0; i < 3; ++i) {
@@ -258,7 +273,7 @@ TEST_P(GraphicsExportTest, RectangleRunsFragmentWavesAndWritesOnlyCoveredPixels)
     }
     draw->export_lane(*wave_, 0, 20, 1,
                       {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
-    if (scenario == 3 || scenario == 5) {
+    if (scenario == 3 || scenario == 5 || scenario == 6 || scenario == 8 || scenario == 9) {
       EXPECT_THROW(draw->advance(memory_, 0), std::runtime_error);
       continue;
     }
@@ -284,7 +299,7 @@ TEST_P(GraphicsExportTest, RectangleRunsFragmentWavesAndWritesOnlyCoveredPixels)
                                    : amdgpu::gfx11_image_offset(x, y, 4, 4, 26);
         ASSERT_TRUE(address);
         EXPECT_EQ(memory_.read32(0x100000 + *address),
-                  x >= 1 && x < 3 && y >= 1 && y < 3 ? 0xff0000ffu : 0u)
+                  scenario != 7 && x >= 1 && x < 3 && y >= 1 && y < 3 ? 0xff0000ffu : 0u)
             << x << "," << y;
       }
   }
@@ -419,6 +434,107 @@ TEST_P(GraphicsExportTest, HardwareImageLoadReadsTiledUintChannelsAndPacksD16) {
   EXPECT_EQ(memory_.read32(0x100000 + 36), 0x88776655);
 }
 
+TEST_P(GraphicsExportTest, LinearImageLoadsRespectDefaultPitchAndArrayDescriptorFields) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  struct Case {
+    uint32_t width, word4, type, dim, offset;
+  };
+  const Case cases[] = {{2, 0, 9, 1, gfx12 ? 132u : 260u},
+                        {2, 127, 9, 1, 516},
+                        {128, 1, 13, 5, 516},
+                        {128, 0, 13, 5, 516}};
+  for (uint32_t i = 0; i < std::size(cases); ++i) {
+    SCOPED_TRACE(i);
+    const auto &c = cases[i];
+    const uint32_t base = 0x100000 + i * 0x10000;
+    const std::array<uint32_t, 8> descriptor{base >> 8,
+                                             (46u << (gfx12 ? 17 : 20)) |
+                                                 (((c.width - 1) & 3) << 30),
+                                             ((c.width - 1) >> 2) | (1u << 14),
+                                             (c.type << 28) | 0xfac,
+                                             c.word4,
+                                             0,
+                                             0,
+                                             0};
+    for (uint32_t r = 0; r < descriptor.size(); ++r)
+      wave_->debug_write_sgpr(8 + r, descriptor[r]);
+    wave_->set_exec(1);
+    wave_->debug_write_vgpr(2, 0, 1);
+    wave_->debug_write_vgpr(3, 0, 1);
+    wave_->debug_write_vgpr(4, 0, 0);
+    memory_.write32(base + c.offset, 0x44332211);
+    std::array<uint32_t, 4> words{};
+    if (gfx12) {
+      const auto inst = rdna4::build_vimage(0, {.dim = uint8_t(c.dim),
+                                                .dmask = 15,
+                                                .vdata = 8,
+                                                .rsrc = 8,
+                                                .vaddr0 = 2,
+                                                .vaddr1 = 3,
+                                                .vaddr2 = 4});
+      std::copy(inst.begin(), inst.end(), words.begin());
+    } else {
+      const auto inst = rdna3::build_mimg(
+          0, {.dim = uint8_t(c.dim), .dmask = 15, .vaddr = 2, .vdata = 8, .srsrc = 2});
+      std::copy(inst.begin(), inst.end(), words.begin());
+    }
+    auto decoded = decoder_->decode(words.data());
+    ASSERT_FALSE(decoded.failed());
+    auto instruction = std::move(decoded).value();
+    ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
+    ASSERT_NE(instruction->data(), nullptr);
+    EXPECT_EQ(instruction->data_as<amdgpu::VectorMemState>()->per_lane_addr[0], base + c.offset);
+    amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
+    pipeline.issue(instruction.release(), *wave_);
+    for (uint32_t c = 0; c < 4; ++c)
+      EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), 0x11u * (c + 1));
+  }
+}
+
+TEST_P(GraphicsExportTest, LinearMipLevelsUseReverseAllocationOrder) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint32_t offsets[] = {1024, 512, 256, 0};
+  for (uint32_t level = 0; level < 4; ++level) {
+    SCOPED_TRACE(level);
+    std::array<uint32_t, 8> descriptor{0x3000, 0, 11, (8u << 28) | 0xfac, 0, 0, 0, 0};
+    descriptor[1] = (63u << (gfx12 ? 17 : 20)) | (3u << 30) | (3u << (gfx12 ? 12 : 16));
+    descriptor[2] = 11; // Full level-zero width is 48 texels.
+    if (gfx12) {
+      descriptor[1] |= level << 25;
+      descriptor[3] |= level << 15;
+    } else {
+      descriptor[3] |= (level << 12) | (level << 16);
+    }
+    for (uint32_t r = 0; r < descriptor.size(); ++r)
+      wave_->debug_write_sgpr(8 + r, descriptor[r]);
+    wave_->set_exec(1);
+    wave_->debug_write_vgpr(2, 0, 5);
+    const uint32_t address = 0x300000 + offsets[level] + 5 * 16;
+    for (uint32_t c = 0; c < 4; ++c)
+      memory_.write32(address + 4 * c, std::bit_cast<uint32_t>(float(level + c)));
+    std::array<uint32_t, 4> words{};
+    if (gfx12) {
+      const auto inst =
+          rdna4::build_vimage(0, {.dim = 0, .dmask = 15, .vdata = 8, .rsrc = 8, .vaddr0 = 2});
+      std::copy(inst.begin(), inst.end(), words.begin());
+    } else {
+      const auto inst =
+          rdna3::build_mimg(0, {.dim = 0, .dmask = 15, .vaddr = 2, .vdata = 8, .srsrc = 2});
+      std::copy(inst.begin(), inst.end(), words.begin());
+    }
+    auto decoded = decoder_->decode(words.data());
+    ASSERT_FALSE(decoded.failed());
+    auto instruction = std::move(decoded).value();
+    ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
+    ASSERT_NE(instruction->data(), nullptr);
+    EXPECT_EQ(instruction->data_as<amdgpu::VectorMemState>()->per_lane_addr[0], address);
+    amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
+    pipeline.issue(instruction.release(), *wave_);
+    for (uint32_t c = 0; c < 4; ++c)
+      EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 0), std::bit_cast<uint32_t>(float(level + c)));
+  }
+}
+
 TEST_P(GraphicsExportTest, HardwareSampleClampsCoordinatesAndConvertsSrgb) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   const std::array<uint32_t, 8> descriptor{
@@ -434,7 +550,7 @@ TEST_P(GraphicsExportTest, HardwareSampleClampsCoordinatesAndConvertsSrgb) {
     wave_->debug_write_vgpr(10, lane, 0xdeadbeef);
   }
   memory_.write32(0x100000, 0xff000000);
-  memory_.write32(gfx12 ? 0x10000c : 0x100104, 0x804080ff);
+  memory_.write32(gfx12 ? 0x100084 : 0x100104, 0x804080ff);
   // The cube shader aliases both coordinate VGPRs with the sampled result.
   std::array<uint32_t, 4> words{0xe7c6c001, 0x02001008, 0x00000809, 0};
   if (!gfx12) {

@@ -19,7 +19,7 @@ inline std::optional<uint64_t> gfx12_image_offset(uint32_t x, uint32_t y, uint32
   if (!width || x >= width || (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8 && bytes != 16))
     return std::nullopt;
   if (!swizzle)
-    return (uint64_t{y} * width + x) * bytes;
+    return uint64_t{y} * ((uint64_t{width} * bytes + 127u) & ~uint64_t{127}) + uint64_t{x} * bytes;
   if (swizzle > 4)
     return std::nullopt;
   // Positive selectors address x, negative selectors address y; zero is a byte bit.

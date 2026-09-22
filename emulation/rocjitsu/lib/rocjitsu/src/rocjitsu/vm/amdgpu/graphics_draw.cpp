@@ -46,6 +46,7 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
                                   {0x205, 0x206},
                                   {0x207, 0x205},
                                   {0x214, 0x8e},
+                                  {0x216, 0x202},
                                   {0x319, 0x31b},
                                   {0x31b, 0x31d},
                                   {0x31f, 0x3b8},
@@ -277,7 +278,12 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
                    attrib3, " export=", color_format_, " inputs=", context_[0x198],
                    " mask=", context_[0x214], " depth=", context_[0x1c], std::dec);
   memory_format_ = ((info >> 8) & 7) == 4 ? 46 : 42;
-  color_enabled_ = context_[0x214] != 0;
+  const uint32_t color_control = context_[0x216];
+  const uint32_t color_mode = (color_control >> 4) & 7;
+  color_enabled_ = context_[0x214] != 0 && color_mode != 0;
+  if (color_enabled_ &&
+      (color_mode != 1 || ((color_control >> 16) & 255) != 0xcc || (color_control & 8)))
+    throw std::runtime_error("unsupported graphics color mode, logic operation, or degamma");
   depth_control_ = context_[0x1c];
   if (depth_control_ & ~0x76u)
     throw std::runtime_error("unsupported graphics stencil or depth bounds test");
