@@ -4333,4 +4333,543 @@ TEST_F(TaskPostTuningMicrotest, AllGatherVTasks_AnEntryFails_PropagatesAndLeaves
   EXPECT_NE(nullptr, second->raw);
 }
 
+constexpr int kSymKernelId = 3;
+constexpr int kSecondSymKernelId = 2;
+constexpr int kSymKernelIdBelowRange = -1;
+constexpr int kSymKernelIdAtTheCount = ncclSymkKernelId_Count;
+constexpr int kTopSymKernelId = ncclSymkKernelId_Count - 1;
+constexpr int kSymChannels = 5;
+constexpr int kSymWarps = 7;
+constexpr uint32_t kSymLast = 1;
+constexpr uintptr_t kSymSendWindow = 0x310000;
+constexpr uintptr_t kSymRecvWindow = 0x420000;
+constexpr uint32_t kNoKernelArgumentSpace = 0;
+const uint32_t kOneWorkArgumentSpace =
+  static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 1, false));
+
+struct TaskPostTuning_SymConvertLog {
+  struct ncclComm* comm = nullptr;
+  std::vector<struct ncclTaskColl*> tasks;
+};
+
+class TaskPostTuning_SymDrive {
+ public:
+  TaskPostTuning_SymDrive() {
+    struct ncclComm* comm = scene_.comm();
+    ncclIntruQueueConstruct(&queue_);
+    ncclIntruQueueConstruct(&comm->argsInfoQueue);
+    ncclIntruQueueConstruct(&comm->planner.collSymTaskQueue);
+    ncclMemoryPoolConstruct(&comm->memPool_ncclTaskColl);
+    comm->workArgsBytes = kOneWorkArgumentSpace;
+    probe_ = scene_.NewColl(ncclFuncAllReduce);
+  }
+
+  struct ncclTaskTuningInfo* Add(int symKernelId) {
+    const ncclCollConfig_t unsetConfig = NCCL_COLLCONFIG_INITIALIZER;
+    struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllReduce);
+    raw->coll.collConfig = unsetConfig;
+    struct ncclTaskTuningInfo* tInfo = scene_.NewTuningInfo(raw);
+    tInfo->tuningOut.valid = kTunedValid;
+    tInfo->tuningOut.symKernelId = symKernelId;
+    tInfo->tuningOut.nChannels = kSymChannels;
+    tInfo->tuningOut.maxChannels = kTunedMaxChannels;
+    tInfo->tuningOut.nWarps = kSymWarps;
+    ncclIntruQueueEnqueue(&queue_, tInfo);
+    return tInfo;
+  }
+
+  struct ncclComm* comm() { return scene_.comm(); }
+  TaskPrepScene* scene() { return &scene_; }
+  TaskTuningInfoQueue* queue() { return &queue_; }
+  const void* sendbuff() { return probe_->coll.sendbuff; }
+  const void* recvbuff() { return probe_->coll.recvbuff; }
+  ncclResult_t Run() { return postTuneSymTasks(comm(), &queue_); }
+
+  std::vector<struct ncclTaskColl*> SymTasks() {
+    std::vector<struct ncclTaskColl*> tasks;
+    for (struct ncclTaskColl* task = ncclIntruQueueHead(&comm()->planner.collSymTaskQueue); task != nullptr;
+         task = task->next) {
+      tasks.push_back(task);
+    }
+    return tasks;
+  }
+
+ private:
+  TaskPrepScene scene_;
+  TaskTuningInfoQueue queue_;
+  struct ncclRawTask* probe_;
+};
+
+// The two windows differ so a crossed lookup dies, and the conversion records rather than performs.
+class TaskPostTuning_SymHooks {
+ public:
+  TaskPostTuning_SymHooks(const void* sendbuff, const void* recvbuff)
+    : sendbuff_(sendbuff),
+      recvbuff_(recvbuff),
+      devr_(g_devrFindWindow,
+            [this](struct ncclComm*, void const* ptr, struct ncclDevrWindow** out) {
+              lookups_.push_back(ptr);
+              *out = ptr == sendbuff_ ? SendWindow() : (ptr == recvbuff_ ? RecvWindow() : nullptr);
+              return ncclSuccess;
+            }),
+      convert_(g_convertSymTaskDevOp, [this](struct ncclComm* comm, struct ncclTaskColl* task) {
+        convertLog_.comm = comm;
+        convertLog_.tasks.push_back(task);
+      }) {}
+
+  static struct ncclDevrWindow* SendWindow() { return reinterpret_cast<struct ncclDevrWindow*>(kSymSendWindow); }
+  static struct ncclDevrWindow* RecvWindow() { return reinterpret_cast<struct ncclDevrWindow*>(kSymRecvWindow); }
+  const std::vector<const void*>& lookups() const { return lookups_; }
+  const TaskPostTuning_SymConvertLog& convertLog() const { return convertLog_; }
+
+ private:
+  const void* sendbuff_;
+  const void* recvbuff_;
+  std::vector<const void*> lookups_;
+  TaskPostTuning_SymConvertLog convertLog_;
+  ScopedHook<ncclResult_t(struct ncclComm*, void const*, struct ncclDevrWindow**)> devr_;
+  ScopedHook<void(struct ncclComm*, struct ncclTaskColl*)> convert_;
+};
+
+TEST_F(TaskPostTuningMicrotest, SymTasks_EmptyQueue_SkipsInitializationAndStillChecksTheQueuedArguments) {
+  TaskPostTuning_SymDrive drive;
+  TaskPostTuning_SymHooks hooks(drive.sendbuff(), drive.recvbuff());
+  TaskPostTuning_ArgsInfoQueue args(drive.scene());
+  ScopedHook allGather(g_bootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
+  ScopedHook init(g_symkInitOnce, [](struct ncclComm*) { return ncclSuccess; });
+  args.Enqueue(0);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  EXPECT_EQ(0, init.calls);
+  EXPECT_EQ(1, allGather.calls);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&drive.comm()->argsInfoQueue));
+  EXPECT_TRUE(drive.SymTasks().empty());
+}
+
+TEST_F(TaskPostTuningMicrotest, SymTasks_QueuedTasks_InitializeSymmetricKernelsBeforeCheckingTheQueuedArguments) {
+  TaskPostTuning_SymDrive drive;
+  TaskPostTuning_SymHooks hooks(drive.sendbuff(), drive.recvbuff());
+  TaskPostTuning_ArgsInfoQueue args(drive.scene());
+  ScopedHook allGather(g_bootstrapAllGather, [](void*, void*, int) { return ncclSuccess; });
+  struct ncclComm* initComm = nullptr;
+  bool argsStillQueuedAtInit = false;
+  ScopedHook init(g_symkInitOnce, [&](struct ncclComm* comm) {
+    initComm = comm;
+    argsStillQueuedAtInit = !ncclIntruQueueEmpty(&drive.comm()->argsInfoQueue);
+    return ncclSuccess;
+  });
+  drive.Add(kSymKernelId);
+  args.Enqueue(0);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  EXPECT_EQ(1, init.calls);
+  EXPECT_EQ(drive.comm(), initComm);
+  EXPECT_TRUE(argsStillQueuedAtInit);
+}
+
+TEST_F(TaskPostTuningMicrotest, SymTasks_InitializationFails_PropagatesWithoutCheckingTheQueuedArguments) {
+  TaskPostTuning_SymDrive drive;
+  TaskPostTuning_ArgsInfoQueue args(drive.scene());
+  ScopedHook init(g_symkInitOnce, [](struct ncclComm*) { return ncclSystemError; });
+  drive.Add(kSymKernelId);
+  args.Enqueue(0);
+
+  EXPECT_EQ(ncclSystemError, drive.Run());
+
+  EXPECT_FALSE(ncclIntruQueueEmpty(&drive.comm()->argsInfoQueue));
+  EXPECT_TRUE(drive.SymTasks().empty());
+}
+
+TEST_F(TaskPostTuningMicrotest, SymTasks_ArgumentCheckFails_PropagatesWithoutMaterializingAnyTask) {
+  TaskPostTuning_SymDrive drive;
+  TaskPostTuning_SymHooks hooks(drive.sendbuff(), drive.recvbuff());
+  TaskPostTuning_ArgsInfoQueue args(drive.scene());
+  ScopedHook allGather(g_bootstrapAllGather, [](void*, void*, int) { return ncclInvalidUsage; });
+  drive.Add(kSymKernelId);
+  args.Enqueue(0);
+
+  EXPECT_EQ(ncclInvalidUsage, drive.Run());
+
+  EXPECT_TRUE(drive.SymTasks().empty());
+  EXPECT_FALSE(ncclIntruQueueEmpty(drive.queue()));
+}
+
+TEST_F(TaskPostTuningMicrotest, SymTasks_TunedEntry_MaterializesACollTaskCarryingTheSymmetricTunerOutput) {
+  TaskPostTuning_SymDrive drive;
+  TaskPostTuning_SymHooks hooks(drive.sendbuff(), drive.recvbuff());
+  drive.Add(kSymKernelId);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  const std::vector<struct ncclTaskColl*> tasks = drive.SymTasks();
+  ASSERT_EQ(1u, tasks.size());
+  EXPECT_EQ(ncclFuncAllReduce, tasks[0]->func);
+  EXPECT_EQ(static_cast<uint32_t>(kSymKernelId), tasks[0]->devFuncId);
+  EXPECT_EQ(kSymChannels, tasks[0]->nMaxChannels);
+  EXPECT_EQ(kSymWarps, tasks[0]->nWarps);
+  EXPECT_EQ(kSymLast, tasks[0]->isSymLast);
+  EXPECT_EQ(drive.comm(), hooks.convertLog().comm);
+  EXPECT_EQ(std::vector<struct ncclTaskColl*>{tasks[0]}, hooks.convertLog().tasks);
+}
+
+TEST_F(TaskPostTuningMicrotest, SymTasks_TunedEntry_ResolvesBothWindowsAndTheirRegistrationType) {
+  TaskPostTuning_SymDrive drive;
+  TaskPostTuning_SymHooks hooks(drive.sendbuff(), drive.recvbuff());
+  g_symRegType = ncclSymSendRegRecvReg;
+  drive.Add(kSymKernelId);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  const std::vector<struct ncclTaskColl*> tasks = drive.SymTasks();
+  ASSERT_EQ(1u, tasks.size());
+  EXPECT_EQ(TaskPostTuning_SymHooks::SendWindow(), tasks[0]->sendWin);
+  EXPECT_EQ(TaskPostTuning_SymHooks::RecvWindow(), tasks[0]->recvWin);
+  EXPECT_EQ(ncclSymSendRegRecvReg, tasks[0]->winRegType);
+  EXPECT_EQ(2u, hooks.lookups().size());
+}
+
+TEST_F(TaskPostTuningMicrotest, SymTasks_WindowLookupFails_PropagatesWithoutEnqueueingTheTask) {
+  TaskPostTuning_SymDrive drive;
+  TaskPostTuning_SymHooks hooks(drive.sendbuff(), drive.recvbuff());
+  ScopedHook devr(g_devrFindWindow,
+                  [](struct ncclComm*, void const*, struct ncclDevrWindow**) { return ncclInvalidUsage; });
+  drive.Add(kSymKernelId);
+
+  EXPECT_EQ(ncclInvalidUsage, drive.Run());
+
+  EXPECT_TRUE(drive.SymTasks().empty());
+  EXPECT_TRUE(hooks.convertLog().tasks.empty());
+}
+
+TEST_F(TaskPostTuningMicrotest, SymTasks_RegistrationTypeLookupFails_PropagatesWithoutEnqueueingTheTask) {
+  TaskPostTuning_SymDrive drive;
+  TaskPostTuning_SymHooks hooks(drive.sendbuff(), drive.recvbuff());
+  g_getSymRegTypeResult = ncclInvalidUsage;
+  drive.Add(kSymKernelId);
+
+  EXPECT_EQ(ncclInvalidUsage, drive.Run());
+
+  EXPECT_TRUE(drive.SymTasks().empty());
+  EXPECT_TRUE(hooks.convertLog().tasks.empty());
+}
+
+TEST_F(TaskPostTuningMicrotest, SymTasks_TunerMarkedTheEntryInvalid_ReportsAnInternalErrorBeforeResolvingAWindow) {
+  TaskPostTuning_SymDrive drive;
+  TaskPostTuning_SymHooks hooks(drive.sendbuff(), drive.recvbuff());
+  drive.Add(kSymKernelId)->tuningOut.valid = kInvalidTuning;
+
+  EXPECT_EQ(ncclInternalError, drive.Run());
+
+  EXPECT_TRUE(drive.SymTasks().empty());
+  EXPECT_TRUE(hooks.lookups().empty());
+}
+
+TEST_F(TaskPostTuningMicrotest, SymTasks_SymKernelIdOutsideTheKernelRange_ReportsAnInternalError) {
+  for (int symKernelId : {kSymKernelIdBelowRange, kSymKernelIdAtTheCount}) {
+    TaskPostTuning_SymDrive drive;
+    TaskPostTuning_SymHooks hooks(drive.sendbuff(), drive.recvbuff());
+    drive.Add(symKernelId);
+
+    EXPECT_EQ(ncclInternalError, drive.Run()) << symKernelId;
+
+    EXPECT_TRUE(drive.SymTasks().empty()) << symKernelId;
+    EXPECT_TRUE(hooks.lookups().empty()) << symKernelId;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, SymTasks_SymKernelIdAtEitherEndOfTheKernelRange_IsAccepted) {
+  for (int symKernelId : {0, kTopSymKernelId}) {
+    TaskPostTuning_SymDrive drive;
+    TaskPostTuning_SymHooks hooks(drive.sendbuff(), drive.recvbuff());
+    drive.Add(symKernelId);
+
+    ASSERT_EQ(ncclSuccess, drive.Run()) << symKernelId;
+
+    ASSERT_EQ(1u, drive.SymTasks().size()) << symKernelId;
+    EXPECT_EQ(static_cast<uint32_t>(symKernelId), drive.SymTasks()[0]->devFuncId) << symKernelId;
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, SymTasks_FillRejectsTheConfig_PropagatesBeforeTheValidityGate) {
+  TaskPostTuning_SymDrive drive;
+  TaskPostTuning_SymHooks hooks(drive.sendbuff(), drive.recvbuff());
+  struct ncclTaskTuningInfo* rejected = drive.Add(kSymKernelId);
+  rejected->raw->coll.collConfig.algSelection = kUnknownAlgSelection;
+  rejected->tuningOut.valid = kInvalidTuning;
+
+  EXPECT_EQ(ncclInvalidArgument, drive.Run());
+
+  EXPECT_TRUE(drive.SymTasks().empty());
+}
+
+TEST_F(TaskPostTuningMicrotest, SymTasks_SeveralEntries_MaterializeInQueueOrderAndDrainTheQueueReleasingEveryRaw) {
+  TaskPostTuning_SymDrive drive;
+  TaskPostTuning_SymHooks hooks(drive.sendbuff(), drive.recvbuff());
+  struct ncclTaskTuningInfo* first = drive.Add(kSymKernelId);
+  struct ncclTaskTuningInfo* second = drive.Add(kSecondSymKernelId);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  const std::vector<struct ncclTaskColl*> tasks = drive.SymTasks();
+  ASSERT_EQ(2u, tasks.size());
+  EXPECT_EQ(static_cast<uint32_t>(kSymKernelId), tasks[0]->devFuncId);
+  EXPECT_EQ(static_cast<uint32_t>(kSecondSymKernelId), tasks[1]->devFuncId);
+  EXPECT_TRUE(ncclIntruQueueEmpty(drive.queue()));
+  EXPECT_EQ(nullptr, first->raw);
+  EXPECT_EQ(nullptr, second->raw);
+}
+
+TEST_F(TaskPostTuningMicrotest, SymTasks_LaterEntryIsRejected_LeavesTheEarlierOneMaterializedAndTheRestQueued) {
+  TaskPostTuning_SymDrive drive;
+  TaskPostTuning_SymHooks hooks(drive.sendbuff(), drive.recvbuff());
+  drive.Add(kSymKernelId);
+  drive.Add(kSymKernelIdBelowRange);
+  struct ncclTaskTuningInfo* third = drive.Add(kSecondSymKernelId);
+
+  EXPECT_EQ(ncclInternalError, drive.Run());
+
+  EXPECT_EQ(1u, drive.SymTasks().size());
+  EXPECT_EQ(third, ncclIntruQueueHead(drive.queue()));
+}
+
+// symmetric_sched.cc:170-173 refuses a comm whose kernel args cannot hold one work; there is no twin here.
+TEST_F(TaskPostTuningMicrotest, SymTasks_KernelArgumentSpaceTooSmallForOneWork_CurrentlyMaterializesTheTaskAnyway) {
+  TaskPostTuning_SymDrive drive;
+  TaskPostTuning_SymHooks hooks(drive.sendbuff(), drive.recvbuff());
+  ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
+  drive.comm()->workArgsBytes = kNoKernelArgumentSpace;
+  drive.Add(kSymKernelId);
+
+  ASSERT_EQ(ncclSuccess, drive.Run());
+
+  EXPECT_EQ(1u, drive.SymTasks().size());
+}
+
+TEST_F(TaskPostTuningMicrotest, DISABLED_SymTasks_KernelArgumentSpaceTooSmallForOneWork_ReportsAnInternalError) {
+  TaskPostTuning_SymDrive drive;
+  TaskPostTuning_SymHooks hooks(drive.sendbuff(), drive.recvbuff());
+  ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
+  drive.comm()->workArgsBytes = kNoKernelArgumentSpace;
+  drive.Add(kSymKernelId);
+
+  EXPECT_EQ(ncclInternalError, drive.Run());
+
+  EXPECT_TRUE(drive.SymTasks().empty());
+}
+
+constexpr int kPipelinePeerOutsideTheComm = kRanks;
+
+// Every family's entry is one its own validation rejects, each with a code no neighbour produces.
+class TaskPostTuning_Pipeline {
+ public:
+  TaskPostTuning_Pipeline() : scene_(kRanks, kAgvRank), planPeers_(kRanks) {
+    struct ncclComm* comm = scene_.comm();
+    TaskPostTuning_ConstructQueues(&ctq_);
+    comm->planner.peers = planPeers_.data();
+    comm->planner.bcast_info.minBcastPeer = INT_MAX;
+    comm->planner.bcast_info.maxBcastPeer = INT_MIN;
+    comm->runtimeConn = false;
+    ncclIntruQueueConstruct(&comm->argsInfoQueue);
+    ncclIntruQueueConstruct(&comm->planner.collSymTaskQueue);
+    ncclIntruQueueConstruct(&comm->planner.collTaskQueue);
+    ncclIntruQueueConstruct(&comm->planner.collCeTaskQueue);
+    ncclIntruQueueConstruct(&comm->planner.collWorkQueue);
+    ncclIntruQueueConstruct(&comm->planner.collCleanupQueue);
+    ncclMemoryPoolConstruct(&comm->memPool_ncclTaskColl);
+    ncclMemoryPoolConstruct(&comm->memPool_ncclTaskBcast);
+  }
+
+  struct ncclComm* comm() { return scene_.comm(); }
+  struct ncclClassifiedTaskQueues* ctq() { return &ctq_; }
+  ncclResult_t Run(ncclSimInfo_t* simInfo = nullptr) { return ncclTaskPostTuning(comm(), &ctq_, simInfo); }
+
+  void RejectSym() { ncclIntruQueueEnqueue(&ctq_.symTaskQueue, Coll()); }
+
+  void RejectLegacy() {
+    struct ncclTaskTuningInfo* tInfo = Coll();
+    tInfo->tuningOut.algo = NCCL_ALGO_RING;
+    tInfo->raw->coll.collConfig.algSelection = kUnknownAlgSelection;
+    ncclIntruQueueEnqueue(&ctq_.legacyTaskQueue, tInfo);
+  }
+
+  void RejectAllGatherV() {
+    struct ncclTaskTuningInfo* tInfo = scene_.NewTuningInfo(scene_.NewAllGatherV());
+    tInfo->raw->allGatherV.func = ncclFuncAllGather;
+    tInfo->raw->allGatherV.counts[kAgvMidRoot] = kAgvMidCount;
+    ncclIntruQueueEnqueue(&ctq_.allgathervTaskQueue, tInfo);
+  }
+
+  void RejectP2p() {
+    struct ncclTaskTuningInfo* tInfo =
+      scene_.NewTuningInfo(scene_.NewSendRecv(ncclFuncSend, kPipelinePeerOutsideTheComm));
+    ncclIntruQueueEnqueue(&ctq_.p2pTaskQueue, tInfo);
+  }
+
+  void RejectRma() {
+    struct ncclTaskTuningInfo* tInfo = scene_.NewTuningInfo(scene_.NewRma(ncclFuncAllReduce));
+    ncclIntruQueueEnqueue(&ctq_.rmaTaskQueue, tInfo);
+  }
+
+  void RejectCe() { ncclIntruQueueEnqueue(&ctq_.ceTaskQueue, Coll()); }
+
+ private:
+  struct ncclTaskTuningInfo* Coll() {
+    const ncclCollConfig_t unsetConfig = NCCL_COLLCONFIG_INITIALIZER;
+    struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllReduce);
+    raw->coll.collConfig = unsetConfig;
+    return scene_.NewTuningInfo(raw);
+  }
+
+  TaskPrepScene scene_;
+  std::vector<ncclKernelPlanner::Peer> planPeers_;
+  struct ncclClassifiedTaskQueues ctq_;
+};
+
+class TaskPostTuning_PipelineHooks {
+ public:
+  TaskPostTuning_PipelineHooks()
+    : symkInit_(g_symkInitOnce, [](struct ncclComm*) { return ncclSystemError; }),
+      ceInit_(g_ncclCeInit, [](struct ncclComm*) { return ncclSystemError; }) {}
+
+ private:
+  ScopedHook<ncclResult_t(struct ncclComm*)> symkInit_;
+  ScopedHook<ncclResult_t(struct ncclComm*)> ceInit_;
+};
+
+TEST_F(TaskPostTuningMicrotest, TaskPostTuning_NoCommunicator_RejectsTheCall) {
+  TaskPostTuning_Pipeline pipeline;
+
+  EXPECT_EQ(ncclInvalidArgument, ncclTaskPostTuning(nullptr, pipeline.ctq(), nullptr));
+}
+
+TEST_F(TaskPostTuningMicrotest, TaskPostTuning_NoClassifiedQueues_RejectsTheCall) {
+  TaskPostTuning_Pipeline pipeline;
+
+  EXPECT_EQ(ncclInvalidArgument, ncclTaskPostTuning(pipeline.comm(), nullptr, nullptr));
+}
+
+TEST_F(TaskPostTuningMicrotest, TaskPostTuning_EveryQueueEmpty_SucceedsWithoutMaterializingAnything) {
+  TaskPostTuning_Pipeline pipeline;
+
+  ASSERT_EQ(ncclSuccess, pipeline.Run());
+
+  EXPECT_EQ(0, pipeline.comm()->planner.nTasksColl);
+  EXPECT_EQ(0, pipeline.comm()->planner.nTasksBcast);
+  EXPECT_EQ(0, pipeline.comm()->planner.nTasksP2p);
+}
+
+TEST_F(TaskPostTuningMicrotest, TaskPostTuning_SimulationRequested_WritesTheEstimateWithoutRunningAnyFamily) {
+  TaskPostTuning_Pipeline pipeline;
+  ncclSimInfo_t simInfo = PoisonedSimInfo();
+  pipeline.RejectAllGatherV();
+
+  ASSERT_EQ(ncclSuccess, pipeline.Run(&simInfo));
+
+  EXPECT_EQ(kNoTimeUs, simInfo.estimatedTime);
+  EXPECT_FALSE(ncclIntruQueueEmpty(&pipeline.ctq()->allgathervTaskQueue));
+}
+
+TEST_F(TaskPostTuningMicrotest, TaskPostTuning_SymmetricEntryIsRejected_PropagatesThatFamilysFailure) {
+  TaskPostTuning_Pipeline pipeline;
+  TaskPostTuning_PipelineHooks hooks;
+  pipeline.RejectSym();
+
+  EXPECT_EQ(ncclSystemError, pipeline.Run());
+}
+
+TEST_F(TaskPostTuningMicrotest, TaskPostTuning_LegacyEntryIsRejected_PropagatesThatFamilysFailure) {
+  TaskPostTuning_Pipeline pipeline;
+  TaskPostTuning_PipelineHooks hooks;
+  pipeline.RejectLegacy();
+
+  EXPECT_EQ(ncclInvalidArgument, pipeline.Run());
+}
+
+TEST_F(TaskPostTuningMicrotest, TaskPostTuning_AllGatherVEntryIsRejected_PropagatesThatFamilysFailure) {
+  TaskPostTuning_Pipeline pipeline;
+  TaskPostTuning_PipelineHooks hooks;
+  pipeline.RejectAllGatherV();
+
+  EXPECT_EQ(ncclInternalError, pipeline.Run());
+}
+
+TEST_F(TaskPostTuningMicrotest, TaskPostTuning_P2pEntryIsRejected_PropagatesThatFamilysFailure) {
+  TaskPostTuning_Pipeline pipeline;
+  TaskPostTuning_PipelineHooks hooks;
+  pipeline.RejectP2p();
+
+  EXPECT_EQ(ncclInvalidArgument, pipeline.Run());
+}
+
+TEST_F(TaskPostTuningMicrotest, TaskPostTuning_RmaEntryIsRejected_PropagatesThatFamilysFailure) {
+  TaskPostTuning_Pipeline pipeline;
+  TaskPostTuning_PipelineHooks hooks;
+  pipeline.RejectRma();
+
+  EXPECT_EQ(ncclInternalError, pipeline.Run());
+}
+
+TEST_F(TaskPostTuningMicrotest, TaskPostTuning_CopyEngineEntryIsRejected_PropagatesThatFamilysFailure) {
+  TaskPostTuning_Pipeline pipeline;
+  TaskPostTuning_PipelineHooks hooks;
+  pipeline.RejectCe();
+
+  EXPECT_EQ(ncclSystemError, pipeline.Run());
+}
+
+TEST_F(TaskPostTuningMicrotest, TaskPostTuning_SymmetricAndLegacyEntriesRejected_StopsAtTheSymmetricFamily) {
+  TaskPostTuning_Pipeline pipeline;
+  TaskPostTuning_PipelineHooks hooks;
+  pipeline.RejectSym();
+  pipeline.RejectLegacy();
+
+  EXPECT_EQ(ncclSystemError, pipeline.Run());
+
+  EXPECT_EQ(0, pipeline.comm()->planner.nTasksColl);
+}
+
+TEST_F(TaskPostTuningMicrotest, TaskPostTuning_LegacyAndAllGatherVEntriesRejected_StopsAtTheLegacyFamily) {
+  TaskPostTuning_Pipeline pipeline;
+  TaskPostTuning_PipelineHooks hooks;
+  pipeline.RejectLegacy();
+  pipeline.RejectAllGatherV();
+
+  EXPECT_EQ(ncclInvalidArgument, pipeline.Run());
+
+  EXPECT_FALSE(ncclIntruQueueEmpty(&pipeline.ctq()->allgathervTaskQueue));
+}
+
+TEST_F(TaskPostTuningMicrotest, TaskPostTuning_AllGatherVAndP2pEntriesRejected_StopsAtTheAllGatherVFamily) {
+  TaskPostTuning_Pipeline pipeline;
+  TaskPostTuning_PipelineHooks hooks;
+  pipeline.RejectAllGatherV();
+  pipeline.RejectP2p();
+
+  EXPECT_EQ(ncclInternalError, pipeline.Run());
+}
+
+TEST_F(TaskPostTuningMicrotest, TaskPostTuning_P2pAndRmaEntriesRejected_StopsAtTheP2pFamily) {
+  TaskPostTuning_Pipeline pipeline;
+  TaskPostTuning_PipelineHooks hooks;
+  pipeline.RejectP2p();
+  pipeline.RejectRma();
+
+  EXPECT_EQ(ncclInvalidArgument, pipeline.Run());
+
+  EXPECT_FALSE(ncclIntruQueueEmpty(&pipeline.ctq()->rmaTaskQueue));
+}
+
+TEST_F(TaskPostTuningMicrotest, TaskPostTuning_RmaAndCopyEngineEntriesRejected_StopsAtTheRmaFamily) {
+  TaskPostTuning_Pipeline pipeline;
+  TaskPostTuning_PipelineHooks hooks;
+  pipeline.RejectRma();
+  pipeline.RejectCe();
+
+  EXPECT_EQ(ncclInternalError, pipeline.Run());
+
+  EXPECT_FALSE(ncclIntruQueueEmpty(&pipeline.ctq()->ceTaskQueue));
+}
+
 }  // namespace

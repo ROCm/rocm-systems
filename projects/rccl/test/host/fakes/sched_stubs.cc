@@ -16,8 +16,14 @@
 #include "device.h"
 #include "info.h"
 #include "nccl.h"
+#include "scheduler.h"
 
 #include "fail_loud.h"
+#include "sched_stubs.h"
+#include "signature-drift.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_convertSymTaskDevOp, convertSymTaskDevOp);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 // scheduler/symmetric_sched.cc
 ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm*, struct ncclTaskColl*,
@@ -32,8 +38,18 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm*,
                                         struct ncclKernelPlan*) {
   FailLoudUnfaked("sched_stubs", "ncclSymmetricTaskScheduler");
 }
-void convertSymTaskDevOp(struct ncclComm*, struct ncclTaskColl*) {
+static void DefaultConvertSymTaskDevOp(struct ncclComm*, struct ncclTaskColl*) {
   FailLoudUnfaked("sched_stubs", "convertSymTaskDevOp");
+}
+
+std::function<void(struct ncclComm*, struct ncclTaskColl*)> g_convertSymTaskDevOp = DefaultConvertSymTaskDevOp;
+
+void ResetSchedStubs() {
+  g_convertSymTaskDevOp = DefaultConvertSymTaskDevOp;
+}
+
+void convertSymTaskDevOp(struct ncclComm* comm, struct ncclTaskColl* task) {
+  g_convertSymTaskDevOp(comm, task);
 }
 
 // scheduler/allgatherv_sched.cc
