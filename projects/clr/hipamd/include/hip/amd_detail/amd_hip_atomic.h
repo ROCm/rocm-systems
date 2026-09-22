@@ -21,14 +21,13 @@
 #define __HIP_ATOMIC_BACKWARD_COMPAT_MEMORY
 #endif
 
-template <bool B, typename T, typename F> struct Cond_t;
-
-template <typename T, typename F> struct Cond_t<true, T, F> {
-  using type = T;
-};
-template <typename T, typename F> struct Cond_t<false, T, F> {
-  using type = F;
-};
+// Annoyingly, unrecognized attributes are a warning and the scoped
+// atomic builtins predate clang_atomic_attributes.
+#if defined(__has_extension) && __has_extension(clang_atomic_attributes)
+#define __HIP_ATOMIC_ATTR(...) [[clang::atomic(__VA_ARGS__)]]
+#else
+#define __HIP_ATOMIC_ATTR(...)
+#endif
 
 #if !__HIP_DEVICE_COMPILE__
 // TODO: Remove this after compiler pre-defines the following Macros.
@@ -559,15 +558,15 @@ __device__ inline double atomicMax_system(double* addr, double val) {
 }
 
 __device__ inline unsigned int atomicInc(unsigned int* address, unsigned int val) {
-  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_atomic_inc32))
-    return __builtin_amdgcn_atomic_inc32(address, val, __ATOMIC_RELAXED, "agent");
-  return 0;
+  __HIP_ATOMIC_ATTR(remote_memory, no_fine_grained_memory) {
+    return __scoped_atomic_fetch_uinc(address, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  }
 }
 
 __device__ inline unsigned int atomicDec(unsigned int* address, unsigned int val) {
-  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_atomic_dec32))
-    return __builtin_amdgcn_atomic_dec32(address, val, __ATOMIC_RELAXED, "agent");
-  return 0;
+  __HIP_ATOMIC_ATTR(remote_memory, no_fine_grained_memory) {
+    return __scoped_atomic_fetch_udec(address, val, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  }
 }
 
 __device__ inline int atomicAnd(int* address, int val) {
