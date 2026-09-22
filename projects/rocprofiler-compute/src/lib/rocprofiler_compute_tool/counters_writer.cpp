@@ -3,10 +3,11 @@
 #include "counters_writer.h"
 
 #include "compression/gzip_output_stream.h"
-#include "csv_gz_writer.h"
+#include "csv/csv.h"
 
 #include <algorithm>
-#include <sstream>
+#include <iostream>
+#include <ostream>
 #include <string>
 
 namespace rocprofiler_compute_tool
@@ -16,41 +17,25 @@ namespace
 constexpr std::string_view kHeader = "dispatch_id,gpu_id,kernel_id,lds_per_workgroup,"
                                      "counter_id,counter_name,counter_value\n";
 
-// Amortizes the sink indirection and the gzwrite call over many rows rather
-// than paying both per row. Not tuned; any size well above a row works.
-constexpr std::size_t kBatchBytes = 256 * 1024;
-
 // The filename advertises gzip, so the writer must actually produce it.
 static_assert(CsvCountersWriter::kFileSuffix.size() >= compression::kGzipSuffix.size() &&
                   CsvCountersWriter::kFileSuffix.substr(CsvCountersWriter::kFileSuffix.size() -
                                                         compression::kGzipSuffix.size()) ==
                       compression::kGzipSuffix,
               "CsvCountersWriter::kFileSuffix must end in the gzip suffix");
+
+// ostream keeps counter_value formatting the readers already parse.
+void write_row(std::ostream& out, const counter_info_record_t& record)
+{
+    out << record.dispatch_id << ',' << record.agent_id << ',' << record.kernel_id << ','
+        << record.LDS_memory_size << ',' << record.counter_id << ',' << record.counter_name << ','
+        << record.counter_value;
+}
 }  // namespace
 
-bool format_counters_csv(const tool_data_t& tool_data, const std::function<bool(std::string_view)>& sink)
+bool format_counters_csv(const tool_data_t& tool_data, const csv::Sink& sink)
 {
-    // ostringstream keeps counter_value formatting the readers already parse.
-    std::ostringstream batch;
-    batch << kHeader;
-
-    const auto flush_batch = [&sink, &batch]()
-    {
-        const auto text = batch.str();
-        batch.str(std::string{});
-        return text.empty() || sink(text);
-    };
-
-    for (const auto& r : tool_data.counter_records)
-    {
-        batch << r.dispatch_id << ',' << r.agent_id << ',' << r.kernel_id << ',' << r.LDS_memory_size
-              << ',' << r.counter_id << ',' << r.counter_name << ',' << r.counter_value << '\n';
-
-        if (static_cast<std::size_t>(batch.tellp()) >= kBatchBytes && !flush_batch())
-            return false;
-    }
-
-    return flush_batch();
+    return csv::format(kHeader, tool_data.counter_records, write_row, sink);
 }
 
 void CountersWriter::write(tool_data_t& tool_data)
@@ -77,9 +62,25 @@ void CountersWriter::write(tool_data_t& tool_data)
 
 void CsvCountersWriter::write_counters(tool_data_t* tool_data)
 {
-    write_csv_gz(tool_data->output_filename,
-                 "Counter collection data",
-                 [tool_data](const auto& sink) { return format_counters_csv(*tool_data, sink); });
+    compression::GzipFileOutputStream stream(tool_data->output_filename);
+    if (!stream.is_open())
+    {
+        std::cerr << "Failed to open output file: " << tool_data->output_filename << std::endl;
+        return;
+    }
+
+    const auto wrote = format_counters_csv(*tool_data,
+                                           [&stream](std::string_view text)
+                                           { return stream.write(text); });
+
+    if (!stream.close() || !wrote)
+    {
+        std::cerr << "Failed to write output file: " << tool_data->output_filename << std::endl;
+        return;
+    }
+
+    std::clog << "[rocprofiler-compute] Counter collection data has been written to: "
+              << tool_data->output_filename << std::endl;
 }
 
 }  // namespace rocprofiler_compute_tool

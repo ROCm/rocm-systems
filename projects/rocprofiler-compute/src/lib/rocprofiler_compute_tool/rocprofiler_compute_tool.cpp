@@ -31,8 +31,6 @@ static std::shared_ptr<SdkWrapper>& g_sdk_wrapper = *new std::shared_ptr<SdkWrap
     std::make_shared<SdkWrapperImpl>());
 static std::shared_ptr<SdkCallbacks>& g_sdk_callbacks = *new std::shared_ptr<SdkCallbacks>(
     std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper));
-static std::shared_ptr<CountersWriter>& g_counters_writer = *new std::shared_ptr<CountersWriter>(
-    std::make_shared<CsvCountersWriter>());
 static std::shared_ptr<rocprofiler_tool_configure_result_t>& g_cfg =
     *new std::shared_ptr<rocprofiler_tool_configure_result_t>();
 static std::unique_ptr<tool_data_t>& g_tool_data       = *new std::unique_ptr<tool_data_t>();
@@ -50,9 +48,9 @@ void test_knobs::set_sdk_wrapper(const std::shared_ptr<SdkWrapper>& sdk_wrapper)
     g_sdk_wrapper = sdk_wrapper;
 }
 
-void test_knobs::set_csv_writer(const std::shared_ptr<CountersWriter>& csv_writer)
+bool test_knobs::replace_writer(std::string_view name, const std::shared_ptr<OutputWriter>& writer)
 {
-    g_counters_writer = csv_writer;
+    return g_output_registry.replace_writer(name, writer);
 }
 
 void test_knobs::reset_cfg()
@@ -282,7 +280,7 @@ rocprofiler_tool_configure_result_t* rocprofiler_configure(uint32_t             
         g_tool_data         = create_tool_data(id);
         auto* tool_data_ptr = &g_tool_data;
 
-        g_output_registry.register_writer(g_counters_writer);
+        g_output_registry.register_writer(std::make_shared<CsvCountersWriter>());
         g_output_registry.register_writer(std::make_shared<DispatchWriter>());
         g_output_registry.register_writer(std::make_shared<KernelSymbolsWriter>());
         g_output_registry.register_writer(g_tool_data->pc_sampling);

@@ -1,17 +1,17 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 #pragma once
+#include "csv/csv.h"
 #include "output_registry.h"
 #include "sdk_callbacks.h"
 
-#include <functional>
 #include <string_view>
 
 namespace rocprofiler_compute_tool
 {
 
-/// Formats the dispatch CSV in batches; separate from the file for testing.
-bool format_dispatch_csv(const tool_data_t& tool_data, const std::function<bool(std::string_view)>& sink);
+/// Formats the dispatch CSV; separate from the file for testing.
+bool format_dispatch_csv(const tool_data_t& tool_data, const csv::Sink& sink);
 
 /// Writes one row per profiled dispatch to tool_data.dispatch_filename.
 /// Kernel properties live in the kernel symbols artifact, joined by kernel id.
