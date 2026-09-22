@@ -34,6 +34,11 @@ HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Negative_Parameters) {
   HIP_CHECK(hipFree(nullptr));
   ModuleLaunchKernelNegativeParameters<hipModuleLaunchKernelWrapper>();
 }
+
+HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Negative_MaxGridDim) {
+  HIP_CHECK(hipFree(nullptr));
+  ModuleLaunchKernelNegativeMaxGridDim<hipModuleLaunchKernelWrapper>();
+}
 constexpr auto fileName = "matmul.code";
 constexpr auto dummyKernel = "dummyKernel";
 
