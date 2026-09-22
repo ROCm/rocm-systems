@@ -24,4 +24,8 @@ int ncclIbScanPeerMemClients(const char* const* basePaths);
 // the base-path list so net_ib and net_ib_cast do not each carry a copy of it.
 int ncclIbScanDefaultPeerMemClients(void);
 
+// Runtime fallback for when the sysfs scan finds nothing: attempts a real GPU memory
+// registration against `context`. Returns 1 on success, 0 otherwise. Caller caches.
+int ncclIbProbeGdrSupport(struct ibv_context* context, int relaxedOrderingEnabled);
+
 #endif  // NCCL_GDR_PEERMEM_H_
