@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ctypes
+import os
 import re
 from pathlib import Path
 from typing import Optional
@@ -90,5 +91,42 @@ def install() -> bool:
         return False
 
     _lib = lib
+    try:
+        lib.torch_trace_collector_push_launcher_tid.restype = ctypes.c_int
+        lib.torch_trace_collector_push_launcher_tid.argtypes = [ctypes.c_uint64]
+        lib.torch_trace_collector_pop_launcher_tid.restype = ctypes.c_int
+        lib.torch_trace_collector_pop_launcher_tid.argtypes = []
+    except AttributeError:
+        pass
     console_log("ml api trace", f"loaded prebuilt .so: {so_path}")
     return True
+
+
+def _current_os_tid() -> int:
+    gettid = getattr(os, "gettid", None)
+    if callable(gettid):
+        return int(gettid())
+    libc = ctypes.CDLL(None)
+    libc.gettid.restype = ctypes.c_long
+    return int(libc.gettid())
+
+
+def push_launcher_tid() -> None:
+    if _lib is None:
+        return
+    push = getattr(_lib, "torch_trace_collector_push_launcher_tid", None)
+    if push is None:
+        return
+    try:
+        push(_current_os_tid())
+    except Exception:
+        return
+
+
+def pop_launcher_tid() -> None:
+    if _lib is None:
+        return
+    pop = getattr(_lib, "torch_trace_collector_pop_launcher_tid", None)
+    if pop is None:
+        return
+    pop()
