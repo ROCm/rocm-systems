@@ -49,6 +49,7 @@ def build_kernel_hover_template(
             f"Achieved throughput: %{{y:,.3f}} {unit}",
             f"Peak throughput: %{{customdata[0]}} {unit}",
             "Percent of roofline achieved: %{customdata[1]} %",
+            "Cache level bandwidth: %{customdata[2]}",
             f"Performance limiter: {limiter}",
             f"Total dispatches: {_format_integer(count)}",
             f"Aggregate time in kernel: {time_txt}",
@@ -67,7 +68,7 @@ def build_roof_hover(
     roof this slope caps against, each labeled with its datatype."""
     rows = [
         "Model: throughput = min(bandwidth \u00d7 AI, compute peak).",
-        f"Bandwidth (slope): {_format_bandwidth(bandwidth)}",
+        f"Bandwidth (slope): {format_bandwidth(bandwidth)}",
     ]
     if compute_peaks:
         rows.append("Compute peaks (flat roofs):")
@@ -116,7 +117,7 @@ def _hover(header: str, rows: list[str]) -> str:
     return "<br>".join([header, "", *rows]) + "<extra></extra>"
 
 
-def _format_bandwidth(gb_per_s: float) -> str:
+def format_bandwidth(gb_per_s: float) -> str:
     """Bandwidth as GB/s, switching to TB/s at >= 1000 GB/s
     so the roof hover stays readable."""
     try:
