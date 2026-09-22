@@ -44,6 +44,7 @@ struct constmem_t {
   int ipc_first_pe;
   int ipc_stride;    // 0 = pattern invalid (use fallback linear scan)
   int ipc_shm_size;
+  size_t ipc_sdma_threshold;  // SIZE_MAX = SDMA disabled
   uintptr_t heap_base;  // Local symmetric heap base
   size_t heap_size;     // Local symmetric heap size in bytes
 } __attribute__ ((aligned (16)));

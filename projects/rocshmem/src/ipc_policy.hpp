@@ -393,7 +393,7 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy(void *dst, void *src, size_t size, int local_pe) {
-    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
+    if (size >= constmem.ipc_sdma_threshold) {
       auto* handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
       assert(nullptr != handle /* Assuming sdma is available to all pes uniformly */);
       if constexpr (is_blocking(Kind)) handle->quietAll();
@@ -404,7 +404,7 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wg(void *dst, void *src, size_t size, int local_pe) {
-    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
+    if (size >= constmem.ipc_sdma_threshold) {
       sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_block()) {
         handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
@@ -418,7 +418,7 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy_wave(void *dst, void *src, size_t size, int local_pe) {
-    if (sdmaImpl_.sdmaEnabled && size >= sdmaImpl_.sdmaThreshold) {
+    if (size >= constmem.ipc_sdma_threshold) {
       sdma_anvil::SdmaQueueDeviceHandle* handle = nullptr;
       if (is_thread_zero_in_wave()) {
         handle = sdmaImpl_.sdmaCopy<Kind>(dst, src, size, local_pe);
@@ -433,17 +433,18 @@ class IpcSdmaImpl : public IpcOnImpl {
   template <atomic::memory_scope scope = atomic::memory_scope::system,
             atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence() {
-    if (sdmaImpl_.sdmaEnabled &&
-        atomic::load<atomic::memory_scope::device,
-                     atomic::memory_order::relaxed>(&sdmaImpl_.sdmaDirty) != 0)
-      sdmaImpl_.sdmaQuietAll();
+    if (constmem.ipc_sdma_threshold != SIZE_MAX) {
+      if (atomic::load<atomic::memory_scope::device,
+                       atomic::memory_order::relaxed>(&sdmaImpl_.sdmaDirty) != 0)
+        sdmaImpl_.sdmaQuietAll();
+    }
     atomic::threadfence<scope, order>();
   }
 
   template <atomic::memory_scope scope = atomic::memory_scope::system,
             atomic::memory_order order = atomic::memory_order::release>
   __device__ __forceinline__ void ipcFence(int local_pe) {
-    if (sdmaImpl_.sdmaEnabled) {
+    if (constmem.ipc_sdma_threshold != SIZE_MAX) {
       uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
                          (local_pe * sdmaImpl_.numChannels);
       if (atomic::load<atomic::memory_scope::device,
@@ -455,26 +456,34 @@ class IpcSdmaImpl : public IpcOnImpl {
   }
 
   __device__ void ipcQuiet() {
-    if (sdmaImpl_.sdmaEnabled &&
-          atomic::load<atomic::memory_scope::device,
-                       atomic::memory_order::relaxed>(
-                         &sdmaImpl_.sdmaDirty) != 0)
-      sdmaImpl_.sdmaQuietAll();
+    if (constmem.ipc_sdma_threshold != SIZE_MAX) {
+      if (atomic::load<atomic::memory_scope::device,
+                       atomic::memory_order::relaxed>(&sdmaImpl_.sdmaDirty) != 0) {
+        sdmaImpl_.sdmaQuietAll();
+        atomic::threadfence<atomic::memory_scope::system,
+                            atomic::memory_order::acq_rel>();
+        return;
+      }
+    }
     atomic::threadfence<atomic::memory_scope::system,
-                        atomic::memory_order::acq_rel>();
+                        atomic::memory_order::release>();
   }
 
   __device__ void ipcQuiet(int local_pe) {
-    if (sdmaImpl_.sdmaEnabled) {
+    if (constmem.ipc_sdma_threshold != SIZE_MAX) {
       uint64_t pe_mask = ((1ULL << sdmaImpl_.numChannels) - 1) <<
                          (local_pe * sdmaImpl_.numChannels);
       if (atomic::load<atomic::memory_scope::device,
                        atomic::memory_order::relaxed>(
-                         &sdmaImpl_.sdmaDirty) & pe_mask)
+                         &sdmaImpl_.sdmaDirty) & pe_mask) {
         sdmaImpl_.sdmaQuiet(local_pe);
+        atomic::threadfence<atomic::memory_scope::system,
+                            atomic::memory_order::acq_rel>();
+        return;
+      }
     }
     atomic::threadfence<atomic::memory_scope::system,
-                        atomic::memory_order::acq_rel>();
+                        atomic::memory_order::release>();
   }
 };
 #endif  // USE_SDMA

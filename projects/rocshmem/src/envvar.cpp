@@ -227,7 +227,7 @@ namespace envvar {
   }  // namespace gda
 
   namespace sdma {
-    const var<bool> enabled("ENABLED", "Enable SDMA transport at runtime", true);
+    const var<bool> enabled("ENABLED", "Enable SDMA transport at runtime", false);
     const var<size_t> threshold("THRESHOLD", "SDMA transfer size threshold in bytes", 256);
     const var<int32_t> num_channels("NUM_CHANNELS", "Number of SDMA channels per destination [1, 8]", 1);
     const var<bool> spread_channels("SPREAD_CHANNELS",
