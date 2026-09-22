@@ -9,6 +9,11 @@
 #include "rocjitsu/vm/amdgpu/graphics_stage.h"
 #include "rocjitsu/vm/amdgpu/pm4.h"
 
+#include <array>
+#include <cstdint>
+#include <optional>
+#include <vector>
+
 namespace rocjitsu::amdgpu {
 class GpuMemory;
 

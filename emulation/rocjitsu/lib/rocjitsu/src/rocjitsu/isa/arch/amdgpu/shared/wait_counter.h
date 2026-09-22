@@ -14,7 +14,7 @@ namespace rocjitsu::amdgpu {
 /// for store-only tracking. On GFX11, the internal LOADCNT/STORECNT and
 /// DSCNT/KMCNT names preserve event subsets covered by its aggregate
 /// VMCNT/VSCNT and LGKMCNT waits. GFX12 exposes those fine-grained counters
-/// directly.
+/// directly and adds SAMPLECNT for image sampling.
 /// GFX12.5 also adds TENSORCNT for tensor data mover operations and ASYNCCNT
 /// for async global/cluster transfers to or from LDS.
 enum class WaitCounterType : uint8_t {

@@ -215,10 +215,66 @@ TEST_P(GraphicsExportTest, ParameterLoadUsesQuadMaskAndPrimitiveOffsets) {
   }
 }
 
-TEST_P(GraphicsExportTest, RectangleRunsFragmentWavesAndWritesOnlyCoveredPixels) {
+TEST_P(GraphicsExportTest, RectangleCoverageAndUnsupportedRasterStates) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
-  for (uint32_t scenario = 0; scenario < 19; ++scenario) {
-    SCOPED_TRACE(scenario);
+  enum class Outcome { Draw, Empty, Reject };
+  struct Case {
+    const char *name;
+    Outcome outcome = Outcome::Draw;
+    uint32_t clip_control = 0;
+    uint32_t shader_control = 0;
+    uint32_t color_control = 0xcc0010;
+    uint32_t polygon_mode = 0;
+    uint32_t samples = 0;
+    std::array<float, 4> depth_bias{};
+    bool depth_only = false;
+    float depth = 0;
+    bool first_vertex_depth_only = false;
+    float extent = 1;
+    bool full_scissor = false;
+  };
+  const Case cases[] = {
+      {.name = "integer coverage"},
+      {.name = "fractional coverage", .extent = 0.625f, .full_scissor = true},
+      {.name = "rasterizer discard", .outcome = Outcome::Empty, .clip_control = 1u << 22},
+      {.name = "fragment discard", .outcome = Outcome::Reject, .shader_control = 1u << 6},
+      {.name = "fully clipped", .outcome = Outcome::Empty, .depth = 2},
+      {.name = "partially clipped",
+       .outcome = Outcome::Reject,
+       .depth = 2,
+       .first_vertex_depth_only = true},
+      {.name = "logic op clear", .outcome = Outcome::Reject, .color_control = 0x10},
+      {.name = "color disabled", .color_control = 0, .depth_only = true},
+      {.name = "unsupported color mode", .outcome = Outcome::Reject, .color_control = 0xcc0020},
+      {.name = "color degamma", .outcome = Outcome::Reject, .color_control = 0xcc0018},
+      {.name = "line polygons",
+       .outcome = Outcome::Reject,
+       .polygon_mode = 8 | (1 << 5) | (1 << 8)},
+      {.name = "point polygons", .outcome = Outcome::Reject, .polygon_mode = 8},
+      {.name = "mixed polygon faces",
+       .outcome = Outcome::Reject,
+       .polygon_mode = 8 | (2 << 5) | (1 << 8)},
+      {.name = "reserved polygon mode",
+       .outcome = Outcome::Reject,
+       .polygon_mode = 16 | (2 << 5) | (2 << 8)},
+      {.name = "filled dual mode", .polygon_mode = 8 | (2 << 5) | (2 << 8)},
+      {.name = "front depth bias",
+       .outcome = Outcome::Reject,
+       .polygon_mode = 1u << 11,
+       .depth_bias = {1, 0, 0, 0}},
+      {.name = "back depth bias",
+       .outcome = Outcome::Reject,
+       .polygon_mode = 1u << 12,
+       .depth_bias = {0, 0, 1, 0}},
+      {.name = "parallel depth bias",
+       .outcome = Outcome::Reject,
+       .polygon_mode = 1u << 13,
+       .depth_bias = {0, 1, 0, 1}},
+      {.name = "four samples", .outcome = Outcome::Reject, .samples = 2},
+      {.name = "zero depth bias", .polygon_mode = 7u << 11, .depth_bias = {-0.0f, 0, 0, 0}},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.name);
     for (uint32_t y = 0; y < 4; ++y)
       for (uint32_t x = 0; x < 4; ++x) {
         const auto address = gfx12 ? amdgpu::gfx12_image_offset(x, y, 4, 4, 3)
@@ -253,57 +309,41 @@ TEST_P(GraphicsExportTest, RectangleRunsFragmentWavesAndWritesOnlyCoveredPixels)
       state.context_registers[0x206] = 0x43f;
       state.context_registers[0x205] = 0;
     }
-    if (scenario == 1) {
+    if (test.full_scissor) {
       state.context_registers[0x90] = 0;
       state.context_registers[0x91] = 4 | (4 << 16);
     }
-    if (scenario == 2)
-      state.context_registers[0x204] = 1u << 22;
-    if (scenario == 3)
-      state.context_registers[gfx12 ? 0x1b : 0x203] = 1u << 6;
-    state.context_registers[gfx12 ? 0x216 : 0x202] = 0xcc0010;
-    if (scenario == 6) // ROP3_CLEAR is not a plain copy.
-      state.context_registers[gfx12 ? 0x216 : 0x202] = 0x10;
-    if (scenario == 7) { // CB_DISABLE preserves color during a depth-only draw.
-      state.context_registers[gfx12 ? 0x216 : 0x202] = 0;
+    state.context_registers[0x204] = test.clip_control;
+    state.context_registers[gfx12 ? 0x1b : 0x203] = test.shader_control;
+    state.context_registers[gfx12 ? 0x216 : 0x202] = test.color_control;
+    state.context_registers[gfx12 ? 0x207 : 0x205] = test.polygon_mode;
+    state.context_registers[0x2f8] = test.samples;
+    for (uint32_t i = 0; i < test.depth_bias.size(); ++i)
+      state.context_registers[0x2e0 + i] = std::bit_cast<uint32_t>(test.depth_bias[i]);
+    if (test.depth_only) {
       state.context_registers[gfx12 ? 0x1c : 0x200] = 6 | (7 << 4);
       state.context_registers[gfx12 ? 5 : 7] = (3 << 16) | 3;
       state.context_registers[gfx12 ? 6 : 0x10] = 3 | ((gfx12 ? 3 : 24) << 4);
       state.context_registers[gfx12 ? 8 : 0x12] = 0x2000;
       state.context_registers[gfx12 ? 10 : 0x14] = 0x2000;
     }
-    if (scenario == 8)
-      state.context_registers[gfx12 ? 0x216 : 0x202] = 0xcc0020;
-    if (scenario == 9)
-      state.context_registers[gfx12 ? 0x216 : 0x202] = 0xcc0018;
-    if (scenario >= 10 && scenario < 15) {
-      // Dual polygon mode: lines, points, mixed faces, invalid mode, and filled faces.
-      constexpr uint32_t modes[] = {8 | (1 << 5) | (1 << 8), 8, 8 | (2 << 5) | (1 << 8),
-                                    16 | (2 << 5) | (2 << 8), 8 | (2 << 5) | (2 << 8)};
-      state.context_registers[gfx12 ? 0x207 : 0x205] = modes[scenario - 10];
-    }
-    if (scenario >= 15 && scenario < 18)
-      state.context_registers[gfx12 ? 0x207 : 0x205] = 1u << (11 + scenario - 15);
-    if (scenario == 18)
-      state.context_registers[0x2f8] = 2; // Four samples per pixel.
-    const float extent = scenario == 1 ? 0.625f : 1.0f;
+    const float extent = test.extent;
     auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
     for (uint32_t i = 0; i < 3; ++i) {
       const std::array<uint32_t, 4> position{
           std::bit_cast<uint32_t>(i == 2 ? extent : -extent),
           std::bit_cast<uint32_t>(i == 1 ? extent : -extent),
-          std::bit_cast<uint32_t>(scenario == 4 || (scenario == 5 && i == 0) ? 2.0f : 0.0f),
+          std::bit_cast<uint32_t>(!test.first_vertex_depth_only || i == 0 ? test.depth : 0.0f),
           std::bit_cast<uint32_t>(1.0f)};
       draw->export_lane(*wave_, i, 12, 15, position);
     }
     draw->export_lane(*wave_, 0, 20, 1,
                       {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
-    if (scenario == 3 || scenario == 5 || scenario == 6 || scenario == 8 || scenario == 9 ||
-        (scenario >= 10 && scenario < 14) || scenario >= 15) {
+    if (test.outcome == Outcome::Reject) {
       EXPECT_THROW(draw->advance(memory_, 0), std::runtime_error);
       continue;
     }
-    if (scenario == 2 || scenario == 4) {
+    if (test.outcome == Outcome::Empty) {
       EXPECT_FALSE(draw->advance(memory_, 0));
       EXPECT_EQ(memory_.read32(0x100000), 0);
       continue;
@@ -325,7 +365,7 @@ TEST_P(GraphicsExportTest, RectangleRunsFragmentWavesAndWritesOnlyCoveredPixels)
                                    : amdgpu::gfx11_image_offset(x, y, 4, 4, 26);
         ASSERT_TRUE(address);
         EXPECT_EQ(memory_.read32(0x100000 + *address),
-                  scenario != 7 && x >= 1 && x < 3 && y >= 1 && y < 3 ? 0xff0000ffu : 0u)
+                  !test.depth_only && x >= 1 && x < 3 && y >= 1 && y < 3 ? 0xff0000ffu : 0u)
             << x << "," << y;
       }
   }

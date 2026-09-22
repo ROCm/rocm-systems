@@ -272,7 +272,8 @@ void GraphicsDraw::rasterize(GpuMemory &memory, uint32_t process_id) {
   const uint32_t polygon_mode = (context_[0x207] >> 3) & 3;
   if (polygon_mode && (polygon_mode != 1 || ((context_[0x207] >> 5) & 63) != (2 | (2 << 3))))
     throw std::runtime_error("graphics point or line polygon modes are not implemented");
-  if (context_[0x207] & (7u << 11))
+  if ((context_[0x207] & (7u << 11)) &&
+      ((context_[0x2e0] | context_[0x2e1] | context_[0x2e2] | context_[0x2e3]) & 0x7fffffffu))
     throw std::runtime_error("graphics polygon depth bias is not implemented");
   if (context_[0x2f8] & 7)
     throw std::runtime_error("graphics multisample rasterization is not implemented");

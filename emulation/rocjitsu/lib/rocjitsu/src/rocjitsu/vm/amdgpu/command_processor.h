@@ -8,8 +8,8 @@
 /// @brief Command processor (CP) component.
 ///
 /// @details Models a CP that works with the ROCm runtime to fetch
-/// and process HSA AQL packets, or consume DRM PM4 compute submissions, and
-/// dispatch work to compute units.
+/// and process HSA AQL packets or DRM PM4 compute and graphics submissions,
+/// dispatching shader work to compute units.
 ///
 /// Architecture: the CP directly owns queue state and doorbell monitoring
 /// (CP hardware functions). Three sub-blocks handle distinct pipeline stages:
