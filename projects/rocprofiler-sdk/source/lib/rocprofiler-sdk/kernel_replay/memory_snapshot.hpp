@@ -63,13 +63,14 @@ struct device_snapshot_t
     bool empty() const { return blocks.empty(); }
 };
 
-// Copy (device->host) every tracked allocation owned by `agent`, plus every module-scope variable
-// (__device__ / __constant__ global) visible to `agent` in the loaded executables. On success the
-// returned snapshot has ok==true. It returns early with ok==false, so the caller can decline replay
-// rather than restore a partial snapshot, when a region cannot be captured (host memory pressure --
-// the host buffer allocation fails -- or a failed copy) or when the module-scope variables of a
-// loaded executable cannot be enumerated. Host memory pressure is never fatal: a dispatch that
-// cannot be snapshotted runs once instead of aborting the application.
+// Copy (device->host) every tracked allocation owned by `agent`, plus every writable module-scope
+// __device__ variable visible to `agent` in the loaded executables. Read-only __constant__ symbols
+// are not captured: a kernel cannot mutate them, and restoring them can write to protected pages.
+// On success the returned snapshot has ok==true. It returns early with ok==false, so the caller can
+// decline replay rather than restore a partial snapshot, when a region cannot be captured (host
+// memory pressure -- the host buffer allocation fails -- or a failed copy) or when the module-scope
+// variables of a loaded executable cannot be enumerated. Host memory pressure is never fatal: a
+// dispatch that cannot be snapshotted runs once instead of aborting the application.
 device_snapshot_t
 snap(hsa_agent_t agent);
 

@@ -531,6 +531,28 @@ TEST(kernel_replay_snapshot, restore_reverts_module_variable)
         << "module variable (__device__ global) was not restored by snapshot/restore";
 }
 
+// Read-only module constants do not need restoration and may reside in protected GPU pages.
+// Snapshotting one would make restore() issue an invalid host->device write to that page.
+TEST(kernel_replay_snapshot, excludes_read_only_module_constant)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    const auto agent = gpu_agent();
+    ASSERT_NE(agent.handle, 0U) << "no GPU agent found";
+
+    void* constant_addr = kernel_launch::module_constant_address();
+    ASSERT_NE(constant_addr, nullptr) << "failed to resolve __constant__ symbol";
+
+    auto snapshot = msnp::snap(agent);
+    ASSERT_TRUE(snapshot.ok);
+
+    for(const auto& block : snapshot.blocks)
+        EXPECT_NE(block.gpu_addr, constant_addr)
+            << "read-only __constant__ symbol was included in the restore set";
+
+    EXPECT_TRUE(msnp::restore(snapshot));
+}
+
 // The replay scenario for a module global: N passes each bump it; a restore between passes must
 // prevent accumulation, so the final value stays kBase (each pass reverts kBase+1 -> kBase), never
 // kBase + N. A no-op (missing) module-variable restore would leave kBase + N.

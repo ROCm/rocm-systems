@@ -97,8 +97,9 @@ typedef rocprofiler_status_t (*rocprofiler_kernel_replay_context_cb_t)(
  * @warning Beta. A dispatch is replayed only when its submission is a single packet containing a
  * single dispatch. HIP graph launches are not replayed, and a multi-packet submission runs once
  * without replay; each case warns once. Repeatability rests on a snapshot covering coarse-grained
- * device allocations owned by the agent plus module-scope @c __device__ / @c __constant__
- * variables. Unified or managed memory, @c hipMallocAsync and other virtual-memory-mapped
+ * device allocations owned by the agent plus writable module-scope @c __device__ variables.
+ * Read-only @c __constant__ symbols do not require restoration and are excluded to avoid writes
+ * to protected pages. Unified or managed memory, @c hipMallocAsync and other virtual-memory-mapped
  * allocations, and host, fine-grained and kernarg memory are not captured, so a kernel writing to
  * them observes values accumulated across passes rather than identical inputs. Allocations carrying
  * @c HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG are excluded from the snapshot (HIP kernarg pools /

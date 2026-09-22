@@ -193,7 +193,9 @@ Between passes, kernel replay restores:
 
 * Coarse-grained device (VRAM) allocations from ``hipMalloc`` /
   ``hsa_amd_memory_pool_allocate`` / ``hsa_memory_allocate``.
-* Module-scope ``__device__`` and ``__constant__`` variables in loaded executables.
+* Writable module-scope ``__device__`` variables in loaded executables. Read-only
+  ``__constant__`` symbols are excluded because kernels cannot mutate them and restore must not
+  write to protected pages.
 
 It does **not** restore:
 
@@ -213,7 +215,7 @@ Limitations
 
 * **Beta.** The domain, payload, and snapshot policy may change.
 * **Single** ``KERNEL_REPLAY`` **subscriber.**
-* **Coarse-grained device VRAM only**, plus module-scope device/constant variables.
+* **Coarse-grained device VRAM only**, plus writable module-scope device variables.
 * **HIP graph launches are not replayed.** The interceptor warns once and the graph runs once on
   the ordinary path. A graph dispatch does **not** hard-error at the replay gate.
 * **Only single-packet, single-dispatch submissions** are replayed. Multi-packet batches warn once

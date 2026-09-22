@@ -33,6 +33,7 @@ namespace
 // hipMalloc allocation, so only snap()'s HSA_SYMBOL_KIND_VARIABLE path captures it. Kernels bump it
 // in place (single thread) so replay must restore it between passes, else it accumulates per pass.
 __device__ int g_module_counter = 0;
+__constant__ int g_module_constant = 17;
 
 __global__ void
 fill_kernel(float* d, float val, int n)
@@ -123,6 +124,14 @@ read_module_counter()
     int v = 0;
     (void) hipMemcpyFromSymbol(&v, HIP_SYMBOL(g_module_counter), sizeof(int));
     return v;
+}
+
+void*
+module_constant_address()
+{
+    void* ptr = nullptr;
+    (void) hipGetSymbolAddress(&ptr, HIP_SYMBOL(g_module_constant));
+    return ptr;
 }
 
 void
