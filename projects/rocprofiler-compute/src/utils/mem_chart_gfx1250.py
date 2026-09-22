@@ -26,6 +26,7 @@ from utils.mem_chart_common import (
     COLORS,
     build_bw_edges,
     build_cache_panel,
+    build_cu_panel,
     build_legend,
     colored,
     format_edge,
@@ -41,6 +42,13 @@ from utils.mem_chart_common import (
 # Metric keys — match 0300_Memory_Chart.yaml for gfx1250 (tables 301-308)
 # ---------------------------------------------------------------------------
 _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
+    # Compute Units
+    ("Wavefront Occupancy", 8),
+    ("VGPR", 64),
+    ("SGPR", 32),
+    ("LDS Allocation", 32768),
+    ("Scratch Allocation", 0),
+    ("Workgroups", 256),
     # Table 301: Instruction Cache
     ("ICache Requests", 450),
     ("ICache Utilization", 60.0),
@@ -465,16 +473,19 @@ def create_mem_chart_diagram(
     std_arrows = make_arrows(_ARROW_LEN)
 
     # --- Kernel panel ---
-    kernel_panel = Panel(
-        "\n" * (_KERNEL_H // 2 - 4)
-        + "[dim]Shader Core[/dim]\n"
-        + "[dim]Wave[/dim]\n"
-        + "[dim]Execution[/dim]",
-        title=(f"[bold {COLORS['kernel']}]Compute Units[/bold {COLORS['kernel']}]"),
-        border_style=COLORS["kernel"],
-        width=_KERNEL_W,
-        height=_KERNEL_H,
-    )
+    scratch_bytes = safe_float(m.get("Scratch Allocation"))
+    scratch_kb = scratch_bytes / 1024 if scratch_bytes is not None else None
+    lds_bytes = safe_float(m.get("LDS Allocation"))
+    lds_alloc_kb = lds_bytes / 1024 if lds_bytes is not None else None
+    cu_stats = [
+        ("Wave Occ", m.get("Wavefront Occupancy"), " waves/CU"),
+        ("vGPRs", m.get("VGPR"), ""),
+        ("sGPRs", m.get("SGPR"), ""),
+        ("Scratch", scratch_kb, " KB"),
+        ("LDS Alloc", lds_alloc_kb, " KB"),
+        ("Workgroups", m.get("Workgroups"), ""),
+    ]
+    kernel_panel = build_cu_panel(_KERNEL_H, stats=cu_stats)
 
     # --- Kernel -> TCP/SQC edges ---
     color_read = COLORS["read"]
