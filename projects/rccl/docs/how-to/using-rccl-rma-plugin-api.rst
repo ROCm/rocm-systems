@@ -23,11 +23,11 @@ required:
 * ``init``, ``devices``, ``getProperties``, ``listen`` and ``connect``
 * ``createContext``, ``regMrSym``, ``deregMrSym`` and ``destroyContext``
 * ``closeColl`` and ``closeListen``
-* ``iput``, ``iputSignal``, ``test`` and ``finalize``
+* ``iput``, ``iputSignal``, ``iget``, ``test`` and ``finalize``
 
 ``regMrSymDmaBuf`` is also required when ``getProperties`` advertises
-``NCCL_PTR_DMABUF``. ``iget``, ``iflush``, ``rmaProgress`` and
-``queryLastError`` are optional.
+``NCCL_PTR_DMABUF``. ``iflush``, ``rmaProgress`` and ``queryLastError`` are
+optional.
 
 Version 15 adds an ``optFlags`` argument to ``iput``, ``iputSignal`` and
 ``iget``. Plugins must accept these values:
@@ -49,16 +49,18 @@ Loading a plugin
 ================
 
 Set ``NCCL_RMA_PLUGIN`` to an absolute path, a shared-library file name or a
-short name. Short names use the ``librccl-rma`` prefix:
+short name. RCCL passes the raw value to ``dlopen`` first. If that fails, it
+retries a short name with the ``librccl-rma`` prefix:
 
 .. code-block:: shell
 
    export LD_LIBRARY_PATH=/path/to/plugin:$LD_LIBRARY_PATH
    export NCCL_RMA_PLUGIN=mybackend
 
-The command above resolves ``librccl-rma-mybackend.so``. During communicator
-initialization, ``NCCL_DEBUG=INFO`` reports the selected interface version and
-the backend assigned to the communicator.
+The command above loads a file literally named ``mybackend`` when one is on the
+library search path, and otherwise resolves ``librccl-rma-mybackend.so``.
+During communicator initialization, ``NCCL_DEBUG=INFO`` reports the selected
+interface version and the backend assigned to the communicator.
 
 ``plugins/rma/example`` is a minimal v15 implementation that demonstrates the
 lifecycle, registration and data-operation callback signatures.

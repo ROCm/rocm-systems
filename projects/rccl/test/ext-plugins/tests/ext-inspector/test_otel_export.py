@@ -81,6 +81,7 @@ def _run_all_reduce(paths, dump_dir, extra_env, log_name):
     for name in (
         "NCCL_INSPECTOR_OTEL_EXPORT",
         "NCCL_INSPECTOR_OTEL_VERBOSE",
+        "NCCL_INSPECTOR_PROM_DUMP",
         "OTEL_EXPORTER_OTLP_ENDPOINT",
         "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
     ):
@@ -163,6 +164,9 @@ def test_otel_export_posts_metrics(paths):
     missing = [name for name in OTEL_AGGREGATED_METRICS if name not in joined]
     assert not missing, (
         f"OTLP payloads are missing metrics {missing}; saw {len(received)} request(s). See {log_file}"
+    )
+    assert OTEL_VERBOSE_ONLY_METRIC not in joined, (
+        f"Aggregated export must not emit {OTEL_VERBOSE_ONLY_METRIC}; see {log_file}"
     )
 
 

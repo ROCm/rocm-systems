@@ -632,10 +632,18 @@ variables are collected in the following table.
 
     * - | ``OTEL_EXPORTER_OTLP_METRICS_ENDPOINT``
         | Destination for the OTLP metric export. Also accepts
-        | ``OTEL_EXPORTER_OTLP_ENDPOINT``, to which ``/v1/metrics`` is appended.
+        | ``OTEL_EXPORTER_OTLP_ENDPOINT``. ``/v1/metrics`` is appended to
+          whichever variable is used when its URL carries no path.
       - | Plaintext ``http://`` URL. ``https://`` is unsupported and disables
           export, so use a local collector when the telemetry is sensitive.
         | Default: ``http://localhost:4318/v1/metrics``
+
+    * - | ``OTEL_EXPORTER_OTLP_METRICS_HEADERS``
+        | Extra headers attached to every OTLP request. Also accepts
+          ``OTEL_EXPORTER_OTLP_HEADERS``.
+      - | Comma-separated ``key=value`` list
+        | Sent verbatim over the plaintext connection above, so do not put a
+          credential here unless the collector is local.
 
 Profiler plugin
 ===============

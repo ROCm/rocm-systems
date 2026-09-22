@@ -59,7 +59,7 @@ def _run_all_reduce(paths, extra_env, log_name):
     env = os.environ.copy()
     # A stray plugin selection in the caller's environment would decide adoption.
     for var in ("NCCL_RMA_PLUGIN", "NCCL_GIN_PLUGIN", "NCCL_NET_PLUGIN", "NCCL_TUNER_PLUGIN",
-                "NCCL_PROFILER_PLUGIN"):
+                "NCCL_PROFILER_PLUGIN", "NCCL_ENV_PLUGIN"):
         env.pop(var, None)
     env.update(
         {
@@ -134,8 +134,8 @@ def test_rma_v15_is_selected_and_preserves_opt_flags(paths):
         ctypes.c_size_t, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_uint32,
         ctypes.c_uint32, ctypes.POINTER(ctypes.c_void_p),
     )(table.iput)
-    assert iput(None, 0, 0, None, 0, 0, None, 0, 0, ctypes.byref(request)) == 0
-    assert ctypes.cast(request, ctypes.POINTER(_RmaRequest)).contents.optFlags == 0
+    assert iput(None, 0, 0, None, 0, 0, None, 0, 1, ctypes.byref(request)) == 0
+    assert ctypes.cast(request, ctypes.POINTER(_RmaRequest)).contents.optFlags == 1
     done = ctypes.c_int()
     assert complete(None, request, ctypes.byref(done)) == 0
 
