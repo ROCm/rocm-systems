@@ -16,7 +16,7 @@ Tile routines
 .. note::
 
    Only **1-D and 2-D tiles** are supported. Tensors with rank greater than 2 are
-   not supported and will result in an error.
+   not supported.
 
 The tile API provides tensor-aware data movement and collective operations that
 operate on multi-dimensional sub-regions (tiles) of symmetric-heap tensors.
