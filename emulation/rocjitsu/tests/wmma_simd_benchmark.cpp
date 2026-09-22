@@ -34,6 +34,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <chrono>
@@ -41,7 +42,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <memory>
 #include <random>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -63,6 +67,8 @@ constexpr uint32_t S0_OFF = 0;
 constexpr uint32_t S1_OFF = 32;
 constexpr uint32_t S2_OFF = 64;
 constexpr uint32_t INDEX_OFF = 96;
+constexpr uint32_t SCALE_A_OFF = 100;
+constexpr uint32_t SCALE_B_OFF = 104;
 constexpr uint32_t OUT_REGS = 8; // Default dst window read back for the correctness check.
 
 constexpr uint32_t INDEX_ENTRIES = 16;
@@ -228,6 +234,118 @@ void bench(const char *label, BenchFixture &fx, const std::function<void()> &run
               label, macs, sc, sd, (sd > 0) ? sc / sd : 0.0);
   EXPECT_GT(sc, 0.0);
   EXPECT_GT(sd, 0.0);
+}
+
+struct MxfpBenchmarkFormat {
+  uint32_t selector;
+  uint32_t bits;
+  uint32_t one_code;
+  std::string_view name;
+};
+
+constexpr std::array<MxfpBenchmarkFormat, 5> kMxfpFormats = {{{0, 8, 0x38, "fp8"},
+                                                              {1, 8, 0x3c, "bf8"},
+                                                              {2, 6, 0x08, "fp6"},
+                                                              {3, 6, 0x0c, "bf6"},
+                                                              {4, 4, 0x02, "fp4"}}};
+
+constexpr uint32_t repeat_low_code(uint32_t code, uint32_t bits) {
+  uint32_t word = 0;
+  for (uint32_t shift = 0; shift < 32; shift += bits)
+    word |= code << shift;
+  return word;
+}
+
+uint32_t packed_reg_count(uint32_t elements, uint32_t bits) {
+  return static_cast<uint32_t>((static_cast<uint64_t>(elements) * bits + WF_SIZE * 32u - 1u) /
+                               (WF_SIZE * 32u));
+}
+
+std::unique_ptr<Instruction> decode_mxfp_wmma(Decoder &decoder, const MxfpBenchmarkFormat &a,
+                                              const MxfpBenchmarkFormat &b,
+                                              uint32_t prefix_op = 0) {
+  auto matrix = cdna5::build_vop3p(
+      cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
+      {.vdst = S2_OFF,
+       .opsel = static_cast<uint8_t>(a.selector),
+       .src0 = 256 + S0_OFF,
+       .src1 = 256 + S1_OFF,
+       .src2 = 128,
+       .opsel_hi = static_cast<uint8_t>(b.selector & 0x3u)});
+  if ((b.selector & 0x4u) != 0)
+    matrix[0] |= 1u << 14;
+  if (prefix_op == 0)
+    return std::unique_ptr<Instruction>(decode_valid(decoder, matrix.data()));
+
+  const auto prefix = cdna5::build_vop3p(
+      prefix_op,
+      {.src0 = 256 + SCALE_A_OFF, .src1 = 256 + SCALE_B_OFF, .src2 = 256});
+  const std::array<uint32_t, 4> words = {prefix[0], prefix[1], matrix[0], matrix[1]};
+  return std::unique_ptr<Instruction>(decode_valid(decoder, words.data()));
+}
+
+std::unique_ptr<Instruction> decode_fp4_32x16_wmma(Decoder &decoder, uint32_t prefix_op = 0) {
+  const auto matrix = cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
+                                        {.vdst = S2_OFF,
+                                         .src0 = 256 + S0_OFF,
+                                         .src1 = 256 + S1_OFF,
+                                         .src2 = 128,
+                                         .opsel_hi = 3});
+  if (prefix_op == 0)
+    return std::unique_ptr<Instruction>(decode_valid(decoder, matrix.data()));
+
+  const auto prefix = cdna5::build_vop3p(
+      prefix_op,
+      {.src0 = 256 + SCALE_A_OFF, .src1 = 256 + SCALE_B_OFF, .src2 = 256});
+  const std::array<uint32_t, 4> words = {prefix[0], prefix[1], matrix[0], matrix[1]};
+  return std::unique_ptr<Instruction>(decode_valid(decoder, words.data()));
+}
+
+void seed_mxfp_arithmetic(BenchFixture &fx, const MxfpBenchmarkFormat &a,
+                          const MxfpBenchmarkFormat &b, uint32_t M, uint32_t N) {
+  fx.seed_words(S0_OFF, packed_reg_count(M * 128u, a.bits), repeat_low_code(a.one_code, a.bits));
+  fx.seed_words(S1_OFF, packed_reg_count(N * 128u, b.bits), repeat_low_code(b.one_code, b.bits));
+  fx.seed_words(S2_OFF, (M * N) / WF_SIZE, 0u);
+  fx.seed_words(SCALE_A_OFF, 2, 0x7f7f7f7fu);
+  fx.seed_words(SCALE_B_OFF, 2, 0x7f7f7f7fu);
+}
+
+double median(std::array<double, 5> values) {
+  std::sort(values.begin(), values.end());
+  return values[values.size() / 2];
+}
+
+void bench_mxfp_arithmetic(const char *label, BenchFixture &fx, Instruction &instruction,
+                           uint32_t out_regs) {
+  ASSERT_NE(fx.cu, nullptr);
+  ASSERT_NE(fx.wf, nullptr);
+  auto run = [&] {
+    ASSERT_TRUE(fx.cu->execute_instruction(&instruction, *fx.wf).succeeded());
+  };
+
+  util::set_force_scalar_for_testing(true);
+  run();
+  const auto scalar = fx.snapshot_out(out_regs);
+  util::set_force_scalar_for_testing(false);
+  run();
+  EXPECT_EQ(fx.snapshot_out(out_regs), scalar) << label;
+
+  constexpr int kWarmups = 50;
+  constexpr int kTimedIterations = 1000;
+  std::array<double, 5> samples{};
+  for (double &sample : samples) {
+    for (int i = 0; i < kWarmups; ++i)
+      run();
+    const auto begin = Clock::now();
+    for (int i = 0; i < kTimedIterations; ++i)
+      run();
+    const auto end = Clock::now();
+    sample = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count() /
+             static_cast<double>(kTimedIterations);
+  }
+  util::set_force_scalar_for_testing(false);
+  std::printf("MXFP_ARITH_RESULT label=%s ns=%.1f native_lanes=%zu\n", label, median(samples),
+              util::native<float>::size());
 }
 
 } // namespace
@@ -569,4 +687,40 @@ TEST(WmmaSimdBenchmark, F16_16x16x32_f16_Specialized) {
                                            fx.vbase + S1_OFF, fx.vbase + S2_OFF, /*const_acc=*/0);
   };
   bench("v_wmma_f16_16x16x32_f16 [specialized]", fx, run, double(M) * N * K, Cmp::F16Tol);
+}
+
+TEST(WmmaSimdBenchmark, MxfpArithmeticAllFormats) {
+  SKIP_IF_NO_SIMD();
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+
+  for (const auto &a : kMxfpFormats) {
+    for (const auto &b : kMxfpFormats) {
+      for (const auto &[prefix_op, family] :
+           std::array<std::pair<uint32_t, std::string_view>, 3>{{{0, "dense"},
+                                                                 {0x35, "scale32"},
+                                                                 {0x3a, "scale16"}}}) {
+        BenchFixture fx;
+        seed_mxfp_arithmetic(fx, a, b, 16, 16);
+        auto instruction = decode_mxfp_wmma(*decoder, a, b, prefix_op);
+        ASSERT_NE(instruction, nullptr);
+        const std::string label =
+            std::string(family) + ".16x16x128." + std::string(a.name) + "_" + std::string(b.name);
+        bench_mxfp_arithmetic(label.c_str(), fx, *instruction, 8);
+      }
+    }
+  }
+
+  const MxfpBenchmarkFormat &fp4 = kMxfpFormats.back();
+  for (const auto &[prefix_op, family] :
+       std::array<std::pair<uint32_t, std::string_view>, 3>{{{0, "dense"},
+                                                             {0x35, "scale32"},
+                                                             {0x3a, "scale16"}}}) {
+    BenchFixture fx;
+    seed_mxfp_arithmetic(fx, fp4, fp4, 32, 16);
+    auto instruction = decode_fp4_32x16_wmma(*decoder, prefix_op);
+    ASSERT_NE(instruction, nullptr);
+    const std::string label = std::string(family) + ".32x16x128.fp4_fp4";
+    bench_mxfp_arithmetic(label.c_str(), fx, *instruction, 16);
+  }
 }
