@@ -39,6 +39,7 @@
 #include "fakes/recorder_fakes.h"
 #include "fakes/register_stubs.h"
 #include "fakes/rma_fakes.h"
+#include "fakes/sched_stubs.h"
 #include "fakes/sym_kernels_fakes.h"
 #include "fakes/transport_stubs.h"
 #include "fakes/tuning_fakes.h"
@@ -277,6 +278,7 @@ class TaskPrepFakesFixture : public ::testing::Test {
     ResetRecorderFakes();
     ResetRegisterStubs();
     ResetRmaFakes();
+    ResetSchedStubs();
     ResetSymKernelsFakes();
     ResetTransportStubs();
     ResetTuningFakes();
