@@ -157,6 +157,12 @@ binding instead of branching on a GPU name. Execution capability remains
 independent of both: a model-only binding may expose target legality and
 behavior for analysis without advertising simulator execution.
 
+Once a code-analysis caller selects a concrete target, that selection remains
+authoritative through decoding, CFG construction, and target-specific semantic
+analysis. A targetless code object may use the architecture default only when
+the caller did not supply a concrete target; its missing ELF identity must not
+replace an explicit selection made alongside the decoder.
+
 Direct registry construction accepts only const lvalue descriptor arrays. The
 array and every aliases/GPU metadata array referenced by it must remain alive
 and unchanged for the registry's lifetime; provider compositions meet that
