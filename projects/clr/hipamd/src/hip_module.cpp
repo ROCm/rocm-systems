@@ -15,6 +15,7 @@
 #include "hip_event.hpp"
 #include "hip_platform.hpp"
 #include "hip_comgr_helper.hpp"
+#include "hip_launch_validation.hpp"
 
 #if defined(_MSC_VER) && !defined(__clang__)
 #include <intsafe.h>
@@ -323,26 +324,18 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
     return hipErrorInvalidValue;
   }
 
-  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0 ||
-      launch_params.global_[2] == 0) {
-    return hipErrorInvalidConfiguration;
-  }
-
-  if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0 ||
-      launch_params.local_[2] == 0) {
-    return hipErrorInvalidConfiguration;
+  static constexpr LaunchErrorRule kValidateRules[] = {
+      {amd::kZeroGlobal,          hipErrorInvalidConfiguration},
+      {amd::kZeroBlock,           hipErrorInvalidConfiguration},
+      {amd::kSharedMemExceedsMax, hipErrorInvalidValue},
+      {amd::kBlockExceedsMaxWG,   hipErrorInvalidConfiguration},
+  };
+  hipError_t status = MapLaunchViolations(launch_params.violations_, kValidateRules);
+  if (status != hipSuccess) {
+    return status;
   }
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
-  const auto& info = device->info();
-  if (launch_params.sharedMemBytes_ > info.localMemSizePerCU_) {  // sharedMemPerBlock
-    return hipErrorInvalidValue;
-  }
-
-  // Make sure dispatch doesn't exceed max workgroup size limit
-  if (launch_params.local_.product() > info.maxWorkGroupSize_) {
-    return hipErrorInvalidConfiguration;
-  }
   amd::Kernel* kernel = hip::asKernel(f);
   if (!kernel) {
     LogPrintfError("%s", "Kernel object is invalid or null, possibly due to architecture mismatch.");
