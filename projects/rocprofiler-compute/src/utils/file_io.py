@@ -261,12 +261,9 @@ def load_kernel_short_names(
 def _read_kernel_symbol_csvs(workload_path: str) -> list[pd.DataFrame]:
     """Return the workload's symbol CSVs that hold symbols to read.
 
-    A workload carries one of two shapes, never both. The native tool writes a
-    file per process with lowercase column names when it collects the counters.
-    When it is not present the SDK collects them, and the only symbols file is
-    the one the rocpd conversion writes, with capitalized names. Workloads
-    profiled before the native tool wrote symbols also have only that one. The
-    columns are renamed so one reader serves either shape.
+    A workload has one shape or the other: lowercase columns from the native
+    tool, capitalized from the rocpd conversion. Renamed so one reader serves
+    both.
 
     The conversion opens each file before it runs its query, so an extract that
     failed leaves an empty file behind rather than no file.
