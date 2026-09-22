@@ -33,7 +33,7 @@ state which conclusions cannot be made without re-profiling.
 | Mode | What it measures | When to use |
 |---|---|---|
 | Perfmon counter analysis | Architecture-level counters (memory BW, occupancy, MFMA, stall types) | Overall kernel efficiency; memory vs compute |
-| PC sampling analysis | Stochastic / host-trap samples with stall reasons at ISA offsets | After perfmon, which instructions stall and why |
+| PC sampling analysis | Instruction samples at ISA offsets. Stall reasons are recorded only by stochastic sampling, not host-trap | After perfmon, which instructions stall and why |
 
 Primary workflow is CLI (stdout, or txt/csv/db files). Do not invent flags;
 use `rocprof-compute analyze --help`.
@@ -158,14 +158,13 @@ rocprof-compute analyze --path ./workloads/<workload_name>/<gpu_model> --list-st
 rocprof-compute analyze --path ./workloads/<workload_name>/<gpu_model> -k 0 -b sol
 rocprof-compute analyze --path ./workloads/<workload_name>/<gpu_model> -k 0 -b memchart
 
-# Roofline HTML from profile (if not --no-roof):
-# ./workloads/<workload_name>/<gpu_model>/empirRoof_gpu-0_FP32.html
-# Left of ridge = memory-bound; right = compute-bound.
-
+# Roofline table. Do not open the HTML chart; these rows are the same data.
+# Compare AI (FLOPs/Byte) with peak FLOPs / peak bandwidth:
+# lower AI is memory-bound, higher AI is compute-bound.
 rocprof-compute analyze \
     --path ./workloads/<workload_name>/<gpu_model> \
     -k 0 \
-    -R FP16 BF16 FP32
+    -b roof
 ```
 
 Then drill into L2/vL1D/LDS (memory), Compute/MFMA/VALU (compute),

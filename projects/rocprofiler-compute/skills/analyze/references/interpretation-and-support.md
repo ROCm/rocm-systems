@@ -78,9 +78,9 @@ rocprof-compute analyze \
 ```
 
 A high sample count identifies a hot instruction, not necessarily a defect.
-Interpret its stall reason and surrounding ISA/source context. Host-trap
-sampling can skid to a nearby instruction. Very short workloads may not yield
-enough samples.
+Interpret a stall reason only for stochastic samples; host-trap records none.
+Host-trap sampling can skid to a nearby instruction. Very short workloads may
+not yield enough samples.
 
 CSV output writes per-kernel annotated disassembly below
 `per_kernel_pc_sampling/`; database output stores equivalent views.
