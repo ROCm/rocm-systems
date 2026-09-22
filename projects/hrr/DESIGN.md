@@ -131,7 +131,7 @@ precisely the ones left without a trailer and absent from the root index, while
 the parent that exited cleanly needs no repair. Sub-archives that already carry
 a clean trailer are skipped without being read.
 
-### Archive Format (v3)
+### Archive Format (v5)
 ```
 capture.hrr/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
@@ -318,20 +318,33 @@ The generator classifies each API:
 
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
 
-## Archive Format (v3)
+## Archive Format (v5)
 
 Single-authority definition in `hrr_api_args.h` (auto-generated):
 
 ```
 HRR_MAGIC   = 0x52524845  ("HRRE")
-HRR_VERSION = 3
+HRR_VERSION = 5
 ```
+
+Version history, so an archive written by an older runtime can be placed:
+
+- **v4** widened `hrr_event_header::payload_length` from `uint16_t` to `uint32_t`,
+  so a kernel launch serialising to more than 65535 bytes is recorded instead of
+  dropped. See Wire-Format Size Limits below.
+- **v5** assigns `hrr_api_id_t` from `HipDispatchTable` member order followed by
+  `HipCompilerDispatchTable` member order, rather than typedef declaration order.
+  This renumbered 496 of the 552 IDs once. Every event stores its ID, so a pre-v5
+  archive names the wrong API when decoded against the current table and needs an
+  ID translation to be read back. From v5 on, a new API takes the next free ID in
+  its table and no existing runtime ID moves, so adding an API no longer bumps the
+  version. A retired dispatch-table slot (nulled `void*`) still occupies an ID.
 
 ```
 <output_dir>/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
                      (version here is the manifest schema = 1, distinct from the
-                      events.bin HRR_VERSION = 3)
+                      events.bin HRR_VERSION = 5)
   pid-<pid>/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     writer_state.json  checkpoint cursor (next_seq, event/blob counts, events file
@@ -348,7 +361,7 @@ HRR_VERSION = 3
 [0..7]    hrr_file_header  { magic:u32, version:u16, reserved:u16 }
 [8..]     records, back-to-back, no padding:
             hrr_event_header (32 bytes, pack(1)):
-              event_type     u16   hrr_api_id_t (0..528)
+              event_type     u16   hrr_api_id_t (0..552)
               sequence_id    u64   monotonically increasing (atomic)
               timestamp_ns   u64   MONOTONIC wall clock
               thread_id      u64   OS thread ID (cached per-thread)
