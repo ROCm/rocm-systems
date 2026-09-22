@@ -22,6 +22,7 @@ find_package(
 
 set(CMAKE_INSTALL_TESTDIR test/${PROJECT_NAME})
 find_package(hip CONFIG REQUIRED PATHS "${ROCM_PATH}")
+set(CMAKE_HIP_ARCHITECTURES OFF)
 enable_language(HIP)
 
 # Enable CLANG-TIDY for static analysis search for clang-tidy
