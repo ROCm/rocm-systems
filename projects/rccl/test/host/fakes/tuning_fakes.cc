@@ -8,6 +8,7 @@
 
 #include "tuning_fakes.h"
 
+#include "collective_execution_policy.h"
 #include "comm.h"
 #include "device.h"
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM default this stands in for
@@ -46,8 +47,17 @@ ncclResult_t ncclTuningFinalize(struct ncclComm* comm) {
 
 int64_t g_paramMinNchannels = -2;
 int64_t g_paramMaxNchannels = -2;
+int64_t g_tuningParamP2pDisable = 0;
 int64_t ncclParamMinNchannels() { return g_paramMinNchannels; }
 int64_t ncclParamMaxNchannels() { return g_paramMaxNchannels; }
+__attribute__((weak)) int64_t ncclParamP2pDisable() { return g_tuningParamP2pDisable; }
+// Policy seams rccl_wrap.cc reaches in targets without the policy sources.
+__attribute__((weak)) bool rcclGetCollectiveExecutionPolicy(const struct ncclComm*, enum rcclExecutionScope,
+                                                            ncclFunc_t, size_t, bool, bool,
+                                                            struct rcclCollectiveExecutionPolicy*) {
+  return false;
+}
+__attribute__((weak)) bool rcclBuffersOverlap(const void*, size_t, const void*, size_t) { return false; }
 // Referenced by init.cc but not declared inside it, so the redirected NCCL_PARAM does not cover it.
 int64_t ncclParamPatEnable() { return g_loadParam("PAT_ENABLE", 0); }  // graph/tuning.cc:1105
 
@@ -72,6 +82,7 @@ void ResetTuningFakes() {
   g_topoGetAlgoTimeCalls = 0;
   g_paramMinNchannels = -2;
   g_paramMaxNchannels = -2;
+  g_tuningParamP2pDisable = 0;
   g_tuningIndexValue = 0;
   g_tuningIndexLastArch.clear();
   g_tuningCompute = DefaultTuningCompute;

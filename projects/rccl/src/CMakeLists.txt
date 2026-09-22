@@ -237,6 +237,7 @@ set(SRC_FILES
   algorithms/dda/ipc/ipc_init.h
   algorithms/dda/ipc/ipc_mem_handler.h
   include/ipcsocket.h
+  include/collective_execution_policy.h
   include/rccl_graph_gen.h
   include/kernel_config.h
   include/latency_profiler/CollTrace.h
@@ -599,6 +600,9 @@ set(SRC_FILES
   transport/rma_socket_setup.cc
   transport/shm.cc
   tuning/ce_model.cc
+  tuning/collective_execution_policy.cc
+  tuning/collective_execution_policy_internal.h
+  tuning/collective_execution_policy_rules.cc
   tuning/collnet.cc
   tuning/cost_model.cc
   tuning/cost_model.h

@@ -347,6 +347,7 @@ struct ncclTaskP2p {
   uint64_t opCount;
   bool allowUB;
   cudaEvent_t launchCompletionEvent;
+  bool inPlace;
 
   // Profiler plugin
   int eActivationMask;

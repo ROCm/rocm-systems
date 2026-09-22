@@ -189,6 +189,8 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicroEnqueue(+-devlinker) -- src/enqueue.cc.
   set(TEST_MICRO_ENQUEUE_SOURCE_FILES
     enqueue-test.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
     fakes/enqueue_test_deps.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
@@ -838,6 +840,10 @@ endforeach()
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroEnqueue (+ shipping -devlinker arm standalone)
 # ---------------------------------------------------------------------------
+set_source_files_properties(
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
+  PROPERTIES GENERATED TRUE)
 set(_enq_common_args
   SOURCES ${TEST_MICRO_ENQUEUE_SOURCE_FILES}
   EXTRA_INCLUDES

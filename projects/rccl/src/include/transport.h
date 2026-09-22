@@ -42,7 +42,7 @@ extern int64_t ncclParamNvlsEnable();
 int ncclPatEnable(struct ncclComm* comm);
 
 #define CHANNEL_MASK_OFFSET(nranks, connIndex) \
-  (nranks * (connIndex == NCCL_CONN_IDX_P2P_NET ? NCCL_CONN_IDX_P2P_NET : 0))
+  (nranks * ((connIndex) >= NCCL_CONN_IDX_P2P_NET ? (connIndex) : 0))
 
 // NOTE: struct ncclPeerInfo lives in comm.h in RCCL (upstream declares it here).
 // It is exchanged before NCCL version validation; preserve its wire ABI by
