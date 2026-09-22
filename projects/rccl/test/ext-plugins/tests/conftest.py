@@ -76,11 +76,16 @@ def run_tuner_mpirun(args, env, log_file):
 
     TUNING logs on the collective path hang multi-node pytest if they go through
     mpirun stdout, so each rank writes NCCL_DEBUG_FILE next to log_file instead
-    (log_file.%p). Assertions read those shards plus the captured stdout.
+    (log_file.%h.%p). Assertions read those shards plus the captured stdout.
     """
     os.makedirs(os.path.dirname(os.path.abspath(log_file)), exist_ok=True)
+    for stale in glob.glob(log_file + ".*"):
+        try:
+            os.remove(stale)
+        except OSError:
+            pass
     env = dict(env)
-    env["NCCL_DEBUG_FILE"] = log_file + ".%p"
+    env["NCCL_DEBUG_FILE"] = log_file + ".%h.%p"
     with open(log_file, "w") as out:
         result = subprocess.run(
             args, env=env, stdout=out, stderr=subprocess.STDOUT, universal_newlines=True

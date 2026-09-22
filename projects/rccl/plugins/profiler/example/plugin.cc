@@ -1296,7 +1296,11 @@ __hidden ncclResult_t exampleProfilerStartEvent_v7(void* context, void** eHandle
     phase->phaseName = eDescr->kernelPhase.phaseName;
     phase->startGpuClk = eDescr->kernelPhase.pTimer;
     phase->stopGpuClk = 0;
-    phase->startTs = gettime() - startTime;
+    // Place the 100 MHz GPU timestamp on the parent channel's host timeline.
+    uint64_t elapsedTicks = phase->startGpuClk >= parent->startGpuClk
+                              ? phase->startGpuClk - parent->startGpuClk
+                              : 0;
+    phase->startTs = parent->startTs + (double)elapsedTicks / 100.0;
     phase->parent = parent;
     *eHandle = phase;
     return ncclSuccess;
