@@ -1,6 +1,6 @@
 #pragma once
 
-#include "profiler-hub/c_interface/profiler_hub_types.h"
+#include "profiler-hub/c/profiler_hub_types.h"
 #include "profiler-hub/reader.hpp"
 #include <cstdint>
 #include <memory>

@@ -22,7 +22,7 @@ downstream consumer of the library.
 
 ### Added
 
-- New public C ABI (`c_interface/profiler_hub.h`, `c_interface/profiler_hub_types.h`):
+- New public C ABI (`c/profiler_hub.h`, `c/profiler_hub_types.h`):
   `ph_ctx_create`/`ph_ctx_free`, `ph_get_library_version`, `ph_get_schema_version`,
   `ph_get_track_list`, `ph_get_node`, `ph_get_track_events`, `ph_get_track_samples`,
   and stub declarations for a planned async task API (`ph_future_get`/`ph_future_wait`/

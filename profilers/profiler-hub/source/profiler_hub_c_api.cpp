@@ -1,4 +1,4 @@
-#include "profiler-hub/c_interface/profiler_hub.h"
+#include "profiler-hub/c/profiler_hub.h"
 #include "profiler_hub_ctx.hpp"
 
 ph_result_t
