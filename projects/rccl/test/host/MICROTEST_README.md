@@ -150,14 +150,15 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroTaskPrep`** — `src/enqueue/task_prep/task_prep.cc` (via
   `TASK_PREP_CC_PATH`, suite `TaskPrepMicrotest.*`),
   `src/enqueue/task_prep/task_classify.cc` (via `TASK_CLASSIFY_CC_PATH`, suite
-  `TaskClassifyMicrotest.*`) and `src/enqueue/task_prep/task_pretuning.cc` (via
-  `TASK_PRETUNING_CC_PATH`, suite `TaskPreTuningMicrotest.*`). Its own binary, not sharing
+  `TaskClassifyMicrotest.*`), `src/enqueue/task_prep/task_pretuning.cc` (via
+  `TASK_PRETUNING_CC_PATH`, suite `TaskPreTuningMicrotest.*`) and
+  `src/enqueue/task_prep/task_posttuning.cc` (via `TASK_POSTTUNING_CC_PATH`, suite
+  `TaskPostTuningMicrotest.*`). Its own binary, not sharing
   `rccl-UnitTestsMicro`: that target links `collective_stubs.cc`, whose fail-loud
   `ncclTaskPrepare` would be a duplicate symbol against the real one, and
-  `group-test.cc` drives the path that stub stands in for. The files not yet under
-  test are compiled as separate TUs so `task_prep.cc`'s sibling externs resolve to
-  real code; each leaves that source list for its own test TU as it comes under
-  test, since listing both would be a duplicate symbol. Shared scene, vocabulary
+  `group-test.cc` drives the path that stub stands in for. All four production
+  files are now test TUs, one per file, so `task_prep.cc`'s sibling externs
+  resolve to real code and no file is listed twice. Shared scene, vocabulary
   and fake-reset fixture live in `TaskPrepScene.h`. `ENABLE_WARP_SPEED` is
   deliberately absent: all four files are free of it. See
   `test_categories_micro_taskprep.yaml`.
