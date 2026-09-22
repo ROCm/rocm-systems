@@ -1982,6 +1982,19 @@ RJ_NOINLINE void VCvtPkU8F32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32SrPk8Fp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp4E2m1,
+                                                amdgpu::MxfpWideFormat::F32, 8u,
+                                                amdgpu::MxfpDirection::Pack, true>(
+            wf, simd_dst_base, simd_src_base, src2, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2016,7 +2029,7 @@ void VCvtScalef32SrPk8Fp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp4_e2m1_sr(value, seed));
       seed = util::prng_advance(seed);
     }
@@ -2026,6 +2039,19 @@ void VCvtScalef32SrPk8Fp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32SrPk8Fp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp8E4m3,
+                                                amdgpu::MxfpWideFormat::F32, 8u,
+                                                amdgpu::MxfpDirection::Pack, true>(
+            wf, simd_dst_base, simd_src_base, src2, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2060,7 +2086,7 @@ void VCvtScalef32SrPk8Fp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp8_e4m3_sr_mode(value, seed, wf.fp16_ovfl()));
       seed = util::prng_advance(seed);
     }
@@ -2070,6 +2096,19 @@ void VCvtScalef32SrPk8Fp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32SrPk8Bf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf8E5m2,
+                                                amdgpu::MxfpWideFormat::F32, 8u,
+                                                amdgpu::MxfpDirection::Pack, true>(
+            wf, simd_dst_base, simd_src_base, src2, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2104,7 +2143,7 @@ void VCvtScalef32SrPk8Bf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_bf8_e5m2_sr_mode(value, seed, wf.fp16_ovfl()));
       seed = util::prng_advance(seed);
     }
@@ -2114,6 +2153,19 @@ void VCvtScalef32SrPk8Bf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalePk8F16Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp4E2m1,
+                                                amdgpu::MxfpWideFormat::F16, 8u,
+                                                amdgpu::MxfpDirection::Unpack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2139,7 +2191,8 @@ void VCvtScalePk8F16Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
     auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
     uint32_t dst_words[4] = {};
     for (uint32_t index = 0; index < 8u; ++index) {
-      uint32_t bits = util::f32_to_f16_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
+      uint32_t bits = util::f32_to_f16_mode(
+          amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale), wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 4u; ++word)
@@ -2148,6 +2201,19 @@ void VCvtScalePk8F16Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalePk8Bf16Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp4E2m1,
+                                                amdgpu::MxfpWideFormat::Bf16, 8u,
+                                                amdgpu::MxfpDirection::Unpack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2173,7 +2239,8 @@ void VCvtScalePk8Bf16Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
     auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
     uint32_t dst_words[4] = {};
     for (uint32_t index = 0; index < 8u; ++index) {
-      uint32_t bits = util::f32_to_bf16_rne_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
+      uint32_t bits = util::f32_to_bf16_rne_mode(
+          amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale), wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 4u; ++word)
@@ -2182,6 +2249,19 @@ void VCvtScalePk8Bf16Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalePk8F32Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp4E2m1,
+                                                amdgpu::MxfpWideFormat::F32, 8u,
+                                                amdgpu::MxfpDirection::Unpack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2206,13 +2286,26 @@ void VCvtScalePk8F32Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
     };
     auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_src(index) * scale;
+      float value = amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale);
       dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));
     }
   }
 }
 
 void VCvtScalePk8F16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp8E4m3,
+                                                amdgpu::MxfpWideFormat::F16, 8u,
+                                                amdgpu::MxfpDirection::Unpack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2238,7 +2331,8 @@ void VCvtScalePk8F16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
     uint32_t dst_words[4] = {};
     for (uint32_t index = 0; index < 8u; ++index) {
-      uint32_t bits = util::f32_to_f16_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
+      uint32_t bits = util::f32_to_f16_mode(
+          amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale), wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 4u; ++word)
@@ -2247,6 +2341,19 @@ void VCvtScalePk8F16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalePk8Bf16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp8E4m3,
+                                                amdgpu::MxfpWideFormat::Bf16, 8u,
+                                                amdgpu::MxfpDirection::Unpack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2272,7 +2379,8 @@ void VCvtScalePk8Bf16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
     uint32_t dst_words[4] = {};
     for (uint32_t index = 0; index < 8u; ++index) {
-      uint32_t bits = util::f32_to_bf16_rne_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
+      uint32_t bits = util::f32_to_bf16_rne_mode(
+          amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale), wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 4u; ++word)
@@ -2281,6 +2389,19 @@ void VCvtScalePk8Bf16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalePk8F32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp8E4m3,
+                                                amdgpu::MxfpWideFormat::F32, 8u,
+                                                amdgpu::MxfpDirection::Unpack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2305,13 +2426,26 @@ void VCvtScalePk8F32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     };
     auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_src(index) * scale;
+      float value = amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale);
       dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));
     }
   }
 }
 
 void VCvtScalePk8F16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf8E5m2,
+                                                amdgpu::MxfpWideFormat::F16, 8u,
+                                                amdgpu::MxfpDirection::Unpack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2337,7 +2471,8 @@ void VCvtScalePk8F16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
     uint32_t dst_words[4] = {};
     for (uint32_t index = 0; index < 8u; ++index) {
-      uint32_t bits = util::f32_to_f16_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
+      uint32_t bits = util::f32_to_f16_mode(
+          amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale), wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 4u; ++word)
@@ -2346,6 +2481,19 @@ void VCvtScalePk8F16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalePk8Bf16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf8E5m2,
+                                                amdgpu::MxfpWideFormat::Bf16, 8u,
+                                                amdgpu::MxfpDirection::Unpack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2371,7 +2519,8 @@ void VCvtScalePk8Bf16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     auto dst_region = regs.write_vgpr_region(dst_base, 4u, 1ULL << lane);
     uint32_t dst_words[4] = {};
     for (uint32_t index = 0; index < 8u; ++index) {
-      uint32_t bits = util::f32_to_bf16_rne_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
+      uint32_t bits = util::f32_to_bf16_rne_mode(
+          amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale), wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 4u; ++word)
@@ -2380,6 +2529,19 @@ void VCvtScalePk8Bf16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalePk8F32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf8E5m2,
+                                                amdgpu::MxfpWideFormat::F32, 8u,
+                                                amdgpu::MxfpDirection::Unpack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2404,13 +2566,26 @@ void VCvtScalePk8F32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     };
     auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_src(index) * scale;
+      float value = amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale);
       dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));
     }
   }
 }
 
 void VCvtScalef32Pk8Fp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp4E2m1,
+                                                amdgpu::MxfpWideFormat::F32, 8u,
+                                                amdgpu::MxfpDirection::Pack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2444,7 +2619,7 @@ void VCvtScalef32Pk8Fp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp4_e2m1_rne(value));
     }
     for (uint32_t word = 0; word < 1u; ++word)
@@ -2453,6 +2628,19 @@ void VCvtScalef32Pk8Fp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32Pk8Fp4F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp4E2m1,
+                                                amdgpu::MxfpWideFormat::F16, 8u,
+                                                amdgpu::MxfpDirection::Pack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2487,7 +2675,7 @@ void VCvtScalef32Pk8Fp4F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp4_e2m1_rne(value));
     }
     for (uint32_t word = 0; word < 1u; ++word)
@@ -2496,6 +2684,19 @@ void VCvtScalef32Pk8Fp4F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32Pk8Fp8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp8E4m3,
+                                                amdgpu::MxfpWideFormat::Bf16, 8u,
+                                                amdgpu::MxfpDirection::Pack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2530,7 +2731,7 @@ void VCvtScalef32Pk8Fp8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp8_e4m3_rne_mode(value, wf.fp16_ovfl()));
     }
     for (uint32_t word = 0; word < 2u; ++word)
@@ -2539,6 +2740,19 @@ void VCvtScalef32Pk8Fp8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32Pk8Bf8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf8E5m2,
+                                                amdgpu::MxfpWideFormat::Bf16, 8u,
+                                                amdgpu::MxfpDirection::Pack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2573,7 +2787,7 @@ void VCvtScalef32Pk8Bf8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_bf8_e5m2_rne_mode(value, wf.fp16_ovfl()));
     }
     for (uint32_t word = 0; word < 2u; ++word)
@@ -2582,6 +2796,19 @@ void VCvtScalef32Pk8Bf8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32Pk8Fp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp4E2m1,
+                                                amdgpu::MxfpWideFormat::Bf16, 8u,
+                                                amdgpu::MxfpDirection::Pack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2616,7 +2843,7 @@ void VCvtScalef32Pk8Fp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp4_e2m1_rne(value));
     }
     for (uint32_t word = 0; word < 1u; ++word)
@@ -2625,6 +2852,19 @@ void VCvtScalef32Pk8Fp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32SrPk8Fp4F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp4E2m1,
+                                                amdgpu::MxfpWideFormat::F16, 8u,
+                                                amdgpu::MxfpDirection::Pack, true>(
+            wf, simd_dst_base, simd_src_base, src2, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2660,7 +2900,7 @@ void VCvtScalef32SrPk8Fp4F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp4_e2m1_sr(value, seed));
       seed = util::prng_advance(seed);
     }
@@ -2670,6 +2910,19 @@ void VCvtScalef32SrPk8Fp4F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32SrPk8Fp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp4E2m1,
+                                                amdgpu::MxfpWideFormat::Bf16, 8u,
+                                                amdgpu::MxfpDirection::Pack, true>(
+            wf, simd_dst_base, simd_src_base, src2, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2705,7 +2958,7 @@ void VCvtScalef32SrPk8Fp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp4_e2m1_sr(value, seed));
       seed = util::prng_advance(seed);
     }
@@ -2715,6 +2968,19 @@ void VCvtScalef32SrPk8Fp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32SrPk8Fp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp8E4m3,
+                                                amdgpu::MxfpWideFormat::F16, 8u,
+                                                amdgpu::MxfpDirection::Pack, true>(
+            wf, simd_dst_base, simd_src_base, src2, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2750,7 +3016,7 @@ void VCvtScalef32SrPk8Fp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp8_e4m3_sr_mode(value, seed, wf.fp16_ovfl()));
       seed = util::prng_advance(seed);
     }
@@ -2760,6 +3026,19 @@ void VCvtScalef32SrPk8Fp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32SrPk8Fp8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp8E4m3,
+                                                amdgpu::MxfpWideFormat::Bf16, 8u,
+                                                amdgpu::MxfpDirection::Pack, true>(
+            wf, simd_dst_base, simd_src_base, src2, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2795,7 +3074,7 @@ void VCvtScalef32SrPk8Fp8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp8_e4m3_sr_mode(value, seed, wf.fp16_ovfl()));
       seed = util::prng_advance(seed);
     }
@@ -2805,6 +3084,19 @@ void VCvtScalef32SrPk8Fp8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32SrPk8Bf8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf8E5m2,
+                                                amdgpu::MxfpWideFormat::F16, 8u,
+                                                amdgpu::MxfpDirection::Pack, true>(
+            wf, simd_dst_base, simd_src_base, src2, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2840,7 +3132,7 @@ void VCvtScalef32SrPk8Bf8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_bf8_e5m2_sr_mode(value, seed, wf.fp16_ovfl()));
       seed = util::prng_advance(seed);
     }
@@ -2850,6 +3142,19 @@ void VCvtScalef32SrPk8Bf8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32SrPk8Bf8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf8E5m2,
+                                                amdgpu::MxfpWideFormat::Bf16, 8u,
+                                                amdgpu::MxfpDirection::Pack, true>(
+            wf, simd_dst_base, simd_src_base, src2, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2885,7 +3190,7 @@ void VCvtScalef32SrPk8Bf8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_bf8_e5m2_sr_mode(value, seed, wf.fp16_ovfl()));
       seed = util::prng_advance(seed);
     }
@@ -2895,6 +3200,19 @@ void VCvtScalef32SrPk8Bf8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32Pk8Fp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp8E4m3,
+                                                amdgpu::MxfpWideFormat::F32, 8u,
+                                                amdgpu::MxfpDirection::Pack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2928,7 +3246,7 @@ void VCvtScalef32Pk8Fp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp8_e4m3_rne_mode(value, wf.fp16_ovfl()));
     }
     for (uint32_t word = 0; word < 2u; ++word)
@@ -2937,6 +3255,19 @@ void VCvtScalef32Pk8Fp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32Pk8Fp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp8E4m3,
+                                                amdgpu::MxfpWideFormat::F16, 8u,
+                                                amdgpu::MxfpDirection::Pack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2971,7 +3302,7 @@ void VCvtScalef32Pk8Fp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp8_e4m3_rne_mode(value, wf.fp16_ovfl()));
     }
     for (uint32_t word = 0; word < 2u; ++word)
@@ -2980,6 +3311,19 @@ void VCvtScalef32Pk8Fp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32Pk8Bf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf8E5m2,
+                                                amdgpu::MxfpWideFormat::F32, 8u,
+                                                amdgpu::MxfpDirection::Pack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3013,7 +3357,7 @@ void VCvtScalef32Pk8Bf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_bf8_e5m2_rne_mode(value, wf.fp16_ovfl()));
     }
     for (uint32_t word = 0; word < 2u; ++word)
@@ -3022,6 +3366,19 @@ void VCvtScalef32Pk8Bf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32Pk8Bf8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf8E5m2,
+                                                amdgpu::MxfpWideFormat::F16, 8u,
+                                                amdgpu::MxfpDirection::Pack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3056,7 +3413,7 @@ void VCvtScalef32Pk8Bf8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 8u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_bf8_e5m2_rne_mode(value, wf.fp16_ovfl()));
     }
     for (uint32_t word = 0; word < 2u; ++word)
@@ -3065,6 +3422,19 @@ void VCvtScalef32Pk8Bf8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalePk16F16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp6E2m3,
+                                                amdgpu::MxfpWideFormat::F16, 16u,
+                                                amdgpu::MxfpDirection::Unpack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3098,7 +3468,8 @@ void VCvtScalePk16F16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
     auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
     uint32_t dst_words[8] = {};
     for (uint32_t index = 0; index < 16u; ++index) {
-      uint32_t bits = util::f32_to_f16_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
+      uint32_t bits = util::f32_to_f16_mode(
+          amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale), wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 8u; ++word)
@@ -3107,6 +3478,19 @@ void VCvtScalePk16F16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalePk16Bf16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp6E2m3,
+                                                amdgpu::MxfpWideFormat::Bf16, 16u,
+                                                amdgpu::MxfpDirection::Unpack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3140,7 +3524,8 @@ void VCvtScalePk16Bf16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
     auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
     uint32_t dst_words[8] = {};
     for (uint32_t index = 0; index < 16u; ++index) {
-      uint32_t bits = util::f32_to_bf16_rne_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
+      uint32_t bits = util::f32_to_bf16_rne_mode(
+          amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale), wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 8u; ++word)
@@ -3149,6 +3534,19 @@ void VCvtScalePk16Bf16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalePk16F32Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp6E2m3,
+                                                amdgpu::MxfpWideFormat::F32, 16u,
+                                                amdgpu::MxfpDirection::Unpack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3181,13 +3579,26 @@ void VCvtScalePk16F32Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
     };
     auto dst_region = regs.write_vgpr_region(dst_base, 16u, 1ULL << lane);
     for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_src(index) * scale;
+      float value = amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale);
       dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));
     }
   }
 }
 
 void VCvtScalePk16F16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf6E3m2,
+                                                amdgpu::MxfpWideFormat::F16, 16u,
+                                                amdgpu::MxfpDirection::Unpack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3221,7 +3632,8 @@ void VCvtScalePk16F16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
     auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
     uint32_t dst_words[8] = {};
     for (uint32_t index = 0; index < 16u; ++index) {
-      uint32_t bits = util::f32_to_f16_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
+      uint32_t bits = util::f32_to_f16_mode(
+          amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale), wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 8u; ++word)
@@ -3230,6 +3642,19 @@ void VCvtScalePk16F16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalePk16Bf16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf6E3m2,
+                                                amdgpu::MxfpWideFormat::Bf16, 16u,
+                                                amdgpu::MxfpDirection::Unpack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3263,7 +3688,8 @@ void VCvtScalePk16Bf16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
     auto dst_region = regs.write_vgpr_region(dst_base, 8u, 1ULL << lane);
     uint32_t dst_words[8] = {};
     for (uint32_t index = 0; index < 16u; ++index) {
-      uint32_t bits = util::f32_to_bf16_rne_mode(read_scaled_src(index) * scale, wf.fp16_ovfl());
+      uint32_t bits = util::f32_to_bf16_rne_mode(
+          amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale), wf.fp16_ovfl());
       dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
     }
     for (uint32_t word = 0; word < 8u; ++word)
@@ -3272,6 +3698,19 @@ void VCvtScalePk16Bf16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalePk16F32Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf6E3m2,
+                                                amdgpu::MxfpWideFormat::F32, 16u,
+                                                amdgpu::MxfpDirection::Unpack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3304,13 +3743,26 @@ void VCvtScalePk16F32Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
     };
     auto dst_region = regs.write_vgpr_region(dst_base, 16u, 1ULL << lane);
     for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_src(index) * scale;
+      float value = amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale);
       dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));
     }
   }
 }
 
 void VCvtScalef32Pk16Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp6E2m3,
+                                                amdgpu::MxfpWideFormat::F32, 16u,
+                                                amdgpu::MxfpDirection::Pack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3344,7 +3796,7 @@ void VCvtScalef32Pk16Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp6_e2m3_rne(value));
     }
     for (uint32_t word = 0; word < 3u; ++word)
@@ -3353,6 +3805,19 @@ void VCvtScalef32Pk16Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32Pk16Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf6E3m2,
+                                                amdgpu::MxfpWideFormat::F32, 16u,
+                                                amdgpu::MxfpDirection::Pack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3386,7 +3851,7 @@ void VCvtScalef32Pk16Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_bf6_e3m2_rne(value));
     }
     for (uint32_t word = 0; word < 3u; ++word)
@@ -3395,6 +3860,19 @@ void VCvtScalef32Pk16Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32Pk16Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp6E2m3,
+                                                amdgpu::MxfpWideFormat::F16, 16u,
+                                                amdgpu::MxfpDirection::Pack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3429,7 +3907,7 @@ void VCvtScalef32Pk16Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp6_e2m3_rne(value));
     }
     for (uint32_t word = 0; word < 3u; ++word)
@@ -3438,6 +3916,19 @@ void VCvtScalef32Pk16Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32Pk16Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf6E3m2,
+                                                amdgpu::MxfpWideFormat::F16, 16u,
+                                                amdgpu::MxfpDirection::Pack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3472,7 +3963,7 @@ void VCvtScalef32Pk16Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_bf6_e3m2_rne(value));
     }
     for (uint32_t word = 0; word < 3u; ++word)
@@ -3481,6 +3972,19 @@ void VCvtScalef32Pk16Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32Pk16Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp6E2m3,
+                                                amdgpu::MxfpWideFormat::Bf16, 16u,
+                                                amdgpu::MxfpDirection::Pack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3515,7 +4019,7 @@ void VCvtScalef32Pk16Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp6_e2m3_rne(value));
     }
     for (uint32_t word = 0; word < 3u; ++word)
@@ -3524,6 +4028,19 @@ void VCvtScalef32Pk16Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32Pk16Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf6E3m2,
+                                                amdgpu::MxfpWideFormat::Bf16, 16u,
+                                                amdgpu::MxfpDirection::Pack, false>(
+            wf, simd_dst_base, simd_src_base, src1, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3558,7 +4075,7 @@ void VCvtScalef32Pk16Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_bf6_e3m2_rne(value));
     }
     for (uint32_t word = 0; word < 3u; ++word)
@@ -3567,6 +4084,19 @@ void VCvtScalef32Pk16Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32SrPk16Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp6E2m3,
+                                                amdgpu::MxfpWideFormat::F32, 16u,
+                                                amdgpu::MxfpDirection::Pack, true>(
+            wf, simd_dst_base, simd_src_base, src2, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3601,7 +4131,7 @@ void VCvtScalef32SrPk16Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp6_e2m3_sr(value, seed));
       seed = util::prng_advance(seed);
     }
@@ -3611,6 +4141,19 @@ void VCvtScalef32SrPk16Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32SrPk16Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf6E3m2,
+                                                amdgpu::MxfpWideFormat::F32, 16u,
+                                                amdgpu::MxfpDirection::Pack, true>(
+            wf, simd_dst_base, simd_src_base, src2, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3645,7 +4188,7 @@ void VCvtScalef32SrPk16Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_bf6_e3m2_sr(value, seed));
       seed = util::prng_advance(seed);
     }
@@ -3655,6 +4198,19 @@ void VCvtScalef32SrPk16Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32SrPk16Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp6E2m3,
+                                                amdgpu::MxfpWideFormat::F16, 16u,
+                                                amdgpu::MxfpDirection::Pack, true>(
+            wf, simd_dst_base, simd_src_base, src2, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3690,7 +4246,7 @@ void VCvtScalef32SrPk16Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp6_e2m3_sr(value, seed));
       seed = util::prng_advance(seed);
     }
@@ -3700,6 +4256,19 @@ void VCvtScalef32SrPk16Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32SrPk16Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf6E3m2,
+                                                amdgpu::MxfpWideFormat::F16, 16u,
+                                                amdgpu::MxfpDirection::Pack, true>(
+            wf, simd_dst_base, simd_src_base, src2, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3735,7 +4304,7 @@ void VCvtScalef32SrPk16Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_bf6_e3m2_sr(value, seed));
       seed = util::prng_advance(seed);
     }
@@ -3745,6 +4314,19 @@ void VCvtScalef32SrPk16Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32SrPk16Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Fp6E2m3,
+                                                amdgpu::MxfpWideFormat::Bf16, 16u,
+                                                amdgpu::MxfpDirection::Pack, true>(
+            wf, simd_dst_base, simd_src_base, src2, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3780,7 +4362,7 @@ void VCvtScalef32SrPk16Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_fp6_e2m3_sr(value, seed));
       seed = util::prng_advance(seed);
     }
@@ -3790,6 +4372,19 @@ void VCvtScalef32SrPk16Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtScalef32SrPk16Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {
+    uint32_t simd_dst_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+    uint32_t simd_src_base =
+        wf.vgpr_alloc().base +
+        *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+    if (amdgpu::try_execute_mxfp_cvt_scale_simd<amdgpu::MxfpFormat::Bf6E3m2,
+                                                amdgpu::MxfpWideFormat::Bf16, 16u,
+                                                amdgpu::MxfpDirection::Pack, true>(
+            wf, simd_dst_base, simd_src_base, src2, src1, inst_.opsel & 0x3u))
+      return;
+  }
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3825,7 +4420,7 @@ void VCvtScalef32SrPk16Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         dst_words[word + 1u] |= code >> (32u - shift);
     };
     for (uint32_t index = 0; index < 16u; ++index) {
-      float value = read_scaled_input(index) / scale;
+      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);
       pack_scaled_dst(index, util::f32_to_bf6_e3m2_sr(value, seed));
       seed = util::prng_advance(seed);
     }
