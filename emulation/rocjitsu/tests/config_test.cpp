@@ -1879,6 +1879,53 @@ TEST(CheckpointTest, PreservesTrapHandlerSgprReserve) {
     EXPECT_TRUE(restored_cu->wf(i)->trap_handler_enabled());
 }
 
+TEST(CheckpointTest, PreservesMixedAllocationSimdPlacement) {
+  auto loaded = config::load_config_from_string(register_allocation_test_config("cdna5", 1024, 8),
+                                                rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  // Dispatch order differs from slot order, as can happen after slot reuse.
+  // Repacking in slot order puts 384+512 together and strands the final 512.
+  const std::array<std::pair<uint32_t, uint32_t>, 6> allocations = {
+      {{0, 1024}, {1, 1024}, {4, 640}, {2, 384}, {3, 512}, {5, 512}}};
+  for (const auto &[slot, count] : allocations)
+    ASSERT_NE(cu->dispatch_wf_at(slot, slot, 0x1000, 16, count, 32), nullptr);
+
+  test::ScopedTempFile checkpoint("rocjitsu-mixed-simd-placement-");
+  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
+                          loaded.cpu_dispatch_threads);
+  auto restored = config::restore_checkpoint(checkpoint.path());
+  auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_EQ(restored_cu->num_wfs(), allocations.size());
+  for (const auto &[slot, count] : allocations) {
+    EXPECT_EQ(restored_cu->wave_physical_simd(slot), cu->wave_physical_simd(slot));
+    EXPECT_EQ(restored_cu->wf(slot)->num_vgprs(), count);
+  }
+  EXPECT_FALSE(restored_cu->can_accept_workgroup(1, 16, 16, 32));
+  restored_cu->wf(4)->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);
+  EXPECT_EQ(restored_cu->wave_physical_simd(4), UINT32_MAX);
+  EXPECT_TRUE(restored_cu->can_accept_workgroup(1, 16, 640, 32));
+  EXPECT_FALSE(restored_cu->can_accept_workgroup(1, 16, 656, 32));
+  ASSERT_NE(restored_cu->dispatch_wf_at(4, 4, 0x1000, 16, 640, 32), nullptr);
+  EXPECT_EQ(restored_cu->wave_physical_simd(4), cu->wave_physical_simd(4));
+}
+
+TEST(CheckpointTest, RecordedSimdPlacementRejectsInvalidOrFullSimd) {
+  auto loaded = config::load_config_from_string(register_allocation_test_config("cdna5", 1024, 8),
+                                                rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  const amdgpu::WaveVgprAllocation allocation{1024, 1024, 0};
+  EXPECT_EQ(cu->dispatch_wf_at(0, 0, 0x1000, 16, allocation, 32, false, 4), nullptr);
+  ASSERT_NE(cu->dispatch_wf_at(0, 0, 0x1000, 16, allocation, 32, false, 2), nullptr);
+  EXPECT_EQ(cu->wave_physical_simd(0), 2u);
+  EXPECT_EQ(cu->dispatch_wf_at(1, 1, 0x1000, 16, allocation, 32, false, 2), nullptr);
+  // Failed pinned admissions must not consume slots or physical capacity.
+  EXPECT_EQ(cu->num_wfs(), 1u);
+  EXPECT_EQ(cu->wave_physical_simd(1), UINT32_MAX);
+  for (uint32_t simd : {0u, 1u, 3u})
+    ASSERT_NE(cu->dispatch_wf(simd, 0x1000, 16, allocation, 32), nullptr);
+  EXPECT_FALSE(cu->can_accept_workgroup(1, 16, 16, 32));
+}
+
 TEST(CheckpointTest, PreservesStrictVgprAllocationAndPhysicalOccupancy) {
   constexpr uint32_t kWaveCount = 12;
   constexpr uint32_t kAllocatedVgprs = 8;

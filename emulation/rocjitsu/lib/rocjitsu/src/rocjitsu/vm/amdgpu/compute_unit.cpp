@@ -264,7 +264,8 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
 
 Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc,
                                            uint32_t num_sgprs, WaveVgprAllocation vgprs,
-                                           uint32_t wave_size, bool trap_handler) {
+                                           uint32_t wave_size, bool trap_handler,
+                                           uint32_t physical_simd) {
   assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
   if (wf_id >= config_.num_wf_slots || !wfs_[wf_id]->is_halted())
     return nullptr;
@@ -301,8 +302,8 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
     sgpr_file_.free(static_cast<uint32_t>(sgpr_base));
     return nullptr;
   }
-  if (!reserve_physical_registers(wf_id, num_sgprs, vgprs.total, dispatched_wave_size,
-                                  trap_handler)) {
+  if (!reserve_physical_registers(wf_id, num_sgprs, vgprs.total, dispatched_wave_size, trap_handler,
+                                  physical_simd)) {
     free_vgprs(static_cast<uint32_t>(vgpr_base));
     sgpr_file_.free(static_cast<uint32_t>(sgpr_base));
     return nullptr;
@@ -662,7 +663,7 @@ bool ComputeUnitCore::place_physical_registers(std::vector<SimdRegisterUsage> &u
                                                uint32_t num_sgprs, uint32_t num_vgprs,
                                                uint32_t wave_size,
                                                WaveRegisterReservation *reservation,
-                                               bool trap_handler) const {
+                                               bool trap_handler, uint32_t physical_simd) const {
   if (num_sgprs == 0 || num_sgprs > config_.sgprs_per_wf || num_vgprs == 0 ||
       num_vgprs > vgpr_allocation_block_size())
     return false;
@@ -677,6 +678,8 @@ bool ComputeUnitCore::place_physical_registers(std::vector<SimdRegisterUsage> &u
 
   size_t selected = usage.size();
   for (size_t simd = 0; simd < usage.size(); ++simd) {
+    if (physical_simd != UINT32_MAX && simd != physical_simd)
+      continue;
     const auto &candidate = usage[simd];
     if (candidate.resident_waves >= physical_registers_.max_waves_per_simd ||
         candidate.vgprs > physical_registers_.vgprs_per_simd - vgpr_units ||
@@ -705,12 +708,12 @@ bool ComputeUnitCore::place_physical_registers(std::vector<SimdRegisterUsage> &u
 
 bool ComputeUnitCore::reserve_physical_registers(uint32_t wf_id, uint32_t num_sgprs,
                                                  uint32_t num_vgprs, uint32_t wave_size,
-                                                 bool trap_handler) {
+                                                 bool trap_handler, uint32_t physical_simd) {
   if (wf_id >= wave_register_reservations_.size() ||
       wave_register_reservations_[wf_id].simd != UINT32_MAX)
     return false;
   return place_physical_registers(simd_register_usage_, num_sgprs, num_vgprs, wave_size,
-                                  &wave_register_reservations_[wf_id], trap_handler);
+                                  &wave_register_reservations_[wf_id], trap_handler, physical_simd);
 }
 
 void ComputeUnitCore::release_physical_registers(uint32_t wf_id) {

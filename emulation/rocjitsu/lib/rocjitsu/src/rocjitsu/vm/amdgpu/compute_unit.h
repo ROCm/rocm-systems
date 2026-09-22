@@ -174,9 +174,15 @@ public:
                             uint32_t num_vgprs, uint32_t wave_size = 0, bool trap_handler = false);
 
   /// @brief Activate a specific slot with an explicit VGPR allocation split.
+  /// @details A recorded SIMD pins checkpoint placement; UINT32_MAX selects best fit.
   Wavefront *dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
                             WaveVgprAllocation vgprs, uint32_t wave_size = 0,
-                            bool trap_handler = false);
+                            bool trap_handler = false, uint32_t physical_simd = UINT32_MAX);
+
+  /// @brief Physical SIMD reservation, or UINT32_MAX for an idle wave slot.
+  uint32_t wave_physical_simd(uint32_t wf_id) const {
+    return wave_register_reservations_.at(wf_id).simd;
+  }
 
   /// @brief Advance every RUNNING wavefront by one instruction, then report
   /// residency.
@@ -1032,7 +1038,8 @@ protected:
 
   /// @brief Reserve/release physical SIMD register-file capacity for a wave slot.
   bool reserve_physical_registers(uint32_t wf_id, uint32_t num_sgprs, uint32_t num_vgprs,
-                                  uint32_t wave_size, bool trap_handler = false);
+                                  uint32_t wave_size, bool trap_handler = false,
+                                  uint32_t physical_simd = UINT32_MAX);
   void release_physical_registers(uint32_t wf_id);
 
   using RawVgprVisitor = void (*)(const void *, std::span<const uint32_t>);
@@ -1133,7 +1140,8 @@ protected:
                                               uint32_t num_sgprs, uint32_t num_vgprs,
                                               uint32_t wave_size,
                                               WaveRegisterReservation *reservation,
-                                              bool trap_handler = false) const;
+                                              bool trap_handler = false,
+                                              uint32_t physical_simd = UINT32_MAX) const;
   /// @brief Hold the wave-state lock, then notify the CP once it is released.
   /// @details The CP takes hw_queue_mutex_ and then this lock when it dispatches
   /// (handle_doorbell -> dispatch_workgroups -> dispatch_wf), so anything running

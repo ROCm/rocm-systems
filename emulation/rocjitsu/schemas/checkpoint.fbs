@@ -51,6 +51,8 @@ table WavefrontState {
   accvgpr_count: uint32; // Accumulator acc0-based window.
   has_vgpr_allocation: bool;
   trap_handler_enabled: bool; // GFX9 SGPR reserve; false for older checkpoints.
+  // Preserve placement: replaying best fit in slot order can fragment the SIMD files.
+  physical_simd: uint32 = 4294967295; // Older checkpoints use best-fit placement.
 }
 
 /// Serialized state of a compute unit.
