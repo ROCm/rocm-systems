@@ -6225,14 +6225,14 @@ pub fn amdsmi_get_link_topology_nearest(
 
 /// Retrieve the unified link topology information between two processors.
 ///
-/// This function retrieves the link weight, status, type, hop count, and framebuffer sharing flag for the connection between the source and destination processor handles.
+/// # Baremetal notes
 ///
-/// On the current baremetal backend, every successful call reports `ENABLED`;
-/// `UNKNOWN` to `DISABLED` is only a defensive mapping, not an observed success case.
-/// Status is retained for host API parity, not live link health or P2P accessibility.
-/// A self pair returns `INTERNAL`/`ENABLED`, zero weight and hops, and `fb_sharing=1`.
-/// For distinct GPUs, `fb_sharing` is best-effort P2P accessibility: 0 also covers
-/// an unsuccessful P2P query. The fields are queried sequentially, not atomically.
+/// - Self pair: `INTERNAL`/`ENABLED`, zero weight and hops, `fb_sharing=1`.
+/// - Current successful calls report `ENABLED`; `UNKNOWN` to `DISABLED` is defensive.
+/// - Status provides host API parity, not link health or P2P access.
+/// - `num_hops` counts abstracted steps, capped at 255, not physical links.
+/// - For peers, `fb_sharing=0` means no P2P access or a failed P2P query.
+/// - Fields are queried sequentially, not atomically.
 ///
 /// # Arguments
 ///
@@ -6241,37 +6241,11 @@ pub fn amdsmi_get_link_topology_nearest(
 ///
 /// # Returns
 ///
-/// * `AmdsmiResult<AmdsmiLinkTopologyT>` - Returns `Ok(AmdsmiLinkTopologyT)` containing the [`AmdsmiLinkTopologyT`] if successful, or an error if it fails.
-///
-/// # Example
-///
-/// ```rust
-/// # use amdsmi::*;
-/// #
-/// # fn main() {
-/// #   // Initialize the AMD SMI library
-/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
-/// #
-///     // Example processor handles, assuming the number of processors is greater than zero
-///     let processor_handles = amdsmi_get_processor_handles!();
-///     let processor_handle_src = processor_handles[0];
-///     let processor_handle_dst = processor_handles[processor_handles.len() - 1];
-///
-///     match amdsmi_get_link_topology(processor_handle_src, processor_handle_dst) {
-///         Ok(info) => {
-///             println!("Link Topology Info: {:?}", info);
-///         },
-///         Err(e) => println!("Failed to retrieve link topology information: {}", e),
-///     }
-/// #
-/// #   // Shut down the AMD SMI library
-/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
-/// # }
-/// ```
+/// [`AmdsmiLinkTopologyT`] with weight, status, type, hops, and framebuffer sharing.
 ///
 /// # Errors
 ///
-/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_link_topology` call fails.
+/// Returns [`AmdsmiStatusT`] if the native query fails.
 pub fn amdsmi_get_link_topology(
     processor_handle_src: AmdsmiProcessorHandle,
     processor_handle_dst: AmdsmiProcessorHandle,

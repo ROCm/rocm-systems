@@ -2,13 +2,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Unified ``amdsmi_get_link_topology`` binding unit tests.
-
-Hardware independent: validates that the ctypes ``amdsmi_link_topology_t``
-structure matches the C ABI (64 bytes, matching the host struct), that the
-high-level ``amdsmi_get_link_topology`` symbol is exported, and that argument
-validation and the success-path dict mapping behave without a GPU present.
-"""
+"""GPU-independent checks for topology ABI, exports, arguments, and dict mapping."""
 
 import ctypes
 import unittest
@@ -19,7 +13,6 @@ from common.common import amdsmi
 
 class TestLinkTopology(unittest.TestCase):
     def test_struct_size_matches_host_abi(self):
-        # 64 bytes keeps the baremetal and host interfaces binary compatible.
         self.assertEqual(ctypes.sizeof(amdsmi.amdsmi_wrapper.amdsmi_link_topology_t), 64)
 
     def test_struct_fields(self):
@@ -35,7 +28,7 @@ class TestLinkTopology(unittest.TestCase):
         ):
             self.assertIn(expected, field_names)
 
-        # Offsets must match the C ABI; a same-size reorder would break it silently.
+        # Catch field reordering even when the total size is unchanged.
         self.assertEqual(struct_type.weight.offset, 0)
         self.assertEqual(struct_type.link_status.offset, 8)
         self.assertEqual(struct_type.link_type.offset, 12)
@@ -49,26 +42,23 @@ class TestLinkTopology(unittest.TestCase):
         self.assertTrue(hasattr(amdsmi, "amdsmi_get_link_topology"))
 
     def test_rejects_non_handle_arguments(self):
-        # Validation happens before any library call, so no GPU is needed.
         with self.assertRaises(amdsmi.amdsmi_interface.AmdSmiParameterException):
             amdsmi.amdsmi_interface.amdsmi_get_link_topology("not-a-handle", "also-bad")
 
     def test_rejects_bad_destination_handle(self):
-        # A valid source with a bad destination exercises the second-argument guard.
         src = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
         with self.assertRaises(amdsmi.amdsmi_interface.AmdSmiParameterException):
             amdsmi.amdsmi_interface.amdsmi_get_link_topology(src, "also-bad")
 
     def test_success_path_returns_mapped_dict(self):
-        # Mock the entry point so the success path runs without a GPU.
         src = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
         dst = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
 
         def _fill(_src, _dst, topology_ref):
-            # ._obj is the underlying struct the binding reads back.
+            # Access the struct passed through ctypes.byref().
             topology = topology_ref._obj
             topology.weight = 42
-            # XGMI (2) is a concrete type, so pair it with link_status ENABLED (0).
+            # ENABLED (0), XGMI (2).
             topology.link_status = 0
             topology.link_type = 2
             topology.num_hops = 3
