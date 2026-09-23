@@ -68,10 +68,12 @@ def build_kernel_hover_template(
         [
             f"<b>Limited by {limiter_category}: {limiter}</b>",
             f"Performance: %{{customdata[1]}}% (%{{y:,.0f}} / %{{customdata[0]}} {unit})",
+            "AI: %{x:.6g}",
+            "",
+            "<b>Details</b>",
             "%{customdata[2]}",
             f"Dispatch Count: {pct_dispatches_txt}% ({_format_integer(count)} / {_format_integer(total_dispatches)})",
             f"Duration: {pct_runtime_txt}% ({kernel_time_txt} / {total_app_time_txt} {time_unit})",
-            "AI: %{x:.6g}",
         ],
     )
 
