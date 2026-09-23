@@ -214,14 +214,9 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   all numerical oracles passed, and all pre/post health checks passed. The
   minimum-detection requirement failed; the cell remains yellow. Evidence:
   `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round1-qwen-supercollider/`.
-- Latest clean assessments: 36/42 pass across the recorded artifact roots.
-  Six gaps remain: both scatter-reduce modes and Default top-k are inapplicable;
-  Default TP1 decode hits an illegal instruction before teardown times out; optimized D128 block SuperCollider and D128
-  pressure Default hit illegal instructions in sampled-fast cases. The latter
-  are ordinary numeric-reference tests, not intentional fault cases, and remain
-  in the clean workload filters. Other optimized hip-moi cells pass. This
-  count includes earlier hook hashes; final qualification must match the tested
-  binary/configuration and complete the reviewed fault checks.
+- At the end of round 4, 36/42 clean assessments passed. Round 6 below
+  resolves the three illegal-instruction failures; historical failures remain
+  in their artifact roots.
 - `tp1-decode-combined` / default: missing ConSan analysis verdict; exit 124. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round5/tp1-decode-combined-default`.
 - `tp1-decode-combined` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round5/tp1-decode-combined-supercollider`.
 - TP1 decode Default retry with the repaired hook reproduces `HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION`, followed by a 300-second teardown timeout. Its native baseline and SuperCollider run pass. A longer deadline does not resolve this failure. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round5/`.
@@ -231,3 +226,17 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `d128-pressure` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round6/d128-pressure-supercollider`.
 - `tp1-decode-combined` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round6/tp1-decode-combined-default`.
 - `tp1-decode-combined` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round6/tp1-decode-combined-supercollider`.
+- Round 6: **39/42 clean assessments now pass** across recorded roots.
+  `735d9cb7af7` prevents generated branch-island pools from splitting `s_clause`
+  memory runs. This fixes the illegal instructions in D128 block SuperCollider,
+  D128 pressure Default, and TP1 decode Default. Both modes of all three
+  workloads pass with the rebuilt hook and maintained deadlines. The reduced
+  D128 diagnostic reproduced the failure even when the failing kernel received
+  no sanitizer probes, exposing the relocation defect. All 382 translator tests
+  (including a new RDNA4 clause-preservation regression) and 1,055 host ConSan
+  tests pass. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round6/`
+  and `d128-debug/` in that campaign root.
+  The three remaining clean gaps are both scatter-reduce modes and Default
+  top-k (no applicable instrumentation). These counts span hook hashes; final
+  qualification must use matching clean/fault configurations. No fault miss is
+  promoted by a clean pass; the Qwen 0/8 results remain recorded.
