@@ -1772,7 +1772,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_InfoLoggingBranch_KernelIdCount
   EXPECT_EQ(scene.comm->planner.nTasksColl, 5);
 }
 
-// task->winRegType is always ncclSymSendRegRecvReg here (the classification loop's wantSym gate is its only writer).
+// Both winRegType arms of the LL-init gate (symmetric_sched.cc:257) are reachable now. Each test below pins one.
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_LLKernelInit_NotCalledWhenBuffersRegistered) {
   MakeSymmetricTaskList_Scene scene;
   ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);  // sets g_symRegType = ncclSymSendRegRecvReg
