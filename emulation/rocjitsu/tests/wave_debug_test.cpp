@@ -224,7 +224,7 @@ TEST(WaveDebugTest, UnmappedInstructionFetchReportsMemoryViolationAtBranchTarget
   constexpr uint64_t kBranchTarget = 0x100;
   std::vector<uint8_t> kernel_page(amdgpu::GpuMemory::PAGE_SIZE);
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
                                                               amdgpu::Mtype::RW};
   fx.gpu_mem.register_process(kProcessId, &page_table, &page_table_mutex);
@@ -263,7 +263,7 @@ TEST(WaveDebugTest, UnmappedScalarLoadReportsMemoryViolationAfterInstruction) {
   constexpr uint32_t kProcessId = 7;
   std::vector<uint8_t> kernel_page(amdgpu::GpuMemory::PAGE_SIZE);
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
                                                               amdgpu::Mtype::RW};
   fx.gpu_mem.register_process(kProcessId, &page_table, &page_table_mutex);
@@ -702,7 +702,7 @@ TEST(WaveDebugTest, DeclinedMemoryViolationStillIssuesTheAccess) {
   std::vector<uint8_t> kernel_page(kPageSize);
   std::vector<uint8_t> data_page(kPageSize);
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
                                                               amdgpu::Mtype::RW};
   fx.gpu_mem.register_process(kProcessId, &page_table, &page_table_mutex);
@@ -768,7 +768,7 @@ TEST(WaveDebugTest, ScalarLoadStraddlingIntoUnmappedPageReportsMemoryViolation) 
   std::vector<uint8_t> kernel_page(kPageSize);
   std::vector<uint8_t> data_page(kPageSize);
   KfdProcess::PageTable page_table;
-  std::shared_mutex page_table_mutex;
+  util::DistributedSharedMutex page_table_mutex;
   page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
                                                               amdgpu::Mtype::RW};
   // Exactly one data page is mapped; the page above it deliberately is not.

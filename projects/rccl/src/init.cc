@@ -609,6 +609,10 @@ static ncclResult_t commFree(ncclComm_t comm) {
   if (comm->nvlsSupport) NCCLCHECK(ncclNvlsFree(comm));
 #endif
 
+  // Must run before the destructor loop frees the host-pinned workStarted/workCompleted/workPhases
+  // the profiler thread polls, and before the free(comm->abortFlag) it loads through pt->abortFlag.
+  NCCLCHECK(ncclProfilerThreadDestroy(comm));
+
   struct ncclDestructor* dtor = comm->destructorHead;
   while (dtor != nullptr) {
     NCCLCHECK(dtor->fn(dtor));
@@ -650,7 +654,6 @@ static ncclResult_t commFree(ncclComm_t comm) {
        comm->rank, comm->nRanks, comm->cudaDev, comm->busId, comm->commHash, abort ? "Abort" : "Destroy");
 
   commPoison(comm); // poison comm before free to avoid comm reuse.
-  NCCLCHECK(ncclProfilerThreadDestroy(comm));
   NCCLCHECK(ncclProfilerPluginFinalize(comm));
   if (sharedResRefCount == 0) {
     NCCLCHECK(ncclNetFinalize(comm));

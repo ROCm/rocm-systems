@@ -75,8 +75,8 @@ namespace sampling
 {
 namespace
 {
-using causal_sampler_allocator_t = typename causal_sampler_t::allocator_t;
-using causal_sampler_bundle_t    = typename causal_sampler_t::bundle_type;
+using causal_sampler_allocator_t = causal_sampler_t::allocator_t;
+using causal_sampler_bundle_t    = causal_sampler_t::bundle_type;
 using causal_sampler_buffer_t = tim::data_storage::ring_buffer<causal_sampler_bundle_t>;
 
 struct causal_sampling
