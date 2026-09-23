@@ -40,6 +40,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <sys/mman.h>
 
 // Count hipMemAddressFree for skip-on vs skip-off finalize tests.
@@ -337,6 +338,10 @@ HIP_FAKE hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp
   if (prop) {
     *prop = hipMemAllocationProp{};
     prop->location.type = hipMemLocationTypeDevice;
+    const char* loc = std::getenv("RCCL_TEST_VMM_LOCATION");
+    if (loc != nullptr && std::strcmp(loc, "host") == 0) {
+      prop->location.type = hipMemLocationTypeHost;
+    }
   }
   return hipSuccess;
 }
@@ -365,9 +370,12 @@ HIP_FAKE hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t
 }
 HIP_FAKE hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
   if (pbase) *pbase = dptr;
-  // Host tests map one 4096-byte segment per LSA rank. Returning 0 would still
-  // call unmap once (the idx loop advances), but a real size matches destroy.
-  if (psize) *psize = 4096;
+  if (psize) {
+    const char* sz = std::getenv("RCCL_TEST_VMM_SEGMENT_SIZE");
+    // Host tests map one 4096-byte segment per LSA rank unless a test overrides
+    // the reported VMM range size explicitly.
+    *psize = (sz != nullptr && sz[0] != '\0') ? static_cast<size_t>(std::strtoull(sz, nullptr, 0)) : 4096;
+  }
   return hipSuccess;
 }
 

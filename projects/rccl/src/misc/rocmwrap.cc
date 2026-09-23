@@ -246,7 +246,9 @@ int ncclCuMemHostEnable() {
       CUCHECK(cuDeviceGetAttribute(&cpuNumaNodeId, hipDeviceAttributeHostNumaId, currentDev));
       if (cpuNumaNodeId < 0) cpuNumaNodeId = 0;
 #endif
-      // CLR rejects HostNuma; probe with Host to match alloc.h's ncclCuMemHostAlloc.
+      // CLR rejects HostNuma (AIRUNTIME-2638). AMD probe matches alloc.h:
+      // hipMemLocationTypeHost, id 0. The #else is the NCCL HostNuma restore
+      // path, not a HIP compile arm.
 #if defined(__HIP_PLATFORM_AMD__)
       prop.location.type = hipMemLocationTypeHost;
 #else
