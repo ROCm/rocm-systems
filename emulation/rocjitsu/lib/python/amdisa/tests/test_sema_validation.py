@@ -63,7 +63,7 @@ def _extract_properties(cpp: str) -> dict:
         'writes_scalar': 'write_scalar' in cpp,
         'writes_lane': 'write_lane' in cpp,
         'uses_fabs': 'fabs' in cpp,
-        'uses_fma': 'fma' in cpp or 'std::fma' in cpp,
+        'uses_fma': 'fma' in cpp or 'Arithmetic::FMA' in cpp,
         'operand_names': set(re.findall(r'\b(ssrc\d|sdst|src\d|vsrc\d|vdst)\b', cpp)),
     }
 

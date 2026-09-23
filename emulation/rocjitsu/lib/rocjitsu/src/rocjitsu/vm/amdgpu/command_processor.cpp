@@ -1251,7 +1251,8 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
     cu->with_wave_state_locked([&] {
       for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
         auto *wave = cu->wf(slot);
-        if (!wave->is_halted() && wave->process_id() == process_id && wave->queue_id() == queue_id)
+        if (wave && !wave->is_halted() && wave->process_id() == process_id &&
+            wave->queue_id() == queue_id)
           wave->set_debug_suspended(true);
       }
     });
@@ -1306,7 +1307,7 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
         cu->with_wave_state_locked([&] {
           for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
             auto *wave = cu->wf(slot);
-            if (!wave->is_halted() && wave->process_id() == process_id &&
+            if (wave && !wave->is_halted() && wave->process_id() == process_id &&
                 wave->queue_id() == queue_id)
               wave->halt();
           }
@@ -1446,7 +1447,8 @@ bool CommandProcessor::update_queue_registration(uint64_t registration_id, uint6
     cu->with_wave_state_locked([&] {
       for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
         auto *wave = cu->wf(slot);
-        if (!wave->is_halted() && wave->process_id() == process_id && wave->queue_id() == queue_id)
+        if (wave && !wave->is_halted() && wave->process_id() == process_id &&
+            wave->queue_id() == queue_id)
           // The runtime's own pause reason. Writing the debugger's bit here let
           // a runtime resume clear a debugger pause, and a debugger or CWSR
           // resume clear an active runtime pause.

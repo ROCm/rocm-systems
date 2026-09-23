@@ -216,7 +216,7 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
           const auto *w = cu->wf(i);
           // Only checkpoint active (non-halted) wavefronts. Idle slots
           // have no register allocations and nothing meaningful to save.
-          if (w->is_halted())
+          if (!w || w->is_halted())
             continue;
 
           // The record holds the architectural registers and the TTMPs, but

@@ -28,6 +28,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/amdgpu/wf_scheduler.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
@@ -3978,6 +3979,76 @@ TEST(FunctionalSchedulingTest, UncontendedComputeUnitKeepsFullFunctionalQuantum)
             kCodeAddress + amdgpu::ComputeUnitCore::kFunctionalQuantum * sizeof(uint32_t));
 }
 
+struct WavefrontSlotTestParam {
+  std::string arch;
+  uint32_t wave_size;
+};
+
+class WavefrontSlotTest : public ::testing::TestWithParam<WavefrontSlotTestParam> {};
+
+TEST_P(WavefrontSlotTest, WavefrontSlotsMaterializeOnDispatchAndRemainReusable) {
+  const auto &[arch, wave_size] = GetParam();
+  constexpr uint32_t kSlots = 4;
+  VmFixture f(arch, 1, kSlots);
+  auto *cu = f.cu();
+  const rocjitsu::amdgpu::ComputeUnitCore &idle_cu = *cu;
+  EXPECT_EQ(cu->num_wfs(), 0u);
+  EXPECT_FALSE(cu->has_active_wfs());
+  EXPECT_FALSE(cu->has_runnable_wfs());
+  EXPECT_TRUE(cu->can_accept_workgroup(kSlots, 0));
+  for (uint32_t slot = 0; slot < kSlots; ++slot)
+    EXPECT_EQ(idle_cu.wf(slot), nullptr);
+
+  // Checkpoint restoration can first populate a nonzero slot, leaving holes.
+  auto *last = cu->dispatch_wf_at(kSlots - 1, 7, 0x1040, 104, 256, wave_size);
+  ASSERT_NE(last, nullptr);
+  EXPECT_EQ(last->wf_id(), kSlots - 1);
+  EXPECT_EQ(last->wf_size(), wave_size);
+  EXPECT_EQ(cu->num_wfs(), 1u);
+  for (uint32_t slot = 0; slot < kSlots - 1; ++slot)
+    EXPECT_EQ(cu->wf(slot), nullptr);
+  EXPECT_EQ(cu->dispatch_wf_at(kSlots - 1, 8, 0x1080, 104, 256, wave_size), nullptr);
+  EXPECT_EQ(cu->dispatch_wf_at(kSlots, 8, 0x1080, 104, 256, wave_size), nullptr);
+
+  cu->free_wavefront_resources(*last);
+  EXPECT_TRUE(last->is_halted());
+  EXPECT_EQ(cu->wf(kSlots - 1), last);
+  EXPECT_FALSE(cu->has_active_wfs());
+  auto *reused = cu->dispatch_wf_at(kSlots - 1, 9, 0x1080, 104, 256, wave_size);
+  ASSERT_EQ(reused, last);
+  EXPECT_EQ(reused->wg_id(), 9u);
+  EXPECT_EQ(reused->pc, 0x1080u);
+  EXPECT_EQ(reused->wf_size(), wave_size);
+
+  auto *first = cu->dispatch_wf(10, 0x10c0, 104, 256, wave_size);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->wf_id(), 0u);
+  EXPECT_EQ(first->wf_size(), wave_size);
+  EXPECT_EQ(cu->wf(1), nullptr);
+  EXPECT_EQ(cu->wf(2), nullptr);
+
+  // A rejected first dispatch retains an idle object for the next attempt.
+  EXPECT_EQ(cu->dispatch_wf_at(1, 11, 0x1100, 104, 256, /*wave_size=*/1), nullptr);
+  auto *rejected = cu->wf(1);
+  ASSERT_NE(rejected, nullptr);
+  EXPECT_TRUE(rejected->is_halted());
+  EXPECT_EQ(cu->num_wfs(), 2u);
+  EXPECT_EQ(cu->dispatch_wf_at(1, 11, 0x1100, 104, 256, wave_size), rejected);
+  EXPECT_EQ(rejected->wf_size(), wave_size);
+}
+
+INSTANTIATE_TEST_SUITE_P(Cdna, WavefrontSlotTest,
+                         ::testing::Values(WavefrontSlotTestParam{"cdna3", 64},
+                                           WavefrontSlotTestParam{"cdna4", 64},
+                                           WavefrontSlotTestParam{"cdna5", 32}),
+                         [](const auto &info) { return info.param.arch; });
+
+TEST(WavefrontSchedulerTest, UnmaterializedSlotsAreIdle) {
+  std::vector<std::unique_ptr<amdgpu::Wavefront>> slots(4);
+  amdgpu::OldestFirstScheduler scheduler;
+  EXPECT_EQ(scheduler.schedule(slots), nullptr);
+}
+
 TEST_P(IsaTest, DispatchWfReturnsNullWhenSlotsExhausted) {
   // dispatch_wf() promises nullptr (not an out-of-bounds slot) when the CU is full.
   // The CP relies on can_accept_workgroup() gating, but the API contract must hold
@@ -4095,7 +4166,7 @@ TEST(CommandProcessorTest, DispatchToQuiescedDebugHaltedCuReactivatesEventLoop) 
   for (uint32_t i = 0; i < 100 && f.engine->step(); ++i) {
     for (uint32_t slot = 0; slot < f.cu(0)->num_wf_slots(); ++slot) {
       auto *wf = f.cu(0)->wf(slot);
-      if (wf != stopped && wf->dispatch_id() == 3) {
+      if (wf && wf != stopped && wf->dispatch_id() == 3) {
         followup_wf = wf;
         break;
       }
@@ -6752,8 +6823,10 @@ std::vector<uint32_t> make_multi_quantum_nop_kernel() {
 }
 
 void step_until_first_quantum(VmFixture &fixture, amdgpu::ComputeUnitCore *cu) {
-  for (uint32_t i = 0; i < 16 && cu->wf(0)->trace_inst_count_ < cu->functional_quantum(); ++i)
+  for (uint32_t i = 0;
+       i < 16 && (!cu->wf(0) || cu->wf(0)->trace_inst_count_ < cu->functional_quantum()); ++i)
     ASSERT_TRUE(fixture.engine->step());
+  ASSERT_NE(cu->wf(0), nullptr);
   ASSERT_EQ(cu->wf(0)->trace_inst_count_, cu->functional_quantum());
   ASSERT_TRUE(cu->has_active_wfs());
 }

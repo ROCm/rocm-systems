@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/pci/register_symbols.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/soc.h"
+#include "util/distributed_shared_mutex.h"
 
 #include <gtest/gtest.h>
 
@@ -2389,7 +2390,7 @@ TEST_F(GpuDeviceMes, LostConnectionReleasesOnlyPciQueuesAndAllowsPasidReuse) {
   rocjitsu::amdgpu::CommandProcessor legacy_cp("legacy-cp");
   legacy_cp.set_gpu_vm(&soc_.gpu_vm());
   rocjitsu::amdgpu::LegacyPageTable legacy_page_table;
-  std::shared_mutex legacy_page_table_mutex;
+  util::DistributedSharedMutex legacy_page_table_mutex;
   rocjitsu::amdgpu::LegacyGpuVmAdapter legacy_vm(soc_.gpu_vm(), soc_.memory());
   const rocjitsu::amdgpu::AddressSpaceHandle legacy_address_space =
       legacy_vm.register_address_space(9, &legacy_page_table, &legacy_page_table_mutex);

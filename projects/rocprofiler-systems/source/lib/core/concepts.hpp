@@ -67,7 +67,7 @@ struct tuple_element_impl;
 template <size_t N, typename... Tp>
 struct tuple_element_impl<N, std::tuple<Tp...>, true>
 {
-    using type = typename std::tuple_element<N, std::tuple<Tp...>>::type;
+    using type = std::tuple_element<N, std::tuple<Tp...>>::type;
 };
 
 template <size_t N, typename... Tp>
@@ -82,11 +82,10 @@ struct tuple_element;
 template <size_t N, typename... Tp>
 struct tuple_element<N, std::tuple<Tp...>>
 {
-    using type =
-        typename tuple_element_impl<N, std::tuple<Tp...>, (N < sizeof...(Tp))>::type;
+    using type = tuple_element_impl<N, std::tuple<Tp...>, (N < sizeof...(Tp))>::type;
 };
 
 template <size_t N, typename Tp>
-using tuple_element_t = typename tuple_element<N, Tp>::type;
+using tuple_element_t = tuple_element<N, Tp>::type;
 }  // namespace concepts
 }  // namespace tim

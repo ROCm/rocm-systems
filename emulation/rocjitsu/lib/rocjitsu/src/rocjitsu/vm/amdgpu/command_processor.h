@@ -80,7 +80,7 @@ struct QueueReconfigureRequest;
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.
 ///
 /// @details Distributes AQL dispatch packets across the registered compute units in
-/// round-robin order, activating pre-allocated wavefront slots.
+/// round-robin order, materializing wavefronts in configured slots on first use.
 ///
 /// Event-driven: the CP monitors registered AQL queue doorbells via a
 /// polling thread. When new AQL packets are detected, it fetches them from the
