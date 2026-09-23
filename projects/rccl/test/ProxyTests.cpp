@@ -14,7 +14,10 @@
 #define ENABLE_TIMER 0
 #include <assert.h>
 #include <errno.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <poll.h>
+#include <pthread.h>
 #include <sched.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -76,6 +79,7 @@ void ncclDumpProxyState(int signal);
 // Defined in proxy.cc, not exported through proxy.h.
 ncclResult_t ncclProxyPost(struct ncclProxyOpsPool* pool, int nextOps, int nextOpsEnd);
 ncclResult_t ncclProxyProgressDestroy(struct ncclProxyState* proxyState);
+void* ncclProxyService(void* _args);
 
 #define PROXYARGS_ALLOCATE_SIZE NCCL_MAX_OPS
 
@@ -989,6 +993,108 @@ TEST(ProxyTests, ProxyConnectionPoolBoundsCheck)
     EXPECT_EQ(ncclProxyGetConnection(&emptyPool, 0, &out), ncclInvalidArgument);
 
     TEST_INFO("[ProxyTests] ProxyConnectionPoolBoundsCheck PASSED");
+}
+
+// Regression for NVIDIA NCCL PR #1834 / RCCL AICOMRCCL-1850.
+//
+// Before 2.30.7, a bad-magic connection was discarded and ncclSocketAccept()
+// immediately retried from inside the proxy service thread. With no subsequent
+// connection ready, that retry blocked in accept() and the thread stopped
+// polling the proxy listen socket and checking abortFlag. The proxy now calls
+// ncclSocketAccept(..., false), which returns after rejecting the peer.
+TEST(ProxyTests, ProxyServiceDoesNotHangOnExternalBadMagic)
+{
+    RUN_ISOLATED_TEST(
+        "ProxyServiceDoesNotHangOnExternalBadMagic",
+        []() {
+            constexpr uint64_t kProxyMagic = 0x13579bdf2468ace0ULL;
+            volatile uint32_t abortFlag = 0;
+
+            auto* listenSock = static_cast<ncclSocket*>(calloc(1, sizeof(ncclSocket)));
+            ASSERT_NE(listenSock, nullptr);
+
+            union ncclSocketAddress listenAddr = {};
+            listenAddr.sin.sin_family = AF_INET;
+            listenAddr.sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            listenAddr.sin.sin_port = 0;
+
+            ASSERT_EQ(ncclSocketInit(listenSock, &listenAddr, kProxyMagic, ncclSocketTypeProxy,
+                                     &abortFlag),
+                      ncclSuccess);
+            ASSERT_EQ(ncclSocketListen(listenSock), ncclSuccess);
+
+            union ncclSocketAddress boundAddr = {};
+            ASSERT_EQ(ncclSocketGetAddr(listenSock, &boundAddr), ncclSuccess);
+
+            ncclProxyState proxyState = {};
+            proxyState.listenSock = listenSock;
+            proxyState.abortFlag = const_cast<uint32_t*>(&abortFlag);
+            // Avoid HIP device initialization latency; the proxy service
+            // continues with a warning when this deliberately invalid device
+            // is used by the host-only regression.
+            proxyState.cudaDev = -1;
+
+            const int externalFd = socket(AF_INET, SOCK_STREAM, 0);
+            ASSERT_GE(externalFd, 0);
+            ASSERT_EQ(connect(externalFd, reinterpret_cast<const sockaddr*>(&boundAddr.sin),
+                              sizeof(boundAddr.sin)),
+                      0);
+
+            std::atomic<bool> serviceExited{false};
+            std::thread serviceThread([&]() {
+                ncclProxyService(&proxyState);
+                serviceExited.store(true, std::memory_order_release);
+            });
+
+            // Let ncclProxyService enter its poll loop before delivering the
+            // malformed connection.
+            std::this_thread::sleep_for(std::chrono::seconds(3));
+
+            clockid_t serviceClock;
+            ASSERT_EQ(pthread_getcpuclockid(serviceThread.native_handle(), &serviceClock), 0);
+            struct timespec cpuBefore = {};
+            ASSERT_EQ(clock_gettime(serviceClock, &cpuBefore), 0);
+
+            // Simulate an unrelated external TCP client. It completes the TCP
+            // connection and sends a wrong NCCL magic, but no NCCL type.
+            const uint64_t badMagic = kProxyMagic ^ 1ULL;
+            const ssize_t sent = send(externalFd, &badMagic, sizeof(badMagic), MSG_NOSIGNAL);
+            close(externalFd);
+
+            // The fixed service returns to poll(). The pre-fix service keeps
+            // retrying accept() on the nonblocking listen socket and burns a
+            // CPU while no new peer exists.
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            struct timespec cpuAfter = {};
+            ASSERT_EQ(clock_gettime(serviceClock, &cpuAfter), 0);
+            const double cpuMs =
+                (cpuAfter.tv_sec - cpuBefore.tv_sec) * 1e3 +
+                (cpuAfter.tv_nsec - cpuBefore.tv_nsec) / 1e6;
+            EXPECT_LT(cpuMs, 125.0)
+                << "proxy service busy-spun after bad magic (CPU time " << cpuMs << " ms)";
+
+            __atomic_store_n(&abortFlag, 1, __ATOMIC_RELEASE);
+
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+            while (!serviceExited.load(std::memory_order_acquire) &&
+                   std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+
+            if (!serviceExited.load(std::memory_order_acquire)) {
+                TEST_INFO("ncclProxyService did not return after rejecting a bad-magic peer");
+                fflush(nullptr);
+                // The pre-fix proxy is blocked in its internal accept retry.
+                // Exit this isolated child so the parent reports a bounded
+                // failure rather than leaving a test thread behind.
+                _exit(1);
+            }
+
+            serviceThread.join();
+            EXPECT_EQ(sent, static_cast<ssize_t>(sizeof(badMagic)))
+                << "external client failed to send the malformed handshake";
+            TEST_INFO("ProxyServiceDoesNotHangOnExternalBadMagic PASSED");
+        });
 }
 
 // std::mutex / std::condition_variable modernization coverage.
