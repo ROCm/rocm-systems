@@ -119,8 +119,6 @@ struct vm_object {
 	void *user_data;
 	/* Flag to indicate imported KFD buffer */
 	bool is_imported_kfd_bo;
-	/* Paged host memory backed by SVM, no BO behind it */
-	bool is_svm_paged;
 #ifdef SANITIZER_AMDGPU
 	int mmap_flags;
 	int mmap_fd;
@@ -238,7 +236,6 @@ typedef struct {
 
 	/* whether to use userptr for paged memory */
 	bool userptr_for_paged_mem;
-	bool svm_for_paged_mem;
 
 	/* whether to check userptrs on registration */
 	bool check_userptr;
@@ -322,7 +319,6 @@ int hsakmt_kfdcontext_init_fmm_context(HsaKFDContext *ctx)
 	ctx->fmm_context->svm.dgpu_aperture = NULL;
 	ctx->fmm_context->svm.dgpu_alt_aperture = NULL;
 	ctx->fmm_context->svm.userptr_for_paged_mem = false;
-	ctx->fmm_context->svm.svm_for_paged_mem = true;
 	ctx->fmm_context->svm.check_userptr = false;
 	ctx->fmm_context->svm.reserve_svm = false;
 	ctx->fmm_context->svm.disable_cache = false;
@@ -430,7 +426,6 @@ static vm_object_t *vm_create_and_init_object(void *start, uint64_t size,
 		object->metadata = NULL;
 		object->user_data = NULL;
 		object->is_imported_kfd_bo = false;
-		object->is_svm_paged = false;
 		object->node.key = rbtree_key((unsigned long)start, size);
 		object->user_node.key = rbtree_key(0, 0);
 #ifdef SANITIZER_AMDGPU
@@ -1197,51 +1192,6 @@ static HSAKMT_STATUS fmm_map_mem_svm_api(HsaKFDContext *ctx,
 
 	ret = HSAKMT_STATUS_SUCCESS;
 
-out:
-	free(args);
-	return ret;
-}
-
-static HSAKMT_STATUS fmm_unmap_mem_svm_api(HsaKFDContext *ctx,
-					   void *address,
-					   uint64_t size,
-					   uint32_t *nodes_to_unmap,
-					   uint32_t num_of_nodes)
-{
-	struct kfd_ioctl_svm_args *args;
-	size_t s_attr;
-	uint32_t i;
-	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
-	HSAKMT_STATUS ret;
-
-	if (!fmm_ctx->first_gpu_mem)
-		return HSAKMT_STATUS_ERROR;
-
-	/* Check ioctl size-field limit (14 bits = 16383 bytes max, ~2044 attrs) */
-	if (sizeof(*args) + num_of_nodes * sizeof(struct kfd_ioctl_svm_attribute) > ((1UL << _IOC_SIZEBITS) - 1))
-		return HSAKMT_STATUS_INVALID_PARAMETER;
-
-	s_attr = sizeof(struct kfd_ioctl_svm_attribute) * num_of_nodes;
-	args = malloc(sizeof(*args) + s_attr);
-	if (!args)
-		return HSAKMT_STATUS_NO_MEMORY;
-
-	args->start_addr = (uint64_t)address;
-	args->size = size;
-	args->op = KFD_IOCTL_SVM_OP_SET_ATTR;
-	args->nattr = num_of_nodes;
-	for (i = 0; i < num_of_nodes; i++) {
-		args->attrs[i].type = HSA_SVM_ATTR_NO_ACCESS;
-		args->attrs[i].value = nodes_to_unmap[i];
-	}
-	/* Driver does one copy_from_user, with extra attrs size */
-	if (hsakmt_ioctl(ctx->fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args)) {
-		pr_debug("op set range attrs failed %s\n", strerror(errno));
-		ret = HSAKMT_STATUS_ERROR;
-		goto out;
-	}
-
-	ret = HSAKMT_STATUS_SUCCESS;
 out:
 	free(args);
 	return ret;
@@ -2189,9 +2139,7 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 	 * memory is allocated from KFD
 	 */
 retry:
-	if (!mflags.ui32.NonPaged &&
-	    (fmm_ctx->svm.userptr_for_paged_mem ||
-	     (fmm_ctx->svm.svm_for_paged_mem && ctx->hsakmt_is_svm_api_supported))) {
+	if (!mflags.ui32.NonPaged && fmm_ctx->svm.userptr_for_paged_mem) {
 		int advice = MADV_NORMAL;
 
 		/* set madvise flags to HUGEPAGE always for 2MB pages */
@@ -2217,53 +2165,30 @@ retry:
 
 		madvise(mem, MemorySizeInBytes, advice);
 
-		if (!fmm_ctx->svm.userptr_for_paged_mem) {
-			/* No BO. The pages are served by SVM, but keep the
-			 * object so map, unmap and release still find the range.
+		/* Create userptr BO */
+		mmap_offset = (uint64_t)mem;
+		ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_USERPTR;
+		vm_obj = fmm_allocate_memory_object(ctx, preferred_gpu_id, mem, size,
+						       aperture, &mmap_offset,
+						       ioc_flags);
+		if (!vm_obj) {
+			/* KFD refuses userptr on GPUs in recoverable-fault mode.
+			 * Evicting a userptr BO there means invalidating its PTEs
+			 * rather than preempting the queues, which the userptr
+			 * mmu-notifier path cannot do. Stop asking for userptr and
+			 * allocate from KFD, same as HSA_USERPTR_FOR_PAGED_MEM=0.
 			 */
-			pthread_mutex_lock(&aperture->fmm_mutex);
-			vm_obj = aperture_allocate_object(aperture, mem, 0, size, mflags);
-			if (vm_obj)
-				vm_obj->is_svm_paged = true;
-			pthread_mutex_unlock(&aperture->fmm_mutex);
-
-			if (vm_obj &&
-			    fmm_register_mem_svm_api(ctx, mem, size, mflags)
-					!= HSAKMT_STATUS_SUCCESS) {
-				pthread_mutex_lock(&aperture->fmm_mutex);
-				vm_remove_object(aperture, vm_obj);
-				pthread_mutex_unlock(&aperture->fmm_mutex);
-				vm_obj = NULL;
-			}
-			if (!vm_obj)
+			if (errno != EOPNOTSUPP)
 				goto out_release_area;
-		} else {
-			/* Create userptr BO */
-			mmap_offset = (uint64_t)mem;
-			ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_USERPTR;
-			vm_obj = fmm_allocate_memory_object(ctx, preferred_gpu_id, mem, size,
-							       aperture, &mmap_offset,
-							       ioc_flags);
-			if (!vm_obj) {
-				/* KFD refuses userptr on GPUs in recoverable-fault
-				 * mode. Evicting a userptr BO there means invalidating
-				 * its PTEs rather than preempting the queues, which the
-				 * userptr mmu-notifier path cannot do. Stop asking for
-				 * userptr and retry: SVM serves the pages when
-				 * svm_for_paged_mem is on, a KFD allocation otherwise.
-				 */
-				if (errno != EOPNOTSUPP)
-					goto out_release_area;
 
-				fmm_ctx->svm.userptr_for_paged_mem = false;
-				pthread_mutex_lock(&aperture->fmm_mutex);
-				aperture_release_area(aperture, mem, size);
-				pthread_mutex_unlock(&aperture->fmm_mutex);
-				mem = NULL;
-				mmap_offset = 0;
-				ioc_flags &= ~KFD_IOC_ALLOC_MEM_FLAGS_USERPTR;
-				goto retry;
-			}
+			fmm_ctx->svm.userptr_for_paged_mem = false;
+			pthread_mutex_lock(&aperture->fmm_mutex);
+			aperture_release_area(aperture, mem, size);
+			pthread_mutex_unlock(&aperture->fmm_mutex);
+			mem = NULL;
+			mmap_offset = 0;
+			ioc_flags &= ~KFD_IOC_ALLOC_MEM_FLAGS_USERPTR;
+			goto retry;
 		}
 	} else {
 		ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_GTT;
@@ -2368,9 +2293,6 @@ static int __fmm_release(HsaKFDContext *ctx,
 
 	if (ret)
 		goto err_free_mem_failed;
-
-	if (object->is_svm_paged)
-		munmap(object->start, object->size);
 
 	aperture_release_area(aperture, object->start, object->size);
 	vm_remove_object(aperture, object);
@@ -2966,7 +2888,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	struct kfd_process_device_apertures *process_apertures;
 	uint32_t num_of_sysfs_nodes;
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
-	char *disableCache, *pagedUserptr, *pagedSvm, *checkUserptr, *guardPagesStr, *reserveSvm;
+	char *disableCache, *pagedUserptr, *checkUserptr, *guardPagesStr, *reserveSvm;
 	char *maxVaAlignStr, *mfmaHighPrecisionModeStr;
 	unsigned int guardPages = 1;
 	uint64_t svm_base = 0, svm_limit = 0;
@@ -2982,12 +2904,6 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	 */
 	pagedUserptr = getenv("HSA_USERPTR_FOR_PAGED_MEM");
 	fmm_ctx->svm.userptr_for_paged_mem = (!pagedUserptr || strcmp(pagedUserptr, "0"));
-
-	/* Back paged memory with SVM when userptr is off. GTT is capped well
-	 * below system memory, so keep it for NonPaged allocations only.
-	 */
-	pagedSvm = getenv("HSA_SVM_FOR_PAGED_MEM");
-	fmm_ctx->svm.svm_for_paged_mem = (!pagedSvm || strcmp(pagedSvm, "0"));
 
 	if (hsakmt_use_model || !ctx->hsakmt_is_primary_ctx)
 		fmm_ctx->svm.userptr_for_paged_mem = false;
@@ -3686,7 +3602,7 @@ static HSAKMT_STATUS _fmm_map_to_gpu_userptr(HsaKFDContext *ctx,
 	/* Map and return the GPUVM address adjusted by the offset
 	 * from the start of the page
 	 */
-	if ((!object || object->is_svm_paged) && ctx->hsakmt_is_svm_api_supported) {
+	if (!object && ctx->hsakmt_is_svm_api_supported) {
 		svm_addr = (void*)((HSAuint64)addr - page_offset);
 		if (!nodes_to_map) {
 			nodes_to_map = fmm_ctx->all_gpu_id_array;
@@ -3742,7 +3658,7 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu(HsaKFDContext *ctx,
 	/* Successful vm_find_object returns with the aperture locked */
 
 	/* allocate VA only */
-	if (object && object->handles[0] == 0 && !object->is_svm_paged) {
+	if (object && object->handles[0] == 0) {
 		pthread_mutex_unlock(&aperture->fmm_mutex);
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 	}
@@ -3757,8 +3673,7 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu(HsaKFDContext *ctx,
 		/* Prefetch memory on APUs with dummy-reads */
 		fmm_check_user_memory(address, size);
 		ret = HSAKMT_STATUS_SUCCESS;
-	} else if ((ctx->hsakmt_is_svm_api_supported && !object) ||
-		   (object && (object->userptr || object->is_svm_paged))) {
+	} else if ((ctx->hsakmt_is_svm_api_supported && !object) || (object && (object->userptr))) {
 		ret = _fmm_map_to_gpu_userptr(ctx, address, size, gpuvm_address, object, NULL, 0);
 	} else if (aperture) {
 		ret = _fmm_map_to_gpu(ctx, aperture, address, size, object, NULL, 0);
@@ -3954,11 +3869,6 @@ int hsakmt_fmm_unmap_from_gpu(HsaKFDContext *ctx, void *address)
 	if (aperture == &fmm_ctx->cpuvm_aperture)
 		/* On APUs GPU unmapping of system memory is a no-op */
 		ret = 0;
-	else if (object->is_svm_paged)
-		ret = fmm_unmap_mem_svm_api(ctx, object->start, object->size,
-					    fmm_ctx->all_gpu_id_array,
-					    fmm_ctx->all_gpu_id_array_size / sizeof(uint32_t))
-			== HSAKMT_STATUS_SUCCESS ? 0 : -EINVAL;
 	else
 		ret = _fmm_unmap_from_gpu(ctx, aperture, address, NULL, 0, object);
 
@@ -4614,7 +4524,7 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu_nodes(HsaKFDContext *ctx,
 	/* Successful vm_find_object returns with aperture locked */
 
 	/* allocates VA only */
-	if (object && object->handles[0] == 0 && !object->is_svm_paged) {
+	if (object && object->handles[0] == 0) {
 		pthread_mutex_unlock(&aperture->fmm_mutex);
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 	}
@@ -4632,8 +4542,7 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu_nodes(HsaKFDContext *ctx,
 		return HSAKMT_STATUS_ERROR;
 	}
 
-	if ((ctx->hsakmt_is_svm_api_supported && !object) ||
-	    object->userptr || object->is_svm_paged) {
+	if ((ctx->hsakmt_is_svm_api_supported && !object) || object->userptr) {
 		retcode = _fmm_map_to_gpu_userptr(ctx, address, size, gpuvm_address,
 				object, nodes_to_map, num_of_nodes * sizeof(uint32_t));
 		if (object)

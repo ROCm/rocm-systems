@@ -291,13 +291,6 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     kmt_alloc_flags.ui32.NonPaged = 1;
   }
 
-  // GPU-executed code and queue buffers have to be BO-backed. Paged system
-  // memory is SVM-backed and faultable, and kfd_queue_buffer_get() resolves
-  // queue buffers with amdgpu_vm_bo_lookup_mapping(). A faulting trap handler
-  // cannot service a fault either, which turns into a retry storm.
-  if (m_region.IsSystem() && kmt_alloc_flags.ui32.ExecuteAccess)
-    kmt_alloc_flags.ui32.NonPaged = 1;
-
   // Allocating a memory handle for virtual memory
   kmt_alloc_flags.ui32.NoAddress =
       !!(alloc_flags & core::MemoryRegion::AllocateMemoryOnly);
