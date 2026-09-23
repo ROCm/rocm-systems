@@ -728,9 +728,8 @@ static ncclResult_t ncclIbSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
-  // GIN data requests can keep a full segmented payload plus a trailing signal
-  // outstanding. Classic NET/IB uses fewer entries but shares this QP path.
-  qpCreateAttrs.maxSendWorkRequest = std::max(2 * NET_IB_MAX_REQUESTS, NCCL_RMA_MAX_SIGNAL_WRS);
+  // GIN iput can post NCCL_RMA_MAX_SIGNAL_WRS on top of the classic 2*MAX data budget.
+  qpCreateAttrs.maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
     // For example, if there are 2 devices and 4 QPs, the QPs will be created
@@ -1392,10 +1391,13 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     qpCreateAttrs.pd = rCommDev->base.pd;
     qpCreateAttrs.maxRecvWorkRequest = 0;
     // Each flush may post a scratchpad write in addition to the read.
-    // One logical GIN flush can post one read per registered segment.
-    qpCreateAttrs.maxSendWorkRequest = std::max(2 * NET_IB_MAX_REQUESTS, NCCL_RMA_MAX_FLUSH_WRS);
+    // GIN flush posts one RDMA read per segment on top of that budget.
+    qpCreateAttrs.maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_FLUSH_WRS;
     qpCreateAttrs.qpContext = &comm->base.stats;
     NCCLCHECK(ncclIbQpCreate(flushQp, &qpCreateAttrs));
+    // Loopback flush QP: local and remote device indices are this recv device.
+    flushQp->devIndex = i;
+    flushQp->remDevIdx = i;
     INFO(NCCL_NET, "NET/IB: %s: Flush QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p",
          __func__, ibDev->portNum, rCommDev->base.ibDevN, ncclIbDevs[rCommDev->base.ibDevN].devName, ncclNIbDevs,
          ncclNMergedIbDevs, flushQp->qp->qp_num, (uint16_t)rCommDev->base.pkeyIndex, rCommDev->base.pd);
