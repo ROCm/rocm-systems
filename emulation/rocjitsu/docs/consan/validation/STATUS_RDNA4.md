@@ -225,3 +225,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `tp1-decode-combined` / default: missing ConSan analysis verdict; exit 124. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round5/tp1-decode-combined-default`.
 - `tp1-decode-combined` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round5/tp1-decode-combined-supercollider`.
 - TP1 decode Default retry with the repaired hook reproduces `HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION`, followed by a 300-second teardown timeout. Its native baseline and SuperCollider run pass. A longer deadline does not resolve this failure. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round5/`.
+- `d128-block` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round6/d128-block-default`.
