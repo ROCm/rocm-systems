@@ -934,6 +934,71 @@
           }
         }
       ]
+    },
+    "llama-rdna4-mul-mat-vec-q": {
+      "faults": [
+        {
+          "id": "barrier-drop-wave-sum-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine gfx1201 library ELF fnv1a64:fd5ac4e13780e469, matching quantized-matvec clean-run code_object identity and native-selected mul_mat_vec_q<ggml_type(2),1,false,false>. Waves 1..7 write partial sums at .text+0xb8b8; EXEC is restored at 0xb8c4 before the unconditional signal/wait at 0xb8cc/0xb8d0. Wave zero then reads peer-wave sums at 0xb8e8, 0xb8f0, 0xb8f8 and 0xb90c. Source ggml-cuda/mmvq.cu:591-627 confirms the same dependency. Remove the pair as one mutation. Eight standard trials per profile require at least one detection, recording numerical manifestations independently. Pristine ELF, exact inventory and disassembly: rdna4-20260923/llama-matvec-debug."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:fd5ac4e13780e469|kernel=_ZL13mul_mat_vec_qIL9ggml_type2ELi1ELb0ELb0EEvPKvS2_PKi31ggml_cuda_mm_fusion_args_devicePfj15HIP_vector_typeIjLj3EEjjjS8_jjjS8_jjjj|kind=barrier|pc=0x000000000000b8cc|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:fd5ac4e13780e469|kernel=_ZL13mul_mat_vec_qIL9ggml_type2ELi1ELb0ELb0EEvPKvS2_PKi31ggml_cuda_mm_fusion_args_devicePfj15HIP_vector_typeIjLj3EEjjjS8_jjjS8_jjjj|event=barrier|pc=0x000000000000b8cc|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:fd5ac4e13780e469|kernel=_ZL13mul_mat_vec_qIL9ggml_type2ELi1ELb0ELb0EEvPKvS2_PKi31ggml_cuda_mm_fusion_args_devicePfj15HIP_vector_typeIjLj3EEjjjS8_jjjS8_jjjj|event=barrier|pc=0x000000000000b8d0|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 1,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 1,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }
