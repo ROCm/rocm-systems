@@ -542,15 +542,16 @@ public:
   friend bool operator==(const VmCacheNamespace &, const VmCacheNamespace &) = default;
 };
 
-/// @brief Immutable, operation-scoped view of one GPU address-space binding.
+/// @brief Immutable view of one GPU address-space binding.
 ///
 /// @details The registry lock selects an immutable translator/backing generation.
 /// Ordinary snapshots share that generation's retirement state; each pinned
 /// snapshot has independent retirement state and survives root replacement.
 /// Access methods hold a shared revocation lease, allowing an in-flight access
 /// to finish without mixing roots. Invalidation and unregistration revoke both
-/// kinds of snapshot. Functional instruction fetch reuses an ordinary snapshot
-/// within a quantum, checking is_current() before reuse.
+/// kinds of snapshot. An admitted kernel dispatch retains a pinned snapshot;
+/// functional instruction fetch without one reuses an ordinary snapshot within
+/// a quantum, checking is_current() before reuse.
 class GpuVmAccess {
 public:
   /// @brief Whether this snapshot's access state is still valid.

@@ -1453,7 +1453,7 @@ template <bool EnableAsync>
   };
 
   std::optional<GpuVmAccess> fresh_vm_access;
-  const GpuVmAccess *vm_access = nullptr;
+  const GpuVmAccess *vm_access = active->vm_access();
   InstructionVmSnapshot *snapshot = instruction_vm_snapshot_;
   // A callback may recursively issue another wave. Keep its fetch from
   // replacing the snapshot borrowed by this instruction's later debug probes.
@@ -1466,24 +1466,26 @@ template <bool EnableAsync>
       handle_terminal_vm_fault(*active, VmAccessOutcome::Faulted);
       return;
     }
-    const AddressSpaceHandle address_space = active->address_space();
-    if (snapshot && snapshot->compute_unit == this) {
-      auto &cached = *snapshot;
-      if (cached.owner != gpu_vm_ || cached.address_space != address_space || cached.vmid != vmid ||
-          !cached.access || !cached.access->is_current()) {
-        cached.access =
+    if (vm_access == nullptr) {
+      const AddressSpaceHandle address_space = active->address_space();
+      if (snapshot && snapshot->compute_unit == this) {
+        auto &cached = *snapshot;
+        if (cached.owner != gpu_vm_ || cached.address_space != address_space ||
+            cached.vmid != vmid || !cached.access || !cached.access->is_current()) {
+          cached.access =
+              address_space ? gpu_vm_->snapshot(address_space) : gpu_vm_->snapshot_vmid(vmid);
+          cached.owner = gpu_vm_;
+          cached.address_space = address_space;
+          cached.vmid = vmid;
+        }
+        if (cached.access)
+          vm_access = &*cached.access;
+      } else {
+        fresh_vm_access =
             address_space ? gpu_vm_->snapshot(address_space) : gpu_vm_->snapshot_vmid(vmid);
-        cached.owner = gpu_vm_;
-        cached.address_space = address_space;
-        cached.vmid = vmid;
+        if (fresh_vm_access)
+          vm_access = &*fresh_vm_access;
       }
-      if (cached.access)
-        vm_access = &*cached.access;
-    } else {
-      fresh_vm_access =
-          address_space ? gpu_vm_->snapshot(address_space) : gpu_vm_->snapshot_vmid(vmid);
-      if (fresh_vm_access)
-        vm_access = &*fresh_vm_access;
     }
     if (!vm_access) {
       drain_async_window();
