@@ -26,7 +26,7 @@ on:
       corpus_ref:
         description: "Branch, tag, or SHA used by all corpus tests"
         # Last updated on 2026/09/23.
-        default: "1bcc3424e4654bd5dfe2d66c5af4f28138dbfb65"
+        default: "d0e3182e981dfc45e38258965b297aa918c33f76"
         required: true
 
 concurrency:
@@ -45,7 +45,7 @@ env:
   ROCJITSU_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
   ROCJITSU_DBT_VENV: ${{ github.workspace }}/gfx1250-dbt-venv-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_HSACO_CORPUS: ${{ github.workspace }}/gfx1250-packaged-hsacos-${{ github.run_id }}-${{ github.run_attempt }}
-  ROCJITSU_DBT_CORPUS_REF: 1bcc3424e4654bd5dfe2d66c5af4f28138dbfb65
+  ROCJITSU_DBT_CORPUS_REF: d0e3182e981dfc45e38258965b297aa918c33f76
   ROCJITSU_DBT_SHA_FRAGMENTS: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/fragments
   ROCJITSU_DBT_SHA_MANIFEST: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/gfx1250-b0-a0-sha-pairs.json
   ROCM_SDK_VERSION: 10.1.0a20260812

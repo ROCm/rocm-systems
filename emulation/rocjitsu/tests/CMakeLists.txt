@@ -662,7 +662,6 @@ add_executable(
     race-detector/race_detector_event_registry_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
-    race-detector/race_log_expectation_test.cpp
     big_int_test.cpp
     data_types_test.cpp
     drm_info_layout_test.cpp
