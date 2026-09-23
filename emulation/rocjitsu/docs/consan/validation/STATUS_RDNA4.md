@@ -48,7 +48,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | PyTorch | P3 | native histogram (`pytorch-torch-histc`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | llama.cpp | P3 | RMS norm (`llama-rdna4-rms-norm`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟥 Sep 23: exit 1 |
-| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟥 Sep 23: exit 1 | 🟥 Sep 23: ConSan rejected a code object before execution; exit 92 |
+| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟥 Sep 23: exit 1 | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟥 Sep 23: ConSan rejected a code object before execution; exit 92 | 🟥 Sep 23: ConSan rejected a code object before execution; exit 92 |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟥 Sep 23: no applicable code object; analysis incomplete | 🟥 Sep 23: no applicable code object; analysis incomplete |
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟥 Sep 23: no applicable code object; analysis incomplete | 🟥 Sep 23: no applicable code object; analysis incomplete |
@@ -190,3 +190,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `d128-block` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round4/d128-block-default`.
 - `d128-block` / supercollider: exit 1. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round4/d128-block-supercollider`.
 - `d128-pressure` / default: exit 1. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round4/d128-pressure-default`.
+- `d128-pressure` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round4/d128-pressure-supercollider`.
