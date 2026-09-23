@@ -57,6 +57,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
@@ -1955,13 +1956,20 @@ public:
   explicit AsyncEventPlugin(std::string name = "async-events") : ExecutionPlugin(std::move(name)) {}
   bool supports_async_instructions() const override { return true; }
   bool observes_sgpr_reads() const override { return false; }
-  void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &inst, Wavefront &) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst, Wavefront &wf) override {
+    if (inst.mnemonic() == "s_set_vgpr_msb")
+      hazard_before_set_vgpr = wf.setreg_vgpr_msb_hazard();
+  }
+  void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &inst, Wavefront &wf) override {
     EXPECT_EQ(std::this_thread::get_id(), issuer_thread);
     EXPECT_EQ(inst.mnemonic(), "v_wmma_f32_16x16x64_fp8_fp8");
+    hazard_at_async_issue = wf.setreg_vgpr_msb_hazard();
     ++issued;
   }
   std::thread::id issuer_thread = std::this_thread::get_id();
   unsigned issued = 0;
+  std::optional<bool> hazard_at_async_issue;
+  std::optional<bool> hazard_before_set_vgpr;
 };
 
 TEST(ExecutionPluginTest, AsyncSupportComesFromCapabilities) {
@@ -1995,6 +2003,33 @@ std::vector<uint32_t> independent_wmma_kernel() {
   }
   code.push_back(cdna5::build_sopp(cdna5::kSEndpgmSopp, {})[0]);
   return code;
+}
+
+TEST(ExecutionPluginTest, AsyncMmaEndsSetregVgprMsbAdjacencyHazard) {
+  PluginFixture f(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4);
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto observer = std::make_unique<AsyncEventPlugin>();
+  auto *events = observer.get();
+  ASSERT_TRUE(f.plugin_group_->add(std::move(observer)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
+  constexpr auto set_vgpr_msb = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0xC3});
+  std::vector<uint32_t> code{setreg[0], 0u};
+  auto mma_code = independent_wmma_kernel();
+  code.insert(code.end(), mma_code.begin(), mma_code.end() - 1);
+  code.push_back(set_vgpr_msb[0]);
+  code.push_back(mma_code.back());
+
+  f.run_kernel(code.data(), code.size(), 32, 32);
+  f.shutdown();
+  ASSERT_EQ(events->issued, 1u);
+  ASSERT_TRUE(events->hazard_at_async_issue.has_value());
+  EXPECT_FALSE(*events->hazard_at_async_issue);
+  ASSERT_TRUE(events->hazard_before_set_vgpr.has_value());
+  EXPECT_FALSE(*events->hazard_before_set_vgpr);
 }
 
 TEST(ExecutionPluginTest, SynchronousObserverDisablesActualMmaOffload) {
