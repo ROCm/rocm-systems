@@ -4,9 +4,13 @@
 #include <amd_smi_test/test_base.h>
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
@@ -94,6 +98,40 @@ auto WriteBlobToTempFile(const std::vector<uint8_t>& blob,
   stream.close();
 
   return file_path;
+}
+
+using AttrId = amd::smi::details::AMDGpuMetricAttributeId_t;
+
+// Serializes a dynamic (v1.9) gpu_metrics table of uint64 attributes, laid out
+// as the driver emits it: header, attribute count, then encoded id + values.
+auto BuildDynamicU64Blob(const std::vector<std::pair<AttrId, std::vector<uint64_t>>>& attrs)
+    -> std::vector<std::byte> {
+  std::vector<std::byte> blob;
+  auto put = [&blob](const auto& v) {
+    const auto* p = reinterpret_cast<const std::byte*>(&v);
+    blob.insert(blob.end(), p, p + sizeof(v));
+  };
+  put(amd::smi::details::AMDGpuDynamicMetricsHeader_v1_t{0, 1, 9});
+  put(static_cast<uint32_t>(attrs.size()));
+  for (const auto& [id, values] : attrs) {
+    put(amd::smi::details::amdgpu_metrics_encode_attr(
+        0, static_cast<uint64_t>(amd::smi::details::AMDGpuMetricAttributeType_t::TYPE_UINT64),
+        static_cast<uint64_t>(id), values.size()));
+    for (const auto v : values) put(v);
+  }
+  const auto size = static_cast<uint16_t>(blob.size());
+  std::memcpy(blob.data(), &size, sizeof(size));
+  return blob;
+}
+
+auto ToPublicMetrics(const std::vector<std::byte>& blob) -> amd::smi::AMGpuMetricsPublicLatest_t {
+  amd::smi::AMDGpuDynamicMetrics_t dyn;
+  EXPECT_EQ(dyn.parse_from_buffer(blob.data(), blob.size()), RSMI_STATUS_SUCCESS);
+  amd::smi::GpuMetricsBaseDynamic_t metrics;
+  metrics.set_parsed_dynamic(std::move(dyn));
+  const auto [status, out] = metrics.copy_internal_to_external_metrics();
+  EXPECT_EQ(status, RSMI_STATUS_SUCCESS);
+  return out;
 }
 
 }  // namespace
@@ -188,4 +226,28 @@ TEST(GpuUnit, XCPMetricDynamicVersionSupported) {
 
     std::filesystem::remove(fake_path);
   }
+}
+
+// MI450 publishes one xGMI read/write data counter (its GPU-CPU link). It must
+// land in link 0 rather than be dropped, leaving every link "not reported".
+TEST(GpuUnit, DynamicMetricsXgmiSingleInstanceFillsFirstLink) {
+  const auto out = ToPublicMetrics(BuildDynamicU64Blob({
+      {AttrId::XGMI_READ_DATA_ACC, {449353}},
+      {AttrId::XGMI_WRITE_DATA_ACC, {0}},
+  }));
+  EXPECT_EQ(out.xgmi_read_data_acc[0], 449353u);
+  EXPECT_EQ(out.xgmi_write_data_acc[0], 0u);
+  EXPECT_EQ(out.xgmi_read_data_acc[1], UINT64_MAX);
+  EXPECT_EQ(out.xgmi_write_data_acc[1], UINT64_MAX);
+}
+
+// Per-link arrays keep mapping element by element.
+TEST(GpuUnit, DynamicMetricsXgmiPerLinkArrayCopiesEachLink) {
+  const auto out = ToPublicMetrics(BuildDynamicU64Blob({
+      {AttrId::XGMI_READ_DATA_ACC, {10, 20, 30}},
+  }));
+  EXPECT_EQ(out.xgmi_read_data_acc[0], 10u);
+  EXPECT_EQ(out.xgmi_read_data_acc[1], 20u);
+  EXPECT_EQ(out.xgmi_read_data_acc[2], 30u);
+  EXPECT_EQ(out.xgmi_read_data_acc[3], UINT64_MAX);
 }

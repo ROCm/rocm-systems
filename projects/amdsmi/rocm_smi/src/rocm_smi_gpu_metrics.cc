@@ -2446,7 +2446,12 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBaseDynamic_t::copy_internal_to_externa
     using Dst = std::remove_reference_t<decltype(dst)>;
     using T = std::remove_cv_t<std::remove_extent_t<Dst>>;
     auto v = std::get_if<std::vector<T>>(&r.m_value);
-    if (!v) return;  // Not a vector type, skip
+    if (!v) {
+      // A single-instance row parses as a scalar (MI450's one xGMI data
+      // counter); it is element 0.
+      if (const auto* x = std::get_if<T>(&r.m_value)) dst[0] = *x;
+      return;
+    }
     const std::size_t n = std::min<std::size_t>(v->size(), cap);
     std::copy_n(v->data(), n, dst);
   };
