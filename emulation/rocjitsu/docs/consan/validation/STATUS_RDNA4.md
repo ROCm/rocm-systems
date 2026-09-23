@@ -242,3 +242,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   top-k (no applicable instrumentation). These counts span hook hashes; final
   qualification must use matching clean/fault configurations. No fault miss is
   promoted by a clean pass; the Qwen 0/8 results remain recorded.
+- After the branch-island fix, all **447 physical device tests** pass on
+  gfx1201 (serialized, 63.27 seconds). No test failed or was skipped. Log:
+  `/home/benoit/workspace/consan-validation/rdna4-20260923/d128-debug/clause-physical.log`.
+  This regression gate does not replace external-workload fault qualification.
