@@ -15,6 +15,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace rocprofsys::utility
