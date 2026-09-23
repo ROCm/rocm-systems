@@ -113,25 +113,21 @@ ncclResult_t ncclIbRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, si
                                        int* segFds, int type, void** mhandle) {
   ncclResult_t ret = ncclSuccess;
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
+  *mhandle = NULL;
   if (nSeg < 1 || nSeg > NCCL_IB_MAX_SEGMENTS) {
     WARN("NET/IB: multi-segment registration with %d segments exceeds NCCL_IB_MAX_SEGMENTS=%d", nSeg,
          NCCL_IB_MAX_SEGMENTS);
     return ncclInvalidUsage;
   }
-  if (nSeg > 1) {
-    uint32_t peerCaps =
-      base->isSend ? ((struct ncclIbSendComm*)comm)->peerCaps : ((struct ncclIbRecvComm*)comm)->peerCaps;
-    if ((peerCaps & NCCL_IB_CAP_MULTISEG) == 0) {
-      INFO(NCCL_NET | NCCL_REG,
-           "NET/IB: peer does not advertise multi-segment CTS side table; declining %d-segment registration", nSeg);
-      return ncclInvalidUsage;
-    }
+  uint32_t peerCaps =
+    base->isSend ? ((struct ncclIbSendComm*)comm)->peerCaps : ((struct ncclIbRecvComm*)comm)->peerCaps;
+  if (ncclIbDeclineMultiSegRegistration(peerCaps, nSeg)) {
+    INFO(NCCL_NET | NCCL_REG,
+         "NET/IB: peer does not advertise multi-segment CTS side table; declining %d-segment registration", nSeg);
+    return ncclInvalidUsage;
   }
-  struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)calloc(1, sizeof(struct ncclIbMrHandle));
-  if (mhandleWrapper == nullptr) {
-    WARN("Failed to allocate IB MR handle wrapper");
-    return ncclSystemError;
-  }
+  struct ncclIbMrHandle* mhandleWrapper = NULL;
+  NCCLCHECK(ncclCalloc(&mhandleWrapper, 1));
   mhandleWrapper->nSegments = nSeg;
   for (int s = 0; s < nSeg; s++) {
     mhandleWrapper->segStart[s] = (uintptr_t)segAddrs[s];

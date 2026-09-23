@@ -9,11 +9,12 @@
 // src/transport/net_ib/multiseg.h and run in rccl-UnitTestsFixtures without
 // IB hardware, a GPU, or MPI.
 
-#include <gtest/gtest.h>
-
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <vector>
+
+#include <gtest/gtest.h>
 
 // Pure helpers under test (no ibverbs / RCCL deps).
 #include "../src/transport/net_ib/multiseg.h"
@@ -67,6 +68,35 @@ TEST(NetIbMultiSeg, ConnectCapabilitiesPreserveDeviceName) {
     EXPECT_STREQ(devName, "bnxt_re0");
     EXPECT_EQ(ncclIbGetConnectCaps(devName, sizeof(devName)),
               NCCL_IB_CAP_MULTISEG);
+}
+
+// Merged vNIC names can fill MAX_MERGED_DEV_NAME (648). The helper must still
+// terminate the C string before the 8-byte trailer and keep the trailer valid.
+TEST(NetIbMultiSeg, ConnectCapabilitiesTruncatesNameThatFillsTrailer) {
+    char devName[648];
+    std::memset(devName, 'x', sizeof(devName));
+    ncclIbSetConnectCaps(devName, sizeof(devName), NCCL_IB_CAP_MULTISEG);
+    const size_t trailer = sizeof(ncclIbConnectCapsTrailer);
+    EXPECT_EQ(devName[sizeof(devName) - trailer - 1], '\0');
+    EXPECT_EQ(ncclIbGetConnectCaps(devName, sizeof(devName)),
+              NCCL_IB_CAP_MULTISEG);
+}
+
+// A peer that never advertised NCCL_IB_CAP_MULTISEG cannot parse the
+// per-segment CTS side table, so multi-segment registration must be declined.
+// Every MPI test connects two same-build peers, so only a unit test reaches it.
+TEST(NetIbMultiSeg, MultiSegRegistrationDeclinedWithoutPeerCapability) {
+    EXPECT_TRUE(ncclIbDeclineMultiSegRegistration(0u, 4));
+    EXPECT_TRUE(ncclIbDeclineMultiSegRegistration(~NCCL_IB_CAP_MULTISEG, 4));
+}
+
+TEST(NetIbMultiSeg, MultiSegRegistrationAcceptedWithPeerCapability) {
+    EXPECT_FALSE(ncclIbDeclineMultiSegRegistration(NCCL_IB_CAP_MULTISEG, 4));
+}
+
+TEST(NetIbMultiSeg, SingleSegmentRegistrationNeverDeclined) {
+    EXPECT_FALSE(ncclIbDeclineMultiSegRegistration(0u, 1));
+    EXPECT_FALSE(ncclIbDeclineMultiSegRegistration(NCCL_IB_CAP_MULTISEG, 1));
 }
 
 // === Segment selection and uniformity helpers ===============================
@@ -127,9 +157,51 @@ TEST(NetIbMultiSeg, OverlappingRangeZeroLengthIsEmpty) {
               0);
 }
 
+TEST(NetIbMultiSeg, ZeroLengthWrUsesContainingSegment) {
+    Layout L = MakeUniform(kBase, kSeg, 4);
+    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(), kBase), 0);
+    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(), kBase + kSeg), 1);
+    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(),
+                                              kBase + 2 * kSeg + 64),
+              2);
+}
+
+TEST(NetIbMultiSeg, ZeroLengthWrAtLastExclusiveEndUsesLastMr) {
+    Layout L = MakeUniform(kBase, kSeg, 4);
+    uintptr_t end = kBase + 4 * kSeg;
+    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(), end), 3);
+    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(), end + 1), -1);
+    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(L.n(), L.start.data(), L.len.data(), kBase - 1), -1);
+}
+
+TEST(NetIbMultiSeg, ZeroLengthWrNullOrEmptyLayout) {
+    EXPECT_EQ(ncclIbSegmentIndexForZeroLength(0, nullptr, nullptr, kBase), -1);
+}
+
 TEST(NetIbMultiSeg, UniformLayoutAccepted) {
     std::vector<size_t> len(4, kSeg);
     EXPECT_TRUE(ncclIbSegmentsUniform(4, len.data()));
+}
+
+TEST(NetIbMultiSeg, TrailingSegmentMayBeSmaller) {
+    std::vector<size_t> len = {kSeg, kSeg, kSeg, kSeg / 2};
+    EXPECT_TRUE(ncclIbSegmentsUniform(4, len.data()));
+}
+
+TEST(NetIbMultiSeg, ShortLeadingSegmentAccepted) {
+    std::vector<size_t> len = {kSeg / 2, kSeg, kSeg, kSeg};
+    EXPECT_TRUE(ncclIbSegmentsUniform(4, len.data()));
+}
+
+TEST(NetIbMultiSeg, TrailingSegmentMayNotBeLarger) {
+    std::vector<size_t> len = {kSeg, kSeg, kSeg, kSeg * 2};
+    EXPECT_FALSE(ncclIbSegmentsUniform(4, len.data()));
+}
+
+TEST(NetIbMultiSeg, SingleOrEmptyLayoutIsUniform) {
+    std::vector<size_t> len = {kSeg};
+    EXPECT_TRUE(ncclIbSegmentsUniform(1, len.data()));
+    EXPECT_TRUE(ncclIbSegmentsUniform(0, nullptr));
 }
 
 TEST(NetIbMultiSeg, NonUniformInteriorRejected) {
@@ -341,4 +413,69 @@ TEST(NetIbSplit, SlicesTileRangeContiguously) {
             EXPECT_EQ(sum, len) << "off=" << off << " len=" << len;
         }
     }
+}
+
+TEST(NetIbCtsLayout, AcceptsMonotonicNonzeroRkeys) {
+    const uint64_t start[] = {kBase, kBase + kSeg, kBase + 2 * kSeg};
+    const uint32_t rkeys[] = {1u, 2u, 3u};
+    EXPECT_TRUE(ncclIbCtsRemoteLayoutValid(3, /*remDevIdx=*/0, /*maxDevs=*/2, NCCL_IB_MAX_SEGMENTS, start, rkeys));
+}
+
+TEST(NetIbCtsLayout, RejectsZeroSegmentCount) {
+    const uint64_t start[] = {kBase};
+    const uint32_t rkeys[] = {1u};
+    EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(0, 0, 2, NCCL_IB_MAX_SEGMENTS, start, rkeys));
+}
+
+TEST(NetIbCtsLayout, RejectsSegmentCountAboveCap) {
+    const uint64_t start[] = {kBase};
+    const uint32_t rkeys[] = {1u};
+    EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(NCCL_IB_MAX_SEGMENTS + 1, 0, 2, NCCL_IB_MAX_SEGMENTS, start, rkeys));
+}
+
+TEST(NetIbCtsLayout, RejectsOutOfRangeDeviceIndex) {
+    const uint64_t start[] = {kBase, kBase + kSeg};
+    const uint32_t rkeys[] = {1u, 2u};
+    EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(2, /*remDevIdx=*/-1, 2, NCCL_IB_MAX_SEGMENTS, start, rkeys));
+    EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(2, /*remDevIdx=*/2, 2, NCCL_IB_MAX_SEGMENTS, start, rkeys));
+}
+
+TEST(NetIbCtsLayout, RejectsNonMonotonicSegStart) {
+    const uint64_t start[] = {kBase, kBase, kBase + 2 * kSeg};
+    const uint32_t rkeys[] = {1u, 2u, 3u};
+    EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(3, 0, 2, NCCL_IB_MAX_SEGMENTS, start, rkeys));
+}
+
+TEST(NetIbCtsLayout, RejectsZeroRkey) {
+    const uint64_t start[] = {kBase, kBase + kSeg};
+    const uint32_t rkeys[] = {1u, 0u};
+    EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(2, 0, 2, NCCL_IB_MAX_SEGMENTS, start, rkeys));
+}
+
+TEST(NetIbCtsLayout, RejectsNullTables) {
+    const uint64_t start[] = {kBase, kBase + kSeg};
+    const uint32_t rkeys[] = {1u, 2u};
+    EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(2, 0, 2, NCCL_IB_MAX_SEGMENTS, nullptr, rkeys));
+    EXPECT_FALSE(ncclIbCtsRemoteLayoutValid(2, 0, 2, NCCL_IB_MAX_SEGMENTS, start, nullptr));
+}
+
+TEST(NetIbCtsLayout, AcceptsSegmentCountAtCap) {
+    std::vector<uint64_t> start(NCCL_IB_MAX_SEGMENTS);
+    std::vector<uint32_t> rkeys(NCCL_IB_MAX_SEGMENTS, 1u);
+    for (int s = 0; s < NCCL_IB_MAX_SEGMENTS; s++) start[s] = kBase + (uint64_t)s * kSeg;
+    EXPECT_TRUE(
+        ncclIbCtsRemoteLayoutValid(NCCL_IB_MAX_SEGMENTS, 0, 2, NCCL_IB_MAX_SEGMENTS, start.data(), rkeys.data()));
+}
+
+TEST(NetIbCtsLayout, AcceptsLastDeviceIndex) {
+    const uint64_t start[] = {kBase, kBase + kSeg};
+    const uint32_t rkeys[] = {1u, 2u};
+    EXPECT_TRUE(ncclIbCtsRemoteLayoutValid(2, /*remDevIdx=*/1, /*maxDevs=*/2, NCCL_IB_MAX_SEGMENTS, start, rkeys));
+}
+
+TEST(NetIbMultiSeg, HostVmmBaseZeroDoesNotWrapRemaining)
+{
+    const size_t segSize = kSeg;
+    EXPECT_EQ(ncclIbBytesRemainingInSegment(kBase, 0, segSize), segSize);
+    EXPECT_EQ(ncclIbBytesRemainingInSegment(kBase + 4096, kBase, segSize), segSize - 4096);
 }

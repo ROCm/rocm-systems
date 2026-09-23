@@ -95,7 +95,26 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
   int nreqs = slots[0].nreqs;
   if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
 
-  int nqps = ncclIbCommBaseGetNqpsPerRequest(&comm->base);
+  int nqps = 0;
+  NCCLCHECK(ncclIbCommBaseGetNqpsPerRequest(&comm->base, &nqps));
+#ifdef NCCL_ENABLE_NET_PROFILING
+  if (nqps > MAX_QPS_PER_REQ) {
+    WARN("NET/IB: QP count %d exceeds maximum profiler event handle capacity %d", nqps, MAX_QPS_PER_REQ);
+    return ncclInternalError;
+  }
+#endif
+  if (nqps > NCCL_IB_MAX_QPS) {
+    WARN("NET/IB: QP count %d exceeds maximum QP capacity %d", nqps, NCCL_IB_MAX_QPS);
+    return ncclInternalError;
+  }
+  ncclIbQp* qps[NCCL_IB_MAX_QPS];
+  int qpIndexes[NCCL_IB_MAX_QPS];
+  int qpsPerDev[NCCL_IB_MAX_DEVS_PER_NIC] = {};
+  for (int i = 0; i < nqps; i++) {
+    NCCLCHECK(ncclIbCommBaseGetQpForRequest(&comm->base, reqs[0]->id, i, &qps[i], &qpIndexes[i]));
+    qpsPerDev[comm->base.qps[qpIndexes[i]].devIndex]++;
+  }
+  uint8_t* weights = reqs[0]->send.weights;
   ncclResult_t ret;
 
   // Cumulative wr_id across requests; placed on the final signaled WR so
@@ -111,23 +130,30 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
 
   int64_t splitDataThreshold = rcclParamIbSplitDataThreshold();
   uint32_t sendOffsets[NCCL_NET_IB_MAX_RECVS] = {0};
+#ifdef NCCL_ENABLE_NET_PROFILING
+  for (int r = 0; r < nreqs; r++) reqs[r]->pInfo[0].nEventHandles = 0;
+#endif
 
   int qpIndex = -1;
   ncclIbQp* qp = NULL;
   for (int i = 0; i < nqps; i++) {
-    NCCLCHECK(ncclIbCommBaseGetQpForRequest(&comm->base, reqs[0]->id, i, &qp, &qpIndex));
+    qp = qps[i];
+    qpIndex = qpIndexes[i];
     int devIndex = qp->devIndex;
     int remDevIdx = qp->remDevIdx;
+    int origDevIndex = comm->base.qps[qpIndex].devIndex;
 
     // Per-request chunk length on this QP (computed independently of the
     // resiliency skip so skipped QPs still advance the offsets consistently).
     uint32_t chunkLen[NCCL_NET_IB_MAX_RECVS];
     for (int r = 0; r < nreqs; r++) {
-      int chunkSize;
+      uint32_t chunkSize;
       if (reqs[r]->send.size < splitDataThreshold) {
         chunkSize = (i == 0) ? reqs[r]->send.size : 0;
       } else {
-        chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), IB_WRITE_CHUNK_ALIGNMENT) * IB_WRITE_CHUNK_ALIGNMENT;
+        chunkSize = DIVUP(DIVUP((uint64_t)reqs[r]->send.size * weights[origDevIndex], 100 * qpsPerDev[origDevIndex]),
+                          IB_WRITE_CHUNK_ALIGNMENT) *
+                    IB_WRITE_CHUNK_ALIGNMENT;
       }
       chunkLen[r] = std::min<uint32_t>(reqs[r]->send.size - sendOffsets[r], chunkSize);
     }
@@ -166,18 +192,37 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
       }
       // Remote segment tables from the side table when the peer published a
       // matching multi-seg layout; otherwise a single-segment view of the CTS slot.
+      // Snapshot starts and rkeys once: the WR path must ship the same values
+      // ncclIbCtsRemoteLayoutValid checked, not a later volatile re-read.
       uint64_t rVA[NCCL_IB_MAX_SEGMENTS], rOff[NCCL_IB_MAX_SEGMENTS + 1];
+      uint32_t remoteRkeys[NCCL_IB_MAX_SEGMENTS];
       int nRemote;
       uint64_t remoteReqOff = 0;
       bool remoteMulti = ncclIbCtsRemoteMultiSeg(comm, slot, r);
       if (remoteMulti) {
-        nRemote = side[r].nSegments;
-        for (int s = 0; s < nRemote; s++) {
-          rVA[s] = side[r].segStart[s];
-          rOff[s] = side[r].segStart[s] - side[r].segStart[0];
+        uint32_t remoteSegments = side[r].nSegments;
+        uint64_t starts[NCCL_IB_MAX_SEGMENTS];
+        const uint32_t nCopy =
+          (remoteSegments >= 1 && remoteSegments <= NCCL_IB_MAX_SEGMENTS && remDevIdx >= 0 &&
+           remDevIdx < NCCL_IB_MAX_DEVS_PER_NIC)
+            ? remoteSegments
+            : 0;
+        for (uint32_t s = 0; s < nCopy; s++) {
+          starts[s] = side[r].segStart[s];
+          remoteRkeys[s] = side[r].segRkeys[s][remDevIdx];
         }
-        if (remoteBase < side[r].segStart[0]) return ncclInternalError;
-        remoteReqOff = remoteBase - side[r].segStart[0];
+        if (!ncclIbCtsRemoteLayoutValid(remoteSegments, remDevIdx, NCCL_IB_MAX_DEVS_PER_NIC, NCCL_IB_MAX_SEGMENTS,
+                                        nCopy ? starts : NULL, nCopy ? remoteRkeys : NULL)) {
+          WARN("NET/IB: received invalid segment layout (nSegments=%u remDevIdx=%d)", remoteSegments, remDevIdx);
+          return ncclInternalError;
+        }
+        nRemote = (int)remoteSegments;
+        for (int s = 0; s < nRemote; s++) {
+          rVA[s] = starts[s];
+          rOff[s] = starts[s] - starts[0];
+        }
+        if (remoteBase < starts[0]) return ncclInternalError;
+        remoteReqOff = remoteBase - starts[0];
         uint64_t remoteReqEnd = remoteReqOff + slots[r].size;
         if (remoteReqEnd < remoteReqOff) return ncclInternalError;
         while (nRemote > 1 && rOff[nRemote - 1] >= remoteReqEnd) nRemote--;
@@ -190,7 +235,8 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
       }
 
       if (chunkLen[r] == 0) {
-        // Zero-length write preserves the chain/imm; segment-0 keys suffice.
+        // Zero-length write preserves the chain/imm. The remote address can sit
+        // in a later physical segment, so use that segment's rkey.
         struct ibv_send_wr* wr = comm->wrs + w;
         struct ibv_sge* sge = comm->sges + w;
         memset(wr, 0, sizeof(struct ibv_send_wr));
@@ -198,7 +244,15 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
         wr->send_flags = 0;
         wr->wr_id = wr_id;
         wr->wr.rdma.remote_addr = remoteBase + sendOffsets[r];
-        wr->wr.rdma.rkey = remoteMulti ? side[r].segRkeys[0][remDevIdx] : slots[r].rkeys[remDevIdx];
+        if (remoteMulti) {
+          uint64_t off = remoteReqOff + sendOffsets[r];
+          int s = ncclIbSegmentForOffset(nRemote, rOff, off);
+          if (s < 0 && off == rOff[nRemote]) s = nRemote - 1;
+          if (s < 0) return ncclInternalError;
+          wr->wr.rdma.rkey = remoteRkeys[s];
+        } else {
+          wr->wr.rdma.rkey = slots[r].rkeys[remDevIdx];
+        }
         sge->addr = localBase + sendOffsets[r];
         sge->length = 0;
         sge->lkey = reqs[r]->send.lkeys[devIndex];
@@ -227,7 +281,7 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
           wr->send_flags = 0;
           wr->wr_id = wr_id;
           wr->wr.rdma.remote_addr = slices[k].remoteAddr;
-          wr->wr.rdma.rkey = remoteMulti ? side[r].segRkeys[slices[k].remoteSeg][remDevIdx] : slots[r].rkeys[remDevIdx];
+          wr->wr.rdma.rkey = remoteMulti ? remoteRkeys[slices[k].remoteSeg] : slots[r].rkeys[remDevIdx];
           sge->addr = slices[k].localAddr;
           sge->length = slices[k].len;
           sge->lkey =
@@ -271,7 +325,26 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
     for (int k = 0; k < w - 1; k++) comm->wrs[k].next = comm->wrs + k + 1;
     comm->wrs[w - 1].next = NULL;
 
+#ifdef NCCL_ENABLE_NET_PROFILING
+    for (int r = 0; r < nreqs; r++) {
+      int nEventHandles = reqs[r]->pInfo[0].nEventHandles;
+      reqs[r]->pInfo[0].qpIndex[nEventHandles] = qpIndex;
+      int64_t pluginId = NCCL_PROFILER_NET_TYPE_IB | NCCL_PROFILER_NET_IB_VER;
+      reqs[r]->pInfo[0].data.type = ncclProfileQp;
+      reqs[r]->pInfo[0].data.qp.device = devIndex;
+      reqs[r]->pInfo[0].data.qp.wr_id = lastWr->wr_id;
+      reqs[r]->pInfo[0].data.qp.opcode = lastWr->opcode;
+      reqs[r]->pInfo[0].data.qp.qpNum = qp->qp->qp_num;
+      reqs[r]->pInfo[0].data.qp.length = chunkLen[r];
+      void* pHandle = reqs[r]->pInfo[0].pHandle;
+      NCCLCHECK(ncclProfilerFunction(&reqs[r]->pInfo[0].qpEventHandles[nEventHandles], ncclProfilerNetEventStart,
+                                     pHandle, pluginId, &reqs[r]->pInfo[0].data));
+      reqs[r]->pInfo[0].nEventHandles++;
+    }
+#endif
+
     struct ibv_send_wr* bad_wr;
+    if (ncclIbWqeLatEnabled) ncclIbWqeLatMonStampSend(qp, comm->wrs);
     ret = wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr);
     if (ret != ncclSuccess) {
       ncclIbStatsFatalError(&comm->base.stats);
@@ -544,6 +617,14 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
   for (int r = 1; r < nreqs; r++)
     while (slots[r].idx != idx);
   std::atomic_thread_fence(std::memory_order_seq_cst); // order the nreqsPtr load against tag/rkey/addr loads below
+  // Side table and CTS are separate RDMA writes. Wait for the matching idx so
+  // a late side table is not treated as single-segment.
+  if (comm->peerCaps & NCCL_IB_CAP_MULTISEG) {
+    volatile struct ncclIbSegLayout* side = comm->segLayoutFifo[slot];
+    for (int r = 0; r < nreqs; r++)
+      while (side[r].idx != idx);
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+  }
   for (int r = 0; r < nreqs; r++) {
     if (reqs[r] != NULL || slots[r].tag != tag) continue;
 
@@ -703,15 +784,9 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
     wr.wr_id = slot;
   }
 
-  bool postSide = false;
-  if (comm->peerCaps & NCCL_IB_CAP_MULTISEG) {
-    for (int i = 0; i < req->nreqs; i++) {
-      if (comm->remSegLayout.elems[slot][i].nSegments > 1) {
-        postSide = true;
-        break;
-      }
-    }
-  }
+  // Always publish the side table when the peer understands it, including
+  // nSegments==1, so the sender can wait on idx without hanging.
+  bool postSide = (comm->peerCaps & NCCL_IB_CAP_MULTISEG);
 
   struct ibv_sge sgeSide;
   struct ibv_send_wr wrSide;
@@ -877,22 +952,27 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
     localElem[i].tag = tags[i];
     localElem[i].idx = comm->base.fifoHead + 1; // last store in the 64-byte CTS slot
 
-    // Multi-segment layout goes on the side table, never in CTS.
+    // Multi-segment layout goes on the side table, never in CTS. Always store
+    // idx when the peer has the cap so the sender can wait for this slot.
     struct ncclIbSegLayout* sideElem = comm->remSegLayout.elems[slot];
-    if (mhandleWrapper->nSegments > 1 && (comm->peerCaps & NCCL_IB_CAP_MULTISEG)) {
-      sideElem[i].nSegments = mhandleWrapper->nSegments;
-      for (int s = 0; s < mhandleWrapper->nSegments; s++) {
-        sideElem[i].segStart[s] = (uint64_t)mhandleWrapper->segStart[s];
-        for (int j = 0; j < comm->base.vProps.ndevs; j++) {
-          if (mhandleWrapper->segMrs[s][j] == NULL) {
-            WARN("NET/IB: irecv[%d] missing MR for segment %d device %d", i, s, j);
-            ret = ncclInternalError;
-            goto irecvFail;
+    if (comm->peerCaps & NCCL_IB_CAP_MULTISEG) {
+      if (mhandleWrapper->nSegments > 1) {
+        sideElem[i].nSegments = mhandleWrapper->nSegments;
+        for (int s = 0; s < mhandleWrapper->nSegments; s++) {
+          sideElem[i].segStart[s] = (uint64_t)mhandleWrapper->segStart[s];
+          for (int j = 0; j < comm->base.vProps.ndevs; j++) {
+            if (mhandleWrapper->segMrs[s][j] == NULL) {
+              WARN("NET/IB: irecv[%d] missing MR for segment %d device %d", i, s, j);
+              ret = ncclInternalError;
+              goto irecvFail;
+            }
+            sideElem[i].segRkeys[s][j] = mhandleWrapper->segMrs[s][j]->rkey;
           }
-          sideElem[i].segRkeys[s][j] = mhandleWrapper->segMrs[s][j]->rkey;
         }
+      } else {
+        sideElem[i].nSegments = 0;
       }
-      sideElem[i].idx = localElem[i].idx;
+      sideElem[i].idx = localElem[i].idx; // last store; sender spins on idx
     } else {
       sideElem[i].nSegments = 0;
       sideElem[i].idx = 0;
@@ -995,7 +1075,6 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
       // that touches every non-zero entry and every segment it overlaps.
       struct ibv_send_wr flushWrs[NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS];
       int nFlushWrs = 0;
-      memset(flushWrs, 0, sizeof(flushWrs));
       for (int r = 0; r < n; r++) {
         if (sizes[r] == 0) continue;
         struct ncclIbMrHandle* mhandle = (struct ncclIbMrHandle*)mhandles[r];
@@ -1019,6 +1098,7 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
               ret = ncclInternalError;
               goto iflushFail;
             }
+            memset(&flushWrs[nFlushWrs], 0, sizeof(flushWrs[0]));
             flushWrs[nFlushWrs].wr.rdma.remote_addr = (uint64_t)(rangeStart > segBase ? rangeStart : segBase);
             flushWrs[nFlushWrs].wr.rdma.rkey = flushMr->rkey;
             nFlushWrs++;
@@ -1030,6 +1110,7 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
             ret = ncclInternalError;
             goto iflushFail;
           }
+          memset(&flushWrs[nFlushWrs], 0, sizeof(flushWrs[0]));
           flushWrs[nFlushWrs].wr.rdma.remote_addr = (uint64_t)data[r];
           flushWrs[nFlushWrs].wr.rdma.rkey = flushMr->rkey;
           nFlushWrs++;
@@ -1046,9 +1127,23 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
       TRACE(NCCL_NET, "NET/IB: %s: Posting a %d-read flush request (req=%p, comm=%p, wr_id=%ld)", __func__, nFlushWrs,
             req, req->base, wr.wr_id);
       TIME_START(4);
-      struct ibv_send_wr* bad_wr;
-      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &flushWrs[0], &bad_wr), iflushRet, iflushFail);
+      struct ibv_send_wr* bad_wr = NULL;
+      iflushRet = wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &flushWrs[0], &bad_wr);
       TIME_STOP(4);
+      if (iflushRet != ncclSuccess) {
+        // Prefix posts do not call ncclIbAddEvent. Count accepted WRs so we keep
+        // the request when a signaled tail is lost, matching isendFail.
+        int posted = 0;
+        for (struct ibv_send_wr* w = &flushWrs[0]; w != NULL && w != bad_wr; w = w->next) posted++;
+        if (posted > 0) {
+          ncclIbAddEvent(req, i);
+          req->type = NCCL_NET_IB_REQ_FAILED;
+          *request = req;
+          ncclIbStatsFatalError(&comm->base.stats);
+          return ncclSuccess;
+        }
+        goto iflushFail;
+      }
       ncclIbAddEvent(req, i);
     }
   }
@@ -1076,7 +1171,8 @@ iflushFail:
   } else {
     *request = NULL;
   }
-  return ret;
+  // NCCLCHECKGOTO stored the post error in iflushRet; ret is still success.
+  return (iflushRet != ncclSuccess) ? iflushRet : ret;
 }
 
 #define HCA_NAME(req, index) ((req)->devBases[(index)]->pd->context->device->name)
