@@ -3,6 +3,7 @@ set(TUNING_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/ce_model.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/collective_execution_policy.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/collective_execution_policy_rules.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/policy_adapter.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/collnet.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/cost_model.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/nvls.cc

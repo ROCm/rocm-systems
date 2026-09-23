@@ -191,6 +191,7 @@ function(rccl_define_micro_source_lists)
     enqueue-test.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/tuning/policy_adapter.cc
     fakes/enqueue_test_deps.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
@@ -843,6 +844,7 @@ endforeach()
 set_source_files_properties(
   ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/tuning/policy_adapter.cc
   PROPERTIES GENERATED TRUE)
 set(_enq_common_args
   SOURCES ${TEST_MICRO_ENQUEUE_SOURCE_FILES}

@@ -35,9 +35,9 @@ enum rcclP2pTransferMode {
   RCCL_P2P_TRANSFER_READ = 2,
 };
 
-// Normalized transport selected by the runtime adapter. Rules match a concrete
-// tag instead of inferring transport from enable/disable booleans. Append new
-// transport kinds before COUNT without changing the generic evaluator.
+// Concrete transport used by one execution candidate. UNKNOWN means that a
+// transport-neutral policy does not override the runtime's existing choice.
+// AUTO is an input intent, not a concrete transport.
 enum rcclExecutionTransport {
   RCCL_EXECUTION_TRANSPORT_UNKNOWN = 0,
   RCCL_EXECUTION_TRANSPORT_IPC,
@@ -46,6 +46,23 @@ enum rcclExecutionTransport {
   RCCL_EXECUTION_TRANSPORT_COLLNET,
   RCCL_EXECUTION_TRANSPORT_MIXED,
   RCCL_EXECUTION_TRANSPORT_COUNT,
+};
+static_assert(RCCL_EXECUTION_TRANSPORT_COUNT < 32,
+              "Execution transport masks require fewer than 32 values");
+constexpr uint32_t rcclExecutionTransportBit(enum rcclExecutionTransport transport) {
+  return uint32_t{1} << static_cast<unsigned>(transport);
+}
+constexpr uint32_t RCCL_EXECUTION_TRANSPORT_VALID_MASK =
+  (rcclExecutionTransportBit(RCCL_EXECUTION_TRANSPORT_COUNT) - 1u) &
+  ~rcclExecutionTransportBit(RCCL_EXECUTION_TRANSPORT_UNKNOWN);
+
+// User intent normalized by an external runtime adapter. The policy core never
+// reads NCCL/RCCL environment variables or infers intent from transport setup.
+enum rcclExecutionTransportIntent {
+  RCCL_EXECUTION_TRANSPORT_INTENT_AUTO = 0,
+  RCCL_EXECUTION_TRANSPORT_INTENT_IPC,
+  RCCL_EXECUTION_TRANSPORT_INTENT_SHM,
+  RCCL_EXECUTION_TRANSPORT_INTENT_COUNT,
 };
 
 // Concrete facts supplied by RCCL adapters. Add future dimensions here and in
@@ -58,11 +75,21 @@ struct rcclCollectivePolicyInput {
   int nNodes;
   int nRanks;
   int nChannels;
-  enum rcclExecutionTransport transport;
-  bool inPlace;            // Active send/receive buffer ranges overlap
-  // UNKNOWN means automatic selection. A concrete value records an explicit
-  // user request and constrains policy transport outputs to that value.
-  enum rcclExecutionTransport requestedTransport;
+  // Capability mask before applying user intent. Concrete candidate rules are
+  // filtered against the derived eligible mask.
+  uint32_t availableTransportMask;
+  bool inPlace; // Active send/receive buffer ranges overlap.
+  enum rcclExecutionTransportIntent transportIntent;
+};
+
+// Stable normalized facts used to reserve enough channels before individual
+// operations are known.
+struct rcclExecutionPolicyProvisioningInput {
+  const char* gfxArch;
+  int nNodes;
+  int nRanks;
+  uint32_t availableTransportMask;
+  enum rcclExecutionTransportIntent transportIntent;
 };
 
 // Sparse execution overrides. AUTO/-1 fields preserve RCCL's normal selection.
@@ -126,9 +153,10 @@ enum rcclExecutionPolicyInputField {
   RCCL_EXECUTION_INPUT_N_NODES,
   RCCL_EXECUTION_INPUT_N_RANKS,
   RCCL_EXECUTION_INPUT_N_CHANNELS,
-  RCCL_EXECUTION_INPUT_TRANSPORT,
+  RCCL_EXECUTION_INPUT_AVAILABLE_TRANSPORTS,
+  RCCL_EXECUTION_INPUT_ELIGIBLE_TRANSPORTS,
   RCCL_EXECUTION_INPUT_IN_PLACE,
-  RCCL_EXECUTION_INPUT_REQUESTED_TRANSPORT,
+  RCCL_EXECUTION_INPUT_TRANSPORT_INTENT,
 };
 
 enum rcclExecutionPolicyOutputField {
@@ -148,6 +176,7 @@ enum rcclExecutionPolicyCompareOp {
   RCCL_EXECUTION_COMPARE_GT,
   RCCL_EXECUTION_COMPARE_GE,
   RCCL_EXECUTION_COMPARE_ARCH_MATCH,
+  RCCL_EXECUTION_COMPARE_MASK_CONTAINS,
 };
 
 struct rcclExecutionPolicyFact {
@@ -253,37 +282,8 @@ bool rcclResolveCollectiveExecutionPolicy(const struct rcclCollectivePolicyInput
                                           struct rcclCollectiveExecutionPolicy* policy,
                                           rcclExecutionPolicyRuleId* selectedRuleId);
 bool rcclBuffersOverlap(const void* firstBuffer, size_t firstBytes, const void* secondBuffer, size_t secondBytes);
-
-// Maximum channel count requested by any collective-scope rule matching the
-// communicator's stable facts. Used during communicator setup so per-operation
-// rules can select channels that were actually provisioned.
-int rcclGetCollectiveExecutionPolicyRequiredChannels(struct ncclComm* comm, bool p2pDisabled);
-
-// Convenience adapter from communicator state to generic rule-engine facts.
-struct rcclExecutionPolicyResolution rcclGetCollectiveExecutionPolicyWithValidation(
-  const struct ncclComm* comm, enum rcclExecutionScope scope, ncclFunc_t collType,
-  size_t dataSize, bool p2pDisabled, bool inPlace,
-  const struct rcclExecutionPolicyValidationContext* validation);
-
-// RCCL runtime adapters. These keep translation from mutable communicator,
-// task, environment, and cost-table state out of common enqueue call sites.
-bool rcclExecutionPolicyForP2pTask(
-  struct ncclComm* comm, struct ncclTaskP2p* task, bool p2pDisabled,
-  struct rcclCollectiveExecutionPolicy* policy);
-bool rcclApplyCollectiveExecutionPolicy(
-  struct ncclComm* comm, struct ncclTaskColl* info, size_t dataSize,
-  float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS],
-  int* policyChannels);
-
-bool rcclGetCollectiveExecutionPolicy(const struct ncclComm* comm, enum rcclExecutionScope scope,
-                                      ncclFunc_t collType,
-                                      size_t dataSize, bool p2pDisabled, bool inPlace,
-                                      struct rcclCollectiveExecutionPolicy* policy);
-inline bool rcclGetCollectiveExecutionPolicy(const struct ncclComm* comm, enum rcclExecutionScope scope,
-                                             ncclFunc_t collType, size_t dataSize, bool p2pDisabled,
-                                             struct rcclCollectiveExecutionPolicy* policy) {
-  return rcclGetCollectiveExecutionPolicy(comm, scope, collType, dataSize, p2pDisabled, /*inPlace=*/false, policy);
-}
+int rcclResolveExecutionPolicyRequiredChannels(
+  const struct rcclExecutionPolicyProvisioningInput* input);
 
 inline bool rcclEvaluateCollectiveExecutionRules(const struct rcclExecutionPolicyFact* facts, size_t factCount,
                                                  const struct rcclCollectiveExecutionRule* rules, size_t ruleCount,

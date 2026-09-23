@@ -139,10 +139,6 @@ inline size_t rcclGetSizePerRank(ncclFunc_t const& func, size_t const& nBytes, i
            nBytes;
 }
 ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t nBytes, int& nc);
-bool rcclRuntimeTransportToggleEligible(const struct ncclComm* comm);
-int rcclRuntimeCollectiveConnIndex(const struct ncclComm* comm, const struct ncclTaskColl* info,
-                                   size_t nBytes);
-int rcclRuntimeP2pConnIndex(const struct ncclComm* comm, int transport);
 void rcclRestrictMaxChannels(struct ncclComm* comm, int& nc);
 ncclResult_t rcclGetAlgoProtoIndex(const char* envStr, const char* algoProtoString[], int nEntries, int& result);
 ncclResult_t rcclOverrideProtocol(const char* ncclProtoStr[], float table[][NCCL_NUM_PROTOCOLS],

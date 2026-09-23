@@ -14,7 +14,7 @@
 #include "topo.h"
 #include "bootstrap.h"
 #include "rccl_graph_gen.h"
-#include "collective_execution_policy.h"
+#include "policy_adapter.h"
 
 #include <stdio.h>      // For NULL and
 #include <stdlib.h>     // For malloc(), calloc(), and free()
