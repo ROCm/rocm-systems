@@ -2488,7 +2488,7 @@ TEST(GpuMemoryTest, ClientCopyBypassesDaemonIdentityTranslation) {
   uint64_t source_address = 0;
   ASSERT_EQ(read(address_pipe[0], &source_address, sizeof(source_address)), sizeof(source_address));
 
-  amdgpu::GpuMemory memory("memory");
+  rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   memory.set_passthrough(true);
   KfdProcess process(kPid);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
@@ -4138,8 +4138,11 @@ TEST_P(IsaTest, StepFetchSeparatesIdenticalAddressesAcrossVmids) {
   KfdProcess process_b(kVmidB);
   process_a.map_pages(kCodePage, backing_a.data(), backing_a.size());
   process_b.map_pages(kCodePage, backing_b.data(), backing_b.size());
-  f.mem()->register_process(kVmidA, &process_a.page_table_, &process_a.page_table_mutex_);
-  f.mem()->register_process(kVmidB, &process_b.page_table_, &process_b.page_table_mutex_);
+  amdgpu::LegacyGpuVmAdapter legacy_vm(f.soc_ptr->gpu_vm(), f.mem());
+  ASSERT_TRUE(legacy_vm.register_address_space(kVmidA, &process_a.page_table_,
+                                               &process_a.page_table_mutex_));
+  ASSERT_TRUE(legacy_vm.register_address_space(kVmidB, &process_b.page_table_,
+                                               &process_b.page_table_mutex_));
 
   auto *cu = f.cu();
   auto *wave_a = cu->dispatch_wf(/*wg_id=*/0, kPc, /*num_sgprs=*/104, /*num_vgprs=*/256);
@@ -4155,8 +4158,8 @@ TEST_P(IsaTest, StepFetchSeparatesIdenticalAddressesAcrossVmids) {
   EXPECT_EQ(wave_a->pc, kPc + sizeof(uint32_t));
   EXPECT_TRUE(wave_b->is_halted());
 
-  f.mem()->unregister_process(kVmidA);
-  f.mem()->unregister_process(kVmidB);
+  EXPECT_TRUE(legacy_vm.unregister_vmid(kVmidA));
+  EXPECT_TRUE(legacy_vm.unregister_vmid(kVmidB));
 }
 
 TEST_P(IsaTest, DispatchAndCapacity) {
@@ -4319,7 +4322,7 @@ TEST_P(WavefrontSlotTest, WavefrontSlotsMaterializeOnDispatchAndRemainReusable) 
   EXPECT_EQ(cu->num_wfs(), 0u);
   EXPECT_FALSE(cu->has_active_wfs());
   EXPECT_FALSE(cu->has_runnable_wfs());
-  EXPECT_TRUE(cu->can_accept_workgroup(kSlots, 0));
+  EXPECT_TRUE(cu->can_accept_workgroup(kSlots, 104, 256, wave_size, 0));
   for (uint32_t slot = 0; slot < kSlots; ++slot)
     EXPECT_EQ(idle_cu.wf(slot), nullptr);
 

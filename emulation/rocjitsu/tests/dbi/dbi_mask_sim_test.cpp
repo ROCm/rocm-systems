@@ -103,8 +103,8 @@ protected:
   [[nodiscard]] std::vector<uint8_t> make_target(const std::vector<uint32_t> &setup,
                                                  uint32_t anchor_word) {
     std::vector<uint32_t> text = setup;
-    text.push_back(build_s_mov_b64(scalar_operand_exec_lo(a_.arch),
-                                   scalar_positive_inline_u32(kAnchorMask), a_.arch));
+    text.push_back(build_s_mov_b64_encoding(scalar_operand_exec_lo(a_.arch),
+                                            scalar_positive_inline_u32(kAnchorMask), a_.arch));
     anchor_offset_ = static_cast<uint64_t>(text.size()) * sizeof(uint32_t);
     text.push_back(anchor_word);
     text.push_back(build_s_endpgm(a_.arch));
@@ -184,8 +184,8 @@ protected:
   // and the envelope is what has to cope.
   [[nodiscard]] std::vector<uint32_t> narrowing_sentinel_probe() const {
     return {test::make_mov_vgpr_inline(3, kProbeSentinel),
-            build_s_mov_b64(scalar_operand_exec_lo(a_.arch),
-                            scalar_positive_inline_u32(kAnchorMask), a_.arch),
+            build_s_mov_b64_encoding(scalar_operand_exec_lo(a_.arch),
+                                     scalar_positive_inline_u32(kAnchorMask), a_.arch),
             build_s_setpc_b64(/*s[30:31]=*/30, a_.arch)};
   }
 
@@ -362,8 +362,8 @@ protected:
                                               {3, 0}));
     ASSERT_FALSE(patched_text_.empty());
 
-    const uint32_t widen =
-        build_s_mov_b64(scalar_operand_exec_lo(a_.arch), scalar_inline_neg_one(a_.arch), a_.arch);
+    const uint32_t widen = build_s_mov_b64_encoding(scalar_operand_exec_lo(a_.arch),
+                                                    scalar_inline_neg_one(a_.arch), a_.arch);
     std::vector<uint32_t> sabotaged = patched_text_;
     // A full-exec site widens exactly twice: once opening the window, once
     // reopening it for the spill loads. The anchor-mask restore that would sit
@@ -393,8 +393,8 @@ protected:
         (void)run_patched(bare_target(), sentinel_probe(), {}, /*full_exec=*/true, {3}));
     ASSERT_FALSE(patched_text_.empty());
 
-    const uint32_t widen =
-        build_s_mov_b64(scalar_operand_exec_lo(a_.arch), scalar_inline_neg_one(a_.arch), a_.arch);
+    const uint32_t widen = build_s_mov_b64_encoding(scalar_operand_exec_lo(a_.arch),
+                                                    scalar_inline_neg_one(a_.arch), a_.arch);
     std::vector<uint32_t> sabotaged = patched_text_;
     auto it = std::find(sabotaged.begin(), sabotaged.end(), widen);
     ASSERT_NE(it, sabotaged.end()) << "full-mask widen not found in the patched text";

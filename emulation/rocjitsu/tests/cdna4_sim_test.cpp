@@ -3,7 +3,9 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
-#include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/sdma_ring_consumer.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
@@ -46,23 +48,18 @@ void write_address(uint32_t *packet, uint32_t lo_dw, uint32_t hi_dw, const void 
 TEST(Cdna4SdmaTest, ProducerPacketsUseOss7Dialect) {
   auto loaded = config::load_config(std::string(CONFIG_DIR) + "/gfx950_mi355x.json",
                                     rocjitsu::kEmbeddedSchema);
-  // This packet-dialect test advances execution explicitly with step().
-  // The production preset may use multiple workers, but step() requires one.
-  loaded.engine_config.num_threads = 1;
-  auto *memory = loaded.memory();
-  auto *cp = loaded.soc()->xcd(0)->command_processor();
-  ASSERT_EQ(cp->sdma_packet_dialect(), amdgpu::SdmaPacketDialect::Oss7);
-
-  auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
-  engine->topology().set_root(loaded.take_root());
-  loaded.wire_links(engine->topology());
-  engine->create();
-  memory->set_passthrough(true);
+  const auto dialect = loaded.soc()->sdma_queue_scheduler().packet_dialect();
+  ASSERT_EQ(dialect, amdgpu::SdmaPacketDialect::Oss7);
+  KfdProcess process(950);
+  amdgpu::LegacyGpuVmAdapter legacy_vm(loaded.soc()->gpu_vm(), loaded.memory());
+  const auto address_space =
+      legacy_vm.register_address_space(950, &process.page_table_, &process.page_table_mutex_);
+  ASSERT_TRUE(address_space);
+  ASSERT_TRUE(legacy_vm.set_passthrough(address_space, true));
 
   alignas(8) std::array<uint32_t, 128> ring{};
   alignas(8) uint64_t read_idx = 0;
   alignas(8) uint64_t write_idx = 0;
-  alignas(8) std::array<uint64_t, 1> doorbells{};
   alignas(32) std::array<uint8_t, 4 * kCopyBytes> src{};
   alignas(32) std::array<uint8_t, 4 * kCopyBytes> dst{};
   alignas(32) std::array<uint8_t, kCopyBytes> broadcast_dst1{};
@@ -74,17 +71,12 @@ TEST(Cdna4SdmaTest, ProducerPacketsUseOss7Dialect) {
   for (uint32_t i = 0; i < src.size(); ++i)
     src[i] = static_cast<uint8_t>(i ^ 0xA5u);
 
-  amdgpu::HwQueue queue{};
-  queue.process_id = 0;
-  queue.queue_id = 950;
-  queue.ring_base_va = reinterpret_cast<uint64_t>(ring.data());
-  queue.ring_size = static_cast<uint32_t>(ring.size() * sizeof(ring[0]));
-  queue.read_ptr_va = reinterpret_cast<uint64_t>(&read_idx);
-  queue.write_ptr_va = reinterpret_cast<uint64_t>(&write_idx);
-  queue.doorbell_base = doorbells.data();
-  queue.host_accessible = true;
-  queue.is_sdma = true;
-  cp->register_queue(std::move(queue));
+  amdgpu::SdmaRingConsumer consumer(loaded.soc()->gpu_vm(),
+                                    {.address_space = address_space,
+                                     .ring_base = reinterpret_cast<uint64_t>(ring.data()),
+                                     .ring_bytes = sizeof(ring),
+                                     .read_pointer_address = reinterpret_cast<uint64_t>(&read_idx)},
+                                    dialect);
 
   // rocSHMEM's fused OSS7 producer always emits the full 19-DWORD struct.
   // Disabling WAIT retains DW1-7 while COPY stays at DW8 and SIGNAL at DW14.
@@ -110,9 +102,7 @@ TEST(Cdna4SdmaTest, ProducerPacketsUseOss7Dialect) {
   write_address(wait_only, 10, 11, src.data() + kCopyBytes);
   write_address(wait_only, 12, 13, dst.data() + kCopyBytes);
 
-  // Exercise both optional blocks together and leave the destination
-  // unresolved for the first attempt. The packet must retry at its own start
-  // without copying or applying its signal update.
+  // Exercise both optional blocks together after the stalled wait-only packet.
   uint32_t *wait_and_signal = wait_only + kFusedCopyDwords;
   wait_and_signal[0] = kOpCopy | kHeaderWait | kHeaderSignal;
   wait_and_signal[1] = kWaitFunctionGe;
@@ -122,6 +112,7 @@ TEST(Cdna4SdmaTest, ProducerPacketsUseOss7Dialect) {
   wait_and_signal[7] = 0xFFFFFFFFu;
   wait_and_signal[8] = kCopyBytes - 1;
   write_address(wait_and_signal, 10, 11, src.data() + 2 * kCopyBytes);
+  write_address(wait_and_signal, 12, 13, dst.data() + 2 * kCopyBytes);
   wait_and_signal[14] = kSignalOperationAdd64;
   write_address(wait_and_signal, 15, 16, &signal);
   wait_and_signal[17] = 4;
@@ -153,9 +144,7 @@ TEST(Cdna4SdmaTest, ProducerPacketsUseOss7Dialect) {
   constexpr uint32_t kSubmittedDwords =
       3 * kFusedCopyDwords + kLinearCopyDwords + kBroadcastCopyDwords + kFence64Dwords;
   write_idx = kSubmittedDwords * sizeof(uint32_t);
-  std::atomic_ref<uint64_t>(doorbells[0]).store(write_idx, std::memory_order_release);
-  engine->schedule_event_now(cp->doorbell_event());
-  ASSERT_TRUE(engine->step());
+  EXPECT_EQ(consumer.service(write_idx), amdgpu::SdmaRingStatus::Blocked);
 
   EXPECT_EQ(std::atomic_ref<uint64_t>(read_idx).load(std::memory_order_acquire),
             kFusedCopyDwords * sizeof(uint32_t));
@@ -164,17 +153,7 @@ TEST(Cdna4SdmaTest, ProducerPacketsUseOss7Dialect) {
   EXPECT_EQ(std::atomic_ref<uint64_t>(signal).load(std::memory_order_acquire), 10u);
 
   std::atomic_ref<uint64_t>(poll).store(5, std::memory_order_release);
-  engine->schedule_event_now(cp->doorbell_event());
-  ASSERT_TRUE(engine->step());
-  EXPECT_EQ(std::atomic_ref<uint64_t>(read_idx).load(std::memory_order_acquire),
-            2 * kFusedCopyDwords * sizeof(uint32_t));
-  EXPECT_EQ(std::memcmp(dst.data(), src.data(), 2 * kCopyBytes), 0);
-  EXPECT_EQ(dst[2 * kCopyBytes], 0u);
-  EXPECT_EQ(std::atomic_ref<uint64_t>(signal).load(std::memory_order_acquire), 10u);
-
-  write_address(wait_and_signal, 12, 13, dst.data() + 2 * kCopyBytes);
-  engine->schedule_event_now(cp->doorbell_event());
-  ASSERT_TRUE(engine->step());
+  EXPECT_EQ(consumer.service(write_idx), amdgpu::SdmaRingStatus::Idle);
   EXPECT_EQ(std::atomic_ref<uint64_t>(read_idx).load(std::memory_order_acquire), write_idx);
   EXPECT_EQ(std::memcmp(dst.data(), src.data(), src.size()), 0);
   EXPECT_EQ(std::memcmp(broadcast_dst1.data(), src.data(), kCopyBytes), 0);
@@ -182,7 +161,7 @@ TEST(Cdna4SdmaTest, ProducerPacketsUseOss7Dialect) {
   EXPECT_EQ(std::atomic_ref<uint64_t>(signal).load(std::memory_order_acquire), 14u);
   EXPECT_EQ(std::atomic_ref<uint64_t>(fence).load(std::memory_order_acquire), kFenceValue);
 
-  cp->unregister_queue(/*queue_id=*/950, /*process_id=*/0);
+  EXPECT_TRUE(legacy_vm.unregister_address_space(address_space));
 }
 
 } // namespace

@@ -347,7 +347,7 @@ TEST(RegisterAccessTest, ReadRegionCopiesDwordsToLaneMajorStorage) {
 #pragma GCC diagnostic ignored "-Warray-bounds"
 #endif
 TEST(RegisterAccessTest, ReadRegionRejectsInvalidLaneMajorCopyBounds) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA5, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
              /*wave_size=*/32);
   ASSERT_NE(fx.wf, nullptr);
   ASSERT_EQ(fx.wf->wf_size(), 32u);

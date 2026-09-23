@@ -342,6 +342,7 @@ class CodeGenerator:
         'flat_load': 'flat_load',
         'flat_store': 'flat_store',
         'flat_atomic': 'flat_atomic',
+        'global_load_lds': 'flat_load',
         'global_load_async_to_lds': 'async_load',
         'global_store_async_from_lds': 'async_store',
         'global_load_addtid': 'vmem_load',

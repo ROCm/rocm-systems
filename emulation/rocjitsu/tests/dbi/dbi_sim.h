@@ -95,6 +95,7 @@ public:
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                     ((256 / 8) - 1));
+    AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, ((128 / 4) - 1));
     // 104 SGPRs is ample for the probe link pair s[30:31] and envelope temps.
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                     ((104 / 8) - 1));

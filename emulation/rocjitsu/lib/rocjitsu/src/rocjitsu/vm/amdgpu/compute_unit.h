@@ -1062,8 +1062,16 @@ protected:
   /// @brief Update wavefront states (WAITCNT, BARRIER, ENDING transitions).
   void update_wf_states();
 
+  struct StepFetchEntry {
+    bool valid = false;
+    uint32_t vmid = 0;
+    uint64_t pc = 0;
+    VmCacheNamespace cache_namespace{};
+    std::array<rj_code_binary_inst_t, 4> words{};
+  };
+
   /// @brief Fetch, decode, execute one instruction from the given wavefront.
-  void issue_instruction(Wavefront *wf);
+  void issue_instruction(Wavefront *wf, StepFetchEntry *fetch = nullptr);
   /// @brief Try the diagnostic adjacent-MMA batch modes before ordinary issue.
   /// @brief Issue a bounded MMA window and drain it before returning to scheduling.
   void issue_async_instruction(Wavefront *wf, MmaAdmissionCache *admission, uint32_t wave_size,
@@ -1074,7 +1082,8 @@ protected:
   void issue_instruction_impl(
       Wavefront *wf,
       std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window = {},
-      std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage = {});
+      std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage = {},
+      StepFetchEntry *fetch = nullptr);
   /// @brief Advance CU scheduling with compile-time selection of the issue adapter.
   template <bool EnableAsync>
   bool step_impl(MmaAdmissionCache *admission = nullptr, uint32_t async_wave_size = 0,

@@ -12,8 +12,8 @@
 #include "decode_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/base/rj_compiler.h"
-#include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
@@ -320,8 +320,9 @@ public:
       : Base(std::move(name), config, memory, l2) {}
 
   void issue(uint32_t word, amdgpu::Wavefront &wf) {
-    typename Base::FetchedInstruction words{word, 0, 0, 0};
-    this->issue_instruction(&wf, words);
+    typename Base::StepFetchEntry fetch{
+        .valid = true, .vmid = wf.process_id(), .pc = wf.pc, .words = {word, 0, 0, 0}};
+    this->issue_instruction(&wf, &fetch);
   }
 };
 
@@ -3293,7 +3294,7 @@ TEST(Gfx1250TopKPrefixTest, Vop3BcntAddsOverlappingSrc1Accumulator) {
   std::unique_ptr<Instruction> bcnt(decode_valid(*decoder, bcnt_words));
   ASSERT_NE(bcnt, nullptr);
   ASSERT_EQ(std::string_view(bcnt->mnemonic()), "v_bcnt_u32_b32");
-  cu->execute_instruction(bcnt.get(), *wf);
+  ASSERT_TRUE(cu->execute_instruction(bcnt.get(), *wf).succeeded());
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     const uint32_t expected = (active_mask & (1u << lane))
@@ -3381,7 +3382,7 @@ TEST(Gfx1250True16Vop3Test, SelectedHalfArithmeticPreservesDestinationHalf) {
     cu->write_vgpr(v3, lane, 0xBEEF0007u);
   }
 
-  auto execute = [&](const uint32_t(&words)[2], std::string_view mnemonic) {
+  auto execute = [&](const uint32_t (&words)[2], std::string_view mnemonic) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
@@ -5288,7 +5289,7 @@ TEST(Gfx1250True16Vop3Test, Bitop3B16UsesSelectedSourceHalfAndPreservesDestinati
     cu->write_vgpr(v8, lane, 0x55550014u);
   }
 
-  auto execute = [&](const uint32_t(&words)[2], std::string_view mnemonic) {
+  auto execute = [&](const uint32_t (&words)[2], std::string_view mnemonic) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);

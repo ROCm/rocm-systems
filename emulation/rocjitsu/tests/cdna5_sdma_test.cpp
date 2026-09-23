@@ -2093,7 +2093,7 @@ TEST(Gfx1250SdmaTest, FixedCopySignalPacketCopiesAndSignals) {
   packet[18] = 0;
 
   queue.submit(19);
-  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Accepted);
   EXPECT_EQ(queue.read_idx(), 19u * sizeof(uint32_t));
   EXPECT_EQ(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
   EXPECT_EQ(queue.signal_value(), 4);

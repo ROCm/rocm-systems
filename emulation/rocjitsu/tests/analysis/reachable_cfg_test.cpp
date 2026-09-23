@@ -37,16 +37,18 @@ constexpr uint32_t conditional(int16_t delta) {
 class TestTextSection final : public Section {
 public:
   explicit TestTextSection(std::span<const uint32_t> words, size_t trailing_bytes = 0)
-      : Section(".text", std::make_unique<char[]>(words.size_bytes() + trailing_bytes)),
+      : Section(".text"), data_(std::make_unique<char[]>(words.size_bytes() + trailing_bytes)),
         size_(words.size_bytes() + trailing_bytes) {
     if (!words.empty())
       std::memcpy(data_.get(), words.data(), words.size_bytes());
   }
+  const char *data() const override { return data_.get(); }
   size_t size() const override { return size_; }
   uint32_t sectionHeaderNameIdx() const override { return 0; }
   uint64_t sectionOffset() const override { return 0; }
 
 private:
+  std::unique_ptr<char[]> data_;
   size_t size_;
 };
 
@@ -326,12 +328,15 @@ TEST_F(ReachableCfg, RejectsAmbiguousSectionsAndReachedPartialWords) {
   auto decoder = Decoder::create(kArch);
   TestCodeObject object;
   constexpr std::array<uint64_t, 1> entries{0};
-  EXPECT_TRUE(BasicBlock::build_reachable(object, *decoder, kArch, entries, DecodeErrorEmitter{}).failed());
+  EXPECT_TRUE(
+      BasicBlock::build_reachable(object, *decoder, kArch, entries, DecodeErrorEmitter{}).failed());
   const std::array<uint32_t, 1> words{kNop};
   object.add_text(words, 1);
-  EXPECT_TRUE(BasicBlock::build_reachable(object, *decoder, kArch, entries, DecodeErrorEmitter{}).failed());
+  EXPECT_TRUE(
+      BasicBlock::build_reachable(object, *decoder, kArch, entries, DecodeErrorEmitter{}).failed());
   object.add_text(words);
-  EXPECT_TRUE(BasicBlock::build_reachable(object, *decoder, kArch, entries, DecodeErrorEmitter{}).failed());
+  EXPECT_TRUE(
+      BasicBlock::build_reachable(object, *decoder, kArch, entries, DecodeErrorEmitter{}).failed());
 }
 
 TEST_F(ReachableCfg, FullAndReachableConstructionAgreeOnClosedGraphs) {

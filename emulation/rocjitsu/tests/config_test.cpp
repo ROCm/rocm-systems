@@ -280,7 +280,7 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   EXPECT_EQ(soc->assign_queue_owner_cp(0), soc->xcd(0)->command_processor());
   EXPECT_EQ(soc->assign_queue_owner_cp(1), soc->xcd(1)->command_processor());
   EXPECT_EQ(soc->assign_queue_owner_cp(soc->num_xcds()), soc->xcd(0)->command_processor());
-  EXPECT_EQ(xcd->command_processor()->sdma_packet_dialect(), amdgpu::SdmaPacketDialect::Oss7);
+  EXPECT_EQ(soc->sdma_queue_scheduler().packet_dialect(), amdgpu::SdmaPacketDialect::Oss7);
 }
 
 TEST(ConfigLoaderTest, LoadCdna5Config) {
@@ -1934,7 +1934,7 @@ TEST(CheckpointTest, SaveAndRestoreLazySgprs) {
   ASSERT_EQ(cu->config().sgprs_per_wf, regs_per_wave);
   ASSERT_EQ(cu->num_wf_slots(), 10u);
   for (uint32_t slot = 0; slot < 10; ++slot)
-    ASSERT_NE(cu->dispatch_wf(slot, 0x1000, regs_per_wave, cu->config().vgprs_per_wf), nullptr);
+    ASSERT_NE(cu->dispatch_wf(slot, 0x1000, regs_per_wave, /*vgprs=*/4), nullptr);
   EXPECT_EQ(cu->sgpr_file().materialized_chunk_count(), 0u);
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");

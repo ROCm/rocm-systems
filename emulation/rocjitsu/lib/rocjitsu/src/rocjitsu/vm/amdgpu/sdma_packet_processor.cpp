@@ -170,7 +170,10 @@ public:
     std::optional<SdmaCacheLease> cache_lease;
     bool wait_enabled = false;
     bool signal_enabled = false;
-    bool signal_decrement = false;
+    bool signal_update = false;
+    bool signal_subtract = false;
+    bool indirect_source = false;
+    bool indirect_destination = false;
     uint64_t signal_address = 0;
     uint64_t signal_data = 0;
     bool cas_expected_valid = false;
@@ -294,7 +297,27 @@ private:
     return frame.words[frame.at + offset];
   }
 
-  bool gfx11_plus() const { return dialect_ != SdmaPacketDialect::Legacy; }
+  SdmaPacketCapabilities capabilities() const { return sdma_packet_capabilities(dialect_); }
+
+  bool wait_signal_copy(uint32_t header) const {
+    return capabilities().wait_signal_copy &&
+           ((header & ((1u << 30) | (1u << 31))) ||
+            (capabilities().compact_wait_signal_copy && (header & ((1u << 20) | (1u << 21)))));
+  }
+
+  bool compact_copy(std::span<const uint32_t> words) const {
+    if (!capabilities().compact_wait_signal_copy)
+      return false;
+    const uint32_t header = words.front();
+    auto is_signal = [](uint32_t word) { return (word & 0x7f) == 0x6f || (word & 0x7f) == 0x70; };
+    // Some gfx1250 runtimes retain the fixed WAIT block even for signal-only copies.
+    // The ring fetches incrementally: recognize the missing compact signal word
+    // before asking for the remaining fixed-layout dwords.
+    if (!(header & (1u << 30)) && (header & (1u << 31)) && words.size() > 1 + kCopyBodyDwords &&
+        !is_signal(words[1 + kCopyBodyDwords]))
+      return false;
+    return true;
+  }
 
   PacketExtent packet_extent(std::span<const uint32_t> words) const {
     const auto need = [&](std::size_t dwords) {
@@ -315,22 +338,24 @@ private:
       constexpr uint8_t kSubopLinearBroadcast = 16;
       if (subopcode != kSubopLinear && subopcode != kSubopLinearBroadcast)
         return {};
-      if (gfx11_plus() && (header & ((1u << 30) | (1u << 31))) != 0) {
-        const std::size_t copy_base = 1 + ((header & (1u << 30)) != 0 ? kWaitDwords : 0);
+      if (wait_signal_copy(header)) {
+        const bool compact = compact_copy(words);
+        const std::size_t copy_base = 1 + ((!compact || (header & (1u << 30))) ? kWaitDwords : 0);
         const std::size_t signal_base = copy_base + kCopyBodyDwords;
-        return need(signal_base + ((header & (1u << 31)) != 0 ? kSignalDwords : 0));
+        return need(signal_base + ((!compact || (header & (1u << 31))) ? kSignalDwords : 0));
       }
       const bool broadcast =
-          subopcode == kSubopLinearBroadcast ||
-          (gfx11_plus() ? (header & (1u << 27)) != 0 : (header & (1u << 28)) != 0);
+          subopcode == kSubopLinearBroadcast || (header & capabilities().copy_broadcast_flag) != 0;
       return need(broadcast ? kCopyBroadcastDwords : kCopyLinearDwords);
     }
     case kOpFence:
-      return need(gfx11_plus() && subopcode == kSubopFence64 ? kFence64Dwords : kFenceDwords);
+      return need(capabilities().fence64 && subopcode == kSubopFence64 ? kFence64Dwords
+                                                                       : kFenceDwords);
     case kOpTrap:
       return need(kTrapDwords);
     case kOpPollRegmem:
-      return need(gfx11_plus() && subopcode == kSubopPollMemory64 ? kPoll64Dwords : kPollDwords);
+      return need(capabilities().poll64 && subopcode == kSubopPollMemory64 ? kPoll64Dwords
+                                                                           : kPollDwords);
     case kOpAtomic:
       return ((header >> 25) & 0x7f) == 47 ? need(kAtomicDwords) : PacketExtent{};
     case kOpConstantFill:
@@ -386,10 +411,13 @@ private:
       constexpr uint8_t kSubopLinearBroadcast = 16;
       if (subopcode != kSubopLinear && subopcode != kSubopLinearBroadcast)
         return SdmaPacketExecutionOutcome::Malformed;
-      if (gfx11_plus() && (header & ((1u << 30) | (1u << 31))) != 0) {
+      if (wait_signal_copy(header)) {
         operation.wait_enabled = (header & (1u << 30)) != 0;
         operation.signal_enabled = (header & (1u << 31)) != 0;
-        const std::size_t copy_base = 1 + (operation.wait_enabled ? kWaitDwords : 0);
+        const bool compact = compact_copy(std::span(frame.words).subspan(frame.at));
+        const std::size_t copy_base = 1 + ((!compact || operation.wait_enabled) ? kWaitDwords : 0);
+        operation.indirect_source = compact && (header & (1u << 20));
+        operation.indirect_destination = compact && (header & (1u << 21));
         const std::size_t signal_base = copy_base + kCopyBodyDwords;
         if (operation.wait_enabled) {
           operation.function = word(frame, 1) & 0x7;
@@ -409,13 +437,14 @@ private:
           operation.signal_address =
               join(word(frame, signal_base + 1) & ~0x7u, word(frame, signal_base + 2));
           operation.signal_data = join(word(frame, signal_base + 3), word(frame, signal_base + 4));
-          operation.signal_decrement = operation.signal_address > 0x1000 && signal_op == 0x70;
+          operation.signal_update =
+              operation.signal_address > 0x1000 && (signal_op == 0x6f || signal_op == 0x70);
+          operation.signal_subtract = signal_op == 0x70;
         }
         break;
       }
       const bool broadcast =
-          subopcode == kSubopLinearBroadcast ||
-          (gfx11_plus() ? (header & (1u << 27)) != 0 : (header & (1u << 28)) != 0);
+          subopcode == kSubopLinearBroadcast || (header & capabilities().copy_broadcast_flag) != 0;
       const uint32_t count_mask =
           broadcast || dialect_ == SdmaPacketDialect::Legacy ? 0x003fffff : 0x3fffffff;
       operation.count = (word(frame, 1) & count_mask) + uint64_t{1};
@@ -432,7 +461,7 @@ private:
     }
     case kOpFence:
       operation.kind = Kind::Fence;
-      if (gfx11_plus() && subopcode == kSubopFence64) {
+      if (capabilities().fence64 && subopcode == kSubopFence64) {
         operation.address = join(word(frame, 1) & ~0x7u, word(frame, 2));
         operation.value = join(word(frame, 3), word(frame, 4));
         operation.count = sizeof(uint64_t);
@@ -448,7 +477,7 @@ private:
       break;
     case kOpPollRegmem:
       operation.kind = Kind::Poll;
-      if (gfx11_plus() && subopcode == kSubopPollMemory64) {
+      if (capabilities().poll64 && subopcode == kSubopPollMemory64) {
         operation.function = (header >> 28) & 0x7;
         operation.address = join(word(frame, 1) & ~0x7u, word(frame, 2));
         operation.reference = join(word(frame, 3), word(frame, 4));
@@ -589,7 +618,7 @@ private:
       operation.phase = 1;
     }
     if (operation.phase == 1) {
-      if (operation.signal_decrement) {
+      if (operation.signal_update) {
         const VmAccessOutcome outcome = access_->read(
             operation.signal_address, std::span(operation.scratch).first(sizeof(uint64_t)),
             operation.io_progress);
@@ -600,6 +629,26 @@ private:
       operation.phase = 2;
     }
     if (operation.phase == 2) {
+      auto resolve = [&](uint64_t &address, bool &indirect) {
+        if (!indirect)
+          return VmAccessOutcome::Complete;
+        const VmAccessOutcome outcome = access_->read(
+            address, std::span(operation.scratch).first(sizeof(uint64_t)), operation.io_progress);
+        if (outcome != VmAccessOutcome::Complete)
+          return outcome;
+        std::memcpy(&address, operation.scratch.data(), sizeof(address));
+        operation.io_progress = 0;
+        indirect = false;
+        return valid_range(address, operation.count) ? VmAccessOutcome::Complete
+                                                     : VmAccessOutcome::Malformed;
+      };
+      const VmAccessOutcome source = resolve(operation.source, operation.indirect_source);
+      if (source != VmAccessOutcome::Complete)
+        return map_outcome(source);
+      const VmAccessOutcome destination =
+          resolve(operation.destinations[0], operation.indirect_destination);
+      if (destination != VmAccessOutcome::Complete)
+        return map_outcome(destination);
       operation.retire_on_fault = true;
       operation.phase = 3;
     }
@@ -637,10 +686,11 @@ private:
       operation.destination_index = 0;
     }
     operation.phase = 4;
-    if (operation.signal_decrement) {
+    if (operation.signal_update) {
       cache_before_write(operation);
       const SdmaPacketExecutionOutcome outcome = atomic_fetch_add(
-          operation, operation.signal_address, uint64_t{0} - operation.signal_data);
+          operation, operation.signal_address,
+          operation.signal_subtract ? uint64_t{0} - operation.signal_data : operation.signal_data);
       if (outcome != SdmaPacketExecutionOutcome::Complete)
         return outcome;
     }

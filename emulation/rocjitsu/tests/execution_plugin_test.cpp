@@ -1112,7 +1112,12 @@ struct PluginFixture {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 31);
+    AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                    cu()->wf_size() == 32);
+    const uint32_t granule =
+        descriptor_vgpr_count_granule_for_wavefront(cu()->arch(), cu()->wf_size()).value();
+    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                    (256 / granule - 1));
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                     granulated_sgpr_count);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);

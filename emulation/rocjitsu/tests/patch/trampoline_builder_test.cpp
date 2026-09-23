@@ -1259,7 +1259,8 @@ TEST(TrampolineBuilderEmit, MaterializesArgumentsInsideTheFullMaskWindow) {
 
   const std::vector<uint32_t> &w = bytes->trampoline_words;
   const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
-  const uint32_t widen = build_s_mov_b64(exec_lo, scalar_inline_neg_one(plan.arch), plan.arch);
+  const uint32_t widen =
+      build_s_mov_b64_encoding(exec_lo, scalar_inline_neg_one(plan.arch), plan.arch);
   const auto widen_at = std::find(w.begin(), w.end(), widen);
   ASSERT_NE(widen_at, w.end()) << "no full-mask widen; an argument site must open the window";
 
@@ -1336,7 +1337,8 @@ TEST(TrampolineBuilderEmit, FullExecReachesTheCallWithTheWindowOpen) {
 
   const std::vector<uint32_t> &w = bytes->trampoline_words;
   const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
-  const uint32_t widen = build_s_mov_b64(exec_lo, scalar_inline_neg_one(plan.arch), plan.arch);
+  const uint32_t widen =
+      build_s_mov_b64_encoding(exec_lo, scalar_inline_neg_one(plan.arch), plan.arch);
   const auto widen_at = std::find(w.begin(), w.end(), widen);
   ASSERT_NE(widen_at, w.end());
   const auto swappc = std::find_if(w.begin(), w.end(), [&](uint32_t word) {
@@ -1371,7 +1373,7 @@ TEST(TrampolineBuilderEmit, WithoutFullExecTheAnchorMaskIsRestoredBeforeTheCall)
   const auto saved = std::find_if(plan.special_state_saves.begin(), plan.special_state_saves.end(),
                                   [&](const SpecialStateSlot &s) { return s.operand == exec_lo; });
   ASSERT_NE(saved, plan.special_state_saves.end());
-  const uint32_t restore = build_s_mov_b64(exec_lo, saved->temp_base, plan.arch);
+  const uint32_t restore = build_s_mov_b64_encoding(exec_lo, saved->temp_base, plan.arch);
   const auto swappc = std::find_if(w.begin(), w.end(), [&](uint32_t word) {
     return decode_sop1_op(word) == sop1_op_swappc_b64(plan.arch) &&
            decode_sop1_sdst(word) == plan.link_pair_base;

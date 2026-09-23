@@ -141,6 +141,10 @@ public:
   VmAccessOutcome read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype = Mtype::RW,
                        uint32_t vmid = 0);
 
+  /// @brief Recheck demanded host bytes in sanitizer builds, including cache hits.
+  VmAccessOutcome validate_cache_access(uint64_t addr, uint32_t size, uint32_t vmid,
+                                        VmAccessKind access) const;
+
   /// @brief Write data to L2 (and possibly through to HBM).
   ///
   /// Used by L1 for write-through (CC) and write-back evictions.

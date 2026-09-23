@@ -19,6 +19,8 @@ namespace rocjitsu {
 namespace {
 
 amdgpu::SdmaPacketDialect sdma_dialect(rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return amdgpu::SdmaPacketDialect::Oss7;
   if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return amdgpu::SdmaPacketDialect::Gfx1250;
   if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||

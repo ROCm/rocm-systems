@@ -136,6 +136,13 @@ void L1VectorCache::cache_partial_bytes(uint64_t addr, const uint8_t *src, uint3
 VmAccessOutcome L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size,
                                           bool non_temporal, bool request_l1_bypass, uint32_t vmid,
                                           RequestMtypeResolver &mtypes) {
+  const VmAccessOutcome validation =
+      l2_->validate_cache_access(addr, size, vmid, VmAccessKind::Read);
+  if (validation != VmAccessOutcome::Complete) {
+    std::memset(dst, 0, size);
+    return validation;
+  }
+
   util::Logger::cp([&](auto &os) {
     const Mtype effective = mtypes.at(addr);
     static thread_local uint64_t mtype_counts[5] = {};
@@ -205,6 +212,12 @@ VmAccessOutcome L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t 
 VmAccessOutcome L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size,
                                            bool non_temporal, uint32_t vmid,
                                            RequestMtypeResolver &mtypes) {
+  const VmAccessOutcome validation =
+      l2_->validate_cache_access(addr, size, vmid, VmAccessKind::Write);
+  if (validation != VmAccessOutcome::Complete) {
+    return validation;
+  }
+
   util::Logger::vm([&](auto &os) {
     if (addr >= 0x4d00c00000ULL && addr < 0x4d00c00100ULL) {
       const Mtype effective = mtypes.at(addr);

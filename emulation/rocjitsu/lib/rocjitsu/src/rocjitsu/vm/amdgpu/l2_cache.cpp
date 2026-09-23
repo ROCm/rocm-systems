@@ -203,6 +203,30 @@ void L2Cache::clear_all_dirty_bytes() {
   has_dirty_lines_.store(false, std::memory_order_relaxed);
 }
 
+VmAccessOutcome L2Cache::validate_cache_access(uint64_t addr, uint32_t size, uint32_t vmid,
+                                               VmAccessKind access) const {
+#if defined(__SANITIZE_ADDRESS__)
+#define RJ_VALIDATE_CACHE_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define RJ_VALIDATE_CACHE_ASAN 1
+#endif
+#endif
+#if defined(RJ_VALIDATE_CACHE_ASAN)
+  if (vmid != 0 && gpu_vm_) {
+    const auto snapshot = gpu_vm_->snapshot_vmid(vmid);
+    return snapshot ? snapshot->probe(addr, size, access) : VmAccessOutcome::Faulted;
+  }
+#else
+  (void)addr;
+  (void)size;
+  (void)vmid;
+  (void)access;
+#endif
+#undef RJ_VALIDATE_CACHE_ASAN
+  return VmAccessOutcome::Complete;
+}
+
 VmAccessOutcome L2Cache::access_outcome(simdojo::MessageStatus status) {
   switch (status) {
   case simdojo::MessageStatus::Complete:
@@ -398,6 +422,12 @@ VmAccessOutcome L2Cache::cache_partial_bytes(uint64_t addr, const uint8_t *src, 
 
 VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype,
                               uint32_t vmid) {
+  const VmAccessOutcome validation = validate_cache_access(addr, size, vmid, VmAccessKind::Read);
+  if (validation != VmAccessOutcome::Complete) {
+    std::memset(dst, 0, size);
+    return validation;
+  }
+
   auto maintenance_lock = acquire_cache_access();
   uint32_t copied = 0;
   if (mtype == Mtype::UC) {
@@ -466,6 +496,11 @@ VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype 
 
 VmAccessOutcome L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype,
                                uint32_t vmid) {
+  const VmAccessOutcome validation = validate_cache_access(addr, size, vmid, VmAccessKind::Write);
+  if (validation != VmAccessOutcome::Complete) {
+    return validation;
+  }
+
   auto maintenance_lock = acquire_cache_access();
   uint32_t copied = 0;
   if (mtype == Mtype::UC) {

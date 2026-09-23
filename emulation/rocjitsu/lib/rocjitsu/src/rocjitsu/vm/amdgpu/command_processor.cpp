@@ -712,13 +712,17 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
           (static_cast<uint64_t>(scratch_xcc_id_) * shader_engine_count + shader_engine_id) *
               scratch_wave_stride_per_se +
           scoreboard_id;
-      scratch_slots =
-          static_cast<uint64_t>(scratch_xcc_count_) * shader_engine_count * scratch_waves_per_se_;
+      scratch_slots = static_cast<uint64_t>(scratch_xcc_count_) * shader_engine_count *
+                      scratch_wave_stride_per_se;
     } else {
       // Legacy CWSR records use the dispatch-wide logical scratch slot.
       wf->set_scratch_scoreboard_id(static_cast<uint32_t>(global_wave_idx));
     }
-    if (scratch_slot > (std::numeric_limits<uint64_t>::max() - scratch_pool) / per_wave_size)
+    if (scratch_slots == 0 || scratch_slot >= scratch_slots ||
+        per_wave_size > std::numeric_limits<size_t>::max() / scratch_slots ||
+        scratch_pool >
+            std::numeric_limits<uint64_t>::max() - (per_wave_size * scratch_slots - 1u) ||
+        scratch_slot > (std::numeric_limits<uint64_t>::max() - scratch_pool) / per_wave_size)
       return VmAccessOutcome::Malformed;
     uint64_t wave_scratch = scratch_pool + scratch_slot * per_wave_size;
     std::optional<GpuVmAccess> scratch_access = snapshot_gpu_access(pkt.address_space);
@@ -737,13 +741,6 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
       // Size against the whole grid, not this XCD's share: every XCD of a
       // fanned-out dispatch shares the allocation. CDNA5 uses the complete
       // physical XCC/SE/scoreboard address space instead of logical grid slots.
-      uint64_t scratch_slots = static_cast<uint64_t>(pkt.grid_total_wgs()) * waves_per_wg;
-      if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
-        const uint32_t shader_engine_count =
-            std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
-        scratch_slots =
-            static_cast<uint64_t>(scratch_xcc_count_) * shader_engine_count * scratch_waves_per_se_;
-      }
       if (scratch_slots == 0 || per_wave_size > std::numeric_limits<size_t>::max() / scratch_slots)
         return VmAccessOutcome::Malformed;
       const size_t total_scratch = static_cast<size_t>(per_wave_size * scratch_slots);

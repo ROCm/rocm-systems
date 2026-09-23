@@ -3077,7 +3077,7 @@ TEST(BinaryTranslatorE2E, Gfx1250CompactsNegativeLongJumpWithInterleavedPrefetch
       cdna5::build_sop2(cdna5::kSAddCoI32Sop2,
                         {.ssrc0 = kLiteralOperand, .ssrc1 = kInlineInt4, .sdst = kTmpSreg})[0],
       0xfffffff4u,
-      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_CDNA5),
+      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_CDNA5).value(),
       cdna5::build_sop1(cdna5::kSAbsI32Sop1, {.ssrc0 = kTmpSreg, .sdst = kTmpSreg})[0],
       cdna5::build_sop2(cdna5::kSSubCoU32Sop2,
                         {.ssrc0 = kPcSreg, .ssrc1 = kTmpSreg, .sdst = kPcSreg})[0],

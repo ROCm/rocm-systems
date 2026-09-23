@@ -68,7 +68,6 @@ constexpr SdmaPacketCapabilities sdma_packet_capabilities(SdmaPacketDialect dial
   return {};
 }
 
-
 using SdmaCacheOperation = DeviceCacheOperation;
 using SdmaCacheLease = DeviceCacheMaintenanceLease;
 

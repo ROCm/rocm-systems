@@ -84,6 +84,12 @@ void L1ScalarCache::cache_partial_bytes(uint64_t addr, const uint8_t *src, uint3
 
 VmAccessOutcome L1ScalarCache::store(uint64_t addr, uint32_t num_dwords, const uint32_t *src,
                                      uint32_t vmid) {
+  const VmAccessOutcome validation =
+      l2_->validate_cache_access(addr, num_dwords * sizeof(uint32_t), vmid, VmAccessKind::Write);
+  if (validation != VmAccessOutcome::Complete) {
+    return validation;
+  }
+
   synchronize_epoch();
   RequestMtypeResolver mtypes(gpu_vm_, vmid);
   for (uint32_t i = 0; i < num_dwords; ++i) {
@@ -173,6 +179,13 @@ void L1ScalarCache::flush_line(uint64_t addr, uint32_t vmid) {
 
 VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t *dst,
                                     uint32_t vmid) {
+  const VmAccessOutcome validation =
+      l2_->validate_cache_access(addr, num_dwords * sizeof(uint32_t), vmid, VmAccessKind::Read);
+  if (validation != VmAccessOutcome::Complete) {
+    std::memset(dst, 0, num_dwords * sizeof(uint32_t));
+    return validation;
+  }
+
   synchronize_epoch();
   RequestMtypeResolver mtypes(gpu_vm_, vmid);
   for (uint32_t i = 0; i < num_dwords; ++i) {
@@ -226,6 +239,13 @@ VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t
 
 VmAccessOutcome L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst,
                                           uint32_t vmid) {
+  const VmAccessOutcome validation =
+      l2_->validate_cache_access(addr, num_bytes, vmid, VmAccessKind::Read);
+  if (validation != VmAccessOutcome::Complete) {
+    std::memset(dst, 0, num_bytes);
+    return validation;
+  }
+
   synchronize_epoch();
   RequestMtypeResolver mtypes(gpu_vm_, vmid);
   uint32_t copied = 0;

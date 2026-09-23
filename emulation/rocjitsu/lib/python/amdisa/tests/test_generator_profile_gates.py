@@ -547,7 +547,7 @@ def test_gfx1250_dual_atomic_generator_covers_each_variant(
 def test_ds_atomic_generator_only_writes_back_explicit_return_destination() -> None:
     codegen = object.__new__(CodeGenerator)
     codegen._vgpr_base_expr = lambda operand, **_kwargs: operand
-    codegen._append_wait_counter_type = lambda lines, _semantic_class: lines.append(
+    codegen._append_wait_counter_type = lambda lines, _sem, _semantic_class: lines.append(
         '  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;'
     )
     sem = InstructionSemantics(

@@ -207,7 +207,7 @@ TEST(ConSan, FlatRelocationDoesNotRequireAWinningReservoirRetry) {
       0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
   };
   const uint32_t ineligible_reservoir_word =
-      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value();
   for (uint16_t sgpr = 2u; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
     first_kernel_words.push_back(build_s_mov_b32(sgpr, sgpr, ROCJITSU_CODE_ARCH_RDNA4));
     first_kernel_words.push_back(ineligible_reservoir_word);
@@ -291,7 +291,7 @@ TEST(ConSan, FlatCheckTrapRelocatesMultipleFarBodiesWithoutAnchorTails) {
   };
   std::vector<uint32_t> first_kernel_words(flat_prefix.begin(), flat_prefix.end());
   const uint32_t ineligible_reservoir_word =
-      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value();
   first_kernel_words.resize(16000u, ineligible_reservoir_word);
   first_kernel_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
   std::vector<uint32_t> second_kernel_words(flat_prefix.begin(), flat_prefix.end());
@@ -625,7 +625,7 @@ TEST(ConSan, FlatCheckTrapRelocatesFarBodyWithoutDisplacingPrefix) {
       0xBE890089u,                           // s_mov_b32 s9, s9
   };
   text_words.resize(kLargeTextWords - 1u,
-                    build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4));
+                    build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value());
   text_words.push_back(0xBFB00000u); // s_endpgm
 
   const uint64_t original_text_size = text_words.size() * sizeof(uint32_t);

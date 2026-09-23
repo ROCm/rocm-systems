@@ -100,46 +100,52 @@ using rocjitsu::amdgpu::RequestMtypeResolver;
 TEST(L2CacheTest, CacheFillPreservesAllocationTailAndRwCaching) {
   for (int level = 0; level != 3; ++level) {
     SCOPED_TRACE(level);
-    GpuMemory memory("memory");
+    rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
+    rocjitsu::KfdProcess process(1);
+    memory.register_process(1, &process.page_table_, &process.page_table_mutex_);
     memory.set_passthrough(true);
     L2Cache l2("l2");
     l2.set_backing_memory(&memory);
+    l2.set_gpu_vm(&memory.gpu_vm());
     L1ScalarCache scalar(&l2);
     L1VectorCache vector(&l2);
+    scalar.set_gpu_vm(&memory.gpu_vm());
+    vector.set_gpu_vm(&memory.gpu_vm());
     auto allocation = std::make_unique<uint32_t[]>(33);
     auto *tail = allocation.get() + 32;
     const uint64_t address = reinterpret_cast<uintptr_t>(tail);
     auto read = [&] {
       uint32_t result = 0;
       if (level == 0)
-        l2.read(address, reinterpret_cast<uint8_t *>(&result), sizeof(result));
+        l2.read(address, reinterpret_cast<uint8_t *>(&result), sizeof(result), Mtype::RW, 1);
       else if (level == 1)
-        scalar.load(address, 1, &result);
+        scalar.load(address, 1, &result, 1);
       else
         vector.load(&address, 1, sizeof(result), 1, reinterpret_cast<uint8_t *>(&result), Mtype::RW,
-                    false, false, 1);
+                    false, false, 1, 1);
       return result;
     };
     *tail = 0x12345678;
-    const GpuMemory::FaultScope faults;
+    const rocjitsu::amdgpu::LegacyAddressSpace::FaultScope faults;
     EXPECT_EQ(read(), 0x12345678u);
     *tail = 0x87654321;
     EXPECT_EQ(read(), 0x12345678u) << "partial lines must retain RW cache semantics";
     const uint32_t replacement = 0xaabbccdd;
     if (level == 0)
-      l2.write(address, reinterpret_cast<const uint8_t *>(&replacement), sizeof(replacement));
+      l2.write(address, reinterpret_cast<const uint8_t *>(&replacement), sizeof(replacement),
+               Mtype::RW, 1);
     else if (level == 1)
-      scalar.store(address, 1, &replacement);
+      scalar.store(address, 1, &replacement, 1);
     else
       vector.store(&address, 1, sizeof(replacement), 1,
-                   reinterpret_cast<const uint8_t *>(&replacement), Mtype::RW, false, 1);
+                   reinterpret_cast<const uint8_t *>(&replacement), Mtype::RW, false, 1, 1);
     EXPECT_EQ(*tail, replacement);
     EXPECT_EQ(read(), replacement);
     EXPECT_FALSE(faults.observed());
 #if defined(RJ_CACHE_TEST_WITH_ASAN)
     __asan_poison_memory_region(tail, sizeof(*tail));
     {
-      const GpuMemory::FaultScope poisoned_access;
+      const rocjitsu::amdgpu::LegacyAddressSpace::FaultScope poisoned_access;
       EXPECT_EQ(read(), 0u);
       EXPECT_TRUE(poisoned_access.observed()) << "a cache hit must still reject poisoned demand";
     }

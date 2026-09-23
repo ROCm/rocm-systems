@@ -47,6 +47,10 @@ namespace rocjitsu {
 
 class SimulatedKfdTestAccess {
 public:
+  static amdgpu::LegacyAddressSpace *address_space(SimulatedKfd &driver, uint32_t vmid) {
+    return driver.gpus_[0].legacy_vm->address_space(vmid);
+  }
+
   static bool allocate_scratch_backing(SimulatedKfd &driver, uint32_t process_id, uint64_t gpu_va,
                                        size_t size) {
     return driver.allocate_scratch_backing(process_id, gpu_va, size);
@@ -144,7 +148,7 @@ TEST_F(SimulatedKfdTest, ScratchBackingGrowthPreservesContentsAndZeroFillsExtens
   const uint32_t process_id = t.driver()->local_process_id();
   auto *vm = dynamic_cast<rocjitsu::VirtualMachine *>(t.engine->topology().root());
   ASSERT_NE(vm, nullptr);
-  auto *memory = vm->memory();
+  auto *memory = rocjitsu::SimulatedKfdTestAccess::address_space(*t.driver(), process_id);
   ASSERT_NE(memory, nullptr);
 
   ASSERT_TRUE(rocjitsu::SimulatedKfdTestAccess::allocate_scratch_backing(
@@ -204,7 +208,7 @@ TEST_F(SimulatedKfdTest, ScratchBackingGrowthDoesNotMistakePassthroughForMappedP
   const uint32_t process_id = t.driver()->local_process_id();
   auto *vm = dynamic_cast<rocjitsu::VirtualMachine *>(t.engine->topology().root());
   ASSERT_NE(vm, nullptr);
-  auto *memory = vm->memory();
+  auto *memory = rocjitsu::SimulatedKfdTestAccess::address_space(*t.driver(), process_id);
   ASSERT_NE(memory, nullptr);
   ASSERT_TRUE(memory->has_page_table_mapping(scratch_va, process_id));
   ASSERT_FALSE(memory->has_page_table_mapping(scratch_va + kInitialSize, process_id));
@@ -258,7 +262,7 @@ TEST_F(SimulatedKfdTest, ScratchBackingGrowthActivatesReservedUserptrTail) {
   const uint32_t process_id = t.driver()->local_process_id();
   auto *vm = dynamic_cast<rocjitsu::VirtualMachine *>(t.engine->topology().root());
   ASSERT_NE(vm, nullptr);
-  auto *memory = vm->memory();
+  auto *memory = rocjitsu::SimulatedKfdTestAccess::address_space(*t.driver(), process_id);
   ASSERT_NE(memory, nullptr);
   ASSERT_TRUE(memory->has_page_table_mapping(scratch_va + kGrownSize - 1u, process_id))
       << "USERPTR PTEs describe the reservation, not its current host permissions";
@@ -306,7 +310,7 @@ TEST_F(SimulatedKfdTest, ScratchBackingGrowthUsesVerifiedReservationBeyondUserpt
   const uint32_t process_id = t.driver()->local_process_id();
   auto *vm = dynamic_cast<rocjitsu::VirtualMachine *>(t.engine->topology().root());
   ASSERT_NE(vm, nullptr);
-  auto *memory = vm->memory();
+  auto *memory = rocjitsu::SimulatedKfdTestAccess::address_space(*t.driver(), process_id);
   ASSERT_NE(memory, nullptr);
   ASSERT_FALSE(memory->has_page_table_mapping(scratch_va + kGrownSize - 1u, process_id));
 

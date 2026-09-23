@@ -1211,7 +1211,8 @@ template <bool EnableAsync>
 [[gnu::always_inline]] inline void ComputeUnitCore::issue_instruction_impl(
     Wavefront *active,
     std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window,
-    std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage) {
+    std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage,
+    StepFetchEntry *fetch) {
   uint32_t vmid = active->process_id();
   const auto drain_async_window = [&]() {
     if constexpr (EnableAsync) {
@@ -1246,7 +1247,13 @@ template <bool EnableAsync>
   static_assert(sizeof(words) == InstructionCache::kFetchBytes,
                 "the I$ fetch width must match the issue window");
   VmAccessOutcome fetch_outcome = VmAccessOutcome::Complete;
-  if (vm_address_space) {
+  const VmCacheNamespace cache_namespace =
+      vm_access ? vm_access->cache_namespace() : VmCacheNamespace{};
+  const bool cached = fetch && fetch->valid && !debug_active() && fetch->pc == active->pc &&
+                      fetch->vmid == vmid && fetch->cache_namespace == cache_namespace;
+  if (cached) {
+    std::copy(fetch->words.begin(), fetch->words.end(), words);
+  } else if (vm_address_space) {
     if (debug_active()) {
       fetch_outcome = vm_access->read(
           active->pc, std::span<std::byte>(reinterpret_cast<std::byte *>(words), sizeof(words)),
@@ -1266,6 +1273,18 @@ template <bool EnableAsync>
     // running. Take the invalidation set_debug_active() published.
     sync_inst_cache_debug_epoch();
     inst_cache_.fetch(*memory_, active->pc, reinterpret_cast<uint8_t *>(words));
+  }
+
+  if (!cached) {
+    ++fetched_instruction_count_;
+    if (fetch) {
+      fetch->valid = fetch_outcome == VmAccessOutcome::Complete && !debug_active();
+      fetch->vmid = vmid;
+      fetch->pc = active->pc;
+      fetch->cache_namespace = cache_namespace;
+      if (fetch->valid)
+        std::copy_n(words, fetch->words.size(), fetch->words.begin());
+    }
   }
 
   if (fetch_outcome != VmAccessOutcome::Complete) {
@@ -1718,8 +1737,8 @@ template <bool EnableAsync>
 
 // Keep ordinary issue and step as concrete entry points. Async execution
 // uses a separate entry selected when constructing the CU.
-void ComputeUnitCore::issue_instruction(Wavefront *active) {
-  issue_instruction_impl<false>(active);
+void ComputeUnitCore::issue_instruction(Wavefront *active, StepFetchEntry *fetch) {
+  issue_instruction_impl<false>(active, {}, {}, fetch);
 }
 
 template <bool EnableAsync>
@@ -1732,6 +1751,10 @@ template <bool EnableAsync>
   tick_pipelines();
   update_wf_states();
 
+  // Share immutable instruction words among same-PC waves for this step only.
+  // Each wave still snapshots its VM binding and decodes its own instruction.
+  constexpr size_t kStepFetchEntries = 8;
+  std::array<StepFetchEntry, kStepFetchEntries> step_fetches{};
   for (auto &wf : wfs_) {
     if (!wf)
       continue;
@@ -1754,7 +1777,9 @@ template <bool EnableAsync>
             admission->flush();
         }
       } else {
-        issue_instruction(wf.get());
+        const size_t index = ((wf->pc >> 2u) ^ (uint64_t{wf->process_id()} * 0x9e3779b9u)) &
+                             (kStepFetchEntries - 1u);
+        issue_instruction(wf.get(), &step_fetches[index]);
       }
       if (single_step && !wf->in_trap_handler() && !wf->debug_halted() && single_step_handler_)
         single_step_handler_(*wf);

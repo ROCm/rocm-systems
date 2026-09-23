@@ -25,10 +25,12 @@ constexpr uint32_t kManyOwnerCount = 8u;
 #define RJ_CONSAN_SPARSE_SPILL_STORE "ds_store_b32"
 #define RJ_CONSAN_SPARSE_SPILL_LOAD "ds_load_b32"
 #define RJ_CONSAN_SPARSE_SPILL_WAIT "s_wait_dscnt 0\n\t"
+#define RJ_CONSAN_SPARSE_SPILL_WAIT_INPUTS "s_wait_kmcnt 0\n\ts_wait_loadcnt_dscnt 0\n\t"
 #else
 #define RJ_CONSAN_SPARSE_SPILL_STORE "ds_write_b32"
 #define RJ_CONSAN_SPARSE_SPILL_LOAD "ds_read_b32"
 #define RJ_CONSAN_SPARSE_SPILL_WAIT "s_waitcnt lgkmcnt(0)\n\t"
+#define RJ_CONSAN_SPARSE_SPILL_WAIT_INPUTS "s_waitcnt 0\n\t"
 #endif
 
 // Preserve broad scalar liveness across every dense LDS site while leaving a
@@ -108,16 +110,20 @@ __device__ __forceinline__ uint32_t lds_address(volatile uint32_t *address) {
   return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(address) & 0xffffu);
 }
 
+// The pressure scaffold reads named registers the compiler cannot see. Drain
+// pending loads first, including scalar kernarg loads on split-counter targets.
+// Each repeated load writes its output before later iterations consume the
+// address and value inputs, so the output must not share either input register.
 __device__ __forceinline__ uint32_t pressured_dense_roundtrip(volatile uint32_t *address,
                                                               uint32_t value) {
   const uint32_t address_value = lds_address(address);
   uint32_t observed = 0u;
-  asm volatile(RJ_CONSAN_SPARSE_SPILL_WAIT
+  asm volatile(RJ_CONSAN_SPARSE_SPILL_WAIT_INPUTS
                    RJ_CONSAN_SPARSE_SPILL_SCALAR_USES RJ_CONSAN_SPARSE_SPILL_VECTOR_USES
                ".rept 64\n\t" RJ_CONSAN_SPARSE_SPILL_STORE " %1, %2\n\t" RJ_CONSAN_SPARSE_SPILL_LOAD
                " %0, %1\n\t" RJ_CONSAN_SPARSE_SPILL_WAIT
                ".endr\n\t" RJ_CONSAN_SPARSE_SPILL_VECTOR_USES RJ_CONSAN_SPARSE_SPILL_SCALAR_USES
-               : "=v"(observed)
+               : "=&v"(observed)
                : "v"(address_value), "v"(value)
                : RJ_CONSAN_SPARSE_SPILL_SCALAR_CLOBBERS, RJ_CONSAN_SPARSE_SPILL_VECTOR_CLOBBER,
                  "memory");
@@ -129,12 +135,12 @@ full_scalar_pressured_dense_roundtrip(volatile uint32_t *address, uint32_t value
   const uint32_t address_value = lds_address(address);
   uint32_t observed = 0u;
   asm volatile(
-      RJ_CONSAN_SPARSE_SPILL_WAIT
+      RJ_CONSAN_SPARSE_SPILL_WAIT_INPUTS
           RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_USES RJ_CONSAN_SPARSE_SPILL_VECTOR_USES
       ".rept 64\n\t" RJ_CONSAN_SPARSE_SPILL_STORE " %1, %2\n\t" RJ_CONSAN_SPARSE_SPILL_LOAD
       " %0, %1\n\t" RJ_CONSAN_SPARSE_SPILL_WAIT
       ".endr\n\t" RJ_CONSAN_SPARSE_SPILL_VECTOR_USES RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_USES
-      : "=v"(observed)
+      : "=&v"(observed)
       : "v"(address_value), "v"(value)
       : RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_CLOBBERS, RJ_CONSAN_SPARSE_SPILL_VECTOR_CLOBBER,
         "memory");
@@ -151,12 +157,12 @@ __device__ __forceinline__ uint32_t many_owner_pressured_dense_roundtrip(volatil
   const uint32_t address_value = lds_address(address);
   uint32_t observed = 0u;
   asm volatile(
-      RJ_CONSAN_SPARSE_SPILL_WAIT
+      RJ_CONSAN_SPARSE_SPILL_WAIT_INPUTS
           RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_USES RJ_CONSAN_SPARSE_SPILL_VECTOR_USES
       ".rept 24\n\t" RJ_CONSAN_SPARSE_SPILL_STORE " %1, %2\n\t" RJ_CONSAN_SPARSE_SPILL_LOAD
       " %0, %1\n\t" RJ_CONSAN_SPARSE_SPILL_WAIT
       ".endr\n\t" RJ_CONSAN_SPARSE_SPILL_VECTOR_USES RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_USES
-      : "=v"(observed)
+      : "=&v"(observed)
       : "v"(address_value), "v"(value)
       : RJ_CONSAN_SPARSE_SPILL_FULL_SCALAR_CLOBBERS, RJ_CONSAN_SPARSE_SPILL_VECTOR_CLOBBER,
         "memory");

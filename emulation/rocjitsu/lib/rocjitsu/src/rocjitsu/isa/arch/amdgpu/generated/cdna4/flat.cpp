@@ -3570,6 +3570,13 @@ GlobalLoadLdsDwordx4Flat::GlobalLoadLdsDwordx4Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
@@ -3609,6 +3616,13 @@ GlobalLoadLdsDwordx3Flat::GlobalLoadLdsDwordx3Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                       (inst_.seg == 0 ? amdgpu::MemoryCompletionClass::UNORDERED
+                                                       : amdgpu::MemoryCompletionClass::VMEM)},
+       (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
