@@ -481,10 +481,10 @@ class Device : public NullDevice {
   uint64_t hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const;
 
   //! Recovers the location and size of a VMM allocation from its ROCr handle.
-  //! Returns false when ROCr cannot report them - notably an imported handle
-  //! whose placement the kernel could not describe - leaving the caller on its
-  //! default. Note this is not a guard against an older ROCr: these symbols bind
-  //! at link time, so a runtime lacking them fails to load libamdhip64 entirely.
+  //! Returns false when ROCr cannot report them - an imported handle whose
+  //! placement the kernel could not describe, or (under ROCR_DLL_LOAD) a ROCr
+  //! too old to export hsa_amd_vmem_get_vmem_info - leaving the caller on its
+  //! default.
   bool getVmmAllocInfo(uint64_t handle, amd::Device::VmmLocationType* location_type,
                        size_t* size) const override;
 

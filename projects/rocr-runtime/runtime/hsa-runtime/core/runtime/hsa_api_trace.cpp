@@ -472,8 +472,7 @@ void HsaApiTable::UpdateAmdExts() {
   amd_ext_api.hsa_amd_vmem_retain_alloc_handle_fn = AMD::hsa_amd_vmem_retain_alloc_handle;
   amd_ext_api.hsa_amd_vmem_get_alloc_properties_from_handle_fn =
       AMD::hsa_amd_vmem_get_alloc_properties_from_handle;
-  amd_ext_api.hsa_amd_vmem_get_alloc_size_from_handle_fn =
-      AMD::hsa_amd_vmem_get_alloc_size_from_handle;
+  amd_ext_api.hsa_amd_vmem_get_vmem_info_fn = AMD::hsa_amd_vmem_get_vmem_info;
   amd_ext_api.hsa_amd_agent_set_async_scratch_limit_fn = AMD::hsa_amd_agent_set_async_scratch_limit;
   amd_ext_api.hsa_amd_queue_get_info_fn = AMD::hsa_amd_queue_get_info;
   amd_ext_api.hsa_amd_enable_logging_fn = AMD::hsa_amd_enable_logging;

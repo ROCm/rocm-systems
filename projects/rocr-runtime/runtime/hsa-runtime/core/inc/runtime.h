@@ -475,8 +475,8 @@ class Runtime {
                                                    const core::MemoryRegion** mem_region,
                                                    hsa_amd_memory_type_t* type);
 
-  hsa_status_t VMemoryGetAllocSizeFromHandle(const hsa_amd_vmem_alloc_handle_t memoryHandle,
-                                             size_t* size);
+  hsa_status_t VMemoryGetHandleInfo(const hsa_amd_vmem_alloc_handle_t memoryHandle,
+                                    hsa_amd_vmem_handle_info_t* info);
 
   hsa_status_t VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_handle,
                                          hsa_amd_vmem_alloc_handle_t handle, uint64_t flags);
