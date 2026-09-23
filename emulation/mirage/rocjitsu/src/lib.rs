@@ -1832,7 +1832,9 @@ mod tests {
     fn generated_config_spreads_target_budget_over_gpus() {
         let mut def = def_with_gpus(2);
         if let MaybeRef::Owned(topology) = &mut def.topology {
-            topology.agent = MaybeRef::Owned(mirage_builtin::agents::mi350x());
+            topology.agent = MaybeRef::Owned(
+                mirage_builtin::agents::agent("mi350x").expect("builtin mi350x agent"),
+            );
         }
         let SimConfig::Synthesised(bytes) = resolve_sim_config(&def).unwrap() else {
             panic!("expected generated config");
