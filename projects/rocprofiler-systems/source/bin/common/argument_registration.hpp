@@ -15,9 +15,7 @@
 #include <string>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace common_utils
+namespace rocprofsys::common_utils
 {
 
 using argument_parser = tim::argparse::argument_parser;
@@ -237,5 +235,4 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
         });
 }
 
-}  // namespace common_utils
-}  // namespace rocprofsys
+}  // namespace rocprofsys::common_utils

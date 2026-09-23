@@ -1047,7 +1047,7 @@ protected:
   /// @param pre_routing_addresses Original addresses when routing rewrote them.
   /// @param flat_local_lane_mask Requesting FLAT lanes in the LDS aperture half.
   /// @param flat_dds_lane_mask Requesting FLAT lanes in the DDS aperture half.
-  void report_routed_access(const Instruction &inst, const Wavefront &wf, uint8_t route_tag,
+  void report_routed_access(const Instruction &inst, Wavefront &wf, uint8_t route_tag,
                             uint8_t decoded_route_tag, bool normalized_to_local,
                             std::span<const uint64_t> pre_routing_addresses,
                             uint64_t flat_local_lane_mask, uint64_t flat_dds_lane_mask);

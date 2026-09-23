@@ -149,6 +149,16 @@ public:
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation & /*access*/) {}
 
+  /// Context-preserving form of onAmdgpuMemoryAccessRouted(). The instruction
+  /// and wavefront are borrowed for the duration of the callback and already
+  /// reflect the selected route. The default preserves source compatibility by
+  /// forwarding to the observation-only hook.
+  virtual void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
+                                          const Instruction & /*inst*/,
+                                          amdgpu::Wavefront & /*wf*/) {
+    onAmdgpuMemoryAccessRouted(access);
+  }
+
   /// Called after one tensor DMA instruction and any descriptor-requested
   /// atomic-barrier arrival return normally. The observation contains only
   /// in-bounds global requests attempted, in execution order. It intentionally
