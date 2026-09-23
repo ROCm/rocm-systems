@@ -25,7 +25,7 @@ none of those historical colors count as a pass for this campaign.
 - SDK: `/home/benoit/venv`, ROCm `10.2.0a20260915` development package.
 - Preparation: rebuilding the current hook, integrating per-workload generated
   allowlists, preparing Qwen provenance, and building the production matmul.
-- Fresh clean assessments: **25/42**; no cell has completed fresh fault qualification.
+- Fresh clean assessments: **26/42**; no cell has completed fresh fault qualification.
 - Preparation logs: `/home/benoit/workspace/consan-validation-artifacts/`.
 
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
@@ -43,7 +43,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | PyTorch | P2 | split online softmax (`pytorch-rdna4-split-softmax`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | PyTorch | P2 | Qwen-vocabulary top-k (`pytorch-rdna4-llm-topk`) | 🟥 Sep 23: no applicable code object; analysis incomplete | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | llama.cpp | P2 | quantized matvec (`llama-rdna4-mul-mat-vec-q`) | 🟩 exact; 462 accesses and 88 barriers; fault bundle | 🟩 exact; 462/462 accesses; fault bundle |
-| Main E2E | P2 | Sharktank TP2 family (`tp2-family`) | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log | 🟩 exact; 2,976/2,976 accesses; fault bundle |
+| Main E2E | P2 | Sharktank TP2 family (`tp2-family`) | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 exact; 85 accesses and 72 barriers; fault bundle | 🟩 exact; 85/85 accesses; fault bundle |
 | PyTorch | P3 | native histogram (`pytorch-torch-histc`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | llama.cpp | P3 | RMS norm (`llama-rdna4-rms-norm`) | 🟨 exact/complete; effective reviewed fault pending | 🟨 exact/complete; effective reviewed fault pending |
@@ -114,3 +114,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `tp1-decode-combined` / default: native rocprofv3 discovery failed; inspect discovery log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/tp1-decode-combined-default`.
 - `tp1-decode-combined` / supercollider: native rocprofv3 discovery failed; inspect discovery log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/tp1-decode-combined-supercollider`.
 - `tp2-family` / default: native rocprofv3 discovery failed; inspect discovery log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/tp2-family-default`.
+- `tp2-family` / supercollider: native rocprofv3 discovery failed; inspect discovery log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/tp2-family-supercollider`.
