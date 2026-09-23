@@ -20,7 +20,6 @@ if _PACKAGE_PARENT not in sys.path:
 
 from utils.inject_roctx.core import install_global_wraps  # noqa: E402
 
-
 # Consume a leading "--frameworks <name> [<name> ...]" option and an optional
 # "--" separator. Framework names are all tokens until "--".
 args = sys.argv[1:]
