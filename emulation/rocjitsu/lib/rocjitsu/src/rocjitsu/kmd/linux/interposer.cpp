@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file interposer.cpp
-/// @brief LD_PRELOAD interposer that redirects KFD syscalls to rocjitsu KFD drivers.
+/// @brief LD_PRELOAD interposer for simulated KFD and DRM compute devices.
 ///
 /// @details Intercepts open, close, ioctl, mmap, munmap, and filesystem access
 /// to route /dev/kfd operations and sysfs topology reads through one of two
@@ -11,7 +11,9 @@
 /// append one synthetic guest GPU over either real KFD hardware or an existing
 /// SimulatedKfd target. The HSA tools hook maps guest-agent API calls to that
 /// execution agent and translates guest code objects before loading them. All
-/// mutable state is consolidated in InterposerContext.
+/// mutable state is consolidated in InterposerContext. The DRM path emulates
+/// render-node discovery, GEM buffers, contexts, syncobj fences, and PM4 compute
+/// submission for the Vulkan userspace driver.
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/config/dbt_guest_config.h"
@@ -24,6 +26,7 @@
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
+#include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm.h"
@@ -64,6 +67,8 @@ RJ_DIAGNOSTIC_POP
 #include <limits>
 #include <linux/futex.h>
 #include <linux/memfd.h>
+#include <linux/sync_file.h>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -73,8 +78,10 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -85,6 +92,7 @@ RJ_DIAGNOSTIC_POP
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -324,6 +332,45 @@ __attribute__((constructor)) void rj_install_signal_handler() {
   sigaction(SIGSEGV, &sa, nullptr);
 }
 
+void preallocate_backing_fd_table() {
+  // A late load may already share its descriptor table with application threads.
+  // Skip that case: growth would still wait for RCU, and another thread could
+  // replace a temporary descriptor or change the process limit. The optional
+  // dynamic lookup keeps older libc versions supported without assuming that
+  // their threading state is known.
+  const char *single_threaded =
+      static_cast<const char *>(dlsym(RTLD_DEFAULT, "__libc_single_threaded"));
+  if (!single_threaded || !*single_threaded)
+    return;
+  struct rlimit original {};
+  if (syscall(SYS_prlimit64, 0, RLIMIT_NOFILE, nullptr, &original) != 0)
+    return;
+  const bool raise_limit = original.rlim_cur <= SimulatedKfd::kBackingFdMin;
+  if (raise_limit) {
+    if (original.rlim_max <= SimulatedKfd::kBackingFdMin)
+      return;
+    // SimulatedKfd::open can raise a low soft limit later, after workers exist.
+    // Temporarily lift it while this thread owns the process limit exclusively.
+    struct rlimit temporary = original;
+    temporary.rlim_cur = SimulatedKfd::kBackingFdMin + 1;
+    if (syscall(SYS_prlimit64, 0, RLIMIT_NOFILE, &temporary, nullptr) != 0)
+      return;
+  }
+  // Use only raw syscalls until the limit is restored: no callback can create a
+  // thread while the process limit differs from the application's setting.
+  const int temporary_fd =
+      static_cast<int>(syscall(SYS_openat, AT_FDCWD, "/dev/null", O_RDONLY | O_CLOEXEC, 0));
+  if (temporary_fd >= 0) {
+    const int high_fd = static_cast<int>(
+        syscall(SYS_fcntl, temporary_fd, F_DUPFD_CLOEXEC, SimulatedKfd::kBackingFdMin));
+    if (high_fd >= 0)
+      syscall(SYS_close, high_fd);
+    syscall(SYS_close, temporary_fd);
+  }
+  if (raise_limit && syscall(SYS_prlimit64, 0, RLIMIT_NOFILE, &original, nullptr) != 0)
+    std::fprintf(stderr, "rocjitsu: cannot restore descriptor limit: %s\n", std::strerror(errno));
+}
+
 /// @brief All mutable interposer state.
 class InterposerContext {
 public:
@@ -355,6 +402,14 @@ public:
   static InterposerContext &ctx;
 
   static void init() {
+    // Grow the descriptor table before the backend starts worker threads. Growing
+    // a shared Linux descriptor table for the first high backing descriptor can
+    // wait for an RCU grace period. Keep the driver's existing descriptor range;
+    // only the table capacity survives these temporary descriptors. Failure is
+    // harmless, including when the hard descriptor limit excludes that range.
+    const int saved_errno = errno;
+    preallocate_backing_fd_table();
+    errno = saved_errno;
     new (storage_) InterposerContext();
     ctx.owner_pid_ = getpid();
     // Record the HOST KFD device identity once, here, while single-threaded and
@@ -1126,10 +1181,139 @@ public:
     sysfs_fds_.erase(fd);
   }
 
+  struct SyncobjFence {
+    mutable std::atomic<bool> signaled{false};
+    std::atomic<bool> failed{false};
+    // Merged sync files retain immutable snapshots of the original fences.
+    std::vector<std::shared_ptr<SyncobjFence>> dependencies;
+    bool is_signaled() const {
+      if (signaled.load(std::memory_order_acquire))
+        return true;
+      // Merges and timeline transfers form a DAG. Visit each payload once,
+      // without recursive calls or repeated walks through shared predecessors.
+      std::vector<const SyncobjFence *> pending{this};
+      std::unordered_set<const SyncobjFence *> visited;
+      while (!pending.empty()) {
+        const auto *fence = pending.back();
+        pending.pop_back();
+        if (fence->signaled.load(std::memory_order_acquire) || !visited.insert(fence).second)
+          continue;
+        if (fence->dependencies.empty())
+          return false;
+        // Check the newly appended work before revisiting its predecessors.
+        for (auto it = fence->dependencies.rbegin(); it != fence->dependencies.rend(); ++it)
+          pending.push_back(it->get());
+      }
+      // Successful completion is permanent; subsequent queries need not revisit
+      // an immutable subtree whose leaves have all completed successfully.
+      for (const auto *fence : visited)
+        fence->signaled.store(true, std::memory_order_release);
+      return true;
+    }
+    bool is_failed() const {
+      std::vector<const SyncobjFence *> pending{this};
+      std::unordered_set<const SyncobjFence *> visited;
+      while (!pending.empty()) {
+        const auto *fence = pending.back();
+        pending.pop_back();
+        if (fence->signaled.load(std::memory_order_acquire) || !visited.insert(fence).second)
+          continue;
+        if (fence->failed.load(std::memory_order_acquire))
+          return true;
+        for (const auto &dependency : fence->dependencies)
+          pending.push_back(dependency.get());
+      }
+      return false;
+    }
+  };
+
   struct SyncobjEntry {
     bool has_fence = false;
+    bool signaled = false;
     uint64_t submitted_point = 0;
     uint64_t signaled_point = 0;
+    std::shared_ptr<SyncobjFence> binary_fence;
+    std::map<uint64_t, std::shared_ptr<SyncobjFence>> timeline_fences;
+  };
+
+  /// Private backing descriptors move when application dup2/dup3 replaces their
+  /// numbers. All uses share the relocation lock, including asynchronous writes.
+  class PrivateDrmFd {
+  public:
+    PrivateDrmFd() = default;
+    PrivateDrmFd(const PrivateDrmFd &) = delete;
+    PrivateDrmFd &operator=(const PrivateDrmFd &) = delete;
+
+    static std::shared_ptr<PrivateDrmFd> duplicate(int source) {
+      auto result = std::make_shared<PrivateDrmFd>();
+      std::lock_guard lock(mutex_);
+      const int fd = real().fcntl(source, F_DUPFD_CLOEXEC, SimulatedKfd::kBackingFdMin);
+      if (fd < 0)
+        return {};
+      result->fd_ = fd;
+      owned_.emplace(fd, result.get());
+      return result;
+    }
+
+    ~PrivateDrmFd() {
+      std::lock_guard lock(mutex_);
+      if (fd_ < 0)
+        return;
+      owned_.erase(fd_);
+      real().close(fd_);
+    }
+
+    template <typename F> auto use(F &&operation) const {
+      std::lock_guard lock(mutex_);
+      return operation(fd_);
+    }
+
+    static bool owns(int fd) {
+      std::lock_guard lock(mutex_);
+      return owned_.contains(fd);
+    }
+
+    template <typename F> static int replace(int target, F &&operation) {
+      std::lock_guard lock(mutex_);
+      const auto it = owned_.find(target);
+      if (it == owned_.end())
+        return operation();
+      const int relocated = real().fcntl(target, F_DUPFD_CLOEXEC, SimulatedKfd::kBackingFdMin);
+      if (relocated < 0)
+        return -1;
+      auto *owner = it->second;
+      const int result = operation();
+      if (result < 0) {
+        const int error = errno;
+        real().close(relocated);
+        errno = error;
+        return result;
+      }
+      auto node = owned_.extract(target);
+      node.key() = relocated;
+      owned_.insert(std::move(node));
+      owner->fd_ = relocated;
+      return result;
+    }
+
+  private:
+    int fd_ = -1;
+    static inline std::mutex mutex_;
+    static inline std::unordered_map<int, PrivateDrmFd *> owned_;
+  };
+
+  struct SyncFile {
+    std::shared_ptr<SyncobjFence> fence;
+    std::shared_ptr<PrivateDrmFd> event_fd;
+    bool notified = false;
+    void refresh() {
+      if (notified || !fence || (!fence->is_signaled() && !fence->is_failed()))
+        return;
+      uint64_t value = 1;
+      if (event_fd->use([&](int fd) { return syscall(SYS_write, fd, &value, sizeof(value)); }) ==
+          sizeof(value))
+        notified = true;
+    }
   };
 
   /// @brief Move-only operational reference to the backend serving a DRM file.
@@ -1248,6 +1432,14 @@ public:
     // futex(2), which preserves EINTR instead of transparently restarting after a
     // signal as std::condition_variable does.
     std::atomic<uint32_t> syncobj_generation{0};
+    bool imported_sync_fence = false; // Wait on the cross-file notification generation.
+    uint32_t next_context_id = 1;
+    std::unordered_set<uint32_t> contexts;
+    bool vmid_reserved = false;
+    std::mutex submission_mutex;
+    std::unordered_map<uint64_t, uint64_t>
+        pm4_queue_keys;           ///< Context/ring queues until context or file release.
+    uint64_t next_submission = 1; ///< Next file-local CS sequence number.
   };
 
   using DrmFileToken = std::shared_ptr<DrmFileState>;
@@ -1276,6 +1468,7 @@ public:
   struct DrmFinalRelease {
     std::optional<uint64_t> file_id;
     DrmBackendLease lease;
+    std::unordered_map<uint64_t, uint64_t> queue_keys;
   };
 
   /// @brief Drop one fd or reservation reference while fd_mutex_ is held.
@@ -1290,7 +1483,7 @@ public:
     --state->open_fds;
     if (state->open_fds != 0)
       return {};
-    return {state->id, std::move(state->backend_lease)};
+    return {state->id, std::move(state->backend_lease), std::move(state->pm4_queue_keys)};
   }
 
   struct DrmUntrackResult {
@@ -1298,9 +1491,12 @@ public:
     DrmFinalRelease release;
   };
 
-  /// @brief Finish a final DRM release: reap GEM, then drop the backend lease.
+  /// @brief Cancel the file's PM4 queues, reap GEM, then drop the backend lease.
   /// @details Must run with NO interposer lock held.
   void complete_drm_release(DrmFinalRelease release) {
+    if (auto *driver = dynamic_cast<SimulatedKfd *>(release.lease.local().get()))
+      for (const auto &[context_ring, key] : release.queue_keys)
+        driver->retire_pm4_queue(key);
     if (release.file_id)
       reap_gem_for_drm_file(*release.file_id);
     // release.lease destructs here, dropping the open reference. For a local
@@ -1485,6 +1681,11 @@ public:
     try {
       auto entry = std::make_shared<SyncobjEntry>();
       entry->has_fence = (flags & DRM_SYNCOBJ_CREATE_SIGNALED) != 0;
+      entry->signaled = entry->has_fence;
+      if (entry->has_fence) {
+        entry->binary_fence = std::make_shared<SyncobjFence>();
+        entry->binary_fence->signaled.store(true, std::memory_order_relaxed);
+      }
       state.syncobj_entries.emplace(candidate, std::move(entry));
     } catch (const std::bad_alloc &) {
       return -ENOMEM;
@@ -1503,6 +1704,307 @@ public:
     if (file->syncobj_entries.erase(handle) == 0)
       return -EINVAL;
     return 0;
+  }
+
+  /// @brief Allocate nonzero context IDs or query/remove one in this DRM file.
+  int drm_context(const DrmFileToken &file, drm_amdgpu_ctx *argument) {
+    if (!file)
+      return -EBADF;
+    const auto request = argument->in;
+    // Serialize with CS acceptance; callbacks run only after dropping fd_mutex_.
+    std::lock_guard submission_lock(file->submission_mutex);
+    if (request.op == AMDGPU_CTX_OP_FREE_CTX) {
+      std::vector<uint64_t> retired;
+      {
+        std::lock_guard lock(fd_mutex_);
+        if (!file->contexts.erase(request.ctx_id))
+          return -EINVAL;
+        std::erase_if(file->pm4_queue_keys, [&](const auto &entry) {
+          if ((entry.first >> 32) != request.ctx_id)
+            return false;
+          retired.push_back(entry.second);
+          return true;
+        });
+      }
+      if (auto *driver = dynamic_cast<SimulatedKfd *>(file->backend_lease.local().get()))
+        for (uint64_t key : retired)
+          driver->retire_pm4_queue(key);
+      return 0;
+    }
+    std::lock_guard lock(fd_mutex_);
+    switch (request.op) {
+    case AMDGPU_CTX_OP_ALLOC_CTX: {
+      uint32_t id = file->next_context_id++;
+      while (!id || file->contexts.count(id))
+        id = file->next_context_id++;
+      file->contexts.insert(id);
+      argument->out.alloc.ctx_id = id;
+      return 0;
+    }
+    case AMDGPU_CTX_OP_QUERY_STATE:
+    case AMDGPU_CTX_OP_QUERY_STATE2:
+      if (!file->contexts.count(request.ctx_id))
+        return -EINVAL;
+      std::memset(&argument->out, 0, sizeof(argument->out));
+      return 0;
+    default:
+      return -EINVAL;
+    }
+  }
+
+  /// @brief Track the DRM file's compute VMID reservation.
+  int drm_vm(const DrmFileToken &file, uint32_t operation) {
+    if (!file)
+      return -EBADF;
+    std::lock_guard lock(fd_mutex_);
+    if (operation == AMDGPU_VM_OP_RESERVE_VMID) {
+      file->vmid_reserved = true;
+      return 0;
+    }
+    if (operation == AMDGPU_VM_OP_UNRESERVE_VMID) {
+      file->vmid_reserved = false;
+      return 0;
+    }
+    return -EINVAL;
+  }
+
+  int update_syncobjs(const DrmFileToken &file, uint64_t handles_address, uint64_t points_address,
+                      uint32_t count, bool reset) {
+    std::vector<uint32_t> handles;
+    std::vector<uint64_t> points(count, 0);
+    if (int result = snapshot_user_array(handles_address, count, handles); result != 0)
+      return result;
+    if (points_address) {
+      if (int result = snapshot_user_array(points_address, count, points); result != 0)
+        return result;
+    }
+    if (!file)
+      return -EBADF;
+    {
+      std::lock_guard lock(fd_mutex_);
+      for (uint32_t handle : handles)
+        if (!lookup_syncobj_locked(file, handle))
+          return -ENOENT;
+      for (size_t i = 0; i < handles.size(); ++i) {
+        auto entry = lookup_syncobj_locked(file, handles[i]);
+        if (reset)
+          *entry = {};
+        else
+          signal_syncobj_locked(entry, points[i]);
+      }
+    }
+    notify_syncobj_waiters(file);
+    return 0;
+  }
+
+  int query_syncobjs(const DrmFileToken &file, const drm_syncobj_timeline_array &request) {
+    if (request.flags & ~DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED)
+      return -EINVAL;
+    std::vector<uint32_t> handles;
+    if (int result = snapshot_user_array(request.handles, request.count_handles, handles);
+        result != 0)
+      return result;
+    if (!file)
+      return -EBADF;
+    std::vector<uint64_t> points;
+    {
+      std::lock_guard lock(fd_mutex_);
+      for (uint32_t handle : handles) {
+        auto entry = lookup_syncobj_locked(file, handle);
+        if (!entry)
+          return -ENOENT;
+        refresh_syncobj_locked(*entry);
+        points.push_back(request.flags & DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED
+                             ? entry->submitted_point
+                             : entry->signaled_point);
+      }
+    }
+    const size_t bytes = points.size() * sizeof(uint64_t);
+    iovec local{points.data(), bytes};
+    iovec remote{reinterpret_cast<void *>(request.points), bytes};
+    return process_vm_writev(getpid(), &local, 1, &remote, 1, 0) == static_cast<ssize_t>(bytes)
+               ? 0
+               : -EFAULT;
+  }
+
+  static std::shared_ptr<SyncobjFence> syncobj_fence_locked(const SyncobjEntry &entry,
+                                                            uint64_t point) {
+    if (!point)
+      return entry.binary_fence;
+    auto it = entry.timeline_fences.lower_bound(point);
+    return it == entry.timeline_fences.end() ? nullptr : it->second;
+  }
+
+  static void refresh_syncobj_locked(SyncobjEntry &entry) {
+    entry.signaled = entry.binary_fence && entry.binary_fence->is_signaled();
+    for (auto it = entry.timeline_fences.rbegin(); it != entry.timeline_fences.rend(); ++it) {
+      if (!it->second->is_signaled())
+        continue;
+      entry.signaled_point = std::max(entry.signaled_point, it->first);
+      // Keep the completed boundary so waits on earlier points still resolve.
+      // Exported fence snapshots retain their own references to old payloads.
+      entry.timeline_fences.erase(entry.timeline_fences.begin(), std::prev(it.base()));
+      break;
+    }
+  }
+
+  /// @brief Append a timeline point while retaining all preceding work.
+  /// @details Fence payloads are immutable once published, including exported snapshots.
+  static void append_timeline_fence_locked(SyncobjEntry &entry, uint64_t point,
+                                           std::shared_ptr<SyncobjFence> fence) {
+    if (entry.binary_fence && entry.binary_fence != fence && !entry.binary_fence->is_signaled()) {
+      auto chain = std::make_shared<SyncobjFence>();
+      chain->dependencies = {std::move(fence), entry.binary_fence};
+      fence = std::move(chain);
+    }
+    entry.timeline_fences[point] = fence;
+    entry.binary_fence = std::move(fence);
+    entry.submitted_point = std::max(entry.submitted_point, point);
+    entry.has_fence = true;
+  }
+
+  int transfer_syncobj(const DrmFileToken &file, const drm_syncobj_transfer &request) {
+    if (!file)
+      return -EBADF;
+    if (request.flags || request.pad)
+      return -EINVAL;
+    {
+      std::lock_guard lock(fd_mutex_);
+      auto source = lookup_syncobj_locked(file, request.src_handle);
+      auto target = lookup_syncobj_locked(file, request.dst_handle);
+      if (!source || !target)
+        return -ENOENT;
+      auto fence = syncobj_fence_locked(*source, request.src_point);
+      if (!fence)
+        return -EINVAL;
+      if (request.dst_point) {
+        append_timeline_fence_locked(*target, request.dst_point, std::move(fence));
+      } else {
+        target->timeline_fences.clear();
+        target->submitted_point = target->signaled_point = 0;
+        target->binary_fence = std::move(fence);
+      }
+      target->has_fence = true;
+      refresh_syncobj_locked(*target);
+    }
+    notify_syncobj_waiters(file);
+    return 0;
+  }
+
+  // The fd table and fence state are process-local, like the simulated DRM file.
+  // Keep a private eventfd duplicate for poll notification after the export fd closes.
+  int create_sync_file_locked(const std::shared_ptr<SyncobjFence> &fence) {
+    auto object = std::make_shared<SyncFile>();
+    object->fence = fence;
+    const int fd = static_cast<int>(syscall(SYS_eventfd2, 0, EFD_CLOEXEC | EFD_NONBLOCK));
+    if (fd < 0)
+      return -errno;
+    object->event_fd = PrivateDrmFd::duplicate(fd);
+    if (!object->event_fd) {
+      const int error = errno;
+      real().close(fd);
+      return -error;
+    }
+    try {
+      sync_file_fds_.emplace(fd, object);
+    } catch (...) {
+      real().close(fd);
+      throw;
+    }
+    object->refresh();
+    return fd;
+  }
+
+  int export_syncobj(const DrmFileToken &file, drm_syncobj_handle &request) try {
+    if (request.pad || request.flags != DRM_SYNCOBJ_HANDLE_TO_FD_FLAGS_EXPORT_SYNC_FILE)
+      return -EINVAL;
+    std::lock_guard lock(fd_mutex_);
+    auto entry = lookup_syncobj_locked(file, request.handle);
+    if (!entry)
+      return -ENOENT;
+    if (!entry->binary_fence)
+      return -EINVAL;
+    const int fd = create_sync_file_locked(entry->binary_fence);
+    if (fd < 0)
+      return fd;
+    request.fd = fd;
+    return 0;
+  } catch (const std::bad_alloc &) {
+    return -ENOMEM;
+  }
+
+  int import_syncobj(const DrmFileToken &file, drm_syncobj_handle &request) try {
+    if (request.pad || request.flags != DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE)
+      return -EINVAL;
+    {
+      std::lock_guard lock(fd_mutex_);
+      auto it = sync_file_fds_.find(request.fd);
+      if (it == sync_file_fds_.end())
+        return -EINVAL;
+      const auto &object = it->second;
+      auto entry = lookup_syncobj_locked(file, request.handle);
+      if (!entry)
+        return -ENOENT;
+      entry->timeline_fences.clear();
+      entry->submitted_point = entry->signaled_point = 0;
+      entry->binary_fence = object->fence;
+      entry->has_fence = true;
+      refresh_syncobj_locked(*entry);
+      file->imported_sync_fence = true;
+    }
+    notify_syncobj_waiters(file);
+    return 0;
+  } catch (const std::bad_alloc &) {
+    return -ENOMEM;
+  }
+
+  std::optional<int> merge_sync_files(int fd, sync_merge_data &request) try {
+    std::lock_guard lock(fd_mutex_);
+    auto first = sync_file_fds_.find(fd);
+    if (first == sync_file_fds_.end())
+      return std::nullopt;
+    if (request.flags || request.pad)
+      return -EINVAL;
+    auto second = sync_file_fds_.find(request.fd2);
+    if (second == sync_file_fds_.end())
+      return -EINVAL;
+    auto merged = std::make_shared<SyncobjFence>();
+    for (const auto &fence : {first->second->fence, second->second->fence}) {
+      if (fence->dependencies.empty())
+        merged->dependencies.push_back(fence);
+      else
+        merged->dependencies.insert(merged->dependencies.end(), fence->dependencies.begin(),
+                                    fence->dependencies.end());
+    }
+    std::sort(merged->dependencies.begin(), merged->dependencies.end());
+    merged->dependencies.erase(
+        std::unique(merged->dependencies.begin(), merged->dependencies.end()),
+        merged->dependencies.end());
+    const int result = create_sync_file_locked(merged);
+    if (result < 0)
+      return result;
+    request.fence = result;
+    return 0;
+  } catch (const std::bad_alloc &) {
+    return -ENOMEM;
+  }
+
+  // Called inside the fd lifecycle lock, after a successful kernel dup operation.
+  void duplicate_sync_file(int source, int target) {
+    std::lock_guard lock(fd_mutex_);
+    auto it = sync_file_fds_.find(source);
+    auto object = it == sync_file_fds_.end() ? nullptr : it->second;
+    sync_file_fds_.erase(target);
+    if (object)
+      sync_file_fds_.emplace(target, std::move(object));
+  }
+
+  bool close_sync_file(int fd) {
+    std::lock_guard lock(fd_mutex_);
+    if (!sync_file_fds_.erase(fd))
+      return false;
+    real().close(fd);
+    return true;
   }
 
   /// @brief Copy a caller-owned array without faulting inside the interposer.
@@ -1549,7 +2051,9 @@ public:
     if (!file)
       return -EBADF;
     std::vector<std::shared_ptr<SyncobjEntry>> entries;
+    std::vector<std::shared_ptr<SyncobjFence>> fences;
     try {
+      fences.resize(request.count_handles);
       entries.reserve(request.count_handles);
     } catch (const std::bad_alloc &) {
       return -ENOMEM;
@@ -1570,9 +2074,8 @@ public:
     // unrelated wakeup must not turn a valid pending wait into EINVAL.
     if (!wait_for_submit && !wait_available) {
       for (uint32_t i = 0; i < request.count_handles; ++i) {
-        const auto &entry = *entries[i];
-        const bool submitted =
-            entry.has_fence && (points[i] == 0 || entry.submitted_point >= points[i]);
+        fences[i] = syncobj_fence_locked(*entries[i], points[i]);
+        const bool submitted = fences[i] != nullptr;
         if (!submitted)
           return -EINVAL;
       }
@@ -1582,12 +2085,12 @@ public:
       bool any_ready = false;
       uint32_t first_ready = 0;
       for (uint32_t i = 0; i < request.count_handles; ++i) {
-        const auto &entry = *entries[i];
-        const bool submitted =
-            entry.has_fence && (points[i] == 0 || entry.submitted_point >= points[i]);
-        const bool ready = wait_available ? submitted
-                                          : entry.has_fence && (points[i] == 0 ||
-                                                                entry.signaled_point >= points[i]);
+        if (!fences[i])
+          fences[i] = syncobj_fence_locked(*entries[i], points[i]);
+        const bool submitted = fences[i] != nullptr;
+        if (submitted && !wait_available && fences[i]->is_failed())
+          return {-EIO, 0};
+        const bool ready = submitted && (wait_available || fences[i]->is_signaled());
         all_ready = all_ready && ready;
         if (!wait_all && ready && !any_ready) {
           first_ready = i;
@@ -1598,6 +2101,9 @@ public:
     };
 
     while (true) {
+      auto &generation_word =
+          file->imported_sync_fence ? imported_syncobj_generation_ : file->syncobj_generation;
+      const uint32_t generation = generation_word.load(std::memory_order_acquire);
       auto [state, first_ready] = evaluate();
       if (state < 0)
         return state;
@@ -1612,7 +2118,6 @@ public:
       const int64_t now_ns = static_cast<int64_t>(now.tv_sec) * 1'000'000'000LL + now.tv_nsec;
       if (request.timeout_nsec <= now_ns)
         return -ETIME;
-      const uint32_t generation = file->syncobj_generation.load(std::memory_order_relaxed);
       lock.unlock();
       const timespec deadline{static_cast<time_t>(request.timeout_nsec / 1'000'000'000LL),
                               static_cast<long>(request.timeout_nsec % 1'000'000'000LL)};
@@ -1620,7 +2125,7 @@ public:
       // so it cannot apply the kernel ioctl layer's SA_RESTART decision. Surface
       // EINTR consistently and let callers retry; the focused regression pins
       // that documented difference from the in-kernel DRM implementation.
-      const long rc = futex_wait_until(file->syncobj_generation, generation, &deadline);
+      const long rc = futex_wait_until(generation_word, generation, &deadline);
       const int wait_errno = errno;
       lock.lock();
       if (rc == 0 || wait_errno == EAGAIN)
@@ -1638,13 +2143,20 @@ public:
     if (!entry)
       return;
     entry->has_fence = true;
+    entry->signaled = true;
     if (point == 0) {
       entry->submitted_point = 0;
       entry->signaled_point = 0;
+      entry->timeline_fences.clear();
+      entry->binary_fence = std::make_shared<SyncobjFence>();
+      entry->binary_fence->signaled.store(true, std::memory_order_release);
       return;
     }
-    entry->submitted_point = std::max(entry->submitted_point, point);
-    entry->signaled_point = std::max(entry->signaled_point, point);
+    // A host signal appends a completed payload; preceding GPU work still
+    // belongs to the timeline and must not be completed through another handle.
+    auto fence = std::make_shared<SyncobjFence>();
+    fence->signaled.store(true, std::memory_order_release);
+    append_timeline_fence_locked(*entry, point, std::move(fence));
   }
 
   /// @brief Resolve one handle while fd_mutex_ is held.
@@ -1657,11 +2169,16 @@ public:
   }
 
   /// @brief Advance the per-file generation and wake every futex waiter.
-  static void notify_syncobj_waiters(const DrmFileToken &file) {
+  void notify_syncobj_waiters(const DrmFileToken &file) {
     if (!file)
       return;
     file->syncobj_generation.fetch_add(1, std::memory_order_release);
     futex_wake_all(file->syncobj_generation);
+    imported_syncobj_generation_.fetch_add(1, std::memory_order_release);
+    futex_wake_all(imported_syncobj_generation_);
+    std::lock_guard lock(fd_mutex_);
+    for (const auto &[fd, object] : sync_file_fds_)
+      object->refresh();
   }
 
   bool create_local_vm(const std::string &config_path) {
@@ -1822,13 +2339,12 @@ public:
   /// hands userspace a dmabuf fd whose KFD allocation flags determine the GPU PTE
   /// MTYPE; PRIME_FD_TO_HANDLE then mints a STABLE, monotonically-increasing GEM
   /// handle (never derived from the fd number). The entry is keyed by that handle,
-  /// which owns the mapping's lifetime: it carries the flags from export through to
-  /// GEM_VA (where it lazily mmaps the backing pages used to install the GPU page
-  /// table) and lives until DRM_IOCTL_GEM_CLOSE (or until its owning DRM file
-  /// closes). It deliberately does NOT die when the transient dmabuf export fd is
-  /// closed — ROCr closes that fd immediately after GEM_VA returns, while the GPU
-  /// mapping must stay live for the caller. Because handles are not fd-derived, a
-  /// recycled dmabuf fd number can never resolve to a still-live handle and tear
+  /// which shares the mapping's lifetime with submitted jobs: it carries the flags from export
+  /// through to GEM_VA (where it lazily mmaps the backing pages used to install the GPU page table)
+  /// and lives until DRM_IOCTL_GEM_CLOSE (or until its owning DRM file closes). It deliberately
+  /// does NOT die when the transient dmabuf export fd is closed — ROCr closes that fd immediately
+  /// after GEM_VA returns, while the GPU mapping must stay live for the caller. Because handles are
+  /// not fd-derived, a recycled dmabuf fd number can never resolve to a still-live handle and tear
   /// down an unrelated BO. `dmabuf_fd` is a PRIVATE dup taken at PRIME time and held
   /// only for the lazy backing mmap, so the backing stays valid even if the caller
   /// closes the export fd before GEM_VA (the fd number cannot be recycled out from
@@ -1858,15 +2374,331 @@ public:
   };
 
   struct GemEntry {
-    int dmabuf_fd = -1;          ///< Private dup of the backing dmabuf fd for the lazy mmap.
-    bool owns_dmabuf_fd = false; ///< True if dmabuf_fd is our dup (close at teardown).
-    uint64_t drm_file_id = 0;    ///< Owning DRM file; the entry is reaped on its last close.
+    std::shared_ptr<PrivateDrmFd>
+        dmabuf_fd;            ///< Backing retained through lazy mmap and submissions.
+    uint64_t drm_file_id = 0; ///< Owning DRM file; the entry is reaped on its last close.
     uint64_t size = 0;
+    size_t submission_refs = 0; ///< Jobs retaining backing after the handle closes.
+    bool handle_closed = false; ///< Close invalidates the handle; jobs retain its backing.
+    uint64_t mmap_offset = 0;
     uint32_t alloc_flags = 0;
     void *cpu_ptr = nullptr;
     SimulatedKfd *owner = nullptr;
     std::vector<GemMapping> installed_vas;
   };
+
+  /// @brief Submission-owned BO references, also released on rejected enqueue.
+  struct GemSubmissionLease {
+    InterposerContext *context;
+    std::vector<uint32_t> handles;
+    bool active = false;
+    ~GemSubmissionLease() { release(); }
+    void release(SimulatedKfd *executing_driver = nullptr) {
+      if (!active)
+        return;
+      std::lock_guard lock(context->fd_mutex_);
+      for (auto handle : handles) {
+        auto it = context->gem_entries_.find(handle);
+        assert(it != context->gem_entries_.end() && it->second.submission_refs);
+        auto &gem = it->second;
+        if (--gem.submission_refs == 0 && gem.handle_closed) {
+          context->teardown_gem_entry_locked(gem, executing_driver);
+          context->gem_entries_.erase(it);
+        }
+      }
+      active = false;
+    }
+  };
+
+  static constexpr uint64_t kGemMmapOffsetBase = uint64_t{1} << 48;
+
+  /// @brief Allocate shared BO backing and an offset in the GEM mmap namespace.
+  int create_gem(const DrmFileToken &file, const drm_amdgpu_gem_create_in &request,
+                 uint32_t *handle) {
+    if (!file || !drm_file_simulated(file))
+      return -ENODEV;
+    constexpr uint64_t domains =
+        AMDGPU_GEM_DOMAIN_CPU | AMDGPU_GEM_DOMAIN_GTT | AMDGPU_GEM_DOMAIN_VRAM;
+    if (!request.bo_size || request.bo_size > (uint64_t{1} << 47) || !(request.domains & domains) ||
+        (request.domains & ~domains))
+      return -EINVAL;
+    uint64_t size = (request.bo_size + 4095) & ~uint64_t{4095};
+    int fd = real().memfd_create("rocjitsu_gem", MFD_CLOEXEC);
+    if (fd < 0)
+      return -errno;
+    if (ftruncate(fd, static_cast<off_t>(size)) != 0) {
+      int error = errno;
+      real().close(fd);
+      return -error;
+    }
+    auto backing = PrivateDrmFd::duplicate(fd);
+    const int error = errno;
+    real().close(fd);
+    if (!backing)
+      return -error;
+    std::lock_guard lock(fd_mutex_);
+    if (next_gem_mmap_offset_ > uint64_t{INT64_MAX} - size)
+      return -ENOSPC;
+    uint32_t candidate = next_gem_handle_++;
+    while (candidate == 0 || gem_entries_.count(candidate))
+      candidate = next_gem_handle_++;
+    GemEntry entry{};
+    entry.dmabuf_fd = std::move(backing);
+    entry.drm_file_id = file->id;
+    entry.size = size;
+    entry.mmap_offset = next_gem_mmap_offset_;
+    entry.alloc_flags = (request.domains & AMDGPU_GEM_DOMAIN_VRAM) ? KFD_IOC_ALLOC_MEM_FLAGS_VRAM
+                                                                   : KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    gem_entries_.emplace(candidate, std::move(entry));
+    next_gem_mmap_offset_ += size;
+    *handle = candidate;
+    return 0;
+  }
+
+  /// @brief Retain BOs, enqueue IBs, and publish syncobj and userspace completion fences.
+  int submit_drm_cs(const DrmFileToken &file, drm_amdgpu_cs *argument) {
+    auto *driver = drm_file_simulated(file);
+    if (!driver)
+      return -ENODEV;
+    std::shared_ptr<SyncobjFence> finished;
+    try {
+      const auto request = argument->in;
+      if (request.flags || request.bo_list_handle || !request.num_chunks ||
+          request.num_chunks > 1024)
+        return -EINVAL;
+      std::lock_guard submission_lock(file->submission_mutex);
+      std::vector<uint64_t> pointers;
+      if (int rc = snapshot_user_array(request.chunks, request.num_chunks, pointers); rc)
+        return rc;
+      rocjitsu::amdgpu::Pm4Submission submission;
+      std::vector<drm_amdgpu_cs_chunk_syncobj> inputs, outputs;
+      std::vector<drm_amdgpu_bo_list_entry> buffers;
+      std::optional<drm_amdgpu_cs_chunk_fence> user_fence;
+      uint32_t engine = UINT32_MAX, ring = UINT32_MAX;
+      for (uint64_t pointer : pointers) {
+        std::vector<drm_amdgpu_cs_chunk> chunks;
+        if (int rc = snapshot_user_array(pointer, 1, chunks); rc)
+          return rc;
+        const auto chunk = chunks[0];
+        if (chunk.length_dw > (1u << 20))
+          return -EINVAL;
+        std::vector<uint32_t> words;
+        if (int rc = snapshot_user_array(chunk.chunk_data, chunk.length_dw, words); rc)
+          return rc;
+        const size_t bytes = words.size() * 4;
+        switch (chunk.chunk_id) {
+        case AMDGPU_CHUNK_ID_IB: {
+          if (bytes != sizeof(drm_amdgpu_cs_chunk_ib))
+            return -EINVAL;
+          drm_amdgpu_cs_chunk_ib ib;
+          std::memcpy(&ib, words.data(), sizeof(ib));
+          if ((ib.ip_type != AMDGPU_HW_IP_COMPUTE && ib.ip_type != AMDGPU_HW_IP_GFX) ||
+              ib.ip_instance || ib.ring >= (ib.ip_type == AMDGPU_HW_IP_GFX ? 1u : 4u) ||
+              !ib.ib_bytes || (ib.ib_bytes & 3) ||
+              (ib.flags & ~(AMDGPU_IB_FLAG_PREAMBLE | AMDGPU_IB_FLAG_PREEMPT |
+                            AMDGPU_IB_FLAG_TC_WB_NOT_INVALIDATE | AMDGPU_IB_FLAG_EMIT_MEM_SYNC)))
+            return -EINVAL;
+          if (engine != UINT32_MAX && (engine != ib.ip_type || ring != ib.ring))
+            return -EINVAL;
+          submission.graphics_engine = ib.ip_type == AMDGPU_HW_IP_GFX;
+          engine = ib.ip_type;
+          ring = ib.ring;
+          submission.buffers.push_back({ib.va_start, ib.ib_bytes / 4});
+          break;
+        }
+        case AMDGPU_CHUNK_ID_FENCE: {
+          if (bytes != sizeof(drm_amdgpu_cs_chunk_fence) || user_fence)
+            return -EINVAL;
+          user_fence.emplace();
+          std::memcpy(&*user_fence, words.data(), sizeof(*user_fence));
+          break;
+        }
+        case AMDGPU_CHUNK_ID_BO_HANDLES: {
+          if (bytes != sizeof(drm_amdgpu_bo_list_in))
+            return -EINVAL;
+          drm_amdgpu_bo_list_in list;
+          std::memcpy(&list, words.data(), sizeof(list));
+          if (list.bo_info_size != sizeof(drm_amdgpu_bo_list_entry))
+            return -EINVAL;
+          if (int rc = snapshot_user_array(list.bo_info_ptr, list.bo_number, buffers); rc)
+            return rc;
+          break;
+        }
+        case AMDGPU_CHUNK_ID_SYNCOBJ_IN:
+        case AMDGPU_CHUNK_ID_SYNCOBJ_OUT: {
+          auto &target = chunk.chunk_id == AMDGPU_CHUNK_ID_SYNCOBJ_IN ? inputs : outputs;
+          for (uint32_t handle : words)
+            target.push_back({handle, 0, 0});
+          break;
+        }
+        case AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_WAIT:
+        case AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_SIGNAL: {
+          if (bytes % sizeof(drm_amdgpu_cs_chunk_syncobj))
+            return -EINVAL;
+          auto &target = chunk.chunk_id == AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_WAIT ? inputs : outputs;
+          for (size_t offset = 0; offset < bytes; offset += sizeof(drm_amdgpu_cs_chunk_syncobj)) {
+            drm_amdgpu_cs_chunk_syncobj object;
+            std::memcpy(&object, reinterpret_cast<uint8_t *>(words.data()) + offset,
+                        sizeof(object));
+            if (object.flags & ~DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT)
+              return -EINVAL;
+            target.push_back(object);
+          }
+          break;
+        }
+        default:
+          return -ENOTSUP;
+        }
+      }
+      if (submission.buffers.empty())
+        return -EINVAL;
+      struct Dependency {
+        std::shared_ptr<SyncobjEntry> entry;
+        std::shared_ptr<SyncobjFence> fence;
+        uint64_t point;
+      };
+      std::vector<Dependency> dependencies;
+      finished = std::make_shared<SyncobjFence>();
+      auto retained = std::make_shared<GemSubmissionLease>();
+      retained->context = this;
+      for (const auto &buffer : buffers)
+        retained->handles.push_back(buffer.bo_handle);
+      if (user_fence)
+        retained->handles.push_back(user_fence->handle);
+      std::sort(retained->handles.begin(), retained->handles.end());
+      retained->handles.erase(std::unique(retained->handles.begin(), retained->handles.end()),
+                              retained->handles.end());
+      std::shared_ptr<PrivateDrmFd> fence_fd;
+      uint64_t sequence, queue_key;
+      {
+        std::lock_guard lock(fd_mutex_);
+        if (!file->contexts.count(request.ctx_id))
+          return -EINVAL;
+        for (auto handle : retained->handles) {
+          auto it = gem_entries_.find(handle);
+          if (it == gem_entries_.end() || it->second.handle_closed ||
+              it->second.drm_file_id != file->id)
+            return -ENOENT;
+        }
+        for (const auto &input : inputs) {
+          auto entry = lookup_syncobj_locked(file, input.handle);
+          if (!entry)
+            return -ENOENT;
+          auto fence = syncobj_fence_locked(*entry, input.point);
+          if (!fence && !(input.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT))
+            return -EINVAL;
+          dependencies.push_back({entry, fence, input.point});
+        }
+        for (const auto &output : outputs)
+          if (!lookup_syncobj_locked(file, output.handle))
+            return -ENOENT;
+        if (user_fence) {
+          auto it = gem_entries_.find(user_fence->handle);
+          if (it == gem_entries_.end() || it->second.handle_closed ||
+              it->second.drm_file_id != file->id || user_fence->offset % 8 || it->second.size < 8 ||
+              user_fence->offset > it->second.size - 8)
+            return -EINVAL;
+          fence_fd = it->second.dmabuf_fd;
+        }
+        for (auto handle : retained->handles)
+          ++gem_entries_.at(handle).submission_refs;
+        retained->active = true;
+        for (const auto &output : outputs) {
+          auto entry = lookup_syncobj_locked(file, output.handle);
+          if (output.point) {
+            append_timeline_fence_locked(*entry, output.point, finished);
+          } else {
+            entry->timeline_fences.clear();
+            entry->submitted_point = entry->signaled_point = 0;
+            entry->binary_fence = finished;
+          }
+          entry->has_fence = true;
+          entry->signaled = false;
+        }
+        const uint64_t key = (uint64_t{request.ctx_id} << 32) | (engine << 16) | ring;
+        static std::atomic<uint64_t> next_queue_key{1};
+        auto [it, inserted] = file->pm4_queue_keys.try_emplace(key, 0);
+        if (inserted)
+          it->second = next_queue_key.fetch_add(1, std::memory_order_relaxed);
+        queue_key = it->second;
+        sequence = file->next_submission++;
+      }
+      submission.ready = [this, dependencies = std::move(dependencies)]() mutable {
+        std::lock_guard lock(fd_mutex_);
+        for (auto &dependency : dependencies) {
+          if (!dependency.fence)
+            dependency.fence = syncobj_fence_locked(*dependency.entry, dependency.point);
+          if (dependency.fence && dependency.fence->is_failed())
+            throw std::runtime_error("PM4 submission dependency failed");
+          if (!dependency.fence || !dependency.fence->is_signaled())
+            return false;
+        }
+        return true;
+      };
+      submission.complete = [this, file, finished, fence_fd, user_fence, sequence, retained,
+                             driver](bool success) {
+        if (success && fence_fd)
+          success = fence_fd->use([&](int fd) {
+            return syscall(SYS_pwrite64, fd, &sequence, sizeof(sequence), user_fence->offset);
+          }) == sizeof(sequence);
+        // The executing CP keeps its driver alive. Do not acquire a VM ownership
+        // snapshot here: its last release must never join the engine from itself.
+        retained->release(driver);
+        if (success)
+          finished->signaled.store(true, std::memory_order_release);
+        else
+          finished->failed.store(true, std::memory_order_release);
+        notify_syncobj_waiters(file);
+      };
+      int result = driver->submit_pm4(file->render_minor, queue_key, std::move(submission));
+      if (result) {
+        finished->failed.store(true, std::memory_order_release);
+        notify_syncobj_waiters(file);
+        return result;
+      }
+      argument->out.handle = sequence;
+      notify_syncobj_waiters(file);
+      return 0;
+    } catch (const std::exception &error) {
+      if (finished) {
+        finished->failed.store(true, std::memory_order_release);
+        notify_syncobj_waiters(file);
+      }
+      util::Logger::warn("DRM submission failed: ", error.what());
+      return dynamic_cast<const std::bad_alloc *>(&error) ? -ENOMEM : -EINVAL;
+    }
+  }
+
+  int gem_mmap_offset(const DrmFileToken &file, uint32_t handle, uint64_t *offset) {
+    std::lock_guard lock(fd_mutex_);
+    auto it = gem_entries_.find(handle);
+    if (it == gem_entries_.end() || !file || it->second.handle_closed ||
+        it->second.drm_file_id != file->id)
+      return -ENOENT;
+    if (it->second.mmap_offset == 0)
+      return -EINVAL;
+    *offset = it->second.mmap_offset;
+    return 0;
+  }
+
+  /// @brief Map a live GEM handle's backing through its synthetic mmap offset.
+  void *mmap_gem(const DrmFileToken &file, void *address, size_t size, int prot, int flags,
+                 uint64_t offset) {
+    std::lock_guard lock(fd_mutex_);
+    for (const auto &[handle, entry] : gem_entries_) {
+      if (!file || entry.handle_closed || entry.drm_file_id != file->id || !entry.mmap_offset ||
+          offset < entry.mmap_offset || offset - entry.mmap_offset >= entry.size)
+        continue;
+      uint64_t relative = offset - entry.mmap_offset;
+      if (!size || size > entry.size - relative)
+        break;
+      auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
+      return entry.dmabuf_fd->use(
+          [&](int fd) { return real().mmap(address, size, prot, flags, fd, relative); });
+    }
+    errno = EINVAL;
+    return MAP_FAILED;
+  }
 
   /// @brief Record KFD alloc flags for an exported dmabuf fd (at EXPORT_DMABUF).
   /// @details The flags determine the GPU PTE MTYPE when the fd is later mapped via
@@ -1915,9 +2747,10 @@ public:
     // client from closing it between PRIME and a deferred GEM_VA MAP; the fd number
     // could then be recycled and the lazy mmap in gem_map() would map an unrelated
     // file. The dup keeps the same dmabuf open under a private fd until the handle is
-    // torn down. Falls back to the raw fd if dup fails (best effort; the common
-    // fd-still-open case is unaffected).
-    int backing_fd = InterposerContext::real().fcntl(dmabuf_fd, F_DUPFD_CLOEXEC, 0);
+    // torn down. Reject an import if its backing cannot be retained.
+    auto backing_fd = PrivateDrmFd::duplicate(dmabuf_fd);
+    if (!backing_fd)
+      return 0;
     // Mint the next free handle. Skip 0 ("no handle") and any handle still live, so a
     // uint32 wrap after a very long-lived process cannot silently overwrite an
     // in-use entry (which would detach its PTEs from a future GEM_CLOSE).
@@ -1926,8 +2759,7 @@ public:
       handle = next_gem_handle_++;
     GemEntry &gem = gem_entries_[handle];
     gem = {};
-    gem.dmabuf_fd = (backing_fd >= 0) ? backing_fd : dmabuf_fd;
-    gem.owns_dmabuf_fd = (backing_fd >= 0);
+    gem.dmabuf_fd = std::move(backing_fd);
     gem.drm_file_id = drm_file->id;
     gem.size = size;
     gem.alloc_flags = alloc_flags;
@@ -1969,7 +2801,7 @@ public:
     if (!drv)
       return -ENODEV;
     auto it = gem_entries_.find(handle);
-    if (it == gem_entries_.end() || it->second.drm_file_id != file->id)
+    if (it == gem_entries_.end() || it->second.handle_closed || it->second.drm_file_id != file->id)
       return -ENOENT;
     GemEntry &gem = it->second;
     // Bound the request within the BO without letting offset_in_bo + map_size
@@ -2002,8 +2834,9 @@ public:
       return -EINVAL;
     }
     if (!gem.cpu_ptr) {
-      void *p = InterposerContext::real().mmap(nullptr, gem.size, PROT_READ | PROT_WRITE,
-                                               MAP_SHARED, gem.dmabuf_fd, 0);
+      void *p = gem.dmabuf_fd->use([&](int fd) {
+        return real().mmap(nullptr, gem.size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+      });
       if (p == MAP_FAILED)
         return -EINVAL;
       gem.cpu_ptr = p;
@@ -2057,7 +2890,7 @@ public:
     if (!drv)
       return -ENODEV;
     auto it = gem_entries_.find(handle);
-    if (it == gem_entries_.end() || it->second.drm_file_id != file->id)
+    if (it == gem_entries_.end() || it->second.handle_closed || it->second.drm_file_id != file->id)
       return -ENOENT;
     GemEntry &gem = it->second;
     const GemMapping range{va_address, map_size};
@@ -2115,7 +2948,9 @@ public:
   void reap_gem_for_drm_file(uint64_t drm_file_id) {
     std::lock_guard lock(fd_mutex_);
     for (auto it = gem_entries_.begin(); it != gem_entries_.end();) {
-      if (it->second.drm_file_id == drm_file_id) {
+      if (it->second.drm_file_id == drm_file_id)
+        it->second.handle_closed = true;
+      if (it->second.handle_closed && !it->second.submission_refs) {
         teardown_gem_entry_locked(it->second);
         it = gem_entries_.erase(it);
       } else {
@@ -2125,20 +2960,21 @@ public:
   }
 
   /// @brief Drop the GEM entry for a closing GEM handle (at DRM_IOCTL_GEM_CLOSE).
-  /// @details The handle owns the mapping lifetime, so this is the point where the
-  /// BO is truly gone. Tears down the page-table entries (through the owning driver)
-  /// and munmaps the host mapping entirely under fd_mutex_, so no GemEntry pointer
-  /// or driver pointer escapes the lock and a concurrent GEM_VA cannot race the
-  /// teardown.
+  /// @details Closing removes userspace access immediately. Submitted jobs retain
+  /// the backing and GPU mappings until retirement; the last owner tears them down
+  /// under fd_mutex_, before freeing their host mapping.
   int untrack_gem(const DrmFileToken &file, uint32_t handle) {
     std::lock_guard lock(fd_mutex_);
     if (!file)
       return -EBADF;
     auto it = gem_entries_.find(handle);
-    if (it == gem_entries_.end() || it->second.drm_file_id != file->id)
+    if (it == gem_entries_.end() || it->second.handle_closed || it->second.drm_file_id != file->id)
       return -ENOENT;
-    teardown_gem_entry_locked(it->second);
-    gem_entries_.erase(it);
+    it->second.handle_closed = true;
+    if (!it->second.submission_refs) {
+      teardown_gem_entry_locked(it->second);
+      gem_entries_.erase(it);
+    }
     return 0;
   }
 
@@ -2466,6 +3302,8 @@ private:
 
   std::mutex init_mutex_;
   std::mutex fd_mutex_;
+  std::unordered_map<int, std::shared_ptr<SyncFile>> sync_file_fds_;
+  std::atomic<uint32_t> imported_syncobj_generation_{0};
   /// Serializes synthetic DRM fd-table operations with tracking updates. The
   /// kernel makes close and duplication atomic with respect to the process fd
   /// table; this lock extends that atomicity through the interposer's drm_fds_
@@ -2491,6 +3329,8 @@ private:
   /// closes (reap_gem_for_drm_file). Because handles are not recycled with fd numbers,
   /// a reused dmabuf fd can never collide with a still-live BO.
   std::unordered_map<uint32_t, GemEntry> gem_entries_;
+  /// @brief GEM mmap cursor, outside the KFD doorbell/queue offset namespace.
+  uint64_t next_gem_mmap_offset_ = kGemMmapOffsetBase;
   /// @brief Next stable GEM handle to mint. Starts at 1 so 0 means "no handle".
   uint32_t next_gem_handle_ = 1;
   /// @brief Transient EXPORT_DMABUF fd→alloc_flags association awaiting the next
@@ -2504,8 +3344,13 @@ private:
   /// into freed host memory. If that driver is no longer the active one, its page
   /// table is already gone with it, so the PTE removal is skipped (never applied to
   /// a different, replacement driver).
-  void teardown_gem_entry_locked(GemEntry &gem) {
-    if (gem.owner && gem.owner == dynamic_cast<SimulatedKfd *>(driver().get())) {
+  void teardown_gem_entry_locked(GemEntry &gem, SimulatedKfd *executing_driver = nullptr) {
+    // Completion runs on the engine. Other callers are application-side teardown
+    // or VM destruction after the engine has joined, and may take a snapshot.
+    auto snapshot = executing_driver ? std::shared_ptr<LinuxKfd>{} : driver();
+    auto *active_driver =
+        executing_driver ? executing_driver : dynamic_cast<SimulatedKfd *>(snapshot.get());
+    if (gem.owner && gem.owner == active_driver) {
       // The owning driver is still active; remove its PTEs. gem_va_unmap only fails
       // if the local process already vanished, in which case the page table is gone
       // and there is nothing to remove — either way the range must not remain
@@ -2520,10 +3365,7 @@ private:
     // Release our private dup of the backing dmabuf (taken in prime_import) now that
     // no lazy mmap can reference it. Close through the passthrough table so we don't
     // re-enter our own close() hook and its GEM/dup bookkeeping.
-    if (gem.owns_dmabuf_fd && gem.dmabuf_fd >= 0)
-      InterposerContext::real().close(gem.dmabuf_fd);
-    gem.dmabuf_fd = -1;
-    gem.owns_dmabuf_fd = false;
+    gem.dmabuf_fd.reset();
   }
 
   /// @brief Evict every recorded range that OVERLAPS @p range in one DRM file.
@@ -2719,38 +3561,29 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
   if (!backend_lease)
     return {};
 
-  auto raw_drm_fd = InterposerContext::real().memfd_create("rocjitsu_drm", MFD_CLOEXEC);
-  if (raw_drm_fd < 0)
+  // Descriptor identity is tracked explicitly; moving it to a high number only
+  // forces the host to grow its descriptor table after threads have started.
+  const int drm_fd = InterposerContext::real().memfd_create("rocjitsu_drm", MFD_CLOEXEC);
+  if (drm_fd < 0)
     return {true, -1};
-
-  // Use real().fcntl, not the unqualified fcntl: this TU defines the interposed
-  // fcntl with external linkage, so an unqualified call would re-enter our own
-  // hook (reserve_dup_backend/untrack_dup, fd_mutex_) needlessly.
-  int high_fd = InterposerContext::real().fcntl(raw_drm_fd, F_DUPFD_CLOEXEC, 512);
-  int saved_errno = errno;
-  InterposerContext::real().close(raw_drm_fd);
-  if (high_fd < 0) {
-    errno = saved_errno;
-    return {true, -1};
-  }
 
   InterposerContext::DrmFinalRelease displaced;
   try {
     auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
     // backend_lease stays OURS across this call: on a throw it is released at this
     // function's scope exit, by which point drm_lifecycle is gone. See track_drm().
-    displaced = InterposerContext::ctx.track_drm(high_fd, render_minor, backend_lease);
+    displaced = InterposerContext::ctx.track_drm(drm_fd, render_minor, backend_lease);
   } catch (const std::exception &) {
     // Not just bad_alloc: unique_lock's constructor can throw system_error, and this
     // is an extern "C" entry point -- letting anything escape into a C caller frame
     // is undefined.
     const int saved_errno = ENOMEM;
-    InterposerContext::real().close(high_fd);
+    InterposerContext::real().close(drm_fd);
     errno = saved_errno;
     return {true, -1};
   }
   InterposerContext::ctx.complete_drm_release(std::move(displaced));
-  return {true, high_fd};
+  return {true, drm_fd};
 }
 
 /// @brief True if @p st describes a device rocJITsu emulates.
@@ -3213,6 +4046,8 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   InterposerContext::DrmUntrackResult drm_close;
   {
     auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
+    if (InterposerContext::ctx.close_sync_file(fd))
+      return 0;
     drm_close = InterposerContext::ctx.untrack_drm(fd);
     if (drm_close.tracked)
       InterposerContext::real().close(fd);
@@ -3245,7 +4080,7 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
     InterposerContext::ctx.release_local_open();
     return 0;
   }
-  if (is_owned_fd)
+  if (is_owned_fd || InterposerContext::PrivateDrmFd::owns(fd))
     return 0;
   return static_cast<int>(InterposerContext::real().close(fd));
 }
@@ -3287,6 +4122,14 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
     return InterposerContext::real().ioctl(fd, request, arg);
   }
 
+  if (request == SYNC_IOC_MERGE && arg) {
+    auto lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
+    if (auto result =
+            InterposerContext::ctx.merge_sync_files(fd, *static_cast<sync_merge_data *>(arg)))
+      return kfd_ioctl_ret(*result);
+    return InterposerContext::real().ioctl(fd, request, arg);
+  }
+
   constexpr unsigned kDrmIoctlType = 'd';
   constexpr unsigned kDrmIoctlNrVersion = 0x00;
   constexpr unsigned kDrmIoctlNrGemClose = _IOC_NR(DRM_IOCTL_GEM_CLOSE);
@@ -3302,6 +4145,80 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
   if (drm_file) {
     unsigned nr = _IOC_NR(request);
     unsigned type = _IOC_TYPE(request);
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_CS && arg)
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.submit_drm_cs(drm_file, static_cast<drm_amdgpu_cs *>(arg)));
+    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_GET_CAP) && arg) {
+      auto *cap = static_cast<drm_get_cap *>(arg);
+      cap->value = 0;
+      if (cap->capability == DRM_CAP_SYNCOBJ || cap->capability == DRM_CAP_SYNCOBJ_TIMELINE)
+        cap->value = 1;
+      else if (cap->capability == DRM_CAP_PRIME)
+        cap->value = DRM_PRIME_CAP_IMPORT;
+      return 0;
+    }
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_CTX && arg)
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.drm_context(drm_file, static_cast<drm_amdgpu_ctx *>(arg)));
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_VM && arg)
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.drm_vm(drm_file, static_cast<drm_amdgpu_vm *>(arg)->in.op));
+    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_WAIT) && arg) {
+      auto *wait = static_cast<drm_syncobj_wait *>(arg);
+      constexpr uint32_t kSupportedFlags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL |
+                                           DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT |
+                                           DRM_SYNCOBJ_WAIT_FLAGS_WAIT_DEADLINE;
+      if ((wait->flags & ~kSupportedFlags) != 0)
+        return kfd_ioctl_ret(-EINVAL);
+      std::vector<uint64_t> points;
+      try {
+        points.resize(wait->count_handles, 0);
+      } catch (const std::bad_alloc &) {
+        return kfd_ioctl_ret(-ENOMEM);
+      } catch (const std::length_error &) {
+        return kfd_ioctl_ret(-ENOMEM);
+      }
+      drm_syncobj_timeline_wait timeline{};
+      timeline.handles = wait->handles;
+      timeline.points = reinterpret_cast<uint64_t>(points.data());
+      timeline.count_handles = wait->count_handles;
+      timeline.timeout_nsec = wait->timeout_nsec;
+      timeline.flags = wait->flags;
+      int result = InterposerContext::ctx.wait_syncobj_timeline(drm_file, &timeline);
+      wait->first_signaled = timeline.first_signaled;
+      return kfd_ioctl_ret(result);
+    }
+    if (type == kDrmIoctlType &&
+        (nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_SIGNAL) || nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_RESET)) &&
+        arg) {
+      auto *array = static_cast<drm_syncobj_array *>(arg);
+      if (array->pad)
+        return kfd_ioctl_ret(-EINVAL);
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.update_syncobjs(drm_file, array->handles, 0, array->count_handles,
+                                                 nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_RESET)));
+    }
+    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL) && arg) {
+      auto *array = static_cast<drm_syncobj_timeline_array *>(arg);
+      if (array->flags)
+        return kfd_ioctl_ret(-EINVAL);
+      return kfd_ioctl_ret(InterposerContext::ctx.update_syncobjs(
+          drm_file, array->handles, array->points, array->count_handles, false));
+    }
+    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD) && arg)
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.export_syncobj(drm_file, *static_cast<drm_syncobj_handle *>(arg)));
+    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE) && arg) {
+      auto lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.import_syncobj(drm_file, *static_cast<drm_syncobj_handle *>(arg)));
+    }
+    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_QUERY) && arg)
+      return kfd_ioctl_ret(InterposerContext::ctx.query_syncobjs(
+          drm_file, *static_cast<drm_syncobj_timeline_array *>(arg)));
+    if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_TRANSFER) && arg)
+      return kfd_ioctl_ret(InterposerContext::ctx.transfer_syncobj(
+          drm_file, *static_cast<drm_syncobj_transfer *>(arg)));
     if (type == kDrmIoctlType && nr == kDrmIoctlNrVersion && arg) {
       auto *ver = static_cast<drm_version *>(arg);
       ver->version_major = 3;
@@ -3360,6 +4277,22 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       }
       return 0;
     }
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_GEM_CREATE && arg) {
+      auto *create = static_cast<drm_amdgpu_gem_create *>(arg);
+      const auto request = create->in;
+      return kfd_ioctl_ret(
+          InterposerContext::ctx.create_gem(drm_file, request, &create->out.handle));
+    }
+    if (type == kDrmIoctlType && nr == DRM_COMMAND_BASE + DRM_AMDGPU_GEM_MMAP && arg) {
+      auto *map = static_cast<drm_amdgpu_gem_mmap *>(arg);
+      const uint32_t handle = map->in.handle;
+      uint64_t offset = 0;
+      int result = InterposerContext::ctx.gem_mmap_offset(drm_file, handle, &offset);
+      if (result != 0)
+        return kfd_ioctl_ret(result);
+      map->out.addr_ptr = offset;
+      return 0;
+    }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrSyncobjCreate && arg) {
       auto *create = static_cast<drm_syncobj_create *>(arg);
       return kfd_ioctl_ret(
@@ -3399,18 +4332,64 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       if (!out || info->return_size == 0)
         return 0;
       std::memset(out, 0, info->return_size);
+      const uint32_t major = gpu->gfx_target_version / 10000;
+      const bool rdna_compute = gpu->gfx_target_version == 100100 ||
+                                gpu->gfx_target_version == 100300 || major == 11 ||
+                                gpu->gfx_target_version / 100 == 1200;
 
       switch (info->query) {
+      case AMDGPU_INFO_TIMESTAMP: {
+        const uint64_t timestamp = rocjitsu::amdgpu::hsa_system_timestamp();
+        std::memcpy(out, &timestamp, std::min<size_t>(info->return_size, sizeof(timestamp)));
+        return 0;
+      }
+      case AMDGPU_INFO_HW_IP_INFO: {
+        drm_amdgpu_info_hw_ip ip{};
+        if (info->query_hw_ip.ip_instance != 0) {
+          errno = EINVAL;
+          return -1;
+        }
+        if (rdna_compute && info->query_hw_ip.type <= AMDGPU_HW_IP_COMPUTE) {
+          ip.hw_ip_version_major = major;
+          ip.hw_ip_version_minor = (gpu->gfx_target_version / 100) % 100;
+          ip.ip_discovery_version =
+              rocjitsu::kmd::gc_ip_version_for_gfx_target_version(gpu->gfx_target_version) >> 8;
+          ip.ib_start_alignment = 32;
+          ip.ib_size_alignment = 32;
+          ip.available_rings = info->query_hw_ip.type == AMDGPU_HW_IP_COMPUTE ? 0xf : 1;
+        }
+        std::memcpy(out, &ip, std::min<size_t>(info->return_size, sizeof(ip)));
+        return 0;
+      }
+      case AMDGPU_INFO_HW_IP_COUNT: {
+        const uint32_t count =
+            rdna_compute && info->query_hw_ip.type <= AMDGPU_HW_IP_COMPUTE ? 1 : 0;
+        std::memcpy(out, &count, std::min<size_t>(info->return_size, sizeof(count)));
+        return 0;
+      }
+      case AMDGPU_INFO_MAX_IBS: {
+        if (info->return_size >= (AMDGPU_HW_IP_COMPUTE + 1) * sizeof(uint32_t))
+          static_cast<uint32_t *>(out)[AMDGPU_HW_IP_COMPUTE] = 125;
+        if (info->return_size >= sizeof(uint32_t))
+          static_cast<uint32_t *>(out)[AMDGPU_HW_IP_GFX] = 192;
+        return 0;
+      }
       case AMDGPU_INFO_ACCEL_WORKING: {
         if (info->return_size >= sizeof(uint32_t))
           *static_cast<uint32_t *>(out) = 1u;
         return 0;
       }
       case AMDGPU_INFO_READ_MMR_REG: {
-        // rocjitsu does not model raster/tiling MMRs. libdrm only stores the
-        // returned words (never validates them), so zero-fill `count` u32s is
-        // sufficient for both the AI short path and the pre-AI cascade.
-        return 0; // buffer already zeroed
+        // libdrm uses GB_ADDR_CONFIG for address-library initialization;
+        // other raster/tiling registers remain unmodeled.
+        if (info->read_mmr_reg.dword_offset == 0x263e && info->read_mmr_reg.count == 1 &&
+            info->return_size >= sizeof(uint32_t)) {
+          *static_cast<uint32_t *>(out) =
+              major == 11
+                  ? rocjitsu::kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3)
+                  : rocjitsu::kmd::gb_addr_config_for_gfx_target_version(gpu->gfx_target_version);
+        }
+        return 0;
       }
       case AMDGPU_INFO_VRAM_GTT: {
         if (info->return_size >= sizeof(drm_amdgpu_info_vram_gtt)) {
@@ -3446,9 +4425,10 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         dev.num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
             gpu->array_count_per_xcc(), gpu->num_shader_arrays_per_engine);
         dev.num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
-        dev.gpu_counter_freq = 100000;
-        dev.max_engine_clock = gpu->max_engine_clk_fcompute;
-        dev.max_memory_clock = gpu->mem_clk_max;
+        dev.gpu_counter_freq = 1000000; // kHz: the synthetic clock counts nanoseconds.
+        // KFD topology clocks are MHz; the DRM ABI reports kHz.
+        dev.max_engine_clock = uint64_t{gpu->max_engine_clk_fcompute} * 1000;
+        dev.max_memory_clock = uint64_t{gpu->mem_clk_max} * 1000;
         dev.wave_front_size = gpu->wave_front_size;
         dev.num_cu_per_sh = gpu->num_cu_per_sh;
         dev.num_hw_gfx_contexts =
@@ -3457,6 +4437,27 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         dev.vram_bit_width = gpu->mem_width;
         dev.cu_active_number =
             rocjitsu::kmd::drm_cu_active_number(gpu->simd_count, gpu->simd_per_cu);
+        if (rdna_compute) {
+          for (uint32_t se = 0; se < std::min(dev.num_shader_engines, 8u); ++se)
+            for (uint32_t sa = 0; sa < std::min(dev.num_shader_arrays_per_engine, 2u); ++sa)
+              dev.cu_bitmap[se % 4][sa + (se / 4) * 2] =
+                  util::mask<uint32_t>(std::min(dev.num_cu_per_sh, 32u));
+          dev.num_shader_visible_vgprs = major == 10 ? 1024 : 1536;
+          dev.num_tcc_blocks = gpu->mem_width / (major <= 11 ? 16 : 8);
+          // Cache sizes in this ioctl are KiB, except MALL which is bytes.
+          // RADV uses them to size mandatory graphics-queue preamble buffers.
+          dev.tcp_cache_size = major == 10 ? 16 : 32;
+          dev.sqc_data_cache_size = 16;
+          dev.sqc_inst_cache_size = 32;
+          dev.gl1c_cache_size = major == 10 ? 128 : 256;
+          dev.gl2c_cache_size = dev.num_tcc_blocks * 256;
+          const uint32_t mall_mb_per_tcc =
+              major == 10 ? (gpu->gfx_target_version == 100300 ? 8 : 0) : (major == 11 ? 4 : 2);
+          dev.mall_size = uint64_t{dev.num_tcc_blocks} * mall_mb_per_tcc * 1024 * 1024;
+          dev.num_rb_pipes = gpu->gfx_target_version == 100100 ? 16 : dev.num_shader_engines * 4;
+          dev.enabled_rb_pipes_mask = util::mask<uint32_t>(std::min(dev.num_rb_pipes, 32u));
+          dev.gc_double_offchip_lds_buf = 64;
+        }
         // VA aperture — libdrm's VA manager (amdgpu_vamgr_init) needs a sane
         // range. Mirror the KFD GPUVM aperture used elsewhere.
         dev.virtual_address_offset = 0x200000;       // 2 MiB
@@ -3493,7 +4494,9 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
       // amdgpu_bo_va_op; IREE's ring allocator triple-maps one BO at adjacent
       // VAs. We map by GEM handle, lazily mmap the backing pages, and
       // install/remove them in the GPU page table.
-      auto *va = static_cast<drm_amdgpu_gem_va *>(arg);
+      drm_amdgpu_gem_va request_va{};
+      std::memcpy(&request_va, arg, std::min<size_t>(_IOC_SIZE(request), sizeof(request_va)));
+      auto *va = &request_va;
       // The kernel waits synchronously for every input fence before touching the
       // VM. This model has no input-fence lookup/wait implementation, so reject a
       // nonzero authoritative count instead of applying the update before its
@@ -3676,8 +4679,10 @@ RJ_INTERPOSER_EXPORT int dup(int oldfd) {
     // tracking update complete. Backend and GEM cleanup run after this scope.
     drm_file = InterposerContext::ctx.reserve_drm_file(oldfd);
     rc = InterposerContext::real().dup(oldfd);
-    if (rc >= 0)
+    if (rc >= 0) {
+      InterposerContext::ctx.duplicate_sync_file(oldfd, rc);
       drm_release = InterposerContext::ctx.commit_drm_dup(rc, drm_file);
+    }
   }
   if (rc < 0) {
     const int saved_errno = errno;
@@ -3754,8 +4759,10 @@ RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
   {
     auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
     drm_file = InterposerContext::ctx.reserve_drm_file(oldfd);
-    rc = InterposerContext::real().dup2(oldfd, newfd);
+    rc = InterposerContext::PrivateDrmFd::replace(
+        newfd, [&] { return InterposerContext::real().dup2(oldfd, newfd); });
     if (rc >= 0) {
+      InterposerContext::ctx.duplicate_sync_file(oldfd, rc);
       auto drm_close = InterposerContext::ctx.untrack_drm(rc);
       overwritten_release = std::move(drm_close.release);
       displaced_release = InterposerContext::ctx.commit_drm_dup(rc, drm_file);
@@ -3798,8 +4805,10 @@ RJ_INTERPOSER_EXPORT int dup3(int oldfd, int newfd, int flags) {
   {
     auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
     drm_file = InterposerContext::ctx.reserve_drm_file(oldfd);
-    rc = InterposerContext::real().dup3(oldfd, newfd, flags);
+    rc = InterposerContext::PrivateDrmFd::replace(
+        newfd, [&] { return InterposerContext::real().dup3(oldfd, newfd, flags); });
     if (rc >= 0) {
+      InterposerContext::ctx.duplicate_sync_file(oldfd, rc);
       auto drm_close = InterposerContext::ctx.untrack_drm(rc);
       overwritten_release = std::move(drm_close.release);
       displaced_release = InterposerContext::ctx.commit_drm_dup(rc, drm_file);
@@ -3933,8 +4942,10 @@ int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
     auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
     drm_file = InterposerContext::ctx.reserve_drm_file(fd);
     rc = invoke();
-    if (rc >= 0)
+    if (rc >= 0) {
+      InterposerContext::ctx.duplicate_sync_file(fd, static_cast<int>(rc));
       drm_release = InterposerContext::ctx.commit_drm_dup(static_cast<int>(rc), drm_file);
+    }
   } else {
     rc = invoke();
   }
@@ -4057,6 +5068,8 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
     if (!remote_mmap) {
       if (auto drm_file = InterposerContext::ctx.reserve_drm_file(fd)) {
         InterposerContext::DrmFileReservation held(InterposerContext::ctx, drm_file);
+        if (static_cast<uint64_t>(offset) >= InterposerContext::kGemMmapOffsetBase)
+          return InterposerContext::ctx.mmap_gem(drm_file, addr, length, prot, flags, offset);
         const auto &lease = drm_file->backend_lease;
         // BOTH branches dispatch inside the reservation. Holding a shared_ptr keeps
         // the object allocated but not OPERATIONAL: if the reservation were released
@@ -4425,6 +5438,8 @@ static std::string redirect_dev_dri(const char *path) {
                                              sv.substr(kDevDri.size()).starts_with("card"));
   if (!is_dir && !is_node)
     return {};
+  if (!InterposerContext::ctx.initialized())
+    InterposerContext::ctx.get_or_create();
   std::string drm_base;
   {
     auto drv = InterposerContext::ctx.driver();
@@ -4444,6 +5459,29 @@ static std::string redirect_dev_dri(const char *path) {
   return drm_base + "/dev_dri/" + std::string(sv.substr(kDevDri.size()));
 }
 
+static int finish_drm_node_stat(const char *path, int result, mode_t *mode, dev_t *device) {
+  if (result != 0 || !path || !S_ISREG(*mode))
+    return result;
+  std::string_view view(path);
+  if (!view.starts_with("/dev/dri/renderD") &&
+      view.find("/dev_dri/renderD") == std::string_view::npos)
+    return result;
+  std::string drm_base;
+  if (auto driver = InterposerContext::ctx.driver())
+    drm_base = driver->drm_path();
+  else
+    drm_base = InterposerContext::ctx.remote_drm_path();
+  uint32_t render_minor = 0;
+  if (!drm_base.empty() && render_minor_from_drm_node_path(path, drm_base.c_str(), &render_minor) &&
+      interposer_gpu_info(render_minor)) {
+    // libdrm enumerates nodes by path as well as by fd. Both must describe the
+    // same character device even though the synthetic tree uses regular files.
+    *device = makedev(226, render_minor);
+    *mode = (*mode & ~S_IFMT) | S_IFCHR;
+  }
+  return result;
+}
+
 RJ_INTERPOSER_EXPORT int stat(const char *path, struct stat *buf) {
   if (!InterposerContext::real().ready()) {
     auto fn = util::lookup_symbol<int (*)(const char *, struct stat *)>(RTLD_NEXT, "stat");
@@ -4456,9 +5494,9 @@ RJ_INTERPOSER_EXPORT int stat(const char *path, struct stat *buf) {
     redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
-  if (!redirected.empty())
-    return InterposerContext::real().stat(redirected.c_str(), buf);
-  return InterposerContext::real().stat(path, buf);
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  int result = InterposerContext::real().stat(actual, buf);
+  return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
 }
 
 RJ_INTERPOSER_EXPORT int lstat(const char *path, struct stat *buf) {
@@ -4473,9 +5511,9 @@ RJ_INTERPOSER_EXPORT int lstat(const char *path, struct stat *buf) {
     redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
-  if (!redirected.empty())
-    return InterposerContext::real().lstat(redirected.c_str(), buf);
-  return InterposerContext::real().lstat(path, buf);
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  int result = InterposerContext::real().lstat(actual, buf);
+  return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
 }
 
 RJ_INTERPOSER_EXPORT int access(const char *path, int mode) {
@@ -4641,9 +5679,9 @@ RJ_INTERPOSER_EXPORT int stat64(const char *path, struct stat64 *buf) {
     redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
-  if (redirected.empty())
-    return real.stat64_fn(path, reinterpret_cast<void *>(buf));
-  return real.stat64_fn(redirected.c_str(), reinterpret_cast<void *>(buf));
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  int result = real.stat64_fn(actual, reinterpret_cast<void *>(buf));
+  return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
 }
 
 RJ_INTERPOSER_EXPORT int lstat64(const char *path, struct stat64 *buf) {
@@ -4664,9 +5702,9 @@ RJ_INTERPOSER_EXPORT int lstat64(const char *path, struct stat64 *buf) {
     redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
-  if (redirected.empty())
-    return real.lstat64_fn(path, reinterpret_cast<void *>(buf));
-  return real.lstat64_fn(redirected.c_str(), reinterpret_cast<void *>(buf));
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  int result = real.lstat64_fn(actual, reinterpret_cast<void *>(buf));
+  return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
 }
 
 RJ_INTERPOSER_EXPORT int __xstat(int ver, const char *path, struct stat *buf) {
@@ -4687,9 +5725,9 @@ RJ_INTERPOSER_EXPORT int __xstat(int ver, const char *path, struct stat *buf) {
     redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
-  if (redirected.empty())
-    return real.xstat_fn(ver, path, buf);
-  return real.xstat_fn(ver, redirected.c_str(), buf);
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  int result = real.xstat_fn(ver, actual, buf);
+  return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
 }
 
 RJ_INTERPOSER_EXPORT int __xstat64(int ver, const char *path, struct stat64 *buf) {
@@ -4710,9 +5748,9 @@ RJ_INTERPOSER_EXPORT int __xstat64(int ver, const char *path, struct stat64 *buf
     redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
-  if (redirected.empty())
-    return real.xstat64_fn(ver, path, reinterpret_cast<void *>(buf));
-  return real.xstat64_fn(ver, redirected.c_str(), reinterpret_cast<void *>(buf));
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  int result = real.xstat64_fn(ver, actual, reinterpret_cast<void *>(buf));
+  return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
 }
 
 RJ_INTERPOSER_EXPORT int __lxstat(int ver, const char *path, struct stat *buf) {
@@ -4733,9 +5771,9 @@ RJ_INTERPOSER_EXPORT int __lxstat(int ver, const char *path, struct stat *buf) {
     redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
-  if (redirected.empty())
-    return real.lxstat_fn(ver, path, buf);
-  return real.lxstat_fn(ver, redirected.c_str(), buf);
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  int result = real.lxstat_fn(ver, actual, buf);
+  return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
 }
 
 RJ_INTERPOSER_EXPORT int __lxstat64(int ver, const char *path, struct stat64 *buf) {
@@ -4756,9 +5794,9 @@ RJ_INTERPOSER_EXPORT int __lxstat64(int ver, const char *path, struct stat64 *bu
     redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_dev_dri(path);
-  if (redirected.empty())
-    return real.lxstat64_fn(ver, path, reinterpret_cast<void *>(buf));
-  return real.lxstat64_fn(ver, redirected.c_str(), reinterpret_cast<void *>(buf));
+  const char *actual = redirected.empty() ? path : redirected.c_str();
+  int result = real.lxstat64_fn(ver, actual, reinterpret_cast<void *>(buf));
+  return result == 0 ? finish_drm_node_stat(actual, result, &buf->st_mode, &buf->st_rdev) : result;
 }
 
 // fork() is not interposed. The child handler resets only an unused context;

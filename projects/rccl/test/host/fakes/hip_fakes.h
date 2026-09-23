@@ -27,6 +27,8 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_runtime.h>
 
+#include "nccl.h"
+
 // hipMemGetAddressRange / hipIpcGetMemHandle
 extern std::function<hipError_t(hipDeviceptr_t* /*pbase*/, std::size_t* /*psize*/,
                                 hipDeviceptr_t /*dptr*/)>
@@ -169,6 +171,14 @@ extern std::function<hipError_t(void)> g_hipGetLastError;
 // symmetric-memory paths -- calls this from its fixture SetUp.
 // ResetHipFakes() puts the fail-loud defaults back.
 void InstallHipVmmEmulator();
+// Cross-stream ordering seams, defaulting to hipErrorInvalidValue as the stubs
+// they replaced did. std::function, not a result global: rma.cc calls each twice
+// around its launch pair, so the arms need per-call control.
+extern std::function<hipError_t(hipEvent_t /*event*/, hipStream_t /*stream*/)>
+    g_hipEventRecord;
+extern std::function<hipError_t(hipStream_t /*stream*/, hipEvent_t /*event*/,
+                                unsigned int /*flags*/)>
+    g_hipStreamWaitEvent;
 
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.

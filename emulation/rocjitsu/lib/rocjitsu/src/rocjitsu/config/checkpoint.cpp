@@ -216,7 +216,7 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
           const auto *w = cu->wf(i);
           // Only checkpoint active (non-halted) wavefronts. Idle slots
           // have no register allocations and nothing meaningful to save.
-          if (w->is_halted())
+          if (!w || w->is_halted())
             continue;
 
           // The record holds the architectural registers and the TTMPs, but
@@ -240,8 +240,10 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
                 ": the wave is in a trap handler or stopped for a debugger, and that state "
                 "is not part of the checkpoint format");
 
-          auto sgprs_vec =
-              builder.CreateVector(cu->sgpr_data(w->sgpr_alloc().base), w->num_sgprs());
+          std::vector<uint32_t> sgprs(w->num_sgprs());
+          cu->sgpr_file().copy_to(w->sgpr_alloc().base, w->num_sgprs(),
+                                  std::as_writable_bytes(std::span(sgprs)));
+          auto sgprs_vec = builder.CreateVector(sgprs);
           auto vgprs_vec = serialize_vgpr_block(builder, *cu, w->vgpr_alloc().base, w->wf_size());
 
           // TTMPs are their own file, so they are not covered by sgprs_vec.
@@ -258,11 +260,11 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
           const auto &wg_coord = w->wg_coord();
           auto wg_coord_vec = builder.CreateVector(wg_coord.data(), wg_coord.size());
 
-          auto wfs = fb::CreateWavefrontState(builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(),
-                                              w->vcc(), w->m0(), w->is_halted(), w->status_raw(),
-                                              sgprs_vec, vgprs_vec, w->mode_raw(),
-                                              w->wave_sched_mode_raw(), ttmps_vec, wg_coord_vec,
-                                              w->kernel_wave_size(), w->wf_size());
+          auto wfs = fb::CreateWavefrontState(
+              builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(), w->vcc(), w->m0(),
+              w->is_halted(), w->status_raw(), sgprs_vec, vgprs_vec, w->mode_raw(),
+              w->wave_sched_mode_raw(), ttmps_vec, wg_coord_vec, w->kernel_wave_size(),
+              w->wf_size(), w->setreg_vgpr_msb_hazard());
           wf_offsets.push_back(wfs);
         }
 
@@ -435,11 +437,17 @@ LoadedConfig restore_checkpoint(const std::string &path) {
           wf->set_status_raw(wf_state->status());
           wf->set_mode_raw(wf_state->mode());
           wf->set_wave_sched_mode_raw(wf_state->wave_sched_mode());
+          if (wf_state->setreg_vgpr_msb_hazard())
+            wf->arm_setreg_vgpr_msb_hazard();
+
           const auto *sgprs = wf_state->sgprs();
           if (sgprs != nullptr) {
+            // Dispatch allocated a logically zero block. Skip zero source
+            // registers to preserve lazy backing for untouched waves.
             for (size_t r = 0; r < sgprs->size() && r < wf->num_sgprs(); ++r) {
-              cu->write_sgpr(wf->sgpr_alloc().base + static_cast<uint32_t>(r),
-                             sgprs->Get(static_cast<unsigned>(r)));
+              const uint32_t value = sgprs->Get(static_cast<unsigned>(r));
+              if (value != 0)
+                cu->write_sgpr(wf->sgpr_alloc().base + static_cast<uint32_t>(r), value);
             }
           }
 

@@ -165,7 +165,7 @@ The `configs/` directory ships several ready-to-use topology files:
 | `gfx950_mi355x.json` | Single CDNA4 GPU, standalone simulation. |
 | `gfx950_mi355x_kmd.json` | Single CDNA4 GPU, daemon or KFD mode. |
 | `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs, multi-GPU daemon mode. |
-| `gfx1250_mi455x.json` | Single CDNA5 GPU, standalone simulation. |
+| `gfx1250_mi455x.json` | Single CDNA5 GPU, standalone or PCI/VFIO simulation. |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four CDNA5 GPUs, multi-GPU daemon mode. |
 | `gfx1100_w7900.json` | Single RDNA3 GPU, standalone simulation. |
 | `gfx1151.json` | Single RDNA3.5 GPU, standalone simulation. |
@@ -177,6 +177,12 @@ Standalone configs (without `_kmd` in the name) are used with
 `rj_vm_step` or `rj_vm_run`. KMD configs initialize the topology and
 simulated driver so that an unmodified ROCm runtime stack can issue
 ioctls through the interposer.
+
+The gfx1250 standalone profile can also back the Linux VFIO-user server. That
+compute-only PCI profile requires an AMDGPU guest containing commit
+`4e07da515d1c` or an equivalent backport so discovery accepts the intentional
+absence of VCN, UVD, and JPEG hardware. See
+[Run a QEMU VFIO-user compute guest](/how-to/qemu-vfio.md).
 
 ## Multi-GPU configurations
 

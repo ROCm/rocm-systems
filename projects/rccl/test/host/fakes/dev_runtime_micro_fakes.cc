@@ -149,6 +149,12 @@ int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int
   return deftVal;
 }
 
+// Emitted by init.cc, which this binary does not link, so the redirected
+// NCCL_PARAM in dev_runtime.cc does not cover it. Routed through g_loadParam
+// like the params dev_runtime.cc owns, so a test can drive the NCCL_WIN_ENABLE=0
+// opt-out in ncclCommWindowRegister_impl.
+int64_t ncclParamWinEnable() { return g_loadParam("WIN_ENABLE", 1); }
+
 // ---------------------------------------------------------------------------
 // Proxy.
 // ---------------------------------------------------------------------------
@@ -272,14 +278,11 @@ ncclResult_t ncclIntruAddressMapRemove_untyped(struct ncclIntruAddressMap_untype
 }
 
 // ---------------------------------------------------------------------------
-// Memory stack spill (must return real memory to avoid a crash if ever hit).
+// Memory stack spill lives in utils_fakes.cc, which owns src/misc/utils.cc's
+// symbols and now links into this binary alongside this file. That version
+// builds a reclaimable hunk chain rather than leaking each spill, so
+// ncclMemoryStackDestruct (also there) actually frees them.
 // ---------------------------------------------------------------------------
-void* ncclMemoryStack::allocateSpilled(struct ncclMemoryStack*, size_t size, size_t align) {
-  void* p = nullptr;
-  if (align < sizeof(void*)) align = sizeof(void*);
-  if (posix_memalign(&p, align, size) != 0) return nullptr;
-  return p;  // intentionally leaked; process is short-lived
-}
 
 // ---------------------------------------------------------------------------
 // GIN host.
@@ -484,15 +487,9 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
   return ncclSuccess;
 }
 
-// ---------------------------------------------------------------------------
-// Other 2.31 externs ncclDevrInitOnce / ncclDevrCommCreateInternal reach.
-// ---------------------------------------------------------------------------
-// Real in rma.cc, which this binary does not compile. The proxy is off unless
-// a test says otherwise: symMemoryObtain caches the answer into
-// devrState.rmaProxyEnabled and gates the connect/register arm on it.
-static bool DefaultRmaProxyEnabled(struct ncclComm*) { return false; }
-std::function<bool(struct ncclComm*)> g_devrRmaProxyEnabled = DefaultRmaProxyEnabled;
-bool ncclRmaProxyEnabled(struct ncclComm* comm) { return g_devrRmaProxyEnabled(comm); }
+// ncclRmaProxyEnabled is no longer faked here: the real predicate is linked into
+// this binary, so a fake would be a duplicate. Tests drive its terms instead of
+// its answer.
 
 // Reached only once GIN is activated, which the GIN gate rejects for every
 // comm this binary builds.
@@ -549,7 +546,6 @@ void ResetDevRuntimeMicroFakes() {
   g_devrTeamCftMultimem                         = DefaultTeamCftMultimem;
   g_devrComputeCftSize                          = DefaultComputeCftSize;
   g_devrComputeCftMcSize                        = DefaultComputeCftMcSize;
-  g_devrRmaProxyEnabled                         = DefaultRmaProxyEnabled;
   g_devrNcclCommRegister                        = DefaultCommRegister;
   g_devrNcclCommDeregister                      = DefaultCommDeregister;
   g_devrRmaProxyDeregister                      = DefaultRmaProxyDeregister;

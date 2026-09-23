@@ -282,6 +282,31 @@ in the following table.
       - | Integer value (default: ``-1``)
         | See InfiniBand ``show_gids`` command for valid values
 
+    * - | ``NCCL_IB_QUERY_PORT_SPEED``
+        | Controls whether RCCL queries the extended port speed
+          (``ibv_query_port`` active speed extension) for bandwidth reporting.
+          Disabling it falls back to the legacy ``active_speed``/
+          ``active_width`` computation and disables runtime speed-change
+          detection.
+      - | ``1``: Query the extended speed (default).
+        | ``0``: Use the legacy speed field only.
+
+    * - | ``NCCL_IB_SUBNET_AWARE_ROUTING``
+        | Enables subnet-aware device selection.
+          When a peer's GID subnet does not match the default device's RoCE
+          ports, RCCL searches other locally merged devices for one whose
+          ports do match, so the connection uses a device on the same subnet
+          as the peer. Only meaningfully exercised on a multi-subnet RoCE
+          fabric (for example, behind an IB router); on a single-subnet
+          cluster the default device already matches and this is a no-op.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``NCCL_IB_SUBNET_PREFIX_LEN``
+        | Prefix length, in bits, used when comparing two GIDs' subnets for
+          ``NCCL_IB_SUBNET_AWARE_ROUTING``.
+      - | Integer value, bits (default: ``24``)
+
     * - | ``NCCL_PXN_C2C``
         | Allows PXN routing through a C2C link to reach a NIC attached to a
           peer GPU. The C2C path is NVIDIA-specific and is not currently
