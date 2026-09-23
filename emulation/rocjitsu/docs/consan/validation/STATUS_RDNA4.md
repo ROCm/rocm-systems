@@ -43,7 +43,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | PyTorch | P1 | collision-heavy `scatter_reduce` (`pytorch-scatter-reduce`) | 🟥 Sep 23: no applicable code object; analysis incomplete | 🟥 Sep 23: no applicable code object; analysis incomplete |
 | PyTorch | P2 | Inductor compiled softmax (`pytorch-rdna4-compiled-softmax`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | PyTorch | P2 | split online softmax (`pytorch-rdna4-split-softmax`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
-| PyTorch | P2 | Qwen-vocabulary top-k (`pytorch-rdna4-llm-topk`) | 🟥 Sep 23: missing ConSan analysis verdict; exit -6 | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
+| PyTorch | P2 | Qwen-vocabulary top-k (`pytorch-rdna4-llm-topk`) | 🟥 Sep 23: owner-complete allowlist enables instrumentation; illegal GPU memory access | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | llama.cpp | P2 | quantized matvec (`llama-rdna4-mul-mat-vec-q`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P2 | Sharktank TP2 family (`tp2-family`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
@@ -260,3 +260,11 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round2-qwen-dense/`.
 - `pytorch-rdna4-llm-topk` / default: missing ConSan analysis verdict; exit -6. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round7/pytorch-rdna4-llm-topk-default`.
 - `pytorch-rdna4-llm-topk` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round7/pytorch-rdna4-llm-topk-supercollider`.
+- Top-k follow-up: the traced rocPRIM radix-sort kernel shares physical sites
+  with other kernel entries. Adding their exact mangled names to a separate
+  owner-complete allowlist enables Default instrumentation (45/45 accesses and
+  28/28 barriers), but the clean workload now fails with a GPU memory fault.
+  SuperCollider still passes with the expanded list. The gap is no longer merely
+  inapplicability. Original native lists remain unchanged; closure evidence is
+  in `topk-debug/owner-closure.json`, and runs are in `clean-round7/` under
+  `/home/benoit/workspace/consan-validation/rdna4-20260923/`.
