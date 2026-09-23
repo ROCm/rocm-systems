@@ -76,6 +76,8 @@ struct NicDevice {
   struct ibv_pd *pd_uxdma[2] = {nullptr, nullptr};
 };
 
+struct QpInfo;  // rocshmem/qp_introspect.hpp
+
 class GDABackend : public Backend {
  private:
   typedef struct dest_info {
@@ -216,6 +218,13 @@ class GDABackend : public Backend {
 
  public:
   GDAProvider get_gda_provider() const { return gda_provider; }
+
+  /**
+   * @brief Describe the RC QP to @p peer within @p ctx_id.
+   *        Implementation of rocshmem_query_qp_info; see
+   *        include/rocshmem/qp_introspect.hpp.
+   */
+  bool fill_qp_info(int peer, int ctx_id, QpInfo *out);
 
   friend GDAContext;
 
