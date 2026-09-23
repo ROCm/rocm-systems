@@ -16,11 +16,20 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <format>
 #include <stdexcept>
 
 namespace rocjitsu::amdgpu {
 namespace {
 constexpr uint32_t kTriangleList = 4, kTriangleStrip = 6, kRectangleList = 17;
+
+std::array<uint32_t, 3> strip_vertex_offsets(bool reverse, bool last_provoking) {
+  if (!reverse)
+    return {0, 1, 2};
+  // Reverse winding without moving the selected first or last provoking vertex.
+  return last_provoking ? std::array<uint32_t, 3>{1, 0, 2} : std::array<uint32_t, 3>{0, 2, 1};
+}
+
 // Factors 13-16 select the unsupported second-source export.
 constexpr uint32_t kBlendZero = 0, kBlendOne = 1, kBlendSrcColor = 2, kBlendInvSrcColor = 3,
                    kBlendSrcAlpha = 4, kBlendInvSrcAlpha = 5, kBlendDstAlpha = 6,
@@ -30,7 +39,8 @@ constexpr uint32_t kBlendZero = 0, kBlendOne = 1, kBlendSrcColor = 2, kBlendInvS
                    kBlendInvConstantAlpha = 18;
 constexpr uint32_t kBlendAdd = 0, kBlendSubtract = 1, kBlendMin = 2, kBlendMax = 3,
                    kBlendReverseSubtract = 4;
-constexpr uint32_t kBlendSeparateAlpha = 1u << 29, kBlendEnable = 1u << 30;
+constexpr uint32_t kBlendSeparateAlpha = 1u << 29, kBlendEnable = 1u << 30, kDisableRop3 = 1u << 31;
+constexpr uint32_t kRopCopy = 12;
 constexpr uint32_t kNumberUnorm = 0, kNumberUint = 4, kNumberSint = 5, kNumberSrgb = 6,
                    kNumberFloat = 7;
 constexpr uint32_t kBufR32Uint = 20, kBufRgba8Unorm = 42, kBufRg32Uint = 48, kBufRgba16Unorm = 51,
@@ -280,11 +290,37 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
     context_[1] = ctx[2] & 0xc0ffffff;
     context_[2] = ctx[2] & 0x3f000000;
   }
-  select_vertex_group();
   if (!indices_.empty() && indices_.size() != total_vertices_)
     throw std::runtime_error("graphics index count does not match draw");
-  if (!indices_.empty() && (state.uconfig_registers[0x24b] & 1))
-    throw std::runtime_error("graphics primitive restart is not implemented");
+  if (!indices_.empty() && (state.uconfig_registers[0x24b] & 1)) {
+    const uint32_t index_type = state.uconfig_registers[0x243] & 3;
+    const uint32_t index_bytes = index_type == 0 ? 2 : index_type == 1 ? 4 : 1;
+    const uint32_t index_mask = index_bytes == 4 ? ~0u : (1u << (8 * index_bytes)) - 1;
+    const uint32_t restart =
+        context_[0x103] & ((state.uconfig_registers[0x24b] & 2) ? ~0u : index_mask);
+    if (std::find(indices_.begin(), indices_.end(), restart) != indices_.end()) {
+      if (primitive_type_ == kRectangleList)
+        throw std::runtime_error("graphics rectangle restart is not implemented");
+      std::vector<uint32_t> triangles;
+      size_t start = 0;
+      const bool strip = primitive_type_ == kTriangleStrip;
+      const bool last_provoking = context_[0x207] & (1u << 19);
+      for (size_t end = 0; end <= indices_.size(); ++end) {
+        if (end != indices_.size() && indices_[end] != restart)
+          continue;
+        for (size_t i = start; i + 2 < end; i += strip ? 1 : 3) {
+          const bool reverse = strip && ((i - start) & 1);
+          for (const uint32_t offset : strip_vertex_offsets(reverse, last_provoking))
+            triangles.push_back(indices_[i + offset]);
+        }
+        start = end + 1;
+      }
+      indices_ = std::move(triangles);
+      total_vertices_ = indices_.size();
+      primitive_type_ = kTriangleList;
+    }
+  }
+  select_vertex_group();
 }
 
 uint32_t GraphicsDraw::primitive_count() const {
@@ -381,6 +417,9 @@ void GraphicsDraw::initialize(Wavefront &wave, uint32_t workgroup, uint32_t wave
       for (uint32_t component = 0; component < 4; ++component)
         if (context_[0x198] & (1u << (8 + component)))
           put(position[component]);
+      // Single-sample rasterization: sample ID and primitive type are zero.
+      if (context_[0x198] & (1u << 13))
+        wave.debug_write_vgpr(vgpr++, lane, batch.relative_layer << 16);
       if (context_[0x198] & (1u << 15))
         wave.debug_write_vgpr(vgpr++, lane, (uint32_t(f.x) & 0xffff) | (uint32_t(f.y) << 16));
       if (f.covered)
@@ -404,13 +443,15 @@ void GraphicsDraw::initialize(Wavefront &wave, uint32_t workgroup, uint32_t wave
   for (uint32_t i = 0; i < user_count; ++i)
     wave.debug_write_sgpr(i + 8, sh_[0x8c + i]);
   const uint32_t index_bits = gfx12 ? 9 : 10;
+  const bool last_provoking = context_[0x207] & (1u << 19);
   for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
     // Primitive connectivity is local to the primitive group's position exports.
     const uint32_t first = primitive_type_ == kTriangleStrip ? lane : 3 * lane;
     const bool reverse = primitive_type_ == kTriangleStrip && ((first_vertex_ + lane) & 1);
+    const auto offsets = strip_vertex_offsets(reverse, last_provoking);
     wave.debug_write_vgpr(0, lane,
-                          (first + reverse) | ((first + !reverse) << index_bits) |
-                              ((first + 2) << (2 * index_bits)));
+                          (first + offsets[0]) | ((first + offsets[1]) << index_bits) |
+                              ((first + offsets[2]) << (2 * index_bits)));
     for (uint32_t i = 1; i < (gfx12 ? 3u : 5u); ++i)
       wave.debug_write_vgpr(i, lane, 0);
     const uint32_t index = indices_.empty()       ? first_vertex_ + lane
@@ -507,8 +548,8 @@ void GraphicsDraw::prepare_colors() {
   const uint32_t color_control = context_[0x216];
   const uint32_t color_mode = (color_control >> 4) & 7;
   color_enabled_ = (context_[0x214] & context_[0x215]) != 0 && color_mode != 0;
-  if (color_enabled_ &&
-      (color_mode != 1 || ((color_control >> 16) & 255) != 0xcc || (color_control & 8)))
+  if (color_enabled_ && (color_mode != 1 || (color_control & 8) ||
+                         ((color_control >> 16) & 15) != ((color_control >> 20) & 15)))
     throw std::runtime_error("unsupported graphics color mode, logic operation, or degamma");
   width_ = height_ = 0;
   uint32_t export_index = 0;
@@ -535,6 +576,11 @@ void GraphicsDraw::prepare_colors() {
     color.memory_format = color_buffer_format(data_format, number_format);
     color.bytes = buffer_format_bytes(color.memory_format);
     color.components = buffer_format_components(color.memory_format);
+    const uint32_t swap = (info >> 11) & 3;
+    // Map logical RGBA channels to equally sized components in memory.
+    constexpr std::array<std::array<uint32_t, 4>, 4> swaps{
+        {{0, 1, 2, 3}, {2, 1, 0, 3}, {3, 2, 1, 0}, {1, 2, 3, 0}}};
+    color.component_indices = swaps[swap];
     color.blend = context_[0x1e0 + target];
     uint32_t allowed_attrib = gfx12 ? 0u : 0x30u;
     // FORCE_DST_ALPHA_1 has no effect on these non-blended targets without alpha.
@@ -545,10 +591,10 @@ void GraphicsDraw::prepare_colors() {
     color.first_layer = view & layer_mask;
     color.last_layer = (view >> layer_bits) & layer_mask;
     if (!color.memory_format || (color.srgb && color.export_format != kExportFp16Abgr) ||
-        (info & (3u << 11)) || (attrib & ~allowed_attrib) || ((attrib3 >> 24) & 3) > 1 ||
-        (attrib3 & (1u << layer_bits)) || (context_[block + 2] & ~31u) ||
-        color.first_layer > color.last_layer || color.last_layer > (attrib3 & layer_mask) ||
-        (view & (gfx12 ? 0xf0000000u : 0xc0000000u)) ||
+        (swap && color.components != 4) || (attrib & ~allowed_attrib) ||
+        ((attrib3 >> 24) & 3) > 1 || (attrib3 & (1u << layer_bits)) ||
+        (context_[block + 2] & ~31u) || color.first_layer > color.last_layer ||
+        color.last_layer > (attrib3 & layer_mask) || (view & (gfx12 ? 0xf0000000u : 0xc0000000u)) ||
         !supported_export_format(color.export_format, color.components))
       throw std::runtime_error("unsupported graphics color state");
     if ((color.blend & kBlendEnable) &&
@@ -603,10 +649,14 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
     throw std::runtime_error("unsupported graphics pixel center or subpixel rounding");
   prepare_colors();
   depth_control_ = context_[0x1c];
-  if (depth_control_ & ~0x76u)
-    throw std::runtime_error("unsupported graphics stencil or depth bounds test");
-  if ((context_[0x198] & ~0x8f7fu) || (context_[0x197] & ~context_[0x198]))
-    throw std::runtime_error("unsupported graphics fragment inputs");
+  // Disabled stencil comparisons do not affect depth testing.
+  if (depth_control_ & ~0x7007f6u)
+    throw std::runtime_error(
+        std::format("unsupported graphics stencil or depth bounds test {:#x}", depth_control_));
+  if ((context_[0x198] & ~0xaf7fu) || (context_[0x197] & ~context_[0x198]))
+    throw std::runtime_error(
+        std::format("unsupported graphics fragment inputs addr={:#x} ena={:#x}", context_[0x198],
+                    context_[0x197]));
 
   if (depth_control_ & 2) {
     const uint32_t zinfo = context_[6];
@@ -719,8 +769,9 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
     }
     // Layer selection uses the provoking vertex before interpolation reorders vertices.
     const uint32_t provoking = (context_[0x207] & (1u << 19)) ? 2 : 0;
+    const uint32_t provoking_index = indices[provoking];
     const uint32_t relative_layer =
-        (context_[0x206] & (1u << 18)) ? layer_viewport_[indices[provoking]] & 0xffff : 0;
+        (context_[0x206] & (1u << 18)) ? layer_viewport_[provoking_index] & 0xffff : 0;
     if (color_enabled_ && std::none_of(colors_.begin(), colors_.end(), [&](const auto &color) {
           return color.write_mask && relative_layer <= color.last_layer - color.first_layer;
         }))
@@ -897,7 +948,9 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       const uint32_t control = context_[0x199 + a];
       // FLAT_SHADE with OFFSET bit 5 exposes the three raw vertex values.
       const bool passthrough = (control & 0x420) == 0x420;
-      if ((control & ~0x100073fu) || ((control & 0x400) && !passthrough))
+      // Flat inputs retain the provoking vertex's raw bits with zero coefficient deltas.
+      const bool flat = (control & 0x400) && !passthrough;
+      if (control & ~0x100073fu)
         throw std::runtime_error("unsupported graphics parameter interpolation");
       for (uint32_t c = 0; c < 4; ++c) {
         std::array<float, 3> values{};
@@ -905,8 +958,9 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
           if ((control & 32) && !passthrough) {
             values[k] = ((control >> 8) & (c == 3 ? 1u : 2u)) ? 1.0f : 0.0f;
           } else {
-            const auto address = addr_calc::rdna_buffer_address(
-                ring[1], ring[3], ring_stride, true, indices[k], (control & 31) * 16 + c * 4, 0, 0);
+            const auto address = addr_calc::rdna_buffer_address(ring[1], ring[3], ring_stride, true,
+                                                                flat ? provoking_index : indices[k],
+                                                                (control & 31) * 16 + c * 4, 0, 0);
             uint32_t bits = 0;
             if (memory.read(ring_base + address.offset,
                             {reinterpret_cast<std::byte *>(&bits), sizeof(bits)}) !=
@@ -917,9 +971,9 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
         }
         parameters[a * 12 + c * 3] = std::bit_cast<uint32_t>(values[0]);
         parameters[a * 12 + c * 3 + 1] =
-            std::bit_cast<uint32_t>(passthrough ? values[1] : values[1] - values[0]);
+            flat ? 0 : std::bit_cast<uint32_t>(passthrough ? values[1] : values[1] - values[0]);
         parameters[a * 12 + c * 3 + 2] =
-            std::bit_cast<uint32_t>(passthrough ? values[2] : values[2] - values[0]);
+            flat ? 0 : std::bit_cast<uint32_t>(passthrough ? values[2] : values[2] - values[0]);
       }
     }
     FragmentWave batch;
@@ -1128,17 +1182,25 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
           throw std::runtime_error("graphics color address is unsupported");
         std::array<uint8_t, 16> previous{}, bytes{};
         const uint32_t blend = color.blend, write_mask = color.write_mask & component_mask;
+        // Hardware ignores ROP3 when blending is enabled, matching DISABLE_ROP3.
+        const uint32_t rop =
+            (blend & (kDisableRop3 | kBlendEnable)) ? kRopCopy : (context_[0x216] >> 16) & 15;
+        const uint32_t component_bytes = color.bytes / color.components;
         if (!write_mask)
           continue;
         const uint32_t full_mask = (1u << color.components) - 1;
-        if (((blend & kBlendEnable) || (write_mask & full_mask) != full_mask) &&
+        if ((rop != kRopCopy || (blend & kBlendEnable) || (write_mask & full_mask) != full_mask) &&
             memory.read(*address, std::as_writable_bytes(std::span{previous}.first(color.bytes))) !=
                 VmAccessOutcome::Complete)
           throw std::runtime_error("graphics color read failed");
         if (blend & kBlendEnable) {
           std::array<float, 4> source{}, destination{}, constant{};
+          std::array<uint8_t, 16> logical_previous{};
+          for (uint32_t c = 0; c < color.components; ++c)
+            std::copy_n(previous.begin() + color.component_indices[c] * component_bytes,
+                        component_bytes, logical_previous.begin() + c * component_bytes);
           const auto decoded = unpack_buffer_format(color.memory_format, 0xfac,
-                                                    std::span{previous}.first(color.bytes));
+                                                    std::span{logical_previous}.first(color.bytes));
           for (uint32_t c = 0; c < 4; ++c) {
             source[c] = std::bit_cast<float>(components[c]);
             destination[c] = std::bit_cast<float>(decoded[c]);
@@ -1182,13 +1244,19 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
         if (color.srgb)
           for (uint32_t c = 0; c < 3; ++c)
             bytes[c] = srgb_color_byte(std::bit_cast<float>(components[c]));
-        // Accepted color formats have equally sized components.
-        const uint32_t component_bytes = color.bytes / color.components;
-        for (uint32_t c = 0; c < color.components; ++c)
+        std::array<uint8_t, 16> output = previous;
+        for (uint32_t c = 0; c < color.components; ++c) {
           if (!(write_mask & (1u << c)))
-            std::copy_n(previous.begin() + c * component_bytes, component_bytes,
-                        bytes.begin() + c * component_bytes);
-        if (memory.write(*address, std::as_bytes(std::span{bytes}.first(color.bytes))) !=
+            continue;
+          for (uint32_t b = 0; b < component_bytes; ++b) {
+            const uint32_t index = color.component_indices[c] * component_bytes + b;
+            const uint8_t source = bytes[c * component_bytes + b], destination = previous[index];
+            output[index] =
+                ((rop & 1) ? ~source & ~destination : 0) | ((rop & 2) ? ~source & destination : 0) |
+                ((rop & 4) ? source & ~destination : 0) | ((rop & 8) ? source & destination : 0);
+          }
+        }
+        if (memory.write(*address, std::as_bytes(std::span{output}.first(color.bytes))) !=
             VmAccessOutcome::Complete)
           throw std::runtime_error("graphics color write failed");
       }

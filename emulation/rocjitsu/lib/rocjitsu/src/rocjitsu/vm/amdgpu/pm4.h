@@ -39,6 +39,8 @@ enum class Pm4Opcode : uint32_t {
   Nop = 0x10,
   SetBase = 0x11,
   ClearState = 0x12,
+  SetPredication = 0x20,
+  CondExec = 0x22,
   DrawIndex2 = 0x27,
   ContextControl = 0x28,
   DrawIndexAuto = 0x2d,
@@ -133,6 +135,7 @@ struct Pm4Submission {
 struct Pm4QueueState {
   uint64_t indirect_base = 0;
   uint32_t num_instances = 1;
+  bool predicate_pass = true;
   std::shared_ptr<GraphicsDraw> draw;
   std::array<uint32_t, 0x400> sh_registers{};
   std::array<uint32_t, 0x2000> context_registers{};

@@ -74,6 +74,7 @@ private:
     uint32_t max_mip = 0, mip = 0;
     uint32_t pitch = 0, tail_x = 0, tail_y = 0;
     uint32_t write_mask = 0, blend = 0;
+    std::array<uint32_t, 4> component_indices{0, 1, 2, 3};
     bool srgb = false, pipe_aligned = false;
     std::optional<uint64_t> metadata;
   };

@@ -3139,6 +3139,8 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
         for (uint32_t word : words)
           os << ' ' << word;
       });
+      if ((header & 1) && !state.predicate_pass)
+        continue;
       switch (static_cast<Pm4Opcode>(opcode)) {
       case Pm4Opcode::Nop:
         break;
@@ -3157,6 +3159,43 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
         else if (words.size() < 2)
           throw std::runtime_error("invalid graphics register payload");
         break;
+      case Pm4Opcode::CondExec: {
+        require(4);
+        if ((words[0] & 3) || words[2] || (words[3] & ~0x3fffu) || words[3] > ib.dwords)
+          throw std::runtime_error("invalid COND_EXEC address, control, or extent");
+        flush_gpu_caches();
+        uint32_t value = 0;
+        if (access->read(address(0), {reinterpret_cast<std::byte *>(&value), sizeof(value)}) !=
+            VmAccessOutcome::Complete)
+          throw std::runtime_error("PM4 COND_EXEC read failed");
+        if (!value) {
+          ib.address += uint64_t{words[3]} * 4;
+          ib.dwords -= words[3];
+        }
+        break;
+      }
+      case Pm4Opcode::SetPredication: {
+        require(3);
+        const uint32_t operation = (words[0] >> 16) & 7;
+        // Boolean predicates use the common GFX9+ packet layout.
+        // Query accumulation and its CONTINUE/HINT controls are not modeled.
+        if (!submission.graphics_engine || (words[0] & ~0x70100u) ||
+            (operation != 0 && operation != 3 && operation != 4))
+          throw std::runtime_error("unsupported SET_PREDICATION control");
+        state.predicate_pass = true;
+        if (operation) {
+          const size_t bytes = operation == 4 ? 4 : 8;
+          if (address(1) % bytes)
+            throw std::runtime_error("unaligned SET_PREDICATION address");
+          flush_gpu_caches();
+          uint64_t value = 0;
+          if (access->read(address(1), {reinterpret_cast<std::byte *>(&value), bytes}) !=
+              VmAccessOutcome::Complete)
+            throw std::runtime_error("PM4 SET_PREDICATION read failed");
+          state.predicate_pass = (value != 0) == bool(words[0] & (1u << 8));
+        }
+        break;
+      }
       case Pm4Opcode::SetBase:
         require(3);
         if (!submission.graphics_engine || words[0] != 1)
@@ -3355,7 +3394,8 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
           const uint32_t index = words[0] >> 28;
           const uint32_t first = words[0] & 0xffff;
           if ((words[0] & 0x0fff0000) || (index && (context || index > 4)))
-            throw std::runtime_error("unsupported graphics register index");
+            throw std::runtime_error(
+                std::format("unsupported graphics register index {:#x}", words[0]));
           for (size_t i = 1; i < words.size(); ++i)
             write(first + i - 1, words[i]);
         }

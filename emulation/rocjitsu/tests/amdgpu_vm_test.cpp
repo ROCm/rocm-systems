@@ -7456,6 +7456,71 @@ TEST(Pm4DispatchTest, BaseCoordinatesThreadgroupInfoAndIndirectZeroOrigin) {
   }
 }
 
+TEST(Pm4DispatchTest, BooleanPredicationOrdersReadsAndOnlySuppressesFlaggedPackets) {
+  for (const auto *arch :
+       {"rdna1", "rdna2", "rdna3", "rdna3_5", "rdna4", "cdna1", "cdna2", "cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    VmFixture f(arch, 1, 8, 64, 106, 256, 1, 0);
+    amdgpu::Pm4SubmitQueue queue;
+    queue.queue_id = 71;
+    queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
+    ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
+    constexpr uint64_t ib = 0x4000, predicate = 0x6000, output = 0x7000;
+    std::vector<uint32_t> words;
+    auto packet = [&](amdgpu::Pm4Opcode opcode, std::initializer_list<uint32_t> payload,
+                      bool predicated = false) {
+      words.push_back(0xc0000000 | ((payload.size() - 1) << 16) | (uint32_t(opcode) << 8) |
+                      uint32_t(predicated));
+      words.insert(words.end(), payload.begin(), payload.end());
+    };
+    std::vector<uint32_t> expected;
+    const auto write = [&](bool predicated, bool executed) {
+      const uint32_t address = output + expected.size() * 4;
+      packet(amdgpu::Pm4Opcode::WriteData, {5u << 8, address, 0, 0x1234}, predicated);
+      expected.push_back(executed ? 0x1234 : 0);
+    };
+    for (uint32_t operation : {3u, 4u}) {
+      for (uint64_t value : {uint64_t{0}, uint64_t{1}, uint64_t{1} << 32}) {
+        for (bool visible : {false, true}) {
+          packet(amdgpu::Pm4Opcode::WriteData,
+                 {5u << 8, predicate, 0, uint32_t(value), uint32_t(value >> 32)});
+          packet(amdgpu::Pm4Opcode::SetPredication,
+                 {(operation << 16) | (uint32_t(visible) << 8), predicate, 0});
+          const bool nonzero = operation == 4 ? uint32_t(value) != 0 : value != 0;
+          write(true, nonzero == visible);
+          write(false, true);
+          packet(amdgpu::Pm4Opcode::SetPredication, {0, 0, 0});
+          write(true, true);
+          // COND_EXEC reads only the low dword, independent of SET_PREDICATION width.
+          packet(amdgpu::Pm4Opcode::CondExec, {predicate, 0, 0, 5});
+          write(false, uint32_t(value) != 0);
+          write(false, true);
+        }
+      }
+    }
+    for (uint32_t i = 0; i < words.size(); ++i)
+      f.mem()->write32(ib + i * 4, words[i]);
+    for (uint32_t i = 0; i < expected.size(); ++i)
+      f.mem()->write32(output + i * 4, 0);
+    bool completed = false, succeeded = false;
+    amdgpu::Pm4Submission submission;
+    submission.graphics_engine = true;
+    submission.buffers.push_back({ib, uint32_t(words.size())});
+    f.engine->register_as_primary();
+    submission.complete = [&](bool success) {
+      completed = true;
+      succeeded = success;
+      f.engine->primary_release();
+    };
+    ASSERT_TRUE(f.cp()->submit_pm4(71, 0, std::move(submission)));
+    f.engine->run();
+    ASSERT_TRUE(completed);
+    ASSERT_TRUE(succeeded);
+    for (uint32_t i = 0; i < expected.size(); ++i)
+      EXPECT_EQ(f.mem()->read32(output + i * 4), expected[i]) << i;
+  }
+}
+
 TEST(Pm4DispatchTest, CancellationFailsPendingSubmissionAndReleasesVmBinding) {
   KfdProcess process(7);
   VmFixture f("rdna3");

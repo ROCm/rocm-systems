@@ -331,11 +331,17 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
     bool triangle = false;
     uint32_t expected_coverage = 0;
     bool passthrough = false;
+    bool flat = false;
     bool viewport_scissor = false;
     std::optional<std::array<std::array<float, 4>, 3>> positions{};
   };
   // Additional coverage masks were captured on physical gfx1100/gfx1201.
   const Case cases[] = {
+      {.name = "flat first provoking vertex", .inputs = 0xaf28, .flat = true},
+      {.name = "flat last provoking vertex",
+       .polygon_mode = 1u << 19,
+       .inputs = 0xaf28,
+       .flat = true},
       {.name = "all vertices behind eye",
        .outcome = Outcome::Empty,
        .clip_control = 1u << 19,
@@ -437,10 +443,10 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
 
       {.name = "integer coverage"},
       {.name = "viewport scissor", .expected_coverage = 0x440, .viewport_scissor = true},
-      {.name = "unequal W and explicit vertex parameters", .inputs = 0x8f28, .passthrough = true},
+      {.name = "unequal W and explicit vertex parameters", .inputs = 0xaf28, .passthrough = true},
       {.name = "position z and packed coordinates", .inputs = 0x8402},
       {.name = "unsupported line stipple input", .outcome = Outcome::Reject, .inputs = 0x80},
-      {.name = "unsupported ancillary input", .outcome = Outcome::Reject, .inputs = 0x2000},
+      {.name = "unsupported front-face input", .outcome = Outcome::Reject, .inputs = 0x1000},
       {.name = "fractional coverage", .extent = 0.625f, .full_scissor = true},
       {.name = "rasterizer discard", .outcome = Outcome::Empty, .clip_control = 1u << 22},
       {.name = "fragment discard enabled", .shader_control = 1u << 6},
@@ -487,7 +493,7 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
        .full_scissor = true,
        .triangle = true,
        .expected_coverage = 0x137},
-      {.name = "logic op clear", .outcome = Outcome::Reject, .color_control = 0x10},
+      {.name = "pattern-dependent logic op", .outcome = Outcome::Reject, .color_control = 0x120010},
       {.name = "color disabled", .color_control = 0, .depth_only = true},
       {.name = "unsupported color mode", .outcome = Outcome::Reject, .color_control = 0xcc0020},
       {.name = "color degamma", .outcome = Outcome::Reject, .color_control = 0xcc0018},
@@ -577,20 +583,22 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
       state.context_registers[gfx12 ? 8 : 0x12] = 0x2000;
       state.context_registers[gfx12 ? 10 : 0x14] = 0x2000;
     }
-    if (test.passthrough) {
+    const bool vertex_parameters = test.passthrough || test.flat;
+    if (vertex_parameters) {
       state.sh_registers[gfx12 ? 0x84 : 0x88] = 0x300000;
       if (gfx12)
         state.sh_registers[0x31] = 1u << 11;
       else
         state.context_registers[0x1b6] = 1;
-      state.context_registers[gfx12 ? 0x199 : 0x191] = 0x420;
+      state.context_registers[gfx12 ? 0x199 : 0x191] = test.flat ? 0x400 : 0x420;
       state.context_registers[gfx12 ? 0x197 : 0x1b3] = test.inputs;
       for (uint32_t c = 0; c < 4; ++c)
         memory_.write32(0x3000a0 + c * 4, c == 0 ? 0x400000 : 0);
       for (uint32_t k = 0; k < 3; ++k)
         for (uint32_t c = 0; c < 4; ++c)
           memory_.write32(0x400000 + k * 16 + c * 4,
-                          std::bit_cast<uint32_t>(float(10 + k * 4 + c)));
+                          test.flat ? 0x7fc00000u + k * 4 + c
+                                    : std::bit_cast<uint32_t>(float(10 + k * 4 + c)));
     }
     if (test.viewport_scissor) {
       state.context_registers[0x292] = 2;
@@ -604,7 +612,7 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
     const float extent = test.extent;
     auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
     for (uint32_t i = 0; i < 3; ++i) {
-      const float w = test.passthrough ? float(1u << i) : 1.0f;
+      const float w = vertex_parameters ? float(1u << i) : 1.0f;
       std::array<uint32_t, 4> position{
           std::bit_cast<uint32_t>((i == 2 ? extent : -extent) * w),
           std::bit_cast<uint32_t>((i == 1 ? extent : -extent) * w),
@@ -639,7 +647,7 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
     for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
       if (!(wave_->exec() & (uint64_t{1} << lane)))
         continue;
-      if (test.inputs == 0x8f28) {
+      if (test.inputs == 0xaf28) {
         // Pull I/W, J/W, 1/W; linear I/J; position XYZW; packed XY.
         const uint32_t x = 1 + covered_index % 2, y = 1 + covered_index / 2;
         // Screen vertices are (0,0), (0,4), (4,0), with W={1,2,4}.
@@ -650,11 +658,15 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
         for (uint32_t reg = 0; reg < 9; ++reg)
           EXPECT_EQ(wave_->debug_read_vgpr(reg, lane), std::bit_cast<uint32_t>(expected[reg]))
               << "register=" << reg << " lane=" << lane;
-        EXPECT_EQ(wave_->debug_read_vgpr(9, lane), x | (y << 16));
+        EXPECT_EQ(wave_->debug_read_vgpr(9, lane), 0u);
+        EXPECT_EQ(wave_->debug_read_vgpr(10, lane), x | (y << 16));
         for (uint32_t c = 0; c < 4; ++c)
           for (uint32_t k = 0; k < 3; ++k)
-            EXPECT_EQ(lds_.read32(wave_->lds_base() + (c * 3 + k) * 4),
-                      std::bit_cast<uint32_t>(float(10 + k * 4 + c)));
+            EXPECT_EQ(
+                lds_.read32(wave_->lds_base() + (c * 3 + k) * 4),
+                test.flat
+                    ? (k ? 0u : 0x7fc00000u + ((test.polygon_mode & (1u << 19)) ? 8u : 0u) + c)
+                    : std::bit_cast<uint32_t>(float(10 + k * 4 + c)));
       } else if (test.inputs == 0x8402) {
         EXPECT_EQ(wave_->debug_read_vgpr(2, lane), 0u);
         const uint32_t packed = wave_->debug_read_vgpr(3, lane);
@@ -710,7 +722,7 @@ TEST_P(GraphicsExportTest, ArrayAttachmentViewsSelectProvokingVertexAndPreserveO
             context[gfx12 ? 0x214 : 0x8e] = 15u << (4 * target);
             context[gfx12 ? 0x215 : 0x8f] = 15u << (4 * target);
             context[gfx12 ? 0x195 : 0x1c5] = 9;
-            context[gfx12 ? 0x198 : 0x1b4] = 2;
+            context[gfx12 ? 0x198 : 0x1b4] = 2 | (1u << 13);
             context[0x2f9] = 0x2d;
             context[gfx12 ? 0x205 : 0x206] = 0x43f;
             context[gfx12 ? 0x206 : 0x207] = enabled ? 1u << 18 : 0;
@@ -751,6 +763,7 @@ TEST_P(GraphicsExportTest, ArrayAttachmentViewsSelectProvokingVertexAndPreserveO
                 wave_->set_wg_coord(workgroup, 0, 0);
                 wave_->set_graphics_stage(draw);
                 draw->initialize(*wave_, workgroup, 0);
+                EXPECT_EQ(wave_->debug_read_vgpr(2, 0), relative_layer << 16);
                 for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
                   draw->export_lane(*wave_, lane, 0, 15, {0x3f800000, 0, 0, 0x3f800000});
               }
@@ -791,7 +804,57 @@ TEST_P(GraphicsExportTest, IndexedDrawPreservesVertexIndicesAndLocalConnectivity
   const uint32_t bits = gfx12 ? 9 : 10;
   EXPECT_EQ(wave_->debug_read_vgpr(0, 0), (1u << bits) | (2u << (2 * bits)));
   state.uconfig_registers[0x24b] = 1;
-  EXPECT_THROW(amdgpu::GraphicsDraw(state, GetParam(), 3, {9, 4, 9}), std::runtime_error);
+  EXPECT_NO_THROW(amdgpu::GraphicsDraw(state, GetParam(), 3, {9, 4, 9}));
+  // Odd strip triangles retain the API-selected first or last provoking vertex.
+  state.uconfig_registers[0x242] = 6;
+  state.uconfig_registers[0x24b] = 0;
+  for (bool last_provoking : {false, true}) {
+    state.context_registers[gfx12 ? 0x207 : 0x205] = last_provoking ? 1u << 19 : 0;
+    amdgpu::GraphicsDraw strip(state, GetParam(), 4, {3, 4, 5, 6});
+    strip.initialize(*wave_, 0, 0);
+    EXPECT_EQ(wave_->debug_read_vgpr(0, 1), last_provoking
+                                                ? 2u | (1u << bits) | (3u << (2 * bits))
+                                                : 1u | (3u << bits) | (2u << (2 * bits)));
+  }
+}
+
+TEST_P(GraphicsExportTest, PrimitiveRestartResetsStripWindingAndDropsIncompleteSegments) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  for (bool last_provoking : {false, true})
+    for (uint32_t primitive : {4u, 6u}) {
+      for (const auto [index_type, marker] :
+           {std::pair{0u, 0xffffu}, {1u, 0xffffffffu}, {2u, 0xffu}}) {
+        amdgpu::Pm4QueueState state;
+        state.uconfig_registers[0x242] = primitive;
+        state.uconfig_registers[0x24b] = 1;
+        state.uconfig_registers[0x243] = index_type;
+        state.context_registers[0x103] = 0xffffffff;
+        state.context_registers[gfx12 ? 0x207 : 0x205] = last_provoking ? 1u << 19 : 0;
+        const std::vector<uint32_t> input{marker, 99, marker, 3,  4,  5,      6,  marker,
+                                          marker, 10, 11,     12, 13, marker, 90, 91};
+        const std::vector<uint32_t> expected =
+            primitive == 4   ? std::vector<uint32_t>{3, 4, 5, 10, 11, 12}
+            : last_provoking ? std::vector<uint32_t>{3, 4, 5, 5, 4, 6, 10, 11, 12, 12, 11, 13}
+                             : std::vector<uint32_t>{3, 4, 5, 4, 6, 5, 10, 11, 12, 11, 13, 12};
+        amdgpu::GraphicsDraw draw(state, GetParam(), input.size(), input);
+        draw.initialize(*wave_, 0, 0);
+        EXPECT_EQ(wave_->debug_read_sgpr(3), expected.size() | ((expected.size() / 3) << 8));
+        for (uint32_t i = 0; i < expected.size(); ++i)
+          EXPECT_EQ(wave_->debug_read_vgpr(gfx12 ? 3 : 5, i), expected[i]);
+        for (uint32_t i = 0; i < expected.size() / 3; ++i) {
+          const uint32_t bits = gfx12 ? 9 : 10;
+          EXPECT_EQ(wave_->debug_read_vgpr(0, i),
+                    (3 * i) | ((3 * i + 1) << bits) | ((3 * i + 2) << (2 * bits)));
+        }
+        // MATCH_ALL_BITS keeps upper register bits significant for narrow indices.
+        state.uconfig_registers[0x24b] |= 2;
+        amdgpu::GraphicsDraw full_match(state, GetParam(), input.size(), input);
+        full_match.initialize(*wave_, 0, 0);
+        if (marker != 0xffffffff)
+          for (uint32_t i = 0; i < input.size(); ++i)
+            EXPECT_EQ(wave_->debug_read_vgpr(gfx12 ? 3 : 5, i), input[i]);
+      }
+    }
 }
 
 TEST_P(GraphicsExportTest, MergedVertexUserCountExcludesSystemRingPair) {
@@ -1423,10 +1486,14 @@ TEST_P(GraphicsExportTest, ColorBlendingPreservesMasksAndUsesSeparateAlpha) {
     bool constant_boundary = false;
     uint32_t number_format = 0, export_format = 9;
     uint32_t initial = 0xff40bf80;
+    uint32_t color_control = 0xcc0010;
     std::array<uint32_t, 4> exported{0x3f000000, 0x3e800000, 0x3e800000, 0x3f000000};
   };
   constexpr uint32_t enabled = 1u << 30, separate = 1u << 29;
   const Case cases[] = {
+      // Physical RDNA3/4 give blending precedence over XOR, including ZERO/ZERO.
+      {.blend = enabled, .mask = 15, .expected = 0, .color_control = 0x660010},
+      {.blend = enabled | 1, .mask = 15, .expected = 0x80404080, .color_control = 0x660010},
       {0, 5, 0xff40bf80},
       {enabled | 4 | (5 << 8), 15, 0xbf407f80},
       {enabled | separate | 4 | (5 << 8) | (1 << 16), 15, 0x80407f80},
@@ -1464,56 +1531,134 @@ TEST_P(GraphicsExportTest, ColorBlendingPreservesMasksAndUsesSeparateAlpha) {
        .initial = 0x20760005,
        .exported = {0x3f4bc000, 0x3e40c000, 0x3e60e000, 0x3edac000}},
   };
-  for (const auto &test : cases) {
-    SCOPED_TRACE(test.blend);
-    amdgpu::Pm4QueueState state;
-    state.num_instances = 1;
-    state.uconfig_registers[0x242] = 17;
-    auto &context = state.context_registers;
-    context[gfx12 ? 0x3b0 : 0x31c] = 10 | (test.number_format << 8);
-    context[gfx12 ? 0x31e : 0x3b0] = gfx12 ? 3 | (3 << 16) : 3 | (3 << 14);
-    context[gfx12 ? 0x31f : 0x3b8] = gfx12 ? 3u << 15 : 26u << 14;
-    context[0x318] = 0x1000;
-    context[gfx12 ? 0x214 : 0x8e] = test.mask;
-    context[gfx12 ? 0x215 : 0x8f] = 15;
-    context[gfx12 ? 0x195 : 0x1c5] = test.export_format;
-    context[gfx12 ? 0x198 : 0x1b4] = 2;
-    context[0x2f9] = 0x2d;
-    context[gfx12 ? 0x205 : 0x206] = 0x43f;
-    context[gfx12 ? 0x216 : 0x202] = 0xcc0010;
-    context[0x1e0] = test.blend;
-    const float constants[] = {0.25f, 0.25f, 0.5f, 0.5f};
-    const uint32_t boundary[] = {0x3b008081, 0x3e56d6d7, 0x3ed5d5d6, 0x3f202020};
-    for (uint32_t c = 0; c < 4; ++c)
-      context[0x105 + c] =
-          test.constant_boundary ? boundary[c] : std::bit_cast<uint32_t>(constants[c]);
-    context[0x10f] = context[0x110] = context[0x111] = context[0x112] =
-        std::bit_cast<uint32_t>(2.0f);
-    context[0x91] = gfx12 ? 0 : 1 | (1 << 16);
-    context[0x30e] = context[0x30f] = 0xffffffff;
-    memory_.write32(0x100000, test.initial);
+  for (uint32_t swap = 0; swap < 4; ++swap) {
+    const auto memory_word = [swap](uint32_t rgba) {
+      const uint32_t r = rgba & 255, g = (rgba >> 8) & 255, b = (rgba >> 16) & 255, a = rgba >> 24;
+      switch (swap) {
+      case 1:
+        return b | (g << 8) | (r << 16) | (a << 24);
+      case 2:
+        return a | (b << 8) | (g << 16) | (r << 24);
+      case 3:
+        return a | (r << 8) | (g << 16) | (b << 24);
+      default:
+        return rgba;
+      }
+    };
+    SCOPED_TRACE(swap);
+    for (const auto &test : cases) {
+      SCOPED_TRACE(test.blend);
+      amdgpu::Pm4QueueState state;
+      state.num_instances = 1;
+      state.uconfig_registers[0x242] = 17;
+      auto &context = state.context_registers;
+      context[gfx12 ? 0x3b0 : 0x31c] = 10 | (test.number_format << 8) | (swap << 11);
+      context[gfx12 ? 0x31e : 0x3b0] = gfx12 ? 3 | (3 << 16) : 3 | (3 << 14);
+      context[gfx12 ? 0x31f : 0x3b8] = gfx12 ? 3u << 15 : 26u << 14;
+      context[0x318] = 0x1000;
+      context[gfx12 ? 0x214 : 0x8e] = test.mask;
+      context[gfx12 ? 0x215 : 0x8f] = 15;
+      context[gfx12 ? 0x195 : 0x1c5] = test.export_format;
+      context[gfx12 ? 0x198 : 0x1b4] = 2;
+      context[0x2f9] = 0x2d;
+      context[gfx12 ? 0x205 : 0x206] = 0x43f;
+      context[gfx12 ? 0x216 : 0x202] = test.color_control;
+      context[0x1e0] = test.blend;
+      const float constants[] = {0.25f, 0.25f, 0.5f, 0.5f};
+      const uint32_t boundary[] = {0x3b008081, 0x3e56d6d7, 0x3ed5d5d6, 0x3f202020};
+      for (uint32_t c = 0; c < 4; ++c)
+        context[0x105 + c] =
+            test.constant_boundary ? boundary[c] : std::bit_cast<uint32_t>(constants[c]);
+      context[0x10f] = context[0x110] = context[0x111] = context[0x112] =
+          std::bit_cast<uint32_t>(2.0f);
+      context[0x91] = gfx12 ? 0 : 1 | (1 << 16);
+      context[0x30e] = context[0x30f] = 0xffffffff;
+      memory_.write32(0x100000, memory_word(test.initial));
 
-    auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
-    for (uint32_t i = 0; i < 3; ++i)
-      draw->export_lane(*wave_, i, 12, 15,
-                        {std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
-                         std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f), 0,
-                         std::bit_cast<uint32_t>(1.0f)});
-    draw->export_lane(*wave_, 0, 20, 1,
-                      {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
-    if (test.reject) {
-      EXPECT_THROW(draw->advance(*access_), std::runtime_error);
-      EXPECT_EQ(memory_.read32(0x100000), test.initial);
-      continue;
+      auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
+      for (uint32_t i = 0; i < 3; ++i)
+        draw->export_lane(*wave_, i, 12, 15,
+                          {std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
+                           std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f), 0,
+                           std::bit_cast<uint32_t>(1.0f)});
+      draw->export_lane(*wave_, 0, 20, 1,
+                        {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
+      if (test.reject) {
+        EXPECT_THROW(draw->advance(*access_), std::runtime_error);
+        EXPECT_EQ(memory_.read32(0x100000), memory_word(test.initial));
+        continue;
+      }
+      ASSERT_TRUE(draw->advance(*access_));
+      wave_->set_wg_coord(0, 0, 0);
+      wave_->set_graphics_stage(draw);
+      draw->initialize(*wave_, 0, 0);
+      for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+        draw->export_lane(*wave_, lane, 0, 15, test.exported);
+      EXPECT_FALSE(draw->advance(*access_));
+      EXPECT_EQ(memory_.read32(0x100000), memory_word(test.expected));
     }
-    ASSERT_TRUE(draw->advance(*access_));
-    wave_->set_wg_coord(0, 0, 0);
-    wave_->set_graphics_stage(draw);
-    draw->initialize(*wave_, 0, 0);
-    for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
-      draw->export_lane(*wave_, lane, 0, 15, test.exported);
-    EXPECT_FALSE(draw->advance(*access_));
-    EXPECT_EQ(memory_.read32(0x100000), test.expected);
+  }
+}
+
+TEST_P(GraphicsExportTest, LogicOperationsUseConvertedBitsAndLogicalChannelMasks) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  const uint32_t sources[] = {0x3c695ac3, 0x3cc35a69, 0xc35a693c, 0x695ac33c};
+  const uint32_t masks[] = {0x00ff00ff, 0x00ff00ff, 0xff00ff00, 0xff00ff00};
+  for (uint32_t swap = 0; swap < 4; ++swap) {
+    const uint32_t src = sources[swap], dst = 0xf3c596a5;
+    const uint32_t results[] = {0,          ~(src | dst), ~src & dst, ~src,
+                                src & ~dst, ~dst,         src ^ dst,  ~(src & dst),
+                                src & dst,  ~(src ^ dst), dst,        ~src | dst,
+                                src,        src | ~dst,   src | dst,  ~0u};
+    for (uint32_t rop = 0; rop < 16; ++rop) {
+      for (bool disable : {false, true})
+        for (uint32_t mask : {5u, 15u}) {
+          SCOPED_TRACE(swap);
+          SCOPED_TRACE(rop);
+          SCOPED_TRACE(mask);
+          SCOPED_TRACE(disable);
+          amdgpu::Pm4QueueState state;
+          state.num_instances = 1;
+          state.uconfig_registers[0x242] = 17;
+          auto &context = state.context_registers;
+          context[gfx12 ? 0x3b0 : 0x31c] = 10 | (4u << 8) | (swap << 11);
+          context[gfx12 ? 0x31e : 0x3b0] = gfx12 ? 3 | (3 << 16) : 3 | (3 << 14);
+          context[gfx12 ? 0x31f : 0x3b8] = gfx12 ? 3u << 15 : 26u << 14;
+          context[0x318] = 0x1000;
+          context[0x1e0] = disable ? 1u << 31 : 0;
+          context[gfx12 ? 0x214 : 0x8e] = mask;
+          context[gfx12 ? 0x215 : 0x8f] = 15;
+          context[gfx12 ? 0x195 : 0x1c5] = 9u;
+          context[gfx12 ? 0x198 : 0x1b4] = 2;
+          context[0x2f9] = 0x2d;
+          context[gfx12 ? 0x205 : 0x206] = 0x43f;
+          context[gfx12 ? 0x216 : 0x202] = (rop * 0x110000) | 0x10;
+          context[0x10f] = context[0x110] = context[0x111] = context[0x112] =
+              std::bit_cast<uint32_t>(2.0f);
+          context[0x91] = gfx12 ? 0 : 1 | (1 << 16);
+          context[0x30e] = context[0x30f] = 0xffffffff;
+          memory_.write32(0x100000, 0xf3c596a5);
+
+          auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
+          for (uint32_t i = 0; i < 3; ++i)
+            draw->export_lane(*wave_, i, 12, 15,
+                              {std::bit_cast<uint32_t>(i == 2 ? 1.0f : -1.0f),
+                               std::bit_cast<uint32_t>(i == 1 ? 1.0f : -1.0f), 0,
+                               std::bit_cast<uint32_t>(1.0f)});
+          draw->export_lane(*wave_, 0, 20, 1,
+                            {(1u << (gfx12 ? 9 : 10)) | (2u << (gfx12 ? 18 : 20)), 0, 0, 0});
+          ASSERT_TRUE(draw->advance(*access_));
+          wave_->set_wg_coord(0, 0, 0);
+          wave_->set_graphics_stage(draw);
+          draw->initialize(*wave_, 0, 0);
+          for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+            draw->export_lane(*wave_, lane, 0, 15, {0xc3, 0x5a, 0x69, 0x3c});
+          EXPECT_FALSE(draw->advance(*access_));
+          const uint32_t bits = mask == 15 ? ~0u : masks[swap];
+          EXPECT_EQ(memory_.read32(0x100000),
+                    ((disable ? src : results[rop]) & bits) | (dst & ~bits));
+        }
+    }
   }
 }
 
@@ -3068,7 +3213,7 @@ TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
         state.context_registers[5] = (3 << 16) | 3;
         state.context_registers[6] = (bytes == 2 ? 1 : 3) | (3 << 4);
         state.context_registers[8] = state.context_registers[10] = 0x2000;
-        state.context_registers[0x1c] = 6 | (comparison << 4);
+        state.context_registers[0x1c] = 0x700780 | 6 | (comparison << 4);
         state.context_registers[0x198] = 2;
         state.context_registers[0x2f9] = 0x2d;
         state.context_registers[0x30e] = state.context_registers[0x30f] =
@@ -3090,7 +3235,7 @@ TEST_P(GraphicsExportTest, DepthClearAndComparisonsUseTiledD16AndD32) {
           state.context_registers[7] = (3 << 16) | 3;
           state.context_registers[0x10] = (bytes == 2 ? 1 : 3) | (24 << 4);
           state.context_registers[0x12] = state.context_registers[0x14] = 0x2000;
-          state.context_registers[0x200] = 6 | (comparison << 4);
+          state.context_registers[0x200] = 0x700780 | 6 | (comparison << 4);
           state.context_registers[0x1c] = 0;
           state.context_registers[0x1b4] = 2;
           state.context_registers[0x206] = 0x43f;
