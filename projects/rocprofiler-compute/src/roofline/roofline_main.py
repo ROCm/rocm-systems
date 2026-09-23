@@ -19,6 +19,7 @@ from roofline.roofline_hover import (
     build_roof_hover,
     format_bandwidth,
     format_hover_number,
+    truncate_kernel_name,
     wrap_hover_name,
 )
 from roofline.roofline_html import (
@@ -346,24 +347,27 @@ class Roofline:
         ceiling_data: dict[str, Any],
         compute_cap: float,
         compute_cap_label: str,
-    ) -> str:
+    ) -> tuple[str, str]:
         """Name the specific binding roof for a kernel: the roof with the lowest
         achievable performance at the kernel's operating point. The compute
         candidate is the envelope cap the diagonals are actually drawn to, so
         the limiter agrees with the drawn roof and with the percent of roofline
-        the tooltip reports."""
-        candidates: list[tuple[float, str]] = []
+        the tooltip reports.
+
+        Returns (label, category), where category is "Memory" or "Compute"."""
+        candidates: list[tuple[float, str, str]] = []
         for level_name, ai_value in level_ai.items():
             bandwidth = self._peak_value(ceiling_data, level_name.lower())
             if bandwidth and ai_value > 0:
-                candidates.append((bandwidth * ai_value, level_name))
+                candidates.append((bandwidth * ai_value, level_name, "Memory"))
 
         if compute_cap != float("inf"):
-            candidates.append((compute_cap, compute_cap_label))
+            candidates.append((compute_cap, compute_cap_label, "Compute"))
 
         if not candidates:
-            return "Unknown"
-        return min(candidates, key=lambda candidate: candidate[0])[1]
+            return "Unknown", "Unknown"
+        _, label, category = min(candidates, key=lambda candidate: candidate[0])
+        return label, category
 
     def _build_kernel_traces(
         self,
@@ -398,7 +402,7 @@ class Roofline:
                 values[kernel_index] if kernel_index < len(values) else None
                 for values in (kernel_colors, counts, total_time, pct_runtime)
             )
-            limiter = self._determine_kernel_limiter(
+            limiter, limiter_category = self._determine_kernel_limiter(
                 level_ai, ceiling_data, compute_cap, compute_cap_label
             )
 
@@ -416,8 +420,9 @@ class Roofline:
                     ),
                     customdata=[point["hoverCells"] for point in points],
                     hovertemplate=build_kernel_hover_template(
-                        name_html=wrap_hover_name(kernel_name),
+                        name_html=wrap_hover_name(truncate_kernel_name(kernel_name)),
                         limiter=limiter,
+                        limiter_category=limiter_category,
                         count=count_val,
                         total_time=time_val,
                         time_unit=time_unit,
