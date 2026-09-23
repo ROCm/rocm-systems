@@ -3,6 +3,7 @@
 
 #include "library/components/pthread_create_gotcha.hpp"
 #include "core/config.hpp"
+#include "core/control/clocks/posix.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
@@ -201,7 +202,7 @@ pthread_create_gotcha::wrapper::operator()() const
                 (state::process::get() == ::rocprofsys::state::process::Active &&
                  bundles != nullptr && bundles_mutex != nullptr);
             if(!_active) return;
-            thread_info::set_stop(comp::wall_clock::record());
+            thread_info::set_stop(control::clocks::timeline_ns());
             auto& _thr_bundle = thread_bundle_data_t::instance();
             if(_thr_bundle && _thr_bundle->get<comp::wall_clock>() &&
                _thr_bundle->get<comp::wall_clock>()->get_is_running())

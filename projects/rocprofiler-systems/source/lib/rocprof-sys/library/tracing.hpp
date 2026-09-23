@@ -7,6 +7,7 @@
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
+#include "core/control/clocks/posix.hpp"
 #include "core/demangler.hpp"
 #include "core/perfetto.hpp"
 #include "core/perfetto/emitter.hpp"
@@ -134,7 +135,7 @@ template <typename Tp = std::uint64_t>
 ROCPROFSYS_INLINE auto
 now()
 {
-    return ::tim::get_clock_real_now<Tp, std::nano>();
+    return control::clocks::timeline_ns<Tp>();
 }
 
 inline auto&

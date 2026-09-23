@@ -6,6 +6,7 @@
 #include "common/defines.h"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
+#include "core/control/clocks/posix.hpp"
 #include "core/demangler.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
@@ -88,10 +89,7 @@ inline constexpr std::size_t renumber_growth_slack = 16;
 
 struct wall_clock_source
 {
-    timestamp_t now() const
-    {
-        return static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-    }
+    [[nodiscard]] timestamp_t now() const { return control::clocks::timeline_ns(); }
 };
 
 struct trace_cache_region_sink
