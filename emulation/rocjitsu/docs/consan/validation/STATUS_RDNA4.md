@@ -252,3 +252,9 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   profile's 0/8 miss. The original miss remains failed qualification; this
   diagnostic requires its own matching clean comparator and cannot promote the
   standard profile. Trial policy is committed before execution.
+- Qwen Default dense diagnostic: **8/8 detections**, all numerical oracles
+  pass and all trials accepted with pre/post GPU health checks. Sampling every
+  workgroup/cell resolves this fault-detection miss in the diagnostic setting.
+  The standard profile's 0/8 result remains unchanged; a matching dense clean
+  comparator and explicit configuration qualification are still required.
+  Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round2-qwen-dense/`.
