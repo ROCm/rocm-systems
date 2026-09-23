@@ -88,9 +88,12 @@ HIP_TEST_CASE(Unit_hipMalloc3D_Basic) {
     HIPCHECK(hipFree(devPitchedPtr[i].ptr));
   }
 
-  const size_t reclaimed_bytes_target = height * width * depth + kMemoryAccountingSlack;
-  const size_t expected_min_avail =
-      (pavail > reclaimed_bytes_target) ? (pavail - reclaimed_bytes_target) : 0;
+  const size_t allocation_size = height * width * depth;
+  const size_t expected_min_after_reclaim =
+      (pavail > allocation_size) ? (pavail - allocation_size) : 0;
+  const size_t expected_min_avail = (expected_min_after_reclaim > kMemoryAccountingSlack)
+                                        ? (expected_min_after_reclaim - kMemoryAccountingSlack)
+                                        : 0;
   size_t max_avail = 0;
 
   for (int attempt = 0; attempt < kMemoryInfoRetryCount; ++attempt) {
