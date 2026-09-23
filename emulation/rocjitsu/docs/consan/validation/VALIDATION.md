@@ -95,6 +95,12 @@ SuperCollider delay matrices must use `RJ_CONSAN_SC_DELAY`. The earlier
 September 23 matrices used an unrecognized variable and therefore ran at delay
 zero; their artifact snapshots retain that evidence. Revalidate with the
 correct variable before claiming coverage of multiple delay settings.
+Set `CONSAN_VALIDATION_SC_DELAY` and `CONSAN_VALIDATION_SC_DELAY_MODE` to
+apply explicit delay controls to SuperCollider clean comparators as well as
+fault runs. Native and Default runs ignore these selectors. Every distinct
+delay configuration contributing detections must have a passing clean
+comparator with the same controls; a delay-zero clean run cannot qualify a
+nonzero-delay fault result.
 
 For workloads that intentionally use identical concurrent LDS stores, an
 explicit policy investigation can set

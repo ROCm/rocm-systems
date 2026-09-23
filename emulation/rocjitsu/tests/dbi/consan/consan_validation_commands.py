@@ -887,6 +887,17 @@ def _clean_environment(
     allowlist = _kernel_allowlist_file(target, workload)
     config = PROFILES[profile]
     environment.update(config.environment)
+    if profile == "supercollider":
+        delay = os.environ.get("CONSAN_VALIDATION_SC_DELAY")
+        delay_mode = os.environ.get("CONSAN_VALIDATION_SC_DELAY_MODE")
+        if delay is not None:
+            if not delay.isascii() or not delay.isdecimal() or int(delay) > 0xFFFFFFFF:
+                raise ValidationError("invalid CONSAN_VALIDATION_SC_DELAY")
+            environment["RJ_CONSAN_SC_DELAY"] = delay
+        if delay_mode is not None:
+            if delay_mode not in {"nop", "sleep", "sleep_var"}:
+                raise ValidationError("invalid CONSAN_VALIDATION_SC_DELAY_MODE")
+            environment["RJ_CONSAN_SC_DELAY_MODE"] = delay_mode
     same_value = os.environ.get(
         "CONSAN_VALIDATION_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES"
     )

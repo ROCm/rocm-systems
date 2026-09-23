@@ -6656,6 +6656,35 @@ class DefaultPresetEnvironmentTest(unittest.TestCase):
                     "default", workload, root / "hook.so", "gfx1201", root)
 
 
+class SuperColliderDelayEnvironmentTest(unittest.TestCase):
+    def test_matching_delay_controls_apply_only_to_supercollider(self):
+        with temporary_root() as root, mock.patch.dict(os.environ, {
+            "CONSAN_VALIDATION_SC_DELAY": "4",
+            "CONSAN_VALIDATION_SC_DELAY_MODE": "sleep",
+        }, clear=True):
+            workload = validation.WORKLOAD_BY_ID["d128-block"]
+            clean = validation_commands._clean_environment(
+                "supercollider", workload, root / "hook.so", "gfx1201", root)
+            fault = validation_faults._fault_trial_environment(
+                "supercollider", workload, root / "hook.so", "gfx1201",
+                {"environment": {}}, {}, {}, root)
+            for environment in (clean, fault):
+                self.assertEqual(environment["RJ_CONSAN_SC_DELAY"], "4")
+                self.assertEqual(environment["RJ_CONSAN_SC_DELAY_MODE"], "sleep")
+            for profile in (None, "default"):
+                environment = validation_commands._clean_environment(
+                    profile, workload, root / "hook.so", "gfx1201", root)
+                self.assertNotIn("RJ_CONSAN_SC_DELAY", environment)
+                self.assertNotIn("RJ_CONSAN_SC_DELAY_MODE", environment)
+            for key, bad in (("CONSAN_VALIDATION_SC_DELAY", "-1"),
+                             ("CONSAN_VALIDATION_SC_DELAY", "4294967296"),
+                             ("CONSAN_VALIDATION_SC_DELAY_MODE", "typo")):
+                with mock.patch.dict(os.environ, {key: bad}):
+                    with self.assertRaises(validation.ValidationError):
+                        validation_commands._clean_environment(
+                            "supercollider", workload, root / "hook.so", "gfx1201", root)
+
+
 class SameValueWriteEnvironmentTest(unittest.TestCase):
     def test_policy_is_explicit_and_matches_clean_and_fault(self):
         knob = "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES"
