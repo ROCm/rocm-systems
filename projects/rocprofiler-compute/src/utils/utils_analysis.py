@@ -582,13 +582,6 @@ def attach_unlocated_trees_by_launcher_thread(
         end = float(root.end_timestamp or 0.0)
         launcher_thread_id = _launcher_thread_id_from_tree(root)
         if launcher_thread_id is None:
-            attach_errors.append(
-                MissingSourceLocationError(
-                    operator_name=root.name,
-                    thread_id=thread_id,
-                    start_timestamp=start,
-                )
-            )
             continue
         launcher_key = str(launcher_thread_id)
         if launcher_key not in forest:
@@ -637,6 +630,29 @@ def _prune_cpu_only_call_trees(forest: dict[str, list[CallTreeNode]]) -> None:
             forest[thread_id] = kept_roots
             continue
         del forest[thread_id]
+
+
+def _record_missing_source_location_errors(
+    forest: dict[str, list[CallTreeNode]],
+    errors: Optional[list[MlApiTraceError]] = None,
+) -> None:
+    """Record unlocated torch/triton roots with no launcher thread."""
+    for thread_id, roots in forest.items():
+        for root in roots:
+            if root.file_name is not None:
+                continue
+            if root.backend not in KNOWN_ML_API_BACKENDS:
+                continue
+            if root.launcher_thread_id is not None:
+                continue
+            _record_ml_api_trace_error(
+                errors,
+                MissingSourceLocationError(
+                    operator_name=root.name,
+                    thread_id=thread_id,
+                    start_timestamp=float(root.start_timestamp or 0.0),
+                ),
+            )
 
 
 def _nested_invocation_keys(
@@ -1495,6 +1511,7 @@ def process_ml_api_trace_output(
     for roots in workload.ml_api_call_trees.values():
         for node in roots:
             rollup_node_stats(node)
+    _record_missing_source_location_errors(workload.ml_api_call_trees, errors)
     workload.ml_api_trace_errors = errors
 
 
