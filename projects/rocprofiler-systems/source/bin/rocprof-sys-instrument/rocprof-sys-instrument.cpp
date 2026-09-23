@@ -111,7 +111,7 @@ create_dependency_listing_envp()
     auto envp = std::vector<char*>{};
 
     // Copy existing environment until nullptr terminator is reached
-    for(char** var = ::environ; var != nullptr && *var != nullptr; ++var)
+    for(char* const* var = ::environ; var != nullptr && *var != nullptr; ++var)
     {
         envp.emplace_back(*var);
     }
@@ -218,6 +218,9 @@ read_dynamic_dependencies(const std::string& exe_path)
     {
         // Retry if interrupted by a signal
     }
+    // <stdlib.h> is included transitively (via "rocprof-sys-instrument.hpp") before
+    // <sys/wait.h>, so glibc defines the W* macros there and <sys/wait.h> skips them.
+    // NOLINTNEXTLINE(misc-include-cleaner)
     if(!WIFEXITED(status) || WEXITSTATUS(status) != 0)
     {
         return std::nullopt;
