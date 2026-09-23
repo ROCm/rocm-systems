@@ -373,3 +373,10 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   below; earlier fault assessments remain visible.
 - `rdna4-matmul-fp16-production` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round10/rdna4-matmul-fp16-production-default`.
 - `rdna4-matmul-fp16-production` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round10/rdna4-matmul-fp16-production-supercollider`.
+- WMMA follow-up review: the current hook already supports a grouped drop
+  through exact primary and companion barrier-sequence identities. Precommitted
+  `barrier-drop-kv-publication-group` selects both FastContext K/V publication
+  pairs (`.text+0x13234/0x13258` and `0x1326c/0x13270`) as one logical mutation.
+  Both profiles require at least one detection in eight trials. Spec loading
+  passes; live trials are pending the serialized clean sweep. The earlier
+  single-pair review remains valid, but no new mutation mechanism is needed.
