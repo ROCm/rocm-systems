@@ -37,8 +37,6 @@ concept backend =
         typename Backend::timestamp_t;
         typename Backend::correlation_id_t;
         typename Backend::callback_tracing_operation_args_cb_t;
-        typename Backend::external_correlation_request_kind_t;
-        typename Backend::external_correlation_id_request_cb_t;
         { Backend::compile_time_version } -> std::convertible_to<std::uint32_t>;
         {
             Backend::BUFFER_POLICY_LOSSLESS
@@ -115,11 +113,6 @@ concept backend =
                 record, args_callback, max_deref, callback_data)
         };
         { user_data.value = timestamp };
-        // ─── External-correlation-id-request service ────────────────────────────
-        {
-            Backend::configure_external_correlation_id_request_service(
-                context, correlation_kinds, num_operations, correlation_cb, callback_data)
-        };
     };
 
 }  // namespace rocprofsys::policies::domain_service

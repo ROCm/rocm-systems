@@ -48,9 +48,12 @@ struct record_header_t
     void* payload = nullptr;
 };
 
-struct user_data_t
+// Real SDK defines rocprofiler_user_data_t as a union of value/ptr; match that
+// so backend<mock_sdk> type-checks cleanly.
+union user_data_t
 {
-    std::uint64_t value = 0;
+    std::uint64_t value;
+    void*         ptr;
 };
 
 using callback_phase_t = int;
@@ -373,6 +376,7 @@ struct mock_sdk
 {
     using context_id_t              = test_support::context_id_t;
     using buffer_id_t               = test_support::buffer_id_t;
+    using thread_id_t               = std::uint64_t;
     using callback_thread_id_t      = test_support::callback_thread_id_t;
     using record_header_t           = test_support::record_header_t;
     using user_data_t               = test_support::user_data_t;
@@ -600,21 +604,6 @@ struct mock_sdk
         const scratch_memory_record_t& record)
     {
         return record.allocation_size;
-    }
-
-    // Stub external-correlation-id-request callback shared by the kernel_dispatch,
-    // memory_copy, and memory_allocation buffered domains' correlation_dependency. No
-    // test currently asserts on its invocation; add an EXPECT_CALL-backed variant here
-    // if one needs to.
-    static int request_stream_correlation_id(std::uint64_t /*thread_id*/,
-                                             context_id_t /*context_id*/,
-                                             external_correlation_request_kind_t /*kind*/,
-                                             tracing_operation_t /*operation*/,
-                                             std::uint64_t /*internal_corr_id*/,
-                                             user_data_t* /*external_corr_id*/,
-                                             void* /*user_data*/)
-    {
-        return 0;
     }
 };
 

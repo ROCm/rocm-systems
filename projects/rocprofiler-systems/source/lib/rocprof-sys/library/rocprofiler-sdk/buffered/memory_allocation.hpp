@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include "library/rocprofiler-sdk/stream_stack_service.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
+
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
@@ -42,7 +44,8 @@ on_memory_allocation(typename SdkBackend::memory_allocation_record_t* record, vo
     constexpr auto        k_zero_start_timestamp = 0;
     constexpr auto        k_zero_end_timestamp   = 0;
 
-    const std::uint64_t stream_id = SdkBackend::get_stream_id(record).handle;
+    const std::uint64_t stream_id =
+        rocprofiler_sdk::stream_stack_service<SdkBackend>::get_stream_id(record).handle;
 
     Externals::get_metadata_registry().add_thread_info(
         { Externals::get_ppid(), Externals::get_pid(), record->thread_id,
@@ -65,7 +68,8 @@ inline constexpr external_correlation_domain_definition<SdkBackend>
     k_memory_allocation_stream_correlation =
         external_correlation_domain_definition<SdkBackend>{
             .kind       = SdkBackend::EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION,
-            .on_request = SdkBackend::request_stream_correlation_id,
+            .on_request = rocprofiler_sdk::stream_stack_service<
+                SdkBackend>::request_stream_correlation_id,
         };
 
 template <policies::domain_service::backend   SdkBackend,

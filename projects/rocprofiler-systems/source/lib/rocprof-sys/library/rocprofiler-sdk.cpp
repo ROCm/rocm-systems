@@ -36,6 +36,7 @@
 #include "library/rocprofiler-sdk/domain_service.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include "library/rocprofiler-sdk/rccl.hpp"
+#include "library/rocprofiler-sdk/stream_stack_service.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "rocprofiler-sdk.hpp"
@@ -183,6 +184,7 @@ using rocprofiler_sdk::tracing_config;
 using rocprofiler_sdk::wrapper;
 
 using production_backend = backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>;
+using production_stream_stack_service = stream_stack_service<production_backend>;
 
 struct external_dependencies
 {
@@ -802,7 +804,7 @@ tool_tracing_callback_stop(
 
         std::uint64_t _beg_ts   = begin_ts;
         std::uint64_t _end_ts   = ts;
-        auto          stream_id = production_backend::stream_id_top();
+        auto          stream_id = production_stream_stack_service::top();
 
         tracing::push_perfetto_ts(
             CategoryT{}, name.data(), _beg_ts,
@@ -1274,7 +1276,7 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
         }
 
         std::uint64_t _beg_ts   = ts;
-        auto          stream_id = production_backend::stream_id_top();
+        auto          stream_id = production_stream_stack_service::top();
 
         tracing::push_perfetto_ts(
             category::rocm_ompt_api{}, _name.data(), _beg_ts,
@@ -1958,7 +1960,7 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
             LOG_TRACE(" operation = ROCPROFILER_HIP_STREAM_SET, phase = "
                       "ROCPROFILER_CALLBACK_PHASE_ENTER, stream_id={}",
                       (unsigned long) stream_id.handle);
-            production_backend::stream_id_push(stream_id);
+            production_stream_stack_service::push(stream_id);
         }
         // Pop stream ID off of stream stack after underlying HIP function is
         // completed
@@ -1967,7 +1969,7 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
             LOG_TRACE("operation = ROCPROFILER_HIP_STREAM_SET, phase = "
                       "ROCPROFILER_CALLBACK_PHASE_EXIT, stream_id={}",
                       (unsigned long) stream_id.handle);
-            production_backend::stream_id_pop();
+            production_stream_stack_service::pop();
         }
     }
     else
