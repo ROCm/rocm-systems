@@ -164,9 +164,9 @@ auto SelectSymkTuning(ncclSymkKernelId id, int maxChannels) {
 }  // namespace
 
 // ===========================================================================
-// rcclGetProtoForGfx120x -- directly test the protocol-selector helper. The
-// surrounding rcclUpdateCollectiveProtocol tests cover gfx120x recognition via
-// the production IsArchMatch(..., "gfx120") prefix check.
+// Navi protocol-selector helpers. The surrounding
+// rcclUpdateCollectiveProtocol tests cover gfx110x/gfx120x recognition via the
+// production prefix checks.
 // ===========================================================================
 
 // SingleNodeLLCutoffs[] is indexed directly by ncclFunc_t, so its ordering IS
@@ -219,6 +219,22 @@ TEST(WrapMicrotest, GetProtoForGfx120x_ZeroCutoffFuncsOnlyLLAtZero) {
 // this build.
 TEST(WrapMicrotest, GetProtoForGfx120x_FuncBeyondTable_DefaultsSimple) {
   EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx120x(ncclFuncAlltoAll, 1));
+}
+
+TEST(WrapMicrotest, GetProtoForGfx110x_CutoffBoundaries) {
+  EXPECT_EQ(NCCL_PROTO_LL, rcclGetProtoForGfx110x(ncclFuncBroadcast, 1536));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx110x(ncclFuncBroadcast, 1537));
+  EXPECT_EQ(NCCL_PROTO_LL, rcclGetProtoForGfx110x(ncclFuncReduce, 1024));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx110x(ncclFuncReduce, 1025));
+  EXPECT_EQ(NCCL_PROTO_LL, rcclGetProtoForGfx110x(ncclFuncAllGather, 24756));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx110x(ncclFuncAllGather, 24757));
+  EXPECT_EQ(NCCL_PROTO_LL, rcclGetProtoForGfx110x(ncclFuncReduceScatter, 24756));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx110x(ncclFuncReduceScatter, 24757));
+  EXPECT_EQ(NCCL_PROTO_LL, rcclGetProtoForGfx110x(ncclFuncAllReduce, 65536));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx110x(ncclFuncAllReduce, 65537));
+  EXPECT_EQ(NCCL_PROTO_LL, rcclGetProtoForGfx110x(ncclFuncSendRecv, 0));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx110x(ncclFuncSendRecv, 1));
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, rcclGetProtoForGfx110x(ncclFuncAlltoAll, 1));
 }
 
 // ===========================================================================
@@ -624,7 +640,7 @@ TEST(WrapMicrotest, HierarchicalTempBufferSize_NeitherFlagIsZero) {
 }
 
 // ===========================================================================
-// rcclCeAllReduceGraphLatchTick / rcclCeAllReduceAllowed -- plain ncclComm
+// rcclCeAllReduceGraphLatchTick / rcclCeArGraphSafe -- plain ncclComm
 // field access, no topology. rccl_wrap.cc:834-857.
 // ===========================================================================
 
@@ -717,14 +733,14 @@ TEST(WrapMicrotestIsolated, CeAllReduceGraphLatchTick_BothTransitionsLogTheirOwn
 TEST(WrapMicrotest, CeAllReduceAllowed_TrueWhenLatchClear) {
   ncclComm* comm = MakeZeroedComm();
   comm->ceColl.graphModeSeen = false;
-  EXPECT_TRUE(rcclCeAllReduceAllowed(comm));
+  EXPECT_TRUE(rcclCeArGraphSafe(comm));
   DeleteCommWithArch(comm);
 }
 
 TEST(WrapMicrotest, CeAllReduceAllowed_FalseWhenLatchSet) {
   ncclComm* comm = MakeZeroedComm();
   comm->ceColl.graphModeSeen = true;
-  EXPECT_FALSE(rcclCeAllReduceAllowed(comm));
+  EXPECT_FALSE(rcclCeArGraphSafe(comm));
   DeleteCommWithArch(comm);
 }
 
@@ -1154,7 +1170,7 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xDelegatesThenP2pDisa
       "Wrap_UpdateCollectiveProtocol_Gfx120xDelegatesThenP2pDisableForcesSimple",
       []() {
         SetMicroEnvAbsent("NCCL_PROTO");
-        SetMicroEnv("NCCL_P2P_DISABLE", "1");
+        ScopedHook p2pDisable(g_paramP2pDisable, []() { return 1; });
         ncclComm* comm = MakeCommWithArch("gfx1200");
         comm->nNodes = 1;
         comm->nRanks = 1;
@@ -1181,6 +1197,30 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xSingleNodeDelegatesT
         info.protocol = NCCL_PROTO_SIMPLE;
         rcclUpdateCollectiveProtocol(comm, /*nBytes=*/1024, &info);
         EXPECT_EQ(NCCL_PROTO_LL, info.protocol);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx110xSingleNodeDelegatesToProtocolSelector) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx110xSingleNodeDelegatesToProtocolSelector",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeCommWithArch("gfx1100");
+        comm->nNodes = 1;
+        comm->nRanks = 1;
+
+        ncclTaskColl atCutoff{};
+        atCutoff.func = ncclFuncAllReduce;
+        atCutoff.protocol = NCCL_PROTO_SIMPLE;
+        rcclUpdateCollectiveProtocol(comm, /*nBytes=*/65536, &atCutoff);
+        EXPECT_EQ(NCCL_PROTO_LL, atCutoff.protocol);
+
+        ncclTaskColl pastCutoff{};
+        pastCutoff.func = ncclFuncAllReduce;
+        pastCutoff.protocol = NCCL_PROTO_LL;
+        rcclUpdateCollectiveProtocol(comm, /*nBytes=*/65537, &pastCutoff);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, pastCutoff.protocol);
         DeleteCommWithArch(comm);
       });
 }
@@ -2021,16 +2061,17 @@ TEST(WrapMicrotestIsolated, UseAllGatherDirect_NonMultipleOf8RanksReturnsFalse) 
       });
 }
 
-// rcclUseAinic() had no controllable seam before (hardcoded false), so this
-// branch had literally never fired -- now a seam, closing a real,
-// previously-structural gap.
+// Default policy disables Direct AllGather on AINIC only for nNodes > 8.
+// nNodes=9 plus gfx950 / nRanks=8 / small msgSize would otherwise return
+// true (cust-coll + threshold + rank-multiple all pass), so this isolates
+// the AINIC scale gate.
 TEST(WrapMicrotestIsolated, UseAllGatherDirect_AinicDisablesDirect) {
   RUN_ISOLATED_TEST(
       "Wrap_UseAllGatherDirect_AinicDisablesDirect",
       []() {
         ScopedHook useAinic(g_useAinic, []() { return true; });
         ncclComm* comm = MakeCommWithArch("gfx950");
-        comm->nNodes = 1;
+        comm->nNodes = 9;
         comm->nRanks = 8;
         size_t msgSize = 1024;
         EXPECT_FALSE(rcclUseAllGatherDirect(comm, msgSize));
@@ -2697,6 +2738,45 @@ TEST(WrapMicrotest, OverrideChannels_FewerThan2NodesLeavesNcUntouched) {
   DeleteCommWithArch(comm);
 }
 
+TEST(WrapMicrotest, OverrideChannels_SingleNodeNaviAppliesTuning) {
+  for (const char* arch : {"gfx1100", "gfx1201"}) {
+    ncclComm* comm = MakeCommWithArch(arch);
+    comm->nNodes = 1;
+    comm->nRanks = 8;
+    comm->nChannels = 32;
+    comm->config.minCTAs = 1;
+    comm->config.maxCTAs = 64;
+    comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][0] = 1;
+    comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][1] = 2048;
+    comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][2] = 8;
+    int nc = -100;
+    EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/8192, nc));
+    EXPECT_EQ(8, nc) << arch;
+    DeleteCommWithArch(comm);
+  }
+}
+
+TEST(WrapMicrotest, OverrideChannels_NonzeroRankSuppressesVerboseTuningLogs) {
+  RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_ALL);
+  ncclComm* comm = MakeCommWithArch("gfx1100");
+  comm->rank = 1;
+  comm->nNodes = 1;
+  comm->nRanks = 8;
+  comm->nChannels = 32;
+  comm->config.minCTAs = 1;
+  comm->config.maxCTAs = 64;
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][0] = 1;
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][1] = 2048;
+  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][2] = 8;
+  int nc = -100;
+  const std::string log = RcclUnitTesting::CaptureLog(
+    [&]() { EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/8192, nc)); });
+  EXPECT_EQ(8, nc);
+  EXPECT_EQ(std::string::npos, log.find("nBytes:"));
+  EXPECT_EQ(std::string::npos, log.find("RCCL tuning model overrides nchannels"));
+  DeleteCommWithArch(comm);
+}
+
 // nNodes == 2 is the first value the `nNodes < 2` guard must let THROUGH.
 // The test above uses 1 and the tuning tests below use 4, so neither can tell
 // `< 2` from `<= 2` -- a mutation sweep confirmed that mutant survives them.
@@ -2920,7 +3000,7 @@ TEST(WrapMicrotest, OverrideChannels_UndefinedFirstBucketStopsBeforeLaterMatch) 
 }
 
 // ===========================================================================
-// rcclUseCeAllReduce -- rccl_wrap.cc:766-831. Caches rcclParamCeAllReduce
+// rcclUseCeAr2Shot -- rccl_wrap.cc:766-831. Caches rcclParamCeAllReduce
 // ("enabled") and rcclParamForceCeAllReduce ("force") in function-local
 // statics -- rcclParamCeAllReduce's real default (0) fully blocked this
 // function before the g_loadParam seam existed. Isolated per case.
@@ -2935,10 +3015,10 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_DisabledByDefaultWarnsOnce) {
         RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_ALL);
         ncclComm* comm = MakeZeroedComm();
         std::string log1 = RcclUnitTesting::CaptureLog(
-            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr)); });
+            [&]() { EXPECT_FALSE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr)); });
         EXPECT_NE(std::string::npos, log1.find("CE AllReduce not enabled"));
         std::string log2 = RcclUnitTesting::CaptureLog(
-            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr)); });
+            [&]() { EXPECT_FALSE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr)); });
         EXPECT_EQ(std::string::npos, log2.find("CE AllReduce not enabled")); // warn-once latch
         DeleteCommWithArch(comm);
       });
@@ -2951,7 +3031,7 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_BiasBufferPresentReturnsFalse) {
         g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
         ncclComm* comm = MakeZeroedComm();
         int bias = 0;
-        EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, &bias));
+        EXPECT_FALSE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, &bias));
         DeleteCommWithArch(comm);
       });
 }
@@ -2964,7 +3044,7 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_NoSymmetricSupportReturnsFalse) {
         ncclComm* comm = MakeZeroedComm();
         comm->symmetricSupport = 0;
         std::string log = RcclUnitTesting::CaptureLog(
-            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr)); });
+            [&]() { EXPECT_FALSE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr)); });
         EXPECT_NE(std::string::npos, log.find("symmetric support is not enabled"));
         DeleteCommWithArch(comm);
       });
@@ -2979,7 +3059,7 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_MultiNodeReturnsFalse) {
         comm->symmetricSupport = 1;
         comm->nNodes = 2;
         std::string log = RcclUnitTesting::CaptureLog(
-            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr)); });
+            [&]() { EXPECT_FALSE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr)); });
         EXPECT_NE(std::string::npos, log.find("nNodes is not 1"));
         DeleteCommWithArch(comm);
       });
@@ -2995,7 +3075,7 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_CountNotDivisibleByNRanksReturnsFalse
         comm->nNodes = 1;
         comm->nRanks = 4;
         std::string log = RcclUnitTesting::CaptureLog(
-            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, /*count=*/5, ncclFloat32, ncclSum, nullptr)); });
+            [&]() { EXPECT_FALSE(rcclUseCeAr2Shot(comm, /*count=*/5, ncclFloat32, ncclSum, nullptr)); });
         EXPECT_NE(std::string::npos, log.find("is not divisible by nRanks"));
         DeleteCommWithArch(comm);
       });
@@ -3013,7 +3093,7 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_MsgTooLargeReturnsFalse) {
         // count * sizeof(float) must exceed NCCL_CE_AR_MAX_MSG_BYTES (256MiB).
         size_t count = (256ull * 1024 * 1024 / 4) + 1;
         std::string log = RcclUnitTesting::CaptureLog(
-            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, count, ncclFloat32, ncclSum, nullptr)); });
+            [&]() { EXPECT_FALSE(rcclUseCeAr2Shot(comm, count, ncclFloat32, ncclSum, nullptr)); });
         EXPECT_NE(std::string::npos, log.find("msgBytes"));
         DeleteCommWithArch(comm);
       });
@@ -3030,7 +3110,7 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_NonZeroCtaPolicyWithoutForceReturnsFa
         comm->nRanks = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
         std::string log = RcclUnitTesting::CaptureLog(
-            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr)); });
+            [&]() { EXPECT_FALSE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr)); });
         EXPECT_NE(std::string::npos, log.find("CTA policy is not ZERO"));
         DeleteCommWithArch(comm);
       });
@@ -3046,7 +3126,7 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_UnsupportedOpReturnsFalse) {
         comm->nNodes = 1;
         comm->nRanks = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
-        EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclAvg, nullptr));
+        EXPECT_FALSE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclAvg, nullptr));
         DeleteCommWithArch(comm);
       });
 }
@@ -3061,7 +3141,7 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_Float8DatatypeReturnsFalse) {
         comm->nNodes = 1;
         comm->nRanks = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
-        EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat8e4m3, ncclSum, nullptr));
+        EXPECT_FALSE(rcclUseCeAr2Shot(comm, 8, ncclFloat8e4m3, ncclSum, nullptr));
         DeleteCommWithArch(comm);
       });
 }
@@ -3080,7 +3160,7 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_ForceBypassesCtaPolicyAndAllValidRetu
         comm->nNodes = 1;
         comm->nRanks = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT; // not ZERO -- force must bypass this
-        EXPECT_TRUE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr));
+        EXPECT_TRUE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr));
         DeleteCommWithArch(comm);
       });
 }
@@ -3106,9 +3186,9 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_NonLogOnceGuardWarnsOnEveryCall) {
         comm->symmetricSupport = 1;
         comm->nNodes = 2; // fails the "nNodes is not 1" guard, which has no log-once protection
         std::string log1 = RcclUnitTesting::CaptureLog(
-            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr)); });
+            [&]() { EXPECT_FALSE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr)); });
         std::string log2 = RcclUnitTesting::CaptureLog(
-            [&]() { EXPECT_FALSE(rcclUseCeAllReduce(comm, 8, ncclFloat32, ncclSum, nullptr)); });
+            [&]() { EXPECT_FALSE(rcclUseCeAr2Shot(comm, 8, ncclFloat32, ncclSum, nullptr)); });
         EXPECT_NE(std::string::npos, log1.find("nNodes is not 1"));
         EXPECT_NE(std::string::npos, log2.find("nNodes is not 1"))
             << "if this now finds nothing, the production WARN gained log-once protection -- "
@@ -3118,34 +3198,17 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_NonLogOnceGuardWarnsOnEveryCall) {
 }
 
 // ===========================================================================
-// rcclDdaEnabled -- rccl_wrap.cc:648-667. rcclParamDdaEnable's real default
-// (1) and ncclGroupDepth's real default (0) both favor the "enabled" path,
+// rcclDdaEnabled -- rcclParamDdaEnable's real default (1) and
+// ncclGroupDepth's real default (0) both favor the "enabled" path,
 // so most branches are reachable without the seam; not cached, no isolation
-// needed.
+// needed. Threshold is passed explicitly by the caller (from the arch table).
 // ===========================================================================
 
 TEST(WrapMicrotest, DdaEnabled_DisabledByParamReturnsFalse) {
   ScopedHook loadParam(g_loadParam, ForceParam("RCCL_DDA_ENABLE", int64_t(0)));
   ncclComm* comm = MakeCommWithArch("gfx942");
   comm->nRanks = 8;
-  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, 0, 0));
-  DeleteCommWithArch(comm);
-}
-
-TEST(WrapMicrotest, DdaEnabled_Gfx1250UsesCallerDefaultThreshold) {
-  ncclComm* comm = MakeCommWithArch("gfx1250");
-  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, 0, 0, /*gfx1250Default=*/2048));
-  DeleteCommWithArch(comm);
-}
-
-// Same ternary-with-fallback pattern as the gfx950 test below
-// (DdaEnabled_Gfx950FallsBackToParamThresholdWhenDefaultZero), but for
-// gfx1250 -- previously only the caller-provides-a-real-default case was
-// exercised; this closes the fallback-path gap.
-TEST(WrapMicrotest, DdaEnabled_Gfx1250FallsBackToParamThresholdWhenDefaultZero) {
-  ncclComm* comm = MakeCommWithArch("gfx1250");
-  // gfx1250Default == 0 -> falls back to rcclParamDdaThreshold()'s real default (128MiB); well within it.
-  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, 0, 0, /*gfx1250Default=*/0));
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
   DeleteCommWithArch(comm);
 }
 
@@ -3158,7 +3221,7 @@ TEST(WrapMicrotest, DdaEnabled_ImplicitLaunchOrderReturnsFalse) {
   ncclComm* comm = MakeCommWithArch("gfx942");
   comm->nRanks = 8;
   comm->config.launchOrderImplicit = 1;
-  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, 0, 0));
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
   DeleteCommWithArch(comm);
 }
 
@@ -3170,7 +3233,7 @@ TEST(WrapMicrotest, DdaEnabled_InsideGroupReturnsFalse) {
   ncclComm* comm = MakeCommWithArch("gfx942");
   comm->nRanks = 8;
   ncclGroupDepth = 1;
-  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, 0, 0));
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
   ncclGroupDepth = 0; // restore: other tests in this binary assume the default
   DeleteCommWithArch(comm);
 }
@@ -3178,36 +3241,28 @@ TEST(WrapMicrotest, DdaEnabled_InsideGroupReturnsFalse) {
 TEST(WrapMicrotest, DdaEnabled_Gfx942BelowRankThresholdReturnsFalse) {
   ncclComm* comm = MakeCommWithArch("gfx942");
   comm->nRanks = 7; // below the 8-rank floor
-  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, 0, 0));
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
   DeleteCommWithArch(comm);
 }
 
 TEST(WrapMicrotest, DdaEnabled_Gfx942WithinThresholdReturnsTrue) {
   ncclComm* comm = MakeCommWithArch("gfx942");
   comm->nRanks = 8;
-  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/2048, /*gfx942Default=*/2048, 0, 0));
+  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/2048, /*threshold=*/2048));
   DeleteCommWithArch(comm);
 }
 
 TEST(WrapMicrotest, DdaEnabled_Gfx942AboveThresholdReturnsFalse) {
   ncclComm* comm = MakeCommWithArch("gfx942");
   comm->nRanks = 8;
-  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/2049, /*gfx942Default=*/2048, 0, 0));
-  DeleteCommWithArch(comm);
-}
-
-TEST(WrapMicrotest, DdaEnabled_Gfx950FallsBackToParamThresholdWhenDefaultZero) {
-  ncclComm* comm = MakeCommWithArch("gfx950");
-  comm->nRanks = 8;
-  // gfx950Default == 0 -> falls back to rcclParamDdaThreshold()'s real default (128MiB); well within it.
-  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, 0, /*gfx950Default=*/0, 0));
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/2049, /*threshold=*/2048));
   DeleteCommWithArch(comm);
 }
 
 TEST(WrapMicrotest, DdaEnabled_UnsupportedArchReturnsFalse) {
   ncclComm* comm = MakeCommWithArch("gfx90a");
   comm->nRanks = 8;
-  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*gfx942Default=*/2048, /*gfx950Default=*/2048, 0));
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
   DeleteCommWithArch(comm);
 }
 
@@ -3335,7 +3390,7 @@ TEST(WrapMicrotest, GetFirmwareVersion_FailureReturnsNegativeOne) {
 // rcclSelectAllReduce -- rccl_wrap.cc:864-1026. The master AllReduce decision
 // function: symmetric -> CE 2-shot -> DDA (fabric LL/LL128/VMM + IPC) -> CE
 // registered -> symmetric (reported) -> plain kernel, in that priority
-// order. Every test is isolated: rcclUseCeAllReduce (called internally to
+// order. Every test is isolated: rcclUseCeAr2Shot (called internally to
 // compute ceAllReduceAllowed) caches its enabled/force flags in
 // function-local statics, so any test touching RCCL_CE_ALLREDUCE/
 // RCCL_FORCE_CE_ALLREDUCE needs a fresh process, and for consistency every
@@ -3411,17 +3466,25 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricEligibleChoosesSymmetric) {
 // CE registered wins over symmetric when both are eligible, per the
 // production comment's documented precedence -- distinct from the test
 // above, which only proves symmetric wins when CE ISN'T eligible.
-TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredBeatsSymmetricWhenBothEligible) {
+TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricBeatesCeRegisteredWhenBothEligible) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAllReduce_CeRegisteredBeatsSymmetricWhenBothEligible",
+      "Wrap_SelectAllReduce_SymmetricBeatesCeRegisteredWhenBothEligible",
       []() {
-        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
+          return def;
+        };
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                                   size_t, const void*, void*, bool) { return true; });
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/6));
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
@@ -3429,9 +3492,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredBeatsSymmetricWhenBothEl
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
                                                     /*stream=*/nullptr, /*query=*/true,
                                                     /*graphCapturingHint=*/false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
-        EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
-        EXPECT_EQ(1, decision.nMaxChannels);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
@@ -3444,7 +3505,11 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredChosenWithProdOp) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_CeRegisteredChosenWithProdOp",
       []() {
-        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
+          return def;
+        };
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
@@ -3523,7 +3588,11 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredChosenWhenAvailableAndPo
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_CeRegisteredChosenWhenAvailableAndPolicyZero",
       []() {
-        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
+          return def;
+        };
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
@@ -3545,7 +3614,11 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeRegisteredForwardsBlockCalculatorA
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_CeRegisteredForwardsBlockCalculatorArguments",
       []() {
-        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
+          return def;
+        };
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
@@ -3617,10 +3690,10 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RecvWinSysmemSegmentBlocksCeRegister
       });
 }
 
-// CE 2-shot: needs ceAllReduceAllowed (rcclUseCeAllReduce eligible +
+// CE 2-shot: needs ceAllReduceAllowed (rcclUseCeAr2Shot eligible +
 // force-or-symReg) AND a non-null ceARTmpBuf. Uses `force` (via
 // RCCL_FORCE_CE_ALLREDUCE) as the "force || symReg" side, matching
-// rcclUseCeAllReduce's own ForceBypassesCtaPolicy test precedent.
+// rcclUseCeAr2Shot's own ForceBypassesCtaPolicy test precedent.
 TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenEligibleAndStagingBufferReady) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_CeTwoShotChosenWhenEligibleAndStagingBufferReady",
@@ -3637,7 +3710,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenEligibleAndStagin
         });
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
-        // force bypasses this, matching rcclUseCeAllReduce's precedent
+        // force bypasses this, matching rcclUseCeAr2Shot's precedent
         comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
@@ -3654,7 +3727,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenEligibleAndStagin
 
 // ceAllReduceAllowed's final conjunct is `force || symReg`; every prior
 // test drove it true via one side or the other, but never both false at
-// once. Same setup as above (staging buffer ready, rcclUseCeAllReduce
+// once. Same setup as above (staging buffer ready, rcclUseCeAr2Shot
 // otherwise eligible), but neither RCCL_FORCE_CE_ALLREDUCE nor a CE-
 // available seam is set -- CE 2-shot must not fire despite the buffer
 // being ready.
@@ -3665,7 +3738,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenNeitherForceNo
         g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
-        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO; // rcclUseCeAllReduce itself still eligible
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO; // rcclUseCeAr2Shot itself still eligible
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
         rcclCollDecision decision{};
@@ -3710,7 +3783,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLLChosenOnGfx1250) {
       "Wrap_SelectAllReduce_DdaFabricLLChosenOnGfx1250",
       []() {
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
         ScopedHook llEligible(g_allReduceDdaFabricLLEligible,
                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx1250");
@@ -3735,9 +3808,13 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ChosenWhenLLNotEligibl
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_DdaFabricLL128ChosenWhenLLNotEligible",
       []() {
-        g_loadParam = ForceParam("RCCL_DDA_LL128", int64_t(1));
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL128") == 0) return 1;
+          if (std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0) return INT64_MAX;
+          return def;
+        };
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
         ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible,
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                    return true;
@@ -3765,8 +3842,12 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ChosenAboveLegacyThres
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_DdaFabricLL128ChosenAboveLegacyThreshold",
       []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0) return INT64_MAX;
+          return def;
+        };
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
         ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible,
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                    return true;
@@ -3795,7 +3876,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricVmmChosenWhenNeitherLLNorLL
       "Wrap_SelectAllReduce_DdaFabricVmmChosenWhenNeitherLLNorLL128Eligible",
       []() {
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
         ScopedHook vmmEligible(g_allReduceDdaFabricEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         // g_allReduceDdaFabricLLEligible / LL128Eligible left at their default (false).
@@ -3820,7 +3901,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaIpcChosenOnNonGfx1250Arch) {
       "Wrap_SelectAllReduce_DdaIpcChosenOnNonGfx1250Arch",
       []() {
         ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
         ScopedHook ipcEligible(g_allReduceDdaIpcEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942"); // not gfx1250
@@ -3995,7 +4076,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_LiveModeProbesCapturingGraph) {
 // rcclSelectAllGather -- rccl_wrap.cc:1031-1202. Same overall shape as
 // rcclSelectAllReduce, different priority order: DDA -> Hierarchical -> CE
 // (force-scratch + registered) -> symmetric (reported) -> Direct -> plain
-// kernel. Isolated throughout for the same reason (rcclUseCeAllReduce is not
+// kernel. Isolated throughout for the same reason (rcclUseCeAr2Shot is not
 // called here, but rcclUseAllGatherDirect's own disable-flag/threshold
 // statics are reached via the Direct branch and the Hierarchical branch's
 // sub-comm dispatch).
@@ -4013,7 +4094,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaFabricLLChosenOnGfx1250) {
         comm->nNodes = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, decision.algo);
         EXPECT_EQ(123u, decision.nMaxChannels);  // proves ncclAllGatherDdaFabricLLBlocks ran, not a sibling
 
@@ -4026,7 +4108,11 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaFabricLL128ChosenWhenLLNotEligibl
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllGather_DdaFabricLL128ChosenWhenLLNotEligible",
       []() {
-        g_loadParam = ForceParam("RCCL_DDA_LL128", int64_t(1));
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL128") == 0) return 1;
+          if (std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0) return INT64_MAX;
+          return def;
+        };
         ScopedHook ll128Eligible(g_allGatherDdaFabricLL128Eligible,
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
         // g_allGatherDdaFabricLLEligible left at its default (false).
@@ -4035,7 +4121,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaFabricLL128ChosenWhenLLNotEligibl
         comm->nNodes = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, decision.algo);
         EXPECT_EQ(124u, decision.nMaxChannels);  // proves ncclAllGatherDdaFabricLL128Blocks ran, not a sibling
 
@@ -4055,7 +4142,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaFabricVmmChosenWhenNeitherLLNorLL
         comm->nNodes = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, decision.algo);
         EXPECT_EQ(122u, decision.nMaxChannels);  // proves ncclAllGatherDdaFabricBlocks ran, not a sibling
 
@@ -4076,7 +4164,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaIpcChosenOnNonGfx1250Arch) {
         comm->nNodes = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, decision.algo);
         EXPECT_EQ(121u, decision.nMaxChannels);  // proves ncclAllGatherDdaIpcBlocks ran, not a sibling
 
@@ -4107,9 +4196,9 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaGatedOnNotSymEligible) {
         comm->nNodes = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/false, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_IPC, decision.algo);
-        EXPECT_EQ(NCCL_ALGO_RING, decision.algo); // fell all the way to the plain-kernel placeholder
         DeleteCommWithArch(comm);
       });
 }
@@ -4128,8 +4217,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_HierarchicalChosenLiveMode) {
         comm->hierarchicalCommsInitialized = true;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess,
-                  rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32, /*query=*/false,
-                                      /*graphCapturingHint=*/false, &decision));
+                  rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32, /*stream=*/nullptr,
+                                      /*query=*/false, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
         DeleteCommWithArch(comm);
       });
@@ -4146,8 +4235,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_InsideGroupExcludesHierarchical) {
         ncclGroupDepth = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess,
-                  rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32, /*query=*/false,
-                                      /*graphCapturingHint=*/false, &decision));
+                  rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32, /*stream=*/nullptr,
+                                      /*query=*/false, /*graphCapturingHint=*/false, &decision));
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
@@ -4172,8 +4261,9 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchChosen) {
         comm->ddaScratchBytes = sizeof(scratch);
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
@@ -4190,7 +4280,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CaptureExcludesCeForceScratch) {
         comm->ddaScratchBytes = sizeof(scratch);
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/true, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/true,
+                                                   &decision));
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
@@ -4208,7 +4299,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CaptureExcludesCeRegistered) {
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/true, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/true,
+                                                   &decision));
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
@@ -4230,7 +4322,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchRequiresForceCe) {
         comm->ddaScratchBytes = sizeof(scratch);
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
@@ -4251,8 +4344,9 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchRejectsFullyRegistered
         comm->ddaScratch = scratch;
         comm->ddaScratchBytes = sizeof(scratch);
         rcclCollDecision decision{};
-        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, 8, ncclFloat32, true, false, &decision));
-        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, 8, ncclFloat32, /*stream=*/nullptr, true,
+                                                   false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
@@ -4272,8 +4366,9 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchRejectsRegisteredRecvW
         comm->ddaScratch = scratch;
         comm->ddaScratchBytes = sizeof(scratch);
         rcclCollDecision decision{};
-        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, 8, ncclFloat32, true, false, &decision));
-        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, 8, ncclFloat32, /*stream=*/nullptr, true,
+                                                   false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
@@ -4292,7 +4387,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchRejectsSysmemSegment) 
         comm->ddaScratchBytes = sizeof(scratch);
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess,
-                  rcclSelectAllGather(comm, &sendBuffer, &recvBuffer, 8, ncclFloat32, true, false, &decision));
+                  rcclSelectAllGather(comm, &sendBuffer, &recvBuffer, 8, ncclFloat32, /*stream=*/nullptr, true, false,
+                                      &decision));
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
@@ -4310,8 +4406,9 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchAcceptsExactCapacity) 
         comm->ddaScratchBytes = sizeof(scratch);
         rcclCollDecision decision{};
         // nRanks(1) * sendcount(16) * sizeof(float32)(4) == 64 bytes.
-        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, 16, ncclFloat32, true, false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, 16, ncclFloat32, /*stream=*/nullptr, true,
+                                                   false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, decision.algo);
         DeleteCommWithArch(comm);
       });
 }
@@ -4337,7 +4434,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchNotChosenWhenProbeSays
         comm->ddaScratchBytes = sizeof(scratch);
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo)
             << "ncclCeScratchAvailable() returning false must block the force-scratch branch";
         DeleteCommWithArch(comm);
@@ -4364,7 +4462,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeRegisteredViaSymmetricWindowsChose
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
 
         // ...and the CTA-policy conjunct itself: same everything, policy back
@@ -4373,7 +4472,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeRegisteredViaSymmetricWindowsChose
         comm->config.CTAPolicy = 0;
         rcclCollDecision noPolicy{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &noPolicy));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &noPolicy));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, noPolicy.algo)
             << "CE via symmetric windows must require CTA_POLICY_ZERO";
         DeleteCommWithArch(comm);
@@ -4397,7 +4497,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_SysmemSegmentBlocksCeRegistered) {
         TestDevrWindows registered(comm, &sendBuffer, true, &recvBuffer, false);
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, &sendBuffer, &recvBuffer, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         DeleteCommWithArch(comm);
       });
@@ -4421,7 +4522,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_RecvWinSysmemSegmentBlocksCeRegister
         TestDevrWindows registered(comm, &sendSentinel, false, &recvSentinel, true);
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, &sendSentinel, &recvSentinel, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         DeleteCommWithArch(comm);
       });
@@ -4443,7 +4545,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_ForceScratchBlockedWhenScratchBuffer
         // comm->ddaScratch left at its zero-init default (nullptr).
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         DeleteCommWithArch(comm);
       });
@@ -4467,7 +4570,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_ForceScratchBlockedWhenMessageExceed
         rcclCollDecision decision{};
         // totalBytes = nRanks(1) * sendcount(1024) * sizeof(float32)(4) = 4096, > 64.
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/1024, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         DeleteCommWithArch(comm);
       });
@@ -4493,7 +4597,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_SymmetricReportedWhenQueryAndEligibl
         comm->symmetricSupport = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
         EXPECT_EQ(NCCL_PROTO_LL, decision.protocol);
         EXPECT_EQ(4, decision.nMaxChannels);
@@ -4518,7 +4623,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_SymmetricEligibleButSymkQueryFailsFa
         comm->symmetricSupport = 1;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
         EXPECT_EQ(NCCL_ALGO_RING, decision.algo); // plain-kernel placeholder, not overwritten by symk
         DeleteCommWithArch(comm);
@@ -4536,7 +4642,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DirectChosenWhenEligible) {
         comm->p2pnChannels = 17;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER, decision.algo);
         EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
         EXPECT_EQ(17, decision.nMaxChannels);
@@ -4568,7 +4675,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_PlainKernelFallbackReportsGetAlgoInf
         ncclComm* comm = MakeSelectComm(); // not a DDA/Direct-eligible arch
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_EQ(NCCL_ALGO_TREE, decision.algo);
         EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
         EXPECT_EQ(38, decision.nMaxChannels);
@@ -4651,64 +4759,16 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLLChosenOnGfx1250) {
       });
 }
 
-// The genuinely ReduceScatter-unique exception: on gfx1250, DDA fabric is
-// allowed to preempt symmetric eligibility entirely (`!symEligible ||
-// ddaFabricArch`) -- distinct from every other gate in this function (and
-// from AllReduce/AllGather's DDA, which are strictly !symEligible-gated
-// with no such override).
-TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250DdaPreemptsSymmetricEvenWhenEligible) {
-  RUN_ISOLATED_TEST(
-      "Wrap_SelectReduceScatter_Gfx1250DdaPreemptsSymmetricEvenWhenEligible",
-      []() {
-        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*, bool) { return true; });
-        ScopedHook vmmEligible(g_reduceScatterDdaFabricEligible,
-                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
-                                 return true;
-                               });
-        ncclComm* comm = MakeCommWithArch("gfx1250");
-        comm->nRanks = 1;
-        comm->nNodes = 1;
-        rcclCollDecision decision{};
-        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclSum, /*query=*/false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM, decision.algo); // DDA won, not SYMMETRIC
-        DeleteCommWithArch(comm);
-      });
-}
-
-// Complementary proof: on a NON-gfx1250 arch, the same symEligible=true +
-// DDA-eligible=true setup must NOT let DDA win -- the preemption is
-// strictly gfx1250-specific.
-TEST(WrapMicrotestIsolated, SelectReduceScatter_NonGfx1250DdaStrictlyGatedOnNotSymEligible) {
-  RUN_ISOLATED_TEST(
-      "Wrap_SelectReduceScatter_NonGfx1250DdaStrictlyGatedOnNotSymEligible",
-      []() {
-        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*, bool) { return true; });
-        ScopedHook ipcEligible(g_reduceScatterDdaIpcEligible,
-                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
-                                 return true;
-                               });
-        ncclComm* comm = MakeCommWithArch("gfx942"); // not gfx1250
-        // 8, not 1: satisfies rcclDdaEnabled's own gfx942 rank floor so this test isolates
-        // the symEligible gate specifically, rather than piggybacking on an unrelated
-        // rank-count guard that would mask the same gate being broken.
-        comm->nRanks = 8;
-        comm->nNodes = 1;
-        rcclCollDecision decision{};
-        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
-                                                        ncclSum, /*query=*/false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo); // symmetric won, not DDA_IPC
-        DeleteCommWithArch(comm);
-      });
-}
 
 TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLL128ChosenWhenLLNotEligible) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_DdaFabricLL128ChosenWhenLLNotEligible",
       []() {
-        g_loadParam = ForceParam("RCCL_DDA_LL128", int64_t(1));
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL128") == 0) return 1;
+          if (std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0) return INT64_MAX;
+          return def;
+        };
         ScopedHook ll128Eligible(g_reduceScatterDdaFabricLL128Eligible,
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                    return true;
@@ -5467,11 +5527,16 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllReduceDelegatesToSelectAllReduce)
       []() {
         ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                                   size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/6));
         // Must have a real archName, not a zeroed comm: symEligible=true skips
         // rcclSelectAllReduce's CE-2-shot early return, so execution reaches its
         // unconditional IsArchMatch(comm->archName, "gfx1250") a few lines later --
         // confirmed via a real crash (IsArchMatch doesn't null-check) before this fix.
         ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
         int algo, protocol, maxChannels;
         EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllReduce, 8, ncclFloat32, ncclSum, nullptr,
                                                     nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
@@ -5848,7 +5913,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_PlainKernelFallbackGetAlgoInfoFailur
         ncclComm* comm = MakeSelectComm(); // not DDA/Hierarchical/CE/symmetric/Direct eligible
         rcclCollDecision decision{};
         EXPECT_EQ(ncclInternalError, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                          /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                         /*stream=*/nullptr, /*query=*/true,
+                                                         /*graphCapturingHint=*/false, &decision));
         DeleteCommWithArch(comm);
       });
 }
@@ -6126,11 +6192,11 @@ void ExerciseInfoCallSites(bool seedDirectDisabled) {
     DeleteCommWithArch(comm);
     ClearMicroEnv();
   }
-  // rcclUseCeAllReduce: disabled-by-default (774).
+  // rcclUseCeAr2Shot: disabled-by-default (774).
   {
     g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(0));
     ncclComm* comm = MakeCommWithArch("gfx942");
-    rcclUseCeAllReduce(comm, /*count=*/8, ncclFloat32, ncclSum, /*acc=*/nullptr);
+    rcclUseCeAr2Shot(comm, /*count=*/8, ncclFloat32, ncclSum, /*acc=*/nullptr);
     DeleteCommWithArch(comm);
   }
   // rcclCeAllReduceGraphLatchTick: latch-set (837), latch-cleared (850).
@@ -6274,7 +6340,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_HierarchicalQueryModeInterAndIntraDi
         comm->hierarchicalIntraComm = intraComm;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER, decision.algo);
         EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
         EXPECT_EQ(11, decision.nMaxChannels); // inter's p2pnChannels, not intra's 22 nor a getAlgoInfo value
@@ -6314,7 +6381,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_HierarchicalQueryModeInterAboveNodeC
         comm->hierarchicalIntraComm = intraComm;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
         EXPECT_EQ(42, decision.nMaxChannels);
         DeleteCommWithArch(comm);
@@ -6348,7 +6416,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_HierarchicalQueryModeFallsToGetAlgoI
         RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_INFO, NCCL_ALL); // exercises the summary INFO too
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
-                                                    /*query=*/true, /*graphCapturingHint=*/false, &decision));
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
         EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
         EXPECT_EQ(42, decision.nMaxChannels);
         DeleteCommWithArch(comm);

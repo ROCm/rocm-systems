@@ -65,6 +65,7 @@
 #include "git_version.h"
 #include "rccl_vars.h"
 #include "hip_rocm_version_info.h"
+#include "rccl_graph_gen.h"
 // #include <hsa/hsa_ext_amd.h>
 #ifdef USE_AMDSMI
 #include "amdsmi_wrap.h"
@@ -223,7 +224,6 @@ RCCL_PARAM(TdmSimpleEnable, "TDM_SIMPLE_ENABLE", 0);
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
  */
 RCCL_PARAM(InitChannels, "INIT_CHANNELS", -1);
-RCCL_PARAM_DECLARE(ForceCeAllReduce);
 
 // Returns the process-wide NCCL_CTA_POLICY env override, or NCCL_CONFIG_UNDEF_INT when the env var
 // is unset or held no valid token. A UNDEF result means no env override was applied, so per-call and
@@ -609,6 +609,10 @@ static ncclResult_t commFree(ncclComm_t comm) {
   if (comm->nvlsSupport) NCCLCHECK(ncclNvlsFree(comm));
 #endif
 
+  // Must run before the destructor loop frees the host-pinned workStarted/workCompleted/workPhases
+  // the profiler thread polls, and before the free(comm->abortFlag) it loads through pt->abortFlag.
+  NCCLCHECK(ncclProfilerThreadDestroy(comm));
+
   struct ncclDestructor* dtor = comm->destructorHead;
   while (dtor != nullptr) {
     NCCLCHECK(dtor->fn(dtor));
@@ -650,7 +654,6 @@ static ncclResult_t commFree(ncclComm_t comm) {
        comm->rank, comm->nRanks, comm->cudaDev, comm->busId, comm->commHash, abort ? "Abort" : "Destroy");
 
   commPoison(comm); // poison comm before free to avoid comm reuse.
-  NCCLCHECK(ncclProfilerThreadDestroy(comm));
   NCCLCHECK(ncclProfilerPluginFinalize(comm));
   if (sharedResRefCount == 0) {
     NCCLCHECK(ncclNetFinalize(comm));
@@ -1840,20 +1843,44 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(ncclTopoCompute(comm->topo, ringGraph), ret, fail);
   NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, ringGraph), ret, fail);
 
-  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151")) {
+  {
+    const bool isGfx1151 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151");
+    const bool isGfx_110x_120x = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110") ||
+                                 IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120");
+    const bool p2pDisabled = ncclParamP2pDisable();
     /**
-     * GFX1151 (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
-     * edge-disjoint Hamiltonian rings. For N nodes, N/2 perfect rings are guaranteed;
-     * additional channels are balanced via greedy heuristics to saturate Fat-Tree/Clos fabrics.
-     * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels
-     * is required during Preset. Therefore, nChannels cannot be auto-calculated
-     * based on nNodes at this stage.
-     * Recommended: Set nChannels via environment variable (e.g., 6 channels for
-     * optimal 4-node load balancing). Missing channel data is backfilled
-     * by repairMissingChannels() during Postset.
-     * */
-    int numChannels = rcclParamInitChannels() > 0 ? rcclParamInitChannels() : 6 /* 2 X (comm->nNodes - 1)  */;
-    ringGraph->nChannels = std::max(ringGraph->minChannels, std::min(ringGraph->maxChannels, (int32_t)numChannels));
+     * Identical with ncclTopoPreset() in connect.cc
+     * We prefer intraGraphGen = true in case of p2pDisabled && isGfx_110x_120x for better performance
+     */
+    const bool intraGraphGen = rcclParamIntraGraphGen() || (p2pDisabled && isGfx_110x_120x);
+
+    if (isGfx1151 || intraGraphGen) {
+      /**
+       * GFX1151 (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
+       * edge-balanced Hamiltonian rings. For N nodes, N/2 perfect rings are guaranteed;
+       * additional channels are balanced via greedy heuristics to saturate Fat-Tree/Clos fabrics.
+       * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels
+       * is required during Preset. Therefore, nChannels cannot be auto-calculated
+       * based on nNodes at this stage.
+       * Recommended: Set nChannels via environment variable (e.g., 6 channels for
+       * optimal 4-node load balancing). Missing channel data is backfilled
+       * by repairMissingChannels() during Postset.
+       *
+       * In isGfx_110x_120x, defaultNumChannels = 56 is due to Minimum edge-balanced Hamiltonian
+       * cycles in graph K8 (8 GPU case) = 14, and 56 is 14*4.
+       */
+      int initChannels = (int)rcclParamInitChannels();
+      int defaultNumChannels =
+        isGfx1151 ? 6 /* 2 X (comm->nNodes - 1) */ : ((isGfx_110x_120x && p2pDisabled) ? 56 : ringGraph->nChannels);
+      int numChannels = initChannels > 0 ? initChannels : defaultNumChannels;
+      ringGraph->minChannels = 1;
+      ringGraph->maxChannels = std::min(MAXCHANNELS / 2, numChannels);
+      ringGraph->nChannels = std::max(ringGraph->minChannels, std::min(ringGraph->maxChannels, (int32_t)numChannels));
+      INFO(NCCL_INIT,
+           "intraGraphGen : %d rcclParamInitChannels:%d numChannels : %d ringGraph->minChannels: %d "
+           "ringGraph->maxChannels: %d",
+           (int)intraGraphGen, initChannels, numChannels, ringGraph->minChannels, ringGraph->maxChannels);
+    }
   }
   INFO(NCCL_INIT, "ringGraph->nChannels = %d ", ringGraph->nChannels);
 
@@ -2901,6 +2928,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
   comm->ll128LineElems = rcclLL128LineElemsFromArch(comm->archName);
   comm->ll128DataElems = rcclLL128DataElemsFromArch(comm->archName);
+  comm->archThresholds = rcclGetArchThresholds(comm->archName);
 
   NCCLCHECKGOTO(initTransportsRank(comm, job->parent, timers), res, fail);
 
@@ -3234,11 +3262,11 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
   maxP2pPeersEnv = ncclParamMaxP2pPeers();
   if (maxP2pPeersEnv != NCCL_CONFIG_UNDEF_INT) {
     if (maxP2pPeersEnv <= 0) {
-      INFO(NCCL_ENV, "NCCL_MAX_P2P_PEERS %d is too low, leaving it set at %d", maxP2pPeersEnv,
+      INFO(NCCL_ENV, "NCCL_P2P_MAX_PEERS %d is too low, leaving it set at %d", maxP2pPeersEnv,
            comm->config.maxP2pPeers);
     } else {
       if (comm->config.maxP2pPeers != NCCL_CONFIG_UNDEF_INT) {
-        INFO(NCCL_ENV, "Comm config maxP2pPeers reset to NCCL_MAX_P2P_PEERS=%d", maxP2pPeersEnv);
+        INFO(NCCL_ENV, "Comm config maxP2pPeers reset to NCCL_P2P_MAX_PEERS=%d", maxP2pPeersEnv);
       }
       comm->config.maxP2pPeers = maxP2pPeersEnv;
     }

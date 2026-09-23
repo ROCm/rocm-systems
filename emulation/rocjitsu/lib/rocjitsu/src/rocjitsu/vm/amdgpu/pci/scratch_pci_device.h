@@ -20,6 +20,7 @@
 #include "rocjitsu/vm/amdgpu/pci/bar_access_trace.h"
 #include "simdojo/components/pci_device.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -54,12 +55,14 @@ public:
   void reset(simdojo::ResetKind kind) override;
 
   /// @brief Return how many guest memory windows are currently mapped.
-  [[nodiscard]] std::size_t mapped_regions() const { return mapped_regions_; }
+  [[nodiscard]] std::size_t mapped_regions() const {
+    return mapped_regions_.load(std::memory_order_relaxed);
+  }
 
 private:
   BarAccessTrace *trace_;
   std::vector<std::byte> storage_;
-  std::size_t mapped_regions_ = 0;
+  std::atomic<std::size_t> mapped_regions_{0};
 };
 
 } // namespace rocjitsu

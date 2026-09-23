@@ -15,11 +15,18 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - `ROCPROFSYS_MONOCHROME` and `MONOCHROME` now treat any value other than a recognized
   false token (`off`/`false`/`no`/`n`/`f`/`0`) as `true`, instead of only recognizing a
   fixed set of true tokens.
+- Perfetto trace output now defaults to the `.pftrace` extension instead of
+  `.proto`, and `--output-format pftrace` is the canonical token for
+  requesting it (`proto` is kept as a permanent backward-compatible alias).
 
 ### Resolved issues
 
 - Fixed per-link XGMI and device-level JPEG AMD SMI metrics missing from rocpd output
   because PMC metadata names did not match the sample insertion path.
+- `--trace-clock-id` no longer crashes the profiled process; the option is
+  now restricted to its two documented, supported values (realtime,
+  cputime), and an invalid value now fails cleanly at startup instead of
+  aborting mid-run.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1
 

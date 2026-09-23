@@ -82,7 +82,7 @@ md5sum::update(Tp inp)
 namespace
 {
 
-using size_type = typename md5sum::size_type;
+using size_type = md5sum::size_type;
 
 // Constants for md5sumTransform routine.
 constexpr std::uint32_t S11 = 7;
@@ -202,9 +202,10 @@ void
 decode(std::uint32_t output[], const std::uint8_t input[], size_type len)
 {
     for(unsigned int i = 0, j = 0; j < len; i++, j += 4)
-        output[i] = ((std::uint32_t) input[j]) | (((std::uint32_t) input[j + 1]) << 8) |
-                    (((std::uint32_t) input[j + 2]) << 16) |
-                    (((std::uint32_t) input[j + 3]) << 24);
+        output[i] = (static_cast<std::uint32_t>(input[j])) |
+                    ((static_cast<std::uint32_t>(input[j + 1])) << 8) |
+                    ((static_cast<std::uint32_t>(input[j + 2])) << 16) |
+                    ((static_cast<std::uint32_t>(input[j + 3])) << 24);
 }
 
 // encodes input (std::uint32_t) into output (unsigned char). Assumes len is
@@ -357,7 +358,7 @@ md5sum::update(const unsigned char input[], size_type length)
 md5sum&
 md5sum::update(const char input[], size_type length)
 {
-    return update((const unsigned char*) input, length);
+    return update(reinterpret_cast<const unsigned char*>(input), length);
 }
 
 // md5sum finalization. Ends an md5sum message-digest operation, writing the

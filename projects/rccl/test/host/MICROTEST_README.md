@@ -49,6 +49,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `dev_runtime.cc` (`DEV_RUNTIME_CC_PATH`, from `dev-runtime-test.cc`);
     suites `Alloc*`, `Comm*`, `Compute*`, `DeepCopy*`, `Dev*`, `Gin*`, `Nccl*`,
     `Sym*`, and `Win*`.
+  - the generated `sym_kernels_host.cc` (`SYM_KERNELS_HOST_CC_PATH`, from
+    `sym-kernels-index-test.cc`); suites `SymKernelIndex*`,
+    `SymAllEmittedCombinations/*`, `SymUnhandledCombinations/*` (covered by the
+    `Sym*` CTest pattern). Each kernel `__global__` is neutered to an ordinary
+    host stub (see the file's own header comment) so the 84 generated function
+    pointers link without the HIP runtime.
   - `rccl_wrap.cc` (`WRAP_CC_PATH`, from `wrap-test.cc`); suites
     `WrapMicrotest.*`, `WrapMicrotestIsolated.*`. Shared dependency seams live
     in their production-TU owners (`ce_fakes.cc`, `sym_kernels_fakes.cc`,
@@ -67,6 +73,16 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `#ifdef ENABLE_WARP_SPEED` cluster (~10 functions) is compiled out of
     this binary entirely, so no seam can reach it without changing the
     binary's own build configuration.
+  - `ras/ras.cc` (`RAS_CC_PATH`, from `ras-test.cc`); suite
+    `RasMicrotest.*`. The suite covers every executable line and function in
+    `ras.cc`: communicator setup and cleanup, local notifications, message
+    allocation and transfer, connection handshakes, message dispatch, the poll
+    loop, timeout handling, and poll-slot management. External socket, network,
+    and neighboring subsystem calls use test-controlled replacements in
+    `ras-test.cc`, their sole consumer. Real multi-process behavior remains
+    integration-test territory. Since this binary uses section GC, validate
+    completeness by checking that the linked coverage report still contains
+    the same `ras.cc` function inventory as the compiled source.
   - `ras/client.cc` (`RAS_CLIENT_CC_PATH`, from `ras-client-test.cc`); suite
     `RasClientMicrotest.*`. With
     `NCCL_RAS_CLIENT` defined, `ras_internal.h` reduces to four macros, so this
@@ -86,6 +102,17 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   entries are omitted for this target via `RCCL_STUBS_OMIT_<symbol>` macros
   because `enqueue.cc` defines them itself. See
   `test_categories_micro_enqueue.yaml`.
+- **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
+  `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
+  GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
+  `SymKernelMaskTest.*`, `SymAllChunkEltsCases/*` (covered by the `Sym*` CTest
+  pattern). Its own binary, not shared with `rccl-UnitTestsMicro`:
+  `fakes/sym_kernels_fakes.cc` (needed there by other units) fakes the exact
+  symbols the real file also defines, which would duplicate-symbol together;
+  this binary simply does not link that file, so no guard is needed.
+  `getRequirements_gin`'s large tuning/GIN dependency surface is never called
+  by these tests, so `-ffunction-sections`/`--gc-sections` drop it before any
+  fake would be needed.
 - **`rccl-UnitTestsMicroInit`** (+ **`-uncached`**, **`-faultinj`**) — `init.cc` (via
   `INIT_CC_PATH`);
   suites `InitMicrotest.*`, `InitMicrotestIsolated.*`. The `-uncached` variant adds
@@ -96,6 +123,21 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   binaries cover both arms of both without a 2x2 cross product. init.cc compiles the *real* `argcheck.cc`/`archinfo.cc`/`utils.cc` ("oracle"
   TUs) from the hipify tree rather than stubbing them; `--gc-sections` drops the
   deep-path symbols the tests never reach. See `test_categories_micro_init.yaml`.
+- **`rccl-UnitTestsMicroWarpSpeed`** — `allgatherv_sched.cc` +
+  `symmetric_sched.cc` (via `ALLGATHERV_SCHED_CC_PATH`/`SYMMETRIC_SCHED_CC_PATH`,
+  both from `scheduler-test.cc`); suite `SchedulerMicrotest.*`. Its own binary,
+  not sharing `rccl-UnitTestsMicro`: some of its test scenarios need
+  `ENABLE_WARP_SPEED`, which must be binary-wide (every TU compiled in has to
+  agree on `struct ncclComm`'s layout), and giving the macro its own small,
+  dedicated binary keeps it from silently reaching the ~8 unrelated TUs that
+  used to share a binary with it. `ncclDevrInitOnce`/`ncclDevrFindWindow` are
+  faked here (`fakes/dev_runtime_fakes.cc`) rather than compiling the real
+  `dev_runtime.cc` in, unlike `dev-runtime-test.cc`: `ncclDevrFindWindow` can
+  only ever return success against a fresh comm, and `ncclDevrInitOnce`'s real
+  error path is already covered directly by `dev-runtime-test.cc`'s own suite,
+  so a fake tests this binary's own error-propagation logic just as well
+  without pulling in that file's dependency floor. See
+  `test_categories_micro_scheduler.yaml`.
 
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
@@ -240,7 +282,8 @@ symbol.
 | `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
 | `src/register/*.cc` | `fakes/register_stubs.cc` |
-| `src/scheduler/*.cc` and the deep launch paths | `fakes/sched_stubs.cc` |
+| `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
+| `src/scheduler/*.cc`'s dependencies (`rccl-UnitTestsMicroWarpSpeed`, which compiles the real files and tests them directly) | `fakes/enqueue_symbols_fakes.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`) | `fakes/libc_interposers.cc` |
@@ -280,6 +323,13 @@ Five things do NOT follow the TU-per-file rule, deliberately:
   that target to avoid fakes-versus-fakes duplicate definitions.
 - `rcclParamIntraGraphGen` stays in `fakes/init_fakes.cc` because its owner
   (`graph/rccl_graph_gen.cc:34`) has no fakes file at all.
+- `IsArchMatch` and the `allocTracker` data symbol stay in `p2p-test.cc`
+  itself rather than a fakes file, because neither has an owning production
+  TU to name a fakes file after: `IsArchMatch` is declared in the
+  header-only `archinfo.h`, and `allocTracker` is an `alloc.h` data symbol
+  that only `p2p.cc` references in this target. (The busId helpers alongside
+  them *do* have an owner — `src/misc/utils.cc` — so they live in
+  `fakes/utils_fakes.cc`, not here.)
 
 `<uut>_fakes.h` (e.g. `enqueue_fakes.h`) is an aggregation header: it includes
 the per-TU headers that unit's tests use and declares the `Reset<Uut>Fakes()`
@@ -300,8 +350,10 @@ them to a specific value (for instance, fake
 new-registration happy path can be tested), the recommended pattern
 is:
 
-1. In `fakes/p2p_fakes.cc`, add a `std::function`-typed hook with a
-   default that matches the current constant behaviour:
+1. In the fakes file that owns that module's seams (`fakes/nccl_fakes.cc`
+   for `nccl*` symbols, `fakes/hip_fakes.cc` for HIP runtime symbols), add
+   a `std::function`-typed hook with a default that matches the current
+   constant behaviour:
    ```cpp
    std::function<ncclResult_t(ncclComm*, ncclProxyConnector*, int,
                               void*, int, void*, int)>
@@ -313,8 +365,9 @@ is:
        return g_proxyCallBlocking(c, p, t, req, rs, resp, rsz);
    }
    ```
-2. Expose the hook from a small `fakes/p2p_fakes.h` so tests can
-   install per-test behaviour in a gtest fixture's `SetUp` / `TearDown`.
+2. Expose the hook from the matching header (`fakes/nccl_fakes.h`,
+   `fakes/hip_fakes.h`) so tests can install per-test behaviour in a
+   gtest fixture's `SetUp` / `TearDown`.
 3. Reset the hook to its default in `TearDown` so tests don't
    contaminate each other.
 
@@ -431,7 +484,18 @@ When the link fails with `undefined symbol: foo`, find `foo` and
 triage it into the right bucket:
 
 - **It's a global variable (`extern int foo;`)** → add a definition
-  to `fakes/p2p_fakes.cc`. Use a sensible default (usually zero).
+  to its owning TU's fakes file. If it has no owning TU (e.g. a data
+  symbol declared in a header-only file) and only one test TU
+  references it, define it in that test (the fifth exception above —
+  e.g. the `allocTracker` array in `p2p-test.cc`). Use a sensible
+  default (usually zero).
+- **It's a plain function the module references but doesn't define**
+  → add a definition returning a sensible default to its owning TU's
+  fakes file (e.g. `busIdToInt64` / `getBusId` go in
+  `fakes/utils_fakes.cc`, since `src/misc/utils.cc` owns them). Only
+  when the symbol has no owning TU does it belong in the test itself
+  (the fifth exception above — e.g. `IsArchMatch`, owned by the
+  header-only `archinfo.h`, in `p2p-test.cc`).
 - **It's a logging or env-param helper** → already covered by the
   no-op `ncclDebugLog` / `ncclLoadParam`. If a new logging primitive
   appears, follow the same pattern.
@@ -457,7 +521,7 @@ triage it into the right bucket:
   `cuPointerGetAttribute`, `cuMemCreate`, `cuMemExportToShareableHandle`,
   …) are never ordinary HIP host-runtime symbols, so under
   `rccl-UnitTestsMicro` they always need an explicit definition in
-  `fakes/p2p_fakes.cc`: use the signature the header declares and return a
+  `fakes/hip_fakes.cc`: use the signature the header declares and return a
   failure code (or a canned success) by default — another bucket-C seam
   that gets the function-pointer-hook treatment when a test needs to
   drive it.
@@ -526,7 +590,7 @@ RCCL's canonical build entry point is `./install.sh` (never `cmake`
 directly). The two-phase pattern for this directory is: one full
 `install.sh` to configure + build everything, then a tight
 `make`-only inner loop for every subsequent edit to `p2p-test.cc` or
-`fakes/p2p_fakes.cc`.
+the `fakes/*.cc` it links against.
 
 ### Initial (one-time) build
 
@@ -561,8 +625,9 @@ make -j $(nproc) rccl-UnitTestsMicro
 `test/host/CMakeLists.txt` is dual-mode. Alongside the in-RCCL-build target
 above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
-`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroInit[-uncached|-faultinj]` and
-`rccl-UnitTestsMicroEnqueue[-devlinker]` — **without configuring/building all of
+`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
+`rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`
+and `rccl-UnitTestsMicroSymKernels` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
 
@@ -592,11 +657,13 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DRCCL_BUILD_DIR=/path/to/projects/rccl/build/release
 cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicro          # p2p tests, ldd shows no HIP/ROCm/HSA/RCCL
+./build/rccl-UnitTestsMicroWarpSpeed  # src/scheduler/*.cc tests
 ./build/rccl-UnitTestsMicroInit      # init.cc tests
 ./build/rccl-UnitTestsMicroInit-uncached
 ./build/rccl-UnitTestsMicroInit-faultinj      # same, ENABLE_FAULT_INJECTION arm
 ./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
+./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-HostUnitTests
 ```
 

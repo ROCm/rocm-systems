@@ -38,6 +38,10 @@ NCCL_PARAM(ElasticBufferRegister, "ELASTIC_BUFFER_REGISTER", 1);
 NCCL_PARAM(SymReuseSysmemHandles, "SYM_REUSE_SYSMEM_HANDLES", 0);
 NCCL_PARAM(DevApiJit, "DEV_API_JIT", 0);
 
+// Defined in init.cc, where comm->symmetricSupport is derived from it. Window
+// registration honors the same opt-out (see ncclCommWindowRegister_impl).
+extern int64_t ncclParamWinEnable();
+
 // Elastic buffers back a symmetric window with CPU memory. Upstream uses the
 // host-NUMA VMM location type, but HIP/CLR has no host-NUMA member and rejects
 // it; RCCL allocates host segments as CU_MEM_LOCATION_TYPE_HOST on AMD (see
@@ -897,6 +901,16 @@ fail_mem:
 static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem) {
   if (mem != nullptr) {
     struct ncclDevrState* devr = &comm->devrState;
+    // Idempotent: a window pair or the finalize drain may already have destroyed
+    // this mem. Establish membership before touching it, not after. The unlink
+    // below walks the list unguarded, so a second call on a freed mem would
+    // otherwise repeat every deregister, unmap, cuMemRelease and free in this
+    // function and then run off the end of the list.
+    {
+      struct ncclDevrMemory* cursor = devr->memHead;
+      while (cursor != nullptr && cursor != mem) cursor = cursor->next;
+      if (cursor != mem) return;
+    }
     if (devr->ginEnabled && mem->ginSegmentInfos != nullptr) {
       for (int segment = 0; segment < mem->numGinSegments; segment++) {
         ncclGinDeregister(comm, mem->ginSegmentInfos[segment].ginHostWins);
@@ -2015,6 +2029,16 @@ ncclResult_t ncclCommWindowRegister_impl(struct ncclComm* comm, void* userPtr, s
   if (userPtr == nullptr || userSize == 0) {
     WARN("%s: invalid pointer %p / size %zu", __func__, userPtr, userSize);
     return ncclInvalidArgument;
+  }
+
+  // RCCL: NCCL_WIN_ENABLE=0 opts out of symmetric-window paths, and the
+  // non-sym fallback cannot back cuMem/VMM buffers (cudaIpcGetMemHandle rejects
+  // them). Decline the registration instead of failing callers that register
+  // symmetric buffers unconditionally; their collectives run on unregistered
+  // buffers.
+  if (!ncclParamWinEnable()) {
+    INFO(NCCL_INIT, "%s: NCCL_WIN_ENABLE=0, skipping registration of %p (%zu bytes)", __func__, userPtr, userSize);
+    return ncclSuccess;
   }
 
   if (!comm->symmetricSupport && !comm->hostRmaSupport) {

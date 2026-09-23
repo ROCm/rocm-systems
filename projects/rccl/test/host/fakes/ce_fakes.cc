@@ -51,7 +51,8 @@ bool ncclCeScratchAvailable(struct ncclComm* comm, ncclFunc_t func, int op, nccl
   return g_ceScratchAvailable(comm, func, op, type, regType);
 }
 int ncclCeLocalReduceBlocks(ncclDataType_t type, size_t count) { return g_ceLocalReduceBlocks(type, count); }
-bool ncclHierCeAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) {
+bool ncclHierCeAvailable(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+                         struct ncclDevrWindow*, struct ncclDevrWindow*) {
   return g_hierCeAvailable;
 }
 

@@ -30,6 +30,7 @@ static constexpr status_t k_status_error                  = -1;
 static constexpr status_t k_status_buffer_busy            = -2;
 static constexpr status_t k_status_hsa_not_loaded         = -3;
 static constexpr status_t k_status_error_invalid_argument = -4;
+static constexpr status_t k_status_error_not_implemented  = -5;
 
 struct context_id
 {
@@ -78,6 +79,11 @@ struct timestamp
 {
     std::uint64_t value{};
     bool          operator==(const timestamp&) const = default;
+};
+struct correlation_id
+{
+    std::uint64_t ancestor{};
+    bool          operator==(const correlation_id&) const = default;
 };
 
 using counter_flag_t   = std::uint32_t;
@@ -137,9 +143,12 @@ using device_counting_agent_cb_t = void*;
 using device_counting_svc_cb_t   = void*;
 using dispatch_counting_svc_cb   = void*;
 using dispatch_counting_rec_cb   = void*;
+using callback_phase             = int;
 
 struct callback_tracing_record_t
-{};
+{
+    callback_phase phase = 0;
+};
 
 // record_header_t mirrors rocprofiler_record_header_t: buffered_callback_dispatcher
 // dereferences ->payload on every element of the header array it iterates.
@@ -369,6 +378,7 @@ struct mock_sdk
     using counter_flag_t                       = testing::counter_flag_t;
     using user_data_t                          = testing::user_data;
     using timestamp_t                          = testing::timestamp;
+    using correlation_id_t                     = testing::correlation_id;
     using available_counters_cb_t              = testing::available_counters_cb_t;
     using device_counting_agent_cb_t           = testing::device_counting_agent_cb_t;
     using device_counting_service_cb_t         = testing::device_counting_svc_cb_t;
@@ -384,6 +394,7 @@ struct mock_sdk
     using external_correlation_id_request_cb_t = testing::ext_correlation_req_cb_t;
     using internal_thread_library_cb_t         = testing::internal_thread_cb_t;
     using callback_tracing_record              = testing::callback_tracing_record_t;
+    using callback_phase_t                     = testing::callback_phase;
     using callback_tracing_operation_args_cb_t = testing::tracing_op_args_cb_t;
     using available_dimensions_cb_t            = testing::available_dimensions_cb_t;
     using counter_info_version_id_t            = testing::counter_info_ver;
@@ -413,11 +424,21 @@ struct mock_sdk
     static constexpr status_t STATUS_ERROR_HSA_NOT_LOADED = k_status_hsa_not_loaded;
     static constexpr status_t STATUS_ERROR_INVALID_ARGUMENT =
         k_status_error_invalid_argument;
+    static constexpr status_t STATUS_ERROR_NOT_IMPLEMENTED =
+        k_status_error_not_implemented;
 
     // ── Counter constants ─────────────────────────────────────────────────────
     static constexpr counter_flag_t            COUNTER_FLAG_NONE      = 0;
     static constexpr counter_info_version_id_t COUNTER_INFO_VERSION_0 = 0;
     static constexpr counter_info_version_id_t COUNTER_INFO_VERSION_1 = 1;
+
+    // ── Callback phase constants ──────────────────────────────────────────────
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_phase_t CALLBACK_PHASE_ENTER = 0;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_phase_t CALLBACK_PHASE_EXIT = 1;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_phase_t CALLBACK_PHASE_NONE = 2;
 
     // ── Callback/buffer tracing kind constants ────────────────────────────────
     // Only backend<Sdk>'s unconditional constants — ROCPROFILER_VERSION is

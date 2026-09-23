@@ -21,7 +21,7 @@ class type_registry
                   "TypeIdentifierEnum must be an enum class");
 
 public:
-    using variant_t = typename std::variant<SupportedTypes...>;
+    using variant_t = std::variant<SupportedTypes...>;
 
     type_registry() { (register_type<SupportedTypes>(), ...); }
 
@@ -40,7 +40,7 @@ private:
 
     template <typename T>
         requires type_traits::cacheable<T, TypeIdentifierEnum>
-    inline void register_type()
+    void register_type()
     {
         deserializers[T::type_identifier] = [](std::uint8_t*& data) -> variant_t {
             return deserialize<T>(data);
