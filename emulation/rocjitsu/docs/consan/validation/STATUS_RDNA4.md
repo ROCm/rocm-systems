@@ -35,7 +35,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 
 | Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |
-| Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟨 Sep 23: standard fault 0/8; qualified preset=max alternative: clean pass, fault 8/8 | 🟨 Sep 23: clean pass; fault 0/8 detections; 8 trials admitted after transform fix |
+| Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟨 Sep 23: standard fault 0/8; qualified preset=max alternative: clean pass, fault 8/8 | 🟨 Sep 23: clean pass; fault 0/8 detections; 8 trials admitted after transform fix; dense clean failed |
 | Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟨 Sep 23: clean pass; publication fault 0/8 detections; fault qualification failed | 🟩 Sep 23: clean pass; reviewed publication fault 1/8 |
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: standard fault 0/8; preset=max clean passes and fault detects 7/8 (separate configuration) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: clean pass; reviewed publication-barrier fault missed in 8/8 trials |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: standard fault 0/8; preset=max clean passes and fault detects 8/8 (separate configuration) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: clean pass; reviewed cross-wave publication fault missed in 8/8 trials |
@@ -543,3 +543,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `d128-block` / default: K-fragment publication fault detects 0/8; admitted 8, reached 8; aggregate accepted=False. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round12-d128-block-default`. Final qualification requires comparator/provenance audit.
 - `d128-block` / supercollider: K-fragment publication fault detects 0/8; admitted 8, reached 8; aggregate accepted=False. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round12-d128-block-supercollider`. Final qualification requires comparator/provenance audit.
 - `wmma-attention` / supercollider dense sampling: dense clean failed. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round17/wmma-attention-supercollider-dense`.
+- `rdna4-matmul-fp16-production` / supercollider dense sampling: dense clean failed. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round17/rdna4-matmul-fp16-production-supercollider-dense`.
