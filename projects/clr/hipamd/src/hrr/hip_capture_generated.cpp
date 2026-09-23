@@ -7335,6 +7335,20 @@ static hipError_t capture_hipInitDevice(int device, unsigned int deviceFlags, un
 }
 
 // Generated shim
+static hipError_t capture_hipDeviceGetExecAffinitySupport(int* p0, hipExecAffinityType p1, hipDevice_t p2) {
+  hipError_t r = g_real_table.hipDeviceGetExecAffinitySupport_fn(p0, p1, p2);
+  if (r == hipSuccess) {
+    hrr_args_hipDeviceGetExecAffinitySupport a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.p0 = reinterpret_cast<uint64_t>(p0);
+    a.p1 = static_cast<decltype(a.p1)>(p1);
+    a.p2 = static_cast<uint64_t>(static_cast<int>(p2));
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDEVICEGETEXECAFFINITYSUPPORT, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem, hipStream_t* stream) {
   hipError_t r = g_real_compiler_table.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
   if (r == hipSuccess) {
@@ -8029,6 +8043,7 @@ void hip_capture_build_table() {
   g_cap_table.hipMemGetDefaultMemPool_fn = capture_hipMemGetDefaultMemPool;
   g_cap_table.hipDeviceGetLuid_fn = capture_hipDeviceGetLuid;
   g_cap_table.hipInitDevice_fn = capture_hipInitDevice;
+  g_cap_table.hipDeviceGetExecAffinitySupport_fn = capture_hipDeviceGetExecAffinitySupport;
 }
 
 void hip_capture_build_compiler_table() {
