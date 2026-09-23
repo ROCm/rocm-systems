@@ -712,6 +712,33 @@ def _doctor(
                 and (not executable or os.access(path, os.X_OK)),
             }
     runtimes = {}
+    sharktank_workloads = tuple(
+        workload for workload in workloads if workload.kind == "sharktank"
+    )
+    if sharktank_workloads:
+        python = _sharktank_python()
+        try:
+            completed = subprocess.run(
+                [str(python), "-c", "import iree.compiler, iree.runtime, numpy, pytest"],
+                env=_clean_environment(
+                    None, sharktank_workloads[0], None, target, workspace
+                ),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+            runtimes["sharktank"] = {
+                "ok": completed.returncode == 0,
+                "python": str(python),
+                "detail": (completed.stdout + completed.stderr).strip(),
+            }
+        except (OSError, subprocess.TimeoutExpired) as error:
+            runtimes["sharktank"] = {
+                "ok": False,
+                "python": str(python),
+                "detail": str(error),
+            }
     pytorch_workloads = tuple(
         workload for workload in workloads if workload.kind == "pytorch"
     )

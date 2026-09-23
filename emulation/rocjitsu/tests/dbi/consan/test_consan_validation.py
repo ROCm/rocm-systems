@@ -2803,6 +2803,39 @@ class ConSanValidationTest(unittest.TestCase):
                 Path("/custom/venv/bin/python"),
             )
 
+    def test_sharktank_doctor_checks_bindings_in_selected_interpreter(self) -> None:
+        for returncode in (0, 1):
+            with self.subTest(returncode=returncode), temporary_root() as workspace:
+                completed = subprocess.CompletedProcess(
+                    [], returncode, stdout="",
+                    stderr="No module named iree" if returncode else "",
+                )
+                with (
+                    mock.patch.dict(
+                        os.environ,
+                        {
+                            validation.SHARKTANK_PYTHON_ENV: "/selected/venv/bin/python",
+                            "PYTHONPATH": "/local/iree-bindings",
+                            "HSA_TOOLS_LIB": "/ambient/hook.so",
+                        },
+                    ),
+                    mock.patch.object(
+                        validation.subprocess, "run", return_value=completed
+                    ) as run,
+                ):
+                    doctor = validation._doctor(workspace, "gfx1201", ("tp1-prefill",))
+                runtime = doctor["runtimes"]["sharktank"]
+                self.assertEqual(runtime["ok"], returncode == 0)
+                self.assertEqual(
+                    run.call_args.args[0][0], "/selected/venv/bin/python"
+                )
+                self.assertEqual(
+                    run.call_args.kwargs["env"]["PYTHONPATH"], "/local/iree-bindings"
+                )
+                self.assertNotIn("HSA_TOOLS_LIB", run.call_args.kwargs["env"])
+                if returncode:
+                    self.assertIn("No module named iree", runtime["detail"])
+
     def test_pytorch_doctor_rejects_interpreter_with_broken_imports(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
         with temporary_root() as workspace:
