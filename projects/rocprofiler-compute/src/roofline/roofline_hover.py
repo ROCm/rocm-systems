@@ -11,6 +11,16 @@ KERNEL_NAME_FONT_FAMILY = "ui-monospace, SFMono-Regular, Menlo, Consolas, monosp
 _HOVER_WRAP_WIDTH = 44
 
 
+def truncate_kernel_name(name: str) -> str:
+    """Cap a kernel name at 200 characters so a pathological name can't blow
+    up the tooltip."""
+    max_length = 200
+    suffix = "..."
+    if len(name) <= max_length:
+        return name
+    return name[: max_length - len(suffix)] + suffix
+
+
 def wrap_hover_name(name: str) -> str:
     """Wrap a kernel name across as many tooltip lines as it takes."""
     if not name:
@@ -29,6 +39,7 @@ def wrap_hover_name(name: str) -> str:
 def build_kernel_hover_template(
     name_html: str,
     limiter: str,
+    limiter_category: str,
     count: Optional[float],
     total_time: Optional[float],
     time_unit: str,
@@ -45,12 +56,12 @@ def build_kernel_hover_template(
     return _hover(
         name_html,
         [
+            f"<b>Limited by {limiter_category}: {limiter}</b>",
             "AI: %{x:.6g}",
             f"Achieved throughput: %{{y:,.3f}} {unit}",
             f"Peak throughput: %{{customdata[0]}} {unit}",
             "Percent of roofline achieved: %{customdata[1]} %",
             "Cache level bandwidth: %{customdata[2]}",
-            f"Performance limiter: {limiter}",
             f"Total dispatches: {_format_integer(count)}",
             f"Aggregate time in kernel: {time_txt}",
             f"Aggregate percent runtime: {format_hover_number(pct_runtime, '.5f')} %",
