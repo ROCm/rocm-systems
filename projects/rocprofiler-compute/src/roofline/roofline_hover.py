@@ -69,7 +69,7 @@ def build_kernel_hover_template(
             f"<b>Limited by {limiter_category}: {limiter}</b>",
             f"Performance: %{{customdata[1]}}% (%{{y:,.0f}} / %{{customdata[0]}} {unit})",
             "%{customdata[2]}",
-            f"Dispatch Number: {pct_dispatches_txt}% ({_format_integer(count)} / {_format_integer(total_dispatches)})",
+            f"Dispatch Count: {pct_dispatches_txt}% ({_format_integer(count)} / {_format_integer(total_dispatches)})",
             f"Duration: {pct_runtime_txt}% ({kernel_time_txt} / {total_app_time_txt} {time_unit})",
             "AI: %{x:.6g}",
         ],
@@ -110,24 +110,26 @@ def build_compute_peak_hover(
     )
 
 
+def _safe_float(value: object) -> Optional[float]:
+    """Convert to float, or None if missing/not numeric."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def format_hover_number(value: object, spec: str) -> str:
     """Format a numeric tooltip value with the given format spec, or N/A."""
-    if value is None:
-        return "N/A"
-    try:
-        return format(float(value), spec)
-    except (TypeError, ValueError):
-        return "N/A"
+    parsed = _safe_float(value)
+    return format(parsed, spec) if parsed is not None else "N/A"
 
 
 def _format_integer(value: object) -> str:
     """Thousands-separated integer for the tooltip, or N/A when missing."""
-    if value is None:
-        return "N/A"
-    try:
-        return f"{int(round(float(value))):,}"
-    except (TypeError, ValueError):
-        return "N/A"
+    parsed = _safe_float(value)
+    return f"{int(round(parsed)):,}" if parsed is not None else "N/A"
 
 
 def _hover(header: str, rows: list[str]) -> str:
@@ -135,13 +137,33 @@ def _hover(header: str, rows: list[str]) -> str:
     return "<br>".join([header, "", *rows]) + "<extra></extra>"
 
 
-def format_bandwidth(gb_per_s: float) -> str:
-    """Bandwidth as GB/s, switching to TB/s at >= 1000 GB/s
-    so the roof hover stays readable."""
-    try:
-        value = float(gb_per_s)
-    except (TypeError, ValueError):
-        return "N/A"
+def _bandwidth_unit(value: float) -> tuple[float, str]:
+    """Scale factor and suffix for a bandwidth magnitude: GB/s, switching to
+    TB/s at >= 1000 GB/s so the hover stays readable."""
     if abs(value) >= 1000.0:
-        return f"{value / 1000.0:,.3f} TB/s"
-    return f"{value:,.3f} GB/s"
+        return 1000.0, "TB/s"
+    return 1.0, "GB/s"
+
+
+def format_bandwidth(gb_per_s: object) -> str:
+    """Bandwidth as GB/s, switching to TB/s at >= 1000 GB/s."""
+    value = _safe_float(gb_per_s)
+    if value is None:
+        return "N/A"
+    scale, unit = _bandwidth_unit(value)
+    return f"{value / scale:,.3f} {unit}"
+
+
+def format_bandwidth_pair(achieved_gb_per_s: object, peak_gb_per_s: object) -> str:
+    """Achieved/peak bandwidth sharing a single unit suffix (GB/s or TB/s),
+    picked from the peak's magnitude, matching the single-suffix style of
+    the Performance field instead of scaling each side independently."""
+    achieved = _safe_float(achieved_gb_per_s)
+    peak = _safe_float(peak_gb_per_s)
+    reference = peak if peak else achieved
+    scale, unit = _bandwidth_unit(reference) if reference is not None else (1.0, "GB/s")
+    achieved_txt = format_hover_number(
+        achieved / scale if achieved is not None else None, ",.3f"
+    )
+    peak_txt = format_hover_number(peak / scale if peak is not None else None, ",.3f")
+    return f"{achieved_txt} / {peak_txt} {unit}"
