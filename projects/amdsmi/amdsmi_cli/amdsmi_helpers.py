@@ -945,7 +945,7 @@ class AMDSMIHelpers:
         """Render one record's ``afids`` column for the human/CSV tables."""
         if record["decode_failed"]:
             return f"[{record['status']}] {record['message']}"
-        return " ".join(map(str, record["afids"])) if record["afids"] else "-"
+        return " ".join(map(str, record["afids"])) if record["afids"] else "N/A"
 
     def record_or_raise(self, exception, context=None):
         """Record a per-device library failure, or raise when it is command-wide.

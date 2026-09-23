@@ -2083,6 +2083,17 @@ class TestRasCperAfidExitCodes(unittest.TestCase):
         self.assertFalse(rows[0]["decode_failed"])
         self.assertFalse(self.helpers.error_collector.has_errors)
 
+    def test_afid_cell_renders_na_for_a_successful_empty_decode(self):
+        """A successful decode with zero AFIDs shows 'N/A', not '-' or blank."""
+        rows = self._drive("json", afids=[])
+        self.assertFalse(rows[0]["decode_failed"])
+        self.assertEqual(self.helpers.afid_cell(rows[0]), "N/A")
+
+    def test_afid_cell_renders_space_joined_afids(self):
+        """Control: a non-empty decode renders as space-joined AFIDs."""
+        rows = self._drive("json", afids=self.AFIDS)
+        self.assertEqual(self.helpers.afid_cell(rows[0]), "11 22 33")
+
     def test_real_decode_failure_through_the_file_write_path(self):
         """End-to-end minus the driver read: real files, real library decode.
 
