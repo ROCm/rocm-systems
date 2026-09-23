@@ -14,6 +14,7 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
 
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
@@ -4382,6 +4383,9 @@ enum class Vop3pDotHalfFormat { F16, BF16 };
 template <Vop3pDotHalfFormat Fmt, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_dot_f16_simd(Inst &inst, Wavefront &wf) {
+  // Route integer accumulation policies through the exact scalar instruction body.
+  if (isa_properties(wf.cu().arch()).float_dot_accumulation != FloatDotAccumulation::HostF32)
+    return false;
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
@@ -4594,6 +4598,8 @@ template <int ElemBits, bool Vop3, typename Inst>
 template <bool Vop3, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_dotc_f16_simd(Inst &inst, Wavefront &wf) {
+  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+    return false;
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.vdst.simd_capable())
     return false;
