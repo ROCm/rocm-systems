@@ -3,8 +3,13 @@
 
 """Unit tests for rocprof_compute_analyze/analysis_cli.py."""
 
+import argparse
+from types import SimpleNamespace
+
 import pandas as pd
 import pytest
+
+from rocprof_compute_analyze.analysis_cli import cli_analysis, parse_operator_patterns
 
 # -- parse_operator_patterns (torch_operator) -------------------------------
 
@@ -12,36 +17,24 @@ import pytest
 @pytest.mark.torch_ops
 def test_parse_patterns_basic():
     """Single and multiple patterns are parsed correctly."""
-    from argparse import Namespace
-
-    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
-
-    args = Namespace(torch_operator=["relu"])
+    args = argparse.Namespace(torch_operator=["relu"])
     assert parse_operator_patterns(args, "torch_operator") == ["relu"]
 
-    args = Namespace(torch_operator=["relu", "conv2d"])
+    args = argparse.Namespace(torch_operator=["relu", "conv2d"])
     assert parse_operator_patterns(args, "torch_operator") == ["relu", "conv2d"]
 
 
 @pytest.mark.torch_ops
 def test_parse_patterns_comma_split():
     """Comma-separated patterns in a single arg are split."""
-    from argparse import Namespace
-
-    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
-
-    args = Namespace(torch_operator=["relu,conv2d"])
+    args = argparse.Namespace(torch_operator=["relu,conv2d"])
     assert parse_operator_patterns(args, "torch_operator") == ["relu", "conv2d"]
 
 
 @pytest.mark.torch_ops
 def test_parse_patterns_whitespace():
     """Leading/trailing whitespace is stripped."""
-    from argparse import Namespace
-
-    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
-
-    args = Namespace(torch_operator=["  relu  ", " conv2d , linear "])
+    args = argparse.Namespace(torch_operator=["  relu  ", " conv2d , linear "])
     result = parse_operator_patterns(args, "torch_operator")
     assert result == ["relu", "conv2d", "linear"]
 
@@ -49,14 +42,10 @@ def test_parse_patterns_whitespace():
 @pytest.mark.torch_ops
 def test_parse_patterns_empty():
     """Flag given with no args defaults to '**'; absent flag returns empty."""
-    from argparse import Namespace
-
-    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
-
     parse = parse_operator_patterns
-    assert parse(Namespace(torch_operator=[]), "torch_operator") == ["**"]
-    assert parse(Namespace(torch_operator=None), "torch_operator") == []
-    assert parse(Namespace(), "torch_operator") == []
+    assert parse(argparse.Namespace(torch_operator=[]), "torch_operator") == ["**"]
+    assert parse(argparse.Namespace(torch_operator=None), "torch_operator") == []
+    assert parse(argparse.Namespace(), "torch_operator") == []
 
 
 # -- parse_operator_patterns / triton backend selection ---------------------
@@ -65,11 +54,9 @@ def test_parse_patterns_empty():
 @pytest.mark.torch_ops
 def test_parse_operator_patterns_generic_attr():
     """parse_operator_patterns reads the given dest attribute."""
-    from argparse import Namespace
-
-    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
-
-    args = Namespace(triton_operator=["*matmul*,*softmax*"], torch_operator=None)
+    args = argparse.Namespace(
+        triton_operator=["*matmul*,*softmax*"], torch_operator=None
+    )
     assert parse_operator_patterns(args, "triton_operator") == [
         "*matmul*",
         "*softmax*",
@@ -78,14 +65,12 @@ def test_parse_operator_patterns_generic_attr():
         args, "torch_operator"
     )
     assert parse_operator_patterns(
-        Namespace(triton_operator=[]), "triton_operator"
+        argparse.Namespace(triton_operator=[]), "triton_operator"
     ) == ["**"]
 
 
 @pytest.mark.torch_ops
 def test_filter_by_backend_selects_only_requested_backend():
-    from rocprof_compute_analyze.analysis_cli import cli_analysis
-
     df = pd.DataFrame({
         "Operator_Name": ["aten::mm", "triton_matmul", "aten::relu"],
         "Backend": ["torch", "triton", "torch"],
@@ -100,8 +85,6 @@ def test_filter_by_backend_selects_only_requested_backend():
 
 @pytest.mark.torch_ops
 def test_filter_by_backend_without_column_defaults_to_torch():
-    from rocprof_compute_analyze.analysis_cli import cli_analysis
-
     df = pd.DataFrame({"Operator_Name": ["aten::mm", "aten::relu"]})
 
     # Without a Backend column, rows are treated as torch.
@@ -112,14 +95,10 @@ def test_filter_by_backend_without_column_defaults_to_torch():
 @pytest.mark.torch_ops
 def test_parse_patterns_star():
     """'*' is passed through as-is by the pattern parser."""
-    from argparse import Namespace
-
-    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
-
-    args = Namespace(torch_operator=["*"])
+    args = argparse.Namespace(torch_operator=["*"])
     assert parse_operator_patterns(args, "torch_operator") == ["*"]
 
-    args = Namespace(torch_operator=["*,torch.relu"])
+    args = argparse.Namespace(torch_operator=["*,torch.relu"])
     assert parse_operator_patterns(args, "torch_operator") == ["*", "torch.relu"]
 
 
@@ -135,12 +114,6 @@ def test_parse_patterns_star():
 )
 def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypatch):
     """run_membw_analysis is called iff profiling config recorded membw data."""
-    import argparse
-    from types import SimpleNamespace
-    from unittest.mock import MagicMock
-
-    from rocprof_compute_analyze.analysis_cli import cli_analysis
-
     inst = cli_analysis.__new__(cli_analysis)
     inst._profiling_config = {"membw_analysis": membw_collected}
 
@@ -169,9 +142,10 @@ def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypat
     )
     inst._OmniAnalyze_Base__args = args
 
-    mock_run = MagicMock(return_value=None)
+    membw_calls: list[tuple] = []
     monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_cli.run_membw_analysis", mock_run
+        "rocprof_compute_analyze.analysis_cli.run_membw_analysis",
+        lambda *a, **kw: membw_calls.append(a),
     )
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_base.OmniAnalyze_Base.pre_processing",
@@ -194,7 +168,4 @@ def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypat
 
     inst.pre_processing()
 
-    if expect_called:
-        mock_run.assert_called_once()
-    else:
-        mock_run.assert_not_called()
+    assert len(membw_calls) == (1 if expect_called else 0)

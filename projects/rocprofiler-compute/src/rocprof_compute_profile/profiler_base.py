@@ -231,14 +231,13 @@ class RocProfCompute_Base:
                 current.append("21")
             args.filter_blocks = current
 
-        # When --membw-analysis is set and the user specified explicit blocks,
-        # inject "30" so block 30 counters are collected alongside the
-        # requested blocks.  When filter_blocks is empty (no -b), all blocks
-        # are collected by default and soc_base.detect_counters() already
-        # includes/excludes block 30 based on args.membw_analysis.
+        # Collect block 30 alongside explicitly requested blocks.
         if getattr(args, "membw_analysis", False):
             current = list(args.filter_blocks or [])
-            if current and not any(t == "30" or t.startswith("30.") for t in current):
+            has_block_30 = any(
+                block == "30" or block.startswith("30.") for block in current
+            )
+            if current and not has_block_30:
                 current.append("30")
                 args.filter_blocks = current
 

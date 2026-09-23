@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -616,6 +617,14 @@ def _make_rpc_with_args(args: argparse.Namespace) -> RocProfCompute:
     return instance
 
 
+def _make_profiler_with_args(args: argparse.Namespace) -> RocProfCompute_Base:
+    """Construct a RocProfCompute_Base without invoking __init__."""
+    instance = RocProfCompute_Base.__new__(RocProfCompute_Base)
+    # Name-mangled private attribute consumed by sanitize().
+    instance._RocProfCompute_Base__args = args
+    return instance
+
+
 def _fake_pc_sampling_limits(method: str, _sdk_tool_path=None) -> PCSamplingLimits:
     """Stub of the device query, using the limits a gfx950 reports."""
     return PCSamplingLimits(
@@ -681,14 +690,12 @@ def _fake_pc_sampling_limits(method: str, _sdk_tool_path=None) -> PCSamplingLimi
     ],
 )
 def test_sanitize_block_experimental_gating(
-    tmp_path, args, expect_error, expected_filter_blocks
+    args, expect_error, expected_filter_blocks, monkeypatch
 ):
     """Unit test: block 21 and block 30 require their experimental flags."""
-    binary = tmp_path / "myapp"
-    binary.write_text("#!/bin/sh\n")
-    binary.chmod(0o755)
-    args.remaining = ["--", str(binary)]
-    instance = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
+    # sanitize() resolves the workload binary; the gating runs before that.
+    monkeypatch.setattr(shutil, "which", lambda cmd: f"/usr/bin/{cmd}")
+    instance = _make_profiler_with_args(args)
     if expect_error:
         with pytest.raises(SystemExit):
             instance.sanitize()
@@ -727,14 +734,12 @@ def test_sanitize_block_experimental_gating(
     ],
 )
 def test_sanitize_membw_analysis_injects_block_30(
-    tmp_path, args, expected_filter_blocks
+    args, expected_filter_blocks, monkeypatch
 ):
     """Block 30 is injected into filter_blocks when --membw-analysis is set."""
-    binary = tmp_path / "myapp"
-    binary.write_text("#!/bin/sh\n")
-    binary.chmod(0o755)
-    args.remaining = ["--", str(binary)]
-    instance = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
+    # sanitize() resolves the workload binary; the injection runs before that.
+    monkeypatch.setattr(shutil, "which", lambda cmd: f"/usr/bin/{cmd}")
+    instance = _make_profiler_with_args(args)
     instance.sanitize()
     assert args.filter_blocks == expected_filter_blocks
 
