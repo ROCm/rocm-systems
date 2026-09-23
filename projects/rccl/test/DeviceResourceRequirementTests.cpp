@@ -13,17 +13,17 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <sys/prctl.h>
+#include <sys/resource.h>
 #include <vector>
 
 #include "common/ProcessIsolatedTestRunner.hpp"
 
-// ncclDevResourceRequirements / ncclTeam definitions live behind core_tmp.h, transitively included
-// by each of the four headers below.
+// ncclDevResourceRequirements / ncclTeam live behind core_tmp.h, transitively included below.
 #include "nccl_device/impl/ll_a2a__types.h"
 #include "nccl_device/impl/lsa_barrier__types.h"
 #include "nccl_device/impl/gin_barrier__types.h"
-// gin_scratch__types.h below expects the unqualified alignUp/imodFast32 that production TUs get
-// transitively through "core.h", which we do not include; bitops.h supplies them directly.
+// gin_scratch__types.h expects the unqualified alignUp/imodFast32 that "core.h" gives production TUs.
 #include "bitops.h"
 // Outbox/inbox declarations still live at their pre-public-split location, not under nccl_device/impl/.
 #include "device/symmetric/gin_scratch.h"
@@ -32,8 +32,7 @@ namespace RcclUnitTesting {
 
 namespace {
 
-// Re-implemented via division rather than the production bit-mask trick, so a bug in the real
-// alignUp cannot also hide inside the test's own expectation.
+// Re-implemented via division, not the production bit-mask trick, so a bug there can't hide here.
 constexpr size_t alignUpLocal(size_t x, size_t a) {
   return ((x + a - 1) / a) * a;
 }
@@ -43,6 +42,47 @@ ncclDevResourceRequirements_t poisonedRequirement() {
   ncclDevResourceRequirements_t req;
   std::memset(&req, 0xAA, sizeof(req));
   return req;
+}
+
+// Same poison for handle out-params: an unpoisoned handle can pass by accident on a zeroed stack.
+template <typename T>
+T poisonedHandle() {
+  T handle;
+  std::memset(&handle, 0xAA, sizeof(handle));
+  return handle;
+}
+
+// GIN-signal fields untouched by the buffer-only builders (LLA2A, outbox, LSA barrier).
+void ExpectNoGinSignalFields(const ncclDevResourceRequirements_t& req) {
+  EXPECT_EQ(req.next, nullptr);
+  EXPECT_EQ(req.ginSignalCount, 0);
+  EXPECT_EQ(req.ginCounterCount, 0);
+  EXPECT_EQ(req.outGinSignalStart, nullptr);
+  EXPECT_EQ(req.outGinCounterStart, nullptr);
+}
+
+// GIN-counter fields untouched by the signal-setting builders; ginSignalCount/outGinSignalStart
+// are set and checked separately by each test.
+void ExpectNoGinCounterFields(const ncclDevResourceRequirements_t& req) {
+  EXPECT_EQ(req.next, nullptr);
+  EXPECT_EQ(req.ginCounterCount, 0);
+  EXPECT_EQ(req.outGinCounterStart, nullptr);
+}
+
+// The isolated child re-execs, resetting PR_SET_DUMPABLE, so it must be set again here rather than
+// once in the runner. ci-precheckin.json builds Debug with coverage on, so a core dump is sizable.
+void DisableCoreDumpsForExpectedCrash() {
+#if defined(__linux__)
+  if (prctl(PR_SET_DUMPABLE, 0) != 0) {
+    std::perror("prctl(PR_SET_DUMPABLE) failed");
+    _exit(1);
+  }
+#endif
+  const struct rlimit noCore = {0, 0};
+  if (setrlimit(RLIMIT_CORE, &noCore) != 0) {
+    std::perror("setrlimit(RLIMIT_CORE) failed");
+    _exit(1);
+  }
 }
 
 } // namespace
@@ -58,14 +98,15 @@ TEST(DeviceResourceRequirementTests, LLA2ACalcSlots_DivUpRounding) {
     {"eltSize_1", 1, 1}, {"eltSize_7", 7, 1}, {"eltSize_8", 8, 1}, {"eltSize_9", 9, 2}, {"eltSize_16", 16, 2},
   };
   for (const Case& c : cases) {
-    EXPECT_EQ(ncclLLA2ACalcSlots(/*maxElts=*/1, c.maxEltSize), c.expectedSlots) << "case: " << c.name;
+    SCOPED_TRACE(c.name);
+    EXPECT_EQ(ncclLLA2ACalcSlots(/*maxElts=*/1, c.maxEltSize), c.expectedSlots);
   }
 }
 
-// The result scales linearly with maxElts for a fixed maxEltSize.
+// Scales linearly with maxElts against a known-correct literal, not ncclLLA2ACalcSlots's own
+// output: that would hold for any maxElts * g(maxEltSize) shape, including a wrong g.
 TEST(DeviceResourceRequirementTests, LLA2ACalcSlots_LinearInMaxElts) {
-  const int base = ncclLLA2ACalcSlots(/*maxElts=*/1, /*maxEltSize=*/8);
-  EXPECT_EQ(ncclLLA2ACalcSlots(/*maxElts=*/5, /*maxEltSize=*/8), 5 * base);
+  EXPECT_EQ(ncclLLA2ACalcSlots(/*maxElts=*/5, /*maxEltSize=*/8), 5);
 }
 
 // maxElts = 0 always yields 0 slots, independent of maxEltSize.
@@ -87,31 +128,29 @@ TEST(DeviceResourceRequirementTests, LLA2ACreateRequirement_BufferSizeFormula) {
     {"larger", 4, 5},
   };
   for (const Case& c : cases) {
-    ncclLLA2AHandle_t handle;
-    std::memset(&handle, 0xAA, sizeof(handle));
+    SCOPED_TRACE(c.name);
+    ncclLLA2AHandle_t handle = poisonedHandle<ncclLLA2AHandle_t>();
     ncclDevResourceRequirements_t req = poisonedRequirement();
-    ASSERT_EQ(ncclLLA2ACreateRequirement(c.nBlocks, c.nSlots, &handle, &req), ncclSuccess) << "case: " << c.name;
-    EXPECT_EQ(req.bufferSize, static_cast<size_t>(c.nBlocks) * (1 + 2 * c.nSlots) * 16) << "case: " << c.name;
-    EXPECT_EQ(req.bufferAlign, 16u) << "case: " << c.name;
-    EXPECT_EQ(req.outBufferHandle, &handle.bufHandle) << "case: " << c.name;
-    EXPECT_EQ(handle.nSlots, static_cast<uint32_t>(c.nSlots)) << "case: " << c.name;
+    ASSERT_EQ(ncclLLA2ACreateRequirement(c.nBlocks, c.nSlots, &handle, &req), ncclSuccess);
+    EXPECT_EQ(req.bufferSize, static_cast<size_t>(c.nBlocks) * (1 + 2 * c.nSlots) * 16);
+    EXPECT_EQ(req.bufferAlign, 16u);
+    EXPECT_EQ(req.outBufferHandle, &handle.bufHandle);
+    EXPECT_EQ(handle.nSlots, static_cast<uint32_t>(c.nSlots));
     // Fields this function never sets must still read back zero: proves the memset prologue ran.
-    EXPECT_EQ(req.next, nullptr) << "case: " << c.name;
-    EXPECT_EQ(req.ginSignalCount, 0) << "case: " << c.name;
-    EXPECT_EQ(req.ginCounterCount, 0) << "case: " << c.name;
-    EXPECT_EQ(req.outGinSignalStart, nullptr) << "case: " << c.name;
-    EXPECT_EQ(req.outGinCounterStart, nullptr) << "case: " << c.name;
+    ExpectNoGinSignalFields(req);
   }
 }
 
-// Realistic-usage row (mirrors src/sym_kernels.cc), not a contract: the two functions are independent by signature.
+// Realistic-usage row (mirrors src/sym_kernels.cc), not a contract. Expected bufferSize is a
+// literal rather than a formula built from nSlots, since nSlots is the function under test's own
+// output and would hold regardless of its value. ncclLLA2ACalcSlots(4, 16) == 8.
 TEST(DeviceResourceRequirementTests, LLA2ACreateRequirement_RoundTripWithCalcSlots) {
   const int nSlots = ncclLLA2ACalcSlots(/*maxElts=*/4, /*maxEltSize=*/16);
   const int nBlocks = 3;
-  ncclLLA2AHandle_t handle;
+  ncclLLA2AHandle_t handle = poisonedHandle<ncclLLA2AHandle_t>();
   ncclDevResourceRequirements_t req = poisonedRequirement();
   ASSERT_EQ(ncclLLA2ACreateRequirement(nBlocks, nSlots, &handle, &req), ncclSuccess);
-  EXPECT_EQ(req.bufferSize, static_cast<size_t>(nBlocks) * (1 + 2 * nSlots) * 16);
+  EXPECT_EQ(req.bufferSize, size_t{816});  // nBlocks=3, nSlots=8: 3 * (1 + 2*8) * 16
   EXPECT_EQ(handle.nSlots, static_cast<uint32_t>(nSlots));
 }
 
@@ -119,8 +158,7 @@ TEST(DeviceResourceRequirementTests, LLA2ACreateRequirement_RoundTripWithCalcSlo
 TEST(DeviceResourceRequirementTests, GinOutboxCreateRequirement_FloorClampsSizeLog2Below7) {
   const std::vector<int> belowFloor = {0, 5, 6, 7};
   for (int sizeLog2 : belowFloor) {
-    ncclGinOutboxHandle handle;
-    std::memset(&handle, 0xAA, sizeof(handle));
+    ncclGinOutboxHandle handle = poisonedHandle<ncclGinOutboxHandle>();
     ncclDevResourceRequirements_t req = poisonedRequirement();
     ASSERT_EQ(ncclGinOutboxCreateRequirement(/*nBlocks=*/1, sizeLog2, &handle, &req), ncclSuccess)
       << "case: size_log2=" << sizeLog2;
@@ -130,7 +168,7 @@ TEST(DeviceResourceRequirementTests, GinOutboxCreateRequirement_FloorClampsSizeL
 
 // Above the floor, size_log2 passes through unclamped.
 TEST(DeviceResourceRequirementTests, GinOutboxCreateRequirement_SizeLog2AboveFloorIsUnclamped) {
-  ncclGinOutboxHandle handle;
+  ncclGinOutboxHandle handle = poisonedHandle<ncclGinOutboxHandle>();
   ncclDevResourceRequirements_t req = poisonedRequirement();
   ASSERT_EQ(ncclGinOutboxCreateRequirement(/*nBlocks=*/1, /*size_log2=*/8, &handle, &req), ncclSuccess);
   EXPECT_EQ(handle.size_log2, 8u);
@@ -149,29 +187,26 @@ TEST(DeviceResourceRequirementTests, GinOutboxCreateRequirement_BufferSizeFormul
     {"above_floor", 2, 8},
   };
   for (const Case& c : cases) {
-    ncclGinOutboxHandle handle;
+    SCOPED_TRACE(c.name);
+    ncclGinOutboxHandle handle = poisonedHandle<ncclGinOutboxHandle>();
     ncclDevResourceRequirements_t req = poisonedRequirement();
-    ASSERT_EQ(ncclGinOutboxCreateRequirement(c.nBlocks, c.sizeLog2, &handle, &req), ncclSuccess) << "case: " << c.name;
+    ASSERT_EQ(ncclGinOutboxCreateRequirement(c.nBlocks, c.sizeLog2, &handle, &req), ncclSuccess);
     const int clampedLog2 = std::max<int>(c.sizeLog2, 7);
     const size_t expected =
       static_cast<size_t>(c.nBlocks) * (sizeof(ncclGinOutboxState) + ncclGinOutboxState::RequestBytes +
                                         alignUpLocal(size_t(1) << clampedLog2, alignof(ncclGinOutboxState)));
-    EXPECT_EQ(req.bufferSize, expected) << "case: " << c.name;
-    EXPECT_EQ(req.bufferAlign, 128u) << "case: " << c.name;
-    EXPECT_EQ(req.outBufferHandle, &handle.bufHandle) << "case: " << c.name;
+    EXPECT_EQ(req.bufferSize, expected);
+    EXPECT_EQ(req.bufferAlign, 128u);
+    EXPECT_EQ(req.outBufferHandle, &handle.bufHandle);
     // The outbox has no GIN signals; only the inbox A2A sibling below sets ginSignalCount.
-    EXPECT_EQ(req.ginSignalCount, 0) << "case: " << c.name;
-    EXPECT_EQ(req.next, nullptr) << "case: " << c.name;
-    EXPECT_EQ(req.ginCounterCount, 0) << "case: " << c.name;
-    EXPECT_EQ(req.outGinSignalStart, nullptr) << "case: " << c.name;
-    EXPECT_EQ(req.outGinCounterStart, nullptr) << "case: " << c.name;
+    ExpectNoGinSignalFields(req);
   }
 }
 
 // Unlike the outbox, the inbox A2A applies no floor to size_log2: pinned as observed, not endorsed.
 TEST(DeviceResourceRequirementTests, GinInboxA2ACreateRequirement_NoFloorOnSizeLog2) {
   ncclTeam_t peers{/*nRanks=*/2, /*rank=*/0, /*stride=*/1};
-  ncclGinInboxA2AHandle handle;
+  ncclGinInboxA2AHandle handle = poisonedHandle<ncclGinInboxA2AHandle>();
   ncclDevResourceRequirements_t req = poisonedRequirement();
   ASSERT_EQ(ncclGinInboxA2ACreateRequirement(peers, /*nBlocks=*/1, /*size_log2=*/0, &handle, &req), ncclSuccess);
   EXPECT_EQ(handle.size_log2, 0u) << "asymmetric with the outbox's 128-byte floor; no floor here today";
@@ -190,36 +225,45 @@ TEST(DeviceResourceRequirementTests, GinInboxA2ACreateRequirement_BufferSizeAndS
     {"larger_team", 5, 2, 8},
   };
   for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
     ncclTeam_t peers{c.nRanks, /*rank=*/0, /*stride=*/1};
-    ncclGinInboxA2AHandle handle;
+    ncclGinInboxA2AHandle handle = poisonedHandle<ncclGinInboxA2AHandle>();
     ncclDevResourceRequirements_t req = poisonedRequirement();
-    ASSERT_EQ(ncclGinInboxA2ACreateRequirement(peers, c.nBlocks, c.sizeLog2, &handle, &req), ncclSuccess)
-      << "case: " << c.name;
+    ASSERT_EQ(ncclGinInboxA2ACreateRequirement(peers, c.nBlocks, c.sizeLog2, &handle, &req), ncclSuccess);
     const int nPeers = c.nRanks - 1;
     const size_t expectedBufferSize =
       static_cast<size_t>(c.nBlocks) *
       (sizeof(ncclGinInboxA2AState) + alignUpLocal(size_t(1) << c.sizeLog2, alignof(ncclGinInboxA2AState)));
-    EXPECT_EQ(req.bufferSize, expectedBufferSize) << "case: " << c.name;
-    EXPECT_EQ(req.bufferAlign, 128u) << "case: " << c.name;
-    EXPECT_EQ(req.outBufferHandle, &handle.bufHandle) << "case: " << c.name;
-    EXPECT_EQ(req.ginSignalCount, c.nBlocks * 4 * (nPeers + (1 << ncclGinScratchMaxBufs_log2))) << "case: " << c.name;
-    EXPECT_EQ(req.outGinSignalStart, &handle.signals) << "case: " << c.name;
-    EXPECT_EQ(req.next, nullptr) << "case: " << c.name;
-    EXPECT_EQ(req.ginCounterCount, 0) << "case: " << c.name;
-    EXPECT_EQ(req.outGinCounterStart, nullptr) << "case: " << c.name;
+    EXPECT_EQ(req.bufferSize, expectedBufferSize);
+    EXPECT_EQ(req.bufferAlign, 128u);
+    EXPECT_EQ(req.outBufferHandle, &handle.bufHandle);
+    EXPECT_EQ(req.ginSignalCount, c.nBlocks * 4 * (nPeers + (1 << ncclGinScratchMaxBufs_log2)));
+    EXPECT_EQ(req.outGinSignalStart, &handle.signals);
+    ExpectNoGinCounterFields(req);
+    // handle.nPeers_rcp32 feeds imodFast32 in device code (gin_scratch__types.h / __funcs.h); check
+    // the reciprocal contract, not just that some value got stored, so a wrong-operand builder fails.
+    for (uint32_t x : {0u, 1u, 3u, 7u, 100u}) {
+      EXPECT_EQ(imodFast32(x, static_cast<uint32_t>(nPeers), handle.nPeers_rcp32), x % static_cast<uint32_t>(nPeers))
+        << "x=" << x;
+    }
   }
 }
 
 // A 1-rank team makes nPeers = 0, and idivRcp32(0) (bitops.h) divides by zero at runtime: a real
-// defect, unreachable from any in-tree caller (src/sym_kernels.cc's only call site guards
-// nRanks >= 2 via computeLsaSize's GCD construction). A crash-containment pin, not an assertion:
-// it checks the isolated child was killed, since the call itself never returns normally.
+// defect, unreachable from any in-tree caller (src/sym_kernels.cc guards nRanks >= 2 via
+// computeLsaSize's GCD construction). A crash-containment pin, not an assertion on the exact
+// signal: ProcessIsolatedTestRunner's public API clears per-test results before executeAllTests()
+// returns, so nothing here can read back WTERMSIG. A gtest death test would pin SIGFPE precisely,
+// but this file compiles for both host and the gfx1151 device pass, which never defines __linux__,
+// so GTEST_HAS_DEATH_TEST is false there and EXPECT_EXIT does not exist (confirmed by a scratch
+// build). Verified empirically instead: the isolated child is killed by signal 8 today.
 TEST(DeviceResourceRequirementTests, GinInboxA2ACreateRequirement_SingleRankTeam_CrashesOnDivideByZero) {
   // Not RUN_ISOLATED_TEST (it EXPECT_TRUE's the run); no lambda assertion either, so a future fix
   // that makes the call return normally flips executeAllTests() true and fails the EXPECT_FALSE below.
   ProcessIsolatedTestRunner::registerTest("GinInboxA2A_SingleRankTeam_DivideByZero", [] {
+    DisableCoreDumpsForExpectedCrash();
     ncclTeam_t peers{/*nRanks=*/1, /*rank=*/0, /*stride=*/1};
-    ncclGinInboxA2AHandle handle;
+    ncclGinInboxA2AHandle handle = poisonedHandle<ncclGinInboxA2AHandle>();
     ncclDevResourceRequirements_t req = poisonedRequirement();
     // Never expected to return: SIGFPE fires inside idivRcp32 before this line completes.
     ncclGinInboxA2ACreateRequirement(peers, /*nBlocks=*/1, /*size_log2=*/7, &handle, &req);
@@ -242,21 +286,18 @@ TEST(DeviceResourceRequirementTests, LsaBarrierCreateRequirement_BufferSizeFormu
     {"larger", 5, 3},
   };
   for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
     ncclTeam_t team{c.nRanks, /*rank=*/0, /*stride=*/1};
-    ncclLsaBarrierHandle_t handle;
+    ncclLsaBarrierHandle_t handle = poisonedHandle<ncclLsaBarrierHandle_t>();
     ncclDevResourceRequirements_t req = poisonedRequirement();
-    ASSERT_EQ(ncclLsaBarrierCreateRequirement(team, c.nBarriers, &handle, &req), ncclSuccess) << "case: " << c.name;
+    ASSERT_EQ(ncclLsaBarrierCreateRequirement(team, c.nBarriers, &handle, &req), ncclSuccess);
     const size_t expected = static_cast<size_t>(3 * c.nBarriers + c.nBarriers * c.nRanks) * sizeof(uint32_t);
-    EXPECT_EQ(req.bufferSize, expected) << "case: " << c.name;
-    EXPECT_EQ(req.bufferAlign, alignof(uint32_t)) << "case: " << c.name;
-    EXPECT_EQ(req.outBufferHandle, &handle.bufHandle) << "case: " << c.name;
-    EXPECT_EQ(handle.nBarriers, c.nBarriers) << "case: " << c.name;
+    EXPECT_EQ(req.bufferSize, expected);
+    EXPECT_EQ(req.bufferAlign, alignof(uint32_t));
+    EXPECT_EQ(req.outBufferHandle, &handle.bufHandle);
+    EXPECT_EQ(handle.nBarriers, c.nBarriers);
     // The buffer-only sibling of the GIN barrier below: no GIN signals here.
-    EXPECT_EQ(req.ginSignalCount, 0) << "case: " << c.name;
-    EXPECT_EQ(req.next, nullptr) << "case: " << c.name;
-    EXPECT_EQ(req.ginCounterCount, 0) << "case: " << c.name;
-    EXPECT_EQ(req.outGinSignalStart, nullptr) << "case: " << c.name;
-    EXPECT_EQ(req.outGinCounterStart, nullptr) << "case: " << c.name;
+    ExpectNoGinSignalFields(req);
   }
 }
 
@@ -273,19 +314,17 @@ TEST(DeviceResourceRequirementTests, GinBarrierCreateRequirement_NullCommAndSign
     {"small", 3, 4},
   };
   for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
     ncclTeam_t team{c.nRanks, /*rank=*/0, /*stride=*/1};
-    ncclGinBarrierHandle_t handle;
+    ncclGinBarrierHandle_t handle = poisonedHandle<ncclGinBarrierHandle_t>();
     ncclDevResourceRequirements_t req = poisonedRequirement();
-    ASSERT_EQ(ncclGinBarrierCreateRequirement(/*comm=*/nullptr, team, c.nBarriers, &handle, &req), ncclSuccess)
-      << "case: " << c.name;
-    EXPECT_EQ(req.ginSignalCount, c.nBarriers * c.nRanks) << "case: " << c.name;
-    EXPECT_EQ(req.outGinSignalStart, &handle.signal0) << "case: " << c.name;
-    EXPECT_EQ(req.bufferSize, 0u) << "case: " << c.name;
-    EXPECT_EQ(req.bufferAlign, 0u) << "case: " << c.name;
-    EXPECT_EQ(req.outBufferHandle, nullptr) << "case: " << c.name;
-    EXPECT_EQ(req.next, nullptr) << "case: " << c.name;
-    EXPECT_EQ(req.ginCounterCount, 0) << "case: " << c.name;
-    EXPECT_EQ(req.outGinCounterStart, nullptr) << "case: " << c.name;
+    ASSERT_EQ(ncclGinBarrierCreateRequirement(/*comm=*/nullptr, team, c.nBarriers, &handle, &req), ncclSuccess);
+    EXPECT_EQ(req.ginSignalCount, c.nBarriers * c.nRanks);
+    EXPECT_EQ(req.outGinSignalStart, &handle.signal0);
+    EXPECT_EQ(req.bufferSize, 0u);
+    EXPECT_EQ(req.bufferAlign, 0u);
+    EXPECT_EQ(req.outBufferHandle, nullptr);
+    ExpectNoGinCounterFields(req);
   }
 }
 
