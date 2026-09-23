@@ -1,8 +1,9 @@
 # ConSan RDNA4 (`gfx1201`) status
 
-Historical evidence: this ledger was not requalified during the September 2026
-documentation audit. Existing results describe their recorded runs, not the
-current branch. Rerun the linked procedure after relevant changes.
+September 23, 2026 revalidation is in progress. The table records fresh
+assessments; the campaign log retains prior attempts. Results qualify only
+their recorded binaries and configurations. Rerun the linked procedure after
+relevant changes.
 
 Start any new revalidation with
 [rocprofv3-based allowlist discovery and application](VALIDATION.md#first-step-for-revalidation-generate-and-apply-kernel-allowlists).
@@ -18,14 +19,15 @@ toolchain, workload, or runtime changes.
 ## September 23 revalidation in progress
 
 All 42 workload/mode cells are being rerun, including previously green cells.
-The table below retains historical results until each cell has fresh evidence;
-none of those historical colors count as a pass for this campaign.
+Every cell has a fresh clean assessment. Reviewed fault qualification remains
+incomplete; historical green results do not count as passes for this campaign.
 
 - Host: AMD Radeon RX 9070 (`gfx1201`); native HIP shared-memory smoke passed.
 - SDK: `/home/benoit/venv`, ROCm `10.2.0a20260915` development package.
 - Preparation: current hook and production matmul built; generated per-workload
   allowlists applied; Qwen build provenance verified through the campaign symlinks.
-- Fresh clean assessments: **42/42**; no cell has passed fresh fault qualification.
+- Fresh clean assessments: **42/42**, with **39 clean passes** across recorded
+  configurations. No cell has passed fresh fault qualification.
 - Preparation logs: `/home/benoit/workspace/consan-validation-artifacts/`.
 
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
