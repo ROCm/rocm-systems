@@ -63,16 +63,9 @@ __attribute__((weak)) bool rcclGetCollectiveExecutionPolicy(const struct ncclCom
 __attribute__((weak)) bool rcclBuffersOverlap(const void*, size_t, const void*, size_t) { return false; }
 __attribute__((weak)) int64_t ncclParamShmDisable() { return g_paramShmDisable; }
 __attribute__((weak)) int64_t ncclParamP2pReadEnable() { return g_paramP2pReadEnable; }
-__attribute__((weak)) bool rcclRuntimeTransportToggleEligible(const struct ncclComm*) {
+__attribute__((weak)) bool rcclPolicyTransportToggleEligible(
+  const struct ncclComm*) {
   return g_runtimeTransportToggleEligible;
-}
-__attribute__((weak)) int rcclRuntimeP2pConnIndex(const struct ncclComm*, int transport) {
-  if (!g_runtimeTransportToggleEligible) return -1;
-  if (transport == RCCL_EXECUTION_TRANSPORT_SHM) return RCCL_CONN_IDX_P2P_SHM;
-  if (transport == RCCL_EXECUTION_TRANSPORT_IPC ||
-      transport == RCCL_EXECUTION_TRANSPORT_UNKNOWN)
-    return 1;
-  return -1;
 }
 // Referenced by init.cc but not declared inside it, so the redirected NCCL_PARAM does not cover it.
 int64_t ncclParamPatEnable() { return g_loadParam("PAT_ENABLE", 0); }  // graph/tuning.cc:1105
