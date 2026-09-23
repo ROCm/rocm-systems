@@ -66,8 +66,7 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
   if (0 < nIters) {
 #if NCCL_SYMK_ASYNC_TILE
     if NCCL_IF_CONSTEXPR (EnableTma) {
-      ncclSymkTileLoad<kNcclSymkTileLocalPolicy>(tmaSmem->buff[0], inpPacks.peerPtr(world, rank), tileSize,
-                                                 tmaSmem->bar, tmaSize, lane);
+      ncclSymkTileLoad(tmaSmem->buff[0], inpPacks.peerPtr(world, rank), tileSize, tmaSmem->bar, tmaSize, lane);
     } else
 #endif
     {
@@ -89,8 +88,7 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
         Pack tmp1[UnrollPacks];
 #if NCCL_SYMK_ASYNC_TILE
         if NCCL_IF_CONSTEXPR (EnableTma) {
-          ncclSymkTileLoad<kNcclSymkTilePeerPolicy>(tmaSmem->buff[1], inpPacks.peerPtr(world, r), tileSize,
-                                                    tmaSmem->bar, tmaSize, lane);
+          ncclSymkTileLoad(tmaSmem->buff[1], inpPacks.peerPtr(world, r), tileSize, tmaSmem->bar, tmaSize, lane);
           ncclSymkTileLoadWait</*Arrivers=*/WARP_SIZE>(tmaSmem->bar, tmaSize, lane);
         } else
 #endif
@@ -135,8 +133,7 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
             if (partial && ur != 0 && dr + ur == nRanks) break;
 #if NCCL_SYMK_ASYNC_TILE
             if NCCL_IF_CONSTEXPR (EnableTma) {
-              ncclSymkTileLoad<kNcclSymkTilePeerPolicy>(tmaSmem->buff[ur], inpPacks.peerPtr(world, r), tileSize,
-                                                        tmaSmem->bar, tmaSize, lane);
+              ncclSymkTileLoad(tmaSmem->buff[ur], inpPacks.peerPtr(world, r), tileSize, tmaSmem->bar, tmaSize, lane);
             } else
 #endif
             {
@@ -189,16 +186,6 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
 
       dr = 0;
       r = rank;
-#if NCCL_SYMK_ASYNC_TILE
-      // This rank's own copy is the only destination in local memory. Peeling it off
-      // the front leaves the loop below a single cache policy; folded into the loop it
-      // would have to emit both scopes and choose between them on every store.
-      if NCCL_IF_CONSTEXPR (EnableTma) {
-        ncclSymkTileStore<kNcclSymkTileLocalPolicy>(outPacks.peerPtr(world, rank), tmaSmem->buff[0], tileSize, lane);
-        dr = 1;
-        if (++r == nRanks) r = 0;
-      }
-#endif
       NVCC_PRAGMA_UNROLL(2)
       for (int partial = 0; partial <= 1; partial++) {
         NVCC_PRAGMA_UNROLL_DISABLED
@@ -208,7 +195,7 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
             if (partial && dr == nRanks) break;
 #if NCCL_SYMK_ASYNC_TILE
             if NCCL_IF_CONSTEXPR (EnableTma) {
-              ncclSymkTileStore<kNcclSymkTilePeerPolicy>(outPacks.peerPtr(world, r), tmaSmem->buff[0], tileSize, lane);
+              ncclSymkTileStore(outPacks.peerPtr(world, r), tmaSmem->buff[0], tileSize, lane);
             } else
 #endif
             {
@@ -237,8 +224,7 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
 #if NCCL_SYMK_ASYNC_TILE
       // Load data for next iteration.
       if NCCL_IF_CONSTEXPR (EnableTma) {
-        ncclSymkTileLoad<kNcclSymkTileLocalPolicy>(tmaSmem->buff[0], inpPacks.peerPtr(world, rank), tileSize,
-                                                   tmaSmem->bar, tmaSize, lane);
+        ncclSymkTileLoad(tmaSmem->buff[0], inpPacks.peerPtr(world, rank), tileSize, tmaSmem->bar, tmaSize, lane);
       } else
 #endif
       {

@@ -63,8 +63,7 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
   if (0 < nIters) {
 #if NCCL_SYMK_ASYNC_TILE
     if NCCL_IF_CONSTEXPR (EnableTma) {
-      ncclSymkTileLoad<kNcclSymkTileLocalPolicy>(tmaSmem->buff[0], inpPacks.peerPtr(world, rank), tileSize,
-                                                 tmaSmem->bar, tmaSize, lane);
+      ncclSymkTileLoad(tmaSmem->buff[0], inpPacks.peerPtr(world, rank), tileSize, tmaSmem->bar, tmaSize, lane);
     } else
 #endif
     {
@@ -86,8 +85,7 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
         Pack tmp1[UnrollPacks];
 #if NCCL_SYMK_ASYNC_TILE
         if NCCL_IF_CONSTEXPR (EnableTma) {
-          ncclSymkTileLoad<kNcclSymkTilePeerPolicy>(tmaSmem->buff[1], inpPacks.peerPtr(world, r), tileSize,
-                                                    tmaSmem->bar, tmaSize, lane);
+          ncclSymkTileLoad(tmaSmem->buff[1], inpPacks.peerPtr(world, r), tileSize, tmaSmem->bar, tmaSize, lane);
           ncclSymkTileLoadWait</*Arrivers=*/WARP_SIZE>(tmaSmem->bar, tmaSize, lane);
         } else
 #endif
@@ -133,8 +131,7 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
             if (partial && ur != 0 && dr + ur == nRanks) break;
 #if NCCL_SYMK_ASYNC_TILE
             if NCCL_IF_CONSTEXPR (EnableTma) {
-              ncclSymkTileLoad<kNcclSymkTilePeerPolicy>(tmaSmem->buff[ur], inpPacks.peerPtr(world, r), tileSize,
-                                                        tmaSmem->bar, tmaSize, lane);
+              ncclSymkTileLoad(tmaSmem->buff[ur], inpPacks.peerPtr(world, r), tileSize, tmaSmem->bar, tmaSize, lane);
             } else
 #endif
             {
@@ -187,7 +184,7 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
       if NCCL_IF_CONSTEXPR (EnableTma) {
         // Publish the lanes' reduced tile to the engine that is about to read it.
         ncclSymkTileFenceSmem();
-        ncclSymkTileStore<kNcclSymkTileLocalPolicy>(outPacks.localPtr(), tmaSmem->buff[0], tileSize, lane);
+        ncclSymkTileStore(outPacks.localPtr(), tmaSmem->buff[0], tileSize, lane);
         // Drain before the next iteration refills the tile.
         ncclSymkTileStoreWait(lane);
         __syncwarp();
@@ -205,8 +202,7 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
 
 #if NCCL_SYMK_ASYNC_TILE
       if NCCL_IF_CONSTEXPR (EnableTma) {
-        ncclSymkTileLoad<kNcclSymkTileLocalPolicy>(tmaSmem->buff[0], inpPacks.peerPtr(world, rank), tileSize,
-                                                   tmaSmem->bar, tmaSize, lane);
+        ncclSymkTileLoad(tmaSmem->buff[0], inpPacks.peerPtr(world, rank), tileSize, tmaSmem->bar, tmaSize, lane);
       } else
 #endif
       {

@@ -54,22 +54,6 @@
 #define NCCL_SYMK_ASYNC_TILE (NCCL_SYMK_TILE_TMA || NCCL_SYMK_TILE_TDM)
 
 #if NCCL_SYMK_ASYNC_TILE
-// The tile wrappers are keyed on a CachePolicy and their signatures are common to both
-// engines, so the encoding has to be visible even on the TMA path, which has no use for
-// it. tdmCopy.h already pulls this in on the TDM side; the header guard absorbs that.
-#include "tdm/cachePolicy.h"
-
-// Only TDM acts on these: they become the immediate cpol operand on its tensor
-// instructions. TMA has no equivalent knob and discards the argument.
-//
-// A tile whose other end is a peer has to be visible off this GPU, so it is streamed
-// at system scope and kept out of the local caches. Matches kRcclTdmPolicy on the
-// SIMPLE TDM path.
-static constexpr CachePolicy kNcclSymkTilePeerPolicy = createCachePolicy(TemporalHint::NT, MemScope::SYS);
-// A tile that never leaves this GPU only has to reach device coherence, so it can
-// stop at L2 rather than paying for the system-scope round trip.
-static constexpr CachePolicy kNcclSymkTileLocalPolicy = createCachePolicy(TemporalHint::NT, MemScope::DEV);
-
 #if NCCL_SYMK_TILE_TMA
 #include <cuda/barrier>
 #include <cuda/ptx>
@@ -81,6 +65,10 @@ using ncclSymkTileBar = cuda::barrier<cuda::thread_scope_block>;
 // TDM completion is a per-wave counter, so gfx1250 needs no shared-memory
 // barrier. The empty type keeps tmaSmemStruct's layout common to both paths.
 struct ncclSymkTileBar {};
+
+// Tiles are streamed once and read back by a peer, not by this GPU, so keep them
+// out of the local caches. Matches kRcclTdmPolicy on the SIMPLE TDM path.
+static constexpr CachePolicy kNcclSymkTilePolicy = createCachePolicy(TemporalHint::NT, MemScope::SYS);
 #endif
 
 template <typename Pack, int UnrollPacks, int UnrollPeers = 1>
@@ -102,10 +90,7 @@ static __device__ __forceinline__ void ncclSymkTileBarInit(ncclSymkTileBar* bar,
 
 // Start a global -> shared transfer of `bytes` into the warp's tile, leaving it in
 // flight. `pending` accumulates the bytes the next barrier arrival has to account
-// for; TDM counts its own transfers, so it is left alone there. `cp` says how far the
-// transfer has to be made visible: pass kNcclSymkTileLocalPolicy only when `global` is
-// this GPU's own memory, kNcclSymkTilePeerPolicy otherwise.
-template <CachePolicy cp>
+// for; TDM counts its own transfers, so it is left alone there.
 static __device__ __forceinline__ void ncclSymkTileLoad(void* smem, void const* global, size_t bytes,
                                                         ncclSymkTileBar& bar, size_t& pending, int lane) {
 #if NCCL_SYMK_TILE_TMA
@@ -115,7 +100,7 @@ static __device__ __forceinline__ void ncclSymkTileLoad(void* smem, void const* 
   }
 #else
   (void)bar, (void)pending, (void)lane;
-  tdm::asyncLoadToLDS<SyncPolicy::Async, cp>((uint8_t const*)global, (uint8_t*)smem, bytes);
+  tdm::asyncLoadToLDS<SyncPolicy::Async, kNcclSymkTilePolicy>((uint8_t const*)global, (uint8_t*)smem, bytes);
 #endif
 }
 
@@ -138,15 +123,12 @@ static __device__ __forceinline__ void ncclSymkTileLoadWait(ncclSymkTileBar& bar
 // Start a shared -> global transfer of `bytes` out of the warp's tile, leaving it
 // in flight. Several of these may be issued back to back (one per peer) before a
 // single ncclSymkTileStoreWait(); they all read the tile, so they cannot conflict.
-// `cp` carries the same meaning as on ncclSymkTileLoad(), here about `global` as the
-// destination.
-template <CachePolicy cp>
 static __device__ __forceinline__ void ncclSymkTileStore(void* global, void const* smem, size_t bytes, int lane) {
 #if NCCL_SYMK_TILE_TMA
   if (lane == 0) ptx::cp_async_bulk(ptx::space_global, ptx::space_shared, global, smem, bytes);
 #else
   (void)lane;
-  tdm::asyncStoreFromLDS<SyncPolicy::Async, cp>((uint8_t const*)smem, (uint8_t*)global, bytes);
+  tdm::asyncStoreFromLDS<SyncPolicy::Async, kNcclSymkTilePolicy>((uint8_t const*)smem, (uint8_t*)global, bytes);
 #endif
 }
 
@@ -527,14 +509,13 @@ struct ncclSymkGinAccumType<FuncSumPostDiv, rccl_bfloat8> {
 
 #if NCCL_SYMK_ASYNC_TILE
 // Round-trip one tile global -> shared -> global. Called by the whole warp with
-// wave-uniform arguments. `source` is this rank's own input; `dest` is a multimem
-// address that fans the tile out to every peer.
+// wave-uniform arguments.
 static __device__ __forceinline__ void tmaLoadStoreMc(char* dest, char* smem, char const* source, size_t size,
                                                       ncclSymkTileBar& bar, int lane) {
   size_t pending = 0;
-  ncclSymkTileLoad<kNcclSymkTileLocalPolicy>(smem, source, size, bar, pending, lane);
+  ncclSymkTileLoad(smem, source, size, bar, pending, lane);
   ncclSymkTileLoadWait</*Arrivers=*/1>(bar, pending, lane);
-  ncclSymkTileStore<kNcclSymkTilePeerPolicy>(dest, smem, size, lane);
+  ncclSymkTileStore(dest, smem, size, lane);
   ncclSymkTileStoreWait(lane);
 }
 #endif
