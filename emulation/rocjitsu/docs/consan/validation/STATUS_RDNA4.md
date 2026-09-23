@@ -34,7 +34,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 
 | Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |
-| Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟨 Sep 23: clean pass; fault 0/8 detections; 8 trials admitted after transform fix | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: clean pass; fault transformation times out before admission; no sensitivity result |
+| Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟨 Sep 23: clean pass; fault 0/8 detections; 8 trials admitted after transform fix | 🟨 Sep 23: clean pass; fault retry in progress, 2/8 trials completed, 0 detections; admission timeout fixed |
 | Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟨 Sep 23: clean pass; fault transformation times out before admission; no sensitivity result | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: standard fault 0/8; preset=max clean passes and fault detects 7/8 (separate configuration) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: clean pass; reviewed publication-barrier fault missed in 8/8 trials |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: standard fault 0/8; preset=max clean passes and fault detects 8/8 (separate configuration) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: clean pass; reviewed cross-wave publication fault missed in 8/8 trials |
@@ -505,3 +505,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   clean and fault runs. This qualifies `preset=max`, not the original standard
   sampling cell; its 0/8 miss remains visible. Audit artifact:
   `fault-round8-wmma-dense/wmma-attention/faults/barrier-drop-kv-publication-group-dense-diagnostic/qualification-audit.json`.
+- FP16 SuperCollider cell update: 2/8 round-7 trials complete, 0 detections so far; completed trials installed the mutation. Final matrix pending. Dense Default clean/fault comparison is queued afterward, under precommitted spec `61a7bc0f741`.
