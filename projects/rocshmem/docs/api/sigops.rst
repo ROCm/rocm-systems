@@ -95,6 +95,22 @@ to ensure completion.
 
 Valid ``sig_op`` values are listed in SIGNAL_OPERATORS_.
 
+ROCSHMEM_SIGNAL_ADD
+-------------------
+
+.. cpp:function:: __device__ void rocshmem_signal_add(uint64_t *sig_addr, uint64_t signal, int pe)
+.. cpp:function:: __device__ void rocshmem_ctx_signal_add(rocshmem_ctx_t ctx, uint64_t *sig_addr, uint64_t signal, int pe)
+
+  :param ctx:      Context with which to perform this operation.
+  :param sig_addr: Symmetric address of the signal data object on the remote PE.
+  :param signal:   Value to add to the signal data object.
+  :param pe:       PE containing the signal data object.
+  :returns:        None.
+
+**Description:**
+This function atomically adds ``signal`` to the signal data object at ``sig_addr``
+on PE ``pe``.
+
 ROCSHMEM_SIGNAL_FETCH
 ---------------------
 
@@ -107,6 +123,38 @@ ROCSHMEM_SIGNAL_FETCH
 
 **Description:**
 This function atomically fetches the value stored at ``sig_addr``.
+
+ROCSHMEM_SIGNAL_SET
+-------------------
+
+.. cpp:function:: __device__ void rocshmem_signal_set(uint64_t *sig_addr, uint64_t signal, int pe)
+.. cpp:function:: __device__ void rocshmem_ctx_signal_set(rocshmem_ctx_t ctx, uint64_t *sig_addr, uint64_t signal, int pe)
+
+  :param ctx:      Context with which to perform this operation.
+  :param sig_addr: Symmetric address of the signal data object on the remote PE.
+  :param signal:   Value to store in the signal data object.
+  :param pe:       PE containing the signal data object.
+  :returns:        None.
+
+**Description:**
+This function atomically stores ``signal`` in the signal data object at
+``sig_addr`` on PE ``pe``.
+
+ROCSHMEM_SIGNAL_WAIT_UNTIL
+--------------------------
+
+.. cpp:function:: __device__ uint64_t rocshmem_signal_wait_until(uint64_t *sig_addr, int cmp, uint64_t cmp_value)
+
+  :param sig_addr:  Local address of the signal data object.
+  :param cmp:       Comparison operator.
+  :param cmp_value: Value against which to compare the signal.
+  :returns:         The signal value that satisfied the comparison.
+
+**Description:**
+This function blocks until ``(*sig_addr cmp cmp_value)`` is true and returns
+the value that satisfied the comparison.
+
+Valid ``cmp`` values are listed in :ref:`CMP_VALUES`.
 
 Signal operators
 ----------------
