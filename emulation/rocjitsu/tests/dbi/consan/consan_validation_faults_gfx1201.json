@@ -735,6 +735,87 @@
               ]
             }
           }
+        },
+        {
+          "id": "barrier-drop-wave-sum-publication-dense-diagnostic",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine gfx1201 ELF fnv1a64:57d125f3f8a0c446 extracted from libggml-hip.so.0.13.1 used by the native RMS norm trace. The selected rms_norm_f32<256,false,false> kernel performs an eight-wave reduction. Lane zero of each wave stores its partial sum at .text+0x1810; EXEC is restored at 0x181c. The unconditional signal at 0x1824 and wait at 0x1830 publish those sums before lanes 0..7 in each wave load peer-wave sums at 0x184c. Source block_reduce in ggml-cuda/common.cuh agrees with this final ISA. Remove the associated signal/wait pair as one logical mutation. Both standard profiles require at least one detection in eight admitted/reached trials; numerical manifestations are recorded independently. Extraction, inventory and disassembly are retained in rdna4-20260923/llama-rms-debug. Separate prospective dense sampling comparison after standard trials recorded no sampled access events. Sample every workgroup and cell, with zero offsets; run a matching clean comparator. Eight trials and minimum one detection retained. This does not qualify standard sampling."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:57d125f3f8a0c446|kernel=_ZL12rms_norm_f32ILi256ELb0ELb0EEvPKfPfilllfS1_lll15HIP_vector_typeIjLj3EES4_S4_S4_S1_lllS4_S4_S4_S4_|kind=barrier|pc=0x0000000000001824|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:57d125f3f8a0c446|kernel=_ZL12rms_norm_f32ILi256ELb0ELb0EEvPKfPfilllfS1_lll15HIP_vector_typeIjLj3EES4_S4_S4_S1_lllS4_S4_S4_S4_|event=barrier|pc=0x0000000000001824|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:57d125f3f8a0c446|kernel=_ZL12rms_norm_f32ILi256ELb0ELb0EEvPKfPfilllfS1_lll15HIP_vector_typeIjLj3EES4_S4_S4_S1_lllS4_S4_S4_S4_|event=barrier|pc=0x0000000000001830|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton",
+            "RJ_CONSAN_PRESET": "max"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 1,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-wave-sum-publication-supercollider-sample-all",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine gfx1201 ELF fnv1a64:57d125f3f8a0c446 extracted from libggml-hip.so.0.13.1 used by the native RMS norm trace. The selected rms_norm_f32<256,false,false> kernel performs an eight-wave reduction. Lane zero of each wave stores its partial sum at .text+0x1810; EXEC is restored at 0x181c. The unconditional signal at 0x1824 and wait at 0x1830 publish those sums before lanes 0..7 in each wave load peer-wave sums at 0x184c. Source block_reduce in ggml-cuda/common.cuh agrees with this final ISA. Remove the associated signal/wait pair as one logical mutation. Both standard profiles require at least one detection in eight admitted/reached trials; numerical manifestations are recorded independently. Extraction, inventory and disassembly are retained in rdna4-20260923/llama-rms-debug. Separate prospective dense sampling comparison after standard trials recorded no sampled access events. Sample every workgroup and cell, with zero offsets; run a matching clean comparator. Eight trials and minimum one detection retained. This does not qualify standard sampling."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:57d125f3f8a0c446|kernel=_ZL12rms_norm_f32ILi256ELb0ELb0EEvPKfPfilllfS1_lll15HIP_vector_typeIjLj3EES4_S4_S4_S1_lllS4_S4_S4_S4_|kind=barrier|pc=0x0000000000001824|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:57d125f3f8a0c446|kernel=_ZL12rms_norm_f32ILi256ELb0ELb0EEvPKfPfilllfS1_lll15HIP_vector_typeIjLj3EES4_S4_S4_S1_lllS4_S4_S4_S4_|event=barrier|pc=0x0000000000001824|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:57d125f3f8a0c446|kernel=_ZL12rms_norm_f32ILi256ELb0ELb0EEvPKfPfilllfS1_lll15HIP_vector_typeIjLj3EES4_S4_S4_S1_lllS4_S4_S4_S4_|event=barrier|pc=0x0000000000001830|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton",
+            "RJ_CONSAN_WORKGROUP_SAMPLE_STRIDE": "1",
+            "RJ_CONSAN_WORKGROUP_SAMPLE_OFFSET": "0",
+            "RJ_CONSAN_CELL_SAMPLE_STRIDE": "1",
+            "RJ_CONSAN_CELL_SAMPLE_OFFSET": "0"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 1,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                }
+              ]
+            }
+          }
         }
       ]
     },
