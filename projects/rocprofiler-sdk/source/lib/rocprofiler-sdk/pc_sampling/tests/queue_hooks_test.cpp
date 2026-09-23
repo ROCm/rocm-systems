@@ -38,14 +38,14 @@ TEST(pc_sampling_queue_hooks, is_configured_on_agent_unconfigured)
     EXPECT_FALSE(rocprofiler::pc_sampling::is_configured_on_agent(agent_id));
 }
 
-TEST(pc_sampling_queue_hooks, signal_completion_hook_null_session_is_noop)
+TEST(pc_sampling_queue_hooks, exit_hook_null_session_is_noop)
 {
     rocprofiler::hsa::rocprofiler_packet                    kern_pkt{};
     std::shared_ptr<rocprofiler::hsa::queue_info_session_t> null_session;
     rocprofiler::hsa::packet_data_t                         packet{};
     rocprofiler::hsa::inst_pkt_t                            inst_pkt{};
 
-    rocprofiler::pc_sampling::signal_completion_hook(
+    rocprofiler::pc_sampling::kernel_dispatch_phase_exit_hook(
         nullptr,
         kern_pkt,
         null_session,

@@ -50,12 +50,12 @@ is_configured_on_agent(rocprofiler_agent_id_t agent_id)
 }
 
 void
-signal_completion_hook(const ::rocprofiler::hsa::Queue*                           queue,
-                       const ::rocprofiler::hsa::rocprofiler_packet&              kernel_packet,
-                       std::shared_ptr<::rocprofiler::hsa::queue_info_session_t>& session,
-                       ::rocprofiler::hsa::packet_data_t& /*packet*/,
-                       ::rocprofiler::hsa::inst_pkt_t& /*inst_pkt*/,
-                       kernel_dispatch::profiling_time /*dispatch_time*/)
+kernel_dispatch_phase_exit_hook(const ::rocprofiler::hsa::Queue*              queue,
+                                const ::rocprofiler::hsa::rocprofiler_packet& kernel_packet,
+                                std::shared_ptr<::rocprofiler::hsa::queue_info_session_t>& session,
+                                ::rocprofiler::hsa::packet_data_t& /*packet*/,
+                                ::rocprofiler::hsa::inst_pkt_t& /*inst_pkt*/,
+                                kernel_dispatch::profiling_time /*dispatch_time*/)
 {
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
     if(!session) return;

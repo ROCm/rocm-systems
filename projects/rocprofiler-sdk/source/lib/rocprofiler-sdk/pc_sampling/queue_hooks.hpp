@@ -48,11 +48,11 @@ is_configured_on_agent(rocprofiler_agent_id_t agent_id);
 // that the kernel's correlation ID has completed. No-op when PC sampling HSA
 // support is unavailable or when the service is not configured on the agent.
 void
-signal_completion_hook(const ::rocprofiler::hsa::Queue*                           queue,
-                       const ::rocprofiler::hsa::rocprofiler_packet&              kernel_packet,
-                       std::shared_ptr<::rocprofiler::hsa::queue_info_session_t>& session,
-                       ::rocprofiler::hsa::packet_data_t&                         packet,
-                       ::rocprofiler::hsa::inst_pkt_t&                            inst_pkt,
-                       kernel_dispatch::profiling_time                            dispatch_time);
+kernel_dispatch_phase_exit_hook(const ::rocprofiler::hsa::Queue*              queue,
+                                const ::rocprofiler::hsa::rocprofiler_packet& kernel_packet,
+                                std::shared_ptr<::rocprofiler::hsa::queue_info_session_t>& session,
+                                ::rocprofiler::hsa::packet_data_t&                         packet,
+                                ::rocprofiler::hsa::inst_pkt_t&                            inst_pkt,
+                                kernel_dispatch::profiling_time dispatch_time);
 }  // namespace pc_sampling
 }  // namespace rocprofiler

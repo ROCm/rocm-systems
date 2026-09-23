@@ -297,12 +297,12 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
         // PC sampling completion is no longer routed through the per-queue
         // callback registry; invoke its hook explicitly.
-        pc_sampling::signal_completion_hook(&queue_info_session.queue,
-                                            packet.kernel_packet,
-                                            _session,
-                                            packet,
-                                            packet.instrumentation_packets,
-                                            dispatch_time);
+        pc_sampling::kernel_dispatch_phase_exit_hook(&queue_info_session.queue,
+                                                     packet.kernel_packet,
+                                                     _session,
+                                                     packet,
+                                                     packet.instrumentation_packets,
+                                                     dispatch_time);
 
         CHECK_NOTNULL(hsa::get_queue_controller())
             ->serializer(&queue_info_session.queue)

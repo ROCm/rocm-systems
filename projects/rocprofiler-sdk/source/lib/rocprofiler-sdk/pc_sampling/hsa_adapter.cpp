@@ -127,7 +127,7 @@ amd_intercept_marker_handler_callback(const struct amd_aql_intercept_marker_s* p
 
 /**
  * Callback called by HSA interceptor when the kernel has completed. Declared in
- * hsa_adapter.hpp and invoked from pc_sampling::signal_completion_hook (see
+ * hsa_adapter.hpp and invoked from pc_sampling::kernel_dispatch_phase_exit_hook (see
  * pc_sampling/queue_hooks.cpp), so it lives outside the anonymous namespace.
  */
 void
@@ -138,7 +138,8 @@ kernel_completion_cb(const rocprofiler_agent_t* rocp_agent,
     // No internal correlation IDs, meaning there is no need to call CID manager.
     if(!session.correlation_id) return;
 
-    // signal_completion_hook verifies that the service is configured before forwarding here.
+    // kernel_dispatch_phase_exit_hook verifies that the service is configured before forwarding
+    // here.
     auto* agent_session = get_agent_session(rocp_agent->id);
     ROCP_FATAL_IF(agent_session == nullptr)
         << "No PC sampling sessions configured for the agent where kernel completion "
@@ -351,7 +352,7 @@ pc_sampling_service_finish_configuration(context::pc_sampling_service* service)
 
     // PC sampling no longer registers a per-queue callback with the HSA queue
     // controller. Kernel completion is delivered explicitly via
-    // pc_sampling::signal_completion_hook, called from the HSA async signal
+    // pc_sampling::kernel_dispatch_phase_exit_hook, called from the HSA async signal
     // handler (see hsa/queue.cpp). The marker packet is still injected directly
     // in the write interceptor, gated by is_pc_sample_service_configured.
 }

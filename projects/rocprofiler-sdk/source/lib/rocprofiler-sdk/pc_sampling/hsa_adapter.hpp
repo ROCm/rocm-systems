@@ -55,7 +55,7 @@ void
 pc_sampling_service_finish_configuration(context::pc_sampling_service* service);
 
 // Notifies the CID manager that the kernel's correlation ID has completed.
-// Invoked from pc_sampling::signal_completion_hook (pc_sampling/queue_hooks.cpp),
+// Invoked from pc_sampling::kernel_dispatch_phase_exit_hook (pc_sampling/queue_hooks.cpp),
 // which is called by the HSA async signal handler in hsa/queue.cpp.
 void
 kernel_completion_cb(const rocprofiler_agent_t*                    rocp_agent,
