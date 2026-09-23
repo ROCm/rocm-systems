@@ -548,8 +548,10 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
 
       uint64_t preload_addr = pkt.kernarg_addr + static_cast<uint64_t>(preload_offset) * 4;
       for (uint32_t preload_index = 0; preload_index < preload_length; ++preload_index) {
-        const AtomicLoadResult loaded =
-            read_gpu_u32(pkt.address_space, preload_addr + preload_index * 4);
+        const uint64_t address = preload_addr + preload_index * 4;
+        const AtomicLoadResult loaded = pkt.execution_access
+                                            ? read_gpu_u32(*pkt.execution_access, address)
+                                            : read_gpu_u32(pkt.address_space, address);
         if (loaded.outcome != VmAccessOutcome::Complete)
           return loaded.outcome;
         cu->write_sgpr(sbase + idx + preload_index, static_cast<uint32_t>(loaded.value));
@@ -720,7 +722,12 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     if (scratch_slot > (std::numeric_limits<uint64_t>::max() - scratch_pool) / per_wave_size)
       return VmAccessOutcome::Malformed;
     uint64_t wave_scratch = scratch_pool + scratch_slot * per_wave_size;
-    std::optional<GpuVmAccess> scratch_access = snapshot_gpu_access(pkt.address_space);
+    std::optional<GpuVmAccess> fallback_scratch_access;
+    const GpuVmAccess *scratch_access = pkt.execution_access.get();
+    if (scratch_access == nullptr) {
+      fallback_scratch_access = snapshot_gpu_access(pkt.address_space);
+      scratch_access = fallback_scratch_access ? &*fallback_scratch_access : nullptr;
+    }
     auto scratch_range_outcome = [&](bool report_fault) {
       if (!scratch_access)
         return VmAccessOutcome::Unavailable;
@@ -748,7 +755,10 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
       const size_t total_scratch = static_cast<size_t>(per_wave_size * scratch_slots);
       if (!scratch_allocator_(pkt.process_id, scratch_pool, total_scratch))
         return VmAccessOutcome::Faulted;
-      scratch_access = snapshot_gpu_access(pkt.address_space);
+      if (!pkt.execution_access) {
+        fallback_scratch_access = snapshot_gpu_access(pkt.address_space);
+        scratch_access = fallback_scratch_access ? &*fallback_scratch_access : nullptr;
+      }
       scratch_outcome = scratch_access ? scratch_range_outcome(true) : VmAccessOutcome::Unavailable;
     }
 
@@ -1617,6 +1627,13 @@ AtomicLoadResult CommandProcessor::read_gpu_u32(AddressSpaceHandle address_space
   return {.outcome = outcome, .value = val};
 }
 
+AtomicLoadResult CommandProcessor::read_gpu_u32(const GpuVmAccess &access, uint64_t va) const {
+  uint32_t value = 0;
+  const VmAccessOutcome outcome =
+      access.read(va, std::as_writable_bytes(std::span<uint32_t, 1>(&value, 1)));
+  return {.outcome = outcome, .value = value};
+}
+
 VmAccessOutcome CommandProcessor::read_gpu_block(AddressSpaceHandle address_space, uint64_t va,
                                                  void *dst, size_t size) const {
   const std::optional<GpuVmAccess> access = snapshot_gpu_access(address_space);
@@ -2228,6 +2245,7 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_code_load_bias(entry.code_load_bias);
       wf->set_wave_in_group(w);
       wf->set_address_space(entry.address_space);
+      wf->set_vm_access(entry.execution_access);
       wf->set_process_id(entry.process_id);
       // Live PM4 applications share the host monotonic clock with DRM query
       // timestamps. Internal simulation workloads retain the modeled clock.
@@ -3918,6 +3936,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   dp.enabled_cus = queue.enabled_cus;
   dp.queue_packet_id = queue_packet_id;
   dp.address_space = queue.address_space;
+  dp.execution_access = std::make_shared<GpuVmAccess>(transaction_access);
   dp.interrupt_sink = queue.interrupt_sink;
   dp.process_id = queue.process_id;
   dp.aql_packet_id = static_cast<uint32_t>(aql_packet_id);
@@ -4200,6 +4219,7 @@ AqlAdmissionResult CommandProcessor::admit_aql_packet(const AqlPacketProcessRequ
       .dispatch_id = allocate_dispatch_id(),
       .queue_id = queue->queue_id,
       .address_space = queue->address_space,
+      .execution_access = {},
       .interrupt_sink = queue->interrupt_sink,
       .process_id = queue->process_id,
       .completion_signal = prepared.completion_signal,

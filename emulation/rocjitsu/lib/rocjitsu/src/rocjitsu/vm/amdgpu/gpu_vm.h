@@ -461,13 +461,16 @@ public:
   friend bool operator==(const VmCacheNamespace &, const VmCacheNamespace &) = default;
 };
 
-/// @brief Immutable, operation-scoped view of one GPU address-space binding.
+/// @brief Immutable view of one GPU address-space binding.
 ///
 /// @details The snapshot retains the translator and physical backing selected under the
 /// GpuVm lock.  A multi-page access therefore cannot observe half of an old
 /// root and half of its replacement.  Replacement or invalidation advances the
 /// cache namespace used by subsequent snapshots; an already-started operation
-/// is allowed to finish against the binding it captured.
+/// is allowed to finish against the binding it captured. Snapshots returned by
+/// snapshot_pinned() may be retained by longer transactions such as an admitted
+/// kernel dispatch, and remain on that root until the transaction ends or the
+/// address space is synchronously revoked.
 class GpuVmAccess {
 public:
   [[nodiscard]] AddressSpaceInfo info() const { return info_; }

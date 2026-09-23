@@ -880,6 +880,41 @@ TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
   }
 }
 
+TEST(AqlDispatchTest, AdmittedWavesShareTheDispatchVmSnapshot) {
+  class SnapshotPlugin final : public ExecutionPlugin {
+  public:
+    SnapshotPlugin() : ExecutionPlugin("dispatch_vm_snapshot") {}
+
+    void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override {
+      const amdgpu::GpuVmAccess *access = wf.vm_access();
+      if (dispatched == 0)
+        shared_access = access;
+      ++dispatched;
+      all_share_access &= access != nullptr && access == shared_access;
+    }
+
+    uint32_t dispatched = 0;
+    const amdgpu::GpuVmAccess *shared_access = nullptr;
+    bool all_share_access = true;
+  };
+
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  VmFixture fixture("cdna5");
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<SnapshotPlugin>();
+  SnapshotPlugin *observed = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fixture.soc_ptr->set_plugin_group(group);
+
+  const uint64_t kernel = fixture.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(fixture.mem(), fixture.cp());
+  queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
+  ASSERT_NO_THROW(fixture.engine->run());
+
+  EXPECT_EQ(observed->dispatched, 4u);
+  EXPECT_TRUE(observed->all_share_access);
+}
+
 TEST(RdnaDispatchTest, Gfx1250DoesNotEnableWgpMode) {
   const uint32_t code[] = {SOPP_S_ENDPGM};
   VmFixture f("cdna5", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);

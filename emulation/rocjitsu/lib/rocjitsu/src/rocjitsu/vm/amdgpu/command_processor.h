@@ -918,6 +918,9 @@ private:
   /// @brief Read a uint32 through the queue's lifetime-safe GPU address space.
   [[nodiscard]] AtomicLoadResult read_gpu_u32(AddressSpaceHandle address_space, uint64_t va) const;
 
+  /// @brief Read a uint32 through one already-captured address-space binding.
+  [[nodiscard]] AtomicLoadResult read_gpu_u32(const GpuVmAccess &access, uint64_t va) const;
+
   /// @brief Read a block of bytes from GPU virtual address space into a buffer.
   [[nodiscard]] VmAccessOutcome read_gpu_block(AddressSpaceHandle address_space, uint64_t va,
                                                void *dst, size_t size) const;
