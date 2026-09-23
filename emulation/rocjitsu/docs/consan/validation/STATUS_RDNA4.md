@@ -34,7 +34,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | --- | ---: | --- | --- | --- |
 | Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) |
 | Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) |
-| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
+| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 Sep 23: clean pass; reviewed publication-barrier fault missed in 8/8 trials | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟥 Sep 23: missing ConSan analysis verdict; exit 124 | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
@@ -199,3 +199,13 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `tree-atomic-or` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round4/tree-atomic-or-supercollider`.
 - `jakub-attention` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round4/jakub-attention-default`.
 - `jakub-attention` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round4/jakub-attention-supercollider`.
+- Qwen Default reviewed fault: all eight trials installed exactly one paired
+  publication-barrier drop, completed normally, passed the independent oracle,
+  and passed pre/post GPU health probes. Detection was 0/8, below the precommitted
+  minimum of one. This is a failed detection qualification, not a green cell.
+  Reach is supported by the reviewed unconditional ISA path. Evidence:
+  `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round1-qwen-default/`.
+- With the rebuilt relocation fix, Qwen passes both clean modes. All 1,055
+  host ConSan tests pass again. Both matmul modes and precisions pass with the
+  measured 300-second envelope, now adopted by the workload manifest; their
+  earlier override runs remain explicitly recorded.
