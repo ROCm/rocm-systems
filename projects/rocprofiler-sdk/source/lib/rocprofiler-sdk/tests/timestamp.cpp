@@ -58,8 +58,10 @@ TEST(rocprofiler_lib, profiling_time_bounds)
         {120, 180, 120, 180},  // Already within the CPU bounds.
         {80, 140, 100, 160},   // Shift forward, preserving duration.
         {160, 220, 140, 200},  // Shift backward, preserving duration.
+        {50, 150, 100, 200},   // Exact-window duration only needs a forward shift.
+        {150, 250, 100, 200},  // Exact-window duration only needs a backward shift.
         {50, 250, 100, 200},   // Duration cannot fit: neither bound may be exceeded.
-        {0, 250, 100, 200},    // Correcting the end must not underflow the start.
+        {0, 250, 100, 200},    // Clamping must repair an unsigned wraparound from the shifts.
     };
     for(const auto& entry : cases)
     {
