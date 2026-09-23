@@ -28,13 +28,19 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cfenv>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <string_view>
+
+#if (defined(__x86_64__) || defined(__i386__)) && defined(__SSE__)
+#include <xmmintrin.h>
+#endif
 
 namespace {
 
@@ -406,6 +412,83 @@ const ConversionCase *find_conversion(std::string_view mnemonic) {
   return it == kConversionCases.end() ? nullptr : &*it;
 }
 
+class HeldFloatingEnvironment {
+public:
+  HeldFloatingEnvironment() : valid_(std::feholdexcept(&saved_) == 0) {}
+  ~HeldFloatingEnvironment() {
+    if (valid_)
+      std::fesetenv(&saved_);
+  }
+
+  [[nodiscard]] bool valid() const { return valid_; }
+
+private:
+  std::fenv_t saved_{};
+  bool valid_ = false;
+};
+
+void seed_inactive_lane_fp_hazard(ConversionFixture &fixture, const ConversionCase &test_case) {
+  fixture.seed(test_case, 1u);
+  if (test_case.kind == ConversionKind::Unpack) {
+    // Lane 0 executes FP4 1.0 * E8M0(0x7f). Lane 1 is inactive but would
+    // overflow by evaluating FP4 6.0 * E8M0(0xfe) in an unmasked host lane.
+    fixture.fill_packed_source(test_case, kSourceBase, 0x2u);
+    for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+      fixture.cu->write_vgpr(fixture.vgpr_base + kScaleReg, lane, 0x007F'0000u);
+    fixture.cu->write_vgpr(fixture.vgpr_base + kSourceBase, 1, 0x7777'7777u);
+    fixture.cu->write_vgpr(fixture.vgpr_base + kScaleReg, 1, 0x00FE'0000u);
+    return;
+  }
+
+  // Lane 0 executes 1.0 / 1.0. Lane 1 is inactive but would divide by zero
+  // if the SIMD host operation evaluated its unsanitized operands.
+  fixture.fill_wide_source(test_case, kSourceBase, [](uint32_t, uint32_t) { return 1.0f; });
+  for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+    fixture.cu->write_vgpr(fixture.vgpr_base + kScaleReg, lane, std::bit_cast<uint32_t>(1.0f));
+  fixture.cu->write_vgpr(fixture.vgpr_base + kScaleReg, 1, 0u);
+}
+
+#if GTEST_HAS_DEATH_TEST && defined(__linux__) && defined(__SSE__) &&                              \
+    (defined(__x86_64__) || defined(__i386__))
+int run_inactive_lane_unmasked_exception_test() {
+  std::fenv_t environment{};
+  if (std::feholdexcept(&environment) != 0)
+    return 1;
+  if constexpr (!util::has_stdx_simd || util::native_width_v<uint32_t> < 2u) {
+    return 0;
+  } else {
+    ConversionFixture fixture("gfx1250_mxfp_cvt_inactive_unmasked");
+    if (!fixture.cu || !fixture.decoder || !fixture.wf)
+      return 2;
+
+    for (std::string_view mnemonic : {"v_cvt_scalef32_pk8_fp4_f32", "v_cvt_scale_pk8_f32_fp4"}) {
+      const ConversionCase *test_case = find_conversion(mnemonic);
+      if (test_case == nullptr)
+        return 3;
+      const auto words = build_conversion(*test_case);
+      std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words.data()));
+      if (!instruction)
+        return 4;
+
+      seed_inactive_lane_fp_hazard(fixture, *test_case);
+      ForceScalarGuard enable_simd(false);
+      if (std::feclearexcept(FE_ALL_EXCEPT) != 0)
+        return 5;
+      uint32_t mxcsr = _mm_getcsr();
+      mxcsr &= ~static_cast<uint32_t>(_MM_EXCEPT_MASK);
+      mxcsr &= ~static_cast<uint32_t>(_MM_MASK_DIV_ZERO | _MM_MASK_OVERFLOW);
+      _mm_setcsr(mxcsr);
+      const bool succeeded =
+          fixture.cu->execute_instruction(instruction.get(), *fixture.wf).succeeded();
+      _mm_setcsr(_mm_getcsr() | _MM_MASK_MASK);
+      if (!succeeded)
+        return 6;
+    }
+    return 0;
+  }
+}
+#endif
+
 } // namespace
 
 TEST(Gfx1250MxfpCvtSimdCorrectness, AllWideFormatsAndExceptionalPackInputsAreBitExact) {
@@ -723,6 +806,84 @@ TEST(Gfx1250MxfpCvtSimdCorrectness, UnpackSpecialScalesMasksAndOverflowAreBitExa
     }
   }
 }
+
+TEST(Gfx1250MxfpCvtSimdCorrectness, InactiveExecLanesPreserveHostFloatingPointExceptions) {
+  if constexpr (!util::has_stdx_simd || util::native_width_v<uint32_t> < 2u) {
+    GTEST_SKIP() << "native SIMD with at least two lanes unavailable";
+  } else {
+    HeldFloatingEnvironment environment;
+    ASSERT_TRUE(environment.valid());
+    ConversionFixture fixture("gfx1250_mxfp_cvt_inactive_fenv");
+    ASSERT_NE(fixture.cu, nullptr);
+    ASSERT_NE(fixture.decoder, nullptr);
+    ASSERT_NE(fixture.wf, nullptr);
+
+    struct RunResult {
+      int clear_result;
+      int raise_result;
+      int baseline_exceptions;
+      int result_exceptions;
+      bool succeeded;
+      std::array<uint32_t, kMaxDestinationRegs * kWaveSize> destination;
+    };
+
+    for (std::string_view mnemonic : {"v_cvt_scalef32_pk8_fp4_f32", "v_cvt_scale_pk8_f32_fp4"}) {
+      SCOPED_TRACE(mnemonic);
+      const ConversionCase *test_case = find_conversion(mnemonic);
+      ASSERT_NE(test_case, nullptr);
+      const auto words = build_conversion(*test_case);
+      std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words.data()));
+      ASSERT_NE(instruction, nullptr);
+
+      const auto run = [&](bool force_scalar) {
+        seed_inactive_lane_fp_hazard(fixture, *test_case);
+        ForceScalarGuard guard(force_scalar);
+        const int clear_result = std::feclearexcept(FE_ALL_EXCEPT);
+        const int raise_result = std::feraiseexcept(FE_INVALID);
+        const int baseline_exceptions = std::fetestexcept(FE_ALL_EXCEPT);
+        const bool succeeded =
+            fixture.cu->execute_instruction(instruction.get(), *fixture.wf).succeeded();
+        const int result_exceptions = std::fetestexcept(FE_ALL_EXCEPT);
+        return RunResult{clear_result,      raise_result, baseline_exceptions,
+                         result_exceptions, succeeded,    fixture.snapshot_vgpr_window()};
+      };
+
+      const RunResult scalar = run(true);
+      const RunResult simd = run(false);
+      ASSERT_EQ(scalar.clear_result, 0);
+      ASSERT_EQ(scalar.raise_result, 0);
+      ASSERT_EQ(simd.clear_result, 0);
+      ASSERT_EQ(simd.raise_result, 0);
+      ASSERT_TRUE(scalar.succeeded);
+      ASSERT_TRUE(simd.succeeded);
+      EXPECT_EQ(scalar.baseline_exceptions, FE_INVALID);
+      EXPECT_EQ(scalar.result_exceptions, scalar.baseline_exceptions);
+      EXPECT_EQ(simd.baseline_exceptions, scalar.baseline_exceptions);
+      EXPECT_EQ(simd.result_exceptions, scalar.result_exceptions);
+      EXPECT_EQ(simd.destination, scalar.destination);
+
+      const uint32_t destination_words = test_case->kind == ConversionKind::Unpack
+                                             ? wide_word_count(*test_case)
+                                             : packed_word_count(*test_case);
+      for (uint32_t word = 0; word < destination_words; ++word) {
+        const uint32_t sentinel = 0xA5A5'0000u ^ (word * 0x101u) ^ 1u;
+        EXPECT_EQ(simd.destination[word * kWaveSize + 1u], sentinel);
+      }
+    }
+  }
+}
+
+#if GTEST_HAS_DEATH_TEST && defined(__linux__) && defined(__SSE__) &&                              \
+    (defined(__x86_64__) || defined(__i386__))
+TEST(Gfx1250MxfpCvtSimdDeathTest, InactiveExecLanesDoNotTrapWithUnmaskedHostExceptions) {
+  if constexpr (!util::has_stdx_simd || util::native_width_v<uint32_t> < 2u) {
+    GTEST_SKIP() << "native SIMD with at least two lanes unavailable";
+  } else {
+    ASSERT_EXIT(std::_Exit(run_inactive_lane_unmasked_exception_test()),
+                ::testing::ExitedWithCode(0), "");
+  }
+}
+#endif
 
 TEST(Gfx1250MxfpCvtSimdCorrectness, NativeSimdHelperHandlesSupportedOperands) {
   if constexpr (!util::has_stdx_simd) {
