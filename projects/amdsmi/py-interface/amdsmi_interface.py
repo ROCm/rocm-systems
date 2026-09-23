@@ -4329,27 +4329,22 @@ def amdsmi_topo_get_link_type(
 def amdsmi_get_link_topology(
     processor_handle_src: processor_handle_t, processor_handle_dst: processor_handle_t
 ):
-    """Return the unified link topology information between two GPUs.
-
-    Aggregates link weight, link status, link type, abstracted hop count, and
-    the framebuffer-sharing flag into a single result, matching the host
-    ``amdsmi_get_link_topology`` interface.
+    """Return GPU link topology using the host API's fields.
 
     Returns:
         dict: ``{"weight": int, "link_status": int, "link_type": int,
-        "num_hops": int, "fb_sharing": int}`` where ``link_status`` is one of
-        the ``AMDSMI_LINK_STATUS_*`` values and ``link_type`` is one of the
-        ``AMDSMI_LINK_TYPE_*`` values.
+        "num_hops": int, "fb_sharing": int}``.
+        Status/type use ``AMDSMI_LINK_STATUS_*``/``AMDSMI_LINK_TYPE_*`` values.
 
     Note:
-        On baremetal, a self pair reports INTERNAL/ENABLED, zero weight and
-        hops, and ``fb_sharing=1``. Every successful call on the current baremetal
-        backend reports ENABLED; UNKNOWN-to-DISABLED is only a defensive mapping.
-        ``link_status`` is retained for host API parity, not live link health
-        or the topology CLI's P2P accessibility status.
-        ``fb_sharing`` is best-effort: it reports 0 both when P2P framebuffer
-        access is unavailable and when the underlying P2P query could not be
-        completed. The two cases are indistinguishable.
+        Baremetal behavior:
+
+        - Self pair: INTERNAL/ENABLED, zero weight and hops, ``fb_sharing=1``.
+        - Current successful calls report ENABLED; UNKNOWN-to-DISABLED is defensive.
+        - Status is not link health or the topology CLI's P2P access check.
+        - ``num_hops`` counts abstracted steps, capped at 255, not physical links.
+        - ``fb_sharing=0`` means no P2P access or a failed P2P query.
+        - Fields are queried sequentially, not atomically.
     """
     if not isinstance(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle)

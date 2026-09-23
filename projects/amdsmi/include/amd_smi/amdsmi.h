@@ -6885,40 +6885,27 @@ amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_hand
  *
  *  @platform{gpu_bm_linux} @platform{host}
  *
- *  @details Aggregates the link weight, status, type, abstracted hop count, and
- *  framebuffer-sharing flag for the connection between @p processor_handle_src
- *  and @p processor_handle_dst into a single ::amdsmi_link_topology_t, mirroring
- *  the host interface.
+ *  @details Returns weight, status, type, hops, and framebuffer sharing in
+ *  ::amdsmi_link_topology_t, matching the host interface.
  *
- *  @note @p num_hops is the abstracted topology step count from
- *  ::amdsmi_topo_get_link_type, not the number of physical xGMI links.
- *
- *  @note On @platform{gpu_bm_linux}, a self pair returns ::AMDSMI_LINK_TYPE_INTERNAL
- *  and ::AMDSMI_LINK_STATUS_ENABLED directly, with weight and num_hops both 0
- *  and fb_sharing 1; it does not query an inter-device link.
- *
- *  @note For distinct GPUs, the current baremetal backend resolves PCIe or xGMI.
- *  Every successful call, including a self pair, reports ::AMDSMI_LINK_STATUS_ENABLED.
- *  The UNKNOWN-to-DISABLED mapping is defensive; the current backend does not return
- *  an unknown link type on success. INACTIVE and ERROR are not produced by this backend.
- *  IFoE reporting on MI4XX is not yet implemented.
- *
- *  @note On baremetal, link_status is retained for host API parity, not live link
- *  health or P2P accessibility. The topology CLI's link_status field instead uses
- *  ::amdsmi_is_P2P_accessible, so the two status values can differ.
- *
- *  @note @p fb_sharing is best-effort: a P2P query that cannot complete is
- *  reported as 0, indistinguishable from a genuine "not shared" result.
- *
- *  @note link type, weight, and fb_sharing are queried sequentially, not
- *  atomically, so a concurrent topology change may skew the returned fields.
+ *  @note Baremetal behavior:
+ *  - Self pair: INTERNAL, ENABLED, zero weight and hops, fb_sharing=1.
+ *  - Peer types: PCIe or xGMI. MI4XX IFoE reporting is not implemented.
+ *  - Current successful calls always report ::AMDSMI_LINK_STATUS_ENABLED.
+ *  - UNKNOWN-to-DISABLED is defensive, not a current success case.
+ *    INACTIVE and ERROR are not produced.
+ *  - Status provides host API parity, not link health or P2P access.
+ *    The topology CLI uses ::amdsmi_is_P2P_accessible, so its status can differ.
+ *  - num_hops is the abstracted count from ::amdsmi_topo_get_link_type,
+ *    not physical xGMI links; values above 255 are capped.
+ *  - fb_sharing is best-effort: 0 means no P2P access or a failed P2P query.
+ *  - Queries are sequential, so topology changes can affect field consistency.
  *
  *  @param[in] processor_handle_src the source processor handle
  *
  *  @param[in] processor_handle_dst the destination processor handle
  *
- *  @param[out] topology_info A pointer to an ::amdsmi_link_topology_t to
- *  which the link topology information should be written.
+ *  @param[out] topology_info Receives the link topology.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */

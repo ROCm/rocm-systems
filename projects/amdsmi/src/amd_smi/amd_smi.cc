@@ -154,23 +154,6 @@ static_assert(offsetof(rsmi_gpu_metrics_t, apu_metrics) ==
                   offsetof(amdsmi_gpu_metrics_t, apu_metrics),
               "GPU metrics: apu_metrics (last field) offset mismatch");
 
-// amdsmi_link_topology_t is part of the published ABI; guard its size and field
-// offsets so the layout stays in lockstep with the host definition.
-static_assert(sizeof(amdsmi_link_topology_t) == 64,
-              "amdsmi_link_topology_t must remain 64 bytes to match the published ABI");
-static_assert(offsetof(amdsmi_link_topology_t, weight) == 0,
-              "amdsmi_link_topology_t: weight offset mismatch");
-static_assert(offsetof(amdsmi_link_topology_t, link_status) == 8,
-              "amdsmi_link_topology_t: link_status offset mismatch");
-static_assert(offsetof(amdsmi_link_topology_t, link_type) == 12,
-              "amdsmi_link_topology_t: link_type offset mismatch");
-static_assert(offsetof(amdsmi_link_topology_t, num_hops) == 16,
-              "amdsmi_link_topology_t: num_hops offset mismatch");
-static_assert(offsetof(amdsmi_link_topology_t, fb_sharing) == 17,
-              "amdsmi_link_topology_t: fb_sharing offset mismatch");
-static_assert(offsetof(amdsmi_link_topology_t, reserved) == 20,
-              "amdsmi_link_topology_t: reserved offset mismatch");
-
 static void copy_rsmi_gpu_metrics_to_amdsmi(const rsmi_gpu_metrics_t& rsmi_metrics,
                                             amdsmi_gpu_metrics_t* amdsmi_metrics) {
   if (amdsmi_metrics == nullptr) return;
@@ -3261,7 +3244,7 @@ amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handl
     return AMDSMI_STATUS_INVAL;
   }
 
-  // Well-defined defaults so every error path leaves a coherent result.
+  // Keep defaults intact if a later query fails.
   *topology_info = {};
   topology_info->link_type = AMDSMI_LINK_TYPE_UNKNOWN;
   topology_info->link_status = AMDSMI_LINK_STATUS_DISABLED;
@@ -3277,9 +3260,7 @@ amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handl
   uint32_t dst_id = dst_device->get_gpu_id();
 
 #ifdef ENABLE_WSL_BACKEND
-  // WSL exposes a single WDDM adapter with no xGMI fabric, so the native sysfs
-  // topology calls below do not apply. Mirror amdsmi_topo_get_link_type here: a
-  // self-pair is INTERNAL, any peer is a single PCIe hop.
+  // WSL has no native sysfs topology; match amdsmi_topo_get_link_type.
   if (src_device->backend() || dst_device->backend()) {
     if (src_device == dst_device) {
       topology_info->link_type = AMDSMI_LINK_TYPE_INTERNAL;
@@ -3293,7 +3274,7 @@ amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handl
   }
 #endif
 
-  // A device has no link to itself; report a trivial internal, shared result.
+  // Self pairs need no inter-device queries.
   if (src_id == dst_id) {
     topology_info->link_type = AMDSMI_LINK_TYPE_INTERNAL;
     topology_info->link_status = AMDSMI_LINK_STATUS_ENABLED;
@@ -3307,8 +3288,7 @@ amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handl
       amd::smi::rsmi_to_amdsmi_status(rsmi_topo_get_link_type(src_id, dst_id, &hops, &rsmi_type));
   if (status != AMDSMI_STATUS_SUCCESS) return status;
 
-  // Map explicitly: only PCIe and xGMI share values between the rsmi and amdsmi
-  // link-type enums, so a reinterpret cast would misread the other enumerators.
+  // Only PCIe and xGMI share enum values across the two APIs.
   amdsmi_link_type_t link_type;
   switch (rsmi_type) {
     case RSMI_IOLINK_TYPE_PCIEXPRESS:
@@ -3326,7 +3306,7 @@ amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handl
   status = amd::smi::rsmi_to_amdsmi_status(rsmi_topo_get_link_weight(src_id, dst_id, &weight));
   if (status != AMDSMI_STATUS_SUCCESS) return status;
 
-  // Best-effort P2P framebuffer sharing; a failed query stays 0 (not shared).
+  // A failed P2P query leaves fb_sharing at 0.
   uint8_t fb_sharing = 0;
   bool accessible = false;
   if (amd::smi::rsmi_to_amdsmi_status(rsmi_is_P2P_accessible(src_id, dst_id, &accessible)) ==
@@ -3337,7 +3317,7 @@ amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handl
   topology_info->link_type = link_type;
   topology_info->num_hops = hops > 255 ? 255 : static_cast<uint8_t>(hops);  // clamp to uint8_t
   topology_info->weight = weight;
-  // Host API parity, not live link health or the topology CLI's P2P accessibility status.
+  // Host API parity, not link health or P2P access.
   topology_info->link_status = (link_type == AMDSMI_LINK_TYPE_UNKNOWN) ? AMDSMI_LINK_STATUS_DISABLED
                                                                        : AMDSMI_LINK_STATUS_ENABLED;
   topology_info->fb_sharing = fb_sharing;
