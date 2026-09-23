@@ -261,8 +261,9 @@ typedef struct {
 } svm_t;
 
 /*
- * Tracks host memory ranges registered with KFD through the SVM API
- * (fmm_register_mem_svm_api/fmm_map_mem_svm_api). These registrations only set
+ * Tracks host memory ranges registered with KFD through the SVM API. The
+ * reference is taken by fmm_register_mem_svm_api() alone; the map that follows
+ * grants access but holds no reference. These registrations only set
  * SVM attributes on the VA range and do not create a vm_object, so there is no
  * way to discover the range size at deregistration time. We keep the aligned
  * base and size here, refcounted to mirror the registration_count handling of
@@ -1379,9 +1380,9 @@ static int svm_api_range_put_locked(struct hsa_kfd_fmm_context *fmm_ctx, void *a
 }
 
 /*
- * Inverse of fmm_register_mem_svm_api()/fmm_map_mem_svm_api(): revoke GPU access
- * to the range (NO_ACCESS for every GPU). Called with svm_api_mutex held, when
- * the last SVM-API registration of a range is removed.
+ * Inverse of fmm_register_mem_svm_api(): revoke GPU access to the range
+ * (NO_ACCESS for every GPU). Called with svm_api_mutex held, when the last
+ * SVM-API registration of a range is removed.
  */
 static HSAKMT_STATUS fmm_unregister_mem_svm_api(HsaKFDContext *ctx,
 						void *aligned_addr,
