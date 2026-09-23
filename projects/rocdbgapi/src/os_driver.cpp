@@ -65,6 +65,8 @@ one_os_process_flag_to_string (os_process_flags_t flag)
       return "PRECISE_MEMORY";
     case os_process_flags_t::precise_alu_exceptions:
       return "PRECISE_ALU_EXCEPTIONS";
+    case os_process_flags_t::report_lds_exception:
+      return "LDS_OUT_OF_ADDR_RANGE_EXCEPTION";
     }
 
   return to_string (
