@@ -265,6 +265,71 @@
           }
         }
       ]
+    },
+    "rdna4-matmul-fp16-production": {
+      "faults": [
+        {
+          "id": "barrier-drop-initial-tile-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Pristine production matmul ELF fnv1a64:0ffc359899105b1d, native-traced fp16_wmma_tiled_kernel<16,8,true,false,Correct,NoopPolicy,8,2,4,4>. Eight waves publish initial A/B fragments with ds_store_b128 at VA0x64bac,0x64be4,0x64bec,0x64c38,0x64c70,0x64c78. The validation uses K=128 and sampled production K=4096, so the K<48 single-group branch at0x64c90 is false and all waves take the multi-group path. Conditional global prefetch paths reconverge with EXEC restored at0x65230. Signal .text+0xc38 and associated wait0xc88 are the sole synchronization pair before peer LDS reads at0xc98,0xca0,0xca8. NoopPolicy adds no bookkeeping barrier. Source rdna4_matmul.hip:2046-2057 confirms initial publication, next-tile prefetch, sync_after_load(0), shared_to_compute_regs. Offline current-library inventory confirms both exact identities; pristine ELF, disassembly and inventory retained in rdna4-20260923/matmul-debug. Prospectively require at least one detection in eight trials per mode; record independent numeric manifestations."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:0ffc359899105b1d|kernel=_Z22fp16_wmma_tiled_kernelILi16ELi8ELb1ELb0EL8SyncMode0EN4tsan10NoopPolicyELi8ELi2ELi4ELi4EEvPKDF16_S4_Pfiii|kind=barrier|pc=0x0000000000000c38|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:0ffc359899105b1d|kernel=_Z22fp16_wmma_tiled_kernelILi16ELi8ELb1ELb0EL8SyncMode0EN4tsan10NoopPolicyELi8ELi2ELi4ELi4EEvPKDF16_S4_Pfiii|event=barrier|pc=0x0000000000000c38|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:0ffc359899105b1d|kernel=_Z22fp16_wmma_tiled_kernelILi16ELi8ELb1ELb0EL8SyncMode0EN4tsan10NoopPolicyELi8ELi2ELi4ELi4EEvPKDF16_S4_Pfiii|event=barrier|pc=0x0000000000000c88|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 1,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 1,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }
