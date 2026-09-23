@@ -926,7 +926,7 @@ TEST_CASE("Unit_HRR_StreamWriteValue_Direct", "[.][hrr-direct]") {
   // Increment slot: base value, then a read-modify-write increment on top of it.
   // 0x0A0A0A0A + 0xF4E3F0C4 wraps to 0xFEEDFACE.
   constexpr uint32_t kIncBase = 0x0A0A0A0Au;
-  constexpr uint32_t kIncDelta = 0xF4E3F0C4u;
+  [[maybe_unused]] constexpr uint32_t kIncDelta = 0xF4E3F0C4u;
 
   hipStream_t s;
   HRR_HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
