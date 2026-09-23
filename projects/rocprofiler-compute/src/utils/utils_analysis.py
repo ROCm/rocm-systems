@@ -618,9 +618,6 @@ def attach_unlocated_trees_by_launcher_thread(
         forest[thread_id] = [node for node in forest[thread_id] if node is not root]
     for thread_id in [tid for tid, roots in forest.items() if not roots]:
         del forest[thread_id]
-    for roots in forest.values():
-        for node in roots:
-            rollup_node_stats(node)
     return attach_errors
 
 
@@ -1476,6 +1473,9 @@ def process_ml_api_trace_output(
     _validate_all_markers_nested(
         workload.ml_api_trace_df, workload.ml_api_call_trees, errors
     )
+    for roots in workload.ml_api_call_trees.values():
+        for node in roots:
+            rollup_node_stats(node)
     workload.ml_api_trace_errors = errors
 
 
