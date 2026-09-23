@@ -163,6 +163,39 @@
               ]
             }
           }
+        },
+        {
+          "id": "barrier-drop-crosswave-sort-publication-dense-diagnostic",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Pristine ELF fnv1a64:7fc1bc99054e6416, compute_mode<int,128>, native trace dispatches the single row of 128 values. Reviewed final ISA .text+0x351e0 signal and 0x351e4 wait form the sole barrier between conditional stride-64 LDS swaps at 0x351bc (plus byte flags at 0x351c4/0x351cc) and the next compare stage reads at 0x351f4/0x351fc/0x35204 (stride 32). EXEC is restored at 0x351d8 before the unconditional pair; the only kernel-entry bounds exit is false for the dispatched row. No duplicate barrier remains in this publication interval. Both profiles prospectively require at least one detection across eight trials; oracle manifestations are recorded independently. Separate prospective dense-sampling diagnostic following a 0/8 standard-profile miss: preserve the site and expectations, sample every workgroup/cell with preset=max, and require a matching clean comparator. This does not qualify standard sampling."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:7fc1bc99054e6416|kernel=_ZN2at6native12compute_modeIiLj128EEEvPKT_NS_4cuda6detail10TensorInfoIS2_jEENS7_IljEEll|kind=barrier|pc=0x00000000000351e0|mnemonic=s_barrier_signal|occurrence=46",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:7fc1bc99054e6416|kernel=_ZN2at6native12compute_modeIiLj128EEEvPKT_NS_4cuda6detail10TensorInfoIS2_jEENS7_IljEEll|event=barrier|pc=0x00000000000351e0|mnemonic=s_barrier_signal|occurrence=46|sequence=singleton|associated-with=fnv1a64:7fc1bc99054e6416|kernel=_ZN2at6native12compute_modeIiLj128EEEvPKT_NS_4cuda6detail10TensorInfoIS2_jEENS7_IljEEll|event=barrier|pc=0x00000000000351e4|mnemonic=s_barrier_wait|occurrence=47|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 1,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "environment": {
+                "RJ_CONSAN_PRESET": "max"
+              }
+            }
+          }
         }
       ]
     }
