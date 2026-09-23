@@ -26,34 +26,40 @@ extern int64_t ncclParamIbPciRelaxedOrdering();
 // A peer-memory client can complete registration without publishing a sysfs group under
 // memory_peers, so the directory scan reports no client on hosts where registering device
 // memory still works. Probe the registration itself before giving up on peermem: one page of
-// device memory on the first IB device, with the access flags the data path uses.
-static int ncclIbProbePeerMemRegistration() {
-  if (ncclNIbDevs < 1) return 0;
-  if (rocmLibraryInit() != ncclSuccess) return 0;
+// device memory on every selected IB device, with the access flags the data path uses. The
+// capability is host-wide (the client belongs to the kernel driver, not to one GPU), so the
+// current GPU stands in for all of them, as ncclGpuGdrSupport() already assumes on HIP.
+struct ncclIbPeerMemProbeBuf {
+  void* ptr;
+  size_t size;
+};
 
-  size_t pageSize = sysconf(_SC_PAGESIZE);
-  void* gpuPtr = NULL;
-  if (hipMalloc(&gpuPtr, pageSize) != hipSuccess) return 0;
-
-  int found = 0;
+static int ncclIbProbePeerMemRegDev(int dev, void* ctx) {
+  struct ncclIbPeerMemProbeBuf* buf = (struct ncclIbPeerMemProbeBuf*)ctx;
   struct ibv_pd* pd = NULL;
-  if (wrap_ibv_alloc_pd(&pd, ncclIbDevs[0].context) == ncclSuccess) {
-    // wrap_direct_ibv_reg_mr() is used so that an expected failure stays silent.
-    struct ibv_mr* mr =
-      wrap_direct_ibv_reg_mr(pd, gpuPtr, pageSize,
-                             IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
-                               IBV_ACCESS_REMOTE_ATOMIC);
-    if (mr != NULL) {
-      found = 1;
-      (void)wrap_ibv_dereg_mr(mr);
-    }
-    (void)wrap_ibv_dealloc_pd(pd);
-  }
-  (void)hipFree(gpuPtr);
+  if (wrap_ibv_alloc_pd(&pd, ncclIbDevs[dev].context) != ncclSuccess) return 0;
+  // wrap_direct_ibv_reg_mr() is used so that an expected failure stays silent.
+  struct ibv_mr* mr =
+    wrap_direct_ibv_reg_mr(pd, buf->ptr, buf->size,
+                           IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
+                             IBV_ACCESS_REMOTE_ATOMIC);
+  int ok = (mr != NULL);
+  if (ok) (void)wrap_ibv_dereg_mr(mr);
+  (void)wrap_ibv_dealloc_pd(pd);
+  return ok;
+}
+
+static int ncclIbProbePeerMemRegistration() {
+  if (rocmLibraryInit() != ncclSuccess) return 0;
+  struct ncclIbPeerMemProbeBuf buf = {NULL, (size_t)sysconf(_SC_PAGESIZE)};
+  if (hipMalloc(&buf.ptr, buf.size) != hipSuccess) return 0;
+  int found = ncclIbProbePeerMemAllDevs(ncclNIbDevs, ncclIbProbePeerMemRegDev, &buf);
+  (void)hipFree(buf.ptr);
 
   if (found) {
-    INFO(NCCL_INIT, "Device memory registered on %s with no memory_peers client present, GDR via peermem enabled",
-         ncclIbDevs[0].devName);
+    INFO(NCCL_INIT,
+         "Device memory registered on all %d IB devices with no memory_peers client present, GDR via peermem enabled",
+         ncclNIbDevs);
   }
   return found;
 }

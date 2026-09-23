@@ -24,4 +24,14 @@ int ncclIbScanPeerMemClients(const char* const* basePaths);
 // the base-path list so net_ib and net_ib_cast do not each carry a copy of it.
 int ncclIbScanDefaultPeerMemClients(void);
 
+// Tries to register device memory on IB device `dev`, returning 1 on success and 0 otherwise.
+typedef int (*ncclIbPeerMemRegProbe)(int dev, void* ctx);
+
+// Returns 1 only if `probe` succeeds on every one of the `nDevs` devices, stopping at the first
+// failure, and 0 when there are no devices. Registration working on one NIC says nothing about a
+// different driver in a mixed-HCA host, so one passing device must not enable peermem for all.
+//
+// The probe is a parameter so unit tests can drive the decision without a GPU or a NIC.
+int ncclIbProbePeerMemAllDevs(int nDevs, ncclIbPeerMemRegProbe probe, void* ctx);
+
 #endif  // NCCL_GDR_PEERMEM_H_

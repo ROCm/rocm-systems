@@ -14,6 +14,7 @@
 #include <string>
 #include <system_error>
 #include <unistd.h>
+#include <vector>
 
 // Weak stub for ncclDebugLog, required because gdr_peermem.cc uses the debug.h
 // INFO() macro. Debug builds: ncclDebugLog is exported from librccl.so
@@ -145,6 +146,62 @@ TEST_F(GdrPeerMem, FirstMatchShortCircuits) {
   const std::string p1 = Path("second_absent");
   const char* paths[] = {p0.c_str(), p1.c_str(), nullptr};
   EXPECT_EQ(ncclIbScanPeerMemClients(paths), 1);
+}
+
+namespace {
+// Stands in for the per-device registration probe: fails on device `failDev` (-1 = never) and
+// records which devices it was asked about.
+struct FakeRegProbe {
+  int failDev = -1;
+  std::vector<int> calls;
+};
+
+int FakeRegProbeFn(int dev, void* ctx) {
+  FakeRegProbe* fake = static_cast<FakeRegProbe*>(ctx);
+  fake->calls.push_back(dev);
+  return dev != fake->failDev;
+}
+}  // namespace
+
+// With no IB devices there is nothing to register on, so peermem is not enabled and the probe
+// is never invoked.
+TEST(GdrPeerMemProbe, NoDevices_NotEnabled) {
+  FakeRegProbe fake;
+  EXPECT_EQ(ncclIbProbePeerMemAllDevs(0, FakeRegProbeFn, &fake), 0);
+  EXPECT_TRUE(fake.calls.empty());
+}
+
+// Registration succeeding on every device enables peermem, and every device was probed.
+TEST(GdrPeerMemProbe, AllDevicesRegister_Enabled) {
+  FakeRegProbe fake;
+  EXPECT_EQ(ncclIbProbePeerMemAllDevs(4, FakeRegProbeFn, &fake), 1);
+  EXPECT_EQ(fake.calls, (std::vector<int>{0, 1, 2, 3}));
+}
+
+// A host with no GPU-memory registration support fails on the first device and keeps the
+// DMA-BUF fallback. This is the configuration the sysfs scan was introduced to fix.
+TEST(GdrPeerMemProbe, FirstDeviceFails_NotEnabled) {
+  FakeRegProbe fake;
+  fake.failDev = 0;
+  EXPECT_EQ(ncclIbProbePeerMemAllDevs(4, FakeRegProbeFn, &fake), 0);
+  EXPECT_EQ(fake.calls, (std::vector<int>{0}));
+}
+
+// Mixed-HCA host: registration works on the first devices but not on a later one. Peermem must
+// stay disabled, and probing stops at the failing device.
+TEST(GdrPeerMemProbe, LaterDeviceFails_NotEnabled) {
+  FakeRegProbe fake;
+  fake.failDev = 2;
+  EXPECT_EQ(ncclIbProbePeerMemAllDevs(4, FakeRegProbeFn, &fake), 0);
+  EXPECT_EQ(fake.calls, (std::vector<int>{0, 1, 2}));
+}
+
+// The last device alone failing is enough to disable peermem.
+TEST(GdrPeerMemProbe, LastDeviceFails_NotEnabled) {
+  FakeRegProbe fake;
+  fake.failDev = 3;
+  EXPECT_EQ(ncclIbProbePeerMemAllDevs(4, FakeRegProbeFn, &fake), 0);
+  EXPECT_EQ(fake.calls, (std::vector<int>{0, 1, 2, 3}));
 }
 
 }  // namespace RcclUnitTesting

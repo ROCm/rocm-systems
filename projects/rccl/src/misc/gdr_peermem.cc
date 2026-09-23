@@ -36,6 +36,17 @@ int ncclIbScanPeerMemClients(const char* const* basePaths) {
   return found;
 }
 
+int ncclIbProbePeerMemAllDevs(int nDevs, ncclIbPeerMemRegProbe probe, void* ctx) {
+  if (nDevs < 1) return 0;
+  for (int dev = 0; dev < nDevs; ++dev) {
+    if (!probe(dev, ctx)) {
+      INFO(NCCL_INIT, "Device memory registration failed on IB device %d, GDR via peermem disabled", dev);
+      return 0;
+    }
+  }
+  return 1;
+}
+
 int ncclIbScanDefaultPeerMemClients(void) {
   // `memory_peers` lives under `/sys/kernel/mm/` on Linux 5.15 (e.g. Ubuntu 22.04); newer kernels
   // may omit it or place it under `/sys/kernel/` or `/sys/`, depending on the ib_peer_mem module.
