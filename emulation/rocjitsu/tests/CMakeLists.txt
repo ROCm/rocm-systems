@@ -576,12 +576,18 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
 endif()
 
-add_test(
-    NAME RocjitsuVfioCapabilityCheck
-    COMMAND $<TARGET_FILE:rocjitsu_bin> --check-vfio-user
-)
-if(NOT ROCJITSU_ENABLE_VFIO)
-    set_tests_properties(RocjitsuVfioCapabilityCheck PROPERTIES WILL_FAIL TRUE)
+# Through the CLI rather than the C++ front end this replaced: vfio-user
+# support is a property of the library, and the probe asks it for the
+# entry point the server lives behind -- the same question `vfio-serve`
+# asks, so the two cannot disagree about a build.
+if(RJ_HAVE_CLI)
+    rj_add_test(
+        NAME RocjitsuVfioCapabilityCheck
+        COMMAND ${RJ_CLI} check-vfio-user
+    )
+    if(NOT ROCJITSU_ENABLE_VFIO)
+        set_tests_properties(RocjitsuVfioCapabilityCheck PROPERTIES WILL_FAIL TRUE)
+    endif()
 endif()
 
 add_test(

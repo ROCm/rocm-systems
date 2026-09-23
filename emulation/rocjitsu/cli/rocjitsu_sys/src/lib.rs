@@ -37,10 +37,17 @@ use std::os::raw::{c_char, c_int, c_void};
 type FnGetVersionString = unsafe extern "C" fn() -> *const c_char;
 
 type FnDbtWriteHandoff = unsafe extern "C" fn(*const c_char, *const c_char, u32) -> c_int;
-type FnRunVfioServer = unsafe extern "C" fn(*const c_char, *const c_char) -> c_int;
+type FnRunVfioServer = unsafe extern "C" fn(*const c_char, *const c_char, c_int) -> c_int;
 type FnAvailableHostThreads = unsafe extern "C" fn(*mut u32) -> c_int;
-type FnResolveExecutionThreads =
-    unsafe extern "C" fn(*const c_char, u32, u32, *mut u32, *mut u32, *mut usize) -> c_int;
+type FnResolveExecutionThreads = unsafe extern "C" fn(
+    *const c_char,
+    u32,
+    u32,
+    *mut u32,
+    *mut u32,
+    *mut u32,
+    *mut usize,
+) -> c_int;
 
 /// Load and copy the formatted build identity exported by `librocjitsu.so`.
 ///
@@ -151,6 +158,7 @@ pub fn run_vfio_server(
     library: impl AsRef<OsStr>,
     config_path: &std::path::Path,
     socket_path: &std::path::Path,
+    ready_fd: c_int,
 ) -> Result<c_int, String> {
     let config_path = path_to_cstring(config_path)?;
     let socket_path = path_to_cstring(socket_path)?;
@@ -166,7 +174,28 @@ pub fn run_vfio_server(
              vfio-user support. Reconfigure rocjitsu with -DROCJITSU_ENABLE_VFIO=ON."
                     .to_string()
             })?;
-        Ok(serve(config_path.as_ptr(), socket_path.as_ptr()))
+        Ok(serve(config_path.as_ptr(), socket_path.as_ptr(), ready_fd))
+    }
+}
+
+/// Whether this build of the emulator can serve a GPU over vfio-user.
+///
+/// The transport is a build option, and a library without it simply does
+/// not export the entry point, so the question is answered by asking for
+/// the symbol rather than by anything the library reports about itself.
+/// That is also how [`run_vfio_server`] discovers the same fact, which is
+/// what keeps the probe and the operation from disagreeing.
+///
+/// # Errors
+///
+/// Returns a diagnostic when the library cannot be loaded at all, which
+/// is a different answer from "loaded, and has no vfio-user support".
+pub fn has_vfio_server(library: impl AsRef<OsStr>) -> Result<bool, String> {
+    // SAFETY: the caller's discovery selects the library; nothing is
+    // called, only looked up, and the handle is dropped at scope exit.
+    unsafe {
+        let lib = libloading::Library::new(library.as_ref()).map_err(|error| error.to_string())?;
+        Ok(lib.get::<FnRunVfioServer>(b"rj_run_vfio_server\0").is_ok())
     }
 }
 
@@ -215,19 +244,24 @@ pub fn config_is_loadable(library: impl AsRef<OsStr>, json: &CStr) -> Result<(),
 pub struct ThreadAllocation {
     /// Effective engine count (`num_threads`).
     pub engines: u32,
+    /// Shared MMA helpers the VM retains (`async_helper_threads`). One pool
+    /// per VM rather than per SoC, so it is a scalar beside the engines.
+    pub helpers: u32,
     /// Inclusive dispatch width per SoC (`cpu_dispatch_threads`).
     pub dispatch: Vec<u32>,
 }
 
 impl ThreadAllocation {
-    /// Total threads the allocation retains: the engines plus the workers
-    /// each SoC's dispatch pool keeps beyond the engine already counted.
+    /// Total threads the allocation retains: the engines, the shared MMA
+    /// helper pool, and the workers each SoC's dispatch pool keeps beyond
+    /// the engine already counted.
     pub fn total(&self) -> u64 {
         self.dispatch
             .iter()
             .map(|width| u64::from(width.saturating_sub(1)))
             .sum::<u64>()
             + u64::from(self.engines)
+            + u64::from(self.helpers)
     }
 }
 
@@ -286,6 +320,7 @@ pub fn resolve_execution_threads(
         let mut rows = Vec::with_capacity(budgets.len());
         for &budget in budgets {
             let mut engines: u32 = 0;
+            let mut helpers: u32 = 0;
             let mut count: usize = 0;
             // Sizing call: a null buffer asks only how many widths there are.
             match resolve(
@@ -293,6 +328,7 @@ pub fn resolve_execution_threads(
                 budget,
                 host_threads,
                 &mut engines,
+                &mut helpers,
                 std::ptr::null_mut(),
                 &mut count,
             ) {
@@ -306,6 +342,7 @@ pub fn resolve_execution_threads(
                 budget,
                 host_threads,
                 &mut engines,
+                &mut helpers,
                 dispatch.as_mut_ptr(),
                 &mut count,
             ) {
@@ -313,7 +350,11 @@ pub fn resolve_execution_threads(
                 status => return Err(resolve_error(config_path, budget, status)),
             }
             dispatch.truncate(count);
-            rows.push(ThreadAllocation { engines, dispatch });
+            rows.push(ThreadAllocation {
+                engines,
+                helpers,
+                dispatch,
+            });
         }
         Ok((host_threads, rows))
     }

@@ -1111,7 +1111,7 @@ fn check_sanitizer_preload() -> Result<()> {
 ///
 /// Returns an error when the runtime library cannot be located, or when
 /// it was built without vfio-user support.
-pub fn serve_vfio(config: &Path, socket: &Path) -> Result<i32> {
+pub fn serve_vfio(config: &Path, socket: &Path, ready_fd: i32) -> Result<i32> {
     check_sanitizer_preload()?;
     let lib = kmd_preload().ok_or_else(|| {
         let detail = runtime_location()
@@ -1122,13 +1122,38 @@ pub fn serve_vfio(config: &Path, socket: &Path) -> Result<i32> {
              server is part of it — {detail}"
         ))
     })?;
-    rocjitsu_sys::run_vfio_server(&lib, config, socket).map_err(RocJITsuError::Other)
+    rocjitsu_sys::run_vfio_server(&lib, config, socket, ready_fd).map_err(RocJITsuError::Other)
+}
+
+/// Whether the located emulator can serve a GPU over vfio-user.
+///
+/// Answered by asking the library for the entry point, because that is
+/// what [`serve_vfio`] does: a probe that decided this some other way
+/// could say yes to a build the server then refuses.
+///
+/// # Errors
+///
+/// Returns an error when the runtime library cannot be located or
+/// loaded, which is a different answer from a library that loaded and has
+/// no vfio-user support.
+pub fn has_vfio_support() -> Result<bool> {
+    check_sanitizer_preload()?;
+    let lib = kmd_preload().ok_or_else(|| {
+        let detail = runtime_location()
+            .explain_missing()
+            .unwrap_or_else(|| format!("{LIB_NAME} was not found"));
+        RocJITsuError::Other(format!(
+            "rocjitsu: the rocjitsu runtime library was not found, and vfio-user support \
+             is a property of it — {detail}"
+        ))
+    })?;
+    rocjitsu_sys::has_vfio_server(&lib).map_err(RocJITsuError::Other)
 }
 
 /// The budgets a thread-allocation table reports on, in the order it
 /// shows them. Zero leads, standing for the budget the config itself
 /// asks for; the rest are the ceilings the shipped tables are indexed by.
-pub const THREAD_BUDGET_TABLE_ROWS: &[u32] = &[0, 1, 2, 4, 8, 12, 16, 24, 32, 48, 64];
+pub const THREAD_BUDGET_TABLE_ROWS: &[u32] = &[0, 1, 2, 4, 8, 12, 16, 24, 32, 34, 36, 40, 48, 64];
 
 /// Resolve what `config` would allocate at each of `budgets`, without
 /// building the GPU it describes.

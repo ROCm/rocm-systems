@@ -43,10 +43,15 @@ extern "C" {
 ///
 /// @param[in] config_path Simulation config describing the GPU to present.
 /// @param[in] socket_path Filesystem path of the AF_UNIX socket to listen on.
+/// @param[in] ready_fd Descriptor written to once the socket is accepting, so a
+/// launcher can wait for readiness rather than poll for the socket. Negative to
+/// ask for no notification, which is what a caller that does not supervise the
+/// server passes.
 /// @returns A process exit status: zero on an orderly shutdown, nonzero if the
 /// config could not be parsed, the device could not be built, or the transport
 /// failed.
-RJ_API_EXPORT int rj_run_vfio_server(const char *config_path, const char *socket_path);
+RJ_API_EXPORT int rj_run_vfio_server(const char *config_path, const char *socket_path,
+                                     int ready_fd);
 
 /// @}
 

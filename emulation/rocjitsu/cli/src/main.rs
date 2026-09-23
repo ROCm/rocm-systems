@@ -97,6 +97,16 @@ enum TopCmd {
     #[command(name = THREAD_BUDGET_TABLE)]
     ThreadBudgetTable(ThreadBudgetArgs),
 
+    /// Report whether this build of the emulator can serve a GPU over
+    /// vfio-user, and exit nonzero when it cannot.
+    ///
+    /// A build option of the library rather than of this CLI, so the
+    /// answer comes from asking the library for the entry point the
+    /// server lives behind.
+    #[cfg(feature = "rocjitsu")]
+    #[command(name = CHECK_VFIO_USER)]
+    CheckVfioUser,
+
     /// Every other subcommand (profile, topology, agent, emulators,
     /// state, run, exec, paths) is flattened in here.
     #[command(flatten)]
@@ -114,6 +124,14 @@ struct VfioArgs {
     /// the older CLI spelled it, which is how that spelling still works.
     #[arg(long = VFIO_SOCKET_FLAG, value_name = "PATH")]
     vfio_socket: String,
+    /// Descriptor to write to once the socket is accepting connections.
+    ///
+    /// A launcher that supervises the server needs to know when it may
+    /// start the guest, and polling for the socket file cannot tell
+    /// "listening" from "created but not yet bound". `scripts/run-vfio-guest.py`
+    /// passes the write end of a pipe here and waits on the read end.
+    #[arg(long = "vfio-ready-fd", value_name = "FD")]
+    vfio_ready_fd: Option<i32>,
 }
 
 /// `rocjitsu thread-budget-table`.
@@ -176,9 +194,34 @@ fn serve_vfio(a: &VfioArgs) -> anyhow::Result<ExitCode> {
             a.config
         )
     })?;
-    let status = rj_backend_rocjitsu::serve_vfio(&config, std::path::Path::new(&a.vfio_socket))
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    // Negative means "tell nobody", which is what the C API takes for a
+    // caller that is not waiting on readiness.
+    let ready_fd = a.vfio_ready_fd.unwrap_or(-1);
+    if ready_fd < 0 && a.vfio_ready_fd.is_some() {
+        anyhow::bail!("--vfio-ready-fd requires a nonnegative descriptor");
+    }
+    let status =
+        rj_backend_rocjitsu::serve_vfio(&config, std::path::Path::new(&a.vfio_socket), ready_fd)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(ExitCode::from(u8::try_from(status).unwrap_or(1)))
+}
+
+/// Say whether this build can serve a GPU over vfio-user.
+///
+/// Exits zero only when it can, which is what makes it usable as the
+/// capability probe a build check wants; the CLI this replaced behaved
+/// the same way, and a ctest case depends on it.
+#[cfg(feature = "rocjitsu")]
+fn check_vfio_user() -> anyhow::Result<ExitCode> {
+    if rj_backend_rocjitsu::has_vfio_support().map_err(|e| anyhow::anyhow!("{e}"))? {
+        println!("vfio-user support enabled");
+        return Ok(ExitCode::SUCCESS);
+    }
+    eprintln!(
+        "rocjitsu: this build has no vfio-user support; reconfigure rocjitsu with \
+         -DROCJITSU_ENABLE_VFIO=ON"
+    );
+    Ok(ExitCode::FAILURE)
 }
 
 /// Print what `a.config` would allocate, at its own budget and at each
@@ -204,7 +247,7 @@ fn thread_budget_table(a: &ThreadBudgetArgs) -> anyhow::Result<ExitCode> {
     let (_host, rows) = rj_backend_rocjitsu::resolve_thread_budgets(&config, ROWS)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    println!("Budget | num_threads | cpu_dispatch_threads per GPU | Total");
+    println!("Budget | num_threads | cpu_dispatch_threads per GPU | async_helper_threads | Total");
     for (budget, row) in ROWS.iter().zip(&rows) {
         // Budget zero is the config's own request rather than a ceiling,
         // which is why it is labelled instead of numbered.
@@ -219,7 +262,12 @@ fn thread_budget_table(a: &ThreadBudgetArgs) -> anyhow::Result<ExitCode> {
             .map(u32::to_string)
             .collect::<Vec<_>>()
             .join(",");
-        println!("{label} | {} | {dispatch} | {}", row.engines, row.total());
+        println!(
+            "{label} | {} | {dispatch} | {} | {}",
+            row.engines,
+            row.helpers,
+            row.total()
+        );
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -405,6 +453,12 @@ const VFIO_SERVE: &str = "vfio-serve";
 
 /// The flag that names the socket, and the thing the rewriter keys on.
 const VFIO_SOCKET_FLAG: &str = "vfio-socket";
+
+/// The subcommand a `--check-vfio-user` invocation is routed to.
+///
+/// Spelled as a bare flag by the CLI this replaces, and by the ctest case
+/// that probes the build, so the rewriter keeps that spelling working.
+const CHECK_VFIO_USER: &str = "check-vfio-user";
 
 /// The subcommand a `--thread-budget-table` invocation is routed to.
 ///
@@ -628,6 +682,22 @@ fn dropin_argv(args: Vec<String>) -> Result<Vec<String>, String> {
         out.extend(args[1..].iter().cloned());
         return Ok(out);
     }
+    // `rocjitsu --check-vfio-user` — the older spelling of the build
+    // probe. It takes nothing and reports on the library rather than on
+    // any machine, so it is routed on its own and everything else on the
+    // line is a mistake clap should name.
+    if args[1..scan_end].iter().any(|a| a == "--check-vfio-user") {
+        let mut out = Vec::with_capacity(args.len());
+        out.push(args[0].clone());
+        out.push(CHECK_VFIO_USER.to_string());
+        out.extend(
+            args[1..]
+                .iter()
+                .filter(|a| *a != "--check-vfio-user")
+                .cloned(),
+        );
+        return Ok(out);
+    }
     // `rocjitsu --config <cfg> --thread-budget-table` — the older
     // spelling for reporting what a config would allocate. Like serving
     // a VMM it is not a workload invocation, so it must not reach `run`.
@@ -837,6 +907,8 @@ fn dispatch(cli: Cli) -> anyhow::Result<ExitCode> {
         TopCmd::VfioServe(a) => serve_vfio(&a),
         #[cfg(feature = "rocjitsu")]
         TopCmd::ThreadBudgetTable(a) => thread_budget_table(&a),
+        #[cfg(feature = "rocjitsu")]
+        TopCmd::CheckVfioUser => check_vfio_user(),
         // Everything else, including `run`, happens right here in this
         // process. There is no routing decision to make: no command
         // reaches a session it does not own, because the only command
@@ -1754,7 +1826,9 @@ mod tests {
     fn the_reported_budgets_are_the_ones_the_docs_tabulate() {
         assert_eq!(
             rj_backend_rocjitsu::THREAD_BUDGET_TABLE_ROWS,
-            &[0, 1, 2, 4, 8, 12, 16, 24, 32, 48, 64]
+            // 34, 36 and 40 are the additive helper rows: engine and
+            // dispatch cost is capped at 32, and helpers go above it.
+            &[0, 1, 2, 4, 8, 12, 16, 24, 32, 34, 36, 40, 48, 64]
         );
     }
 

@@ -3371,19 +3371,23 @@ fn the_thread_budget_table_reports_the_allocations_the_docs_publish() {
     let out = env.ok(&["thread-budget-table", "--config", &config.to_string_lossy()]);
 
     assert!(
-        out.starts_with("Budget | num_threads | cpu_dispatch_threads per GPU | Total"),
+        out.starts_with(
+            "Budget | num_threads | cpu_dispatch_threads per GPU | async_helper_threads | Total"
+        ),
         "the header is quoted in the docs: {out}"
     );
     // configuration.md, "the initial single-GPU tables use these
-    // engine/dispatch pairs", gfx950 column.
+    // engine/dispatch pairs", gfx950 column. Helpers are zero throughout
+    // it: the table is indexed by engine/dispatch cost, which is capped
+    // at 32, and helpers are additive above that.
     for row in [
-        "1 | 1 | 1 | 1",
-        "2 | 1 | 2 | 2",
-        "4 | 2 | 3 | 4",
-        "8 | 2 | 7 | 8",
-        "16 | 8 | 9 | 16",
-        "24 | 8 | 17 | 24",
-        "32 | 8 | 25 | 32",
+        "1 | 1 | 1 | 0 | 1",
+        "2 | 1 | 2 | 0 | 2",
+        "4 | 2 | 3 | 0 | 4",
+        "8 | 2 | 7 | 0 | 8",
+        "16 | 8 | 9 | 0 | 16",
+        "24 | 8 | 17 | 0 | 24",
+        "32 | 8 | 25 | 0 | 32",
     ] {
         assert!(
             out.lines().any(|line| line == row),
@@ -3392,9 +3396,23 @@ fn the_thread_budget_table_reports_the_allocations_the_docs_publish() {
     }
     // "A budget of 12 selects the eight-thread row."
     assert!(
-        out.lines().any(|line| line == "12 | 2 | 7 | 8"),
+        out.lines().any(|line| line == "12 | 2 | 7 | 0 | 8"),
         "budget 12 should select the eight-thread row:\n{out}"
     );
+    // "Affinity above 32 selects additive helper rows at totals 34, 36,
+    // 40 and 48 (2, 4, 8 and 16 helpers). Larger hosts still select 48."
+    for row in [
+        "34 | 8 | 25 | 2 | 34",
+        "36 | 8 | 25 | 4 | 36",
+        "40 | 8 | 25 | 8 | 40",
+        "48 | 8 | 25 | 16 | 48",
+        "64 | 8 | 25 | 16 | 48",
+    ] {
+        assert!(
+            out.lines().any(|line| line == row),
+            "missing documented helper row {row:?} in:\n{out}"
+        );
+    }
     // The configured row reports the file's own request, not a ceiling.
     assert!(
         out.lines().any(|line| line.starts_with("Configured | ")),

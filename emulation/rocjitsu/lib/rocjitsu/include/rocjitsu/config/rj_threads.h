@@ -53,6 +53,9 @@ RJ_API_EXPORT rj_status_t rj_config_available_host_threads(uint32_t *out_host_th
 /// @param[in] host_threads Host width to resolve against. Zero queries the host,
 /// matching @ref rj_config_available_host_threads.
 /// @param[out] out_engines Receives the effective engine count.
+/// @param[out] out_helpers Receives the shared MMA helper count the VM retains.
+/// Counted alongside the engines rather than per SoC, because the pool is one
+/// per VM.
 /// @param[out] out_dispatch Receives the inclusive dispatch width per SoC. May
 /// be NULL to query the count only.
 /// @param[in,out] inout_dispatch_count On entry, the capacity of
@@ -68,7 +71,7 @@ RJ_API_EXPORT rj_status_t rj_config_available_host_threads(uint32_t *out_host_th
 /// or its allocation metadata is invalid.
 RJ_API_EXPORT rj_status_t rj_config_resolve_execution_threads(
     const char *config_path, uint32_t budget, uint32_t host_threads, uint32_t *out_engines,
-    uint32_t *out_dispatch, size_t *inout_dispatch_count);
+    uint32_t *out_helpers, uint32_t *out_dispatch, size_t *inout_dispatch_count);
 
 /// @}
 

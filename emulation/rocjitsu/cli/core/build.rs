@@ -50,6 +50,12 @@ fn main() {
         // Only the scalar fields have a default worth publishing; a
         // string's is the empty string, which is what Rust already does.
         let Some(rust) = rust_type(&ty) else { continue };
+        // `= null` makes a scalar optional: the schema is saying it has no
+        // default, not that its default is some value. Published as zero,
+        // which is what "nobody set this" serialises as, and the reason
+        // this generator exists does not apply to such a field -- there is
+        // no nonzero schema default for a derived `Default` to lose.
+        let default = if default == "null" { "0" } else { &default };
         writeln!(
             out,
             "/// `{TABLE}.{name}` as the schema declares it.\n\
