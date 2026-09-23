@@ -661,6 +661,46 @@ TEST(RelocationFunctionTable, DiscoversLegacySplitPcRelativeDataBuilder) {
   EXPECT_EQ(builder.target_vaddr, 0x800u);
 }
 
+TEST(RelocationFunctionTable, Rdna4CanonicalPcDataAddressPreservesCarryAndHighHalf) {
+  constexpr auto kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  for (unsigned mutation = 0; mutation != 4; ++mutation) {
+    SCOPED_TRACE(mutation);
+    std::vector<uint32_t> words = {
+        build_s_getpc_b64(6, kArch),
+        // s_sext_i32_i16 s7, s7, as emitted in IREE Qwen initializers.
+        mutation == 2 ? build_s_mov_b32(7, 128, kArch) : 0xbe870f07u,
+        build_s_add_u32(6, 6, 255, kArch),
+        0xfffff7fcu,
+    };
+    if (mutation == 1)
+      words.push_back(0xbf88ff9eu); // s_wait_alu depctr_sa_sdst(0).
+    if (mutation == 3)
+      words.push_back(build_s_add_u32(20, 128, 128, kArch)); // Clobber SCC.
+    const uint64_t high_offset = words.size() * sizeof(uint32_t);
+    words.push_back(build_s_addc_u32(7, 7, 255, kArch));
+    words.push_back(0xffffffffu);
+    words.push_back(build_s_endpgm(kArch));
+    auto image = make_relocation_function_table_elf(words);
+    reinterpret_cast<Elf64_Ehdr *>(image.data())->e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1201;
+    const AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    auto decoder = Decoder::create(kArch);
+    ASSERT_NE(decoder, nullptr);
+    const auto blocks = build_valid_blocks(object, *decoder, kArch, {});
+    const auto analysis = analyze_relocation_pairs(blocks, {}, 0x1000);
+    if (mutation >= 2) {
+      EXPECT_TRUE(analysis.address_builders.empty());
+      continue;
+    }
+    ASSERT_EQ(analysis.address_builders.size(), 1u);
+    const auto &builder = analysis.address_builders.front();
+    EXPECT_EQ(builder.source_getpc_offset, 0u);
+    EXPECT_EQ(builder.source_address_add_offset, 8u);
+    EXPECT_EQ(builder.source_address_high_add_offset, high_offset);
+    EXPECT_EQ(builder.target_vaddr, 0x800u);
+  }
+}
+
 TEST(RelocationFunctionTable, RejectsChainedAddressAddDispatch) {
   const auto text_words = make_double_add_table_dispatch_text();
   auto image = make_relocation_function_table_elf(text_words);

@@ -149,6 +149,33 @@ void transfer_instruction(PairState &state, const Instruction &inst,
   // operand register classes or constructing a full def/use set for them.
   if (state.empty() && mnemonic != "s_get_pc_i64" && mnemonic != "s_getpc_b64")
     return;
+  // RDNA4 canonicalizes the 48-bit PC before forming a data address. Preserve
+  // only an unchanged, canonical getpc value; arbitrary high-half writes must
+  // still invalidate the pair.
+  if (mnemonic == "s_sext_i32_i16") {
+    const auto dst = scalar_sgpr(inst.dst_operand(0));
+    const auto src = scalar_sgpr(inst.src_operand(0));
+    if (dst && src && *dst == *src && *dst != 0) {
+      const auto address = state.find(static_cast<uint16_t>(*dst - 1));
+      if (address != state.end() && address->second.kind == PairValueKind::Address &&
+          address->second.source_address_add_offset == 0) {
+        const uint64_t value = address->second.value;
+        const uint64_t canonical =
+            (value & 0x0000ffffffffffffull) | ((value & (1ull << 47)) ? 0xffff000000000000ull : 0);
+        if (value == canonical)
+          return;
+      }
+    }
+  }
+  // This scheduling wait does not write SCC or the address pair. LLVM may
+  // place it between the low add and its carry-consuming high add.
+  if (mnemonic == "s_wait_alu") {
+    for (auto &[pair, value] : state) {
+      if (value.pending_low_word && value.pending_high_offset == inst.src_loc())
+        value.pending_high_offset += static_cast<uint64_t>(inst.size());
+    }
+    return;
+  }
   // A split low add communicates its carry to the immediately following high
   // add through SCC. Do not retain a half-built value across any intervening
   // instruction or CFG placement.
@@ -248,7 +275,8 @@ void transfer_instruction(PairState &state, const Instruction &inst,
         result_pair = dst_pair;
       }
     }
-  } else if ((mnemonic == "s_add_u32" || mnemonic == "s_add_i32") &&
+  } else if ((mnemonic == "s_add_u32" || mnemonic == "s_add_i32" || mnemonic == "s_add_co_u32" ||
+              mnemonic == "s_add_co_i32") &&
              inst.size() == 2 * sizeof(uint32_t)) {
     const auto dst = scalar_sgpr(inst.dst_operand(0));
     const auto src0 = scalar_sgpr(inst.src_operand(0));
@@ -264,7 +292,7 @@ void transfer_instruction(PairState &state, const Instruction &inst,
         result_pair = *dst;
       }
     }
-  } else if (mnemonic == "s_addc_u32") {
+  } else if (mnemonic == "s_addc_u32" || mnemonic == "s_add_co_ci_u32") {
     const auto dst = scalar_sgpr(inst.dst_operand(0));
     const auto src0 = scalar_sgpr(inst.src_operand(0));
     const auto high = scalar_u32_constant(inst.src_operand(1));
