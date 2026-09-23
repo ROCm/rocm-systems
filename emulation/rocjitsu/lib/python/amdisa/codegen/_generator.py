@@ -15266,7 +15266,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                         return;
                       }
                       if (!reads_value()) {
-                        std::fill_n(out, count, 0u);
+                        std::ranges::fill_n(out, count, 0u);
                         return;
                       }
                       assert(lane_base <= wf.wf_size());
@@ -15282,11 +15282,11 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                         uint64_t lane_mask = count == 0 ? 0 : util::mask<uint64_t>(static_cast<int>(count)) << lane_base;
                         auto region = amdgpu::RegisterAccess(wf).read_vgpr_region(
                             wf.vgpr_alloc().base + voff, 1, lane_mask);
-                        std::copy_n(region.lanes().begin() + lane_base, count, out);
+                        std::ranges::copy_n(region.lanes().begin() + lane_base, count, out);
                         return;
                       }
-                      std::fill_n(out, count,
-                                  Isa::simd_broadcast_value(wf, opr_type_, encoding_value_));
+                      std::ranges::fill_n(
+                          out, count, Isa::simd_broadcast_value(wf, opr_type_, encoding_value_));
                     }
 
                     void Operand::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base,
@@ -15349,7 +15349,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     return;
                   }
                   if (!reads_value()) {
-                    std::fill_n(out, count, 0u);
+                    std::ranges::fill_n(out, count, 0u);
                     return;
                   }
                   assert(lane_base <= wf.wf_size());
@@ -15361,11 +15361,11 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                    : util::mask<uint64_t>(static_cast<int>(count)) << lane_base;
                     auto region = amdgpu::RegisterAccess(wf).read_vgpr_region(
                         wf.vgpr_alloc().base + voff, 1, lane_mask);
-                    std::copy_n(region.lanes().begin() + lane_base, count, out);
+                    std::ranges::copy_n(region.lanes().begin() + lane_base, count, out);
                     return;
                   }
-                  std::fill_n(out, count,
-                              Isa::simd_broadcast_value(wf, opr_type_, encoding_value_));
+                  std::ranges::fill_n(
+                      out, count, Isa::simd_broadcast_value(wf, opr_type_, encoding_value_));
                 }
 
                 void Operand::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base,
