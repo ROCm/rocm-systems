@@ -1043,7 +1043,9 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 // Get Staging or Pinned memory buffer
 void DmaBlitManager::getBuffer(const_address hostMem, size_t size, bool enablePin, bool first_tx,
                                DmaBlitManager::BufferState& buffState) const {
-  bool doHostPinning = enablePin && (size > MinSizeForPinnedXfer);
+  // Pinning is slower than staging on unified-memory devices; skip it there.
+  bool doHostPinning =
+      enablePin && (size > MinSizeForPinnedXfer) && !dev().info().hostUnifiedMemory_;
   size_t copyChunkSize = doHostPinning ? PinXferSize : StagingXferSize;
   size_t xferSize = std::min(size, copyChunkSize);
 
