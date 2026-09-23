@@ -1,6 +1,6 @@
 | Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |
-| Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟩 higher: clean pass; fault 8/8 (bar 6/8) | 🟨 Sep 23: clean pass; fault 0/8 detections; 8 trials admitted after transform fix |
+| Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟩 higher: clean pass; fault 8/8 (bar 6/8) | 🟨 delay-matrix: clean pass; fault trials running |
 | Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟩 higher: clean pass; fault 8/8 (bar 6/8) | 🟩 Sep 23: clean pass; fault 1/8 (delay=0) |
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟩 higher: clean pass; fault 8/8 (bar 6/8) | 🟨 delay-matrix: clean pass; fault 0/8 (bar 6/8) |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟩 higher: clean pass; fault 8/8 (bar 6/8) | 🟨 delay-matrix: clean pass; fault 0/8 (bar 6/8) |
