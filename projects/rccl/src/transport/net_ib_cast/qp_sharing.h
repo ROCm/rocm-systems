@@ -186,20 +186,20 @@ void IbCastValidateSharedQpPool(void);
 // Encode commId into wr_id[63:48]. When commId==0 (sharing disabled or
 // fallback) this is a no-op (OR with zero).
 static inline uint64_t IbCastEncodeCommId(uint64_t wr_id, uint16_t commId) {
-  return wr_id | ((uint64_t)commId << WR_ID_RX_COMM_ID_SHIFT);
+  return wr_id | (((uint64_t)commId << WR_ID_RX_COMM_ID_BIT_POS) & WR_ID_RX_COMM_ID_MASK);
 }
 
 // Encode receiver commId into immData for BY_ID matching scheme:
 //   bits[7:0]  = reqId,  bits[23:8] = remCommId.
 static inline uint32_t IbCastEncodeCommIdImmData(uint32_t reqId, uint16_t remCommId) {
-  return (reqId & WR_IMM_BYID_REQ_ID_MASK) |
-         (((uint32_t)remCommId & WR_IMM_BYID_COMM_ID_MASK) << WR_IMM_BYID_COMM_ID_SHIFT);
+  return ((reqId << WR_IMM_BYID_REQ_ID_BIT_POS) & WR_IMM_BYID_REQ_ID_MASK) |
+         (((uint32_t)remCommId << WR_IMM_BYID_COMM_ID_BIT_POS) & WR_IMM_BYID_COMM_ID_MASK);
 }
 
 // Strip the commId from wr_id[63:48], recovering the original index. Safe when
 // sharing is disabled (commId==0, so the mask is a no-op).
 static inline uint64_t IbCastStripCommId(uint64_t wr_id) {
-  return wr_id & ~((uint64_t)WR_ID_RX_COMM_ID_MASK << WR_ID_RX_COMM_ID_SHIFT);
+  return wr_id & ~WR_ID_RX_COMM_ID_MASK;
 }
 
 // Look up the target comm from the commId encoded in wr_id[63:48]. Returns NULL

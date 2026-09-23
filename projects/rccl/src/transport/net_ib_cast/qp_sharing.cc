@@ -170,7 +170,7 @@ void IbCastFreeCommIdLocked(uint16_t commId) {
 }
 
 struct ncclIbNetCommBase* IbCastRouteCommFromWrId(uint64_t wr_id) {
-  uint16_t commId = (wr_id >> WR_ID_RX_COMM_ID_SHIFT) & WR_ID_RX_COMM_ID_MASK;
+  uint16_t commId = (wr_id & WR_ID_RX_COMM_ID_MASK) >> WR_ID_RX_COMM_ID_BIT_POS;
   if (commId == 0 || commId >= IBCAST_MAX_COMMS || !g_IbCastCommTable[commId].used) return NULL;
   return g_IbCastCommTable[commId].isSend
     ? &((struct ncclIbSendComm*)g_IbCastCommTable[commId].comm)->base
@@ -179,8 +179,8 @@ struct ncclIbNetCommBase* IbCastRouteCommFromWrId(uint64_t wr_id) {
 
 struct ncclIbNetCommBase* IbCastRouteCommFromImmData(struct ncclIbNetCommBase* base, uint32_t immDataHost) {
   if (IbCastQpSharingEnabled()) {
-    uint16_t immCommId = (immDataHost >> WR_IMM_BYID_COMM_ID_SHIFT) & WR_IMM_BYID_COMM_ID_MASK;
-    //uint8_t reqSlot = immDataHost & WR_IMM_BYID_REQ_ID_MASK;
+    uint16_t immCommId = (immDataHost & WR_IMM_BYID_COMM_ID_MASK) >> WR_IMM_BYID_COMM_ID_BIT_POS;
+    //uint8_t reqSlot = (immDataHost & WR_IMM_BYID_REQ_ID_MASK) >> WR_IMM_BYID_REQ_ID_BIT_POS;
     if (immCommId != 0 && immCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[immCommId].used) {
       return g_IbCastCommTable[immCommId].isSend
         ? &((struct ncclIbSendComm*)g_IbCastCommTable[immCommId].comm)->base
