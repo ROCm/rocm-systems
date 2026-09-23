@@ -683,9 +683,13 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       throw std::runtime_error("graphics depth and color extents must match");
     }
   } else if (!color_enabled_) {
-    throw std::runtime_error("graphics draw has no supported attachment");
+    // Fragment shaders can write buffers or images without any attachment writes.
+    // Use the window scissor until the viewport scissor is applied below.
+    const uint32_t scissor_mask = gfx12 ? 0xffff : 0x7fff;
+    width_ = (context_[0x91] & scissor_mask) + uint32_t(gfx12);
+    height_ = ((context_[0x91] >> 16) & scissor_mask) + uint32_t(gfx12);
   }
-  if (width_ > 4096 || height_ > 4096)
+  if ((color_enabled_ || (depth_control_ & 2)) && (width_ > 4096 || height_ > 4096))
     throw std::runtime_error("graphics render target exceeds supported dimensions");
   fragment_wave_size_ = (context_[0x190] & (1u << 15)) ? 32 : 64;
   const uint32_t attributes = (sh_[0x31] >> 11) & 63;
@@ -725,6 +729,8 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
   }
   if (left >= right || top >= bottom)
     return;
+  if (right - left > 4096 || bottom - top > 4096)
+    throw std::runtime_error("graphics render area exceeds supported dimensions");
   for (uint32_t p = 0; p < primitive_count(); ++p) {
     if (primitives_[p] & (1u << 31))
       continue;

@@ -378,6 +378,8 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
     uint32_t clip_control = 0;
     uint32_t shader_control = 0;
     uint32_t color_control = 0xcc0010;
+    uint32_t target_mask = 15;
+    uint32_t shader_mask = 15;
     uint32_t polygon_mode = 0;
     uint32_t samples = 0;
     uint32_t sample_coverage = 15;
@@ -393,6 +395,7 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
     bool passthrough = false;
     bool flat = false;
     bool viewport_scissor = false;
+    bool wide_window_scissor = false;
     std::optional<std::array<std::array<float, 4>, 3>> positions{};
     std::optional<FragmentInputWitness> fragment_inputs{};
   };
@@ -570,6 +573,15 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
        .expected_coverage = 0x137},
       {.name = "pattern-dependent logic op", .outcome = Outcome::Reject, .color_control = 0x120010},
       {.name = "color disabled", .color_control = 0, .depth_only = true},
+      {.name = "color mode disabled without depth", .color_control = 0},
+      {.name = "all color writes masked", .target_mask = 0},
+      {.name = "no fragment color export", .shader_mask = 0},
+      {.name = "no attachment writes with viewport scissor",
+       .target_mask = 0,
+       .shader_mask = 0,
+       .expected_coverage = 0x440,
+       .viewport_scissor = true,
+       .wide_window_scissor = true},
       {.name = "unsupported color mode", .outcome = Outcome::Reject, .color_control = 0xcc0020},
       {.name = "color degamma", .outcome = Outcome::Reject, .color_control = 0xcc0018},
       {.name = "line polygons",
@@ -613,8 +625,8 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
     state.context_registers[0x31e] = (3 << 16) | 3;
     state.context_registers[0x31f] = 3 << 15;
     state.context_registers[0x318] = 0x1000;
-    state.context_registers[0x214] = 15;
-    state.context_registers[0x215] = 15;
+    state.context_registers[0x214] = test.target_mask;
+    state.context_registers[0x215] = test.shader_mask;
     state.context_registers[0x195] = 4;
     state.context_registers[0x198] = test.inputs;
     state.context_registers[0x2f9] = 0x2d;
@@ -629,8 +641,8 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
       state.context_registers[0x3b0] = 3 | (3 << 14);
       state.context_registers[0x3b8] = 26 << 14;
       state.context_registers[0x31e] = 0;
-      state.context_registers[0x8e] = 15;
-      state.context_registers[0x8f] = 15;
+      state.context_registers[0x8e] = test.target_mask;
+      state.context_registers[0x8f] = test.shader_mask;
       state.context_registers[0x1c5] = 4;
       state.context_registers[0x1b4] = test.inputs;
       state.context_registers[0x206] = 0x43f;
@@ -680,6 +692,8 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
       state.context_registers[0x94] = 2 | (1 << 16);
       state.context_registers[0x95] = (3 - gfx12) | ((3 - gfx12) << 16);
     }
+    if (test.wide_window_scissor)
+      state.context_registers[0x91] = 0x3fff3fff;
     if (test.positions) {
       state.context_registers[gfx12 ? 0x10b : 0x2fa] =
           state.context_registers[gfx12 ? 0x10d : 0x2fc] = std::bit_cast<uint32_t>(16382.5f);
@@ -775,7 +789,10 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
                                  ? (test.expected_coverage & (1u << (y * 4 + x)))
                                  : x >= 1 && x < 3 && y >= 1 && y < 3;
         EXPECT_EQ(memory_.read32(0x100000 + *address),
-                  !test.depth_only && sample_enabled && covered ? 0xff0000ffu : 0u)
+                  !test.depth_only && test.color_control && test.target_mask && test.shader_mask &&
+                          sample_enabled && covered
+                      ? 0xff0000ffu
+                      : 0u)
             << x << "," << y;
       }
   }
