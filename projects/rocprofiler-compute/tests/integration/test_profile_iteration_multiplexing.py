@@ -5,6 +5,7 @@
 
 import inspect
 import os
+from pathlib import Path
 
 import common
 import pandas as pd
@@ -21,6 +22,12 @@ from tests.integration.common import (
     skip_unsupported_roofline_soc,
     validate,
 )
+
+
+def read_rocpd_counter_results(workload_dir: str) -> pd.DataFrame:
+    """Load long-form ROCPD counter artifacts for counter-value comparisons."""
+    result_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
+    return pd.concat([pd.read_csv(result_file) for result_file in result_files])
 
 
 @pytest.mark.iteration_multiplexing_1
@@ -126,13 +133,8 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
             app_name="app_laplace_eqn",
         )
         integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-        binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--gen-pmc",
-        ])
-        counters_no_multiplexing = pd.read_csv(common.pmc_perf_path(workload_dir))
+        binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
+        counters_no_multiplexing = read_rocpd_counter_results(workload_dir)
 
         options = [
             "--block",
@@ -155,13 +157,8 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
             app_name="app_laplace_eqn_iter",
         )
         integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-        binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--gen-pmc",
-        ])
-        counters_kernel = pd.read_csv(common.pmc_perf_path(workload_dir))
+        binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
+        counters_kernel = read_rocpd_counter_results(workload_dir)
 
         options = [
             "--block",
@@ -184,15 +181,8 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
             app_name="app_laplace_eqn_iter",
         )
         integration_common.check_csv_files(workload_dir_klp, num_devices, num_kernels)
-        binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir_klp,
-            "--gen-pmc",
-        ])
-        counters_kernel_launch_params = pd.read_csv(
-            common.pmc_perf_path(workload_dir_klp)
-        )
+        binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir_klp])
+        counters_kernel_launch_params = read_rocpd_counter_results(workload_dir_klp)
 
         assert are_deterministic_counters_equal(
             [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
@@ -232,13 +222,8 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
             app_name="app_laplace_eqn",
         )
         integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-        binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--gen-pmc",
-        ])
-        counters_no_multiplexing = pd.read_csv(common.pmc_perf_path(workload_dir))
+        binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
+        counters_no_multiplexing = read_rocpd_counter_results(workload_dir)
 
         options = [
             "--block",
@@ -259,13 +244,8 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
             app_name="app_laplace_eqn_iter",
         )
         integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-        binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--gen-pmc",
-        ])
-        counters_kernel = pd.read_csv(common.pmc_perf_path(workload_dir))
+        binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
+        counters_kernel = read_rocpd_counter_results(workload_dir)
 
         options = [
             "--block",
@@ -286,15 +266,8 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
             app_name="app_laplace_eqn_iter",
         )
         integration_common.check_csv_files(workload_dir_klp, num_devices, num_kernels)
-        binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir_klp,
-            "--gen-pmc",
-        ])
-        counters_kernel_launch_params = pd.read_csv(
-            common.pmc_perf_path(workload_dir_klp)
-        )
+        binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir_klp])
+        counters_kernel_launch_params = read_rocpd_counter_results(workload_dir_klp)
 
         assert are_stochastic_counters_similar(
             [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
