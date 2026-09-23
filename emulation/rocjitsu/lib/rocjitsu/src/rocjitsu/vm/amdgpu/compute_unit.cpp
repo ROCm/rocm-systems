@@ -231,11 +231,11 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
   std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
   // Halted wavefronts have already freed their SGPR/VGPR blocks at s_endpgm, so a
-  // halted slot is immediately available. Find an idle slot.
+  // halted slot is immediately available, as is a slot never materialized.
   size_t slot = config_.num_wf_slots;
   for (size_t i = 0; i < wfs_.size(); ++i) {
     const uint64_t scratch_scoreboard_id = static_cast<uint64_t>(scratch_scoreboard_base_) + i;
-    if (scratch_scoreboard_id < scratch_wave_limit_per_se && wfs_[i]->is_halted()) {
+    if (scratch_scoreboard_id < scratch_wave_limit_per_se && (!wfs_[i] || wfs_[i]->is_halted())) {
       slot = i;
       break;
     }
@@ -254,10 +254,13 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
 Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc,
                                            uint32_t num_sgprs, uint32_t num_vgprs,
                                            uint32_t wave_size) {
+  std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
-  if (wf_id >= config_.num_wf_slots || !wfs_[wf_id]->is_halted())
+  if (wf_id >= config_.num_wf_slots || (wfs_[wf_id] && !wfs_[wf_id]->is_halted()))
     return nullptr;
 
+  if (!wfs_[wf_id])
+    wfs_[wf_id] = create_wavefront(wf_id);
   auto *wf = wfs_[wf_id].get();
   const uint32_t dispatched_wave_size = wave_size == 0 ? wf->default_wf_size_ : wave_size;
   if ((dispatched_wave_size != 32 && dispatched_wave_size != 64) ||
@@ -319,7 +322,7 @@ size_t ComputeUnitCore::num_wfs() const {
   std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   size_t count = 0;
   for (const auto &w : wfs_)
-    if (!w->is_halted())
+    if (w && !w->is_halted())
       ++count;
   return count;
 }
@@ -482,7 +485,7 @@ std::vector<Wavefront *> ComputeUnitCore::complete_barrier(uint32_t dispatch_id,
                                                            uint32_t named_barrier_id) {
   std::vector<Wavefront *> members;
   for (const auto &candidate : wfs_) {
-    if (candidate->is_halted() || candidate->dispatch_id() != dispatch_id ||
+    if (!candidate || candidate->is_halted() || candidate->dispatch_id() != dispatch_id ||
         candidate->wg_id() != wg_id)
       continue;
     if (completion_bit == kNamedBarrierBit && candidate->named_barrier_id_ != named_barrier_id)
@@ -633,7 +636,7 @@ void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
   // and reclaim LDS if the CU is now idle and unpinned. The caller unpins the cluster
   // LDS separately (the pin is CP-side bookkeeping).
   for (const auto &w : wfs_) {
-    if (!w->is_halted() && w->dispatch_id() == dispatch_id && w->wg_id() == wg_id)
+    if (w && !w->is_halted() && w->dispatch_id() == dispatch_id && w->wg_id() == wg_id)
       free_wavefront_resources(*w);
   }
   active_wgs_.erase(wg_key(dispatch_id, wg_id));
@@ -644,7 +647,7 @@ void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
 void ComputeUnitCore::abort_dispatch(uint32_t dispatch_id) {
   std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   for (const auto &wavefront : wfs_) {
-    if (!wavefront->is_halted() && wavefront->dispatch_id() == dispatch_id)
+    if (wavefront && !wavefront->is_halted() && wavefront->dispatch_id() == dispatch_id)
       free_wavefront_resources(*wavefront);
   }
 
@@ -665,7 +668,8 @@ bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes,
   uint32_t free_slots = 0;
   for (size_t slot = 0; slot < wfs_.size(); ++slot) {
     const uint64_t scratch_scoreboard_id = static_cast<uint64_t>(scratch_scoreboard_base_) + slot;
-    if (scratch_scoreboard_id < scratch_wave_limit_per_se && wfs_[slot]->is_halted())
+    if (scratch_scoreboard_id < scratch_wave_limit_per_se &&
+        (!wfs_[slot] || wfs_[slot]->is_halted()))
       ++free_slots;
   }
   if (free_slots < num_wfs) {
@@ -907,6 +911,8 @@ void ComputeUnitCore::update_wf_states() {
   ++cycle_counter_;
 
   for (auto &w : wfs_) {
+    if (!w)
+      continue;
     if (w->state() == WfState::WAITCNT && w->wait_satisfied()) {
       w->set_state(WfState::RUNNING);
       w->set_ready_cycle(cycle_counter_);
@@ -916,13 +922,15 @@ void ComputeUnitCore::update_wf_states() {
   }
 
   for (auto &w : wfs_) {
+    if (!w)
+      continue;
     if (w->state() != WfState::BARRIER || w->waiting_barrier_bit_ != Wavefront::kNoBarrierWait)
       continue;
     uint32_t did = w->dispatch_id();
     uint32_t wg = w->wg_id();
     bool all_at_barrier = true;
     for (auto &w2 : wfs_) {
-      if (w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() != WfState::HALTED &&
+      if (w2 && w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() != WfState::HALTED &&
           (w2->state() != WfState::BARRIER ||
            w2->waiting_barrier_bit_ != Wavefront::kNoBarrierWait)) {
         all_at_barrier = false;
@@ -932,7 +940,8 @@ void ComputeUnitCore::update_wf_states() {
     if (all_at_barrier) {
       std::vector<Wavefront *> barrier_wfs;
       for (auto &w2 : wfs_)
-        if (w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() == WfState::BARRIER &&
+        if (w2 && w2->dispatch_id() == did && w2->wg_id() == wg &&
+            w2->state() == WfState::BARRIER &&
             w2->waiting_barrier_bit_ == Wavefront::kNoBarrierWait)
           barrier_wfs.push_back(w2.get());
       plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(barrier_wfs));
@@ -1543,6 +1552,8 @@ template <bool EnableAsync>
   update_wf_states();
 
   for (auto &wf : wfs_) {
+    if (!wf)
+      continue;
     if (wf->state() == WfState::RUNNING && !wf->debug_paused()) {
       // Burn down an in-flight S_SLEEP before issuing anything else. A
       // single-step request cancels the remainder instead of spending the
@@ -1575,6 +1586,8 @@ template <bool EnableAsync>
       util::Logger::cp([&](auto &os) {
         os << std::format("CU[{}] steps={}M", full_path(), step_count_ >> 20);
         for (auto &wf : wfs_) {
+          if (!wf)
+            continue;
           auto st = wf->state();
           if (st == WfState::RUNNING || st == WfState::WAITCNT || st == WfState::BARRIER)
             os << std::format(" wf{}:pc={:#x}:{}", wf->wf_id(), wf->pc,

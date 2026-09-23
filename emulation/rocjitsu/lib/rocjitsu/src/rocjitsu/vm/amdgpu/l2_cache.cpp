@@ -46,7 +46,7 @@ void L2Cache::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coheren
   coherence_->register_l2_cache(this);
 }
 
-std::shared_lock<std::shared_mutex> L2Cache::acquire_cache_access() {
+std::shared_lock<util::DistributedSharedMutex> L2Cache::acquire_cache_access() {
   for (;;) {
     std::shared_lock access_lock(maintenance_mutex_);
     if (coherence_epoch_ == coherence_->current_epoch())
@@ -58,7 +58,7 @@ std::shared_lock<std::shared_mutex> L2Cache::acquire_cache_access() {
   }
 }
 
-std::unique_lock<std::shared_mutex> L2Cache::acquire_cache_maintenance() {
+std::unique_lock<util::DistributedSharedMutex> L2Cache::acquire_cache_maintenance() {
   std::unique_lock maintenance_lock(maintenance_mutex_);
   synchronize_epoch_locked();
   return maintenance_lock;
@@ -84,6 +84,10 @@ void L2Cache::mark_dirty_bytes(uint64_t line_addr, uint32_t offset, uint32_t siz
 
 bool L2Cache::clear_dirty_bytes(uint64_t line_addr, uint32_t offset, uint32_t size, uint32_t vmid) {
   assert(offset < LINE_SIZE && size != 0 && size <= LINE_SIZE - offset);
+  // The caller holds the set lock, which orders any earlier dirty mask for
+  // this line. Concurrent changes in other sets cannot make this line dirty.
+  if (!has_dirty_lines_.load(std::memory_order_relaxed))
+    return false;
   std::lock_guard lock(dirty_bytes_mutex_);
   const std::pair<uint32_t, uint64_t> key{vmid, line_addr};
   const std::map<std::pair<uint32_t, uint64_t>, DirtyMask>::iterator position =
@@ -394,7 +398,7 @@ VmAccessOutcome L2Cache::cache_partial_bytes(uint64_t addr, const uint8_t *src, 
 
 VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype,
                               uint32_t vmid) {
-  std::shared_lock<std::shared_mutex> maintenance_lock = acquire_cache_access();
+  auto maintenance_lock = acquire_cache_access();
   uint32_t copied = 0;
   if (mtype == Mtype::UC) {
     while (copied < size) {
@@ -462,7 +466,7 @@ VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype 
 
 VmAccessOutcome L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype,
                                uint32_t vmid) {
-  std::shared_lock<std::shared_mutex> maintenance_lock = acquire_cache_access();
+  auto maintenance_lock = acquire_cache_access();
   uint32_t copied = 0;
   if (mtype == Mtype::UC) {
     while (copied < size) {
@@ -521,7 +525,7 @@ VmAccessOutcome L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size,
 }
 
 VmAccessOutcome L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid) {
-  std::shared_lock<std::shared_mutex> maintenance_lock = acquire_cache_access();
+  auto maintenance_lock = acquire_cache_access();
   std::lock_guard set_lock(set_mutex(addr));
   uint64_t line_addr = CacheStore::line_address(addr);
   const VmAccessOutcome outcome = ensure_line(line_addr, vmid);
@@ -542,7 +546,7 @@ VmAccessOutcome L2Cache::writeback_line(uint64_t line_addr, const uint8_t *data,
   assert(CacheStore::line_address(line_addr) == line_addr && "writeback address must be aligned");
   assert(dirty_offset < LINE_SIZE && dirty_size != 0 && dirty_size <= LINE_SIZE - dirty_offset &&
          "dirty range must fit in one L2 line");
-  std::shared_lock<std::shared_mutex> maintenance_lock = acquire_cache_access();
+  auto maintenance_lock = acquire_cache_access();
   std::lock_guard set_lock(set_mutex(line_addr));
   const VmAccessOutcome fill_outcome = ensure_line(line_addr, vmid, /*fetch_on_miss=*/false);
   if (fill_outcome != VmAccessOutcome::Complete)
@@ -588,14 +592,14 @@ VmAccessOutcome L2Cache::flush_line_locked(uint64_t addr, uint32_t vmid) {
 }
 
 VmAccessOutcome L2Cache::flush_line(uint64_t addr, uint32_t vmid) {
-  std::shared_lock<std::shared_mutex> maintenance_lock = acquire_cache_access();
+  auto maintenance_lock = acquire_cache_access();
   std::lock_guard set_lock(set_mutex(addr));
   return flush_line_locked(addr, vmid);
 }
 
 VmAccessOutcome L2Cache::flush_all(uint32_t vmid) {
   (void)vmid;
-  std::unique_lock<std::shared_mutex> maintenance_lock = acquire_cache_maintenance();
+  auto maintenance_lock = acquire_cache_maintenance();
   const VmAccessOutcome outcome = flush_dirty_locked();
   if (outcome != VmAccessOutcome::Complete)
     return outcome;
@@ -662,12 +666,12 @@ VmAccessOutcome L2Cache::invalidate_range(uint64_t addr, uint32_t size, uint32_t
   const uint64_t line_count = std::min(requested_lines, addressable_lines);
 
   if (line_count <= MAX_INVALIDATE_RANGE_SET_LOCKS) {
-    std::shared_lock<std::shared_mutex> maintenance_lock = acquire_cache_access();
+    auto maintenance_lock = acquire_cache_access();
     SetRangeLocks locks = lock_sets_for_range(line_start, line_count);
     return invalidate_range_locked(addr, size, vmid, line_start, line_count);
   }
 
-  std::unique_lock<std::shared_mutex> maintenance_lock = acquire_cache_maintenance();
+  auto maintenance_lock = acquire_cache_maintenance();
   return invalidate_range_locked(addr, size, vmid, line_start, line_count);
 }
 
