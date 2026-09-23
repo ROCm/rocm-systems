@@ -38,7 +38,7 @@ A notional workflow we need to support is something like this:
       storage must support subsequent querying for timestamp translation.
     - **Note: whether these operations are done by the same or separate threads, whether those threads are part of the
       ROCR instance or a separate system daemon(s), and how storage is managed are design considerations we
-      will elaborate on [here](./docs/arch.md).**
+      elaborate on [here](./doc/arch.md).**
 3. Kernel dispatch/completion events produced by the workload, which include raw GPU timestamps, are surfaced into rocprof
 4. rocprof calls into ROCR through HSA API to convert these raw GPU timestamps to the system/realtime timeline (e.g.,
 via something like
