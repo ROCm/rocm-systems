@@ -36,6 +36,37 @@
 
 namespace util {
 
+/// Round an IEEE F32/F64 value to an integral value with ties to even.
+/// Integer operations preserve signed zero and quiet NaN payloads without
+/// depending on or changing host rounding, denormal modes or exception flags.
+template <typename Float> inline Float rndne_scalar(Float value) {
+  static_assert(std::is_same_v<Float, float> || std::is_same_v<Float, double>);
+  using U = std::conditional_t<sizeof(Float) == 4, uint32_t, uint64_t>;
+  constexpr unsigned kFraction = std::numeric_limits<Float>::digits - 1;
+  constexpr unsigned kBias = std::numeric_limits<Float>::max_exponent - 1;
+  constexpr U kSign = U(1) << (sizeof(U) * 8 - 1);
+  constexpr U kInfinity = U(2 * kBias + 1) << kFraction;
+  const U bits = std::bit_cast<U>(value);
+  const U magnitude = bits & ~kSign;
+  const U sign = bits & kSign;
+  if (magnitude >= kInfinity)
+    return std::bit_cast<Float>(bits | (magnitude > kInfinity ? U(1) << (kFraction - 1) : 0));
+  const unsigned exponent = static_cast<unsigned>(magnitude >> kFraction);
+  if (exponent >= kBias + kFraction)
+    return value;
+  if (exponent < kBias) {
+    const U rounded = magnitude > (U(kBias - 1) << kFraction) ? U(kBias) << kFraction : 0;
+    return std::bit_cast<Float>(sign | rounded);
+  }
+  const unsigned shift = kBias + kFraction - exponent;
+  const U unit = U(1) << shift;
+  const U fraction = magnitude & (unit - 1);
+  U rounded = magnitude & ~(unit - 1);
+  if (fraction > unit / 2 || (fraction == unit / 2 && (rounded & unit) != 0))
+    rounded += unit;
+  return std::bit_cast<Float>(sign | rounded);
+}
+
 /// Compile-time switch for `<experimental/simd>` availability. Callers
 /// gate SIMD fast paths via `if constexpr (util::has_stdx_simd)` so the
 /// branch and all downstream calls compile out when the header is
@@ -705,9 +736,34 @@ inline native<float> ceil_simd(native<float> a) {
 inline native<float> floor_simd(native<float> a) {
   return round_fixup_simd<float, false>(a, [](native<float> x) { return stdx::floor(x); });
 }
-inline native<float> rndne_simd(native<float> a) {
-  return round_fixup_simd<float, true>(a, [](native<float> x) { return stdx::nearbyint(x); });
+/// Vector counterpart of rndne_scalar, using only unsigned integer lanes.
+template <typename Float> inline native<Float> rndne_bits_simd(native<Float> value) {
+  using Bits = std::conditional_t<sizeof(Float) == 4, uint32_t, uint64_t>;
+  using U = native<Bits>;
+  constexpr unsigned kFraction = std::numeric_limits<Float>::digits - 1;
+  constexpr unsigned kBias = std::numeric_limits<Float>::max_exponent - 1;
+  constexpr Bits kSign = Bits(1) << (sizeof(Bits) * 8 - 1);
+  constexpr Bits kInfinity = Bits(2 * kBias + 1) << kFraction;
+  const U bits = std::bit_cast<U>(value);
+  const U magnitude = bits & U(~kSign);
+  const U exponent = magnitude >> kFraction;
+  // All lanes need a valid shift, including values handled by the blends below.
+  const U shift = stdx::min(stdx::max(U(kBias + kFraction) - exponent, U(1)), U(kFraction));
+  const U unit = U(1) << shift;
+  const U fraction = magnitude & (unit - U(1));
+  U rounded = magnitude & ~(unit - U(1));
+  const auto increment =
+      (fraction > (unit >> 1)) || ((fraction == (unit >> 1)) && ((rounded & unit) != U(0)));
+  stdx::where(increment, rounded) += unit;
+  const U half(Bits(kBias - 1) << kFraction), one(Bits(kBias) << kFraction);
+  stdx::where(magnitude <= half, rounded) = U(0);
+  stdx::where((magnitude > half) && (magnitude < one), rounded) = one;
+  stdx::where(exponent >= U(kBias + kFraction), rounded) = magnitude;
+  stdx::where(magnitude > U(kInfinity), rounded) = magnitude | U(Bits(1) << (kFraction - 1));
+  return std::bit_cast<native<Float>>(rounded | (bits & U(kSign)));
 }
+
+inline native<float> rndne_simd(native<float> a) { return rndne_bits_simd(a); }
 
 inline native<double> trunc_simd(native<double> a) {
 #if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
@@ -732,9 +788,9 @@ inline native<double> floor_simd(native<double> a) {
 }
 inline native<double> rndne_simd(native<double> a) {
 #if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  return map_native64_scalar<double>(a, [](double x) { return std::nearbyint(x); });
+  return map_native64_scalar<double>(a, [](double x) { return rndne_scalar(x); });
 #else
-  return round_fixup_simd<double, true>(a, [](native<double> x) { return stdx::nearbyint(x); });
+  return rndne_bits_simd(a);
 #endif
 }
 
@@ -745,8 +801,8 @@ inline native<double> rndne_simd(native<double> a) {
 /// produce. gcc's glibc floorf/floor/ceil/trunc instead pass an sNaN through
 /// verbatim, so the generated scalar body would disagree with its own SIMD
 /// fast path (and with hardware) under gcc. Quiet explicitly there; on clang
-/// this is an idempotent no-op left to the compiler. (std::nearbyint already
-/// quiets under glibc, so rndne needs no fixup.)
+/// this is an idempotent no-op left to the compiler. rndne_scalar handles
+/// NaNs directly with integer bits.
 #if defined(__GNUC__) && !defined(__clang__)
 template <class F> inline F quiet_snan_scalar(F a, F r) {
   using U = std::conditional_t<sizeof(F) == 4, uint32_t, uint64_t>;
