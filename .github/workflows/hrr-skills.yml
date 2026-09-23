@@ -1,0 +1,98 @@
+# Checks for the HRR agent skills. These are the checks that need no GPU: the
+# inspector's unit suite, and the structural rules the AMD skills catalogue
+# enforces on any skill it federates. The behavioural evals need an agent and a
+# language-model gateway, so they are not run here.
+
+name: "HRR skills"
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/hrr/skills/**'
+      - '.github/workflows/hrr-skills.yml'
+  pull_request:
+    paths:
+      - 'projects/hrr/skills/**'
+      - '.github/workflows/hrr-skills.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    name: "HRR skills: inspector unit tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: |
+            projects/hrr/skills
+            .github/workflows
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.10'
+
+      - name: Install pytest
+        run: python -m pip install --disable-pip-version-check pytest
+
+      - name: Run the tests each skill ships
+        run: |
+          set -euo pipefail
+          # Every skill's own tests, wherever it keeps them. Discovered rather
+          # than listed, so a new skill is covered the day it lands.
+          mapfile -t suites < <(find projects/hrr/skills -name 'test_*.py' -print | sort)
+          if [ ${#suites[@]} -eq 0 ]; then
+            echo "No skill test suites found under projects/hrr/skills."
+            exit 1
+          fi
+          printf 'Running %s\n' "${suites[@]}"
+          python -m pytest "${suites[@]}" -q
+
+  shell-syntax:
+    name: "HRR skills: shell scripts parse"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: |
+            projects/hrr/skills
+            .github/workflows
+
+      - name: Parse every shell script
+        run: |
+          set -euo pipefail
+          find projects/hrr/skills -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+          echo "All skill shell scripts parse."
+
+  structural:
+    name: "HRR skills: catalogue structural checks"
+    runs-on: ubuntu-latest
+    steps:
+      # The whole project, not just the skills: this job checks the references
+      # the markdown makes, and a file left out of the checkout is
+      # indistinguishable from a broken link.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: |
+            projects/hrr
+            .github/workflows
+
+      - uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+
+      # skillscope is the harness the AMD skills catalogue runs. Pinned to a
+      # tag: it grades the same skills we ship, so its rules changing under us
+      # is a thing to adopt deliberately rather than discover on a red run.
+      - name: Run skillscope structural checks
+        run: |
+          uvx --from git+https://github.com/amd/skillscope@v0.1.2 skillscope \
+            --repo . structural \
+            --skills-dir 'projects/hrr/skills/*' \
+            --skill-files skill-card.md \
+            --skill-sections Description,Owner,License \
+            --docs 'projects/hrr/README.md'
