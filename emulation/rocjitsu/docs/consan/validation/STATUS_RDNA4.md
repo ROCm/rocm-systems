@@ -34,7 +34,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | --- | ---: | --- | --- | --- |
 | Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) |
 | Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) |
-| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟥 Sep 23: numerical mismatch under instrumentation; native pass |
+| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟥 Sep 23: missing ConSan analysis verdict; exit 124 | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
@@ -186,3 +186,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   in the earlier artifact roots.
 - `rdna4-matmul-fp8-production` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round3/rdna4-matmul-fp8-production-supercollider`.
 - `qwen-prefill` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round4/qwen-prefill-default`.
+- `qwen-prefill` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round4/qwen-prefill-supercollider`.
