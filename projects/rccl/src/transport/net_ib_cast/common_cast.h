@@ -530,7 +530,7 @@ struct ncclIbMrHandle {
 struct ncclIbResiliency;
 
 struct IbCastQpSharingInfo {
-  uint16_t commId;
+  uint16_t netIbCommId;
   bool     isPrimary;
   int      groupIdx;
   int      remIbDevIdx;

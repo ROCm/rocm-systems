@@ -47,22 +47,22 @@ static inline bool IbCastQpSharingEnabled(void) {
 // Returns true when this comm is actively sharing QPs (sharing enabled AND
 // commId was successfully allocated; commId==0 means fallback to non-sharing).
 static inline bool IbCastCommIsSharing(const struct ncclIbNetCommBase* base) {
-  return IbCastQpSharingEnabled() && base->qpSharing.commId != 0;
+  return IbCastQpSharingEnabled() && base->qpSharing.netIbCommId != 0;
 }
 
 // Returns true when this comm is the primary (owner) of shared QPs in its group.
 static inline bool IbCastCommIsPrimary(const struct ncclIbNetCommBase* base) {
-  return base->qpSharing.commId != 0 && base->qpSharing.isPrimary;
+  return base->qpSharing.netIbCommId != 0 && base->qpSharing.isPrimary;
 }
 
 // Returns true when this comm is a secondary (reuses QPs owned by a primary).
 static inline bool IbCastCommIsSecondary(const struct ncclIbNetCommBase* base) {
-  return base->qpSharing.commId != 0 && !base->qpSharing.isPrimary;
+  return base->qpSharing.netIbCommId != 0 && !base->qpSharing.isPrimary;
 }
 
 // Initialize QP sharing fields on a comm base to defaults (sharing disabled).
 static inline void IbCastCommInitSharingFields(struct ncclIbNetCommBase* base) {
-  base->qpSharing.commId = 0;
+  base->qpSharing.netIbCommId = 0;
   base->qpSharing.isPrimary = false;
   base->qpSharing.groupIdx = -1;
   base->qpSharing.remIbDevIdx = -1;
