@@ -182,12 +182,11 @@ read_pipe_until_eof(pipe_fds& fds)
 [[nodiscard]] std::optional<std::vector<std::string>>
 read_dynamic_dependencies(const std::string& exe_path)
 {
-    auto pipe_optional = create_pipe();
-    if(!pipe_optional)
+    auto fds = create_pipe();
+    if(!fds)
     {
         return std::nullopt;
     }
-    auto& fds = *pipe_optional;
 
     // Build environment for listing deps. LD_LIBRARY_PATH and LD_PRELOAD are copied from
     // current env, so the later-listed lib paths will match what a real run would load.
@@ -198,19 +197,19 @@ read_dynamic_dependencies(const std::string& exe_path)
     const auto pid = ::fork();
     if(pid < 0)
     {
-        ::close(fds.read_fd);
-        ::close(fds.write_fd);
+        ::close(fds->read_fd);
+        ::close(fds->write_fd);
         return std::nullopt;
     }
 
     if(pid == 0)  // we are in the child
     {
-        exec_with_stdout_to_pipe(exe_path, fds, listing_envp);
+        exec_with_stdout_to_pipe(exe_path, *fds, listing_envp);
     }
 
     // If we are here - we are in the parent
 
-    const auto loader_output = read_pipe_until_eof(fds);
+    const auto loader_output = read_pipe_until_eof(*fds);
 
     // Reap the child
     auto status = 0;
@@ -218,8 +217,9 @@ read_dynamic_dependencies(const std::string& exe_path)
     {
         // Retry if interrupted by a signal
     }
-    // <stdlib.h> is included transitively (via "rocprof-sys-instrument.hpp") before
-    // <sys/wait.h>, so glibc defines the W* macros there and <sys/wait.h> skips them.
+    // Included <sys/wait.h> is correct for W* macros, but <stdlib.h> is included
+    // via "rocprof-sys-instrument.hpp" before <sys/wait.h>, so glibc defines the W*
+    // macros there, <sys/wait.h> skips them, and clang-tidy reports no direct include.
     // NOLINTNEXTLINE(misc-include-cleaner)
     if(!WIFEXITED(status) || WEXITSTATUS(status) != 0)
     {
@@ -228,7 +228,7 @@ read_dynamic_dependencies(const std::string& exe_path)
 
     // Loader output lines we need:
     //   <soname> => <abs path> (<addr>)
-    //   <abs path> (<addr>)"
+    //   <abs path> (<addr>)
     // Parse and keep only abs paths.
     auto out = rocprofsys::delimit(loader_output, " \n\t=>");
     std::erase_if(out, [](const std::string& item) { return !item.starts_with('/'); });
