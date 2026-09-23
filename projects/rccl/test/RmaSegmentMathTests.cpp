@@ -133,10 +133,19 @@ TEST(RmaSegmentMathTest, PrefixPostCountsWrsBeforeBadWr)
 
 TEST(RmaSegmentMathTest, PrefixPostKeepsRequestOnlyWhenSomethingPosted)
 {
-    EXPECT_EQ(ncclRmaPostedRequestStatus(ncclSystemError, /*posted=*/1), ncclSuccess);
-    EXPECT_EQ(ncclRmaPostedRequestStatus(ncclSystemError, /*posted=*/0), ncclSystemError);
-    EXPECT_EQ(ncclRmaPostedRequestStatus(ncclSuccess, /*posted=*/0), ncclSuccess);
-    EXPECT_EQ(ncclRmaPostedRequestStatus(ncclSuccess, /*posted=*/2), ncclSuccess);
+    int keep = 0, failed = 0;
+    EXPECT_EQ(ncclRmaCompletePostedRequest(ncclSystemError, /*posted=*/1, /*nWr=*/3, &keep, &failed), ncclSuccess);
+    EXPECT_TRUE(keep);
+    EXPECT_TRUE(failed);
+    EXPECT_EQ(ncclRmaCompletePostedRequest(ncclSystemError, /*posted=*/0, /*nWr=*/3, &keep, &failed), ncclSystemError);
+    EXPECT_FALSE(keep);
+    EXPECT_FALSE(failed);
+    EXPECT_EQ(ncclRmaCompletePostedRequest(ncclSuccess, /*posted=*/0, /*nWr=*/0, &keep, &failed), ncclSuccess);
+    EXPECT_TRUE(keep);
+    EXPECT_FALSE(failed);
+    EXPECT_EQ(ncclRmaCompletePostedRequest(ncclSuccess, /*posted=*/2, /*nWr=*/2, &keep, &failed), ncclSuccess);
+    EXPECT_TRUE(keep);
+    EXPECT_FALSE(failed);
     EXPECT_TRUE(ncclRmaPrefixPostLostSignaledTail(/*posted=*/1, /*nWr=*/3));
     EXPECT_FALSE(ncclRmaPrefixPostLostSignaledTail(/*posted=*/3, /*nWr=*/3));
     EXPECT_FALSE(ncclRmaPrefixPostLostSignaledTail(/*posted=*/0, /*nWr=*/3));
