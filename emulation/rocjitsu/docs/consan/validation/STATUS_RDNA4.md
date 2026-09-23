@@ -417,3 +417,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   clean sweep; each completed fault cell will be recorded separately.
   Review: `/home/benoit/workspace/consan-validation/rdna4-20260923/matmul-debug/fp8-inventory.txt`.
 - `pytorch-rdna4-split-softmax` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round10/pytorch-rdna4-split-softmax-default`.
+- `pytorch-rdna4-split-softmax` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round10/pytorch-rdna4-split-softmax-supercollider`.
