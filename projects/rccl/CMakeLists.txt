@@ -836,7 +836,6 @@ if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR)
     ${ROCSHMEM_SOURCE_DIR}/src/sdma/sdma_opcodes.h
     ${ROCSHMEM_SOURCE_DIR}/src/sdma/sdma_pkt_struct.h
     ${ROCSHMEM_SOURCE_DIR}/src/sdma/sdma_pkt_struct_mi4.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gin/log.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device/gin/anvil_sdma/sdma)
 endif()
 ## Optional: install LLVM bitcode artifacts when EMIT_LLVM_IR is enabled.

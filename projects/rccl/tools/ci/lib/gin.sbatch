@@ -125,7 +125,7 @@ rm -rf "${rccl_prefix}"
   MPI_PATH="${MPI_HOME}" ./install.sh -j "${build_jobs}" \
     --amdgpu_targets="${gpu_targets}" \
     --prefix="${rccl_prefix}" \
-    --rocshmem-gin --no_clean --tests_build \
+    --rocshmem-gin --no_clean \
     --cmake-options "-DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
 )
 if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.so.1" ]]; then
@@ -134,14 +134,14 @@ if [[ ! -f "${rccl_prefix}/lib/librccl.so" && ! -f "${rccl_prefix}/lib/librccl.s
   exit 1
 fi
 
-echo "==> [4/7] build rccl-UnitTestsFixtures + GinSdmaBroadcastPolicy (GIN_ANVIL_UNIT_TESTS=ON)"
+echo "==> [4/7] build rccl-UnitTestsFixtures + GinSdmaBroadcastPolicy + GinAnvilSdmaFactory (GIN_ANVIL_UNIT_TESTS=ON)"
 (
   cd "${rccl_build}"
   cmake . \
     -DBUILD_TESTS=ON \
     -DGIN_ANVIL_UNIT_TESTS=ON \
     -DROCSHMEM_INSTALL_DIR="${ROCSHMEM_INSTALL_DIR}"
-  make -j"${build_jobs}" rccl-UnitTestsFixtures rccl-UnitTestsGinSdmaBroadcastPolicy
+  make -j"${build_jobs}" rccl-UnitTestsFixtures rccl-UnitTestsGinSdmaBroadcastPolicy rccl-UnitTestsGinAnvilSdmaFactory
 )
 if [[ ! -x "${rccl_fixtures_bin}" ]]; then
   echo "ERROR: rccl-UnitTestsFixtures not built at ${rccl_fixtures_bin}" >&2
@@ -228,13 +228,18 @@ if [[ "${build_rc}" -ne 0 ]]; then
   exit "${build_rc}"
 fi
 
-# --- unit test: SDMA factory gtest (single-node, no MPI needed). ---
-# Runs against the real librccl.so; HW-dependent tests auto-skip if probe fails.
-# Source rccl.env to get RCCL_INSTALL_PREFIX (set inside the build subshell).
+# Re-source env files written by the build subshell — ROCM_PATH,
+# ROCSHMEM_INSTALL_DIR, RCCL_INSTALL_PREFIX etc. don't survive the subshell.
 set -a
-# shellcheck source=/dev/null
-source "${workdir}/.ci-out/rccl.env"
+for _env in rocm ompi rocshmem rccl; do
+  _f="${workdir}/.ci-out/${_env}.env"
+  # shellcheck source=/dev/null
+  [[ -f "${_f}" ]] && source "${_f}"
+done
 set +a
+
+# --- unit test: SDMA factory gtest (single-node, no MPI needed). ---
+# Self-contained: compiles factory + anvil.cpp directly, no librccl.so link.
 echo "==> [6/7] run SDMA factory unit tests"
 sdma_factory_test="${rccl_build}/test/rccl-UnitTestsGinAnvilSdmaFactory"
 if [[ -x "${sdma_factory_test}" ]]; then

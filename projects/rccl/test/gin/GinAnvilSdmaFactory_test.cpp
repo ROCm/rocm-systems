@@ -56,8 +56,12 @@ class ScopedEnv {
 
 int mockAllgatherFail(void*, void*, size_t) { return -1; }
 
-int mockAllgatherLeaveInvalidPeer(void*, void* buf, size_t bytes_per_rank) {
-  const int nRanks = static_cast<int>(bytes_per_rank / sizeof(int));
+// Mock allgather callbacks receive nRanks via the context pointer (cast to
+// intptr_t). bytes_per_rank is the per-rank element size (sizeof(int)),
+// not the total buffer size — nRanks cannot be derived from it.
+
+int mockAllgatherLeaveInvalidPeer(void* ctx, void* buf, size_t) {
+  const int nRanks = static_cast<int>(reinterpret_cast<intptr_t>(ctx));
   auto* devs = static_cast<int*>(buf);
   for (int i = 0; i < nRanks; ++i) {
     if (i == 1) devs[i] = -1;
@@ -65,8 +69,8 @@ int mockAllgatherLeaveInvalidPeer(void*, void* buf, size_t bytes_per_rank) {
   return 0;
 }
 
-int mockAllgatherFillDevices(void*, void* buf, size_t bytes_per_rank) {
-  const int nRanks = static_cast<int>(bytes_per_rank / sizeof(int));
+int mockAllgatherFillDevices(void* ctx, void* buf, size_t) {
+  const int nRanks = static_cast<int>(reinterpret_cast<intptr_t>(ctx));
   auto* devs = static_cast<int*>(buf);
   for (int i = 0; i < nRanks; ++i) {
     if (devs[i] < 0) devs[i] = i;
@@ -80,9 +84,11 @@ struct CreateOut {
   uint64_t* sdma_dirty{nullptr};
 };
 
+void* mockCtx(int nRanks) { return reinterpret_cast<void*>(static_cast<intptr_t>(nRanks)); }
+
 int tryCreate(int nRanks, int myRank, int deviceId, int (*allgather)(void*, void*, size_t),
-              void* allgather_ctx, int num_channels, CreateOut* out) {
-  return gin_anvil_sdma_create(nRanks, myRank, deviceId, allgather, allgather_ctx, num_channels,
+              int num_channels, CreateOut* out) {
+  return gin_anvil_sdma_create(nRanks, myRank, deviceId, allgather, mockCtx(nRanks), num_channels,
                                &out->handle, &out->gpu_handles, &out->sdma_dirty);
 }
 
@@ -97,10 +103,10 @@ class GinAnvilSdmaFactoryTest : public ::testing::Test {
  protected:
   void SetUp() override {
     int ndev = 0;
-    ASSERT_EQ(hipGetDeviceCount(&ndev), hipSuccess);
-    if (ndev > 0) {
-      ASSERT_EQ(hipSetDevice(0), hipSuccess);
-    }
+    hipError_t err = hipGetDeviceCount(&ndev);
+    if (err == hipErrorNoDevice || ndev < 1) return;
+    ASSERT_EQ(err, hipSuccess);
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
   }
 };
 
@@ -119,38 +125,38 @@ TEST_F(GinAnvilSdmaFactoryTest, Probe_ReturnsZeroOrOne) {
 // F2: null / invalid output and rank arguments.
 TEST_F(GinAnvilSdmaFactoryTest, Create_NullOutParams) {
   CreateOut out{};
-  EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, mockAllgatherFillDevices, nullptr, 1,
+  EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, mockAllgatherFillDevices, mockCtx(1), 1,
                                   nullptr, &out.gpu_handles, &out.sdma_dirty),
             -1);
-  EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, mockAllgatherFillDevices, nullptr, 1, &out.handle,
+  EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, mockAllgatherFillDevices, mockCtx(1), 1, &out.handle,
                                   nullptr, &out.sdma_dirty),
             -1);
-  EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, mockAllgatherFillDevices, nullptr, 1, &out.handle,
+  EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, mockAllgatherFillDevices, mockCtx(1), 1, &out.handle,
                                   &out.gpu_handles, nullptr),
             -1);
-  EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, nullptr, nullptr, 1, &out.handle, &out.gpu_handles,
+  EXPECT_EQ(gin_anvil_sdma_create(1, 0, 0, nullptr, mockCtx(1), 1, &out.handle, &out.gpu_handles,
                                   &out.sdma_dirty),
             -1);
 }
 
 TEST_F(GinAnvilSdmaFactoryTest, Create_InvalidRankArgs) {
   CreateOut out{};
-  EXPECT_EQ(tryCreate(0, 0, 0, mockAllgatherFillDevices, nullptr, 1, &out), -1);
-  EXPECT_EQ(tryCreate(2, -1, 0, mockAllgatherFillDevices, nullptr, 1, &out), -1);
-  EXPECT_EQ(tryCreate(2, 2, 0, mockAllgatherFillDevices, nullptr, 1, &out), -1);
+  EXPECT_EQ(tryCreate(0, 0, 0, mockAllgatherFillDevices, 1, &out), -1);
+  EXPECT_EQ(tryCreate(2, -1, 0, mockAllgatherFillDevices, 1, &out), -1);
+  EXPECT_EQ(tryCreate(2, 2, 0, mockAllgatherFillDevices, 1, &out), -1);
 }
 
 // F3: allgather failure.
 TEST_F(GinAnvilSdmaFactoryTest, Create_AllgatherFail) {
   CreateOut out{};
-  EXPECT_EQ(tryCreate(2, 0, 0, mockAllgatherFail, nullptr, 1, &out), -1);
+  EXPECT_EQ(tryCreate(2, 0, 0, mockAllgatherFail, 1, &out), -1);
   EXPECT_EQ(out.handle, nullptr);
 }
 
 // F4: post-allgather invalid device id.
 TEST_F(GinAnvilSdmaFactoryTest, Create_InvalidPeerDev) {
   CreateOut out{};
-  EXPECT_EQ(tryCreate(2, 0, 0, mockAllgatherLeaveInvalidPeer, nullptr, 1, &out), -1);
+  EXPECT_EQ(tryCreate(2, 0, 0, mockAllgatherLeaveInvalidPeer, 1, &out), -1);
   EXPECT_EQ(out.handle, nullptr);
 }
 
@@ -161,7 +167,7 @@ TEST_F(GinAnvilSdmaFactoryTest, Create_Success_1Rank) {
   }
 
   CreateOut out{};
-  ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, nullptr, 1, &out), 0);
+  ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, 1, &out), 0);
   EXPECT_NE(out.handle, nullptr);
   EXPECT_NE(out.gpu_handles, nullptr);
   EXPECT_NE(out.sdma_dirty, nullptr);
@@ -184,11 +190,11 @@ TEST_F(GinAnvilSdmaFactoryTest, Create_NumChannelsClamp) {
   }
 
   CreateOut out{};
-  ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, nullptr, 0, &out), 0);
+  ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, 0, &out), 0);
   EXPECT_EQ(gin_anvil_sdma_get_num_channels(out.handle), 1);
   destroyOut(&out);
 
-  ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, nullptr, 99, &out), 0);
+  ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, 99, &out), 0);
   EXPECT_EQ(gin_anvil_sdma_get_num_channels(out.handle), 8);
   destroyOut(&out);
 }
@@ -201,7 +207,7 @@ TEST_F(GinAnvilSdmaFactoryTest, SpreadChannels_Env) {
   {
     ScopedEnv spread("NCCL_GIN_ANVIL_SDMA_SPREAD_CHANNELS", "0");
     CreateOut out{};
-    ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, nullptr, 1, &out), 0);
+    ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, 1, &out), 0);
     EXPECT_EQ(gin_anvil_sdma_get_channel_stride(out.handle), 0);
     destroyOut(&out);
   }
@@ -209,17 +215,16 @@ TEST_F(GinAnvilSdmaFactoryTest, SpreadChannels_Env) {
   {
     ScopedEnv spread("NCCL_GIN_ANVIL_SDMA_SPREAD_CHANNELS", "1");
     CreateOut out{};
-    ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, nullptr, 1, &out), 0);
+    ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, 1, &out), 0);
     EXPECT_EQ(gin_anvil_sdma_get_channel_stride(out.handle), 1);
     destroyOut(&out);
   }
 
   unsetenv("NCCL_GIN_ANVIL_SDMA_SPREAD_CHANNELS");
   CreateOut outDefault{};
-  if (tryCreate(1, 0, 0, mockAllgatherFillDevices, nullptr, 1, &outDefault) == 0) {
-    EXPECT_EQ(gin_anvil_sdma_get_channel_stride(outDefault.handle), 1);
-    destroyOut(&outDefault);
-  }
+  ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, 1, &outDefault), 0);
+  EXPECT_EQ(gin_anvil_sdma_get_channel_stride(outDefault.handle), 1);
+  destroyOut(&outDefault);
 }
 
 // F8: destroy null and valid.
@@ -229,7 +234,7 @@ TEST_F(GinAnvilSdmaFactoryTest, Destroy_NullAndValid) {
     GTEST_SKIP() << "Anvil SDMA probe failed";
   }
   CreateOut out{};
-  ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, nullptr, 1, &out), 0);
+  ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, 1, &out), 0);
   destroyOut(&out);
 }
 
@@ -249,7 +254,7 @@ TEST_F(GinAnvilSdmaFactoryTest, Create_MultiChannel) {
   }
 
   CreateOut out{};
-  ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, nullptr, 4, &out), 0);
+  ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, 4, &out), 0);
   EXPECT_EQ(gin_anvil_sdma_get_n_ranks(out.handle), 1);
   EXPECT_EQ(gin_anvil_sdma_get_num_channels(out.handle), 4);
   EXPECT_GE(gin_anvil_sdma_get_channel_stride(out.handle), 0);
@@ -266,7 +271,7 @@ TEST_F(GinAnvilSdmaFactoryTest, SpreadChannels_EnvAtoi) {
   {
     ScopedEnv spread("NCCL_GIN_ANVIL_SDMA_SPREAD_CHANNELS", "2");
     CreateOut out{};
-    ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, nullptr, 1, &out), 0);
+    ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, 1, &out), 0);
     EXPECT_EQ(gin_anvil_sdma_get_channel_stride(out.handle), 1);
     destroyOut(&out);
   }
@@ -274,7 +279,7 @@ TEST_F(GinAnvilSdmaFactoryTest, SpreadChannels_EnvAtoi) {
   {
     ScopedEnv spread("NCCL_GIN_ANVIL_SDMA_SPREAD_CHANNELS", "x");
     CreateOut out{};
-    ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, nullptr, 1, &out), 0);
+    ASSERT_EQ(tryCreate(1, 0, 0, mockAllgatherFillDevices, 1, &out), 0);
     EXPECT_EQ(gin_anvil_sdma_get_channel_stride(out.handle), 0);
     destroyOut(&out);
   }
