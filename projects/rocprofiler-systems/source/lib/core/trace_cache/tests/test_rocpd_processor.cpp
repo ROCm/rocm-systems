@@ -1,8 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// NOLINTBEGIN(readability-function-cognitive-complexity, readability-function-size)
-
 #include "core/agent.hpp"
 #include "core/agent_manager.hpp"
 #include "core/common_types.hpp"
@@ -101,6 +99,16 @@ struct scoped_force_rocpd_metadata_registration
         rocprofsys::trace_cache::detail::set_force_rocpd_metadata_registration_for_tests(
             false);
     }
+};
+
+struct scoped_restore_output_path
+{
+    explicit scoped_restore_output_path(std::string previous)
+    : m_previous{ std::move(previous) }
+    {}
+    ~scoped_restore_output_path() { tim::settings::output_path() = m_previous; }
+
+    std::string m_previous;
 };
 
 // rocprof-sys-unit-tests does not link library/thread_info.cpp (see
@@ -501,50 +509,428 @@ protected:
         return std::nullopt;
     }
 
-    void expect_memory_alloc(
-        const std::function<void(const profiler_hub::reader_types::memory_alloc_data_t&)>&
-            check) const
+    struct kernel_dispatch_expect
     {
-        const auto event = require_optional(
-            find_first_event(profiler_hub::reader_types::event_type_t::memory_allocate),
-            "memory_allocate event not found in read-back");
-        check(require_optional(m_reader->get_memory_alloc_details(event),
-                               "memory_allocate detail not readable"));
+        std::uint64_t start_timestamp   = 0;
+        std::uint64_t end_timestamp     = 0;
+        std::uint64_t dispatch_id       = 0;
+        std::uint64_t workgroup_size_x  = 0;
+        std::uint64_t workgroup_size_y  = 1;
+        std::uint64_t workgroup_size_z  = 1;
+        std::uint64_t grid_size_x       = 0;
+        std::uint64_t grid_size_y       = 1;
+        std::uint64_t grid_size_z       = 1;
+        const char*   name              = nullptr;
+        bool          check_dispatch_id = false;
+    };
+
+    void expect_kernel_dispatch_name_and_times(
+        const profiler_hub::reader_types::kernel_dispatch_data_t& detail,
+        const kernel_dispatch_expect&                             expected) const
+    {
+        EXPECT_EQ(detail.start_timestamp, expected.start_timestamp);
+        EXPECT_EQ(detail.end_timestamp, expected.end_timestamp);
+        if(expected.name != nullptr)
+        {
+            EXPECT_EQ(detail.name, expected.name);
+        }
     }
 
-    void expect_region(
-        const std::function<void(const profiler_hub::reader_types::region_data_t&,
-                                 const profiler_hub::reader_types::timeline_event_t&)>&
-            check) const
+    void expect_kernel_dispatch_id(
+        const profiler_hub::reader_types::kernel_dispatch_data_t& detail,
+        const kernel_dispatch_expect&                             expected) const
     {
-        const auto event = require_optional(
-            find_first_event(profiler_hub::reader_types::event_type_t::region),
-            "region event not found in read-back");
-        check(require_optional(m_reader->get_region_details(event),
-                               "region detail not readable"),
-              event);
+        if(expected.check_dispatch_id)
+        {
+            EXPECT_EQ(detail.dispatch_id, expected.dispatch_id);
+        }
     }
 
-    void expect_kernel_dispatch(
-        const std::function<
-            void(const profiler_hub::reader_types::kernel_dispatch_data_t&)>& check) const
+    void expect_kernel_dispatch_workgroup(
+        const profiler_hub::reader_types::kernel_dispatch_data_t& detail,
+        const kernel_dispatch_expect&                             expected) const
+    {
+        EXPECT_EQ(detail.workgroup_size_x, expected.workgroup_size_x);
+        EXPECT_EQ(detail.workgroup_size_y, expected.workgroup_size_y);
+        EXPECT_EQ(detail.workgroup_size_z, expected.workgroup_size_z);
+    }
+
+    void expect_kernel_dispatch_grid(
+        const profiler_hub::reader_types::kernel_dispatch_data_t& detail,
+        const kernel_dispatch_expect&                             expected) const
+    {
+        EXPECT_EQ(detail.grid_size_x, expected.grid_size_x);
+        EXPECT_EQ(detail.grid_size_y, expected.grid_size_y);
+        EXPECT_EQ(detail.grid_size_z, expected.grid_size_z);
+    }
+
+    void expect_kernel_dispatch_matches(const kernel_dispatch_expect& expected) const
     {
         const auto event = require_optional(
             find_first_event(profiler_hub::reader_types::event_type_t::kernel_dispatch),
             "kernel_dispatch event not found in read-back");
-        check(require_optional(m_reader->get_kernel_dispatch_details(event),
-                               "kernel dispatch detail not readable"));
+        const auto detail = require_optional(m_reader->get_kernel_dispatch_details(event),
+                                             "kernel dispatch detail not readable");
+        expect_kernel_dispatch_name_and_times(detail, expected);
+        expect_kernel_dispatch_id(detail, expected);
+        expect_kernel_dispatch_workgroup(detail, expected);
+        expect_kernel_dispatch_grid(detail, expected);
     }
 
-    void expect_memory_copy(
-        const std::function<void(const profiler_hub::reader_types::memory_copy_data_t&)>&
-            check) const
+    struct memory_copy_expect
+    {
+        std::uint64_t start_timestamp = 0;
+        std::uint64_t end_timestamp   = 0;
+        std::uint64_t size            = 0;
+        std::uint64_t dst_address     = 0;
+        std::uint64_t src_address     = 0;
+        const char*   name            = "MEMORY_COPY_HOST_TO_DEVICE";
+        const char*   dst_agent_type  = "GPU";
+        const char*   src_agent_type  = "CPU";
+        bool          check_agents    = true;
+    };
+
+    void expect_memory_copy_core(
+        const profiler_hub::reader_types::memory_copy_data_t& detail,
+        const memory_copy_expect&                             expected) const
+    {
+        EXPECT_EQ(detail.start_timestamp, expected.start_timestamp);
+        EXPECT_EQ(detail.end_timestamp, expected.end_timestamp);
+        EXPECT_EQ(detail.size, expected.size);
+        EXPECT_EQ(detail.name, expected.name);
+    }
+
+    void expect_memory_copy_addresses(
+        const profiler_hub::reader_types::memory_copy_data_t& detail,
+        const memory_copy_expect&                             expected) const
+    {
+        EXPECT_EQ(require_optional(detail.dst_address, "dst_address missing"),
+                  expected.dst_address);
+        EXPECT_EQ(require_optional(detail.src_address, "src_address missing"),
+                  expected.src_address);
+    }
+
+    void expect_memory_copy_agent_types(
+        const profiler_hub::reader_types::memory_copy_data_t& detail,
+        const memory_copy_expect&                             expected) const
+    {
+        ASSERT_NE(detail.dst_agent_id, nullptr);
+        EXPECT_EQ(detail.dst_agent_id->agent_type, expected.dst_agent_type);
+        ASSERT_NE(detail.src_agent_id, nullptr);
+        EXPECT_EQ(detail.src_agent_id->agent_type, expected.src_agent_type);
+    }
+
+    void expect_memory_copy_matches(const memory_copy_expect& expected) const
     {
         const auto event = require_optional(
             find_first_event(profiler_hub::reader_types::event_type_t::memory_copy),
             "memory_copy event not found in read-back");
-        check(require_optional(m_reader->get_memory_copy_details(event),
-                               "memory_copy detail not readable"));
+        const auto detail = require_optional(m_reader->get_memory_copy_details(event),
+                                             "memory_copy detail not readable");
+        expect_memory_copy_core(detail, expected);
+        expect_memory_copy_addresses(detail, expected);
+        if(expected.check_agents)
+        {
+            expect_memory_copy_agent_types(detail, expected);
+        }
+    }
+
+    struct memory_alloc_expect
+    {
+        std::uint64_t           start_timestamp = 0;
+        std::uint64_t           end_timestamp   = 0;
+        std::uint64_t           size            = 0;
+        const char*             type            = "ALLOC";
+        const char*             level           = "SCRATCH";
+        std::optional<uint64_t> address         = std::nullopt;
+    };
+
+    void expect_memory_alloc_core(
+        const profiler_hub::reader_types::memory_alloc_data_t& detail,
+        const memory_alloc_expect&                             expected) const
+    {
+        EXPECT_EQ(detail.start_timestamp, expected.start_timestamp);
+        EXPECT_EQ(detail.end_timestamp, expected.end_timestamp);
+        EXPECT_EQ(detail.type, expected.type);
+        EXPECT_EQ(detail.level, expected.level);
+        EXPECT_EQ(detail.size, expected.size);
+    }
+
+    void expect_memory_alloc_address(
+        const profiler_hub::reader_types::memory_alloc_data_t& detail,
+        const memory_alloc_expect&                             expected) const
+    {
+        if(expected.address.has_value())
+        {
+            EXPECT_EQ(require_optional(detail.address, "address missing"),
+                      *expected.address);
+        }
+    }
+
+    void expect_memory_alloc_matches(const memory_alloc_expect& expected) const
+    {
+        const auto event = require_optional(
+            find_first_event(profiler_hub::reader_types::event_type_t::memory_allocate),
+            "memory_allocate event not found in read-back");
+        const auto detail = require_optional(m_reader->get_memory_alloc_details(event),
+                                             "memory_allocate detail not readable");
+        expect_memory_alloc_core(detail, expected);
+        expect_memory_alloc_address(detail, expected);
+    }
+
+    struct region_expect
+    {
+        std::uint64_t start_timestamp = 0;
+        std::uint64_t end_timestamp   = 0;
+        const char*   name            = nullptr;
+        const char*   event_category  = nullptr;
+        bool          check_category  = false;
+    };
+
+    struct region_arg_expect
+    {
+        const char*   type                = nullptr;
+        const char*   name                = nullptr;
+        const char*   value               = nullptr;
+        std::uint32_t position            = 0;
+        bool          check_type_position = false;
+    };
+
+    void expect_region_times_and_name(
+        const profiler_hub::reader_types::region_data_t& detail,
+        const region_expect&                             expected) const
+    {
+        EXPECT_EQ(detail.start_timestamp, expected.start_timestamp);
+        EXPECT_EQ(detail.end_timestamp, expected.end_timestamp);
+        EXPECT_EQ(detail.name, expected.name);
+    }
+
+    void expect_region_category(const profiler_hub::reader_types::region_data_t& detail,
+                                const region_expect& expected) const
+    {
+        if(expected.check_category)
+        {
+            ASSERT_NE(detail.event, nullptr);
+            EXPECT_EQ(detail.event->event_category, expected.event_category);
+        }
+    }
+
+    void expect_region_core(const profiler_hub::reader_types::region_data_t& detail,
+                            const region_expect& expected) const
+    {
+        expect_region_times_and_name(detail, expected);
+        expect_region_category(detail, expected);
+    }
+
+    void expect_region_matches(const region_expect& expected) const
+    {
+        const auto event = require_optional(
+            find_first_event(profiler_hub::reader_types::event_type_t::region),
+            "region event not found in read-back");
+        const auto detail = require_optional(m_reader->get_region_details(event),
+                                             "region detail not readable");
+        expect_region_core(detail, expected);
+    }
+
+    void expect_argument_name_value(
+        const profiler_hub::reader_types::timeline_event_t& tl_event, size_t index,
+        const region_arg_expect& expected) const
+    {
+        const auto args = m_reader->get_arguments(tl_event);
+        ASSERT_GT(args.size(), index);
+        EXPECT_EQ(args[index]->name, expected.name);
+        EXPECT_EQ(args[index]->value, expected.value);
+    }
+
+    void expect_argument_type_position(
+        const profiler_hub::reader_types::timeline_event_t& tl_event, size_t index,
+        const region_arg_expect& expected) const
+    {
+        if(!expected.check_type_position)
+        {
+            return;
+        }
+        const auto args = m_reader->get_arguments(tl_event);
+        ASSERT_GT(args.size(), index);
+        EXPECT_EQ(args[index]->position, expected.position);
+        EXPECT_EQ(args[index]->type, expected.type);
+    }
+
+    void expect_one_argument(const profiler_hub::reader_types::timeline_event_t& tl_event,
+                             size_t index, const region_arg_expect& expected) const
+    {
+        expect_argument_name_value(tl_event, index, expected);
+        expect_argument_type_position(tl_event, index, expected);
+    }
+
+    void expect_region_with_two_args(const region_expect&     expected,
+                                     const region_arg_expect& arg0,
+                                     const region_arg_expect& arg1) const
+    {
+        const auto event = require_optional(
+            find_first_event(profiler_hub::reader_types::event_type_t::region),
+            "region event not found in read-back");
+        const auto detail = require_optional(m_reader->get_region_details(event),
+                                             "region detail not readable");
+        expect_region_core(detail, expected);
+        ASSERT_EQ(m_reader->get_arguments(event).size(), 2U);
+        expect_one_argument(event, 0, arg0);
+        expect_one_argument(event, 1, arg1);
+    }
+
+    void expect_region_with_call_stack(const region_expect& expected) const
+    {
+        const auto event = require_optional(
+            find_first_event(profiler_hub::reader_types::event_type_t::region),
+            "region event not found in read-back");
+        const auto detail = require_optional(m_reader->get_region_details(event),
+                                             "region detail not readable");
+        expect_region_core(detail, expected);
+        EXPECT_FALSE(m_reader->get_call_stack(event).empty());
+    }
+
+    void expect_event_type_count(profiler_hub::reader_types::event_type_t type,
+                                 size_t                                   expected) const
+    {
+        auto counts = m_reader->get_event_counts();
+        auto it     = counts.find(type);
+        ASSERT_NE(it, counts.end());
+        EXPECT_EQ(it->second, expected);
+    }
+
+    void expect_region_times_by_name(const char* name, std::uint64_t start_ts,
+                                     std::uint64_t end_ts) const
+    {
+        for(const auto& tl_event : m_reader->get_events())
+        {
+            if(tl_event.unique_identifier.type !=
+               profiler_hub::reader_types::event_type_t::region)
+            {
+                continue;
+            }
+            const auto detail = require_optional(m_reader->get_region_details(tl_event),
+                                                 "region detail not readable");
+            if(detail.name != name)
+            {
+                continue;
+            }
+            EXPECT_EQ(detail.start_timestamp, start_ts);
+            EXPECT_EQ(detail.end_timestamp, end_ts);
+            return;
+        }
+        FAIL() << "region not found: " << name;
+    }
+
+    struct kernel_summary_expect
+    {
+        const char*   name        = nullptr;
+        std::uint64_t start_ts    = 0;
+        std::uint64_t end_ts      = 0;
+        std::uint64_t workgroup_x = 0;
+        std::uint64_t grid_x      = 0;
+    };
+
+    void expect_kernel_summary_name_and_times(
+        const profiler_hub::reader_types::kernel_dispatch_data_t& detail,
+        const kernel_summary_expect&                              expected) const
+    {
+        EXPECT_EQ(detail.name, expected.name);
+        EXPECT_EQ(detail.start_timestamp, expected.start_ts);
+        EXPECT_EQ(detail.end_timestamp, expected.end_ts);
+    }
+
+    void expect_kernel_summary_sizes(
+        const profiler_hub::reader_types::kernel_dispatch_data_t& detail,
+        const kernel_summary_expect&                              expected) const
+    {
+        EXPECT_EQ(detail.workgroup_size_x, expected.workgroup_x);
+        EXPECT_EQ(detail.grid_size_x, expected.grid_x);
+    }
+
+    void expect_kernel_summary_fields(
+        const profiler_hub::reader_types::kernel_dispatch_data_t& detail,
+        const kernel_summary_expect&                              expected) const
+    {
+        expect_kernel_summary_name_and_times(detail, expected);
+        expect_kernel_summary_sizes(detail, expected);
+    }
+
+    void expect_first_kernel_summary(const kernel_summary_expect& expected) const
+    {
+        for(const auto& tl_event : m_reader->get_events())
+        {
+            if(tl_event.unique_identifier.type !=
+               profiler_hub::reader_types::event_type_t::kernel_dispatch)
+            {
+                continue;
+            }
+            const auto detail =
+                require_optional(m_reader->get_kernel_dispatch_details(tl_event),
+                                 "kernel dispatch detail not readable");
+            expect_kernel_summary_fields(detail, expected);
+            return;
+        }
+        FAIL() << "kernel_dispatch event not found";
+    }
+
+    void expect_metadata_nodes() const
+    {
+        const auto& host_node = rocprofsys::node_info::get_instance();
+        const auto  nodes     = m_reader->get_all_nodes();
+        ASSERT_GE(nodes.size(), 1U);
+        EXPECT_EQ(nodes[0]->system_name, host_node.system_name);
+        EXPECT_EQ(nodes[0]->hostname, host_node.node_name);
+    }
+
+    void expect_metadata_process_ids() const
+    {
+        auto processes = m_reader->get_all_processes();
+        ASSERT_EQ(processes.size(), 1U);
+        EXPECT_EQ(processes[0]->pid, k_pid);
+        EXPECT_EQ(processes[0]->ppid, k_ppid);
+    }
+
+    void expect_metadata_process_command_and_times() const
+    {
+        auto processes = m_reader->get_all_processes();
+        ASSERT_EQ(processes.size(), 1U);
+        EXPECT_EQ(processes[0]->command, "test_binary");
+        EXPECT_EQ(processes[0]->start, k_process_start);
+        EXPECT_EQ(processes[0]->end, k_process_end);
+    }
+
+    void expect_metadata_process() const
+    {
+        expect_metadata_process_ids();
+        expect_metadata_process_command_and_times();
+    }
+
+    void expect_metadata_thread() const
+    {
+        auto threads = m_reader->get_all_threads();
+        ASSERT_EQ(threads.size(), 1U);
+        EXPECT_EQ(threads[0]->thread_id, k_thread_id);
+        EXPECT_EQ(threads[0]->name, "Thread 300");
+        EXPECT_EQ(threads[0]->start, k_process_start);
+        EXPECT_EQ(threads[0]->end, k_process_end);
+    }
+
+    void expect_metadata_queues_and_streams() const
+    {
+        ASSERT_EQ(m_reader->get_all_queues().size(), 2U);
+        expect_readback_queue_named("Queue 0");
+        expect_readback_queue_named("Queue 10");
+        ASSERT_EQ(m_reader->get_all_streams().size(), 1U);
+        expect_readback_stream_named("Stream 20");
+    }
+
+    void expect_gpu_agent_mi210() const
+    {
+        expect_readback_agent_fields({ .agent_type   = "GPU",
+                                       .name         = "gfx90a",
+                                       .model_name   = "MI210",
+                                       .vendor_name  = "AMD",
+                                       .product_name = "Instinct MI210" });
     }
 
     // Drive the production path: agent_manager →
@@ -601,12 +987,7 @@ protected:
         std::filesystem::create_directories(out_dir);
         tim::settings::output_path() = out_dir.string();
         rocprofsys::reset_database_path_memo();
-
-        struct restore_output_path
-        {
-            std::string prev_out;
-            ~restore_output_path() { tim::settings::output_path() = prev_out; }
-        } const restore_out{ prev_out };
+        const scoped_restore_output_path restore_out{ prev_out };
 
         auto metadata = make_seeded_metadata(metadata_setup);
         auto mgr      = std::make_shared<agent_manager>();
@@ -886,21 +1267,9 @@ TEST_F(rocpd_write_read_test_interface, nic_pmc_info_invalid_target_arch_rejecte
     std::filesystem::create_directories(out_dir);
     tim::settings::output_path() = out_dir.string();
     rocprofsys::reset_database_path_memo();
-    struct restore_out_path
-    {
-        std::string prev;
-        ~restore_out_path() { tim::settings::output_path() = prev; }
-    } const restore_out{ prev_out };
+    const scoped_restore_output_path restore_out{ prev_out };
 
-    auto metadata = std::make_shared<metadata_registry>();
-    rocprofsys::trace_cache::info::process proc{};
-    proc.pid     = static_cast<pid_t>(k_pid);
-    proc.ppid    = static_cast<pid_t>(k_ppid);
-    proc.command = "test_binary";
-    proc.start   = k_process_start;
-    proc.end     = k_process_end;
-    metadata->set_process(proc);
-
+    auto metadata       = make_seeded_metadata({});
     auto bad_pmc        = make_nic_metadata_pmc(k_nic_pmcs[0]);
     bad_pmc.target_arch = "AINIC";
     metadata->add_pmc_info(bad_pmc);
@@ -913,7 +1282,6 @@ TEST_F(rocpd_write_read_test_interface, nic_pmc_info_invalid_target_arch_rejecte
     rocpd_processor_t    processor{ metadata, mgr, static_cast<int>(k_pid),
                                  static_cast<int>(k_ppid), registry };
 
-    // Validate: prepare_for_processing rejects invalid target_arch (no rocpd DB).
     EXPECT_THROW(processor.prepare_for_processing(), std::invalid_argument);
     EXPECT_TRUE(find_rocpd_database_in_directory(out_dir).empty())
         << "invalid PMC metadata must not create a rocpd database";
@@ -952,7 +1320,6 @@ TEST_F(rocpd_write_read_test_interface, gpu_and_nic_pmc_keep_distinct_target_arc
 
 TEST_F(rocpd_write_read_test_interface, kernel_dispatch_values_persisted)
 {
-    // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
     static constexpr std::uint64_t k_start_ts         = 5000;
     static constexpr std::uint64_t k_end_ts           = 6000;
     static constexpr std::uint64_t k_dispatch_id      = 42;
@@ -987,20 +1354,13 @@ TEST_F(rocpd_write_read_test_interface, kernel_dispatch_values_persisted)
             processor.handle(kds);
         });
 
-    // Validate: profiler_hub::reader_t read-back matches inserted values.
-    expect_kernel_dispatch([](const auto& detail) {
-        EXPECT_EQ(detail.start_timestamp, k_start_ts);
-        EXPECT_EQ(detail.end_timestamp, k_end_ts);
-        EXPECT_EQ(detail.dispatch_id, k_dispatch_id);
-        EXPECT_EQ(detail.workgroup_size_x, k_workgroup_size_x);
-        EXPECT_EQ(detail.workgroup_size_y, 1U);
-        EXPECT_EQ(detail.workgroup_size_z, 1U);
-        EXPECT_EQ(detail.grid_size_x, k_grid_size_x);
-        EXPECT_EQ(detail.grid_size_y, 1U);
-        EXPECT_EQ(detail.grid_size_z, 1U);
-        EXPECT_EQ(detail.name, "my_test_kernel");
-    });
-
+    expect_kernel_dispatch_matches({ .start_timestamp   = k_start_ts,
+                                     .end_timestamp     = k_end_ts,
+                                     .dispatch_id       = k_dispatch_id,
+                                     .workgroup_size_x  = k_workgroup_size_x,
+                                     .grid_size_x       = k_grid_size_x,
+                                     .name              = "my_test_kernel",
+                                     .check_dispatch_id = true });
     expect_readback_queue_named("Queue 10");
     expect_readback_stream_named("Stream 20");
     EXPECT_EQ(
@@ -1014,7 +1374,6 @@ TEST_F(rocpd_write_read_test_interface, kernel_dispatch_values_persisted)
 
 TEST_F(rocpd_write_read_test_interface, region_with_args_values_persisted)
 {
-    // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
     static constexpr std::uint64_t k_start_ts = 5000;
     static constexpr std::uint64_t k_end_ts   = 5200;
     const auto                     region_args =
@@ -1032,25 +1391,21 @@ TEST_F(rocpd_write_read_test_interface, region_with_args_values_persisted)
         processor.handle(reg);
     });
 
-    // Validate: profiler_hub::reader_t read-back matches inserted values.
-    expect_region([this](const auto& detail, const auto& tl_event) {
-        EXPECT_EQ(detail.start_timestamp, k_start_ts);
-        EXPECT_EQ(detail.end_timestamp, k_end_ts);
-        EXPECT_EQ(detail.name, "hipMemcpy");
-        ASSERT_NE(detail.event, nullptr);
-        EXPECT_EQ(detail.event->event_category, "HIP_API");
-
-        const auto args = m_reader->get_arguments(tl_event);
-        ASSERT_EQ(args.size(), 2U);
-        EXPECT_EQ(args[0]->position, 0U);
-        EXPECT_EQ(args[0]->type, "void*");
-        EXPECT_EQ(args[0]->name, "dst");
-        EXPECT_EQ(args[0]->value, "0x7f0000000000");
-        EXPECT_EQ(args[1]->position, 1U);
-        EXPECT_EQ(args[1]->type, "size_t");
-        EXPECT_EQ(args[1]->name, "sizeBytes");
-        EXPECT_EQ(args[1]->value, "4096");
-    });
+    expect_region_with_two_args({ .start_timestamp = k_start_ts,
+                                  .end_timestamp   = k_end_ts,
+                                  .name            = "hipMemcpy",
+                                  .event_category  = "HIP_API",
+                                  .check_category  = true },
+                                { .type                = "void*",
+                                  .name                = "dst",
+                                  .value               = "0x7f0000000000",
+                                  .position            = 0U,
+                                  .check_type_position = true },
+                                { .type                = "size_t",
+                                  .name                = "sizeBytes",
+                                  .value               = "4096",
+                                  .position            = 1U,
+                                  .check_type_position = true });
 }
 
 // ---------------------------------------------------------------------------
@@ -1059,7 +1414,6 @@ TEST_F(rocpd_write_read_test_interface, region_with_args_values_persisted)
 
 TEST_F(rocpd_write_read_test_interface, memory_copy_values_persisted)
 {
-    // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
     static constexpr std::uint64_t k_start_ts    = 6500;
     static constexpr std::uint64_t k_end_ts      = 7000;
     static constexpr std::uint64_t k_copy_size   = 4096;
@@ -1090,21 +1444,11 @@ TEST_F(rocpd_write_read_test_interface, memory_copy_values_persisted)
             processor.handle(mcs);
         });
 
-    // Validate: profiler_hub::reader_t read-back matches inserted values.
-    expect_memory_copy([](const auto& detail) {
-        EXPECT_EQ(detail.start_timestamp, k_start_ts);
-        EXPECT_EQ(detail.end_timestamp, k_end_ts);
-        EXPECT_EQ(detail.size, k_copy_size);
-        EXPECT_EQ(detail.name, "MEMORY_COPY_HOST_TO_DEVICE");
-        EXPECT_EQ(require_optional(detail.dst_address, "dst_address missing"),
-                  k_dst_address);
-        EXPECT_EQ(require_optional(detail.src_address, "src_address missing"),
-                  k_src_address);
-        ASSERT_NE(detail.dst_agent_id, nullptr);
-        EXPECT_EQ(detail.dst_agent_id->agent_type, "GPU");
-        ASSERT_NE(detail.src_agent_id, nullptr);
-        EXPECT_EQ(detail.src_agent_id->agent_type, "CPU");
-    });
+    expect_memory_copy_matches({ .start_timestamp = k_start_ts,
+                                 .end_timestamp   = k_end_ts,
+                                 .size            = k_copy_size,
+                                 .dst_address     = k_dst_address,
+                                 .src_address     = k_src_address });
     expect_readback_stream_named("Stream 20");
 }
 
@@ -1114,7 +1458,6 @@ TEST_F(rocpd_write_read_test_interface, memory_copy_values_persisted)
 
 TEST_F(rocpd_write_read_test_interface, event_counts_match_inserted_data)
 {
-    // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
     static constexpr std::uint64_t k_region_base_start = 1000;
     static constexpr std::uint64_t k_region_base_end   = 1050;
     static constexpr std::uint64_t k_region_stride     = 100;
@@ -1170,51 +1513,17 @@ TEST_F(rocpd_write_read_test_interface, event_counts_match_inserted_data)
             processor.handle(kds);
         });
 
-    // Validate: profiler_hub::reader_t read-back matches inserted values.
-    auto counts = m_reader->get_event_counts();
-
-    auto region_it = counts.find(profiler_hub::reader_types::event_type_t::region);
-    ASSERT_NE(region_it, counts.end());
-    EXPECT_EQ(region_it->second, 2U);
-
-    auto kd_it = counts.find(profiler_hub::reader_types::event_type_t::kernel_dispatch);
-    ASSERT_NE(kd_it, counts.end());
-    EXPECT_EQ(kd_it->second, 1U);
-
-    std::unordered_map<std::string, std::pair<size_t, size_t>> region_times;
-    for(const auto& tl_event : m_reader->get_events())
-    {
-        if(tl_event.unique_identifier.type !=
-           profiler_hub::reader_types::event_type_t::region)
-        {
-            continue;
-        }
-        const auto detail = require_optional(m_reader->get_region_details(tl_event),
-                                             "region detail not readable");
-        region_times[detail.name] = { detail.start_timestamp, detail.end_timestamp };
-    }
-    ASSERT_EQ(region_times.size(), 2U);
-    EXPECT_EQ(region_times["region_0"].first, k_region_base_start);
-    EXPECT_EQ(region_times["region_0"].second, k_region_base_end);
-    EXPECT_EQ(region_times["region_1"].first, k_region_base_start + k_region_stride);
-    EXPECT_EQ(region_times["region_1"].second, k_region_base_end + k_region_stride);
-
-    for(const auto& tl_event : m_reader->get_events())
-    {
-        if(tl_event.unique_identifier.type !=
-           profiler_hub::reader_types::event_type_t::kernel_dispatch)
-        {
-            continue;
-        }
-        const auto detail =
-            require_optional(m_reader->get_kernel_dispatch_details(tl_event),
-                             "kernel dispatch detail not readable");
-        EXPECT_EQ(detail.name, "count_test_kernel");
-        EXPECT_EQ(detail.start_timestamp, k_kd_start_ts);
-        EXPECT_EQ(detail.end_timestamp, k_kd_end_ts);
-        EXPECT_EQ(detail.workgroup_size_x, k_workgroup_size_x);
-        EXPECT_EQ(detail.grid_size_x, k_grid_size_x);
-    }
+    expect_event_type_count(profiler_hub::reader_types::event_type_t::region, 2U);
+    expect_event_type_count(profiler_hub::reader_types::event_type_t::kernel_dispatch,
+                            1U);
+    expect_region_times_by_name("region_0", k_region_base_start, k_region_base_end);
+    expect_region_times_by_name("region_1", k_region_base_start + k_region_stride,
+                                k_region_base_end + k_region_stride);
+    expect_first_kernel_summary({ .name        = "count_test_kernel",
+                                  .start_ts    = k_kd_start_ts,
+                                  .end_ts      = k_kd_end_ts,
+                                  .workgroup_x = k_workgroup_size_x,
+                                  .grid_x      = k_grid_size_x });
 }
 
 // ---------------------------------------------------------------------------
@@ -1223,42 +1532,16 @@ TEST_F(rocpd_write_read_test_interface, event_counts_match_inserted_data)
 
 TEST_F(rocpd_write_read_test_interface, metadata_round_trip)
 {
-    // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
     run_processor_and_open_reader({},
                                   [](const std::shared_ptr<metadata_registry>& metadata) {
                                       seed_test_thread(metadata);
                                       seed_gpu_queue_stream(metadata);
                                   });
 
-    // Validate: profiler_hub::reader_t read-back matches inserted values.
-    const auto& host_node = rocprofsys::node_info::get_instance();
-    const auto  nodes     = m_reader->get_all_nodes();
-    ASSERT_GE(nodes.size(), 1U);
-    EXPECT_EQ(nodes[0]->system_name, host_node.system_name);
-    EXPECT_EQ(nodes[0]->hostname, host_node.node_name);
-
-    auto processes = m_reader->get_all_processes();
-    ASSERT_EQ(processes.size(), 1U);
-    EXPECT_EQ(processes[0]->pid, k_pid);
-    EXPECT_EQ(processes[0]->command, "test_binary");
-
-    auto threads = m_reader->get_all_threads();
-    ASSERT_EQ(threads.size(), 1U);
-    EXPECT_EQ(threads[0]->thread_id, k_thread_id);
-    EXPECT_EQ(threads[0]->name, "Thread 300");
-
-    ASSERT_EQ(m_reader->get_all_queues().size(), 2U);
-    expect_readback_queue_named("Queue 0");
-    expect_readback_queue_named("Queue 10");
-
-    ASSERT_EQ(m_reader->get_all_streams().size(), 1U);
-    expect_readback_stream_named("Stream 20");
-
-    EXPECT_EQ(processes[0]->ppid, k_ppid);
-    EXPECT_EQ(processes[0]->start, k_process_start);
-    EXPECT_EQ(processes[0]->end, k_process_end);
-    EXPECT_EQ(threads[0]->start, k_process_start);
-    EXPECT_EQ(threads[0]->end, k_process_end);
+    expect_metadata_nodes();
+    expect_metadata_process();
+    expect_metadata_thread();
+    expect_metadata_queues_and_streams();
 }
 
 // ---------------------------------------------------------------------------
@@ -1353,18 +1636,11 @@ TEST_F(rocpd_write_read_test_interface, handle_scratch_memory_pathway)
         });
 
     // Validate: profiler_hub::reader_t read-back matches inserted values.
-    expect_memory_alloc([](const auto& detail) {
-        EXPECT_EQ(detail.start_timestamp, k_start_ts);
-        EXPECT_EQ(detail.end_timestamp, k_end_ts);
-        EXPECT_EQ(detail.type, "ALLOC");
-        EXPECT_EQ(detail.level, "SCRATCH");
-        EXPECT_EQ(detail.size, k_alloc_size);
-    });
-    expect_readback_agent_fields({ .agent_type   = "GPU",
-                                   .name         = "gfx90a",
-                                   .model_name   = "MI210",
-                                   .vendor_name  = "AMD",
-                                   .product_name = "Instinct MI210" });
+    expect_memory_alloc_matches({ .start_timestamp = k_start_ts,
+                                  .end_timestamp   = k_end_ts,
+                                  .size            = k_alloc_size,
+                                  .level           = "SCRATCH" });
+    expect_gpu_agent_mi210();
 }
 
 // ---------------------------------------------------------------------------
@@ -1407,19 +1683,12 @@ TEST_F(rocpd_write_read_test_interface, handle_memory_allocate_pathway)
         });
 
     // Validate: profiler_hub::reader_t read-back matches inserted values.
-    expect_memory_alloc([](const auto& detail) {
-        EXPECT_EQ(detail.start_timestamp, k_start_ts);
-        EXPECT_EQ(detail.end_timestamp, k_end_ts);
-        EXPECT_EQ(detail.type, "ALLOC");
-        EXPECT_EQ(detail.level, "REAL");
-        EXPECT_EQ(detail.size, k_alloc_size);
-        EXPECT_EQ(require_optional(detail.address, "address missing"), k_address);
-    });
-    expect_readback_agent_fields({ .agent_type   = "GPU",
-                                   .name         = "gfx90a",
-                                   .model_name   = "MI210",
-                                   .vendor_name  = "AMD",
-                                   .product_name = "Instinct MI210" });
+    expect_memory_alloc_matches({ .start_timestamp = k_start_ts,
+                                  .end_timestamp   = k_end_ts,
+                                  .size            = k_alloc_size,
+                                  .level           = "REAL",
+                                  .address         = k_address });
+    expect_gpu_agent_mi210();
 #endif
 }
 
@@ -1450,13 +1719,11 @@ TEST_F(rocpd_write_read_test_interface, handle_backtrace_region_pathway)
         });
 
     // Validate: profiler_hub::reader_t read-back matches inserted values.
-    expect_region([](const auto& detail, const auto&) {
-        EXPECT_EQ(detail.start_timestamp, k_start_ts);
-        EXPECT_EQ(detail.end_timestamp, k_end_ts);
-        EXPECT_EQ(detail.name, "backtrace_sample_func");
-        ASSERT_NE(detail.event, nullptr);
-        EXPECT_EQ(detail.event->event_category, "sampling");
-    });
+    expect_region_matches({ .start_timestamp = k_start_ts,
+                            .end_timestamp   = k_end_ts,
+                            .name            = "backtrace_sample_func",
+                            .event_category  = "sampling",
+                            .check_category  = true });
     expect_reader_has_tracks({ "Sampling [CPU 0]" });
 }
 
@@ -1783,17 +2050,11 @@ TEST_F(rocpd_write_read_test_interface, handle_kfd_sample_pathway)
         });
 
     // Validate: profiler_hub::reader_t read-back matches inserted values.
-    expect_region([this](const auto& detail, const auto& tl_event) {
-        EXPECT_EQ(detail.start_timestamp, k_start_ts);
-        EXPECT_EQ(detail.end_timestamp, k_end_ts);
-        EXPECT_EQ(detail.name, "KFD_PAGE_FAULT");
-        const auto args = m_reader->get_arguments(tl_event);
-        ASSERT_EQ(args.size(), 2U);
-        EXPECT_EQ(args[0]->name, "address");
-        EXPECT_EQ(args[0]->value, "0x7f4a00001000");
-        EXPECT_EQ(args[1]->name, "agent");
-        EXPECT_EQ(args[1]->value, "5");
-    });
+    expect_region_with_two_args({ .start_timestamp = k_start_ts,
+                                  .end_timestamp   = k_end_ts,
+                                  .name            = "KFD_PAGE_FAULT" },
+                                { .name = "address", .value = "0x7f4a00001000" },
+                                { .name = "agent", .value = "5" });
 
     const auto pmc_infos = m_reader->get_all_pmc_info();
     ASSERT_EQ(pmc_infos.size(), 1U);
@@ -1918,25 +2179,24 @@ insert_multiple_event_type_samples(rocpd_processor_t&            processor,
 }
 
 void
-expect_multiple_event_type_counts(profiler_hub::reader_t& reader)
+expect_event_count(profiler_hub::reader_t&                  reader,
+                   profiler_hub::reader_types::event_type_t type, size_t expected)
 {
     auto counts = reader.get_event_counts();
+    auto it     = counts.find(type);
+    ASSERT_NE(it, counts.end());
+    EXPECT_EQ(it->second, expected);
+}
 
-    auto region_it = counts.find(profiler_hub::reader_types::event_type_t::region);
-    ASSERT_NE(region_it, counts.end());
-    EXPECT_EQ(region_it->second, 2U);
-
-    auto kd_it = counts.find(profiler_hub::reader_types::event_type_t::kernel_dispatch);
-    ASSERT_NE(kd_it, counts.end());
-    EXPECT_EQ(kd_it->second, 1U);
-
-    auto mc_it = counts.find(profiler_hub::reader_types::event_type_t::memory_copy);
-    ASSERT_NE(mc_it, counts.end());
-    EXPECT_EQ(mc_it->second, 1U);
-
-    auto ma_it = counts.find(profiler_hub::reader_types::event_type_t::memory_allocate);
-    ASSERT_NE(ma_it, counts.end());
-    EXPECT_EQ(ma_it->second, 1U);
+void
+expect_multiple_event_type_counts(profiler_hub::reader_t& reader)
+{
+    expect_event_count(reader, profiler_hub::reader_types::event_type_t::region, 2U);
+    expect_event_count(reader, profiler_hub::reader_types::event_type_t::kernel_dispatch,
+                       1U);
+    expect_event_count(reader, profiler_hub::reader_types::event_type_t::memory_copy, 1U);
+    expect_event_count(reader, profiler_hub::reader_types::event_type_t::memory_allocate,
+                       1U);
 }
 
 struct multi_event_saw_flags
@@ -1949,27 +2209,49 @@ struct multi_event_saw_flags
 };
 
 void
+expect_multi_db_hip_region(profiler_hub::reader_t&                             reader,
+                           const profiler_hub::reader_types::timeline_event_t& tl_event,
+                           const multi_event_timestamps&                       timestamps,
+                           multi_event_saw_flags&                              saw)
+{
+    const auto detail = require_optional(reader.get_region_details(tl_event),
+                                         "region detail not readable");
+    if(detail.name != "hipLaunchKernel")
+    {
+        return;
+    }
+    saw.hip_region = true;
+    EXPECT_EQ(detail.start_timestamp, timestamps.hip_start_ts);
+    EXPECT_EQ(detail.end_timestamp, timestamps.hip_end_ts);
+    ASSERT_NE(detail.event, nullptr);
+    EXPECT_EQ(detail.event->event_category, "HIP_API");
+}
+
+void
+expect_multi_db_bt_region(profiler_hub::reader_t&                             reader,
+                          const profiler_hub::reader_types::timeline_event_t& tl_event,
+                          const multi_event_timestamps&                       timestamps,
+                          multi_event_saw_flags&                              saw)
+{
+    const auto detail = require_optional(reader.get_region_details(tl_event),
+                                         "region detail not readable");
+    if(detail.name != "bt_func")
+    {
+        return;
+    }
+    saw.bt_region = true;
+    EXPECT_EQ(detail.start_timestamp, timestamps.bt_start_ts);
+    EXPECT_EQ(detail.end_timestamp, timestamps.bt_end_ts);
+}
+
+void
 expect_multi_db_region_details(
     profiler_hub::reader_t&                             reader,
     const profiler_hub::reader_types::timeline_event_t& tl_event,
     const multi_event_timestamps& timestamps, multi_event_saw_flags& saw)
 {
-    const auto detail = require_optional(reader.get_region_details(tl_event),
-                                         "region detail not readable");
-    if(detail.name == "hipLaunchKernel")
-    {
-        saw.hip_region = true;
-        EXPECT_EQ(detail.start_timestamp, timestamps.hip_start_ts);
-        EXPECT_EQ(detail.end_timestamp, timestamps.hip_end_ts);
-        ASSERT_NE(detail.event, nullptr);
-        EXPECT_EQ(detail.event->event_category, "HIP_API");
-    }
-    else if(detail.name == "bt_func")
-    {
-        saw.bt_region = true;
-        EXPECT_EQ(detail.start_timestamp, timestamps.bt_start_ts);
-        EXPECT_EQ(detail.end_timestamp, timestamps.bt_end_ts);
-    }
+    expect_multi_db_hip_region(reader, tl_event, timestamps, saw);
+    expect_multi_db_bt_region(reader, tl_event, timestamps, saw);
 }
 
 void
@@ -2020,36 +2302,49 @@ expect_multi_db_scratch_details(
 }
 
 void
-expect_multiple_event_type_details(profiler_hub::reader_t&       reader,
-                                   const multi_event_timestamps& timestamps)
+expect_multiple_event_saw_flags(const multi_event_saw_flags& saw)
 {
-    multi_event_saw_flags saw{};
-
-    for(const auto& tl_event : reader.get_events())
-    {
-        switch(tl_event.unique_identifier.type)
-        {
-            case profiler_hub::reader_types::event_type_t::region:
-                expect_multi_db_region_details(reader, tl_event, timestamps, saw);
-                break;
-            case profiler_hub::reader_types::event_type_t::kernel_dispatch:
-                expect_multi_db_kernel_details(reader, tl_event, timestamps, saw);
-                break;
-            case profiler_hub::reader_types::event_type_t::memory_copy:
-                expect_multi_db_memory_copy_details(reader, tl_event, timestamps, saw);
-                break;
-            case profiler_hub::reader_types::event_type_t::memory_allocate:
-                expect_multi_db_scratch_details(reader, tl_event, timestamps, saw);
-                break;
-            default: break;
-        }
-    }
-
     EXPECT_TRUE(saw.hip_region);
     EXPECT_TRUE(saw.bt_region);
     EXPECT_TRUE(saw.kernel);
     EXPECT_TRUE(saw.memory_copy);
     EXPECT_TRUE(saw.scratch_alloc);
+}
+
+void
+expect_one_multi_event(profiler_hub::reader_t&                             reader,
+                       const profiler_hub::reader_types::timeline_event_t& tl,
+                       const multi_event_timestamps&                       timestamps,
+                       multi_event_saw_flags&                              saw)
+{
+    switch(tl.unique_identifier.type)
+    {
+        case profiler_hub::reader_types::event_type_t::region:
+            expect_multi_db_region_details(reader, tl, timestamps, saw);
+            break;
+        case profiler_hub::reader_types::event_type_t::kernel_dispatch:
+            expect_multi_db_kernel_details(reader, tl, timestamps, saw);
+            break;
+        case profiler_hub::reader_types::event_type_t::memory_copy:
+            expect_multi_db_memory_copy_details(reader, tl, timestamps, saw);
+            break;
+        case profiler_hub::reader_types::event_type_t::memory_allocate:
+            expect_multi_db_scratch_details(reader, tl, timestamps, saw);
+            break;
+        default: break;
+    }
+}
+
+void
+expect_multiple_event_type_details(profiler_hub::reader_t&       reader,
+                                   const multi_event_timestamps& timestamps)
+{
+    multi_event_saw_flags saw{};
+    for(const auto& tl_event : reader.get_events())
+    {
+        expect_one_multi_event(reader, tl_event, timestamps, saw);
+    }
+    expect_multiple_event_saw_flags(saw);
 }
 
 TEST_F(rocpd_write_read_test_interface, multiple_event_types_in_single_db)
@@ -2105,14 +2400,11 @@ TEST_F(rocpd_write_read_test_interface, handle_region_with_call_stack_pathway)
     });
 
     // Validate: profiler_hub::reader_t read-back matches inserted values.
-    expect_region([this](const auto& detail, const auto& tl_event) {
-        EXPECT_EQ(detail.name, "hsa_signal_wait");
-        EXPECT_EQ(detail.start_timestamp, k_start_ts);
-        EXPECT_EQ(detail.end_timestamp, k_end_ts);
-        ASSERT_NE(detail.event, nullptr);
-        EXPECT_EQ(detail.event->event_category, "HSA_API");
-        EXPECT_FALSE(m_reader->get_call_stack(tl_event).empty());
-    });
+    expect_region_with_call_stack({ .start_timestamp = k_start_ts,
+                                    .end_timestamp   = k_end_ts,
+                                    .name            = "hsa_signal_wait",
+                                    .event_category  = "HSA_API",
+                                    .check_category  = true });
 }
 
 // ---------------------------------------------------------------------------
@@ -2165,18 +2457,17 @@ TEST_F(rocpd_write_read_test_interface, handle_kernel_dispatch_full_grid)
         });
 
     // Validate: profiler_hub::reader_t read-back matches inserted values.
-    expect_kernel_dispatch([](const auto& detail) {
-        EXPECT_EQ(detail.dispatch_id, k_dispatch_id);
-        EXPECT_EQ(detail.start_timestamp, k_start_ts);
-        EXPECT_EQ(detail.end_timestamp, k_end_ts);
-        EXPECT_EQ(detail.workgroup_size_x, k_workgroup_size_x);
-        EXPECT_EQ(detail.workgroup_size_y, k_workgroup_size_y);
-        EXPECT_EQ(detail.workgroup_size_z, k_workgroup_size_z);
-        EXPECT_EQ(detail.grid_size_x, k_grid_size_x);
-        EXPECT_EQ(detail.grid_size_y, k_grid_size_y);
-        EXPECT_EQ(detail.grid_size_z, k_grid_size_z);
-        EXPECT_EQ(detail.name, "matmul_kernel");
-    });
+    expect_kernel_dispatch_matches({ .start_timestamp   = k_start_ts,
+                                     .end_timestamp     = k_end_ts,
+                                     .dispatch_id       = k_dispatch_id,
+                                     .workgroup_size_x  = k_workgroup_size_x,
+                                     .workgroup_size_y  = k_workgroup_size_y,
+                                     .workgroup_size_z  = k_workgroup_size_z,
+                                     .grid_size_x       = k_grid_size_x,
+                                     .grid_size_y       = k_grid_size_y,
+                                     .grid_size_z       = k_grid_size_z,
+                                     .name              = "matmul_kernel",
+                                     .check_dispatch_id = true });
 }
 
 // ---------------------------------------------------------------------------
@@ -2217,16 +2508,11 @@ TEST_F(rocpd_write_read_test_interface, handle_memory_copy_addresses_persisted)
         });
 
     // Validate: profiler_hub::reader_t read-back matches inserted values.
-    expect_memory_copy([](const auto& detail) {
-        EXPECT_EQ(detail.start_timestamp, k_start_ts);
-        EXPECT_EQ(detail.end_timestamp, k_end_ts);
-        EXPECT_EQ(detail.size, k_copy_size);
-        EXPECT_EQ(detail.name, "MEMORY_COPY_DEVICE_TO_HOST");
-        EXPECT_EQ(require_optional(detail.dst_address, "dst_address missing"),
-                  k_dst_address);
-        EXPECT_EQ(require_optional(detail.src_address, "src_address missing"),
-                  k_src_address);
-    });
+    expect_memory_copy_matches({ .start_timestamp = k_start_ts,
+                                 .end_timestamp   = k_end_ts,
+                                 .size            = k_copy_size,
+                                 .dst_address     = k_dst_address,
+                                 .src_address     = k_src_address,
+                                 .name            = "MEMORY_COPY_DEVICE_TO_HOST",
+                                 .check_agents    = false });
 }
-
-// NOLINTEND(readability-function-cognitive-complexity, readability-function-size)
