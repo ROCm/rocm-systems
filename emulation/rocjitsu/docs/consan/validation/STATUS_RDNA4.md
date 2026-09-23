@@ -25,7 +25,7 @@ none of those historical colors count as a pass for this campaign.
 - SDK: `/home/benoit/venv`, ROCm `10.2.0a20260915` development package.
 - Preparation: rebuilding the current hook, integrating per-workload generated
   allowlists, preparing Qwen provenance, and building the production matmul.
-- Fresh clean assessments: **3/42**; no cell has completed fresh fault qualification.
+- Fresh clean assessments: **4/42**; no cell has completed fresh fault qualification.
 - Preparation logs: `/home/benoit/workspace/consan-validation-artifacts/`.
 
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
@@ -35,7 +35,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🩶 unassessed | 🩶 unassessed |
 | Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟩 exact; 227/227 accesses and 48/48 barriers; reviewed fault bundle | 🟧 exact; only 75/227 accesses supported |
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟩 exact; 20/20 accesses and 26/26 barriers; 17/32 fault sweep | 🟩 exact; 20/20 accesses; fault bundle |
-| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log | 🟨 clean exact/complete; 29,111 accesses; qualification refresh pending |
+| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 exact; 352/352 accesses and 86/86 barriers; fault bundle | 🟩 exact; 352/352 accesses; fault bundle |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 exact; 704/704 accesses and 172/172 barriers; fault bundle | 🟩 exact; 704/704 accesses; fault bundle |
 | PyTorch | P1 | collision-heavy `scatter_reduce` (`pytorch-scatter-reduce`) | 🟩 BF16/FP32 exact; 27/27 accesses; fault bundle | 🟩 BF16/FP32 exact; 27/27 accesses; fault bundle |
@@ -69,3 +69,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - Qwen preparation and production matmul compilation now pass. All 245 hook
   unit tests passed; the labeled nonphysical gate completed (see preparation log).
 - `pytorch-torch-mode` / default: native rocprofv3 discovery failed; inspect discovery log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round1/pytorch-torch-mode-default`.
+- `pytorch-torch-mode` / supercollider: native rocprofv3 discovery failed; inspect discovery log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round1/pytorch-torch-mode-supercollider`.
