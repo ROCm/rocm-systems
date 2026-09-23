@@ -65,7 +65,7 @@ inline constexpr external_correlation_domain_definition<SdkBackend>
     k_memory_allocation_stream_correlation =
         external_correlation_domain_definition<SdkBackend>{
             .kind       = SdkBackend::EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION,
-            .on_request = Externals::request_stream_correlation_id,
+            .on_request = SdkBackend::request_stream_correlation_id,
         };
 
 template <policies::domain_service::backend   SdkBackend,

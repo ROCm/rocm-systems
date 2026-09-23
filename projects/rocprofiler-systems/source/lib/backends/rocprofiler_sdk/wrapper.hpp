@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer.h>
