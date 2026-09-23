@@ -637,12 +637,12 @@ protected:
 
     struct memory_alloc_expect
     {
-        std::uint64_t           start_timestamp = 0;
-        std::uint64_t           end_timestamp   = 0;
-        std::uint64_t           size            = 0;
-        const char*             type            = "ALLOC";
-        const char*             level           = "SCRATCH";
-        std::optional<uint64_t> address         = std::nullopt;
+        std::uint64_t                start_timestamp = 0;
+        std::uint64_t                end_timestamp   = 0;
+        std::uint64_t                size            = 0;
+        const char*                  type            = "ALLOC";
+        const char*                  level           = "SCRATCH";
+        std::optional<std::uint64_t> address         = std::nullopt;
     };
 
     void expect_memory_alloc_core(
