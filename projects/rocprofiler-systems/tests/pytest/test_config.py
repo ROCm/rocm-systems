@@ -367,6 +367,36 @@ class TestConfigXmlViaC(RocprofsysTest):
             use_abort_fail_regex=False,
         )
 
+    def test_exported_preset(self, config_target, test_output_dir):
+        exported = test_output_dir / "bad_cfg.xml"
+        self.run_test(
+            "baseline",
+            target="rocprof-sys-run",
+            run_args=[
+                f"--export-config={exported}",
+                "--preset=balanced",
+                "--",
+                _true_cmd(),
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_file_exists(exported, description="exported preset XML")
+        result = self.run_test(
+            "sys_run",
+            target=config_target,
+            env=MINIMAL_RUNTIME_ENV,
+            sys_run_args=["-c", str(exported)],
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"Unable to apply configuration file",
+                r"specify it with '--preset' instead",
+            ],
+            fail_regex=[CONFIG_SIGABRT_REGEX],
+            use_abort_fail_regex=False,
+        )
+
 
 @pytest.mark.sys_run
 @pytest.mark.timeout(120)

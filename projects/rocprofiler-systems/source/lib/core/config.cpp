@@ -1553,10 +1553,18 @@ configure_settings(bool _init)
 
         LOG_DEBUG("Reading config file {}", filename);
         validate_config_file_values(filename, _config->get_tag(), _config);
-        if(_config->read(filename) && _main_proc &&
-           ((_config->get<bool>(std::string{ env_vars::CI }) &&
-             settings::verbose() >= 0) ||
-            settings::verbose() >= 1 || settings::debug()))
+        if(!_config->read(filename))
+        {
+            LOG_WARNING("Unable to apply configuration file '{}'.The file does not "
+                        "contain valid key/value formatting. If this file is intended to "
+                        "be used as a preset configuration, specify it with '--preset' "
+                        "instead. Otherwise, correct the file structure and try again.",
+                        expanded_filename);
+            continue;
+        }
+        if(_main_proc && ((_config->get<bool>(std::string{ env_vars::CI }) &&
+                           settings::verbose() >= 0) ||
+                          settings::verbose() >= 1 || settings::debug()))
         {
             std::ifstream     _in{ expanded_filename };
             std::stringstream _iss{};
