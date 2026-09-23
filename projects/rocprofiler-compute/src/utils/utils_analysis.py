@@ -529,8 +529,6 @@ def nest_marker_intervals(
             else:
                 roots.append(node)
             open_ranges.append((node, start, end))
-        for root in roots:
-            rollup_node_stats(root)
         forest[thread_key] = roots
     return forest
 
