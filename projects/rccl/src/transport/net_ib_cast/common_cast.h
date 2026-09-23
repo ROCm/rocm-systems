@@ -579,10 +579,10 @@ struct alignas(32) ncclIbNetCommBase {
 #endif
   struct ncclIbResiliency* resiliency;
 
-  // QP Sharing fields
-  uint16_t commId;              // 0 = not shared
+  // QP Sharing fields — see qp_sharing.h for state query helpers
+  uint16_t commId;
   bool     isSharedQpPrimary;
-  int      sharedGroupIdx;      // -1 = not shared
+  int      sharedGroupIdx;
   int      remIbDevIdx;
   int      sharedPrimaryNqps;
   uint64_t peerProcTag;         // remote process identity, 0 = unknown
