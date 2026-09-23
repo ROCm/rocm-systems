@@ -64,7 +64,7 @@ TEST_F(StreamStackServiceTest, request_stream_correlation_id_returns_success)
         std::uint64_t{ 0 }, &external_corr_id, nullptr);
 
     EXPECT_EQ(result, 0);
-    EXPECT_NE(external_corr_id.ptr, nullptr);
+    EXPECT_EQ(external_corr_id.value, 123u);
 }
 
 TEST_F(StreamStackServiceTest,
@@ -87,10 +87,16 @@ TEST_F(StreamStackServiceTest,
         mock_sdk::external_correlation_request_kind_t{}, mock_sdk::tracing_operation_t{},
         std::uint64_t{ 0 }, &external_corr_id, nullptr);
     ASSERT_EQ(result, 0);
-    ASSERT_NE(external_corr_id.ptr, nullptr);
+    ASSERT_EQ(external_corr_id.value, 55u);
 
+    // The real SDK's correlation_id.external field is itself the exact union
+    // the callback writes through, so setting .value also makes .ptr observe
+    // a non-null bit pattern (the sentinel get_stream_id checks). The mock
+    // keeps the record's external field as a separate, non-union type, so
+    // that aliasing is simulated explicitly here.
     mock_sdk::kernel_dispatch_record_t record{};
-    record.correlation_id.external.ptr = external_corr_id.ptr;
+    record.correlation_id.external.value = external_corr_id.value;
+    record.correlation_id.external.ptr   = external_corr_id.ptr;
 
     service_t::pop();
 
@@ -113,7 +119,8 @@ TEST_F(StreamStackServiceTest, get_stream_id_is_idempotent_after_consuming_corre
               0);
 
     mock_sdk::kernel_dispatch_record_t record{};
-    record.correlation_id.external.ptr = external_corr_id.ptr;
+    record.correlation_id.external.value = external_corr_id.value;
+    record.correlation_id.external.ptr   = external_corr_id.ptr;
     service_t::pop();
 
     ASSERT_EQ(service_t::get_stream_id(&record).handle, 77u);

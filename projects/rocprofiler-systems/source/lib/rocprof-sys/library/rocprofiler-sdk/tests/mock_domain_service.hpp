@@ -70,6 +70,7 @@ struct callback_tracing_record_t
     std::uint32_t    operation = 0;
     std::uint64_t    thread_id = 0;
     correlation_id_t correlation_id{};
+    void*            payload = nullptr;
 };
 
 using tracing_operation_t     = std::size_t;
@@ -427,6 +428,8 @@ struct mock_sdk
     static constexpr std::size_t      CALLBACK_TRACING_ROCDECODE_API          = 9;
     static constexpr std::size_t      CALLBACK_TRACING_ROCSHMEM_API           = 10;
     static constexpr std::size_t      CALLBACK_TRACING_HIPFILE_API            = 11;
+    static constexpr std::size_t      CALLBACK_TRACING_HIP_STREAM             = 12;
+    static constexpr std::size_t      HIP_STREAM_SET                          = 0;
     static constexpr callback_phase_t CALLBACK_PHASE_ENTER                    = 0;
     static constexpr callback_phase_t CALLBACK_PHASE_EXIT                     = 1;
     static constexpr callback_phase_t CALLBACK_PHASE_NONE                     = 2;
@@ -533,6 +536,13 @@ struct mock_sdk
     struct stream_id_t
     {
         std::uint64_t handle = 0;
+    };
+
+    struct tracing_hip_stream_data_t
+    {
+        std::uint64_t size = 0;
+        stream_id_t   stream_id{};
+        std::uint64_t stream_value = 0;
     };
 
     static stream_id_t get_stream_id(kernel_dispatch_record_t* /*record*/)

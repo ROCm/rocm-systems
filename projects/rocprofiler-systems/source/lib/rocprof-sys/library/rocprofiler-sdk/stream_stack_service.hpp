@@ -12,8 +12,18 @@ template <typename SdkBackend>
 struct stream_stack_service
 {
     static void push(SdkBackend::stream_id_t sid) { get_stack().push(sid); }
-    static SdkBackend::stream_id_t top() { return get_stack().top(); }
-    static void                    pop() { get_stack().pop(); }
+
+    static void pop() { get_stack().pop(); }
+
+    static SdkBackend::stream_id_t top()
+    {
+        auto stack = get_stack();
+        if(stack.empty())
+        {
+            return {};
+        }
+        return get_stack().top();
+    }
 
     // NOLINTNEXTLINE (readability-function-size)
     static int request_stream_correlation_id(
@@ -22,9 +32,7 @@ struct stream_stack_service
         SdkBackend::tracing_operation_t /*operation*/, std::uint64_t /*internal_corr_id*/,
         SdkBackend::user_data_t* external_corr_id, void* /*user_data*/)
     {
-        auto* info            = new kernel_dispatch_stream_correlation_t{};
-        info->handle          = top();
-        external_corr_id->ptr = info;
+        external_corr_id->value = top().handle;
         return 0;
     }
 
@@ -37,24 +45,15 @@ struct stream_stack_service
             return stream_id;
         }
 
-        auto* info = static_cast<kernel_dispatch_stream_correlation_t*>(
-            record->correlation_id.external.ptr);
-        stream_id                             = info->handle;
-        auto region_id                        = info->region_id;
-        record->correlation_id.external.value = region_id;
-        delete info;
-        record->correlation_id.external.ptr = nullptr;
+        stream_id.handle = record->correlation_id.external.value;
+
+        record->correlation_id.external.ptr   = nullptr;
+        record->correlation_id.external.value = {};
 
         return stream_id;
     }
 
 private:
-    struct kernel_dispatch_stream_correlation_t
-    {
-        std::uint64_t           region_id = 0;
-        SdkBackend::stream_id_t handle    = {};
-    };
-
     static auto& get_stack()
     {
         static thread_local std::stack<typename SdkBackend::stream_id_t> s_stack{

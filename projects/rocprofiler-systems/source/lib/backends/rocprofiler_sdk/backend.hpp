@@ -92,7 +92,9 @@ struct backend
     using memory_copy_record_t           = Wrapper::memory_copy_record;
     using scratch_memory_record_t        = Wrapper::scratch_memory_record;
 #if ROCPROFILER_VERSION >= 700
-    using async_correlation_id_t = Wrapper::async_correlation_id_t;
+    using async_correlation_id_t    = Wrapper::async_correlation_id_t;
+    using tracing_hip_stream_data_t = Wrapper::hip_stream_data;
+    using hip_stream_operation_t    = Wrapper::hip_stream_operation_t;
 #endif
     using stream_id_t = Wrapper::stream_id;
 #if ROCPROFILER_VERSION >= 600
@@ -149,6 +151,11 @@ struct backend
 #if ROCPROFILER_VERSION >= 700
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_ROCJPEG_API =
         Wrapper::CALLBACK_TRACING_ROCJPEG_API;
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_HIP_STREAM =
+        Wrapper::CALLBACK_TRACING_HIP_STREAM;
+
+    // ─── HIP stream operation constants ──────────────────────────────────────────
+    static constexpr hip_stream_operation_t HIP_STREAM_SET = Wrapper::HIP_STREAM_SET;
 #endif
 
 #if ROCPROFILER_VERSION >= 10304

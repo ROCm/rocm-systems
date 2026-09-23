@@ -216,6 +216,16 @@ struct stream_id
 {
     std::uint64_t handle{};
 };
+// Real SDK defines rocprofiler_hip_stream_operation_t as an enum; a plain int
+// satisfies every comparison/assignment backend<mock_sdk> performs on it.
+using hip_stream_operation_t = int;
+struct hip_stream_data
+{
+    std::uint64_t size{};
+    struct stream_id stream_id
+    {};
+    std::uint64_t stream_value{};
+};
 
 // ─── Tracing-name table stub ────────────────────────────────────────────────
 //
@@ -458,6 +468,8 @@ struct mock_sdk
     using async_correlation_id_t               = testing::async_correlation_id_t;
     using memory_alloc_record                  = testing::memory_alloc_record;
     using scratch_memory_record                = testing::scratch_memory_record;
+    using hip_stream_data                      = testing::hip_stream_data;
+    using hip_stream_operation_t               = testing::hip_stream_operation_t;
     using stream_id                            = testing::stream_id;
 
     // compile_time_version >= 10000 selects the v1 branch in query_counter_details.
