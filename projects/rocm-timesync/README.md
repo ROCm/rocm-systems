@@ -62,7 +62,7 @@ with the provided GPU timestamp to produce the offset to translate to realtime.
 channels:
   hz_precision_high:
     hz: <hz>
-    order< <order>
+    order: <order>
   hz_precision_low:
     hz: <hz>
     order: <order>
