@@ -111,14 +111,9 @@ private:
 
 #include "fakes/sym_kernels_fakes.h"
 
-// Host location types. hipMemLocationTypeHost is in hip/driver_types.h from
-// 7.0.2.2 (the host-VMM window floor). HostNuma is still missing below 7.12;
-// hip_compat.h supplies CU_MEM_LOCATION_TYPE_HOST_NUMA as 3 on those builds.
-// This file is compiled as-is (not hipified), so it cannot rely on HIPIFY
-// rewriting the CUDA spelling.
-//
-// static const, not constexpr: below 7.12 HostNuma falls outside the enum's
-// range, which makes it ill-formed as a constant expression.
+// hipMemLocationTypeHost is in hip/driver_types.h from 7.0.2.2. HostNuma is
+// missing below 7.12; hip_compat.h supplies the CUDA enumerator 3. This file
+// is not hipified. static const: below 7.12 HostNuma is outside the enum range.
 // ---------------------------------------------------------------------------
 // Shared fixture teardown for suites that leave windows registered.
 //
@@ -155,9 +150,8 @@ static const hipMemLocationType kLocHostNuma = hipMemLocationTypeHostNuma;
 static const hipMemLocationType kLocHost = hipMemLocationTypeHost;
 
 // ---------------------------------------------------------------------------
-// ncclSymIsHostSegment: true for host-NUMA on CUDA, and on AMD inside
-// NCCL_CUMEM_HOST_VERSION_SUPPORTED also for plain host. HOST_NUMA is not
-// a sysmem type on AMD until the HostNuma runtime tickets land.
+// ncclSymIsHostSegment: host-NUMA on CUDA; on AMD, also plain host inside
+// NCCL_CUMEM_HOST_VERSION_SUPPORTED. HOST_NUMA is not sysmem on AMD yet.
 
 #if defined(__HIP_PLATFORM_AMD__)
 TEST(SymIsHostSegment, HostNuma_ReturnsFalse) {
@@ -1348,8 +1342,7 @@ TEST_F(SymMemoryMapLsaTeamTest, BarrierFails_ReturnsError) {
 }
 
 #if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
-// Reuse-param path: a genuine 2-rank host/device split must reject rather than
-// stamp host onto the device owner's message (nHost==1 used to skip the check).
+// A 2-rank host/device split must reject; nHost==1 used to skip the check.
 // Off the host-VMM compile gate ncclSymIsHostSegment(kLocHost) is false.
 TEST_F(SymMemoryMapLsaTeamTest, MixedHostAndDeviceOwners_ReturnsInvalidUsage) {
   ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
@@ -3826,15 +3819,9 @@ TEST_F(DevrWindowRegisterInGroupSymTest, MisalignedWindow_ReturnsInvalidArgument
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
 }
 
-// Branch: CPU-backed segments need the elastic-buffer param, and are rejected
-// with a specific code when it is off rather than failing later.
-//
-// Both this and the accepting case depend on hipMemLocationTypeHost being
-// recognised as CPU-backed, which ncclSymIsHostSegment only does inside
-// NCCL_CUMEM_HOST_VERSION_SUPPORTED. Outside that window the segment is
-// rejected as an unsupported location type -- the same return code for a
-// different reason, so the test would pass without exercising the
-// elastic-buffer gate.
+// CPU-backed segments need the elastic-buffer param. Compiled only inside
+// NCCL_CUMEM_HOST_VERSION_SUPPORTED so the reject is that gate, not an
+// unsupported location type.
 #if NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
 TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithoutElasticParam_ReturnsInvalidArgument) {
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));

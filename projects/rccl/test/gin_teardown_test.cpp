@@ -289,9 +289,8 @@ TEST(DevrGetWinOffsetTest, OffsetIsWindowPositionWithinBackingMemory) {
   EXPECT_EQ(ncclDevrGetRmaWin(&win, NCCL_GIN_MAX_CONNECTIONS), nullptr);
 }
 
-// NCCL_PARAM caches the first read, so in-process setenv is not a contract.
-// Drive ncclDevrWindowRegisterInGroup in a child: reverting the production
-// CheckRegistrationSupport call must fail this test (helper-direct would not).
+// NCCL_PARAM caches the first read. Drive WindowRegisterInGroup in a child so
+// reverting CheckRegistrationSupport fails this test (a helper-direct call would not).
 TEST(DevrRegistrationSupportTest, DisabledElasticRejectsHostSegment) {
   using RcclUnitTesting::ProcessIsolatedTestRunner;
 

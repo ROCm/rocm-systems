@@ -42,11 +42,9 @@ NCCL_PARAM(DevApiJit, "DEV_API_JIT", 0);
 // registration honors the same opt-out (see ncclCommWindowRegister_impl).
 extern int64_t ncclParamWinEnable();
 
-// Elastic buffers back a symmetric window with CPU memory. Upstream uses the
-// host-NUMA VMM location type, but HIP/CLR has no host-NUMA member and rejects
-// it; RCCL allocates host segments as hipMemLocationTypeHost on AMD (see
-// alloc.h). Each platform recognizes only its own host location type as a
-// CPU-backed (sysmem) segment, so elastic-buffer consumers see AMD host segments.
+// Elastic buffers use host-NUMA VMM on CUDA. HIP has no host-NUMA member, so AMD
+// host segments are hipMemLocationTypeHost (alloc.h). Each platform treats only
+// its own host location type as CPU-backed sysmem.
 static inline bool ncclSymIsHostSegment(CUmemLocationType type) {
 #if defined(__HIP_PLATFORM_AMD__)
 #if NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
@@ -476,9 +474,8 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
                 ret, fail);
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // Reject mixed host/device owners of one segment index. Scan maxSegments so a
-  // rank with fewer local segments still fails with its peers instead of waiting
-  // at the closing barrier.
+  // Reject mixed host/device owners of one segment. Scan maxSegments so a rank
+  // with fewer local segments fails with its peers instead of hanging on the barrier.
   if (ncclParamSymReuseSysmemHandles()) {
     for (int segment = 0; segment < maxSegments; segment++) {
       int nHost = 0, nDevice = 0;
@@ -735,9 +732,8 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     int ptrType = ncclSymIsHostSegment(cuMemLocType) ? NCCL_PTR_HOST : NCCL_PTR_CUDA;
     bool needDmabuf = mem->maxGlobalNumSegments > 1;
 #endif
-    // Device put-fence checks HOST_NUMA. On ROCm < 7.12 that enumerator is a
-    // #define int, so the ternary with locType would promote to int and fail
-    // to assign to hipMemLocationType.
+    // Device put-fence checks HOST_NUMA. Below 7.12 that enumerator is an int
+    // #define, so a ternary with locType would not assign to hipMemLocationType.
     if (ncclSymIsHostSegment(cuMemLocType)) {
       cuMemLocType = static_cast<CUmemLocationType>(CU_MEM_LOCATION_TYPE_HOST_NUMA);
       mem->ginSegmentInfos[segment].memType = cuMemLocType;
@@ -1404,15 +1400,12 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
   // RCCL: when sym VMM is unavailable (no cuMem), route through the non-sym
   // helper which lays out IPC for intra-node and proxy/GIN MR for inter-node
   if (!comm->symmetricSupport) {
-    // Host-backed VMM cannot be exported through the non-symmetric IPC
-    // fallback. Probe its segment layout first so the common support check can
-    // reject it before windowRegisterNonSym attempts cudaIpcGetMemHandle. Do
-    // not probe ordinary allocations when cuMem is disabled: ROCm 7.0.2.2
-    // faults in hipMemRetainAllocationHandle instead of returning an error.
+    // Host VMM cannot use the non-symmetric IPC fallback. Probe the layout first
+    // so support checks reject it before cudaIpcGetMemHandle. Skip the probe when
+    // cuMem is off: ROCm 7.0.2.2 faults in hipMemRetainAllocationHandle.
     if (ncclCuMemEnable()) {
-      // Match register.cc: classify the pointer before the retain walk in
-      // ncclCuMemGetAddressRange. hipMalloc is not cuMem; retaining it WARNs
-      // on every registration and can fault on HIP 7.0.
+      // Classify the pointer before ncclCuMemGetAddressRange. hipMalloc is not
+      // cuMem; retaining it WARNs on every registration and can fault on HIP 7.0.
       ncclResult_t probeRet = ncclSuccess;
       CUmemorytype memType = CU_MEMORYTYPE_DEVICE;
       CUCHECKGOTO(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr)userPtr), ret,
