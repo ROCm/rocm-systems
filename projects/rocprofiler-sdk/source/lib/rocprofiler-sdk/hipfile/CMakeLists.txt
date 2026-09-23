@@ -20,7 +20,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(ROCPROFILER_LIB_HIPFILE_SOURCES abi.cpp hipfile.cpp)
+if(WIN32)
+    # hipFile has no Windows build, so its API table is never captured.
+    set(ROCPROFILER_LIB_HIPFILE_SOURCES windows_stubs.cpp)
+else()
+    set(ROCPROFILER_LIB_HIPFILE_SOURCES abi.cpp hipfile.cpp)
+endif()
 set(ROCPROFILER_LIB_HIPFILE_HEADERS defines.hpp hipfile.hpp utils.hpp)
 
 target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_HIPFILE_SOURCES}

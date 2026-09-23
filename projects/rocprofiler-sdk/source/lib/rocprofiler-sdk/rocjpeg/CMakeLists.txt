@@ -20,7 +20,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(ROCPROFILER_LIB_ROCJPEG_SOURCES abi.cpp rocjpeg.cpp)
+if(WIN32)
+    # rocJPEG has no Windows build, so its API table is never captured.
+    set(ROCPROFILER_LIB_ROCJPEG_SOURCES windows_stubs.cpp)
+else()
+    set(ROCPROFILER_LIB_ROCJPEG_SOURCES abi.cpp rocjpeg.cpp)
+endif()
 set(ROCPROFILER_LIB_ROCJPEG_HEADERS defines.hpp rocjpeg.hpp)
 
 target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_ROCJPEG_SOURCES}

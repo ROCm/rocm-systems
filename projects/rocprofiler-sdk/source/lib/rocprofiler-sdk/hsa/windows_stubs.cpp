@@ -25,14 +25,24 @@
 // the ETW tracing path observes the runtime from outside the process instead, so no
 // queue is ever intercepted and the API tables are never captured.
 
+// ROCm's amd_hip_vector_types.h spells its members std::int32_t but does not include
+// <cstdint> itself, so under MSVC it only compiles if something already has.
+#include <cstdint>
+
+#include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
 #include "lib/rocprofiler-sdk/hsa/profile_serializer.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+#include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
+
+#include <rocprofiler-sdk/hsa/table_id.h>
 
 #include <optional>
 #include <string_view>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -55,6 +65,82 @@ std::string_view get_hsa_status_string(hsa_status_t)
 {
     return "HSA is not available on this platform";
 }
+
+// The HSA API name tables are generated from the captured dispatch table, which is never
+// captured here, so every HSA domain reports no operations.
+template <size_t TableIdx>
+const char* name_by_id(uint32_t)
+{
+    return nullptr;
+}
+
+template <size_t TableIdx>
+std::vector<uint32_t>
+get_ids()
+{
+    return {};
+}
+
+template <size_t TableIdx>
+void
+iterate_args(uint32_t,
+             const rocprofiler_callback_tracing_hsa_api_data_t&,
+             rocprofiler_callback_tracing_operation_args_cb_t,
+             int32_t,
+             void*)
+{}
+
+using iterate_args_data_t = rocprofiler_callback_tracing_hsa_api_data_t;
+using iterate_args_cb_t   = rocprofiler_callback_tracing_operation_args_cb_t;
+
+#define INSTANTIATE_HSA_STUB(TABLE_IDX)                                                            \
+    template const char*           name_by_id<TABLE_IDX>(uint32_t);                                \
+    template std::vector<uint32_t> get_ids<TABLE_IDX>();                                           \
+    template void                  iterate_args<TABLE_IDX>(                                        \
+        uint32_t, const iterate_args_data_t&, iterate_args_cb_t, int32_t, void*);
+
+INSTANTIATE_HSA_STUB(ROCPROFILER_HSA_TABLE_ID_Core)
+INSTANTIATE_HSA_STUB(ROCPROFILER_HSA_TABLE_ID_AmdExt)
+INSTANTIATE_HSA_STUB(ROCPROFILER_HSA_TABLE_ID_ImageExt)
+INSTANTIATE_HSA_STUB(ROCPROFILER_HSA_TABLE_ID_FinalizeExt)
+
+#undef INSTANTIATE_HSA_STUB
+
+// stands in for async_copy.cpp
+namespace async_copy
+{
+const char* name_by_id(uint32_t) { return nullptr; }
+
+std::vector<uint32_t>
+get_ids()
+{
+    return {};
+}
+}  // namespace async_copy
+
+// stands in for memory_allocation.cpp
+namespace memory_allocation
+{
+const char* name_by_id(uint32_t) { return nullptr; }
+
+std::vector<uint32_t>
+get_ids()
+{
+    return {};
+}
+}  // namespace memory_allocation
+
+// stands in for scratch_memory.cpp
+namespace scratch_memory
+{
+const char* name_by_id(uint32_t) { return nullptr; }
+
+std::vector<uint32_t>
+get_ids()
+{
+    return {};
+}
+}  // namespace scratch_memory
 
 // stands in for queue.cpp
 queue_state
