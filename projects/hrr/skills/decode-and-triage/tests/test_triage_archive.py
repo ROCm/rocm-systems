@@ -17,9 +17,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent.parent / "scripts"
 SCRIPT = SCRIPT_DIR / "triage_archive.sh"
-FIXTURE = SCRIPT_DIR.parent / "evals" / "fixtures" / "rocm_smi_vram.txt"
+FIXTURE = Path(__file__).resolve().parent / "fixtures" / "rocm_smi_vram.txt"
 
 
 def _shell_function(name: str) -> str:
@@ -227,6 +227,118 @@ class EnsurePlaybackTests(unittest.TestCase):
                 proc.returncode, 0, f"ensure_playback failed: {proc.stderr}"
             )
             self.assertEqual(proc.stdout.strip(), str(play))
+
+
+class WorkdirDefaultTests(unittest.TestCase):
+    """The findings must never land in the archive being triaged.
+
+    Run from inside a customer's archive, the script used to default its
+    output directory to the working directory, which is the one place this
+    skill says not to write to.
+    """
+
+    def test_default_workdir_is_outside_the_archive_private_and_per_user(self):
+        text = SCRIPT.read_text(encoding="utf-8")
+        default = text.split("HRR_TRIAGE_WORKDIR:-}", 1)[1].split("\nfi\n", 1)[0]
+        self.assertNotIn("$(pwd)", default)
+        self.assertIn("id -u", default, "a shared /tmp directory locks out every other user")
+        self.assertIn("-m 700", default, "a finding names a customer's kernels and addresses")
+        self.assertIn("mktemp -d", default, "somebody else may have got to the name first")
+
+    def test_the_archive_is_untouched_by_a_metadata_only_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "capture.hrr" / "pid-1"
+            archive.mkdir(parents=True)
+            (archive / "events.bin").write_bytes(b"\0" * 64)
+            before = {p.name: p.read_bytes() for p in archive.iterdir()}
+            # The default is what is under test, so TMPDIR is what points
+            # somewhere disposable, not HRR_TRIAGE_WORKDIR.
+            env = {k: v for k, v in os.environ.items() if k != "HRR_TRIAGE_WORKDIR"}
+            env["TMPDIR"] = tmp
+
+            proc = subprocess.run(
+                ["bash", str(SCRIPT), "--archive", str(archive), "--no-replay"],
+                cwd=archive,
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            after = {p.name: p.read_bytes() for p in archive.iterdir()}
+            self.assertEqual(before, after)
+            workdir = Path(tmp) / f"hrr-triage-{os.getuid()}"
+            findings = list(workdir.glob("pid-1-*.finding.md"))
+            self.assertEqual(len(findings), 1, proc.stderr)
+            self.assertEqual(workdir.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(findings[0].stat().st_mode & 0o777, 0o600)
+
+
+class LibraryPathSafetyTests(unittest.TestCase):
+    """An empty component in LD_LIBRARY_PATH means the current directory, and
+    this script is run from inside customer archives.
+    """
+
+    def _resulting_path(self, env: dict, parent: str = "bin") -> str:
+        body = _shell_function("setup_library_path")
+        # The playback has to exist: from a path that does not resolve, the
+        # sibling probe reads /../lib, which is /lib on any Linux host.
+        # ROCR_LIB is read too, so a developer's own must not leak in.
+        # `set -u` as in the script, where an unbound name aborts the run.
+        with tempfile.TemporaryDirectory() as tmp:
+            play = Path(tmp) / parent / "hrr-playback"
+            play.parent.mkdir()
+            play.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            play.chmod(0o755)
+            inherited = {
+                k: v
+                for k, v in os.environ.items()
+                if k not in ("LD_LIBRARY_PATH", "ROCR_LIB")
+            }
+            result = subprocess.run(
+                ["bash", "-c", f'set -u\nSCRIPT_DIR="{tmp}"\n{body}\n'
+                               f'setup_library_path "{play}"\n'
+                               'echo "${LD_LIBRARY_PATH-unset}"'],
+                capture_output=True,
+                text=True,
+                env={**inherited, **env},
+                check=True,
+            )
+        return result.stdout.strip().splitlines()[-1]
+
+    def test_no_empty_component_when_nothing_is_found(self):
+        self.assertEqual(self._resulting_path({"ROCM_PATH": ""}), "unset")
+
+    def test_no_empty_component_with_only_rocm_path(self):
+        path = self._resulting_path({"ROCM_PATH": "/opt/rocm"})
+        self.assertEqual(path, "/opt/rocm/lib")
+        self.assertFalse(path.startswith(":"))
+
+    def test_the_callers_value_keeps_its_place(self):
+        path = self._resulting_path({"ROCM_PATH": "/opt/rocm", "LD_LIBRARY_PATH": "/mine"})
+        self.assertEqual(path, "/mine:/opt/rocm/lib")
+
+    def test_a_build_tree_playback_with_no_lib_dir_beside_it(self):
+        """`ensure_playback.sh --build` leaves the binary in build/playback/.
+
+        Nothing is found there, and expanding the empty list under `set -u`
+        aborts on bash before 4.4.
+        """
+        path = self._resulting_path({"ROCM_PATH": "/opt/rocm"}, parent="playback")
+        self.assertEqual(path, "/opt/rocm/lib")
+
+
+class WorkdirSymlinkTests(unittest.TestCase):
+    def test_a_symlinked_default_is_not_reused(self):
+        """`-O` follows symlinks, so the predictable name can be a link into a
+        directory the caller owns, an archive among them.
+        """
+        line = next(
+            ln for ln in SCRIPT.read_text(encoding="utf-8").splitlines() if '-O "$WORKDIR"' in ln
+        )
+        self.assertIn('-L "$WORKDIR"', line)
+        self.assertIn('-d "$WORKDIR"', line)
 
 
 if __name__ == "__main__":
