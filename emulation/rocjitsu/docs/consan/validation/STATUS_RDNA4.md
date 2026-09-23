@@ -1,3 +1,18 @@
+# ConSan validation on RDNA4 (gfx1201)
+
+This table tracks end-to-end ConSan revalidation of the external workloads on
+this host’s gfx1201 GPU. **Default** names the sampling preset used by the
+Default engine; **SuperCollider** records its replay and timing-perturbation
+configuration. Fault counts such as **8/8** mean eight detections in eight
+fault-injection trials, not eight passing workloads. **Bar 6/8** means at least
+six of eight admitted and reached trials must detect the injected fault. Green
+also requires a passing clean correctness run with matching controls, complete
+coverage evidence, and healthy GPU checks. “Lowest passing” means all smaller
+presets from `default` failed; “lowest verified” means smaller presets remain
+untested or unqualified. Yellow is pending or below the qualification bar; red
+records a failure or an unsupported workload. See [VALIDATION.md](VALIDATION.md)
+for the procedure and qualification rules.
+
 | Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |
 | Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟩 higher (lowest verified): clean pass; fault 8/8 (bar 6/8) | 🟨 delay-matrix: clean pass; fault 1/8 (bar 6/8); sleep calibration queued |
