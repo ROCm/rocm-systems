@@ -35,7 +35,7 @@ flowchart TB
     direction TB
     C1["service start_context<br/>no registration"]
     C2["WriteInterceptor<br/><b>counters::kernel_dispatch_phase_enter_hook</b><br/>called inline, unconditionally"]
-    C3["counters::is_any_active<br/>folded into no_real_consumers and<br/>forces should_batch_packets = false"]
+    C3["counters::is_active_on_agent<br/>folded into no_real_consumers and<br/>forces should_batch_packets = false"]
     C4["AsyncSignalHandler<br/><b>counters::kernel_dispatch_phase_exit_hook</b><br/>called inline"]
     C5["hsa/queue_hooks/client_ids.hpp<br/>stable producer tags<br/>COUNTERS / SPM / THREAD_TRACE"]
     C1 --> C2
@@ -92,18 +92,26 @@ For counter collection:
 |---|---|
 | `counters::kernel_dispatch_phase_enter_hook` | `counters/queue_hooks.hpp`, `counters/queue_hooks.cpp` |
 | `counters::kernel_dispatch_phase_exit_hook` | `counters/queue_hooks.hpp`, `counters/queue_hooks.cpp` |
-| `counters::is_any_active` | `counters/queue_hooks.hpp`, `counters/queue_hooks.cpp` |
+| `counters::is_any_active`, `counters::is_active_on_agent` | `counters/queue_hooks.hpp`, `counters/queue_hooks.cpp` |
 | Context filter shared by all three | `counters/queue_hooks.cpp`, `counter_contexts_filter()` |
 | Stable producer tags | `hsa/queue_hooks/client_ids.hpp` |
 | Exit hook call site | `hsa/queue.cpp`, in the async signal handler |
-| `no_real_consumers` gains `!counters::is_any_active()` | `hsa/queue.cpp` |
+| `no_real_consumers` gains `!counters::is_active_on_agent(queue's agent)` | `hsa/queue.cpp` |
 | Enter hook call site | `hsa/queue.cpp`, in the write interceptor |
 | Batching disabled while counters are active | `hsa/queue.cpp`, `should_batch_packets` |
 | Service stop path | `counters/core.cpp`, `stop_context()` |
 
 The hook names describe the dispatch phase they run in: the enter hook runs when a dispatch is being
-submitted, the exit hook when its completion signal fires. `is_any_active` is neither phase, so it
-keeps a plain name. Each remaining service mirrors this trio in its own `queue_hooks.{hpp,cpp}`.
+submitted, the exit hook when its completion signal fires. The activity predicates are neither
+phase, so they keep plain names. Each remaining service mirrors this set in its own
+`queue_hooks.{hpp,cpp}`.
+
+`is_active_on_agent()` is the form the per-queue gate uses, and it exists because
+`kernel_dispatch_phase_enter_hook()` already skips contexts that do not collect on the dispatch's
+agent. Gating on the process-wide `is_any_active()` would drag every queue on every GPU through
+interception — and cost it packet batching — on behalf of a context scoped to one GPU, to run a
+hook that then filters those dispatches out anyway. `is_any_active()` remains for callers that
+genuinely want "is this service in use at all".
 
 `client_ids.hpp` replaces the registry's auto-incrementing `ClientID` with fixed producer tags, so
 the id attached to an instrumentation packet no longer depends on the order in which services
@@ -202,6 +210,7 @@ completion path becomes an application hang rather than data loss.
 2. Several in-flight PRs edit the same `no_real_consumers` expression in `hsa/queue.cpp`.
    Consolidating the predicate into one `needs_interception(queue)` helper would remove the
    recurring conflict.
-3. `counters::is_any_active()` forces `should_batch_packets = false` for every dispatch while any
-   counter context is active. The performance effect of that, combined with kernel replay's own
-   gate, has not been measured.
+3. `counters::is_active_on_agent()` forces `should_batch_packets = false` for every dispatch on an
+   agent a counter context collects on. Scoping the predicate to the agent keeps unrelated GPUs
+   batching, but the cost on the collecting agent, combined with kernel replay's own gate, has not
+   been measured.

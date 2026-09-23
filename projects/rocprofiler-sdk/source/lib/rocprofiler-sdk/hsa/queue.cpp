@@ -438,10 +438,15 @@ WriteInterceptor(const void* packets,
 
     auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
     const bool graph_launch_active = (gls != nullptr);
-    const bool counters_active     = counters::is_any_active();
     // Counter collection no longer registers a queue-controller callback, so it does not count
     // toward get_notifiers(); detect it explicitly so a counters-only run still enters the
     // interceptor.
+    //
+    // Scoped to this queue's agent: a context restricted via set_agents() must leave queues on
+    // the other agents on the fast path instead of paying interception and losing batching for
+    // dispatches that kernel_dispatch_phase_enter_hook() would filter out anyway.
+    const bool counters_active =
+        counters::is_active_on_agent(CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id);
     const bool no_real_consumers =
         (queue.get_notifiers() == 0 && !counters_active &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());

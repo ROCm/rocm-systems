@@ -174,6 +174,14 @@ TEST(counters_queue_hooks, is_any_active_false_when_no_context_active)
     EXPECT_FALSE(rocprofiler::counters::is_any_active());
 }
 
+// is_active_on_agent is the per-queue form of the same gate, and with nothing active it must
+// agree with is_any_active() for every agent rather than falling back to "assume active".
+TEST(counters_queue_hooks, is_active_on_agent_false_when_no_context_active)
+{
+    EXPECT_FALSE(rocprofiler::counters::is_active_on_agent(rocprofiler_agent_id_t{.handle = 0}));
+    EXPECT_FALSE(rocprofiler::counters::is_active_on_agent(rocprofiler_agent_id_t{.handle = 1}));
+}
+
 TEST(counters_queue_hooks, exit_hook_skips_when_inst_pkt_has_no_counter_client_id)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);

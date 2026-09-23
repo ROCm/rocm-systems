@@ -219,6 +219,43 @@ TEST(counters_per_agent, set_agents_is_locked_while_the_context_is_active)
               ROCPROFILER_STATUS_SUCCESS);
 }
 
+// The HSA write interceptor gates on is_active_on_agent(), so this is what decides whether a
+// queue on an unrelated GPU stays on the fast path and keeps packet batching. An unrestricted
+// context claims every agent; one narrowed with set_agents() must claim only its own.
+TEST(counters_per_agent, is_active_on_agent_follows_the_scoped_agent_set)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto agents = get_two_agents();
+    if(!agents.first || !agents.second) GTEST_SKIP() << "needs two GPU agents";
+
+    const auto agent_0 = agents.first->get_rocp_agent()->id;
+    const auto agent_1 = agents.second->get_rocp_agent()->id;
+
+    auto ctx = make_counter_context();
+
+    // Registered but never started, so it claims nothing.
+    EXPECT_FALSE(counters::is_active_on_agent(agent_0));
+
+    ASSERT_EQ(rocprofiler_start_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_TRUE(counters::is_active_on_agent(agent_0));
+    EXPECT_TRUE(counters::is_active_on_agent(agent_1));
+    ASSERT_EQ(rocprofiler_stop_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+
+    ASSERT_EQ(rocprofiler_dispatch_counting_service_set_agents(ctx, &agent_1, 1),
+              ROCPROFILER_STATUS_SUCCESS);
+    ASSERT_EQ(rocprofiler_start_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+
+    EXPECT_FALSE(counters::is_active_on_agent(agent_0));
+    EXPECT_TRUE(counters::is_active_on_agent(agent_1));
+
+    // is_any_active() cannot draw that distinction, which is the reason the gate moved off it.
+    EXPECT_TRUE(counters::is_any_active());
+
+    ASSERT_EQ(rocprofiler_stop_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Context conflict: the scenario from the #9586 review
 // ---------------------------------------------------------------------------------------------

@@ -130,5 +130,15 @@ is_any_active()
 {
     return !context::get_active_contexts(counter_contexts_filter()).empty();
 }
+
+bool
+is_active_on_agent(rocprofiler_agent_id_t agent_id)
+{
+    for(const auto* ctx : context::get_active_contexts(counter_contexts_filter()))
+    {
+        if(ctx->dispatch_counter_collection->collects_on(agent_id)) return true;
+    }
+    return false;
+}
 }  // namespace counters
 }  // namespace rocprofiler
