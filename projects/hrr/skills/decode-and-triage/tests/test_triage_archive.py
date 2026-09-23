@@ -17,9 +17,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent.parent / "scripts"
 SCRIPT = SCRIPT_DIR / "triage_archive.sh"
-FIXTURE = SCRIPT_DIR.parent / "evals" / "fixtures" / "rocm_smi_vram.txt"
+FIXTURE = Path(__file__).resolve().parent / "fixtures" / "rocm_smi_vram.txt"
 
 
 def _shell_function(name: str) -> str:

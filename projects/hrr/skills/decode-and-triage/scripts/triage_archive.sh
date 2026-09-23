@@ -60,7 +60,10 @@ ARCHIVE="$(readlink -f "$ARCHIVE" 2>/dev/null || realpath "$ARCHIVE" 2>/dev/null
 
 name="$(basename "$ARCHIVE")"
 ts="$(date -u +%Y%m%dT%H%M%SZ)"
-WORKDIR="${HRR_TRIAGE_WORKDIR:-$(pwd)}"
+# Never the current directory by default: run from inside a customer's archive
+# and the finding and the replay log land in it, against this skill's own rule
+# that the archive is not to be written to.
+WORKDIR="${HRR_TRIAGE_WORKDIR:-${TMPDIR:-/tmp}/hrr-triage}"
 mkdir -p "$WORKDIR"
 LOG=""
 ext=".finding.md"; [[ "$FORMAT" == "json" ]] && ext=".finding.json"
