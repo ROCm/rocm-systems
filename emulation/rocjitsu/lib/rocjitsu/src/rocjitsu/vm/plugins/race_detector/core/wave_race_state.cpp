@@ -113,8 +113,7 @@ void WaveRaceState::registerEventWithIntervals(
   const size_t register_limit = toSgpr   ? sgprMemoryEvents.size()
                                 : toTtmp ? ttmpMemoryEvents.size()
                                          : vgprMemoryEvents.size();
-  if (std::any_of(regIds.begin(), regIds.end(),
-                  [register_limit](uint32_t reg) { return reg >= register_limit; }))
+  if (std::ranges::any_of(regIds, [register_limit](uint32_t reg) { return reg >= register_limit; }))
     return;
   if (!toSgpr && !toTtmp) {
     for (auto reg : regIds) {
@@ -442,7 +441,7 @@ void WaveRaceState::checkScalarAccess(RegisterRef ref, bool isWrite) const {
       continue;
     for (EventId eid : (*events)[index]) {
       if (detector->events().type(eid) != type ||
-          std::find(reportedEvents.begin(), reportedEvents.end(), eid) != reportedEvents.end())
+          std::ranges::find(reportedEvents, eid) != reportedEvents.end())
         continue;
       reportedEvents.push_back(eid);
       detector->getRaceHandler()({space, static_cast<int>(index), waveId.value, -1, isWrite,

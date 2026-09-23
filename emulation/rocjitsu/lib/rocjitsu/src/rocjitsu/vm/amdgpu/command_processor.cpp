@@ -264,7 +264,7 @@ uint32_t aligned_lds_bytes_per_workgroup(const DispatchEntry &entry) {
 }
 
 bool any_active_wavefronts(const std::vector<ComputeUnitCore *> &cus) {
-  return std::any_of(cus.begin(), cus.end(), [](const auto *cu) { return cu->has_active_wfs(); });
+  return std::ranges::any_of(cus, [](const auto *cu) { return cu->has_active_wfs(); });
 }
 
 bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_local_wg_id,
@@ -1246,10 +1246,9 @@ bool CommandProcessor::signal_queue_exception(uint32_t queue_id, uint32_t proces
   InterruptSink interrupt_sink;
   {
     std::lock_guard<std::recursive_mutex> lk(hw_queue_mutex_);
-    auto queue =
-        std::find_if(aql_queues_.begin(), aql_queues_.end(), [&](const AqlQueueRecord &candidate) {
-          return candidate.queue_id == queue_id && candidate.process_id == process_id;
-        });
+    auto queue = std::ranges::find_if(aql_queues_, [&](const AqlQueueRecord &candidate) {
+      return candidate.queue_id == queue_id && candidate.process_id == process_id;
+    });
     if (queue == aql_queues_.end() || queue->exception_status_va == 0)
       return false;
     exception_status_va = queue->exception_status_va;
@@ -2859,10 +2858,9 @@ bool CommandProcessor::submit_pm4(uint32_t queue_id, uint32_t process_id,
                                   Pm4Submission submission) {
   {
     std::lock_guard lock(hw_queue_mutex_);
-    auto it =
-        std::find_if(drm_queues_.begin(), drm_queues_.end(), [&](const Pm4SubmitQueue &queue) {
-          return queue.queue_id == queue_id && queue.process_id == process_id;
-        });
+    auto it = std::ranges::find_if(drm_queues_, [&](const Pm4SubmitQueue &queue) {
+      return queue.queue_id == queue_id && queue.process_id == process_id;
+    });
     if (it == drm_queues_.end() || !it->pm4)
       throw std::runtime_error("PM4 submission has no registered queue");
     if (it->faulted)
@@ -2924,7 +2922,8 @@ void CommandProcessor::dispatch_pm4(const Pm4SubmitQueue &queue, Pm4DispatchStat
     throw std::runtime_error("PM4 launch exceeds compute user-data registers");
   dp.pm4_abi = true;
   dp.pm4_failure = queue.pm4->submissions.front().failure;
-  std::copy_n(regs.begin() + kPm4ComputeUserData0, dp.num_user_sgprs, dp.user_sgprs.begin());
+  std::ranges::copy_n(regs.begin() + kPm4ComputeUserData0, dp.num_user_sgprs,
+                      dp.user_sgprs.begin());
   dp.sgprs_per_wf = cus_[0]->config().sgprs_per_wf;
   const auto granule = descriptor_vgpr_count_granule_for_wavefront(arch, dp.kernel_wave_size);
   if (!granule)
@@ -3247,7 +3246,7 @@ void CommandProcessor::fetch_pm4(Pm4SubmitQueue &queue, Pm4DispatchState &qs, si
         if (words.size() < 2 || words[0] >= state.sh_registers.size() ||
             words.size() - 1 > state.sh_registers.size() - words[0])
           throw std::runtime_error("invalid SET_SH_REG range");
-        std::copy(words.begin() + 1, words.end(), state.sh_registers.begin() + words[0]);
+        std::ranges::copy(words.begin() + 1, words.end(), state.sh_registers.begin() + words[0]);
         break;
       }
       case Pm4Opcode::SetShRegPairs: // SET_SH_REG_PAIRS

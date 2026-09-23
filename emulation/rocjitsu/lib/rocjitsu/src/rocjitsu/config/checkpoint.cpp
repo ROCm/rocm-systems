@@ -44,8 +44,8 @@ serialize_vgpr_block(flatbuffers::FlatBufferBuilder &builder, const amdgpu::Comp
   cu.for_each_raw_vgpr(base, cu.vgpr_allocation_block_size(), [&](std::span<const uint32_t> lanes) {
     if (lanes.size() < lane_count)
       throw std::runtime_error("VGPR storage is narrower than the checkpoint wave");
-    std::copy_n(reinterpret_cast<const uint8_t *>(lanes.data()), register_bytes,
-                serialized + offset_bytes);
+    std::ranges::copy_n(reinterpret_cast<const uint8_t *>(lanes.data()), register_bytes,
+                        serialized + offset_bytes);
     offset_bytes += register_bytes;
   });
   return offset;
