@@ -42,7 +42,7 @@ SCHEDULED_CATALOGUE = [
     ("monthly", "ruby64-rccl-perf-monthly", "ruby", "perf", 2880),
     ("monthly", "oci-rccl-perf-monthly", "oci", "perf", 2880),
     # Crusoe: job configs exist in tRCCL, but there is no crusoe label in
-    # cluster-runners.allowlist yet.
+    # rccl-cluster-runners.allowlist yet.
     # ("nightly", "crusoe-rccl-perf-nightly", "crusoe", "perf", 720),
     # ("nightly", "crusoe-rccl-unit-nightly", "crusoe", "unit", 720),
     # ("weekly", "crusoe-rccl-perf-weekly", "crusoe", "perf", 2880),

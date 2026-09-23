@@ -5,7 +5,7 @@
 """Guard RCCL cluster scale-runner usage in GitHub Actions workflows.
 
 Runners and permitted workflows live in .github/scripts/allowlist/
-cluster-runners.allowlist. On pull requests, newly added references are flagged
+rccl-cluster-runners.allowlist. On pull requests, newly added references are flagged
 so CI can request @ROCm/rccl-ci review.
 """
 
@@ -21,7 +21,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 from ci_utils import retry, set_github_output
 
-ALLOWLIST_PATH = Path(".github/scripts/allowlist/cluster-runners.allowlist")
+ALLOWLIST_PATH = Path(".github/scripts/allowlist/rccl-cluster-runners.allowlist")
 WORKFLOWS_DIR = Path(".github/workflows")
 # Scripts holding runner labels, mapped to the workflows that consume them.
 MATRIX_SOURCES = {

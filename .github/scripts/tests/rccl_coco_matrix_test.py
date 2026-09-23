@@ -44,7 +44,7 @@ class PrClustersTest(unittest.TestCase):
         allowlist = (
             Path(__file__).resolve().parents[1]
             / "allowlist"
-            / "cluster-runners.allowlist"
+            / "rccl-cluster-runners.allowlist"
         )
         listed = {
             line.split("#", 1)[0].strip()

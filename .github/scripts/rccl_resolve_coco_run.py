@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Resolve coco run mode, trigger kind, and CLI flags for resolve-coco-run."""
+"""Resolve coco run mode, trigger kind, and CLI flags for rccl-resolve-coco-run."""
 
 from __future__ import annotations
 

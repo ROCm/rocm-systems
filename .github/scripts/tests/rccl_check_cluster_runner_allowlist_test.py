@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Tests for check_rccl_cluster_runner_allowlist.py.
+"""Tests for rccl_check_cluster_runner_allowlist.py.
 
 Covers the YAML shapes that can carry a runner label, and the exit status
 main() reports for each verdict.
@@ -18,7 +18,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
-import check_rccl_cluster_runner_allowlist as guard
+import rccl_check_cluster_runner_allowlist as guard
 
 RUNNER = "ruby-linux-slurm-scale-runner"
 # A workflow whose only interesting property is that it names RUNNER.
@@ -76,7 +76,7 @@ class LineAssignsRunnerTest(unittest.TestCase):
 class LoadAllowlistTest(unittest.TestCase):
     def _load(self, text: str):
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "cluster-runners.allowlist"
+            path = Path(tmp) / "rccl-cluster-runners.allowlist"
             path.write_text(text, encoding="utf-8")
             return guard.load_allowlist(path)
 
@@ -111,7 +111,7 @@ class LoadAllowlistTest(unittest.TestCase):
     def test_rejects_a_github_path_outside_workflows(self):
         # Only workflow paths are scanned, so such a line could never match.
         with self.assertRaises(ValueError):
-            self._load(".github/actions/resolve-coco-run/action.yml\n")
+            self._load(".github/actions/rccl-resolve-coco-run/action.yml\n")
 
 
 class GitDiffNewRunnerUsageTest(unittest.TestCase):

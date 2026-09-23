@@ -35,8 +35,8 @@ class CocoPathsTest(unittest.TestCase):
             ".github/workflows/rccl-coco-run.yml",
             ".github/scripts/rccl_coco_matrix.py",
             ".github/scripts/rccl_resolve_coco_run.py",
-            ".github/actions/resolve-coco-run/action.yml",
-            ".github/actions/checkout-coco-harness/action.yml",
+            ".github/actions/rccl-resolve-coco-run/action.yml",
+            ".github/actions/rccl-checkout-coco-harness/action.yml",
             ".github/scripts/rccl_detect_coco_changes.py",
             ".github/scripts/ci_utils.py",
         ]:

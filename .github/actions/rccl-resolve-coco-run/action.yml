@@ -67,7 +67,7 @@ runs:
   using: 'composite'
   steps:
     - name: Checkout the coco harness
-      uses: ./.github/actions/checkout-coco-harness
+      uses: ./.github/actions/rccl-checkout-coco-harness
       with:
         ref: ${{ inputs.coco_ref }}
         path: _coco

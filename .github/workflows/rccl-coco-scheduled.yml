@@ -50,13 +50,13 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           sparse-checkout: |
-            .github/actions/checkout-coco-harness
-            .github/actions/resolve-coco-run
+            .github/actions/rccl-checkout-coco-harness
+            .github/actions/rccl-resolve-coco-run
             .github/scripts
 
       - name: Resolve coco run parameters
         id: resolve
-        uses: ./.github/actions/resolve-coco-run
+        uses: ./.github/actions/rccl-resolve-coco-run
         with:
           coco_ref: ${{ inputs.coco_ref || 'main' }}
           dry_run: ${{ inputs.dry_run || false }}

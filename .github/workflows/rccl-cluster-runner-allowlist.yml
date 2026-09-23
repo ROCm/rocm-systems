@@ -4,7 +4,7 @@
 name: RCCL cluster runner allowlist
 
 # Cluster scale runners may only appear in workflows listed in
-# .github/scripts/allowlist/cluster-runners.allowlist.
+# .github/scripts/allowlist/rccl-cluster-runners.allowlist.
 
 on:
   pull_request:
@@ -62,7 +62,7 @@ jobs:
           if [ "${EVENT_NAME}" = "pull_request" ]; then
             args+=(--base HEAD^ --head HEAD)
           fi
-          python3 .github/scripts/check_rccl_cluster_runner_allowlist.py "${args[@]}"
+          python3 .github/scripts/rccl_check_cluster_runner_allowlist.py "${args[@]}"
 
   request-rccl-ci-review:
     name: Request @ROCm/rccl-ci review
