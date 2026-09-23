@@ -57,9 +57,9 @@ void WaveRaceState::registerEvent(
 void WaveRaceState::registerEvent(
     uint64_t pc, MemoryEventType type, std::vector<uint32_t> regIds, uint64_t execMask,
     uint8_t byteMask, std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-    MemoryOrderClass memoryOrder) {
+    MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask) {
   registerEventWithIntervals(pc, type, std::move(regIds), execMask, byteMask, {},
-                             counterObligations, memoryOrder);
+                             counterObligations, memoryOrder, lastRegisterByteMask);
 }
 
 void WaveRaceState::registerScalarLoad(
@@ -106,7 +106,7 @@ void WaveRaceState::registerEventWithIntervals(
     uint64_t pc, MemoryEventType type, std::vector<uint32_t> regIds, uint64_t execMask,
     uint8_t byteMask, IntervalSet ldsIntervals,
     std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-    MemoryOrderClass memoryOrder) {
+    MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask) {
   ProfileScope ps(*profiler_, "registerEvent");
   bool toSgpr = isToSgpr(type);
   bool toTtmp = isToTtmp(type);
@@ -122,9 +122,9 @@ void WaveRaceState::registerEventWithIntervals(
     }
   }
 
-  auto eventId =
-      detector->allocateEventId(waveId, pc, type, std::move(regIds), execMask, byteMask,
-                                std::move(ldsIntervals), counterObligations, memoryOrder);
+  auto eventId = detector->allocateEventId(waveId, pc, type, std::move(regIds), execMask, byteMask,
+                                           std::move(ldsIntervals), counterObligations, memoryOrder,
+                                           lastRegisterByteMask);
   for (uint32_t reg : detector->events().registers(eventId)) {
     if (toSgpr) {
       sgprMemoryEvents[reg].push_back(eventId);
@@ -341,7 +341,7 @@ void WaveRaceState::checkVgprReadLanes(int reg, uint64_t laneMask, uint8_t byteM
   for (EventId eid : vgprMemoryEvents[reg]) {
     uint64_t conflictMask = laneMask & detector->events().execMask(eid);
     if (isToVgpr(detector->events().type(eid)) &&
-        (detector->events().byteMask(eid) & byteMask) != 0 && conflictMask != 0) {
+        (detector->events().registerByteMask(eid, reg) & byteMask) != 0 && conflictMask != 0) {
       int lane = std::countr_zero(conflictMask);
       detector->getRaceHandler()({RaceViolation::Space::VGPR, reg, waveId.value, lane, false,
                                   detector->getWorkgroupId(), eid});
@@ -359,7 +359,7 @@ void WaveRaceState::checkVgprWriteLanes(int reg, uint64_t laneMask, uint8_t byte
   for (EventId eid : vgprMemoryEvents[reg]) {
     uint64_t conflictMask = laneMask & detector->events().execMask(eid);
     if (isToVgpr(detector->events().type(eid)) &&
-        (detector->events().byteMask(eid) & byteMask) != 0 && conflictMask != 0) {
+        (detector->events().registerByteMask(eid, reg) & byteMask) != 0 && conflictMask != 0) {
       int lane = std::countr_zero(conflictMask);
       detector->getRaceHandler()({RaceViolation::Space::VGPR, reg, waveId.value, lane, true,
                                   detector->getWorkgroupId(), eid});
@@ -375,7 +375,7 @@ void WaveRaceState::checkVgprWrite(int reg, uint64_t execMask, uint8_t byteMask,
     const bool orderedWithCurrent =
         currentMemoryOrder != MemoryOrderClass::UNORDERED && pendingOrder == currentMemoryOrder;
     if (!isToVgpr(pendingType) || orderedWithCurrent ||
-        (detector->events().byteMask(eventId) & byteMask) == 0) {
+        (detector->events().registerByteMask(eventId, reg) & byteMask) == 0) {
       continue;
     }
 
@@ -396,7 +396,8 @@ void WaveRaceState::checkVgprReadAllLanes(int reg) const {
   if (getRegEventCount(MemoryEventType::GLOBAL_TO_VGPR, reg) != 0 ||
       getRegEventCount(MemoryEventType::LDS_TO_VGPR, reg) != 0) {
     for (EventId eid : vgprMemoryEvents[reg]) {
-      if (isToVgpr(detector->events().type(eid)) && (detector->events().byteMask(eid) & 0xF) != 0) {
+      if (isToVgpr(detector->events().type(eid)) &&
+          (detector->events().registerByteMask(eid, reg) & 0xF) != 0) {
         int lane = std::countr_zero(detector->events().execMask(eid));
         detector->getRaceHandler()({RaceViolation::Space::VGPR, reg, waveId.value, lane, false,
                                     detector->getWorkgroupId(), eid});

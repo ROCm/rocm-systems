@@ -4270,8 +4270,139 @@ TEST(ExecutionPluginTest, D16MemoryCompletionPreservesHalfWithoutObservation) {
   }
 }
 
+class FormattedLoadRaceTest : public ::testing::Test {
+protected:
+  PluginFixture fixture{1, "rdna4", 32, 128};
+  StringSink *sink = nullptr;
+  Wavefront *wave = nullptr;
+  RaceWavefrontState *plugin_state = nullptr;
+  std::unique_ptr<Decoder> decoder;
+
+  void SetUp() override {
+    PluginSinkConfig sink_config;
+    sink = &sink_config.emplace<StringSink>();
+    fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    auto plugin = std::make_unique<RaceDetectorPlugin>();
+    auto *plugin_ptr = plugin.get();
+    ASSERT_TRUE(fixture.plugin_group_->add(std::move(plugin)));
+    fixture.soc->set_plugin_group(fixture.plugin_group_);
+    fixture.plugin_group_->onInit();
+    wave = fixture.cu()->dispatch_wf(0, 0, 128, 256, 32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    std::array<Wavefront *, 1> waves{wave};
+    fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 128, waves);
+    plugin_state = static_cast<RaceWavefrontState *>(wave->plugin_state(plugin_ptr->slot_index()));
+    decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_NE(decoder, nullptr);
+  }
+
+  void issue(uint16_t opcode, uint32_t format, uint8_t destination, uint32_t components) {
+    auto *cu = fixture.cu();
+    const uint32_t scalar_base = wave->sgpr_alloc().base;
+    cu->write_sgpr(scalar_base + 4, 0x1000);
+    cu->write_sgpr(scalar_base + 5, 0);
+    cu->write_sgpr(scalar_base + 6, 64);
+    cu->write_sgpr(scalar_base + 7,
+                   4 | (5 << 3) | (6 << 6) | (7 << 9) | (format << 12) | (1u << 28));
+    const auto words = rdna4::build_vbuffer(opcode, {.soffset = rdna4::OPR_SREG_M0_NULL,
+                                                     .vdata = destination,
+                                                     .rsrc = 4,
+                                                     .format = static_cast<uint8_t>(format)});
+    std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
+    ASSERT_NE(load, nullptr);
+    wave->pc += 16; // Give each probe a distinct PC so report deduplication cannot hide it.
+    ASSERT_TRUE(cu->execute_instruction(load.get(), *wave).succeeded());
+    ASSERT_NE(load->data(), nullptr);
+    const auto &state = *load->data_as<VectorMemState>();
+    EXPECT_EQ(state.buffer_components, components);
+    EXPECT_EQ(state.num_elems, 1u);
+    EXPECT_EQ(state.elem_size, format == 46 ? 4u : 16u);
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load, *wave);
+  }
+
+  void wait(uint32_t count) {
+    wave->set_wait_target_loadcnt(count);
+    TestWaitcntInstruction instruction("s_wait_loadcnt");
+    fixture.plugin_group_->onAmdgpuAfterExecuteInstruction(wave->pc + 4, instruction, *wave);
+  }
+
+  bool probe(uint32_t destination, uint8_t byte_mask, bool write, uint64_t lanes = 1) {
+    const size_t previous = sink->str().size();
+    const uint32_t physical = wave->vgpr_alloc().base + destination;
+    if (write)
+      fixture.plugin_group_->onAmdgpuWriteVgprLanes(wave, physical, lanes, byte_mask);
+    else
+      fixture.plugin_group_->onAmdgpuReadVgprLanes(wave, physical, lanes, byte_mask);
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+};
+
+TEST_F(FormattedLoadRaceTest, TracksEveryDestinationAndWrittenHalf) {
+  struct Case {
+    uint16_t opcode;
+    uint32_t components;
+    std::array<uint8_t, 4> masks;
+  };
+  const Case cases[] = {
+      {rdna4::kBufferLoadFormatXVbuffer, 1, {0xf, 0, 0, 0}},
+      {rdna4::kBufferLoadFormatXyzwVbuffer, 4, {0xf, 0xf, 0xf, 0xf}},
+      {rdna4::kTbufferLoadFormatXyzwVbuffer, 4, {0xf, 0xf, 0xf, 0xf}},
+      {rdna4::kBufferLoadD16FormatXVbuffer, 1, {0x3, 0, 0, 0}},
+      {rdna4::kBufferLoadD16HiFormatXVbuffer, 1, {0xc, 0, 0, 0}},
+      {rdna4::kBufferLoadD16FormatXyVbuffer, 2, {0xf, 0, 0, 0}},
+      {rdna4::kBufferLoadD16FormatXyzVbuffer, 3, {0xf, 0x3, 0, 0}},
+      {rdna4::kBufferLoadD16FormatXyzwVbuffer, 4, {0xf, 0xf, 0, 0}},
+  };
+  for (const auto &test : cases) {
+    for (uint32_t format : {46u, 62u}) { // Four-byte and sixteen-byte memory footprints.
+      for (uint32_t offset = 0; offset < 5; ++offset) {
+        for (uint8_t mask : {0x3, 0xc}) {
+          for (bool write : {false, true}) {
+            SCOPED_TRACE(std::format("opcode={} format={} offset={} mask={} write={}", test.opcode,
+                                     format, offset, mask, write));
+            issue(test.opcode, format, 8, test.components);
+            ASSERT_EQ(plugin_state->race_state->getWaveMemoryEvents().size(), 1u);
+            EXPECT_FALSE(probe(8 + offset, mask, write, /*lanes=*/2));
+            const bool expected = offset < test.masks.size() && (test.masks[offset] & mask);
+            EXPECT_EQ(probe(8 + offset, mask, write), expected);
+            wait(0);
+            EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());
+            EXPECT_FALSE(probe(8 + offset, mask, write));
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_F(FormattedLoadRaceTest, PartialWaitRetiresOneLoadWithAllItsDestinations) {
+  issue(rdna4::kBufferLoadD16FormatXyzVbuffer, 46, 8, 3);
+  issue(rdna4::kBufferLoadD16FormatXyzVbuffer, 46, 12, 3);
+  ASSERT_EQ(plugin_state->race_state->getWaveMemoryEvents().size(), 2u);
+  wait(1);
+  ASSERT_EQ(plugin_state->race_state->getWaveMemoryEvents().size(), 1u);
+  EXPECT_FALSE(probe(8, 0xf, false));
+  EXPECT_FALSE(probe(9, 0xf, false));
+  EXPECT_FALSE(probe(13, 0xc, false));
+  EXPECT_TRUE(probe(13, 0x3, false));
+  wait(0);
+  EXPECT_FALSE(probe(12, 0xf, false));
+  EXPECT_FALSE(probe(13, 0xf, false));
+}
+
+TEST_F(FormattedLoadRaceTest, RejectsWholeDestinationRangeWhenItExceedsTheWaveAllocation) {
+  issue(rdna4::kBufferLoadFormatXyzwVbuffer, 46, 255, 4);
+  EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());
+  EXPECT_FALSE(probe(255, 0xf, false));
+  issue(rdna4::kBufferLoadD16FormatXyzVbuffer, 46, 255, 3);
+  EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());
+  EXPECT_FALSE(probe(255, 0xf, false));
+}
+
 TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
-  auto opposite_half_read_reports_race = [](std::string_view arch, uint32_t wavefront_size) {
+  auto opposite_half_read_reports_race = [](std::string_view arch, uint32_t wavefront_size,
+                                            bool formatted) {
     PluginFixture f(/*num_wf_slots=*/1, arch, wavefront_size);
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
@@ -4302,18 +4433,23 @@ TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
     state->exec_mask = 1;
     state->lane_mask = 1;
     state->dst_reg_base = wf->vgpr_alloc().base + kDst;
-    state->d16_lo = true;
+    state->d16_lo = !formatted;
+    state->buffer_d16 = formatted;
+    state->buffer_components = formatted ? 3 : 0;
     TestMemoryInstruction load(std::move(state));
     f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
 
-    f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kDst, /*lane_mask=*/1,
-                                           ExecutionPlugin::kHighHalfByteMask);
+    f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kDst + (formatted ? 1 : 0),
+                                           /*lane_mask=*/1, ExecutionPlugin::kHighHalfByteMask);
     return sink.str().find("RACE ") != std::string::npos;
   };
 
-  EXPECT_TRUE(opposite_half_read_reports_race("cdna4", /*wavefront_size=*/64));
-  EXPECT_TRUE(opposite_half_read_reports_race("cdna5", /*wavefront_size=*/32));
-  EXPECT_FALSE(opposite_half_read_reports_race("rdna4", /*wavefront_size=*/32));
+  for (bool formatted : {false, true}) {
+    SCOPED_TRACE(formatted);
+    EXPECT_TRUE(opposite_half_read_reports_race("cdna4", /*wavefront_size=*/64, formatted));
+    EXPECT_TRUE(opposite_half_read_reports_race("cdna5", /*wavefront_size=*/32, formatted));
+    EXPECT_FALSE(opposite_half_read_reports_race("rdna4", /*wavefront_size=*/32, formatted));
+  }
 }
 
 TEST(RaceDetectorPluginTest, InvalidVectorLoadDestinationIsRejectedBeforeWawChecks) {

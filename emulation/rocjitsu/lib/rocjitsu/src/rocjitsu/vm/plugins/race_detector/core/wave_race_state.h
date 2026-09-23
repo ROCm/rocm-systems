@@ -41,10 +41,11 @@ public:
                 uint64_t execMask, uint8_t byteMask, amdgpu::WaitCounterType waitCounterType,
                 MemoryOrderClass memoryOrder,
                 std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
+  /// A nonzero lastRegisterByteMask overrides byteMask for the last destination.
   void registerEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
                      uint64_t execMask, uint8_t byteMask,
                      std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                     MemoryOrderClass memoryOrder);
+                     MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
 
   /// Register an in-flight scalar load using its architectural destination.
   void registerScalarLoad(
@@ -161,7 +162,7 @@ private:
   void registerEventWithIntervals(uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
                                   uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
                                   std::span<const amdgpu::MemoryCounterObligation>,
-                                  MemoryOrderClass memoryOrder);
+                                  MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
   void retireEventRegisters(EventId);
   void checkScalarAccess(RegisterRef reg, bool isWrite) const;
 

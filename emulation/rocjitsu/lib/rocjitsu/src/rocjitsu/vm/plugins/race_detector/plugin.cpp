@@ -35,8 +35,16 @@ void warn_cluster_peer_writes_ignored_once() {
   });
 }
 
-uint8_t vector_memory_byte_mask(const amdgpu::VectorMemState &state,
-                                const amdgpu::Wavefront &wave) {
+uint8_t vector_memory_byte_mask(const amdgpu::VectorMemState &state, const amdgpu::Wavefront &wave,
+                                uint32_t register_offset = 0) {
+  if (state.buffer_components && state.buffer_d16) {
+    if (state.is_load && wave.cu().sram_ecc())
+      return ExecutionPlugin::kFullByteMask;
+    if (state.d16_hi)
+      return ExecutionPlugin::kHighHalfByteMask;
+    return register_offset * 2 + 1 < state.buffer_components ? ExecutionPlugin::kFullByteMask
+                                                             : ExecutionPlugin::kLowHalfByteMask;
+  }
   if (state.is_load && wave.cu().sram_ecc() && (state.d16_lo || state.d16_hi))
     return ExecutionPlugin::kFullByteMask;
   if (state.d16_lo)
@@ -397,10 +405,12 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(
         return;
       std::vector<uint32_t> registers = std::move(*destinations);
       const uint8_t byte_mask = vector_memory_byte_mask(d, wf);
-      for (uint32_t reg : registers)
-        rs->checkVgprWrite(static_cast<int>(reg), d.exec_mask, byte_mask, memoryOrder);
+      const uint8_t last_byte_mask = vector_memory_byte_mask(d, wf, registers.size() - 1);
+      for (uint32_t i = 0; i < registers.size(); ++i)
+        rs->checkVgprWrite(static_cast<int>(registers[i]), d.exec_mask,
+                           vector_memory_byte_mask(d, wf, i), memoryOrder);
       rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_VGPR, std::move(registers), d.exec_mask,
-                        byte_mask, issue->counter_obligations(), memoryOrder);
+                        byte_mask, issue->counter_obligations(), memoryOrder, last_byte_mask);
     } else if (!d.is_load) {
       rs->registerEvent(wf.pc, MemoryEventType::VGPR_TO_GLOBAL, {}, d.exec_mask, 0xF,
                         issue->counter_obligations(), memory_order_for(inst));
