@@ -5,6 +5,7 @@
 #include "common/path.hpp"
 #include "logger/debug.hpp"
 
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <algorithm>
@@ -51,7 +52,7 @@ print_usage(const char* prog_name)
               << "Once attached, press ENTER to detach from the process.\n";
 }
 
-void
+std::string
 setup_tool_library_env()
 {
     const auto* attach_tool_library_env_name = "ROCPROF_ATTACH_TOOL_LIBRARY";
@@ -72,7 +73,7 @@ setup_tool_library_env()
     {
         setenv(rocp_tool_libraries_env_name, existing, 0);
         LOG_INFO("Using tool library: {}", existing);
-        return;
+        return std::string{ existing };
     }
 
     const auto path =
@@ -83,6 +84,25 @@ setup_tool_library_env()
         setenv(rocp_tool_libraries_env_name, path.c_str(), 0);
         LOG_INFO("Using tool library: {}", path);
     }
+    return path;
+}
+
+bool
+verify_tool_library_visible_to_target(pid_t pid, const std::string& tool_lib_path)
+{
+    const auto visibility =
+        rocprofsys::common::path::check_target_path_visibility(pid, tool_lib_path);
+    if(visibility != rocprofsys::common::path::target_visibility::confirmed_missing)
+    {
+        return true;
+    }
+    LOG_ERROR(
+        "Tool library '{}' does not exist in the mount namespace of process {}. If the "
+        "target is running in a container with rocprofiler-systems installed at a "
+        "different location, set ROCPROF_ATTACH_TOOL_LIBRARY to the path as seen by the "
+        "target before attaching.",
+        tool_lib_path, pid);
+    return false;
 }
 
 void
@@ -253,11 +273,16 @@ main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    setup_tool_library_env();
+    const auto tool_lib_path = setup_tool_library_env();
     setup_output_env(opts.output_path);
     setup_output_format_env(opts.profile_format);
 
     const auto pid = opts.pid;
+
+    if(!verify_tool_library_visible_to_target(pid, tool_lib_path))
+    {
+        return EXIT_FAILURE;
+    }
 
     LOG_INFO("Trying to attach to process {}", pid);
 

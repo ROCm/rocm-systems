@@ -259,6 +259,29 @@ If the process cannot be found:
 2. Ensure the process is still running.
 3. Check if the process is in a different namespace (containers).
 
+Attaching to a process in a container
+----------------------------------------
+
+``rocprof-sys-attach`` injects a tool library (``librocprof-sys-dl.so``) into the
+target process. By default, it uses the path to its own installation, which is
+only valid if the target process shares the attaching process' mount namespace
+(view of the filesystem).
+
+If the target process is running in a container (or any mount namespace that
+does not have rocprofiler-systems installed at the same path), set
+``ROCPROF_ATTACH_TOOL_LIBRARY`` to the absolute path of ``librocprof-sys-dl.so``
+**as seen by the target process** before attaching:
+
+.. code-block:: shell
+
+   # path of librocprof-sys-dl.so inside the target's own mount namespace
+   export ROCPROF_ATTACH_TOOL_LIBRARY=/opt/rocprofiler-systems/lib/librocprof-sys-dl.so
+   rocprof-sys-attach -p <pid>
+
+``rocprof-sys-attach`` validates this path against the target's mount namespace
+before attaching. If the library cannot be found there, attachment fails
+cleanly with a diagnostic instead of injecting a path the target cannot load.
+
 See also
 ========================================
 

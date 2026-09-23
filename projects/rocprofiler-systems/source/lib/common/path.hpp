@@ -7,6 +7,7 @@
 #include "common/delimit.hpp"
 #include <fmt/format.h>
 
+#include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -117,6 +118,21 @@ get_internal_script_path() ROCPROFSYS_INTERNAL_API;
 
 inline std::string
 get_internal_libdir() ROCPROFSYS_INTERNAL_API;
+
+/**
+ * Whether an absolute library path is visible to a process other than the
+ * caller (e.g. an attach target running in a different mount namespace).
+ */
+enum class target_visibility
+{
+    available,          ///< confirmed present as a regular file (symlinks followed)
+    confirmed_missing,  ///< confirmed absent
+    indeterminate       ///< could not be determined; caller should proceed optimistically
+};
+
+[[nodiscard]] inline target_visibility
+check_target_path_visibility(pid_t              pid,
+                             const std::string& library_path) ROCPROFSYS_INTERNAL_API;
 
 struct ROCPROFSYS_INTERNAL_API path_type
 {
@@ -474,6 +490,39 @@ std::string
 get_internal_libdir()
 {
     return get_rocprofsys_root() + "/lib";
+}
+
+/**
+ * @brief Determine whether an absolute library path is visible to a target process,
+ * without assuming the caller shares a mount namespace with the target.
+ * Non-absolute paths (e.g. a bare SONAME meant to be resolved by the
+ * target's own dynamic linker search path) are not checked and always
+ * yield ::indeterminate.
+ *
+ * @param pid Target process ID.
+ * @param library_path Path to check, as it would be passed to the target for `dlopen`.
+ *
+ * @return The selected target library visibility relative to the host process.
+ */
+target_visibility
+check_target_path_visibility(pid_t pid, const std::string& library_path)
+{
+    if(library_path.empty() || library_path.front() != '/')
+    {
+        return target_visibility::indeterminate;
+    }
+    const auto  absolute_path = fmt::format("/proc/{}/root/{}", pid, library_path);
+    struct stat buffer;
+    if(stat(absolute_path.c_str(), &buffer) == 0)
+    {
+        return (S_ISREG(buffer.st_mode) != 0) ? target_visibility::available
+                                              : target_visibility::confirmed_missing;
+    }
+
+    // ENOENT/ENOTDIR mean a component of the path is genuinely absent; any other
+    // errno (e.g. EACCES from restricted /proc access) means we can't tell.
+    return (errno == ENOENT || errno == ENOTDIR) ? target_visibility::confirmed_missing
+                                                 : target_visibility::indeterminate;
 }
 
 }  // namespace rocprofsys::inline common::path
