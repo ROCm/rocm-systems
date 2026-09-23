@@ -1597,6 +1597,13 @@ typedef union rocprofiler_hsa_api_args_t
         hsa_signal_t        completion_signal;
     } hsa_amd_svm_discard_and_prefetch_batch_async;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x14
+    struct
+    {
+        hsa_amd_vmem_alloc_handle_t memory_handle;
+        hsa_amd_vmem_handle_info_t* info;
+    } hsa_amd_vmem_get_vmem_info;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 
