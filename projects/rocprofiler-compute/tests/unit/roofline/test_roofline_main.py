@@ -18,7 +18,7 @@ import pytest
 
 import roofline.roofline_html as roofline_html
 from roofline.roofline_frame import FRAME_X_MIN, canonical_frame
-from roofline.roofline_hover import wrap_hover_name
+from roofline.roofline_hover import truncate_kernel_name, wrap_hover_name
 from roofline.roofline_html import RooflineViewModel, build_interactive_document
 
 if TYPE_CHECKING:
@@ -194,8 +194,8 @@ def test_kernel_traces_score_against_the_tallest_drawn_ceiling() -> None:
 
     assert pct_roof(matrix_capped[0]) < 100.0
     assert pct_roof(valu_capped[0]) > 100.0
-    assert "Performance limiter: FP32 MFMA" in matrix_traces[0].hovertemplate
-    assert "Performance limiter: FP32 VALU" in valu_traces[0].hovertemplate
+    assert "Limited by Compute: FP32 MFMA" in matrix_traces[0].hovertemplate
+    assert "Limited by Compute: FP32 VALU" in valu_traces[0].hovertemplate
 
 
 def test_kernel_traces_name_the_roof_that_binds() -> None:
@@ -213,7 +213,7 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
     )
     assert [kernel["name"] for kernel in model] == ["kA"]
     assert [point["peak"] for point in model[0]["points"]] == ["HBM"]
-    assert "Performance limiter: HBM" in traces[0].hovertemplate
+    assert "Limited by Memory: HBM" in traces[0].hovertemplate
 
     unroofed_traces, unroofed = kernel_traces(
         make_roofline(["FP32"]),
@@ -221,16 +221,16 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
         ceiling_data={},
         compute_peaks=[],
     )
-    assert "Performance limiter: Unknown" in unroofed_traces[0].hovertemplate
+    assert "Limited by Unknown: Unknown" in unroofed_traces[0].hovertemplate
     assert unroofed[0]["points"][0]["hoverCells"] == ["N/A", "N/A", "900.000 GB/s"]
 
 
-def test_kernel_hover_carries_the_whole_name() -> None:
-    """A long demangled name reaches the tooltip whole. It is wrapped onto as
-    many lines as it takes, but nothing is dropped: two instantiations of the
-    same function are told apart by template arguments that run to the very end
-    of the name."""
-    name = "Cijk_Alik_Bljk_" + "SB_MT256x256x16_MI32x32x2x1_" * 40
+def test_kernel_hover_carries_the_whole_name_up_to_the_limit() -> None:
+    """A demangled name within the tooltip's length cap reaches the tooltip
+    whole. It is wrapped onto as many lines as it takes, but nothing is
+    dropped: two instantiations of the same function are told apart by
+    template arguments that run to the very end of the name."""
+    name = "Cijk_Alik_Bljk_" + "SB_MT256x256x16_MI32x32x2x1_" * 6
 
     traces, _ = kernel_traces(
         make_roofline(["FP32"]),
@@ -244,6 +244,37 @@ def test_kernel_hover_carries_the_whole_name() -> None:
     assert lines.endswith(suffix)
     lines = lines[: -len(suffix)]
     assert lines.replace("<br>", "") == name
+
+
+def test_truncate_kernel_name_caps_pathologically_long_names() -> None:
+    """A pathologically long demangled name is capped at 200 characters, ending
+    in an ellipsis, so it can't blow up the tooltip. Names within the cap are
+    untouched."""
+    name = "Cijk_Alik_Bljk_" + "SB_MT256x256x16_MI32x32x2x1_" * 40
+
+    truncated = truncate_kernel_name(name)
+
+    assert len(truncated) == 200
+    assert truncated == name[:197] + "..."
+    assert truncate_kernel_name("short_name") == "short_name"
+
+
+def test_kernel_hover_truncates_names_beyond_two_hundred_characters() -> None:
+    """The kernel trace hover wraps the truncated name, not the raw one, so a
+    pathologically long demangled name can't blow up the tooltip."""
+    name = "Cijk_Alik_Bljk_" + "SB_MT256x256x16_MI32x32x2x1_" * 40
+
+    traces, _ = kernel_traces(
+        make_roofline(["FP32"]),
+        {"ai_hbm": [[1.0], [900.0]], "kernelNames": [name]},
+    )
+
+    wrapped = wrap_hover_name(truncate_kernel_name(name))
+    assert wrapped in traces[0].hovertemplate
+    lines = wrapped.split(">", 1)[1].removesuffix("</span>")
+    flattened = lines.replace("<br>", "")
+    assert len(flattened) == 200
+    assert flattened.endswith("...")
 
 
 def test_canonical_frame_bounds_are_whole_decades() -> None:
