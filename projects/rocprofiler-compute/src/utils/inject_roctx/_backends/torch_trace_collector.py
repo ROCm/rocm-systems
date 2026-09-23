@@ -29,7 +29,7 @@ def _workload_torch_version() -> str:
     except Exception as exc:
         console_error(
             "ml api trace",
-            f"torch is not importable; cannot profile a torch workload: {exc}",
+            f"torch is not importable. Cannot profile a torch workload: {exc}",
         )
 
 
@@ -55,8 +55,7 @@ def install() -> bool:
     if not collectors_by_version:
         console_warning(
             "ml api trace",
-            "torch_trace_collector was not built for this installation; "
-            "using TorchDispatchMode.",
+            "torch_trace_collector was not built for this installation.",
         )
         return False
 
@@ -64,10 +63,9 @@ def install() -> bool:
     if so_path is None:
         console_warning(
             "ml api trace",
-            "torch_trace_collector has no prebuilt extension for PyTorch "
-            f"{workload_torch_version}. Supported PyTorch versions: "
-            f"{', '.join(sorted(collectors_by_version))}. "
-            "using TorchDispatchMode.",
+            "torch_trace_collector has no extension for PyTorch "
+            f"{workload_torch_version}. Supported versions: "
+            f"{', '.join(sorted(collectors_by_version))}.",
         )
         return False
 
@@ -78,15 +76,13 @@ def install() -> bool:
         if lib.torch_trace_collector_install() != 0:
             console_warning(
                 "ml api trace",
-                f"torch_trace_collector_install failed for {so_path}; "
-                "using TorchDispatchMode.",
+                f"torch_trace_collector_install failed for {so_path}.",
             )
             return False
     except Exception as exc:
         console_warning(
             "ml api trace",
-            "C++ RecordFunction tier unavailable "
-            f"({type(exc).__name__}: {exc}); using TorchDispatchMode.",
+            f"Failed to load torch_trace_collector ({type(exc).__name__}: {exc}).",
         )
         return False
 
@@ -98,7 +94,7 @@ def install() -> bool:
         lib.torch_trace_collector_pop_launcher_tid.argtypes = []
     except AttributeError:
         pass
-    console_log("ml api trace", f"loaded prebuilt .so: {so_path}")
+    console_log("ml api trace", f"Loaded {so_path}")
     return True
 
 

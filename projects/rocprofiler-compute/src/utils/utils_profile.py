@@ -456,10 +456,7 @@ def save_ml_api_trace_inputs(
     fbase: str,
     src_counter: Path,
 ) -> None:
-    """
-    Move counter_collection and marker_api_trace data to workload_dir,
-    for creation of ML API trace in Analyze mode.
-    """
+    """Copy the counter and marker CSVs into the workload directory for analyze."""
     src_dir = Path(workload_dir) / "out" / "pmc_1"
     # Only one pair expected
     src_marker = csv_compression.compressed_name(
@@ -476,8 +473,7 @@ def save_ml_api_trace_inputs(
     shutil.copyfile(src_marker, dst_marker)
     console_log(
         "ml api trace",
-        "Moved counter collection and marker trace files "
-        "to workload dir for ML API trace creation.",
+        "Copied counter collection and marker trace files to the workload directory.",
     )
     console_log("Counter Collection: ", str(dst_counter))
     console_log("Marker API Trace: ", str(dst_marker))
