@@ -1027,9 +1027,24 @@ try_execute_mxfp_cvt_scale_simd(Wavefront &wf, uint32_t dst_base, uint32_t src_b
     for (uint32_t word = 0; word < SrcWords; ++word)
       src_words[word] = source.template load_native<uint32_t>(word, lane_base);
     const U scale_bits = scale.template load_native<uint32_t>(lane_base);
-    const F scale_value = Direction == MxfpDirection::Unpack
-                              ? util::e8m0_to_f32_simd((scale_bits >> (scale_byte * 8u)) & 0xffu)
-                              : std::bit_cast<F>(scale_bits);
+    F scale_value = Direction == MxfpDirection::Unpack
+                        ? util::e8m0_to_f32_simd((scale_bits >> (scale_byte * 8u)) & 0xffu)
+                        : std::bit_cast<F>(scale_bits);
+    // A native operation evaluates every host lane. Make EXEC-disabled lanes
+    // arithmetically inert so their values cannot raise host floating-point
+    // exceptions before the masked store drops their results. Keep the common
+    // full-EXEC path free of the mask construction and blends.
+    if (chunk != chunk_full) {
+      const auto inactive =
+          U([chunk](auto lane) {
+            return static_cast<uint32_t>((chunk >> static_cast<uint32_t>(lane)) & 1u);
+          }) == U(0u);
+      for (U &word : src_words)
+        util::stdx::where(inactive, word) = U(0u);
+      U safe_scale_bits = std::bit_cast<U>(scale_value);
+      util::stdx::where(inactive, safe_scale_bits) = U(0x3f800000u);
+      scale_value = std::bit_cast<F>(safe_scale_bits);
+    }
     U lane_seed(0u);
     if constexpr (Stochastic)
       lane_seed = seed->template load_native<uint32_t>(lane_base);
