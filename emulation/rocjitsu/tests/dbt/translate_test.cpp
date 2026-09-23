@@ -46,6 +46,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
@@ -4061,6 +4062,50 @@ TEST(BinaryTranslator, ClientRewriteExhaustedSgprsFallsBackToLongBranchIslands) 
         std::ranges::find(translated_words, build_s_getpc_b64(pair, ROCJITSU_CODE_ARCH_CDNA4)),
         translated_words.end());
   }
+}
+
+TEST(BinaryTranslator, Rdna4BranchIslandDoesNotSplitMemoryClause) {
+  const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto load = rdna4::build_smem(rdna4::kSLoadB32Smem, {.sbase = 0, .sdata = 4});
+  const uint32_t clause = rdna4::build_sopp(rdna4::kSClauseSopp, {.simm16 = 1})[0];
+  // The client prefix moves the first clause member onto the island threshold.
+  std::vector<uint32_t> words(first_direct_branch_island_pool_offset() / 4 - 2, nop);
+  words.push_back(clause);
+  words.insert(words.end(), load.begin(), load.end());
+  words.insert(words.end(), load.begin(), load.end());
+  words.insert(words.end(), 8, nop);
+  words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  write_value_for_test<uint32_t>(image, offsetof(Elf64_Ehdr, e_flags),
+                                 EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  translator.set_instruction_rewrite_callback(
+      [&](const InstructionRewriteContext &context) -> std::optional<InstructionRewrite> {
+        if (context.source_offset != 0)
+          return std::nullopt;
+        InstructionRewrite rewrite;
+        rewrite.prefix_words = {nop};
+        return rewrite;
+      });
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_EQ(translated.text_sections().size(), 1u);
+  const Section &text = *translated.text_sections().front();
+  const auto output = std::span<const uint32_t>(reinterpret_cast<const uint32_t *>(text.data()),
+                                                text.size() / sizeof(uint32_t));
+  const auto found = std::ranges::find(output, clause);
+  ASSERT_NE(found, output.end());
+  ASSERT_GE(output.end() - found, 1 + 2 * load.size());
+  EXPECT_TRUE(std::equal(load.begin(), load.end(), found + 1));
+  EXPECT_TRUE(std::equal(load.begin(), load.end(), found + 1 + load.size()));
+  EXPECT_NE(std::ranges::find(
+                output, build_s_nop(kBranchIslandPoolMarkerNopImmediate, ROCJITSU_CODE_ARCH_RDNA4)),
+            output.end());
 }
 
 TEST(BinaryTranslator, ClientEntryPrefixUsesLongBranchIslandsToReachDeepBodyEntry) {

@@ -3637,6 +3637,26 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       source_block_by_end_offset.emplace(block->end_offset(), block);
     }
 
+    // A skipped island still executes its marker and branch. Neither may be
+    // inserted among the memory instructions covered by an s_clause, including
+    // when a CFG boundary falls inside that run.
+    std::unordered_set<uint64_t> clause_interior_offsets;
+    for (const auto &[offset, inst] : source_instruction_by_offset) {
+      if (inst->mnemonic() != "s_clause" || inst->num_src_operands() != 1 ||
+          inst->src_operand(0) == nullptr)
+        continue;
+      const uint32_t count =
+          (static_cast<uint32_t>(inst->src_operand(0)->encoding_value()) & 0x3fu) + 1u;
+      uint64_t following = offset + inst->size();
+      for (uint32_t index = 0; index < count; ++index) {
+        clause_interior_offsets.insert(following);
+        const auto next = source_instruction_by_offset.find(following);
+        if (next == source_instruction_by_offset.end())
+          break;
+        following += next->second->size();
+      }
+    }
+
     // An adopted body is entered by a call through its address rather than by an edge from this
     // scope, so the architectural analyses have to be told it is an entry. Without that its blocks
     // are never reached by the forward fixed point and every VGPR_MSB query over them is
@@ -4265,13 +4285,14 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         active_marked_long_transfer.reset();
 
         // A source basic block can itself be much larger than the island
-        // spacing. Pools are safe at any ordinary instruction boundary: the
+        // spacing. Pools are safe outside s_clause runs: the
         // marker is a no-op and the following branch skips every private slot.
         // Waiting for a CFG boundary can therefore leave a large straight-line
         // expansion with no reachable island even though the fallback was
         // planned before emission.
         if (should_emit_branch_island_pools() && !preserve_generated_branch_island_pools &&
             it != block->instructions().begin() && std::next(it) != block->instructions().end() &&
+            !clause_interior_offsets.contains(offset) &&
             kernel_text.size() >= next_branch_island_pool_offset) {
           append_direct_branch_island_pool(kernel_text, layout, host_arch_);
           next_branch_island_pool_offset =
@@ -4950,7 +4971,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       layout.blocks.push_back(placement);
       target_offset_by_source_offset.emplace(block->end_offset(), placement.target_end);
       if (should_emit_branch_island_pools() && !preserve_generated_branch_island_pools &&
-          block != scope.blocks.back() && kernel_text.size() >= next_branch_island_pool_offset) {
+          block != scope.blocks.back() && !clause_interior_offsets.contains(block->end_offset()) &&
+          kernel_text.size() >= next_branch_island_pool_offset) {
         append_direct_branch_island_pool(kernel_text, layout, host_arch_);
         next_branch_island_pool_offset = next_direct_branch_island_pool_offset(kernel_text.size());
       }
