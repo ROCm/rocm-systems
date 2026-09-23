@@ -5072,6 +5072,363 @@
           }
         }
       ]
+    },
+    "jakub-attention": {
+      "faults": [
+        {
+          "id": "barrier-drop-nonpipeline-tile-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine release Jakub ELF fnv1a64:3025c2739d7d2630, matching the September 23 clean run. Native allowlist selects the SyncMode::Correct non-pipelined fp16_wmma_tiled_kernel<16,8,false,false,...>. The first parameterized safe test executes this variant with K=128. Cooperative tile stores finish at VA 0x499c; EXEC reconverges at 0x49b4 before publication signal/wait 0x49bc/0x49cc (.text+0xdbc/0xdcc, occurrences 2/3). Following tiled LDS loads at 0x49e0..0x4a18 feed cross-wave WMMA operands. Remove this pair as one mutation, preserving the separate compute-to-load reuse barrier at .text+0x54c/0x584. The non-pipelined source loop stages, publishes, and computes each K group, so the selected publication executes on the recorded input. Source: hip-moi/tests/reference/rdna4_jakub_matmul_reference.hip, sync_after_load and non-pipelined loop. Final ISA and pristine inventory: rdna4-20260923/jakub-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses the named preset; SuperCollider uses actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|kind=barrier|pc=0x0000000000000dbc|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|event=barrier|pc=0x0000000000000dbc|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|event=barrier|pc=0x0000000000000dcc|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-nonpipeline-tile-publication-preset-low",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine release Jakub ELF fnv1a64:3025c2739d7d2630, matching the September 23 clean run. Native allowlist selects the SyncMode::Correct non-pipelined fp16_wmma_tiled_kernel<16,8,false,false,...>. The first parameterized safe test executes this variant with K=128. Cooperative tile stores finish at VA 0x499c; EXEC reconverges at 0x49b4 before publication signal/wait 0x49bc/0x49cc (.text+0xdbc/0xdcc, occurrences 2/3). Following tiled LDS loads at 0x49e0..0x4a18 feed cross-wave WMMA operands. Remove this pair as one mutation, preserving the separate compute-to-load reuse barrier at .text+0x54c/0x584. The non-pipelined source loop stages, publishes, and computes each K group, so the selected publication executes on the recorded input. Source: hip-moi/tests/reference/rdna4_jakub_matmul_reference.hip, sync_after_load and non-pipelined loop. Final ISA and pristine inventory: rdna4-20260923/jakub-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses the named preset; SuperCollider uses actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|kind=barrier|pc=0x0000000000000dbc|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|event=barrier|pc=0x0000000000000dbc|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|event=barrier|pc=0x0000000000000dcc|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-nonpipeline-tile-publication-preset-default",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine release Jakub ELF fnv1a64:3025c2739d7d2630, matching the September 23 clean run. Native allowlist selects the SyncMode::Correct non-pipelined fp16_wmma_tiled_kernel<16,8,false,false,...>. The first parameterized safe test executes this variant with K=128. Cooperative tile stores finish at VA 0x499c; EXEC reconverges at 0x49b4 before publication signal/wait 0x49bc/0x49cc (.text+0xdbc/0xdcc, occurrences 2/3). Following tiled LDS loads at 0x49e0..0x4a18 feed cross-wave WMMA operands. Remove this pair as one mutation, preserving the separate compute-to-load reuse barrier at .text+0x54c/0x584. The non-pipelined source loop stages, publishes, and computes each K group, so the selected publication executes on the recorded input. Source: hip-moi/tests/reference/rdna4_jakub_matmul_reference.hip, sync_after_load and non-pipelined loop. Final ISA and pristine inventory: rdna4-20260923/jakub-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses the named preset; SuperCollider uses actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|kind=barrier|pc=0x0000000000000dbc|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|event=barrier|pc=0x0000000000000dbc|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|event=barrier|pc=0x0000000000000dcc|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-nonpipeline-tile-publication-preset-high",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine release Jakub ELF fnv1a64:3025c2739d7d2630, matching the September 23 clean run. Native allowlist selects the SyncMode::Correct non-pipelined fp16_wmma_tiled_kernel<16,8,false,false,...>. The first parameterized safe test executes this variant with K=128. Cooperative tile stores finish at VA 0x499c; EXEC reconverges at 0x49b4 before publication signal/wait 0x49bc/0x49cc (.text+0xdbc/0xdcc, occurrences 2/3). Following tiled LDS loads at 0x49e0..0x4a18 feed cross-wave WMMA operands. Remove this pair as one mutation, preserving the separate compute-to-load reuse barrier at .text+0x54c/0x584. The non-pipelined source loop stages, publishes, and computes each K group, so the selected publication executes on the recorded input. Source: hip-moi/tests/reference/rdna4_jakub_matmul_reference.hip, sync_after_load and non-pipelined loop. Final ISA and pristine inventory: rdna4-20260923/jakub-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses the named preset; SuperCollider uses actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|kind=barrier|pc=0x0000000000000dbc|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|event=barrier|pc=0x0000000000000dbc|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|event=barrier|pc=0x0000000000000dcc|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-nonpipeline-tile-publication-preset-higher",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine release Jakub ELF fnv1a64:3025c2739d7d2630, matching the September 23 clean run. Native allowlist selects the SyncMode::Correct non-pipelined fp16_wmma_tiled_kernel<16,8,false,false,...>. The first parameterized safe test executes this variant with K=128. Cooperative tile stores finish at VA 0x499c; EXEC reconverges at 0x49b4 before publication signal/wait 0x49bc/0x49cc (.text+0xdbc/0xdcc, occurrences 2/3). Following tiled LDS loads at 0x49e0..0x4a18 feed cross-wave WMMA operands. Remove this pair as one mutation, preserving the separate compute-to-load reuse barrier at .text+0x54c/0x584. The non-pipelined source loop stages, publishes, and computes each K group, so the selected publication executes on the recorded input. Source: hip-moi/tests/reference/rdna4_jakub_matmul_reference.hip, sync_after_load and non-pipelined loop. Final ISA and pristine inventory: rdna4-20260923/jakub-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses the named preset; SuperCollider uses actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|kind=barrier|pc=0x0000000000000dbc|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|event=barrier|pc=0x0000000000000dbc|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|event=barrier|pc=0x0000000000000dcc|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-nonpipeline-tile-publication-preset-max",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine release Jakub ELF fnv1a64:3025c2739d7d2630, matching the September 23 clean run. Native allowlist selects the SyncMode::Correct non-pipelined fp16_wmma_tiled_kernel<16,8,false,false,...>. The first parameterized safe test executes this variant with K=128. Cooperative tile stores finish at VA 0x499c; EXEC reconverges at 0x49b4 before publication signal/wait 0x49bc/0x49cc (.text+0xdbc/0xdcc, occurrences 2/3). Following tiled LDS loads at 0x49e0..0x4a18 feed cross-wave WMMA operands. Remove this pair as one mutation, preserving the separate compute-to-load reuse barrier at .text+0x54c/0x584. The non-pipelined source loop stages, publishes, and computes each K group, so the selected publication executes on the recorded input. Source: hip-moi/tests/reference/rdna4_jakub_matmul_reference.hip, sync_after_load and non-pipelined loop. Final ISA and pristine inventory: rdna4-20260923/jakub-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses the named preset; SuperCollider uses actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|kind=barrier|pc=0x0000000000000dbc|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|event=barrier|pc=0x0000000000000dbc|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|event=barrier|pc=0x0000000000000dcc|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-nonpipeline-tile-publication-sc-delay-calibration",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine release Jakub ELF fnv1a64:3025c2739d7d2630, matching the September 23 clean run. Native allowlist selects the SyncMode::Correct non-pipelined fp16_wmma_tiled_kernel<16,8,false,false,...>. The first parameterized safe test executes this variant with K=128. Cooperative tile stores finish at VA 0x499c; EXEC reconverges at 0x49b4 before publication signal/wait 0x49bc/0x49cc (.text+0xdbc/0xdcc, occurrences 2/3). Following tiled LDS loads at 0x49e0..0x4a18 feed cross-wave WMMA operands. Remove this pair as one mutation, preserving the separate compute-to-load reuse barrier at .text+0x54c/0x584. The non-pipelined source loop stages, publishes, and computes each K group, so the selected publication executes on the recorded input. Source: hip-moi/tests/reference/rdna4_jakub_matmul_reference.hip, sync_after_load and non-pipelined loop. Final ISA and pristine inventory: rdna4-20260923/jakub-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses the named preset; SuperCollider uses actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|kind=barrier|pc=0x0000000000000dbc|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|event=barrier|pc=0x0000000000000dbc|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:3025c2739d7d2630|kernel=_ZN12_GLOBAL__N_122fp16_wmma_tiled_kernelILi16ELi8ELb0ELb0ELNS_8SyncModeE0ELi8ELi2ELi4ELi4EEEvPKDF16_S3_Pfiii|event=barrier|pc=0x0000000000000dcc|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }
