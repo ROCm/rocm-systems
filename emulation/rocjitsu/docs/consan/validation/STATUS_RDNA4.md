@@ -36,7 +36,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟥 Sep 23: missing ConSan analysis verdict; exit 124 | 🟥 Sep 23: missing ConSan analysis verdict; exit 124 |
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟥 Sep 23: exit 1 | 🟥 Sep 23: exit 1 |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
-| Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log |
+| Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log |
 | PyTorch | P1 | collision-heavy `scatter_reduce` (`pytorch-scatter-reduce`) | 🟥 Sep 23: no applicable code object; analysis incomplete | 🟥 Sep 23: no applicable code object; analysis incomplete |
 | PyTorch | P2 | Inductor compiled softmax (`pytorch-rdna4-compiled-softmax`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
@@ -132,3 +132,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `jakub-attention` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/jakub-attention-default`.
 - `jakub-attention` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/jakub-attention-supercollider`.
 - `tp1-prefill` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round3/tp1-prefill-default`.
+- `tp1-prefill` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round3/tp1-prefill-supercollider`.
