@@ -37,7 +37,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) |
 | Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) |
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 Sep 23: standard fault 0/8; preset=max clean passes and fault detects 7/8 (separate configuration) | 🟨 Sep 23: clean pass; reviewed publication-barrier fault missed in 8/8 trials |
-| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: clean pass; reviewed cross-wave publication fault missed in 8/8 standard trials | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
+| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: clean pass; reviewed cross-wave publication fault missed in 8/8 standard trials | 🟨 Sep 23: clean pass; reviewed cross-wave publication fault missed in 8/8 trials |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | PyTorch | P1 | collision-heavy `scatter_reduce` (`pytorch-scatter-reduce`) | 🟥 Sep 23: no applicable code object; analysis incomplete | 🟥 Sep 23: no applicable code object; analysis incomplete |
@@ -351,3 +351,8 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   collision-count numerical oracle alone cannot qualify them. Keep both cells
   non-green. Inventory evidence:
   `/home/benoit/workspace/consan-validation/rdna4-20260923/inventory-round2/pytorch-scatter-reduce/`.
+- torch.mode SuperCollider stable-spec rerun: **0/8 detections**, failing
+  the precommitted minimum of one. All eight trials were admitted/reached;
+  numerical oracles and pre/post health checks passed. The saved spec snapshot
+  fixes the earlier provenance issue, but sensitivity remains unqualified.
+  Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round4-mode-supercollider/`.
