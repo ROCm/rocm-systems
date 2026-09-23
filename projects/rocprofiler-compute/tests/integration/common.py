@@ -158,16 +158,6 @@ common.check_resource_allocation()
 os.environ["ROCPROF"] = "rocprofiler-sdk"
 
 
-def migrate_legacy_pmc_fixture(workload_dir: Path) -> None:
-    """Rename a copied legacy PMC fixture to the current source artifact name."""
-    if list(workload_dir.glob("results_*.csv.gz")):
-        return
-
-    legacy_pmc = workload_dir / "pmc_perf.csv.gz"
-    if legacy_pmc.exists():
-        legacy_pmc.rename(workload_dir / "results_pmc_perf_0.csv.gz")
-
-
 def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=None):
     """Provides a unique input workload directory with contents of input_dir
     based on the name of the calling test function. For parametrized tests,
@@ -200,7 +190,6 @@ def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=N
             shutil.rmtree(output_dir)
 
     shutil.copytree(input_dir, output_dir)
-    migrate_legacy_pmc_fixture(Path(output_dir))
     return output_dir
 
 
