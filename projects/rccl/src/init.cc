@@ -2801,6 +2801,17 @@ static ncclResult_t getParentRanks(int parentRanks, int parentRank, int* exclude
   return ncclSuccess;
 }
 
+// Hierarchical AllGather builds the sub-communicators on first use. Two users
+// have no lazy trigger and need them from init: hierarchical ReduceScatter, and
+// hierarchical CE AllGather/AlltoAll, which requires the zero-CTA policy and
+// initialized sub-communicators (ncclHierCeAvailable). Turning both
+// hierarchical flags off disables the hierarchy for CE as well.
+static bool hierarchicalCommsNeededAtInit(struct ncclComm* comm) {
+  if (!comm->hierarchicalEligible) return false;
+  if (rcclParamHierarchicalReduceScatter() == 1) return true;
+  return rcclParamHierarchicalAllGather() == 1 && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO);
+}
+
 static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   struct ncclCommInitRankAsyncJob* job = (struct ncclCommInitRankAsyncJob*)job_;
   ncclComm_t comm = job->comm;
@@ -3029,8 +3040,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 
   // Record topology eligibility now, but defer hierarchical AllGather resources
-  // until the first eligible live call. Hierarchical ReduceScatter retains its
-  // existing eager behavior when explicitly enabled.
+  // until the first eligible live call. See hierarchicalCommsNeededAtInit for
+  // the features that still build them here.
   comm->hierarchicalEligible = false;
   if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && comm->maxLocalRanks > 1) {
     if (comm->minLocalRanks != comm->maxLocalRanks) {
@@ -3050,13 +3061,14 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         INFO(NCCL_INIT, "Hierarchical collectives: non-compact rank ordering, skipping hierarchical algorithms");
       } else {
         comm->hierarchicalEligible = true;
-        INFO(NCCL_INIT,
-             "Hierarchical collectives: topology eligible; deferring sub-communicator setup until enabled first use");
       }
     }
   }
-  if (comm->hierarchicalEligible && rcclParamHierarchicalReduceScatter() == 1) {
+  if (hierarchicalCommsNeededAtInit(comm)) {
     NCCLCHECKGOTO(rcclEnsureHierarchicalComms(comm), res, fail);
+  } else if (comm->hierarchicalEligible) {
+    INFO(NCCL_INIT,
+         "Hierarchical collectives: topology eligible; deferring sub-communicator setup until enabled first use");
   }
 
   // RCCL: init-time allocations are done; release the side stream now so its GPU

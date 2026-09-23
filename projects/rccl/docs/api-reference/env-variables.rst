@@ -96,14 +96,6 @@ in the following table.
       - | ``0``: Disabled (default).
         | ``1``: Enabled.
 
-    * - | ``RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK``
-        | Sets the minimum contribution per rank required before hierarchical
-          AllGather can be selected. All ranks in a communicator must use the
-          same value because first-use setup creates collective sub-communicators.
-      - | Nonnegative byte count.
-        | Default: ``1024``.
-        | ``0`` restores the previous upper-bound-only selection behavior.
-
 Logging and debugging
 =====================
 
@@ -266,6 +258,14 @@ collected in the following table.
         | ``0``: Skips the automatic AINIC check. The size, architecture and
           CTA-policy gates in ``rcclUseAllGatherDirect`` still apply.
         | Any other value: Disabled.
+
+    * - | ``RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK``
+        | Sets the minimum contribution per rank required before hierarchical
+          AllGather can be selected. All ranks in a communicator must use the
+          same value because first-use setup creates collective sub-communicators.
+      - | Nonnegative byte count.
+        | Default: ``1024``.
+        | ``0`` restores the previous upper-bound-only selection behavior.
 
 Network and topology
 ====================

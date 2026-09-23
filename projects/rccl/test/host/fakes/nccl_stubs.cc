@@ -187,8 +187,7 @@ std::function<ncclResult_t(ncclComm_t)> g_ncclCommDestroy = DefaultNcclCommDestr
 ncclResult_t ncclCommDestroy(ncclComm_t comm) { return g_ncclCommDestroy(comm); }
 ncclResult_t ncclCommInitRank(ncclComm_t*, int, ncclUniqueId, int) { ::abort(); }
 static ncclResult_t DefaultNcclCommSplit(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*) { ::abort(); }
-std::function<ncclResult_t(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*)> g_ncclCommSplit =
-    DefaultNcclCommSplit;
+std::function<ncclResult_t(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*)> g_ncclCommSplit = DefaultNcclCommSplit;
 ncclResult_t ncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t* newcomm, ncclConfig_t* config) {
   return g_ncclCommSplit(comm, color, key, newcomm, config);
 }

@@ -37,9 +37,6 @@ extern bool g_rcclIsArchSupportedForFunc;
 // RCCL_PARAM(DirectReduceScatterThreshold). Only referenced once a test hooks
 // ncclRegisterCollBuffers: the aborting stub makes the rest of the loop unreachable.
 extern int64_t g_rcclParamDirectReduceScatterThreshold;  // UNDRIVEN
-extern size_t g_rcclHierarchicalTempBufferSize;
-extern int64_t g_rcclParamHierarchicalAllGather;
-extern int64_t g_rcclParamHierarchicalReduceScatter;
 // Call counters for the no-op tuning hooks: a no-op that was never called and one
 // that was look identical without these, so a dropped call site would be silent.
 extern int g_rcclUpdateCollectiveProtocolCalls;
@@ -91,6 +88,13 @@ extern int g_rcclParamWarpSpeedForceEnableCalls;
 // auto-mode arm can never fire.
 extern bool g_rcclCanUseWarpSpeedAutoResult;
 extern int g_rcclCanUseWarpSpeedAutoCalls;
+
+// Hierarchical collectives (rcclEnsureHierarchicalComms). The temp-buffer size
+// is a hook so a test can check the arguments it was sized from, not only that
+// the returned size reached the allocator.
+extern std::function<size_t(int, bool, bool)> g_rcclHierarchicalTempBufferSize;
+extern int64_t g_rcclParamHierarchicalAllGather;
+extern int64_t g_rcclParamHierarchicalReduceScatter;
 
 // checkHsaEnvSetting's HSA_* scratch validation (rccl_wrap.cc). g_lastHsaScratchEnv records the
 // hsaScratchEnv argument, which is the only proof the check read the environment at all.

@@ -44,6 +44,7 @@ TEST(HierarchicalCollectives, LazyInitGuards)
     registerCase("EnsureInitializedIsNoOp", []()
     {
         ncclComm comm{};
+        comm.hierarchicalEligible = true;
         comm.hierarchicalCommsInitialized = true;
         EXPECT_EQ(ncclSuccess, rcclEnsureHierarchicalComms(&comm));
         EXPECT_FALSE(comm.hierarchicalInitAttempted);

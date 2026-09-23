@@ -25,6 +25,7 @@
 #include <sys/prctl.h>
 #endif
 #include <sys/resource.h>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -6019,13 +6020,10 @@ TEST_F(InitMicrotest, CommFree_HierarchicalSubComms_DestroysIntraThenInter) {
   EXPECT_EQ(std::vector<ncclComm*>({intra.get(), inter.get()}), destroyed);
 }
 
-TEST_F(InitMicrotest, EnsureHierarchicalComms_BuildsResourcesSynchronouslyAndRestoresParentState) {
-  ScopedHook loadParam(g_loadParam, [](const char* name, int64_t deft) {
-    if (std::strcmp(name, "CUMEM_ENABLE") == 0) return int64_t{0};
-    if (std::strcmp(name, "HIERARCHICAL_ALLGATHER") == 0) return int64_t{1};
-    if (std::strcmp(name, "HIERARCHICAL_REDUCE_SCATTER") == 0) return int64_t{0};
-    return deft;
-  });
+namespace {
+// Eligible parent at rank 11 of 64, on node 1 as local rank 3. It points into
+// the caller's rank maps, which must outlive it.
+std::unique_ptr<ncclComm> Hier_MakeEligibleParent(int (&rankToNode)[64], int (&rankToLocalRank)[64]) {
   auto parent = std::make_unique<ncclComm>();
   const ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
   parent->config = config;
@@ -6034,18 +6032,58 @@ TEST_F(InitMicrotest, EnsureHierarchicalComms_BuildsResourcesSynchronouslyAndRes
   parent->nNodes = 8;
   parent->nRanks = 64;
   parent->rank = 11;
-  parent->pxnDisable = 7;
-  int rankToNode[64]{};
-  int rankToLocalRank[64]{};
   rankToNode[parent->rank] = 1;
   rankToLocalRank[parent->rank] = 3;
   parent->rankToNode = rankToNode;
   parent->rankToLocalRank = rankToLocalRank;
+  return parent;
+}
+}  // namespace
+
+TEST_F(InitMicrotest, HierarchicalCommsNeededAtInit_OnlyForUsersWithoutALazyTrigger) {
+  auto comm = std::make_unique<ncclComm>();
+  g_rcclParamHierarchicalAllGather = 1;
+  g_rcclParamHierarchicalReduceScatter = 1;
+  comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+  EXPECT_FALSE(hierarchicalCommsNeededAtInit(comm.get())) << "topology not eligible";
+
+  comm->hierarchicalEligible = true;
+  comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+  EXPECT_TRUE(hierarchicalCommsNeededAtInit(comm.get())) << "hierarchical ReduceScatter";
+
+  g_rcclParamHierarchicalReduceScatter = 0;
+  EXPECT_FALSE(hierarchicalCommsNeededAtInit(comm.get())) << "AllGather alone builds on first use";
+  comm->config.CTAPolicy = NCCL_CTA_POLICY_EFFICIENCY;
+  EXPECT_FALSE(hierarchicalCommsNeededAtInit(comm.get())) << "AllGather alone builds on first use";
+  comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+  EXPECT_TRUE(hierarchicalCommsNeededAtInit(comm.get())) << "hierarchical CE under the zero-CTA policy";
+
+  g_rcclParamHierarchicalAllGather = 0;
+  EXPECT_FALSE(hierarchicalCommsNeededAtInit(comm.get())) << "both hierarchical flags off";
+}
+
+TEST_F(InitMicrotest, EnsureHierarchicalComms_BuildsResourcesSynchronouslyAndRestoresParentState) {
+  ScopedHook loadParam(g_loadParam, [](const char* name, int64_t deft) {
+    if (std::strcmp(name, "CUMEM_ENABLE") == 0) return int64_t{0};
+    return deft;
+  });
+  g_rcclParamHierarchicalAllGather = 1;
+  g_rcclParamHierarchicalReduceScatter = 0;
+  int rankToNode[64]{};
+  int rankToLocalRank[64]{};
+  auto parent = Hier_MakeEligibleParent(rankToNode, rankToLocalRank);
+  parent->pxnDisable = 7;
 
   auto intra = std::make_unique<ncclComm>();
   auto inter = std::make_unique<ncclComm>();
   intra->nRanks = 8;
   inter->nRanks = 8;
+  constexpr size_t kTempBufferBytes = size_t{3} << 20;
+  std::tuple<int, bool, bool> tempBufferArgs{};
+  ScopedHook tempBufferSize(g_rcclHierarchicalTempBufferSize, [&](int nNodes, bool allGather, bool reduceScatter) {
+    tempBufferArgs = std::make_tuple(nNodes, allGather, reduceScatter);
+    return kTempBufferBytes;
+  });
   size_t allocatedBytes = 0;
   ScopedHook allocation(g_hipExtMallocWithFlags, [&](void** ptr, size_t bytes, unsigned) {
     allocatedBytes = bytes;
@@ -6074,7 +6112,9 @@ TEST_F(InitMicrotest, EnsureHierarchicalComms_BuildsResourcesSynchronouslyAndRes
   EXPECT_EQ(inter.get(), parent->hierarchicalInterComm);
   EXPECT_EQ(parent->pxnDisable, inter->pxnDisable);
   EXPECT_NE(nullptr, parent->hierarchicalTempBuffer);
-  EXPECT_EQ(g_rcclHierarchicalTempBufferSize, allocatedBytes);
+  EXPECT_EQ(1, tempBufferSize.calls);
+  EXPECT_EQ(std::make_tuple(8, true, false), tempBufferArgs);
+  EXPECT_EQ(kTempBufferBytes, allocatedBytes);
   EXPECT_TRUE(parent->hierarchicalCommsInitialized);
   EXPECT_TRUE(parent->hierarchicalInitAttempted);
   EXPECT_EQ(ncclSuccess, parent->hierarchicalInitResult);
@@ -6084,26 +6124,9 @@ TEST_F(InitMicrotest, EnsureHierarchicalComms_BuildsResourcesSynchronouslyAndRes
 }
 
 TEST_F(InitMicrotest, EnsureHierarchicalComms_FailureIsRetainedAndDoesNotRetry) {
-  ScopedHook loadParam(g_loadParam, [](const char* name, int64_t deft) {
-    if (std::strcmp(name, "CUMEM_ENABLE") == 0) return int64_t{0};
-    if (std::strcmp(name, "HIERARCHICAL_ALLGATHER") == 0) return int64_t{1};
-    if (std::strcmp(name, "HIERARCHICAL_REDUCE_SCATTER") == 0) return int64_t{0};
-    return deft;
-  });
-  auto parent = std::make_unique<ncclComm>();
-  const ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
-  parent->config = config;
-  parent->config.blocking = 0;
-  parent->hierarchicalEligible = true;
-  parent->nNodes = 8;
-  parent->nRanks = 64;
-  parent->rank = 11;
   int rankToNode[64]{};
   int rankToLocalRank[64]{};
-  rankToNode[parent->rank] = 1;
-  rankToLocalRank[parent->rank] = 3;
-  parent->rankToNode = rankToNode;
-  parent->rankToLocalRank = rankToLocalRank;
+  auto parent = Hier_MakeEligibleParent(rankToNode, rankToLocalRank);
 
   auto intra = std::make_unique<ncclComm>();
   int splitCalls = 0;

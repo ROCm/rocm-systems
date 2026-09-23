@@ -1113,19 +1113,48 @@ bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
   return rcclHierarchicalAllGatherEligible(comm, msgSize) && comm->hierarchicalCommsInitialized;
 }
 
-static ncclResult_t rcclAllRanksReadyForHierarchicalInit(struct ncclComm* comm, bool localReady, bool* allReady) {
-  *allReady = localReady;
+// Collective: every rank must call this together, and all of them get the same
+// *allTrue back.
+static ncclResult_t rcclAllRanksAgree(struct ncclComm* comm, bool local, bool* allTrue) {
+  *allTrue = local;
   if (comm->nRanks < 2 || comm->bootstrap == nullptr) return ncclSuccess;
 
   std::vector<uint8_t> flags((size_t)comm->nRanks, 0);
-  flags[(size_t)comm->rank] = localReady ? 1 : 0;
+  flags[(size_t)comm->rank] = local ? 1 : 0;
   NCCLCHECK(bootstrapAllGather(comm->bootstrap, flags.data(), sizeof(uint8_t)));
   for (int r = 0; r < comm->nRanks; r++) {
     if (flags[(size_t)r] == 0) {
-      *allReady = false;
+      *allTrue = false;
       return ncclSuccess;
     }
   }
+  return ncclSuccess;
+}
+
+// Collective. The splits run only once no rank is capturing, and a setup
+// failure on any rank disables the hierarchy on every rank: the communicator
+// keeps using the non-hierarchical algorithms rather than failing the
+// collective and never attempts the splits again. Whatever a rank did build is
+// released by commFree.
+static ncclResult_t rcclLazyInitHierarchicalComms(struct ncclComm* comm, bool localReady) {
+  bool allReady = false;
+  NCCLCHECK(rcclAllRanksAgree(comm, localReady, &allReady));
+  if (!allReady) return ncclSuccess;
+
+  const ncclResult_t initResult = rcclEnsureHierarchicalComms(comm);
+  bool allInitialized = false;
+  NCCLCHECK(rcclAllRanksAgree(comm, initResult == ncclSuccess && comm->hierarchicalCommsInitialized, &allInitialized));
+  if (allInitialized) return ncclSuccess;
+
+  if (initResult != ncclSuccess) {
+    WARN("Hierarchical collectives: sub-communicator setup failed (%s), using non-hierarchical algorithms",
+         ncclGetErrorString(initResult));
+  } else {
+    INFO(NCCL_INIT, "Hierarchical collectives: sub-communicator setup failed on another rank, using "
+                    "non-hierarchical algorithms");
+  }
+  comm->hierarchicalCommsInitialized = false;
+  comm->hierarchicalEligible = false;
   return ncclSuccess;
 }
 
@@ -1639,10 +1668,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // use a hierarchy initialized by an earlier call.
     bool useHierarchical = false;
     if (ncclGroupDepth == 0 && rcclHierarchicalAllGatherEligible(comm, msgSize)) {
-      if (!query && !comm->hierarchicalCommsInitialized) {
-        bool allRanksReady = false;
-        NCCLCHECK(rcclAllRanksReadyForHierarchicalInit(comm, /*localReady=*/!ceCapturing, &allRanksReady));
-        if (allRanksReady) NCCLCHECK(rcclEnsureHierarchicalComms(comm));
+      if (!query && comm->hierarchicalEligible && !comm->hierarchicalCommsInitialized) {
+        NCCLCHECK(rcclLazyInitHierarchicalComms(comm, /*localReady=*/!ceCapturing));
       }
       useHierarchical = comm->hierarchicalCommsInitialized;
     }

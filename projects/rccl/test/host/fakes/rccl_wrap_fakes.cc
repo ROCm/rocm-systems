@@ -137,6 +137,16 @@ bool rcclCanUseWarpSpeedAuto(struct ncclComm*, int) {
   return g_rcclCanUseWarpSpeedAutoResult;
 }
 
+static size_t DefaultHierarchicalTempBufferSize(int, bool, bool) { return 32 * 1024 * 1024; }
+std::function<size_t(int, bool, bool)> g_rcclHierarchicalTempBufferSize = DefaultHierarchicalTempBufferSize;
+size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceScatter) {
+  return g_rcclHierarchicalTempBufferSize(nNodes, allGather, reduceScatter);
+}
+int64_t g_rcclParamHierarchicalAllGather = 1;      // RCCL_PARAM(HierarchicalAllGather) default
+int64_t rcclParamHierarchicalAllGather() { return g_rcclParamHierarchicalAllGather; }
+int64_t g_rcclParamHierarchicalReduceScatter = 0;  // RCCL_PARAM(HierarchicalReduceScatter) default
+int64_t rcclParamHierarchicalReduceScatter() { return g_rcclParamHierarchicalReduceScatter; }
+
 void ResetRcclWrapFakes() {
   g_rcclUpdateCollectiveProtocol = DefaultNoOpTune;
   g_rcclSetPipelining = DefaultNoOpTune;
@@ -144,7 +154,7 @@ void ResetRcclWrapFakes() {
   g_rcclOverrideChannelsCalls = 0;
   g_rcclIsArchSupportedForFunc = true;
   g_rcclParamDirectReduceScatterThreshold = 8388608;
-  g_rcclHierarchicalTempBufferSize = 32 * 1024 * 1024;
+  g_rcclHierarchicalTempBufferSize = DefaultHierarchicalTempBufferSize;
   g_rcclParamHierarchicalAllGather = 1;
   g_rcclParamHierarchicalReduceScatter = 0;
   g_rcclUpdateCollectiveProtocolCalls = 0;
@@ -198,8 +208,6 @@ void rcclSetP2pNetChunkSize(struct ncclComm*, int& sz) { sz = 1 << 17; }
 // path must be loud. A bare ::abort() here would print nothing.
 // ===========================================================================
 
-size_t g_rcclHierarchicalTempBufferSize = 32 * 1024 * 1024;
-size_t rcclHierarchicalTempBufferSize(int, bool, bool) { return g_rcclHierarchicalTempBufferSize; }
 ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCommSetP2pShiftSize");
 }
@@ -207,7 +215,3 @@ int64_t g_rcclParamDirectReduceScatterThreshold = 8388608;     // rccl_wrap.cc:5
 int64_t rcclParamDirectReduceScatterThreshold() {              // rccl_wrap.cc:51
   return g_rcclParamDirectReduceScatterThreshold;
 }
-int64_t g_rcclParamHierarchicalAllGather = 1;                  // rccl_wrap.cc:1077 default
-int64_t rcclParamHierarchicalAllGather() { return g_rcclParamHierarchicalAllGather; }
-int64_t g_rcclParamHierarchicalReduceScatter = 0;              // rccl_wrap.cc:2035 default
-int64_t rcclParamHierarchicalReduceScatter() { return g_rcclParamHierarchicalReduceScatter; }
