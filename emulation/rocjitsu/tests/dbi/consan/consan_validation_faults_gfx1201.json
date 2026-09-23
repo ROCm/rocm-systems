@@ -4358,6 +4358,363 @@
           }
         }
       ]
+    },
+    "tp1-decode-combined": {
+      "faults": [
+        {
+          "id": "barrier-drop-attention-max-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine TP1 ELF fnv1a64:bab9f292c843907c compiled with workload HIP flags and matching clean-run identity. The native-selected decode_bs1$async_dispatch_24_attention_8x32x32xD executes during the first decode model as well as the combined phase. After the lane-local maximum reduction, waves store at LDS address 672+12*(tid>>5), .text+0x1338c. EXEC reconverges at 0x13398 before the unconditional publication pair 0x133a0/0x133b4. Loads at 0x133b8 read 672+12*(tid&7), consuming peer-wave maxima. Remove that pair; preserve the later reuse barrier and remaining synchronization. Exact compile, ELF and final ISA: rdna4-20260923/tp1-debug, including decode-attention-inventory.txt. Require 6/8 detections and matching clean, coverage, completeness and health checks. Default uses the named preset; SuperCollider tests actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|kind=barrier|pc=0x00000000000133a0|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|event=barrier|pc=0x00000000000133a0|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|event=barrier|pc=0x00000000000133b4|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-attention-max-publication-preset-low",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine TP1 ELF fnv1a64:bab9f292c843907c compiled with workload HIP flags and matching clean-run identity. The native-selected decode_bs1$async_dispatch_24_attention_8x32x32xD executes during the first decode model as well as the combined phase. After the lane-local maximum reduction, waves store at LDS address 672+12*(tid>>5), .text+0x1338c. EXEC reconverges at 0x13398 before the unconditional publication pair 0x133a0/0x133b4. Loads at 0x133b8 read 672+12*(tid&7), consuming peer-wave maxima. Remove that pair; preserve the later reuse barrier and remaining synchronization. Exact compile, ELF and final ISA: rdna4-20260923/tp1-debug, including decode-attention-inventory.txt. Require 6/8 detections and matching clean, coverage, completeness and health checks. Default uses the named preset; SuperCollider tests actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|kind=barrier|pc=0x00000000000133a0|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|event=barrier|pc=0x00000000000133a0|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|event=barrier|pc=0x00000000000133b4|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-attention-max-publication-preset-default",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine TP1 ELF fnv1a64:bab9f292c843907c compiled with workload HIP flags and matching clean-run identity. The native-selected decode_bs1$async_dispatch_24_attention_8x32x32xD executes during the first decode model as well as the combined phase. After the lane-local maximum reduction, waves store at LDS address 672+12*(tid>>5), .text+0x1338c. EXEC reconverges at 0x13398 before the unconditional publication pair 0x133a0/0x133b4. Loads at 0x133b8 read 672+12*(tid&7), consuming peer-wave maxima. Remove that pair; preserve the later reuse barrier and remaining synchronization. Exact compile, ELF and final ISA: rdna4-20260923/tp1-debug, including decode-attention-inventory.txt. Require 6/8 detections and matching clean, coverage, completeness and health checks. Default uses the named preset; SuperCollider tests actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|kind=barrier|pc=0x00000000000133a0|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|event=barrier|pc=0x00000000000133a0|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|event=barrier|pc=0x00000000000133b4|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-attention-max-publication-preset-high",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine TP1 ELF fnv1a64:bab9f292c843907c compiled with workload HIP flags and matching clean-run identity. The native-selected decode_bs1$async_dispatch_24_attention_8x32x32xD executes during the first decode model as well as the combined phase. After the lane-local maximum reduction, waves store at LDS address 672+12*(tid>>5), .text+0x1338c. EXEC reconverges at 0x13398 before the unconditional publication pair 0x133a0/0x133b4. Loads at 0x133b8 read 672+12*(tid&7), consuming peer-wave maxima. Remove that pair; preserve the later reuse barrier and remaining synchronization. Exact compile, ELF and final ISA: rdna4-20260923/tp1-debug, including decode-attention-inventory.txt. Require 6/8 detections and matching clean, coverage, completeness and health checks. Default uses the named preset; SuperCollider tests actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|kind=barrier|pc=0x00000000000133a0|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|event=barrier|pc=0x00000000000133a0|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|event=barrier|pc=0x00000000000133b4|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-attention-max-publication-preset-higher",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine TP1 ELF fnv1a64:bab9f292c843907c compiled with workload HIP flags and matching clean-run identity. The native-selected decode_bs1$async_dispatch_24_attention_8x32x32xD executes during the first decode model as well as the combined phase. After the lane-local maximum reduction, waves store at LDS address 672+12*(tid>>5), .text+0x1338c. EXEC reconverges at 0x13398 before the unconditional publication pair 0x133a0/0x133b4. Loads at 0x133b8 read 672+12*(tid&7), consuming peer-wave maxima. Remove that pair; preserve the later reuse barrier and remaining synchronization. Exact compile, ELF and final ISA: rdna4-20260923/tp1-debug, including decode-attention-inventory.txt. Require 6/8 detections and matching clean, coverage, completeness and health checks. Default uses the named preset; SuperCollider tests actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|kind=barrier|pc=0x00000000000133a0|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|event=barrier|pc=0x00000000000133a0|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|event=barrier|pc=0x00000000000133b4|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-attention-max-publication-preset-max",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine TP1 ELF fnv1a64:bab9f292c843907c compiled with workload HIP flags and matching clean-run identity. The native-selected decode_bs1$async_dispatch_24_attention_8x32x32xD executes during the first decode model as well as the combined phase. After the lane-local maximum reduction, waves store at LDS address 672+12*(tid>>5), .text+0x1338c. EXEC reconverges at 0x13398 before the unconditional publication pair 0x133a0/0x133b4. Loads at 0x133b8 read 672+12*(tid&7), consuming peer-wave maxima. Remove that pair; preserve the later reuse barrier and remaining synchronization. Exact compile, ELF and final ISA: rdna4-20260923/tp1-debug, including decode-attention-inventory.txt. Require 6/8 detections and matching clean, coverage, completeness and health checks. Default uses the named preset; SuperCollider tests actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|kind=barrier|pc=0x00000000000133a0|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|event=barrier|pc=0x00000000000133a0|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|event=barrier|pc=0x00000000000133b4|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-attention-max-publication-sc-delay-calibration",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine TP1 ELF fnv1a64:bab9f292c843907c compiled with workload HIP flags and matching clean-run identity. The native-selected decode_bs1$async_dispatch_24_attention_8x32x32xD executes during the first decode model as well as the combined phase. After the lane-local maximum reduction, waves store at LDS address 672+12*(tid>>5), .text+0x1338c. EXEC reconverges at 0x13398 before the unconditional publication pair 0x133a0/0x133b4. Loads at 0x133b8 read 672+12*(tid&7), consuming peer-wave maxima. Remove that pair; preserve the later reuse barrier and remaining synchronization. Exact compile, ELF and final ISA: rdna4-20260923/tp1-debug, including decode-attention-inventory.txt. Require 6/8 detections and matching clean, coverage, completeness and health checks. Default uses the named preset; SuperCollider tests actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|kind=barrier|pc=0x00000000000133a0|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|event=barrier|pc=0x00000000000133a0|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:bab9f292c843907c|kernel=decode_bs1$async_dispatch_24_attention_8x32x32xD|event=barrier|pc=0x00000000000133b4|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }
