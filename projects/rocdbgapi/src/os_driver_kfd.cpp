@@ -1943,6 +1943,8 @@ kfd_driver_t::set_process_flags (os_process_flags_t flags) const
     args.set_flags.flags |= KFD_DBG_TRAP_FLAG_SINGLE_MEM_OP;
   if (!!(flags & os_process_flags_t::precise_alu_exceptions))
     args.set_flags.flags |= KFD_DBG_TRAP_FLAG_SINGLE_ALU_OP;
+  if (!!(flags & os_process_flags_t::report_lds_exception))
+    args.set_flags.flags |= KFD_DBG_TRAP_FLAG_LDS_OUT_OF_ADDR_RANGE;
 
   int err = kfd_dbg_trap_ioctl (KFD_IOC_DBG_TRAP_SET_FLAGS, &args);
   if (err == -ESRCH)

@@ -440,7 +440,8 @@ enum class os_wave_launch_mode_t : uint32_t
 enum class os_process_flags_t : uint32_t
 {
   precise_memory = 1 << 0,
-  precise_alu_exceptions = 1 << 1
+  precise_alu_exceptions = 1 << 1,
+  report_lds_exception = 1 << 2,
 };
 template <> struct is_flag<os_process_flags_t> : std::true_type
 {
