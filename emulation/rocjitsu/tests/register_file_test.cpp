@@ -96,6 +96,50 @@ TEST(RegisterFileTest, SoftwareLazyStorageSupportsFixedCapacityBoundary) {
   EXPECT_EQ(storage.materialized_chunk_count(), 1u);
 }
 
+class LazyScalarRegisterFileTest : public ::testing::TestWithParam<uint32_t> {};
+
+TEST_P(LazyScalarRegisterFileTest, SharedChunksPreserveNeighborsAndClearReusedBlocks) {
+  using File = RegisterFile<uint32_t, RegisterFileStorage::SOFTWARE_LAZY>;
+  static_assert(!HasContiguousData<File>);
+  const uint32_t block_size = GetParam();
+  constexpr uint32_t block_count = 20;
+  File file("sgpr");
+  file.init(block_count * block_size, block_size);
+  const File &const_file = file;
+  for (uint32_t block = 0; block < block_count; ++block)
+    ASSERT_EQ(file.allocate(block_size), static_cast<int32_t>(block * block_size));
+
+  std::vector<uint32_t> copied(block_size, 0xFFFFFFFFu);
+  const uint32_t reused_base = 9 * block_size;
+  const_file.copy_to(reused_base, block_size, std::as_writable_bytes(std::span(copied)));
+  for (uint32_t value : copied)
+    EXPECT_EQ(value, 0u);
+  EXPECT_EQ(const_file[block_count * block_size - 1], 0u);
+  EXPECT_EQ(file.materialized_chunk_count(), 0u);
+
+  for (uint32_t reg = 0; reg < block_count * block_size; ++reg)
+    file[reg] = reg + 1;
+  // The 104-register layout crosses a 4 KiB chunk boundary in this block.
+  const_file.copy_to(reused_base, block_size, std::as_writable_bytes(std::span(copied)));
+  for (uint32_t reg = 0; reg < block_size; ++reg)
+    EXPECT_EQ(copied[reg], reused_base + reg + 1);
+
+  file.free(reused_base);
+  ASSERT_EQ(file.allocate(1), static_cast<int32_t>(reused_base));
+  for (uint32_t reg = 0; reg < block_count * block_size; ++reg) {
+    const bool was_freed = reg >= reused_base && reg < reused_base + block_size;
+    EXPECT_EQ(const_file[reg], was_freed ? 0u : reg + 1) << reg;
+  }
+  for (uint32_t block = 0; block < block_count; ++block)
+    file.free(block * block_size);
+  EXPECT_EQ(file.materialized_chunk_count(), 0u);
+  ASSERT_EQ(file.allocate(block_size), 0);
+  EXPECT_EQ(const_file[block_size - 1], 0u);
+  EXPECT_EQ(file.materialized_chunk_count(), 0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(SgprLayouts, LazyScalarRegisterFileTest, ::testing::Values(104u, 128u));
+
 TEST(RegisterFileTest, SoftwareLazyStorageClearsReusedUnalignedBlock) {
   using Vgpr = simdojo::VectorReg<64, uint32_t>;
   using File = SoftwareLazyTestFile<Vgpr>;

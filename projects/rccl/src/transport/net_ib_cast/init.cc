@@ -8,6 +8,7 @@
 #include "common_cast.h"
 #include "p2p_resiliency_recovery_cast.h"
 #include "net_telemetry.h"
+#include "qp_sharing.h"
 
 extern int64_t ncclParamIbCastQpsPerConn();
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
@@ -359,6 +360,11 @@ ncclResult_t IbCastFinalizeDevices(void) {
   // No telemetry flush here: netRefCount reaching 0 is not process exit, and
   // the flush is one-shot. atexit(rcclTelemetryFlush) covers the process.
   --netRefCount;
+  if (netRefCount == 0) {
+    if (rcclParamIbCastQpSharingValidatePool()) {
+      IbCastValidateSharedQpPool();
+    }
+  }
   return ncclSuccess;
 }
 
@@ -610,6 +616,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, IbCastRelaxedOrderingEnabled ? "[RO]" : "",
          IbCastIfName, ncclSocketToString(&IbCastIfAddr, addrline));
 
+    IbCastQpSharingGlobalEnable = rcclParamIbCastQpSharingEnable() > 0;
     IbCastUseInline = ncclParamIbCastUseInline();
     IbCastGdrFlushDisable = ncclParamIbCastGdrFlushDisable();
 
@@ -633,6 +640,12 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
       // flag IbCastAinicCtsInlineData is used specifically to identify UseInline for Ainic
       IbCastAinicCtsInlineData = IbCastUseInline;
 
+      // CTS offload and QP sharing are mutually exclusive. disable CTS offload when QP sharing is enabled
+      if (IbCastOffloadEnabled && IbCastQpSharingEnabled()) {
+        INFO(NCCL_INIT | NCCL_NET, "NET/IB : QP sharing enabled - disabling CTS Offload (not yet supported with QP sharing)");
+        IbCastOffloadEnabled = false;
+      }
+
       INFO(NCCL_INIT | NCCL_NET,
            "NET/IB : AINIC RoCEv2 optimizations enabled: CTS Inline Data: %s; CTS Offload: %s; "
            "IB Use Inline: %s; GDR Flush: %s",
@@ -648,6 +661,16 @@ exit:
                                "(load balancer integration with resiliency is pending)");
     castGlobalQpSchedParms.enable = false;
   }
+  if (ret == ncclSuccess && IbCastQpSharingEnabled() && rcclParamIbCastCommNGroups() < 1) {
+    WARN("NET/IB : QP sharing enabled (RCCL_IB_QP_SHARING_ENABLE=1) but RCCL_IB_COMM_NGROUPS=%ld is invalid "
+         "(must be >= 1). Disabling QP sharing.",
+         rcclParamIbCastCommNGroups());
+    IbCastQpSharingGlobalEnable = false;
+  }
+  if (ret == ncclSuccess && castGlobalQpSchedParms.enable && IbCastQpSharingEnabled()) {
+    INFO(NCCL_INIT | NCCL_NET, "NET/IB : QP sharing enabled - disabling QP scheduler");
+    castGlobalQpSchedParms.enable = false;
+  }
   if (ret == ncclSuccess && IbCastOffloadEnabled &&
       (ncclParamIbCastResiliencyPortFailover() || ncclParamIbCastResiliencyPortRecovery())) {
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : PORT_FAILOVER/RECOVERY enabled - disabling CTS offload, Inline Data "
@@ -655,6 +678,21 @@ exit:
     IbCastOffloadEnabled = false;
     IbCastUseInline = false;
     IbCastAinicCtsInlineData = false;
+  }
+  // After all offload/scheduler mutations so BY_ORDER + failover logs match
+  // the scheme comms will actually use (IbCastByOrderRequested reads live).
+  if (ret == ncclSuccess && IbCastNDevs > 0) {
+    if (IbCastByOrderRequested()) {
+      if (ncclParamIbCastResiliencyPortFailover() > 0) {
+        WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d): disabling resiliency "
+             "(port failover and port recovery)", BY_ORDER);
+      }
+      if (ncclParamIbCastOooRq()) {
+        WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d):"
+             " disabling out-of-order RQ", BY_ORDER);
+      }
+    }
+    IbCastReportMatchingScheme();
   }
   return ret;
 fail:

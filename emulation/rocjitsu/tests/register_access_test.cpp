@@ -340,6 +340,12 @@ TEST(RegisterAccessTest, ReadRegionCopiesDwordsToLaneMajorStorage) {
   EXPECT_TRUE(std::ranges::all_of(masked_lane, [](uint8_t byte) { return byte == 0xAA; }));
 }
 
+// GCC 14+ inlines copy_dwords_lane_major and flags the memcpy as out-of-bounds,
+// not realizing the exception guard makes it unreachable. Suppress the false positive.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
 TEST(RegisterAccessTest, ReadRegionRejectsInvalidLaneMajorCopyBounds) {
   Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
              /*wave_size=*/32);
@@ -355,6 +361,9 @@ TEST(RegisterAccessTest, ReadRegionRejectsInvalidLaneMajorCopyBounds) {
                std::invalid_argument);
   EXPECT_THROW(region.copy_dwords_lane_major(bytes, uint64_t{1} << 32), std::invalid_argument);
 }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 TEST(RegisterAccessTest, ReadRegionTraversesAndCopiesLogicalRegisterRange) {
   for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
@@ -475,9 +484,7 @@ TEST(RegisterAccessTest, MaskedLaneWritePreservesBytesWithoutSyntheticRead) {
 
   cdna4::Operand destination(32, cdna4::OperandType::OPR_VGPR, 11);
   RegisterAccess(*fx.wf).write_lane_masked(destination, /*lane=*/3, /*value=*/0x00003300u,
-                                           /*update_byte_mask=*/0b0010,
-                                           /*observed_byte_mask=*/0b0010,
-                                           /*post_transform=*/nullptr);
+                                           /*byte_mask=*/0b0010);
 
   EXPECT_TRUE(fx.plugin->reads.empty());
   ASSERT_EQ(fx.plugin->writes.size(), 1u);
