@@ -24,7 +24,6 @@
 from __future__ import absolute_import
 
 import numpy as np
-import pandas as pd
 
 
 # Keep this in case we decide to revert workgroup_id information
