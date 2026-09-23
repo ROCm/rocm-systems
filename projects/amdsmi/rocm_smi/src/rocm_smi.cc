@@ -1425,7 +1425,7 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
   CATCH
 }
 
-// The transposed SMU 13.0.x pp_power_profile_mode layout numbers every profile
+// The transposed SMU 13.0.7 pp_power_profile_mode layout numbers every profile
 // sequentially starting at 0 on its first line (the driver emits the complete
 // run 0..N-1 -- see smu_v13_0_7_get_power_profile_mode()), interleaved with the
 // profile names. The classic layout's first line is instead a text column
@@ -1533,8 +1533,8 @@ namespace amd::smi {
 // unit tests reach it through the static archive.
 //
 // - Handles both driver layouts: classic (header line, one profile per line)
-//   and transposed SMU 13.0.x (every profile and the '*' on the first line,
-//   e.g. gfx1102).
+//   and transposed SMU 13.0.7 (every profile and the '*' on the first line;
+//   Navi 33, gfx1102).
 // - The driver marks exactly one profile current. p->current is left
 //   RSMI_PWR_PROF_PRST_INVALID ("current unknown") when the active profile has
 //   no rsmi preset in this build, or when the table carries no marker (a

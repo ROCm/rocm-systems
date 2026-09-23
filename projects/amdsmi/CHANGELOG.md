@@ -9,7 +9,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Added
 
 - **Added the `WINDOW_3D` power profile preset**.
-  - `rsmi_power_profile_preset_masks_t` / `amdsmi_power_profile_preset_masks_t` now define `*_PWR_PROF_PRST_WINDOW_3D_MASK` (`0x80`), so the SMU 13.0.x WINDOW_3D profile reported by gfx1101/gfx1102 is enumerable and can be reported as the current profile instead of `INVALID`.
+  - `rsmi_power_profile_preset_masks_t` / `amdsmi_power_profile_preset_masks_t` now define `*_PWR_PROF_PRST_WINDOW_3D_MASK` (`0x80`), so the `WINDOW_3D` profile that GPUs such as Navi 31 and Navi 33 report is enumerable and can be reported as the current profile instead of `INVALID`.
 
 - **Exposed `BOOT_FIRMWARE` field in `amd-smi static --ifwi` output**.  
   - The `boot_firmware` value returned by `amdsmi_get_gpu_vbios_info()` now appears under the `IFWI` section alongside `NAME`, `BUILD_DATE`, `PART_NUMBER` and `VERSION` (`--vbios` remains available as a legacy alias).
@@ -63,8 +63,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
-- **Fixed `amd-smi` misreporting power profiles, and aborting in asserts-enabled builds, on GPUs that use the transposed `pp_power_profile_mode` layout (e.g. gfx1102)**.  
-  - These newer SMU 13.0.x GPUs list their power profiles in a layout the parser did not recognize; it now reads them, so the current and available power profiles are reported correctly.
+- **Fixed `amd-smi` misreporting power profiles, and aborting in asserts-enabled builds, on Navi 33 (gfx1102) GPUs**.  
+  - Navi 33 lists its power profiles in a different layout from other GPUs, which the parser did not recognize. It now reads that layout, so the current and available power profiles are reported correctly.
 
 - **Fixed `rsmi_dev_reg_table_get()` failing on register-state images that contain no SMN entries**.  
   - The loop-back test ran before the SMN and instance counters reached zero, so an image with no SMN entries re-entered the loop and read past the end of the image; the call then returned an error for a well-formed file.
