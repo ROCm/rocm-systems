@@ -28,7 +28,7 @@ struct IbCastCommTableEntry g_IbCastCommTable[IBCAST_MAX_COMMS];
 uint16_t                    g_IbCastNextCommId = 1;   // 0 reserved for "not shared"
 uint16_t                    g_IbCastCommIdFreeStack[IBCAST_MAX_COMMS];
 int                         g_IbCastCommIdFreeTop = 0;
-std::mutex                  g_IbCastSharedQpMutex;
+std::mutex                  g_IbCastQpSharingGlobalMutex;
 
 void IbCastStripPort(union ncclSocketAddress* addr) {
     if (addr->sa.sa_family == AF_INET) {
@@ -78,7 +78,7 @@ struct IbCastSharedQp* IbCastRegisterSharedQp(const IbCastSharedQpKey* key,
     struct ibv_qp* qp, struct ibv_cq* primaryCq,
     int primaryIbDevN, int devIndex, int initialRefcount) {
 
-    std::lock_guard<std::mutex> lock(g_IbCastSharedQpMutex);
+    std::lock_guard<std::mutex> lock(g_IbCastQpSharingGlobalMutex);
     int idx;
     if (g_IbCastSharedQpFreeTop > 0) {
         // Reuse a slot freed by IbCastCleanupGroupCqs -- O(1)
@@ -141,7 +141,7 @@ int IbCastCountPeerTotalRefcount(int ibDevN, const union ncclSocketAddress* peer
 }
 
 uint16_t IbCastAllocCommId(void* comm, bool isSend) {
-    std::lock_guard<std::mutex> lock(g_IbCastSharedQpMutex);
+    std::lock_guard<std::mutex> lock(g_IbCastQpSharingGlobalMutex);
     uint16_t id;
     if (g_IbCastCommIdFreeTop > 0) {
         // Reuse a previously freed commId — O(1)
@@ -159,7 +159,7 @@ uint16_t IbCastAllocCommId(void* comm, bool isSend) {
     return id;
 }
 
-// Caller MUST hold g_IbCastSharedQpMutex. Used by the teardown paths, which take
+// Caller MUST hold g_IbCastQpSharingGlobalMutex. Used by the teardown paths, which take
 // the mutex across the whole shared-QP cleanup block.
 void IbCastFreeCommIdLocked(uint16_t commId) {
     if (commId > 0 && commId < IBCAST_MAX_COMMS) {
@@ -194,7 +194,7 @@ struct ncclIbNetCommBase* IbCastRouteCommFromImmData(struct ncclIbNetCommBase* b
 // (e.g. the connect/accept non-sharing fallback paths).
 void IbCastFreeCommId(uint16_t commId) {
     if (commId > 0 && commId < IBCAST_MAX_COMMS) {
-        std::lock_guard<std::mutex> lock(g_IbCastSharedQpMutex);
+        std::lock_guard<std::mutex> lock(g_IbCastQpSharingGlobalMutex);
         IbCastFreeCommIdLocked(commId);
     }
 }
@@ -250,7 +250,7 @@ void IbCastCleanupGroupCqs(struct IbCastSharedQp* slot0Entry) {
 void IbCastValidateSharedQpPool(void) {
     if (!IbCastQpSharingEnabled()) return;
 
-    std::lock_guard<std::mutex> lock(g_IbCastSharedQpMutex);
+    std::lock_guard<std::mutex> lock(g_IbCastQpSharingGlobalMutex);
     int leakedSlots = 0;
     int leakedCommIds = 0;
 

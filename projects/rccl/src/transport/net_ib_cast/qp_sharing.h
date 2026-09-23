@@ -131,7 +131,7 @@ extern struct IbCastCommTableEntry g_IbCastCommTable[IBCAST_MAX_COMMS];
 extern uint16_t                    g_IbCastNextCommId;
 extern uint16_t                    g_IbCastCommIdFreeStack[IBCAST_MAX_COMMS];
 extern int                         g_IbCastCommIdFreeTop;
-extern std::mutex                  g_IbCastSharedQpMutex;
+extern std::mutex                  g_IbCastQpSharingGlobalMutex;
 
 // Strip port from socket address for peer matching
 void IbCastStripPort(union ncclSocketAddress* addr);
@@ -168,10 +168,10 @@ int IbCastCountPeerTotalRefcount(int ibDevN, const union ncclSocketAddress* peer
 // Allocate a commId and register in the global comm table (mutex-protected)
 uint16_t IbCastAllocCommId(void* comm, bool isSend);
 
-// Free a commId (self-locking; for callers NOT holding g_IbCastSharedQpMutex)
+// Free a commId (self-locking; for callers NOT holding g_IbCastQpSharingGlobalMutex)
 void IbCastFreeCommId(uint16_t commId);
 
-// Free a commId; caller MUST already hold g_IbCastSharedQpMutex (teardown paths)
+// Free a commId; caller MUST already hold g_IbCastQpSharingGlobalMutex (teardown paths)
 void IbCastFreeCommIdLocked(uint16_t commId);
 
 // Destroy all CQs for a group when cqRefcount reaches 0
