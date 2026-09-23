@@ -60,7 +60,13 @@ constexpr uint32_t kernelMask_Tma = 1 << ncclSymkKernelId_AllGather_TmaST | 1 <<
                                     1 << ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST |
                                     1 << ncclSymkKernelId_ReduceScatter_TmaLD;
 
+// GIN RailA2A does not read dynamic LDS on AMD (scratch lives in device windows).
+// Opting it into max-LDS launch (160 KiB) plus ~48 KiB static LDS overflows gfx950.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+constexpr uint32_t kernelMask_DynamicSmem = kernelMask_Tma;
+#else
 constexpr uint32_t kernelMask_DynamicSmem = (kernelMask_Gin & kernelMask_RS) | kernelMask_Tma;
+#endif
 
 int ncclSymkLLKernelMask() {
   return kernelMask_LL;

@@ -11,6 +11,7 @@
 #include "core.h"
 #include "comm.h"
 #include "transport.h"
+#include <algorithm>
 #include <cfloat>
 
 NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
@@ -381,6 +382,14 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
 
   tuning->timeUs = kTime * (1.0f + smPenalty * kBlocks);
   tuning->nChannels = kBlocks;
+  // GIN RailA2A keeps NVIDIA's 512-thread CTA. Sixteen wave64 warps is 1024
+  // threads, occupancy 0 on gfx950, and ROCr reports INVALID_ISA.
   tuning->nWarps = 16;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  if ((ncclSymkGinKernelMask() >> (int)tuning->symKernelId) & 1) {
+    int warpSize = inputs->comm->WarpSize > 0 ? inputs->comm->WarpSize : 64;
+    tuning->nWarps = std::max(ncclSymkMinWarpsPerBlock, 512 / warpSize);
+  }
+#endif
   return ret;
 }

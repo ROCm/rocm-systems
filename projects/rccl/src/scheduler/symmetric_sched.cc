@@ -16,6 +16,8 @@
 #include "bootstrap.h"
 #include "config/algorithm_registry.h"
 #include "profiler.h"
+#include "sym_kernels.h"
+#include <algorithm>
 #include <cuda_fp16.h>
 #include <vector>
 #if defined(__CUDA_FP8_TYPES_EXIST__)
@@ -321,7 +323,17 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
 
   plan->isSymColl = true;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  plan->threadPerBlock = headTask->nWarps * comm->WarpSize;
+  {
+    int nWarps = headTask->nWarps;
+    int warpSize = comm->WarpSize > 0 ? comm->WarpSize : 64;
+    ncclSymkKernelId gid = (ncclSymkKernelId)headTask->devFuncId;
+    // Match NVIDIA's 512-thread GIN CTA. 1024 threads is occupancy 0 on gfx950.
+    if ((ncclSymkGinKernelMask() >> (int)gid) & 1) {
+      int maxWarps = std::max(ncclSymkMinWarpsPerBlock, 512 / warpSize);
+      if (nWarps > maxWarps) nWarps = maxWarps;
+    }
+    plan->threadPerBlock = nWarps * warpSize;
+  }
 #else
   plan->threadPerBlock = headTask->nWarps * WARP_SIZE;
 #endif
