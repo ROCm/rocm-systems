@@ -100,21 +100,6 @@ else()
             OUTPUT_NAME profiler-hub-sqlite3
     )
 
-    set(SQLITE3_VERSION_SCRIPT "${PROJECT_BINARY_DIR}/profiler-hub-sqlite3.lds")
-    file(
-        GENERATE OUTPUT ${SQLITE3_VERSION_SCRIPT}
-        CONTENT "PROFILER_HUB_SQLITE3_1.0 {\n    global: *;\n};\n"
-    )
-    target_link_options(
-        profiler-hub-sqlite3-shared
-        PRIVATE "-Wl,--version-script=${SQLITE3_VERSION_SCRIPT}"
-    )
-    set_property(
-        TARGET profiler-hub-sqlite3-shared
-        APPEND
-        PROPERTY LINK_DEPENDS ${SQLITE3_VERSION_SCRIPT}
-    )
-
     install(
         TARGETS profiler-hub-sqlite3-shared
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT profiler-hub
