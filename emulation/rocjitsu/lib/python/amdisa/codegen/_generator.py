@@ -6907,8 +6907,7 @@ class CodeGenerator:
             L.append('  uint64_t value = 0;')
             L.append('  switch (msg) {')
             L.append('  case 0x83: {')
-            L.append('    auto *engine = wf.cu().engine();')
-            L.append('    value = engine ? engine->global_time() : 0;')
+            L.append('    value = wf.realtime_timestamp();')
             L.append('    break;')
             L.append('  }')
             L.append('  case 0x80:')  # MSG_RTN_GET_DOORBELL
@@ -7101,7 +7100,14 @@ class CodeGenerator:
             L.append(
                 f'  uint32_t src = amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]});'
             )
-            L.append('  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);')
+            write_kind = (
+                ', amdgpu::HwregWriteKind::Setreg'
+                if profile.uses_vgpr_msb_indexing
+                else ''
+            )
+            L.append(
+                f'  auto result = amdgpu::write_hwreg_field(wf, hwreg, src{write_kind});'
+            )
             L.append('  if (result != amdgpu::HwregAccessResult::Success)')
             L.append(
                 '    util::Logger::warn("s_setreg_b32: ", amdgpu::hwreg_access_result_name(result), '
@@ -7124,7 +7130,14 @@ class CodeGenerator:
                 else 'literal_'
             )
             L.append(f'  uint32_t src = {src_expr};')
-            L.append('  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);')
+            write_kind = (
+                ', amdgpu::HwregWriteKind::SetregImm32'
+                if profile.uses_vgpr_msb_indexing
+                else ''
+            )
+            L.append(
+                f'  auto result = amdgpu::write_hwreg_field(wf, hwreg, src{write_kind});'
+            )
             L.append('  if (result != amdgpu::HwregAccessResult::Success)')
             L.append(
                 '    util::Logger::warn("s_setreg_imm32_b32: ", '
