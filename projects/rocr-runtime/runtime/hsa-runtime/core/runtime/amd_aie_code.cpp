@@ -7,7 +7,7 @@
 #include "core/inc/amd_aie_code.hpp"
 
 #include <cstring>
-#include <elf.h>
+#include <libelf.h>
 
 #include "core/inc/amd_aie_section.h"
 #include "core/inc/amd_elf_image.hpp"

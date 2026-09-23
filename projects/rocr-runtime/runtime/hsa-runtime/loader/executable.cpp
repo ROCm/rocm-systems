@@ -1404,22 +1404,24 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     }
   }
 
-  // AIE code objects take a separate loading path. The AIE loader (AMD::AieCode,
-  // amd_aie_code.cpp) is Linux-only (SRC_XDNA), so gate the sniff+dispatch to match.
-  // IsAieCodeObject() parses the ELF (GElfImage + a GElfSection per section) just to
-  // rule the object out, so restrict the sniff to AIE agents: every non-AIE (e.g. GPU)
-  // code object load would otherwise pay that cost for nothing.
-#if defined(__linux__)
+  // AIE code objects take a separate loading path. IsAieCodeObject() (amd_aie_code.cpp)
+  // is pure ELF parsing with no driver dependency, so the sniff runs on every platform;
+  // restrict it to AIE agents so every non-AIE (e.g. GPU) code object load doesn't pay
+  // that cost for nothing. The dispatch to LoadAieCodeObject is Linux-only because it
+  // requires AieAgent, which is coupled to XdnaDriver (SRC_XDNA).
   {
     core::Agent* aie_probe_agent = core::Agent::Convert(agent);
     if (aie_probe_agent && aie_probe_agent->device_type() == core::Agent::DeviceType::kAmdAieDevice &&
         AMD::AieCode::IsAieCodeObject(reinterpret_cast<const void*>(code_object.handle),
                                       code_object_size)) {
+#if defined(__linux__)
       return LoadAieCodeObject(agent, reinterpret_cast<const void*>(code_object.handle),
                                code_object_size, loaded_code_object);
+#else
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+#endif
     }
   }
-#endif
 
   LoaderOptions loaderOptions;
   if (options && !loaderOptions.ParseOptions(options)) {
@@ -1592,7 +1594,8 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   return HSA_STATUS_SUCCESS;
 }
 
-// Linux-only: see the gated call site in LoadCodeObject.
+// Linux-only: requires AieAgent, which depends on XdnaDriver (SRC_XDNA). See the gated
+// call site in LoadCodeObject.
 #if defined(__linux__)
 hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* data, size_t size,
                                                hsa_loaded_code_object_t* loaded_code_object) {
