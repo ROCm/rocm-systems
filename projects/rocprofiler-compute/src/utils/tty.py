@@ -527,8 +527,10 @@ def show_call_tree(call_trees: dict[str, list[CallTreeNode]]) -> None:
         print_wrapped_tree_line("", heading)
         for variant_line in format_args_variant_lines(root):
             print_wrapped_tree_line("", variant_line)
-        for child in root.children:
-            print_operator_node(child)
+        for i, child in enumerate(root.children):
+            child_is_last = (i == len(root.children) - 1) and not root.kernels
+            print_operator_node(child, is_last=child_is_last)
+        _print_node_kernels(root, "")
 
 
 def show_operator_summary(summary_df: pd.DataFrame) -> None:
@@ -651,7 +653,11 @@ def print_operator_node(
         child_is_last = (i == len(children) - 1) and (len(node.kernels) == 0)
         print_operator_node(child, is_last=child_is_last, parent_pipes=new_parent_pipes)
 
-    # Process kernels
+    _print_node_kernels(node, new_parent_pipes)
+
+
+def _print_node_kernels(node: CallTreeNode, parent_pipes: str) -> None:
+    """Print this node's GPU dispatches, longest total duration first."""
     for i, (kernel_name, kernel_stats) in enumerate(
         sorted(
             node.kernels.items(),
@@ -667,16 +673,15 @@ def print_operator_node(
         total_ms = duration_ns * NS_TO_MS
         stats = f"(dispatches: {launches}, total: {format_duration(total_ms)})"
 
-        # Last kernel gets └─, others get ├─
         kernel_is_last = i == len(node.kernels) - 1
         kernel_branch_char = "└─ " if kernel_is_last else "├─ "
-        kernel_prefix = f"{new_parent_pipes}{kernel_branch_char}"
+        kernel_prefix = f"{parent_pipes}{kernel_branch_char}"
 
         print_wrapped_kernel_line(
             kernel_prefix,
             display_name,
             f"{id_suffix} {stats}".strip(),
-            continuation_prefix=new_parent_pipes,
+            continuation_prefix=parent_pipes,
         )
 
 
