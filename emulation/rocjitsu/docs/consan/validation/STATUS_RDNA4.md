@@ -9,7 +9,7 @@
 | PyTorch | P1 | collision-heavy `scatter_reduce` (`pytorch-scatter-reduce`) | 🟥 Global-atomic workload; traced kernels have no LDS/FLAT accesses; outside detector scope | 🟥 Global-atomic workload; traced kernels have no LDS/FLAT accesses; outside detector scope |
 | PyTorch | P2 | Inductor compiled softmax (`pytorch-rdna4-compiled-softmax`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8); same-value writes allowed | 🟨 delay-matrix: clean pass; fault 1/8 (bar 6/8); sleep calibration queued |
 | PyTorch | P2 | split online softmax (`pytorch-rdna4-split-softmax`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8); same-value writes allowed | 🟩 delay matrix: fault 8/8; matching clean controls pass |
-| PyTorch | P2 | Qwen-vocabulary top-k (`pytorch-rdna4-llm-topk`) | 🟨 higher: clean pass; fault 0/1 (bar 6/8) | 🟨 Clean pass; reviewed fault ready; delay-matrix qualification queued |
+| PyTorch | P2 | Qwen-vocabulary top-k (`pytorch-rdna4-llm-topk`) | 🟨 max: clean pass; fault running | 🟨 Clean pass; reviewed fault ready; delay-matrix qualification queued |
 | llama.cpp | P2 | quantized matvec (`llama-rdna4-mul-mat-vec-q`) | 🟩 higher (lowest verified): clean pass; fault 7/8 (bar 6/8) | 🟨 delay-matrix: clean pass; fault 4/8 (bar 6/8); sleep calibration queued |
 | Main E2E | P2 | Sharktank TP2 family (`tp2-family`) | 🟨 Clean pass; reviewed fault ready; lowest-preset search queued | 🟨 Clean pass; reviewed fault ready; delay=0 qualification queued |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟨 Clean pass; reviewed fault ready; lowest-preset search queued | 🟨 Clean pass; reviewed fault ready; delay=0 qualification queued |
