@@ -413,7 +413,7 @@ void GraphicsDraw::initialize(Wavefront &wave, uint32_t workgroup, uint32_t wave
       }
       // POS_W_FLOAT supplies W; PERSP_PULL_MODEL above supplies 1/W.
       const std::array<float, 4> position{float(f.x) + 0.5f, float(f.y) + 0.5f, f.z,
-                                          1.0f / f.pull_model[2]};
+                                          raster::reciprocal(f.pull_model[2])};
       for (uint32_t component = 0; component < 4; ++component)
         if (context_[0x198] & (1u << (8 + component)))
           put(position[component]);
@@ -1000,8 +1000,8 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
           f.linear_j = b2;
           f.pull_model = {plane_iw.at_quad(dx, dy, q), plane_jw.at_quad(dx, dy, q),
                           plane_rw.at_quad(dx, dy, q)};
-          // Per-fragment W reconstruction is distinct from the vertex reciprocal unit.
-          const float w = 1.0f / f.pull_model[2];
+          // Fragment W uses the same reciprocal approximation as vertex setup.
+          const float w = raster::reciprocal(f.pull_model[2]);
           f.i = raster::multiply_perspective(f.pull_model[0], w);
           f.j = raster::multiply_perspective(f.pull_model[1], w);
           f.z = (clip_xy ? double(plane_z.at_quad(dx, dy, q))

@@ -17,10 +17,10 @@ inline float truncate_float(double value) {
   return result;
 }
 
-// Raster setup uses a linear reciprocal seed followed by a fixed-point
-// Newton step. These coefficients and rounding stages match every normalized
-// FP32 mantissa captured on physical RDNA3 and RDNA4. Shader reciprocals use
-// a different approximation.
+// Vertex setup and fragment W use a linear reciprocal seed followed by a
+// fixed-point Newton step. These coefficients and rounding stages match every
+// normalized FP32 mantissa captured on physical RDNA3 and RDNA4. Shader
+// reciprocals use a different approximation.
 inline float reciprocal(float value) {
   const uint32_t bits = std::bit_cast<uint32_t>(value);
   const uint32_t magnitude = bits & 0x7fffffffu;

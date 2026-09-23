@@ -368,6 +368,10 @@ TEST_P(GraphicsExportTest, ParameterLoadUsesQuadMaskAndPrimitiveOffsets) {
 TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   enum class Outcome { Draw, Empty, Reject };
+  struct FragmentInputWitness {
+    uint32_t xy;
+    std::array<uint32_t, 6> values;
+  };
   struct Case {
     const char *name;
     Outcome outcome = Outcome::Draw;
@@ -390,6 +394,7 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
     bool flat = false;
     bool viewport_scissor = false;
     std::optional<std::array<std::array<float, 4>, 3>> positions{};
+    std::optional<FragmentInputWitness> fragment_inputs{};
   };
   // Additional coverage masks were captured on physical gfx1100/gfx1201.
   const Case cases[] = {
@@ -398,6 +403,20 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
        .polygon_mode = 1u << 19,
        .inputs = 0xaf28,
        .flat = true},
+      {.name = "fragment reciprocal and perspective reconstruction",
+       .clip_control = 1u << 19,
+       .inputs = 0x880a,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x777,
+       .positions = std::array<std::array<float, 4>, 3>{{{-0x1.7ffb74p-1f, -0x1.fff0f4p-2f,
+                                                          0x1.80047ap-17f, 0x1.80047ap-15f},
+                                                         {0.75f, -0.5f, 0.25f, 1.0f},
+                                                         {0.0f, 0.75f, 0.25f, 1.0f}}},
+       // Physical RDNA3/4 inputs: perspective I/J, pull I/W, J/W, 1/W, and W.
+       .fragment_inputs =
+           FragmentInputWitness{
+               1, {0x3eb9eebfu, 0x3de83a50u, 0x3f4316d8u, 0x3e73aa10u, 0x40064dbau, 0x3ef3fc08u}}},
       {.name = "all vertices behind eye",
        .outcome = Outcome::Empty,
        .clip_control = 1u << 19,
@@ -700,9 +719,16 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
                                                 ? std::popcount(test.expected_coverage)
                                                 : std::popcount(test.sample_coverage));
     uint32_t covered_index = 0;
+    bool witness_seen = false;
     for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
       if (!(wave_->exec() & (uint64_t{1} << lane)))
         continue;
+      if (test.fragment_inputs && wave_->debug_read_vgpr(6, lane) == test.fragment_inputs->xy) {
+        witness_seen = true;
+        for (uint32_t reg = 0; reg < test.fragment_inputs->values.size(); ++reg)
+          EXPECT_EQ(wave_->debug_read_vgpr(reg, lane), test.fragment_inputs->values[reg])
+              << "register=" << reg << " lane=" << lane;
+      }
       if (test.inputs == 0xaf28) {
         // Pull I/W, J/W, 1/W; linear I/J; position XYZW; packed XY.
         const uint32_t x = 1 + covered_index % 2, y = 1 + covered_index / 2;
@@ -733,6 +759,8 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
       }
       ++covered_index;
     }
+    if (test.fragment_inputs)
+      EXPECT_TRUE(witness_seen);
     // Include helper lanes in exports; only covered fragments may write.
     for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
       draw->export_lane(*wave_, lane, 0, 3, {0x00003c00, 0x3c000000, 0, 0});
