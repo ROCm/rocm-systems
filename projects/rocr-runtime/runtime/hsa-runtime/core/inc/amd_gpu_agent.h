@@ -462,6 +462,10 @@ class GpuAgent : public GpuAgentInt {
 
   /// @brief Override from AMD::GpuAgentInt.
   __forceinline bool is_xgmi_cpu_gpu() const { return xgmi_cpu_gpu_; }
+  /// @brief Host stores to this GPU's memory pass through HDP and need a flush.
+  __forceinline bool HostStoresNeedHdpFlush() const { return !xgmi_cpu_gpu_; }
+  /// @brief Host atomics on this GPU's memory are atomic with respect to the GPU.
+  __forceinline bool HostAtomicsSupported() const { return xgmi_cpu_gpu_; }
   /// @brief Is large BAR support enabled for this GPU.
   __forceinline bool LargeBarEnabled() const { return large_bar_enabled_; }
 

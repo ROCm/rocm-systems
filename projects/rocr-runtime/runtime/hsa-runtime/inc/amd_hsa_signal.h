@@ -76,4 +76,41 @@ typedef struct AMD_SIGNAL_ALIGN amd_signal_s {
   uint32_t reserved3[2];
 } amd_signal_t;
 
+// Signal handle hints. A signal is 64-byte aligned, so the low 6 bits of its
+// handle are zero; a producer may set hints there so the CP can act on a
+// completion signal without loading it. Hints live only in the handle, never
+// in the signal, so they may differ per use. Zero is today's behaviour.
+// Hints are purely optional: a consumer may ignore any of them, so a producer
+// must be correct whether or not a hint is honoured.
+typedef enum {
+  /* Bit 0 reserved. */
+
+  /* Bits 1-2, WHEN to interrupt. INTR_NONE on a signal with an event leaves
+     a waiter sleeping on that event asleep. */
+  AMD_SIGNAL_HINT_INTR_DEFAULT  = (0u << 1),  /* as today: if mailbox set */
+  AMD_SIGNAL_HINT_INTR_NONE     = (1u << 1),  /* never */
+  AMD_SIGNAL_HINT_INTR_ON_ZERO  = (2u << 1),  /* only non-zero -> zero */
+  AMD_SIGNAL_HINT_INTR_MASK     = (3u << 1),
+
+  /* Bit 3, HOW to update the value. Clear is the atomic add. */
+  AMD_SIGNAL_HINT_VALUE_BINARY  = (1u << 3),  /* plain 64-bit store of 0 */
+
+  /* Bits 4-5, WHETHER to capture timestamps. */
+  AMD_SIGNAL_HINT_TS_INHERIT    = (0u << 4),  /* defer to the queue property */
+  AMD_SIGNAL_HINT_TS_ON         = (1u << 4),  /* capture, whatever the queue */
+  AMD_SIGNAL_HINT_TS_OFF        = (2u << 4),  /* suppress, whatever the queue */
+  AMD_SIGNAL_HINT_TS_MASK       = (3u << 4),
+} amd_signal_hint_t;
+
+#define AMD_SIGNAL_HINT_MASK ((uint64_t)0x3F)
+
+static inline amd_signal_t* amd_signal_from_handle(uint64_t handle) {
+  return (amd_signal_t*)(uintptr_t)(handle & ~AMD_SIGNAL_HINT_MASK);
+}
+
+#if defined(__cplusplus)
+static_assert(AMD_SIGNAL_HINT_MASK == AMD_SIGNAL_ALIGN_BYTES - 1,
+              "The hint mask is exactly the bits the signal alignment leaves zero.");
+#endif
+
 #endif // AMD_HSA_SIGNAL_H
