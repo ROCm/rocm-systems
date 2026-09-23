@@ -332,3 +332,12 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round3-mode-default/`.
   Precommitted a separate eight-trial `preset=max` diagnostic with the same
   site and minimum detection requirement; standard sampling remains unqualified.
+- torch.mode SuperCollider exploratory trial set: 0/8 detections and 0/8
+  numerical failures. The selected fault policy was unchanged, but the shared
+  spec file gained the separate dense policy while this run was active. The
+  old runner hashed that file at completion rather than at load time, so this
+  root is retained as exploratory and is being rerun with stable provenance.
+  The runner now saves the loaded bytes and rejects mismatched
+  saved specs on resume; all **195 validation-runner tests** pass. Evidence:
+  `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round3-mode-supercollider/`
+  and `fault-snapshot-tests.log` in that campaign root.
