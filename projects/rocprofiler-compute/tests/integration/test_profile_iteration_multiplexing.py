@@ -218,74 +218,94 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
         pytest.skip("Skipping stochastic iteration multiplexing for non-CDNA socs.")
 
     workload_dir = common.get_output_dir(param_id="no_iter_mplx")
+    workload_dirs = [workload_dir]
     # These metrics should cover the L1 cache stochastic counters
     # Block 4 (roofline) included to verify roofline counters under multiplexing
     options = ["--block", "4", "16.1", "16.3"]
-    _ = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        options,
-        check_success=True,
-        roof=False,
-        app_name="app_laplace_eqn",
-    )
-    integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-    binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
-    counters_no_multiplexing = pd.read_csv(common.pmc_perf_path(workload_dir))
-    common.clean_output_dir(config["cleanup"], workload_dir)
+    try:
+        _ = binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+            app_name="app_laplace_eqn",
+        )
+        integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
+        binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--gen-pmc",
+        ])
+        counters_no_multiplexing = pd.read_csv(common.pmc_perf_path(workload_dir))
 
-    options = [
-        "--block",
-        "4",
-        "16.1",
-        "16.3",
-        "--iteration-multiplexing",
-        "kernel",
-    ]
-    workload_dir = common.get_output_dir(param_id="iter_mplx_kernel")
-    _ = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        options,
-        check_success=True,
-        roof=False,
-        app_name="app_laplace_eqn_iter",
-    )
-    integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-    binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
-    counters_kernel = pd.read_csv(common.pmc_perf_path(workload_dir))
-    common.clean_output_dir(config["cleanup"], workload_dir)
+        options = [
+            "--block",
+            "4",
+            "16.1",
+            "16.3",
+            "--iteration-multiplexing",
+            "kernel",
+        ]
+        workload_dir = common.get_output_dir(param_id="iter_mplx_kernel")
+        workload_dirs.append(workload_dir)
+        _ = binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+            app_name="app_laplace_eqn_iter",
+        )
+        integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
+        binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--gen-pmc",
+        ])
+        counters_kernel = pd.read_csv(common.pmc_perf_path(workload_dir))
 
-    options = [
-        "--block",
-        "4",
-        "16.1",
-        "16.3",
-        "--iteration-multiplexing",
-        "kernel_launch_params",
-    ]
-    workload_dir_klp = common.get_output_dir(param_id="iter_mplx_params")
-    _ = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir_klp,
-        options,
-        check_success=True,
-        roof=True,
-        app_name="app_laplace_eqn_iter",
-    )
-    integration_common.check_csv_files(workload_dir_klp, num_devices, num_kernels)
-    binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir_klp])
-    counters_kernel_launch_params = pd.read_csv(common.pmc_perf_path(workload_dir_klp))
+        options = [
+            "--block",
+            "4",
+            "16.1",
+            "16.3",
+            "--iteration-multiplexing",
+            "kernel_launch_params",
+        ]
+        workload_dir_klp = common.get_output_dir(param_id="iter_mplx_params")
+        workload_dirs.append(workload_dir_klp)
+        _ = binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir_klp,
+            options,
+            check_success=True,
+            roof=True,
+            app_name="app_laplace_eqn_iter",
+        )
+        integration_common.check_csv_files(workload_dir_klp, num_devices, num_kernels)
+        binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir_klp,
+            "--gen-pmc",
+        ])
+        counters_kernel_launch_params = pd.read_csv(
+            common.pmc_perf_path(workload_dir_klp)
+        )
 
-    assert are_stochastic_counters_similar(
-        [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
-    )
+        assert are_stochastic_counters_similar(
+            [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
+        )
 
-    assert os.path.exists(f"{workload_dir_klp}/roofline.csv")
-    roofline_df = pd.read_csv(f"{workload_dir_klp}/roofline.csv")
-    assert len(roofline_df) >= num_devices
-
-    common.clean_output_dir(config["cleanup"], workload_dir_klp)
+        assert os.path.exists(f"{workload_dir_klp}/roofline.csv")
+        roofline_df = pd.read_csv(f"{workload_dir_klp}/roofline.csv")
+        assert len(roofline_df) >= num_devices
+    finally:
+        for output_dir in workload_dirs:
+            common.clean_output_dir(config["cleanup"], output_dir)
 
 
 # Not part of automated test runs since testing all counters is expensive
