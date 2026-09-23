@@ -54,15 +54,17 @@ collected and runs bottleneck detection automatically:
 
    $ rocprof-compute analyze -p workloads/my_workload/MI350/
 
-To view only the memory chart, use the block filter:
+To view only the memory chart and its guidance panel, use the block
+filter with both block 3 and block 30:
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze -p workloads/my_workload/MI350/ -b 3
+   $ rocprof-compute analyze -p workloads/my_workload/MI350/ -b 3 30
 
-In this command, ``-b 3`` selects the memory chart. The memory bandwidth
-analysis annotations and guidance panel appear automatically when block
-30 data was collected during profiling.
+In this command, ``-b 3`` selects the memory chart and ``-b 30`` selects
+the memory bandwidth analysis panel. When block 30 data was collected
+during profiling, the guidance annotations appear on the memory chart
+and a guidance panel is rendered below it.
 
 .. code-block:: text
 
