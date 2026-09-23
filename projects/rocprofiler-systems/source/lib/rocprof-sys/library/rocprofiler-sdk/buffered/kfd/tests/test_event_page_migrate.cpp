@@ -13,9 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace rocprofsys::domains::buffered
-{
-namespace kfd
+namespace rocprofsys::domains::buffered::kfd
 {
 namespace
 {
@@ -142,6 +140,4 @@ TEST(kfd_event_page_migrate_test,
     g_externals_mock.reset();
 }
 
-}  // namespace kfd
-
-}  // namespace rocprofsys::domains::buffered
+}  // namespace rocprofsys::domains::buffered::kfd
