@@ -17,26 +17,26 @@ toolchain, workload, or runtime changes.
 
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
 
-| Set | Priority | Workload / validation ID | SuperCollider | ConSan |
+| Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |
 | Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🩶 unassessed | 🩶 unassessed |
-| Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟧 exact; only 75/227 accesses supported | 🟩 exact; 227/227 accesses and 48/48 barriers; reviewed fault bundle |
-| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟩 exact; 20/20 accesses; fault bundle | 🟩 exact; 20/20 accesses and 26/26 barriers; 17/32 fault sweep |
-| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 clean exact/complete; 29,111 accesses; qualification refresh pending | 🟨 clean exact/complete; 29,111 accesses and 7,819 barriers; qualification refresh pending |
-| Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 exact; 352/352 accesses; fault bundle | 🟩 exact; 352/352 accesses and 86/86 barriers; fault bundle |
-| Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 exact; 704/704 accesses; fault bundle | 🟩 exact; 704/704 accesses and 172/172 barriers; fault bundle |
+| Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟩 exact; 227/227 accesses and 48/48 barriers; reviewed fault bundle | 🟧 exact; only 75/227 accesses supported |
+| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟩 exact; 20/20 accesses and 26/26 barriers; 17/32 fault sweep | 🟩 exact; 20/20 accesses; fault bundle |
+| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 clean exact/complete; 29,111 accesses and 7,819 barriers; qualification refresh pending | 🟨 clean exact/complete; 29,111 accesses; qualification refresh pending |
+| Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 exact; 352/352 accesses and 86/86 barriers; fault bundle | 🟩 exact; 352/352 accesses; fault bundle |
+| Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 exact; 704/704 accesses and 172/172 barriers; fault bundle | 🟩 exact; 704/704 accesses; fault bundle |
 | PyTorch | P1 | collision-heavy `scatter_reduce` (`pytorch-scatter-reduce`) | 🟩 BF16/FP32 exact; 27/27 accesses; fault bundle | 🟩 BF16/FP32 exact; 27/27 accesses; fault bundle |
-| PyTorch | P2 | Inductor compiled softmax (`pytorch-rdna4-compiled-softmax`) | 🟩 exact; 4/4 accesses; fault bundle | 🟩 exact; 4/4 accesses and 6/6 barriers; fault bundle |
-| PyTorch | P2 | split online softmax (`pytorch-rdna4-split-softmax`) | 🟩 exact; 8/8 accesses; fault bundle | 🟩 exact; 8/8 accesses and 12/12 barriers; fault bundle |
-| PyTorch | P2 | Qwen-vocabulary top-k (`pytorch-rdna4-llm-topk`) | 🟨 exact/complete; 58,992/58,992 accesses; reviewed-fault refresh pending | 🟨 exact/complete; 418,292 accesses and 100,916 barriers; reviewed-fault refresh pending |
-| llama.cpp | P2 | quantized matvec (`llama-rdna4-mul-mat-vec-q`) | 🟩 exact; 462/462 accesses; fault bundle | 🟩 exact; 462 accesses and 88 barriers; fault bundle |
-| Main E2E | P2 | Sharktank TP2 family (`tp2-family`) | 🟩 exact; 2,976/2,976 accesses; fault bundle | 🟩 exact; 2,976 accesses and 420 barriers; fault bundle |
-| Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 exact; 85/85 accesses; fault bundle | 🟩 exact; 85 accesses and 72 barriers; fault bundle |
-| PyTorch | P3 | native histogram (`pytorch-torch-histc`) | 🟩 exact; 135/135 accesses; fault bundle | 🟩 exact; 135 accesses and 168 barriers; fault bundle |
+| PyTorch | P2 | Inductor compiled softmax (`pytorch-rdna4-compiled-softmax`) | 🟩 exact; 4/4 accesses and 6/6 barriers; fault bundle | 🟩 exact; 4/4 accesses; fault bundle |
+| PyTorch | P2 | split online softmax (`pytorch-rdna4-split-softmax`) | 🟩 exact; 8/8 accesses and 12/12 barriers; fault bundle | 🟩 exact; 8/8 accesses; fault bundle |
+| PyTorch | P2 | Qwen-vocabulary top-k (`pytorch-rdna4-llm-topk`) | 🟨 exact/complete; 418,292 accesses and 100,916 barriers; reviewed-fault refresh pending | 🟨 exact/complete; 58,992/58,992 accesses; reviewed-fault refresh pending |
+| llama.cpp | P2 | quantized matvec (`llama-rdna4-mul-mat-vec-q`) | 🟩 exact; 462 accesses and 88 barriers; fault bundle | 🟩 exact; 462/462 accesses; fault bundle |
+| Main E2E | P2 | Sharktank TP2 family (`tp2-family`) | 🟩 exact; 2,976 accesses and 420 barriers; fault bundle | 🟩 exact; 2,976/2,976 accesses; fault bundle |
+| Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 exact; 85 accesses and 72 barriers; fault bundle | 🟩 exact; 85/85 accesses; fault bundle |
+| PyTorch | P3 | native histogram (`pytorch-torch-histc`) | 🟩 exact; 135 accesses and 168 barriers; fault bundle | 🟩 exact; 135/135 accesses; fault bundle |
 | llama.cpp | P3 | RMS norm (`llama-rdna4-rms-norm`) | 🟨 exact/complete; effective reviewed fault pending | 🟨 exact/complete; effective reviewed fault pending |
-| Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 exact; 12/12 accesses; fault bundle | 🟩 exact; 12 accesses and 8 barriers; fault bundle |
-| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 exact; 12/12 accesses; fault bundle | 🟩 exact; 12 accesses and 8 barriers; fault bundle |
-| Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 exact; 12/12 accesses; fault bundle | 🟩 exact; 12 accesses and 8 barriers; fault bundle |
-| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 exact; 4/4 accesses; fault bundle | 🟩 exact; 4 accesses, 15 atomics, 8 barriers; fault bundle |
-| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 exact; 4/4 accesses; fault bundle | 🟩 exact; 4 accesses, 15 atomics, 8 barriers; fault bundle |
-| Main E2E | P4 | hip-moi Jakub attention (`jakub-attention`) | 🟩 exact; 31/31 accesses; fault bundle | 🟩 exact; 31 accesses and 8 barriers; fault bundle |
+| Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 exact; 12 accesses and 8 barriers; fault bundle | 🟩 exact; 12/12 accesses; fault bundle |
+| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 exact; 12 accesses and 8 barriers; fault bundle | 🟩 exact; 12/12 accesses; fault bundle |
+| Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 exact; 12 accesses and 8 barriers; fault bundle | 🟩 exact; 12/12 accesses; fault bundle |
+| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 exact; 4 accesses, 15 atomics, 8 barriers; fault bundle | 🟩 exact; 4/4 accesses; fault bundle |
+| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 exact; 4 accesses, 15 atomics, 8 barriers; fault bundle | 🟩 exact; 4/4 accesses; fault bundle |
+| Main E2E | P4 | hip-moi Jakub attention (`jakub-attention`) | 🟩 exact; 31 accesses and 8 barriers; fault bundle | 🟩 exact; 31/31 accesses; fault bundle |
