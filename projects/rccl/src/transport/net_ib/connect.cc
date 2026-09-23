@@ -695,7 +695,7 @@ static ncclResult_t ncclIbSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
-  // Segmented multi-recv chain plus the 2*MAX request budget (was 2*MAX+65).
+  // Segmented multi-recv chain plus the 2*MAX request budget.
   qpCreateAttrs.maxSendWorkRequest = NCCL_IB_MAX_SEND_WRS;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
