@@ -341,3 +341,13 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   saved specs on resume; all **195 validation-runner tests** pass. Evidence:
   `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round3-mode-supercollider/`
   and `fault-snapshot-tests.log` in that campaign root.
+- Scatter-reduce review: both dtypes use global-memory atomics (BF16 packed
+  add/CAS and FP32 add), with **zero LDS or group-FLAT access sites** in the
+  selected code objects. All 16 atomic candidates have conservative/unknown
+  ordering roles. Default ordering observation requires a selected directional
+  LDS/group-FLAT access window; SuperCollider treats atomic mutations as
+  mutation-only and has no repeated-read coverage for this workload's global
+  accesses. Thus these rows currently lack applicable detector coverage; the
+  collision-count numerical oracle alone cannot qualify them. Keep both cells
+  non-green. Inventory evidence:
+  `/home/benoit/workspace/consan-validation/rdna4-20260923/inventory-round2/pytorch-scatter-reduce/`.
