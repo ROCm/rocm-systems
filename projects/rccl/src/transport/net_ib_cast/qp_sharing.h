@@ -13,9 +13,9 @@
 #ifndef NET_IB_CAST_QP_SHARING_H_
 #define NET_IB_CAST_QP_SHARING_H_
 
+#include <mutex>
 #include "common_cast.h"
 #include "param.h"
-#include <mutex>
 
 // QP sharing configuration parameters
 // Master switch: RCCL_IB_QP_SHARING_ENABLE
