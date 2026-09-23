@@ -138,7 +138,7 @@ public:
     /// Shared VM resources; null preserves direct-construction environment controls.
     std::shared_ptr<matrix_coexecution::ExecutionResources> async_resources = nullptr;
     /// Report premature memory-result accesses and conflicting replay-source overwrites.
-    MemoryWaitDiagnostics memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    MemoryWaitDiagnostics memory_wait_diagnostics = MemoryWaitDiagnostics::Off;
   };
 
   ~ComputeUnitCore() override = default;

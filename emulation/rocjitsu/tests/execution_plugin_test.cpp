@@ -1124,6 +1124,7 @@ struct PluginFixture {
               {{"key":"num_wf_slots","value":"{}"}},
               {{"key":"sgprs_per_wf","value":"{}"}},
               {{"key":"vgprs_per_wf","value":"{}"}},
+              {{"key":"memory_wait_diagnostics","value":"warn"}},
               {{"key":"lds_size_kb","value":"64"}}
             ]}}
           ]}}

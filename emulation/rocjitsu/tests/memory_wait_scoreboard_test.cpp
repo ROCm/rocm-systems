@@ -19,6 +19,19 @@ using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
 using namespace rocjitsu::test::cdna5;
 
+// Diagnostic tests opt in; an empty setting exercises the production default.
+std::string memory_wait_test_config(std::string_view setting = "warn") {
+  std::ifstream file(kGfx1250ConfigPath);
+  std::string config((std::istreambuf_iterator<char>(file)), {});
+  const auto cu = config.find("\"type\": \"compute_unit\"");
+  const auto array = config.find('[', config.find("\"config\"", cu));
+  if (!setting.empty())
+    config.insert(
+        array + 1,
+        std::format("{{\"key\":\"memory_wait_diagnostics\",\"value\":\"{}\"}},", setting));
+  return config;
+}
+
 struct MemoryWaitScoreboardTest : ::testing::Test {
   MemoryWaitShadow shadow;
   MemoryWaitScoreboard state{shadow};
@@ -488,6 +501,7 @@ TEST(MemoryWaitExecutionTest, WaitIdleAndRdna4CompatibilityWaitDrainEveryFunctio
       GpuMemory memory("wait_memory");
       L2Cache l2("wait_l2");
       ComputeUnitCore::Config config{};
+      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
       config.arch = arch;
       config.num_wf_slots = 1;
       config.sgprs_per_wf = 128;
@@ -569,6 +583,7 @@ TEST(MemoryWaitExecutionTest, ZeroExecTransposeResultsRequireDsWait) {
   GpuMemory memory("transpose_wait_memory");
   L2Cache l2("transpose_wait_l2");
   ComputeUnitCore::Config config{};
+  config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
   config.arch = ROCJITSU_CODE_ARCH_CDNA5;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 128;
@@ -619,7 +634,7 @@ TEST(MemoryWaitExecutionTest, InlineDsResultAndCounterOnlyNopUseOrderedQueue) {
                                                {.simm16 = static_cast<uint16_t>(threshold)}));
     append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 258, .vdst = 3}));
     append_instruction(code, S_ENDPGM_GFX12);
-    Gfx1250Sim sim;
+    Gfx1250Sim sim(memory_wait_test_config());
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
     test::AqlQueue queue(sim.memory, sim.cp());
     queue.dispatch(kernel, 32, 32);
@@ -639,7 +654,7 @@ TEST(MemoryWaitExecutionTest, CounterAdmissionPrecedesTheIncomingInstructionsReg
       append_instruction(code, cdna5::build_vds(cdna5::kDsNopVds));
     append_instruction(code, cdna5::build_vds(cdna5::kDsSwizzleB32Vds, {.addr = 2, .vdst = 3}));
     append_instruction(code, S_ENDPGM_GFX12);
-    Gfx1250Sim sim;
+    Gfx1250Sim sim(memory_wait_test_config());
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
     test::AqlQueue queue(sim.memory, sim.cp());
     queue.dispatch(kernel, 32, 32);
@@ -662,7 +677,7 @@ TEST(MemoryWaitExecutionTest, ReturnMessagesHaveSeparateSendAndReturnCompletions
                                                {.simm16 = static_cast<uint16_t>(threshold)}));
     append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 6}));
     append_instruction(code, S_ENDPGM_GFX12);
-    Gfx1250Sim sim;
+    Gfx1250Sim sim(memory_wait_test_config());
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
     test::AqlQueue queue(sim.memory, sim.cp());
     queue.dispatch(kernel, 32, 32);
@@ -708,7 +723,7 @@ TEST(MemoryWaitExecutionTest, MessageResultsCheckM0AndOnlyConsumedExecWords) {
           append_instruction(code,
                              cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 2}));
         append_instruction(code, S_ENDPGM_GFX12);
-        Gfx1250Sim sim;
+        Gfx1250Sim sim(memory_wait_test_config());
         auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
         test::AqlQueue queue(sim.memory, sim.cp());
         queue.dispatch(kernel, 32, 32);
@@ -745,7 +760,7 @@ TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationCountsWithZeroExecBehindP
       append_instruction(code, S_ENDPGM_GFX12);
       uint32_t properties = 0;
       AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-      Gfx1250Sim sim;
+      Gfx1250Sim sim(memory_wait_test_config());
       write_global_u32(*sim.memory, 0x400000, 0x12345678);
       auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
                                      false, properties, 16);
@@ -771,7 +786,7 @@ TEST(MemoryWaitExecutionTest, ScalarMissingWaitWarnsWithoutChangingTheResult) {
     append_instruction(code, S_ENDPGM_GFX12);
     uint32_t properties = 0;
     AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-    Gfx1250Sim sim;
+    Gfx1250Sim sim(memory_wait_test_config());
     write_global_u32(*sim.memory, 0x400000, 0x12345678);
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
                                    false, properties, 16);
@@ -793,6 +808,7 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndKeepBothQueueE
       GpuMemory memory("flat_memory");
       L2Cache l2("flat_l2");
       ComputeUnitCore::Config config{};
+      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
       config.arch = arch;
       config.num_wf_slots = 1;
       config.sgprs_per_wf = 128;
@@ -847,6 +863,7 @@ TEST(MemoryWaitExecutionTest, IncomingFlatOverwriteUsesItsOwnOrderingAndRoutedLa
         GpuMemory memory("flat_overwrite_memory");
         L2Cache l2("flat_overwrite_l2");
         ComputeUnitCore::Config config{};
+        config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
         config.arch = arch;
         config.num_wf_slots = 1;
         config.sgprs_per_wf = 128;
@@ -892,7 +909,7 @@ TEST(MemoryWaitExecutionTest, BarrierObserversPreservePendingResults) {
   };
   for (bool wait : {false, true}) {
     SCOPED_TRACE(wait);
-    Gfx1250Sim sim;
+    Gfx1250Sim sim(memory_wait_test_config());
     auto observer = std::make_unique<BarrierSnapshot>();
     auto *snapshot = observer.get();
     ASSERT_TRUE(sim.plugin_group->add(std::move(observer)));
@@ -946,7 +963,7 @@ TEST(MemoryWaitExecutionTest, BarrierSccReadAndOverwriteNeedTheKmWait) {
                                                           4 | ((consumer == 3 ? 9 : 10) << 6)),
                                                       .sdst = 4}));
         append_instruction(code, S_ENDPGM_GFX12);
-        Gfx1250Sim sim;
+        Gfx1250Sim sim(memory_wait_test_config());
         auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
         test::AqlQueue queue(sim.memory, sim.cp());
         queue.dispatch(kernel, group_size, group_size);
@@ -970,6 +987,7 @@ TEST(MemoryWaitExecutionTest, SccHwregWritesCheckOnlyPermittedOverlappingFields)
           GpuMemory memory("hwreg_wait_memory");
           L2Cache l2("hwreg_wait_l2");
           ComputeUnitCore::Config config{};
+          config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
           config.arch = arch;
           config.num_wf_slots = 1;
           config.sgprs_per_wf = 128;
@@ -1021,6 +1039,7 @@ TEST(MemoryWaitExecutionTest, Wave64MaskReadChecksPendingVccHighWord) {
     GpuMemory memory("vcc_high_memory");
     L2Cache l2("vcc_high_l2");
     ComputeUnitCore::Config config{};
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
     config.arch = ROCJITSU_CODE_ARCH_CDNA3;
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 128;
@@ -1078,7 +1097,7 @@ TEST(MemoryWaitExecutionTest, ScalarVccLoadChecksOnlyTheConsumedOrWrittenWords) 
         append_instruction(code, S_ENDPGM_GFX12);
         uint32_t properties = 0;
         AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-        Gfx1250Sim sim;
+        Gfx1250Sim sim(memory_wait_test_config());
         write_global_u32(*sim.memory, 0x400000, 1);
         auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
                                        false, properties, 16);
@@ -1099,6 +1118,7 @@ TEST(MemoryWaitExecutionTest, SdwaExplicitCompareDoesNotOverwriteItsTemporaryVcc
       GpuMemory memory("sdwa_wait_memory");
       L2Cache l2("sdwa_wait_l2");
       ComputeUnitCore::Config config{};
+      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
       config.arch = ROCJITSU_CODE_ARCH_CDNA4;
       config.num_wf_slots = 1;
       config.sgprs_per_wf = 128;
@@ -1157,6 +1177,7 @@ TEST(MemoryWaitExecutionTest, ScratchAddressChecksDoNotObserveGlobalOrInactiveLa
         GpuMemory memory("scratch_memory");
         L2Cache l2("scratch_l2");
         ComputeUnitCore::Config config{};
+        config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
         config.arch = ROCJITSU_CODE_ARCH_CDNA3;
         config.num_wf_slots = 1;
         config.sgprs_per_wf = 128;
@@ -1207,6 +1228,7 @@ TEST(MemoryWaitExecutionTest, VopdMoveChecksOnlyItsConsumedSources) {
       GpuMemory memory("vopd_memory");
       L2Cache l2("vopd_l2");
       ComputeUnitCore::Config config{};
+      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
       config.arch = arch;
       config.num_wf_slots = 1;
       config.sgprs_per_wf = 128;
@@ -1254,6 +1276,7 @@ TEST(MemoryWaitExecutionTest, NarrowStoresCheckOnlyConsumedBytes) {
       GpuMemory memory("store_memory");
       L2Cache l2("store_l2");
       ComputeUnitCore::Config config{};
+      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
       config.arch = ROCJITSU_CODE_ARCH_RDNA3;
       config.num_wf_slots = 1;
       config.sgprs_per_wf = 128;
@@ -1315,7 +1338,7 @@ TEST(MemoryWaitExecutionTest, GlobalFlatResultNeedsOnlyItsLoadCounter) {
     append_instruction(code, S_ENDPGM_GFX12);
     uint32_t properties = 0;
     AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-    Gfx1250Sim sim;
+    Gfx1250Sim sim(memory_wait_test_config());
     write_global_u32(*sim.memory, 0x400000, 0x12345678);
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
                                    false, properties, 16);
@@ -1376,15 +1399,7 @@ TEST(MemoryWaitExecutionTest, EagerLdsTransfersStillDiagnoseMissingWaits) {
         async_load();
       append_instruction(code, S_ENDPGM_GFX12);
 
-      std::ifstream file(kGfx1250ConfigPath);
-      std::string config((std::istreambuf_iterator<char>(file)), {});
-      if (mode == 3) {
-        const auto cu = config.find("\"type\": \"compute_unit\"");
-        const auto array = config.find('[', config.find("\"config\"", cu));
-        ASSERT_NE(array, std::string::npos);
-        config.insert(array + 1, "{\"key\":\"memory_wait_diagnostics\",\"value\":\"off\"},");
-      }
-      Gfx1250Sim sim(config);
+      Gfx1250Sim sim(memory_wait_test_config(mode == 3 ? "off" : "warn"));
       write_global_u32(*sim.memory, 0x400000, 0x12345678);
       const auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
       hsa_kernel_dispatch_packet_t packet{};
@@ -1416,7 +1431,7 @@ TEST(MemoryWaitExecutionTest, LdsFootprintsUseExecutedLanesAndExactBytes) {
         {1u, 64u, 0u, 0u}}) {
     SCOPED_TRACE(std::format("exec={} source={} consumer={}", producer_exec, producer_address,
                              consumer_address));
-    Gfx1250Sim sim;
+    Gfx1250Sim sim(memory_wait_test_config());
     auto *cu = sim.cu();
     auto *wf = sim.dispatch_scratch_wf();
     cu->allocate_lds(256); // Check nonzero physical LDS allocation bases too.
@@ -1468,15 +1483,7 @@ TEST(MemoryWaitExecutionTest, VectorWaitDiagnosticsCanBeSilenced) {
     append_instruction(code, S_ENDPGM_GFX12);
     uint32_t properties = 0;
     AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-    std::ifstream file(kGfx1250ConfigPath);
-    std::string config((std::istreambuf_iterator<char>(file)), {});
-    if (mode == 3) {
-      const auto cu = config.find("\"type\": \"compute_unit\"");
-      const auto array = config.find('[', config.find("\"config\"", cu));
-      ASSERT_NE(array, std::string::npos);
-      config.insert(array + 1, "{\"key\":\"memory_wait_diagnostics\",\"value\":\"off\"},");
-    }
-    Gfx1250Sim sim(config);
+    Gfx1250Sim sim(memory_wait_test_config(mode == 3 ? "off" : "warn"));
     write_global_u32(*sim.memory, 0x400000, 0x12345678);
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
                                    false, properties, 16);
@@ -1626,24 +1633,14 @@ void enable_multi_group_replay(std::vector<uint32_t> &code) {
   code.push_back(1);
 }
 
-std::string xcnt_test_config(std::string_view entries = {}) {
-  std::ifstream file(kGfx1250ConfigPath);
-  std::string config((std::istreambuf_iterator<char>(file)), {});
-  const auto cu = config.find("\"type\": \"compute_unit\"");
-  const auto array = config.find('[', config.find("\"config\"", cu));
-  if (!entries.empty())
-    config.insert(array + 1, entries);
-  return config;
-}
-
-std::array<uint64_t, 2> run_xcnt_kernel(std::vector<uint32_t> code, std::string_view entries = {},
-                                        unsigned vgprs = 32) {
+std::array<uint64_t, 2> run_xcnt_kernel(std::vector<uint32_t> code,
+                                        std::string_view setting = "warn", unsigned vgprs = 32) {
   using namespace rocr::llvm::amdhsa;
   append_instruction(code, S_WAIT_KMCNT_0_GFX12);
   append_instruction(code, cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = 0}));
   append_instruction(code, cdna5::build_sopp(cdna5::kSWaitStorecntSopp, {.simm16 = 0}));
   append_instruction(code, S_ENDPGM_GFX12);
-  Gfx1250Sim sim(xcnt_test_config(entries));
+  Gfx1250Sim sim(memory_wait_test_config(setting));
   write_global_u32(*sim.memory, 0x400000, 0x12345678);
   uint32_t properties = 0;
   AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
@@ -1653,6 +1650,10 @@ std::array<uint64_t, 2> run_xcnt_kernel(std::vector<uint32_t> code, std::string_
   queue.dispatch(kernel, 32, 32, 0x400000);
   step_until_halted(*sim.engine, *sim.cu());
   EXPECT_EQ(sim.snapshot->snapshots().size(), 1u);
+  if (setting != "warn") {
+    EXPECT_FALSE(sim.cu()->wf(0)->memory_wait_checks_enabled());
+    EXPECT_EQ(sim.cu()->wf(0)->memory_wait_scoreboard(), nullptr);
+  }
   return {sim.cu()->xcnt_diagnostic_count(), sim.cu()->memory_wait_diagnostic_count()};
 }
 
@@ -1744,19 +1745,14 @@ TEST(XcntExecutionTest, MemoryWaitSettingControlsCompletionAndReplayChecksTogeth
     append_instruction(code, make_s_load_b32_scaled_imm(4, 0, 0));
     append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 5}));
     append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 0}));
-    const auto counts = run_xcnt_kernel(
-        code, mode == 1   ? "{\"key\":\"memory_wait_diagnostics\",\"value\":\"warn\"},"
-              : mode == 2 ? "{\"key\":\"memory_wait_diagnostics\",\"value\":\"off\"},"
-                          : "");
-    EXPECT_EQ(counts[0], mode == 2 ? 0u : 1u);
-    EXPECT_EQ(counts[1], mode == 2 ? 0u : 1u);
+    const auto counts = run_xcnt_kernel(code, mode == 1 ? "warn" : mode == 2 ? "off" : "");
+    EXPECT_EQ(counts[0], mode == 1 ? 1u : 0u);
+    EXPECT_EQ(counts[1], mode == 1 ? 1u : 0u);
   }
 }
 
 TEST(XcntExecutionTest, InvalidMemoryWaitSettingIsRejected) {
-  EXPECT_THROW(
-      Gfx1250Sim(xcnt_test_config("{\"key\":\"memory_wait_diagnostics\",\"value\":\"no\"},")),
-      std::invalid_argument);
+  EXPECT_THROW(Gfx1250Sim(memory_wait_test_config("no")), std::invalid_argument);
 }
 
 TEST(XcntExecutionTest, SingleGroupVmemIsOutsideQualifiedCoverage) {
@@ -1806,13 +1802,14 @@ TEST(XcntExecutionTest, ReplaySourcesUseTheExecutedHighVgprBank) {
   append_instruction(code, cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
                                                 {.saddr = 0, .vdst = 2, .vaddr = 0}));
   append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 129, .vdst = 0}));
-  EXPECT_EQ(run_xcnt_kernel(code, {}, 320), (std::array<uint64_t, 2>{1, 0}));
+  EXPECT_EQ(run_xcnt_kernel(code, "warn", 320), (std::array<uint64_t, 2>{1, 0}));
 }
 
 TEST(XcntExecutionTest, ReplayAddressFootprintsHonorScratchAndBufferEnableBits) {
   GpuMemory memory("replay_memory");
   L2Cache l2("replay_l2");
   ComputeUnitCore::Config config{};
+  config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
   config.arch = ROCJITSU_CODE_ARCH_CDNA5;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 128;

@@ -9,11 +9,11 @@ threshold. Execution continues with the eager value. The first conflicting acces
 reports the producer and recovers its readiness to avoid cascading warnings. Each CU
 prints at most 16 warnings during its lifetime.
 
-Diagnostics default to `warn`. To disable tracking and messages, add this entry to each
+Diagnostics default to `off`. To enable tracking and messages, add this entry to each
 `compute_unit` node's `config` array:
 
 ```json
-{"key": "memory_wait_diagnostics", "value": "off"}
+{"key": "memory_wait_diagnostics", "value": "warn"}
 ```
 
 `warn` and `off` are the accepted values. Invalid values reject the configuration. This
