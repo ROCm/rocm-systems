@@ -53,6 +53,13 @@ static inline uint32_t ncclIbGetConnectCaps(const char* devName, size_t len) {
   return trailer.magic == NCCL_IB_CONNECT_CAPS_MAGIC ? trailer.caps : 0;
 }
 
+// A multi-segment registration is only usable if the peer can parse the
+// per-segment CTS side table. Single-segment buffers keep the legacy wire
+// format, so they are accepted whatever the peer advertised.
+static inline bool ncclIbDeclineMultiSegRegistration(uint32_t peerCaps, int nSegments) {
+  return nSegments > 1 && (peerCaps & NCCL_IB_CAP_MULTISEG) == 0;
+}
+
 // Return the index of the segment that fully contains [addr, addr+len), or -1
 // if addr is outside every segment or the range straddles a segment boundary
 // (which the classic single-rkey wire protocol cannot express).
@@ -75,6 +82,17 @@ static inline int ncclIbSegmentIndexForRange(int nSegments, const uintptr_t* seg
   return -1;
 }
 
+// MR index for a 0-byte RDMA_WRITE at addr. Inclusive start; the exclusive end
+// of the last segment still uses that last MR.
+static inline int ncclIbSegmentIndexForZeroLength(int nSegments, const uintptr_t* segStart, const size_t* segLen,
+                                                  uintptr_t addr) {
+  int s = ncclIbSegmentIndexForRange(nSegments, segStart, segLen, addr, 0);
+  if (s >= 0) return s;
+  if (nSegments < 1 || segStart == NULL || segLen == NULL) return -1;
+  uintptr_t end = segStart[nSegments - 1] + segLen[nSegments - 1];
+  return addr == end ? nSegments - 1 : -1;
+}
+
 // True iff the segment layout is "uniform": every interior segment has the same
 // size as segment 0, and the trailing segment is no larger. This keeps every
 // segment boundary at a multiple of the segment size, so step-aligned transfers
@@ -82,9 +100,29 @@ static inline int ncclIbSegmentIndexForRange(int nSegments, const uintptr_t* seg
 // non-uniform layouts and falls back to staging buffers.
 static inline bool ncclIbSegmentsUniform(int nSegments, const size_t* segLen) {
   if (nSegments <= 1) return true;
-  for (int s = 1; s < nSegments; s++) {
-    bool last = (s == nSegments - 1);
-    if ((!last && segLen[s] != segLen[0]) || (last && segLen[s] > segLen[0])) return false;
+  // Stride is the largest segment. Interior segments must equal it; the first
+  // and last may be shorter when registration clips a physical allocation.
+  size_t stride = 0;
+  for (int s = 0; s < nSegments; s++) {
+    if (segLen[s] > stride) stride = segLen[s];
+  }
+  if (stride == 0) return false;
+  for (int s = 1; s < nSegments - 1; s++) {
+    if (segLen[s] != stride) return false;
+  }
+  return segLen[0] <= stride && segLen[nSegments - 1] <= stride;
+}
+
+// Peer CTS side table is usable iff nSegments is in [1, maxSegments], remDevIdx
+// is in range, segStart is strictly increasing, and every rkey is nonzero.
+static inline bool ncclIbCtsRemoteLayoutValid(uint32_t nSegments, int remDevIdx, int maxDevs, int maxSegments,
+                                              const uint64_t* segStart, const uint32_t* rkeys) {
+  if (nSegments < 1 || nSegments > (uint32_t)maxSegments) return false;
+  if (remDevIdx < 0 || remDevIdx >= maxDevs) return false;
+  if (segStart == NULL || rkeys == NULL) return false;
+  for (uint32_t s = 0; s < nSegments; s++) {
+    if (s > 0 && segStart[s] <= segStart[s - 1]) return false;
+    if (rkeys[s] == 0) return false;
   }
   return true;
 }
@@ -133,8 +171,8 @@ struct ncclIbSegSlice {
   uint64_t localAddr;   // sender VA for this slice
   uint64_t remoteAddr;  // receiver VA for this slice
   uint32_t len;         // slice byte count
-  int localSeg;    // sender segment index
-  int remoteSeg;   // receiver segment index
+  int localSeg;         // sender segment index
+  int remoteSeg;        // receiver segment index
 };
 
 // Return the segment index whose [segOff[s], segOff[s+1]) contains `off`, or -1.
@@ -191,6 +229,11 @@ static inline int ncclIbSplitTransfer(int nLocal, const uint64_t* localSegVA, co
                                       uint64_t len, struct ncclIbSegSlice* out, int maxSlices) {
   return ncclIbSplitTransferAtOffsets(nLocal, localSegVA, localSegOff, nRemote, remoteSegVA, remoteSegOff, off, off,
                                       len, out, maxSlices);
+}
+
+// Host VMM can report base 0; subtracting then wraps the remaining length.
+static inline size_t ncclIbBytesRemainingInSegment(uintptr_t segPtr, uintptr_t segBase, size_t segSize) {
+  return (segBase == 0) ? segSize : segSize - (segPtr - segBase);
 }
 
 #endif // NCCL_NET_IB_MULTISEG_H_

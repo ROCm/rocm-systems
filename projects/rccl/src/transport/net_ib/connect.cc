@@ -13,8 +13,9 @@
 
 #include <mutex>
 
-static_assert(NCCL_RMA_SEND_QP_WRS == 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS,
-              "NCCL_RMA_SEND_QP_WRS must match the multi-segment sender depth");
+static_assert(NCCL_RMA_SEND_QP_WRS == NCCL_IB_MAX_SEND_WRS, "rma_multiseg.h restates NCCL_IB_MAX_SEND_WRS");
+static_assert(NCCL_IB_MAX_SEND_WRS >= 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS,
+              "multi-segment sender QP must also fit GIN iput signal WRs");
 // RCCL: credits wait until a chain fits, so one RMA flush chain must fit the flush QP.
 static_assert(NCCL_RMA_MAX_FLUSH_WRS <= NET_IB_MAX_REQUESTS,
               "one RMA flush chain must fit the flush QP");
@@ -735,8 +736,8 @@ static ncclResult_t ncclIbSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
-  // RCCL: extra signal WRs only while multi-segment RMA is on. =0 keeps develop's depth.
-  qpCreateAttrs.maxSendWorkRequest = rcclRmaMultiSegEnabled() ? NCCL_RMA_SEND_QP_WRS : 2 * NET_IB_MAX_REQUESTS;
+  // RCCL: segmented multi-recv chain plus the 2*MAX request budget. =0 keeps develop's depth.
+  qpCreateAttrs.maxSendWorkRequest = rcclRmaMultiSegEnabled() ? NCCL_IB_MAX_SEND_WRS : 2 * NET_IB_MAX_REQUESTS;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
     // For example, if there are 2 devices and 4 QPs, the QPs will be created
@@ -1256,13 +1257,12 @@ static ncclResult_t ncclIbReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = NET_IB_MAX_REQUESTS;
-  // CTS messages are posted using send work requests.
-  // Note that because only specific CTS messages are signaled, the send queue
-  // size needs to be double the number of max requests.
-  // When resiliency is enabled, the number of send work requests is same as the
-  // number of max requests because every CTS message is signaled.
+  // CTS messages are posted using send work requests. Multi-segment CTS posts
+  // an unsignaled side-table WR before the CTS WR (two WRs per slot). Because
+  // only specific CTS WRs are signaled, the send queue needs 2x max requests
+  // times two WRs. Resiliency signals every CTS WR, so 1x times two WRs.
   // +1 reserves space for one in-flight speed update RDMA write on qps[0].
-  qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS * (rComm->base.resiliency ? 1 : 2) +
+  qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS * (rComm->base.resiliency ? 1 : 2) * 2 +
                                      ((ncclParamIbEventBasedLb() && ncclParamIbEventBasedLbRemote()) ? 1 : 0);
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
@@ -1412,10 +1412,10 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     qpCreateAttrs.cq = rCommDev->base.cq;
     qpCreateAttrs.pd = rCommDev->base.pd;
     qpCreateAttrs.maxRecvWorkRequest = 0;
-    // RCCL: extra flush WRs only while multi-segment RMA is on. Off keeps the scratchpad depth.
+    // RCCL: classic iflush posts one RDMA read per recv per segment. Off keeps the scratchpad depth.
     qpCreateAttrs.maxSendWorkRequest = rcclRmaMultiSegEnabled()
-      ? 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_FLUSH_WRS
-      : 2 * NET_IB_MAX_REQUESTS;
+                                         ? 2 * NET_IB_MAX_REQUESTS + NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS
+                                         : 2 * NET_IB_MAX_REQUESTS;
     qpCreateAttrs.qpContext = &comm->base.stats;
     NCCLCHECK(ncclIbQpCreate(flushQp, &qpCreateAttrs));
     // Loopback flush QP: local and remote device indices are this recv device.
