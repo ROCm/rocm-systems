@@ -159,8 +159,9 @@ rocprof-compute analyze --path ./workloads/<workload_name>/<gpu_model> -k 0 -b s
 rocprof-compute analyze --path ./workloads/<workload_name>/<gpu_model> -k 0 -b memchart
 
 # Roofline table. Do not open the HTML chart; these rows are the same data.
-# Compare AI (FLOPs/Byte) with peak FLOPs / peak bandwidth:
-# lower AI is memory-bound, higher AI is compute-bound.
+# Compare AI (FLOPs/Byte) with the empirical peak FLOPs and bandwidth
+# printed in the table. Do not calculate a peak.
+# Lower AI is memory-bound, higher AI is compute-bound.
 rocprof-compute analyze \
     --path ./workloads/<workload_name>/<gpu_model> \
     -k 0 \

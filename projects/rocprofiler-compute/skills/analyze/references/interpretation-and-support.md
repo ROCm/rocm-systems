@@ -24,8 +24,16 @@ through rocpd, which is the current profile backend.
 ## Metric interpretation
 
 Thresholds below are triage heuristics, not universal pass/fail criteria.
-Compare against the device peak, workload intent, neighboring kernels, and a
-known-good baseline.
+Compare each metric with the peak the report already prints: the theoretical
+peak on System Speed-of-Light, or the empirical peak on the roofline table.
+Do not calculate a peak. Also compare workload intent, neighboring kernels,
+and a known-good baseline.
+
+These heuristics are separate from memory-bandwidth analysis. That feature's
+cutoffs and guidance text live in
+`src/membw_analysis/tree_spec/gfx950_membw_tree_spec.yaml` and
+`src/membw_analysis/tree_spec/gfx950_membw_guidance.yaml`. Read those files
+when interpreting that analysis instead of copying the numbers below.
 
 ### Roofline
 

@@ -42,6 +42,9 @@ rocprofv3-avail info --pc-sampling
 - The user must have access to the GPU device nodes and performance counters.
 - PyTorch tracing requires PyTorch 2.13 or 2.14 installed with ROCm from the
   same TheRock package index.
+- When a local install hits dependency mismatches, use the Docker setup in
+  `docker/`. The README Testing section documents the TheRock tarball compose
+  flow. That image is the current way to get a consistent environment.
 
 ## Detailed collection options
 
