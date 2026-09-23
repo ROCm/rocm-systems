@@ -1249,7 +1249,10 @@ TEST(Gfx1250SimulationTest, RejectsUnsupportedClusterSize) {
                            /*cluster_size_x=*/amdgpu::kClusterMulticastMaskBits + 1,
                            /*workgroup_size_x=*/32);
 
-  EXPECT_THROW((void)sim.engine->step(), std::runtime_error);
+  EXPECT_NO_THROW((void)sim.engine->step());
+  EXPECT_TRUE(sim.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_EQ(sim.memory->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+  EXPECT_EQ(sim.cp()->dispatched_count(), 0u);
 }
 
 TEST(Gfx1250SimulationTest, RejectsMisalignedClusteredWorkgroupIdOffset) {
@@ -1263,7 +1266,10 @@ TEST(Gfx1250SimulationTest, RejectsMisalignedClusteredWorkgroupIdOffset) {
   queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
                            /*workgroup_size_x=*/32);
 
-  EXPECT_THROW((void)sim.engine->step(), std::runtime_error);
+  EXPECT_NO_THROW((void)sim.engine->step());
+  EXPECT_TRUE(sim.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_EQ(sim.memory->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+  EXPECT_EQ(sim.cp()->dispatched_count(), 0u);
 }
 
 TEST(Gfx1250SimulationTest, RejectsIncompleteClusterGrid) {
@@ -1276,7 +1282,10 @@ TEST(Gfx1250SimulationTest, RejectsIncompleteClusterGrid) {
   queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
                            /*workgroup_size_x=*/0);
 
-  EXPECT_THROW((void)sim.engine->step(), std::runtime_error);
+  EXPECT_NO_THROW((void)sim.engine->step());
+  EXPECT_TRUE(sim.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_EQ(sim.memory->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+  EXPECT_EQ(sim.cp()->dispatched_count(), 0u);
 }
 
 TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsDoesNotWriteMaskExcludedParticipant) {

@@ -17,13 +17,21 @@ set(RJ_PCI_SOURCES
     bar_access_trace.cpp
     scratch_pci_device.cpp
     gpu_pci_device_spec.cpp
+    graphics_block_model.cpp
+    register_aperture.cpp
+    ip_block_model.cpp
+    interrupt_block_model.cpp
+    mes_block_model.cpp
+    memory_hub_block_model.cpp
+    physical_memory_access.cpp
+    sdma_block_model.cpp
 )
 
 # The GPU model shares its video memory with a guest through a file descriptor,
 # which is a POSIX shared-memory facility with no portable equivalent, so it
 # builds only where a transport could use it. Everything else here is portable.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    list(APPEND RJ_PCI_SOURCES gpu_pci_device.cpp)
+    list(APPEND RJ_PCI_SOURCES gpu_pci_device.cpp vram_store.cpp)
 endif()
 
 rj_add_object_library(rocjitsu_pci ${RJ_PCI_SOURCES})

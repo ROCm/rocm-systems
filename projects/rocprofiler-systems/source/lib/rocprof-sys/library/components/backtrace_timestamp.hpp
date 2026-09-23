@@ -14,9 +14,7 @@
 #include <chrono>
 #include <cstdint>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 struct backtrace_timestamp : comp::empty_base
 {
@@ -48,5 +46,4 @@ private:
     std::int64_t  m_tid  = 0;
     std::uint64_t m_real = 0;
 };
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component

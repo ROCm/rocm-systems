@@ -14,6 +14,7 @@
 
 ASSERT_HOOK_MATCHES_PROD(g_devrFindWindow, ncclDevrFindWindow);
 ASSERT_HOOK_MATCHES_PROD(g_devrWindowHasSysmemSegment, ncclDevrWindowHasSysmemSegment);
+ASSERT_HOOK_MATCHES_PROD(g_devrInitOnce, ncclDevrInitOnce);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 static ncclResult_t DefaultDevrFindWindow(struct ncclComm*, void const*, struct ncclDevrWindow** window) {
@@ -37,9 +38,14 @@ bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* window) {
   return g_devrWindowHasSysmemSegment(window);
 }
 
+static ncclResult_t DefaultDevrInitOnce(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_devrInitOnce = DefaultDevrInitOnce;
+ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) { return g_devrInitOnce(comm); }
+
 void ResetDevRuntimeFakes() {
   g_devrFindWindow = DefaultDevrFindWindow;
   g_devrWindowIsMultiSegment = false;
   g_devrWindowHasSysmemSegmentValue = false;
   g_devrWindowHasSysmemSegment = DefaultDevrWindowHasSysmemSegment;
+  g_devrInitOnce = DefaultDevrInitOnce;
 }

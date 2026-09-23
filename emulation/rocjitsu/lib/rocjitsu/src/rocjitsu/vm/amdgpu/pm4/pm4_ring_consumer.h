@@ -35,6 +35,11 @@ struct Pm4RingResult {
   uint64_t register_dword = 0;
 };
 
+/// @brief Convert a native ring-relative producer cursor into its monotonic epoch.
+[[nodiscard]] std::optional<uint64_t> normalize_pm4_producer_cursor(uint64_t producer_cursor,
+                                                                    uint64_t reference_cursor,
+                                                                    uint64_t ring_dwords) noexcept;
+
 /// @brief Owns one PM4 ring transaction, including cursor retirement and publication.
 class Pm4RingConsumer {
 public:

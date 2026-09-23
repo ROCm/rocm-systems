@@ -10,9 +10,7 @@
 #include <cstdint>
 #include <string>
 
-namespace rocprofsys
-{
-namespace utility
+namespace rocprofsys::utility
 {
 namespace
 {
@@ -131,5 +129,4 @@ parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(std::string,
                                                                     const std::string&,
                                                                     long);
 
-}  // namespace utility
-}  // namespace rocprofsys
+}  // namespace rocprofsys::utility
