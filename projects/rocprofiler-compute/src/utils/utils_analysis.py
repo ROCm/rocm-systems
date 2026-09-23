@@ -1321,6 +1321,31 @@ def _kernel_names_as_set(names: object) -> frozenset[str]:
     return frozenset(str(name) for name in names)
 
 
+def _record_kernel_name_mismatch_across_passes(
+    group: pd.DataFrame,
+    stitch_key: object,
+    ordinal: object,
+    present_ids: list[object],
+    errors: Optional[list[MlApiTraceError]],
+) -> None:
+    """Record PassMarkerMismatchError when Kernel_Names disagree across passes."""
+    kernel_name_sets = [
+        _kernel_names_as_set(
+            group[group["_pass_id"] == pass_id].iloc[0]["Kernel_Names"]
+        )
+        for pass_id in present_ids
+    ]
+    if len(set(kernel_name_sets)) != 1:
+        _record_ml_api_trace_error(
+            errors,
+            PassMarkerMismatchError(
+                stitch_key=str(stitch_key),
+                function_ordinal=int(ordinal),
+                disagreeing_values=f"Kernel_Names {list(kernel_name_sets)}",
+            ),
+        )
+
+
 def _collapse_matching_markers_across_passes(
     pass_frames: list[pd.DataFrame],
     errors: Optional[list[MlApiTraceError]] = None,
@@ -1368,23 +1393,9 @@ def _collapse_matching_markers_across_passes(
                 )
             present_ids = sorted(present_passes)
             if len(present_ids) > 1:
-                kernel_name_sets = [
-                    _kernel_names_as_set(
-                        group[group["_pass_id"] == pass_id].iloc[0]["Kernel_Names"]
-                    )
-                    for pass_id in present_ids
-                ]
-                if len(set(kernel_name_sets)) != 1:
-                    _record_ml_api_trace_error(
-                        errors,
-                        PassMarkerMismatchError(
-                            stitch_key=str(stitch_key),
-                            function_ordinal=int(ordinal),
-                            disagreeing_values=(
-                                f"Kernel_Names {list(kernel_name_sets)}"
-                            ),
-                        ),
-                    )
+                _record_kernel_name_mismatch_across_passes(
+                    group, stitch_key, ordinal, present_ids, errors
+                )
             pass0 = group[group["_pass_id"] == 0]
             first = pass0.iloc[0] if not pass0.empty else group.iloc[0]
             records.append({

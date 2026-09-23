@@ -983,70 +983,12 @@ Output
 When Torch operator mapping is enabled, profiling writes additional CSV files in
 the workload directory: **marker_api_trace** and **counter_collection** files with
 the ``ml_api_trace`` prefix. These correlate PyTorch operators
-with GPU kernels and performance counters. When you run analyze (e.g. with
-``--list-torch-operators`` or ``--torch-operator``), a consolidated CSV is written
-to ``ml_api_trace/consolidated.csv``; the source marker and counter files are
-**retained** in the workload directory and are not deleted.
+with GPU kernels and performance counters. The source marker and counter files
+are **retained** in the workload directory.
 
-``ml_api_trace/`` directory
-The ``ml_api_trace/`` directory contains ``consolidated.csv`` with all
-operator/kernel data. The columns include:
-
-   * ``Operator_Name``: Full operator hierarchy (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``, ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
-   * ``Context_Id``: Call context (e.g., ``1@__init__.py:231``)
-   * ``Counter_Name`` / ``Counter_Value``: Performance counter values
-   * ``Start_Timestamp_function`` / ``End_Timestamp_function``: Operator timing
-   * ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel``: Kernel timing
-
-The consolidated CSV is generated automatically on the first analysis run that
-requires it (``--list-torch-operators`` or ``--torch-operator``) and is reused on
-subsequent runs.
-
-Sample rows from ``ml_api_trace/consolidated.csv`` (from profiling an mnist model).
-
-.. list-table::
-   :header-rows: 1
-   :widths: 16 14 42 22 12 14 14 14 14
-
-   * - Operator_Name
-     - Context_Id
-     - Kernel_Name
-     - Counter_Name
-     - Counter_Value
-     - Start_Timestamp_function
-     - End_Timestamp_function
-     - Start_Timestamp_kernel
-     - End_Timestamp_kernel
-
-   * - torch.ones_like
-     - 1@__init__.py:231
-     - ``void at::native::vectorized_elementwise_kernel<...>(...)``
-     - CPC_CPC_STAT_BUSY
-     - 23004
-     - 6789210204040073
-     - 6789210223815845
-     - 6789210223810274
-     - 6789210223811914
-
-   * - torch.ones_like
-     - 1@__init__.py:231
-     - ``void at::native::vectorized_elementwise_kernel<...>(...)``
-     - CPC_CPC_STAT_IDLE
-     - 0
-     - 6789210204040073
-     - 6789210223815845
-     - 6789210223810274
-     - 6789210223811914
-
-   * - torch.ones_like
-     - 1@__init__.py:231
-     - ``void at::native::vectorized_elementwise_kernel<...>(...)``
-     - CPC_CPC_STAT_STALL
-     - 6715
-     - 6789281060081123
-     - 6789281079930585
-     - 6789281079932564
-     - 6789281079934204
+Analyze reads those files and prints an operator call tree and a per-operator
+summary (for example with ``--list-torch-operators`` or ``--torch-operator``).
+It does not write ``ml_api_trace/consolidated.csv``.
 
 Performance counter data file
 -----------------------------
@@ -1102,8 +1044,7 @@ operator occurs in your PyTorch application:
    nn.Module.MyModel.forward/nn.Module.Linear.forward
    torch.nn.functional.relu
 
-The ``Operator_Name`` column in ``ml_api_trace/consolidated.csv`` contains
-the full operator hierarchy.
+The analyze call tree shows the full operator hierarchy on each node.
 
 This hierarchical information enables:
 
@@ -1123,7 +1064,7 @@ Example with hierarchical naming:
 
        def forward(self, x):
            x = self.encoder(x)  # Captured as nn.Module.MyModel.forward/nn.Module.Linear.forward
-           x = self.decoder(x)  # Same hierarchy; both appear in consolidated.csv under Operator_Name
+           x = self.decoder(x)  # Same hierarchy; both appear as Linear.forward nodes in the call tree
            return x
 
 **Analyzing captured operators**: After profiling, use the analyze CLI (see
@@ -1191,9 +1132,9 @@ frameworks in a single run:
 
    $ rocprof-compute profile --experimental --torch-trace --triton-trace --name compiled_model -- python train.py
 
-Each captured marker records its originating framework in the ``Backend`` column
-of ``ml_api_trace/consolidated.csv``, so each framework can be analyzed
-independently. To enable all supported backends at once, use
+Each captured marker records its originating framework, so
+``--list-torch-operators`` and ``--list-triton-operators`` can show each
+framework independently. To enable all supported backends at once, use
 :ref:`--ml-api-trace <ml-api-trace>`.
 
 To analyze the captured Triton kernels, use the ``--list-triton-operators`` and
@@ -1217,7 +1158,7 @@ single option.
    $ rocprof-compute profile --experimental --ml-api-trace --name model -- python train.py
 
 The output is identical to enabling each framework's trace flag individually.
-Captured kernels are attributed in the ``Backend`` column and analyzed with the
+Captured markers are attributed to a framework backend and analyzed with the
 corresponding per-framework operator options (see :doc:`../analyze/cli`).
 
 .. _profile-vllm-workloads:
