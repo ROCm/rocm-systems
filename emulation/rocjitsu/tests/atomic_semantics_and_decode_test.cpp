@@ -854,35 +854,54 @@ TEST_P(AtomicPolicyExecutionTest, Rdna4StackPairsParentTransitionsAndPrimitiveRa
   };
   // Use a nonzero allocation to catch accidental sharing between workgroups.
   wave_->set_lds_base(4096);
-  for (const auto &c : cases) {
-    SCOPED_TRACE(testing::Message() << "flags=" << c.flags << " last=" << std::hex << c.last);
-    compute_unit_->write_vgpr(base_, 0, c.last);
-    compute_unit_->write_vgpr(base_ + 16, 0, 0);
-    compute_unit_->write_vgpr(base_ + 13, 0, 0xdeadbeef);
-    for (uint32_t i = 0; i < 8; ++i)
-      compute_unit_->write_vgpr(base_ + 4 + i, 0,
-                                i == 0   ? c.first
-                                : i == 6 ? c.seventh
-                                : i == 7 ? c.eighth
-                                         : 0x1004 + i * 0x100);
-    wave_->lds().write32(0, 0xfacefeed);
-    const auto words = rdna4::build_vds(c.pop == 2 ? rdna4::kDsBvhStackPush8Pop2RtnB64Vds
-                                                   : rdna4::kDsBvhStackPush8Pop1RtnB32Vds,
-                                        {.offset0 = static_cast<uint8_t>(c.size),
-                                         .offset1 = static_cast<uint8_t>(c.flags),
-                                         .addr = 16,
-                                         .data0 = 0,
-                                         .data1 = 4,
-                                         .vdst = 12});
-    std::unique_ptr<Instruction> inst(decode_valid(*decoder_, words.data()));
-    ASSERT_NE(inst, nullptr);
-    ASSERT_TRUE(compute_unit_->execute_instruction(inst.get(), *wave_).succeeded());
-    amdgpu::LocalMemPipeline pipeline;
-    pipeline.issue(inst.release(), *wave_);
-    EXPECT_EQ(compute_unit_->read_vgpr(base_ + 16, 0), c.ptr);
-    EXPECT_EQ(compute_unit_->read_vgpr(base_ + 12, 0), c.result0);
-    EXPECT_EQ(compute_unit_->read_vgpr(base_ + 13, 0), c.result1);
-    EXPECT_EQ(wave_->lds().read32(0), 0xfacefeed);
+  const uint32_t high = wave_->wf_size() - 1;
+  wave_->set_exec(1 | (uint64_t{1} << high));
+  const uint32_t last_vgpr = wave_->vgpr_alloc().count - 1;
+  ASSERT_LE(last_vgpr, 255u);
+  for (uint32_t addr : {16u, last_vgpr}) {
+    for (const auto &c : cases) {
+      SCOPED_TRACE(testing::Message() << "addr=" << addr << " pop=" << c.pop << " flags=" << c.flags
+                                      << " last=" << std::hex << c.last);
+      for (uint32_t lane : {0u, 1u, high}) {
+        compute_unit_->write_vgpr(base_, lane, c.last);
+        compute_unit_->write_vgpr(base_ + addr, lane, lane << 15);
+        compute_unit_->write_vgpr(base_ + 12, lane, 0xdeadbeef);
+        compute_unit_->write_vgpr(base_ + 13, lane, 0xdeadbeef);
+        if (addr != last_vgpr)
+          compute_unit_->write_vgpr(base_ + addr + 1, lane, 0xfacefeed);
+        for (uint32_t i = 0; i < 8; ++i)
+          compute_unit_->write_vgpr(base_ + 4 + i, lane,
+                                    i == 0   ? c.first
+                                    : i == 6 ? c.seventh
+                                    : i == 7 ? c.eighth
+                                             : 0x1004 + i * 0x100);
+      }
+      wave_->lds().write32(0, 0xfacefeed);
+      const auto words = rdna4::build_vds(c.pop == 2 ? rdna4::kDsBvhStackPush8Pop2RtnB64Vds
+                                                     : rdna4::kDsBvhStackPush8Pop1RtnB32Vds,
+                                          {.offset0 = static_cast<uint8_t>(c.size),
+                                           .offset1 = static_cast<uint8_t>(c.flags),
+                                           .addr = static_cast<uint8_t>(addr),
+                                           .data0 = 0,
+                                           .data1 = 4,
+                                           .vdst = 12});
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder_, words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_TRUE(compute_unit_->execute_instruction(inst.get(), *wave_).succeeded());
+      amdgpu::LocalMemPipeline pipeline;
+      pipeline.issue(inst.release(), *wave_);
+      for (uint32_t lane : {0u, 1u, high}) {
+        SCOPED_TRACE(testing::Message() << "lane=" << lane);
+        const bool active = lane != 1;
+        EXPECT_EQ(compute_unit_->read_vgpr(base_ + addr, lane),
+                  (lane << 15) | (active ? c.ptr : 0));
+        EXPECT_EQ(compute_unit_->read_vgpr(base_ + 12, lane), active ? c.result0 : 0xdeadbeef);
+        EXPECT_EQ(compute_unit_->read_vgpr(base_ + 13, lane), active ? c.result1 : 0xdeadbeef);
+        if (addr != last_vgpr)
+          EXPECT_EQ(compute_unit_->read_vgpr(base_ + addr + 1, lane), 0xfacefeed);
+      }
+      EXPECT_EQ(wave_->lds().read32(0), 0xfacefeed);
+    }
   }
 }
 

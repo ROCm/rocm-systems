@@ -65,20 +65,21 @@ MemoryOrderClass memory_order_for(const Instruction &inst) {
 std::optional<std::vector<uint32_t>>
 validated_load_destinations(const amdgpu::VectorMemState &state, const amdgpu::Wavefront &wave) {
   const uint32_t vgpr_count = state.destination_vgpr_count();
+  const uint32_t ds2_vgpr_count = state.ds2_active ? state.ds2_destination_vgpr_count() : 0;
   const amdgpu::RegisterAccess registers_for(wave);
   std::vector<uint32_t> registers;
-  registers.reserve(vgpr_count * (state.ds2_active ? 2u : 1u));
-  auto append_range = [&](uint32_t physical_base) {
-    if (!registers_for.owns_vgpr_range(physical_base, vgpr_count))
+  registers.reserve(vgpr_count + ds2_vgpr_count);
+  auto append_range = [&](uint32_t physical_base, uint32_t count) {
+    if (!registers_for.owns_vgpr_range(physical_base, count))
       return false;
     const uint32_t logical_base = physical_base - wave.vgpr_alloc().base;
-    for (uint32_t i = 0; i < vgpr_count; ++i)
+    for (uint32_t i = 0; i < count; ++i)
       registers.push_back(logical_base + i);
     return true;
   };
 
-  if (!append_range(state.dst_reg_base) ||
-      (state.ds2_active && !append_range(state.ds2_dst_reg_base)))
+  if (!append_range(state.dst_reg_base, vgpr_count) ||
+      (state.ds2_active && !append_range(state.ds2_dst_reg_base, ds2_vgpr_count)))
     return std::nullopt;
   return registers;
 }

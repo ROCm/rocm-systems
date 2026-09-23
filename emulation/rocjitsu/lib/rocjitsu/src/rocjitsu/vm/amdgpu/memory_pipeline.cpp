@@ -1204,7 +1204,7 @@ MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wave
     const uint32_t vgpr_count = d.destination_vgpr_count();
     auto &cu = wf.raw_cu();
     if (!cu.owns_vgpr_range(wf, d.dst_reg_base, vgpr_count) ||
-        !cu.owns_vgpr_range(wf, d.ds2_dst_reg_base, vgpr_count))
+        !cu.owns_vgpr_range(wf, d.ds2_dst_reg_base, d.ds2_destination_vgpr_count()))
       return MemoryAccessCompletion::Complete;
   }
   if (d.transpose != 0)
@@ -1214,7 +1214,7 @@ MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wave
   // DS dual-access: write the second load or returning-atomic result.
   if (d.ds2_active && d.is_load) {
     auto &cu = wf.raw_cu();
-    uint32_t vgpr_count = d.destination_vgpr_count();
+    const uint32_t vgpr_count = d.ds2_destination_vgpr_count();
     for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
       if (!(d.lane_mask & (1ULL << lane)))
         continue;

@@ -263,15 +263,20 @@ public:
   std::vector<uint8_t> ds2_response_data;
   TranslatedMemoryProgress translated;
 
-  /// Number of consecutive VGPRs written by one load-result range.
-  /// DS dual-access instructions have two such ranges, starting at
-  /// dst_reg_base and ds2_dst_reg_base respectively.
+  /// Number of consecutive VGPRs written starting at dst_reg_base.
   [[nodiscard]] uint32_t destination_vgpr_count() const {
     if (buffer_components)
       return buffer_d16 ? (buffer_components + 1) / 2 : buffer_components;
     const uint32_t result_bytes = atomic_op == AtomicOp::NONE ? num_elems * elem_size : elem_size;
     constexpr uint32_t kBytesPerVgpr = sizeof(uint32_t);
     return std::max(1u, (result_bytes + kBytesPerVgpr - 1u) / kBytesPerVgpr);
+  }
+
+  /// Number of consecutive VGPRs written starting at ds2_dst_reg_base.
+  /// LDS stack instructions return one pointer DWORD independently of the
+  /// popped-node count. Ordinary DS dual-access results have equal widths.
+  [[nodiscard]] uint32_t ds2_destination_vgpr_count() const {
+    return lds_stack_inputs ? 1u : destination_vgpr_count();
   }
 };
 
