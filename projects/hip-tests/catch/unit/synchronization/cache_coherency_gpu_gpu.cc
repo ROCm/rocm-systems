@@ -15,12 +15,12 @@ __device__ int gpu_spin_loop_or_abort_on_negative_one(unsigned int* address, uns
   unsigned int compare;
   bool check = false;
   do {
-    compare = atomicCAS_system(address, /*compare=*/value, /*val=*/value);
-    check = (compare == value);
+    compare = value;
+    check = __scoped_atomic_compare_exchange_n(address, /*expected=*/&compare, /*desired=*/value,
+                                               /*weak=*/0, __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE,
+                                               /*scope=*/__MEMORY_SCOPE_SYSTEM);
     if (compare == -1) return -1;
   } while (!check);
-  // atomicCAS_system is relaxed, so acquire the writes ordered before the flag.
-  __threadfence_system();
   return 0;
 }
 
@@ -32,8 +32,7 @@ __global__ void gpu_cache0(int* A, int* B, int* X, int* Y, size_t N, unsigned in
     // Store data into A, system fence, and atomically mark flag.
     // This guarantees this global write is visible by device 1.
     A[i] = X[i];
-    __threadfence_system();
-    atomicAdd_system(AA1, 1u);
+    __scoped_atomic_fetch_add(AA1, 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
     // Wait on device 1's global write to B.
     if (gpu_spin_loop_or_abort_on_negative_one(BA1, i + 1) == -1) {
       *cache0_result = -1;
@@ -45,13 +44,11 @@ __global__ void gpu_cache0(int* A, int* B, int* X, int* Y, size_t N, unsigned in
     if (!stored_data_matches) {
       // If the data does not match, alert other thread and abort.
       printf("FAIL: at i=%zu, B[i]=%d, which does not match Y[i]=%d.\n", i, B[i], Y[i]);
-      __threadfence_system();
-      atomicExch_system(AA2, -1);
+      __scoped_atomic_exchange_n(AA2, -1, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
       *cache0_result = -1;
     }
     // Otherwise tell the other thread to continue.
-    __threadfence_system();
-    atomicAdd_system(AA2, 1u);
+    __scoped_atomic_fetch_add(AA2, 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
     // Wait on kernel gpu_cache1 to finish checking X is stored in A.
     if (gpu_spin_loop_or_abort_on_negative_one(BA2, i + 1) == -1) {
       *cache0_result = -1;
@@ -67,8 +64,7 @@ __global__ void gpu_cache1(int* A, int* B, int* X, int* Y, size_t N, unsigned in
                            unsigned int* cache1_result) {
   for (size_t i = 0; i < N; i++) {
     B[i] = Y[i];
-    __threadfence_system();
-    atomicAdd_system(BA1, 1u);
+    __scoped_atomic_fetch_add(BA1, 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
     if (gpu_spin_loop_or_abort_on_negative_one(AA1, i + 1) == -1) {
       *cache1_result = -1;
       break;
@@ -77,12 +73,10 @@ __global__ void gpu_cache1(int* A, int* B, int* X, int* Y, size_t N, unsigned in
     bool stored_data_matches = (A[i] == X[i]);
     if (!stored_data_matches) {
       printf("FAIL: at i=%zu, A[i]=%d, which does not match X[i]=%d.\n", i, A[i], X[i]);
-      __threadfence_system();
-      atomicExch_system(BA2, -1);
+      __scoped_atomic_exchange_n(BA2, -1, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
       *cache1_result = -1;
     }
-    __threadfence_system();
-    atomicAdd_system(BA2, 1u);
+    __scoped_atomic_fetch_add(BA2, 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
     if (gpu_spin_loop_or_abort_on_negative_one(AA2, i + 1) == -1) {
       *cache1_result = -1;
       break;
