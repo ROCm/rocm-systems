@@ -157,7 +157,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       }
     } else {
       uint32_t rxReqIdx = (uint32_t)ctsFifoRxReqIndex(slots, 0);
-      immData = (rxReqIdx << WR_IMM_RX_REQ_IDX_SHIFT);
+      immData = (rxReqIdx << WR_IMM_RX_REQ_IDX_BIT_POS) & WR_IMM_RX_REQ_IDX_MASK;
       if (nqps > 1) {
         immData |= WR_IMM_SPLIT_DATA_FLAG;
       }
@@ -865,7 +865,7 @@ static inline ncclResult_t IbCastRequestRetrieveFromCompletion(struct ncclIbNetC
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)base;
     uint32_t immDataHost = be32toh(wc->imm_data);
     if (IbCastQpSharingEnabled()) {
-      uint8_t reqSlot = immDataHost & WR_IMM_BYID_REQ_ID_MASK;
+      uint8_t reqSlot = (immDataHost & WR_IMM_BYID_REQ_ID_MASK) >> WR_IMM_BYID_REQ_ID_BIT_POS;
       *req = recvComm->recvReqs[reqSlot % NET_IB_MAX_REQUESTS];
     } else {
       *req = recvComm->recvReqs[immDataHost % NET_IB_MAX_REQUESTS];
@@ -873,7 +873,7 @@ static inline ncclResult_t IbCastRequestRetrieveFromCompletion(struct ncclIbNetC
   } else if (!base->isSend && wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM && base->recvMatchingScheme == BY_INDEX) {
     // BY_INDEX (non-sharing CAST default): rxReqIndex is echoed in imm_data[31:24].
     uint32_t immDataHost = be32toh(wc->imm_data);
-    uint8_t reqIdx = (immDataHost >> WR_IMM_RX_REQ_IDX_SHIFT) & WR_IMM_RX_REQ_IDX_MASK;
+    uint8_t reqIdx = (immDataHost & WR_IMM_RX_REQ_IDX_MASK) >> WR_IMM_RX_REQ_IDX_BIT_POS;
     *req = &base->reqs[reqIdx];
   } else if (!base->isSend && wc->opcode == IBV_WC_RDMA_READ) { // Flush request completion
     // wr_id[63:48] may carry a commId for completion routing (zero if sharing is
