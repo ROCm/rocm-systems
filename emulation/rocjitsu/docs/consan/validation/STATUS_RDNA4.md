@@ -25,7 +25,7 @@ none of those historical colors count as a pass for this campaign.
 - SDK: `/home/benoit/venv`, ROCm `10.2.0a20260915` development package.
 - Preparation: rebuilding the current hook, integrating per-workload generated
   allowlists, preparing Qwen provenance, and building the production matmul.
-- Fresh clean assessments: **36/42**; no cell has completed fresh fault qualification.
+- Fresh clean assessments: **37/42**; no cell has completed fresh fault qualification.
 - Preparation logs: `/home/benoit/workspace/consan-validation-artifacts/`.
 
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
@@ -50,7 +50,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟥 Sep 23: native oracle passes; strict load rejects relocation of `s_swappc_b64` at `.text+121248`; fix in progress | 🟥 Sep 23: strict load rejects the same indirect-call relocation; fix in progress |
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟥 Sep 23: ConSan rejected a code object before execution; exit 92 | 🟥 Sep 23: ConSan rejected a code object before execution; exit 92 |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟥 Sep 23: ConSan rejected a code object before execution; exit 92 | 🟥 Sep 23: ConSan rejected a code object before execution; exit 92 |
-| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 exact; 4 accesses, 15 atomics, 8 barriers; fault bundle | 🟩 exact; 4/4 accesses; fault bundle |
+| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟥 Sep 23: no applicable code object; analysis incomplete | 🟩 exact; 4/4 accesses; fault bundle |
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 exact; 4 accesses, 15 atomics, 8 barriers; fault bundle | 🟩 exact; 4/4 accesses; fault bundle |
 | Main E2E | P4 | hip-moi Jakub attention (`jakub-attention`) | 🟩 exact; 31 accesses and 8 barriers; fault bundle | 🟩 exact; 31/31 accesses; fault bundle |
 
@@ -125,3 +125,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `d128-pressure` / supercollider: ConSan rejected a code object before execution; exit 92. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/d128-pressure-supercollider`.
 - `wmma-attention` / default: ConSan rejected a code object before execution; exit 92. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/wmma-attention-default`.
 - `wmma-attention` / supercollider: ConSan rejected a code object before execution; exit 92. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/wmma-attention-supercollider`.
+- `streamk-arrival` / default: no applicable code object; analysis incomplete. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/streamk-arrival-default`.
