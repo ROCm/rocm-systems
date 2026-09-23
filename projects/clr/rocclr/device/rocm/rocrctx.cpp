@@ -109,7 +109,6 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_vmem_address_reserve)
   GET_ROCR_SYMBOL(hsa_amd_vmem_address_free)
   GET_ROCR_SYMBOL(hsa_amd_vmem_handle_create)
-  GET_ROCR_SYMBOL(hsa_amd_vmem_get_alloc_properties_from_handle)
   // Optional: absent on an older ROCr, in which case getVmmAllocInfo falls back.
   GET_ROCR_OPTIONAL_SYMBOL_DECLTYPE(hsa_amd_vmem_get_vmem_info)
   GET_ROCR_SYMBOL(hsa_amd_vmem_handle_release)

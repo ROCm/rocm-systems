@@ -122,8 +122,6 @@ struct RocrEntryPoints {
   decltype(hsa_amd_vmem_address_reserve)* hsa_amd_vmem_address_reserve_;
   decltype(hsa_amd_vmem_address_free)* hsa_amd_vmem_address_free_;
   decltype(hsa_amd_vmem_handle_create)* hsa_amd_vmem_handle_create_;
-  decltype(hsa_amd_vmem_get_alloc_properties_from_handle)*
-      hsa_amd_vmem_get_alloc_properties_from_handle_;
   decltype(hsa_amd_vmem_get_vmem_info)* hsa_amd_vmem_get_vmem_info_;
   decltype(hsa_amd_vmem_handle_release)* hsa_amd_vmem_handle_release_;
   decltype(hsa_amd_vmem_map)* hsa_amd_vmem_map_;
@@ -525,11 +523,6 @@ class Hsa : public amd::AllStatic {
   static hsa_status_t vmem_handle_create(hsa_amd_memory_pool_t pool, size_t size,
     hsa_amd_memory_type_t type, uint64_t flags, hsa_amd_vmem_alloc_handle_t* memory_handle) {
     return ROCR_DYN(hsa_amd_vmem_handle_create)(pool, size, type, flags, memory_handle);
-  }
-  static hsa_status_t vmem_get_alloc_properties_from_handle(
-    hsa_amd_vmem_alloc_handle_t memory_handle, hsa_amd_memory_pool_t* pool,
-    hsa_amd_memory_type_t* type) {
-    return ROCR_DYN(hsa_amd_vmem_get_alloc_properties_from_handle)(memory_handle, pool, type);
   }
   // hsa_amd_vmem_get_vmem_info is an enhancement: an older ROCr will not export
   // it, and callers fall back to their legacy behaviour rather than failing.
