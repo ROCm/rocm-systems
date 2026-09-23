@@ -176,14 +176,16 @@ stop_context(const context::context* ctx)
 {
     if(!ctx || !ctx->dispatch_counter_collection) return;
 
-    auto* controller = hsa::get_queue_controller();
+    auto* controller  = hsa::get_queue_controller();
+    bool  was_enabled = false;
 
     ctx->dispatch_counter_collection->enabled.wlock([&](auto& enabled) {
         if(!enabled) return;
-        enabled = false;
+        was_enabled = true;
+        enabled     = false;
     });
 
-    if(controller)
+    if(controller && was_enabled)
     {
         // Drain in-flight dispatches before anything else is torn down. The review of #8891
         // accepted provenance-based completion routing on the condition that the callback thread
@@ -215,22 +217,15 @@ set_dispatch_agents(rocprofiler_context_id_t      context_id,
 {
     if(num_agents > 0 && agents == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
+    auto _lk = std::unique_lock<std::mutex>{context::get_contexts_mutex()};
+    context::wait_for_stopping_contexts(_lk);
+
     auto* ctx_p = context::get_mutable_registered_context(context_id);
     if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
     if(!ctx_p->dispatch_counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
     // The agent set is read without a lock on the dispatch path and is what scopes
-    // serialization at start, so it may only change while the context is stopped. Hold the
-    // contexts mutex so this check and the assignment are atomic with start_context: a
-    // concurrent start could otherwise activate the context after the scan (using the old
-    // set for serialization) and then race with the unordered-set assignment below while
-    // dispatch hooks read it.
-    auto _lk = std::unique_lock<std::mutex>{context::get_contexts_mutex()};
-
-    // A context that is mid-stop is still in the active array while its GPU drain runs, and that
-    // drain happens with the mutex released, so the lock alone does not exclude it. Without this
-    // the scan below would read a context that is on its way out as a running one.
-    context::wait_for_stopping_contexts(_lk);
+    // serialization at start, so it may only change while the context is stopped.
 
     for(const auto* itr : context::get_active_contexts())
     {

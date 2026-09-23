@@ -62,6 +62,10 @@ struct registered_context_storage
 {
     std::vector<std::shared_ptr<context>> owned = {};
     std::vector<const context*>           view  = {};
+    // Positional, unlike `view`: index i is registry slot i, holding nullptr where the slot is
+    // empty. Resolving a context id is an index operation, so it needs the slot numbering that
+    // allocate_context() assigns, which `view` loses by skipping empty slots.
+    std::vector<context*> slots = {};
 };
 
 namespace
@@ -151,6 +155,19 @@ struct registry_state
     stable_context_vec_t registry =
         stable_context_vec_t{reserve_size_t{stable_context_vec_t::chunk_size}};
     published_snapshot_t published = {};
+    // Contexts whose client has deregistered. They are unreachable through the registry and the
+    // snapshot, but they are not destroyed here: get_registered_contexts() and
+    // get_active_contexts() hand out raw pointers that outlive the snapshot they were read from,
+    // and those pointers are spread across every tracing service. Holding the last reference until
+    // static teardown gives them the lifetime they had when the registry stored the contexts
+    // by value, which is the lifetime all of those callers were written against.
+    std::vector<context_ptr_t> retired = {};
+    // Context ids whose stop is in progress. stop_context() releases get_contexts_mutex() across
+    // the GPU drain, so for that window the context is still in the active array with no lock
+    // held. This set is what keeps start_context() and a second stop_context() from acting on
+    // that half-stopped state. Guarded by get_contexts_mutex().
+    std::unordered_set<uint64_t> stopping = {};
+    std::condition_variable      cv       = {};
 };
 
 registry_state*
@@ -172,6 +189,13 @@ get_published_snapshot()
 {
     auto* _state = get_registry_state();
     return (_state) ? &_state->published : nullptr;
+}
+
+std::vector<context_ptr_t>*
+get_retired_contexts()
+{
+    auto* _state = get_registry_state();
+    return (_state) ? &_state->retired : nullptr;
 }
 
 context_snapshot_ptr_t
@@ -196,8 +220,10 @@ publish_registered_contexts()
     {
         _data->owned.reserve(_impl->size());
         _data->view.reserve(_impl->size());
+        _data->slots.reserve(_impl->size());
         for(const auto& itr : *_impl)
         {
+            _data->slots.emplace_back(itr.get());
             if(!itr) continue;
             _data->owned.emplace_back(itr);
             _data->view.emplace_back(itr.get());
@@ -209,6 +235,10 @@ publish_registered_contexts()
 
 // The registry is index-addressed: allocate_context() derives context_idx from the slot position,
 // so a context id maps straight back to its slot.
+//
+// Requires get_contexts_mutex(). The registry is a stable_vector, which keeps element addresses
+// stable but reallocates the chunk index that at() walks, so an unlocked reader can index a freed
+// buffer. Callers that cannot take the mutex must go through lookup_registered_context() instead.
 context_ptr_t
 get_registered_context_slot(uint64_t handle)
 {
@@ -221,22 +251,40 @@ get_registered_context_slot(uint64_t handle)
     return _impl->at(_idx);
 }
 
-// Context ids whose stop is in progress. stop_context() releases get_contexts_mutex() across the
-// GPU drain, so for that window the context is still in the active array with no lock held. This
-// set is what keeps start_context() and a second stop_context() from acting on that half-stopped
-// state. Guarded by get_contexts_mutex().
-std::unordered_set<uint64_t>&
-get_stopping_contexts()
+// Resolves a context id off the published snapshot, for the callers that hold no lock. The
+// snapshot is immutable once published and owns the contexts it names, so indexing it neither
+// races allocate_context() nor touches a reference count.
+context*
+lookup_registered_context(uint64_t handle)
 {
-    static auto _v = std::unordered_set<uint64_t>{};
-    return _v;
+    if(handle < get_contexts_offset()) return nullptr;
+
+    auto _snapshot = current_registered_contexts();
+    if(!_snapshot) return nullptr;
+
+    auto _idx = handle - get_contexts_offset();
+    if(_idx >= _snapshot->slots.size()) return nullptr;
+
+    return _snapshot->slots[_idx];
 }
 
-std::condition_variable&
+// Both live in registry_state rather than being function-local statics of their own. A tool's
+// finalizer runs stop_context() during teardown, by which point a plain function-local static may
+// already have been destroyed -- and reading a destroyed unordered_set means hashing into freed
+// bucket memory. registry_state is torn down by common::destroy_static_objects() instead, at a
+// point the SDK controls, and these accessors return null once that has happened.
+std::unordered_set<uint64_t>*
+get_stopping_contexts()
+{
+    auto* _state = get_registry_state();
+    return (_state) ? &_state->stopping : nullptr;
+}
+
+std::condition_variable*
 get_contexts_cv()
 {
-    static auto _v = std::condition_variable{};
-    return _v;
+    auto* _state = get_registry_state();
+    return (_state) ? &_state->cv : nullptr;
 }
 
 }  // namespace
@@ -247,7 +295,13 @@ get_contexts_cv()
 void
 wait_for_stopping_contexts(std::unique_lock<std::mutex>& _lk)
 {
-    get_contexts_cv().wait(_lk, []() { return get_stopping_contexts().empty(); });
+    auto* _cv = get_contexts_cv();
+    if(!_cv) return;
+
+    _cv->wait(_lk, []() {
+        const auto* _stopping = get_stopping_contexts();
+        return (!_stopping) ? true : _stopping->empty();
+    });
 }
 
 std::mutex&
@@ -416,7 +470,7 @@ allocate_context()
 context*
 get_mutable_registered_context(rocprofiler_context_id_t id)
 {
-    return get_registered_context_slot(id.handle).get();
+    return lookup_registered_context(id.handle);
 }
 
 const context*
@@ -451,12 +505,17 @@ start_context(rocprofiler_context_id_t context_id)
     if(validate_context(cfg) != ROCPROFILER_STATUS_SUCCESS)
         return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
-    uint64_t rocp_tot_contexts = get_registered_contexts_impl()->size();
+    uint64_t rocp_tot_contexts = 0;
     auto     idx               = rocp_tot_contexts;
     auto&    active_contexts   = get_active_contexts_impl();
     {
         // hold a lock here to prevent multiple threads from finding the same nullptr slot
         auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
+
+        // Sized under the lock: size() walks the registry's chunk index, which allocate_context()
+        // reallocates as it grows.
+        rocp_tot_contexts = get_registered_contexts_impl()->size();
+        idx               = rocp_tot_contexts;
 
         // A context that is mid-stop is still in the active array while its GPU drain runs, so
         // scanning against that state would either report a conflict against a context that is on
@@ -574,15 +633,15 @@ stop_context(rocprofiler_context_id_t idx)
         if(!slot) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
         _owner = get_registered_context_slot(idx.handle);
-        get_stopping_contexts().emplace(idx.handle);
+        if(auto* _stopping = get_stopping_contexts()) _stopping->emplace(idx.handle);
     }
 
     auto _unclaim = common::scope_destructor{[&idx]() {
         {
             auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
-            get_stopping_contexts().erase(idx.handle);
+            if(auto* _stopping = get_stopping_contexts()) _stopping->erase(idx.handle);
         }
-        get_contexts_cv().notify_all();
+        if(auto* _cv = get_contexts_cv()) _cv->notify_all();
     }};
 
     // Phase two, unlocked: the service teardowns below call hsa::queue_controller_sync(), an
@@ -715,10 +774,6 @@ deregister_client_contexts(rocprofiler_client_id_t client_id)
 {
     if(!get_registered_contexts_impl()) return;
 
-    // Outlives the lock below so the contexts are destroyed without it held: a context destructor
-    // calls back into HSA, which is not something to do underneath the registry mutex.
-    auto _retired = std::vector<context_ptr_t>{};
-
     {
         // Mutates the registry, so it needs the same lock allocate_context() takes.
         auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
@@ -737,10 +792,14 @@ deregister_client_contexts(rocprofiler_client_id_t client_id)
                 {
                     if(bitr && bitr->context_id == itr->context_idx) bitr.reset();
                 }
-                // Moved rather than reset: dropping the registry's reference here would destroy
-                // the context under the lock, and a reader holding an older snapshot still needs
-                // it to stay alive until that snapshot is released.
-                _retired.emplace_back(std::move(itr));
+                // Moved to the retired list rather than reset: dropping the registry's reference
+                // here would destroy the context while dispatch and completion paths may still
+                // hold raw pointers to it, which is what made the anytime-tool-config tests
+                // segfault when one tool finalized while another tool's kernels were in flight.
+                if(auto* _retired = get_retired_contexts())
+                    _retired->emplace_back(std::move(itr));
+                else
+                    itr.reset();
             }
         }
 
