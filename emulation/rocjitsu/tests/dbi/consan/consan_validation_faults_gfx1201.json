@@ -4715,6 +4715,363 @@
           }
         }
       ]
+    },
+    "pytorch-rdna4-llm-topk": {
+      "faults": [
+        {
+          "id": "barrier-drop-radix-count-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine rocPRIM ELF fnv1a64:bf19fa7fbe133589, matching the top-k clean-run log. Native-selected gfx1201 radix_sort_block_sort<float, OpaqueType<8>> uses 256 threads (eight waves). LDS histogram writes at VA 0x6d0ed4 use bucket*32+wave*4+32; the following loads at 0x6d0efc/0x6d0f04 read all eight wave counts for each bucket. EXEC restores at 0x6d0ee0 before the unconditional publication pair VA 0x6d0ee8/0x6d0eec (.text+0xffce8/0xffcec, occurrences 2/3). Remove that pair, retaining initial initialization and later reuse barriers. The pair is reached in the first radix pass for the recorded nonempty vocabulary input. Exact selected site uses the dispatched gfx1201 owner; the pristine synchronization sequence names its canonical aliased owner. Both are in the expanded allowlist, which covers every owner of the shared physical code. Offline final ISA and inventory: rdna4-20260923/topk-debug/{original-selected.asm,publication-inventory.txt,owner-closure.json}. Prospectively require 6/8 detections with matching clean correctness, coverage, completeness and health checks; Default selects a named preset, SuperCollider uses actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE10ELNS1_11target_archE1201ELNS1_3gpuE5ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|kind=barrier|pc=0x00000000000ffce8|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE0ELNS1_11target_archE4294967295ELNS1_3gpuE0ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|event=barrier|pc=0x00000000000ffce8|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE0ELNS1_11target_archE4294967295ELNS1_3gpuE0ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|event=barrier|pc=0x00000000000ffcec|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-radix-count-publication-preset-low",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine rocPRIM ELF fnv1a64:bf19fa7fbe133589, matching the top-k clean-run log. Native-selected gfx1201 radix_sort_block_sort<float, OpaqueType<8>> uses 256 threads (eight waves). LDS histogram writes at VA 0x6d0ed4 use bucket*32+wave*4+32; the following loads at 0x6d0efc/0x6d0f04 read all eight wave counts for each bucket. EXEC restores at 0x6d0ee0 before the unconditional publication pair VA 0x6d0ee8/0x6d0eec (.text+0xffce8/0xffcec, occurrences 2/3). Remove that pair, retaining initial initialization and later reuse barriers. The pair is reached in the first radix pass for the recorded nonempty vocabulary input. Exact selected site uses the dispatched gfx1201 owner; the pristine synchronization sequence names its canonical aliased owner. Both are in the expanded allowlist, which covers every owner of the shared physical code. Offline final ISA and inventory: rdna4-20260923/topk-debug/{original-selected.asm,publication-inventory.txt,owner-closure.json}. Prospectively require 6/8 detections with matching clean correctness, coverage, completeness and health checks; Default selects a named preset, SuperCollider uses actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE10ELNS1_11target_archE1201ELNS1_3gpuE5ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|kind=barrier|pc=0x00000000000ffce8|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE0ELNS1_11target_archE4294967295ELNS1_3gpuE0ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|event=barrier|pc=0x00000000000ffce8|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE0ELNS1_11target_archE4294967295ELNS1_3gpuE0ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|event=barrier|pc=0x00000000000ffcec|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-radix-count-publication-preset-default",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine rocPRIM ELF fnv1a64:bf19fa7fbe133589, matching the top-k clean-run log. Native-selected gfx1201 radix_sort_block_sort<float, OpaqueType<8>> uses 256 threads (eight waves). LDS histogram writes at VA 0x6d0ed4 use bucket*32+wave*4+32; the following loads at 0x6d0efc/0x6d0f04 read all eight wave counts for each bucket. EXEC restores at 0x6d0ee0 before the unconditional publication pair VA 0x6d0ee8/0x6d0eec (.text+0xffce8/0xffcec, occurrences 2/3). Remove that pair, retaining initial initialization and later reuse barriers. The pair is reached in the first radix pass for the recorded nonempty vocabulary input. Exact selected site uses the dispatched gfx1201 owner; the pristine synchronization sequence names its canonical aliased owner. Both are in the expanded allowlist, which covers every owner of the shared physical code. Offline final ISA and inventory: rdna4-20260923/topk-debug/{original-selected.asm,publication-inventory.txt,owner-closure.json}. Prospectively require 6/8 detections with matching clean correctness, coverage, completeness and health checks; Default selects a named preset, SuperCollider uses actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE10ELNS1_11target_archE1201ELNS1_3gpuE5ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|kind=barrier|pc=0x00000000000ffce8|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE0ELNS1_11target_archE4294967295ELNS1_3gpuE0ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|event=barrier|pc=0x00000000000ffce8|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE0ELNS1_11target_archE4294967295ELNS1_3gpuE0ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|event=barrier|pc=0x00000000000ffcec|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-radix-count-publication-preset-high",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine rocPRIM ELF fnv1a64:bf19fa7fbe133589, matching the top-k clean-run log. Native-selected gfx1201 radix_sort_block_sort<float, OpaqueType<8>> uses 256 threads (eight waves). LDS histogram writes at VA 0x6d0ed4 use bucket*32+wave*4+32; the following loads at 0x6d0efc/0x6d0f04 read all eight wave counts for each bucket. EXEC restores at 0x6d0ee0 before the unconditional publication pair VA 0x6d0ee8/0x6d0eec (.text+0xffce8/0xffcec, occurrences 2/3). Remove that pair, retaining initial initialization and later reuse barriers. The pair is reached in the first radix pass for the recorded nonempty vocabulary input. Exact selected site uses the dispatched gfx1201 owner; the pristine synchronization sequence names its canonical aliased owner. Both are in the expanded allowlist, which covers every owner of the shared physical code. Offline final ISA and inventory: rdna4-20260923/topk-debug/{original-selected.asm,publication-inventory.txt,owner-closure.json}. Prospectively require 6/8 detections with matching clean correctness, coverage, completeness and health checks; Default selects a named preset, SuperCollider uses actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE10ELNS1_11target_archE1201ELNS1_3gpuE5ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|kind=barrier|pc=0x00000000000ffce8|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE0ELNS1_11target_archE4294967295ELNS1_3gpuE0ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|event=barrier|pc=0x00000000000ffce8|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE0ELNS1_11target_archE4294967295ELNS1_3gpuE0ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|event=barrier|pc=0x00000000000ffcec|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-radix-count-publication-preset-higher",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine rocPRIM ELF fnv1a64:bf19fa7fbe133589, matching the top-k clean-run log. Native-selected gfx1201 radix_sort_block_sort<float, OpaqueType<8>> uses 256 threads (eight waves). LDS histogram writes at VA 0x6d0ed4 use bucket*32+wave*4+32; the following loads at 0x6d0efc/0x6d0f04 read all eight wave counts for each bucket. EXEC restores at 0x6d0ee0 before the unconditional publication pair VA 0x6d0ee8/0x6d0eec (.text+0xffce8/0xffcec, occurrences 2/3). Remove that pair, retaining initial initialization and later reuse barriers. The pair is reached in the first radix pass for the recorded nonempty vocabulary input. Exact selected site uses the dispatched gfx1201 owner; the pristine synchronization sequence names its canonical aliased owner. Both are in the expanded allowlist, which covers every owner of the shared physical code. Offline final ISA and inventory: rdna4-20260923/topk-debug/{original-selected.asm,publication-inventory.txt,owner-closure.json}. Prospectively require 6/8 detections with matching clean correctness, coverage, completeness and health checks; Default selects a named preset, SuperCollider uses actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE10ELNS1_11target_archE1201ELNS1_3gpuE5ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|kind=barrier|pc=0x00000000000ffce8|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE0ELNS1_11target_archE4294967295ELNS1_3gpuE0ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|event=barrier|pc=0x00000000000ffce8|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE0ELNS1_11target_archE4294967295ELNS1_3gpuE0ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|event=barrier|pc=0x00000000000ffcec|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-radix-count-publication-preset-max",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine rocPRIM ELF fnv1a64:bf19fa7fbe133589, matching the top-k clean-run log. Native-selected gfx1201 radix_sort_block_sort<float, OpaqueType<8>> uses 256 threads (eight waves). LDS histogram writes at VA 0x6d0ed4 use bucket*32+wave*4+32; the following loads at 0x6d0efc/0x6d0f04 read all eight wave counts for each bucket. EXEC restores at 0x6d0ee0 before the unconditional publication pair VA 0x6d0ee8/0x6d0eec (.text+0xffce8/0xffcec, occurrences 2/3). Remove that pair, retaining initial initialization and later reuse barriers. The pair is reached in the first radix pass for the recorded nonempty vocabulary input. Exact selected site uses the dispatched gfx1201 owner; the pristine synchronization sequence names its canonical aliased owner. Both are in the expanded allowlist, which covers every owner of the shared physical code. Offline final ISA and inventory: rdna4-20260923/topk-debug/{original-selected.asm,publication-inventory.txt,owner-closure.json}. Prospectively require 6/8 detections with matching clean correctness, coverage, completeness and health checks; Default selects a named preset, SuperCollider uses actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE10ELNS1_11target_archE1201ELNS1_3gpuE5ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|kind=barrier|pc=0x00000000000ffce8|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE0ELNS1_11target_archE4294967295ELNS1_3gpuE0ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|event=barrier|pc=0x00000000000ffce8|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE0ELNS1_11target_archE4294967295ELNS1_3gpuE0ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|event=barrier|pc=0x00000000000ffcec|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-radix-count-publication-sc-delay-calibration",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine rocPRIM ELF fnv1a64:bf19fa7fbe133589, matching the top-k clean-run log. Native-selected gfx1201 radix_sort_block_sort<float, OpaqueType<8>> uses 256 threads (eight waves). LDS histogram writes at VA 0x6d0ed4 use bucket*32+wave*4+32; the following loads at 0x6d0efc/0x6d0f04 read all eight wave counts for each bucket. EXEC restores at 0x6d0ee0 before the unconditional publication pair VA 0x6d0ee8/0x6d0eec (.text+0xffce8/0xffcec, occurrences 2/3). Remove that pair, retaining initial initialization and later reuse barriers. The pair is reached in the first radix pass for the recorded nonempty vocabulary input. Exact selected site uses the dispatched gfx1201 owner; the pristine synchronization sequence names its canonical aliased owner. Both are in the expanded allowlist, which covers every owner of the shared physical code. Offline final ISA and inventory: rdna4-20260923/topk-debug/{original-selected.asm,publication-inventory.txt,owner-closure.json}. Prospectively require 6/8 detections with matching clean correctness, coverage, completeness and health checks; Default selects a named preset, SuperCollider uses actual delay 0/16/64/256 twice."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE10ELNS1_11target_archE1201ELNS1_3gpuE5ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|kind=barrier|pc=0x00000000000ffce8|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE0ELNS1_11target_archE4294967295ELNS1_3gpuE0ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|event=barrier|pc=0x00000000000ffce8|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:bf19fa7fbe133589|kernel=_ZN7rocprim17ROCPRIM_400700_NS6detail17trampoline_kernelINS0_13kernel_configILj256ELj4ELj4294967295EEENS1_37radix_sort_block_sort_config_selectorIfN2at4cuda3cub6detail10OpaqueTypeILi8EEEEEZNS1_21radix_sort_block_sortIS4_Lb1EPKfPfPKSB_PSB_NS0_19identity_decomposerEEE10hipError_tT1_T2_T3_T4_jRjT5_jjP12ihipStream_tbEUlT_E_NS1_11comp_targetILNS1_3genE0ELNS1_11target_archE4294967295ELNS1_3gpuE0ELNS1_3repE0EEENS1_44radix_sort_block_sort_config_static_selectorELNS0_4arch9wavefront6targetE0EEEvSM_|event=barrier|pc=0x00000000000ffcec|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }
