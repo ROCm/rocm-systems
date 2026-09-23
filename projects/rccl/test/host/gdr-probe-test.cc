@@ -9,10 +9,12 @@
 // memory_peers scan finds no peer-memory client.
 //
 // Contract: given an ibv_context and a relaxed-ordering setting, the probe
-// returns 1 iff a GPU buffer registration actually succeeds, registering with
-// the same entry point and access flags production registration (reg.cc) would
-// use for that setting, and releases exactly what it acquired -- never a
-// resource it failed to obtain -- whichever step fails.
+// returns 1/0 iff a GPU buffer registration definitively succeeds/fails,
+// registering with the same entry point and access flags production
+// registration (reg.cc) would use for that setting; returns -1 if the test
+// itself couldn't run (e.g. hipMalloc/alloc_pd failed) so a caller knows not
+// to cache that as "unsupported". Releases exactly what it acquired -- never
+// a resource it failed to obtain -- whichever step fails.
 //
 // The suite compiles the hipified gdr_probe.cc directly (via GDR_PROBE_CC_PATH)
 // and drives hipMalloc/hipFree through fakes/hip_fakes and the verbs wrappers
@@ -199,12 +201,14 @@ TEST_F(GdrProbeTest, RelaxedOrderingRegistrationRejected_ReportsUnsupportedAndRe
   EXPECT_EQ(freed_, std::vector<void*>{gpuMem_});
 }
 
-// No device buffer means there is nothing to register: report 0 without
-// touching the verbs layer, and free nothing, since nothing was acquired.
-TEST_F(GdrProbeTest, DeviceAllocFails_ReportsUnsupportedAndAcquiresNothing) {
+// No device buffer means there is nothing to register: the test itself
+// couldn't run (-1, distinct from a definitive 0), so a caller retries later
+// rather than caching a false "unsupported". Nothing gets touched or freed,
+// since nothing was acquired.
+TEST_F(GdrProbeTest, DeviceAllocFails_ReportsUndeterminedAndAcquiresNothing) {
   mallocResult_ = hipErrorOutOfMemory;
 
-  EXPECT_EQ(0, ncclIbProbeGdrSupport(&ctx_, /*relaxedOrderingEnabled=*/1));
+  EXPECT_EQ(-1, ncclIbProbeGdrSupport(&ctx_, /*relaxedOrderingEnabled=*/1));
 
   EXPECT_TRUE(allocPdContexts_.empty());
   EXPECT_TRUE(regCalls_.empty());
@@ -212,13 +216,14 @@ TEST_F(GdrProbeTest, DeviceAllocFails_ReportsUnsupportedAndAcquiresNothing) {
   EXPECT_TRUE(releases_.empty());
 }
 
-// Partial acquisition: the buffer exists but the PD does not. The probe must not
-// attempt registration or deallocate the PD it never got, but must still free the
-// buffer rather than leak device memory on every failed probe.
-TEST_F(GdrProbeTest, PdAllocFails_ReportsUnsupportedAndFreesOnlyTheBuffer) {
+// Partial acquisition: the buffer exists but the PD does not. Also -1 (retry
+// later), for the same reason. The probe must not attempt registration or
+// deallocate the PD it never got, but must still free the buffer rather than
+// leak device memory on every failed attempt.
+TEST_F(GdrProbeTest, PdAllocFails_ReportsUndeterminedAndFreesOnlyTheBuffer) {
   allocPdResult_ = ncclSystemError;
 
-  EXPECT_EQ(0, ncclIbProbeGdrSupport(&ctx_, /*relaxedOrderingEnabled=*/1));
+  EXPECT_EQ(-1, ncclIbProbeGdrSupport(&ctx_, /*relaxedOrderingEnabled=*/1));
 
   EXPECT_TRUE(regCalls_.empty());
   EXPECT_TRUE(regIova2Calls_.empty());

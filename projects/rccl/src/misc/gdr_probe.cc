@@ -9,7 +9,7 @@
 #include "ibvwrap.h"
 
 int ncclIbProbeGdrSupport(struct ibv_context* context, int relaxedOrderingEnabled) {
-  int result = 0;
+  int result = -1; // -1 = couldn't run the test, caller may retry
   void* gpuBuf = nullptr;
   struct ibv_pd* pd = nullptr;
   struct ibv_mr* mr = nullptr;
@@ -18,15 +18,21 @@ int ncclIbProbeGdrSupport(struct ibv_context* context, int relaxedOrderingEnable
 
   // Single exit path below (cleanup:) so gpuBuf/pd always get released, even
   // if a future early return gets added here.
-  if (hipMalloc(&gpuBuf, 4096) != hipSuccess) goto cleanup;
-  if (wrap_ibv_alloc_pd(&pd, context) != ncclSuccess) goto cleanup;
+  if (hipMalloc(&gpuBuf, 4096) != hipSuccess) {
+    WARN("NET/IB: peermem probe: hipMalloc failed");
+    goto cleanup;
+  }
+  if (wrap_ibv_alloc_pd(&pd, context) != ncclSuccess) {
+    WARN("NET/IB: peermem probe: ibv_alloc_pd failed");
+    goto cleanup;
+  }
 
   if (relaxedOrderingEnabled) {
     mr = wrap_direct_ibv_reg_mr_iova2(pd, gpuBuf, 4096, (uint64_t)gpuBuf, flags | IBV_ACCESS_RELAXED_ORDERING);
   } else {
     mr = wrap_direct_ibv_reg_mr(pd, gpuBuf, 4096, flags);
   }
-  result = (mr != nullptr);
+  result = (mr != nullptr) ? 1 : 0;
   if (mr && wrap_ibv_dereg_mr(mr) != ncclSuccess) {
     WARN("NET/IB: peermem probe: ibv_dereg_mr failed");
   }
