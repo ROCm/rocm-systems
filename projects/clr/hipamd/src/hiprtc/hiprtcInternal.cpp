@@ -109,6 +109,16 @@ bool RTCCompileProgram::addBuiltinHeader() {
 
 bool RTCCompileProgram::findExeOptions(const std::vector<std::string>& options,
                                        std::vector<std::string>& exe_options) {
+  auto isProfileRuntimeOption = [](const std::string& option) {
+    auto isExactOrJoined = [&option](const char* spelling) {
+      return option == spelling || option.rfind(std::string(spelling) + "=", 0) == 0;
+    };
+    return isExactOrJoined("-fprofile-generate") || isExactOrJoined("-fcs-profile-generate") ||
+           isExactOrJoined("-fprofile-instr-generate") ||
+           isExactOrJoined("-fprofile-generate-cold-function-coverage") ||
+           option == "-fcreate-profile" || option == "-noprofilelib";
+  };
+
   for (size_t i = 0; i < options.size(); ++i) {
     // -mllvm options passed by the app such as "-mllvm" "-amdgpu-early-inline-all=true"
     if (options[i] == "-mllvm") {
@@ -123,6 +133,11 @@ bool RTCCompileProgram::findExeOptions(const std::vector<std::string>& options,
     }
     // Options like -Rpass=inline
     if (options[i].find("-Rpass=") == 0) {
+      exe_options.push_back(options[i]);
+    }
+    // These options affect profile runtime selection during the final device
+    // link, which is a separate COMGR action.
+    if (isProfileRuntimeOption(options[i])) {
       exe_options.push_back(options[i]);
     }
   }
@@ -212,8 +227,13 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fg
     }
   } else {
     LogInfo("Using the new path of comgr");
-    if (!hip::helpers::compileToExecutable(compile_input_, isa_, compileOpts, link_options_,
-                                           build_log_, executable_)) {
+    std::vector<std::string> linkOpts(link_options_);
+    if (!findExeOptions(compileOpts, linkOpts)) {
+      LogError("Error in hiprtc: unable to find executable options");
+      return false;
+    }
+    if (!hip::helpers::compileToExecutable(compile_input_, isa_, compileOpts, linkOpts, build_log_,
+                                           executable_)) {
       LogError("Failing to compile to realloc");
       return false;
     }
