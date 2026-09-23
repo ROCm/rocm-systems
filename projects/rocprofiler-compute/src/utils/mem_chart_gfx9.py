@@ -214,7 +214,6 @@ _PCIE_PANEL_W = 46  # fits "PCIe (to CPU or Non-xGMI connected GPU)" label
 _IO_PAD_OFFSET = 3  # gap between fabric_col edge and xGMI/PCIe arrow text
 # Arch capability sets
 _MALL_ARCHS = frozenset({"gfx940", "gfx941", "gfx942", "gfx950"})
-_XGMI_ARCHS = frozenset({"gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"})
 # Console dimensions
 _CONSOLE_WIDTH = 240  # CDNA layout is wider (more IP blocks than RDNA3.5)
 _FABRIC_COL_INDEX = 6  # kernel, req_edges, l1_stack, l1_l2_edges, l2, l2_fab_edges
@@ -590,7 +589,6 @@ def create_mem_chart_diagram(
     std_arrows = make_arrows(_STD_ARROW_LEN)
     is_gfx950 = gpu_arch is not None and gpu_arch.startswith("gfx950")
     has_mall = gpu_arch in _MALL_ARCHS
-    has_xgmi = gpu_arch in _XGMI_ARCHS
 
     # Build main diagram grid first (needed to measure width for scope bar)
     scratch_bytes = safe_float(metrics["scratch_alloc"])
@@ -695,30 +693,29 @@ def create_mem_chart_diagram(
     if chart_title:
         sections.append(f"[bold]{chart_title}[/bold]")
 
-    if has_xgmi:
-        if is_gfx950:
-            sections.append(
-                _build_io_row(
-                    metrics,
-                    fabric_col,
-                    bw_keys=(
-                        "xgmi_read_bw",
-                        "xgmi_write_bw",
-                        "xgmi_atomic_bw",
-                    ),
-                    panel_label="xGMI (to Peer GPU)",
-                    panel_width=_XGMI_PANEL_W,
-                    panel_above=True,
-                )
+    if is_gfx950:
+        sections.append(
+            _build_io_row(
+                metrics,
+                fabric_col,
+                bw_keys=(
+                    "xgmi_read_bw",
+                    "xgmi_write_bw",
+                    "xgmi_atomic_bw",
+                ),
+                panel_label="xGMI (to Peer GPU)",
+                panel_width=_XGMI_PANEL_W,
+                panel_above=True,
             )
-        else:
-            sections.append(
-                _build_io_panel_only(
-                    fabric_col,
-                    panel_label="xGMI (to Peer GPU)",
-                    panel_width=_XGMI_PANEL_W,
-                )
+        )
+    else:
+        sections.append(
+            _build_io_panel_only(
+                fabric_col,
+                panel_label="xGMI (to Peer GPU)",
+                panel_width=_XGMI_PANEL_W,
             )
+        )
 
     sections.append(_build_scope_bar(chart_width, fabric_col))
     sections.append("")
