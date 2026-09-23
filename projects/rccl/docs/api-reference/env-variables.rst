@@ -655,9 +655,9 @@ threshold table introduced for gfx1250.
           (``RCCL_DDA_THRESHOLD``, ``RCCL_DDA_LL_THRESHOLD``, etc.) defaults to
           ``-1`` (unset) and is resolved from the table at runtime; setting any of
           those variables explicitly still overrides the table.
-      - | ``0``: Use the per-architecture table for threshold defaults.
-        | ``1``: Ignore the table; fall back to pre-table compile-time constants
-          (default). This matches the behavior before the arch table was introduced.
+      - | ``0``: Use the per-architecture table for threshold defaults (default).
+        | ``1``: Ignore the table; fall back to pre-table compile-time constants.
+          This matches the behavior before the arch table was introduced.
 
     * - | ``RCCL_DDA_THRESHOLD``
         | Upper bound in bytes for the DDA VMM/Simple tier per collective.
@@ -682,24 +682,26 @@ threshold table introduced for gfx1250.
     * - | ``RCCL_DDA_LL128``
         | Enables the DDA LL128 protocol tier. When ``-1`` (auto), LL128 is enabled
           only for architectures whose per-arch table has a non-zero ``ddaLL128Max``
-          entry (currently gfx1250 only). Force to ``1`` to enable on other
-          architectures or ``0`` to disable globally.
-      - | ``-1``: Auto — enabled only when the arch table has non-zero LL128 thresholds
+          entry (currently gfx1250 only). ``1`` forces the tier on but still reads
+          its ceiling from the arch table, so it yields the same effective cap as
+          ``-1`` in every current configuration; ``0`` disables the tier on all
+          architectures.
+      - | ``-1``: Auto-enabled only when the arch table has non-zero LL128 thresholds
           (default).
-        | ``0``: Disabled.
-        | ``1``: Force-enabled.
-
+        | ``0``: Disabled on all architectures.
+        | ``1``: Force-enabled; ceiling is still read from the arch table (same cap
+          as ``-1`` in every current configuration).
     * - | ``RCCL_DDA_LL128_THRESHOLD``
         | Upper bound in bytes for the DDA LL128 tier. Messages above this size move
           to VMM/Simple or Ring. When ``-1`` (default), resolved from ``ddaLL128Max``
-          in the arch table. Has no effect when ``RCCL_DDA_LL128=0``.
+          in the arch table. When set explicitly, it takes precedence over ``RCCL_DDA_LL128=0`` (the env var is read before the flag check).
       - | ``-1``: Resolved from the per-arch table at runtime (default).
         | ``0``: Disable the DDA LL128 tier.
         | ``N`` (bytes): Use ``N`` as the LL128 tier ceiling, overriding the table.
-          Pre-table default: ``67108864`` (64 MiB).
+          Pre-table default: ``0`` (LL128 tier was off before the arch table).
 
     * - | ``RCCL_CE_ALLREDUCE``
-        | Enables the Copy Engine (CE) 2-shot AllReduce path. When ``-1`` (auto),
+        | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),
           CE AllReduce is on by default for gfx1250 communicators that meet all
           eligibility criteria, and off for all other architectures.
       - | ``-1``: Auto — enabled on gfx1250, disabled elsewhere (default).
@@ -745,11 +747,3 @@ threshold table introduced for gfx1250.
       - | ``-1``: Use the compile-time default of 16 MiB (default).
         | ``N`` (bytes): Allocate an ``N``-byte staging buffer.
 
-    * - | ``RCCL_ALL_TO_ALL_PIVOT_ENABLE``
-        | Enables the Pivot AlltoAll algorithm, which uses a multi-step rotation
-          scheme instead of direct peer-to-peer sends. Requires aligned message sizes
-          and a supported topology. Disabled by default; enable only when the Pivot
-          algorithm is known to outperform the default selection for the target
-          message size and rank count.
-      - | ``0``: Disabled (default).
-        | ``1``: Enabled.

@@ -10,7 +10,6 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `RCCL_CE_AR_STAGING_BYTES` (default `-1`): overrides the CE AllReduce staging buffer allocation size; when unset, `NCCL_CE_AR_STAGING_BYTES` is used.
 * Per-architecture dispatch table (`rcclArchThresholds`) centralizing algo/proto selection for DDA protocol, CE, and symmetric kernel per collective, replacing scattered hardcoded defaults. Tables are defined for gfx1250, gfx950, and gfx942; the lookup `rcclGetArchThresholds()` maps GCN arch strings to the appropriate entry. The `symMinR2[func]` field sets a per-collective lower bound for registered buffers.
 * `RCCL_IGNORE_ARCH_TABLE` (default `0`): when set to `1`, bypasses the `rcclArchThresholds` dispatch table and falls back to compile-time constants for all DDA, CE, and symmetric-kernel thresholds. Has no effect on gfx942 and gfx950, which always use the arch table.
-* `RCCL_ALLTOALL_PIVOT_ENABLE` (default `-1`, auto): gates the Pivot AlltoAll algorithm in `rcclSelectAlltoAll`. Set to `0` to disable, `1` to force enable.
 * New `rcclAddonAlgos_t` values: `RCCL_CE_SCRATCH` (CE via DDA scratch, distinct from `RCCL_CE_REGISTERED`), `RCCL_A2A_PIVOT`, `RCCL_A2A_GDA`, `RCCL_A2A_GIN_SDMA`, and `RCCL_DIRECT_ALLTOALL`, with corresponding `rcclGetAlgoName()` labels.
 * rccl-tests: AlltoAll now reports algo/protocol in VERSION output, consistent with other collectives.
 * Compatibility with NCCL 2.31.2.
@@ -26,8 +25,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Changed
 
 * `rcclSelectAllGather` signature changed — it now takes a `cudaStream_t stream` parameter (for live dispatch) and a `bool query` mode that uses `graphCapturingHint` instead of probing the stream. The comment block was updated too.
-* `RCCL_DDA_THRESHOLD`, `RCCL_DDA_LL_THRESHOLD`, and `RCCL_DDA_LL128_THRESHOLD` now default to `-1` (unset), resolved at runtime from the arch dispatch table instead of being hardcoded to 128 MiB, 64 KiB, and 64 MiB respectively. Setting these env vars explicitly still takes precedence over the table.
-* `RCCL_DDA_LL128` now defaults to `-1` (auto): enabled for architectures with `1`.
+* `RCCL_DDA_THRESHOLD`, `RCCL_DDA_LL_THRESHOLD`, and `RCCL_DDA_LL128_THRESHOLD` now default to `-1` (unset), resolved at runtime from the arch dispatch table instead of being hardcoded to 128 MiB and 64 KiB respectively (RCCL_DDA_LL128_THRESHOLD had no pre-table default; the LL128 tier was off by default). Setting these env vars explicitly still takes precedence over the table.
+* `RCCL_DDA_LL128` now defaults to `-1` (auto): the LL128 tier is enabled only for architectures whose arch-table row has a non-zero `ddaLL128Max` for the collective (currently gfx1250 only).
 * `RCCL_CE_ALLREDUCE` now defaults to `-1` (auto/enabled) instead of `0` (disabled). CE AllReduce is therefore on by default for gfx1250 communicators that meet all other eligibility criteria.
 * CE-2-Shot AllReduce size cap is now resolved at runtime via `rcclCeAr2ShotMax()` (env var wins, then arch table `ceNonRegMax[AR]`, then 256 MiB fallback) rather than from the compile-time constant `NCCL_CE_AR_MAX_MSG_BYTES`.
 * `RCCL_FORCE_CE_ALLREDUCE=1` no longer overrides the CE AllReduce staging buffer cap. It bypasses the `CTA_POLICY_ZERO` check only; the staging buffer bound is enforced regardless.
