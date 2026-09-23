@@ -34,7 +34,7 @@ constexpr uint32_t kBlendSeparateAlpha = 1u << 29, kBlendEnable = 1u << 30;
 constexpr uint32_t kNumberUnorm = 0, kNumberUint = 4, kNumberSint = 5, kNumberSrgb = 6,
                    kNumberFloat = 7;
 constexpr uint32_t kBufR32Uint = 20, kBufRgba8Unorm = 42, kBufRg32Uint = 48, kBufRgba16Unorm = 51,
-                   kBufRgba32Uint = 61;
+                   kBufRgba16Float = 57, kBufRgba32Uint = 61, kBufRgba32Float = 63;
 
 constexpr uint32_t kExport32R = 1, kExport32Gr = 2, kExportFp16Abgr = 4, kExportUnorm16Abgr = 5,
                    kExportSnorm16Abgr = 6, kExportUint16Abgr = 7, kExportSint16Abgr = 8,
@@ -101,8 +101,9 @@ bool supported_blend(uint32_t control) {
           (supported_factor(control & 31) && supported_factor((control >> 8) & 31)));
 }
 
-float blend_factor(uint32_t factor, uint32_t component, const std::array<float, 4> &source,
-                   const std::array<float, 4> &destination, const std::array<float, 4> &constant) {
+template <typename T>
+T blend_factor(uint32_t factor, uint32_t component, const std::array<T, 4> &source,
+               const std::array<T, 4> &destination, const std::array<T, 4> &constant) {
   switch (factor) {
   case kBlendZero:
     return 0;
@@ -139,19 +140,18 @@ float blend_factor(uint32_t factor, uint32_t component, const std::array<float, 
   }
 }
 
-float blend_component(uint32_t control, uint32_t component, const std::array<float, 4> &source,
-                      const std::array<float, 4> &destination,
-                      const std::array<float, 4> &constant) {
+template <typename T>
+T blend_component(uint32_t control, uint32_t component, const std::array<T, 4> &source,
+                  const std::array<T, 4> &destination, const std::array<T, 4> &constant) {
   const uint32_t operation = (control >> 5) & 7;
   if (operation == kBlendMin)
     return std::min(source[component], destination[component]);
   if (operation == kBlendMax)
     return std::max(source[component], destination[component]);
-  const float source_term =
+  const T source_term =
       source[component] * blend_factor(control & 31, component, source, destination, constant);
-  const float destination_term =
-      destination[component] *
-      blend_factor((control >> 8) & 31, component, source, destination, constant);
+  const T destination_term = destination[component] * blend_factor((control >> 8) & 31, component,
+                                                                   source, destination, constant);
   if (operation == kBlendSubtract)
     return source_term - destination_term;
   if (operation == kBlendReverseSubtract)
@@ -210,7 +210,7 @@ GraphicsDraw::GraphicsDraw(const Pm4QueueState &state, rj_code_arch_t arch, uint
   if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5 &&
       arch != ROCJITSU_CODE_ARCH_RDNA4)
     throw std::runtime_error("graphics draw requires RDNA3 or RDNA4");
-  if (!instance_count_ || instance_count_ > 4096 || vertices < 3 || vertices > (1u << 20) ||
+  if (!instance_count_ || vertices < 3 || vertices > (1u << 20) ||
       (primitive_type_ != kTriangleList && primitive_type_ != kTriangleStrip &&
        primitive_type_ != kRectangleList))
     throw std::runtime_error("unsupported graphics primitive, vertex count, or instance count");
@@ -552,7 +552,10 @@ void GraphicsDraw::prepare_colors() {
         !supported_export_format(color.export_format, color.components))
       throw std::runtime_error("unsupported graphics color state");
     if ((color.blend & kBlendEnable) &&
-        (color.srgb || color.memory_format != kBufRgba8Unorm || !supported_blend(color.blend) ||
+        (color.srgb ||
+         (color.memory_format != kBufRgba8Unorm && color.memory_format != kBufRgba16Float &&
+          color.memory_format != kBufRgba32Float) ||
+         !supported_blend(color.blend) ||
          ((color.blend & kBlendSeparateAlpha) && !supported_blend(color.blend >> 16))))
       throw std::runtime_error("unsupported graphics blend operation or integer attachment");
     color.swizzle = gfx12 ? (attrib3 >> 15) & 7 : (attrib3 >> 14) & 31;
@@ -670,15 +673,19 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
     right = std::min(right, int(context_[0x95] & scissor_mask) + x_offset + int(gfx12));
     bottom = std::min(bottom, int((context_[0x95] >> 16) & scissor_mask) + y_offset + int(gfx12));
   }
+  if (left >= right || top >= bottom)
+    return;
   for (uint32_t p = 0; p < primitive_count(); ++p) {
     if (primitives_[p] & (1u << 31))
       continue;
     std::array<uint32_t, 3> indices{};
     struct Point {
       double x, y, w, z;
+      std::array<double, 3> barycentric{};
     };
     std::array<Point, 3> v{}, screen{}, clip_positions{};
-    uint32_t outside_near = 0, outside_far = 0;
+    uint32_t outside_near = 0, outside_far = 0, nonpositive_w = 0;
+    bool clip_xy = false;
     for (uint32_t k = 0; k < 3; ++k) {
       const uint32_t index_bits = gfx12 ? 9 : 10;
       indices[k] = (primitives_[p] >> (index_bits * k)) & ((1u << index_bits) - 1);
@@ -688,24 +695,27 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       const float w = std::bit_cast<float>(position[3]);
       const float x = std::bit_cast<float>(position[0]);
       const float y = std::bit_cast<float>(position[1]);
-      if (!std::isfinite(w) || w <= 0 || !std::isfinite(x) || !std::isfinite(y)) {
+      if (!std::isfinite(w) || !std::isfinite(x) || !std::isfinite(y)) {
         throw std::runtime_error("graphics homogeneous clipping is not implemented");
       }
       const float z = std::bit_cast<float>(position[2]);
       if (!std::isfinite(z))
         throw std::runtime_error("graphics nonfinite depth is not implemented");
+      nonpositive_w += w <= 0;
       clip_positions[k] = {x, y, w, z};
+      clip_positions[k].barycentric[k] = 1;
       if (!(clip_control & (1u << 16))) {
         const float near = (clip_control & (1u << 19)) ? 0.0f : -w;
         outside_near += !(clip_control & (1u << 26)) && z < near;
         outside_far += !(clip_control & (1u << 27)) && z > w;
       }
-      v[k] = {raster::viewport_coordinate(x, w, sx, ox), raster::viewport_coordinate(y, w, sy, oy),
-              w, z / w};
+      v[k] = w == 0 ? Point{0, 0, w, 0}
+                    : Point{raster::viewport_coordinate(x, w, sx, ox),
+                            raster::viewport_coordinate(y, w, sy, oy), w, z / w};
       screen[k] = v[k];
-      if (!std::isfinite(v[k].x) || !std::isfinite(v[k].y) || std::abs(v[k].x) > (1 << 20) ||
-          std::abs(v[k].y) > (1 << 20))
-        throw std::runtime_error("graphics vertex exceeds supported raster coordinates");
+      // Finite homogeneous inputs can overflow the initial FP32 projection.
+      // Let guard-band clipping produce finite coordinates before validation.
+      clip_xy |= w <= 0 || std::abs(v[k].x) > (1 << 20) || std::abs(v[k].y) > (1 << 20);
     }
     // Layer selection uses the provoking vertex before interpolation reorders vertices.
     const uint32_t provoking = (context_[0x207] & (1u << 19)) ? 2 : 0;
@@ -718,13 +728,12 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
     // Depth still has a single slice; color attachments have independent array views.
     if ((depth_control_ & 2) && relative_layer)
       throw std::runtime_error("graphics layered depth attachments are not implemented");
-    if (outside_near == 3 || outside_far == 3)
+    if (nonpositive_w == 3 || outside_near == 3 || outside_far == 3)
       continue;
-    // Clip coverage in homogeneous coordinates. Keep the original triangle's
-    // interpolation planes: adding vertices must not change its varyings or
-    // the vertex values exposed by explicit interpolation.
+    // Clip coverage in homogeneous coordinates and carry the original
+    // barycentrics so added vertices do not replace shader-visible parameters.
     std::vector<Point> coverage(v.begin(), v.end());
-    if (outside_near || outside_far) {
+    if (clip_xy || outside_near || outside_far) {
       if (primitive_type_ == kRectangleList)
         throw std::runtime_error("graphics clipped rectangles are not implemented");
       coverage.assign(clip_positions.begin(), clip_positions.end());
@@ -739,9 +748,13 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
           if ((previous_distance < 0 && current_distance > 0) ||
               (previous_distance > 0 && current_distance < 0)) {
             const double t = previous_distance / (previous_distance - current_distance);
-            output.push_back(
-                {std::lerp(previous.x, current.x, t), std::lerp(previous.y, current.y, t),
-                 std::lerp(previous.w, current.w, t), std::lerp(previous.z, current.z, t)});
+            output.push_back({std::lerp(previous.x, current.x, t),
+                              std::lerp(previous.y, current.y, t),
+                              std::lerp(previous.w, current.w, t),
+                              std::lerp(previous.z, current.z, t),
+                              {std::lerp(previous.barycentric[0], current.barycentric[0], t),
+                               std::lerp(previous.barycentric[1], current.barycentric[1], t),
+                               std::lerp(previous.barycentric[2], current.barycentric[2], t)}});
           }
           if (current_distance >= 0)
             output.push_back(current);
@@ -754,11 +767,26 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
         clip([&](Point point) { return point.z + ((clip_control & (1u << 19)) ? 0 : point.w); });
       if (outside_far)
         clip([](Point point) { return point.w - point.z; });
+      if (clip_xy) {
+        const double gx = std::bit_cast<float>(context_[gfx12 ? 0x10d : 0x2fc]);
+        const double gy = std::bit_cast<float>(context_[gfx12 ? 0x10b : 0x2fa]);
+        if (!std::isfinite(gx) || !std::isfinite(gy) || gx < 1 || gy < 1)
+          throw std::runtime_error("unsupported graphics guard band");
+        clip([&](Point point) { return point.w * gx + point.x; });
+        clip([&](Point point) { return point.w * gx - point.x; });
+        clip([&](Point point) { return point.w * gy + point.y; });
+        clip([&](Point point) { return point.w * gy - point.y; });
+      }
+      if (coverage.size() < 3)
+        continue;
+      // A clipped vertex at the homogeneous origin has no projected area.
+      std::erase_if(coverage, [](Point point) { return point.w == 0; });
       if (coverage.size() < 3)
         continue;
       for (auto &point : coverage) {
         point.x = raster::viewport_coordinate(point.x, point.w, sx, ox);
         point.y = raster::viewport_coordinate(point.y, point.w, sy, oy);
+        point.z /= point.w;
       }
       const auto same_position = [](Point a, Point b) { return a.x == b.x && a.y == b.y; };
       coverage.erase(std::unique(coverage.begin(), coverage.end(), same_position), coverage.end());
@@ -767,10 +795,15 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       if (coverage.size() < 3)
         continue;
     }
+    for (const auto &point : coverage)
+      if (!std::isfinite(point.x) || !std::isfinite(point.y))
+        throw std::runtime_error("graphics clipped vertex has nonfinite raster coordinates");
     const auto edge = [](Point a, Point b, double x, double y) {
       return (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x);
     };
-    const double area = edge(v[0], v[1], v[2].x, v[2].y);
+    double area = 0;
+    for (uint32_t k = 1; k + 1 < coverage.size(); ++k)
+      area += edge(coverage[0], coverage[k], coverage[k + 1].x, coverage[k + 1].y);
     if (area == 0)
       continue;
     const bool front = (area < 0) != bool(context_[0x207] & 4);
@@ -790,6 +823,31 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       if (a.w == b.w && a.w == c.w && ((a.x == b.x && a.y == c.y) || (a.y == b.y && a.x == c.x)))
         origin = k;
     }
+    if (clip_xy) {
+      // Establish planes from finite clipped coordinates instead of projecting
+      // vertices arbitrarily close to W=0. Keep barycentrics in the original
+      // triangle so explicit interpolation and provoking vertices stay intact.
+      origin = 0;
+      uint32_t first = 0;
+      for (uint32_t k = 1; k < coverage.size(); ++k)
+        if (coverage[k].w < coverage[first].w ||
+            (coverage[k].w == coverage[first].w && coverage[k].x < coverage[first].x))
+          first = k;
+      screen[0] = coverage[first];
+      double largest = 0;
+      for (uint32_t k = 1; k + 1 < coverage.size(); ++k) {
+        const auto &a = coverage[(first + k) % coverage.size()];
+        const auto &b = coverage[(first + k + 1) % coverage.size()];
+        const double candidate = std::abs(edge(screen[0], a, b.x, b.y));
+        if (candidate > largest) {
+          largest = candidate;
+          screen[1] = a;
+          screen[2] = b;
+        }
+      }
+      if (largest == 0)
+        continue;
+    }
     std::rotate(indices.begin(), indices.begin() + origin, indices.end());
     std::rotate(v.begin(), v.begin() + origin, v.end());
     std::rotate(screen.begin(), screen.begin() + origin, screen.end());
@@ -803,19 +861,37 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
                                  double(b) - a, double(c) - a, inverse_area),
           a};
     };
-    const raster::Plane plane_i = plane(0, 1, 0);
-    const raster::Plane plane_j = plane(0, 0, 1);
-    const float iw0 = 1.0f / static_cast<float>(screen[0].w);
-    const float iw1 = 1.0f / static_cast<float>(screen[1].w);
-    const float iw2 = 1.0f / static_cast<float>(screen[2].w);
-    const raster::Plane plane_iw = plane(0, iw1, 0);
-    const raster::Plane plane_jw = plane(0, 0, iw2);
-    const raster::Plane plane_rw = plane(iw0, iw1, iw2);
+    const auto original_weight = [&](uint32_t vertex, uint32_t component) {
+      return clip_xy ? screen[vertex].barycentric[component] : double(vertex == component);
+    };
+    const auto perspective_plane = [&](uint32_t component) {
+      return plane(original_weight(0, component) / screen[0].w,
+                   original_weight(1, component) / screen[1].w,
+                   original_weight(2, component) / screen[2].w);
+    };
+    const raster::Plane plane_iw = perspective_plane(1);
+    const raster::Plane plane_jw = perspective_plane(2);
+    const raster::Plane plane_rw = plane(1.0 / screen[0].w, 1.0 / screen[1].w, 1.0 / screen[2].w);
+    const raster::Plane plane_i = clip_xy ? plane(original_weight(0, 1) * v[1].w / screen[0].w,
+                                                  original_weight(1, 1) * v[1].w / screen[1].w,
+                                                  original_weight(2, 1) * v[1].w / screen[2].w)
+                                          : plane(0, 1, 0);
+    const raster::Plane plane_j = clip_xy ? plane(original_weight(0, 2) * v[2].w / screen[0].w,
+                                                  original_weight(1, 2) * v[2].w / screen[1].w,
+                                                  original_weight(2, 2) * v[2].w / screen[2].w)
+                                          : plane(0, 0, 1);
+    const raster::Plane plane_z = plane(screen[0].z, screen[1].z, screen[2].z);
     const bool rectangle = primitive_type_ == kRectangleList;
-    const int min_x = std::max(left, int(std::floor(std::min({v[0].x, v[1].x, v[2].x}))));
-    const int min_y = std::max(top, int(std::floor(std::min({v[0].y, v[1].y, v[2].y}))));
-    const int max_x = std::min(right, int(std::ceil(std::max({v[0].x, v[1].x, v[2].x}))));
-    const int max_y = std::min(bottom, int(std::ceil(std::max({v[0].y, v[1].y, v[2].y}))));
+    const auto [xmin, xmax] = std::minmax_element(coverage.begin(), coverage.end(),
+                                                  [](Point a, Point b) { return a.x < b.x; });
+    const auto [ymin, ymax] = std::minmax_element(coverage.begin(), coverage.end(),
+                                                  [](Point a, Point b) { return a.y < b.y; });
+    // Bound in floating point before narrowing, including triangles that
+    // extend beyond the integer raster coordinate range.
+    const int min_x = int(std::clamp(std::floor(xmin->x), double(left), double(right)));
+    const int min_y = int(std::clamp(std::floor(ymin->y), double(top), double(bottom)));
+    const int max_x = int(std::clamp(std::ceil(xmax->x), double(left), double(right)));
+    const int max_y = int(std::clamp(std::ceil(ymax->y), double(top), double(bottom)));
     std::vector<uint32_t> parameters(attributes * 12);
     for (uint32_t a = 0; a < attributes; ++a) {
       const uint32_t control = context_[0x199 + a];
@@ -869,7 +945,8 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
           const float w = 1.0f / f.pull_model[2];
           f.i = raster::multiply_perspective(f.pull_model[0], w);
           f.j = raster::multiply_perspective(f.pull_model[1], w);
-          f.z = ((1 - b1 - b2) * v[0].z + b1 * v[1].z + b2 * v[2].z) *
+          f.z = (clip_xy ? double(plane_z.at_quad(dx, dy, q))
+                         : (1 - b1 - b2) * v[0].z + b1 * v[1].z + b2 * v[2].z) *
                     std::bit_cast<float>(context_[0x113]) +
                 std::bit_cast<float>(context_[0x114]);
           bool inside = true;
@@ -1013,11 +1090,13 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
         if (!exported.mask || batch.relative_layer > color.last_layer - color.first_layer)
           continue;
         std::array<uint32_t, 4> components = exported.values;
+        uint32_t component_mask = exported.mask;
         if (color.export_format == kExportFp16Abgr || color.export_format == kExportUnorm16Abgr ||
             color.export_format == kExportSnorm16Abgr || color.export_format == kExportUint16Abgr ||
             color.export_format == kExportSint16Abgr) {
-          if (exported.mask != 3)
+          if (exported.mask & ~3u)
             throw std::runtime_error("unsupported packed graphics color export mask");
+          component_mask = ((exported.mask & 1) ? 3u : 0u) | ((exported.mask & 2) ? 12u : 0u);
           for (uint32_t c = 0; c < 4; ++c) {
             const uint16_t half = exported.values[c / 2] >> (16 * (c % 2));
             if (color.export_format == kExportUint16Abgr)
@@ -1037,7 +1116,7 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
           const uint32_t export_mask = color.export_format == kExport32R    ? 1u
                                        : color.export_format == kExport32Gr ? 3u
                                                                             : 15u;
-          if (exported.mask != export_mask)
+          if (exported.mask & ~export_mask)
             throw std::runtime_error("unsupported graphics color export mask");
         }
         const uint64_t layer_base =
@@ -1048,7 +1127,9 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
         if (!address)
           throw std::runtime_error("graphics color address is unsupported");
         std::array<uint8_t, 16> previous{}, bytes{};
-        const uint32_t blend = color.blend, write_mask = color.write_mask;
+        const uint32_t blend = color.blend, write_mask = color.write_mask & component_mask;
+        if (!write_mask)
+          continue;
         const uint32_t full_mask = (1u << color.components) - 1;
         if (((blend & kBlendEnable) || (write_mask & full_mask) != full_mask) &&
             memory.read(*address, std::as_writable_bytes(std::span{previous}.first(color.bytes))) !=
@@ -1056,20 +1137,44 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
           throw std::runtime_error("graphics color read failed");
         if (blend & kBlendEnable) {
           std::array<float, 4> source{}, destination{}, constant{};
+          const auto decoded = unpack_buffer_format(color.memory_format, 0xfac,
+                                                    std::span{previous}.first(color.bytes));
           for (uint32_t c = 0; c < 4; ++c) {
-            source[c] = std::clamp(std::bit_cast<float>(components[c]), 0.0f, 1.0f);
-            // UNORM destinations round to twelve significant bits before blending.
-            const uint32_t normalized = std::bit_cast<uint32_t>(previous[c] / 255.0f);
-            destination[c] =
-                std::bit_cast<float>((normalized + 0x7ffu + ((normalized >> 12) & 1)) & ~0xfffu);
-            constant[c] = std::clamp(std::bit_cast<float>(context_[0x105 + c]), 0.0f, 1.0f);
-            // Color blending truncates constants to twelve significant bits.
-            constant[c] = std::bit_cast<float>(std::bit_cast<uint32_t>(constant[c]) & ~0xfffu);
+            source[c] = std::bit_cast<float>(components[c]);
+            destination[c] = std::bit_cast<float>(decoded[c]);
+            constant[c] = std::bit_cast<float>(context_[0x105 + c]);
+            if (color.memory_format == kBufRgba8Unorm) {
+              source[c] = std::clamp(source[c], 0.0f, 1.0f);
+              // UNORM destinations round to twelve significant bits before blending.
+              const uint32_t normalized = decoded[c];
+              destination[c] =
+                  std::bit_cast<float>((normalized + 0x7ffu + ((normalized >> 12) & 1)) & ~0xfffu);
+              constant[c] = std::clamp(constant[c], 0.0f, 1.0f);
+              // Color blending truncates UNORM constants to twelve significant bits.
+              constant[c] = std::bit_cast<float>(std::bit_cast<uint32_t>(constant[c]) & ~0xfffu);
+            }
           }
+          const auto widen = [](const std::array<float, 4> &values) {
+            std::array<double, 4> wide{};
+            std::copy(values.begin(), values.end(), wide.begin());
+            return wide;
+          };
+          // FP16 attachments also truncate blend constants to twelve significant bits.
+          if (color.memory_format == kBufRgba16Float)
+            for (auto &value : constant)
+              value = std::bit_cast<float>(std::bit_cast<uint32_t>(value) & ~0xfffu);
           for (uint32_t c = 0; c < 4; ++c) {
             const uint32_t control = c == 3 && (blend & kBlendSeparateAlpha) ? blend >> 16 : blend;
-            components[c] =
-                std::bit_cast<uint32_t>(blend_component(control, c, source, destination, constant));
+            float result =
+                color.memory_format == kBufRgba8Unorm
+                    ? blend_component(control, c, source, destination, constant)
+                    : static_cast<float>(blend_component(control, c, widen(source),
+                                                         widen(destination), widen(constant)));
+            // Floating attachments preserve signed and out-of-range values.
+            // The FP16 blend result truncates on its way back to the attachment.
+            if (color.memory_format == kBufRgba16Float)
+              result = util::f16_to_f32(util::f32_to_f16_rtz(result));
+            components[c] = std::bit_cast<uint32_t>(result);
           }
         }
         pack_buffer_format(color.memory_format, 0xfac, components,

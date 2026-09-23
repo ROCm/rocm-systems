@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/image_address.h"
+#include "rocjitsu/vm/amdgpu/image_cube.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -30,7 +31,7 @@ inline double round_sample_fixed8(double value) {
   return (lo + (part > 0.5 || (part == 0.5 && std::fmod(lo, 2.0) != 0))) / 256;
 }
 
-/// Prepare GFX11/12 image transfers and sampling, including A16 and 2D arrays.
+/// Prepare GFX11/12 image transfers and sampling.
 inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t resource,
                                    uint32_t data, std::array<uint32_t, 7> coords, uint32_t dim,
                                    uint32_t mask, bool d16, bool unsupported_flags,
@@ -44,7 +45,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   const auto arch = wf.cu().arch();
   const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
   if ((!gfx12 && arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) ||
-      unsupported_flags || (dim != 0 && dim != 1 && dim != 5) || !mask)
+      unsupported_flags || (dim != 0 && dim != 1 && dim != 3 && dim != 5) || !mask)
     return unsupported();
   std::array<uint32_t, 8> r{};
   for (uint32_t i = 0; i < r.size(); ++i)
@@ -53,6 +54,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   for (uint32_t i = 0; i < r.size(); ++i)
     r[i] = read_scalar_selector(wf, resource + i);
   const uint32_t type = r[3] >> 28;
+  const bool is_array = type == 11 || type == 13;
   const uint32_t swizzle = (r[3] >> 20) & 31;
   uint32_t width = ((r[1] >> 30) | ((r[2] & (gfx12 ? 0x3fff : 0xfff)) << 2)) + 1;
   uint32_t height = ((r[2] >> 14) & (gfx12 ? 0xffff : 0x3fff)) + 1;
@@ -65,16 +67,21 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   const uint32_t first_level = gfx12 ? (r[1] >> 25) & 31 : (r[3] >> 12) & 15;
   const uint32_t last_level = gfx12 ? (r[3] >> 15) & 31 : (r[3] >> 16) & 15;
   const bool sample = sampler != ~0u;
+  if (dim == 3 && !sample)
+    return unsupported();
   d.image_sampling = sample;
   const uint32_t first_layer = (r[4] >> 16) & (gfx12 ? 0x3fff : 0x1fff);
-  const uint32_t last_layer = r[4] & (gfx12 ? 0x3fff : 0x1fff);
-  if ((type != 8 && type != 9 && type != 13) || (dim == 0 && type != 8) ||
-      (type == 8 && (height != 1 || swizzle)) || (type != 13 && (r[4] >> 16)) || !bytes ||
-      (type == 13 && (first_layer > last_layer || (r[4] & (gfx12 ? 0xc000c000u : 0xe000e000u)))) ||
+  const uint32_t last_layer = is_array ? r[4] & (gfx12 ? 0x3fff : 0x1fff) : 0;
+  if ((type != 8 && type != 9 && !is_array) || (dim == 0 && type != 8) ||
+      (type == 8 && (height != 1 || swizzle)) || (!is_array && (r[4] >> 16)) || !bytes ||
+      (is_array && (first_layer > last_layer || (r[4] & (gfx12 ? 0xc000c000u : 0xe000e000u)))) ||
       first_level > last_level || last_level > max_level ||
-      (max_level && ((type != 13 && r[4]) || compressed)) ||
+      (max_level && ((!is_array && r[4]) || compressed)) ||
       (!d.is_load &&
        (d.image_srgb || (mask != 15 && !(mask == 1 && format >= 20 && format <= 22)))))
+    return unsupported();
+  if (dim == 3 && (type != 11 || width != height || first_layer % 6 || last_layer < first_layer ||
+                   last_layer - first_layer < 5))
     return unsupported();
   const uint32_t resource_width = width, resource_height = height;
   const auto mip =
@@ -83,13 +90,15 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
     return unsupported();
   width = mip->width;
   height = mip->height;
-  bool normalized = true;
-  uint32_t min_filter = 0, mag_filter = 0, mip_filter = 0;
+  bool normalized = true, seamless_cube = false;
+  uint32_t min_filter = 0, mag_filter = 0, mip_filter = 0, max_anisotropy = 1;
   double min_lod = 0, max_lod = 0, lod_bias = 0;
   uint32_t coordinate_offset = 0;
   uint32_t wrap_x = 2, wrap_y = 2;
   if (sample) {
-    if ((dim != 1 && (dim != 5 || type != 13)) || !d.is_load)
+    // RADV's blit shaders use array coordinates for single-layer 2D resources
+    // as well. Their descriptor still bounds the selected layer to zero.
+    if ((dim != 1 && (dim != 5 || (type != 9 && type != 13)) && dim != 3) || !d.is_load)
       return unsupported();
     std::array<uint32_t, 4> s{};
     for (uint32_t i = 0; i < s.size(); ++i) {
@@ -102,20 +111,29 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
     mag_filter = (s[2] >> 20) & 3;
     min_filter = (s[2] >> 22) & 3;
     mip_filter = (s[2] >> 26) & 3;
+    const uint32_t ratio = (s[0] >> 9) & 7;
+    if (ratio > 4)
+      return unsupported();
+    max_anisotropy = 1u << ratio;
     const auto supported_wrap = [](uint32_t wrap) { return wrap <= 3 || wrap == 6; };
     if (!supported_wrap(wrap_x) || !supported_wrap(wrap_y) ||
-        (s[0] & ((7u << 9) | (7u << 12) | (3u << 29) | (3u << 19))) || mag_filter > 1 ||
-        min_filter > 1 || (s[2] & (3u << 24)) || mip_filter > 2)
+        (s[0] & ((7u << 12) | (3u << 29) | (3u << 19))) || (s[2] & (3u << 24)) || mip_filter > 2)
       return unsupported();
+    seamless_cube = dim == 3 && !(s[0] & (1u << 28));
+    if (seamless_cube)
+      wrap_x = wrap_y = 2;
     normalized = !(s[0] & (1u << 15));
+    if (dim == 3 && !normalized)
+      return unsupported();
     d.image_srgb &= !(s[0] & (1u << 31));
     min_lod = (s[1] & (gfx12 ? 0x1fff : 0xfff)) / 256.0;
     max_lod = ((s[1] >> (gfx12 ? 13 : 12)) & (gfx12 ? 0x1fff : 0xfff)) / 256.0;
     // The two signed bias fields must be sign-extended separately.
     lod_bias = (int32_t((s[2] & 0x3fff) ^ 0x2000) - 0x2000) / 256.0 +
                (int32_t(((s[2] >> 14) & 0x3f) ^ 0x20) - 0x20) / 16.0;
-    // RGBA8 UNORM/sRGB and one-, two- or four-component FP16 filtering.
-    const bool filterable = format == 42 || format == 13 || format == 29 || format == 57;
+    // RGBA8 UNORM/sRGB and one-, two- or four-component floating-point filtering.
+    const bool filterable = format == 42 || format == 13 || format == 29 || format == 57 ||
+                            format == 22 || format == 50 || format == 63;
     if (min_lod > max_lod || ((min_filter || mag_filter || mip_filter == 2) && !filterable))
       return unsupported();
     coordinate_offset = sample_mode == ImageSampleMode::Bias          ? 1
@@ -126,6 +144,10 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
         return unsupported(); // Custom border-color tables.
       d.image_sample = std::make_unique<ImageSampleAccess>();
       d.image_sample->tap_count = mip_filter == 2 ? 8 : (min_filter || mag_filter ? 4 : 1);
+      d.image_sample->texels_per_tap = seamless_cube ? 3 : 1;
+      d.image_sample->tap_count *= d.image_sample->texels_per_tap;
+      d.image_sample->taps_per_filter = d.image_sample->tap_count;
+      d.image_sample->taps.resize(d.image_sample->tap_count);
       d.image_sample->border_color = s[3] >> 30;
     }
   }
@@ -147,7 +169,8 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   const uint32_t registers = d16 ? (d.buffer_components + 1) / 2 : d.buffer_components;
   if (data >= wf.num_vgprs() || registers > wf.num_vgprs() - data)
     return unsupported();
-  const uint32_t body_components = 2 + (dim == 5) + (sample_mode == ImageSampleMode::Explicit);
+  const uint32_t body_components =
+      2 + (dim == 5 || dim == 3) + (sample_mode == ImageSampleMode::Explicit);
   const uint32_t load_components = dim == 5 ? 3 : dim == 0 ? 1 : 2;
   const uint32_t coordinate_count =
       !sample ? (a16 ? (load_components + 1) / 2 : load_components)
@@ -201,7 +224,17 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
       double u = read(coordinate_offset, lane), v = read(coordinate_offset + 1, lane);
       if (!std::isfinite(u) || !std::isfinite(v))
         return unsupported();
-      uint32_t layer = first_layer;
+      uint32_t layer = first_layer, face = 0;
+      if (dim == 3) {
+        const double selected = read(coordinate_offset + 2, lane);
+        if (!std::isfinite(selected) || selected < 0 || selected > 5 ||
+            selected != std::trunc(selected))
+          return unsupported();
+        face = static_cast<uint32_t>(selected);
+        layer += face;
+        u -= 1;
+        v -= 1;
+      }
       if (dim == 5) {
         const double slice = read(coordinate_offset + 2, lane);
         if (!std::isfinite(slice))
@@ -212,36 +245,108 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
             std::clamp(std::trunc(slice), 0.0, double(last_layer - first_layer)));
       }
       double lod = 0;
+      uint32_t filter_count = 1;
+      double sample_step_u = 0, sample_step_v = 0;
       if (sample_mode == ImageSampleMode::Explicit) {
-        lod = read(coordinate_offset + 2 + (dim == 5), lane);
-      } else if (sample_mode != ImageSampleMode::Zero && (max_level || min_filter != mag_filter)) {
+        lod = read(coordinate_offset + 2 + (dim == 5 || dim == 3), lane);
+      } else if (sample_mode != ImageSampleMode::Zero &&
+                 (max_level || min_filter != mag_filter || (min_filter & 2) || (mag_filter & 2))) {
         double dxu, dxv, dyu, dyv;
+        bool unbounded_cube_footprint = false;
         if (sample_mode == ImageSampleMode::Derivatives) {
           dxu = read(0, lane);
           dxv = read(1, lane);
           dyu = read(2, lane);
           dyv = read(3, lane);
         } else {
+          // Neighboring quad lanes may select different cube faces. Unfold
+          // their coordinates onto this lane's face before taking derivatives.
+          const auto unfolded = [&](uint32_t source_lane) -> std::optional<std::array<double, 2>> {
+            const double su = read(coordinate_offset, source_lane);
+            const double sv = read(coordinate_offset + 1, source_lane);
+            if (!std::isfinite(su) || !std::isfinite(sv))
+              return std::nullopt;
+            if (dim != 3)
+              return std::array{su, sv};
+            const double sf = read(coordinate_offset + 2, source_lane);
+            if (!std::isfinite(sf) || sf < 0 || sf > 5 || sf != std::trunc(sf))
+              return std::nullopt;
+            if (sf == face)
+              return std::array{su - 1, sv - 1};
+            const uint32_t source_face = static_cast<uint32_t>(sf);
+            if (source_face / 2 == face / 2) {
+              // Opposite faces select the coarsest available mip.
+              unbounded_cube_footprint = true;
+              return std::array{u, v};
+            }
+            // Unfold the adjacent face about its shared edge. Perspective
+            // projection would distort the footprint and become singular at
+            // perpendicular directions. Physical GFX11/12 derivatives instead
+            // retain the distance to the edge in each face's coordinates.
+            auto direction = image_cube_direction(source_face, su - 1, sv - 1);
+            const double sign = face & 1 ? -1 : 1;
+            direction[source_face / 2] *= 2 - sign * direction[face / 2];
+            direction[face / 2] = sign;
+            return image_cube_project(face, direction);
+          };
           const uint32_t left = lane & ~1u, top = lane & ~2u;
-          dxu = read(coordinate_offset, left + 1) - read(coordinate_offset, left);
-          dxv = read(coordinate_offset + 1, left + 1) - read(coordinate_offset + 1, left);
-          dyu = read(coordinate_offset, top + 2) - read(coordinate_offset, top);
-          dyv = read(coordinate_offset + 1, top + 2) - read(coordinate_offset + 1, top);
+          const auto l = unfolded(left), r = unfolded(left + 1);
+          const auto t = unfolded(top), b = unfolded(top + 2);
+          if (!l || !r || !t || !b)
+            return unsupported();
+          dxu = (*r)[0] - (*l)[0];
+          dxv = (*r)[1] - (*l)[1];
+          dyu = (*b)[0] - (*t)[0];
+          dyv = (*b)[1] - (*t)[1];
         }
         if (!std::isfinite(dxu) || !std::isfinite(dxv) || !std::isfinite(dyu) ||
             !std::isfinite(dyv))
           return unsupported();
         const double sx = normalized ? width : 1, sy = normalized ? height : 1;
-        const double rho = std::max(std::hypot(dxu * sx, dxv * sy), std::hypot(dyu * sx, dyv * sy));
+        const double xu = dxu * sx, xv = dxv * sy, yu = dyu * sx, yv = dyv * sy;
+        double rho = std::max(std::hypot(xu, xv), std::hypot(yu, yv));
+        if ((min_filter & 2) || (mag_filter & 2)) {
+          // The ellipse axes determine the mip footprint and the direction
+          // along which additional filtered samples cover the major axis.
+          const double a = xu * xu + yu * yu, b = xu * xv + yu * yv;
+          const double c = xv * xv + yv * yv;
+          const double spread = std::hypot(a - c, 2 * b);
+          const double major = std::sqrt(std::max(0.0, (a + c + spread) * 0.5));
+          const double minor = std::sqrt(std::max(0.0, (a + c - spread) * 0.5));
+          rho = std::max(minor, major / max_anisotropy);
+          const double footprint = std::max(1.0, rho);
+          const double ratio = std::clamp(major / footprint, 1.0, double(max_anisotropy));
+          filter_count = 1u << static_cast<uint32_t>(std::ceil(std::log2(ratio)));
+          if (filter_count > 1) {
+            double direction_u = b, direction_v = major * major - a;
+            if (b == 0) {
+              direction_u = a >= c ? 1 : 0;
+              direction_v = a >= c ? 0 : 1;
+            }
+            const double direction_length = std::hypot(direction_u, direction_v);
+            double spacing = major / filter_count;
+            if (ratio <= 2)
+              spacing = footprint * std::clamp(2 * (ratio - 1), 0.0, 1.0);
+            sample_step_u = direction_u / direction_length * spacing / sx;
+            sample_step_v = direction_v / direction_length * spacing / sy;
+          }
+        }
         lod = rho > 0 ? std::log2(rho) : -32;
         lod += lod_bias;
         if (sample_mode == ImageSampleMode::Bias)
           lod += read(0, lane);
+        if (unbounded_cube_footprint) {
+          lod = max_lod;
+          filter_count = 1;
+        }
       }
       if (!std::isfinite(lod))
         return unsupported();
       lod = round_sample_fixed8(std::clamp(lod, min_lod, max_lod));
-      const bool linear = (lod <= 0 ? mag_filter : min_filter) == 1;
+      const uint32_t selected_filter = lod <= 0 ? mag_filter : min_filter;
+      const bool linear = selected_filter & 1;
+      if (!(selected_filter & 2))
+        filter_count = 1;
       lod = mip_filter ? std::clamp(lod, 0.0, double(last_level - first_level)) : 0;
       const uint32_t level = first_level + uint32_t(std::floor(lod + (mip_filter == 1 ? 0.5 : 0)));
       if (wrap_x == 3)
@@ -278,31 +383,76 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
           return static_cast<float>(round_sample_fixed8(value));
         };
         access.mip_fractions[lane] = fraction(lod - std::floor(lod));
-        for (uint32_t tap = 0; tap < access.tap_count; ++tap) {
-          const uint32_t mip_index = tap / 4;
+        access.filter_counts[lane] = filter_count;
+        access.filters.resize(std::max(access.filters.size(), size_t(filter_count)));
+        access.tap_count = std::max(access.tap_count, filter_count * access.taps_per_filter);
+        if (access.tap_count > ImageSampleAccess::kMaxTaps)
+          return unsupported();
+        access.taps.resize(access.tap_count);
+        for (uint32_t tap = 0; tap < filter_count * access.taps_per_filter; ++tap) {
+          const uint32_t filter_index = tap / access.taps_per_filter;
+          const uint32_t filter_tap = tap % access.taps_per_filter;
+          const uint32_t source = filter_tap % access.texels_per_tap;
+          const uint32_t texel = filter_tap / access.texels_per_tap;
+          const uint32_t mip_index = texel / 4;
           const auto selected =
               image_mip_layout(gfx12, swizzle, bytes, resource_width, resource_height,
                                max_level + 1, std::min(level + mip_index, last_level));
           if (!selected)
             return unsupported();
-          double px = u * (normalized ? selected->width : 1) - (linear ? 0.5 : 0);
-          double py = v * (normalized ? selected->height : 1) - (linear ? 0.5 : 0);
+          const double offset = double(filter_index) - 0.5 * (filter_count - 1);
+          const double sample_u = u + offset * sample_step_u;
+          const double sample_v = v + offset * sample_step_v;
+          double px = sample_u * (normalized ? selected->width : 1) - (linear ? 0.5 : 0);
+          double py = sample_v * (normalized ? selected->height : 1) - (linear ? 0.5 : 0);
           // Clamp to texel centers before generating weights. This preserves
           // exact edge texels, including signed zero in a 1x1 mip level.
-          if (linear && (wrap_x == 2 || wrap_x == 3))
+          if (linear && !seamless_cube && (wrap_x == 2 || wrap_x == 3))
             px = std::clamp(px, 0.0, double(selected->width - 1));
-          if (linear && (wrap_y == 2 || wrap_y == 3))
+          if (linear && !seamless_cube && (wrap_y == 2 || wrap_y == 3))
             py = std::clamp(py, 0.0, double(selected->height - 1));
           const double x0 = std::floor(px), y0 = std::floor(py);
-          access.fractions[lane][mip_index] =
+          access.filters[filter_index].fractions[lane][mip_index] =
               linear ? std::array{fraction(px - x0), fraction(py - y0)} : std::array{0.0f, 0.0f};
-          const auto tx = address_coordinate(x0 + (linear ? tap & 1 : 0), selected->width, wrap_x);
-          const auto ty =
-              address_coordinate(y0 + (linear ? (tap >> 1) & 1 : 0), selected->height, wrap_y);
+          const double raw_x = x0 + (linear ? texel & 1 : 0);
+          const double raw_y = y0 + (linear ? (texel >> 1) & 1 : 0);
+          std::optional<uint32_t> tx, ty;
+          uint32_t selected_layer = layer;
+          if (seamless_cube) {
+            const bool corner =
+                (raw_x < 0 || raw_x >= selected->width) && (raw_y < 0 || raw_y >= selected->height);
+            const double cx = std::clamp(raw_x, 0.0, double(selected->width - 1));
+            const double cy = std::clamp(raw_y, 0.0, double(selected->height - 1));
+            if (corner) {
+              access.filters[filter_index].cube_corners[lane][mip_index] |= 1u << (texel % 4);
+              // The missing corner texel is shared by the three incident faces.
+              if (source == 0) {
+                tx = static_cast<uint32_t>(cx);
+                ty = static_cast<uint32_t>(cy);
+              } else {
+                const auto mapped = image_cube_texel(face, source == 1 ? raw_x : cx,
+                                                     source == 1 ? cy : raw_y, selected->width);
+                tx = mapped.x;
+                ty = mapped.y;
+                selected_layer = first_layer + mapped.face;
+              }
+            } else {
+              if (source)
+                continue;
+              const auto mapped = image_cube_texel(face, raw_x, raw_y, selected->width);
+              tx = mapped.x;
+              ty = mapped.y;
+              selected_layer = first_layer + mapped.face;
+            }
+          } else {
+            tx = address_coordinate(raw_x, selected->width, wrap_x);
+            ty = address_coordinate(raw_y, selected->height, wrap_y);
+          }
           if (!tx || !ty)
             continue;
-          const uint64_t selected_base = image_layer_base(
-              gfx12, resource_base + selected->offset, selected->slice_size, layer, bytes, swizzle);
+          const uint64_t selected_base =
+              image_layer_base(gfx12, resource_base + selected->offset, selected->slice_size,
+                               selected_layer, bytes, swizzle);
           const auto address =
               gfx12 ? gfx12_image_address(selected_base, *tx + selected->tail_x,
                                           *ty + selected->tail_y,
@@ -314,6 +464,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
             return unsupported();
           access.taps[tap].addresses[lane] = *address;
           access.taps[tap].coordinates[lane] = *tx | (*ty << 16);
+          access.taps[tap].layers[lane] = selected_layer;
           access.taps[tap].lane_mask |= uint64_t{1} << lane;
         }
         d.per_lane_addr[lane] = access.taps[0].addresses[lane];
@@ -340,11 +491,11 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
       continue;
     }
     const uint32_t relative_layer = dim == 5 ? load_coordinate(2) : 0;
-    if (type != 13 && relative_layer)
+    if (!is_array && relative_layer)
       return unsupported();
-    if (x >= width || y >= height || (type == 13 && relative_layer > last_layer - first_layer))
+    if (x >= width || y >= height || (is_array && relative_layer > last_layer - first_layer))
       continue;
-    const uint32_t layer = type == 13 ? first_layer + relative_layer : 0;
+    const uint32_t layer = is_array ? first_layer + relative_layer : 0;
     const uint64_t layer_base =
         image_layer_base(gfx12, base, mip->slice_size, layer, bytes, swizzle);
     const auto address = gfx12 ? gfx12_image_address(layer_base, x + mip->tail_x, y + mip->tail_y,

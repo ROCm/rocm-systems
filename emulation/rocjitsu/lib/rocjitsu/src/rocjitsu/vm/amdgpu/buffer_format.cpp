@@ -114,7 +114,8 @@ double round_even(double value) {
 
 constexpr float kFilterNan = std::bit_cast<float>(0xffc00000u);
 
-double filter_float_texels(std::array<double, 4> channels, const std::array<double, 4> &weights) {
+double filter_float_texels(std::array<double, 4> channels, const std::array<double, 4> &weights,
+                           uint32_t unaligned = 0, uint32_t precision = 12) {
   double maximum = 0;
   uint32_t active = 0, selected = 0;
   bool positive_inf = false, negative_inf = false;
@@ -141,12 +142,13 @@ double filter_float_texels(std::array<double, 4> channels, const std::array<doub
   if (active == 1)
     return channels[selected]; // Preserve signed zero at an exact texel center.
 
-  // RDNA3/4 sRGB and FP16 filters align contributing texels to a shared
-  // exponent with twelve significant bits, truncating toward zero.
+  // RDNA3/4 filters align contributing texels to a shared exponent,
+  // truncating toward zero: twelve bits for sRGB/FP16, twenty-five for FP32.
   const int exponent = maximum > 0 ? std::ilogb(maximum) : 0;
-  const double scale = std::ldexp(1.0, 11 - exponent);
-  for (auto &channel : channels)
-    channel = std::trunc(channel * scale) / scale;
+  const double scale = std::ldexp(1.0, int(precision) - 1 - exponent);
+  for (uint32_t i = 0; i < channels.size(); ++i)
+    if (!(unaligned & (1u << i)))
+      channels[i] = std::trunc(channels[i] * scale) / scale;
   // Weighted zero sums are positive, including sums of only negative zeros.
   return 0.0 + channels[0] * weights[0] + channels[1] * weights[1] + channels[2] * weights[2] +
          channels[3] * weights[3];
@@ -413,40 +415,61 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
         const uint32_t selector = (d.buffer_selectors >> (3 * c)) & 7;
         const bool unorm8 = format.number == Number::Unorm && format.widths[0] == 8 &&
                             (!d.image_srgb || selector == 7);
-        const auto filter_level = [&](uint32_t level) {
-          const double x = d.image_sample->fractions[lane][level][0];
-          const double y = d.image_sample->fractions[lane][level][1];
-          std::array<double, 4> channels{};
-          for (uint32_t tap = 0; tap < 4; ++tap) {
-            channels[tap] = std::bit_cast<float>(texels[level * 4 + tap][c]);
-            if (unorm8)
-              channels[tap] = round_even(channels[tap] * 255);
+        const auto filter_sample = [&](uint32_t filter_index) {
+          const auto filter_level = [&](uint32_t level) {
+            const double x = d.image_sample->filters[filter_index].fractions[lane][level][0];
+            const double y = d.image_sample->filters[filter_index].fractions[lane][level][1];
+            std::array<double, 4> channels{};
+            const auto &access = *d.image_sample;
+            const uint32_t corners = access.filters[filter_index].cube_corners[lane][level];
+            for (uint32_t tap = 0; tap < 4; ++tap) {
+              const uint32_t first =
+                  filter_index * access.taps_per_filter + (level * 4 + tap) * access.texels_per_tap;
+              const auto channel = [&](uint32_t source) {
+                const double value = std::bit_cast<float>(texels[first + source][c]);
+                return unorm8 ? round_even(value * 255) : value;
+              };
+              channels[tap] = channel(0);
+              if (corners & (1u << tap))
+                channels[tap] =
+                    (channels[tap] * 21846 + channel(1) * 21845 + channel(2) * 21845) / 65536;
+            }
+            const std::array weights{(1 - x) * (1 - y), x * (1 - y), (1 - x) * y, x * y};
+            if (!unorm8)
+              return filter_float_texels(
+                  channels, weights, corners,
+                  format.number == Number::Float && format.widths[0] == 32 ? 25 : 12);
+            return channels[0] * weights[0] + channels[1] * weights[1] + channels[2] * weights[2] +
+                   channels[3] * weights[3];
+          };
+          double filtered = filter_level(0);
+          if (d.image_sample->taps_per_filter == 8 * d.image_sample->texels_per_tap) {
+            const double fraction = d.image_sample->mip_fractions[lane];
+            if (unorm8) {
+              // Each weighted mip retains nineteen fractional texel-value bits
+              // before the two contributions are added.
+              filtered = (round_even(std::ldexp(filtered * (1 - fraction), 19)) +
+                          round_even(std::ldexp(filter_level(1) * fraction, 19))) /
+                         std::ldexp(1.0, 19);
+            } else {
+              // Do not multiply an unused mip's NaN/infinity by zero, or lose
+              // signed zero at an exact mip level.
+              if (fraction == 1)
+                filtered = filter_level(1);
+              else if (fraction != 0)
+                filtered = 0.0 + filtered * (1 - fraction) + filter_level(1) * fraction;
+              if (std::isnan(filtered))
+                filtered = kFilterNan;
+            }
           }
-          const std::array weights{(1 - x) * (1 - y), x * (1 - y), (1 - x) * y, x * y};
-          if (!unorm8)
-            return filter_float_texels(channels, weights);
-          return channels[0] * weights[0] + channels[1] * weights[1] + channels[2] * weights[2] +
-                 channels[3] * weights[3];
+          return filtered;
         };
-        double filtered = filter_level(0);
-        if (d.image_sample->tap_count == 8) {
-          const double fraction = d.image_sample->mip_fractions[lane];
-          if (unorm8) {
-            // Each weighted mip retains nineteen fractional texel-value bits
-            // before the two contributions are added.
-            filtered = (round_even(std::ldexp(filtered * (1 - fraction), 19)) +
-                        round_even(std::ldexp(filter_level(1) * fraction, 19))) /
-                       std::ldexp(1.0, 19);
-          } else {
-            // Do not multiply an unused mip's NaN/infinity by zero, or lose
-            // signed zero at an exact mip level.
-            if (fraction == 1)
-              filtered = filter_level(1);
-            else if (fraction != 0)
-              filtered = 0.0 + filtered * (1 - fraction) + filter_level(1) * fraction;
-            if (std::isnan(filtered))
-              filtered = kFilterNan;
-          }
+        const uint32_t filter_count = d.image_sample->filter_counts[lane];
+        double filtered = filter_sample(0);
+        if (filter_count > 1) {
+          for (uint32_t filter_index = 1; filter_index < filter_count; ++filter_index)
+            filtered += filter_sample(filter_index);
+          filtered /= filter_count;
         }
         if (unorm8) {
           // Preserve thirteen fractional texel bits, then normalize by byte replication.
@@ -461,6 +484,12 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
             normalized = (normalized + (uint64_t{1} << (shift - 1))) >> shift;
           filtered = std::ldexp(static_cast<double>(normalized), static_cast<int>(shift) - 34);
         } else if (std::isfinite(filtered) && filtered != 0) {
+          if (format.number == Number::Float && format.widths[0] == 32) {
+            // FP32 filtering retains 35 signed significant bits before the
+            // final rounding. Discarding signed low bits rounds downward.
+            const double scale = std::ldexp(1.0, 34 - std::ilogb(std::abs(filtered)));
+            filtered = std::floor(filtered * scale) / scale;
+          }
           // The floating-point filter rounds its result to 29 significant
           // bits before conversion to FP32. This intermediate rounding can
           // turn a value on either side of an FP32 midpoint into an exact tie.

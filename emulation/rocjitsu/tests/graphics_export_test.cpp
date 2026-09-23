@@ -89,6 +89,35 @@ protected:
     (void)cu_->execute_instruction(instruction.get(), *wave_);
   }
 
+  void sample(uint8_t opcode, uint8_t dim) {
+    std::array<uint32_t, 4> words{};
+    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
+      const auto encoded = rdna4::build_vsample(opcode, {.dim = dim,
+                                                         .dmask = 15,
+                                                         .vdata = 12,
+                                                         .rsrc = 8,
+                                                         .samp = 4,
+                                                         .vaddr0 = 0,
+                                                         .vaddr1 = 1,
+                                                         .vaddr2 = 2,
+                                                         .vaddr3 = 3});
+      std::copy(encoded.begin(), encoded.end(), words.begin());
+    } else {
+      const auto encoded = rdna3::build_mimg(
+          opcode, {.dim = dim, .dmask = 15, .vaddr = 0, .vdata = 12, .srsrc = 2, .ssamp = 1});
+      std::copy(encoded.begin(), encoded.end(), words.begin());
+    }
+    auto decoded = decoder_->decode(words.data());
+    ASSERT_FALSE(decoded.failed());
+    auto instruction = std::move(decoded).value();
+    ASSERT_TRUE(instruction->is_memory_op());
+    ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
+    ASSERT_FALSE(wave_->instruction_execution_failed());
+    ASSERT_NE(instruction->data(), nullptr);
+    amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
+    pipeline.issue(instruction.release(), *wave_);
+  }
+
   void execute(uint8_t target, uint8_t mask, bool row = false) {
     std::array<uint32_t, 2> words;
     if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4)
@@ -303,8 +332,109 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
     uint32_t expected_coverage = 0;
     bool passthrough = false;
     bool viewport_scissor = false;
+    std::optional<std::array<std::array<float, 4>, 3>> positions{};
   };
+  // Additional coverage masks were captured on physical gfx1100/gfx1201.
   const Case cases[] = {
+      {.name = "all vertices behind eye",
+       .outcome = Outcome::Empty,
+       .clip_control = 1u << 19,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x0,
+       .positions = std::array<std::array<float, 4>, 3>{{{-0.75f, -0.5f, 0.5f, -1.0f},
+                                                         {0.75f, -0.5f, 0.5f, -1.0f},
+                                                         {0.0f, 0.75f, 0.5f, -1.0f}}}},
+      {.name = "top vertex behind eye",
+       .clip_control = 1u << 19,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0xff0,
+       .positions = std::array<std::array<float, 4>, 3>{{{-0.75f, -0.5f, 0.25f, 1.0f},
+                                                         {0.75f, -0.5f, 0.25f, 1.0f},
+                                                         {0.0f, 0.75f, 0.25f, -0.5f}}}},
+      {.name = "left vertex behind eye",
+       .clip_control = 1u << 19,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x777,
+       .positions = std::array<std::array<float, 4>, 3>{{{-0.75f, -0.5f, 0.25f, -0.5f},
+                                                         {0.75f, -0.5f, 0.25f, 1.0f},
+                                                         {0.0f, 0.75f, 0.25f, 1.0f}}}},
+      {.name = "two vertices behind eye",
+       .clip_control = 1u << 19,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x1,
+       .positions = std::array<std::array<float, 4>, 3>{{{-0.75f, -0.5f, 0.25f, 1.0f},
+                                                         {0.75f, -0.5f, 0.25f, -0.5f},
+                                                         {0.0f, 0.75f, 0.25f, -0.5f}}}},
+      {.name = "mixed W outside viewport",
+       .outcome = Outcome::Empty,
+       .clip_control = 1u << 19,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x0,
+       .positions = std::array<std::array<float, 4>, 3>{{{-2.0f, -2.0f, 0.25f, 1.0f},
+                                                         {2.0f, -2.0f, 0.25f, 1.0f},
+                                                         {0.0f, -2.0f, 0.25f, -1.0f}}}},
+      {.name = "near plane and eye clipping",
+       .clip_control = 1u << 19,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x7773,
+       .positions = std::array<std::array<float, 4>, 3>{{{-1.25f, -0.5f, -0.25f, -0.5f},
+                                                         {1.25f, -0.5f, 0.5f, 2.0f},
+                                                         {0.0f, 1.75f, 0.125f, 0.5f}}}},
+      {.name = "unequal W across eye plane",
+       .clip_control = 1u << 19,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0xcc80,
+       .positions = std::array<std::array<float, 4>, 3>{{{1.5f, 1.0f, 0.125f, -0.25f},
+                                                         {-0.25f, 1.5f, 0.25f, 1.0f},
+                                                         {0.75f, -1.0f, 0.5f, 2.0f}}}},
+      {.name = "top vertex at zero W",
+       .clip_control = 1u << 19,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x7770,
+       .positions = std::array<std::array<float, 4>, 3>{{{-0.75f, -0.5f, 0.25f, 1.0f},
+                                                         {0.75f, -0.5f, 0.25f, 1.0f},
+                                                         {0.0f, 0.75f, 0.25f, 0.0f}}}},
+      {.name = "left vertex at zero W",
+       .clip_control = 1u << 19,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x777,
+       .positions = std::array<std::array<float, 4>, 3>{{{-0.75f, -0.5f, 0.25f, 0.0f},
+                                                         {0.75f, -0.5f, 0.25f, 1.0f},
+                                                         {0.0f, 0.75f, 0.25f, 1.0f}}}},
+      {.name = "near-zero W",
+       .clip_control = 1u << 19,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x777,
+       .positions = std::array<std::array<float, 4>, 3>{{{-0.75f, -0.5f, 0.25f, 1e-10f},
+                                                         {0.75f, -0.5f, 0.25f, 1.0f},
+                                                         {0.0f, 0.75f, 0.25f, 1.0f}}}},
+      {.name = "overflowing initial projection",
+       .clip_control = 1u << 19,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0x777,
+       .positions = std::array<std::array<float, 4>, 3>{{{-0.75f, -0.5f, 0.25f, 1e-39f},
+                                                         {0.75f, -0.5f, 0.25f, 1.0f},
+                                                         {0.0f, 0.75f, 0.25f, 1.0f}}}},
+      {.name = "guard-band horizontal clipping",
+       .clip_control = 1u << 19,
+       .full_scissor = true,
+       .triangle = true,
+       .expected_coverage = 0xff0,
+       .positions = std::array<std::array<float, 4>, 3>{{{-100000000.0f, -0.5f, 0.25f, 1.0f},
+                                                         {100000000.0f, -0.5f, 0.25f, 1.0f},
+                                                         {0.0f, 0.75f, 0.25f, 1.0f}}}},
+
       {.name = "integer coverage"},
       {.name = "viewport scissor", .expected_coverage = 0x440, .viewport_scissor = true},
       {.name = "unequal W and explicit vertex parameters", .inputs = 0x8f28, .passthrough = true},
@@ -467,15 +597,22 @@ TEST_P(GraphicsExportTest, RasterCoverageFragmentInputsAndUnsupportedStates) {
       state.context_registers[0x94] = 2 | (1 << 16);
       state.context_registers[0x95] = (3 - gfx12) | ((3 - gfx12) << 16);
     }
+    if (test.positions) {
+      state.context_registers[gfx12 ? 0x10b : 0x2fa] =
+          state.context_registers[gfx12 ? 0x10d : 0x2fc] = std::bit_cast<uint32_t>(16382.5f);
+    }
     const float extent = test.extent;
     auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
     for (uint32_t i = 0; i < 3; ++i) {
       const float w = test.passthrough ? float(1u << i) : 1.0f;
-      const std::array<uint32_t, 4> position{
+      std::array<uint32_t, 4> position{
           std::bit_cast<uint32_t>((i == 2 ? extent : -extent) * w),
           std::bit_cast<uint32_t>((i == 1 ? extent : -extent) * w),
           std::bit_cast<uint32_t>(!test.first_vertex_depth_only || i == 0 ? test.depth : 0.0f),
           std::bit_cast<uint32_t>(w)};
+      if (test.positions)
+        for (uint32_t c = 0; c < 4; ++c)
+          position[c] = std::bit_cast<uint32_t>((*test.positions)[i][c]);
       draw->export_lane(*wave_, i, 12, 15, position);
     }
     draw->export_lane(*wave_, 0, 20, 1,
@@ -673,11 +810,13 @@ TEST_P(GraphicsExportTest, MergedVertexUserCountExcludesSystemRingPair) {
 TEST_P(GraphicsExportTest, TriangleAndRectangleListsKeepTrailingVerticesWithoutCreatingPrimitives) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   for (uint32_t primitive : {4u, 17u})
-    for (uint32_t vertices : {4u, 5u, 31u, 32u, 64u, 65u}) {
+    for (const auto [vertices, instances] :
+         {std::pair{4u, 2u}, {5u, 2u}, {31u, 2u}, {32u, 2u}, {64u, 2u}, {65u, 2u}, {3u, 8192u}}) {
       SCOPED_TRACE(testing::Message() << "vertices=" << vertices << ", primitive="
                                       << (primitive == 4 ? "triangle list" : "rectangle list"));
       amdgpu::Pm4QueueState state;
-      state.num_instances = 2;
+      state.num_instances = instances;
+      state.sh_registers[0x8b] = (gfx12 ? 1u : 3u) << 16;
       state.uconfig_registers[0x242] = primitive;
       auto &context = state.context_registers;
       context[gfx12 ? 0x2a6 : 0x2d5] = 1u << 22; // Wave32: groups of thirty vertices.
@@ -699,12 +838,13 @@ TEST_P(GraphicsExportTest, TriangleAndRectangleListsKeepTrailingVerticesWithoutC
       auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), vertices);
       uint32_t invocations = 0, primitives = 0, groups = 0;
       do {
-        ASSERT_LT(groups++, 10u);
+        ASSERT_LT(groups++, instances * ((vertices + 29) / 30));
         draw->initialize(*wave_, 0, 0);
         const uint32_t count = wave_->debug_read_sgpr(3) & 255;
         const uint32_t primitive_count = (wave_->debug_read_sgpr(3) >> 8) & 255;
         for (uint32_t i = 0; i < count; ++i) {
           EXPECT_EQ(wave_->debug_read_vgpr(gfx12 ? 3 : 5, i), invocations % vertices);
+          EXPECT_EQ(wave_->debug_read_vgpr(gfx12 ? 4 : 8, i), invocations / vertices);
           ++invocations;
           draw->export_lane(*wave_, i, 12, 15,
                             {std::bit_cast<uint32_t>(i % 3 == 2 ? 1.0f : -1.0f),
@@ -715,8 +855,8 @@ TEST_P(GraphicsExportTest, TriangleAndRectangleListsKeepTrailingVerticesWithoutC
           draw->export_lane(*wave_, i, 20, 1, {wave_->debug_read_vgpr(0, i), 0, 0, 0});
         primitives += primitive_count;
       } while (draw->advance(*access_));
-      EXPECT_EQ(invocations, 2 * vertices);
-      EXPECT_EQ(primitives, 2 * (vertices / 3));
+      EXPECT_EQ(invocations, instances * vertices);
+      EXPECT_EQ(primitives, instances * (vertices / 3));
       EXPECT_FALSE(wave_->instruction_execution_failed());
     }
 }
@@ -926,6 +1066,8 @@ TEST_P(GraphicsExportTest, LinearImageLoadsRespectDefaultPitchAndArrayDescriptor
                         {"one array layer", 128, 0, 13, 5, 516},
                         {"second array layer", 128, 1, 13, 5, 1540, 1},
                         {"nonzero array view", 128, (2 << 16) | 4, 13, 5, 3588, 1},
+                        {"cube face view", 128, (6 << 16) | 11, 11, 5, 7684, 1},
+                        {"cube face view limit", 128, (6 << 16) | 11, 11, 5, 516, 6, true},
                         {"array view limit", 128, (2 << 16) | 4, 13, 5, 516, 3, true},
                         {"array index overflow", 128, (2 << 16) | 4, 13, 5, 516, 0xffffffff, true}};
   for (bool a16 : {false, true})
@@ -1380,8 +1522,57 @@ TEST_P(GraphicsExportTest, ColorAttachmentsWriteFullTexelsAndPreserveMaskedChann
   struct Case {
     uint32_t data_format, number_format, export_format, bytes, components = 4, mask;
     std::array<uint32_t, 4> exported, expected;
+    uint32_t blend = 0;
+    std::array<uint32_t, 4> initial{0xcccccccc, 0xcccccccc, 0xcccccccc, 0xcccccccc};
   };
   const Case cases[] = {
+      // Physical FP16/FP32 blend captures include product precision and RTZ output.
+      {.data_format = 12,
+       .number_format = 7,
+       .export_format = 4,
+       .bytes = 8,
+       .mask = 3,
+       .exported = {0xbff0c3d8u, 0x2c00c7e8u},
+       .expected = {0x2f10c03du, 0x379040a3u},
+       .blend = 0x40000504,
+       .initial = {0x3400c000u, 0x38004200u}},
+      {.data_format = 12,
+       .number_format = 7,
+       .export_format = 4,
+       .bytes = 8,
+       .mask = 3,
+       .exported = {0xbff0c3f8u, 0x0000c7f8u},
+       .expected = {0xb6b8b818u, 0x319ac95bu},
+       .blend = 0x40000c0b,
+       .initial = {0x3400c000u, 0x38004200u}},
+      {.data_format = 14,
+       .number_format = 7,
+       .export_format = 9,
+       .bytes = 16,
+       .mask = 15,
+       .exported = {0xbf943334u, 0x3fb1cccdu, 0xc116999au, 0x3d666666u},
+       .expected = {0xbff9efaeu, 0x3ea0ce14u, 0x401350a4u, 0x3ef33852u},
+       .blend = 0x40000504,
+       .initial = {0xc0000000u, 0x3e800000u, 0x40400000u, 0x3f000000u}},
+      {.data_format = 14,
+       .number_format = 7,
+       .export_format = 9,
+       .bytes = 16,
+       .mask = 15,
+       .exported = {0xbf956667u, 0x3fb1cccdu, 0xc1173334u, 0x3d2cccccu},
+       .expected = {0xc027f999u, 0x3f177ae2u, 0xc1490001u, 0x3e4f47afu},
+       .blend = 0x40000c0b,
+       .initial = {0xc0000000u, 0x3e800000u, 0x40400000u, 0x3f000000u}},
+      {.data_format = 14,
+       .number_format = 7,
+       .export_format = 9,
+       .bytes = 16,
+       .mask = 15,
+       .exported = {0xbf653334u, 0x3fb1cccdu, 0xc105cccdu, 0x3ee66666u},
+       .expected = {0x3f8d6666u, 0x3f91cccdu, 0xc135cccdu, 0xbd4cccd0u},
+       .blend = 0x40000121,
+       .initial = {0xc0000000u, 0x3e800000u, 0x40400000u, 0x3f000000u}},
+
       // Full-width float and integer values for R32/RG32 attachments.
       {.data_format = 4,
        .number_format = 7,
@@ -1568,6 +1759,28 @@ TEST_P(GraphicsExportTest, ColorAttachmentsWriteFullTexelsAndPreserveMaskedChann
        .mask = 3,
        .exported = {0x45670123, 0xcdef89ab},
        .expected = {0x45670123, 0xcdef89ab}},
+      // RGB-only and sparse component exports preserve the remaining channels.
+      {.data_format = 14,
+       .number_format = 7,
+       .export_format = 9,
+       .bytes = 16,
+       .mask = 7,
+       .exported = {0x3e800000, 0x3f000000, 0x3f400000, 0x3f800000},
+       .expected = {0x3e800000, 0x3f000000, 0x3f400000, 0xcccccccc}},
+      {.data_format = 14,
+       .number_format = 7,
+       .export_format = 9,
+       .bytes = 16,
+       .mask = 10,
+       .exported = {0x3e800000, 0x3f000000, 0x3f400000, 0x3f800000},
+       .expected = {0xcccccccc, 0x3f000000, 0xcccccccc, 0x3f800000}},
+      {.data_format = 12,
+       .number_format = 7,
+       .export_format = 4,
+       .bytes = 8,
+       .mask = 1,
+       .exported = {0x38003400, 0x3c003a00},
+       .expected = {0x38003400, 0xcccccccc}},
       {.data_format = 14,
        .number_format = 7,
        .export_format = 9,
@@ -1598,6 +1811,10 @@ TEST_P(GraphicsExportTest, ColorAttachmentsWriteFullTexelsAndPreserveMaskedChann
       context[gfx12 ? 0x31f : 0x3b8] = 0;
       context[gfx12 ? 0x31b : 0x31d] = test.components < 4 ? 1u << 2 : 0; // FORCE_DST_ALPHA_1
       context[0x318] = 0x1000;
+      context[0x1e0] = test.blend;
+      const float constants[]{-0.75f, 0.3f, 1.25f, 0.65f};
+      for (uint32_t c = 0; c < 4; ++c)
+        context[0x105 + c] = std::bit_cast<uint32_t>(constants[c]);
       context[gfx12 ? 0x214 : 0x8e] = write_mask;
       context[gfx12 ? 0x215 : 0x8f] = 15;
       context[gfx12 ? 0x195 : 0x1c5] = test.export_format;
@@ -1610,7 +1827,8 @@ TEST_P(GraphicsExportTest, ColorAttachmentsWriteFullTexelsAndPreserveMaskedChann
       context[0x91] = gfx12 ? 0 : 1 | (1 << 16);
       context[0x30e] = context[0x30f] = 0xffffffff;
       for (uint32_t offset = 0; offset <= test.bytes; offset += 4)
-        memory_.write32(0x100000 + offset, 0xcccccccc);
+        memory_.write32(0x100000 + offset,
+                        offset < test.bytes ? test.initial[offset / 4] : 0xcccccccc);
 
       auto draw = std::make_shared<amdgpu::GraphicsDraw>(state, GetParam(), 3);
       for (uint32_t i = 0; i < 3; ++i)
@@ -1630,7 +1848,8 @@ TEST_P(GraphicsExportTest, ColorAttachmentsWriteFullTexelsAndPreserveMaskedChann
       for (uint32_t byte = 0; byte < test.bytes; ++byte) {
         const uint32_t component = byte / (test.bytes / test.components);
         const uint8_t expected =
-            write_mask & (1u << component) ? test.expected[byte / 4] >> (8 * (byte % 4)) : 0xcc;
+            ((write_mask & (1u << component)) ? test.expected[byte / 4] : test.initial[byte / 4]) >>
+            (8 * (byte % 4));
         uint8_t actual = 0;
         ASSERT_EQ(access_->read(0x100000 + byte, {reinterpret_cast<std::byte *>(&actual), 1}),
                   amdgpu::VmAccessOutcome::Complete);
@@ -2595,98 +2814,99 @@ TEST_P(GraphicsExportTest, SampledArrayViewsClampLayersAndKeepMipCoordinatesSepa
                                          mip->pitch, 4, 0),
                           0xff000000 | (layer << 8) | level);
     }
-  for (bool a16 : {false, true})
-    for (bool array : {false, true})
-      for (const auto [opcode, name] : {std::pair{27u, "IMAGE_SAMPLE"},
-                                        {28u, "IMAGE_SAMPLE_D"},
-                                        {29u, "IMAGE_SAMPLE_L"},
-                                        {30u, "IMAGE_SAMPLE_B"},
-                                        {31u, "IMAGE_SAMPLE_LZ"}}) {
-        SCOPED_TRACE(testing::Message()
-                     << "a16=" << a16 << ", array=" << array << ", opcode=" << name);
-        const std::array<uint32_t, 8> descriptor{0x1000,
-                                                 (46u << (gfx12 ? 17 : 20)) | (3u << 30) |
-                                                     (3u << (gfx12 ? 12 : 16)),
-                                                 1 | (7u << 14),
-                                                 (13u << 28) | 0xfac | (3u << (gfx12 ? 15 : 16)),
-                                                 (2u << 16) | 4,
-                                                 0,
-                                                 0,
-                                                 0};
-        for (uint32_t r = 0; r < descriptor.size(); ++r)
-          wave_->debug_write_sgpr(8 + r, descriptor[r]);
-        wave_->debug_write_sgpr(4, 2 | (2 << 3) | (2 << 6));
-        wave_->debug_write_sgpr(5, 768u << (gfx12 ? 13 : 12));
-        wave_->debug_write_sgpr(6, 1u << 26);
-        wave_->debug_write_sgpr(7, 0);
-        wave_->set_exec(15);
-        const uint32_t prefix = opcode == 28 ? 4 : opcode == 30 ? 1 : 0;
-        const std::array<uint32_t, 7> registers{6, 0, 4, 8, 9, 10, 11};
-        for (uint32_t lane = 0; lane < 4; ++lane) {
-          std::array<float, 7> values{};
-          if (opcode == 28)
-            values = {0.5f, 0, 0, 0.5f};
-          if (opcode == 30)
-            values[0] = 1;
-          values[prefix] = (lane & 1) * 0.5f;
-          values[prefix + 1] = ((lane >> 1) & 1) * 0.5f;
-          if (array)
-            values[prefix + 2] = lane == 0 ? -100.0f : lane == 3 ? 100.0f : 1.0f;
-          if (opcode == 29)
-            values[prefix + 2 + array] = 1.0f;
-          for (uint32_t i = 0; i < values.size(); ++i)
-            wave_->debug_write_vgpr(registers[i], lane, std::bit_cast<uint32_t>(values[i]));
-          if (a16) {
-            const uint32_t count = 2 + array + (opcode == 29);
-            for (uint32_t i = 0; i < count; i += 2)
-              wave_->debug_write_vgpr(
-                  registers[prefix + i / 2], lane,
-                  util::f32_to_f16(values[prefix + i]) |
-                      (uint32_t(util::f32_to_f16(i + 1 < count ? values[prefix + i + 1] : 0))
-                       << 16));
+  for (uint32_t type : {9u, 13u})
+    for (bool a16 : {false, true})
+      for (bool array : {false, true})
+        for (const auto [opcode, name] : {std::pair{27u, "IMAGE_SAMPLE"},
+                                          {28u, "IMAGE_SAMPLE_D"},
+                                          {29u, "IMAGE_SAMPLE_L"},
+                                          {30u, "IMAGE_SAMPLE_B"},
+                                          {31u, "IMAGE_SAMPLE_LZ"}}) {
+          SCOPED_TRACE(testing::Message() << "type=" << type << ", a16=" << a16
+                                          << ", array=" << array << ", opcode=" << name);
+          const std::array<uint32_t, 8> descriptor{0x1000,
+                                                   (46u << (gfx12 ? 17 : 20)) | (3u << 30) |
+                                                       (3u << (gfx12 ? 12 : 16)),
+                                                   1 | (7u << 14),
+                                                   (type << 28) | 0xfac | (3u << (gfx12 ? 15 : 16)),
+                                                   type == 13 ? (2u << 16) | 4 : 0,
+                                                   0,
+                                                   0,
+                                                   0};
+          for (uint32_t r = 0; r < descriptor.size(); ++r)
+            wave_->debug_write_sgpr(8 + r, descriptor[r]);
+          wave_->debug_write_sgpr(4, 2 | (2 << 3) | (2 << 6));
+          wave_->debug_write_sgpr(5, 768u << (gfx12 ? 13 : 12));
+          wave_->debug_write_sgpr(6, 1u << 26);
+          wave_->debug_write_sgpr(7, 0);
+          wave_->set_exec(15);
+          const uint32_t prefix = opcode == 28 ? 4 : opcode == 30 ? 1 : 0;
+          const std::array<uint32_t, 7> registers{6, 0, 4, 8, 9, 10, 11};
+          for (uint32_t lane = 0; lane < 4; ++lane) {
+            std::array<float, 7> values{};
+            if (opcode == 28)
+              values = {0.5f, 0, 0, 0.5f};
+            if (opcode == 30)
+              values[0] = 1;
+            values[prefix] = (lane & 1) * 0.5f;
+            values[prefix + 1] = ((lane >> 1) & 1) * 0.5f;
+            if (array)
+              values[prefix + 2] = lane == 0 ? -100.0f : lane == 3 ? 100.0f : 1.0f;
+            if (opcode == 29)
+              values[prefix + 2 + array] = 1.0f;
+            for (uint32_t i = 0; i < values.size(); ++i)
+              wave_->debug_write_vgpr(registers[i], lane, std::bit_cast<uint32_t>(values[i]));
+            if (a16) {
+              const uint32_t count = 2 + array + (opcode == 29);
+              for (uint32_t i = 0; i < count; i += 2)
+                wave_->debug_write_vgpr(
+                    registers[prefix + i / 2], lane,
+                    util::f32_to_f16(values[prefix + i]) |
+                        (uint32_t(util::f32_to_f16(i + 1 < count ? values[prefix + i + 1] : 0))
+                         << 16));
+            }
+          }
+          std::array<uint32_t, 4> words{};
+          if (gfx12) {
+            const auto encoded = rdna4::build_vsample(opcode, {.dim = uint8_t(array ? 5 : 1),
+                                                               .a16 = a16,
+                                                               .dmask = 15,
+                                                               .vdata = 12,
+                                                               .rsrc = 8,
+                                                               .samp = 4,
+                                                               .vaddr0 = 6,
+                                                               .vaddr1 = 0,
+                                                               .vaddr2 = 4,
+                                                               .vaddr3 = 8});
+            std::copy(encoded.begin(), encoded.end(), words.begin());
+          } else {
+            const auto encoded = rdna3::build_mimg(opcode, {.nsa = 1,
+                                                            .dim = uint8_t(array ? 5 : 1),
+                                                            .dmask = 15,
+                                                            .a16 = a16,
+                                                            .vaddr = 6,
+                                                            .vdata = 12,
+                                                            .srsrc = 2,
+                                                            .ssamp = 1});
+            std::copy(encoded.begin(), encoded.end(), words.begin());
+            words[2] = (4 << 8) | (8 << 16) | (9 << 24);
+          }
+          auto decoded = decoder_->decode(words.data());
+          ASSERT_FALSE(decoded.failed());
+          auto instruction = std::move(decoded).value();
+          ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
+          ASSERT_FALSE(wave_->instruction_execution_failed());
+          amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
+          pipeline.issue(instruction.release(), *wave_);
+          for (uint32_t lane = 0; lane < 4; ++lane) {
+            const uint32_t level = opcode == 31 ? 0 : opcode == 29 ? 1 : opcode == 30 ? 3 : 2;
+            const uint32_t layer = type == 9 ? 0 : !array || lane == 0 ? 2 : lane == 3 ? 4 : 3;
+            EXPECT_EQ(wave_->debug_read_vgpr(12, lane), level);
+            EXPECT_EQ(wave_->debug_read_vgpr(13, lane), layer);
+            EXPECT_EQ(wave_->debug_read_vgpr(14, lane), 0u);
+            EXPECT_EQ(wave_->debug_read_vgpr(15, lane), 255u);
           }
         }
-        std::array<uint32_t, 4> words{};
-        if (gfx12) {
-          const auto encoded = rdna4::build_vsample(opcode, {.dim = uint8_t(array ? 5 : 1),
-                                                             .a16 = a16,
-                                                             .dmask = 15,
-                                                             .vdata = 12,
-                                                             .rsrc = 8,
-                                                             .samp = 4,
-                                                             .vaddr0 = 6,
-                                                             .vaddr1 = 0,
-                                                             .vaddr2 = 4,
-                                                             .vaddr3 = 8});
-          std::copy(encoded.begin(), encoded.end(), words.begin());
-        } else {
-          const auto encoded = rdna3::build_mimg(opcode, {.nsa = 1,
-                                                          .dim = uint8_t(array ? 5 : 1),
-                                                          .dmask = 15,
-                                                          .a16 = a16,
-                                                          .vaddr = 6,
-                                                          .vdata = 12,
-                                                          .srsrc = 2,
-                                                          .ssamp = 1});
-          std::copy(encoded.begin(), encoded.end(), words.begin());
-          words[2] = (4 << 8) | (8 << 16) | (9 << 24);
-        }
-        auto decoded = decoder_->decode(words.data());
-        ASSERT_FALSE(decoded.failed());
-        auto instruction = std::move(decoded).value();
-        ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
-        ASSERT_FALSE(wave_->instruction_execution_failed());
-        amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
-        pipeline.issue(instruction.release(), *wave_);
-        for (uint32_t lane = 0; lane < 4; ++lane) {
-          const uint32_t level = opcode == 31 ? 0 : opcode == 29 ? 1 : opcode == 30 ? 3 : 2;
-          const uint32_t layer = !array || lane == 0 ? 2 : lane == 3 ? 4 : 3;
-          EXPECT_EQ(wave_->debug_read_vgpr(12, lane), level);
-          EXPECT_EQ(wave_->debug_read_vgpr(13, lane), layer);
-          EXPECT_EQ(wave_->debug_read_vgpr(14, lane), 0u);
-          EXPECT_EQ(wave_->debug_read_vgpr(15, lane), 255u);
-        }
-      }
 }
 
 TEST_P(GraphicsExportTest, TrilinearUsesDistinctWeightsForNonuniformMipLevels) {
@@ -3335,5 +3555,299 @@ TEST(GraphicsImageMetadataTest, HtileEndpointClearsAndExplicitClearRegister) {
     memory.write32(tag, 0xfffc0001);
     EXPECT_THROW(amdgpu::materialize_gfx11_htile(*access, base, metadata, 9, 9, 17, 13, bytes, 24),
                  std::runtime_error);
+  }
+}
+
+TEST_P(GraphicsExportTest, AnisotropicArraySamplingUsesIndependentLaneFootprints) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  const auto layout = amdgpu::image_mip_layout(gfx12, 0, 4, 64, 16, 1, 0);
+  ASSERT_TRUE(layout);
+  for (uint32_t y = 0; y < 16; ++y)
+    for (uint32_t x = 0; x < 64; ++x) {
+      uint32_t value = x * 1664525u + y * 1013904223u;
+      value ^= value >> 16;
+      value = value * 2246822519u | 0xff000000u;
+      const auto address = gfx12 ? amdgpu::gfx12_image_address(0x100000 + 2 * layout->slice_size, x,
+                                                               y, layout->pitch, 4, 0)
+                                 : amdgpu::gfx11_image_address(0x100000 + 2 * layout->slice_size, x,
+                                                               y, layout->pitch, 4, 0);
+      ASSERT_TRUE(address);
+      memory_.write32(*address, value);
+    }
+  const std::array<uint32_t, 8> descriptor{0x1000,
+                                           (42u << (gfx12 ? 17 : 20)) | (3u << 30),
+                                           15 | (15u << 14),
+                                           (13u << 28) | 0xfac,
+                                           (2u << 16) | 2,
+                                           0,
+                                           0,
+                                           0};
+  for (uint32_t i = 0; i < descriptor.size(); ++i)
+    wave_->debug_write_sgpr(8 + i, descriptor[i]);
+  wave_->debug_write_sgpr(4, 0x92 | (4u << 9));
+  wave_->debug_write_sgpr(5, 0);
+  wave_->debug_write_sgpr(6, (3u << 20) | (3u << 22));
+  wave_->debug_write_sgpr(7, 0);
+  struct Witness {
+    uint32_t query;
+    std::array<uint32_t, 4> expected;
+  };
+  // Exact raw outputs from 64x16 RGBA8 image samples on both physical targets.
+  const Witness witnesses[] = {
+      {905, {0x3e7c3030u, 0x3f197dfeu, 0x3e8f1515u, 0x3f800000u}},
+      {1929, {0x3e999091u, 0x3f019fe0u, 0x3ea60000u, 0x3f800000u}},
+      {3977, {0x3eb72f2fu, 0x3ecd8505u, 0x3ee05adbu, 0x3f800000u}},
+      {8073, {0x3eca9e5eu, 0x3ec755b6u, 0x3ec3de9fu, 0x3f800000u}},
+      {16265, {0x3ee2acadu, 0x3ef34c2cu, 0x3ecb8707u, 0x3f800000u}},
+      {17289, {0x3e7c3030u, 0x3f197dfeu, 0x3e8f1515u, 0x3f800000u}},
+      {18313, {0x3e999091u, 0x3f019fe0u, 0x3ea60000u, 0x3f800000u}},
+      {20361, {0x3eb72f2fu, 0x3ecd8505u, 0x3ee05adbu, 0x3f800000u}},
+      {24457, {0x3eca9e5eu, 0x3ec755b6u, 0x3ec3de9fu, 0x3f800000u}},
+      {32649, {0x3ee2acadu, 0x3ef34c2cu, 0x3ecb8707u, 0x3f800000u}},
+      {33673, {0x3e80b8b9u, 0x3f1c46c7u, 0x3e9e9515u, 0x3f800000u}},
+      {34697, {0x3e7c3030u, 0x3f197dfeu, 0x3e8f1515u, 0x3f800000u}},
+      {36745, {0x3ec3b9bau, 0x3ec38081u, 0x3eda5f5fu, 0x3f800000u}},
+      {40841, {0x3ecbf373u, 0x3ead7afbu, 0x3ea282c3u, 0x3f800000u}},
+      {49033, {0x3ee7f373u, 0x3eed5959u, 0x3eb10525u, 0x3f800000u}},
+  };
+  wave_->set_exec((1u << std::size(witnesses)) - 1);
+  for (uint32_t lane = 0; lane < std::size(witnesses); ++lane) {
+    const uint32_t q = witnesses[lane].query;
+    const float major = (1 + ((q >> 8) & 63)) * 0.25f;
+    const float minor = 0.5f * (1u << (q >> 14));
+    const float values[] = {major / 64, 0, 0, minor / 16, ((q & 255) + 0.5f) / 256, 0.37f, 0};
+    for (uint32_t i = 0; i < std::size(values); ++i)
+      wave_->debug_write_vgpr(i, lane, std::bit_cast<uint32_t>(values[i]));
+  }
+  for (uint32_t c = 0; c < 4; ++c)
+    wave_->debug_write_vgpr(12 + c, 31, 0xdeadbeef);
+  ASSERT_NO_FATAL_FAILURE(sample(28, 5)); // IMAGE_SAMPLE_D, 2D array.
+  for (uint32_t lane = 0; lane < std::size(witnesses); ++lane)
+    for (uint32_t c = 0; c < 4; ++c)
+      EXPECT_EQ(wave_->debug_read_vgpr(12 + c, lane), witnesses[lane].expected[c])
+          << lane << "," << c;
+  for (uint32_t c = 0; c < 4; ++c)
+    EXPECT_EQ(wave_->debug_read_vgpr(12 + c, 31), 0xdeadbeefu);
+}
+
+TEST_P(GraphicsExportTest, CubeSamplingRemapsEdgesCornersAndArrayViewFaces) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  const auto layout = amdgpu::image_mip_layout(gfx12, 0, 8, 4, 4, 1, 0);
+  ASSERT_TRUE(layout);
+  for (uint32_t face = 0; face < 6; ++face)
+    for (uint32_t y = 0; y < 4; ++y)
+      for (uint32_t x = 0; x < 4; ++x) {
+        const auto address =
+            gfx12 ? amdgpu::gfx12_image_address(0x100000 + (6 + face) * layout->slice_size, x, y,
+                                                layout->pitch, 8, 0)
+                  : amdgpu::gfx11_image_address(0x100000 + (6 + face) * layout->slice_size, x, y,
+                                                layout->pitch, 8, 0);
+        ASSERT_TRUE(address);
+        for (uint32_t c = 0; c < 4; ++c)
+          memory_.write16(*address + 2 * c, 0x2800 + face * 0x500 + x * 0x21 + y * 0x31 + c * 0xb);
+      }
+  const std::array<uint32_t, 8> descriptor{0x1000,
+                                           (57u << (gfx12 ? 17 : 20)) | (3u << 30),
+                                           3u << 14,
+                                           (11u << 28) | 0xfac,
+                                           (6u << 16) | 11,
+                                           0,
+                                           0,
+                                           0};
+  for (uint32_t i = 0; i < descriptor.size(); ++i)
+    wave_->debug_write_sgpr(8 + i, descriptor[i]);
+  wave_->debug_write_sgpr(4, 0x92);
+  wave_->debug_write_sgpr(5, 0);
+  wave_->debug_write_sgpr(6, (1u << 20) | (1u << 22));
+  wave_->debug_write_sgpr(7, 0);
+  struct Witness {
+    uint32_t query;
+    std::array<uint32_t, 4> expected;
+  };
+  // Face-edge and corner outputs captured from a 4x4 RGBA16F cube on both cards.
+  const Witness witnesses[] = {
+      {0, {0x3ee3e5e0u, 0x3ee5f93cu, 0x3ee81d19u, 0x3eea30f8u}},
+      {15, {0x3e955181u, 0x3e9694d6u, 0x3e97f04au, 0x3e99345du}},
+      {16, {0x3f0c7f20u, 0x3f0d815au, 0x3f0e9c34u, 0x3f0fceeeu}},
+      {31, {0x3e14e50cu, 0x3e15804eu, 0x3e169c8bu, 0x3e1835ccu}},
+      {32, {0x3fb5d6e3u, 0x3fb741a3u, 0x3fb8ac63u, 0x3fba2763u}},
+      {47, {0x3fb4f27du, 0x3fb65d3du, 0x3fb7c7fdu, 0x3fb942fdu}},
+      {48, {0x3f4a4587u, 0x3f4bf578u, 0x3f4dad47u, 0x3f4f5d38u}},
+      {63, {0x3f4b7619u, 0x3f4d29d8u, 0x3f4eddd9u, 0x3f509198u}},
+      {64, {0x3f1e3f9cu, 0x3f1fcc5du, 0x3f21611du, 0x3f22f5ddu}},
+      {79, {0x3f1f5c34u, 0x3f20e543u, 0x3f227a03u, 0x3f240ec3u}},
+      {80, {0x3fb20a03u, 0x3fb37f43u, 0x3fb50443u, 0x3fb67983u}},
+      {95, {0x3fb2f69du, 0x3fb46bddu, 0x3fb5f0ddu, 0x3fb7661du}},
+      {255, {0x3f14048eu, 0x3f152edcu, 0x3f1658e9u, 0x3f178b37u}},
+      {256, {0x3ee03546u, 0x3ee26d36u, 0x3ee4b5a4u, 0x3ee6ed95u}},
+      {32767, {0x3f127baeu, 0x3f13ee6eu, 0x3f15616eu, 0x3f16cc2eu}},
+      {32768, {0x3e0f1870u, 0x3e1021d0u, 0x3e112b30u, 0x3e123490u}},
+      {65280, {0x3f13270cu, 0x3f144fd4u, 0x3f1578ddu, 0x3f16a9e5u}},
+      {65295, {0x3ed5f1abu, 0x3ed78295u, 0x3ed9143cu, 0x3edabd45u}},
+      {65311, {0x3e94fa4du, 0x3e95c52cu, 0x3e96d088u, 0x3e97dbe4u}},
+      {65327, {0x3f19c82cu, 0x3f1b4f7du, 0x3f1cdabdu, 0x3f1e65fdu}},
+      {65343, {0x3fd8c65au, 0x3fda499bu, 0x3fdbd4dbu, 0x3fdd601bu}},
+      {65359, {0x3f4fa087u, 0x3f516078u, 0x3f5318c7u, 0x3f54d8b8u}},
+      {65520, {0x3facee23u, 0x3fae39fau, 0x3fafa932u, 0x3fb10c5au}},
+      {65535, {0x3f8d244eu, 0x3f8e3680u, 0x3f8f5febu, 0x3f908115u}},
+  };
+  wave_->set_exec((1u << std::size(witnesses)) - 1);
+  for (uint32_t lane = 0; lane < std::size(witnesses); ++lane) {
+    const uint32_t q = witnesses[lane].query;
+    const float values[] = {1 + ((q & 255) + 0.5f) / 256, 1 + ((q >> 8) + 0.5f) / 256,
+                            float((q >> 4) % 6)};
+    for (uint32_t i = 0; i < 3; ++i)
+      wave_->debug_write_vgpr(i, lane, std::bit_cast<uint32_t>(values[i]));
+  }
+  ASSERT_NO_FATAL_FAILURE(sample(31, 3)); // IMAGE_SAMPLE_LZ, cube.
+  for (uint32_t lane = 0; lane < std::size(witnesses); ++lane)
+    for (uint32_t c = 0; c < 4; ++c)
+      EXPECT_EQ(wave_->debug_read_vgpr(12 + c, lane), witnesses[lane].expected[c])
+          << lane << "," << c;
+}
+
+TEST_P(GraphicsExportTest, ImplicitCubeSamplingUnfoldsAdjacentFacesAndBoundsOppositeFaces) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  for (uint32_t level = 0; level < 3; ++level) {
+    const auto mip = amdgpu::image_mip_layout(gfx12, 0, 8, 4, 4, 3, level);
+    ASSERT_TRUE(mip);
+    for (uint32_t face = 0; face < 6; ++face)
+      for (uint32_t y = 0; y < mip->height; ++y)
+        for (uint32_t x = 0; x < mip->width; ++x) {
+          const uint64_t base = 0x100000 + mip->offset + face * mip->slice_size;
+          const auto address = gfx12 ? amdgpu::gfx12_image_address(base, x, y, mip->pitch, 8, 0)
+                                     : amdgpu::gfx11_image_address(base, x, y, mip->pitch, 8, 0);
+          ASSERT_TRUE(address);
+          for (uint32_t c = 0; c < 4; ++c)
+            memory_.write16(*address + 2 * c, 0x3800 + level * 0x400 + face * 0x20);
+        }
+  }
+  const std::array<uint32_t, 8> descriptor{
+      0x1000,   (57u << (gfx12 ? 17 : 20)) | (3u << 30) | (2u << (gfx12 ? 12 : 16)),
+      3u << 14, (11u << 28) | 0xfac | (2u << (gfx12 ? 15 : 16)),
+      5,        0,
+      0,        0};
+  for (uint32_t i = 0; i < descriptor.size(); ++i)
+    wave_->debug_write_sgpr(8 + i, descriptor[i]);
+  wave_->debug_write_sgpr(4, 0x92);
+  wave_->debug_write_sgpr(5, 512u << (gfx12 ? 13 : 12));
+  wave_->debug_write_sgpr(6, 1u << 26);
+  wave_->debug_write_sgpr(7, 0);
+  // Physical RDNA3/4 captures distinguish each mip (0.5, 1, 2) and each face.
+  // Include perpendicular and opposite faces, identical directions, and an edge.
+  for (uint32_t opcode : {27u, 31u}) {
+    struct Case {
+      const char *name;
+      float face, u, expected;
+    };
+    const Case cases[] = {{"perpendicular Y", 2.0f, 1.5f, 2.0f},
+                          {"opposite X", 1.0f, 1.5f, 2.0f},
+                          {"perpendicular Z", 4.0f, 1.5f, 2.0f},
+                          {"identical directions", 0.0f, 1.5f, 0.5f},
+                          {"adjacent Y toward shared edge", 2.0f, 1.75f, 2.0f},
+                          {"adjacent Y away from shared edge", 2.0f, 1.25f, 2.0f},
+                          {"shared edge", 2.0f, 2.0f, 1.0f}};
+    for (const auto &[name, face, u, expected] : cases) {
+      SCOPED_TRACE(opcode == 27 ? "IMAGE_SAMPLE" : "IMAGE_SAMPLE_LZ");
+      SCOPED_TRACE(name);
+      wave_->set_exec(15);
+      for (uint32_t lane = 0; lane < 4; ++lane) {
+        wave_->debug_write_vgpr(0, lane, std::bit_cast<uint32_t>(lane & 1 ? u : 1.5f));
+        wave_->debug_write_vgpr(1, lane, std::bit_cast<uint32_t>(1.5f));
+        wave_->debug_write_vgpr(2, lane, std::bit_cast<uint32_t>(lane & 1 ? face : 0.0f));
+      }
+      ASSERT_NO_FATAL_FAILURE(sample(opcode, 3));
+      // A 0x20 FP16 significand step adds 1/32 of these power-of-two mip colors.
+      for (uint32_t lane = 0; lane < 4; ++lane)
+        for (uint32_t c = 0; c < 4; ++c)
+          EXPECT_EQ(wave_->debug_read_vgpr(12 + c, lane),
+                    std::bit_cast<uint32_t>((opcode == 31 ? 0.5f : expected) *
+                                            (lane & 1 ? 1.0f + face / 32 : 1.0f)));
+    }
+  }
+}
+
+TEST_P(GraphicsExportTest, Fp32FilteringMatchesPhysicalRoundingAndSpecialValues) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  struct Witness {
+    uint32_t pattern, query;
+    std::array<uint32_t, 4> expected;
+  };
+  const Witness witnesses[] = {
+      {0, 0, {0x3ee5747au, 0x3e0e5bc4u, 0x3e12bb23u, 0x3e379a0au}},
+      {0, 1, {0x3ee570cbu, 0x3e0e5f92u, 0x3e12df73u, 0x3e37bad8u}},
+      {0, 255, {0x3ee1c906u, 0x3e122661u, 0x3e36e6b6u, 0x3e58478eu}},
+      {0, 256, {0x3ee56c9du, 0x3e0e8420u, 0x3e12c441u, 0x3e37df6au}},
+      {0, 257, {0x3ee5686fu, 0x3e0e87cfu, 0x3e12e8cdu, 0x3e37fffbu}},
+      {0, 32896, {0x3ebff983u, 0x3e1ca19eu, 0x3e3882c4u, 0x3e5b6214u}},
+      {0, 65535, {0x3e383a88u, 0x3e1b5aa7u, 0x3e7bc5b7u, 0x3e609f98u}},
+      {1, 0, {0xbee5747au, 0xbe0e5bc4u, 0xbe12bb23u, 0xbe379a0au}},
+      {1, 1, {0xbee570cbu, 0xbe0e5f92u, 0xbe12df73u, 0xbe37bad8u}},
+      {1, 255, {0xbee1c906u, 0xbe122661u, 0xbe36e6b6u, 0xbe58478eu}},
+      {1, 256, {0xbee56c9du, 0xbe0e8420u, 0xbe12c441u, 0xbe37df6au}},
+      {1, 257, {0xbee5686fu, 0xbe0e87cfu, 0xbe12e8cdu, 0xbe37fffbu}},
+      {1, 32896, {0xbebff983u, 0xbe1ca19eu, 0xbe3882c4u, 0xbe5b6214u}},
+      {1, 65535, {0xbe383a88u, 0xbe1b5aa7u, 0xbe7bc5b7u, 0xbe609f98u}},
+      {2, 0, {0xc665747au, 0xc70e5bc4u, 0xc712bb23u, 0xc7379a0au}},
+      {2, 1, {0xc6649d22u, 0xc70dd68bu, 0xc71233d9u, 0xc736eff6u}},
+      {2, 255, {0xc46f3ad2u, 0xc51a7dbau, 0xc53f7fa7u, 0xc5630990u}},
+      {2, 256, {0xc6648fe3u, 0xc70dce1fu, 0xc7122904u, 0xc736e36du}},
+      {2, 257, {0xc663b962u, 0xc70d496au, 0xc711a240u, 0xc7363a03u}},
+      {2, 32896, {0xc5749bf0u, 0xc6183ed3u, 0xc61ed772u, 0xc6462b92u}},
+      {2, 65535, {0xc173fe02u, 0xc19ff7edu, 0xc1e1d1d3u, 0xc1e8c899u}},
+      {3, 0, {0xffc00000u, 0x00000000u, 0x80000000u, 0xffc00000u}},
+      {3, 1, {0xffc00000u, 0xbc000000u, 0x3b800000u, 0xffc00000u}},
+      {3, 255, {0xffc00000u, 0xbfff0000u, 0x3f7f0000u, 0xffc00000u}},
+      {3, 256, {0xffc00000u, 0x00000000u, 0xff800000u, 0xffc00000u}},
+      {3, 257, {0xffc00000u, 0xbbff0000u, 0xffc00000u, 0xffc00000u}},
+      {3, 32896, {0xffc00000u, 0xbf000000u, 0xffc00000u, 0xffc00000u}},
+      {3, 65535, {0xffc00000u, 0xbbff0000u, 0xffc00000u, 0xffc00000u}},
+  };
+  for (uint32_t pattern = 0; pattern < 4; ++pattern) {
+    cu_->l1_vector().invalidate_all();
+    cache_.invalidate_all();
+    for (uint32_t t = 0; t < 4; ++t)
+      for (uint32_t c = 0; c < 4; ++c) {
+        uint32_t q = t * 131 + c * 7 + 12345;
+        q ^= q << 13;
+        q ^= q >> 17;
+        q ^= q << 5;
+        uint32_t bits = 0x3e000000 + (q & 0xffffff);
+        if (pattern == 1)
+          bits |= q & 0x80000000;
+        if (pattern == 2)
+          bits = q & 0xff7fffff;
+        if (pattern == 3) {
+          constexpr uint32_t special[]{0,          0x80000000, 1,          0x80000001,
+                                       0x7fffff,   0x807fffff, 0x3f800000, 0xbf800000,
+                                       0x7f800000, 0xff800000, 0x7f800001, 0xff800001,
+                                       0x7fc00001, 0xffc00001, 0x40000000, 0xc0000000};
+          bits = special[q & 15];
+        }
+        const auto address = gfx12 ? amdgpu::gfx12_image_address(0x100000, t % 2, t / 2, 16, 16, 0)
+                                   : amdgpu::gfx11_image_address(0x100000, t % 2, t / 2, 16, 16, 0);
+        ASSERT_TRUE(address);
+        memory_.write32(*address + 4 * c, bits);
+      }
+    const std::array<uint32_t, 8> descriptor{
+        0x1000, (63u << (gfx12 ? 17 : 20)) | (1u << 30), 1u << 14, (9u << 28) | 0xfac, 15, 0, 0, 0};
+    for (uint32_t i = 0; i < descriptor.size(); ++i)
+      wave_->debug_write_sgpr(8 + i, descriptor[i]);
+    wave_->debug_write_sgpr(4, 0x92);
+    wave_->debug_write_sgpr(5, 0);
+    wave_->debug_write_sgpr(6, (1u << 20) | (1u << 22));
+    wave_->debug_write_sgpr(7, 0);
+    wave_->set_exec(1);
+    for (const auto &witness : witnesses) {
+      if (witness.pattern != pattern)
+        continue;
+      wave_->debug_write_vgpr(0, 0,
+                              std::bit_cast<uint32_t>(0.25f + (witness.query & 255) / 512.0f));
+      wave_->debug_write_vgpr(1, 0, std::bit_cast<uint32_t>(0.25f + (witness.query >> 8) / 512.0f));
+      ASSERT_NO_FATAL_FAILURE(sample(31, 1));
+      for (uint32_t c = 0; c < 4; ++c)
+        EXPECT_EQ(wave_->debug_read_vgpr(12 + c, 0), witness.expected[c])
+            << pattern << "," << witness.query << "," << c;
+    }
   }
 }

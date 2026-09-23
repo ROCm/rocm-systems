@@ -1038,7 +1038,9 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
           else
             materialize_gfx11_dcc(memory, image.base, image.metadata, x, y, image.width,
                                   image.height, d.elem_size, image.swizzle, image.pipe_aligned,
-                                  image.layers[lane], image.slice_size);
+                                  d.image_sample ? d.image_sample->taps[tap].layers[lane]
+                                                 : image.layers[lane],
+                                  image.slice_size);
           if (d.is_load)
             read_image_bytes(
                 memory, addresses[lane],
