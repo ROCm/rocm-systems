@@ -28,14 +28,19 @@ phase below therefore opens its own AmdsmiSession rather than caching a handle.
 Requirements
 ------------
 - Root privileges  (modprobe requires root)
-- kmod installed   (modprobe must be on PATH)
+- kmod installed   (modprobe must be on PATH, only if AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1)
 - No GPU workloads running during the run
+- AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1  (test_cycle_memory_partition_modes only --
+  without it, every mode is still staged and its status checked, but the
+  driver is never reloaded, so nothing is actually applied or verified)
 
 Usage
 -----
   1. Install amd-smi-lib & amd-smi-lib-test packages
   2. sudo /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py \
          -k test_cycle_memory_partition_modes -v
+     Add AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1 to also reload the driver and verify
+     each mode was actually applied.
 """
 
 import os
@@ -56,10 +61,15 @@ _DEVICE_POLL_SEC = 2
 # SIGKILL, so the reap after a timeout needs its own bound.
 _REAP_TIMEOUT_SEC = 10
 
-# Debug: reload even when the mode was rejected or already active.
-# This allows the test to exercise reloading the driver without memory partition
-# support.
+# Debug: reload even when the mode was rejected or already active. Only takes
+# effect alongside AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1 below -- that gate is
+# checked first everywhere this is read, so this alone never touches modprobe.
 _ALWAYS_RELOAD = os.environ.get("AMDSMI_TEST_ALWAYS_RELOAD") == "1"
+
+# Opt-in: test_cycle_memory_partition_modes unloads/reloads amdgpu on live
+# hardware. Without this, it still stages every mode and checks the status
+# each write returns, but never actually reloads the driver.
+_ALLOW_DESTRUCTIVE_TESTS = os.environ.get("AMDSMI_ALLOW_DESTRUCTIVE_TESTS") == "1"
 
 _BANNER_WIDTH = 70
 
@@ -218,6 +228,8 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
     @staticmethod
     def _reload_skip_reason(mode, staged, current):
         """Why a reload would change nothing, or None when one is needed."""
+        if not _ALLOW_DESTRUCTIVE_TESTS:
+            return "AMDSMI_ALLOW_DESTRUCTIVE_TESTS not set; staged only, skipping driver reload"
         if _ALWAYS_RELOAD:
             return None
         if not staged:
@@ -322,6 +334,14 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
         if not self.common.check_amdgpu_driver():
             self.common.print(f"  amdgpu is not loaded; cannot restore {mode} -- node left as-is")
             return
+        if not _ALLOW_DESTRUCTIVE_TESTS:
+            # No reload ever ran, so the active mode says nothing about what is
+            # staged. Always re-stage `mode` so a later reload (by anyone) comes
+            # up on it, even if the run aborted before reaching its own restage.
+            if not self._stage_mode(mode):
+                self.fail(f"could not stage restore back to {mode}")
+            self.common.print(f"  staged {mode}; no reload performed (destructive tests disabled)")
+            return
         if self._agreed_mode(self._read_modes()) == mode and not _ALWAYS_RELOAD:
             self.common.print(f"  already on {mode}; nothing to restore")
         else:
@@ -408,7 +428,14 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
 
     def test_cycle_memory_partition_modes(self):
         self.common.print_func_name("")
-        if not shutil.which("modprobe"):
+        if not _ALLOW_DESTRUCTIVE_TESTS:
+            self.common.print(
+                "  AMDSMI_ALLOW_DESTRUCTIVE_TESTS not set; staging + status checks run, but the "
+                "driver is never reloaded, so nothing is actually applied or verified.\n"
+                "  Set AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1 to also reload the driver and verify "
+                "each mode."
+            )
+        elif not shutil.which("modprobe"):
             self.skipTest("Cycling memory partition modes needs modprobe (install kmod)")
 
         # -- Phase 1: what the device reports today -------------------------
@@ -473,5 +500,10 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
         self._separator("Summary")
         if applied:
             self.common.print(f"  Modes applied : {', '.join(applied)}")
+        elif not _ALLOW_DESTRUCTIVE_TESTS:
+            self.common.print(
+                "  AMDSMI_ALLOW_DESTRUCTIVE_TESTS not set; staged every mode but skipped "
+                "reload/verify"
+            )
         else:
             self.common.print("  No mode was settable; validated the reported status instead")
