@@ -291,6 +291,8 @@ public:
 
   void set_precise_alu_exceptions (bool enabled);
 
+  void set_reporting_lds_exceptions (bool enabled);
+
   /* Suspend/resume a list of queues.  Queues may become invalid as a result of
      suspension/resumption, but not destroyed.  Queues made invalid will
      destroy associated dispatches and waves.  Since waves/dispatches can be
