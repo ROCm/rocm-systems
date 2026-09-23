@@ -506,3 +506,11 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   sampling cell; its 0/8 miss remains visible. Audit artifact:
   `fault-round8-wmma-dense/wmma-attention/faults/barrier-drop-kv-publication-group-dense-diagnostic/qualification-audit.json`.
 - FP16 SuperCollider cell update: 2/8 round-7 trials complete, 0 detections so far; completed trials installed the mutation. Final matrix pending. Dense Default clean/fault comparison is queued afterward, under precommitted spec `61a7bc0f741`.
+- Stream-K arrival fault review located the application counter atomic at
+  `.text+0x10200`, occurrence 104, separately from context-bookkeeping atomics.
+  The inventoried release wait is `s_wait_storecnt`; a following
+  `s_wait_loadcnt_dscnt` and earlier context waits still complete LDS writes.
+  Removing the selected wait alone therefore does not establish the intended
+  missing LDS-publication ordering. Live sensitivity trials remain pending a
+  meaningful mutation review; no artificial miss or pass is claimed.
+  Evidence: `streamk-debug/counter-review.json` under the campaign root.
