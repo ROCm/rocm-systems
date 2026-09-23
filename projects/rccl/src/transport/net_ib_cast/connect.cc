@@ -27,8 +27,6 @@ NCCL_PARAM(IbCastEceEnable, "IB_ECE_ENABLE", 1);
 NCCL_PARAM(IbCastSubnetAwareRouting, "IB_SUBNET_AWARE_ROUTING", 0);
 NCCL_PARAM(IbCastSubnetPrefixLen, "IB_SUBNET_PREFIX_LEN", 24);
 
-extern int64_t ncclParamIbCastOooRq();
-extern int64_t ncclParamIbCastResiliencyPortFailover();
 extern int64_t ncclParamIbCastReceiverSideMatchingScheme();
 
 struct ncclIbDevExtraProps {

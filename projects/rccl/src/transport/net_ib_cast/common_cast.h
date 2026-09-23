@@ -165,6 +165,7 @@ extern bool IbCastAinicRoce;
 extern bool IbCastAinicCtsInlineData;
 extern bool IbCastOffloadEnabled;
 extern int64_t rcclParamIbCastP2pDisableCts();
+int64_t ncclParamIbCastOooRq();
 
 #define NCCL_IB_LLSTR(ll) \
   (((ll) == IBV_LINK_LAYER_INFINIBAND) ? "IB" : (((ll) == IBV_LINK_LAYER_ETHERNET) ? "RoCE" : "UNSPECIFIED"))
