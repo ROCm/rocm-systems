@@ -25,7 +25,7 @@ none of those historical colors count as a pass for this campaign.
 - SDK: `/home/benoit/venv`, ROCm `10.2.0a20260915` development package.
 - Preparation: rebuilding the current hook, integrating per-workload generated
   allowlists, preparing Qwen provenance, and building the production matmul.
-- Fresh clean assessments: **12/42**; no cell has completed fresh fault qualification.
+- Fresh clean assessments: **13/42**; no cell has completed fresh fault qualification.
 - Preparation logs: `/home/benoit/workspace/consan-validation-artifacts/`.
 
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
@@ -41,7 +41,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | PyTorch | P1 | collision-heavy `scatter_reduce` (`pytorch-scatter-reduce`) | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log |
 | PyTorch | P2 | Inductor compiled softmax (`pytorch-rdna4-compiled-softmax`) | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log |
 | PyTorch | P2 | split online softmax (`pytorch-rdna4-split-softmax`) | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log |
-| PyTorch | P2 | Qwen-vocabulary top-k (`pytorch-rdna4-llm-topk`) | 🟨 exact/complete; 418,292 accesses and 100,916 barriers; reviewed-fault refresh pending | 🟨 exact/complete; 58,992/58,992 accesses; reviewed-fault refresh pending |
+| PyTorch | P2 | Qwen-vocabulary top-k (`pytorch-rdna4-llm-topk`) | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log | 🟨 exact/complete; 58,992/58,992 accesses; reviewed-fault refresh pending |
 | llama.cpp | P2 | quantized matvec (`llama-rdna4-mul-mat-vec-q`) | 🟩 exact; 462 accesses and 88 barriers; fault bundle | 🟩 exact; 462/462 accesses; fault bundle |
 | Main E2E | P2 | Sharktank TP2 family (`tp2-family`) | 🟩 exact; 2,976 accesses and 420 barriers; fault bundle | 🟩 exact; 2,976/2,976 accesses; fault bundle |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 exact; 85 accesses and 72 barriers; fault bundle | 🟩 exact; 85/85 accesses; fault bundle |
@@ -78,3 +78,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `pytorch-rdna4-compiled-softmax` / supercollider: native rocprofv3 discovery failed; inspect discovery log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round1/pytorch-rdna4-compiled-softmax-supercollider`.
 - `pytorch-rdna4-split-softmax` / default: native rocprofv3 discovery failed; inspect discovery log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round1/pytorch-rdna4-split-softmax-default`.
 - `pytorch-rdna4-split-softmax` / supercollider: native rocprofv3 discovery failed; inspect discovery log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round1/pytorch-rdna4-split-softmax-supercollider`.
+- `pytorch-rdna4-llm-topk` / default: native rocprofv3 discovery failed; inspect discovery log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round1/pytorch-rdna4-llm-topk-default`.
