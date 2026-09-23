@@ -65,7 +65,7 @@ Panel Config:
           pct_of_peak: true
         # WMMA FLOPs - Each instruction performs multiple FLOPs
         # peak uses cu_per_gpu, which in gfx1250 is given to us as num WGP per GPU, therefore
-        # max_sclk * wgp_per_gpu * 4 simd32 per GPU * ops per simd32
+        # max_sclk * wgp_per_gpu * 4 simd32 per wgp * ops per simd32
         WMMA FLOPs (FP64):
           value: 64 * SUM(SQ_VALU_WMMA_FLOP_FP64_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
