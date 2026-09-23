@@ -542,8 +542,7 @@ def process_ml_api_trace_output(
         raise ValueError(
             f"Consolidated ML API trace is missing required columns {missing_columns}"
         )
-    # Backend is added by utils_profile._augment_marker_csv. When absent,
-    # default to "torch".
+    # Default Backend to torch when the marker CSV has no Backend column.
     has_backend = "Backend" in consolidated_df.columns
     projection = [*required_columns, "Backend"] if has_backend else required_columns
     consolidated_df = consolidated_df[projection]

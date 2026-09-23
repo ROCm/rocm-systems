@@ -4,8 +4,7 @@
 """ROCTX instrumentation for PyTorch.
 
 ATen operators use torch_trace_collector when it is installed, otherwise
-TorchDispatchMode. No collector for the workload PyTorch version, or a
-failure to load the collector, terminates the process.
+TorchDispatchMode.
 """
 
 import importlib.util
@@ -26,7 +25,7 @@ _BACKEND_NAME = "torch"
 
 
 class _TorchState:
-    """Resolved torch modules used by the instrumentation wrappers."""
+    """Resolved torch modules."""
 
     def __init__(self) -> None:
         self.torch: Any = None
@@ -161,9 +160,9 @@ def roctx_wrapper(
 ) -> Callable[..., Any]:
     """Wrap func so each call emits a ROCTX range. Idempotent.
 
-    A non-empty backend attributes the scope to that backend.
-    When publish_launcher_tid is true, also publish launcher OS tid for
-    autograd workers for the duration of the range.
+    A non-empty backend attributes the range to that backend.
+    When publish_launcher_tid is true, the launcher OS thread id is published
+    for the range.
     """
     if getattr(func, "_roctx_wrapped", False):
         return func
@@ -194,11 +193,7 @@ def roctx_wrapper(
 
 
 def _marker_only_init_wrapper(name: str, backend: str = "") -> Callable[..., Any]:
-    """Build an __init__ that emits a ROCTX range, then calls object.__init__.
-
-    Used for classes whose construction occurs in __new__ (e.g. cuda.Event,
-    cuda.Stream).
-    """
+    """Build an __init__ that emits a ROCTX range, then calls object.__init__."""
 
     def marker_only_init(self: object, *args: Any, **kwargs: Any) -> None:
         location = core.resolve_user_caller_location()
@@ -220,12 +215,11 @@ def _walk_subclasses(cls: type, fn: Callable[[type], None]) -> None:
 
 
 def _emit_python_tier_fallback_warning() -> None:
-    """Emit one warning when the C++ tier is unavailable."""
+    """Warn when torch_trace_collector is unavailable."""
     console_warning(
         "ml api trace",
-        "Coverage tier: Python-only injector (the C++ RecordFunction tier is "
-        "unavailable). Operator coverage on autograd backward threads is "
-        "reduced; backward markers may lack their full context chain.",
+        "torch_trace_collector is unavailable. Using TorchDispatchMode. "
+        "ATen operators on autograd worker threads are not recorded.",
     )
 
 
@@ -927,14 +921,12 @@ def install_tensor_method_wrappers() -> None:
 def _cuda_init_wrapper(
     init: Callable[..., Any], marker_name: str
 ) -> Callable[..., Any]:
-    """Wrap a cuda class __init__. Event and Stream construct in __new__."""
     if init is object.__init__:
         return _marker_only_init_wrapper(marker_name, backend=_BACKEND_NAME)
     return roctx_wrapper(init, marker_name, backend=_BACKEND_NAME)
 
 
 def _wrap_one_cuda_class_init(cuda_mod: object, cls_name: str) -> Optional[str]:
-    """Patch ``torch.cuda.{cls_name}.__init__``. Return the marker name on success."""
     cls = getattr(cuda_mod, cls_name, None)
     if cls is None:
         return None
@@ -954,7 +946,6 @@ def _wrap_one_cuda_class_init(cuda_mod: object, cls_name: str) -> Optional[str]:
 
 
 def _wrap_cuda_event_stream_inits(cuda_mod: Optional[object]) -> list:
-    """Patch torch.cuda.Event and Stream __init__. Return wrapped marker names."""
     if cuda_mod is None:
         return []
     wrapped_names = []
@@ -1004,7 +995,6 @@ def install_extra_structural_wrappers() -> None:
 
 
 def _wrap_nn_module_method(method_name: str) -> bool:
-    """Replace nn.Module.method_name with a ROCTX-wrapped version."""
     nn = _STATE.nn
     if nn is None:
         return False
@@ -1041,7 +1031,6 @@ def _wrap_nn_module_method(method_name: str) -> bool:
 
 
 def inject_roctx_into_module_methods() -> None:
-    """Wrap nn.Module __init__, cuda, to, and cpu."""
     wrapped_methods = []
     for method_name in ("__init__", "cuda", "to", "cpu"):
         if _wrap_nn_module_method(method_name):

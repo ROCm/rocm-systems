@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Backend-agnostic core for ROCTX range push/pop shared by all backends."""
+"""ROCTX range push and pop for inject_roctx backends."""
 
 import importlib.util
 import inspect
