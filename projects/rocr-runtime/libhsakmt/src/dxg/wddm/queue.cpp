@@ -40,6 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
 #include <cstring>
 #include <cinttypes>
 #include <cstddef>
@@ -206,8 +207,11 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
   // Set the polling timeout value for 2 seconds
   const std::chrono::milliseconds kMaxElapsed(2000);
   // Device enqueue bumps the write index from the GPU and rings a software doorbell that is a
-  // plain memory write, so nothing notifies us; poll instead of waiting forever.
-  const std::chrono::milliseconds kPollInterval(1);
+  // plain memory write, so nothing notifies us; poll instead of waiting forever. Back off while
+  // nothing moves so an idle queue does not wake up thousands of times per second.
+  constexpr std::chrono::microseconds kPollMin(50);
+  constexpr std::chrono::microseconds kPollMax(2000);
+  auto poll_interval = kPollMin;
   uint64_t current_position = queue->GetAqlWriteIndex();
   bool sleep = false;
   // Last reported {wptr, rptr, gpu fence} so the idle log only fires on real progress.
@@ -247,8 +251,11 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
         pr_debug("wait %p wptr=%" PRIx64 " rptr=%" PRIx64 " fence=%" PRIx64 "\n", queue->ring,
                  state[0], state[1], state[2]);
         memcpy(last_wait_state, state, sizeof(state));
+        poll_interval = kPollMin;
+      } else {
+        poll_interval = std::min(poll_interval * 2, kPollMax);
       }
-      queue->thread_cond_.wait_for(lock, kPollInterval);
+      queue->thread_cond_.wait_for(lock, poll_interval);
     }
   }
 
