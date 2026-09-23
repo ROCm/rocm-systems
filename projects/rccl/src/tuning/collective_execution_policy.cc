@@ -8,18 +8,11 @@
 #include "collective_execution_policy_internal.h"
 
 #include "archinfo.h"
-#include "comm.h"
-#include "debug.h"
 #include "device.h"
-#include "param.h"
-#include "rccl_common.h"
 
-#include <algorithm>
 #include <limits.h>
 #include <stdint.h>
 #include <string.h>
-
-extern int64_t ncclParamShmDisable();
 
 namespace {
 
@@ -28,7 +21,7 @@ namespace {
 // A fact is an immutable, typed observation available during one resolution.
 // Facts may be copied from operation arguments (scope, collective, data size),
 // read from communicator state (architecture, node/rank/channel counts), or
-// derived by the caller (transport and in-place buffer overlap). They
+// derived by the caller (available/requested transports and buffer overlap). They
 // form a per-call snapshot, not mutable global program state.
 //
 // Inputs are normalized into these facts, then resolved through three pure
@@ -81,52 +74,47 @@ bool rcclExecutionPolicyValueMatches(const rcclExecutionPolicyValue& actual,
 
   switch (actual.type) {
   case RCCL_EXECUTION_VALUE_SIGNED:
+    if (op == RCCL_EXECUTION_COMPARE_MASK_CONTAINS) return false;
     return rcclCompareOrdered((actual.signedValue > expected.signedValue) -
                                 (actual.signedValue < expected.signedValue),
                               op);
   case RCCL_EXECUTION_VALUE_UNSIGNED:
+    if (op == RCCL_EXECUTION_COMPARE_MASK_CONTAINS)
+      return (actual.unsignedValue & expected.unsignedValue) ==
+             expected.unsignedValue;
     return rcclCompareOrdered((actual.unsignedValue > expected.unsignedValue) -
                                 (actual.unsignedValue < expected.unsignedValue),
                               op);
   case RCCL_EXECUTION_VALUE_STRING:
     if (actual.stringValue == nullptr || expected.stringValue == nullptr) return false;
     if (op == RCCL_EXECUTION_COMPARE_ARCH_MATCH) return IsArchMatch(actual.stringValue, expected.stringValue);
+    if (op == RCCL_EXECUTION_COMPARE_MASK_CONTAINS) return false;
     return rcclCompareOrdered(strcmp(actual.stringValue, expected.stringValue), op);
   case RCCL_EXECUTION_VALUE_BOOL:
+    if (op == RCCL_EXECUTION_COMPARE_MASK_CONTAINS) return false;
     return rcclCompareOrdered(static_cast<int>(actual.boolValue) - static_cast<int>(expected.boolValue), op);
   }
   return false;
 }
 
-// Normalizes the transport preference produced by RCCL's enable/disable
-// controls. A disabled P2P transport exposes SHM only while SHM itself remains
-// enabled; otherwise the next configured fallback is NET.
-rcclExecutionTransport rcclConfiguredExecutionTransport(bool p2pDisabled) {
-  if (!p2pDisabled) return RCCL_EXECUTION_TRANSPORT_IPC;
-  if (ncclParamShmDisable() == 0) return RCCL_EXECUTION_TRANSPORT_SHM;
-  return RCCL_EXECUTION_TRANSPORT_NET;
+bool rcclExecutionTransportMaskIsValid(uint32_t mask) {
+  return mask != 0 && (mask & ~RCCL_EXECUTION_TRANSPORT_VALID_MASK) == 0;
 }
 
-// Preserve the distinction between an absent setting (automatic policy
-// selection) and an explicit setting whose normalized value happens to equal
-// RCCL's default. The adapter records this as an immutable input fact.
-rcclExecutionTransport rcclRequestedExecutionTransport(bool p2pDisabled) {
-  const char* p2pDisable = ncclGetEnv("NCCL_P2P_DISABLE");
-  if (p2pDisable == nullptr || p2pDisable[0] == '\0')
-    return RCCL_EXECUTION_TRANSPORT_UNKNOWN;
-  return rcclConfiguredExecutionTransport(p2pDisabled);
-}
-
-uint32_t rcclAvailableExecutionTransportMask(const struct ncclComm* comm,
-                                             bool p2pDisabled) {
-  uint32_t mask = 1u << rcclConfiguredExecutionTransport(p2pDisabled);
-  if (rcclRequestedExecutionTransport(p2pDisabled) ==
-        RCCL_EXECUTION_TRANSPORT_UNKNOWN &&
-      rcclRuntimeTransportToggleEligible(comm)) {
-    mask |= (1u << RCCL_EXECUTION_TRANSPORT_IPC) |
-            (1u << RCCL_EXECUTION_TRANSPORT_SHM);
+uint32_t rcclEligibleExecutionTransportMask(
+  uint32_t availableMask, rcclExecutionTransportIntent intent) {
+  switch (intent) {
+  case RCCL_EXECUTION_TRANSPORT_INTENT_AUTO:
+    return availableMask;
+  case RCCL_EXECUTION_TRANSPORT_INTENT_IPC:
+    return availableMask &
+           rcclExecutionTransportBit(RCCL_EXECUTION_TRANSPORT_IPC);
+  case RCCL_EXECUTION_TRANSPORT_INTENT_SHM:
+    return availableMask &
+           rcclExecutionTransportBit(RCCL_EXECUTION_TRANSPORT_SHM);
+  default:
+    return 0;
   }
-  return mask;
 }
 
 // Stage 1: match one rule against the normalized input facts.
@@ -208,19 +196,31 @@ bool rcclExecutionPolicyScopeFromFacts(const rcclExecutionPolicyFact* facts, siz
   return true;
 }
 
-bool rcclExecutionPolicyRequestedTransportFromFacts(
+bool rcclExecutionPolicyTransportIntentFromFacts(
   const rcclExecutionPolicyFact* facts, size_t factCount,
-  rcclExecutionTransport* requestedTransport) {
+  rcclExecutionTransportIntent* transportIntent) {
   const rcclExecutionPolicyFact* fact =
     rcclFindExecutionPolicyFact(
-      facts, factCount, RCCL_EXECUTION_INPUT_REQUESTED_TRANSPORT);
+      facts, factCount, RCCL_EXECUTION_INPUT_TRANSPORT_INTENT);
   if (fact == nullptr || fact->value.type != RCCL_EXECUTION_VALUE_SIGNED ||
-      fact->value.signedValue < RCCL_EXECUTION_TRANSPORT_UNKNOWN ||
-      fact->value.signedValue >= RCCL_EXECUTION_TRANSPORT_COUNT)
+      fact->value.signedValue < RCCL_EXECUTION_TRANSPORT_INTENT_AUTO ||
+      fact->value.signedValue >= RCCL_EXECUTION_TRANSPORT_INTENT_COUNT)
     return false;
-  *requestedTransport =
-    static_cast<rcclExecutionTransport>(fact->value.signedValue);
+  *transportIntent =
+    static_cast<rcclExecutionTransportIntent>(fact->value.signedValue);
   return true;
+}
+
+rcclExecutionTransport rcclExecutionPolicyRequestedTransport(
+  rcclExecutionTransportIntent intent) {
+  switch (intent) {
+  case RCCL_EXECUTION_TRANSPORT_INTENT_IPC:
+    return RCCL_EXECUTION_TRANSPORT_IPC;
+  case RCCL_EXECUTION_TRANSPORT_INTENT_SHM:
+    return RCCL_EXECUTION_TRANSPORT_SHM;
+  default:
+    return RCCL_EXECUTION_TRANSPORT_UNKNOWN;
+  }
 }
 
 bool rcclAlgoProtoShapeAvailable(const rcclExecutionPolicyValidationContext& validation,
@@ -257,6 +257,9 @@ bool rcclExecutionPolicyValidationContextIsValid(
        validation->baselineProtocol < -1 ||
        validation->baselineProtocol >= NCCL_NUM_PROTOCOLS))
     return false;
+  if (validation->validateTransport &&
+      !rcclExecutionTransportMaskIsValid(validation->transportMask))
+    return false;
   return true;
 }
 
@@ -265,11 +268,15 @@ bool rcclExecutionPolicyValidationContextIsValid(
 rcclExecutionPolicyValidationError rcclValidateCollectiveExecutionPolicy(
   const rcclCollectiveExecutionPolicy& policy, const rcclExecutionPolicyFact* facts,
   size_t factCount, const rcclExecutionPolicyValidationContext* validation) {
+  rcclExecutionTransportIntent transportIntent =
+    RCCL_EXECUTION_TRANSPORT_INTENT_AUTO;
   rcclExecutionTransport requestedTransport =
     RCCL_EXECUTION_TRANSPORT_UNKNOWN;
-  if (rcclExecutionPolicyRequestedTransportFromFacts(
-        facts, factCount, &requestedTransport) &&
-      requestedTransport != RCCL_EXECUTION_TRANSPORT_UNKNOWN &&
+  if (rcclExecutionPolicyTransportIntentFromFacts(
+        facts, factCount, &transportIntent))
+    requestedTransport =
+      rcclExecutionPolicyRequestedTransport(transportIntent);
+  if (requestedTransport != RCCL_EXECUTION_TRANSPORT_UNKNOWN &&
       policy.transport != RCCL_EXECUTION_TRANSPORT_UNKNOWN &&
       policy.transport != requestedTransport)
     return RCCL_EXECUTION_POLICY_VALIDATION_TRANSPORT_REQUEST_CONFLICT;
@@ -316,7 +323,8 @@ rcclExecutionPolicyValidationError rcclValidateCollectiveExecutionPolicy(
 
   if (policy.transport != RCCL_EXECUTION_TRANSPORT_UNKNOWN &&
       validation->validateTransport &&
-      (validation->transportMask & (1u << policy.transport)) == 0)
+      (validation->transportMask &
+       rcclExecutionTransportBit(policy.transport)) == 0)
     return RCCL_EXECUTION_POLICY_VALIDATION_TRANSPORT_UNAVAILABLE;
 
   return RCCL_EXECUTION_POLICY_VALIDATION_NONE;
@@ -502,11 +510,17 @@ struct rcclExecutionPolicyResolution rcclResolveCollectiveExecutionPolicyWithVal
   rcclExecutionPolicyResolution resolution;
   rcclDefaultExecutionPolicyResolution(&resolution);
   if (input == nullptr ||
-      input->transport < RCCL_EXECUTION_TRANSPORT_UNKNOWN ||
-      input->transport >= RCCL_EXECUTION_TRANSPORT_COUNT ||
-      input->requestedTransport < RCCL_EXECUTION_TRANSPORT_UNKNOWN ||
-      input->requestedTransport >= RCCL_EXECUTION_TRANSPORT_COUNT ||
+      !rcclExecutionTransportMaskIsValid(input->availableTransportMask) ||
+      input->transportIntent < RCCL_EXECUTION_TRANSPORT_INTENT_AUTO ||
+      input->transportIntent >= RCCL_EXECUTION_TRANSPORT_INTENT_COUNT ||
       !rcclExecutionPolicyValidationContextIsValid(validation)) {
+    resolution.status = RCCL_EXECUTION_POLICY_INVALID_INPUT;
+    return resolution;
+  }
+  uint32_t eligibleTransportMask =
+    rcclEligibleExecutionTransportMask(
+      input->availableTransportMask, input->transportIntent);
+  if (eligibleTransportMask == 0) {
     resolution.status = RCCL_EXECUTION_POLICY_INVALID_INPUT;
     return resolution;
   }
@@ -519,10 +533,13 @@ struct rcclExecutionPolicyResolution rcclResolveCollectiveExecutionPolicyWithVal
     {RCCL_EXECUTION_INPUT_N_NODES, rcclExecutionPolicyValue::Signed(input->nNodes)},
     {RCCL_EXECUTION_INPUT_N_RANKS, rcclExecutionPolicyValue::Signed(input->nRanks)},
     {RCCL_EXECUTION_INPUT_N_CHANNELS, rcclExecutionPolicyValue::Signed(input->nChannels)},
-    {RCCL_EXECUTION_INPUT_TRANSPORT, rcclExecutionPolicyValue::Signed(input->transport)},
+    {RCCL_EXECUTION_INPUT_AVAILABLE_TRANSPORTS,
+     rcclExecutionPolicyValue::Unsigned(input->availableTransportMask)},
+    {RCCL_EXECUTION_INPUT_ELIGIBLE_TRANSPORTS,
+     rcclExecutionPolicyValue::Unsigned(eligibleTransportMask)},
     {RCCL_EXECUTION_INPUT_IN_PLACE, rcclExecutionPolicyValue::Boolean(input->inPlace)},
-    {RCCL_EXECUTION_INPUT_REQUESTED_TRANSPORT,
-     rcclExecutionPolicyValue::Signed(input->requestedTransport)},
+    {RCCL_EXECUTION_INPUT_TRANSPORT_INTENT,
+     rcclExecutionPolicyValue::Signed(input->transportIntent)},
   };
   rcclSelectCollectiveExecutionPolicy(
     inputFacts, sizeof(inputFacts) / sizeof(inputFacts[0]),
@@ -546,21 +563,30 @@ bool rcclResolveCollectiveExecutionPolicy(
   return resolution.status == RCCL_EXECUTION_POLICY_SELECTED;
 }
 
-// Computes the maximum channel pool needed by matching built-in rules.
-int rcclGetCollectiveExecutionPolicyRequiredChannels(struct ncclComm* comm, bool p2pDisabled) {
-  if (comm == nullptr) return 0;
-  rcclExecutionTransport requestedTransport =
-    rcclRequestedExecutionTransport(p2pDisabled);
+// Computes the maximum channel pool needed by matching built-in rules from a
+// normalized, runtime-independent provisioning snapshot.
+int rcclResolveExecutionPolicyRequiredChannels(
+  const rcclExecutionPolicyProvisioningInput* input) {
+  if (input == nullptr ||
+      !rcclExecutionTransportMaskIsValid(input->availableTransportMask) ||
+      input->transportIntent < RCCL_EXECUTION_TRANSPORT_INTENT_AUTO ||
+      input->transportIntent >= RCCL_EXECUTION_TRANSPORT_INTENT_COUNT)
+    return 0;
+  uint32_t eligibleTransportMask =
+    rcclEligibleExecutionTransportMask(
+      input->availableTransportMask, input->transportIntent);
+  if (eligibleTransportMask == 0) return 0;
   const rcclExecutionPolicyFact provisioningFacts[] = {
     {RCCL_EXECUTION_INPUT_SCOPE, rcclExecutionPolicyValue::Signed(RCCL_EXECUTION_SCOPE_COLLECTIVE)},
-    {RCCL_EXECUTION_INPUT_GFX_ARCH, rcclExecutionPolicyValue::String(comm->archName)},
-    {RCCL_EXECUTION_INPUT_N_NODES, rcclExecutionPolicyValue::Signed(comm->nNodes)},
-    {RCCL_EXECUTION_INPUT_N_RANKS, rcclExecutionPolicyValue::Signed(comm->nRanks)},
-    {RCCL_EXECUTION_INPUT_TRANSPORT,
-     rcclExecutionPolicyValue::Signed(
-       rcclConfiguredExecutionTransport(p2pDisabled))},
-    {RCCL_EXECUTION_INPUT_REQUESTED_TRANSPORT,
-     rcclExecutionPolicyValue::Signed(requestedTransport)},
+    {RCCL_EXECUTION_INPUT_GFX_ARCH, rcclExecutionPolicyValue::String(input->gfxArch)},
+    {RCCL_EXECUTION_INPUT_N_NODES, rcclExecutionPolicyValue::Signed(input->nNodes)},
+    {RCCL_EXECUTION_INPUT_N_RANKS, rcclExecutionPolicyValue::Signed(input->nRanks)},
+    {RCCL_EXECUTION_INPUT_AVAILABLE_TRANSPORTS,
+     rcclExecutionPolicyValue::Unsigned(input->availableTransportMask)},
+    {RCCL_EXECUTION_INPUT_ELIGIBLE_TRANSPORTS,
+     rcclExecutionPolicyValue::Unsigned(eligibleTransportMask)},
+    {RCCL_EXECUTION_INPUT_TRANSPORT_INTENT,
+     rcclExecutionPolicyValue::Signed(input->transportIntent)},
   };
 
   int requiredChannels = 0;
@@ -579,7 +605,6 @@ int rcclGetCollectiveExecutionPolicyRequiredChannels(struct ncclComm* comm, bool
       continue;
     bool p2pScope = false;
     bool remapsActivePool = false;
-    bool conflictsWithRequestedTransport = false;
     for (size_t conditionIndex = 0; conditionIndex < ruleView.conditionCount; conditionIndex++) {
       const rcclExecutionPolicyCondition& condition = ruleView.conditions[conditionIndex];
       p2pScope =
@@ -595,14 +620,7 @@ int rcclGetCollectiveExecutionPolicyRequiredChannels(struct ncclComm* comm, bool
         (assignment.field == RCCL_EXECUTION_OUTPUT_PATH &&
          assignment.value.type == RCCL_EXECUTION_VALUE_SIGNED &&
          assignment.value.signedValue == RCCL_P2P_PATH_SENDRECV);
-      conflictsWithRequestedTransport =
-        conflictsWithRequestedTransport ||
-        (requestedTransport != RCCL_EXECUTION_TRANSPORT_UNKNOWN &&
-         assignment.field == RCCL_EXECUTION_OUTPUT_TRANSPORT &&
-         assignment.value.type == RCCL_EXECUTION_VALUE_SIGNED &&
-         assignment.value.signedValue != requestedTransport);
     }
-    if (conflictsWithRequestedTransport) continue;
     // Direction-local P2P caps such as gfx110x's one-channel AllToAll rule
     // operate within the communicator's existing pool and require no widening.
     if (p2pScope && !remapsActivePool) continue;
@@ -616,217 +634,4 @@ int rcclGetCollectiveExecutionPolicyRequiredChannels(struct ncclComm* comm, bool
     }
   }
   return requiredChannels;
-}
-
-// Adapts read-only communicator state to the policy resolver input and optional
-// normalized validation snapshot.
-rcclExecutionPolicyResolution rcclGetCollectiveExecutionPolicyWithValidation(
-  const struct ncclComm* comm, enum rcclExecutionScope scope,
-  ncclFunc_t collType, size_t dataSize, bool p2pDisabled, bool inPlace,
-  const rcclExecutionPolicyValidationContext* validation) {
-  if (comm == nullptr) {
-    rcclExecutionPolicyResolution resolution;
-    rcclDefaultExecutionPolicyResolution(&resolution);
-    resolution.status = RCCL_EXECUTION_POLICY_INVALID_INPUT;
-    return resolution;
-  }
-  rcclExecutionPolicyValidationContext transportValidation;
-  if (validation == nullptr) {
-    rcclDefaultExecutionPolicyValidationContext(&transportValidation);
-    transportValidation.validateTransport = true;
-    transportValidation.transportMask =
-      rcclAvailableExecutionTransportMask(comm, p2pDisabled);
-    validation = &transportValidation;
-  }
-  const rcclCollectivePolicyInput input = {
-    scope,
-    comm->archName,
-    collType,
-    dataSize,
-    comm->nNodes,
-    comm->nRanks,
-    scope == RCCL_EXECUTION_SCOPE_P2P ? comm->p2pnChannels : comm->nChannels,
-    rcclConfiguredExecutionTransport(p2pDisabled),
-    inPlace,
-    rcclRequestedExecutionTransport(p2pDisabled),
-  };
-  return rcclResolveCollectiveExecutionPolicyWithValidation(&input, validation);
-}
-
-bool rcclGetCollectiveExecutionPolicy(const struct ncclComm* comm, enum rcclExecutionScope scope,
-                                      ncclFunc_t collType, size_t dataSize, bool p2pDisabled, bool inPlace,
-                                      struct rcclCollectiveExecutionPolicy* policy) {
-  if (policy == nullptr) return false;
-  rcclExecutionPolicyResolution resolution =
-    rcclGetCollectiveExecutionPolicyWithValidation(
-      comm, scope, collType, dataSize, p2pDisabled, inPlace, nullptr);
-  *policy = resolution.policy;
-  return resolution.status == RCCL_EXECUTION_POLICY_SELECTED;
-}
-
-extern int64_t ncclParamMinNchannels();
-extern int64_t ncclParamMaxNchannels();
-extern int64_t ncclParamP2pDisable();
-extern int64_t ncclParamP2pReadEnable();
-
-bool rcclExecutionPolicyForP2pTask(
-  struct ncclComm* comm, struct ncclTaskP2p* task, bool p2pDisabled,
-  struct rcclCollectiveExecutionPolicy* policy) {
-  if (comm == nullptr || task == nullptr || policy == nullptr || comm->nRanks <= 0)
-    return false;
-  size_t aggregateBytes =
-    task->bytes > SIZE_MAX / comm->nRanks
-      ? SIZE_MAX
-      : task->bytes * static_cast<size_t>(comm->nRanks);
-
-  rcclExecutionPolicyValidationContext validation;
-  rcclDefaultExecutionPolicyValidationContext(&validation);
-  validation.minChannels = 1;
-  int userMinChannels = ncclParamMinNchannels();
-  if (userMinChannels > 0)
-    validation.minChannels =
-      std::max(validation.minChannels, userMinChannels);
-  validation.maxChannels = comm->p2pnChannels;
-  int userMaxChannels = ncclParamMaxNchannels();
-  if (userMaxChannels > 0)
-    validation.maxChannels =
-      std::min(validation.maxChannels, userMaxChannels);
-
-  // NCCL_PROTO parsing has already normalized protocol filters into the
-  // communicator's tuning bandwidths. Some P2P-only collective kinds have no
-  // tuning entries; leave this check disabled when no protocol mask exists.
-  uint32_t protocolMask = 0;
-  if (task->collAPI >= 0 && task->collAPI < NCCL_NUM_FUNCTIONS) {
-    for (int protocol = 0; protocol < NCCL_NUM_PROTOCOLS; protocol++) {
-      for (int algorithm = 0; algorithm < NCCL_NUM_ALGORITHMS; algorithm++) {
-        if (comm->bandwidths[task->collAPI][algorithm][protocol] > 0.0f) {
-          protocolMask |= uint32_t{1} << protocol;
-          break;
-        }
-      }
-    }
-  }
-  validation.validateP2pProtocol = protocolMask != 0;
-  validation.p2pProtocolMask = protocolMask;
-  if (ncclParamP2pReadEnable() == 0) {
-    validation.validateP2pTransfer = true;
-    validation.p2pTransferMask =
-      uint32_t{1} << RCCL_P2P_TRANSFER_WRITE;
-  }
-  validation.validateTransport = true;
-  validation.transportMask =
-    rcclAvailableExecutionTransportMask(comm, p2pDisabled);
-
-  rcclExecutionPolicyResolution resolution =
-    rcclGetCollectiveExecutionPolicyWithValidation(
-      comm, RCCL_EXECUTION_SCOPE_P2P, task->collAPI, aggregateBytes,
-      p2pDisabled, task->inPlace, &validation);
-  *policy = resolution.policy;
-  if (resolution.status != RCCL_EXECUTION_POLICY_SELECTED &&
-      (resolution.status == RCCL_EXECUTION_POLICY_VALIDATION_FAILED ||
-       resolution.status == RCCL_EXECUTION_POLICY_INVALID_INPUT)) {
-    INFO(NCCL_COLL,
-         "RCCL P2P execution policy rejected: coll=%d bytes=%zu status=%d "
-         "rule=%u error=%d",
-         (int)task->collAPI, aggregateBytes, (int)resolution.status,
-         (unsigned)resolution.firstRejectedRuleId,
-         (int)(resolution.status == RCCL_EXECUTION_POLICY_INVALID_INPUT
-                 ? resolution.validationError
-                 : resolution.firstRejectedError));
-  }
-  return resolution.status == RCCL_EXECUTION_POLICY_SELECTED;
-}
-
-static void rcclBuildCollectiveExecutionPolicyValidationContext(
-  const struct ncclComm* comm, const struct ncclTaskColl* info,
-  float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS],
-  struct rcclExecutionPolicyValidationContext* validation) {
-  rcclDefaultExecutionPolicyValidationContext(validation);
-
-  int minChannels = 1;
-  if (info->minCTAs > 0)
-    minChannels = std::max(minChannels, info->minCTAs);
-  int userMinChannels = ncclParamMinNchannels();
-  if (userMinChannels > 0)
-    minChannels = std::max(minChannels, userMinChannels);
-
-  int maxChannels = comm->nChannels;
-  if (info->maxCTAs > 0)
-    maxChannels = std::min(maxChannels, info->maxCTAs);
-  int userMaxChannels = ncclParamMaxNchannels();
-  if (userMaxChannels > 0)
-    maxChannels = std::min(maxChannels, userMaxChannels);
-
-  validation->minChannels = minChannels;
-  validation->maxChannels = maxChannels;
-  validation->baselineAlgorithm = info->algorithm;
-  validation->baselineProtocol = info->protocol;
-  validation->validateAlgoProto = true;
-  validation->validateTransport = true;
-  validation->transportMask =
-    rcclAvailableExecutionTransportMask(comm, ncclParamP2pDisable());
-  for (int algorithm = 0; algorithm < NCCL_NUM_ALGORITHMS; algorithm++) {
-    bool algorithmAllowedByTask =
-      info->algMask == 0 ||
-      (info->algMask & (uint64_t{1} << algorithm)) != 0;
-    for (int protocol = 0; protocol < NCCL_NUM_PROTOCOLS; protocol++) {
-      // NCCL_ALGO/NCCL_PROTO, topology capabilities, and tuner constraints
-      // have already been normalized into the cost table. The task mask
-      // carries the resolved per-call algorithm selection.
-      validation->algoProtoAvailable[algorithm][protocol] =
-        algorithmAllowedByTask && table[algorithm][protocol] >= 0.0f;
-    }
-  }
-}
-
-bool rcclApplyCollectiveExecutionPolicy(
-  struct ncclComm* comm, struct ncclTaskColl* info, size_t dataSize,
-  float table[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS],
-  int* policyChannels) {
-  if (comm == nullptr || info == nullptr || table == nullptr ||
-      policyChannels == nullptr)
-    return false;
-
-  info->executionTransport = RCCL_EXECUTION_TRANSPORT_UNKNOWN;
-  rcclExecutionPolicyValidationContext validation;
-  rcclBuildCollectiveExecutionPolicyValidationContext(
-    comm, info, table, &validation);
-  rcclExecutionPolicyResolution resolution =
-    rcclGetCollectiveExecutionPolicyWithValidation(
-      comm, RCCL_EXECUTION_SCOPE_COLLECTIVE, info->func, dataSize,
-      ncclParamP2pDisable(), /*inPlace=*/false, &validation);
-  if (resolution.status != RCCL_EXECUTION_POLICY_SELECTED) {
-    if (resolution.status == RCCL_EXECUTION_POLICY_VALIDATION_FAILED ||
-        resolution.status == RCCL_EXECUTION_POLICY_INVALID_INPUT) {
-      INFO(NCCL_TUNING,
-           "RCCL collective execution policy rejected: coll=%d bytes=%zu "
-           "status=%d rule=%u error=%d",
-           (int)info->func, dataSize, (int)resolution.status,
-           (unsigned)resolution.firstRejectedRuleId,
-           (int)(resolution.status == RCCL_EXECUTION_POLICY_INVALID_INPUT
-                   ? resolution.validationError
-                   : resolution.firstRejectedError));
-    }
-    return false;
-  }
-  const rcclCollectiveExecutionPolicy& policy = resolution.policy;
-
-  int algorithm =
-    policy.algorithm >= 0 ? policy.algorithm : info->algorithm;
-  int protocol =
-    policy.protocol >= 0 ? policy.protocol : info->protocol;
-  if (policy.algorithm >= 0 || policy.protocol >= 0) {
-    info->algorithm = algorithm;
-    info->protocol = protocol;
-  }
-  info->executionTransport = policy.transport;
-
-  *policyChannels = policy.nChannels;
-  INFO(NCCL_TUNING,
-       "RCCL collective execution policy: arch=%s coll=%d bytes=%zu rule=%u "
-       "channels=%d algorithm=%d protocol=%d transport=%d",
-       comm->archName, (int)info->func, dataSize,
-       (unsigned)resolution.selectedRuleId, policy.nChannels,
-       policy.algorithm, policy.protocol, (int)policy.transport);
-  return true;
 }
