@@ -18,7 +18,6 @@ from typing import Any, Optional, Union, cast
 import config
 import utils.utils_profile_csv as csv_ops
 from utils import csv_compression, rocpd_data
-from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
@@ -60,12 +59,6 @@ _OUTDATED_FIRMWARE_MESSAGE = (
 )
 
 ProfilerOptions = Union[list[str], dict[str, Union[str, list[str]]]]
-
-# inject_roctx appends a trailing "|<backend>" suffix to marker names.
-_UNKNOWN_BACKEND = "unknown"
-_BACKEND_SUFFIX_RE = re.compile(
-    r"\|(" + "|".join(re.escape(b) for b in KNOWN_ML_API_BACKENDS) + r")$"
-)
 
 
 def is_live_attach(
@@ -457,89 +450,13 @@ def get_submodules(package_name: str) -> list[str]:
     return submodules
 
 
-def _parse_function_backend(function_value: Optional[str]) -> tuple[str, str]:
-    """Return (clean_function, backend) for one Function cell.
-
-    Values with no recognized backend suffix return "unknown".
-    """
-    if function_value is None:
-        return "", _UNKNOWN_BACKEND
-    raw = str(function_value)
-    match = _BACKEND_SUFFIX_RE.search(raw)
-    if match is None:
-        return raw, _UNKNOWN_BACKEND
-    return raw[: match.start()], match.group(1)
-
-
-def _augment_marker_rows(
-    rows: list[dict], fieldnames: list[str]
-) -> tuple[list[dict], list[str], int, list[str]]:
-    """Move the wire backend suffix from the Function column into a Backend
-    column.
-
-    Returns the rows, the field names including Backend, the count of rows whose
-    Function has no recognized backend suffix, and up to three sample Function
-    values from those rows.
-    """
-    augmented_fieldnames = list(fieldnames)
-    if "Backend" not in augmented_fieldnames:
-        augmented_fieldnames.append("Backend")
-    unknown_samples: list[str] = []
-    unknown_count = 0
-    for row in rows:
-        clean_function, backend = _parse_function_backend(row.get("Function", ""))
-        row["Function"] = clean_function
-        row["Backend"] = backend
-        if backend == _UNKNOWN_BACKEND:
-            unknown_count += 1
-            sample = clean_function or "<empty>"
-            if len(unknown_samples) < 3 and sample not in unknown_samples:
-                unknown_samples.append(sample)
-    return rows, augmented_fieldnames, unknown_count, unknown_samples
-
-
-def _augment_marker_csv(src_marker: str, dst_marker: str) -> None:
-    """Copy src_marker to dst_marker, moving the wire backend suffix out of
-    Function into a dedicated Backend column. Rows whose Function has no
-    recognized backend suffix are tagged Backend="unknown".
-    """
-    rows, fieldnames = csv_ops.read_csv_as_dicts(src_marker)
-    if "Function" not in fieldnames:
-        # Unrecognized schema: copy verbatim.
-        console_warning(
-            "ml api trace",
-            f"{dst_marker} has no 'Function' column (columns: {fieldnames}); "
-            "copying verbatim without backend augmentation.",
-        )
-        shutil.copyfile(src_marker, dst_marker)
-        return
-    rows, augmented_fieldnames, unknown_count, unknown_samples = _augment_marker_rows(
-        rows, fieldnames
-    )
-    csv_ops.write_csv_from_dicts(dst_marker, rows, fieldnames=augmented_fieldnames)
-    if unknown_count:
-        console_warning(
-            "ml api trace",
-            f"{unknown_count} marker row(s) in {src_marker} have no recognized "
-            f"|<backend> suffix and were tagged Backend='{_UNKNOWN_BACKEND}'. "
-            f"Sample Function values: {unknown_samples}.",
-        )
-
-
 @demarcate
 def save_ml_api_trace_inputs(
     workload_dir: str,
     fbase: str,
     src_counter: Path,
 ) -> None:
-    """
-    Move counter_collection and marker_api_trace data to workload_dir,
-    for creation of ML API trace in Analyze mode.
-
-    Marker CSVs are augmented on copy: the trailing ``|<backend>`` suffix
-    written by inject_roctx is split off Function and surfaced as a
-    dedicated Backend column (torch, triton, ...).
-    """
+    """Copy the counter and marker CSVs into the workload directory for analyze."""
     src_dir = Path(workload_dir) / "out" / "pmc_1"
     # Only one pair expected
     src_marker = csv_compression.compressed_name(
@@ -553,11 +470,10 @@ def save_ml_api_trace_inputs(
     )
     # These files are expected to exist.
     shutil.copyfile(src_counter, dst_counter)
-    _augment_marker_csv(str(src_marker), str(dst_marker))
+    shutil.copyfile(src_marker, dst_marker)
     console_log(
         "ml api trace",
-        "Moved counter collection and marker trace files "
-        "to workload dir for ML API trace creation.",
+        "Copied counter collection and marker trace files to the workload directory.",
     )
     console_log("Counter Collection: ", str(dst_counter))
     console_log("Marker API Trace: ", str(dst_marker))

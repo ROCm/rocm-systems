@@ -3,20 +3,69 @@
 
 #pragma once
 
-#include "stack_entry.h"
-
 #include <string>
-#include <vector>
+#include <string_view>
 
 namespace torch_trace_collector::detail
 {
 
-// Encoded forms of '%' and '/' in marker names. Matched by encode_marker_name
-// in utils/inject_roctx/core.py and decode_marker_name in utils/utils_analysis.py.
 inline constexpr const char* kEncodedPercent = "%25";
 inline constexpr const char* kEncodedSlash   = "%2F";
+inline constexpr const char* kUnavailable    = "n/a";
 
-// "marker1/.../markerN:context1/.../contextN". Marker names are percent-encoded.
-std::string build_marker_string(const std::vector<StackEntry>& stack);
+inline std::string encode_marker_name(std::string_view name)
+{
+    std::string out;
+    out.reserve(name.size());
+    for (char c : name)
+    {
+        if (c == '%')
+        {
+            out += kEncodedPercent;
+        }
+        else if (c == '/')
+        {
+            out += kEncodedSlash;
+        }
+        else
+        {
+            out += c;
+        }
+    }
+    return out;
+}
+
+inline std::string build_range_name(std::string_view name,
+                                    std::string_view context,
+                                    std::string_view seqNr,
+                                    std::string_view tid,
+                                    std::string_view ftid,
+                                    std::string_view ltid,
+                                    std::string_view scope,
+                                    std::string_view args,
+                                    std::string_view backend)
+{
+    std::string out = encode_marker_name(name);
+    out += ':';
+    out += context;
+    out += "|seqNr=";
+    out += seqNr;
+    out += "|tid=";
+    out += tid;
+    out += "|ftid=";
+    out += ftid;
+    out += "|ltid=";
+    out += ltid;
+    out += "|scope=";
+    out += scope;
+    out += "|args=";
+    out += args;
+    if (!backend.empty())
+    {
+        out += '|';
+        out += backend;
+    }
+    return out;
+}
 
 }  // namespace torch_trace_collector::detail

@@ -224,47 +224,6 @@ def test_triton_backend_wraps_jitfunction_run(monkeypatch):
     assert pushes == ["triton.JITFunction.add_kernel"]
 
 
-def test_triton_backend_reentrancy_dedups_nested_launch(monkeypatch):
-    """Nested JITFunction.run and CompiledKernel.run emit one marker."""
-    from utils.inject_roctx._backends import triton as triton_backend
-
-    pushes: list[str] = []
-    monkeypatch.setattr(
-        triton_backend,
-        "_push_scope",
-        lambda marker, ctx, backend="": pushes.append(marker),
-    )
-    monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
-    # Reset the per-thread guard.
-    if hasattr(triton_backend._thread_local, "in_launch"):
-        del triton_backend._thread_local.in_launch
-
-    class FakeCompiledKernel:
-        name = "inner"
-
-        def run(self, *a, **kw):
-            return "inner_ran"
-
-    class FakeJIT:
-        name = "outer"
-
-        def __init__(self, compiled):
-            self._compiled = compiled
-
-        def run(self, *a, **kw):
-            return self._compiled.run()
-
-    monkeypatch.setattr(triton_backend._STATE, "compiled_kernel", FakeCompiledKernel)
-    monkeypatch.setattr(triton_backend._STATE, "jit_function", FakeJIT)
-    triton_backend.patch_triton_launcher()
-
-    compiled = FakeCompiledKernel()
-    out = FakeJIT(compiled).run()
-
-    assert out == "inner_ran"
-    assert pushes == ["triton.JITFunction.outer"]
-
-
 def test_triton_backend_patch_is_idempotent(monkeypatch):
     """Patching twice does not re-wrap the launch entry point."""
     from utils.inject_roctx._backends import triton as triton_backend
@@ -276,9 +235,6 @@ def test_triton_backend_patch_is_idempotent(monkeypatch):
         lambda marker, ctx, backend="": pushes.append(marker),
     )
     monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
-    # Reset the per-thread guard.
-    if hasattr(triton_backend._thread_local, "in_launch"):
-        del triton_backend._thread_local.in_launch
 
     class FakeJIT:
         name = "k"
@@ -369,111 +325,3 @@ def test_extract_kernel_name_prefers_attr_then_meta_then_fn():
         triton_backend._extract_kernel_name(types.SimpleNamespace())
         == "<triton_kernel>"
     )
-
-
-# ---------------------------------------------------------------------------
-# core push/pop
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def core_with_python_tier():
-    """Return ``core`` wired to in-memory push/pop sinks with empty stacks."""
-    from utils.inject_roctx import core
-
-    pushed: list[str] = []
-    popped: list[None] = []
-    core.set_python_tier_io(push=pushed.append, pop=lambda: popped.append(None))
-    for attr in ("marker_stack", "context_stack"):
-        if hasattr(core._thread_local, attr):
-            delattr(core._thread_local, attr)
-    return core, pushed, popped
-
-
-@pytest.fixture
-def torch_backend_tiers():
-    """Return the torch backend wired to in-memory Python-tier sinks."""
-    from utils.inject_roctx import core
-    from utils.inject_roctx._backends import torch as torch_mod
-
-    pushed: list[str] = []
-    popped: list[None] = []
-    core.set_python_tier_io(push=pushed.append, pop=lambda: popped.append(None))
-    for attr in ("marker_stack", "context_stack"):
-        if hasattr(core._thread_local, attr):
-            delattr(core._thread_local, attr)
-    if hasattr(torch_mod._thread_local, "tier_stack"):
-        delattr(torch_mod._thread_local, "tier_stack")
-    saved_hook = torch_mod._STATE.native_hook
-    torch_mod._STATE.native_hook = None
-    try:
-        yield torch_mod, pushed, popped
-    finally:
-        torch_mod._STATE.native_hook = saved_hook
-
-
-def test_push_scope_appends_backend_suffix(core_with_python_tier):
-    core, pushed, _ = core_with_python_tier
-
-    core._push_scope("op", "#1@x:1", backend="torch")
-    assert pushed == ["op:#1@x:1|torch"]
-
-
-def test_push_scope_omits_suffix_when_backend_empty(core_with_python_tier):
-    core, pushed, _ = core_with_python_tier
-
-    core._push_scope("op", "#1@x:1")
-    assert pushed == ["op:#1@x:1"]
-
-
-def test_torch_push_scope_routes_to_native_tier_when_active(torch_backend_tiers):
-    torch_backend, pushed, _ = torch_backend_tiers
-
-    seen: list[tuple] = []
-
-    class Hook:
-        def active(self):
-            return True
-
-        def push(self, marker, context, backend):
-            seen.append((marker, context, backend))
-            return True
-
-        def pop(self):
-            pass
-
-    torch_backend._STATE.native_hook = Hook()
-    torch_backend._push_scope("op", "#1@x:1", backend="torch")
-
-    assert seen == [("op", "#1@x:1", "torch")]
-    assert pushed == []
-
-
-def test_torch_pop_scope_routes_each_frame_to_its_originating_tier(torch_backend_tiers):
-    torch_backend, pushed, popped = torch_backend_tiers
-
-    native_pops: list[None] = []
-
-    class Hook:
-        active_flag = True
-
-        def active(self):
-            return self.active_flag
-
-        def push(self, marker, context, backend):
-            return True
-
-        def pop(self):
-            native_pops.append(None)
-
-    hook = Hook()
-    torch_backend._STATE.native_hook = hook
-    torch_backend._push_scope("native_op", "#1@x:1", backend="torch")
-    hook.active_flag = False
-    torch_backend._push_scope("py_op", "#2@x:2", backend="torch")
-    torch_backend._pop_scope()
-    torch_backend._pop_scope()
-
-    assert pushed == ["native_op/py_op:#1@x:1/#2@x:2|torch"]
-    assert popped == [None]
-    assert native_pops == [None]
