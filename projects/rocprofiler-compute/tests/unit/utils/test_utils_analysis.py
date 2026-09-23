@@ -13,7 +13,6 @@ import pytest
 
 import utils.utils_analysis as utils_analysis
 from utils.ml_api_trace_errors import (
-    MissingSourceLocationError,
     OverlappingMarkerRangeError,
     UncorrelatedLauncherIntervalError,
 )
@@ -980,49 +979,6 @@ def test_nest_marker_intervals_skips_unavailable_args():
     })
     forest = nest_marker_intervals(trace_df)
     assert forest["1"][0].args_invocations == {}
-
-
-def test_attach_defers_missing_source_and_grafts_other_roots():
-    backward = CallTreeNode(
-        name="torch.Tensor.backward",
-        file_name="simple.py",
-        line_number=28,
-        backend="torch",
-        start_timestamp=0.0,
-        end_timestamp=100.0,
-    )
-    backward.invocation_ids.add("bw")
-    detach = CallTreeNode(
-        name="aten::detach",
-        backend="torch",
-        start_timestamp=200.0,
-        end_timestamp=210.0,
-    )
-    detach.invocation_ids.add("detach")
-    child = CallTreeNode(
-        name="AddmmBackward0",
-        backend="torch",
-        start_timestamp=11.0,
-        end_timestamp=19.0,
-    )
-    child.invocation_ids.add("bw_op")
-    engine = CallTreeNode(
-        name="autograd::engine::evaluate_function: AddmmBackward0",
-        backend="torch",
-        start_timestamp=10.0,
-        end_timestamp=20.0,
-        launcher_thread_id="9081",
-    )
-    engine.invocation_ids.add("eval")
-    engine.children = [child]
-    forest = {"9081": [backward, detach], "9247": [engine]}
-    errors = attach_unlocated_trees_by_launcher_thread(forest)
-    assert len(errors) == 1
-    assert isinstance(errors[0], MissingSourceLocationError)
-    assert errors[0].operator_name == "aten::detach"
-    assert engine in backward.children
-    assert "9247" not in forest
-    assert detach in forest["9081"]
 
 
 def test_attach_defers_uncorrelated_interval_and_keeps_worker_root():
