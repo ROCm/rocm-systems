@@ -8672,6 +8672,464 @@
           }
         }
       ]
+    },
+    "tree-atomic-or": {
+      "faults": [
+        {
+          "id": "atomic-weaken-scope-partial-publication",
+          "family": "atomic-weaken-scope",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine code object and application atomic in tree-debug/original.asm and inventory.txt. Lane zero of producer subgroups 0, 1 and 2 sets its bit with the selected release atomic OR; subgroup 3 consumes all three bits before loading peer-wave LDS partials. The clean test launches all participating subgroups, so the selected instruction is reached by each active producer leader. Its original RDNA4 scope is SCOPE_DEV (encoded 2); the supported injector changes it to wave scope (encoded 0) without changing the address, value, operation or waits. Earlier LDS completion waits do not widen this atomic scope. Other context synchronization may still mask the fault; qualification requires observed detections, never admission alone. Require 6/8 admitted/reached healthy trials and matching clean controls."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:e4db9470d11020fa|kernel=_ZN12_GLOBAL__N_134wmma_streamk_tree_atomic_or_kernelILN7hip_moi19atomic_memory_orderE2ELS2_3EEEvNS1_7context11storage_refEPKDv8_DF16_S7_PiPf|kind=atomic|pc=0x0000000000023e80|mnemonic=global_atomic_or_b32|occurrence=252"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "atomic-weaken-scope-partial-publication-preset-default",
+          "family": "atomic-weaken-scope",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine code object and application atomic in tree-debug/original.asm and inventory.txt. Lane zero of producer subgroups 0, 1 and 2 sets its bit with the selected release atomic OR; subgroup 3 consumes all three bits before loading peer-wave LDS partials. The clean test launches all participating subgroups, so the selected instruction is reached by each active producer leader. Its original RDNA4 scope is SCOPE_DEV (encoded 2); the supported injector changes it to wave scope (encoded 0) without changing the address, value, operation or waits. Earlier LDS completion waits do not widen this atomic scope. Other context synchronization may still mask the fault; qualification requires observed detections, never admission alone. Require 6/8 admitted/reached healthy trials and matching clean controls."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:e4db9470d11020fa|kernel=_ZN12_GLOBAL__N_134wmma_streamk_tree_atomic_or_kernelILN7hip_moi19atomic_memory_orderE2ELS2_3EEEvNS1_7context11storage_refEPKDv8_DF16_S7_PiPf|kind=atomic|pc=0x0000000000023e80|mnemonic=global_atomic_or_b32|occurrence=252"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "atomic-weaken-scope-partial-publication-preset-high",
+          "family": "atomic-weaken-scope",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine code object and application atomic in tree-debug/original.asm and inventory.txt. Lane zero of producer subgroups 0, 1 and 2 sets its bit with the selected release atomic OR; subgroup 3 consumes all three bits before loading peer-wave LDS partials. The clean test launches all participating subgroups, so the selected instruction is reached by each active producer leader. Its original RDNA4 scope is SCOPE_DEV (encoded 2); the supported injector changes it to wave scope (encoded 0) without changing the address, value, operation or waits. Earlier LDS completion waits do not widen this atomic scope. Other context synchronization may still mask the fault; qualification requires observed detections, never admission alone. Require 6/8 admitted/reached healthy trials and matching clean controls."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:e4db9470d11020fa|kernel=_ZN12_GLOBAL__N_134wmma_streamk_tree_atomic_or_kernelILN7hip_moi19atomic_memory_orderE2ELS2_3EEEvNS1_7context11storage_refEPKDv8_DF16_S7_PiPf|kind=atomic|pc=0x0000000000023e80|mnemonic=global_atomic_or_b32|occurrence=252"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "atomic-weaken-scope-partial-publication-preset-higher",
+          "family": "atomic-weaken-scope",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine code object and application atomic in tree-debug/original.asm and inventory.txt. Lane zero of producer subgroups 0, 1 and 2 sets its bit with the selected release atomic OR; subgroup 3 consumes all three bits before loading peer-wave LDS partials. The clean test launches all participating subgroups, so the selected instruction is reached by each active producer leader. Its original RDNA4 scope is SCOPE_DEV (encoded 2); the supported injector changes it to wave scope (encoded 0) without changing the address, value, operation or waits. Earlier LDS completion waits do not widen this atomic scope. Other context synchronization may still mask the fault; qualification requires observed detections, never admission alone. Require 6/8 admitted/reached healthy trials and matching clean controls."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:e4db9470d11020fa|kernel=_ZN12_GLOBAL__N_134wmma_streamk_tree_atomic_or_kernelILN7hip_moi19atomic_memory_orderE2ELS2_3EEEvNS1_7context11storage_refEPKDv8_DF16_S7_PiPf|kind=atomic|pc=0x0000000000023e80|mnemonic=global_atomic_or_b32|occurrence=252"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "atomic-weaken-scope-partial-publication-preset-max",
+          "family": "atomic-weaken-scope",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine code object and application atomic in tree-debug/original.asm and inventory.txt. Lane zero of producer subgroups 0, 1 and 2 sets its bit with the selected release atomic OR; subgroup 3 consumes all three bits before loading peer-wave LDS partials. The clean test launches all participating subgroups, so the selected instruction is reached by each active producer leader. Its original RDNA4 scope is SCOPE_DEV (encoded 2); the supported injector changes it to wave scope (encoded 0) without changing the address, value, operation or waits. Earlier LDS completion waits do not widen this atomic scope. Other context synchronization may still mask the fault; qualification requires observed detections, never admission alone. Require 6/8 admitted/reached healthy trials and matching clean controls."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:e4db9470d11020fa|kernel=_ZN12_GLOBAL__N_134wmma_streamk_tree_atomic_or_kernelILN7hip_moi19atomic_memory_orderE2ELS2_3EEEvNS1_7context11storage_refEPKDv8_DF16_S7_PiPf|kind=atomic|pc=0x0000000000023e80|mnemonic=global_atomic_or_b32|occurrence=252"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "streamk-arrival": {
+      "faults": [
+        {
+          "id": "atomic-weaken-scope-partial-publication",
+          "family": "atomic-weaken-scope",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine code object and application atomic in streamk-debug/original.asm and inventory.txt. Each subgroup leader executes the selected acq_rel arrival-counter atomic add after its LDS partial stores; the final arriving subgroup consumes peer-wave partials. The clean test launches all participating subgroups, so the selected instruction is reached by each active producer leader. Its original RDNA4 scope is SCOPE_DEV (encoded 2); the supported injector changes it to wave scope (encoded 0) without changing the address, value, operation or waits. Earlier LDS completion waits do not widen this atomic scope. Other context synchronization may still mask the fault; qualification requires observed detections, never admission alone. Require 6/8 admitted/reached healthy trials and matching clean controls."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:56e5c14547caddca|kernel=_ZN12_GLOBAL__N_135wmma_streamk_arrival_counter_kernelILN7hip_moi19atomic_memory_orderE3EEEvNS1_7context11storage_refEPKDv8_DF16_S7_PiPf|kind=atomic|pc=0x0000000000010200|mnemonic=global_atomic_add_u32|occurrence=104"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "atomic-weaken-scope-partial-publication-preset-default",
+          "family": "atomic-weaken-scope",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine code object and application atomic in streamk-debug/original.asm and inventory.txt. Each subgroup leader executes the selected acq_rel arrival-counter atomic add after its LDS partial stores; the final arriving subgroup consumes peer-wave partials. The clean test launches all participating subgroups, so the selected instruction is reached by each active producer leader. Its original RDNA4 scope is SCOPE_DEV (encoded 2); the supported injector changes it to wave scope (encoded 0) without changing the address, value, operation or waits. Earlier LDS completion waits do not widen this atomic scope. Other context synchronization may still mask the fault; qualification requires observed detections, never admission alone. Require 6/8 admitted/reached healthy trials and matching clean controls."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:56e5c14547caddca|kernel=_ZN12_GLOBAL__N_135wmma_streamk_arrival_counter_kernelILN7hip_moi19atomic_memory_orderE3EEEvNS1_7context11storage_refEPKDv8_DF16_S7_PiPf|kind=atomic|pc=0x0000000000010200|mnemonic=global_atomic_add_u32|occurrence=104"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "atomic-weaken-scope-partial-publication-preset-high",
+          "family": "atomic-weaken-scope",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine code object and application atomic in streamk-debug/original.asm and inventory.txt. Each subgroup leader executes the selected acq_rel arrival-counter atomic add after its LDS partial stores; the final arriving subgroup consumes peer-wave partials. The clean test launches all participating subgroups, so the selected instruction is reached by each active producer leader. Its original RDNA4 scope is SCOPE_DEV (encoded 2); the supported injector changes it to wave scope (encoded 0) without changing the address, value, operation or waits. Earlier LDS completion waits do not widen this atomic scope. Other context synchronization may still mask the fault; qualification requires observed detections, never admission alone. Require 6/8 admitted/reached healthy trials and matching clean controls."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:56e5c14547caddca|kernel=_ZN12_GLOBAL__N_135wmma_streamk_arrival_counter_kernelILN7hip_moi19atomic_memory_orderE3EEEvNS1_7context11storage_refEPKDv8_DF16_S7_PiPf|kind=atomic|pc=0x0000000000010200|mnemonic=global_atomic_add_u32|occurrence=104"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "atomic-weaken-scope-partial-publication-preset-higher",
+          "family": "atomic-weaken-scope",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine code object and application atomic in streamk-debug/original.asm and inventory.txt. Each subgroup leader executes the selected acq_rel arrival-counter atomic add after its LDS partial stores; the final arriving subgroup consumes peer-wave partials. The clean test launches all participating subgroups, so the selected instruction is reached by each active producer leader. Its original RDNA4 scope is SCOPE_DEV (encoded 2); the supported injector changes it to wave scope (encoded 0) without changing the address, value, operation or waits. Earlier LDS completion waits do not widen this atomic scope. Other context synchronization may still mask the fault; qualification requires observed detections, never admission alone. Require 6/8 admitted/reached healthy trials and matching clean controls."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:56e5c14547caddca|kernel=_ZN12_GLOBAL__N_135wmma_streamk_arrival_counter_kernelILN7hip_moi19atomic_memory_orderE3EEEvNS1_7context11storage_refEPKDv8_DF16_S7_PiPf|kind=atomic|pc=0x0000000000010200|mnemonic=global_atomic_add_u32|occurrence=104"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "atomic-weaken-scope-partial-publication-preset-max",
+          "family": "atomic-weaken-scope",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine code object and application atomic in streamk-debug/original.asm and inventory.txt. Each subgroup leader executes the selected acq_rel arrival-counter atomic add after its LDS partial stores; the final arriving subgroup consumes peer-wave partials. The clean test launches all participating subgroups, so the selected instruction is reached by each active producer leader. Its original RDNA4 scope is SCOPE_DEV (encoded 2); the supported injector changes it to wave scope (encoded 0) without changing the address, value, operation or waits. Earlier LDS completion waits do not widen this atomic scope. Other context synchronization may still mask the fault; qualification requires observed detections, never admission alone. Require 6/8 admitted/reached healthy trials and matching clean controls."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_ATOMIC_WEAKEN_SCOPE": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:56e5c14547caddca|kernel=_ZN12_GLOBAL__N_135wmma_streamk_arrival_counter_kernelILN7hip_moi19atomic_memory_orderE3EEEvNS1_7context11storage_refEPKDv8_DF16_S7_PiPf|kind=atomic|pc=0x0000000000010200|mnemonic=global_atomic_add_u32|occurrence=104"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }
