@@ -212,6 +212,7 @@ extern std::function<hipError_t(hipStream_t /*stream*/, void* /*ptr*/,
                                 std::uint64_t /*value*/, unsigned int /*flags*/,
                                 std::uint64_t /*mask*/)>
     g_hipStreamWaitValue64;
+
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.
 void ResetHipFakes();

@@ -525,7 +525,7 @@ std::function<hipError_t(hipStream_t, unsigned int, hipStreamBatchMemOpParams*, 
     g_hipStreamBatchMemOp = DefaultHipStreamBatchMemOp;
 
 static hipError_t DefaultHipStreamWriteValue64(hipStream_t, void*, std::uint64_t,
-                                                unsigned int)
+                                               unsigned int)
 {
     FailLoudUnfaked("hip_fakes", "hipStreamWriteValue64");
 }
@@ -533,12 +533,13 @@ std::function<hipError_t(hipStream_t, void*, std::uint64_t, unsigned int)>
     g_hipStreamWriteValue64 = DefaultHipStreamWriteValue64;
 
 static hipError_t DefaultHipStreamWaitValue64(hipStream_t, void*, std::uint64_t,
-                                               unsigned int, std::uint64_t)
+                                              unsigned int, std::uint64_t)
 {
     FailLoudUnfaked("hip_fakes", "hipStreamWaitValue64");
 }
 std::function<hipError_t(hipStream_t, void*, std::uint64_t, unsigned int, std::uint64_t)>
     g_hipStreamWaitValue64 = DefaultHipStreamWaitValue64;
+
 // Restore every HIP hook to its default.
 void ResetHipFakes()
 {
@@ -749,24 +750,6 @@ hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int flags)
     return g_hipHostMalloc(ptr, size, flags);
 }
 
-hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
-                               hipStreamBatchMemOpParams* params, unsigned int flags)
-{
-    return g_hipStreamBatchMemOp(stream, count, params, flags);
-}
-
-hipError_t hipStreamWriteValue64(hipStream_t stream, void* ptr, std::uint64_t value,
-                                 unsigned int flags)
-{
-    return g_hipStreamWriteValue64(stream, ptr, value, flags);
-}
-
-hipError_t hipStreamWaitValue64(hipStream_t stream, void* ptr, std::uint64_t value,
-                                unsigned int flags, std::uint64_t mask)
-{
-    return g_hipStreamWaitValue64(stream, ptr, value, flags, mask);
-}
-
 hipError_t hipIpcCloseMemHandle(void* ptr) { return g_hipIpcCloseMemHandle(ptr); }
 
 hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle, unsigned int flags)
@@ -857,6 +840,12 @@ hipError_t hipPointerGetAttribute(void* data, hipPointer_attribute attribute,
     return g_hipPointerGetAttribute(data, attribute, ptr);
 }
 
+hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
+                               hipStreamBatchMemOpParams* params, unsigned int flags)
+{
+    return g_hipStreamBatchMemOp(stream, count, params, flags);
+}
+
 hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags)
 {
     return g_hipStreamCreateWithFlags(stream, flags);
@@ -884,6 +873,18 @@ hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPrio
 
 hipError_t hipStreamDestroy(hipStream_t s)     { return g_hipStreamDestroy(s); }
 hipError_t hipStreamSynchronize(hipStream_t s) { return g_hipStreamSynchronize(s); }
+
+hipError_t hipStreamWaitValue64(hipStream_t stream, void* ptr, std::uint64_t value,
+                                unsigned int flags, std::uint64_t mask)
+{
+    return g_hipStreamWaitValue64(stream, ptr, value, flags, mask);
+}
+
+hipError_t hipStreamWriteValue64(hipStream_t stream, void* ptr, std::uint64_t value,
+                                 unsigned int flags)
+{
+    return g_hipStreamWriteValue64(stream, ptr, value, flags);
+}
 
 hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode)
 {
