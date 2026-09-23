@@ -23,10 +23,10 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.parser import MEMBW_ANALYSIS_PANEL_ID
 from utils.specs import MachineSpecs
 from utils.utils_common import (
     INVALID_BLOCK_HINT,
+    MEMBW_ANALYSIS_PANEL_ID,
     METRIC_ID_RE,
     add_counter_extra_config_input_yaml,
     canonical_config_arch,

@@ -24,6 +24,7 @@ from utils.metrics.expression import gen_counter_list
 from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
 from utils.utils_common import (
+    MEMBW_ANALYSIS_PANEL_ID,
     METRIC_ID_RE,
     SUPPORTED_FIELD,
     convert_filter_blocks_to_panel_ids,
@@ -46,8 +47,6 @@ from utils.utils_common import (
 PMC_KERNEL_TOP_TABLE_ID: int = 1
 # 002 is ID of pmc_dispatch_info.csv table
 PMC_DISPATCH_INFO_TABLE_ID: int = 2
-# Panel id of block 30, Memory Bandwidth Analysis
-MEMBW_ANALYSIS_PANEL_ID: int = 3000
 
 
 @demarcate
