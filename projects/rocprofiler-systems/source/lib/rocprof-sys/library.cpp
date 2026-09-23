@@ -316,7 +316,7 @@ struct fini_bundle<tim::lightweight_tuple<Tp...>>
     using base_type = fini_bundle<Tp...>;
 };
 
-using fini_bundle_t = typename fini_bundle<main_bundle_t>::base_type;
+using fini_bundle_t = fini_bundle<main_bundle_t>::base_type;
 }  // namespace
 
 //======================================================================================//

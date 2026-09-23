@@ -40,9 +40,9 @@ public:
                          std::shared_ptr<void> frontend_lifetime = {});
   [[nodiscard]] AddressSpaceHandle
   register_address_space(uint32_t vmid, LegacyPageTable *page_table,
-                         std::shared_mutex *page_table_mutex,
+                         util::DistributedSharedMutex *page_table_mutex,
                          const uint64_t *page_table_generation = nullptr,
-                         std::shared_ptr<std::shared_mutex> request_mutex = {},
+                         std::shared_ptr<util::DistributedSharedMutex> request_mutex = {},
                          std::shared_ptr<void> frontend_lifetime = {});
   [[nodiscard]] bool unregister_address_space(AddressSpaceHandle handle);
   [[nodiscard]] bool unregister_vmid(uint32_t vmid);

@@ -8790,6 +8790,9 @@ TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 0, 0x4400u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 2, 0, 0x4800u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 3, 0, 0x3c00u},
+        // SDWA scaling and directed guest rounding apply to the same wide result.
+        ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x1000u, 1, 1u << 2, 0x4001u},
+        ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x1000u, 1, 2u << 2, 0x4000u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 2u << 6, 0x4000u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1,
                   amdgpu::Wavefront::IEEE_BIT, 0x4000u},

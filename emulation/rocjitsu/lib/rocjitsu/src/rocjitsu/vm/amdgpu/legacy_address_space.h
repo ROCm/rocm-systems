@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/legacy_page_table.h"
 #include "simdojo/components/sparse_memory.h"
 #include "simdojo/sim/component.h"
+#include "util/distributed_shared_mutex.h"
 #include "util/log.h"
 #include "util/unique_handle.h"
 
@@ -145,9 +146,9 @@ public:
 class LegacyAddressSpaceRegistration {
 public:
   LegacyPageTable *page_table = nullptr;
-  std::shared_mutex *page_table_mutex = nullptr;
+  util::DistributedSharedMutex *page_table_mutex = nullptr;
   const uint64_t *page_table_generation = nullptr;
-  std::shared_ptr<std::shared_mutex> request_mutex;
+  std::shared_ptr<util::DistributedSharedMutex> request_mutex;
   std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch{};
   pid_t client_pid = 0;
   int client_mem_fd = -1;
@@ -214,11 +215,12 @@ public:
   private:
     friend class LegacyAddressSpace;
 
-    explicit PageTableRequestGuard(std::shared_ptr<std::shared_mutex> mutex)
+    explicit PageTableRequestGuard(std::shared_ptr<util::DistributedSharedMutex> mutex)
         : mutex_(std::move(mutex)),
-          lock_(mutex_ ? std::shared_lock(*mutex_) : std::shared_lock<std::shared_mutex>{}) {}
+          lock_(mutex_ ? std::shared_lock(*mutex_)
+                       : std::shared_lock<util::DistributedSharedMutex>{}) {}
 
-    void bind(LegacyPageTable *page_table, std::shared_mutex *page_table_mutex,
+    void bind(LegacyPageTable *page_table, util::DistributedSharedMutex *page_table_mutex,
               const uint64_t *generation, uint64_t registry_generation) {
       page_table_ = page_table;
       page_table_mutex_ = page_table_mutex;
@@ -226,10 +228,10 @@ public:
       registry_generation_ = registry_generation;
     }
 
-    std::shared_ptr<std::shared_mutex> mutex_;
-    std::shared_lock<std::shared_mutex> lock_;
+    std::shared_ptr<util::DistributedSharedMutex> mutex_;
+    std::shared_lock<util::DistributedSharedMutex> lock_;
     LegacyPageTable *page_table_ = nullptr;
-    std::shared_mutex *page_table_mutex_ = nullptr;
+    util::DistributedSharedMutex *page_table_mutex_ = nullptr;
     const uint64_t *generation_ = nullptr;
     uint64_t registry_generation_ = 0;
   };
@@ -245,9 +247,9 @@ public:
   ///        Omitting it disables the per-thread fast path for this page table.
   /// @param request_mutex Optional lease that stabilizes batched page-table
   ///        lookups. Omitting it disables cross-chunk MTYPE reuse.
-  void register_process(uint32_t pid, LegacyPageTable *pt, std::shared_mutex *mu,
+  void register_process(uint32_t pid, LegacyPageTable *pt, util::DistributedSharedMutex *mu,
                         const uint64_t *generation = nullptr,
-                        std::shared_ptr<std::shared_mutex> request_mutex = {}) {
+                        std::shared_ptr<util::DistributedSharedMutex> request_mutex = {}) {
     util::Logger::cp("VMID_REG pid=", pid, " mem=0x", std::hex, reinterpret_cast<uintptr_t>(this),
                      std::dec, " pt_size=", pt->size());
     update_vmid_registration(pid, [&](auto) {
@@ -273,7 +275,7 @@ public:
     if (vmid == 0)
       return {};
     while (true) {
-      std::shared_ptr<std::shared_mutex> request_mutex;
+      std::shared_ptr<util::DistributedSharedMutex> request_mutex;
       {
         std::shared_lock lock(vmid_mutex_);
         auto it = vmid_table_.find(vmid);
@@ -590,6 +592,50 @@ public:
     std::shared_lock page_table_lock(*guard.page_table_mutex_);
     auto pte = guard.page_table_->find(addr >> PAGE_SHIFT);
     return pte != guard.page_table_->end() ? pte->second.mtype : Mtype::RW;
+  }
+
+  /// @brief Try a small mapped copy without fault publication or partial stores.
+  /// @details Restrict the operation to one host extent and one host page.
+  /// The mapping lease excludes protection changes, and a guarded write to a
+  /// single host page either succeeds or faults on its first store. Reads are
+  /// staged so a refused copy never modifies the caller's destination.
+  bool try_copy_contiguous(uint64_t addr, void *bytes, size_t size, uint32_t vmid,
+                           bool into_memory) const {
+    constexpr size_t kMaxBytes = 256;
+    if (size == 0 || size > kMaxBytes || size > PAGE_SIZE - (addr & PAGE_MASK))
+      return false;
+    return with_page_mapping(addr, vmid, [&](const LegacyPageTableEntry *pte, IdentityPage) {
+      if (!pte)
+        return false;
+      const size_t offset = addr & PAGE_MASK;
+      const LegacyHostExtent *extent = host_extent_at(*pte, offset);
+      if (!extent || size > extent->host_backed_bytes - (offset - extent->gpu_page_offset))
+        return false;
+      uint8_t *host = extent->host_ptr + offset - extent->gpu_page_offset;
+      const auto first = reinterpret_cast<uintptr_t>(host);
+      if (size > PAGE_SIZE - (first & PAGE_MASK))
+        return false;
+      const auto mapping_lease = rocjitsu::host_mapping_lock().lock_shared();
+      if (addressable_prefix(host, size) != size)
+        return false;
+      std::array<uint8_t, kMaxBytes> staging;
+#if defined(RJ_GPU_MEMORY_WITH_TSAN)
+      void *host_page = reinterpret_cast<void *>(first & ~static_cast<uintptr_t>(PAGE_MASK));
+      __tsan_acquire(host_page);
+#endif
+      const bool copied = rocjitsu::with_host_access_guard([&] {
+        if (into_memory)
+          std::memcpy(host, bytes, size);
+        else
+          std::memcpy(staging.data(), host, size);
+      });
+#if defined(RJ_GPU_MEMORY_WITH_TSAN)
+      __tsan_release(host_page);
+#endif
+      if (copied && !into_memory)
+        std::memcpy(bytes, staging.data(), size);
+      return copied;
+    });
   }
 
   uint32_t fetch32(uint64_t addr, uint32_t vmid = 0) const { return read32(addr, vmid); }
@@ -2318,12 +2364,12 @@ private:
   class VmidEntry {
   public:
     LegacyPageTable *page_table = nullptr;
-    std::shared_mutex *mutex = nullptr;
+    util::DistributedSharedMutex *mutex = nullptr;
     pid_t client_pid = 0;
     /// Debugger-authorized /proc/<target>/mem fd, or empty.
     util::UniqueHandle client_mem_fd;
     const uint64_t *generation = nullptr;
-    std::shared_ptr<std::shared_mutex> request_mutex;
+    std::shared_ptr<util::DistributedSharedMutex> request_mutex;
     bool passthrough = false;
     MemoryFaultReporter *fault_reporter = nullptr;
   };
@@ -2335,7 +2381,7 @@ private:
   /// introducing a lock-order cycle.
   template <typename F> void update_vmid_registration(uint32_t pid, F &&update) {
     while (true) {
-      std::shared_ptr<std::shared_mutex> request_mutex;
+      std::shared_ptr<util::DistributedSharedMutex> request_mutex;
       {
         std::shared_lock lock(vmid_mutex_);
         auto it = vmid_table_.find(pid);
@@ -2343,7 +2389,7 @@ private:
           request_mutex = it->second.request_mutex;
       }
 
-      std::unique_lock<std::shared_mutex> request_lock;
+      std::unique_lock<util::DistributedSharedMutex> request_lock;
       if (request_mutex)
         request_lock = std::unique_lock(*request_mutex);
 
@@ -2371,7 +2417,7 @@ private:
     bool found = false;
     LegacyPageTableEntry pte;
     LegacyPageTable *page_table = nullptr;
-    std::shared_mutex *mutex = nullptr;
+    util::DistributedSharedMutex *mutex = nullptr;
     const uint64_t *generation_ptr = nullptr;
   };
 
@@ -2528,7 +2574,7 @@ private:
           cache.memory == this && cache.memory_instance == instance_id_ && cache.vmid == vmid &&
           cache.registry_generation == registry_generation && cache.page_table && cache.mutex;
       LegacyPageTable *page_table = cache.page_table;
-      std::shared_mutex *page_table_mutex = cache.mutex;
+      util::DistributedSharedMutex *page_table_mutex = cache.mutex;
       const uint64_t *generation_ptr = cache.generation_ptr;
       if (!cached_table) {
         auto vmid_entry = vmid_table_.find(vmid);
@@ -3046,7 +3092,7 @@ private:
   // TLS caches can survive destruction on long-lived host threads.
   inline static std::atomic<uint64_t> next_instance_id_{1};
   const uint64_t instance_id_;
-  mutable std::shared_mutex vmid_mutex_;
+  mutable util::DistributedSharedMutex vmid_mutex_;
   std::unordered_map<uint32_t, VmidEntry> vmid_table_;
   // Version of VMID-to-page-table bindings, accessed only under vmid_mutex_.
   uint64_t vmid_registry_generation_ = 1;
