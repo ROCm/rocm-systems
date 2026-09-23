@@ -789,28 +789,61 @@ TEST_F(TopoTest, SameDomainNetPaths_OtherArchKeepsPhb) {
 // DEV's. GDR therefore already worked for this shape before the rework; what the DEV-keyed rewrite
 // adds is that the physical device agrees with its GPU, so the graph search and the GDR decision
 // cannot read different distances for the same hardware.
+//
+// A second domain is required here specifically: for an SPX GPU, ncclTopoGdrDistance() reads the
+// GPU's own entry rather than a parent's, so a rewrite that leaked past the domain match (e.g. the
+// `gpu->gpu.parent != dev` guard in rcclRewriteSameDomainNetPaths() being dropped) would promote the
+// far NIC's entry directly, and nothing downstream re-derives it from a parent to catch the leak.
+// The single-domain form of this test cannot see that: there is no "wrong domain" NIC to check.
 TEST_F(TopoTest, SameDomainNetPaths_Gfx1250UnpartitionedGpu) {
   const uint64_t host = 0xf2;
   struct ncclXmlNode* cpu = addSystemCpu(host);
   addSameDomainGpuNic(cpu, /*domain=*/1, /*dev=*/0, /*baseRank=*/0, "gfx1250", /*nParts=*/0);
+  addSameDomainGpuNic(cpu, /*domain=*/2, /*dev=*/1, /*baseRank=*/1, "gfx1250", /*nParts=*/0);
 
   struct ncclTopoSystem* built = buildSystemWithPaths(host);
   ASSERT_NE(built, nullptr);
-  ASSERT_EQ(built->nodes[GPU].count, 1);
-  ASSERT_EQ(built->nodes[NET].count, 1);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+  ASSERT_EQ(built->nodes[NET].count, 2);
 
-  struct ncclTopoNode* gpu = built->nodes[GPU].nodes;
-  ASSERT_EQ(gpu->gpu.mloPart, NCCL_TOPO_UNDEF);
-  ASSERT_NE(gpu->gpu.parent, nullptr);
-  EXPECT_EQ(gpu->paths[NET][0].type, PATH_PXB);
-  EXPECT_EQ(gpu->gpu.parent->paths[NET][0].type, PATH_PXB);
-  EXPECT_EQ(built->nodes[NET].nodes[0].paths[GPU][0].type, PATH_PXB);
-  EXPECT_EQ(built->nodes[NET].nodes[0].paths[DEV][0].type, PATH_PXB);
+  for (int g = 0; g < built->nodes[GPU].count; g++) {
+    struct ncclTopoNode* gpu = built->nodes[GPU].nodes + g;
+    const int domain = (int)NCCL_BUSID_DOMAIN(NCCL_TOPO_ID_LOCAL_ID(gpu->id));
+    const int local = netIndexForDomain(built, domain);
+    SCOPED_TRACE(testing::Message() << "gpu " << g << " domain " << domain);
+    ASSERT_GE(local, 0);
+    ASSERT_EQ(gpu->gpu.mloPart, NCCL_TOPO_UNDEF);
+    ASSERT_NE(gpu->gpu.parent, nullptr);
 
-  enum ncclTopoGdrMode mode = ncclTopoGdrModeDisable;
-  ASSERT_EQ(ncclTopoCheckGdr(built, gpu->gpu.rank, built->nodes[NET].nodes[0].id, /*read=*/0, &mode),
-            ncclSuccess);
-  EXPECT_NE(mode, ncclTopoGdrModeDisable);
+    const int dev = (int)(gpu->gpu.parent - built->nodes[DEV].nodes);
+
+    EXPECT_EQ(gpu->paths[NET][local].type, PATH_PXB);
+    EXPECT_EQ(gpu->gpu.parent->paths[NET][local].type, PATH_PXB);
+    EXPECT_EQ(built->nodes[NET].nodes[local].paths[GPU][g].type, PATH_PXB);
+    EXPECT_EQ(built->nodes[NET].nodes[local].paths[DEV][dev].type, PATH_PXB);
+
+    enum ncclTopoGdrMode mode = ncclTopoGdrModeDisable;
+    ASSERT_EQ(ncclTopoCheckGdr(built, gpu->gpu.rank, built->nodes[NET].nodes[local].id, /*read=*/0,
+                               &mode),
+              ncclSuccess);
+    EXPECT_NE(mode, ncclTopoGdrModeDisable);
+
+    // The NIC in the other domain is not this GPU's, and there is no parent-DEV re-check to save a
+    // leaked promotion for an SPX GPU, so this pair has to stay untouched.
+    for (int n = 0; n < built->nodes[NET].count; n++) {
+      if (n == local) continue;
+      EXPECT_EQ(gpu->paths[NET][n].type, PATH_PHB);
+      EXPECT_EQ(gpu->gpu.parent->paths[NET][n].type, PATH_PHB);
+      EXPECT_EQ(built->nodes[NET].nodes[n].paths[GPU][g].type, PATH_PHB);
+      EXPECT_EQ(built->nodes[NET].nodes[n].paths[DEV][dev].type, PATH_PHB);
+
+      enum ncclTopoGdrMode crossMode = ncclTopoGdrModeDefault;
+      ASSERT_EQ(ncclTopoCheckGdr(built, gpu->gpu.rank, built->nodes[NET].nodes[n].id, /*read=*/0,
+                                 &crossMode),
+                ncclSuccess);
+      EXPECT_EQ(crossMode, ncclTopoGdrModeDisable);
+    }
+  }
 
   ncclTopoFree(built);
 }
