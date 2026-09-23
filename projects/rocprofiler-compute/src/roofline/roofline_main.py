@@ -345,14 +345,15 @@ class Roofline:
         self,
         level_ai: dict[str, float],
         ceiling_data: dict[str, Any],
-        compute_cap: float,
-        compute_cap_label: str,
+        performance: float,
+        compute_peaks: list[tuple[str, float]],
     ) -> tuple[str, str]:
         """Name the specific binding roof for a kernel: the roof with the lowest
-        achievable performance at the kernel's operating point. The compute
-        candidate is the envelope cap the diagonals are actually drawn to, so
-        the limiter agrees with the drawn roof and with the percent of roofline
-        the tooltip reports.
+        achievable performance at the kernel's operating point. Each stacked
+        datatype's compute peak is judged on its own, and only peaks the
+        kernel's own measured performance doesn't already exceed are eligible
+        candidates, so the label names the specific datatype/op-path this
+        kernel is bound by instead of always the tallest peak drawn.
 
         Returns (label, category), where category is "Memory" or "Compute"."""
         candidates: list[tuple[float, str, str]] = []
@@ -361,8 +362,9 @@ class Roofline:
             if bandwidth and ai_value > 0:
                 candidates.append((bandwidth * ai_value, level_name, "Memory"))
 
-        if compute_cap != float("inf"):
-            candidates.append((compute_cap, compute_cap_label, "Compute"))
+        for label, peak in compute_peaks:
+            if peak >= performance:
+                candidates.append((peak, label, "Compute"))
 
         if not candidates:
             return "Unknown", "Unknown"
@@ -387,7 +389,7 @@ class Roofline:
         pct_runtime = self.__ai_data.get("pctRuntime", [])
         time_unit = self.__ai_data.get("timeUnit", "")
         total_dispatches = sum(count for count in counts if count is not None)
-        compute_cap, compute_cap_label = self._envelope_compute_cap(compute_peaks)
+        compute_cap, _ = self._envelope_compute_cap(compute_peaks)
 
         for kernel_index, kernel_name in enumerate(kernel_names):
             points, level_ai = self._build_kernel_points(
@@ -404,7 +406,7 @@ class Roofline:
                 for values in (kernel_colors, counts, total_time, pct_runtime)
             )
             limiter, limiter_category = self._determine_kernel_limiter(
-                level_ai, ceiling_data, compute_cap, compute_cap_label
+                level_ai, ceiling_data, points[0]["perf"], compute_peaks
             )
 
             traces.append(
