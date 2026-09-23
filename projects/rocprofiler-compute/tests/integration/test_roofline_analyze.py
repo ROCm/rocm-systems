@@ -17,7 +17,6 @@ from pathlib import Path
 import common
 import pytest
 
-from roofline.roofline_csv import KERNEL_ROOFLINE_CSV_FILENAME
 from tests.integration import common as integration_common
 
 config = {}
@@ -73,38 +72,6 @@ def test_analyze_generates_roofline_html(
         }
     finally:
         common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_generates_kernel_roofline_csv(
-    binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
-) -> None:
-    """
-    Analyze writes roofline_kernels.csv alongside the roofline HTML, with the
-    same per-kernel data plotted in the interactive figure.
-
-    The MI200 fixture's kernel is a pure memory-bandwidth microbenchmark with
-    zero measured FLOPs, so it draws no dot on the FLOP figure and no CSV row
-    either -- matching the empty-HTML-plot case exactly, and confirming the
-    export doesn't write a spurious empty file. Coverage for the populated
-    (non-empty rows, expected columns) case lives in the unit tests, where
-    kernel performance data can be constructed directly.
-    """
-    workload_dir = integration_common.setup_workload_dir(roofline_dir)
-
-    assert (Path(workload_dir) / "roofline.csv").exists()
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--roofline-data-type",
-        "FP32",
-    ])
-    assert code == 0
-
-    assert not (Path(workload_dir) / KERNEL_ROOFLINE_CSV_FILENAME).exists()
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 def test_analyze_roofline_datatype_independently(

@@ -13,12 +13,10 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Tuple
 
-import pandas as pd
 import plotly.graph_objects as go
 import pytest
 
 import roofline.roofline_html as roofline_html
-from roofline.roofline_csv import KERNEL_ROOFLINE_CSV_FILENAME
 from roofline.roofline_frame import FRAME_X_MIN, canonical_frame
 from roofline.roofline_hover import wrap_hover_name
 from roofline.roofline_html import RooflineViewModel, build_interactive_document
@@ -225,43 +223,6 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
     )
     assert "Performance limiter: Unknown" in unroofed_traces[0].hovertemplate
     assert unroofed[0]["points"][0]["hoverCells"] == ["N/A", "N/A", "900.000 GB/s"]
-
-
-def test_kernel_points_carry_raw_values_matching_hover_cells() -> None:
-    """roofline_csv reads raw numeric point values directly (not the formatted
-    hover strings), so they have to be present and agree with what the
-    tooltip shows."""
-    _, model = kernel_traces(
-        make_roofline(["FP32"]),
-        {"ai_hbm": [[100.0], [50000.0]], "kernelNames": ["kA"]},
-    )
-    point = model[0]["points"][0]
-
-    assert point["roofPerf"] == pytest.approx(
-        float(point["hoverCells"][0].replace(",", ""))
-    )
-    assert point["pctRoof"] == pytest.approx(float(point["hoverCells"][1]))
-    # Achieved bandwidth for this kernel: performance / AI, not the ceiling.
-    assert point["bandwidth"] == pytest.approx(50000.0 / 100.0)
-
-
-def test_kernel_model_carries_count_and_total_time() -> None:
-    """The per-kernel view model keeps Count/Total_Time alongside pctRuntime,
-    since the CSV export reads all three straight off it."""
-    _, model = kernel_traces(
-        make_roofline(["FP32"]),
-        {
-            "ai_hbm": [[100.0], [50000.0]],
-            "kernelNames": ["kA"],
-            "counts": [7.0],
-            "totalTime": [123.0],
-            "pctRuntime": [55.0],
-        },
-    )
-
-    assert model[0]["count"] == 7.0
-    assert model[0]["totalTime"] == 123.0
-    assert model[0]["pctRuntime"] == 55.0
 
 
 def test_kernel_hover_carries_the_whole_name() -> None:
