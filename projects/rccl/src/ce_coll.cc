@@ -57,6 +57,8 @@ static int ncclCeBatchAsyncSupported() {
 #endif
 
 // ncclDevrGetLsaRankPtr takes an LSA-team index, not a world rank.
+// AlltoAllv still iterates world ranks (the size matrix is world-indexed);
+// nNodes==1 is not identity once NCCL_LSA_TEAM_SIZE < nRanks.
 static ncclResult_t ncclCePeerLsaPtr(struct ncclComm* comm, struct ncclDevrWindow* win, size_t offset, int worldRank,
                                     void** outPtr) {
   int lsaRank;
@@ -1189,7 +1191,7 @@ ncclResult_t ncclCeAlltoAllv(struct ncclComm* comm, struct ncclCeCollArgs* args,
       offset = dstPtr - (uint8_t*)args->recvBuff;
       winOff = offset + ((uint8_t*)args->recvBuff - (uint8_t*)args->recvWin->userPtr);
 
-      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, args->recvWin, winOff, dstRank, &peerRecvBuff), ret, fail);
+      NCCLCHECKGOTO(ncclCePeerLsaPtr(comm, args->recvWin, winOff, dstRank, &peerRecvBuff), ret, fail);
 
       batchOpsParams.srcs[batchOpsParams.numOps] = (void*)srcPtr;
       batchOpsParams.dsts[batchOpsParams.numOps] = (void*)peerRecvBuff;
