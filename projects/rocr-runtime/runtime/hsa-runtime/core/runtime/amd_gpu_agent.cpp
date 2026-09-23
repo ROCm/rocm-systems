@@ -2750,6 +2750,12 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
         *((size_t*)value) = GetMaxPersistingL2CacheSize();
         break;
       }
+    case HSA_AMD_AGENT_INFO_HOST_STORES_NEED_HDP_FLUSH:
+      *static_cast<bool*>(value) = HostStoresNeedHdpFlush();
+      break;
+    case HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED:
+      *static_cast<bool*>(value) = HostAtomicsSupported();
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;
@@ -3240,7 +3246,7 @@ hsa_status_t GpuAgent::SetAsyncScratchThresholds(size_t use_once_limit) {
 
 void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_time_t& time) {
   uint64_t start, end;
-  signal->GetRawTs(false, start, end);
+  signal->GetRawTs(start, end);
 
   if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
     debug_print("Signal %p time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
@@ -3258,7 +3264,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_ti
 
 void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_time_t& time) {
   uint64_t start, end;
-  signal->GetRawTs(true, start, end);
+  signal->GetRawTs(start, end);
 
   if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
     debug_print("Signal %p async copy time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",

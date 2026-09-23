@@ -87,7 +87,7 @@ void HsaApiTable::Init() {
   // they can add preprocessor macros on the new functions
 
   constexpr size_t expected_core_api_table_size = 1016;
-  constexpr size_t expected_amd_ext_table_size = 768;
+  constexpr size_t expected_amd_ext_table_size = 784;
   constexpr size_t expected_image_ext_table_size = 128;
   constexpr size_t expected_finalizer_ext_table_size = 64;
   constexpr size_t expected_tools_table_size = 64;
@@ -482,6 +482,8 @@ void HsaApiTable::UpdateAmdExts() {
   amd_ext_api.hsa_amd_counted_queue_release_fn = AMD::hsa_amd_counted_queue_release;
   amd_ext_api.hsa_amd_svm_discard_batch_async_fn = AMD::hsa_amd_svm_discard_batch_async;
   amd_ext_api.hsa_amd_svm_discard_and_prefetch_batch_async_fn = AMD::hsa_amd_svm_discard_and_prefetch_batch_async;
+  amd_ext_api.hsa_amd_signal_batch_create_fn = AMD::hsa_amd_signal_batch_create;
+  amd_ext_api.hsa_amd_signal_batch_destroy_fn = AMD::hsa_amd_signal_batch_destroy;
   amd_ext_api.hsa_amd_signal_wait_all_fn = AMD::hsa_amd_signal_wait_all;
   amd_ext_api.hsa_amd_memory_get_preferred_copy_engine_fn = AMD::hsa_amd_memory_get_preferred_copy_engine;
   amd_ext_api.hsa_amd_portable_export_dmabuf_v2_fn = AMD::hsa_amd_portable_export_dmabuf_v2;

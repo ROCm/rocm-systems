@@ -46,10 +46,13 @@
 #include "core/inc/signal.h"
 
 #include <algorithm>
+#include <atomic>
 #include <numeric>
 #include <vector>
 
 #include "core/util/timer.h"
+#include "core/inc/default_signal.h"
+#include "core/inc/interrupt_signal.h"
 #include "core/inc/runtime.h"
 #if defined(_WIN32)
 #include "malloc.h"
@@ -126,11 +129,24 @@ void SharedSignalPool_t::free(SharedSignal* ptr) {
   free_list_.push_back(ptr);
 }
 
-LocalSignal::LocalSignal(hsa_signal_value_t initial_value, bool exportable)
-    : local_signal_(exportable ? nullptr
-                               : core::Runtime::runtime_singleton_->GetSharedSignalPool(),
-                    exportable ? core::MemoryRegion::AllocateIPC : 0) {
-  local_signal_.shared_object()->amd_signal.value = initial_value;
+LocalSignal::LocalSignal(hsa_signal_value_t initial_value, bool exportable) {
+  shared_signal_ =
+      local_signal_
+          .emplace(exportable ? nullptr : core::Runtime::runtime_singleton_->GetSharedSignalPool(),
+                   exportable ? core::MemoryRegion::AllocateIPC : 0)
+          .shared_object();
+  shared_signal_->amd_signal.value = initial_value;
+}
+
+LocalSignal::LocalSignal(hsa_signal_value_t initial_value, SignalBatch* batch,
+                         SharedSignal* slot)
+    : batch_(batch), shared_signal_(slot) {
+  batch_->AcquireSlot();
+  shared_signal_->amd_signal.value = initial_value;
+}
+
+LocalSignal::~LocalSignal() {
+  if (batch_ != nullptr) batch_->ReleaseSlot(shared_signal_);
 }
 
 void Signal::registerIpc() {
@@ -447,6 +463,115 @@ SignalGroup::SignalGroup(uint32_t num_signals, const hsa_signal_t* hsa_signals)
   if (signals == NULL) return;
   for (uint32_t i = 0; i < count; i++) signals[i] = hsa_signals[i];
 }
+
+void FlushDeviceStores(volatile int64_t* stored, int64_t value) {
+  _mm_sfence();
+  *stored = value;
+  _mm_mfence();
+  (void)*stored;
+}
+
+int64_t Signal::UpdateValueWithoutRmw(ValueOp op, int64_t operand, int64_t expected) {
+  int64_t previous = 0;
+  int64_t next = operand;
+  if (op != ValueOp::kStore) {
+    previous = atomic::Load(&signal_.value, std::memory_order_acquire);
+    switch (op) {
+      case ValueOp::kAnd:
+        next = previous & operand;
+        break;
+      case ValueOp::kOr:
+        next = previous | operand;
+        break;
+      case ValueOp::kXor:
+        next = previous ^ operand;
+        break;
+      case ValueOp::kAdd:
+        next = previous + operand;
+        break;
+      case ValueOp::kSub:
+        next = previous - operand;
+        break;
+      case ValueOp::kCas:
+        if (previous != expected) return previous;
+        break;
+      case ValueOp::kStore:
+      case ValueOp::kExchange:
+        break;
+    }
+  }
+  atomic::Store(&signal_.value, next, std::memory_order_release);
+  FlushDeviceStores(&signal_.value, next);
+  return previous;
+}
+
+hsa_status_t SignalBatch::Create(uint32_t count, const hsa_signal_value_t* initial_values,
+                                 bool use_interrupt, const MemoryRegion* region,
+                                 const std::vector<hsa_agent_t>& access_agents,
+                                 bool host_access_via_hdp,
+                                 SignalBatch** batch,
+                                 hsa_signal_t* signals) {
+  const size_t arena_bytes = size_t(count) * sizeof(SharedSignal);
+
+  void* arena = nullptr;
+  hsa_status_t status = Runtime::runtime_singleton_->AllocateMemory(
+      region, arena_bytes, MemoryRegion::AllocateNonPaged, &arena);
+  if (status != HSA_STATUS_SUCCESS) return status;
+  MAKE_NAMED_SCOPE_GUARD(arenaGuard, [&]() { Runtime::runtime_singleton_->FreeMemory(arena); });
+
+  if (!access_agents.empty()) {
+    status = Runtime::runtime_singleton_->AllowAccess(uint32_t(access_agents.size()),
+                                                      access_agents.data(), arena);
+    if (status != HSA_STATUS_SUCCESS) return status;
+  }
+  assert(IsMultipleOf(arena, alignof(SharedSignal)) && "Pool allocations are page aligned.");
+  memset(arena, 0, arena_bytes);
+
+  SignalBatch* new_batch = new SignalBatch(arena, host_access_via_hdp);
+  arenaGuard.Dismiss();
+
+  uint32_t num_created = 0;
+  MAKE_NAMED_SCOPE_GUARD(batchGuard, [&]() {
+    for (uint32_t slot_index = 0; slot_index < num_created; slot_index++)
+      Signal::Convert(signals[slot_index])->DestroySignal();
+    new_batch->ReleaseHandle();
+  });
+  for (uint32_t slot_index = 0; slot_index < count; slot_index++) {
+    SharedSignal* slot = new_batch->Slot(slot_index);
+    new (slot) SharedSignal();
+
+    Signal* member;
+    if (use_interrupt)
+      member = new InterruptSignal(initial_values[slot_index], new_batch, slot);
+    else
+      member = new DefaultSignal(initial_values[slot_index], new_batch, slot);
+
+    signals[slot_index] = Signal::Convert(member);
+    num_created++;
+  }
+  batchGuard.Dismiss();
+  if (host_access_via_hdp)
+    FlushDeviceStores(&new_batch->Slot(count - 1)->amd_signal.value, initial_values[count - 1]);
+
+  *batch = new_batch;
+  return HSA_STATUS_SUCCESS;
+}
+
+void SignalBatch::ReleaseHandle() {
+  if (destroyed_.exchange(true)) return;
+  DropReference();
+}
+
+void SignalBatch::ReleaseSlot(SharedSignal* slot) {
+  slot->~SharedSignal();
+  DropReference();
+}
+
+void SignalBatch::DropReference() {
+  if (--references_ == 0) delete this;
+}
+
+SignalBatch::~SignalBatch() { Runtime::runtime_singleton_->FreeMemory(arena_); }
 
 }  // namespace core
 }  // namespace rocr
