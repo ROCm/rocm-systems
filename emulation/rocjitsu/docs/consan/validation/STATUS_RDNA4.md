@@ -25,7 +25,7 @@ none of those historical colors count as a pass for this campaign.
 - SDK: `/home/benoit/venv`, ROCm `10.2.0a20260915` development package.
 - Preparation: rebuilding the current hook, integrating per-workload generated
   allowlists, preparing Qwen provenance, and building the production matmul.
-- Fresh clean assessments: **41/42**; no cell has completed fresh fault qualification.
+- Fresh clean assessments: **42/42**; no cell has completed fresh fault qualification.
 - Preparation logs: `/home/benoit/workspace/consan-validation-artifacts/`.
 
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
@@ -52,7 +52,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟥 Sep 23: ConSan rejected a code object before execution; exit 92 | 🟥 Sep 23: ConSan rejected a code object before execution; exit 92 |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟥 Sep 23: no applicable code object; analysis incomplete | 🟥 Sep 23: no applicable code object; analysis incomplete |
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟥 Sep 23: no applicable code object; analysis incomplete | 🟥 Sep 23: no applicable code object; analysis incomplete |
-| Main E2E | P4 | hip-moi Jakub attention (`jakub-attention`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟩 exact; 31/31 accesses; fault bundle |
+| Main E2E | P4 | hip-moi Jakub attention (`jakub-attention`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 
 ### September 23 cell evidence
 
@@ -130,3 +130,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `tree-atomic-or` / default: no applicable code object; analysis incomplete. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/tree-atomic-or-default`.
 - `tree-atomic-or` / supercollider: no applicable code object; analysis incomplete. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/tree-atomic-or-supercollider`.
 - `jakub-attention` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/jakub-attention-default`.
+- `jakub-attention` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/jakub-attention-supercollider`.
