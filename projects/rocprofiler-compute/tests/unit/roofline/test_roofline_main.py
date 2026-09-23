@@ -169,8 +169,31 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
     assert unroofed[0]["points"][0]["hoverCells"] == [
         "N/A",
         "N/A",
-        "Bandwidth:<br> HBM: N/A% (900.000 GB/s/N/A)",
+        "Bandwidth:<br>\u2003HBM: N/A% (900.000 GB/s/N/A)",
     ]
+
+
+def test_bandwidth_hover_shows_zero_levels() -> None:
+    """Every cache level still shows up at 0 when a kernel does no traffic
+    there, instead of vanishing from the tooltip."""
+    ceiling = dict(CEILING, lds=[[0.01, 1.0], [1.0, 800.0], 800.0])
+    _, model = kernel_traces(
+        make_roofline(["FP32"]),
+        {
+            "ai_hbm": [[1.0], [900.0]],
+            "ai_l2": [[0.0], [0.0]],
+            "ai_lds": [[0.0], [0.0]],
+            "kernelNames": ["kA"],
+        },
+        sanitized_cache_hierarchy=["HBM", "L2", "LDS"],
+        ceiling_data=ceiling,
+    )
+    bandwidth_html = model[0]["points"][0]["hoverCells"][2]
+    assert bandwidth_html == (
+        "Bandwidth:<br>\u2003L2: N/A% (0.000 GB/s/N/A)"
+        "<br>\u2003HBM: 60.00% (900.000 GB/s/1.500 TB/s)"
+        "<br>\u2003LDS: 0.00% (0.000 GB/s/800.000 GB/s)"
+    )
 
 
 def test_kernel_hover_carries_the_whole_name_up_to_the_limit() -> None:

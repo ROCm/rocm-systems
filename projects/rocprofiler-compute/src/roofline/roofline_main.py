@@ -454,6 +454,7 @@ class Roofline:
         Also returns the level -> AI map the limiter is chosen from.
         """
         points: list[dict[str, Any]] = []
+        bandwidth_entries: list[dict[str, Any]] = []
         level_ai: dict[str, float] = {}
 
         for cache_level in CACHE_LEVELS:
@@ -467,10 +468,19 @@ class Roofline:
                 continue
             ai_value = level_points[0][kernel_index]
             performance = level_points[1][kernel_index]
+            cache_key = cache_level.removeprefix("ai_")
+            peak_bandwidth = self._peak_value(ceiling_data, cache_key)
+
             if not (ai_value > 0 and performance > 0):
+                # A level with no traffic still gets a 0-valued bandwidth
+                # line instead of silently disappearing from the tooltip.
+                bandwidth_entries.append({
+                    "level_name": level_name,
+                    "achieved_bandwidth": 0.0,
+                    "peak_bandwidth": peak_bandwidth,
+                })
                 continue
 
-            cache_key = cache_level.removeprefix("ai_")
             roof_perf = self._roof_value_at(
                 ai_value=ai_value,
                 cache_key=cache_key,
@@ -480,51 +490,50 @@ class Roofline:
             # This kernel's own achieved bandwidth at this level (not the
             # hardware ceiling): performance (FLOP/s) / AI (FLOP/Byte) = Byte/s.
             achieved_bandwidth = performance / ai_value
-            peak_bandwidth = self._peak_value(ceiling_data, cache_key)
             pct_roof = 100.0 * performance / roof_perf if roof_perf else None
             points.append({
                 "peak": level_name,
                 "ai": ai_value,
                 "perf": performance,
-                "level_name": level_name,
                 "roof_perf_txt": format_hover_number(roof_perf, ",.0f"),
                 "pct_roof_txt": format_hover_number(pct_roof, ",.2f"),
+            })
+            bandwidth_entries.append({
+                "level_name": level_name,
                 "achieved_bandwidth": achieved_bandwidth,
                 "peak_bandwidth": peak_bandwidth,
             })
             level_ai[level_name] = ai_value
 
-        bandwidth_html = self._build_bandwidth_hover_html(points)
+        bandwidth_html = self._build_bandwidth_hover_html(bandwidth_entries)
         for point in points:
             point["hoverCells"] = [
                 point.pop("roof_perf_txt"),
                 point.pop("pct_roof_txt"),
                 bandwidth_html,
             ]
-            point.pop("level_name")
-            point.pop("achieved_bandwidth")
-            point.pop("peak_bandwidth")
 
         return points, level_ai
 
     @staticmethod
-    def _build_bandwidth_hover_html(points: list[dict[str, Any]]) -> str:
-        """One 'Bandwidth:' block listing every cache level this kernel has a
-        point for, each formatted like the Performance field: percent
-        (achieved/peak)."""
-        if not points:
+    def _build_bandwidth_hover_html(bandwidth_entries: list[dict[str, Any]]) -> str:
+        """One 'Bandwidth:' block listing every cache level this kernel has
+        data for, each formatted like the Performance field: percent
+        (achieved/peak). A level with no traffic still shows up at 0,
+        rather than vanishing from the tooltip."""
+        if not bandwidth_entries:
             return "Bandwidth: N/A"
         lines = ["Bandwidth:"]
-        for point in points:
-            peak_bandwidth = point["peak_bandwidth"]
-            achieved_bandwidth = point["achieved_bandwidth"]
+        for entry in bandwidth_entries:
+            peak_bandwidth = entry["peak_bandwidth"]
+            achieved_bandwidth = entry["achieved_bandwidth"]
             pct_bandwidth = (
                 100.0 * achieved_bandwidth / peak_bandwidth
                 if peak_bandwidth
                 else None
             )
             lines.append(
-                f" {point['level_name']}: "
+                f"\u2003{entry['level_name']}: "
                 f"{format_hover_number(pct_bandwidth, ',.2f')}% "
                 f"({format_bandwidth(achieved_bandwidth)}/"
                 f"{format_bandwidth(peak_bandwidth)})"
