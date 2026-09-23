@@ -480,8 +480,13 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
   }
 
   if (createQpAttrs->isQpSharingEnabled && (createQpAttrs->qpSharingGroupIdx >= 0)) {
-    // For Ionic with QP sharing, use groupIdx for UDMA mask selection
-    uint8_t mask = (createQpAttrs->qpSharingGroupIdx % 2 == 0) ? IONIC_UDMA_MASK_LOW : IONIC_UDMA_MASK_HIGH;
+    // When only one sharing group exists, alternate UDMA engine per QP within
+    // the group so both DMA engines are utilized.  With multiple groups the
+    // existing per-group alternation already distributes across engines.
+    int udmaSelector = (rcclParamIbCastCommNGroups() == 1)
+                        ? createQpAttrs->qpIdx
+                        : createQpAttrs->qpSharingGroupIdx;
+    uint8_t mask = (udmaSelector % 2 == 0) ? IONIC_UDMA_MASK_LOW : IONIC_UDMA_MASK_HIGH;
     wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, mask);
   } else {
     if (!nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated) {
@@ -863,6 +868,7 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     qpCreateAttrs.ibDevN = commDev->base.ibDevN;
     qpCreateAttrs.useIonic = IbCastAinicRoce;
     qpCreateAttrs.isP2p = comm->base.isP2p;
+    qpCreateAttrs.qpIdx = qpIndex;
 
     if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ncclParamIbCastOooRq()) {
       if (ibDev->ar == 0) {
@@ -1680,6 +1686,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
     qpCreateAttrs.useIonic = IbCastAinicRoce;
     qpCreateAttrs.isP2p = rComm->base.isP2p;
+    qpCreateAttrs.qpIdx = qpIndex;
 
     if (rComm->base.resiliency) {
       IbCastResiliencyDataRqSizeGet(rComm->base.resiliency, devIndex, &qpCreateAttrs.maxRecvWorkRequest);
@@ -1800,6 +1807,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
         qpCreateAttrs.isQpSharingEnabled = true;
         qpCreateAttrs.qpSharingGroupIdx = remMeta->sharedGroupIdx;
         qpCreateAttrs.cqDepthMultiplier = depthMult;
+        qpCreateAttrs.qpIdx = 0;
       } else {
         IbCastQpCreateAttrInitSharing(&qpCreateAttrs);
       }
