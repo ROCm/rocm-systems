@@ -165,14 +165,9 @@ protected:
         MPI_Barrier(MPI_COMM_WORLD);
     }
 
-    // Common setup: prerequisites, GDR, allocate an nSeg window, connect, and
-    // register it through the multi-segment entry point. Returns false if any
-    // precondition is unmet; when the failure is a graceful skip it records
-    // skipReason_ so the caller can GTEST_SKIP() from the test body (GTEST_SKIP
-    // expands to a void return and cannot be used inside this bool helper).
-    // Use GTEST_SKIP_OR_RETURN(skipReason_) at the call site to honor a recorded skip.
-    // ncclInvalidUsage after DMA-BUF is advertised is a failure, not a skip:
-    // that is the peer-capability / plugin reject Argus caught as a green skip.
+    // Allocate, connect, and register an nSeg window. Returns false on skip
+    // (caller GTEST_SKIP_OR_RETURN) or failed setup. ncclInvalidUsage after
+    // DMA-BUF is advertised is a failure, not a skip.
     bool SetupRegistered(int nSeg, ConnectionPair& pair, NetConnectionGuard& guard,
                          void** mh, void** comm, int minNodes = kMinGpusPerNode) {
         skipReason_.clear();
@@ -241,10 +236,8 @@ TEST_F(NetIbMultiSegmentMPITest, IntraSegmentOffsetSelection) {
     }
 }
 
-// DeepEP-style per-peer windows use different source and destination offsets
-// for one logical transfer. Exercise that pattern on the classic CTS-FIFO wire:
-// the sender starts in segment 1 while the receiver starts in segment 0, so a
-// shared registration-relative cursor would select the wrong lkey or rkey.
+// Sender starts in segment 1, receiver in segment 0. A shared cursor would
+// pick the wrong lkey/rkey (DeepEP-style independent offsets).
 TEST_F(NetIbMultiSegmentMPITest, DeepEP_AsymmetricOffsetTransfer) {
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
     SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh, comm);
@@ -270,10 +263,8 @@ TEST_F(NetIbMultiSegmentMPITest, CrossBoundaryTransferSucceeds) {
     SendRecvChunk(pair, lastBuf_->ptr, lastBuf_->ptr, off, size, /*tag=*/400, /*seed=*/0xC3);
 }
 
-// MULTI-NODE STRESS: repeatedly cross independently selected source and
-// destination boundaries in an 8-segment window. The destination is reset to a
-// sentinel on every iteration so incorrect WR splitting, lkey/rkey selection,
-// or length accounting is detected as payload corruption or an adjacent write.
+// Multi-node: cross independent src/dst boundaries in an 8-segment window.
+// Sentinel detects a wrong lkey/rkey or length.
 TEST_F(NetIbMultiSegmentMPITest, DeepEP_MultiNodeAsymmetricCrossBoundaryStress) {
     constexpr int kWideSegments = 8;
     constexpr int kIterations   = 32;
@@ -351,12 +342,9 @@ TEST_F(NetIbMultiSegmentMPITest, SingleSegmentThroughMultiSegPath) {
     SendRecvChunk(pair, lastBuf_->ptr, lastBuf_->ptr, 0, 65536, /*tag=*/300, /*seed=*/0x77);
 }
 
-// FLUSH: after receiving into a NON-zero segment, ncclIbIflush must fence the
-// buffer using that segment's MR (rkey selected by ncclIbMrForRange), not
-// segment 0's. The flush 4-byte read never straddles a boundary, so this
-// validates per-segment key selection on the flush path.
-// When GDR flush is disabled, iflush returns success with no request; the test
-// still asserts iflush accepts a multi-segment handle without a boundary error.
+// iflush after a recv into a non-zero segment must use that segment's MR, not
+// segment 0. With GDR flush off, iflush still succeeds (no request) without a
+// boundary error.
 TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushSelectsSegmentMr) {
     if (SyncSkip(!directGdrFlushEnabled()))
         GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 "
@@ -504,12 +492,8 @@ TEST_F(NetIbMultiSegmentMPITest, MultiRecvFlushTouchesEveryHandle) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
-// REGRESSION (pointer types): the segment-aware changes only affect nSegments>1
-// handles; single-region host (NCCL_PTR_HOST) and device (NCCL_PTR_CUDA) buffers
-// must still register and transfer through the unchanged nSegments==1 fast path
-// (which also leaves ncclIbMultiSend on its original, non-segmented path).
-// Covers the reviewer's "host and device allocations" request (multi-segment
-// VMM itself is device-only).
+// nSegments==1 host (NCCL_PTR_HOST) and device (NCCL_PTR_CUDA) buffers still
+// register and transfer on the unsegmented fast path.
 TEST_F(NetIbMultiSegmentMPITest, HostAndDeviceSingleSegmentRegression) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit));
