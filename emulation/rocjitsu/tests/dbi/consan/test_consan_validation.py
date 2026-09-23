@@ -6,6 +6,7 @@ import ast
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, replace
 import gc
+import hashlib
 import io
 import json
 import os
@@ -6563,6 +6564,22 @@ class SharktankValidationLifecycleTests(unittest.TestCase):
 
         self.assertEqual(set(result), {"decode", "combined"})
         self.assertEqual(FakeToyLlama.live, 0)
+
+
+class FaultSpecSnapshotTest(unittest.TestCase):
+    def test_snapshot_preserves_loaded_bytes_after_source_changes(self):
+        with temporary_root() as root:
+            source = root / "source.json"
+            loaded = b'{"review_required": false}\n'
+            source.write_bytes(loaded)
+            source.write_bytes(b'{"review_required": true}\n')
+            metadata = validation_faults._snapshot_fault_spec(source, root, loaded)
+            self.assertEqual(Path(metadata["snapshot"]).read_bytes(), loaded)
+            self.assertEqual(metadata["sha256"], hashlib.sha256(loaded).hexdigest())
+            self.assertEqual(validation_faults._snapshot_fault_spec(source, root, loaded), metadata)
+            with self.assertRaises(validation.ValidationError):
+                validation_faults._snapshot_fault_spec(source, root, source.read_bytes())
+            self.assertEqual(Path(metadata["snapshot"]).read_bytes(), loaded)
 
 
 class DefaultPresetEnvironmentTest(unittest.TestCase):

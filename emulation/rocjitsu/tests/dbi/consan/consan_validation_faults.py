@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
+import hashlib
 import json
 import math
 import os
@@ -314,8 +315,10 @@ def _load_fault(
     target: str,
     workload: Workload,
     fault_id: str,
+    *,
+    source_bytes: bytes | None = None,
 ) -> dict:
-    document = json.loads(path.read_text(encoding="utf-8"))
+    document = json.loads(path.read_bytes() if source_bytes is None else source_bytes)
     if document.get("schema_version") != SCHEMA_VERSION:
         raise ValidationError("fault spec has unsupported schema_version")
     if document.get("target") != target:
@@ -1126,6 +1129,20 @@ def _load_resumable_fault_result(
     return result
 
 
+def _snapshot_fault_spec(path: Path, root: Path, source_bytes: bytes) -> dict:
+    snapshot = root / "fault-spec.snapshot.json"
+    if snapshot.exists():
+        if snapshot.read_bytes() != source_bytes:
+            raise ValidationError("fault spec differs from the artifact snapshot; use a new root")
+    else:
+        snapshot.write_bytes(source_bytes)
+    return {
+        "path": str(path),
+        "snapshot": str(snapshot),
+        "sha256": hashlib.sha256(source_bytes).hexdigest(),
+    }
+
+
 def _fault(args: argparse.Namespace) -> int:
     selection = _resolve_workload_selection(args, allow_all=False)
     target = selection.target
@@ -1137,12 +1154,14 @@ def _fault(args: argparse.Namespace) -> int:
     if not args.allow_destructive:
         raise ValidationError("fault execution requires --allow-destructive")
     spec_path = args.spec.resolve()
-    fault = _load_fault(spec_path, target, workload, args.fault)
+    spec_bytes = spec_path.read_bytes()
+    fault = _load_fault(spec_path, target, workload, args.fault, source_bytes=spec_bytes)
     profiles = PROFILE_IDS if args.profile == "all" else (args.profile,)
     launcher = args.launcher
     hook = _hook_path(workspace)
     fault_root = args.artifact_root.resolve() / workload.id / "faults" / fault["id"]
     fault_root.mkdir(parents=True, exist_ok=args.resume)
+    spec_metadata = _snapshot_fault_spec(spec_path, fault_root, spec_bytes)
     provenance = _write_provenance(workspace, target, workload, fault_root, launcher)
     root = fault_root / "rows"
     root.mkdir(exist_ok=args.resume)
@@ -1376,10 +1395,7 @@ def _fault(args: argparse.Namespace) -> int:
         "target": target,
         "workload": workload.id,
         "fault": fault["id"],
-        "fault_spec": {
-            "path": str(spec_path),
-            "sha256": sha256_file(spec_path),
-        },
+        "fault_spec": spec_metadata,
         "launcher": launcher,
         "provenance": str(provenance),
         "rows": summaries,

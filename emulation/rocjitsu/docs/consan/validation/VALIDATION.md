@@ -320,7 +320,10 @@ generated inventory and copy its template before editing. A reviewed spec must
 replace every placeholder, precommit the expected detector outcome and
 independent oracle for every applicable profile, declare any statistical trial
 matrix, and set `review_required` to false. Do not choose a different site or
-expected result after observing a live trial.
+expected result after observing a live trial. The runner snapshots the exact
+spec bytes it loads into `fault-spec.snapshot.json` and hashes those bytes in
+the summary. Resuming a root with a different saved spec is rejected; use a new
+root for changed expectations or trial settings.
 
 ### Contained fault execution
 
