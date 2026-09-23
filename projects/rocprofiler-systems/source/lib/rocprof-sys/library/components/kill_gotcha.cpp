@@ -9,9 +9,7 @@
 #include <cstdlib>
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 void
 kill_gotcha::configure()
@@ -49,5 +47,4 @@ kill_gotcha::operator()(const gotcha_data& _data, kill_func_t _func, pid_t _pid,
 
     return (*_func)(_pid, _sig);
 }
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component

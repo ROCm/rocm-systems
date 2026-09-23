@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s: %(message)s"
@@ -136,12 +136,12 @@ def get_rocm_tree_root(try_rocm_path: bool = False) -> Path:
     return rocm_root
 
 
-def get_default_paths(try_rocm_path: bool = False) -> Tuple[Path, Path]:
+def get_default_paths(rocm_root: Path) -> Tuple[Path, Path]:
     """
     Get default paths for test binary and script.
 
     Args:
-        try_rocm_path: If True, try ROCM_PATH environment variable first.
+        rocm_root: ROCm tree root directory.
 
     Returns:
         Tuple of (test_bin, test_script) paths.
@@ -149,8 +149,6 @@ def get_default_paths(try_rocm_path: bool = False) -> Tuple[Path, Path]:
     Raises:
         SystemExit: If paths cannot be resolved or don't exist.
     """
-    rocm_root = get_rocm_tree_root(try_rocm_path)
-
     # Both test binary and script are in <root>/tests/rocm-debug-agent/
     test_dir = rocm_root / "tests" / "rocm-debug-agent"
     test_bin = test_dir / "rocm-debug-agent-test"
@@ -242,9 +240,60 @@ def print_section(
         logger.info(apply_color(border))
 
 
+def _prepend_to_path_var(env_vars: Dict[str, str], name: str, parts: List[str]) -> None:
+    """
+    Prepend `parts` to a path-style env var in `env_vars`.
+
+    Args:
+        env_vars: Environment variable dictionary to mutate.
+        name: Name of the path-style variable (e.g., "PATH", "LD_LIBRARY_PATH").
+        parts: New entries to prepend, in order.
+    """
+    existing = env_vars.get(name, "")
+    env_vars[name] = os.pathsep.join(parts + ([existing] if existing else []))
+
+
+def setup_environment(rocm_root: Path, try_rocm_path: bool) -> Dict[str, str]:
+    """
+    Configure environment variables for test execution.
+
+    Copies the current environment, optionally drops ROCM_PATH to prevent
+    system-wide settings from contaminating the test run, and prepends the
+    ROCm tree's bin and lib directories to PATH and LD_LIBRARY_PATH.
+
+    Args:
+        rocm_root: Path to the ROCm tree root.
+        try_rocm_path: Whether --try-rocm-path was passed. When False,
+            ROCM_PATH is removed from the environment so a system-wide
+            setting cannot interfere with the library paths configured here.
+
+    Returns:
+        Updated environment variables dictionary.
+    """
+    print_section("Setting up environment variables")
+
+    env_vars = os.environ.copy()
+
+    if not try_rocm_path and "ROCM_PATH" in env_vars:
+        del env_vars["ROCM_PATH"]
+        logger.info("Dropped ROCM_PATH from environment (--try-rocm-path not set)")
+
+    path_parts = [str(rocm_root / "bin")]
+    ld_library_parts = [str(rocm_root / "lib")]
+
+    _prepend_to_path_var(env_vars, "PATH", path_parts)
+    _prepend_to_path_var(env_vars, "LD_LIBRARY_PATH", ld_library_parts)
+
+    logger.info(f"  PATH (prepended)           : {rocm_root / 'bin'}")
+    logger.info(f"  LD_LIBRARY_PATH (prepended): {rocm_root / 'lib'}")
+
+    return env_vars
+
+
 def run_tests(
     test_script: Path,
     test_bin_dir: Path,
+    env_vars: Dict[str, str],
     max_retries: int = 3,
     retry_delay: int = 5,
 ) -> None:
@@ -254,6 +303,7 @@ def run_tests(
     Args:
         test_script: Path to test script.
         test_bin_dir: Directory containing test binaries.
+        env_vars: Environment variables for test execution.
         max_retries: Maximum number of retry attempts.
         retry_delay: Base delay in seconds between retries.
 
@@ -269,7 +319,7 @@ def run_tests(
 
         start_time = time.perf_counter()
         try:
-            subprocess.run(cmd, cwd=str(test_bin_dir), check=True)
+            subprocess.run(cmd, cwd=str(test_bin_dir), env=env_vars, check=True)
 
             duration = time.perf_counter() - start_time
 
@@ -304,13 +354,15 @@ def main() -> None:
     args = parse_arguments()
 
     print_section("Path discovery")
-    # Discover paths using automatic logic.
-    test_bin, test_script = get_default_paths(try_rocm_path=args.try_rocm_path)
+    rocm_root = get_rocm_tree_root(try_rocm_path=args.try_rocm_path)
+    test_bin, test_script = get_default_paths(rocm_root)
     test_bin_dir = test_bin.parent
 
     logger.info(f"Test Binary: {test_bin}")
     logger.info(f"Test Script: {test_script}")
     logger.info(f"Test Bin Dir: {test_bin_dir}")
+
+    env_vars = setup_environment(rocm_root, try_rocm_path=args.try_rocm_path)
 
     print_section("Disabling core file generation")
 
@@ -321,6 +373,7 @@ def main() -> None:
     run_tests(
         test_script=test_script,
         test_bin_dir=test_bin_dir,
+        env_vars=env_vars,
         max_retries=args.max_retries,
         retry_delay=args.retry_delay,
     )

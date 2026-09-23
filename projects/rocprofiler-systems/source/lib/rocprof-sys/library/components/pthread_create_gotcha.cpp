@@ -35,12 +35,7 @@
 namespace rocprofsys
 {
 namespace sampling
-{
-std::set<int>
-setup();
-std::set<int>
-shutdown();
-}  // namespace sampling
+{}  // namespace sampling
 
 namespace component
 {
@@ -506,19 +501,17 @@ pthread_create_gotcha::shutdown(std::int64_t _tid)
     }
 }
 
-std::mutex pthread_create_gotcha::s_mutex = {};
+std::atomic<bool> pthread_create_gotcha::s_is_paused = false;
 
 void
 pthread_create_gotcha::pause()
 {
-    const std::scoped_lock<std::mutex> _lk{ s_mutex };
-    pthread_create_gotcha_t::set_ready(false);
+    s_is_paused.store(true, std::memory_order_relaxed);
 }
 void
 pthread_create_gotcha::resume()
 {
-    const std::scoped_lock<std::mutex> _lk{ s_mutex };
-    pthread_create_gotcha_t::set_ready(true);
+    s_is_paused.store(false, std::memory_order_relaxed);
 }
 
 void
@@ -602,7 +595,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     auto use_sampling       = config::get_use_sampling();
     auto use_causal         = config::get_use_causal();
     auto offset             = (!enabled || !active || info->is_offset);
-    auto use_bundle         = (active && !coverage && !offset);
+    auto use_bundle         = (active && !coverage && !offset && !is_paused());
     auto enable_sampling =
         (use_sampling && sample_child && active && !coverage && !offset);
     auto enable_causal = (use_causal && sample_child && active && !coverage && !offset);

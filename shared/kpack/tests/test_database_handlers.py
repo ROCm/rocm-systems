@@ -10,7 +10,7 @@ from rocm_kpack.database_handlers import (
     HipSparseLtHandler,
     AotritonHandler,
     MIOpenHandler,
-    HipKernelProviderRockeHandler,
+    HipKernelProviderArchContentHandler,
     HotswapCacheHandler,
     WHEEL_TYPE_PRESETS,
     get_database_handlers,
@@ -796,14 +796,17 @@ class TestMIOpenHandler:
         assert result is None
 
 
-class TestHipKernelProviderRockeHandler:
-    """Tests for HipKernelProviderRockeHandler detection logic."""
+class TestHipKernelProviderArchContentHandler:
+    """Tests for HipKernelProviderArchContentHandler detection logic."""
 
-    _ENGINE_DIR = "lib/hipdnn_plugins/engines/arch_content/rocke"
+    _ARCH_CONTENT_DIR = "lib/hipdnn_plugins/engines/arch_content/some-producer"
+    _TEST_ARCH_CONTENT_DIR = (
+        "lib/hipdnn_plugins/engines/test_arch_content/some-producer"
+    )
 
     @pytest.fixture
     def handler(self):
-        return HipKernelProviderRockeHandler()
+        return HipKernelProviderArchContentHandler()
 
     @pytest.fixture
     def prefix_root(self, tmp_path):
@@ -815,38 +818,40 @@ class TestHipKernelProviderRockeHandler:
     def test_name(self, handler):
         assert handler.name() == "hipkernelprovider"
 
-    def test_detect_kpack(self, handler, prefix_root):
-        """rocKE per-arch kpack archive routes to its arch."""
-        file_path = prefix_root / f"{self._ENGINE_DIR}/gfx942/rocke_client_gfx942.kpack"
+    def test_detect_arch_content_kpack(self, handler, prefix_root):
+        """A per-arch kpack archive routes to its arch."""
+        file_path = (
+            prefix_root / f"{self._ARCH_CONTENT_DIR}/gfx942/kernels_gfx942.kpack"
+        )
         file_path.parent.mkdir(parents=True)
         file_path.touch()
 
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx942"
 
-    def test_detect_manifest_json(self, handler, prefix_root):
+    def test_detect_arch_content_manifest_json(self, handler, prefix_root):
         """The bundle manifest beside the kpack routes to the same arch."""
-        file_path = prefix_root / f"{self._ENGINE_DIR}/gfx942/rocke_client_gfx942.json"
+        file_path = prefix_root / f"{self._ARCH_CONTENT_DIR}/gfx942/kernels_gfx942.json"
         file_path.parent.mkdir(parents=True)
         file_path.touch()
 
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx942"
 
-    def test_detect_deeply_nested_file(self, handler, prefix_root):
+    def test_detect_arch_content_deeply_nested_file(self, handler, prefix_root):
         """Any file nested below the arch dir routes to that arch."""
-        file_path = prefix_root / f"{self._ENGINE_DIR}/gfx942/sub/extra/blob.bin"
+        file_path = prefix_root / f"{self._ARCH_CONTENT_DIR}/gfx942/sub/extra/blob.bin"
         file_path.parent.mkdir(parents=True)
         file_path.touch()
 
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx942"
 
-    def test_detect_various_arches(self, handler, prefix_root):
+    def test_detect_arch_content_various_arches(self, handler, prefix_root):
         test_cases = ["gfx90a", "gfx942", "gfx950", "gfx1151", "gfx1201"]
         for arch in test_cases:
             file_path = (
-                prefix_root / f"{self._ENGINE_DIR}/{arch}/rocke_client_{arch}.kpack"
+                prefix_root / f"{self._ARCH_CONTENT_DIR}/{arch}/kernels_{arch}.kpack"
             )
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.touch()
@@ -854,11 +859,11 @@ class TestHipKernelProviderRockeHandler:
             result = handler.detect(file_path, prefix_root)
             assert result == arch, f"Failed for {arch}"
 
-    def test_detect_xnack(self, handler, prefix_root):
+    def test_detect_arch_content_xnack(self, handler, prefix_root):
         """xnack arch variant is preserved as the bundle key."""
         file_path = (
             prefix_root
-            / f"{self._ENGINE_DIR}/gfx942-xnack+/rocke_client_gfx942-xnack+.kpack"
+            / f"{self._ARCH_CONTENT_DIR}/gfx942-xnack+/kernels_gfx942-xnack+.kpack"
         )
         file_path.parent.mkdir(parents=True)
         file_path.touch()
@@ -866,7 +871,7 @@ class TestHipKernelProviderRockeHandler:
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx942-xnack+"
 
-    def test_detect_second_engine(self, handler, prefix_root):
+    def test_detect_arch_content_second_producer(self, handler, prefix_root):
         """A different engine's per-arch content under arch_content/ routes with
         no handler change (the anchor is the container, not the engine name)."""
         file_path = (
@@ -879,9 +884,93 @@ class TestHipKernelProviderRockeHandler:
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx942"
 
-    def test_reject_no_arch_dir_under_arch_content(self, handler, prefix_root):
+    def test_detect_without_producer_segment(self, handler, prefix_root):
+        """The producer segment is a naming convention, not part of the match:
+        an arch directory sitting straight under either container still routes."""
+        engines = "lib/hipdnn_plugins/engines"
+        for rel, expected in (
+            (f"{engines}/arch_content/gfx942/kernels.kpack", "gfx942"),
+            (f"{engines}/test_arch_content/gfx1101/kernels.kpack", "gfx1101"),
+        ):
+            file_path = prefix_root / rel
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+            assert handler.detect(file_path, prefix_root) == expected, rel
+
+    def test_detect_arch_content_rocke_placements(self, handler, prefix_root):
+        """rocKE has no shipping content yet and its final home is undecided: it
+        may keep its own producer segment, fold in beside the descriptors, or
+        nest under them. Each candidate resolves, because the container is the
+        anchor and the arch directory is found at any depth beneath it."""
+        engines = "lib/hipdnn_plugins/engines"
+        for rel in (
+            f"{engines}/arch_content/rocke/gfx942/kernels.kpack",
+            f"{engines}/arch_content/hip-kernel-provider/gfx942/kernels.kpack",
+            f"{engines}/arch_content/hip-kernel-provider/rocke/gfx942/kernels.kpack",
+        ):
+            file_path = prefix_root / rel
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+            assert handler.detect(file_path, prefix_root) == "gfx942", rel
+
+    def test_detect_test_arch_content(self, handler, prefix_root):
+        """Test content splits per arch like the runtime container. Unsplit, the
+        per-arch builds each emit one artifact of the same name holding only
+        their own arches, and the last to upload overwrites the others.
+
+        The second path is the shipping layout verbatim, so this keeps one
+        assertion anchored to a real tree rather than only to the arbitrary
+        producer segment the other fixtures use.
+        """
+        for rel in (
+            f"{self._TEST_ARCH_CONTENT_DIR}/unit/shared/gfx1101/kernels.kpack",
+            "lib/hipdnn_plugins/engines/test_arch_content/hip-kernel-provider"
+            "/unit/shared/gfx1101/kernels.kpack",
+        ):
+            file_path = prefix_root / rel
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+            assert handler.detect(file_path, prefix_root) == "gfx1101", rel
+
+    def test_detect_test_arch_content_various_arches(self, handler, prefix_root):
+        for arch in ("gfx942", "gfx1100", "gfx1101", "gfx1201"):
+            file_path = (
+                prefix_root
+                / f"{self._TEST_ARCH_CONTENT_DIR}/unit/shared/{arch}/descriptor.json"
+            )
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+
+            result = handler.detect(file_path, prefix_root)
+            assert result == arch, f"Failed for {arch}"
+
+    def test_reject_test_arch_content_without_arch_dir(self, handler, prefix_root):
+        """An arch-independent asset under test_arch_content stays generic, so
+        every arch's test artifact keeps a copy of it."""
+        file_path = (
+            prefix_root
+            / f"{self._TEST_ARCH_CONTENT_DIR}/test_kpack_binary/test_zstd.kpack"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
+    def test_reject_test_arch_content_not_under_engines(self, handler, prefix_root):
+        """A test_arch_content dir not directly under engines/ stays generic."""
+        file_path = (
+            prefix_root / "share/some_component/test_arch_content/gfx942/data.bin"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
+    def test_reject_arch_content_no_arch_dir(self, handler, prefix_root):
         """arch_content content with no arch directory stays generic (None)."""
-        file_path = prefix_root / f"{self._ENGINE_DIR}/config/settings.json"
+        file_path = prefix_root / f"{self._ARCH_CONTENT_DIR}/config/settings.json"
         file_path.parent.mkdir(parents=True)
         file_path.touch()
 
@@ -905,25 +994,46 @@ class TestHipKernelProviderRockeHandler:
         unrelated component's arch_content tree is never captured."""
         for rel in (
             "share/some_component/arch_content/gfx942/data.bin",
-            "lib/arch_content/gfx942/rocke_client_gfx942.kpack",
+            "lib/arch_content/gfx942/kernels_gfx942.kpack",
         ):
             file_path = prefix_root / rel
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.touch()
             assert handler.detect(file_path, prefix_root) is None, rel
 
-    def test_reject_non_arch_dir(self, handler, prefix_root):
+    def test_reject_arch_content_non_arch_dir(self, handler, prefix_root):
         """A non-gfx directory name is not a bundle key."""
-        file_path = prefix_root / f"{self._ENGINE_DIR}/common/shared.json"
+        file_path = prefix_root / f"{self._ARCH_CONTENT_DIR}/common/shared.json"
         file_path.parent.mkdir(parents=True)
         file_path.touch()
 
         result = handler.detect(file_path, prefix_root)
         assert result is None
 
-    def test_reject_arch_dir_itself(self, handler, prefix_root):
+    def test_reject_unrecognized_arch_dir_shape(self, handler, prefix_root):
+        """A directory that looks like an architecture but is not a bare concrete
+        gfx name is not a bundle key, so its content stays generic -- and generic
+        content of the same name is overwritten by whichever per-arch build
+        uploads last. The descriptor packer normalizes GPU_TARGETS to bare gfx
+        names and drops anything else, so these shapes do not reach the ingestor
+        tree today; this pins the boundary for a producer that does not go
+        through that normalization.
+
+        Paths are not created on disk: detect() is a pure path predicate, and a
+        colon is not a legal path character on Windows.
+        """
+        for arch_dir in (
+            "gfx11-generic",
+            "gfx10-3-generic",
+            "gfx950:sramecc+:xnack-",
+            "gfx1250-b0-a0",
+        ):
+            rel = f"{self._ARCH_CONTENT_DIR}/{arch_dir}/kernels.kpack"
+            assert handler.detect(prefix_root / rel, prefix_root) is None, arch_dir
+
+    def test_reject_empty_arch_content_arch_dir_itself(self, handler, prefix_root):
         """The arch directory with no file underneath does not match."""
-        dir_path = prefix_root / f"{self._ENGINE_DIR}/gfx942"
+        dir_path = prefix_root / f"{self._ARCH_CONTENT_DIR}/gfx942"
         dir_path.mkdir(parents=True)
 
         result = handler.detect(dir_path, prefix_root)
@@ -932,7 +1042,7 @@ class TestHipKernelProviderRockeHandler:
     def test_reject_file_outside_prefix(self, handler, prefix_root):
         """Files outside prefix root are a caller bug -- must raise."""
         file_path = Path(
-            "/tmp/lib/hip_kernel_provider/rocke/gfx942/rocke_client_gfx942.kpack"
+            "/tmp/lib/hip_kernel_provider/rocke/gfx942/kernels_gfx942.kpack"
         )
 
         with pytest.raises(ValueError, match="is not under prefix_root"):
@@ -987,7 +1097,7 @@ class TestDatabaseHandlerRegistry:
         assert isinstance(handlers[2], HipSparseLtHandler)
         assert isinstance(handlers[3], AotritonHandler)
         assert isinstance(handlers[4], MIOpenHandler)
-        assert isinstance(handlers[5], HipKernelProviderRockeHandler)
+        assert isinstance(handlers[5], HipKernelProviderArchContentHandler)
         assert isinstance(handlers[6], HotswapCacheHandler)
 
     def test_wheel_type_preset(self):

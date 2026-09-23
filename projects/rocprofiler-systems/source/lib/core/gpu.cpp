@@ -42,9 +42,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace gpu
+namespace rocprofsys::gpu
 {
 namespace
 {
@@ -424,5 +422,4 @@ get_handle_from_id(std::uint32_t dev_id)
     return processors::processors_list[dev_id];
 }
 
-}  // namespace gpu
-}  // namespace rocprofsys
+}  // namespace rocprofsys::gpu

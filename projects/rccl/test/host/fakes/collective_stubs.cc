@@ -36,13 +36,20 @@ ncclResult_t ncclLaunchKernelBefore_NoUncapturedCuda(struct ncclComm*, struct nc
 ncclResult_t ncclLaunchKernel(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
 ncclResult_t ncclLaunchKernelAfter_NoCuda(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
 ncclResult_t ncclLaunchFinish(struct ncclComm*) { ::abort(); }
+// The 2.31 task-prep split: group.cc calls ncclTaskPrepare where it used to
+// call ncclPrepareTasks, and both it and dev_runtime.cc gate the rearch job
+// path on this param. Pinned to 0 so those call sites take the in-group task
+// branch, which is the one the suites here drive.
+ncclResult_t ncclTaskPrepare(struct ncclComm*, ncclSimInfo_t*) { ::abort(); }
+int64_t ncclParamEnqueueRearchEnable() { return 0; }
 
 // ce_coll.h
 ncclResult_t ncclCeInit(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclLaunchCeColl(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
 
 // rma/rma.h, rma/rma_ce.h
-ncclResult_t ncclLaunchRma(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
+// ncclLaunchRma is absent on purpose: rma-test.cc compiles the real rma.cc in,
+// so a stub here would be a duplicate symbol.
 ncclResult_t ncclRmaCeInit(struct ncclComm*) { ::abort(); }
 
 // dev_runtime.h

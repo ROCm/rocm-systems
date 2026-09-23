@@ -250,6 +250,15 @@ collected in the following table.
       - | Protocol name string
         | Used to override automatic protocol selection
 
+    * - | ``RCCL_DIRECT_ALLGATHER_DISABLE``
+        | Controls the direct AllGather algorithm. Because the algorithm builds a full
+          point-to-point mesh, its queue-pair footprint grows with the square
+          of the job size.
+      - | ``-1``: Automatic (default). Not selected on AINIC above 8 nodes.
+        | ``0``: Skips the automatic AINIC check. The size, architecture and
+          CTA-policy gates in ``rcclUseAllGatherDirect`` still apply.
+        | Any other value: Disabled.
+
 Network and topology
 ====================
 
@@ -272,6 +281,31 @@ in the following table.
         | Defines the Global ID index used in RoCE mode.
       - | Integer value (default: ``-1``)
         | See InfiniBand ``show_gids`` command for valid values
+
+    * - | ``NCCL_IB_QUERY_PORT_SPEED``
+        | Controls whether RCCL queries the extended port speed
+          (``ibv_query_port`` active speed extension) for bandwidth reporting.
+          Disabling it falls back to the legacy ``active_speed``/
+          ``active_width`` computation and disables runtime speed-change
+          detection.
+      - | ``1``: Query the extended speed (default).
+        | ``0``: Use the legacy speed field only.
+
+    * - | ``NCCL_IB_SUBNET_AWARE_ROUTING``
+        | Enables subnet-aware device selection.
+          When a peer's GID subnet does not match the default device's RoCE
+          ports, RCCL searches other locally merged devices for one whose
+          ports do match, so the connection uses a device on the same subnet
+          as the peer. Only meaningfully exercised on a multi-subnet RoCE
+          fabric (for example, behind an IB router); on a single-subnet
+          cluster the default device already matches and this is a no-op.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``NCCL_IB_SUBNET_PREFIX_LEN``
+        | Prefix length, in bits, used when comparing two GIDs' subnets for
+          ``NCCL_IB_SUBNET_AWARE_ROUTING``.
+      - | Integer value, bits (default: ``24``)
 
     * - | ``NCCL_PXN_C2C``
         | Allows PXN routing through a C2C link to reach a NIC attached to a
@@ -382,6 +416,28 @@ in the following table.
         | Values ``<= 0`` are ignored and a warning is logged.
         | Values ``> MAXCHANNELS`` set through ``ncclConfig_t`` are rejected
         | with ``ncclInvalidArgument`` at communicator initialization.
+
+    * - | ``NCCL_P2P_MAX_PEERS``
+        | Sets the maximum number of peers a rank communicates with concurrently
+        | over P2P. This overrides the value of the ``maxP2pPeers`` field in
+        | ``ncclConfig_t``. Where it applies, RCCL divides the P2P channel pool
+        | among this many peers instead of among all ranks, so a smaller value
+        | gives each peer more channels, affecting ``ncclSend``/``ncclRecv`` and
+        | the send/recv-based collectives (all-to-all, scatter, gather). It does
+        | not restrict which peers a rank is allowed to communicate with.
+        | It is read in two places only: the per-peer channel tiling enabled by
+        | ``RCCL_SATURATE_P2P_NCHANNELS`` (on by default for gfx1250 only), and
+        | the multi-node per-peer reduction, which requires more than one node
+        | and ``NCCL_NCHANNELS_PER_NET_PEER`` / ``nChannelsPerNetPeer`` unset.
+        | A single-node job on another architecture with default settings is
+        | therefore unaffected.
+      - | Integer value, ``1`` to the number of ranks (default: unset, which
+        | means the number of ranks in the communicator)
+        | Values ``<= 0`` are ignored and a message is logged.
+        | Values greater than the communicator size are capped to it.
+        | Values ``<= 0`` other than ``NCCL_CONFIG_UNDEF_INT`` set through
+        | ``ncclConfig_t`` are rejected with ``ncclInvalidArgument`` at
+        | communicator initialization.
 
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.

@@ -22,9 +22,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace common_utils
+namespace rocprofsys::common_utils
 {
 
 namespace
@@ -282,7 +280,7 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
     if(tracing_on)
     {
         std::cerr << "  \u2022 Perfetto trace: " << output_dir
-                  << "/perfetto-trace.proto\n";
+                  << "/perfetto-trace.pftrace\n";
     }
 
     if(rocpd_on || tracing_on)
@@ -297,7 +295,7 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
     if(tracing_on)
     {
         std::cerr << "  \u2022 Perfetto: Open " << output_dir
-                  << "/perfetto-trace.proto in https://ui.perfetto.dev\n";
+                  << "/perfetto-trace.pftrace in https://ui.perfetto.dev\n";
     }
     std::cerr << "\n";
 }
@@ -577,7 +575,7 @@ group_topic_table()
         { "tracing", "Tracing-specific options", { "[TRACING OPTIONS]" } },
         { "profiling", "Profile output format options", { "[PROFILE OPTIONS]" } },
         { "output",
-          "Output format selection (proto/rocpd/json/text)",
+          "Output format selection (pftrace/rocpd/json/text)",
           { "[OUTPUT FORMAT OPTIONS]" } },
         { "sampling",
           "Sampling frequency and timer options",
@@ -928,5 +926,4 @@ print_help_for_domain(const std::string& captured, std::string_view domain,
     return true;
 }
 
-}  // namespace common_utils
-}  // namespace rocprofsys
+}  // namespace rocprofsys::common_utils

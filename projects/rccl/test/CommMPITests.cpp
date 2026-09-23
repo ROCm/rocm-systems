@@ -10,6 +10,7 @@
 #include "MPIHelpers.hpp"
 #include "TestChecks.hpp"
 #include "ResourceGuards.hpp"
+#include "SymmetricMemPrereq.hpp"
 
 #include "nccl_device.h"
 #include "comm.h"
@@ -702,6 +703,12 @@ TEST_F(TrafficClassMPITest, ConfiguredTrafficClass)
     constexpr int kTestTrafficClass = 46;
     configured_traffic_class_ = kTestTrafficClass;
 
+    // The needle below is an INFO(NCCL_ENV) line. Force INFO regardless of the
+    // outer NCCL_DEBUG (CI sets INFO; bundled WARN runs otherwise miss it).
+    MPIHelpers::MpiEnvGuard debug("NCCL_DEBUG", "INFO");
+    MPIHelpers::MpiEnvGuard debug_subsys("NCCL_DEBUG_SUBSYS", "ENV");
+    MPIHelpers::resetNcclDebugState();
+
     MPIHelpers::TestLogAssertionContext log_ctx(
         MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
 
@@ -781,7 +788,8 @@ protected:
         const char* gin_type = std::getenv("NCCL_GIN_TYPE");
         const char* cumem    = std::getenv("NCCL_CUMEM_ENABLE");
         return gin_type != nullptr && std::string(gin_type) == "2"
-            && cumem != nullptr && std::string(cumem) == "1";
+            && cumem != nullptr && std::string(cumem) == "1"
+            && ncclCuMemRuntimeSupported();
     }
 
     static std::array<int, 2> collectiveBoolSummary(bool value)
@@ -919,7 +927,7 @@ TEST_F(GinTrafficClassMPITest, DeviceHostPrecedence)
 {
     const auto proxy_prerequisites = collectiveBoolSummary(proxyPrerequisitesMet());
     if(proxy_prerequisites[0] == 0 && proxy_prerequisites[1] == 0)
-        GTEST_SKIP() << "Requires NCCL_GIN_TYPE=2 and NCCL_CUMEM_ENABLE=1";
+        GTEST_SKIP() << "Requires NCCL_GIN_TYPE=2 and runtime-supported cuMem";
     ASSERT_MPI_TRUE(proxy_prerequisites[0] == 1 && proxy_prerequisites[1] == 1);
 
     const bool local_ib_env_unset =
@@ -1401,16 +1409,19 @@ TEST_F(GinRmaContextMPITest, RmaAndGinFinalizeWithSplitComm)
     ASSERT_MPI_TRUE(parent != nullptr);
     ASSERT_MPI_TRUE(parent->sharedRes != nullptr);
 
-    if(parent->sharedRes->ginState.ncclGin == nullptr || parent->rmaState.rmaProxyState.ncclRma == nullptr)
+    if(parent->sharedRes->ginState.numActiveBackends == 0 ||
+       parent->sharedRes->ginState.backends[0].ginInstance == nullptr ||
+       parent->rmaState.rmaProxyState.ncclRma == nullptr)
     {
         GTEST_SKIP() << "Requires both the GIN and RMA plugins enabled on this host";
     }
 
     // One internal backend serves both roles, so the contexts are distinct
     // only when RMA owns a separate field.
-    ASSERT_MPI_TRUE(parent->ginContext != nullptr);
+    void* ginInstance = parent->sharedRes->ginState.backends[0].ginInstance;
+    ASSERT_MPI_TRUE(ginInstance != nullptr);
     ASSERT_MPI_TRUE(parent->rmaContext != nullptr);
-    ASSERT_MPI_TRUE(parent->ginContext != parent->rmaContext);
+    ASSERT_MPI_TRUE(ginInstance != parent->rmaContext);
 
     // The parent shares its resources, so the child inherits both contexts
     // instead of initializing the plugins again.
@@ -1420,7 +1431,7 @@ TEST_F(GinRmaContextMPITest, RmaAndGinFinalizeWithSplitComm)
 
     struct ncclComm* child = splitComm;
     ASSERT_MPI_TRUE(child->sharedRes == parent->sharedRes);
-    ASSERT_MPI_TRUE(child->ginContext == parent->ginContext);
+    ASSERT_MPI_TRUE(child->sharedRes->ginState.backends[0].ginInstance == ginInstance);
     ASSERT_MPI_TRUE(child->rmaContext == parent->rmaContext);
 
     // Destroy the parent first so the child holds the last reference and

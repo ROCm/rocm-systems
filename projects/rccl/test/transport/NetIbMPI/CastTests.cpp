@@ -10,6 +10,11 @@
 
 #ifdef MPI_TESTS_ENABLED
 
+// IB link-layer value, defined here to avoid depending on infiniband/verbs.h in
+// tests. Must match enum ibv_port_attr link_layer (rdma-core verbs.h), where
+// IBV_LINK_LAYER_INFINIBAND=1 and IBV_LINK_LAYER_ETHERNET=2.
+static constexpr uint8_t kLinkLayerEthernet = 2;  // IBV_LINK_LAYER_ETHERNET (RoCE)
+
 // =============================================================================
 // Test: CastEqualWeightsTwoQPsTokenCounts
 //
@@ -18,9 +23,8 @@
 // Verifies: initTokens.totTokens=100, per-QP tokens equal, sum invariant.
 // =============================================================================
 TEST_F(NetIbMPITest, CastEqualWeightsTwoQPsTokenCounts) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -79,9 +83,8 @@ TEST_F(NetIbMPITest, CastEqualWeightsTwoQPsTokenCounts) {
 // SetTokens resets both init and active tokens, so no reconnect needed.
 // =============================================================================
 TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -190,9 +193,8 @@ TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
 // sum(activeQpTokens)==activeTotTokens.
 // =============================================================================
 TEST_F(NetIbMPITest, CastTokenSumInvariantAfterConsumption) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -244,9 +246,8 @@ TEST_F(NetIbMPITest, CastTokenSumInvariantAfterConsumption) {
 // White-box: nqps=1. WRR must be bypassed (schedInit stays false).
 // =============================================================================
 TEST_F(NetIbMPITest, CastSingleQPBypassesWrr) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -294,9 +295,8 @@ TEST_F(NetIbMPITest, CastSingleQPBypassesWrr) {
 // enable=true, doWrr=true, splitData=false, splitDataMin from env.
 // =============================================================================
 TEST_F(NetIbMPITest, CastSchedParmsReflectEnvVars) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -345,9 +345,8 @@ TEST_F(NetIbMPITest, CastSchedParmsReflectEnvVars) {
 // After selection cursor advances to 0.
 // =============================================================================
 TEST_F(NetIbMPITest, CastCursorWrapsAtNqpsBoundary) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -405,9 +404,8 @@ TEST_F(NetIbMPITest, CastCursorWrapsAtNqpsBoundary) {
 // activeTotTokens==0, and qpIndex==0 (cursor wrapped back to start).
 // =============================================================================
 TEST_F(NetIbMPITest, CastMaxQPCount128) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -480,9 +478,8 @@ TEST_F(NetIbMPITest, CastMaxQPCount128) {
 //   - activeQpTokens[i] == 0 for all i
 // =============================================================================
 TEST_F(NetIbMPITest, CastFourQPsMonotonicOrder) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -575,9 +572,8 @@ TEST_F(NetIbMPITest, CastFourQPsMonotonicOrder) {
 // Actual nqps determines threshold dynamically.
 // =============================================================================
 TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -675,9 +671,8 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
 // Phase 3 (doWrr=true):  10 sends → 10 WRR tokens consumed
 // =============================================================================
 TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -806,9 +801,8 @@ TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
 // Phase 3 (splitData=false): oneQp WRR → 1 token consumed
 // =============================================================================
 TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -915,9 +909,8 @@ TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
 //   enable=true  → WRR resumes → 1 token consumed
 // =============================================================================
 TEST_F(NetIbMPITest, CastEnableDisableSched) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -1014,9 +1007,8 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
 // Data integrity verified for all sizes.
 // =============================================================================
 TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -1125,9 +1117,8 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
 // Verify: data integrity + 0 WRR tokens consumed.
 // =============================================================================
 TEST_F(NetIbMPITest, CastLargeTransfer) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -1196,9 +1187,8 @@ TEST_F(NetIbMPITest, CastLargeTransfer) {
 // Verify: send/recv complete with ncclSuccess, received size=0, 1 WRR token consumed.
 // =============================================================================
 TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -1270,9 +1260,8 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
 //   - If nqps > 1: initQpTokens changed from asymmetric initial values (timer fired).
 // =============================================================================
 TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit))
-        << "Test requires exactly " << kExactTwoProcesses << " processes";
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
 
     const int rank = MPIEnvironment::world_rank;
 
@@ -1478,6 +1467,137 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// =============================================================================
+// Test: CastGrhSetOnRoceQp
+//
+// Verifies that RoCE QPs have ah_attr.is_global=1 (GRH/GID addressing) programmed
+// at RTR, read back via ibv_query_qp on both sides, followed by a data-integrity
+// transfer. Skips on IB link layer (subnet-dependent there) and when the provider
+// does not repopulate ah_attr on ibv_query_qp.
+// =============================================================================
+TEST_F(NetIbMPITest, CastGrhSetOnRoceQp) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    ncclNetProperties_t props;
+    memset(&props, 0, sizeof(props));
+    ASSERT_EQ(GetDeviceProperties(0, &props), ncclSuccess);
+    int skipFlag = (props.name && !CanRouteCrossNode(props.name)) ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE, &skipFlag, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    if (skipFlag) {
+        GTEST_SKIP() << "dev 0 has no routable GID (link-local only) on at least one rank";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 1024;
+    char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>((i * 7) & 0xFF);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    // Each rank checks its own comm (accessor works on send and recv comm).
+    // Decisions are MPI_Allreduce'd so both ranks take the same path — a unilateral
+    // return would hang the peer at the next collective.
+    void* myComm = (rank == 0) ? recvComm : sendComm;
+    int grhFail = 0, roceSkip = 0, grhInconclusive = 0;
+    struct ncclIbCastGrhState grh = {};
+    if (ncclIbCastGetGrhState(myComm, &grh) != ncclSuccess || grh.nqps <= 0) {
+        grhFail = 1;
+    } else {
+        bool anyRoce = false;
+        for (int i = 0; i < grh.nqps; i++) {
+            if (grh.linkLayer[i] != kLinkLayerEthernet) continue;
+            anyRoce = true;
+            if (!grh.queryOk[i]) {
+                grhInconclusive = 1;  // provider did not repopulate ah_attr on ibv_query_qp
+            } else {
+                EXPECT_EQ(grh.isGlobal[i], 1)
+                    << "rank " << rank << " RoCE QP " << i
+                    << " qp_num=" << grh.qpNum[i]
+                    << " linkLayer=" << (int)grh.linkLayer[i]
+                    << " must have GRH (is_global=1)";
+            }
+        }
+        if (!anyRoce) roceSkip = 1;
+    }
+    MPI_Allreduce(MPI_IN_PLACE, &grhFail, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    MPI_Allreduce(MPI_IN_PLACE, &roceSkip, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    MPI_Allreduce(MPI_IN_PLACE, &grhInconclusive, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    if (grhFail || roceSkip || grhInconclusive) {
+        TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+        if (grhFail)
+            FAIL() << "ncclIbCastGetGrhState failed or returned no QPs";
+        if (grhInconclusive)
+            GTEST_SKIP() << "provider did not repopulate ah_attr on ibv_query_qp; "
+                            "GRH read-back inconclusive on this NIC";
+        GTEST_SKIP() << "QPs are InfiniBand link layer; forced-GRH invariant is RoCE-only";
+    }
+
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 900, mhandle);
+    if (rank == 0)
+        EXPECT_EQ(memcmp(sendBuf, recvBuf, kMsgSize), 0) << "data mismatch";
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: CastSubnetAwareRoutingSameSubnet
+//
+// Smoke test for NCCL_IB_SUBNET_AWARE_ROUTING=1 (env set by the test config,
+// not this test). On single-subnet hardware, enabling the param drives
+// IbCastFindDevBySubnet down its "default device's PFs all match the peer's
+// subnet -> keep it" fast path (connect.cc IbCastFindDevBySubnet, called from
+// Connect and Accept; IbCastListen only embeds the local GIDs in the handle)
+// on every real connection setup. This does
+// not exercise cross-subnet device switching or the IB GRH+FLID path -- those
+// require a multi-subnet/IB-router fabric this suite does not have. The goal
+// here is only to prove the routing param does not regress normal
+// same-subnet connectivity on production topology.
+// =============================================================================
+TEST_F(NetIbMPITest, CastSubnetAwareRoutingSameSubnet) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 1024;
+    char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>((i * 11) & 0xFF);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 901, mhandle);
+    if (rank == 0)
+        EXPECT_EQ(memcmp(sendBuf, recvBuf, kMsgSize), 0) << "data mismatch";
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
 #endif // MPI_TESTS_ENABLED

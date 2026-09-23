@@ -7,7 +7,7 @@
 #ifdef ENABLE_ROCSHMEM_GIN
 
 /**
- * GIN plugin: SDMA Anvil device path (NCCL_GIN_TYPE=6).
+ * GIN plugin: SDMA Anvil device path (NCCL_GIN_TYPE=7).
  * Small messages use inlined IPC flat stores via GIN-owned device-memory peer table in GPU context.
  * Large messages use standalone Anvil SDMA (gin_anvil_sdma_factory).
  */

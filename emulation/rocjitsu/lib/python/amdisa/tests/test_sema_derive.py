@@ -1699,11 +1699,11 @@ class TestDeriveVectorTernary:
         assert SemaNodeKind.MUL in all_kinds
         assert SemaNodeKind.ADD in all_kinds
 
-    def test_lowers_to_std_fma(self):
+    def test_lowers_to_mode_aware_fma(self):
         sem = _FakeSem('V_FMA_F32', 'vector_ternary', 'fma', 'f32')
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'std::fma(' in cpp
+        assert 'fp_mode::Arithmetic::FMA' in cpp
 
     def test_add_minmax_i32_u32_intrinsically_saturates_add_before_selection(self):
         cases = [
@@ -2661,6 +2661,28 @@ class TestDerivePacked:
             assert sem.operation == operation
             assert sem.data_type == 'u64'
 
+    def test_pk_f64_basic_arithmetic_has_distinct_binary_semantics(self):
+        for name, operation in (
+            ('V_PK_ADD_F64', 'add'),
+            ('V_PK_MUL_F64', 'mul'),
+            ('V_PK_MAX_NUM_F64', 'max_num'),
+            ('V_PK_MIN_NUM_F64', 'min_num'),
+        ):
+            sem = derive_semantics(name, 'ENC_VOP3P')
+
+            assert sem is not None
+            assert sem.semantic_class == 'pk_binop_f64'
+            assert sem.operation == operation
+            assert sem.data_type == 'f64'
+
+    def test_pk_f64_fma_has_fused_ternary_semantics(self):
+        sem = derive_semantics('V_PK_FMA_F64', 'ENC_VOP3P')
+
+        assert sem is not None
+        assert sem.semantic_class == 'pk_ternary_f64'
+        assert sem.operation == 'fma'
+        assert sem.data_type == 'f64'
+
     def test_pk_mov_b32(self):
         sem = _FakeSem('V_PK_MOV_B32', 'pk_mov_b32')
         block = derive_sema_block(sem)
@@ -2752,13 +2774,14 @@ class TestDeriveMfma:
     @pytest.mark.parametrize(
         'name',
         [
+            'V_WMMA_F64_16X16X4_F64',
             'V_WMMA_BF16F32_16X16X32_BF16',
             'V_WMMA_F32_16X16X128_F8F6F4',
             'V_WMMA_F32_32X16X128_F4',
             'V_SWMMAC_BF16F32_16X16X64_BF16',
         ],
     )
-    def test_gfx1250_low_precision_wmma_derives_mfma(self, name):
+    def test_cdna5_wmma_profiles_derive_mfma(self, name):
         sem = derive_semantics(name, 'ENC_VOP3P')
         assert sem is not None
         assert sem.semantic_class == 'mfma'
