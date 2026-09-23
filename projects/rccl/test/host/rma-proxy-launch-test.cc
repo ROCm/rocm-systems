@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -114,6 +115,17 @@ static void RmaProxyFree(void* ptr) {
   std::free(ptr);
 }
 
+// Let queue tests advance a consumer only after the UUT has observed the
+// corresponding full state. The default preserves the production atomic load.
+static std::function<void(const uint32_t*, uint32_t)> g_rmaProxyAtomicLoad32Hook;
+
+static uint32_t RmaProxyAtomicLoad32(const uint32_t* ptr,
+                                     std::memory_order order) {
+  uint32_t value = __atomic_load_n(ptr, NCCL_CONVERT_ORDER(order));
+  if (g_rmaProxyAtomicLoad32Hook) g_rmaProxyAtomicLoad32Hook(ptr, value);
+  return value;
+}
+
 // Other units in rccl-UnitTestsMicro need controllable doubles for these
 // exported functions. Rename this translation unit's definitions at inclusion
 // time so those doubles keep serving their existing callers while the tests
@@ -129,7 +141,10 @@ static void RmaProxyFree(void* ptr) {
 #undef ncclCalloc
 #define ncclCalloc(...) RmaProxyCalloc(__FILE__, __LINE__, __func__, __VA_ARGS__)
 #define free(ptr) RmaProxyFree(ptr)
+#undef COMPILER_ATOMIC_LOAD_32
+#define COMPILER_ATOMIC_LOAD_32(ptr, order) RmaProxyAtomicLoad32((ptr), (order))
 #include RMA_PROXY_LAUNCH_CC_PATH
+#undef COMPILER_ATOMIC_LOAD_32
 #undef free
 #undef ncclCalloc
 #undef freeMemCPUAccessible
@@ -185,6 +200,63 @@ private:
                         uint64_t)> wait_;
 };
 
+class FullQueueConsumerAdvance {
+public:
+  FullQueueConsumerAdvance(uint32_t* consumer, uint32_t blockedValue,
+                           uint32_t advancedValue)
+      : consumer_(consumer),
+        blockedValue_(blockedValue),
+        advancedValue_(advancedValue),
+        load_(g_rmaProxyAtomicLoad32Hook,
+              [this](const uint32_t* ptr, uint32_t value) {
+                if (ptr != consumer_ || value != blockedValue_) return;
+                fullReads_++;
+                __atomic_store_n(consumer_, advancedValue_, __ATOMIC_RELEASE);
+                {
+                  std::lock_guard<std::mutex> lock(mutex_);
+                  advanced_ = true;
+                }
+                condition_.notify_one();
+              }),
+        watchdog_([this] {
+          std::unique_lock<std::mutex> lock(mutex_);
+          if (!condition_.wait_for(lock, std::chrono::seconds(2),
+                                   [this] { return advanced_; })) {
+            timedOut_ = true;
+            __atomic_store_n(consumer_, advancedValue_, __ATOMIC_RELEASE);
+          }
+        }) {}
+
+  ~FullQueueConsumerAdvance() {
+    if (!watchdog_.joinable()) return;
+    __atomic_store_n(consumer_, advancedValue_, __ATOMIC_RELEASE);
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      advanced_ = true;
+    }
+    condition_.notify_one();
+    watchdog_.join();
+  }
+
+  void Wait() {
+    if (watchdog_.joinable()) watchdog_.join();
+  }
+  int fullReads() const { return fullReads_; }
+  bool timedOut() const { return timedOut_; }
+
+private:
+  uint32_t* consumer_;
+  uint32_t blockedValue_;
+  uint32_t advancedValue_;
+  std::mutex mutex_;
+  std::condition_variable condition_;
+  bool advanced_ = false;
+  bool timedOut_ = false;
+  int fullReads_ = 0;
+  ScopedHook<void(const uint32_t*, uint32_t)> load_;
+  std::thread watchdog_;
+};
+
 #if HIP_VERSION >= 71360850
 TEST_F(RmaProxyBatchMemOpTest, MoreThanTheHipLimit_IsSubmittedInContiguousChunks) {
   struct Call {
@@ -234,6 +306,105 @@ TEST_F(RmaProxyBatchMemOpTest, HipFailure_StopsBeforeSubmittingLaterChunks) {
   EXPECT_EQ(2, batch.calls);
   EXPECT_EQ(params.data(), submitted[0]);
   EXPECT_EQ(params.data() + 255, submitted[1]);
+}
+#else
+enum class RmaProxyFallbackOp { Write, Wait };
+
+struct RmaProxyFallbackCall {
+  RmaProxyFallbackOp op;
+  hipStream_t stream;
+  void* address;
+  uint64_t value;
+  unsigned int flags;
+  uint64_t mask;
+};
+
+TEST_F(RmaProxyBatchMemOpTest, Fallback_SubmitsMixedOperationsInOrder) {
+  uint64_t first = 0;
+  uint64_t waited = 0;
+  uint64_t last = 0;
+  hipStream_t stream = reinterpret_cast<hipStream_t>(0x1234);
+  std::array<hipStreamBatchMemOpParams, 3> params{};
+  params[0].writeValue.operation = hipStreamMemOpWriteValue64;
+  params[0].writeValue.address = reinterpret_cast<hipDeviceptr_t>(&first);
+  params[0].writeValue.value64 = 17;
+  params[0].writeValue.flags = 3;
+  params[1].waitValue.operation = hipStreamMemOpWaitValue64;
+  params[1].waitValue.address = reinterpret_cast<hipDeviceptr_t>(&waited);
+  params[1].waitValue.value64 = 23;
+  params[1].waitValue.flags = 5;
+  params[2].writeValue.operation = hipStreamMemOpWriteValue64;
+  params[2].writeValue.address = reinterpret_cast<hipDeviceptr_t>(&last);
+  params[2].writeValue.value64 = 29;
+  params[2].writeValue.flags = 7;
+  std::vector<RmaProxyFallbackCall> calls;
+  ScopedHook write(
+      g_hipStreamWriteValue64,
+      [&](hipStream_t gotStream, void* address, uint64_t value,
+          unsigned int flags) {
+        calls.push_back(
+            {RmaProxyFallbackOp::Write, gotStream, address, value, flags, 0});
+        return hipSuccess;
+      });
+  ScopedHook wait(
+      g_hipStreamWaitValue64,
+      [&](hipStream_t gotStream, void* address, uint64_t value,
+          unsigned int flags, uint64_t mask) {
+        calls.push_back(
+            {RmaProxyFallbackOp::Wait, gotStream, address, value, flags, mask});
+        return hipSuccess;
+      });
+
+  ASSERT_EQ(ncclSuccess,
+            ncclCuStreamBatchMemOpUut(stream, params.size(), params.data()));
+
+  ASSERT_EQ(3u, calls.size());
+  EXPECT_EQ(2, write.calls);
+  EXPECT_EQ(1, wait.calls);
+  EXPECT_EQ(RmaProxyFallbackOp::Write, calls[0].op);
+  EXPECT_EQ(stream, calls[0].stream);
+  EXPECT_EQ(static_cast<void*>(&first), calls[0].address);
+  EXPECT_EQ(17u, calls[0].value);
+  EXPECT_EQ(3u, calls[0].flags);
+  EXPECT_EQ(RmaProxyFallbackOp::Wait, calls[1].op);
+  EXPECT_EQ(stream, calls[1].stream);
+  EXPECT_EQ(static_cast<void*>(&waited), calls[1].address);
+  EXPECT_EQ(23u, calls[1].value);
+  EXPECT_EQ(5u, calls[1].flags);
+  EXPECT_EQ(UINT64_MAX, calls[1].mask);
+  EXPECT_EQ(RmaProxyFallbackOp::Write, calls[2].op);
+  EXPECT_EQ(stream, calls[2].stream);
+  EXPECT_EQ(static_cast<void*>(&last), calls[2].address);
+  EXPECT_EQ(29u, calls[2].value);
+  EXPECT_EQ(7u, calls[2].flags);
+}
+
+TEST_F(RmaProxyBatchMemOpTest, Fallback_FailureStopsBeforeLaterOperations) {
+  std::array<hipStreamBatchMemOpParams, 3> params{};
+  params[0].writeValue.operation = hipStreamMemOpWriteValue64;
+  params[1].waitValue.operation = hipStreamMemOpWaitValue64;
+  params[2].writeValue.operation = hipStreamMemOpWriteValue64;
+  std::vector<RmaProxyFallbackOp> submitted;
+  ScopedHook write(
+      g_hipStreamWriteValue64,
+      [&](hipStream_t, void*, uint64_t, unsigned int) {
+        submitted.push_back(RmaProxyFallbackOp::Write);
+        return hipSuccess;
+      });
+  ScopedHook wait(
+      g_hipStreamWaitValue64,
+      [&](hipStream_t, void*, uint64_t, unsigned int, uint64_t) {
+        submitted.push_back(RmaProxyFallbackOp::Wait);
+        return hipErrorInvalidValue;
+      });
+
+  EXPECT_EQ(ncclUnhandledCudaError,
+            ncclCuStreamBatchMemOpUut(nullptr, params.size(), params.data()));
+  ASSERT_EQ(2u, submitted.size());
+  EXPECT_EQ(RmaProxyFallbackOp::Write, submitted[0]);
+  EXPECT_EQ(RmaProxyFallbackOp::Wait, submitted[1]);
+  EXPECT_EQ(1, write.calls);
+  EXPECT_EQ(1, wait.calls);
 }
 #endif
 
@@ -374,9 +545,6 @@ TEST_F(RmaProxyDescriptorTest, PutDesc_SecondSequenceAllocationFailsAndReleasesT
   EXPECT_EQ(nullptr, desc.readySeq);
   EXPECT_EQ(nullptr, desc.readySeqDev);
   EXPECT_EQ(nullptr, desc.readySeqGdrHandle);
-  EXPECT_EQ(nullptr, desc.doneSeq);
-  EXPECT_EQ(nullptr, desc.doneSeqDev);
-  EXPECT_EQ(nullptr, desc.doneSeqGdrHandle);
 }
 
 TEST_F(RmaProxyDescriptorTest, PutDesc_FailedSecondAllocationWithMemoryReleasesBothSequences) {
@@ -391,7 +559,11 @@ TEST_F(RmaProxyDescriptorTest, PutDesc_FailedSecondAllocationWithMemoryReleasesB
   EXPECT_EQ(g_rmaProxyCpuAllocCalls[0].host, g_rmaProxyCpuFreeCalls[0].host);
   EXPECT_EQ(g_rmaProxyCpuAllocCalls[1].host, g_rmaProxyCpuFreeCalls[1].host);
   EXPECT_EQ(nullptr, desc.readySeq);
+  EXPECT_EQ(nullptr, desc.readySeqDev);
+  EXPECT_EQ(nullptr, desc.readySeqGdrHandle);
   EXPECT_EQ(nullptr, desc.doneSeq);
+  EXPECT_EQ(nullptr, desc.doneSeqDev);
+  EXPECT_EQ(nullptr, desc.doneSeqGdrHandle);
 }
 
 TEST_F(RmaProxyDescriptorTest, PutGroupDesc_PersistentOwnsTheOpsAndDedicatedSequences) {
@@ -470,6 +642,7 @@ TEST_F(RmaProxyDescriptorTest, WaitDesc_PersistentWithGdrDoesNotRequestAFlush) {
   int* signalIdxs = nullptr;
   auto* desc = static_cast<ncclRmaProxyDesc*>(std::calloc(1, sizeof(ncclRmaProxyDesc)));
   ASSERT_NE(nullptr, desc);
+  desc->waitSignal.needFlush = true;
 
   ASSERT_EQ(ncclSuccess,
             ncclRmaProxyWaitBuildDesc(comm_.get(), ctx_.get(), plan_.get(), 0,
@@ -501,6 +674,8 @@ TEST_F(RmaProxyDescriptorTest, WaitDesc_AllocationFailureLeavesArraysForDescript
 
 TEST_F(RmaProxyDescriptorTest, PutOp_NoSignalCopiesTheDataOperationOnly) {
   ncclRmaPutSignalOp op{};
+  op.request = reinterpret_cast<void*>(0x7770);
+  op.signal.op = NCCL_NET_SIGNAL_OP_ADD;
 
   ASSERT_EQ(ncclSuccess,
             ncclRmaProxyPutBuildOp(comm_.get(), ctx_.get(), kContext, false,
@@ -545,6 +720,9 @@ TEST_F(RmaProxyDescriptorTest, PutOp_PersistentSignalUsesTheCpuAccessibleHandle)
 TEST_F(RmaProxyDescriptorTest, PutDesc_NonPersistentUsesTheTargetSequenceSlot) {
   opSeqs_[kPeer] = 8;
   ncclRmaProxyDesc desc{};
+  desc.rmaDescType = ncclRmaDescTypeWaitSignal;
+  desc.persistPlan = plan_.get();
+  desc.persistDescValid = true;
 
   ASSERT_EQ(ncclSuccess, BuildPutDesc(&desc));
 
@@ -570,6 +748,8 @@ TEST_F(RmaProxyDescriptorTest, PutGroupDesc_NonPersistentTakesOpsAndUsesTheLocal
   ASSERT_NE(nullptr, ops);
   ncclRmaPutSignalOp* submittedOps = ops;
   ncclRmaProxyDesc desc{};
+  desc.putSignalGroup.nIssued = -1;
+  desc.putSignalGroup.nCompleted = -1;
 
   ASSERT_EQ(ncclSuccess,
             ncclRmaProxyPutGroupBuildDesc(comm_.get(), ctx_.get(), plan_.get(),
@@ -607,6 +787,7 @@ TEST_F(RmaProxyDescriptorTest, WaitDesc_NonPersistentTakesAllCallerArrays) {
   int* submittedSignals = nsignals;
   int* submittedSignalIdxs = signalIdxs;
   ncclRmaProxyDesc desc{};
+  desc.persistPlan = plan_.get();
 
   ASSERT_EQ(ncclSuccess,
             ncclRmaProxyWaitBuildDesc(comm_.get(), ctx_.get(), plan_.get(), 2,
@@ -846,6 +1027,19 @@ protected:
     return SubmissionRecorder(calls, std::move(afterCall));
   }
 
+  void ExpectSubmissionCalls(const std::vector<BatchCall>& calls,
+                             const SubmissionRecorder& recorder,
+                             size_t fallbackCalls) {
+#if HIP_VERSION >= 71360850
+    (void)fallbackCalls;
+    constexpr size_t expectedCalls = 1;
+#else
+    const size_t expectedCalls = fallbackCalls;
+#endif
+    EXPECT_EQ(expectedCalls, calls.size());
+    EXPECT_EQ(expectedCalls, static_cast<size_t>(recorder.callCount()));
+  }
+
   std::vector<hipStreamBatchMemOpParams> FlattenParams(
       const std::vector<BatchCall>& calls) {
     std::vector<hipStreamBatchMemOpParams> params;
@@ -891,13 +1085,7 @@ TEST_F(RmaProxyLaunchTest, PutLaunch_TasksFromDifferentContextsAreEnqueuedAndSub
 
   ASSERT_EQ(ncclSuccess, ncclRmaProxyPutLaunchUut(comm_.get(), plan_.get(), stream));
 
-#if HIP_VERSION >= 71360850
-  ASSERT_EQ(1u, calls.size());
-  EXPECT_EQ(1, batch.callCount());
-#else
-  ASSERT_EQ(4u, calls.size());
-  EXPECT_EQ(4, batch.callCount());
-#endif
+  ExpectSubmissionCalls(calls, batch, 4);
   for (const BatchCall& call : calls) EXPECT_EQ(stream, call.stream);
   std::vector<hipStreamBatchMemOpParams> params = FlattenParams(calls);
   ASSERT_EQ(4u, params.size());
@@ -935,13 +1123,7 @@ TEST_F(RmaProxyLaunchTest, PutLaunch_PersistentTaskQueuesAReplayableDescriptor) 
 
   ASSERT_EQ(ncclSuccess, ncclRmaProxyPutLaunchUut(comm_.get(), plan_.get(), nullptr));
 
-#if HIP_VERSION >= 71360850
-  ASSERT_EQ(1u, calls.size());
-  EXPECT_EQ(1, batch.callCount());
-#else
-  ASSERT_EQ(3u, calls.size());
-  EXPECT_EQ(3, batch.callCount());
-#endif
+  ExpectSubmissionCalls(calls, batch, 3);
   std::vector<hipStreamBatchMemOpParams> params = FlattenParams(calls);
   ASSERT_EQ(3u, params.size());
   EXPECT_EQ(hipStreamMemOpWriteValue64, params[0].writeValue.operation);
@@ -952,6 +1134,31 @@ TEST_F(RmaProxyLaunchTest, PutLaunch_PersistentTaskQueuesAReplayableDescriptor) 
   EXPECT_EQ(plan_.get(), desc->persistPlan);
   EXPECT_TRUE(desc->persistDescValid);
   EXPECT_EQ(1u, desc->opSeq);
+}
+
+TEST_F(RmaProxyLaunchTest, PutLaunch_FirstFullQueueRetriesAfterConsumerAdvances) {
+  PushPut(0, 3, 128);
+  contexts_[0].pis[3] = kQueueSize;
+  contexts_[0].cis[3] = 0;
+  FullQueueConsumerAdvance advance(&contexts_[0].cis[3], 0, kQueueSize);
+  std::vector<BatchCall> calls;
+  auto batch = RecordBatches(&calls);
+
+  ncclResult_t result =
+      ncclRmaProxyPutLaunchUut(comm_.get(), plan_.get(), nullptr);
+  advance.Wait();
+
+  ASSERT_EQ(ncclSuccess, result);
+  EXPECT_FALSE(advance.timedOut());
+  EXPECT_EQ(1, advance.fullReads());
+  ExpectSubmissionCalls(calls, batch, 2);
+  std::vector<hipStreamBatchMemOpParams> params = FlattenParams(calls);
+  ASSERT_EQ(2u, params.size());
+  EXPECT_EQ(hipStreamMemOpWriteValue64, params[0].writeValue.operation);
+  EXPECT_EQ(hipStreamMemOpWaitValue64, params[1].waitValue.operation);
+  EXPECT_NE(nullptr, contexts_[0].circular[3 * kQueueSize]);
+  EXPECT_EQ(static_cast<uint32_t>(kQueueSize + 1), contexts_[0].pis[3]);
+  EXPECT_EQ(static_cast<uint32_t>(kQueueSize), contexts_[0].cis[3]);
 }
 
 TEST_F(RmaProxyLaunchTest, PutLaunch_LaterFullQueueFlushesEarlierTaskBeforeRetrying) {
@@ -1085,6 +1292,9 @@ TEST_F(RmaProxyLaunchTest, WaitLaunch_NoSignalReturnsTheTaskWithoutSubmittingMem
 TEST_F(RmaProxyLaunchTest, WaitLaunch_SignalTaskSubmitsAccumulatedPeerWaits) {
   ncclTaskRma* task = PushWait(ncclFuncWaitSignal, NCCL_SIGNAL,
                                {{2, 5, 1}, {3, 7, 2}});
+  int* peers = task->peers;
+  int* nsignals = task->nsignals;
+  int* signalIdxs = task->signalIdxs;
   const size_t firstSlot = ncclRmaSignalSlot(kNRanks, 1, 2);
   const size_t secondSlot = ncclRmaSignalSlot(kNRanks, 2, 3);
   contexts_[0].signalsHost[firstSlot] = 11;
@@ -1096,13 +1306,7 @@ TEST_F(RmaProxyLaunchTest, WaitLaunch_SignalTaskSubmitsAccumulatedPeerWaits) {
   ASSERT_EQ(ncclSuccess,
             ncclRmaProxyWaitLaunchUut(comm_.get(), plan_.get(), stream));
 
-#if HIP_VERSION >= 71360850
-  ASSERT_EQ(1u, calls.size());
-  EXPECT_EQ(1, batch.callCount());
-#else
-  ASSERT_EQ(2u, calls.size());
-  EXPECT_EQ(2, batch.callCount());
-#endif
+  ExpectSubmissionCalls(calls, batch, 2);
   for (const BatchCall& call : calls) EXPECT_EQ(stream, call.stream);
   std::vector<hipStreamBatchMemOpParams> params = FlattenParams(calls);
   ASSERT_EQ(2u, params.size());
@@ -1115,6 +1319,13 @@ TEST_F(RmaProxyLaunchTest, WaitLaunch_SignalTaskSubmitsAccumulatedPeerWaits) {
   EXPECT_EQ(nullptr, task->peers);
   EXPECT_EQ(nullptr, task->nsignals);
   EXPECT_EQ(nullptr, task->signalIdxs);
+  ASSERT_EQ(2u, g_rmaProxyCallocCalls.size());
+  ExpectFreedExactlyOnce(peers);
+  ExpectFreedExactlyOnce(nsignals);
+  ExpectFreedExactlyOnce(signalIdxs);
+  for (const RmaProxyCallocCall& call : g_rmaProxyCallocCalls) {
+    ExpectFreedExactlyOnce(call.allocation);
+  }
   EXPECT_EQ(task, reinterpret_cast<ncclTaskRma*>(comm_->memPool_ncclTaskRma.head));
 }
 
@@ -1126,13 +1337,7 @@ TEST_F(RmaProxyLaunchTest, WaitLaunch_PersistentTaskQueuesAReplayableDescriptor)
 
   ASSERT_EQ(ncclSuccess, ncclRmaProxyWaitLaunchUut(comm_.get(), plan_.get(), nullptr));
 
-#if HIP_VERSION >= 71360850
-  ASSERT_EQ(1u, calls.size());
-  EXPECT_EQ(1, batch.callCount());
-#else
-  ASSERT_EQ(3u, calls.size());
-  EXPECT_EQ(3, batch.callCount());
-#endif
+  ExpectSubmissionCalls(calls, batch, 3);
   std::vector<hipStreamBatchMemOpParams> params = FlattenParams(calls);
   ASSERT_EQ(3u, params.size());
   EXPECT_EQ(hipStreamMemOpWriteValue64, params[0].writeValue.operation);
@@ -1322,6 +1527,27 @@ TEST_F(RmaProxyQueueTest, EnqueueNonPersistent_FullQueueIsRejectedWithoutPublish
             ncclRmaProxyEnqueueNonPersistentDesc(ctx_.get(), 2, &desc));
   EXPECT_EQ(nullptr, circular_[2 * kQueueSize]);
   EXPECT_EQ(kQueueSize, pis_[2]);
+}
+
+TEST_F(RmaProxyQueueTest, EnqueueDesc_FullQueueRetriesAfterConsumerAdvances) {
+  ncclRmaProxyDesc desc{};
+  desc.rmaDescType = ncclRmaDescTypePutSignal;
+  desc.putSignal.targetRank = 3;
+  pis_[3] = kQueueSize;
+  cis_[3] = 0;
+  ncclRmaProxyDesc* submitted = &desc;
+  FullQueueConsumerAdvance advance(&cis_[3], 0, kQueueSize);
+
+  ncclResult_t result = ncclRmaProxyEnqueueDesc(ctx_.get(), &submitted);
+  advance.Wait();
+
+  ASSERT_EQ(ncclSuccess, result);
+  EXPECT_FALSE(advance.timedOut());
+  EXPECT_EQ(1, advance.fullReads());
+  EXPECT_EQ(nullptr, submitted);
+  EXPECT_EQ(&desc, circular_[3 * kQueueSize]);
+  EXPECT_EQ(static_cast<uint32_t>(kQueueSize + 1), pis_[3]);
+  EXPECT_EQ(static_cast<uint32_t>(kQueueSize), cis_[3]);
 }
 
 TEST_F(RmaProxyQueueTest, EnqueueDesc_NonPersistentPutPublishesAtProducerSlot) {
@@ -1741,20 +1967,31 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
   std::condition_variable startupCondition;
   bool proxyReady = false;
   bool mainAbandoned = false;
+  bool reclaimFinished = false;
 
   std::thread proxy([&] {
     std::unique_lock<std::mutex> lock(state->mutex);
     proxyReady = true;
     startupCondition.notify_one();
-    state->cond.wait(lock, [&] {
-      return state->rmaProgress == 2 || mainAbandoned;
-    });
-    if (mainAbandoned) return;
+    while (state->rmaProgress != 2 && !mainAbandoned && !reclaimFinished) {
+      if (state->cond.wait_for(lock, kCoordinationTimeout, [&] {
+            return state->rmaProgress == 2 || mainAbandoned || reclaimFinished;
+          })) {
+        break;
+      }
+      // Release a UUT that failed to request the pause, but stay alive in case
+      // the main thread was merely descheduled before entering the call.
+      state->rmaProgress = 0;
+      state->cond.notify_one();
+    }
+    if (mainAbandoned || reclaimFinished) return;
     pauseObserved = true;
     state->rmaProgress = 0;
     state->cond.notify_one();
-    resumeObserved = state->cond.wait_for(
-        lock, kCoordinationTimeout, [&] { return state->rmaProgress == 1; });
+    state->cond.wait_for(lock, kCoordinationTimeout, [&] {
+      return state->rmaProgress == 1 || reclaimFinished;
+    });
+    resumeObserved = state->rmaProgress == 1;
   });
 
   bool proxyStarted;
@@ -1772,9 +2009,15 @@ TEST_F(RmaProxyReclaimTest, ReclaimPlan_ConnectedProxyPausesReclaimsAndResumes) 
     FAIL() << "proxy helper did not start before the coordination deadline";
   }
 
-  EXPECT_EQ(ncclSuccess, ncclRmaProxyReclaimPlanUut(comm_.get(), targetPlan_.get()));
+  ncclResult_t result = ncclRmaProxyReclaimPlanUut(comm_.get(), targetPlan_.get());
+  {
+    std::lock_guard<std::mutex> lock(state->mutex);
+    reclaimFinished = true;
+    state->cond.notify_one();
+  }
   proxy.join();
 
+  EXPECT_EQ(ncclSuccess, result);
   EXPECT_TRUE(pauseObserved);
   EXPECT_TRUE(resumeObserved);
   EXPECT_EQ(1, state->rmaProgress);
