@@ -253,6 +253,50 @@ public:
   }
 };
 
+TEST(GpuVmPipeline, WaveUsesAdmissionSnapshotAcrossRootReplacement) {
+  TranslatedPipelineContext context;
+  ASSERT_TRUE(context.address_space);
+  ASSERT_NE(context.wf, nullptr);
+
+  constexpr uint64_t kAddress = 0x100;
+  constexpr uint32_t kOriginal = 0x11223344;
+  constexpr uint32_t kReplacement = 0xaabbccdd;
+  context.external->store(kAddress, kOriginal);
+
+  std::optional<amdgpu::GpuVmAccess> admitted =
+      context.sim.soc->gpu_vm().snapshot_pinned(context.address_space);
+  ASSERT_TRUE(admitted);
+  context.wf->set_vm_access(std::make_shared<amdgpu::GpuVmAccess>(std::move(*admitted)));
+
+  auto replacement = std::make_shared<TestExternalAddressSpace>();
+  replacement->store(kAddress, kReplacement);
+  ASSERT_TRUE(context.sim.soc->gpu_vm().replace_translated(context.address_space, replacement,
+                                                           replacement));
+
+  std::array<uint8_t, sizeof(uint32_t)> bytes{};
+  EXPECT_EQ(context.wf->read_gpu_memory(kAddress, bytes), amdgpu::VmAccessOutcome::Complete);
+  uint32_t observed = 0;
+  std::memcpy(&observed, bytes.data(), sizeof(observed));
+  EXPECT_EQ(observed, kOriginal);
+}
+
+TEST(GpuVmPipeline, WaveAdmissionSnapshotIsRevokedByUnregister) {
+  TranslatedPipelineContext context;
+  ASSERT_TRUE(context.address_space);
+  ASSERT_NE(context.wf, nullptr);
+
+  std::optional<amdgpu::GpuVmAccess> admitted =
+      context.sim.soc->gpu_vm().snapshot_pinned(context.address_space);
+  ASSERT_TRUE(admitted);
+  context.wf->set_vm_access(std::make_shared<amdgpu::GpuVmAccess>(std::move(*admitted)));
+  ASSERT_TRUE(context.sim.soc->gpu_vm().unregister_address_space(context.address_space));
+
+  std::array<uint8_t, sizeof(uint32_t)> bytes{};
+  EXPECT_EQ(context.wf->read_gpu_memory(0x100, bytes), amdgpu::VmAccessOutcome::Unavailable);
+  context.wf->reset();
+  EXPECT_EQ(context.wf->vm_access(), nullptr);
+}
+
 TEST(GpuVmPipeline, TranslatedScalarLoadAndStoreUseExternalBacking) {
   TranslatedPipelineContext context;
   ASSERT_TRUE(context.address_space);

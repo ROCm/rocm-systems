@@ -1415,7 +1415,7 @@ template <bool EnableAsync>
     }
   };
 
-  const GpuVmAccess *vm_access = nullptr;
+  const GpuVmAccess *vm_access = active->vm_access();
   if (active->address_space() || vmid != 0) {
     if (gpu_vm_ == nullptr) {
       drain_async_window();
@@ -1424,16 +1424,18 @@ template <bool EnableAsync>
       handle_terminal_vm_fault(*active, VmAccessOutcome::Faulted);
       return;
     }
-    const AddressSpaceHandle address_space = active->address_space();
-    if (!instruction_vm_access_ || instruction_address_space_ != address_space ||
-        (!address_space && instruction_vmid_ != vmid) || !instruction_vm_access_->is_current()) {
-      instruction_vm_access_ =
-          address_space ? gpu_vm_->snapshot(address_space) : gpu_vm_->snapshot_vmid(vmid);
-      instruction_address_space_ = address_space;
-      instruction_vmid_ = vmid;
+    if (vm_access == nullptr) {
+      const AddressSpaceHandle address_space = active->address_space();
+      if (!instruction_vm_access_ || instruction_address_space_ != address_space ||
+          (!address_space && instruction_vmid_ != vmid) || !instruction_vm_access_->is_current()) {
+        instruction_vm_access_ =
+            address_space ? gpu_vm_->snapshot(address_space) : gpu_vm_->snapshot_vmid(vmid);
+        instruction_address_space_ = address_space;
+        instruction_vmid_ = vmid;
+      }
+      if (instruction_vm_access_)
+        vm_access = &*instruction_vm_access_;
     }
-    if (instruction_vm_access_)
-      vm_access = &*instruction_vm_access_;
     if (!vm_access) {
       drain_async_window();
       util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
