@@ -1270,8 +1270,7 @@ class TestDeriveVectorUnary:
         assert decode_helper in cpp
         if encode_helper.endswith('_mode'):
             assert (
-                f'{encode_helper}('
-                'amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale), '
+                f'{encode_helper}(read_scaled_src(index) * scale, '
                 'wf.fp16_ovfl())' in cpp
             )
         else:
@@ -1282,7 +1281,8 @@ class TestDeriveVectorUnary:
             'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane))'
             not in cpp
         )
-        assert 'amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale)' in cpp
+        assert 'read_scaled_src(index) * scale' in cpp
+        assert 'amdgpu::scale_mxfp_scalar' not in cpp
         assert 'Isa::resolved_vgpr_offset' in cpp
         assert 'write_vgpr_region' in cpp
         assert 'dst_region.set_lane' in cpp
@@ -1347,7 +1347,8 @@ class TestDeriveVectorUnary:
         )
         assert 'util::e8m0_to_f32' not in cpp
         assert 'pack_scaled_dst(index' in cpp
-        assert 'amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale)' in cpp
+        assert 'read_scaled_input(index) / scale' in cpp
+        assert 'amdgpu::divide_mxfp_scalar' not in cpp
         assert 'Isa::resolved_vgpr_offset' in cpp
         assert 'read_vgpr_region' in cpp
         assert 'write_vgpr_region' in cpp
@@ -1411,7 +1412,8 @@ class TestDeriveVectorUnary:
         assert read_helper in cpp
         assert f'{encode_helper}(value, seed, wf.fp16_ovfl())' in cpp
         assert 'seed = util::prng_advance(seed)' in cpp
-        assert 'amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale)' in cpp
+        assert 'read_scaled_input(index) / scale' in cpp
+        assert 'amdgpu::divide_mxfp_scalar' not in cpp
         assert 'amdgpu::try_execute_mxfp_cvt_scale_simd<' in cpp
         assert 'amdgpu::MxfpDirection::Pack, true>' in cpp
         assert 'wf, simd_dst_base, simd_src_base, src2, src1,' in cpp

@@ -2004,9 +2004,7 @@ def gen_vector_cvt_scale(
                 f'dst_base, {dst_word_count}u, 1ULL << lane);'
             )
             L.append(f'    for (uint32_t index = 0; index < {count}u; ++index) {{')
-            L.append(
-                '      float value = amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale);'
-            )
+            L.append('      float value = read_scaled_src(index) * scale;')
             L.append(
                 '      dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));'
             )
@@ -2024,8 +2022,7 @@ def gen_vector_cvt_scale(
             L.append(f'    uint32_t dst_words[{dst_word_count}] = {{}};')
             L.append(f'    for (uint32_t index = 0; index < {count}u; ++index) {{')
             L.append(
-                f'      uint32_t bits = {conv}('
-                'amdgpu::scale_mxfp_scalar(read_scaled_src(index), scale), '
+                f'      uint32_t bits = {conv}(read_scaled_src(index) * scale, '
                 'wf.fp16_ovfl());'
             )
             L.append('      dst_words[index / 2u] |= bits << ((index & 1u) * 16u);')
@@ -2056,9 +2053,7 @@ def gen_vector_cvt_scale(
         L.append('        dst_words[word + 1u] |= code >> (32u - shift);')
         L.append('    };')
         L.append(f'    for (uint32_t index = 0; index < {count}u; ++index) {{')
-        L.append(
-            '      float value = amdgpu::divide_mxfp_scalar(read_scaled_input(index), scale);'
-        )
+        L.append('      float value = read_scaled_input(index) / scale;')
         if stochastic:
             L.append(
                 f"      pack_scaled_dst(index, {_scale_sr_encode_call(out_fmt, 'value', 'seed', arch_name)});"

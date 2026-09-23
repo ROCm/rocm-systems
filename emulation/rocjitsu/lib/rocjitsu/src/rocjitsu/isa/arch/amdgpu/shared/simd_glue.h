@@ -14,6 +14,7 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
@@ -826,42 +827,6 @@ inline constexpr uint32_t mxfp_format_bits_v = [] {
   return 8u;
 }();
 
-/// Multiply a decoded MX value by its E8M0 scale with deterministic NaN
-/// precedence.  C++ leaves the payload and sign selected by a floating-point
-/// operation implementation-defined; keeping the decoded value first makes
-/// scalar and packed host execution bit-identical on every host ISA.
-inline constexpr bool is_f32_nan_bits(uint32_t bits) {
-  return (bits & 0x7f800000u) == 0x7f800000u && (bits & 0x007fffffu) != 0;
-}
-
-inline float scale_mxfp_scalar(float value, float scale) {
-  const uint32_t value_bits = std::bit_cast<uint32_t>(value);
-  const uint32_t scale_bits = std::bit_cast<uint32_t>(scale);
-  if (is_f32_nan_bits(value_bits))
-    return std::bit_cast<float>(value_bits | 0x00400000u);
-  if (is_f32_nan_bits(scale_bits))
-    return std::bit_cast<float>(scale_bits | 0x00400000u);
-  return value * scale;
-}
-
-/// Divide a wide MX input by its F32 scale with the same deterministic NaN
-/// policy as unpack scaling. Invalid zero/zero and infinity/infinity divisions
-/// produce the positive canonical quiet NaN.
-inline float divide_mxfp_scalar(float value, float scale) {
-  const uint32_t value_bits = std::bit_cast<uint32_t>(value);
-  const uint32_t scale_bits = std::bit_cast<uint32_t>(scale);
-  if (is_f32_nan_bits(value_bits))
-    return std::bit_cast<float>(value_bits | 0x00400000u);
-  if (is_f32_nan_bits(scale_bits))
-    return std::bit_cast<float>(scale_bits | 0x00400000u);
-  const uint32_t value_magnitude = value_bits & 0x7fffffffu;
-  const uint32_t scale_magnitude = scale_bits & 0x7fffffffu;
-  if ((value_magnitude == 0u && scale_magnitude == 0u) ||
-      (value_magnitude == 0x7f800000u && scale_magnitude == 0x7f800000u))
-    return std::bit_cast<float>(0x7fc00000u);
-  return value / scale;
-}
-
 #if __has_include(<experimental/simd>)
 template <MxfpFormat Format>
   requires(util::has_stdx_simd)
@@ -878,62 +843,76 @@ inline util::native<float> decode_mxfp_simd(util::native<uint32_t> code) {
     return util::bf8_e5m2_to_f32_simd(code);
 }
 
-/// Host packed multiply instructions do not promise the deterministic NaN
-/// precedence used by the architectural reference. Repair exceptional lanes
-/// with integer masks so the optimizer cannot reselect the NaN operand.
-template <MxfpFormat Format>
-inline util::native<float> scale_mxfp_unpack_simd(util::native<uint32_t> code,
-                                                  util::native<float> scale) {
-  using U = util::native<uint32_t>;
-  using F = util::native<float>;
-  const F decoded = decode_mxfp_simd<Format>(code);
-  const U decoded_bits = std::bit_cast<U>(decoded);
-  const U scale_bits = std::bit_cast<U>(scale);
-  const auto decoded_nan = ((decoded_bits & U(0x7f800000u)) == U(0x7f800000u)) &&
-                           ((decoded_bits & U(0x007fffffu)) != U(0u));
-  const auto scale_nan =
-      ((scale_bits & U(0x7f800000u)) == U(0x7f800000u)) && ((scale_bits & U(0x007fffffu)) != U(0u));
-  // Match the scalar helper even when floating-point exceptions are enabled:
-  // do not execute the arithmetic on a NaN lane before repairing its bits.
-  const auto nan = decoded_nan || scale_nan;
-  U safe_decoded_bits = decoded_bits;
-  U safe_scale_bits = scale_bits;
-  util::stdx::where(nan, safe_decoded_bits) = U(0x3f800000u);
-  util::stdx::where(nan, safe_scale_bits) = U(0x3f800000u);
-  U result_bits =
-      std::bit_cast<U>(std::bit_cast<F>(safe_decoded_bits) * std::bit_cast<F>(safe_scale_bits));
-  util::stdx::where(scale_nan, result_bits) = scale_bits | U(0x00400000u);
-  util::stdx::where(decoded_nan, result_bits) = decoded_bits | U(0x00400000u);
-  return std::bit_cast<F>(result_bits);
+template <MxfpFormat Format> inline float decode_mxfp_scalar(uint32_t code) {
+  if constexpr (Format == MxfpFormat::Fp4E2m1)
+    return util::fp4_e2m1_to_f32(static_cast<uint8_t>(code));
+  else if constexpr (Format == MxfpFormat::Fp6E2m3)
+    return util::fp6_e2m3_to_f32(static_cast<uint8_t>(code));
+  else if constexpr (Format == MxfpFormat::Bf6E3m2)
+    return util::bf6_e3m2_to_f32(static_cast<uint8_t>(code));
+  else if constexpr (Format == MxfpFormat::Fp8E4m3)
+    return util::fp8_e4m3_to_f32(static_cast<uint8_t>(code));
+  else
+    return util::bf8_e5m2_to_f32(static_cast<uint8_t>(code));
 }
 
-inline util::native<float> divide_mxfp_pack_simd(util::native<float> value,
-                                                 util::native<float> scale) {
-  using U = util::native<uint32_t>;
-  using F = util::native<float>;
-  const U value_bits = std::bit_cast<U>(value);
-  const U scale_bits = std::bit_cast<U>(scale);
-  const U value_magnitude = value_bits & U(0x7fffffffu);
-  const U scale_magnitude = scale_bits & U(0x7fffffffu);
-  const auto value_nan =
-      ((value_bits & U(0x7f800000u)) == U(0x7f800000u)) && ((value_bits & U(0x007fffffu)) != U(0u));
-  const auto scale_nan =
-      ((scale_bits & U(0x7f800000u)) == U(0x7f800000u)) && ((scale_bits & U(0x007fffffu)) != U(0u));
-  const auto invalid = ((value_magnitude == U(0u)) && (scale_magnitude == U(0u))) ||
-                       ((value_magnitude == U(0x7f800000u)) && (scale_magnitude == U(0x7f800000u)));
-  // The scalar helper branches around NaN and invalid divisions. Sanitize the
-  // same lanes here so vector evaluation cannot raise an extra FE_INVALID.
-  const auto exceptional = value_nan || scale_nan || invalid;
-  U safe_value_bits = value_bits;
-  U safe_scale_bits = scale_bits;
-  util::stdx::where(exceptional, safe_value_bits) = U(0x3f800000u);
-  util::stdx::where(exceptional, safe_scale_bits) = U(0x3f800000u);
-  U result_bits =
-      std::bit_cast<U>(std::bit_cast<F>(safe_value_bits) / std::bit_cast<F>(safe_scale_bits));
-  util::stdx::where(invalid, result_bits) = U(0x7fc00000u);
-  util::stdx::where(scale_nan, result_bits) = scale_bits | U(0x00400000u);
-  util::stdx::where(value_nan, result_bits) = value_bits | U(0x00400000u);
-  return std::bit_cast<F>(result_bits);
+template <MxfpFormat Format, bool Stochastic>
+inline uint32_t encode_mxfp_scalar(float value, uint32_t seed, bool fp16_ovfl) {
+  if constexpr (Format == MxfpFormat::Fp4E2m1) {
+    if constexpr (Stochastic)
+      return util::f32_to_fp4_e2m1_sr(value, seed);
+    else
+      return util::f32_to_fp4_e2m1_rne(value);
+  } else if constexpr (Format == MxfpFormat::Fp6E2m3) {
+    if constexpr (Stochastic)
+      return util::f32_to_fp6_e2m3_sr(value, seed);
+    else
+      return util::f32_to_fp6_e2m3_rne(value);
+  } else if constexpr (Format == MxfpFormat::Bf6E3m2) {
+    if constexpr (Stochastic)
+      return util::f32_to_bf6_e3m2_sr(value, seed);
+    else
+      return util::f32_to_bf6_e3m2_rne(value);
+  } else if constexpr (Format == MxfpFormat::Fp8E4m3) {
+    if constexpr (Stochastic)
+      return util::f32_to_fp8_e4m3_sr_mode(value, seed, fp16_ovfl);
+    else
+      return util::f32_to_fp8_e4m3_rne_mode(value, fp16_ovfl);
+  } else {
+    if constexpr (Stochastic)
+      return util::f32_to_bf8_e5m2_sr_mode(value, seed, fp16_ovfl);
+    else
+      return util::f32_to_bf8_e5m2_rne_mode(value, fp16_ovfl);
+  }
+}
+
+/// Keep each rare exceptional pipeline in one scalar call frame. Besides
+/// preventing auto-vectorization, this keeps host NaN operand selection and
+/// floating-point exception side effects coupled to the final consumer.
+template <MxfpFormat Format, MxfpWideFormat WideFormat>
+RJ_NOINLINE inline uint32_t convert_mxfp_unpack_scalar(uint32_t code, uint8_t scale_code,
+                                                       bool fp16_ovfl) {
+  static_assert(WideFormat != MxfpWideFormat::F32);
+  const float scale = util::e8m0_to_f32(scale_code);
+  if constexpr (WideFormat == MxfpWideFormat::F16)
+    return util::f32_to_f16_mode(decode_mxfp_scalar<Format>(code) * scale, fp16_ovfl);
+  else
+    return util::f32_to_bf16_rne_mode(decode_mxfp_scalar<Format>(code) * scale, fp16_ovfl);
+}
+
+template <MxfpFormat Format, MxfpWideFormat WideFormat, bool Stochastic>
+RJ_NOINLINE inline uint32_t convert_mxfp_pack_scalar(uint32_t raw_input, uint32_t scale_bits,
+                                                     uint32_t seed, bool fp16_ovfl) {
+  float input;
+  if constexpr (WideFormat == MxfpWideFormat::F32)
+    input = std::bit_cast<float>(raw_input);
+  else if constexpr (WideFormat == MxfpWideFormat::F16)
+    input = util::f16_to_f32(static_cast<uint16_t>(raw_input));
+  else
+    input = util::bf16_to_f32(static_cast<uint16_t>(raw_input));
+  const float scale = std::bit_cast<float>(scale_bits);
+  float value = input / scale;
+  return encode_mxfp_scalar<Format, Stochastic>(value, seed, fp16_ovfl);
 }
 
 template <MxfpFormat Format, bool Stochastic>
@@ -1014,7 +993,6 @@ try_execute_mxfp_cvt_scale_simd(Wavefront &wf, uint32_t dst_base, uint32_t src_b
     seed.emplace(regs.read_operand(seed_operand, exec));
   auto source = regs.read_vgpr_region(src_base, SrcWords, exec);
   auto destination = regs.write_vgpr_region(dst_base, DstWords, exec);
-
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   for (uint32_t lane_base = 0; lane_base < wf.wf_size(); lane_base += W) {
     const uint64_t chunk = (exec >> lane_base) & chunk_full;
@@ -1027,9 +1005,14 @@ try_execute_mxfp_cvt_scale_simd(Wavefront &wf, uint32_t dst_base, uint32_t src_b
     for (uint32_t word = 0; word < SrcWords; ++word)
       src_words[word] = source.template load_native<uint32_t>(word, lane_base);
     const U scale_bits = scale.template load_native<uint32_t>(lane_base);
-    F scale_value = Direction == MxfpDirection::Unpack
-                        ? util::e8m0_to_f32_simd((scale_bits >> (scale_byte * 8u)) & 0xffu)
-                        : std::bit_cast<F>(scale_bits);
+    U unpack_scale_code(0u);
+    F scale_value;
+    if constexpr (Direction == MxfpDirection::Unpack) {
+      unpack_scale_code = (scale_bits >> (scale_byte * 8u)) & U(0xffu);
+      scale_value = util::e8m0_to_f32_simd(unpack_scale_code);
+    } else {
+      scale_value = std::bit_cast<F>(scale_bits);
+    }
     // A native operation evaluates every host lane. Make EXEC-disabled lanes
     // arithmetically inert so their values cannot raise host floating-point
     // exceptions before the masked store drops their results. Keep the common
@@ -1044,30 +1027,82 @@ try_execute_mxfp_cvt_scale_simd(Wavefront &wf, uint32_t dst_base, uint32_t src_b
       U safe_scale_bits = std::bit_cast<U>(scale_value);
       util::stdx::where(inactive, safe_scale_bits) = U(0x3f800000u);
       scale_value = std::bit_cast<F>(safe_scale_bits);
+      if constexpr (Direction == MxfpDirection::Unpack)
+        util::stdx::where(inactive, unpack_scale_code) = U(0x7fu);
     }
     U lane_seed(0u);
     if constexpr (Stochastic)
       lane_seed = seed->template load_native<uint32_t>(lane_base);
 
     if constexpr (Direction == MxfpDirection::Unpack) {
-      auto unpack_element = [&](uint32_t index) {
+      std::array<U, Count> codes;
+      std::array<F, Count> decoded;
+      auto exceptional = unpack_scale_code == U(0xffu);
+      for (uint32_t index = 0; index < Count; ++index) {
         const uint32_t bit = index * LowBits;
         const uint32_t word = bit / 32u;
         const uint32_t shift = bit & 31u;
-        U code = src_words[word] >> shift;
+        codes[index] = src_words[word] >> shift;
         if (shift + LowBits > 32u)
-          code |= src_words[word + 1u] << (32u - shift);
-        return scale_mxfp_unpack_simd<Format>(code & U(CodeMask), scale_value);
-      };
+          codes[index] |= src_words[word + 1u] << (32u - shift);
+        codes[index] &= U(CodeMask);
+        decoded[index] = decode_mxfp_simd<Format>(codes[index]);
+        if constexpr (Format == MxfpFormat::Fp8E4m3)
+          exceptional = exceptional || ((codes[index] & U(0x7fu)) == U(0x7fu));
+        else if constexpr (Format == MxfpFormat::Bf8E5m2)
+          exceptional = exceptional || ((codes[index] & U(0x7fu)) > U(0x7cu));
+      }
+      // Host scalar NaN selection depends on both the compiler and the final
+      // consumer of the arithmetic result. If any active lane is exceptional,
+      // preserve the generated scalar body's complete decode/multiply/convert
+      // pipeline for this native chunk. The views above have already performed
+      // their plugin observations, so falling through to the generated body
+      // here would observe the same accesses twice.
+      if (util::stdx::any_of(exceptional)) {
+        for (uint32_t local_lane = 0; local_lane < W; ++local_lane) {
+          if ((chunk & (uint64_t{1} << local_lane)) == 0)
+            continue;
+          const uint32_t lane = lane_base + local_lane;
+          const uint8_t scalar_scale_byte =
+              static_cast<uint8_t>(scale_bits[local_lane] >> (scale_byte * 8u));
+          auto read_scaled_code = [&](uint32_t index) -> uint32_t {
+            const uint32_t bit = index * LowBits;
+            const uint32_t word = bit / 32u;
+            const uint32_t shift = bit & 31u;
+            uint32_t code = src_words[word][local_lane] >> shift;
+            if (shift + LowBits > 32u)
+              code |= src_words[word + 1u][local_lane] << (32u - shift);
+            return code & CodeMask;
+          };
+
+          if constexpr (WideFormat == MxfpWideFormat::F32) {
+            const float scalar_scale = util::e8m0_to_f32(scalar_scale_byte);
+            for (uint32_t index = 0; index < Count; ++index) {
+              float value = decode_mxfp_scalar<Format>(read_scaled_code(index)) * scalar_scale;
+              destination.set_lane(index, lane, std::bit_cast<uint32_t>(value));
+            }
+          } else {
+            std::array<uint32_t, WideWords> scalar_dst_words{};
+            for (uint32_t index = 0; index < Count; ++index) {
+              const uint32_t bits = convert_mxfp_unpack_scalar<Format, WideFormat>(
+                  read_scaled_code(index), scalar_scale_byte, wf.fp16_ovfl());
+              scalar_dst_words[index / 2u] |= bits << ((index & 1u) * 16u);
+            }
+            for (uint32_t word = 0; word < WideWords; ++word)
+              destination.set_lane(word, lane, scalar_dst_words[word]);
+          }
+        }
+        continue;
+      }
 
       if constexpr (WideFormat == MxfpWideFormat::F32) {
         for (uint32_t index = 0; index < Count; ++index)
-          destination.template store_native<float>(index, lane_base, unpack_element(index),
+          destination.template store_native<float>(index, lane_base, decoded[index] * scale_value,
                                                    write_chunk);
       } else {
         for (uint32_t word = 0; word < WideWords; ++word) {
-          const F lo_value = unpack_element(word * 2u);
-          const F hi_value = unpack_element(word * 2u + 1u);
+          const F lo_value = decoded[word * 2u] * scale_value;
+          const F hi_value = decoded[word * 2u + 1u] * scale_value;
           U lo;
           U hi;
           if constexpr (WideFormat == MxfpWideFormat::F16) {
@@ -1086,20 +1121,66 @@ try_execute_mxfp_cvt_scale_simd(Wavefront &wf, uint32_t dst_base, uint32_t src_b
       for (U &word : dst_words)
         word = U(0u);
 
-      auto wide_element = [&](uint32_t index) -> F {
+      std::array<F, Count> wide_elements;
+      const U scale_magnitude = std::bit_cast<U>(scale_value) & U(0x7fff'ffffu);
+      auto exceptional = scale_magnitude > U(0x7f80'0000u);
+      for (uint32_t index = 0; index < Count; ++index) {
         if constexpr (WideFormat == MxfpWideFormat::F32)
-          return std::bit_cast<F>(src_words[index]);
+          wide_elements[index] = std::bit_cast<F>(src_words[index]);
         else {
           const U raw = src_words[index / 2u] >> ((index & 1u) * 16u);
           if constexpr (WideFormat == MxfpWideFormat::F16)
-            return util::f16_to_f32_simd(raw);
+            wide_elements[index] = util::f16_to_f32_simd(raw);
           else
-            return util::bf16_to_f32_simd(raw);
+            wide_elements[index] = util::bf16_to_f32_simd(raw);
         }
-      };
+        const U value_magnitude = std::bit_cast<U>(wide_elements[index]) & U(0x7fff'ffffu);
+        exceptional =
+            exceptional || value_magnitude > U(0x7f80'0000u) ||
+            ((value_magnitude == U(0u)) && (scale_magnitude == U(0u))) ||
+            ((value_magnitude == U(0x7f80'0000u)) && (scale_magnitude == U(0x7f80'0000u)));
+      }
+
+      // Keep all exceptional arithmetic and its scalar encoder together. In
+      // particular, the low-format encoders may contribute FE_INVALID for a
+      // NaN result, which cannot be reproduced by repairing only the quotient.
+      if (util::stdx::any_of(exceptional)) {
+        for (uint32_t local_lane = 0; local_lane < W; ++local_lane) {
+          if ((chunk & (uint64_t{1} << local_lane)) == 0)
+            continue;
+          const uint32_t lane = lane_base + local_lane;
+          const uint32_t scalar_scale_bits = scale_bits[local_lane];
+          uint32_t scalar_seed = lane_seed[local_lane];
+          auto read_scaled_input = [&](uint32_t index) -> uint32_t {
+            if constexpr (WideFormat == MxfpWideFormat::F32)
+              return src_words[index][local_lane];
+            else
+              return (src_words[index / 2u][local_lane] >> ((index & 1u) * 16u)) & 0xffffu;
+          };
+
+          std::array<uint32_t, DstWords> scalar_dst_words{};
+          for (uint32_t index = 0; index < Count; ++index) {
+            const uint32_t code =
+                convert_mxfp_pack_scalar<Format, WideFormat, Stochastic>(
+                    read_scaled_input(index), scalar_scale_bits, scalar_seed, wf.fp16_ovfl()) &
+                CodeMask;
+            const uint32_t bit = index * LowBits;
+            const uint32_t word = bit / 32u;
+            const uint32_t shift = bit & 31u;
+            scalar_dst_words[word] |= code << shift;
+            if (shift + LowBits > 32u)
+              scalar_dst_words[word + 1u] |= code >> (32u - shift);
+            if constexpr (Stochastic)
+              scalar_seed = util::prng_advance(scalar_seed);
+          }
+          for (uint32_t word = 0; word < DstWords; ++word)
+            destination.set_lane(word, lane, scalar_dst_words[word]);
+        }
+        continue;
+      }
 
       for (uint32_t index = 0; index < Count; ++index) {
-        const F value = divide_mxfp_pack_simd(wide_element(index), scale_value);
+        const F value = wide_elements[index] / scale_value;
         const U code =
             encode_mxfp_simd<Format, Stochastic>(value, lane_seed, wf.fp16_ovfl()) & U(CodeMask);
         const uint32_t bit = index * LowBits;
