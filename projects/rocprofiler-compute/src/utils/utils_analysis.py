@@ -1235,8 +1235,21 @@ def _join_pass_marker_and_counter(pair: schema.MlApiTracePair) -> pd.DataFrame:
     return _outer_join_dispatches_and_markers(dispatch_df, pair.marker_df)
 
 
+def _marker_stitch_key(function_value: object) -> str:
+    """Pass-stable Function identity: keep seqNr, tid, ftid; omit ltid."""
+    if function_value is None or (
+        isinstance(function_value, float) and pd.isna(function_value)
+    ):
+        return ""
+    return "|".join(
+        token
+        for token in str(function_value).split("|")
+        if not token.startswith("ltid=")
+    )
+
+
 def _add_stitch_key_and_ordinal(pass_frame: pd.DataFrame) -> pd.DataFrame:
-    """Add stitch_key from Function (seqNr, tid, ftid kept) and function_ordinal."""
+    """Add stitch_key from Function (seqNr, tid, ftid kept; ltid omitted)."""
     if pass_frame.empty:
         result = pass_frame.copy()
         result["stitch_key"] = pd.Series(dtype=str)
@@ -1246,7 +1259,7 @@ def _add_stitch_key_and_ordinal(pass_frame: pd.DataFrame) -> pd.DataFrame:
     if "_marker_order" in pass_frame.columns:
         ordered = pass_frame.sort_values("_marker_order", kind="mergesort")
     result = ordered.copy()
-    result["stitch_key"] = result["Function"].map(str)
+    result["stitch_key"] = result["Function"].map(_marker_stitch_key)
     result["function_ordinal"] = result.groupby("stitch_key", sort=False).cumcount()
     return result
 

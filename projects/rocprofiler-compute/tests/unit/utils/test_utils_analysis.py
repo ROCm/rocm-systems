@@ -1059,6 +1059,58 @@ def test_attach_defers_uncorrelated_interval_and_keeps_worker_root():
     assert engine not in backward.children
 
 
+def _pass_marker_row(function: str, thread_id: int, start: int, end: int) -> dict:
+    return {
+        "Function": function,
+        "Thread_Id": thread_id,
+        "Start_Timestamp": start,
+        "End_Timestamp": end,
+        "Kernel_Names": [],
+        "Kernel_Start_Timestamps": [],
+        "Kernel_End_Timestamps": [],
+    }
+
+
+def test_stitch_key_omits_ltid_and_keeps_it_on_collapsed_function():
+    worker_pass0 = (
+        "autograd::engine::evaluate_function: AddmmBackward0:n/a"
+        "|seqNr=n/a|tid=3|ftid=0|ltid=5652|scope=n/a|args=n/a|torch"
+    )
+    worker_pass1 = (
+        "autograd::engine::evaluate_function: AddmmBackward0:n/a"
+        "|seqNr=n/a|tid=3|ftid=0|ltid=5988|scope=n/a|args=n/a|torch"
+    )
+    other_seq_pass0 = (
+        "AddmmBackward0:n/a|seqNr=4|tid=3|ftid=1|ltid=5652|scope=n/a|args=n/a|torch"
+    )
+    other_seq_pass1 = (
+        "AddmmBackward0:n/a|seqNr=4|tid=3|ftid=1|ltid=5988|scope=n/a|args=n/a|torch"
+    )
+    pass0 = utils_analysis._add_stitch_key_and_ordinal(
+        pd.DataFrame([
+            _pass_marker_row(worker_pass0, 5653, 10, 20),
+            _pass_marker_row(other_seq_pass0, 5653, 11, 19),
+        ])
+    )
+    pass1 = utils_analysis._add_stitch_key_and_ordinal(
+        pd.DataFrame([
+            _pass_marker_row(worker_pass1, 5989, 110, 120),
+            _pass_marker_row(other_seq_pass1, 5989, 111, 119),
+        ])
+    )
+    assert pass0["stitch_key"].iloc[0] == pass1["stitch_key"].iloc[0]
+    assert "ltid=" not in pass0["stitch_key"].iloc[0]
+    assert pass0["stitch_key"].iloc[0] != pass0["stitch_key"].iloc[1]
+    collapsed = utils_analysis._collapse_matching_markers_across_passes([pass0, pass1])
+    assert len(collapsed) == 2
+    worker_rows = collapsed[collapsed["Function"].str.contains("evaluate_function")]
+    assert len(worker_rows) == 1
+    assert worker_rows["Thread_Id"].iloc[0] == 5653
+    assert "ltid=5652" in worker_rows["Function"].iloc[0]
+    parsed = utils_analysis.parse_marker_function(worker_rows["Function"].iloc[0])
+    assert parsed["launcher_thread_id"] == "5652"
+
+
 def test_nest_overlap_collects_error_and_keeps_first_marker():
     trace_df = pd.DataFrame({
         "Thread_Id": ["1", "1"],
