@@ -44,6 +44,7 @@
 #include <cinttypes>
 #include <cstddef>
 #include <atomic>
+#include <thread>
 
 #include "util/atomic_helpers.h"
 #include "impl/wddm/queue.h"
@@ -1132,9 +1133,16 @@ void SDMAQueue::SdmaThread(SDMAQueue* queue) {
         poll_pkt += skip;
         poll_next_pkt += skip;
       }
+
       queue->PreparePacket(queue->WrapIntoRocrRing(start), end - start);
       std::atomic_thread_fence(std::memory_order_release);
       queue->Submit();
+
+      // Wait for GPU to complete this IB before submitting the next.
+      uint64_t expected_fence = queue->rptr_next;
+      while (*queue->GetSyncAddr() < expected_fence) {
+        std::this_thread::yield();
+      }
     }
   }
   pr_debug("sdma thread exit\n");
@@ -1174,6 +1182,7 @@ void SDMAQueue::RingDoorbell(uint64_t value) {
   thread_cond_.notify_one();
 
   thread_cond_lock_.unlock();
+
   wptr_pre_ = wptr_next_;
 }
 
