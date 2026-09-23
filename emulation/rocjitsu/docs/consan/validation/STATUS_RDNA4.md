@@ -246,3 +246,9 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   gfx1201 (serialized, 63.27 seconds). No test failed or was skipped. Log:
   `/home/benoit/workspace/consan-validation/rdna4-20260923/d128-debug/clause-physical.log`.
   This regression gate does not replace external-workload fault qualification.
+- Prospective Qwen Default diagnostic: repeat the same reviewed publication
+  barrier drop with `RJ_CONSAN_PRESET=max` (every workgroup/cell), eight trials,
+  minimum one detection. This tests whether sampling explains the standard
+  profile's 0/8 miss. The original miss remains failed qualification; this
+  diagnostic requires its own matching clean comparator and cannot promote the
+  standard profile. Trial policy is committed before execution.

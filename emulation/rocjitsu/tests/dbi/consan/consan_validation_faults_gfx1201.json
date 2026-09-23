@@ -65,6 +65,39 @@
               ]
             }
           }
+        },
+        {
+          "id": "barrier-drop-reduction-publication-dense-diagnostic",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine ELF fnv1a64:5d29deb0b917dbeb from the freshly built Qwen VMFB. main$async_dispatch_0_reduction_5x1024_f32 executes once in the native trace. Its signal at .text+0x2384 and associated wait at 0x23b0 publish per-wave sums: ds_store_b32 at 0x2370 executes in lane zero of each wave; EXEC is restored before the unconditional signal, and ds_load_b32 at 0x23c0 consumes peer-wave sums after the wait. This pair is on the executed straight-line path. Both engines prospectively require at least one detection; misses remain failed qualification, and numeric manifestations are recorded independently. Separate prospective diagnostic after the standard-profile 0/8 miss: use preset=max to sample every workgroup and cell. Keep the same mutation, eight trials, and minimum one detection. This does not qualify the standard profile; a matching clean comparator is required to qualify this denser configuration."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:5d29deb0b917dbeb|kernel=main$async_dispatch_0_reduction_5x1024_f32|kind=barrier|pc=0x0000000000002384|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:5d29deb0b917dbeb|kernel=main$async_dispatch_0_reduction_5x1024_f32|event=barrier|pc=0x0000000000002384|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:5d29deb0b917dbeb|kernel=main$async_dispatch_0_reduction_5x1024_f32|event=barrier|pc=0x00000000000023b0|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 1,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "environment": {
+                "RJ_CONSAN_PRESET": "max"
+              }
+            }
+          }
         }
       ]
     }
