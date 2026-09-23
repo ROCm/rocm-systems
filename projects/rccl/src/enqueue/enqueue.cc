@@ -4468,11 +4468,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       const bool alltoAllDecided = (info->coll == ncclFuncAlltoAll && info->decisionValid);
       if (info->coll == ncclFuncAllReduce && info->decisionValid) {
         // AllReduce's backend was already chosen once by rcclSelectAllReduce();
-        // honor it here instead of recomputing CE eligibility. rcclSelectAllReduce
-        // step 5 reproduces both of develop's CE-append conditions exactly -- registered
-        // windows (ceAvailable && ((CTAPolicy & ZERO) || force)) and forced CE on
-        // unregistered buffers (ceAllReduceFits), each with !hasSysmemSegment -- so
-        // decision.algo == RCCL_CE_REGISTERED <=> the CE branches below would fire.
+        // honor it here instead of recomputing CE eligibility. 2-shot is handled
+        // in ncclAllReduce_impl before enqueue; REGISTERED is the enqueue-bound CE
+        // path (CTAPolicy ZERO / FORCE / !symEligible).
         if (info->decision.algo == RCCL_CE_REGISTERED) {
           INFO(NCCL_INIT, "Taking CE collective path for AllReduce");
           NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,

@@ -346,7 +346,7 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredSelectsCe_Isol
                     &decision);
                 EXPECT_EQ(res, ncclSuccess);
                 EXPECT_EQ(decision.algo, RCCL_CE_REGISTERED)
-                    << "ceStagedUnregistered must select CE for FORCE + unregistered buffers";
+                    << "FORCE + unregistered buffers must enqueue CE before staging is allocated";
             })
             .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"},
                               {"RCCL_FORCE_CE_ALLREDUCE", "1"},
@@ -370,13 +370,14 @@ TEST(RcclCeAllReduceEligibility, StagedUnregisteredRejectsUnsupportedDriver)
     ncclCudaDriverVersionCache = savedDriverVersion;
 }
 
-// FORCE + unregistered still uses ceUsable's 256 MiB cap. Messages between the
-// staging buffer and that cap must not select CE; ce_coll refuses them.
-TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredOverStagingTakesKernel_Isolated)
+// FORCE + unregistered above the 32 MiB staging buffer still takes 2-shot up
+// to NCCL_CE_AR_TMPBUF_DEFAULT_BYTES. ncclCeAllReduce pipelines AllGather
+// through staging slots instead of requiring the whole message to fit.
+TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredOverStagingSelectsTwoShot_Isolated)
 {
     ProcessIsolatedTestRunner::registerTest(
         ProcessIsolatedTestRunner::TestConfig(
-            "ForceUnregisteredOverStagingTakesKernel_Isolated",
+            "ForceUnregisteredOverStagingSelectsTwoShot_Isolated",
             []()
             {
                 CeAllReduceMockComm mock;
@@ -398,8 +399,8 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredOverStagingTak
                     mock.get(), reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x2000), count, ncclFloat32,
                     ncclProd, /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision);
                 EXPECT_EQ(res, ncclSuccess);
-                EXPECT_NE(decision.algo, RCCL_CE_REGISTERED)
-                    << "ceStagedUnregistered must not select CE above the staging buffer";
+                EXPECT_EQ(decision.algo, RCCL_CE_REGISTERED)
+                    << "FORCE unregistered above staging still enqueues CE up to the 2-shot cap";
             })
             .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"},
                               {"RCCL_FORCE_CE_ALLREDUCE", "1"},

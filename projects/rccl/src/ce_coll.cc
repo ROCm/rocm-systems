@@ -2282,12 +2282,11 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   }
   collArgs.recvWin = recvWin;
 
-  if (!fastPath && totalBytes > ncclCeAllReduceStagingBufBytes(comm->nRanks)) {
-    WARN("CE AllReduce: recv range is not contained in the user window and totalBytes %zu exceeds staging %zu",
-         totalBytes, ncclCeAllReduceStagingBufBytes(comm->nRanks));
-    ret = ncclInvalidUsage;
-    goto fail;
-  }
+  // Unregistered (!fastPath) AllReduce pipelines AllGather through ceARTmpBuf
+  // slots below. A full-message AllGather into staging used to reject anything
+  // above ncclCeAllReduceStagingBufBytes (32 MiB); chunked AG only needs one
+  // slot (nRanks * chunkBytes), so FORCE-unregistered messages up to the
+  // 2-shot cap can run.
 
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
 
@@ -2441,21 +2440,32 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     // recvbuff are visible before returning to the user.
     NCCLCHECKGOTO(ncclMemOpSync(comm, ceStream, &collArgs), ret, fail);
   } else {
-    struct ncclCeCollArgs agArgs = {};
-    agArgs.func = ncclFuncAllGather;
-    agArgs.nElts = shardBytes / eltSize;
-    agArgs.eltSize = eltSize;
-    agArgs.sendBuff = outShard;
-    agArgs.recvBuff = tmpBuf;
-    agArgs.sendWin = comm->ceColl.ceARTmpWin;
-    agArgs.recvWin = comm->ceColl.ceARTmpWin;
-    agArgs.collApiEventHandle = collArgs.collApiEventHandle;
-    agArgs.ceCollProfHandle = collArgs.ceCollProfHandle;
-    NCCLCHECKGOTO(ncclCeAllGather(comm, &agArgs, ceStream), ret, fail);
+    // Slow path: user recv is not a contained symmetric window. Pipeline the
+    // AllGather through one ceARTmpBuf slot per chunk (nRanks * currentChunkBytes
+    // fits a slot) then copy each rank's reduced chunk into user recv.
+    for (int ch = 0; ch < (int)chunksPerShard; ch++) {
+      const bool isTail = (ch == (int)chunksPerShard - 1) && (tailChunkElems > 0);
+      const size_t currentChunkBytes = isTail ? tailChunkElems * eltSize : chunkBytes;
+      uint8_t* chunkSrc = outShard + (size_t)ch * chunkBytes;
+      struct ncclCeCollArgs agArgs = {};
+      agArgs.func = ncclFuncAllGather;
+      agArgs.nElts = currentChunkBytes / eltSize;
+      agArgs.eltSize = eltSize;
+      agArgs.sendBuff = chunkSrc;
+      agArgs.recvBuff = tmpBuf;
+      agArgs.sendWin = comm->ceColl.ceARTmpWin;
+      agArgs.recvWin = comm->ceColl.ceARTmpWin;
+      agArgs.collApiEventHandle = collArgs.collApiEventHandle;
+      agArgs.ceCollProfHandle = collArgs.ceCollProfHandle;
+      NCCLCHECKGOTO(ncclCeAllGather(comm, &agArgs, ceStream), ret, fail);
 
-    // Phase 5 (slow path only): Local Copy — move assembled result from
-    // tmpBuf to user recvbuff.
-    CUDACHECKGOTO(cudaMemcpyAsync(recvbuff, tmpBuf, totalBytes, cudaMemcpyDeviceToDevice, ceStream), ret, fail);
+      for (int r = 0; r < comm->nRanks; r++) {
+        CUDACHECKGOTO(cudaMemcpyAsync((uint8_t*)recvbuff + (size_t)r * shardBytes + (size_t)ch * chunkBytes,
+                                      tmpBuf + (size_t)r * currentChunkBytes, currentChunkBytes,
+                                      cudaMemcpyDeviceToDevice, ceStream),
+                      ret, fail);
+      }
+    }
   }
 
   if (totalSteps > 1) {
