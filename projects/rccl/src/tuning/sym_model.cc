@@ -382,9 +382,8 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
 
   tuning->timeUs = kTime * (1.0f + smPenalty * kBlocks);
   tuning->nChannels = kBlocks;
-  // NVIDIA's 16 warps are 512 threads. On AMD wave64, 16 * 64 = 1024 threads
-  // makes occupancy 0 for GIN RailA2A (debug build ~132 VGPRs) and ROCr aborts
-  // with HSA_STATUS_ERROR_INVALID_ISA. Keep the NVIDIA thread count.
+  // GIN RailA2A keeps NVIDIA's 512-thread CTA. Sixteen wave64 warps is 1024
+  // threads, occupancy 0 on gfx950, and ROCr reports INVALID_ISA.
   tuning->nWarps = 16;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if ((ncclSymkGinKernelMask() >> (int)tuning->symKernelId) & 1) {
