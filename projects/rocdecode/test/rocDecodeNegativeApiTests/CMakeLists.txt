@@ -101,18 +101,7 @@ if(NOT WIN32)
     find_package(rocprofiler-register QUIET)
 endif()
 
-set(DEPS_MET TRUE)
-if(NOT HIP_FOUND)
-    set(DEPS_MET FALSE)
-endif()
-if(NOT rocdecode_FOUND)
-    set(DEPS_MET FALSE)
-endif()
-if(NOT WIN32 AND NOT rocprofiler-register_FOUND)
-    set(DEPS_MET FALSE)
-endif()
-
-if(DEPS_MET)
+if(HIP_FOUND AND rocdecode_FOUND AND (WIN32 OR rocprofiler-register_FOUND))
     # HIP
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
     # rocdecode and utils
