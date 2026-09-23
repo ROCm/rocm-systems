@@ -133,7 +133,7 @@ Explicit selector knobs override preset defaults. See the
 | `RJ_CONSAN_REQUIRE_RECORDS` | `0` | At unload, require visible auto-buffer evidence. |
 | `RJ_CONSAN_REQUIRE_DIAGNOSTICS` | `0` | Require at least one diagnostic or conflict. |
 | `RJ_CONSAN_FORBID_DIAGNOSTICS` | `0` | Require zero diagnostics or conflicts. |
-| `RJ_CONSAN_FORBID_OVERFLOW` | `0` | Fail if evidence was truly dropped. |
+| `RJ_CONSAN_FORBID_OVERFLOW` | `0` | Exit with code 90 if evidence was truly dropped or the per-dispatch barrier epoch was exhausted. |
 
 Automatic report buffers are limited to 128 MiB per buffer and 4 GiB of live automatic-report memory per process. The allocator requests exact inventory-derived bytes below those ceilings and does not silently shrink site coverage or disable an event kind to fit. Arithmetic overflow, a ceiling violation, or allocation failure is a typed incomplete outcome.
 

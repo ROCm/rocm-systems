@@ -2595,6 +2595,7 @@ public:
                  "static_complete=%s dynamic_complete=%s applicable_code_objects=%llu "
                  "incomplete_code_objects=%llu access=%llu/%llu barrier=%llu/%llu "
                  "atomic=%llu/%llu fence=%llu/%llu visible_evidence=%llu dynamic_incomplete=%llu "
+                 "epoch_exhaustion=%llu "
                  "\n",
                  static_coverage_summary.applicable_code_objects != 0 ? "true" : "false",
                  analysis_complete ? "true" : "false", static_complete ? "true" : "false",
@@ -2610,7 +2611,8 @@ public:
                  static_cast<unsigned long long>(static_coverage_summary.patched_fence),
                  static_cast<unsigned long long>(static_coverage_summary.supported_fence),
                  static_cast<unsigned long long>(trust.visible_evidence_count),
-                 static_cast<unsigned long long>(dynamic_incomplete_count));
+                 static_cast<unsigned long long>(dynamic_incomplete_count),
+                 static_cast<unsigned long long>(report_summary.epoch_exhaustion_count));
     std::fflush(stderr);
     if (!analysis_complete) {
       std::fprintf(stderr,
@@ -2618,6 +2620,15 @@ public:
                    "available; inspect coverage and runtime evidence (applicable=%s). "
                    "Use RJ_CONSAN_POLICY=strict to reject ineffective instrumentation.\n",
                    static_coverage_summary.applicable_code_objects != 0 ? "true" : "false");
+    }
+    if (report_summary.epoch_exhaustion_count != 0) {
+      std::fprintf(stderr,
+                   "[rocjitsu-dbi-hooks] ConSan epoch exhausted: %llu wave(s) exceeded "
+                   "1023 barriers; later accesses were not checked. Analysis is incomplete.\n",
+                   static_cast<unsigned long long>(report_summary.epoch_exhaustion_count));
+      std::fflush(stderr);
+      if (forbid_overflow)
+        std::_Exit(90);
     }
 
     if (trust.dropped_record_count != 0) {

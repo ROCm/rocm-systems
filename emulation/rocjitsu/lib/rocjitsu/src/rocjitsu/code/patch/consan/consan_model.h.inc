@@ -39,6 +39,9 @@ inline constexpr uint64_t epoch_generation_mask = epoch_mask | generation_mask;
 
 inline constexpr uint32_t max_owner = (1u << owner_bits) - 1u;
 inline constexpr uint32_t max_epoch = (1u << epoch_bits) - 1u;
+// Persistent owner state has a full dword. This sentinel must never be packed
+// into an evidence entry: doing so would alias the first epoch.
+inline constexpr uint32_t exhausted_epoch = max_epoch + 1u;
 inline constexpr uint32_t max_generation = (1u << generation_bits) - 1u;
 
 } // namespace watchpoint

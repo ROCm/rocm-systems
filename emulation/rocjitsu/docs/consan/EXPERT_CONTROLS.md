@@ -412,12 +412,15 @@ typed incomplete outcome.
 | `RJ_CONSAN_REQUIRE_RECORDS=0\|1` | `0` | At unload, require some visible auto-buffer ConSan access or synchronization evidence. |
 | `RJ_CONSAN_REQUIRE_DIAGNOSTICS=0\|1` | `0` | Require at least one ConSan conflict. |
 | `RJ_CONSAN_FORBID_DIAGNOSTICS=0\|1` | `0` | Require zero diagnostics/conflicts. |
-| `RJ_CONSAN_FORBID_OVERFLOW=0\|1` | `0` | Fail if evidence was truly dropped. ConSan bounded saturation is reported separately from loss. |
+| `RJ_CONSAN_FORBID_OVERFLOW=0\|1` | `0` | Exit with code 90 if evidence was truly dropped or the per-dispatch barrier epoch was exhausted. ConSan bounded saturation is reported separately from loss. |
 
 The unload summary reports required and allocated bytes, per-region capacities,
 current and peak live bytes, private spill growth, ConSan banks, saturation, undercoverage, overflow, and drops.
 
 #### Repeated synchronized work
+
+Report recycling does not reset the per-dispatch barrier counter or lift its
+limit; see the [barrier epoch limit](USAGE.md#barrier-epoch-limit).
 
 Repeated synchronized work normally requires no ConSan-specific API. Automatic
 ConSan reports are bounded epoch storage: ConSan tracks completion signals for

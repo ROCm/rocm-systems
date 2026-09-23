@@ -538,6 +538,7 @@ private:
     total.claimed_window_count += entry.claimed_window_count;
     total.dropped_window_count += entry.dropped_window_count;
     total.saturated_window_count += entry.saturated_window_count;
+    total.epoch_exhaustion_count += entry.epoch_exhaustion_count;
     total.stale_snapshot_count += entry.stale_snapshot_count;
     total.incomplete_snapshot_count += entry.incomplete_snapshot_count;
     total.changed_snapshot_count += entry.changed_snapshot_count;

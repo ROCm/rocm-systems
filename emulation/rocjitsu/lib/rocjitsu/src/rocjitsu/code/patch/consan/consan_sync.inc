@@ -402,9 +402,25 @@ plan_sync_emission(const Request &request, const BoundRuntimeResources &bound_re
       "ConSan barrier failed at collision accounting");
 
   sequence.bind_label(restore_label);
+  const auto advance_label = sequence.make_label();
+  require_emission.append(
+      "ConSan barrier failed at epoch exhaustion check",
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch), max_epoch,
+      instrumentation::build_v_cmp_eq_u32_vcc(vector_source_vgpr(expected),
+                                              *plan.owner_epoch_vgprs.epoch, arch),
+      instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch));
+  sequence.branch(advance_label, InstructionSequence::BranchKind::SccZero);
+  require_emission(append_select_first_lane_in_exec_mask(words, lane_rank, temporary_exec,
+                                                         temporary_exec, arch) &&
+                       append_atomic_fetch_add_one_u32(
+                           words, report_base + offsetof(ReportHeader, epoch_exhaustion_count),
+                           value, base, arch),
+                   "ConSan barrier failed at epoch exhaustion accounting");
+  sequence.bind_label(advance_label);
   require_emission.append(
       "ConSan barrier failed at epoch-advance narrowing",
-      instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch), max_epoch,
+      instrumentation::build_s_mov_b64(kAmdGpuExecLo, original_exec, arch),
+      instrumentation::build_v_mov_b32_literal(expected, watchpoint::exhausted_epoch, arch),
       epoch_has_successor,
       instrumentation::build_s_and_saveexec_b64(temporary_exec, kAmdGpuVccLo, arch),
       instrumentation::build_v_add_u32(*plan.owner_epoch_vgprs.epoch, scalar_positive_inline_u32(1),
