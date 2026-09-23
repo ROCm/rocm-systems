@@ -6656,6 +6656,38 @@ class DefaultPresetEnvironmentTest(unittest.TestCase):
                     "default", workload, root / "hook.so", "gfx1201", root)
 
 
+class SameValueWriteEnvironmentTest(unittest.TestCase):
+    def test_policy_is_explicit_and_matches_clean_and_fault(self):
+        knob = "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES"
+        selector = "CONSAN_VALIDATION_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES"
+        with temporary_root() as root, mock.patch.dict(
+            os.environ, {knob: "1"}, clear=True
+        ):
+            workload = validation.WORKLOAD_BY_ID["pytorch-rdna4-compiled-softmax"]
+            for profile in ("default", "supercollider"):
+                clean = validation_commands._clean_environment(
+                    profile, workload, root / "hook.so", "gfx1201", root)
+                self.assertNotIn(knob, clean)
+            os.environ[selector] = "1"
+            for profile in ("default", "supercollider"):
+                clean = validation_commands._clean_environment(
+                    profile, workload, root / "hook.so", "gfx1201", root)
+                fault = validation_faults._fault_trial_environment(
+                    profile, workload, root / "hook.so", "gfx1201",
+                    {"environment": {}}, {}, {}, root)
+                for environment in (clean, fault):
+                    self.assertEqual(environment[knob], "1")
+                    self.assertEqual(
+                        validation_commands._controlled_environment(environment)[knob], "1")
+            native = validation_commands._clean_environment(
+                None, workload, None, "gfx1201", root)
+            self.assertNotIn(knob, native)
+            os.environ[selector] = "typo"
+            with self.assertRaises(validation.ValidationError):
+                validation_commands._clean_environment(
+                    "default", workload, root / "hook.so", "gfx1201", root)
+
+
 class GeneratedAllowlistEnvironmentTest(unittest.TestCase):
     def test_allowlist_survives_clean_inventory_and_fault_environment(self):
         with temporary_root() as root:

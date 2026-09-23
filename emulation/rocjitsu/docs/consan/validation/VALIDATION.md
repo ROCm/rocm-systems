@@ -96,6 +96,16 @@ September 23 matrices used an unrecognized variable and therefore ran at delay
 zero; their artifact snapshots retain that evidence. Revalidate with the
 correct variable before claiming coverage of multiple delay settings.
 
+For workloads that intentionally use identical concurrent LDS stores, an
+explicit policy investigation can set
+`CONSAN_VALIDATION_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES=1`. The runner passes
+`RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES=1` to instrumented clean and
+fault runs, records it in their environments, and leaves native baselines
+uninstrumented. This suppresses only statically proven same-instruction,
+same-value stores within a wave; cross-wave publication conflicts remain
+checked. Require matching clean and fault runs under this policy and label it
+in the cell. A successful numerical oracle alone does not qualify the policy.
+
 ## Validation layers
 
 ConSan uses four complementary layers:

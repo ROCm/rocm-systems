@@ -887,6 +887,15 @@ def _clean_environment(
     allowlist = _kernel_allowlist_file(target, workload)
     config = PROFILES[profile]
     environment.update(config.environment)
+    same_value = os.environ.get(
+        "CONSAN_VALIDATION_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES"
+    )
+    if same_value is not None:
+        if same_value not in {"0", "1"}:
+            raise ValidationError(
+                "invalid CONSAN_VALIDATION_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES"
+            )
+        environment["RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES"] = same_value
     preset = os.environ.get("CONSAN_VALIDATION_DEFAULT_PRESET")
     if profile == "default" and preset is not None:
         if preset not in {"low", "default", "high", "higher", "max"}:

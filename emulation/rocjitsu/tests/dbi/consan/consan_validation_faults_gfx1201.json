@@ -3008,6 +3008,330 @@
               ]
             }
           }
+        },
+        {
+          "id": "barrier-drop-wave-max-publication-preset-high-same-value",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed Triton gfx1201 ELF fnv1a64:dc46cdfe6cf1810e, matching the current compiled-softmax clean-run code_object identity and native kernel allowlist. triton_per_fused__softmax_prepare_softmax_online_0 uses two waves, publishes wave maxima through ds_store_b32 at .text+0x15c, and loads both maxima at 0x17c after its unconditional signal/wait pair at 0x168/0x16c. The pair is on the straight-line executed path. Remove it as one logical mutation; subsequent reduction barriers remain. Eight standard trials per profile require at least one detection, with numerical manifestations independent. Cached pristine ELF, exact inventory and disassembly are retained in rdna4-20260923/softmax-debug. Prospective sampling calibration: preset=high, at least 6 detections in 8 admitted/reached trials (75% observed rate), with passing matching clean, coverage, completeness and health checks. This qualifies the named preset; it is not a confidence bound on population detection probability. Policy variant: allow statically proven same-value intra-wave writes in both clean and fault runs; publication fault detection must still meet 6/8."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|kind=barrier|pc=0x0000000000000168|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000168|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x000000000000016c|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "high",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-wave-max-publication-preset-higher-same-value",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed Triton gfx1201 ELF fnv1a64:dc46cdfe6cf1810e, matching the current compiled-softmax clean-run code_object identity and native kernel allowlist. triton_per_fused__softmax_prepare_softmax_online_0 uses two waves, publishes wave maxima through ds_store_b32 at .text+0x15c, and loads both maxima at 0x17c after its unconditional signal/wait pair at 0x168/0x16c. The pair is on the straight-line executed path. Remove it as one logical mutation; subsequent reduction barriers remain. Eight standard trials per profile require at least one detection, with numerical manifestations independent. Cached pristine ELF, exact inventory and disassembly are retained in rdna4-20260923/softmax-debug. Prospective sampling calibration: preset=higher, at least 6 detections in 8 admitted/reached trials (75% observed rate), with passing matching clean, coverage, completeness and health checks. This qualifies the named preset; it is not a confidence bound on population detection probability. Policy variant: allow statically proven same-value intra-wave writes in both clean and fault runs; publication fault detection must still meet 6/8."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|kind=barrier|pc=0x0000000000000168|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000168|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x000000000000016c|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-wave-max-publication-sc-delay-calibration-same-value",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed Triton gfx1201 ELF fnv1a64:dc46cdfe6cf1810e, matching the current compiled-softmax clean-run code_object identity and native kernel allowlist. triton_per_fused__softmax_prepare_softmax_online_0 uses two waves, publishes wave maxima through ds_store_b32 at .text+0x15c, and loads both maxima at 0x17c after its unconditional signal/wait pair at 0x168/0x16c. The pair is on the straight-line executed path. Remove it as one logical mutation; subsequent reduction barriers remain. Eight standard trials per profile require at least one detection, with numerical manifestations independent. Cached pristine ELF, exact inventory and disassembly are retained in rdna4-20260923/softmax-debug. Prospective SuperCollider delay calibration uses the recognized RJ_CONSAN_SC_DELAY control, 0/16/64/256 repeated twice, requiring 6/8 detections plus clean correctness, coverage, completeness, and health. Earlier mislabeled delay trials are retained as delay-zero evidence. Policy variant: allow statically proven same-value intra-wave writes in both clean and fault runs; publication fault detection must still meet 6/8."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|kind=barrier|pc=0x0000000000000168|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000168|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x000000000000016c|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-wave-max-publication-preset-low-same-value",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed Triton gfx1201 ELF fnv1a64:dc46cdfe6cf1810e, matching the current compiled-softmax clean-run code_object identity and native kernel allowlist. triton_per_fused__softmax_prepare_softmax_online_0 uses two waves, publishes wave maxima through ds_store_b32 at .text+0x15c, and loads both maxima at 0x17c after its unconditional signal/wait pair at 0x168/0x16c. The pair is on the straight-line executed path. Remove it as one logical mutation; subsequent reduction barriers remain. Eight standard trials per profile require at least one detection, with numerical manifestations independent. Cached pristine ELF, exact inventory and disassembly are retained in rdna4-20260923/softmax-debug. Prospective per-workload preset selection: search low/default/high/higher/max in ascending order; choose the first with at least 6/8 detections and passing matching clean, coverage, completeness and health checks. This candidate is preset=low. Policy variant: allow statically proven same-value intra-wave writes in both clean and fault runs; publication fault detection must still meet 6/8."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|kind=barrier|pc=0x0000000000000168|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000168|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x000000000000016c|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "low",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-wave-max-publication-preset-default-same-value",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed Triton gfx1201 ELF fnv1a64:dc46cdfe6cf1810e, matching the current compiled-softmax clean-run code_object identity and native kernel allowlist. triton_per_fused__softmax_prepare_softmax_online_0 uses two waves, publishes wave maxima through ds_store_b32 at .text+0x15c, and loads both maxima at 0x17c after its unconditional signal/wait pair at 0x168/0x16c. The pair is on the straight-line executed path. Remove it as one logical mutation; subsequent reduction barriers remain. Eight standard trials per profile require at least one detection, with numerical manifestations independent. Cached pristine ELF, exact inventory and disassembly are retained in rdna4-20260923/softmax-debug. Prospective per-workload preset selection: search low/default/high/higher/max in ascending order; choose the first with at least 6/8 detections and passing matching clean, coverage, completeness and health checks. This candidate is preset=default. Policy variant: allow statically proven same-value intra-wave writes in both clean and fault runs; publication fault detection must still meet 6/8."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|kind=barrier|pc=0x0000000000000168|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000168|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x000000000000016c|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "default",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-wave-max-publication-preset-max-same-value",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed Triton gfx1201 ELF fnv1a64:dc46cdfe6cf1810e, matching the current compiled-softmax clean-run code_object identity and native kernel allowlist. triton_per_fused__softmax_prepare_softmax_online_0 uses two waves, publishes wave maxima through ds_store_b32 at .text+0x15c, and loads both maxima at 0x17c after its unconditional signal/wait pair at 0x168/0x16c. The pair is on the straight-line executed path. Remove it as one logical mutation; subsequent reduction barriers remain. Eight standard trials per profile require at least one detection, with numerical manifestations independent. Cached pristine ELF, exact inventory and disassembly are retained in rdna4-20260923/softmax-debug. Prospective per-workload preset selection: search low/default/high/higher/max in ascending order; choose the first with at least 6/8 detections and passing matching clean, coverage, completeness and health checks. This candidate is preset=max. Policy variant: allow statically proven same-value intra-wave writes in both clean and fault runs; publication fault detection must still meet 6/8."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|kind=barrier|pc=0x0000000000000168|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000168|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x000000000000016c|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -3345,6 +3669,330 @@
                 },
                 {
                   "RJ_CONSAN_PRESET": "max"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-wave-max-publication-preset-high-same-value",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed Triton gfx1201 ELF fnv1a64:045c766e416734e6, matching split-softmax clean-run code_object identity and native kernel allowlist. The eight-wave triton_red_fused__softmax_prepare_softmax_online_0 publishes wave maxima in 32 bytes LDS at .text+0xdd8. Its unconditional signal/wait pair at 0xde4/0xe28 precedes peer-wave loads at 0xe38. The only preceding scalar branch is the reduction loop backedge; completion reaches this pair for the recorded workload. Remove the associated pair as one logical mutation; retain later reduction barriers. Eight standard trials per profile require at least one detection; numerical manifestations remain independent. Exact pristine ELF, inventory and disassembly: rdna4-20260923/softmax-debug/split.* and split-inventory.txt. Prospective sampling calibration: preset=high, at least 6 detections in 8 admitted/reached trials (75% observed rate), with passing matching clean, coverage, completeness and health checks. This qualifies the named preset; it is not a confidence bound on population detection probability. Policy variant: allow statically proven same-value intra-wave writes in both clean and fault runs; publication fault detection must still meet 6/8."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|kind=barrier|pc=0x0000000000000de4|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000de4|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000e28|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "high",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-wave-max-publication-preset-higher-same-value",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed Triton gfx1201 ELF fnv1a64:045c766e416734e6, matching split-softmax clean-run code_object identity and native kernel allowlist. The eight-wave triton_red_fused__softmax_prepare_softmax_online_0 publishes wave maxima in 32 bytes LDS at .text+0xdd8. Its unconditional signal/wait pair at 0xde4/0xe28 precedes peer-wave loads at 0xe38. The only preceding scalar branch is the reduction loop backedge; completion reaches this pair for the recorded workload. Remove the associated pair as one logical mutation; retain later reduction barriers. Eight standard trials per profile require at least one detection; numerical manifestations remain independent. Exact pristine ELF, inventory and disassembly: rdna4-20260923/softmax-debug/split.* and split-inventory.txt. Prospective sampling calibration: preset=higher, at least 6 detections in 8 admitted/reached trials (75% observed rate), with passing matching clean, coverage, completeness and health checks. This qualifies the named preset; it is not a confidence bound on population detection probability. Policy variant: allow statically proven same-value intra-wave writes in both clean and fault runs; publication fault detection must still meet 6/8."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|kind=barrier|pc=0x0000000000000de4|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000de4|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000e28|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-wave-max-publication-sc-delay-calibration-same-value",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed Triton gfx1201 ELF fnv1a64:045c766e416734e6, matching split-softmax clean-run code_object identity and native kernel allowlist. The eight-wave triton_red_fused__softmax_prepare_softmax_online_0 publishes wave maxima in 32 bytes LDS at .text+0xdd8. Its unconditional signal/wait pair at 0xde4/0xe28 precedes peer-wave loads at 0xe38. The only preceding scalar branch is the reduction loop backedge; completion reaches this pair for the recorded workload. Remove the associated pair as one logical mutation; retain later reduction barriers. Eight standard trials per profile require at least one detection; numerical manifestations remain independent. Exact pristine ELF, inventory and disassembly: rdna4-20260923/softmax-debug/split.* and split-inventory.txt. Prospective SuperCollider delay calibration uses the recognized RJ_CONSAN_SC_DELAY control, 0/16/64/256 repeated twice, requiring 6/8 detections plus clean correctness, coverage, completeness, and health. Earlier mislabeled delay trials are retained as delay-zero evidence. Policy variant: allow statically proven same-value intra-wave writes in both clean and fault runs; publication fault detection must still meet 6/8."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|kind=barrier|pc=0x0000000000000de4|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000de4|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000e28|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-wave-max-publication-preset-low-same-value",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed Triton gfx1201 ELF fnv1a64:045c766e416734e6, matching split-softmax clean-run code_object identity and native kernel allowlist. The eight-wave triton_red_fused__softmax_prepare_softmax_online_0 publishes wave maxima in 32 bytes LDS at .text+0xdd8. Its unconditional signal/wait pair at 0xde4/0xe28 precedes peer-wave loads at 0xe38. The only preceding scalar branch is the reduction loop backedge; completion reaches this pair for the recorded workload. Remove the associated pair as one logical mutation; retain later reduction barriers. Eight standard trials per profile require at least one detection; numerical manifestations remain independent. Exact pristine ELF, inventory and disassembly: rdna4-20260923/softmax-debug/split.* and split-inventory.txt. Prospective per-workload preset selection: search low/default/high/higher/max in ascending order; choose the first with at least 6/8 detections and passing matching clean, coverage, completeness and health checks. This candidate is preset=low. Policy variant: allow statically proven same-value intra-wave writes in both clean and fault runs; publication fault detection must still meet 6/8."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|kind=barrier|pc=0x0000000000000de4|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000de4|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000e28|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "low",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-wave-max-publication-preset-default-same-value",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed Triton gfx1201 ELF fnv1a64:045c766e416734e6, matching split-softmax clean-run code_object identity and native kernel allowlist. The eight-wave triton_red_fused__softmax_prepare_softmax_online_0 publishes wave maxima in 32 bytes LDS at .text+0xdd8. Its unconditional signal/wait pair at 0xde4/0xe28 precedes peer-wave loads at 0xe38. The only preceding scalar branch is the reduction loop backedge; completion reaches this pair for the recorded workload. Remove the associated pair as one logical mutation; retain later reduction barriers. Eight standard trials per profile require at least one detection; numerical manifestations remain independent. Exact pristine ELF, inventory and disassembly: rdna4-20260923/softmax-debug/split.* and split-inventory.txt. Prospective per-workload preset selection: search low/default/high/higher/max in ascending order; choose the first with at least 6/8 detections and passing matching clean, coverage, completeness and health checks. This candidate is preset=default. Policy variant: allow statically proven same-value intra-wave writes in both clean and fault runs; publication fault detection must still meet 6/8."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|kind=barrier|pc=0x0000000000000de4|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000de4|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000e28|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "default",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-wave-max-publication-preset-max-same-value",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed Triton gfx1201 ELF fnv1a64:045c766e416734e6, matching split-softmax clean-run code_object identity and native kernel allowlist. The eight-wave triton_red_fused__softmax_prepare_softmax_online_0 publishes wave maxima in 32 bytes LDS at .text+0xdd8. Its unconditional signal/wait pair at 0xde4/0xe28 precedes peer-wave loads at 0xe38. The only preceding scalar branch is the reduction loop backedge; completion reaches this pair for the recorded workload. Remove the associated pair as one logical mutation; retain later reduction barriers. Eight standard trials per profile require at least one detection; numerical manifestations remain independent. Exact pristine ELF, inventory and disassembly: rdna4-20260923/softmax-debug/split.* and split-inventory.txt. Prospective per-workload preset selection: search low/default/high/higher/max in ascending order; choose the first with at least 6/8 detections and passing matching clean, coverage, completeness and health checks. This candidate is preset=max. Policy variant: allow statically proven same-value intra-wave writes in both clean and fault runs; publication fault detection must still meet 6/8."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|kind=barrier|pc=0x0000000000000de4|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000de4|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000e28|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES": "1"
                 }
               ]
             }
