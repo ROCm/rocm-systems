@@ -61,7 +61,7 @@ fallback.
 
 ## Build and dynamic loading
 
-`src/lib/torch_trace_collector/CMakeLists.txt` requires C++20 and
+`src/lib/torch_trace_collector/CMakeLists.txt` requires C++17 and
 `rocprofiler-sdk-roctx`, but no PyTorch installation, headers, or libraries. It
 builds one module named `torch_trace_collector.so`, without a Torch-version or
 Python-SOABI suffix. An ELF version script exports only the four C functions.

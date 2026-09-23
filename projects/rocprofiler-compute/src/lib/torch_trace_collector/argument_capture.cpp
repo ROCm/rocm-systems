@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -581,7 +582,7 @@ struct DtypeName
     std::string_view name;
 };
 
-constexpr auto kFallbackDtypeNames = std::to_array<std::string_view>({
+constexpr std::string_view kFallbackDtypeNames[] = {
     "byte",
     "char",
     "short",
@@ -629,13 +630,13 @@ constexpr auto kFallbackDtypeNames = std::to_array<std::string_view>({
     "float8_e8m0fnu",
     "float4_e2m1fn_x2",
     "bcomplex32",
-});
+};
 
-static_assert(kFallbackDtypeNames.size() == torch_abi::kKnownScalarTypeCount);
+static_assert(std::size(kFallbackDtypeNames) == torch_abi::kKnownScalarTypeCount);
 
 const auto& common_dtype_names()
 {
-    static const auto names = std::to_array<DtypeName>({
+    static const DtypeName names[] = {
         {aoti_torch_dtype_float32(), "float32"},
         {aoti_torch_dtype_float64(), "float64"},
         {aoti_torch_dtype_float16(), "float16"},
@@ -649,7 +650,7 @@ const auto& common_dtype_names()
         {aoti_torch_dtype_complex32(), "complex32"},
         {aoti_torch_dtype_complex64(), "complex64"},
         {aoti_torch_dtype_complex128(), "complex128"},
-    });
+    };
     return names;
 }
 
@@ -675,14 +676,13 @@ void append_integer(BoundedArgumentBuffer& output, std::int64_t value)
 
 void append_tag_name(BoundedArgumentBuffer& output, const c10::IValue& value)
 {
-    static constexpr auto names = std::to_array<std::string_view>(
-        {"None",   "Tensor",    "Storage",     "Double",      "ComplexDouble", "Int",
-         "UInt",   "SymInt",    "SymFloat",    "SymBool",     "Bool",          "Tuple",
-         "String", "Blob",      "GenericList", "GenericDict", "Future",        "Await",
-         "Device", "Stream",    "Object",      "PyObject",    "Uninitialized", "Capsule",
-         "RRef",   "Quantizer", "Generator",   "Enum"});
-    static_assert(names.size() == torch_abi::kIValueKnownTagCount);
-    if (value.tag < names.size())
+    static constexpr std::string_view names[] = {
+        "None",        "Tensor",        "Storage", "Double", "ComplexDouble", "Int",       "UInt",
+        "SymInt",      "SymFloat",      "SymBool", "Bool",   "Tuple",         "String",    "Blob",
+        "GenericList", "GenericDict",   "Future",  "Await",  "Device",        "Stream",    "Object",
+        "PyObject",    "Uninitialized", "Capsule", "RRef",   "Quantizer",     "Generator", "Enum"};
+    static_assert(std::size(names) == torch_abi::kIValueKnownTagCount);
+    if (value.tag < std::size(names))
     {
         output += names[value.tag];
         return;
@@ -694,7 +694,7 @@ void append_tag_name(BoundedArgumentBuffer& output, const c10::IValue& value)
 
 std::string_view fallback_dtype_name(std::int32_t dtype)
 {
-    if (dtype >= 0 && static_cast<std::size_t>(dtype) < kFallbackDtypeNames.size())
+    if (dtype >= 0 && static_cast<std::size_t>(dtype) < std::size(kFallbackDtypeNames))
     {
         if (dtype == torch_abi::kBComplex32ScalarType && runtime_aoti_abi() < torch_abi::kTorch214AotiAbi)
         {
@@ -709,10 +709,10 @@ std::string_view dtype_name(std::int32_t dtype)
 {
     const auto& dtypes = common_dtype_names();
 
-    const auto found = std::find_if(dtypes.begin(),
-                                    dtypes.end(),
+    const auto found = std::find_if(std::begin(dtypes),
+                                    std::end(dtypes),
                                     [dtype](const DtypeName& entry) { return entry.dtype == dtype; });
-    if (found != dtypes.end())
+    if (found != std::end(dtypes))
     {
         return found->name;
     }

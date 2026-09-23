@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <iostream>
 #include <optional>
-#include <span>
 #include <string_view>
 
 namespace
@@ -23,55 +22,55 @@ constexpr std::string_view kExpectedMarkerWithoutLauncher =
     "aten::add%2F%25:n/a|seqNr=7|tid=11|ftid=13|ltid=n/a|scope=FUNCTION|"
     "args=(value=%25%7C%3B%0D%0A)|torch";
 
-std::size_t render_golden(std::span<char>              destination,
+std::size_t render_golden(char*                        destination,
+                          std::size_t                  capacity,
                           std::int64_t                 sequence_number    = 7,
                           std::optional<std::uint64_t> launcher_thread_id = std::uint64_t{17})
 {
-    const torch_trace_collector::detail::RangeNameFields fields{
-        .name               = "aten::add/%",
-        .context            = "n/a",
-        .sequence_number    = sequence_number,
-        .thread_id          = 11,
-        .forward_thread_id  = 13,
-        .launcher_thread_id = launcher_thread_id,
-        .scope              = "FUNCTION",
-        .arguments          = "(value=%25%7C%3B%0D%0A)",
-        .backend            = "torch",
-    };
-    return torch_trace_collector::detail::format_range_name(destination, fields);
+    torch_trace_collector::detail::RangeNameFields fields{};
+    fields.name               = "aten::add/%";
+    fields.context            = "n/a";
+    fields.sequence_number    = sequence_number;
+    fields.thread_id          = 11;
+    fields.forward_thread_id  = 13;
+    fields.launcher_thread_id = launcher_thread_id;
+    fields.scope              = "FUNCTION";
+    fields.arguments          = "(value=%25%7C%3B%0D%0A)";
+    fields.backend            = "torch";
+    return torch_trace_collector::detail::format_range_name(destination, capacity, fields);
 }
 
 bool full_buffer_matches()
 {
     std::array<char, 256> output{};
-    const std::size_t     required = render_golden(output);
+    const std::size_t     required = render_golden(output.data(), output.size());
     return required == kExpectedMarker.size() + 1 && std::string_view{output.data()} == kExpectedMarker;
 }
 
 bool short_buffer_is_terminated()
 {
     std::array<char, 12> output{};
-    const std::size_t    required = render_golden(output);
+    const std::size_t    required = render_golden(output.data(), output.size());
     return required == kExpectedMarker.size() + 1 && output.back() == '\0' &&
            std::string_view{output.data()} == kExpectedMarker.substr(0, output.size() - 1);
 }
 
 bool empty_buffer_reports_required_size()
 {
-    return render_golden({}) == kExpectedMarker.size() + 1;
+    return render_golden(nullptr, 0) == kExpectedMarker.size() + 1;
 }
 
 bool negative_sequence_is_unavailable()
 {
     std::array<char, 256> output{};
-    render_golden(output, -1);
+    render_golden(output.data(), output.size(), -1);
     return std::string_view{output.data()} == kExpectedMarkerWithoutSequence;
 }
 
 bool missing_launcher_is_unavailable()
 {
     std::array<char, 256> output{};
-    render_golden(output, 7, std::nullopt);
+    render_golden(output.data(), output.size(), 7, std::nullopt);
     return std::string_view{output.data()} == kExpectedMarkerWithoutLauncher;
 }
 

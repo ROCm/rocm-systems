@@ -11,8 +11,8 @@ if(NOT rocprofiler-sdk-roctx_FOUND)
     _skip_collector("rocprofiler-sdk-roctx not found")
 endif()
 
-if(NOT cxx_std_20 IN_LIST CMAKE_CXX_COMPILE_FEATURES)
-    _skip_collector("compiler does not support C++20")
+if(NOT cxx_std_17 IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+    _skip_collector("compiler does not support C++17")
 endif()
 
 add_library(
@@ -32,7 +32,7 @@ target_link_libraries(
 )
 # Torch imports remain unresolved until the Python loader promotes the
 # workload's real libtorch_cpu.so into the process-wide symbol scope.
-target_compile_features(torch-trace-collector-module PRIVATE cxx_std_20)
+target_compile_features(torch-trace-collector-module PRIVATE cxx_std_17)
 target_compile_definitions(torch-trace-collector-module PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 
 set(_torch_collector_exports "${CMAKE_CURRENT_SOURCE_DIR}/exports.map")

@@ -14,10 +14,10 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -89,7 +89,7 @@ std::string_view capture_args(
 
 std::string_view scope_name(at::RecordScope scope)
 {
-    static constexpr auto names = std::to_array<std::string_view>({
+    static constexpr std::string_view names[] = {
         "FUNCTION",
         "BACKWARD_FUNCTION",
         "TORCHSCRIPT_FUNCTION",
@@ -100,11 +100,11 @@ std::string_view scope_name(at::RecordScope scope)
         "USER_SCOPE",
         "STATIC_RUNTIME_OP",
         "STATIC_RUNTIME_MODEL",
-    });
-    static_assert(names.size() == torch_abi::kScopeCount);
+    };
+    static_assert(std::size(names) == torch_abi::kScopeCount);
 
     const std::size_t index = static_cast<std::size_t>(scope);
-    if (index < names.size())
+    if (index < std::size(names))
     {
         return names[index];
     }
@@ -115,30 +115,30 @@ bool push_range(const at::RecordFunction& record_function, std::string_view name
 {
     std::array<char, kInlineMarkerSize> marker_buffer;
     const auto                          launcher_tid = launcher_tid_for_marker();
-    const auto format = [&record_function, name, arguments, launcher_tid](std::span<char> destination)
+    const auto                          format =
+        [&record_function, name, arguments, launcher_tid](char* destination, std::size_t capacity)
     {
-        const torch_trace_collector::detail::RangeNameFields fields{
-            .name               = name,
-            .context            = kUnavailable,
-            .sequence_number    = record_function.seqNr(),
-            .thread_id          = at::RecordFunction::currentThreadId(),
-            .forward_thread_id  = record_function.forwardThreadId(),
-            .launcher_thread_id = launcher_tid,
-            .scope              = scope_name(record_function.scope()),
-            .arguments          = arguments,
-            .backend            = kRecordFnBackend,
-        };
-        return torch_trace_collector::detail::format_range_name(destination, fields);
+        torch_trace_collector::detail::RangeNameFields fields{};
+        fields.name               = name;
+        fields.context            = kUnavailable;
+        fields.sequence_number    = record_function.seqNr();
+        fields.thread_id          = at::RecordFunction::currentThreadId();
+        fields.forward_thread_id  = record_function.forwardThreadId();
+        fields.launcher_thread_id = launcher_tid;
+        fields.scope              = scope_name(record_function.scope());
+        fields.arguments          = arguments;
+        fields.backend            = kRecordFnBackend;
+        return torch_trace_collector::detail::format_range_name(destination, capacity, fields);
     };
 
-    const std::size_t required = format(marker_buffer);
+    const std::size_t required = format(marker_buffer.data(), marker_buffer.size());
     if (required <= marker_buffer.size())
     {
         return roctxRangePushA(marker_buffer.data()) >= 0;
     }
 
     std::string marker(required, '\0');
-    format(std::span<char>{marker.data(), marker.size()});
+    format(marker.data(), marker.size());
     marker.resize(required - 1);
     return roctxRangePushA(marker.c_str()) >= 0;
 }

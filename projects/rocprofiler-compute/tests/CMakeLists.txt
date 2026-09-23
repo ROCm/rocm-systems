@@ -7,7 +7,7 @@ set_target_properties(
 )
 target_compile_features(torch-trace-roctx-intercept PRIVATE cxx_std_17)
 
-if(cxx_std_20 IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+if(cxx_std_17 IN_LIST CMAKE_CXX_COMPILE_FEATURES)
     add_executable(
         torch-trace-wire-format-test
         torch_trace_collector/wire_format_test.cpp
@@ -16,7 +16,7 @@ if(cxx_std_20 IN_LIST CMAKE_CXX_COMPILE_FEATURES)
         torch-trace-wire-format-test
         PRIVATE ${PROJECT_SOURCE_DIR}/src/lib/torch_trace_collector
     )
-    target_compile_features(torch-trace-wire-format-test PRIVATE cxx_std_20)
+    target_compile_features(torch-trace-wire-format-test PRIVATE cxx_std_17)
     set_target_properties(
         torch-trace-wire-format-test
         PROPERTIES OUTPUT_NAME torch_trace_wire_format_test

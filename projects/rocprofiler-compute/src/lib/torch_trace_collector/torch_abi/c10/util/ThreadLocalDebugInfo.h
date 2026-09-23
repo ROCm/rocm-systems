@@ -18,13 +18,13 @@ namespace c10
 class DebugInfoKind
 {
 public:
-    explicit constexpr DebugInfoKind(const std::string_view* value)
+    explicit constexpr DebugInfoKind(const std::string_view* value) noexcept
         : value_{value}
     {
     }
 
 private:
-    [[maybe_unused]] const std::string_view* value_ = nullptr;
+    const std::string_view* value_ = nullptr;
 };
 
 static_assert(sizeof(DebugInfoKind) == torch_abi::kDebugInfoKindSize);

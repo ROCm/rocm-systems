@@ -10,7 +10,6 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
-#include <span>
 #include <string_view>
 
 namespace torch_trace_collector::detail
@@ -23,24 +22,20 @@ inline constexpr const char* kUnavailable    = "n/a";
 class BoundedTextOutput
 {
 public:
-    explicit BoundedTextOutput(std::span<char> output) noexcept
-        : output_{output}
-    {
-    }
-
     BoundedTextOutput(char* output, std::size_t capacity) noexcept
-        : output_{output == nullptr ? std::span<char>{} : std::span<char>{output, capacity}}
+        : output_{output}
+        , capacity_{output == nullptr ? 0 : capacity}
     {
     }
 
     void append(std::string_view value) noexcept
     {
-        if (!output_.empty() && size_ < output_.size() - 1)
+        if (capacity_ > 0 && size_ < capacity_ - 1)
         {
-            const std::size_t copied = std::min(value.size(), output_.size() - 1 - size_);
+            const std::size_t copied = std::min(value.size(), capacity_ - 1 - size_);
             if (copied > 0)
             {
-                std::copy_n(value.data(), copied, output_.data() + size_);
+                std::copy_n(value.begin(), copied, output_ + size_);
             }
         }
         size_ += value.size();
@@ -50,16 +45,17 @@ public:
 
     [[nodiscard]] std::size_t finish() noexcept
     {
-        if (!output_.empty())
+        if (capacity_ > 0)
         {
-            output_[std::min(size_, output_.size() - 1)] = '\0';
+            output_[std::min(size_, capacity_ - 1)] = '\0';
         }
         return size_ + 1;
     }
 
 private:
-    std::span<char> output_;
-    std::size_t     size_ = 0;
+    char*       output_   = nullptr;
+    std::size_t capacity_ = 0;
+    std::size_t size_     = 0;
 };
 
 inline void append_encoded_marker_name(BoundedTextOutput& output, std::string_view name) noexcept
@@ -106,9 +102,9 @@ struct RangeNameFields
     std::string_view             backend;
 };
 
-inline std::size_t format_range_name(std::span<char> destination, const RangeNameFields& fields) noexcept
+inline std::size_t format_range_name(char* destination, std::size_t capacity, const RangeNameFields& fields) noexcept
 {
-    BoundedTextOutput output{destination};
+    BoundedTextOutput output{destination, capacity};
     append_encoded_marker_name(output, fields.name);
     output.append(':');
     output.append(fields.context);
