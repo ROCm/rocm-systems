@@ -411,6 +411,72 @@ add_test(
         ${COV_OPTION} tests/unit/utils/test_native_tool_finder.py ${WORKING_DIR_OPTION}
 )
 
+if(TEST_FROM_INSTALL)
+    set(_torch_test_root tests)
+    set(_torch_test_working_directory .)
+    set(_torch_test_pythonpath .)
+    set(_torch_collector_test_module
+        ../../${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}/torch_trace_collector.so
+    )
+    set(_torch_runtime_interceptor tests/libtorch_trace_roctx_intercept.so)
+else()
+    set(_torch_test_root ${PROJECT_SOURCE_DIR}/tests)
+    set(_torch_test_working_directory ${PROJECT_SOURCE_DIR})
+    set(_torch_test_pythonpath ${PROJECT_SOURCE_DIR}/src)
+    set(_torch_collector_test_module $<TARGET_FILE:torch-trace-collector-module>)
+    set(_torch_runtime_interceptor $<TARGET_FILE:torch-trace-roctx-intercept>)
+endif()
+set(_torch_loader_confcutdir ${_torch_test_root}/unit/utils/inject_roctx/_backends)
+add_test(
+    NAME test_torch_trace_collector_loader
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_torch_trace_collector_loader.xml ${COV_OPTION}
+        --confcutdir=${_torch_loader_confcutdir}
+        ${_torch_loader_confcutdir}/test_torch_trace_collector.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_torch_backend
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_torch_backend.xml
+        ${COV_OPTION} --confcutdir=${_torch_loader_confcutdir}
+        ${_torch_loader_confcutdir}/test_torch.py ${WORKING_DIR_OPTION}
+)
+
+if(TARGET torch-trace-collector-module AND TARGET torch-trace-roctx-intercept)
+    add_test(
+        NAME test_torch_trace_collector_runtime
+        COMMAND
+            ${PYTHON_TEST_COMMAND}
+            ${_torch_test_root}/torch_trace_collector_runtime_check.py
+    )
+    set_tests_properties(
+        test_torch_trace_collector_runtime
+        PROPERTIES
+            SKIP_RETURN_CODE 77
+            WORKING_DIRECTORY ${_torch_test_working_directory}
+            ENVIRONMENT
+                "PYTHONPATH=${_torch_test_pythonpath}:$ENV{PYTHONPATH};ROCPROFCOMPUTE_TEST_TORCH_COLLECTOR=${_torch_collector_test_module};ROCPROFCOMPUTE_TEST_ROCTX_INTERCEPT=${_torch_runtime_interceptor}"
+    )
+endif()
+
+if(TARGET torch-trace-wire-format-test)
+    if(TEST_FROM_INSTALL)
+        set(_torch_wire_format_test tests/torch_trace_wire_format_test)
+    else()
+        set(_torch_wire_format_test $<TARGET_FILE:torch-trace-wire-format-test>)
+    endif()
+    add_test(NAME test_torch_trace_wire_format COMMAND ${_torch_wire_format_test})
+    sanitizer_runtime_env(_torch_wire_format_sanitizer_env OFF)
+    if(_torch_wire_format_sanitizer_env)
+        set_tests_properties(
+            test_torch_trace_wire_format
+            PROPERTIES ENVIRONMENT "${_torch_wire_format_sanitizer_env}"
+        )
+    endif()
+endif()
+
 add_test(
     NAME test_profile_torch_trace
     COMMAND
@@ -884,6 +950,15 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_marker_format
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_marker_format.xml
+        ${COV_OPTION} --confcutdir=${_torch_test_root}/unit/utils/inject_roctx
+        ${_torch_test_root}/unit/utils/inject_roctx/test_marker_format.py
+        ${WORKING_DIR_OPTION}
+)
+
 # ---------------------------------------
 # Pure csv compatibility layer for pandas
 # ---------------------------------------
@@ -991,6 +1066,20 @@ if(TARGET test-pc-sampling-collector)
     endif()
 endif()
 
+if(TARGET torch-trace-collector-module AND CMAKE_NM AND CMAKE_READELF)
+    add_test(
+        NAME test_torch_trace_collector_elf
+        COMMAND
+            ${PYTHON_TEST_COMMAND} ${_torch_test_root}/torch_trace_collector_elf_check.py
+            ${_torch_collector_test_module} --nm ${CMAKE_NM} --readelf ${CMAKE_READELF}
+    )
+elseif(TARGET torch-trace-collector-module)
+    message(
+        WARNING
+        "torch_trace_collector ELF test disabled: nm or readelf was not found"
+    )
+endif()
+
 # -----------------------------------
 # CSV compression Tests
 # -----------------------------------
@@ -1069,6 +1158,7 @@ if(${ENABLE_COVERAGE})
         test_rocpd_data
         test_profile_torch_trace
         test_inject_roctx_package
+        test_marker_format
         test_analysis_db
         test_analysis_base
         test_analysis_orm
@@ -1080,6 +1170,8 @@ if(${ENABLE_COVERAGE})
         test_metrics_common
         test_metric_validation
         test_native_tool_finder
+        test_torch_backend
+        test_torch_trace_collector_loader
         test_profiler_base
         test_rocprofv3_avail_interface
         test_soc_base
@@ -1368,6 +1460,12 @@ if(INSTALL_TESTS)
         FILES ${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake
         COMPONENT tests
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    )
+    install(
+        FILES src/lib/torch_trace_collector/torch_trace_collector.h
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
+        RENAME torch_trace_collector_abi.h
+        COMPONENT tests
     )
 endif()
 message(STATUS "Install tests: ${INSTALL_TESTS}")

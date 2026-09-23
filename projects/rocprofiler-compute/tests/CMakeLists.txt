@@ -1,5 +1,45 @@
 find_package(MPI COMPONENTS CXX)
 
+add_library(torch-trace-roctx-intercept SHARED torch_trace_collector/roctx_intercept.cpp)
+set_target_properties(
+    torch-trace-roctx-intercept
+    PROPERTIES OUTPUT_NAME torch_trace_roctx_intercept
+)
+target_compile_features(torch-trace-roctx-intercept PRIVATE cxx_std_17)
+
+if(cxx_std_20 IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+    add_executable(
+        torch-trace-wire-format-test
+        torch_trace_collector/wire_format_test.cpp
+    )
+    target_include_directories(
+        torch-trace-wire-format-test
+        PRIVATE ${PROJECT_SOURCE_DIR}/src/lib/torch_trace_collector
+    )
+    target_compile_features(torch-trace-wire-format-test PRIVATE cxx_std_20)
+    set_target_properties(
+        torch-trace-wire-format-test
+        PROPERTIES OUTPUT_NAME torch_trace_wire_format_test
+    )
+endif()
+
+if(INSTALL_TESTS)
+    install(
+        TARGETS torch-trace-roctx-intercept
+        LIBRARY
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
+            COMPONENT tests
+    )
+    if(TARGET torch-trace-wire-format-test)
+        install(
+            TARGETS torch-trace-wire-format-test
+            RUNTIME
+                DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
+                COMPONENT tests
+        )
+    endif()
+endif()
+
 if(NOT CMAKE_HIP_COMPILER)
     set(CMAKE_HIP_COMPILER "amdclang++" CACHE STRING "desired c++ compiler")
 endif()
