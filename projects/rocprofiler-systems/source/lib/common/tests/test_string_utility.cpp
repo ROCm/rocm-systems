@@ -5,6 +5,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
+
 using namespace rocprofsys::utility::string;
 
 TEST(to_lower, basic_check) { EXPECT_EQ(to_lower("ABCD"), "abcd"); }
@@ -127,4 +129,63 @@ TEST(strip_rocprofsys_prefix, strips_prefix_case_insensitively)
 TEST(strip_rocprofsys_prefix, no_prefix_is_only_lowercased)
 {
     EXPECT_EQ(strip_rocprofsys_prefix("SAMPLING_FREQ"), "sampling_freq");
+}
+
+TEST(strip_ansi, no_escape_sequences_is_unchanged)
+{
+    EXPECT_EQ(strip_ansi("hello world"), "hello world");
+}
+
+TEST(strip_ansi, empty_string_returns_empty_string) { EXPECT_EQ(strip_ansi(""), ""); }
+
+TEST(strip_ansi, strips_single_color_code)
+{
+    EXPECT_EQ(strip_ansi("\033[01;34minfo\033[0m"), "info");
+}
+
+TEST(strip_ansi, strips_multiple_color_codes)
+{
+    EXPECT_EQ(strip_ansi("\033[01;34m[a]\033[0m \033[01;31m[b]\033[0m"), "[a] [b]");
+}
+
+TEST(strip_ansi, code_followed_by_text_strips_only_the_code)
+{
+    EXPECT_EQ(strip_ansi("\033[01;34mafter"), "after");
+}
+
+TEST(strip_ansi, unterminated_escape_sequence_consumes_rest_of_string)
+{
+    // no 'm' anywhere after the escape starts, so everything through the end
+    // of the string is treated as (and dropped with) the escape sequence
+    EXPECT_EQ(strip_ansi("before\033[01;34no_end_here"), "before");
+}
+
+TEST(strip_ansi, string_with_only_escape_sequence_returns_empty_string)
+{
+    EXPECT_EQ(strip_ansi("\033[0m"), "");
+}
+
+TEST(hex_padded, basic_check)
+{
+    EXPECT_EQ(hex_padded(std::uintptr_t{ 0x10 }), "0x0000000000000010");
+}
+
+TEST(hex_padded, zero_value)
+{
+    EXPECT_EQ(hex_padded(std::uintptr_t{ 0 }), "0x0000000000000000");
+}
+
+TEST(hex_padded, value_filling_default_width_needs_no_padding)
+{
+    EXPECT_EQ(hex_padded(std::uintptr_t{ 0x123456789abcdef0 }), "0x123456789abcdef0");
+}
+
+TEST(hex_padded, custom_width_is_honored)
+{
+    EXPECT_EQ(hex_padded(std::uintptr_t{ 0xff }, 4), "0x00ff");
+}
+
+TEST(hex_padded, custom_width_narrower_than_value_is_not_truncated)
+{
+    EXPECT_EQ(hex_padded(std::uintptr_t{ 0x1234 }, 2), "0x1234");
 }
