@@ -84,8 +84,10 @@ and perturbation evidence must be assessed separately from Default event counts.
 For the September 23 RDNA4 calibration, qualify the named Default preset
 against at least **6 detections in 8 admitted/reached trials** (75% observed
 rate), with all clean correctness, applicable coverage, completeness and health
-checks passing. Precommit the preset and threshold before running. Try `high`
-and `higher`; retain an explicitly named `max` result where needed. Green in
+checks passing. Precommit the preset and threshold before running. Select independently for each workload, in ascending order:
+`low`, `default`, `high`, `higher`, `max`. Choose the lowest passing preset
+and name it in the cell. Reuse matching recorded evidence; while lower presets
+are being tested, retain any already-qualified configuration in the table. Green in
 the status table qualifies that recorded configuration. The observed rate is
 not a lower confidence bound; retain counts and intervals in campaign artifacts.
 
