@@ -164,60 +164,9 @@ endforeach()
 #
 # ROCm Version
 #
-# Prefer `<ROCM_PATH>/.info/version` via FindROCmVersion. If that file is not present
-# (e.g. TheRock configure, before dist flatten), fall back to the rocm-core package
-# version, then HIP.
-#
 # ----------------------------------------------------------------------------------------#
 
-# Populate ROCmVersion_* cache vars from a version string (not from .info/version).
-macro(ROCPROFILER_SYSTEMS_APPLY_ROCM_VERSION _SOURCE _VERSION)
-    rocprofiler_systems_message(STATUS "ROCm version '${_VERSION}' from ${_SOURCE}")
-    rocm_version_compute("${_VERSION}" _rocmver)
-    foreach(_V ${ROCmVersion_VARIABLES})
-        set(_CACHE_VAR ROCmVersion_${_V}_VERSION)
-        set(ROCmVersion_${_V}_VERSION
-            "${_rocmver_${_V}_VERSION}"
-            CACHE STRING
-            "ROCm ${_V} version"
-            FORCE
-        )
-        rocm_version_watch_for_change(${_CACHE_VAR})
-    endforeach()
-    set(ROCmVersion_FOUND TRUE)
-endmacro()
-
-message(STATUS "ROCM_PATH: ${ROCM_PATH}")
-
-find_package(ROCmVersion ${rocprofiler_systems_FIND_QUIETLY})
-
-# If FindROCmVersion fails, try to find rocm-core instead.
-if(NOT ROCmVersion_FOUND)
-    message(STATUS "ROCmVersion_FOUND: ${ROCmVersion_FOUND}")
-    find_package(
-        rocm-core
-        ${rocprofiler_systems_FIND_QUIETLY}
-        HINTS ${ROCM_PATH} ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-        PATHS ${ROCM_PATH} ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-    )
-    message(STATUS "rocm-core_VERSION: ${rocm-core_VERSION}")
-    if(NOT "${rocm-core_VERSION}" STREQUAL "")
-        rocprofiler_systems_apply_rocm_version("rocm-core" "${rocm-core_VERSION}")
-    endif()
-endif()
-
-# If FindROCmVersion and rocm-core fail, try to find hip instead.
-if(NOT ROCmVersion_FOUND)
-    message(STATUS "ROCmVersion_FOUND: ${ROCmVersion_FOUND}")
-    find_package(
-        hip
-        ${rocprofiler_systems_FIND_QUIETLY}
-        REQUIRED
-        HINTS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-        PATHS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-    )
-    rocprofiler_systems_apply_rocm_version("hip" "${hip_VERSION}")
-endif()
+find_package(ROCmVersion ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
 
 if(ROCmVersion_DIR)
     list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR})
@@ -228,12 +177,6 @@ set(ROCPROFSYS_ROCM_VERSION_MAJOR ${ROCmVersion_MAJOR_VERSION})
 set(ROCPROFSYS_ROCM_VERSION_MINOR ${ROCmVersion_MINOR_VERSION})
 set(ROCPROFSYS_ROCM_VERSION_PATCH ${ROCmVersion_PATCH_VERSION})
 set(ROCPROFSYS_ROCM_VERSION ${ROCmVersion_TRIPLE_VERSION})
-
-message(STATUS "ROCmVersion_FULL_VERSION: ${ROCmVersion_FULL_VERSION}")
-message(STATUS "ROCmVersion_MAJOR_VERSION: ${ROCmVersion_MAJOR_VERSION}")
-message(STATUS "ROCmVersion_MINOR_VERSION: ${ROCmVersion_MINOR_VERSION}")
-message(STATUS "ROCmVersion_PATCH_VERSION: ${ROCmVersion_PATCH_VERSION}")
-message(STATUS "ROCmVersion_TRIPLE_VERSION: ${ROCmVersion_TRIPLE_VERSION}")
 
 rocprofiler_systems_add_feature(ROCPROFSYS_ROCM_VERSION
     "ROCm version used by rocprofiler-systems"
