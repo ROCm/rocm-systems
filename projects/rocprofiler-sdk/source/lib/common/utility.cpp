@@ -27,6 +27,10 @@
 
 #if !defined(_WIN32)
 #    include <unistd.h>
+#else
+#    include <windows.h>
+//
+#    include <shellapi.h>
 #endif
 #include <cerrno>
 #include <cstring>
@@ -142,7 +146,26 @@ read_command_line(pid_t _pid)
         ifs.close();
     }
 #else
-    (void) _pid;
+    // Only the calling process can be asked for its command line without debug privileges, so
+    // anything else reports nothing rather than guessing.
+    if(_pid != get_pid()) return _cmdline;
+
+    auto  _argc = int{0};
+    auto* _argv = ::CommandLineToArgvW(::GetCommandLineW(), &_argc);
+    if(_argv == nullptr) return _cmdline;
+
+    _cmdline.reserve(_argc);
+    for(int i = 0; i < _argc; ++i)
+    {
+        auto _len = ::WideCharToMultiByte(CP_UTF8, 0, _argv[i], -1, nullptr, 0, nullptr, nullptr);
+        if(_len <= 1) continue;
+
+        auto _str = std::string(static_cast<size_t>(_len) - 1, '\0');
+        ::WideCharToMultiByte(CP_UTF8, 0, _argv[i], -1, _str.data(), _len, nullptr, nullptr);
+        _cmdline.emplace_back(std::move(_str));
+    }
+
+    ::LocalFree(_argv);
 #endif
     return _cmdline;
 }

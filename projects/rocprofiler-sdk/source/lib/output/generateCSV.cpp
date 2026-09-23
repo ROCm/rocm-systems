@@ -37,7 +37,6 @@
 #include <rocprofiler-sdk/cxx/operators.hpp>
 #include <rocprofiler-sdk/cxx/utility.hpp>
 
-#include <unistd.h>
 #include <cstdint>
 #include <iomanip>
 #include <string_view>

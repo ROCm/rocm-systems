@@ -17,6 +17,7 @@ set(ATT_TOOL_SOURCE_FILES
 set(ATT_TOOL_HEADER_FILES
     att_lib_wrapper.hpp
     code.hpp
+    codeobj_load_info.hpp
     filenames.hpp
     occupancy.hpp
     outputfile.hpp

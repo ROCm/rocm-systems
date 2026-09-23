@@ -26,7 +26,7 @@
 #include "kernel_symbol_info.hpp"
 #include "node_info.hpp"
 
-#include "lib/att-tool/att_lib_wrapper.hpp"
+#include "lib/att-tool/codeobj_load_info.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -44,8 +44,6 @@
 
 #include <fmt/format.h>
 
-#include <dlfcn.h>
-#include <unistd.h>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -62,7 +60,7 @@ namespace fs = ::rocprofiler::common::filesystem;
 
 rocprofiler_status_t
 query_spm_configuration(const rocprofiler_spm_available_configuration_t** configs,
-                        long unsigned int                                 num_config,
+                        size_t                                            num_config,
                         void*                                             user_data)
 {
     auto* avail_configs =
@@ -76,7 +74,7 @@ query_spm_configuration(const rocprofiler_spm_available_configuration_t** config
 
 rocprofiler_status_t
 query_pc_sampling_configuration(const rocprofiler_pc_sampling_configuration_t* configs,
-                                long unsigned int                              num_config,
+                                size_t                                         num_config,
                                 void*                                          user_data)
 {
     auto* avail_configs =
@@ -191,7 +189,7 @@ metadata::metadata(inprocess)
 : buffer_names{sdk::get_buffer_tracing_names()}
 , callback_names{sdk::get_callback_tracing_names()}
 , node_data{read_node_info()}
-, command_line{common::read_command_line(getpid())}
+, command_line{common::read_command_line(common::get_pid())}
 {
     ROCPROFILER_CHECK(rocprofiler_query_available_agents(
         ROCPROFILER_AGENT_INFO_VERSION_0,
@@ -406,7 +404,7 @@ metadata::get_att_filenames() const
     {
         for(const auto& file : files)
         {
-            data.emplace_back(fs::path{file}.filename());
+            data.emplace_back(fs::path{file}.filename().string());
         }
     }
     return data;
@@ -714,7 +712,7 @@ metadata::set_process_id(pid_t _pid, pid_t _ppid, const std::vector<std::string>
 
     if(!_command_line.empty())
         command_line = _command_line;
-    else if(_pid == getpid())
+    else if(_pid == common::get_pid())
         command_line = common::read_command_line(_pid);
 
     if(auto _start_ns = common::get_process_start_time_ns(_pid); _start_ns > 0)
@@ -822,6 +820,7 @@ metadata::get_string_entry(size_t key) const
     return ret;
 }
 
+#if !defined(_WIN32)
 int64_t
 metadata::get_instruction_index(rocprofiler_pc_t record)
 {
@@ -877,6 +876,7 @@ metadata::decode_instruction(rocprofiler_pc_t pc)
         pc.code_object_id,
         pc.code_object_offset);
 }
+#endif
 
 agent_index
 create_agent_index(const rocprofiler::tool::agent_indexing index,

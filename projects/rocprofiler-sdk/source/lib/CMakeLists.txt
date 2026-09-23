@@ -16,8 +16,9 @@ if(WIN32)
                                PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
+add_subdirectory(output)
+
 if(NOT WIN32)
-    add_subdirectory(output)
     add_subdirectory(aqlprofile)
     add_subdirectory(rocprofiler-sdk-attach)
 

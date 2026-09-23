@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "lib/att-tool/codeobj_load_info.hpp"
 #include "lib/att-tool/util.hpp"
 #include "lib/common/filesystem.hpp"
 
@@ -40,14 +41,6 @@ namespace rocprofiler
 namespace att_wrapper
 {
 using Fspath = rocprofiler::common::filesystem::path;
-
-struct CodeobjLoadInfo
-{
-    std::string name{};
-    size_t      id{0};
-    size_t      addr{0};
-    size_t      size{0};
-};
 
 class ATTDecoder
 {

@@ -28,11 +28,12 @@
 #include "kernel_symbol_info.hpp"
 #include "pc_sample_transform.hpp"
 
-#include "lib/att-tool/att_lib_wrapper.hpp"
+#include "lib/att-tool/codeobj_load_info.hpp"
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/demangle.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/synchronized.hpp"
+#include "lib/common/utility.hpp"
 #include "lib/output/node_info.hpp"
 
 #include <rocprofiler-sdk/agent.h>
@@ -40,7 +41,10 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
-#include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
+#if !defined(_WIN32)
+// disassembly reads DWARF out of the loaded code object, which needs libdw
+#    include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
+#endif
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
@@ -98,8 +102,10 @@ using marker_message_ordered_map_t = std::map<uint64_t, std::string>;
 using string_entry_map_t           = std::unordered_map<size_t, std::unique_ptr<std::string>>;
 using counter_dimension_vec_t      = std::vector<rocprofiler_counter_record_dimension_info_t>;
 using external_corr_id_set_t       = std::unordered_set<uint64_t>;
+#if !defined(_WIN32)
 using code_obj_decoder_t = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
 using instruction_t      = rocprofiler::sdk::codeobj::disassembly::Instruction;
+#endif
 using att_dispatch_agent_key_t =
     std::pair<rocprofiler_dispatch_id_t, uint64_t>;  // (dispatch_id, agent_handle)
 using att_filenames_map_t         = std::map<att_dispatch_agent_key_t, std::vector<std::string>>;
@@ -211,8 +217,10 @@ struct metadata
     std::vector<std::string> get_pc_sample_comments() const { return instruction_comment; }
     std::string_view get_instruction(int64_t index) const { return instruction_decoder.at(index); }
     std::string_view get_comment(int64_t index) const { return instruction_comment.at(index); }
-    int64_t          get_instruction_index(rocprofiler_pc_t record);
-    void             add_decoder(rocprofiler_code_object_info_t* obj_data_v);
+#if !defined(_WIN32)
+    int64_t get_instruction_index(rocprofiler_pc_t record);
+    void    add_decoder(rocprofiler_code_object_info_t* obj_data_v);
+#endif
     code_object_load_info_vec_t get_code_object_load_info() const;
 
     string_index_map_t get_string_entries() const;
@@ -248,9 +256,11 @@ struct metadata
     bool               is_runtime_initialized(rocprofiler_runtime_initialization_operation_t) const;
 
 private:
-    bool                           inprocess_init = false;
+    bool inprocess_init = false;
+#if !defined(_WIN32)
     std::unique_ptr<instruction_t> decode_instruction(rocprofiler_pc_t pc);
     synced_map<code_obj_decoder_t> decoder = {};
+#endif
     // TODO: We may have to reserve the vector size based on map size
     std::vector<std::string> instruction_decoder = {};
     std::vector<std::string> instruction_comment = {};

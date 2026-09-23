@@ -151,6 +151,16 @@ timestamp_ns()
     return get_ticks(_clk) / _clk_period;
 }
 
+inline pid_t
+get_pid()
+{
+#if !defined(_WIN32)
+    return ::getpid();
+#else
+    return static_cast<pid_t>(::_getpid());
+#endif
+}
+
 // returns the process start time (in CLOCK_BOOTTIME nanoseconds) via /proc/<pid>/stat
 uint64_t
 get_process_start_time_ns(pid_t _pid);

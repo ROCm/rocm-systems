@@ -28,7 +28,13 @@
 #include "lib/common/filesystem.hpp"
 #include "lib/common/utility.hpp"
 
-#include <linux/limits.h>
+#if !defined(_WIN32)
+#    include <linux/limits.h>
+#else
+#    include <windows.h>
+//
+#    include <tlhelp32.h>
+#endif
 #include <array>
 #include <fstream>
 
@@ -68,8 +74,13 @@ get_local_datetime(const std::string& dt_format, std::time_t*& _dt_curr)
     memset(mbstr, '\0', sizeof(mbstr) * sizeof(char));
 
     struct tm tm_struct;
-    if(std::strftime(
-           mbstr, sizeof(mbstr) - 1, dt_format.c_str(), localtime_r(_dt_curr, &tm_struct)) != 0)
+#if !defined(_WIN32)
+    auto* _tm = localtime_r(_dt_curr, &tm_struct);
+#else
+    // note the reversed argument order relative to localtime_r
+    auto* _tm = (::localtime_s(&tm_struct, _dt_curr) == 0) ? &tm_struct : nullptr;
+#endif
+    if(_tm != nullptr && std::strftime(mbstr, sizeof(mbstr) - 1, dt_format.c_str(), _tm) != 0)
         return new std::string{mbstr};
 
     return nullptr;
@@ -103,6 +114,7 @@ trim(std::string s, bool (*f)(int) = not_is_space)
     return s;
 }
 
+#if !defined(_WIN32)
 std::string
 get_hostname()
 {
@@ -117,6 +129,24 @@ get_hostname()
     }
 
     return std::string{_hostname_buff.data()};
+}
+
+pid_t
+get_parent_process_id()
+{
+    return getppid();
+}
+
+pid_t
+get_process_group_id()
+{
+    return getpgid(getpid());
+}
+
+pid_t
+get_session_id()
+{
+    return getsid(getpid());
 }
 
 std::vector<pid_t>
@@ -135,11 +165,99 @@ get_siblings(pid_t _id = getppid())
     }
     return _data;
 }
+#else
+std::string
+get_hostname()
+{
+    auto _hostname_buff = std::array<char, MAX_COMPUTERNAME_LENGTH + 1>{};
+    _hostname_buff.fill('\0');
+    auto _size = static_cast<DWORD>(_hostname_buff.size());
+
+    if(::GetComputerNameExA(ComputerNameDnsHostname, _hostname_buff.data(), &_size) == 0)
+    {
+        ROCP_WARNING << "Hostname unknown. GetComputerNameExA failed with error code "
+                     << ::GetLastError();
+        return std::string{"UNKNOWN_HOSTNAME"};
+    }
+
+    return std::string{_hostname_buff.data()};
+}
+
+// Windows does not track a parent link in the process itself, so the only way to recover it
+// is to find this process in a system-wide snapshot. The same snapshot answers the sibling
+// question, so both go through it.
+std::vector<pid_t>
+snapshot_processes(pid_t& parent_of_self)
+{
+    parent_of_self = 0;
+
+    auto _snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if(_snapshot == INVALID_HANDLE_VALUE) return {};
+
+    auto _self    = static_cast<DWORD>(common::get_pid());
+    auto _entries = std::vector<std::pair<pid_t, pid_t> >{};
+    auto _entry   = PROCESSENTRY32W{};
+    _entry.dwSize = sizeof(_entry);
+
+    if(::Process32FirstW(_snapshot, &_entry) != 0)
+    {
+        do
+        {
+            if(_entry.th32ProcessID == _self)
+                parent_of_self = static_cast<pid_t>(_entry.th32ParentProcessID);
+            _entries.emplace_back(static_cast<pid_t>(_entry.th32ProcessID),
+                                  static_cast<pid_t>(_entry.th32ParentProcessID));
+        } while(::Process32NextW(_snapshot, &_entry) != 0);
+    }
+
+    ::CloseHandle(_snapshot);
+
+    auto _siblings = std::vector<pid_t>{};
+    if(parent_of_self > 0)
+        for(const auto& itr : _entries)
+            if(itr.second == parent_of_self) _siblings.emplace_back(itr.first);
+
+    return _siblings;
+}
+
+pid_t
+get_parent_process_id()
+{
+    auto _ppid = pid_t{0};
+    snapshot_processes(_ppid);
+    return _ppid;
+}
+
+// Windows has no process group. Report 0 rather than substituting the job object, which is
+// not the same concept and is usually absent.
+pid_t
+get_process_group_id()
+{
+    return 0;
+}
+
+// The Terminal Services session is the closest analogue of a POSIX session id: every process
+// launched from the same logon shares it.
+pid_t
+get_session_id()
+{
+    auto _sid = DWORD{0};
+    if(::ProcessIdToSessionId(::GetCurrentProcessId(), &_sid) == 0) return 0;
+    return static_cast<pid_t>(_sid);
+}
+
+std::vector<pid_t>
+get_siblings()
+{
+    auto _ppid = pid_t{0};
+    return snapshot_processes(_ppid);
+}
+#endif
 
 auto
-get_num_siblings(pid_t _id = getppid())
+get_num_siblings()
 {
-    return get_siblings(_id).size();
+    return get_siblings().size();
 }
 }  // namespace
 
@@ -154,9 +272,9 @@ output_keys(std::string _tag)
 {
     using strpair_t = std::pair<std::string, std::string>;
 
-    auto _cmdline = common::read_command_line(getpid());
+    auto _cmdline = common::read_command_line(common::get_pid());
 
-    if(_tag.empty() && !_cmdline.empty()) _tag = ::basename(_cmdline.front().c_str());
+    if(_tag.empty() && !_cmdline.empty()) _tag = fs::path{_cmdline.front()}.filename().string();
 
     std::string        _argv_string = {};    // entire argv cmd
     std::string        _args_string = {};    // cmdline args
@@ -202,10 +320,10 @@ output_keys(std::string _tag)
 
     auto _dmp_size      = fmt::format("{}", (_mpi_size) > 0 ? _mpi_size : 1);
     auto _dmp_rank      = fmt::format("{}", (_mpi_rank) > 0 ? _mpi_rank : 0);
-    auto _proc_id       = fmt::format("{}", getpid());
-    auto _parent_id     = fmt::format("{}", getppid());
-    auto _pgroup_id     = fmt::format("{}", getpgid(getpid()));
-    auto _session_id    = fmt::format("{}", getsid(getpid()));
+    auto _proc_id       = fmt::format("{}", common::get_pid());
+    auto _parent_id     = fmt::format("{}", get_parent_process_id());
+    auto _pgroup_id     = fmt::format("{}", get_process_group_id());
+    auto _session_id    = fmt::format("{}", get_session_id());
     auto _proc_size     = fmt::format("{}", get_num_siblings());
     auto _pwd_string    = common::get_env<std::string>("PWD", ".");
     auto _slurm_job_id  = common::get_env<std::string>("SLURM_JOB_ID", "0");

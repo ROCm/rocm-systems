@@ -67,8 +67,8 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
         fs::create_directories(output_path);
     }
 
-    auto _ofname =
-        tool::format_path(output_path / fmt::format("{}_{}{}", output_prefix, fname, _ext));
+    auto _ofname = tool::format_path(
+        (output_path / fmt::format("{}_{}{}", output_prefix, fname, _ext)).string());
 
     // the prefix may contain a subdirectory
     if(auto _ofname_path = fs::path{_ofname}.parent_path(); !fs::exists(_ofname_path))
