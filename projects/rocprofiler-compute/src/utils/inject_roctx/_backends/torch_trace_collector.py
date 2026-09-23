@@ -62,12 +62,14 @@ def install() -> bool:
 
     so_path = collectors_by_version.get(workload_torch_version)
     if so_path is None:
-        console_error(
+        console_warning(
             "ml api trace",
             "torch_trace_collector has no prebuilt extension for PyTorch "
             f"{workload_torch_version}. Supported PyTorch versions: "
-            f"{', '.join(sorted(collectors_by_version))}.",
+            f"{', '.join(sorted(collectors_by_version))}. "
+            "using TorchDispatchMode.",
         )
+        return False
 
     try:
         lib = ctypes.CDLL(str(so_path))
