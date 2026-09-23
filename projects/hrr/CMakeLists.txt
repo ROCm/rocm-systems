@@ -8,6 +8,7 @@ project(hrr LANGUAGES CXX)
 option(HRR_BUILD_PLAYBACK "Build HRR playback tools" ON)
 option(HRR_BUILD_TESTS "Build HRR unit tests" OFF)
 
+# Shared HRR archive wire format (header-only public interface).
 add_library(hrr_api_args INTERFACE)
 add_library(hrr::api_args ALIAS hrr_api_args)
 

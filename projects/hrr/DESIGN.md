@@ -168,9 +168,9 @@ Handle-creating and handle-destroying events (malloc, free, stream/event/module 
 | `projects/clr/hipamd/src/hrr/hip_capture_generated.cpp` | ~517 capture shims + `hip_capture_build_table()` |
 | `projects/hrr/playback/hip_playback_generated.cpp` | ~504 playback shims + `hrr_playback_dispatch[]` |
 
-The checked-in generated files above are the compilation inputs. During CLR and standalone HRR builds, `projects/clr/cmake/HrrCodegen.cmake` generates temporary copies in the binary directory, runs `--check-hrr-coverage`, and updates any checked-in generated file that differs from its temporary counterpart. The build prints a warning listing every updated file and requires the developer to review and include those changes in the PR.
+The checked-in generated files above are the compilation inputs. During CLR builds, `projects/clr/cmake/HrrCodegen.cmake` generates temporary copies in the binary directory, runs `--check-hrr-coverage`, and updates any checked-in generated file that differs from its temporary counterpart. The build prints a warning listing every updated file.
 
-When a build updates generated files, review them with `git diff` and include them in the PR. The generator can also be run directly from the repository root with `python3 projects/hrr/tools/gen_hrr_api_args.py --check-hrr-coverage` to refresh all checked-in generated files.
+When a build updates generated files, review them with `git diff`. The generator can also be run directly from the repository root with `python3 projects/hrr/tools/gen_hrr_api_args.py --check-hrr-coverage` to refresh all checked-in generated files.
 
 ### Build
 ```bash

@@ -5,7 +5,7 @@
 # generated files are current. The checked-in files remain the compilation inputs.
 set(HRR_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../hrr")
 set(HRR_CLR_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
-set(HRR_HIP_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../hip")
+set(HRR_HIP_SOURCE_DIR "${HIP_COMMON_DIR}")
 include("${HRR_CLR_SOURCE_DIR}/cmake/HrrCodegen.cmake")
 set(HRR_CODEGEN_CHECK_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/hrr")
 hrr_add_codegen_check(
