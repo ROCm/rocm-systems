@@ -477,3 +477,14 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   qualification attempts. Timing artifact: `matmul-debug/transform-fixed-result.json`.
 - `rdna4-matmul-fp16-production` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round11/rdna4-matmul-fp16-production-default`.
 - `rdna4-matmul-fp16-production` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round11/rdna4-matmul-fp16-production-supercollider`.
+- FP16 Default timeout fix reaches physical execution: round-7 trial 0
+  completes in **43.169 seconds**, installs exactly one reviewed mutation,
+  passes the numeric oracle and before/after health checks, and reports no
+  detection. This resolves the earlier pre-admission timeout for this trial;
+  the full eight-trial sensitivity result remains pending. Inventory time is
+  5.387 seconds versus 55.957 seconds in the old diagnostic. Both round-11
+  clean comparators pass with the rebuilt hook.
+- WMMA Default's prior log explicitly reports no runtime evidence under
+  sampled coverage (`workgroup_stride=256`, `cell_stride=256`). Precommitted
+  the same grouped fault with `preset=max` for eight trials and a separate
+  dense clean comparator. Execution pending; standard misses remain recorded.
