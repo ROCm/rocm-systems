@@ -53,7 +53,6 @@ test_categories:
       - test_utils_profile_csv
       - test_csv_compression
       - test_inject_roctx_package
-      - test_torch_cpp_loader
       - test_conftest
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
@@ -70,7 +69,6 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
-      - test-torch-trace-collector
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -127,7 +125,6 @@ test_categories:
       - test_roofline_analyze
       - test_roofline_main
       - test_rocpd_data
-      - test_torch_trace_coverage
       - test_instant_button
       - test_menu_bar
       - test_tui_utils
@@ -146,7 +143,6 @@ test_categories:
       - test_utils_profile_csv
       - test_csv_compression
       - test_inject_roctx_package
-      - test_torch_cpp_loader
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
@@ -165,9 +161,7 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
-      - test-torch-trace-collector
       - test_profile_torch_trace
-      - test_profile_triton_trace
       - test_profile_live_attach_detach
       - test_metric_validation
     therock_ci_exclude:
@@ -226,7 +220,6 @@ test_categories:
       - test_roofline_analyze
       - test_roofline_main
       - test_rocpd_data
-      - test_torch_trace_coverage
       - test_instant_button
       - test_menu_bar
       - test_tui_utils
@@ -245,7 +238,6 @@ test_categories:
       - test_utils_profile_csv
       - test_csv_compression
       - test_inject_roctx_package
-      - test_torch_cpp_loader
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
@@ -264,9 +256,7 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
-      - test-torch-trace-collector
       - test_profile_torch_trace
-      - test_profile_triton_trace
       - test_profile_live_attach_detach
       - test_metric_validation
     therock_ci_exclude:
@@ -325,7 +315,6 @@ test_categories:
       - test_roofline_analyze
       - test_roofline_main
       - test_rocpd_data
-      - test_torch_trace_coverage
       - test_instant_button
       - test_menu_bar
       - test_tui_utils
@@ -344,7 +333,6 @@ test_categories:
       - test_utils_profile_csv
       - test_csv_compression
       - test_inject_roctx_package
-      - test_torch_cpp_loader
       - test_profiler_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
@@ -363,9 +351,7 @@ test_categories:
       - test_soc_base
       - test-pc-sampling-collector
       - test-compression
-      - test-torch-trace-collector
       - test_profile_torch_trace
-      - test_profile_triton_trace
       - test_profile_live_attach_detach
       - test_metric_validation
     therock_ci_exclude:
