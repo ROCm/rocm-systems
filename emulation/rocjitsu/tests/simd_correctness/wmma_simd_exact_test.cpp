@@ -57,6 +57,30 @@ void run_case(const char *label, Fmt fmt, Fmt acc_fmt,
   }
 }
 
+void expect_fixture_bit_exact(const char *label, const std::function<void(WmmaFixture &)> &seed,
+                              const std::function<void(WmmaFixture &)> &kernel, uint32_t dst,
+                              uint32_t dst_regs) {
+  ForceScalarGuard force_scalar_guard;
+  WmmaFixture scalar_fixture;
+  WmmaFixture simd_fixture;
+  ASSERT_NE(scalar_fixture.wf, nullptr);
+  ASSERT_NE(simd_fixture.wf, nullptr);
+  seed(scalar_fixture);
+  seed(simd_fixture);
+
+  util::set_force_scalar_for_testing(true);
+  kernel(scalar_fixture);
+  util::set_force_scalar_for_testing(false);
+  kernel(simd_fixture);
+
+  const std::vector<uint32_t> scalar = scalar_fixture.snapshot(dst, dst_regs);
+  const std::vector<uint32_t> simd = simd_fixture.snapshot(dst, dst_regs);
+  for (size_t word = 0; word < scalar.size(); ++word)
+    ASSERT_EQ(scalar[word], simd[word])
+        << label << ": SIMD diverges from scalar at word " << word << " (scalar=0x" << std::hex
+        << scalar[word] << " simd=0x" << simd[word] << ")";
+}
+
 template <typename Ea, typename Eb>
 void run_dense_f32(const char *label, Fmt fmt, uint32_t M, uint32_t N, uint32_t K, uint32_t bits,
                    Ea ea, Eb eb) {
@@ -150,6 +174,38 @@ TEST(WmmaSimdExact, Bf16) {
                              fx.vbase + ACC, fx.vbase + INDEX, 16, INDEX_KEY, amdgpu::extract_bf16,
                              amdgpu::extract_bf16, ca);
   });
+}
+
+TEST(WmmaSimdExact, F32F16Bf16SpecDestructiveSourceOverlap) {
+  SKIP_IF_NO_SIMD();
+  constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
+  if (!amdgpu::mma_f32_native_width_supported(16, width))
+    GTEST_SKIP() << "WMMA shape is not divisible by the native SIMD width";
+
+  constexpr uint32_t source_b = 0;
+  constexpr uint32_t destination_and_source_a = 32;
+  constexpr uint32_t accumulator = 64;
+  constexpr uint32_t matrix_regs = 8;
+
+  auto check = [](WmmaF32SpecFn fn, Fmt fmt, const char *label) {
+    for (bool materialize_overlap : {false, true}) {
+      SCOPED_TRACE(materialize_overlap ? "materialized" : "logical zero");
+      auto seed = [=](WmmaFixture &fx) {
+        fx.seed(source_b, matrix_regs, fmt, Mode::RandomInt, 11);
+        fx.seed(accumulator, matrix_regs, Fmt::F32, Mode::RandomInt, 22);
+        if (materialize_overlap)
+          fx.seed(destination_and_source_a, matrix_regs, fmt, Mode::RandomInt, 33);
+      };
+      auto kernel = [=](WmmaFixture &fx) {
+        fn(*fx.cu, fx.vbase + destination_and_source_a, fx.vbase + destination_and_source_a,
+           fx.vbase + source_b, fx.vbase + accumulator, amdgpu::ACC_FROM_VGPR, 0);
+      };
+      expect_fixture_bit_exact(label, seed, kernel, destination_and_source_a, matrix_regs);
+    }
+  };
+
+  check(amdgpu::exec_wmma_f32_16x16x32_f16, Fmt::F16, "f16 source overlap");
+  check(amdgpu::exec_wmma_f32_16x16x32_bf16, Fmt::BF16, "bf16 source overlap");
 }
 
 // --- dense fp8/bf8 inputs, all four A/B combos, K=64 and K=128, f32/f16 out ---

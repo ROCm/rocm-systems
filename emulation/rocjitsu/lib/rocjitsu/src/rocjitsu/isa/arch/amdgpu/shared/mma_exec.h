@@ -2068,14 +2068,20 @@ void exec_wmma_f32(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bit
                       wave_size);
 }
 
+/// Return whether an f32-accumulating matrix output row divides into complete
+/// native SIMD chunks.
+constexpr bool mma_f32_native_width_supported(uint32_t n, uint32_t width) {
+  return width > 1 && n % width == 0;
+}
+
 /// Fast path for v_wmma_f32_16x16x32_f16 (gfx1250, wave32) — the WMMA analogue
 /// of exec_f32_mfma_16x16x32_f16. Compile-time M/N/K let the compiler fully
-/// unroll the 16-row x 32-K matmul into straight-line AVX-512 FMAs; the f16
-/// inputs are bulk-converted once with F16C (one vector op per 16 halves)
-/// instead of branchy per-element extract_f16; VGPRs are accessed through
-/// observed register-access regions and the result scatters directly (no
-/// Result staging vector). Falls back to the generic exec_wmma_f32 without
-/// AVX-512 / under force-scalar.
+/// unroll the 16-row x 32-K matmul into native-width FMA chunks; the f16 inputs
+/// are bulk-converted once (using F16C when enabled) instead of branchy
+/// per-element extract_f16. VGPRs are accessed through observed register-access
+/// regions and the result scatters directly (no Result staging vector). Falls
+/// back to the generic exec_wmma_f32 when the output width does not divide into
+/// native SIMD chunks or under force-scalar.
 inline void exec_wmma_f32_16x16x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
                                        uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
                                        uint32_t c_modifier = 0) {
@@ -2085,7 +2091,8 @@ inline void exec_wmma_f32_16x16x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint
                   const_acc, c_modifier);
     return;
   } else {
-    if (util::force_scalar() || util::native<float>::size() != 16) {
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    if (util::force_scalar() || !mma_f32_native_width_supported(N, W)) {
       exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
                     const_acc, c_modifier);
       return;
@@ -2128,18 +2135,19 @@ inline void exec_wmma_f32_16x16x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint
         auto bl = wmma_input_loc(N, K, col, k, in_bits);
         B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
       }
-    // Dense 16x32 * 32x16 -> 16x16 matmul, 16-lane stdx FMA per row.
-    for (uint32_t row = 0; row < M; ++row) {
-      util::native<float> c_row;
-      c_row.copy_from(&C_buf[row * N], util::stdx::vector_aligned);
-      for (uint32_t k = 0; k < K; ++k) {
-        util::native<float> a_bcast(A_buf[row * K + k]);
-        util::native<float> b_row;
-        b_row.copy_from(&B_buf[k * N], util::stdx::vector_aligned);
-        c_row = util::stdx::fma(a_bcast, b_row, c_row);
+    // Dense 16x32 * 32x16 -> 16x16 matmul in native-width column chunks.
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t c0 = 0; c0 < N; c0 += W) {
+        util::native<float> c_row;
+        c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
+        for (uint32_t k = 0; k < K; ++k) {
+          util::native<float> a_bcast(A_buf[row * K + k]);
+          util::native<float> b_row;
+          b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
+          c_row = util::stdx::fma(a_bcast, b_row, c_row);
+        }
+        c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
       }
-      c_row.copy_to(&C_buf[row * N], util::stdx::vector_aligned);
-    }
     // Scatter directly back to VGPRs (no Result staging vector).
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
@@ -2153,7 +2161,8 @@ inline void exec_wmma_f32_16x16x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint
 /// Fast path for v_wmma_f32_16x16x32_bf16 / v_wmma_bf16f32_16x16x32_bf16
 /// (gfx1250, wave32). Identical to exec_wmma_f32_16x16x32_f16 except the bulk
 /// input convert is the bf16 zero-extend (no F16C needed). Falls back to the
-/// generic exec_wmma_f32 without AVX-512 / under force-scalar.
+/// generic exec_wmma_f32 when the output width does not divide into native SIMD
+/// chunks or under force-scalar.
 inline void exec_wmma_f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1,
                                         uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR,
                                         uint32_t c_modifier = 0) {
@@ -2163,7 +2172,8 @@ inline void exec_wmma_f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0, uin
                   const_acc, c_modifier);
     return;
   } else {
-    if (util::force_scalar() || util::native<float>::size() != 16) {
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    if (util::force_scalar() || !mma_f32_native_width_supported(N, W)) {
       exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16,
                     amdgpu::extract_bf16, const_acc, c_modifier);
       return;
@@ -2206,18 +2216,19 @@ inline void exec_wmma_f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0, uin
         auto bl = wmma_input_loc(N, K, col, k, in_bits);
         B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
       }
-    // Dense 16x32 * 32x16 -> 16x16 matmul, 16-lane stdx FMA per row.
-    for (uint32_t row = 0; row < M; ++row) {
-      util::native<float> c_row;
-      c_row.copy_from(&C_buf[row * N], util::stdx::vector_aligned);
-      for (uint32_t k = 0; k < K; ++k) {
-        util::native<float> a_bcast(A_buf[row * K + k]);
-        util::native<float> b_row;
-        b_row.copy_from(&B_buf[k * N], util::stdx::vector_aligned);
-        c_row = util::stdx::fma(a_bcast, b_row, c_row);
+    // Dense 16x32 * 32x16 -> 16x16 matmul in native-width column chunks.
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t c0 = 0; c0 < N; c0 += W) {
+        util::native<float> c_row;
+        c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
+        for (uint32_t k = 0; k < K; ++k) {
+          util::native<float> a_bcast(A_buf[row * K + k]);
+          util::native<float> b_row;
+          b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
+          c_row = util::stdx::fma(a_bcast, b_row, c_row);
+        }
+        c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
       }
-      c_row.copy_to(&C_buf[row * N], util::stdx::vector_aligned);
-    }
     // Scatter directly back to VGPRs (no Result staging vector).
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
@@ -2349,12 +2360,6 @@ void exec_wmma_f32_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
                                std::bit_cast<uint32_t>(C_buf[row * N + col]));
       }
   }
-}
-
-/// Return whether an f32-accumulating matrix output row divides into complete
-/// native SIMD chunks.
-constexpr bool mma_f32_native_width_supported(uint32_t n, uint32_t width) {
-  return width > 1 && n % width == 0;
 }
 
 /// Fast path for the f32-input WMMA shapes (v_wmma_f32_*_f32). f32 inputs, so no
