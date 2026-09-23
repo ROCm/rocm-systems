@@ -418,7 +418,7 @@ def gen_vector_unary(
         math_map_f16 = {
             'rcp': '1.0f / s',
             'sqrt': 'std::sqrt(s)',
-            'rsq': '1.0f / std::sqrt(s)',
+            'rsq': 'amdgpu::transcendental::rsq_f16(s, wf.fp_denorm_mode_f16_f64())',
             'floor': 'std::floor(s)',
             'ceil': 'std::ceil(s)',
             'trunc': 'std::trunc(s)',

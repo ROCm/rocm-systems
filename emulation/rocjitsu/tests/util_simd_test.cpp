@@ -674,6 +674,25 @@ TEST(UtilSimd, F16ToF32_VectorMatchesScalar_Exhaustive) {
   }
 }
 
+TEST(UtilSimd, F16RoundTripPreservesEveryEncoding) {
+  SKIP_IF_NO_SIMD();
+  using V = util::native<uint32_t>;
+  constexpr std::size_t W = util::native_width_v<uint32_t>;
+  for (uint32_t base = 0; base < 65536u; base += static_cast<uint32_t>(W)) {
+    uint32_t input[W];
+    for (std::size_t i = 0; i < W; ++i)
+      input[i] = base + static_cast<uint32_t>(i);
+    const V encoded(input, util::stdx::element_aligned);
+    const auto promoted = util::f16_to_f32_simd(encoded);
+    const V nearest = util::f32_to_f16_simd(promoted);
+    const V truncated = util::f32_to_f16_rtz_simd(promoted);
+    for (std::size_t i = 0; i < W; ++i) {
+      ASSERT_EQ(nearest[i], input[i]);
+      ASSERT_EQ(truncated[i], input[i]);
+    }
+  }
+}
+
 TEST(UtilSimd, F32ToF16_VectorMatchesScalar_Sweep) {
   SKIP_IF_NO_SIMD();
   using V = util::native<float>;

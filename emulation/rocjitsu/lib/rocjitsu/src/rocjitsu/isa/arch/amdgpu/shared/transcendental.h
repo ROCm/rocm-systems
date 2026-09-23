@@ -9,14 +9,16 @@
 /// These reference implementations produce results within the ULP accuracy
 /// specified by the ISA manuals (typically 1 ULP for f32, 2 ULP for f64).
 /// They are used by the simulator's execute() bodies for V_RCP_F32,
-/// V_RSQ_F32, V_SQRT_F32, V_LOG_F32, V_EXP_F32, V_SIN_F32, V_COS_F32,
+/// V_RSQ_F32, V_RSQ_F16, V_SQRT_F32, V_LOG_F32, V_EXP_F32, V_SIN_F32, V_COS_F32,
 /// V_RCP_F64, V_RSQ_F64, V_SQRT_F64.
-/// The F32 reciprocal additionally matches the captured RDNA3/4 hardware mapping.
+/// F32 reciprocal and F32/F16 reciprocal square root match the captured RDNA3/4 mappings.
+/// F16 RSQ applies the half input-denormal policy after promotion to F32.
 ///
 /// All functions handle special cases (NaN, Inf, denormals, ±0) per the
 /// AMD ISA specification.
 
 #include "util/amdgpu_rcp.h"
+#include "util/amdgpu_rsq.h"
 
 #include <bit>
 #include <cmath>
@@ -31,7 +33,7 @@ namespace transcendental {
 ///
 /// @details AMD transcendental micro-ops always operate in FTZ mode
 /// regardless of the shader's denorm mode.  This helper reproduces
-/// that behaviour for rsq, sqrt, exp, and log.
+/// that behaviour for sqrt, exp, and log.
 inline float flush_denorm_f32(float x) {
   uint32_t bits = std::bit_cast<uint32_t>(x);
   if ((bits & 0x7F800000u) == 0 && (bits & 0x007FFFFFu) != 0)
@@ -42,19 +44,11 @@ inline float flush_denorm_f32(float x) {
 /// @brief AMD single-precision reciprocal matching physical RDNA3/4 (within 1 ULP).
 inline float rcp_f32(float x) { return util::amdgpu_rcp_f32(x); }
 
-/// @brief 1.0 / sqrt(x) (single-precision reciprocal square root, ~1 ULP).
-inline float rsq_f32(float x) {
-  x = flush_denorm_f32(x);
-  if (std::isnan(x))
-    return std::bit_cast<float>(std::bit_cast<uint32_t>(x) | 0x00400000u);
-  if (x == 0.0f)
-    return std::copysign(std::numeric_limits<float>::infinity(), x);
-  if (x < 0.0f)
-    return std::numeric_limits<float>::quiet_NaN();
-  if (std::isinf(x))
-    return 0.0f;
-  return flush_denorm_f32(1.0f / std::sqrt(x));
-}
+/// @brief AMD single-precision reciprocal square root matching physical RDNA3/4 (within 1 ULP).
+inline float rsq_f32(float x) { return util::amdgpu_rsq_f32(x); }
+
+/// @brief F16 reciprocal square root in the promoted F32 domain, with F16 input policy.
+inline float rsq_f16(float x, uint32_t denorm_mode) { return util::amdgpu_rsq_f16(x, denorm_mode); }
 
 /// @brief sqrt(x) (single-precision square root, correctly-rounded).
 inline float sqrt_f32(float x) {

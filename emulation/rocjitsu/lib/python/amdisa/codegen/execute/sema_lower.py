@@ -1869,6 +1869,12 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
             return f'static_cast<uint32_t>(util::f32_to_f16_mode({fp8_decode_fn}(static_cast<uint8_t>({arg})), wf.fp16_ovfl()))'
         return f'static_cast<uint32_t>(util::f32_to_f16_mode({bf8_decode_fn}(static_cast<uint8_t>({arg})), wf.fp16_ovfl()))'
 
+    # Promotion loses the F16 denormal class, so RSQ needs the half input policy.
+    if len(args) == 1 and callee == 'rsq' and node.ty == SemaType.F16:
+        return (
+            f'amdgpu::transcendental::rsq_f16({args[0]}, '
+            'wf.fp_denorm_mode_f16_f64())'
+        )
     if len(args) == 1 and callee in _INLINE_UNARY_OPS:
         return _INLINE_UNARY_OPS[callee].format(args[0])
     if len(args) == 2 and callee in _INLINE_BINARY_OPS:

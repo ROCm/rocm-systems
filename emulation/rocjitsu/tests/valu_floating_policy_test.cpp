@@ -185,65 +185,91 @@ std::array<uint32_t, 2> packed_words(rj_code_arch_t arch, uint16_t op, uint8_t c
 std::array<uint32_t, 1> unary_words(rj_code_arch_t arch, size_t op) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1: {
-    const std::array<uint16_t, 5> ops = {cdna1::kVRcpF32Vop1, cdna1::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {cdna1::kVRcpF32Vop1, cdna1::kVSqrtF32Vop1,
                                          cdna1::kVLogF32Vop1, cdna1::kVExpF32Vop1,
-                                         cdna1::kVRsqF32Vop1};
+                                         cdna1::kVRsqF32Vop1, cdna1::kVRsqF16Vop1};
     return cdna1::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_CDNA2: {
-    const std::array<uint16_t, 5> ops = {cdna2::kVRcpF32Vop1, cdna2::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {cdna2::kVRcpF32Vop1, cdna2::kVSqrtF32Vop1,
                                          cdna2::kVLogF32Vop1, cdna2::kVExpF32Vop1,
-                                         cdna2::kVRsqF32Vop1};
+                                         cdna2::kVRsqF32Vop1, cdna2::kVRsqF16Vop1};
     return cdna2::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_CDNA3: {
-    const std::array<uint16_t, 5> ops = {cdna3::kVRcpF32Vop1, cdna3::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {cdna3::kVRcpF32Vop1, cdna3::kVSqrtF32Vop1,
                                          cdna3::kVLogF32Vop1, cdna3::kVExpF32Vop1,
-                                         cdna3::kVRsqF32Vop1};
+                                         cdna3::kVRsqF32Vop1, cdna3::kVRsqF16Vop1};
     return cdna3::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_CDNA4: {
-    const std::array<uint16_t, 5> ops = {cdna4::kVRcpF32Vop1, cdna4::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {cdna4::kVRcpF32Vop1, cdna4::kVSqrtF32Vop1,
                                          cdna4::kVLogF32Vop1, cdna4::kVExpF32Vop1,
-                                         cdna4::kVRsqF32Vop1};
+                                         cdna4::kVRsqF32Vop1, cdna4::kVRsqF16Vop1};
     return cdna4::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_CDNA5: {
-    const std::array<uint16_t, 5> ops = {cdna5::kVRcpF32Vop1, cdna5::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {cdna5::kVRcpF32Vop1, cdna5::kVSqrtF32Vop1,
                                          cdna5::kVLogF32Vop1, cdna5::kVExpF32Vop1,
-                                         cdna5::kVRsqF32Vop1};
+                                         cdna5::kVRsqF32Vop1, cdna5::kVRsqF16Vop1};
     return cdna5::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_RDNA1: {
-    const std::array<uint16_t, 5> ops = {rdna1::kVRcpF32Vop1, rdna1::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {rdna1::kVRcpF32Vop1, rdna1::kVSqrtF32Vop1,
                                          rdna1::kVLogF32Vop1, rdna1::kVExpF32Vop1,
-                                         rdna1::kVRsqF32Vop1};
+                                         rdna1::kVRsqF32Vop1, rdna1::kVRsqF16Vop1};
     return rdna1::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_RDNA2: {
-    const std::array<uint16_t, 5> ops = {rdna2::kVRcpF32Vop1, rdna2::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {rdna2::kVRcpF32Vop1, rdna2::kVSqrtF32Vop1,
                                          rdna2::kVLogF32Vop1, rdna2::kVExpF32Vop1,
-                                         rdna2::kVRsqF32Vop1};
+                                         rdna2::kVRsqF32Vop1, rdna2::kVRsqF16Vop1};
     return rdna2::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_RDNA3: {
-    const std::array<uint16_t, 5> ops = {rdna3::kVRcpF32Vop1, rdna3::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {rdna3::kVRcpF32Vop1, rdna3::kVSqrtF32Vop1,
                                          rdna3::kVLogF32Vop1, rdna3::kVExpF32Vop1,
-                                         rdna3::kVRsqF32Vop1};
+                                         rdna3::kVRsqF32Vop1, rdna3::kVRsqF16Vop1};
     return rdna3::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_RDNA3_5: {
-    const std::array<uint16_t, 5> ops = {rdna3_5::kVRcpF32Vop1, rdna3_5::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {rdna3_5::kVRcpF32Vop1, rdna3_5::kVSqrtF32Vop1,
                                          rdna3_5::kVLogF32Vop1, rdna3_5::kVExpF32Vop1,
-                                         rdna3_5::kVRsqF32Vop1};
+                                         rdna3_5::kVRsqF32Vop1, rdna3_5::kVRsqF16Vop1};
     return rdna3_5::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
   case ROCJITSU_CODE_ARCH_RDNA4: {
-    const std::array<uint16_t, 5> ops = {rdna4::kVRcpF32Vop1, rdna4::kVSqrtF32Vop1,
+    const std::array<uint16_t, 6> ops = {rdna4::kVRcpF32Vop1, rdna4::kVSqrtF32Vop1,
                                          rdna4::kVLogF32Vop1, rdna4::kVExpF32Vop1,
-                                         rdna4::kVRsqF32Vop1};
+                                         rdna4::kVRsqF32Vop1, rdna4::kVRsqF16Vop1};
     return rdna4::build_vop1(ops[op], {.src0 = 256, .vdst = 6});
   }
+  default:
+    return {};
+  }
+}
+std::array<uint32_t, 2> rsq_f16_vop3_words(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::build_vop3(cdna1::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::build_vop3(cdna2::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::build_vop3(cdna3::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::build_vop3(cdna4::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return cdna5::build_vop3(cdna5::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::build_vop3(rdna1::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::build_vop3(rdna2::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::build_vop3(rdna3::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::build_vop3(rdna3_5::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::build_vop3(rdna4::kVRsqF16Vop3, {.vdst = 6, .src0 = 256});
   default:
     return {};
   }
@@ -370,6 +396,42 @@ TEST(ValuFloatingPolicy, F32UnaryDenormControls) {
     }
   }
 }
+TEST(ValuFloatingPolicy, ReciprocalSquareRootUsesSharedMappingAcrossProfiles) {
+  // The shared one-ULP/FTZ contract applies to all profiles. Raw hardware
+  // qualification for these finite approximation witnesses covers RDNA3/4.
+  for (rj_code_arch_t arch : kAllArchitectures) {
+    InstructionPolicyMachine machine(arch);
+    const auto words = unary_words(arch, 4);
+    for (const auto &test :
+         {std::pair{0x3f80cab3u, 0x3f7f363du}, std::pair{0x80000001u, 0xff800000u},
+          std::pair{0xbf800000u, 0xffc00000u}, std::pair{0x7fa12345u, 0x7fe12345u}})
+      witness("rsq_f32_shared", arch, machine.run(words, test.first, 0, 0, 0xf0), test.second);
+  }
+}
+
+TEST(ValuFloatingPolicy, HalfReciprocalSquareRootModesAndNaNPayloads) {
+  // All profiles support F16 input denormals; the shared mapping meets the
+  // stricter 0.51-ULP bound of older RDNA/CDNA profiles.
+  // Finite witness bits are physically qualified on RDNA3/4.
+  for (rj_code_arch_t arch : kAllArchitectures) {
+    InstructionPolicyMachine machine(arch);
+    for (uint32_t mode = 0; mode < 16; ++mode) {
+      const uint32_t raw_mode = 0x30u | ((mode & 3u) << 2) | ((mode >> 2) << 6);
+      for (const auto &test :
+           {std::pair{0x0401u, 0x57ffu}, std::pair{0x7c02u, 0x7e02u}, std::pair{0xfc02u, 0xfe02u},
+            std::pair{0xbc00u, 0xfe00u}, std::pair{0x0001u, (mode & 4u) ? 0x6c00u : 0x7c00u},
+            std::pair{0x8001u, (mode & 4u) ? 0xfe00u : 0xfc00u}}) {
+        witness("rsq_f16_vop1", arch,
+                machine.run(unary_words(arch, 5), test.first, 0, 0, raw_mode) & 0xffffu,
+                test.second);
+        witness("rsq_f16_vop3", arch,
+                machine.run(rsq_f16_vop3_words(arch), test.first, 0, 0, raw_mode) & 0xffffu,
+                test.second);
+      }
+    }
+  }
+}
+
 TEST(ValuFloatingPolicy, F32UnaryQuietsSignalingNaNs) {
   for (rj_code_arch_t arch : kAllArchitectures) {
     InstructionPolicyMachine machine(arch);

@@ -9,11 +9,12 @@
 /// Reference Guide: section 7.10 requires the usual DENORMAL and ROUND mode bits, and section
 /// 7.2.3.1 requires nonzero OMOD to flush output denormals and map negative zero to positive zero.
 /// The functional examples for the vector V_LOG_F32, V_RSQ_F32, and V_SQRT_F32 equivalents specify
-/// negative quiet NaNs for invalid domains. F32 reciprocal follows its vector equivalent's
+/// negative quiet NaNs for invalid domains. F32 reciprocal and RSQ follow their vector equivalents'
 /// approximation and unconditional denormal flushing, as observed on physical GFX12. Other
 /// operations use host standard-library approximations with the mode handling below.
 
 #include "util/amdgpu_rcp.h"
+#include "util/amdgpu_rsq.h"
 #include "util/data_types.h"
 
 #include <bit>
@@ -52,7 +53,9 @@ inline float flush_input_f16(float value, uint32_t denorm_mode) {
 
 inline float quiet_nan(float value) {
   uint32_t bits = std::bit_cast<uint32_t>(value);
-  if ((bits & 0x7f800000u) == 0x7f800000u && (bits & 0x007fffffu) != 0)
+  // Test signaling NaNs specifically: a general NaN check can become a host
+  // floating-point comparison that raises FE_INVALID before the quieting step.
+  if ((bits & 0x7fc00000u) == 0x7f800000u && (bits & 0x003fffffu) != 0)
     bits |= 0x00400000u;
   return std::bit_cast<float>(bits);
 }
@@ -89,14 +92,8 @@ inline EvaluationResult evaluate(Operation operation, double value) {
       return {std::copysign(0.0, value), ResultProvenance::VALUE};
     return {1.0 / value, ResultProvenance::VALUE};
   case Operation::RSQ:
-    if (value == 0.0)
-      return {std::copysign(std::numeric_limits<double>::infinity(), value),
-              ResultProvenance::VALUE};
-    if (value < 0.0)
-      return {std::numeric_limits<double>::quiet_NaN(), ResultProvenance::INVALID_DOMAIN};
-    if (std::isinf(value))
-      return {0.0, ResultProvenance::VALUE};
-    return {1.0 / std::sqrt(value), ResultProvenance::VALUE};
+    // Unreachable from execute_f32/execute_f16: both handle RSQ with the shared mapping.
+    break;
   case Operation::SQRT:
     if (value < 0.0)
       return {std::numeric_limits<double>::quiet_NaN(), ResultProvenance::INVALID_DOMAIN};
@@ -313,8 +310,8 @@ inline uint16_t round_f16_result(double value, uint32_t round_mode, uint32_t omo
 /// operation evaluation. OMOD is then applied before CLAMP, result rounding, and output-denormal
 /// handling. Round modes are 0 for nearest-even, 1 for positive infinity, 2 for negative infinity,
 /// and 3 for zero. Denormal mode bit 0 allows input denormals and bit 1 allows output denormals.
-/// RCP ignores these mode fields: it uses the hardware approximation, flushes subnormals,
-/// and rounds output-modifier overflow to infinity.
+/// RCP and RSQ ignore these mode fields and use the hardware approximations with flushed
+/// subnormals. RCP rounds output-modifier overflow to infinity.
 /// @param operation Transcendental operation to execute.
 /// @param source Raw F32 source value.
 /// @param absolute Whether to clear the source sign bit before evaluation.
@@ -330,19 +327,22 @@ inline uint32_t execute_f32(Operation operation, float source, bool absolute, bo
   source = detail::apply_source_modifiers(source, absolute, negate);
   source = detail::flush_input_f32(source, denorm_mode);
   source = detail::quiet_nan(source);
-  // Physical GFX12 V_S_RCP_F32 uses the vector reciprocal approximation and
-  // flushes subnormals in every MODE.FP_ROUND/FP_DENORM combination.
-  const detail::EvaluationResult evaluated =
-      operation == Operation::RCP
-          ? detail::EvaluationResult{util::amdgpu_rcp_f32(source), detail::ResultProvenance::VALUE}
-          : detail::evaluate(operation, static_cast<double>(source));
+  // Physical GFX12 F32 RCP/RSQ match their vector equivalents in every MODE.
+  detail::EvaluationResult evaluated;
+  if (operation == Operation::RCP)
+    evaluated = {util::amdgpu_rcp_f32(source), detail::ResultProvenance::VALUE};
+  else if (operation == Operation::RSQ)
+    evaluated = {util::amdgpu_rsq_f32(source), detail::ResultProvenance::VALUE};
+  else
+    evaluated = detail::evaluate(operation, static_cast<double>(source));
   detail::EvaluationResult value = detail::apply_output_modifiers(evaluated, omod, clamp);
   // RCP output scaling is exact in F64. Detect F32 overflow before narrowing,
   // so directed host rounding cannot replace the required infinity with a finite value.
   if (operation == Operation::RCP && std::isfinite(value.value) &&
       std::abs(value.value) > std::numeric_limits<float>::max())
     value.provenance = detail::ResultProvenance::FINITE_OVERFLOW;
-  uint32_t result = detail::round_f64_to_f32(value, operation == Operation::RCP ? 0 : round_mode);
+  const bool fixed_rounding = operation == Operation::RCP || operation == Operation::RSQ;
+  uint32_t result = detail::round_f64_to_f32(value, fixed_rounding ? 0 : round_mode);
   if (((denorm_mode & 2u) == 0 || omod != 0) && (result & 0x7f800000u) == 0 &&
       (result & 0x007fffffu) != 0)
     result &= 0x80000000u;
@@ -355,7 +355,8 @@ inline uint32_t execute_f32(Operation operation, float source, bool absolute, bo
 /// handling. Round modes are 0 for nearest-even, 1 for positive infinity, 2 for negative infinity,
 /// and 3 for zero. Denormal mode bit 0 allows input denormals and bit 1 allows output denormals.
 /// FP16_OVFL clamps finite overflow to signed maximum finite F16 regardless of round mode, but does
-/// not clamp true infinity or divide-by-zero results.
+/// not clamp true infinity or divide-by-zero results. RSQ uses the shared approximation
+/// and nearest-even result rounding independently of the guest rounding mode.
 /// @param operation Transcendental operation to execute.
 /// @param source F16 source value represented exactly as an F32 value.
 /// @param absolute Whether to clear the source sign bit before evaluation.
@@ -373,9 +374,14 @@ inline uint32_t execute_f16(Operation operation, float source, bool absolute, bo
   source = detail::apply_source_modifiers(source, absolute, negate);
   source = detail::flush_input_f16(source, denorm_mode);
   source = detail::quiet_nan(source);
-  const detail::EvaluationResult value = detail::apply_output_modifiers(
-      detail::evaluate(operation, static_cast<double>(source)), omod, clamp);
-  uint16_t result = detail::round_f64_to_f16(value, round_mode, fp16_ovfl);
+  const detail::EvaluationResult evaluated =
+      operation == Operation::RSQ
+          ? detail::EvaluationResult{util::amdgpu_rsq_f16(source, denorm_mode),
+                                     detail::ResultProvenance::VALUE}
+          : detail::evaluate(operation, static_cast<double>(source));
+  const detail::EvaluationResult value = detail::apply_output_modifiers(evaluated, omod, clamp);
+  uint16_t result =
+      detail::round_f64_to_f16(value, operation == Operation::RSQ ? 0 : round_mode, fp16_ovfl);
   if (((denorm_mode & 2u) == 0 || omod != 0) && (result & 0x7c00u) == 0 && (result & 0x03ffu) != 0)
     result &= 0x8000u;
   return result;

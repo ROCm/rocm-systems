@@ -90,6 +90,9 @@ inline void f16_to_f32_block(const uint16_t *src, float *dst, size_t n) {
   for (; i < n; ++i)
     dst[i] = f16_to_f32(src[i]);
 }
+
+/// @brief Round F32 to F16 with nearest-even rounding, preserving retained NaN payload bits.
+/// @details If truncation discards the entire payload, keep bit 0 to avoid producing infinity.
 inline uint16_t f32_to_f16(float val) {
   uint32_t f = std::bit_cast<uint32_t>(val);
   uint32_t sign = (f >> 16) & 0x8000;
@@ -97,8 +100,10 @@ inline uint16_t f32_to_f16(float val) {
   uint32_t f_mant = f & 0x7FFFFF;
 
   if (f_exp == 0xFF) {
-    if (f_mant)
-      return static_cast<uint16_t>(sign | 0x7C00 | (f_mant >> 13) | 1);
+    if (f_mant) {
+      const uint32_t payload = f_mant >> 13;
+      return static_cast<uint16_t>(sign | 0x7C00 | (payload != 0 ? payload : 1));
+    }
     return static_cast<uint16_t>(sign | 0x7C00);
   }
 
@@ -142,6 +147,7 @@ inline uint16_t f32_to_f16_mode(float val, bool fp16_ovfl) {
   return result;
 }
 
+/// @brief Truncate F32 to F16 with the same NaN payload policy as f32_to_f16.
 inline uint16_t f32_to_f16_rtz(float val) {
   uint32_t f = std::bit_cast<uint32_t>(val);
   uint32_t sign = (f >> 16) & 0x8000;
@@ -149,8 +155,10 @@ inline uint16_t f32_to_f16_rtz(float val) {
   uint32_t f_mant = f & 0x7FFFFF;
 
   if (f_exp == 0xFF) {
-    if (f_mant)
-      return static_cast<uint16_t>(sign | 0x7C00 | (f_mant >> 13) | 1);
+    if (f_mant) {
+      const uint32_t payload = f_mant >> 13;
+      return static_cast<uint16_t>(sign | 0x7C00 | (payload != 0 ? payload : 1));
+    }
     return static_cast<uint16_t>(sign | 0x7C00);
   }
 

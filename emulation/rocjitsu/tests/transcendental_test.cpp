@@ -66,6 +66,34 @@ TEST(TranscendentalTest, RsqF32SpecialCases) {
   EXPECT_FLOAT_EQ(rsq_f32(4.0f), 0.5f);
 }
 
+TEST(TranscendentalTest, RsqF32MatchesPhysicalRdna3AndRdna4) {
+  const uint32_t cases[][2] = {
+      {0x3f800000u, 0x3f800000u}, {0x3f800001u, 0x3f7fffffu}, {0x3f83ffffu, 0x3f7c1765u},
+      {0x3f840000u, 0x3f7c1764u}, {0x3f8040c4u, 0x3f7fbf55u}, {0x3f80cab3u, 0x3f7f363du},
+      {0x3fbfffffu, 0x3f5105ecu}, {0x3fc00000u, 0x3f5105ecu}, {0x3fffffffu, 0x3f3504f3u},
+      {0x40000000u, 0x3f3504f3u}, {0x40000001u, 0x3f3504f2u}, {0x4003ffffu, 0x3f32416au},
+      {0x40040000u, 0x3f32416au}, {0x403fffffu, 0x3f13cd3bu}, {0x40400000u, 0x3f13cd3au},
+      {0x407fffffu, 0x3f000000u}, {0x00000000u, 0x7f800000u}, {0x80000000u, 0xff800000u},
+      {0x00000001u, 0x7f800000u}, {0x80000001u, 0xff800000u}, {0xbf800000u, 0xffc00000u},
+      {0xff800000u, 0xffc00000u}, {0x7f800000u, 0x00000000u}, {0x7fa12345u, 0x7fe12345u},
+      {0xffa12345u, 0xffe12345u},
+  };
+  for (const auto &test : cases)
+    EXPECT_EQ(std::bit_cast<uint32_t>(rsq_f32(std::bit_cast<float>(test[0]))), test[1])
+        << std::hex << test[0];
+}
+
+TEST(TranscendentalTest, RsqF32CompleteNormalizedHardwareDigest) {
+  // FNV-style hash of raw result words captured independently on gfx1100 and gfx1201.
+  // Cover every mantissa in both exponent parities without storing the 64 MiB capture.
+  uint64_t digest = 14695981039346656037ull;
+  for (uint32_t index = 0; index < (1u << 24); ++index) {
+    const float input = std::bit_cast<float>(0x3f800000u + index);
+    digest = (digest ^ std::bit_cast<uint32_t>(rsq_f32(input))) * 1099511628211ull;
+  }
+  EXPECT_EQ(digest, 0x010bc79eb6e48cafull);
+}
+
 TEST(TranscendentalTest, SqrtF32SpecialCases) {
   EXPECT_TRUE(std::isnan(sqrt_f32(-1.0f)));
   EXPECT_EQ(sqrt_f32(0.0f), 0.0f);

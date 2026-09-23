@@ -18654,12 +18654,14 @@ inline void execute_v_rndne_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_rsq_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   if (wf.fp16_ovfl()) {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) {
-      return util::f32_to_f16_ovfl_simd(util::rsq_f32_simd(util::f16_to_f32_simd(a)));
+    ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [&wf](auto a) {
+      return util::f32_to_f16_ovfl_simd(
+          util::rsq_f16_simd(util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64()));
     });
   } else {
-    ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) {
-      return util::f32_to_f16_simd(util::rsq_f32_simd(util::f16_to_f32_simd(a)));
+    ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [&wf](auto a) {
+      return util::f32_to_f16_simd(
+          util::rsq_f16_simd(util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64()));
     });
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -18670,15 +18672,18 @@ inline void execute_v_rsq_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
         inst, wf, inst.vdst, lane,
         amdgpu::sdwa::round_f16_result(
             inst, wf,
-            amdgpu::transcendental::rsq_f32(util::f16_to_f32(
-                static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)))),
+            amdgpu::transcendental::rsq_f16(
+                util::f16_to_f32(
+                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))),
+                wf.fp_denorm_mode_f16_f64()),
             wf.fp16_ovfl()));
   }
 }
 
 template <typename Inst>
 inline void execute_v_rsq_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16([](auto a) { return util::rsq_f32_simd(a); });
+  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16(
+      [&wf](auto a) { return util::rsq_f16_simd(a, wf.fp_denorm_mode_f16_f64()); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -18690,15 +18695,17 @@ inline void execute_v_rsq_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
                 inst, wf,
                 [&]() {
                   float v = [&]() {
-                    float v = amdgpu::transcendental::rsq_f32([&]() {
-                      float sv = util::f16_to_f32(static_cast<uint16_t>(
-                          amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
-                      if (inst.inst_.abs & (1u << 0))
-                        sv = std::fabs(sv);
-                      if (inst.inst_.neg & (1u << 0))
-                        sv = -sv;
-                      return sv;
-                    }());
+                    float v = amdgpu::transcendental::rsq_f16(
+                        [&]() {
+                          float sv = util::f16_to_f32(static_cast<uint16_t>(
+                              amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
+                          if (inst.inst_.abs & (1u << 0))
+                            sv = std::fabs(sv);
+                          if (inst.inst_.neg & (1u << 0))
+                            sv = -sv;
+                          return sv;
+                        }(),
+                        wf.fp_denorm_mode_f16_f64());
                     const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
                         wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
                         inst.inst_.omod);

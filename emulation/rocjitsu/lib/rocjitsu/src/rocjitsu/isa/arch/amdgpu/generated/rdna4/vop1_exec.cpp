@@ -1978,11 +1978,13 @@ void VRsqF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::try_execute_words_simd<1, true, true, 1>(inst, wf, [&](auto a) {
         return std::bit_cast<util::native<uint32_t>>(([&](auto a) {
           if (wf.fp16_ovfl())
-            return ([](auto a) {
-              return util::f32_to_f16_ovfl_simd(util::rsq_f32_simd(util::f16_to_f32_simd(a)));
+            return ([&wf](auto a) {
+              return util::f32_to_f16_ovfl_simd(
+                  util::rsq_f16_simd(util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64()));
             })(a);
-          return ([](auto a) {
-            return util::f32_to_f16_simd(util::rsq_f32_simd(util::f16_to_f32_simd(a)));
+          return ([&wf](auto a) {
+            return util::f32_to_f16_simd(
+                util::rsq_f16_simd(util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64()));
           })(a);
         })(std::bit_cast<util::native<uint32_t>>(a)));
       }))
@@ -1995,8 +1997,9 @@ void VRsqF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
         *this, wf, vdst, lane,
         amdgpu::sdwa::round_f16_result(
             *this, wf,
-            amdgpu::transcendental::rsq_f32(util::f16_to_f32(
-                static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)))),
+            amdgpu::transcendental::rsq_f16(util::f16_to_f32(static_cast<uint16_t>(
+                                                amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                                            wf.fp_denorm_mode_f16_f64()),
             wf.fp16_ovfl()));
   }
 }
@@ -2021,11 +2024,13 @@ RJ_NOINLINE void VRsqF16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::try_execute_words_simd<1, true, true, 1>(inst, wf, [&](auto a) {
         return std::bit_cast<util::native<uint32_t>>(([&](auto a) {
           if (wf.fp16_ovfl())
-            return ([](auto a) {
-              return util::f32_to_f16_ovfl_simd(util::rsq_f32_simd(util::f16_to_f32_simd(a)));
+            return ([&wf](auto a) {
+              return util::f32_to_f16_ovfl_simd(
+                  util::rsq_f16_simd(util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64()));
             })(a);
-          return ([](auto a) {
-            return util::f32_to_f16_simd(util::rsq_f32_simd(util::f16_to_f32_simd(a)));
+          return ([&wf](auto a) {
+            return util::f32_to_f16_simd(
+                util::rsq_f16_simd(util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64()));
           })(a);
         })(std::bit_cast<util::native<uint32_t>>(a)));
       }))
@@ -2038,8 +2043,9 @@ RJ_NOINLINE void VRsqF16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
         *this, wf, vdst, lane,
         amdgpu::sdwa::round_f16_result(
             *this, wf,
-            amdgpu::transcendental::rsq_f32(util::f16_to_f32(
-                static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)))),
+            amdgpu::transcendental::rsq_f16(util::f16_to_f32(static_cast<uint16_t>(
+                                                amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
+                                            wf.fp_denorm_mode_f16_f64()),
             wf.fp16_ovfl()));
   }
   dpp_write_mask_scope_.restore();

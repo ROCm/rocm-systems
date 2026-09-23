@@ -5,6 +5,7 @@
 #define UTIL_SIMD_H_
 
 #include "util/amdgpu_rcp.h"
+#include "util/amdgpu_rsq.h"
 #include "util/bit.h"
 
 #include <bit>
@@ -609,9 +610,11 @@ inline native<uint32_t> f32_to_f16_simd(native<float> val) {
   stdx::where(fe < 102u, out) = sign;
   stdx::where(fe >= 143u && fe <= 254u, out) = sign | 0x7C00u;
 
-  // Inf / NaN (fe == 255): NaN keeps payload MSBs and forces the low bit.
+  // Inf / NaN (fe == 255): retain payload MSBs, keeping NaNs distinct from infinity.
   stdx::where(fe == 255u, out) = sign | 0x7C00u;
-  stdx::where(fe == 255u && fm != 0u, out) = sign | 0x7C00u | (fm >> 13) | 1u;
+  U payload = fm >> 13;
+  stdx::where(payload == 0u, payload) = 1u;
+  stdx::where(fe == 255u && fm != 0u, out) = sign | 0x7C00u | payload;
 
   return out;
 }
@@ -653,7 +656,9 @@ inline native<uint32_t> f32_to_f16_rtz_simd(native<float> val) {
   stdx::where(fe >= 143u && fe <= 254u, out) = sign | 0x7BFFu;
 
   stdx::where(fe == 255u, out) = sign | 0x7C00u;
-  stdx::where(fe == 255u && fm != 0u, out) = sign | 0x7C00u | (fm >> 13) | 1u;
+  U payload = fm >> 13;
+  stdx::where(payload == 0u, payload) = 1u;
+  stdx::where(fe == 255u && fm != 0u, out) = sign | 0x7C00u | payload;
 
   return out;
 }
@@ -824,7 +829,7 @@ inline double trunc_scalar(double a) { return quiet_snan_scalar(a, std::trunc(a)
 /// `amdgpu::transcendental::flush_denorm_f32`: a lane with biased exponent 0 and
 /// nonzero mantissa becomes ±0 (sign preserved); every other lane (normal, Inf,
 /// NaN, ±0) passes through unchanged. AMD transcendental micro-ops always run in
-/// FTZ mode, so the f32 rsq/sqrt/exp/log SIMD ports below funnel through this.
+/// FTZ mode, so the f32 sqrt/exp/log SIMD ports below funnel through this.
 inline native<float> flush_denorm_f32_simd(native<float> v) {
   using U = native<uint32_t>;
   U b = std::bit_cast<U>(v);
@@ -834,12 +839,12 @@ inline native<float> flush_denorm_f32_simd(native<float> v) {
 
 /// Vector ports of `amdgpu::transcendental::*_f32`, mirroring the scalar
 /// reference body bit-for-bit so the VOP1 SIMD fast path agrees with the
-/// forced-scalar path on every lane. Reciprocal uses the shared integer hardware mapping;
+/// forced-scalar path on every lane. RCP and RSQ use shared integer hardware mappings;
 /// the other helpers use host arithmetic with explicit NaN and FTZ handling.
-/// The f16 operations reuse these helpers after promotion to f32.
+/// F16 operations use promoted inputs; RSQ additionally applies the F16 input-denormal mode.
 // Canonical positive quiet-NaN (f32), broadcast across the vector. Shared by
 // the transcendental fast paths below, which blend it into out-of-domain
-// lanes (negative sqrt/rsqrt, log of a negative) to match the scalar refs.
+// lanes (negative sqrt or log) to match the scalar refs.
 inline const native<float> kQNaN = std::bit_cast<native<float>>(native<uint32_t>(0x7FC00000u));
 
 inline native<float> rcp_f32_simd(native<float> a) {
@@ -848,12 +853,13 @@ inline native<float> rcp_f32_simd(native<float> a) {
 }
 
 inline native<float> rsq_f32_simd(native<float> a) {
-  native<float> x = flush_denorm_f32_simd(a);
-  native<float> r = flush_denorm_f32_simd(native<float>(1.0f) / stdx::sqrt(x));
-  stdx::where(x < native<float>(0.0f), r) = kQNaN; // negatives incl -Inf -> qNaN
-  stdx::where(stdx::isnan(a), r) =
-      std::bit_cast<native<float>>(std::bit_cast<native<uint32_t>>(a) | 0x00400000u);
-  return r;
+  return map_native_convert_scalar<float, float>(a,
+                                                 [](float value) { return amdgpu_rsq_f32(value); });
+}
+
+inline native<float> rsq_f16_simd(native<float> a, uint32_t denorm_mode) {
+  return map_native_convert_scalar<float, float>(
+      a, [denorm_mode](float value) { return amdgpu_rsq_f16(value, denorm_mode); });
 }
 
 inline native<float> sqrt_f32_simd(native<float> a) {

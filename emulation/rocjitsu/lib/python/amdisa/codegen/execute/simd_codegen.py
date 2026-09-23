@@ -704,9 +704,8 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         ' auto f = util::f16_to_f32_simd(a);'
         ' return util::f32_to_f16_simd(f - util::floor_simd(f)); }',
     ),
-    # f16 transcendentals mirror the scalar f32_to_f16(<op>_f32(f16_to_f32(x)))
-    # by applying the f32-domain util::*_f32_simd helper (FTZ flush + canonical
-    # qNaN / NaN-input guards) on the f16->f32 intermediate.
+    # f16 transcendentals operate on promoted inputs. RSQ applies the F16
+    # input-denormal policy; the other operations reuse the F32 helpers.
     'v_rcp_f16_vop1': (
         'uint32_t',
         'uint32_t',
@@ -716,8 +715,9 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     'v_rsq_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) {'
-        ' return util::f32_to_f16_simd(util::rsq_f32_simd(util::f16_to_f32_simd(a))); }',
+        '[&wf](auto a) {'
+        ' return util::f32_to_f16_simd(util::rsq_f16_simd('
+        'util::f16_to_f32_simd(a), wf.fp_denorm_mode_f16_f64())); }',
     ),
     'v_sqrt_f16_vop1': (
         'uint32_t',
@@ -1996,8 +1996,8 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
 
 # VOP3 f16 unary: widen f16->f32, apply abs/neg, op, omod/clamp, narrow back.
 # Rounding ops (ceil/floor/trunc/rndne) have no FTZ. sqrt is also no-FTZ
-# (transcendental::sqrt_f32 keeps denormals). The four transcendentals
-# (rcp/rsq/exp/log) reuse util::*_f32_simd which already wraps the scalar
+# (transcendental::sqrt_f32 keeps denormals). The remaining transcendentals
+# (rcp/exp/log) reuse util::*_f32_simd which already wraps the scalar
 # transcendental::flush_denorm_f32 carve-outs (FTZ input + matching ±0/Inf
 # blends + NaN-passthrough), so the f16 scalar
 # f32_to_f16(transcendental::op_f32(f16_to_f32(...))) maps directly.
@@ -2014,7 +2014,9 @@ SIMD_VOP3_UNARY_FP16: dict[str, str] = {
         ' return r; }'
     ),
     'v_rcp_f16_vop3': '[](auto a) { return util::rcp_f32_simd(a); }',
-    'v_rsq_f16_vop3': '[](auto a) { return util::rsq_f32_simd(a); }',
+    'v_rsq_f16_vop3': (
+        '[&wf](auto a) { return util::rsq_f16_simd(a, wf.fp_denorm_mode_f16_f64()); }'
+    ),
     'v_exp_f16_vop3': '[](auto a) { return util::exp_f32_simd(a); }',
     'v_log_f16_vop3': '[](auto a) { return util::log_f32_simd(a); }',
     # v_fract_f16: x - floor(x) in the widened f32 domain (the glue widens/narrows
