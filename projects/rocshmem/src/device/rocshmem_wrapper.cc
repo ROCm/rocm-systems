@@ -33,7 +33,7 @@
  * - RMA: put/get/p/g + variants (wave, wg, nbi)
  * - AMO: standard, extended, bitwise
  * - Sync: wait_until variants, test
- * - Signal: put_signal variants
+ * - Signal: put_signal and standalone operations
  *
  * Intentionally excluded (internal use only):
  * - Context methods
@@ -373,6 +373,21 @@ ROCSHMEM_DEVICE_API uint64_t rocshmem_signal_fetch_wg(
 ROCSHMEM_DEVICE_API uint64_t rocshmem_signal_fetch_wave(
     const uint64_t *sig_addr) {
   return rocshmem::rocshmem_signal_fetch_wave(sig_addr);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_signal_add(
+    uint64_t *sig_addr, uint64_t signal, int pe) {
+  rocshmem::rocshmem_signal_add(sig_addr, signal, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_signal_set(
+    uint64_t *sig_addr, uint64_t signal, int pe) {
+  rocshmem::rocshmem_signal_set(sig_addr, signal, pe);
+}
+
+ROCSHMEM_DEVICE_API uint64_t rocshmem_signal_wait_until(
+    uint64_t *sig_addr, int cmp, uint64_t cmp_value) {
+  return rocshmem::rocshmem_signal_wait_until(sig_addr, cmp, cmp_value);
 }
 
 // The explicit instantiation pattern pre-compiles all type variants into bitcode,
