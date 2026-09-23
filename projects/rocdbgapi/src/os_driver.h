@@ -141,6 +141,8 @@ struct os_agent_info_t
   bool precise_memory_supported{ false };
   /* indicates if precise ALU operations reporting is supported.  */
   bool precise_alu_exceptions_supported{ false };
+  /* indicates if LDS out-of-range accesses reporting is supported.  */
+  bool lds_exception_supported{ false };
   /* indicates that the command process firmware is supported.  */
   bool firmware_supported{ false };
   /* indicates that the trap temporaries are always set up.  */

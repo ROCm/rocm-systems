@@ -650,6 +650,7 @@ process_t::update_agents ()
 
   std::optional<bool> precise_memory_supported;
   std::optional<bool> precise_alu_exceptions_supported;
+  std::optional<bool> lds_exception_supported;
 
   /* Add new agents to the process.  */
   for (auto &&agent_info : agent_infos)
@@ -686,11 +687,13 @@ process_t::update_agents ()
 
       if (agent->supports_debugging ())
         {
-          precise_memory_supported = precise_memory_supported.value_or (true)
-                                     && agent_info.precise_memory_supported;
+          precise_memory_supported = (precise_memory_supported.value_or (true)
+                                      && agent_info.precise_memory_supported);
           precise_alu_exceptions_supported
-            = precise_alu_exceptions_supported.value_or (true)
-              && agent_info.precise_alu_exceptions_supported;
+            = (precise_alu_exceptions_supported.value_or (true)
+               && agent_info.precise_alu_exceptions_supported);
+          lds_exception_supported = (lds_exception_supported.value_or (true)
+                                     && agent_info.lds_exception_supported);
         }
     }
 
@@ -713,6 +716,7 @@ process_t::update_agents ()
   m_supports_precise_memory = precise_memory_supported.value_or (false);
   m_supports_precise_alu_exceptions
     = precise_alu_exceptions_supported.value_or (false);
+  m_supports_lds_exception = lds_exception_supported.value_or (false);
 }
 
 void
