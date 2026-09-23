@@ -8670,6 +8670,60 @@
               ]
             }
           }
+        },
+        {
+          "id": "barrier-drop-histogram-initialization-preset-max-banks-256",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed native histogram ELF fnv1a64:6d2e968a699a17e3, matching the clean histogram log. Extracted from torch_gfx1201.kpack entry lib/libtorch_hip.so#149 without GPU execution. The native allowlist selects kernelHistogram1D<float,float,...CUDAHistogramMemoryType=0,...lambda#2> during the first fp32 case. Cooperative LDS zero initialization includes ds_store_b32 at VA0x74f90. EXEC restores at 0x74fb0/0x74fb8 before unconditional publication signal/wait 0x74fc8/0x74fe4 (.text+0x3d8c8/0x3d8e4, occurrences 0/1). Subsequent data-dependent ds_add_f32 operations, including VA0x75690, update bins initialized by peer waves. Remove the initial pair; retain the final reduction barrier 0x756a4/0x756a8. The recorded nonempty input reaches initialization and accumulation. Binary extraction metadata, final ISA and inventory: rdna4-20260923/histc-debug. Require 6/8 detections and matching clean correctness, applicable coverage, completeness and health checks. Default searches named presets; initial SuperCollider uses delay=0 throughout. Prospective watchpoint-capacity calibration at max with 256 banks: require matching clean bank count and 6/8 admitted/reached healthy fault detections. Earlier max trials had zero detections and saturated windows."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:6d2e968a699a17e3|kernel=_ZN2at4cuda17kernelHistogram1DIfflLi1ELi2ELin1ELNS0_23CUDAHistogramMemoryTypeE0EZNS0_21CUDA_tensor_histogramIffLb0EEEbNS_6TensorES4_S4_lNS_14AccumulateTypeIT0_Lb1EE4typeES8_NS0_13TensorArgTypeES9_S9_EUllE0_EEvNS0_6detail10TensorInfoIT_T1_EESF_NSC_IKS6_SE_EElS8_S8_SE_T6_|kind=barrier|pc=0x000000000003d8c8|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:6d2e968a699a17e3|kernel=_ZN2at4cuda17kernelHistogram1DIfflLi1ELi2ELin1ELNS0_23CUDAHistogramMemoryTypeE0EZNS0_21CUDA_tensor_histogramIffLb0EEEbNS_6TensorES4_S4_lNS_14AccumulateTypeIT0_Lb1EE4typeES8_NS0_13TensorArgTypeES9_S9_EUllE0_EEvNS0_6detail10TensorInfoIT_T1_EESF_NSC_IKS6_SE_EElS8_S8_SE_T6_|event=barrier|pc=0x000000000003d8c8|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:6d2e968a699a17e3|kernel=_ZN2at4cuda17kernelHistogram1DIfflLi1ELi2ELin1ELNS0_23CUDAHistogramMemoryTypeE0EZNS0_21CUDA_tensor_histogramIffLb0EEEbNS_6TensorES4_S4_lNS_14AccumulateTypeIT0_Lb1EE4typeES8_NS0_13TensorArgTypeES9_S9_EUllE0_EEvNS0_6detail10TensorInfoIT_T1_EESF_NSC_IKS6_SE_EElS8_S8_SE_T6_|event=barrier|pc=0x000000000003d8e4|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_WATCHPOINT_BANKS": "256"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_WATCHPOINT_BANKS": "256"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_WATCHPOINT_BANKS": "256"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_WATCHPOINT_BANKS": "256"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_WATCHPOINT_BANKS": "256"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_WATCHPOINT_BANKS": "256"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_WATCHPOINT_BANKS": "256"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max",
+                  "RJ_CONSAN_WATCHPOINT_BANKS": "256"
+                }
+              ]
+            }
+          }
         }
       ]
     },

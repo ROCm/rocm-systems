@@ -908,6 +908,11 @@ def _clean_environment(
             )
         environment["RJ_CONSAN_ALLOW_PROVABLY_SAME_VALUE_WRITE_RACES"] = same_value
     preset = os.environ.get("CONSAN_VALIDATION_DEFAULT_PRESET")
+    banks = os.environ.get("CONSAN_VALIDATION_WATCHPOINT_BANKS")
+    if profile == "default" and banks is not None:
+        if not banks.isascii() or not banks.isdecimal() or int(banks) > 0xFFFFFFFF:
+            raise ValidationError("invalid CONSAN_VALIDATION_WATCHPOINT_BANKS")
+        environment["RJ_CONSAN_WATCHPOINT_BANKS"] = banks
     if profile == "default" and preset is not None:
         if preset not in {"low", "default", "high", "higher", "max"}:
             raise ValidationError("invalid CONSAN_VALIDATION_DEFAULT_PRESET")

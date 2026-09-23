@@ -77,6 +77,13 @@ Run a matching clean comparator and precommit fault expectations for a changed
 preset. Label the preset explicitly in the ledger; a denser configuration's
 success cannot qualify the standard profile or erase its detection misses.
 
+For a Default watchpoint-capacity investigation, set
+`CONSAN_VALIDATION_WATCHPOINT_BANKS` to the hook bank-count override (unsigned
+32-bit integer; zero retains automatic sizing). The runner applies it to both
+clean and fault runs. Record the bank count alongside the preset and require a
+matching clean comparator; a preset-only result does not qualify that override.
+Native and SuperCollider runs ignore this selector.
+
 Default-engine presets apply to Default only. SuperCollider already defaults to
 runtime stride 1 and rejects independent workgroup/cell selectors; its replay
 and perturbation evidence must be assessed separately from Default event counts.

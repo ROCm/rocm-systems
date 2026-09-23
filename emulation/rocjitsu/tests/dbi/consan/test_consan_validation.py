@@ -6633,6 +6633,29 @@ class FaultSpecSnapshotTest(unittest.TestCase):
 
 
 class DefaultPresetEnvironmentTest(unittest.TestCase):
+    def test_watchpoint_banks_match_clean_and_fault_controls(self):
+        with temporary_root() as root, mock.patch.dict(os.environ, {
+            "CONSAN_VALIDATION_WATCHPOINT_BANKS": "256",
+            "RJ_CONSAN_WATCHPOINT_BANKS": "1",
+        }, clear=True):
+            workload = validation.WORKLOAD_BY_ID["pytorch-torch-histc"]
+            clean = validation_commands._clean_environment(
+                "default", workload, root / "hook.so", "gfx1201", root)
+            fault = validation_faults._fault_trial_environment(
+                "default", workload, root / "hook.so", "gfx1201",
+                {"environment": {}}, {}, {}, root)
+            for environment in (clean, fault):
+                self.assertEqual(environment["RJ_CONSAN_WATCHPOINT_BANKS"], "256")
+            for profile in (None, "supercollider"):
+                environment = validation_commands._clean_environment(
+                    profile, workload, root / "hook.so", "gfx1201", root)
+                self.assertNotIn("RJ_CONSAN_WATCHPOINT_BANKS", environment)
+            for value in ("-1", "4294967296", "typo", ""):
+                os.environ["CONSAN_VALIDATION_WATCHPOINT_BANKS"] = value
+                with self.assertRaises(validation.ValidationError):
+                    validation_commands._clean_environment(
+                        "default", workload, root / "hook.so", "gfx1201", root)
+
     def test_preset_applies_to_default_clean_and_fault_only(self):
         with temporary_root() as root, mock.patch.dict(os.environ, {
             "CONSAN_VALIDATION_DEFAULT_PRESET": "max",
