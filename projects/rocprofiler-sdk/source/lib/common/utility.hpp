@@ -161,6 +161,12 @@ get_pid()
 #endif
 }
 
+// The process whose activity is being recorded, which is what output identifies a run by.
+// On Linux the tool library is loaded into that process, so this is get_pid(). On Windows
+// the ETW consumer runs in a separate host process and rocprofv3-launch names its child.
+pid_t
+get_traced_pid();
+
 // Windows does not keep a parent link in the process itself, so this is a system-wide
 // snapshot lookup there rather than the constant-time read getppid() is. Returns 0 if the
 // parent cannot be determined.

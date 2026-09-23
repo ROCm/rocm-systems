@@ -23,6 +23,7 @@
 
 #include "lib/common/utility.hpp"
 #include "lib/common/defines.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 
 #if !defined(_WIN32)
@@ -102,6 +103,18 @@ get_clock_period_ns_impl(clockid_t _clk_id)
 #else
     (void) _clk_id;
     return 1;  // QPC already returns ns in get_ticks; period = 1 ns
+#endif
+}
+
+pid_t
+get_traced_pid()
+{
+#if !defined(_WIN32)
+    return get_pid();
+#else
+    // Set by rocprofv3-launch for the child it created. Same variable the ETW consumer filters
+    // on, so the two can never disagree about which process a run describes.
+    return static_cast<pid_t>(get_env("ROCPROF_ETW_TARGET_PID", static_cast<uint32_t>(get_pid())));
 #endif
 }
 

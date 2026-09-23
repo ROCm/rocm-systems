@@ -3673,7 +3673,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         start_context(get_client_ctx(), "primary rocprofv3");
     }
 
-    tool_metadata->set_process_id(common::get_pid(), common::get_ppid());
+    // When the traced process is not this one, this process is its parent: rocprofv3-launch
+    // created it.
+    auto traced_pid = common::get_traced_pid();
+    auto parent_pid = (traced_pid == common::get_pid()) ? common::get_ppid() : common::get_pid();
+
+    tool_metadata->set_process_id(traced_pid, parent_pid);
 
     // set_process_id should set process_start_ns unless it cannot read from /proc/<pid>/stat
     if(tool_metadata->process_start_ns == 0)

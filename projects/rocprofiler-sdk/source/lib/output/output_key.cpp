@@ -290,7 +290,7 @@ output_keys(std::string _tag)
 
     auto _dmp_size      = fmt::format("{}", (_mpi_size) > 0 ? _mpi_size : 1);
     auto _dmp_rank      = fmt::format("{}", (_mpi_rank) > 0 ? _mpi_rank : 0);
-    auto _proc_id       = fmt::format("{}", common::get_pid());
+    auto _proc_id       = fmt::format("{}", common::get_traced_pid());
     auto _parent_id     = fmt::format("{}", common::get_ppid());
     auto _pgroup_id     = fmt::format("{}", get_process_group_id());
     auto _session_id    = fmt::format("{}", get_session_id());
