@@ -1137,7 +1137,12 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
                     len(payload.splitlines()), 2, "layout newlines reached the csv payload"
                 )
                 self.assertEqual(
-                    dict(parsed[0]), {"error": exc.json_message["error"], "code": str(exc.value)}
+                    dict(parsed[0]),
+                    {
+                        "error": exc.json_message["error"],
+                        "code": str(exc.value),
+                        "error_type": exc.json_message["error_type"],
+                    },
                 )
 
     def test_every_exception_is_covered_by_the_csv_round_trip(self):
@@ -1191,7 +1196,7 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
                         json_mod.loads(printed)["code"], cli_exc.library_code_to_exit_code(code)
                     )
                 elif fmt == "csv":
-                    self.assertEqual(printed.splitlines()[0], "error,code")
+                    self.assertEqual(printed.splitlines()[0], "error,code,error_type")
 
     # ---- --file overwrite prompt: both ways of declining -> USER_ABORTED ----
     def test_output_file_prompt_declined_exits_user_aborted(self):

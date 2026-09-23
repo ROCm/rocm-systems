@@ -208,10 +208,27 @@ def _get_error_name(error_code):
     return f"AMDSMI_STATUS_{code}"
 
 
-def _csv_error(message, code):
+def _get_error_type_name(value):
+    """Return the name for an exit code, whichever space it's from.
+
+    Tries the CLI-invented ``AmdSmiExitCode`` band first (e.g. 198 ->
+    'INVALID_PARAMETER_VALUE'), since those values fall outside the library's
+    status range and ``_get_error_name`` would otherwise synthesize a bogus
+    'AMDSMI_STATUS_<code>' for them. Falls back to ``_get_error_name`` for a
+    real library AMDSMI_STATUS_* value.
+    """
+    try:
+        return AmdSmiExitCode(value).name
+    except ValueError:
+        return _get_error_name(value)
+
+
+def _csv_error(message, code, error_type):
     # Messages carry commas and newlines (option lists, multi-line hints).
     buf = io.StringIO()
-    csv.writer(buf, lineterminator="\n").writerows([["error", "code"], [message, code]])
+    csv.writer(buf, lineterminator="\n").writerows(
+        [["error", "code", "error_type"], [message, code, error_type]]
+    )
     return buf.getvalue().rstrip("\n")
 
 
@@ -229,15 +246,23 @@ class AmdSmiException(Exception):
         self.device_type = ""
         self.value = 0
 
-    def _build_output_messages(self, common_message):
-        """Render *common_message* into each output format __str__ selects from."""
+    def _build_output_messages(self, common_message, error_type_name=None):
+        """Render *common_message* into each output format __str__ selects from.
+
+        *error_type_name* lets a subclass supply an already-resolved name (see
+        ``AmdSmiLibraryErrorException``, whose ``status_name`` is derived from
+        the raw library code, not the already-mapped ``self.value``).
+        """
         # json/csv are read a line at a time, so they carry the message without
         # the layout whitespace the human-readable hints use.
         flat = " ".join(common_message.split())
+        if error_type_name is None:
+            error_type_name = _get_error_type_name(self.value)
         self.json_message["error"] = flat
         self.json_message["code"] = self.value
-        self.csv_message = _csv_error(flat, self.value)
-        self.stdout_message = f"{common_message} Error code: {self.value}"
+        self.json_message["error_type"] = error_type_name
+        self.csv_message = _csv_error(flat, self.value, error_type_name)
+        self.stdout_message = f"{common_message} Error code: {self.value} [{error_type_name}]"
 
     def __str__(self):
         # Return message according to the current output format
@@ -419,7 +444,7 @@ class AmdSmiLibraryErrorException(AmdSmiException):
         self.status_message = detail if detail else _get_error_message(self.amdsmi_lib_code)
         common_message = f"[{self.status_name}] {self.status_message}"
 
-        self._build_output_messages(common_message)
+        self._build_output_messages(common_message, error_type_name=self.status_name)
 
 
 def library_code_to_exit_code(error_code):
