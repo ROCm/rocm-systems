@@ -419,3 +419,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `pytorch-rdna4-split-softmax` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round10/pytorch-rdna4-split-softmax-default`.
 - `pytorch-rdna4-split-softmax` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round10/pytorch-rdna4-split-softmax-supercollider`.
 - `pytorch-rdna4-llm-topk` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round10/pytorch-rdna4-llm-topk-default`.
+- `pytorch-rdna4-llm-topk` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round10/pytorch-rdna4-llm-topk-supercollider`.
