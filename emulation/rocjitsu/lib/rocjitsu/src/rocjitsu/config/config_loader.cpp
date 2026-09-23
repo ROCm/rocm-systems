@@ -1122,9 +1122,10 @@ extern "C" rj_status_t rj_config_available_host_threads(uint32_t *out_host_threa
   }
 }
 
-extern "C" rj_status_t rj_config_resolve_execution_threads(
-    const char *config_path, uint32_t budget, uint32_t host_threads, uint32_t *out_engines,
-    uint32_t *out_helpers, uint32_t *out_dispatch, size_t *inout_dispatch_count) {
+extern "C" rj_status_t
+rj_config_resolve_execution_threads(const char *config_path, uint32_t budget, uint32_t host_threads,
+                                    uint32_t *out_engines, uint32_t *out_helpers,
+                                    uint32_t *out_dispatch, size_t *inout_dispatch_count) {
   if (config_path == nullptr || *config_path == '\0' || out_engines == nullptr ||
       out_helpers == nullptr || inout_dispatch_count == nullptr)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;

@@ -770,6 +770,7 @@ dependencies = [
  "nix",
  "rj_backend_hotswap",
  "rj_backend_rocjitsu",
+ "rj_core",
  "rj_ctl",
  "serde",
  "serde_json",

@@ -280,6 +280,28 @@ function(rj_environment_has out variable)
     set(${out} "${_found}" PARENT_SCOPE)
 endfunction()
 
+# Set `option` in the TSAN_OPTIONS of an environment list, keeping
+# whatever that list already asked for.
+#
+# TSAN_OPTIONS is a colon-separated list of `flag=value`, so an entry
+# that is already there is extended rather than replaced; a list with no
+# entry gets one. Writes the whole environment list back to `out`.
+function(rj_environment_merge_tsan_options out option)
+    set(_merged)
+    set(_found FALSE)
+    foreach(_entry IN LISTS ARGN)
+        if(_entry MATCHES "^TSAN_OPTIONS=")
+            set(_found TRUE)
+            set(_entry "${_entry}:${option}")
+        endif()
+        list(APPEND _merged "${_entry}")
+    endforeach()
+    if(NOT _found)
+        list(APPEND _merged "TSAN_OPTIONS=${option}")
+    endif()
+    set(${out} "${_merged}" PARENT_SCOPE)
+endfunction()
+
 function(rj_set_default_runtime_dir name)
     get_property(_env TEST "${name}" PROPERTY ENVIRONMENT)
     rj_environment_has(_has_runtime_dir "ROCJITSU_RUNTIME_DIR" ${_env})
@@ -384,14 +406,19 @@ function(rj_add_test)
     # The Rust side is not left unchecked by it: `cargo test` runs that
     # code's own suites, and races there are the business of a build that
     # instruments Rust, which needs a toolchain this one does not pin.
+    #
+    # Merged into a TSAN_OPTIONS the registration already carries rather
+    # than skipped for it. The registrations that bring one bring a
+    # suppressions file, and a suppressions file is a statement about
+    # which reports to drop, not about whether the CLI should be judged
+    # at all — so overwriting it would lose the suppressions and standing
+    # aside would hand those tests back the five thousand reports.
     if(RJ_TSAN_SHARED_LIBRARY)
-        rj_environment_has(_has_tsan_options "TSAN_OPTIONS" ${ARG_ENVIRONMENT})
-        if(NOT _has_tsan_options)
-            list(
-                APPEND ARG_ENVIRONMENT
-                "TSAN_OPTIONS=ignore_noninstrumented_modules=1"
-            )
-        endif()
+        rj_environment_merge_tsan_options(
+            ARG_ENVIRONMENT
+            "ignore_noninstrumented_modules=1"
+            ${ARG_ENVIRONMENT}
+        )
     endif()
     # The CLI otherwise searches the ROCm install locations for the two
     # libraries it launches a workload with — the KMD interposer and the
@@ -586,7 +613,10 @@ if(RJ_HAVE_CLI)
         COMMAND ${RJ_CLI} check-vfio-user
     )
     if(NOT ROCJITSU_ENABLE_VFIO)
-        set_tests_properties(RocjitsuVfioCapabilityCheck PROPERTIES WILL_FAIL TRUE)
+        set_tests_properties(
+            RocjitsuVfioCapabilityCheck
+            PROPERTIES WILL_FAIL TRUE
+        )
     endif()
 endif()
 

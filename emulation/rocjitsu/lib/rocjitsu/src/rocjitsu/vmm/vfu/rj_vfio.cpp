@@ -12,14 +12,11 @@
 
 #include "rocjitsu/vmm/rj_vfio.h"
 
-#include <exception>
 #include <string>
 
 #include "rocjitsu/vmm/vfu/vfio_server.h"
-#include "util/log.h"
 
-extern "C" int rj_run_vfio_server(const char *config_path, const char *socket_path,
-                                  int ready_fd) {
+extern "C" int rj_run_vfio_server(const char *config_path, const char *socket_path, int ready_fd) {
   // The old CLI checked these before dispatching, and there is no useful
   // server to start without them. Reported as the failure exit status this
   // returns everywhere else rather than a distinct code: the caller's job is
@@ -36,13 +33,16 @@ extern "C" int rj_run_vfio_server(const char *config_path, const char *socket_pa
   // serving thread, every std::format on the way. Converted here to the status
   // this entry point already uses for "it did not start", the same way
   // rj_vm_create converts a bad config.
+  //
+  // The handler does no work of its own, deliberately. Formatting a message
+  // and handing it to the logger both allocate, and an allocation failure
+  // while handling an allocation failure leaves this frame by the one route
+  // it exists to close. `run_vfio_server` has already reported whatever it
+  // knows -- it logs its own failures and is where the detail lives -- so
+  // there is nothing here worth the risk of saying.
   try {
     return rocjitsu::run_vfio_server(std::string(config_path), std::string(socket_path), ready_fd);
-  } catch (const std::exception &error) {
-    util::Logger::warn(std::string("vfu: the server failed to start: ") + error.what());
-    return 1;
   } catch (...) {
-    util::Logger::warn("vfu: the server failed to start");
     return 1;
   }
 }

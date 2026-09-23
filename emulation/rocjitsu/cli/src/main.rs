@@ -492,9 +492,18 @@ fn looks_like_a_program(arg: &str) -> bool {
 /// never spliced in. It failed with "unexpected argument '--daemon'",
 /// while the same command with a bare `c.json` worked, which is why the
 /// case that covered this did not catch it.
+///
+/// Any operand at all, not one that looks like a path: a command found
+/// through `PATH` is a workload and looks like nothing in particular.
+/// `rocjitsu --daemon true` started a session and ran `true` in it,
+/// because `true` has no separator and names no file here — and a
+/// workload without a `--` is meant to be refused, not run. The
+/// daemon-only form is flags and their values throughout, so an operand
+/// left over from that walk is either a workload or a typo, and neither
+/// is something to splice `run` in front of.
 fn names_a_workload(opts: &[String]) -> bool {
     let known = rj_ctl::usage::AcceptedFlags::of(cli(), RUN);
-    rj_ctl::usage::first_operand(opts, &known).is_some_and(looks_like_a_program)
+    rj_ctl::usage::first_operand(opts, &known).is_some()
 }
 
 /// Whether the subcommand `name` names ends in a workload, and so has a
@@ -1200,6 +1209,12 @@ mod tests {
             &["rocjitsu", "--daemon", "./app"][..],
             &["rocjitsu", "--daemon", "--config", "c.json", "./app"][..],
             &["rocjitsu", "--daemon", "/usr/bin/env"][..],
+            // Found through `PATH`, so it has no separator and names no
+            // file here. It is still a workload, and it used to be run:
+            // the session came up and executed it, which is the opposite
+            // of refusing a workload that brought no `--`.
+            &["rocjitsu", "--daemon", "true"][..],
+            &["rocjitsu", "--daemon", "--config", "c.json", "env"][..],
         ] {
             assert_eq!(rewrite(argv), v_args(argv), "{argv:?} must be left alone");
         }

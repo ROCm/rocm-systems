@@ -25,6 +25,7 @@
 #include <format>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <stop_token>
 #include <thread>
 #include <unistd.h>
@@ -415,7 +416,19 @@ int run_vfio_server_impl(const std::string &config_path, const std::string &sock
 
 } // namespace
 
+namespace {
+/// Armed by @ref throw_from_next_vfio_server_for_test, cleared by the call it
+/// arms. Atomic because the tests that use it share a process with the serving
+/// threads of other cases, not because two of them race for it.
+std::atomic<bool> g_throw_for_test{false};
+} // namespace
+
+void throw_from_next_vfio_server_for_test() { g_throw_for_test.store(true); }
+
 int run_vfio_server(const std::string &config_path, const std::string &socket_path, int ready_fd) {
+  if (g_throw_for_test.exchange(false)) {
+    throw std::runtime_error("injected failure for the C boundary test");
+  }
   return run_vfio_server_impl(config_path, socket_path, ready_fd, std::nullopt);
 }
 

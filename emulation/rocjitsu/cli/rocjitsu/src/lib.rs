@@ -1030,35 +1030,78 @@ fn stage_config(config: &Path, dir: &Path) -> Result<PathBuf> {
     })?;
     let staged = dir.join(name);
 
-    // Before the config itself, so that reading the guest block below
-    // still reads the original next to its original sibling.
-    if let Some(guest) = guest::load(config)?
-        && !guest.simulator_config.is_empty()
-    {
-        let sibling = guest::simulator_config_path(config, &guest.simulator_config);
-        // An absolute `simulator_config` is as unreachable as the config
-        // was, but rewriting the reference would mean rewriting file
-        // contents, which nothing here does. Named in the error instead,
-        // where a user can act on it.
-        if Path::new(&guest.simulator_config).is_absolute() {
-            return Err(RocJITsuError::Other(format!(
-                "rocjitsu: dbt_guest.simulator_config {} is an absolute host path, \
-                 which a containerised session cannot reach. Make it relative to {}, \
-                 or mount it into the container yourself.",
-                sibling.display(),
-                config.display()
-            )));
-        }
-        let sibling_name = sibling.file_name().ok_or_else(|| {
-            RocJITsuError::Other(format!(
-                "rocjitsu: dbt_guest.simulator_config {} has no file name",
-                sibling.display()
-            ))
-        })?;
-        copy(&sibling, &dir.join(sibling_name))?;
+    let Some(guest) = guest::load(config)? else {
+        copy(config, &staged)?;
+        return Ok(staged);
+    };
+    if guest.simulator_config.is_empty() {
+        copy(config, &staged)?;
+        return Ok(staged);
     }
 
-    copy(config, &staged)?;
+    let sibling = guest::simulator_config_path(config, &guest.simulator_config);
+    // An absolute `simulator_config` is as unreachable as the config was,
+    // and it is not a reference this can relocate: an absolute path names
+    // a place on the host, and the point of staging is that the container
+    // has no such place. Named in the error instead, where a user can act
+    // on it.
+    if Path::new(&guest.simulator_config).is_absolute() {
+        return Err(RocJITsuError::Other(format!(
+            "rocjitsu: dbt_guest.simulator_config {} is an absolute host path, \
+             which a containerised session cannot reach. Make it relative to {}, \
+             or mount it into the container yourself.",
+            sibling.display(),
+            config.display()
+        )));
+    }
+
+    // Staged flat, under a name of this function's choosing, and the copy
+    // of the config is rewritten to match.
+    //
+    // A relative reference can name a subdirectory -- `hosts/host.json` is
+    // the shape the shipped guest configs use -- and staging flattens it.
+    // Copying the config verbatim then left it pointing at `hosts/host.json`
+    // beside a file called `host.json`, so a session that ran fine with a
+    // direct launch failed under `--image` before a container even started.
+    //
+    // The name is derived from the config's, not from the sibling's, so two
+    // references that end in the same basename cannot collide either: a
+    // guest config called `host.json` next to a `hosts/host.json` was a
+    // second way to lose one of the two files.
+    let staged_sibling_name = format!(
+        "{}.simulator_config.json",
+        Path::new(name)
+            .file_stem()
+            .unwrap_or(name)
+            .to_string_lossy()
+    );
+    copy(&sibling, &dir.join(&staged_sibling_name))?;
+
+    let text = std::fs::read_to_string(config).map_err(|e| {
+        RocJITsuError::Other(format!(
+            "rocjitsu: cannot read config {} to stage it: {e}",
+            config.display()
+        ))
+    })?;
+    let mut json: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        RocJITsuError::Other(format!(
+            "rocjitsu: cannot parse config {} to stage it: {e}",
+            config.display()
+        ))
+    })?;
+    json["dbt_guest"]["simulator_config"] = serde_json::Value::String(staged_sibling_name);
+    let rendered = serde_json::to_string_pretty(&json).map_err(|e| {
+        RocJITsuError::Other(format!(
+            "rocjitsu: cannot re-render config {} for staging: {e}",
+            config.display()
+        ))
+    })?;
+    std::fs::write(&staged, rendered).map_err(|e| {
+        RocJITsuError::Other(format!(
+            "rocjitsu: cannot stage {} for a containerised session: {e}",
+            config.display()
+        ))
+    })?;
     Ok(staged)
 }
 
@@ -1329,10 +1372,101 @@ mod tests {
 
         let staged = stage_config(&config, scratch.path()).unwrap();
         assert!(staged.exists(), "the guest config");
+        // Staged under a name this function chose, and the copy points at
+        // it -- see the nested case below for why the original name is
+        // not kept.
+        let reference = staged_simulator_config(&staged);
         assert!(
-            scratch.path().join("host.json").exists(),
+            scratch.path().join(&reference).exists(),
             "the sibling it names, without which the reference dangles"
         );
+    }
+
+    /// The reference and the staged file have to agree, including when
+    /// the reference names a subdirectory.
+    ///
+    /// `hosts/host.json` is the shape the shipped guest configs use.
+    /// Staging flattens it, so a config copied verbatim went on naming
+    /// `hosts/host.json` beside a file called `host.json`: the same
+    /// config succeeded with a direct launch and failed under `--image`,
+    /// before a container was ever started.
+    #[test]
+    fn staging_rewrites_a_nested_simulator_config_to_what_it_staged() {
+        let src = tempfile::tempdir().unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        std::fs::create_dir(src.path().join("hosts")).unwrap();
+        std::fs::write(
+            src.path().join("hosts/host.json"),
+            r#"{"vm": {}, "topology": {}}"#,
+        )
+        .unwrap();
+        let config = src.path().join("guest.json");
+        std::fs::write(
+            &config,
+            r#"{"dbt_guest": {"enabled": true, "guest_isa": "gfx950",
+                 "host_isa": "gfx942", "simulator_config": "hosts/host.json"}}"#,
+        )
+        .unwrap();
+
+        let staged = stage_config(&config, scratch.path()).unwrap();
+        let reference = staged_simulator_config(&staged);
+        assert!(
+            !reference.contains('/'),
+            "a staged reference names a sibling, not a path: {reference}"
+        );
+        assert!(
+            scratch.path().join(&reference).exists(),
+            "the config names {reference}, which has to be what was staged"
+        );
+    }
+
+    /// And two files that share a basename both survive.
+    ///
+    /// A guest config called `host.json` next to a `simulator_config` of
+    /// `hosts/host.json` staged both as `host.json`, so one overwrote the
+    /// other. The staged name is derived from the config's rather than
+    /// the sibling's, which is what makes that impossible.
+    #[test]
+    fn staging_keeps_a_sibling_whose_basename_matches_the_config() {
+        let src = tempfile::tempdir().unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        std::fs::create_dir(src.path().join("hosts")).unwrap();
+        std::fs::write(
+            src.path().join("hosts/host.json"),
+            r#"{"vm": {"marker": "the sibling"}, "topology": {}}"#,
+        )
+        .unwrap();
+        let config = src.path().join("host.json");
+        std::fs::write(
+            &config,
+            r#"{"dbt_guest": {"enabled": true, "guest_isa": "gfx950",
+                 "host_isa": "gfx942", "simulator_config": "hosts/host.json"}}"#,
+        )
+        .unwrap();
+
+        let staged = stage_config(&config, scratch.path()).unwrap();
+        let reference = staged_simulator_config(&staged);
+        let sibling = std::fs::read_to_string(scratch.path().join(&reference)).unwrap();
+        assert!(
+            sibling.contains("the sibling"),
+            "the config overwrote the file it references: {sibling}"
+        );
+        assert!(
+            std::fs::read_to_string(&staged)
+                .unwrap()
+                .contains("dbt_guest"),
+            "and the config is still the config"
+        );
+    }
+
+    /// `dbt_guest.simulator_config` as the staged copy records it.
+    fn staged_simulator_config(staged: &Path) -> String {
+        let text = std::fs::read_to_string(staged).expect("the staged config");
+        let json: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+        json["dbt_guest"]["simulator_config"]
+            .as_str()
+            .expect("a staged guest config names its simulator config")
+            .to_string()
     }
 
     /// An absolute `simulator_config` is refused rather than staged into

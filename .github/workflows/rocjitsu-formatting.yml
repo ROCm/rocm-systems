@@ -71,12 +71,24 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
-          # `configs` is not optional here: builtin/build.rs reads the
-          # rocjitsu presets out of it at build time, so the workspace
-          # does not compile without them and clippy never runs.
+          # None of the three paths beside `cli` is optional. The
+          # workspace reads all of them while compiling, so without one
+          # cargo fails before clippy is reached and the job reports a
+          # build script or a missing include rather than a lint.
+          #
+          #   configs   builtin/build.rs reads the rocjitsu presets
+          #   schemas   core/build.rs reads simulation_config.fbs
+          #   lib/…/include  rocjitsu_sys `include_str!`s rj_status.h to
+          #                  check its status codes against the C header,
+          #                  and `--all-targets` compiles that test
+          #
+          # Anything under cli/ that reaches outside it at build time --
+          # a build script, an `include_str!` -- belongs in this list too.
           sparse-checkout: |
             emulation/rocjitsu/cli
             emulation/rocjitsu/configs
+            emulation/rocjitsu/schemas
+            emulation/rocjitsu/lib/rocjitsu/include
 
       - name: Install Rust
         run: |

@@ -53,4 +53,16 @@ int run_vfio_server_with_engine_exit_for_test(const std::string &config_path,
                                               const std::string &socket_path, int ready_fd,
                                               int exit_code);
 
+/// @brief Make the next @ref run_vfio_server call throw, once.
+/// @details Test-only, and the only way to exercise the exception boundary in
+/// `rj_run_vfio_server`: that boundary exists because the server can throw and
+/// its caller is Rust, which cannot receive an exception, but nothing a test
+/// can pass as an argument reaches a throwing path. Without a seam the boundary
+/// is asserted by reading it, which is how the same guarantee was wrong once
+/// already -- an earlier version of it allocated inside the handler.
+///
+/// Consumed by the call it arms, so a test that arms it and then fails before
+/// calling does not leave the next one poisoned.
+void throw_from_next_vfio_server_for_test();
+
 } // namespace rocjitsu

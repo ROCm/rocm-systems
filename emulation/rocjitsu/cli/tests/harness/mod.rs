@@ -462,7 +462,7 @@ pub(crate) const TEST_EMULATOR: &str = "rocjitsu";
 /// key and value to set on the child.
 ///
 /// `None` on every ordinary build, which is every build but the sanitizer
-/// ones.
+/// ones — and on a TSan build, for the reason below.
 ///
 /// A sanitizer build of `librocjitsu.so` refuses to be loaded by a
 /// process that does not already have the runtime first in its library
@@ -482,7 +482,7 @@ pub(crate) const TEST_EMULATOR: &str = "rocjitsu";
 fn sanitizer_preload() -> Option<(String, String)> {
     let wanted = std::env::var("ROCJITSU_SANITIZER_PRELOAD").ok()?;
     let wanted = wanted.trim();
-    if wanted.is_empty() {
+    if wanted.is_empty() || names_tsan(wanted) {
         return None;
     }
     let value = match std::env::var("LD_PRELOAD") {
@@ -490,6 +490,57 @@ fn sanitizer_preload() -> Option<(String, String)> {
         _ => wanted.to_string(),
     };
     Some(("LD_PRELOAD".to_string(), value))
+}
+
+/// Whether `preload` names a ThreadSanitizer runtime.
+///
+/// TSan is the one sanitizer whose runtime the CLI cannot be started
+/// behind, because loading it into this binary does not leave the binary
+/// behaving as it does under test. Cargo does not instrument the CLI, so
+/// TSan sees its allocations and none of the synchronisation that orders
+/// them — Rust's channels and locks synchronise with plain atomics, not
+/// the pthread calls TSan intercepts — and every ordinary handoff between
+/// tokio's threads is reported as a race. `ignore_noninstrumented_modules`
+/// is the option for a mixed process, and it silences those, but it
+/// silences them by marking the whole binary ignored: a signal that
+/// arrives while an ignored frame is on the stack is queued for the next
+/// instrumented interception point, and a binary that is ignored end to
+/// end never reaches one. A `rocjitsu run` started that way never sees
+/// the `SIGINT` these suites send it and hangs until the test's deadline.
+///
+/// So neither setting is a build of the CLI worth testing, and the suites
+/// take the answer the codebase already has for a library this process
+/// cannot load: they skip. The C++ suites still run the CLI under TSan —
+/// `rj_add_test` preloads the runtime and sets the option — and they are
+/// what the TSan configuration is for, since they are the instrumented
+/// side. Races in the Rust are the business of a build that instruments
+/// Rust, which this one does not pin a toolchain for.
+///
+/// Matched on the file name because that is what names it: the build
+/// hands over the path to `libclang_rt.tsan-<arch>.so`.
+fn names_tsan(preload: &str) -> bool {
+    preload.split(':').any(|entry| {
+        Path::new(entry)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.contains("tsan"))
+    })
+}
+
+/// Why the CLI these suites spawn could not load the emulator, if it
+/// could not.
+///
+/// Asked against the environment [`sanitizer_preload`] hands the child
+/// rather than this process's own: what decides the answer is what the
+/// CLI is started with, which is why the shared policy exposes a form
+/// that takes the values rather than reading them.
+fn sanitizer_blocks_the_emulator() -> Option<String> {
+    rj_core::discovery::sanitizer_preload_missing_in(
+        std::env::var(rj_core::discovery::ENV_SANITIZER_PRELOAD)
+            .ok()
+            .as_deref(),
+        sanitizer_preload().map(|(_, value)| value).as_deref(),
+    )
 }
 
 /// Whether the test emulator's runtime is available on this machine.
@@ -503,6 +554,13 @@ fn sanitizer_preload() -> Option<(String, String)> {
 pub(crate) fn test_emulator_available() -> bool {
     static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *AVAILABLE.get_or_init(|| {
+        // Before the probe, not after it: the CLI lists the emulator as
+        // present and supported either way — locating the library is all
+        // that takes — and only finds out it cannot load it once a
+        // session is on its way up.
+        if sanitizer_blocks_the_emulator().is_some() {
+            return false;
+        }
         let probe = match tempfile::tempdir() {
             Ok(d) => d,
             Err(_) => return false,
@@ -545,10 +603,13 @@ pub(crate) fn skip_without_emulator() -> bool {
     if test_emulator_available() {
         return false;
     }
-    eprintln!(
-        "SKIP: the `{TEST_EMULATOR}` runtime was not found, so no session \
-         can be brought up."
-    );
+    match sanitizer_blocks_the_emulator() {
+        Some(why) => eprintln!("SKIP: no session can be brought up here: {why}"),
+        None => eprintln!(
+            "SKIP: the `{TEST_EMULATOR}` runtime was not found, so no session \
+             can be brought up."
+        ),
+    }
     true
 }
 
@@ -563,9 +624,20 @@ pub(crate) fn skip_without_emulator() -> bool {
 /// Set `ROCJITSU_E2E_ALLOW_SKIP=1` to accept the skips, for a build that
 /// deliberately does not include rocjitsu.
 ///
+/// A sanitizer build that this process cannot load is accepted without
+/// the variable, because it is not the case this guard is for. The guard
+/// catches a machine that was *supposed* to have the emulator and
+/// quietly does not; a build whose library states in its own environment
+/// that it has to be loaded some other way has said so deliberately, and
+/// there is nobody to tell who does not already know.
+///
 /// Call this from exactly one test per suite.
 pub(crate) fn assert_suite_can_run() {
     if test_emulator_available() {
+        return;
+    }
+    if let Some(why) = sanitizer_blocks_the_emulator() {
+        eprintln!("accepting a suite that tests nothing: {why}");
         return;
     }
     if std::env::var_os(ENV_ALLOW_SKIP).is_some() {
