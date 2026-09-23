@@ -159,8 +159,7 @@ protected:
         int dev = 0;
         if (hipGetDevice(&dev) != hipSuccess)
             return nullptr;
-        if (!RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(
-                dev, /*requireReexport=*/true, reason))
+        if (!RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(dev, reason))
             return nullptr;
         auto buf = std::make_unique<RCCLHybridVmmTests::HybridVmmBuffer>();
         if (!RCCLHybridVmmTests::AllocHybridVmm(
@@ -174,17 +173,30 @@ protected:
         size_t gpuBytes, size_t localCpuBytes, int expectedLocalRanks,
         RCCLHybridVmmTests::HybridVmmBuffer** out, std::string* reason)
     {
-        *out = AllocHybrid(gpuBytes, localCpuBytes, reason);
-        if (SyncSkip(*out == nullptr)) {
+        *out = nullptr;
+        int dev = 0;
+        std::string localReason;
+        bool supported = hipGetDevice(&dev) == hipSuccess &&
+            RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(dev, reason);
+        if (SyncSkip(!supported)) {
+            if (reason && reason->empty())
+                *reason = "hybrid VMM runtime support is unavailable on another rank";
+            return false;
+        }
+        auto buf = std::make_unique<RCCLHybridVmmTests::HybridVmmBuffer>();
+        const bool ok = RCCLHybridVmmTests::AllocHybridForLocalRanks(
+            dev, gpuBytes, localCpuBytes, expectedLocalRanks, buf.get(), &localReason);
+        if (reason && reason->empty())
+            *reason = localReason;
+        // TearDown is the only FreeHybridVmm for a successful alloc. A peer skip
+        // after this rank succeeded used to destroy the unique_ptr without that call.
+        if (ok) hybridBuffers_.push_back(std::move(buf));
+        if (SyncSkip(!ok)) {
             if (reason && reason->empty())
                 *reason = "hybrid VMM allocation failed on another rank";
             return false;
         }
-        if (SyncSkip((*out)->localSize != expectedLocalRanks)) {
-            if (reason)
-                *reason = "unexpected number of shared-memory local ranks";
-            return false;
-        }
+        *out = hybridBuffers_.back().get();
         return true;
     }
 
