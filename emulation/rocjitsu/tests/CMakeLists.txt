@@ -3912,8 +3912,6 @@ if(RJ_ENABLE_HIP_TESTS)
                 "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
                 "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
         )
-
-        add_subdirectory(race-detector)
     else()
         message(
             STATUS

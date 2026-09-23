@@ -288,16 +288,17 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
   via `race_test_builder.h`, covering VGPR, SGPR, LDS, D16, DTL, exec mask,
   multi-workgroup, and mixed counter scenarios.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
-- `hip_race_gfx950_test.hip` and `hip_race_gfx1151_test.hip` — end-to-end HIP
-  kernel tests run under the emulator with the `race` plugin enabled in the
-  config file.
+- The `race` suite in
+  [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
+  owns the gfx950 and gfx1151 end-to-end HIP programs. The
+  `rocjitsu-test-corpus` workflow builds them with the corpus HIP toolchain
+  and runs each case under the emulator with the `race` plugin enabled.
 
 ```bash
 # Core detection tests
 ctest --test-dir build -R "RaceDetector|IntervalSet"
 
-# End-to-end HIP tests (the test config enables the race plugin)
-ctest --test-dir $BUILD_DIR -R "RaceTest"
+# End-to-end HIP tests run in the rocjitsu-test-corpus workflow.
 ```
 
 ## Limitations
