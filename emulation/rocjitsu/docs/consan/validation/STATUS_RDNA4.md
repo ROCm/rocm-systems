@@ -140,8 +140,9 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   executables, libraries, weights, and input/expected data remain accessible.
   The check exposed a Qwen manifest path mismatch through campaign symlinks;
   canonicalizing the encoder path fixed it without rebuilding or weakening hashes.
-- Validation runner: 192 tests pass, including symlinked Qwen provenance and
-  retaining matmul child diagnostics when the outer runner times out.
+- Validation runner: 193 tests pass, including symlinked Qwen provenance,
+  retaining matmul child diagnostics at timeout, and probing Sharktank imports
+  in the selected interpreter. The repaired Sharktank runtime probe passes.
 - Production matmul now honors `SKIP_BENCH` after both numerical checks. Native
   FP16 and FP8 profiling passes, with three exact kernel names each. External
   source fix: `sanitizer-strategy` local commit `16c5ad0`.
@@ -154,7 +155,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - Sharktank's first discovery attempt lacked IREE Python bindings. The retry uses
   the local `iree-build` compiler/runtime bindings via recorded `PYTHONPATH` and
   `ml_dtypes` 0.6.0 in the existing SDK venv. TP1 prefill now passes both clean modes.
-- An isolated Release hip-moi build is being prepared to investigate the
+- An isolated Release hip-moi build completed successfully to investigate the
   unoptimized binaries' indirect-call and shared-helper limitations. A compiler
   optimization change requires new discovery, binary hashes, and fault review;
   it does not resolve the recorded unoptimized-binary failures by itself.
