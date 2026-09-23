@@ -254,13 +254,17 @@ protected:
         }
 
         // Every rank contributes ones, so a correct sum is nRanks in every element. Checking the
-        // payload and not just the status is what makes an accepted call meaningful.
+        // payload and not just the status is what makes an accepted call meaningful. Failures here
+        // record into res rather than returning, so every rank still reaches the agreement below.
+        ncclResult_t res = ncclSuccess;
         std::vector<float> host(count, 1.0f);
         if (hipMemcpy(sendPtr, host.data(), count * sizeof(float), hipMemcpyHostToDevice) != hipSuccess) {
-            return ncclInternalError;
+            res = ncclInternalError;
         }
 
-        ncclResult_t res = ncclAllReduce(sendPtr, recvPtr, count, ncclFloat, ncclSum, comm, stream);
+        if (res == ncclSuccess) {
+            res = ncclAllReduce(sendPtr, recvPtr, count, ncclFloat, ncclSum, comm, stream);
+        }
         if (res == ncclSuccess && hipStreamSynchronize(stream) != hipSuccess) {
             res = ncclInternalError;
         }
@@ -268,10 +272,10 @@ protected:
         if (res == ncclSuccess) {
             std::vector<float> out(count, 0.0f);
             if (hipMemcpy(out.data(), recvPtr, count * sizeof(float), hipMemcpyDeviceToHost) != hipSuccess) {
-                return ncclInternalError;
+                res = ncclInternalError;
             }
-            for (size_t i = 0; i < count; ++i) {
-                if (out[i] != static_cast<float>(nRanks)) return ncclInternalError;
+            for (size_t i = 0; res == ncclSuccess && i < count; ++i) {
+                if (out[i] != static_cast<float>(nRanks)) res = ncclInternalError;
             }
         }
 
@@ -403,7 +407,7 @@ TEST_F(SymCheckMode_Local, DebugGlobal_HostPointer_Rejected)
 // effect. NCCL_CHECK_MODE works because it is re-read through ncclGetEnv() on
 // each communicator, and DEBUG_LOCAL already covers the same rejection path.
 
-// The opt-in nature of the checking is covered by
+// The default (no NCCL_CHECK_MODE) path is covered by
 // SymCheckMode_Registration.Default_MatchingRegistration_Succeeds, which uses buffers
 // that are safe to actually execute. Enqueuing a host pointer without a
 // check mode would let the kernel dereference unmapped memory and take the whole

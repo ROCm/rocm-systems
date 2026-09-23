@@ -1260,6 +1260,28 @@
         {"name": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled", "description": "With cuMem disabled, rcclSymKGetInfo falls back to the real ReduceScatter backend and never claims SYM", "test_filter": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled"}
       ]
     },
+    "collimplinfo_symmetric_cumem": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 0,
+      "description": "CollImplInfo symmetric sweeps with cuMem enabled.",
+      "env_variables": {
+        "NCCL_DEBUG": "",
+        "UT_MIN_GPUS": "8",
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {"name": "CollImplInfo.AllReduceSymmetricMatchesDispatchLog.CuMem", "description": "AllReduce with buffers registered as symmetric windows", "test_filter": "CollImplInfo.AllReduceSymmetricMatchesDispatchLog"},
+        {"name": "CollImplInfo.AllGatherSymmetricMatchesDispatchLog.CuMem", "description": "AllGather with buffers registered as symmetric windows", "test_filter": "CollImplInfo.AllGatherSymmetricMatchesDispatchLog"},
+        {"name": "CollImplInfo.ReduceScatterSymmetricMatchesDispatchLog.CuMem", "description": "ReduceScatter with buffers registered as symmetric windows", "test_filter": "CollImplInfo.ReduceScatterSymmetricMatchesDispatchLog"}
+      ]
+    },
     "asymmetric_visibility": {
       "is_gtest": true,
       "binary": "rccl-UnitTests",
@@ -4456,6 +4478,12 @@
       "name": "Unit Tests - Standard Collectives",
       "description": "Basic collective operation tests",
       "config": "unit_tests_standard",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - Symmetric CollImplInfo with cuMem",
+      "description": "CollImplInfo symmetric sweeps with cuMem enabled",
+      "config": "collimplinfo_symmetric_cumem",
       "enabled": true
     },
     {

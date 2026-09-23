@@ -58,7 +58,7 @@ static constexpr struct rcclSymkTuningModel rcclSymkTuningModel_0 = {
 };
 
 // rccl_sym_model_1: selected only by RCCL_SYM_MODEL=1. Differs from model 0 in four ReduceScatter
-// scalars: Simple baseLat, LL smBw, llBusFactor, and LL withinPeakFactor.
+// scalars: Simple baseLat, LL smBw, llBusFactor, and Simple withinPeakFactor.
 static constexpr struct rcclSymkTuningModel rcclSymkTuningModel_1 = {
   .baseLat = {
              //         LL     Simple
