@@ -31,7 +31,7 @@ for the procedure and qualification rules.
 | PyTorch | P3 | native histogram (`pytorch-torch-histc`) | 🟨 max + 256 banks: clean pass; fault 0/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
 | llama.cpp | P3 | RMS norm (`llama-rdna4-rms-norm`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
-| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 higher (lowest verified): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
+| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟥 max: clean numerical pass; ConSan reports 8 cross-wave conflicts | 🟨 delay-zero: clean pass; fault 0/8 (bar 6/8) |
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟥 max: clean numerical pass; ConSan reports 12 cross-wave conflicts | 🟨 delay-zero: clean pass; fault 0/8 (bar 6/8) |
