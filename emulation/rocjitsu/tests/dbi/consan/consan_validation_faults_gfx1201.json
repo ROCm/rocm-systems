@@ -554,6 +554,73 @@
           }
         }
       ]
+    },
+    "d128-block": {
+      "faults": [
+        {
+          "id": "barrier-drop-k-publication-group",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine gfx1201 ELF fnv1a64:51455fdce9fbef23 for the release hip-moi D128 block binary and its native FastContextPolicy dispatch. The K-fragment producer subgroup stores LDS at .text+0x554dc; EXEC is restored at 0x554e8. The unconditional publication pairs at 0x554f0/0x55508 and 0x5551c/0x55520 precede all-wave peer loads at 0x557c0. These are the two physical barriers implementing one logical ctx.syncthreads in the executed K-fragment loop (source 011_rdna4_d128_attention_block_test.hip:287). Remove both associated pairs as one grouped mutation; removing just one would retain publication. The following reuse barrier is retained. Eight trials per standard profile prospectively require at least one detection, with numerical manifestations recorded independently. Pristine extraction, disassembly and exact inventory: rdna4-20260923/d128-debug."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:51455fdce9fbef23|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x00000000000554f0|mnemonic=s_barrier_signal|occurrence=6",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:51455fdce9fbef23|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x00000000000554f0|mnemonic=s_barrier_signal|occurrence=6|sequence=singleton|associated-with=fnv1a64:51455fdce9fbef23|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000055508|mnemonic=s_barrier_wait|occurrence=7|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:51455fdce9fbef23|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000005551c|mnemonic=s_barrier_signal|occurrence=8",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:51455fdce9fbef23|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000005551c|mnemonic=s_barrier_signal|occurrence=8|sequence=singleton|associated-with=fnv1a64:51455fdce9fbef23|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000055520|mnemonic=s_barrier_wait|occurrence=9|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 1,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 1,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }
