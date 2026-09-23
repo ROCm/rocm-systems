@@ -6498,5 +6498,58 @@ class SharktankValidationLifecycleTests(unittest.TestCase):
         self.assertEqual(FakeToyLlama.live, 0)
 
 
+class GeneratedAllowlistEnvironmentTest(unittest.TestCase):
+    def test_allowlist_survives_clean_inventory_and_fault_environment(self):
+        with temporary_root() as root:
+            workload = validation.WORKLOAD_BY_ID["d128-block"]
+            path = root / "gfx1201" / "d128-block.txt"
+            path.parent.mkdir()
+            path.write_text("kernel_a\nkernel_b\n")
+            with mock.patch.dict(os.environ, {
+                "CONSAN_VALIDATION_KERNEL_ALLOWLIST_DIR": str(root),
+                "RJ_CONSAN_KERNEL_ALLOWLIST": "inherited_wrong_kernel",
+                "RJ_CONSAN_KERNEL_ALLOWLIST_FILE": "/wrong/inherited.txt",
+            }, clear=True):
+                clean = validation_commands._run_environment(
+                    "default", workload, root / "hook.so", "gfx1201", "clean", root)
+                inventory = validation_commands._clean_environment(
+                    "supercollider", workload, root / "hook.so", "gfx1201", root)
+                fault = validation_faults._fault_trial_environment(
+                    "default", workload, root / "hook.so", "gfx1201",
+                    {"environment": {}}, {}, {}, root)
+                native = validation_commands._clean_environment(
+                    None, workload, None, "gfx1201", root)
+            for environment in (clean, inventory, fault):
+                self.assertEqual(environment["RJ_CONSAN_KERNEL_ALLOWLIST_FILE"], str(path))
+                self.assertNotIn("RJ_CONSAN_KERNEL_ALLOWLIST", environment)
+            self.assertNotIn("RJ_CONSAN_KERNEL_ALLOWLIST_FILE", native)
+            self.assertNotIn("RJ_CONSAN_KERNEL_ALLOWLIST", native)
+
+    def test_missing_or_invalid_generated_lists_fail_closed(self):
+        with temporary_root() as root:
+            workload = validation.WORKLOAD_BY_ID["d128-block"]
+            path = root / "gfx1201" / "d128-block.txt"
+            path.parent.mkdir()
+            with mock.patch.dict(os.environ, {
+                "CONSAN_VALIDATION_KERNEL_ALLOWLIST_DIR": str(root),
+            }, clear=True):
+                with self.assertRaises(validation.ValidationError):
+                    validation_commands._kernel_allowlist_file("gfx1201", workload)
+                for contents in ("", "kernel\nkernel\n", " kernel\n", "# comment\n"):
+                    path.write_text(contents)
+                    with self.assertRaises(validation.ValidationError):
+                        validation_commands._kernel_allowlist_file("gfx1201", workload)
+                path.write_text("valid_kernel\n")
+                with self.assertRaises(validation.ValidationError):
+                    validation_commands._kernel_allowlist_file("gfx950", workload)
+
+    def test_explicit_hook_selects_current_build(self):
+        with mock.patch.dict(os.environ, {
+            "CONSAN_VALIDATION_HOOK": "/tmp/current-build/hook.so",
+        }, clear=True):
+            self.assertEqual(validation_commands._hook_path(Path("/workspace")),
+                             Path("/tmp/current-build/hook.so"))
+
+
 if __name__ == "__main__":
     unittest.main()

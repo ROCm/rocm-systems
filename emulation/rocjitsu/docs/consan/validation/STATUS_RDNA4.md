@@ -15,6 +15,19 @@ provenance evidence required by their row contract. Exact counts belong to the
 binaries used for qualification and must be refreshed after relevant source,
 toolchain, workload, or runtime changes.
 
+## September 23 revalidation in progress
+
+All 42 workload/mode cells are being rerun, including previously green cells.
+The table below retains historical results until each cell has fresh evidence;
+none of those historical colors count as a pass for this campaign.
+
+- Host: AMD Radeon RX 9070 (`gfx1201`); native HIP shared-memory smoke passed.
+- SDK: `/home/benoit/venv`, ROCm `10.2.0a20260915` development package.
+- Preparation: rebuilding the current hook, integrating per-workload generated
+  allowlists, preparing Qwen provenance, and building the production matmul.
+- Freshly assessed cells: **0/42**. No workload has been requalified yet.
+- Preparation logs: `/home/benoit/workspace/consan-validation-artifacts/`.
+
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
 
 | Set | Priority | Workload / validation ID | Default | SuperCollider |

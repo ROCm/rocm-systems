@@ -144,6 +144,9 @@ def _command_json(value: str) -> list[str]:
 
 
 def _hook_path(workspace: Path) -> Path:
+    configured = os.environ.get("CONSAN_VALIDATION_HOOK")
+    if configured:
+        return Path(configured).expanduser().resolve()
     suffix = Path("lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so")
     candidates = (
         workspace / "rocjitsu-build" / suffix,
@@ -791,6 +794,26 @@ def _manifest(target: str) -> dict:
     }
 
 
+def _kernel_allowlist_file(target: str | None, workload: Workload) -> Path | None:
+    """Resolve an explicitly configured, trace-generated per-workload allowlist."""
+    directory = os.environ.get("CONSAN_VALIDATION_KERNEL_ALLOWLIST_DIR")
+    if not directory:
+        return None
+    if target is None:
+        raise ValidationError("kernel allowlist selection requires a target")
+    path = Path(directory).expanduser().resolve() / target / f"{workload.id}.txt"
+    try:
+        names = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise ValidationError(f"cannot read generated kernel allowlist {path}: {error}") from error
+    if not names or len(names) != len(set(names)) or any(
+        not name.strip() or name != name.strip() or "\x00" in name
+        or name.startswith("#") for name in names
+    ):
+        raise ValidationError(f"invalid generated kernel allowlist: {path}")
+    return path
+
+
 def _clean_environment(
     profile: str | None,
     workload: Workload,
@@ -834,6 +857,7 @@ def _clean_environment(
         return environment
     if hook is None:
         raise ValidationError("instrumented runtime environment requires a hook")
+    allowlist = _kernel_allowlist_file(target, workload)
     config = PROFILES[profile]
     environment.update(config.environment)
     environment.update(
@@ -842,6 +866,9 @@ def _clean_environment(
             "RJ_CONSAN_LOG": "1",
         }
     )
+    if allowlist is not None:
+        environment.pop("RJ_CONSAN_KERNEL_ALLOWLIST", None)
+        environment["RJ_CONSAN_KERNEL_ALLOWLIST_FILE"] = str(allowlist)
     if workload.kind in {"pytorch", "llama", "rdna4-matmul"}:
         # These clients use a modern HSA runtime which returns after successful
         # rocprofiler registration unless legacy environment tools are
@@ -1383,6 +1410,9 @@ def _write_provenance(
     path = workload_root / "provenance.json"
     hook = _hook_path(workspace)
     files = {"hook": hook, **_input_files(workspace, target, workload)}
+    allowlist = _kernel_allowlist_file(target, workload)
+    if allowlist is not None:
+        files["kernel-allowlist"] = allowlist
     llvm_readelf = _llvm_readelf()
     if llvm_readelf is not None and llvm_readelf.is_file():
         files["llvm-readelf"] = llvm_readelf

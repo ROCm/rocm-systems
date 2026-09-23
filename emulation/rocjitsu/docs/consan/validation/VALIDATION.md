@@ -46,15 +46,14 @@ For each workload:
    correctness, coverage, completeness, and containment checks. Record new
    results and provenance before revising a timeout row or its status.
 
-**Runner integration:** `consan_validation.py` currently scrubs inherited
-`RJ_CONSAN_*` variables and does not automate this discovery workflow. Exporting
-`RJ_CONSAN_KERNEL_ALLOWLIST_FILE` in the parent shell alone does not apply the
-list. Before starting a new campaign, wire the per-workload generated file into
-the runner's explicit child environment and provenance, and verify it survives
-environment construction for clean, inventory, and fault runs. The commands
-below describe the existing runner interfaces; they do not perform this
-preparation automatically. If matching native profiling is unavailable, record
-that prerequisite gap explicitly.
+**Runner integration:** the runner scrubs inherited `RJ_CONSAN_*` variables.
+Store each generated file at `ALLOWLIST_DIR/TARGET/WORKLOAD_ID.txt` and set
+`CONSAN_VALIDATION_KERNEL_ALLOWLIST_DIR=ALLOWLIST_DIR`. The runner explicitly
+passes the matching file to clean, inventory, and fault children and records
+its hash in provenance. Missing, empty, or malformed selected files fail the
+run. Native baselines remain uninstrumented. Discovery still uses the linked
+rocprofv3 procedure; the runner does not generate traces automatically.
+If matching native profiling is unavailable, record that prerequisite gap.
 
 Historical ledgers retain the results of their original configurations. Their
 timeouts are priorities for revalidation with generated allowlists, not evidence
@@ -193,6 +192,9 @@ rocjitsu-test-corpus/
 rocjitsu-test-corpus-build/
 rocjitsu-build/
 ```
+
+Set `CONSAN_VALIDATION_HOOK=/absolute/path/to/librocjitsu_dbi_hooks.so` to
+select a freshly built hook outside the default `rocjitsu-build` directory.
 
 Additional paths are workload-dependent and are reported by `doctor`. IREE
 command-line tools and `rocminfo` are resolved from `PATH`. Workload-specific
