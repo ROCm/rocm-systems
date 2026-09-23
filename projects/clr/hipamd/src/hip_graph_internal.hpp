@@ -2177,8 +2177,7 @@ class GraphKernelNode : public GraphNode {
     }
     launchFlags_ = kernelNode->launchFlags_;
     kernelEvents_ = kernelNode->kernelEvents_;
-    kernelAttr_ = kernelNode->kernelAttr_;
-    kernelAttrInUse_ = kernelNode->kernelAttrInUse_;
+    CopyAttr(kernelNode);
     return status;
   }
 
