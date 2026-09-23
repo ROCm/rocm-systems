@@ -1426,15 +1426,10 @@ elseif(ENABLE_ROCSHMEM_GIN)
   # With the device linker (default), per-arch .bc files are injected directly
   # into the per-arch device link step via DeviceLinker.cmake.
   #
-  # Pull the SDMA host objects out of librocshmem.a so apps running only SDMA do
-  # not have to link it. Seeding by symbol rather than by file survives renames.
-  # GDA stays unresolved, as it needs constmem registration this mode cannot do.
+  # Seed rocshmem host symbols needed by GDA into librccl.so.  SDMA factory
+  # symbols are compiled in directly (gin_anvil_sdma_factory.cc) and no longer
+  # need pulling from librocshmem.a.
   set(_gin_rocshmem_syms
-    gin_anvil_sdma_probe
-    gin_anvil_sdma_create
-    gin_anvil_sdma_destroy
-    gin_anvil_sdma_get_num_channels
-    gin_anvil_sdma_get_channel_stride
     _ZN8rocshmem3ibvE)
   set(_gin_rocshmem_undefine "")
   foreach(_sym ${_gin_rocshmem_syms})
