@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 608 | 608 | 0 |
-| **total** | **608** | **608** | **0** |
+| `contract` | 615 | 615 | 0 |
+| **total** | **615** | **615** | **0** |
 
 ## Tier: `contract`
 
@@ -708,7 +708,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_KernelObjectAttributes_HipKernelGetParamInfo_Default_ReturnsFirstParamLayout` | hipKernelGetParamInfo | reports the first parameter at offset zero with size at least that of a device pointer |
 | `Contract_KernelObjectAttributes_HipKernelSetAttribute_SetMaxDynamicSharedMemory_IsAcceptedOrUnsupported` | hipKernelSetAttribute | setting max dynamic shared memory to zero is either accepted or reported as unsupported, never another error |
 
-### `library` (14 cases)
+### `library` (21 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -724,6 +724,13 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Library_HipLibraryGetKernel_Default_ResolvesKnownSymbol` | hipLibraryGetKernel | an existing symbol resolves to a non-null kernel handle |
 | `Contract_Library_HipLibraryGetKernel_LoadDataValidImage_CanResolveKernel` | hipLibraryGetKernel | a loaded valid image resolves a known kernel symbol to a non-null kernel handle |
 | `Contract_Library_HipLibraryGetKernel_UnknownSymbol_IsRejected` | hipLibraryGetKernel | resolving an undefined symbol fails with a non-success status instead of a bogus handle |
+| `Contract_Library_HipLibraryGetModule_Default_ModuleGlobalMatchesLibraryGlobal` | hipLibraryGetModule | a global resolved through the library and through its own module reports the same size |
+| `Contract_Library_HipLibraryGetModule_Default_ModuleResolvesAndLaunchesKernel` | hipLibraryGetModule | the returned module resolves a library kernel that launches and observably writes |
+| `Contract_Library_HipLibraryGetModule_Default_RepeatedQueryIsStable` | hipLibraryGetModule | repeated queries on one library return the same stable module handle |
+| `Contract_Library_HipLibraryGetModule_Default_ReturnsNonNullModule` | hipLibraryGetModule | a loaded library resolves to a non-null module handle |
+| `Contract_Library_HipLibraryGetModule_ModuleUnload_IsRejected` | hipLibraryGetModule | a module obtained from a library cannot be released with hipModuleUnload |
+| `Contract_Library_HipLibraryGetModule_NullLibrary_IsRejected` | hipLibraryGetModule | a null library handle is rejected with a non-success status |
+| `Contract_Library_HipLibraryGetModule_NullModuleOut_IsRejected` | hipLibraryGetModule | a null module out-parameter is rejected with a non-success status |
 | `Contract_Library_HipLibraryLoadData_FromRtc_Succeeds` | hipLibraryLoadData | a HIPRTC-produced code object loads into a non-null library handle and unloads cleanly |
 | `Contract_Library_HipLibraryLoadData_NullImage_IsRejected` | hipLibraryLoadData | rejects a null image with a non-success status rather than silently succeeding |
 

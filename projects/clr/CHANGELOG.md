@@ -2,6 +2,13 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
+## HIP 10.2.0 for ROCm 10.2.0
+
+### Added
+* New HIP APIs
+    - Module Management: support for API parity with corresponding CUDA API.
+      * `hipLibraryGetModule` returns the module handle backing a library, so a `hipLibrary_t` can be used with the module-based entry points such as `hipModuleGetFunction`, `hipModuleGetGlobal`, and `hipModuleGetTexRef`. Mirrors `cuLibraryGetModule`.
+
 ## HIP 10.1.0 for ROCm 10.1.0
 
 ### Added
