@@ -356,12 +356,20 @@ static ncclResult_t IbCastMultiSendSegmented(struct ncclIbSendComm* comm, int sl
       }
     }
 #endif
+    // Mirror IbCastMultiSend: segmented CQEs still stop telemetry with tel_post_ts.
+    if (rcclTelemetryOn() && i == 0) {
+      int64_t _tel_ns = rcclTelemetryPostTs(qp->telQpStats);
+      for (int r = 0; r < nreqs; r++) reqs[r]->tel_post_ts = _tel_ns;
+    }
+
     struct ibv_send_wr* bad_wr;
     ncclResult_t postRet = wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr);
     if (postRet != ncclSuccess) {
       if (remapWrId) IbCastQpSchedFreeRemap(remapWrId);
       return postRet;
     }
+
+    rcclTelemetryQpSendPosted(qp->telQpStats, useWriteOp ? 0 : 1);
 
     for (int r = 0; r < nreqs; r++) {
       sendOffsets[r] = std::min<uint32_t>(sendOffsets[r] + chunkLen[r], reqs[r]->send.size);
