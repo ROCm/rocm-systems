@@ -278,3 +278,10 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   selection. These results establish a passing clean/fault pair at `preset=max`;
   the standard-profile miss remains yellow. Evidence:
   `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round7/qwen-dense-comparator/`.
+- Top-k detailed retry reproduces `HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION`.
+  Pristine and patched code objects are captured in `topk-debug/default-closure/`.
+  The subsequent native gfx1201 smoke passes all 1,048,576 values across 4,096
+  workgroups; the device remains usable. Evidence:
+  `/home/benoit/workspace/consan-validation/rdna4-20260923/topk-debug/post-fault-smoke.log`.
+- Validation runner preset integration: all **194 Python tests** pass. Log:
+  `/home/benoit/workspace/consan-validation/rdna4-20260923/preset-runner-tests.log`.
