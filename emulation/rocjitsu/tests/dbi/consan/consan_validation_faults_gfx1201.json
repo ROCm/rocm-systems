@@ -6077,6 +6077,317 @@
           }
         }
       ]
+    },
+    "clip-bf16": {
+      "faults": [
+        {
+          "id": "barrier-drop-initial-matmul-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine CLIP BF16 ELF fnv1a64:388b09c43a3a6000 compiled with the exact workload HIP flags; identity matches the September 23 clean log. Native allowlist selects forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32. Its initial cooperative ds_store_2addr_b64 at VA 0x6fe8 stages A/B tiles. Subsequent predicated global-load preparation reconverges at 0x718c before publication signal/wait 0x7198/0x71d4 (.text+0x1b98/0x1bd4, occurrences 0/1). LDS operand loads at 0x71d8/0x71e0 feed the first cross-wave WMMA at 0x71ec. This initial tile path is reached for the recorded fixed K=65 input. Remove the publication pair; retain the following reuse barrier at 0x71f4/0x71f8 and later K-tile synchronization. Offline compile metadata, binary, final ISA and inventory: rdna4-20260923/clip-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses a named preset; initial SuperCollider qualification uses delay=0 in every trial and its clean comparator."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|kind=barrier|pc=0x0000000000001b98|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|event=barrier|pc=0x0000000000001b98|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|event=barrier|pc=0x0000000000001bd4|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-initial-matmul-publication-preset-low",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine CLIP BF16 ELF fnv1a64:388b09c43a3a6000 compiled with the exact workload HIP flags; identity matches the September 23 clean log. Native allowlist selects forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32. Its initial cooperative ds_store_2addr_b64 at VA 0x6fe8 stages A/B tiles. Subsequent predicated global-load preparation reconverges at 0x718c before publication signal/wait 0x7198/0x71d4 (.text+0x1b98/0x1bd4, occurrences 0/1). LDS operand loads at 0x71d8/0x71e0 feed the first cross-wave WMMA at 0x71ec. This initial tile path is reached for the recorded fixed K=65 input. Remove the publication pair; retain the following reuse barrier at 0x71f4/0x71f8 and later K-tile synchronization. Offline compile metadata, binary, final ISA and inventory: rdna4-20260923/clip-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses a named preset; initial SuperCollider qualification uses delay=0 in every trial and its clean comparator."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|kind=barrier|pc=0x0000000000001b98|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|event=barrier|pc=0x0000000000001b98|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|event=barrier|pc=0x0000000000001bd4|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-initial-matmul-publication-preset-default",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine CLIP BF16 ELF fnv1a64:388b09c43a3a6000 compiled with the exact workload HIP flags; identity matches the September 23 clean log. Native allowlist selects forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32. Its initial cooperative ds_store_2addr_b64 at VA 0x6fe8 stages A/B tiles. Subsequent predicated global-load preparation reconverges at 0x718c before publication signal/wait 0x7198/0x71d4 (.text+0x1b98/0x1bd4, occurrences 0/1). LDS operand loads at 0x71d8/0x71e0 feed the first cross-wave WMMA at 0x71ec. This initial tile path is reached for the recorded fixed K=65 input. Remove the publication pair; retain the following reuse barrier at 0x71f4/0x71f8 and later K-tile synchronization. Offline compile metadata, binary, final ISA and inventory: rdna4-20260923/clip-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses a named preset; initial SuperCollider qualification uses delay=0 in every trial and its clean comparator."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|kind=barrier|pc=0x0000000000001b98|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|event=barrier|pc=0x0000000000001b98|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|event=barrier|pc=0x0000000000001bd4|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-initial-matmul-publication-preset-high",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine CLIP BF16 ELF fnv1a64:388b09c43a3a6000 compiled with the exact workload HIP flags; identity matches the September 23 clean log. Native allowlist selects forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32. Its initial cooperative ds_store_2addr_b64 at VA 0x6fe8 stages A/B tiles. Subsequent predicated global-load preparation reconverges at 0x718c before publication signal/wait 0x7198/0x71d4 (.text+0x1b98/0x1bd4, occurrences 0/1). LDS operand loads at 0x71d8/0x71e0 feed the first cross-wave WMMA at 0x71ec. This initial tile path is reached for the recorded fixed K=65 input. Remove the publication pair; retain the following reuse barrier at 0x71f4/0x71f8 and later K-tile synchronization. Offline compile metadata, binary, final ISA and inventory: rdna4-20260923/clip-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses a named preset; initial SuperCollider qualification uses delay=0 in every trial and its clean comparator."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|kind=barrier|pc=0x0000000000001b98|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|event=barrier|pc=0x0000000000001b98|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|event=barrier|pc=0x0000000000001bd4|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-initial-matmul-publication-preset-higher",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine CLIP BF16 ELF fnv1a64:388b09c43a3a6000 compiled with the exact workload HIP flags; identity matches the September 23 clean log. Native allowlist selects forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32. Its initial cooperative ds_store_2addr_b64 at VA 0x6fe8 stages A/B tiles. Subsequent predicated global-load preparation reconverges at 0x718c before publication signal/wait 0x7198/0x71d4 (.text+0x1b98/0x1bd4, occurrences 0/1). LDS operand loads at 0x71d8/0x71e0 feed the first cross-wave WMMA at 0x71ec. This initial tile path is reached for the recorded fixed K=65 input. Remove the publication pair; retain the following reuse barrier at 0x71f4/0x71f8 and later K-tile synchronization. Offline compile metadata, binary, final ISA and inventory: rdna4-20260923/clip-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses a named preset; initial SuperCollider qualification uses delay=0 in every trial and its clean comparator."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|kind=barrier|pc=0x0000000000001b98|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|event=barrier|pc=0x0000000000001b98|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|event=barrier|pc=0x0000000000001bd4|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-initial-matmul-publication-preset-max",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine CLIP BF16 ELF fnv1a64:388b09c43a3a6000 compiled with the exact workload HIP flags; identity matches the September 23 clean log. Native allowlist selects forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32. Its initial cooperative ds_store_2addr_b64 at VA 0x6fe8 stages A/B tiles. Subsequent predicated global-load preparation reconverges at 0x718c before publication signal/wait 0x7198/0x71d4 (.text+0x1b98/0x1bd4, occurrences 0/1). LDS operand loads at 0x71d8/0x71e0 feed the first cross-wave WMMA at 0x71ec. This initial tile path is reached for the recorded fixed K=65 input. Remove the publication pair; retain the following reuse barrier at 0x71f4/0x71f8 and later K-tile synchronization. Offline compile metadata, binary, final ISA and inventory: rdna4-20260923/clip-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses a named preset; initial SuperCollider qualification uses delay=0 in every trial and its clean comparator."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|kind=barrier|pc=0x0000000000001b98|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|event=barrier|pc=0x0000000000001b98|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:388b09c43a3a6000|kernel=forward_bs4$async_dispatch_3_matmul_68x65x65_bf16xbf16xf32|event=barrier|pc=0x0000000000001bd4|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }
