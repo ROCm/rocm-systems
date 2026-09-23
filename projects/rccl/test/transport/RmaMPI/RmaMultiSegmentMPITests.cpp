@@ -195,9 +195,18 @@ protected:
         return !SyncSkip(*src == nullptr || *dst == nullptr);
     }
 
+    // Skip only when no rank took the per-segment path. A mixed result is a
+    // failure: SyncSkip(ANY miss) would hide a unilateral-success bug.
     bool MultiSegmentPathAvailable()
     {
-        return !SyncSkip(!AllTookMultiSegPath());
+        const bool local =
+            readAllLogs().find(kMultiSegMarker) != std::string::npos;
+        if (!MPIHelpers::anyRankTrue(local)) return false;
+        if (!AllTookMultiSegPath()) {
+            ADD_FAILURE() << "multi-segment registration was asymmetric across ranks";
+            return true;
+        }
+        return true;
     }
 
     void ExpectPayloadIsolated(const void* window, size_t totalSize,
