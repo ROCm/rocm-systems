@@ -24,6 +24,7 @@
 
 #if defined(_WIN32)
 
+#    include "lib/common/environment.hpp"
 #    include "lib/common/logging.hpp"
 #    include "lib/common/static_object.hpp"
 #    include "lib/common/utility.hpp"
@@ -32,11 +33,12 @@
 
 #    include <evntrace.h>
 
+#    include <array>
 #    include <cstddef>
 #    include <cstdint>
+#    include <cstring>
 #    include <mutex>
 #    include <string>
-#    include <thread>
 #    include <vector>
 
 namespace rocprofiler
@@ -53,29 +55,12 @@ constexpr auto provider_guid =
 
 constexpr ULONG session_buffer_size_kb = 64;
 
-// Bounds both real-time delivery latency and how long EVENT_TRACE_CONTROL_STOP takes to
-// drain, which is what keeps teardown from stalling finalization.
-constexpr ULONG session_flush_timer_s = 1;
-
-constexpr DWORD process_trace_join_timeout_ms = 10000;
-
 constexpr ULONG provider_enable_timeout_ms = 10000;
-
-constexpr DWORD attach_timeout_ms = 5000;
 
 void WINAPI
 event_record_callback(PEVENT_RECORD event_record)
 {
     handle_event(event_record);
-}
-
-// ETW invokes this as soon as ProcessTrace has attached to the session, which is the earliest
-// point at which the provider's events reach this process.
-ULONG WINAPI
-buffer_callback(PEVENT_TRACE_LOGFILEW logfile)
-{
-    if(logfile && logfile->Context) ::SetEvent(static_cast<HANDLE>(logfile->Context));
-    return TRUE;
 }
 
 std::wstring
@@ -86,6 +71,17 @@ make_session_name()
                 "-" + common::generate_uuid_v7(common::timestamp_ns());
 
     return std::wstring{name.begin(), name.end()};
+}
+
+std::wstring
+make_log_path(const std::wstring& name)
+{
+    auto directory = std::array<wchar_t, MAX_PATH + 1>{};
+
+    auto length = ::GetTempPathW(static_cast<DWORD>(directory.size()), directory.data());
+    if(length == 0 || length > directory.size()) return {};
+
+    return std::wstring{directory.data(), length} + name + L".etl";
 }
 
 rocprofiler_status_t
@@ -123,23 +119,21 @@ public:
 
     rocprofiler_status_t start();
     rocprofiler_status_t stop();
+    void                 drain();
 
 private:
     rocprofiler_status_t    open();
     void                    close();
-    void                    close_trace();
+    void                    decode_log();
     EVENT_TRACE_PROPERTIES* properties();
 
     std::mutex             m_mutex      = {};
     uint32_t               m_ref_count  = 0;
+    ULONG                  m_process_id = 0;
     std::wstring           m_name       = {};
+    std::wstring           m_log_path   = {};
     std::vector<std::byte> m_properties = {};
-    // ProcessTrace reads this back out of the handle, so it has to outlive open().
-    EVENT_TRACE_LOGFILEW m_logfile  = {};
-    HANDLE               m_attached = nullptr;
-    TRACEHANDLE          m_session  = 0;
-    TRACEHANDLE          m_trace    = INVALID_PROCESSTRACE_HANDLE;
-    std::thread          m_thread   = {};
+    TRACEHANDLE            m_session    = 0;
 };
 
 EVENT_TRACE_PROPERTIES*
@@ -151,12 +145,21 @@ trace_session::properties()
 rocprofiler_status_t
 trace_session::open()
 {
-    m_name = make_session_name();
+    m_name     = make_session_name();
+    m_log_path = make_log_path(m_name);
 
-    // StartTraceW copies the session name into the tail of this allocation, and
-    // ControlTraceW reads it back out at teardown, so it has to outlive both calls.
-    m_properties.assign(sizeof(EVENT_TRACE_PROPERTIES) + ((m_name.size() + 1) * sizeof(wchar_t)),
-                        std::byte{});
+    if(m_log_path.empty())
+    {
+        ROCP_ERROR << "GetTempPathW failed with Windows error " << ::GetLastError();
+        return ROCPROFILER_STATUS_ERROR;
+    }
+
+    // StartTraceW copies the session name into this allocation and reads the log file name back
+    // out of it, and ControlTraceW needs both at teardown, so it has to outlive every call.
+    auto name_bytes = (m_name.size() + 1) * sizeof(wchar_t);
+    auto path_bytes = (m_log_path.size() + 1) * sizeof(wchar_t);
+
+    m_properties.assign(sizeof(EVENT_TRACE_PROPERTIES) + name_bytes + path_bytes, std::byte{});
 
     auto* props = properties();
 
@@ -165,20 +168,33 @@ trace_session::open()
     // 1 == QPC, which puts EVENT_HEADER::TimeStamp in the same clock domain as
     // common::timestamp_ns() and lets common::qpc_ticks_to_ns() convert it.
     props->Wnode.ClientContext = 1;
-    props->LogFileMode         = EVENT_TRACE_REAL_TIME_MODE;
-    props->BufferSize          = session_buffer_size_kb;
-    props->FlushTimer          = session_flush_timer_s;
-    props->LoggerNameOffset    = sizeof(EVENT_TRACE_PROPERTIES);
+    // Not EVENT_TRACE_REAL_TIME_MODE: ETW discards a real-time session's undelivered buffers
+    // when the process that wrote them exits, and delivery was measured here to run two flush
+    // periods behind. An application that exits promptly after its last HIP call -- which is
+    // most of them -- would lose the tail of its trace, or all of it. A file-backed session
+    // instead hands everything over at EVENT_TRACE_CONTROL_STOP, so what gets decoded does not
+    // depend on how long the application happened to live.
+    props->LogFileMode       = EVENT_TRACE_FILE_MODE_SEQUENTIAL;
+    props->BufferSize        = session_buffer_size_kb;
+    props->LoggerNameOffset  = sizeof(EVENT_TRACE_PROPERTIES);
+    props->LogFileNameOffset = static_cast<ULONG>(sizeof(EVENT_TRACE_PROPERTIES) + name_bytes);
+
+    std::memcpy(m_properties.data() + props->LogFileNameOffset, m_log_path.c_str(), path_bytes);
 
     auto error = ::StartTraceW(&m_session, m_name.c_str(), props);
     if(error != ERROR_SUCCESS)
     {
         m_session = 0;
         m_properties.clear();
+        m_log_path.clear();
         return map_control_error(error, "StartTraceW");
     }
 
-    auto process_id = static_cast<ULONG>(::GetCurrentProcessId());
+    // Set by rocprofv3-launch, which consumes events for a child it created rather than for
+    // itself. Internal and unsupported: it is not a user-facing knob. Unset means "trace this
+    // process", which is what an in-process tool wants.
+    m_process_id = static_cast<ULONG>(
+        common::get_env("ROCPROF_ETW_TARGET_PID", static_cast<uint32_t>(::GetCurrentProcessId())));
 
     // No kernel-side EVENT_FILTER_TYPE_PID scope filter: it caps at eight processes, it was
     // measured here to stall the enable and cost the first event of the trace, and the decode
@@ -189,11 +205,16 @@ trace_session::open()
     // A non-zero timeout makes the enable synchronous: it returns only once every already
     // running provider has processed the notification. Without it a short-lived application can
     // finish its HIP calls before the provider observes that anyone is listening.
+    //
+    // MatchAnyKeyword is all-ones rather than zero. Zero is documented to mean "every event",
+    // but that normalization is only applied when the provider is already registered: a provider
+    // that registers after the enable replays the stored mask verbatim and matches nothing. The
+    // launcher always enables first, so this is the difference between a full trace and none.
     error = ::EnableTraceEx2(m_session,
                              &provider_guid,
                              EVENT_CONTROL_CODE_ENABLE_PROVIDER,
-                             TRACE_LEVEL_VERBOSE,
-                             0,
+                             0xff,
+                             ~0ULL,
                              0,
                              provider_enable_timeout_ms,
                              &params);
@@ -205,60 +226,41 @@ trace_session::open()
         return map_control_error(error, "EnableTraceEx2");
     }
 
-    set_process_filter(process_id);
+    set_process_filter(m_process_id);
 
-    m_attached = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    ROCP_INFO << "rocm_hip_tlg consumer: tracing process " << m_process_id;
 
-    m_logfile            = EVENT_TRACE_LOGFILEW{};
-    m_logfile.LoggerName = m_name.data();
-    // RAW_TIMESTAMP is what keeps Wnode.ClientContext = 1 meaningful. Without it ProcessTrace
-    // rewrites EVENT_HEADER::TimeStamp into FILETIME no matter how the session was created, and
-    // qpc_ticks_to_ns would then scale a 1601 epoch by the QPC period.
-    m_logfile.ProcessTraceMode = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD |
-                                 PROCESS_TRACE_MODE_RAW_TIMESTAMP;
-    m_logfile.EventRecordCallback = &event_record_callback;
-    m_logfile.BufferCallback      = &buffer_callback;
-    m_logfile.Context             = m_attached;
-
-    m_trace = ::OpenTraceW(&m_logfile);
-    if(m_trace == INVALID_PROCESSTRACE_HANDLE)
-    {
-        auto open_error = ::GetLastError();
-        close();
-        return map_control_error(open_error, "OpenTraceW");
-    }
-
-    m_thread = std::thread{[handle = m_trace]() mutable {
-        auto error_v = ::ProcessTrace(&handle, 1, nullptr, nullptr);
-        ROCP_INFO_IF(error_v != ERROR_SUCCESS && error_v != ERROR_CANCELLED)
-            << "ProcessTrace returned " << error_v;
-    }};
-
-    // Real-time delivery only starts once ProcessTrace has attached, so returning before that
-    // loses the events of an application that finishes its work in the interim.
-    if(m_attached != nullptr)
-    {
-        ROCP_CI_LOG_IF(WARNING,
-                       ::WaitForSingleObject(m_attached, attach_timeout_ms) != WAIT_OBJECT_0)
-            << "the ETW consumer did not attach within " << attach_timeout_ms
-            << " ms; the beginning of the trace may be missing";
-    }
-
+    // The session is collecting as soon as StartTraceW returns and the enable above is
+    // synchronous, so a caller that starts a context before launching an application has the
+    // guarantee it needs without any further handshake.
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
 void
-trace_session::close_trace()
+trace_session::decode_log()
 {
-    if(m_trace == INVALID_PROCESSTRACE_HANDLE) return;
+    auto logfile        = EVENT_TRACE_LOGFILEW{};
+    logfile.LogFileName = m_log_path.data();
+    // RAW_TIMESTAMP is what keeps Wnode.ClientContext = 1 meaningful. Without it ProcessTrace
+    // rewrites EVENT_HEADER::TimeStamp into FILETIME no matter how the session was created, and
+    // qpc_ticks_to_ns would then scale a 1601 epoch by the QPC period.
+    logfile.ProcessTraceMode = PROCESS_TRACE_MODE_EVENT_RECORD | PROCESS_TRACE_MODE_RAW_TIMESTAMP;
+    logfile.EventRecordCallback = &event_record_callback;
 
-    // A real-time session reports ERROR_CTX_CLOSE_PENDING when ProcessTrace has yet to drain;
-    // that is the documented success path, not a failure.
-    auto error = ::CloseTrace(m_trace);
-    ROCP_WARNING_IF(error != ERROR_SUCCESS && error != ERROR_CTX_CLOSE_PENDING)
-        << "CloseTrace failed with " << error;
+    auto trace = ::OpenTraceW(&logfile);
+    if(trace == INVALID_PROCESSTRACE_HANDLE)
+    {
+        ROCP_ERROR << "OpenTraceW failed with Windows error " << ::GetLastError()
+                   << "; the trace could not be decoded";
+        return;
+    }
 
-    m_trace = INVALID_PROCESSTRACE_HANDLE;
+    // The session has already stopped, so this reaches the end of the file and returns rather
+    // than blocking the way it would on a real-time session.
+    auto error = ::ProcessTrace(&trace, 1, nullptr, nullptr);
+    ROCP_WARNING_IF(error != ERROR_SUCCESS) << "ProcessTrace returned " << error;
+
+    ::CloseTrace(trace);
 }
 
 void
@@ -269,51 +271,22 @@ trace_session::close()
         ::EnableTraceEx2(
             m_session, &provider_guid, EVENT_CONTROL_CODE_DISABLE_PROVIDER, 0, 0, 0, 0, nullptr);
 
-        // EVENT_TRACE_CONTROL_STOP flushes the active buffers on its way out, so ProcessTrace
-        // still sees everything the provider wrote before the disable landed.
+        // Writes out every buffer the session still holds, so the file is complete once this
+        // returns and decoding it cannot race the provider.
         auto error = ::ControlTraceW(m_session, nullptr, properties(), EVENT_TRACE_CONTROL_STOP);
         ROCP_WARNING_IF(error != ERROR_SUCCESS) << "ControlTraceW(STOP) failed with " << error;
 
         m_session = 0;
+
+        if(error == ERROR_SUCCESS) decode_log();
     }
 
-    if(m_thread.joinable())
+    if(!m_log_path.empty())
     {
-        auto* handle = static_cast<HANDLE>(m_thread.native_handle());
-
-        // Stopping the session is what hands the flushed buffers to ProcessTrace, and
-        // ProcessTrace returns on its own once it has delivered them. Waiting for that before
-        // CloseTrace is what keeps the tail of the trace; closing first truncates it.
-        auto exited =
-            (::WaitForSingleObject(handle, process_trace_join_timeout_ms) == WAIT_OBJECT_0);
-
-        if(!exited)
-        {
-            close_trace();
-            exited =
-                (::WaitForSingleObject(handle, process_trace_join_timeout_ms) == WAIT_OBJECT_0);
-        }
-
-        if(exited)
-        {
-            m_thread.join();
-        }
-        else
-        {
-            // Leaking the thread is preferable to hanging rocprofiler finalization behind a
-            // ProcessTrace that never returned.
-            ROCP_CI_LOG(WARNING) << "ProcessTrace did not exit within "
-                                 << process_trace_join_timeout_ms << " ms; detaching";
-            m_thread.detach();
-        }
-    }
-
-    close_trace();
-
-    if(m_attached != nullptr)
-    {
-        ::CloseHandle(m_attached);
-        m_attached = nullptr;
+        ROCP_WARNING_IF(::DeleteFileW(m_log_path.c_str()) == FALSE &&
+                        ::GetLastError() != ERROR_FILE_NOT_FOUND)
+            << "could not remove the intermediate ETW log";
+        m_log_path.clear();
     }
 
     m_properties.clear();
@@ -354,8 +327,24 @@ trace_session::stop()
               << " events dropped";
     ROCP_WARNING_IF(stats.events_dropped > 0)
         << stats.events_dropped << " rocm_hip_tlg events could not be decoded";
+    // An amdhip64 built without TraceLogging support never registers the provider, so the
+    // session stays valid and simply receives nothing. Name the likely cause: an empty trace is
+    // otherwise indistinguishable from an application that made no HIP calls.
+    ROCP_WARNING_IF(stats.events_decoded == 0)
+        << "no rocm_hip_tlg events were captured for process " << m_process_id
+        << ". Check that the amdhip64 it loaded supports TraceLogging: tasklist /m amdhip64*";
 
     return ROCPROFILER_STATUS_SUCCESS;
+}
+
+void
+trace_session::drain()
+{
+    auto lk = std::unique_lock<std::mutex>{m_mutex};
+
+    // Leaves the reference count alone: the contexts that took it still have to give it back,
+    // and the close() their stop() then performs finds nothing left to do.
+    if(m_ref_count > 0) close();
 }
 
 trace_session*
@@ -383,6 +372,12 @@ stop_session()
 
     return session->stop();
 }
+
+void
+drain_sessions()
+{
+    if(auto* session = get_session(); session) session->drain();
+}
 }  // namespace etw
 }  // namespace hip
 }  // namespace rocprofiler
@@ -406,6 +401,10 @@ stop_session()
 {
     return ROCPROFILER_STATUS_SUCCESS;
 }
+
+void
+drain_sessions()
+{}
 }  // namespace etw
 }  // namespace hip
 }  // namespace rocprofiler

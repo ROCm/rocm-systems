@@ -47,6 +47,7 @@
 #endif
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
+#include "lib/rocprofiler-sdk/hip/etw/session.hpp"
 #include "lib/rocprofiler-sdk/hip/event.hpp"
 #include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
@@ -1339,6 +1340,12 @@ finalize()
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
         auto num_clients = get_num_clients();
+
+        // Before set_fini_status: the Windows HIP consumer decodes its trace when it closes,
+        // and those records need contexts that are still active and a correlation service that
+        // can still hand out ids. No-op off Windows.
+        hip::etw::drain_sessions();
+
         set_fini_status(-1);
 
         // Signal-less teardown steps 1-6, in the one order that strands no EOP-proven
