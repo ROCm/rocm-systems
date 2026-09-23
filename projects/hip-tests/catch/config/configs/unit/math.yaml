@@ -411,6 +411,9 @@ math:
   Unit_Device___byte_perm_Sanity_Positive:
     <<: *level_2
     tags: [deviceLib]
+  Unit_Device___byte_perm_Exhaustive_Positive:
+    <<: *level_2
+    tags: [deviceLib]
   Unit_Device_sqrtf_Accuracy_Positive:
     <<: *level_2
     tags: [deviceLib]
