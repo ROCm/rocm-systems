@@ -204,8 +204,64 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
     assert unroofed[0]["points"][0]["hoverCells"] == [
         "N/A",
         "N/A",
-        "Bandwidth:<br>\u2003HBM: N/A% (900.000 GB/s/N/A)",
+        "Bandwidth:<br>\u2003HBM: N/A% (900.000 / N/A GB/s)",
     ]
+
+
+def test_kernel_traces_expose_the_limiting_peak_for_a_memory_bound_kernel() -> None:
+    """A memory-bound kernel's model carries a structured limitingPeak field,
+    naming the same cache level the hover text already calls out as the
+    binding roof, so the client can pick that one point without
+    re-deriving the limiter itself."""
+    traces, model = kernel_traces(
+        make_roofline(["FP32"]),
+        {"ai_hbm": [[1.0], [900.0]], "kernelNames": ["kA"]},
+        sanitized_cache_hierarchy=["HBM", "L2"],
+    )
+
+    assert "Limited by Memory: HBM" in traces[0].hovertemplate
+    assert model[0]["limitingPeak"] == "HBM"
+
+
+def test_kernel_traces_expose_the_leftmost_peak_for_a_compute_bound_kernel() -> None:
+    """A compute-bound kernel's limiter names a datatype/op-path (e.g. 'FP32
+    VALU'), not a cache level, so no point.peak matches it directly.
+    limitingPeak falls back to the peak of the kernel's own lowest-AI point
+    (L2's AI of 0.5 sits left of HBM's AI of 2.0) so the client still has a
+    single point to show without guessing which one."""
+    _, model = kernel_traces(
+        make_roofline(["FP32"]),
+        {
+            "ai_hbm": [[2.0], [1000.0]],
+            "ai_l2": [[0.5], [1000.0]],
+            "kernelNames": ["kA"],
+        },
+        sanitized_cache_hierarchy=["HBM", "L2"],
+        ceiling_data={},
+    )
+
+    assert model[0]["limitingPeak"] == "L2"
+
+
+def test_kernel_traces_expose_the_leftmost_peak_when_the_limiter_is_unknown() -> None:
+    """No ceiling data and no compute peaks leaves no candidate roof at all, so
+    the limiter falls back to Unknown -- and, same as the compute-bound case,
+    limitingPeak falls back to the kernel's own lowest-AI point (L2 at 0.5,
+    left of HBM's 2.0)."""
+    traces, model = kernel_traces(
+        make_roofline(["FP32"]),
+        {
+            "ai_hbm": [[2.0], [1000.0]],
+            "ai_l2": [[0.5], [1000.0]],
+            "kernelNames": ["kA"],
+        },
+        sanitized_cache_hierarchy=["HBM", "L2"],
+        ceiling_data={},
+        compute_peaks=[],
+    )
+
+    assert "Limited by Unknown: Unknown" in traces[0].hovertemplate
+    assert model[0]["limitingPeak"] == "L2"
 
 
 def test_kernel_traces_share_one_performance_value_across_a_kernels_points() -> None:
@@ -254,9 +310,9 @@ def test_bandwidth_hover_shows_zero_levels() -> None:
     )
     bandwidth_html = model[0]["points"][0]["hoverCells"][2]
     assert bandwidth_html == (
-        "Bandwidth:<br>\u2003L2: N/A% (0.000 GB/s/N/A)"
-        "<br>\u2003HBM: 60.00% (900.000 GB/s/1.500 TB/s)"
-        "<br>\u2003LDS: 0.00% (0.000 GB/s/800.000 GB/s)"
+        "Bandwidth:<br>\u2003L2: N/A% (0.000 / N/A GB/s)"
+        "<br>\u2003HBM: 60.00% (0.900 / 1.500 TB/s)"
+        "<br>\u2003LDS: 0.00% (0.000 / 800.000 GB/s)"
     )
 
 

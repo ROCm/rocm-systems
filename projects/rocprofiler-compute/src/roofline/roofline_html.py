@@ -22,6 +22,7 @@ from roofline.roofline_frame import (
 from roofline.roofline_hover import KERNEL_NAME_FONT_FAMILY
 
 ALL_PEAKS_VALUE = "all"
+LIMITING_PEAK_VALUE = "limiting"
 
 ROOF_EXTRAP_MIN_AI = 1e-150
 ROOF_EXTRAP_MAX_AI = 1e150
@@ -75,6 +76,7 @@ class RooflineViewModel:
             "precisions": self.precisions,
             "roofExtremeMaxAi": ROOF_EXTRAP_MAX_AI,
             "allPeaksValue": ALL_PEAKS_VALUE,
+            "limitingPeakValue": LIMITING_PEAK_VALUE,
             "framePad": FRAME_PAD,
             "frameMinDecades": FRAME_MIN_DECADES,
             "frameSlopeSkew": FRAME_SLOPE_SKEW,
@@ -108,7 +110,8 @@ def build_interactive_document(
         PEAK_TITLE=html.escape(
             "Plot each kernel at its arithmetic intensity for this memory level, "
             "matching the (AI axis) marker in the Bandwidth rooflines panel. "
-            "All peaks plots every level at once."
+            "All peaks plots every level at once. Limited by plots only each "
+            "kernel's bottleneck point."
         ),
         RUNTIME_TITLE=html.escape(
             "Show only the heaviest kernels whose combined percent of GPU "
