@@ -11,8 +11,9 @@
 #include "rma_multiseg.h"
 #include "p2p_resiliency.h"
 
-static_assert(NCCL_RMA_SEND_QP_WRS == 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS,
-              "NCCL_RMA_SEND_QP_WRS must match the multi-segment sender depth");
+static_assert(NCCL_RMA_SEND_QP_WRS == NCCL_IB_MAX_SEND_WRS, "rma_multiseg.h restates NCCL_IB_MAX_SEND_WRS");
+static_assert(NCCL_IB_MAX_SEND_WRS >= 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS,
+              "multi-segment sender QP must also fit GIN iput signal WRs");
 // RCCL: credits wait until a chain fits, so one RMA flush chain must fit the flush QP.
 static_assert(NCCL_RMA_MAX_FLUSH_WRS <= NET_IB_MAX_REQUESTS,
               "one RMA flush chain must fit the flush QP");
@@ -728,8 +729,8 @@ static ncclResult_t ncclIbSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
-  // Extra signal WRs only while multi-segment RMA is on. =0 keeps develop's depth.
-  qpCreateAttrs.maxSendWorkRequest = rcclRmaMultiSegEnabled() ? NCCL_RMA_SEND_QP_WRS : 2 * NET_IB_MAX_REQUESTS;
+  // Segmented multi-recv chain plus the 2*MAX request budget. =0 keeps develop's depth.
+  qpCreateAttrs.maxSendWorkRequest = rcclRmaMultiSegEnabled() ? NCCL_IB_MAX_SEND_WRS : 2 * NET_IB_MAX_REQUESTS;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
     // For example, if there are 2 devices and 4 QPs, the QPs will be created

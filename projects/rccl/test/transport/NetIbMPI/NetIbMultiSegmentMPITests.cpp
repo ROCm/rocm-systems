@@ -16,7 +16,9 @@
 
 #include "../../../src/transport/net_ib/multiseg.h"
 
+#include <cstdlib>
 #include <cstring>
+#include <strings.h>
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
@@ -558,6 +560,97 @@ TEST_F(NetIbMultiSegmentMPITest, HostAndDeviceSingleSegmentRegression) {
         }
         if (allocOk) (void)hipFree(dptr);
     }
+}
+
+// Flood 3×8-recv 16-seg chains (~249 WQEs each) onto one send QP without Test().
+// Opt-in: RCCL_MSEG_SQ_STRESS=1. Use NCCL_NET=IB and NCCL_IB_QPS_PER_CONNECTION=1.
+TEST_F(NetIbMultiSegmentMPITest, SendQueueFatChainOversubscribe) {
+    const char* stress = std::getenv("RCCL_MSEG_SQ_STRESS");
+    const bool want = stress && std::atoi(stress) != 0;
+    if (SyncSkip(!want))
+        GTEST_SKIP() << "set RCCL_MSEG_SQ_STRESS=1 to run the Point 1 SQ repro";
+    const char* net = std::getenv("NCCL_NET");
+    const bool isCast = net && (strcasecmp(net, "IB-CAST") == 0 || strcasecmp(net, "ib-cast") == 0);
+    if (SyncSkip(isCast))
+        GTEST_SKIP() << "CAST P2P send admits one segmented group at a time; use NCCL_NET=IB";
+
+    constexpr int kSegs = NCCL_IB_MAX_SEGMENTS;
+    constexpr int kRecvs = 8; // NCCL_NET_IB_MAX_RECVS
+    constexpr int kGroups = 3;
+    constexpr int kWaitMs = 15000;
+
+    ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
+    SETUP_REGISTERED_OR_SKIP(kSegs, pair, guard, mh, comm);
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+
+    const size_t dstOff = lastBuf_->segSize / 2;
+    const size_t xfer = lastBuf_->totalSize - dstOff;
+    void* dst = static_cast<uint8_t*>(lastBuf_->ptr) + dstOff;
+    void* src = lastBuf_->ptr;
+
+    void* recvPtrs[kRecvs];
+    size_t recvSizes[kRecvs];
+    int recvTags[kRecvs];
+    void* recvMhs[kRecvs];
+    for (int r = 0; r < kRecvs; r++) {
+        recvPtrs[r] = dst;
+        recvSizes[r] = xfer;
+        recvMhs[r] = mh;
+    }
+
+    const int rank = MPIEnvironment::world_rank;
+    void* recvReqs[kGroups] = {};
+    void* sendReqs[kGroups * kRecvs] = {};
+
+    if (rank == 0) {
+        for (int g = 0; g < kGroups; g++) {
+            for (int r = 0; r < kRecvs; r++) recvTags[r] = 9000 + g * kRecvs + r;
+            ASSERT_EQ(PostRecv(pair.recvComm, kRecvs, recvPtrs, recvSizes, recvTags, recvMhs,
+                               &recvReqs[g]),
+                      ncclSuccess);
+            ASSERT_NE(recvReqs[g], nullptr);
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank != 0) {
+        FillDevice(src, xfer, 0x51);
+        bool keepPosting = true;
+        for (int g = 0; g < kGroups && keepPosting; g++) {
+            for (int r = 0; r < kRecvs && keepPosting; r++) {
+                const int tag = 9000 + g * kRecvs + r;
+                void** req = &sendReqs[g * kRecvs + r];
+                int attempts = 0;
+                ncclResult_t st = ncclSuccess;
+                do {
+                    *req = nullptr;
+                    st = PostSend(pair.sendComm, src, xfer, tag, sendMh_, req);
+                    if (st != ncclSuccess) break;
+                    if (*req != nullptr) break;
+                    usleep(kPollIntervalUs);
+                } while (++attempts < 500);
+                EXPECT_EQ(st, ncclSuccess)
+                    << "isend failed posting group " << g << " recv " << r
+                    << " (SQ oversubscribe / fatal post)";
+                EXPECT_NE(*req, nullptr)
+                    << "isend never matched CTS for group " << g << " recv " << r;
+                keepPosting = (st == ncclSuccess && *req != nullptr);
+            }
+        }
+        for (int i = 0; i < kGroups * kRecvs; i++) {
+            if (sendReqs[i] == nullptr) continue;
+            int sz = 0;
+            EXPECT_EQ(WaitForCompletion(sendReqs[i], &sz, kWaitMs), ncclSuccess)
+                << "send " << i << " did not complete (SQ oversubscribe)";
+        }
+    } else {
+        for (int g = 0; g < kGroups; g++) {
+            int completed[kRecvs] = {};
+            EXPECT_EQ(WaitForCompletion(recvReqs[g], completed, kWaitMs), ncclSuccess)
+                << "recv group " << g << " did not complete (SQ oversubscribe)";
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
 }
 
 #endif // MPI_TESTS_ENABLED
