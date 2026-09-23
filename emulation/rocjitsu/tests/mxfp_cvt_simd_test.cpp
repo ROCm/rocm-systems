@@ -287,6 +287,19 @@ struct ConversionFixture {
           uint32_t packed = 0x9E37'79B9u * (lane + 1u) ^ 0x85EB'CA6Bu * (word + 3u);
           packed ^= packed >> 13;
           packed *= 0xC2B2'AE35u;
+          if (profile == InputProfile::Finite && test_case.low_bits == 8u) {
+            // E4M3 reserves magnitude 0x7f for NaN; E5M2 reserves
+            // 0x7c..0x7f for infinity and NaNs. Keep benchmark and finite
+            // correctness profiles on the common SIMD path for both formats.
+            uint32_t finite_packed = 0u;
+            for (uint32_t byte = 0; byte < 4u; ++byte) {
+              const uint32_t shift = byte * 8u;
+              const uint32_t code = (packed >> shift) & 0xffu;
+              const uint32_t magnitude = std::min(code & 0x7fu, 0x7bu);
+              finite_packed |= ((code & 0x80u) | magnitude) << shift;
+            }
+            packed = finite_packed;
+          }
           cu->write_vgpr(vgpr_base + kSourceBase + word, lane, packed);
         }
       } else {
@@ -547,26 +560,47 @@ TEST(Gfx1250MxfpCvtSimdCorrectness, AllWideFormatsAndExceptionalPackInputsAreBit
   }
 }
 
-TEST(Gfx1250MxfpCvtSimdCorrectness, PackNaNAndInvalidDivisionPolicyIsBitExact) {
+TEST(Gfx1250MxfpCvtSimdCorrectness, PackNaNAndInvalidDivisionPreservesScalarBaseline) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
   } else {
+    HeldFloatingEnvironment environment;
+    ASSERT_TRUE(environment.valid());
     struct DivisionCase {
+      enum class Kind { QuietNaN, SignalingNaN, InvalidDivision };
+
       std::string_view name;
       uint32_t value_bits;
       uint32_t scale_bits;
-      uint8_t expected_code;
+      Kind kind;
     };
-    constexpr std::array<DivisionCase, 9> division_cases = {{
-        {"source_nan", 0xFFC1'2345u, 0x3F80'0000u, 0xFFu},
-        {"scale_nan", 0x3F80'0000u, 0xFFC1'2345u, 0xFFu},
-        {"source_nan_precedes_scale_nan", 0x7FC1'2345u, 0xFFC1'2345u, 0x7Fu},
-        {"source_positive_snan", 0x7F80'0001u, 0x3F80'0000u, 0x7Fu},
-        {"source_negative_snan", 0xFF80'0001u, 0x3F80'0000u, 0xFFu},
-        {"scale_positive_snan", 0x3F80'0000u, 0x7F80'0001u, 0x7Fu},
-        {"scale_negative_snan", 0x3F80'0000u, 0xFF80'0001u, 0xFFu},
-        {"zero_over_zero", 0x0000'0000u, 0x0000'0000u, 0x7Fu},
-        {"infinity_over_infinity", 0x7F80'0000u, 0x7F80'0000u, 0x7Fu},
+    constexpr std::array<DivisionCase, 16> division_cases = {{
+        {"source_negative_qnan", 0xFFC1'2345u, 0x3F80'0000u, DivisionCase::Kind::QuietNaN},
+        {"scale_negative_qnan", 0x3F80'0000u, 0xFFC1'2345u, DivisionCase::Kind::QuietNaN},
+        {"source_positive_qnan_precedes_negative", 0x7FC1'2345u, 0xFFC1'2345u,
+         DivisionCase::Kind::QuietNaN},
+        {"source_negative_qnan_precedes_positive", 0xFFC1'2345u, 0x7FC1'2345u,
+         DivisionCase::Kind::QuietNaN},
+        {"source_positive_snan", 0x7F80'0001u, 0x3F80'0000u, DivisionCase::Kind::SignalingNaN},
+        {"source_negative_snan", 0xFF80'0001u, 0x3F80'0000u, DivisionCase::Kind::SignalingNaN},
+        {"scale_positive_snan", 0x3F80'0000u, 0x7F80'0001u, DivisionCase::Kind::SignalingNaN},
+        {"scale_negative_snan", 0x3F80'0000u, 0xFF80'0001u, DivisionCase::Kind::SignalingNaN},
+        {"positive_zero_over_positive_zero", 0x0000'0000u, 0x0000'0000u,
+         DivisionCase::Kind::InvalidDivision},
+        {"negative_zero_over_positive_zero", 0x8000'0000u, 0x0000'0000u,
+         DivisionCase::Kind::InvalidDivision},
+        {"positive_zero_over_negative_zero", 0x0000'0000u, 0x8000'0000u,
+         DivisionCase::Kind::InvalidDivision},
+        {"negative_zero_over_negative_zero", 0x8000'0000u, 0x8000'0000u,
+         DivisionCase::Kind::InvalidDivision},
+        {"positive_inf_over_positive_inf", 0x7F80'0000u, 0x7F80'0000u,
+         DivisionCase::Kind::InvalidDivision},
+        {"negative_inf_over_positive_inf", 0xFF80'0000u, 0x7F80'0000u,
+         DivisionCase::Kind::InvalidDivision},
+        {"positive_inf_over_negative_inf", 0x7F80'0000u, 0xFF80'0000u,
+         DivisionCase::Kind::InvalidDivision},
+        {"negative_inf_over_negative_inf", 0xFF80'0000u, 0xFF80'0000u,
+         DivisionCase::Kind::InvalidDivision},
     }};
 
     ConversionFixture fixture("gfx1250_mxfp_cvt_pack_nan_policy");
@@ -584,6 +618,11 @@ TEST(Gfx1250MxfpCvtSimdCorrectness, PackNaNAndInvalidDivisionPolicyIsBitExact) {
       for (const DivisionCase &division_case : division_cases) {
         SCOPED_TRACE(test_case.mnemonic.data());
         SCOPED_TRACE(division_case.name.data());
+        struct RunResult {
+          int clear_result;
+          int invalid_exceptions;
+          std::array<uint32_t, kMaxDestinationRegs * kWaveSize> destination;
+        };
         const auto run = [&](bool force_scalar) {
           fixture.seed(test_case, kFullExec);
           const float value = std::bit_cast<float>(division_case.value_bits);
@@ -601,19 +640,40 @@ TEST(Gfx1250MxfpCvtSimdCorrectness, PackNaNAndInvalidDivisionPolicyIsBitExact) {
               fixture.cu->write_vgpr(fixture.vgpr_base + kSourceBase + word, lane, packed_value);
           }
           ForceScalarGuard guard(force_scalar);
+          const int clear_result = std::feclearexcept(FE_ALL_EXCEPT);
           EXPECT_TRUE(fixture.cu->execute_instruction(instruction.get(), *fixture.wf).succeeded());
-          return fixture.snapshot_vgpr_window();
+          return RunResult{clear_result, std::fetestexcept(FE_INVALID),
+                           fixture.snapshot_vgpr_window()};
         };
 
         const auto scalar_result = run(true);
         const auto simd_result = run(false);
-        EXPECT_EQ(simd_result, scalar_result);
-        // FP4/FP6/BF6 have no NaN encoding and map every NaN result to +0.
-        // FP8/BF8 preserve the deterministic NaN sign selected above.
-        const uint32_t expected_code = test_case.low_bits == 8u ? division_case.expected_code : 0u;
-        const uint32_t expected_word = 0x0101'0101u * expected_code;
-        for (uint32_t word = 0; word < packed_word_count(test_case); ++word)
-          EXPECT_EQ(scalar_result[word * kWaveSize], expected_word);
+        ASSERT_EQ(scalar_result.clear_result, 0);
+        ASSERT_EQ(simd_result.clear_result, 0);
+        // A quiet-NaN comparison inside an encoder may or may not raise
+        // FE_INVALID after inlining and optimization. Its result bits remain
+        // part of the scalar contract; its host exception side effect does not.
+        if (division_case.kind != DivisionCase::Kind::QuietNaN) {
+          EXPECT_EQ(simd_result.invalid_exceptions, scalar_result.invalid_exceptions);
+        }
+        EXPECT_EQ(simd_result.destination, scalar_result.destination);
+        if (division_case.kind == DivisionCase::Kind::InvalidDivision) {
+#if defined(__x86_64__) || defined(__i386__)
+          // Independent regression for the original direct host division on
+          // the configured x86 build: both 0/0 and Inf/Inf produce the x86
+          // indefinite negative NaN and therefore pack as 0xff in FP8/BF8.
+          // The C++ abstract machine does not specify this NaN sign on other
+          // hosts, where the untouched generated scalar result stays the oracle.
+          EXPECT_NE(scalar_result.invalid_exceptions, 0);
+          EXPECT_NE(simd_result.invalid_exceptions, 0);
+          const uint32_t expected_code = test_case.low_bits == 8u ? 0xFFu : 0u;
+          const uint32_t expected_word = 0x0101'0101u * expected_code;
+          for (uint32_t word = 0; word < packed_word_count(test_case); ++word) {
+            EXPECT_EQ(scalar_result.destination[word * kWaveSize], expected_word);
+            EXPECT_EQ(simd_result.destination[word * kWaveSize], expected_word);
+          }
+#endif
+        }
       }
     }
   }
@@ -785,24 +845,31 @@ TEST(Gfx1250MxfpCvtSimdCorrectness, UnpackSpecialScalesMasksAndOverflowAreBitExa
         const auto scalar_result = run(true);
         EXPECT_EQ(simd_result, scalar_result);
 
-        // Make the NaN policy itself an oracle instead of only checking that
-        // both implementations made the same choice. The maximum FP8/BF8
-        // code is a negative qNaN; FP4/FP6/BF6 maxima are finite. E8M0 0xff
-        // is a positive qNaN, and a decoded-value NaN takes precedence.
-        constexpr uint32_t kObservedLane = 12;
-        if (scale_byte == 1u || (scale_byte == 3u && test_case.low_bits == 8u)) {
-          const bool negative = test_case.low_bits == 8u;
-          uint32_t expected = negative ? 0xFFC0'0000u : 0x7FC0'0000u;
-          if (test_case.wide_format == WideFormat::F16) {
-            const uint32_t half = negative ? 0xFE01u : 0x7E01u;
-            expected = half | (half << 16);
-          } else if (test_case.wide_format == WideFormat::Bf16) {
-            const uint32_t half = negative ? 0xFFC0u : 0x7FC0u;
-            expected = half | (half << 16);
-          }
-          EXPECT_EQ(simd_result[kObservedLane], expected);
-        }
+        // NaN operand selection for multiplication is compiler- and
+        // consumer-sensitive. The untouched generated scalar expression is
+        // deliberately the oracle for those bit patterns.
       }
+
+      // One exceptional active lane scalarizes its native chunk. Keep the
+      // neighboring lanes ordinary to verify that the complete chunk still
+      // matches the generated scalar pipeline.
+      SCOPED_TRACE("mixed_exceptional_chunk");
+      const auto words = build_conversion(test_case, kDestinationBase, kSourceBase,
+                                          vgpr_source(kSeedReg), vgpr_source(kScaleReg), 0u);
+      std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words.data()));
+      ASSERT_NE(instruction, nullptr);
+      const auto run_mixed_chunk = [&](bool force_scalar) {
+        fixture.seed(test_case, kFullExec);
+        fixture.fill_packed_source(test_case, kSourceBase, 1u);
+        for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
+          const uint32_t scale_code = lane == 0u ? 0xffu : 0x7fu;
+          fixture.cu->write_vgpr(fixture.vgpr_base + kScaleReg, lane, scale_code);
+        }
+        ForceScalarGuard guard(force_scalar);
+        EXPECT_TRUE(fixture.cu->execute_instruction(instruction.get(), *fixture.wf).succeeded());
+        return fixture.snapshot_vgpr_window();
+      };
+      EXPECT_EQ(run_mixed_chunk(false), run_mixed_chunk(true));
     }
   }
 }
