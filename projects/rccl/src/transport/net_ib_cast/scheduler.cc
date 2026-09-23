@@ -24,13 +24,30 @@ FILE* IbCastQpSchedLogStream;
 //   1. RCCL_IB_QP_SCHED_ENABLE / NCCL_IB_QP_SCHED_ENABLE explicitly set (!=−1) → honour it.
 //   2. NCCL_NET=ib-cast explicitly set → force enable.
 //   3. Otherwise → disable on AINIC (default path), enable everywhere else.
+// BY_ORDER comms no-op WRR/split-data (IbCastQpSchedDoWrr returns immediately).
+// An explicit ENABLE=1 still wins, but that combination is unsupported: warn so it
+// is visible instead of silently running a scheduler that never remaps.
 bool rcclUseIbCastQpSched() {
   int64_t schedParam = rcclParamIbCastQpSchedEnable();
+  const bool byOrder = IbCastByOrderRequested();
   if (schedParam != -1) {
     bool enabled = (schedParam != 0);
     INFO(NCCL_NET | NCCL_ENV, "(IB-CAST) NCCL_IB_QP_SCHED_ENABLE explicitly set to %s",
          enabled ? "enabled" : "disabled");
+    if (enabled && byOrder) {
+      WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d) but the QP "
+           "scheduler is force-enabled (NCCL_IB_QP_SCHED_ENABLE=%ld): unsupported combination; "
+           "WRR/split-data are no-ops on BY_ORDER comms",
+           BY_ORDER, schedParam);
+    }
     return enabled;
+  }
+
+  if (byOrder) {
+    WARN("NET/IB: BY_ORDER matching requested (NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=%d): disabling the QP "
+         "scheduler, split-data and WRR",
+         BY_ORDER);
+    return false;
   }
 
   const char* netEnv = ncclGetEnv("NCCL_NET");
@@ -181,6 +198,7 @@ void IbCastLogSched(struct ncclIbSendComm* comm) {
 }
 
 void IbCastUpdateSchedParmsTry(struct ncclIbNetCommBase* base, int nreqs, int size) {
+  if (base->recvMatchingScheme == BY_ORDER) return;
   if (!base->schedParmsInit) {
     base->schedParms = castGlobalQpSchedParms;
     base->schedParmsInit = true;

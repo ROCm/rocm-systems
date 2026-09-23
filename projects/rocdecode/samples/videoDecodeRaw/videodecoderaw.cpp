@@ -25,13 +25,15 @@ THE SOFTWARE.
 #include <cstring>
 #include <string>
 #include <iomanip>
+#ifndef _WIN32
 #include <unistd.h>
+#include <sys/stat.h>
+#include <libgen.h>
+#endif
 #include <vector>
 #include <string>
 #include <chrono>
-#include <sys/stat.h>
-#include <libgen.h>
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#if (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L && __has_include(<filesystem>))
     #include <filesystem>
 #else
     #include <experimental/filesystem>
@@ -200,7 +202,7 @@ int main(int argc, char **argv) {
     }
 
     try {
-        std::size_t found_file = input_file_path.find_last_of('/');
+        std::size_t found_file = input_file_path.find_last_of("/\\");
         std::cout << "info: Input file: " << input_file_path.substr(found_file + 1) << std::endl;
         std::cout << "info: Using built-in bitstream reader" << std::endl;
         RocdecBitstreamReader bs_reader = nullptr;
@@ -244,7 +246,6 @@ int main(int argc, char **argv) {
         uint8_t *pframe = nullptr;
         int64_t pts = 0;
         OutputSurfaceInfo *surf_info;
-        uint32_t width, height;
         double total_dec_time = 0;
         bool first_frame = true;
         // initialize reconfigure params: the following is configured to dump to output which is relevant for this sample
@@ -289,7 +290,7 @@ int main(int argc, char **argv) {
             total_dec_time += time_per_decode;
             n_frame += n_frame_returned;
             n_pic_decoded += decoded_pics;
-            if (num_decoded_frames && num_decoded_frames <= n_frame) {
+            if (num_decoded_frames && num_decoded_frames <= static_cast<uint32_t>(n_frame)) {
                 break;
             }
 

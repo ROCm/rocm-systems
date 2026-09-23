@@ -20,7 +20,7 @@ join(std::string_view delim, Args&&... args)
 {
     std::ostringstream oss;
     oss << std::boolalpha;
-    std::string_view sep = "";
+    std::string_view sep;
 
     ((oss << sep << args, sep = delim), ...);
 
