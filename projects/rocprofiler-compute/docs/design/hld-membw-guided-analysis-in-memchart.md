@@ -90,7 +90,7 @@ Show bottleneck detection results on the memory chart at the relevant memory lev
 - **[FR1.2a]** When no bottlenecks are detected across GL1/GL2/EA, print a single status line below the chart: `Memory Bandwidth Analysis: No bottlenecks detected (GL1 / GL2 / EA).`
 - **[FR1.3]** Show supporting metric values alongside each active bottleneck (e.g. `stall rate = 15.2%`). Multiple metrics use the format: `metric1=42% | metric2=1.2M`.
 - **[FR1.4]** CLI renderer only.
-- **[FR1.5]** This feature requires both `--experimental` and `--membw-analysis` flags. gfx950 only.
+- **[FR1.5]** Profile mode requires both `--experimental` and `--membw-analysis` flags. Analyze mode auto-detects from `profiling_config.yaml`. gfx950 only.
 
 **Acceptance (FR1.1):** Given a profiled workload from the membw analysis test suite with a known bottleneck, the engine must mark the corresponding leaf node active and all mutually exclusive siblings inactive.
 
@@ -108,7 +108,7 @@ When a bottleneck is detected, provide textual guidance to the user.
 
 ### FR3 -- Gate consolidation (PS2)
 
-The `--membw-analysis` flag is currently checked in multiple independent callsites across the codebase. Consolidate these to a single policy function that returns an availability status (available, arch unsupported, counters missing, or disabled by flag). All existing gate callsites delegate to this function.
+Profile mode injects block 30 into `filter_blocks` at profile time and records `membw_analysis: true` in `profiling_config.yaml`. Analyze mode reads this config and auto-detects whether membw data was collected, with no explicit flag needed.
 
 ---
 

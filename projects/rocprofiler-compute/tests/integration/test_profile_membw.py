@@ -37,7 +37,7 @@ def test_membw_profile_and_analyze(
     soc,
     capsys,
 ):
-    """Profile with --membw-analysis, then analyze and verify guidance output."""
+    """Profile with -b 3 30 --membw-analysis, then analyze and verify guidance."""
     if soc != "MI350":
         pytest.skip(f"membw analysis requires MI350, got {soc!r}")
 
@@ -46,7 +46,7 @@ def test_membw_profile_and_analyze(
     binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
-        options=["--experimental", "--membw-analysis"],
+        options=["-b", "3", "30", "--experimental", "--membw-analysis"],
         roof=False,
     )
 
@@ -56,38 +56,6 @@ def test_membw_profile_and_analyze(
 
     results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
     assert len(results_files) > 0
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    output = capsys.readouterr().out
-    assert_membw_analysis_ran(output)
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_membw_analyze_block_filter(
-    binary_handler_profile_rocprof_compute,
-    binary_handler_analyze_rocprof_compute,
-    soc,
-    capsys,
-):
-    """Profile with --membw-analysis, analyze with -b 3 30, verify output."""
-    if soc != "MI350":
-        pytest.skip(f"membw analysis requires MI350, got {soc!r}")
-
-    workload_dir = common.get_output_dir()
-
-    binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        options=["--experimental", "--membw-analysis"],
-        roof=False,
-    )
 
     code = binary_handler_analyze_rocprof_compute([
         "analyze",

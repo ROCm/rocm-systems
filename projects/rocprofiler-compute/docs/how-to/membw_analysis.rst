@@ -33,9 +33,9 @@ The memory bandwidth analysis feature is currently available for AMD Instinct MI
 Profiling
 =========
 
-Collect memory bandwidth counters by adding ``--membw-analysis`` to
-the ``profile`` command. Adding ``--membw-analysis`` enables Block 30, which contains the
-stall and pressure metrics used by the analysis.
+Add ``--membw-analysis`` to the ``profile`` command to collect
+Block 30, which contains the stall and pressure metrics used by the
+analysis.
 
 .. code-block:: shell
 
@@ -232,4 +232,4 @@ Check your terminal width with:
 
    * The analysis evaluates per-dispatch averages. Bottlenecks that occur in only a subset of dispatches may not be visible.
    * Guidance output is capped at 5 blocks. Additional bottlenecks beyond the cap are noted but not expanded.
-   * When Block 30 counters are missing or incomplete, the guidance panel shows "Unavailable", "Partial data", or "Inconclusive" status lines instead of bottleneck details.
+   * When Block 30 counters are present but incomplete, the guidance panel shows "Unavailable", "Partial data", or "Inconclusive" status lines instead of bottleneck details. When Block 30 is excluded by a ``-b`` filter, the guidance panel is omitted entirely.
