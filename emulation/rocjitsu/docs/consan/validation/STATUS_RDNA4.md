@@ -488,3 +488,10 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   sampled coverage (`workgroup_stride=256`, `cell_stride=256`). Precommitted
   the same grouped fault with `preset=max` for eight trials and a separate
   dense clean comparator. Execution pending; standard misses remain recorded.
+- Sampling diagnosis: FP16's admitted trials report `visible_evidence=0`
+  despite two instrumented dispatches and complete static patch coverage.
+  The runtime workgroup gate includes dispatch identity and workgroup
+  coordinates; identical short runs can repeat an empty deterministic sample.
+  Repeating that configuration is not evidence of broader sampling coverage.
+  Dense clean/fault comparisons are therefore needed to separate sampling
+  exclusion from failure of the detector on observed accesses.
