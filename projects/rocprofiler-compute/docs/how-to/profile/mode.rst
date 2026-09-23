@@ -902,15 +902,17 @@ which operators contribute to specific performance counter values.
 Requirements
 ------------
 
-* PyTorch 2.13 or 2.14 in the profiling environment.
+* PyTorch in the profiling environment. Full native coverage requires an exact
+  validated PyTorch 2.13 or 2.14 build; other builds use the reduced Python
+  fallback.
 * PyTorch application must be run as a Python script or a Python command.
 
 .. important::
 
-   PyTorch must be installed together with ROCm from the TheRock package index.
-   Torch trace is built against the PyTorch that ships alongside ROCm, so a
-   PyTorch installed separately, for example from the default PyPI index, is not
-   supported.
+   For full native coverage, install PyTorch together with ROCm from the TheRock
+   package index. The native collector is enabled only for exact PyTorch wheel
+   builds validated with that ROCm release. A separately installed or self-built
+   PyTorch uses reduced-coverage Python tracing instead.
 
    Install ``rocm[profiler]`` and ``torch`` from the same index, each with the
    ``device-*`` extra for your GPU. See `Installing multi-arch PyTorch Python
@@ -971,11 +973,21 @@ these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
 Torch trace collector
 ---------------------
 
-``--torch-trace`` loads ``torch_trace_collector-<major>.<minor>.<abi>.so`` for
-the workload PyTorch version. If this installation has no collector at all,
-profiling stops and says so. If a collector exists but none matches the workload
-PyTorch version, profiling stops with an error listing the supported versions and
-the workload version.
+``--torch-trace`` loads one generic ``torch_trace_collector.so`` through a plain
+C interface. The collector has no dependency on the workload's Python ABI and is
+built without PyTorch headers or libraries. Before installing its callback, the
+loader and collector verify the exact PyTorch wheel and native library identities.
+For backward and gradient entry points, the Python wrapper publishes the
+launcher's native operating-system thread ID so the offline analysis can
+reconnect work executed by autograd worker threads. This launcher ID is
+distinct from PyTorch's logical current-thread and forward-thread IDs.
+
+If the collector is absent, fails to load, or does not recognize the workload's
+exact PyTorch build, profiling continues with ``TorchDispatchMode`` and prints a
+warning. That fallback records operations executed on the Python thread but has
+reduced coverage for autograd worker threads. Its argument output is also less
+detailed: positional tensors have no schema names, and non-tensor values and
+TensorList contents are omitted.
 
 Output
 ------
@@ -992,7 +1004,9 @@ to ``ml_api_trace/consolidated.csv``; the source marker and counter files are
 The ``ml_api_trace/`` directory contains ``consolidated.csv`` with all
 operator/kernel data. The columns include:
 
-   * ``Operator_Name``: Full operator hierarchy (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``, ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
+   * ``Operator_Name``: The operation name, or the reconstructed operator
+     hierarchy when the offline hierarchy analysis is present (e.g.
+     ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``).
    * ``Context_Id``: Call context (e.g., ``1@__init__.py:231``)
    * ``Counter_Name`` / ``Counter_Value``: Performance counter values
    * ``Start_Timestamp_function`` / ``End_Timestamp_function``: Operator timing
@@ -1069,7 +1083,9 @@ The Torch trace feature currently has the following limitations:
 
 * The ``--torch-trace`` option requires the application to be a Python command or Python script.
 
-* The workload’s Python version must match the Python version used by ``roctx``.
+* The native collector uses a plain C interface and is not tied to a particular
+  Python version. The rest of the installed Python package must still support the
+  workload interpreter.
 
 * This feature adds instrumentation overhead to track operator boundaries. For performance-critical measurements, consider profiling without this option first.
 
@@ -1092,9 +1108,10 @@ This means the install requirement above was not met.
 Hierarchical operator names
 ----------------------------
 
-PyTorch operators are captured with full module hierarchy when available (e.g.,
-``nn.Module`` and ``torch.nn.functional`` wrappers), so you see where each
-operator occurs in your PyTorch application:
+The tracing producer records flat ``nn.Module``, ``torch.nn.functional``, ATen,
+and autograd ranges. The offline hierarchy analysis reconstructs their nesting
+from timestamps and correlation fields, so you can see where each operation
+occurs in your PyTorch application:
 
 .. code-block:: text
 
@@ -1102,8 +1119,8 @@ operator occurs in your PyTorch application:
    nn.Module.MyModel.forward/nn.Module.Linear.forward
    torch.nn.functional.relu
 
-The ``Operator_Name`` column in ``ml_api_trace/consolidated.csv`` contains
-the full operator hierarchy.
+When the offline hierarchy analysis is present, the ``Operator_Name`` column in
+``ml_api_trace/consolidated.csv`` contains the reconstructed operator hierarchy.
 
 This hierarchical information enables:
 

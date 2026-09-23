@@ -1,158 +1,169 @@
 # Torch Trace Collector
 
-## System Context
+## System context
 
-`--torch-trace` attributes GPU kernel counters to PyTorch operators.
+`--torch-trace` attributes GPU kernel counters to PyTorch operations.
 
-- Profile mode does not name the operator that launched the GPU work.
-- `--torch-trace` emits ROCTX ranges around operators. Analyze joins those
-  ranges to kernel counters (`--list-torch-operators`, `--torch-operator`).
-- This HLD is the C++ `RecordFunction` collector that `--torch-trace` loads
-  into the workload.
+Two producers emit ROCTX ranges in the workload process:
 
-Surrounding pieces:
+- Python wrappers identify structural calls such as
+  `nn.Module.<Class>.forward`, distributed collectives, and tensor methods.
+- A C++ RecordFunction callback observes ATen and autograd operations on every
+  thread, including autograd worker threads that Python dispatch cannot see.
 
-- Python wraps replace a Python API so each call pushes a named frame onto
-  the per-thread stack and pops it on return. The frame includes a source
-  location. Wraps run only on the Python thread. The wrap set does not
-  change when the collector loads. With the collector, wrap frames share
-  the collector stack; without it they go to the Python ROCTX path.
-- `TorchDispatchMode` can emit ATen ranges on the Python thread only.
-  Autograd workers run backward in C++ and never enter that context.
-- RecordFunction runs on every thread that executes an op and sees the
-  sequence numbers used to join backward ops to their forward calls.
+Each producer emits one flat range per operation. The marker contains the
+operation name, source context when available, sequence number, current and
+forward thread identifiers, Python launcher thread identifier, RecordFunction
+scope, captured arguments, and backend. The offline PyTorch hierarchy analysis
+reconstructs the hierarchy from the recorded range intervals and correlation
+fields. The collector does not keep a runtime call tree or a forward-snapshot
+store. That consumer is implemented by stacked PR #11830 and is not part of
+this producer/build worktree.
 
-Each thread holds a stack of frames (operator name and source context). On
-each push the collector formats the full stack into one ROCTX range. The
-profiler records those ranges for analyze.
+**In scope:** PyTorch eager and autograd operations, structural Python ranges,
+argument metadata, and the marker fields needed by offline analysis.
 
-**In scope:** operator ranges for PyTorch eager and autograd on every thread;
-structural Python frames in the same hierarchy; Inductor kernels launched
-through the static launcher; analyze join on the existing marker CSV.
-
-**Out of scope:** non-Python workloads; PyTorch versions other than 2.13 and
-2.14.
-
-**Assumptions:**
-
-- Autograd copies PyTorch per-thread debug info onto the worker task.
-- Sequence number is the join key between a forward op and its backward op.
-
----
-
-## Problem statement
-
-- Counters are kernel-scoped. Users profiling PyTorch workloads cannot tell
-  which operator produced a kernel.
-- Python instrumentation is thread-local. `TorchDispatchMode` and structural
-  wraps (`nn.Module`, `Tensor.backward`) run only on the Python thread.
-  Autograd workers never see them, so backward kernels are unmarked or lack
-  the forward operator chain.
+**Out of scope:** non-Python workloads and arbitrary self-built PyTorch
+binaries. Native collection is enabled only for exact artifacts that have
+passed the validation matrix and been allowlisted; other builds use the Python
+fallback.
 
 ---
 
 ## Requirements
 
-What the system shall do:
+The producer must:
 
-- Nested ROCTX ranges around ATen operators on every thread that runs them,
-  including autograd workers.
-- A backward operator range includes the matching forward operator chain when
-  PyTorch provides a sequence number.
-- Python structural frames (`nn.Module`, `Tensor.backward`) appear in the
-  same range as nested ATen ops.
-- Marker strings remain compatible with existing analyze: split `Function`
-  on `:#`; optional `|backend` moved to a `Backend` column.
-- A workload PyTorch version with no matching collector module fails with a
-  list of supported versions.
-
-Non-functional:
-
-- RecordFunction callbacks must not throw into PyTorch.
-- The collector is a prebuilt module. Profile does not compile it.
+- observe RecordFunction operations on all execution threads;
+- preserve the argument names, tensor shapes, dtypes, TensorList rendering,
+  limits, escaping, and marker format introduced by the original collector;
+- emit flat per-operation intervals for offline hierarchy reconstruction;
+- expose a plain C interface loaded through `ctypes`, with no Python ABI
+  dependency;
+- build without an installed PyTorch and without generated PyTorch headers;
+- fail closed to `TorchDispatchMode` when the collector or runtime is not an
+  exact validated match; and
+- never throw an exception through PyTorch's callback boundary.
 
 ---
 
 ## Design
 
-Two producers share one per-thread stack. Each ROCTX range is the full stack.
-
 ```mermaid
 flowchart LR
-  profile["profile --torch-trace"] --> wraps["Python wraps"]
-  profile --> collector["versioned collector module"]
-  wraps --> stack["per-thread stack"]
-  collector --> stack
-  stack --> roctx["ROCTX ranges"]
-  roctx --> csv["marker CSV + counters"]
-  csv --> analyze["analyze operator tree"]
+  profile["profile --torch-trace"] --> python["Python structural wrappers"]
+  profile --> loader["plain-Python loader"]
+  loader --> torch["promote workload libtorch_cpu.so"]
+  loader --> collector["generic torch_trace_collector.so"]
+  torch --> collector
+  collector --> events["flat RecordFunction ROCTX ranges"]
+  python --> events
+  events --> csv["marker CSV + counters"]
+  csv --> analyze["offline hierarchy reconstruction"]
 ```
 
-### Decision 1: Where to hook ATen
+### Decision 1: RecordFunction plus Python wrappers
 
-| Option | Pros | Cons |
+| Option | Benefit | Limitation |
 | --- | --- | --- |
-| `TorchDispatchMode` only | Pure Python | Misses autograd workers |
-| `RecordFunction` only | Every thread, sequence numbers | Does not name `nn.Module.forward` |
-| **RecordFunction and wraps (chosen)** | **Workers, sequence numbers, module names** | Two producers to keep consistent |
+| `TorchDispatchMode` only | Pure Python | Misses autograd worker operations and omits native schema names, non-tensor values, and TensorList contents |
+| RecordFunction only | Covers all threads and sequence metadata | Does not name structural Python calls |
+| **RecordFunction plus wrappers** | **Covers both surfaces** | Two producers must share one wire format |
 
-- RecordFunction is a C++ hook. The collector is a module loaded into the
-  workload interpreter.
-- Python wraps push frames for entry points ATen does not name.
-- When the collector is loaded, ATen ops use the callback only
-  (`TorchDispatchMode` is off).
-- If the module fails to install, profile falls back to
-  `TorchDispatchMode` and warns.
-- An unsupported PyTorch version is an error, not a fallback.
-- This collector needs two wraps: module forward
-  (`nn.Module.{Class}.forward`) and `Tensor.backward`.
-- The rest of the wrap surface is leftover from the Python tracer
-  (see the LLD).
+When the native collector installs, ATen operations use RecordFunction and the
+Python dispatcher mode stays off. If native installation fails, the loader
+warns and enables `TorchDispatchMode`; structural wrappers remain enabled in
+both cases.
 
-### Decision 2: How backward joins forward
+### Decision 2: Flat producer, offline hierarchy
 
-**Snapshot store keyed by `(seqNr, thread id)` : Join while the forward stack still exists using a Process-wide map
+The collector emits the current operation only. It does not copy a Python call
+stack or join forward and backward stacks in the workload process. Python
+backward/grad wrappers publish only their launcher OS thread ID through
+`ThreadLocalDebugInfo`, which PyTorch propagates to autograd workers. The
+`seqNr`, `tid`, `ftid`, `ltid`, and `scope` fields preserve the information
+needed by offline analysis to correlate events and reconstruct nesting. This
+avoids maintaining runtime tree or snapshot state, bounds the captured argument
+payload, and aligns the producer with the offline analysis design.
 
-- A snapshot is the entire stack at a forward op with a sequence number.
-- The forward thread pushes it under `(seqNr, thread id)` in a
-  process-wide snapshot store.
-- The backward thread reads (pops) the matching entry using the sequence
-  number and the forward thread id PyTorch provides, and pushes frames it
-  does not already have.
-- Autograd does not copy this stack through debug info.
-- Name matching is not used: several ops can share a name; seqNr is the
-  ATen correlation id.
+`tid` and `ftid` are PyTorch logical thread IDs. `ltid` is the launcher's native
+operating-system thread ID, so consumers must treat it as a separate ID
+namespace rather than comparing it directly with `tid` or `ftid`.
 
-### Decision 3: How the C++ callback is shipped
+### Decision 3: One generic, temporary ABI shim
 
-| Option | Pros | Cons |
-| --- | --- | --- |
-| Compile at profile time | Matches any Torch | Slow first run; extra toolchain in the user env |
-| Link into the native tool `.so` | One artifact | Wrong load path: the callback must live in the Python process |
-| **Prebuilt `torch_trace_collector-<version>.so` (chosen)** | **No compile at profile time** | One artifact per supported Torch |
+The build produces one `torch_trace_collector.so`. A small handwritten adapter
+contains only the PyTorch declarations and measured layout facts needed by the
+callback and argument capture. It uses exported ATen/c10 functions plus
+PyTorch's stable AOTI C functions for tensor metadata.
 
-- Build finds Torch at `$ROCM_PATH/../torch`.
-- The loader selects the artifact whose version matches the workload
-  Torch version.
+This avoids an installed PyTorch at build time, generated header closures,
+per-version collector sources, and Python-version-specific filenames. It is a
+temporary compatibility shim, not a claim that private ATen/c10 layouts are a
+stable ABI.
+
+### Decision 4: Exact runtime gates
+
+The Python loader first checks an exact wheel identity: version/build tag,
+Torch git revision, debug-build flag, and libstdc++ ABI mode. It then reopens
+the workload's real `libtorch_cpu.so` with
+`RTLD_GLOBAL | RTLD_LAZY | RTLD_NODELETE` and loads the collector locally with
+`RTLD_NOW | RTLD_NODELETE`.
+
+Before callback registration, the native collector independently checks the
+providers of `aoti_torch_abi_version` and `ThreadLocalDebugInfo::get` using the
+GNU build IDs of both `libtorch_cpu.so` and `libc10.so`, together with the AOTI
+ABI version. Unknown, mismatched, or malformed identities fail closed. A
+separate C ABI revision handshake prevents a mismatched Python loader and
+collector interface.
+
+Runtime promotion intentionally exposes Torch symbols process-wide. Keeping
+both handles nodelete is required because PyTorch retains callback pointers for
+the lifetime of the process.
 
 ---
 
-## Implementation
-Details: `lld-torch-trace-collector.md`.
+## Validation and maintenance
+
+- The collector must build without Torch headers or Torch libraries.
+- ELF checks enforce the generic filename, four exported C functions, the 31
+  expected unresolved Torch/c10 imports, no Torch/Python `DT_NEEDED`, and no
+  RPATH/RUNPATH.
+- Torch-free Python and C++ golden tests enforce the shared escaping, field
+  order, truncation, required-size, and null-termination rules.
+- An isolated runtime check uses a test-only ROCTX interceptor to prove that an
+  allowlisted wheel takes the native path and emits balanced forward and
+  backward markers with the required argument and correlation fields.
+- Every allowlisted build must pass the full schema-name sweep, argument and
+  marker goldens, concurrency tests, and sanitizer tests.
+- Matching ROCm/PyTorch wheels must pass GPU-resident tensor, autograd,
+  end-to-end CSV, and overhead tests on MI300X before release.
+- Adding a supported build requires updating both the wheel identity gate and
+  native build-ID evidence as applicable. Standalone CPU libtorch archives used
+  for native validation do not belong in the wheel-only Python allowlist.
 
 ---
 
-## Validation, security and debuggability
+## Known temporary limitations
 
-- Profile/analyze tests for `--torch-trace` output and operator listing.
+- RecordFunction, IValue, OperatorHandle, and callback layouts are private
+  PyTorch implementation details. Exact build allowlisting reduces accidental
+  mismatch risk but cannot make those accesses formally supported.
+- Launcher-thread propagation crosses the private c10 C++ ABI through
+  `DebugInfoKind`, `DebugInfoBase`, and `std::shared_ptr`.
+- TensorList output is capped at eight values, but the exported
+  `IValue::visit()` implementation still traverses the complete list.
+- Argument names are parsed from the diagnostic `OperatorEntry::dumpState()`
+  text because exported schema accessors do not expose the required traversal
+  without more private layouts.
+- Runtime symbol promotion is process-wide and cannot be undone.
+- Launcher thread IDs are process-local. Stacked PR #11830 currently uses the
+  full marker string as its cross-pass key; that consumer must exclude `ltid`
+  from cross-pass identity while retaining it for within-pass
+  worker-to-launcher attachment.
 
----
-
-## Open questions
-
-| Item | Notes |
-| --- | --- |
-| Inductor static launcher | Those kernels launch without Triton's Python entry point now, so they appear as torch ranges. Direct Triton launches are `--triton-trace`. |
-| Offline correlation | Encode `seqNr` and PyTorch thread ids in the ROCTX string, larger payload to `roctxRangePushA`. Analyze splices the worker leaf to the matching forward nest (main thread, same `seqNr`). No snapshot store. We may still need overlay to append `Tensor.backward` wrap range (also a main-thread write; no `seqNr`).|
-| Further Torch versions | Each new version needs a built artifact and a CMake version gate. |
-| DispatchMode fallback | Unsupported version is fatal; install failures fall back. Whether fallback should remain is not settled. |
+The long-term replacement is a PyTorch/SDK-provided stable helper exposing
+RecordFunction inputs, IValue kinds, borrowed tensor conversion, bounded
+TensorList access, schema argument names, and launcher correlation. The plain C
+boundary and behavior goldens remain valid when that helper replaces the
+handwritten internals.
