@@ -1,5 +1,9 @@
 # ConSan CDNA5 (`gfx1250`) status
 
+Historical evidence: this ledger was not requalified during the September 2026
+documentation audit. Existing results describe their recorded runs, not the
+current branch. Rerun the linked procedure after relevant changes.
+
 This ledger summarizes the latest accepted emulator evidence. Exact counts
 belong to the native binaries used for those runs and must be refreshed after
 relevant source, toolchain, workload, or emulator changes. Procedures and

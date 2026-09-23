@@ -12,6 +12,12 @@ The other `STATUS_*.md` files are placeholders, not required targets.
 The prepared MI350X campaign invocation and evidence layout are in
 [`GFX950.md`](GFX950.md).
 
+Existing ledgers are historical measurements, not a current-branch performance
+claim. Interpret preset labels using each artifact's resolved controls and
+source revision; a label reused after a policy change does not imply identical
+sampling. Machine-local artifact paths identify the original evidence location
+and are not portable download links.
+
 ## Measurement contract
 
 The runner executes a native baseline, Default Mode with the default preset,
@@ -91,12 +97,13 @@ same two-pass workflow documented in
 4. Pass the generated file unchanged to every ConSan mode through
    `RJ_CONSAN_KERNEL_ALLOWLIST_FILE`.
 
-In expanded form, the discovery operation is:
+In expanded form, the discovery operation is (replace `./workload its-arguments`
+with the exact native command):
 
 ```sh
 rocprofv3 --kernel-trace --output-format csv \
   --output-directory "$artifact_dir/kernel-profile" -- \
-  <the exact native workload command>
+  ./workload its-arguments
 
 rocjitsu_consan_allowlist.py \
   --output "$artifact_dir/kernel-allowlist.txt" \

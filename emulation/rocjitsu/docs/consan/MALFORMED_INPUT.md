@@ -55,8 +55,12 @@ it is not a certificate that every unrelated part of the input is well formed.
 
 Malformed or unstable report state is handled separately from malformed code
 objects. Invalid versions, changed generations, impossible capacities,
-malformed owner/epoch identities, publication collisions, and dropped records
-make the analysis incomplete. They must never be interpreted as proof of a
+malformed owner/epoch identities, invalid publication, and dropped records
+make the analysis incomplete. Ordinary bank collisions and saturation are
+expected bounded-retention outcomes and do not themselves make it incomplete.
+The current barrier epoch saturates at a valid encoded value; this is a
+[detection-model limitation](DESIGN.md#identity-and-barrier-epochs), not malformed
+report state. An incomplete report must never be interpreted as proof of a
 clean execution.
 
 ## Hook and loader behavior

@@ -1,5 +1,9 @@
 # ConSan RDNA3 (`gfx1100`) status
 
+Historical evidence: this ledger was not requalified during the September 2026
+documentation audit. Existing results describe their recorded runs, not the
+current branch. Rerun the linked procedure after relevant changes.
+
 Physical evidence uses native `gfx1100` code objects on a matching GPU;
 simulator prerequisites use RocJITsu `configs/gfx1100_w7900.json`. Exact counts
 belong to the binaries used for qualification and must be refreshed after

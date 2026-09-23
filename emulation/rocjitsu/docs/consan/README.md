@@ -69,6 +69,19 @@ workgroup and cell sampling. `low` trades coverage for lower recording overhead,
 and `default` preserves standard behavior. See [ConSan presets](USAGE.md#presets)
 for exact settings, overrides, and bounded-retention limitations.
 
+## Reading the contract
+
+[DESIGN.md](DESIGN.md#heuristics-and-their-failure-directions) separates enforced
+transformation invariants from detection heuristics and known limitations.
+`analysis_complete=true` describes the selected contract and usable evidence;
+it is not a race-freedom certificate or a check of every heuristic assumption.
+
+Qualification and benchmark ledgers preserve results from particular runs.
+They have not been rerun as part of this documentation audit. Their counts,
+colors, timings, and preset names must be interpreted with the recorded source,
+binary, configuration, and machine provenance, not as qualification of the
+current branch.
+
 ## Documents
 
 - [MODES.md](MODES.md): conceptual, phase-by-phase comparison of what the

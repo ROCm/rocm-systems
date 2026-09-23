@@ -108,7 +108,7 @@ barrier/atomic ordering path. See [SPILLING.md](SPILLING.md).
 guard. It replaces only a statically unique immediate wait which belongs to no
 bounded same-owner barrier sequence with a terminal instruction and records an
 `inline-malformed-barrier-abort` patch. Dynamic, ambiguous, and paired waits
-are untouched. It is not enabled by ordinary modes or modes and is not a
+are untouched. It is not enabled by ordinary modes and is not a
 race diagnostic. See [MALFORMED_INPUT.md](MALFORMED_INPUT.md).
 
 ### Fault injection
@@ -332,19 +332,29 @@ retained exact group with colliding lanes, including repeated examples. `conflic
 duplicates and pairs omitted by either limit. Reaching an output limit does not
 stop analysis or change the diagnostic guards' verdict.
 
-ConSan retains exact dispatch/workgroup identity. Its workgroup selector
+ConSan retains workgroup coordinates and a dispatch fingerprint, not an exact
+globally unique launch identity. Its workgroup selector
 includes dispatch identity, so offset zero does not guarantee selecting
 workgroup zero, and repeated processes can select different workgroups at the
 same offset. A fixed offset schedule reproduces selector settings, not dispatch
 identities. Workgroup stride 1 removes this source of selection misses. When entry-captured
 identity and scalar resources permit, a fast gate skips the shared access body
 for an unselected workgroup; private-identity and compact-spill operating points
-use an in-body fallback. Selected workgroups additionally mix owner, epoch,
-persistent sequence, static site, and LDS-cell identity into bounded causal
-windows. Each logical range receives as many as eight immutable windows when
-capacity permits. A later valid identity after every bank fills is
-`saturated_windows`; malformed publication or true evidence loss uses
-separate counters and makes the analysis incomplete.
+use an in-body fallback. The cell selector uses the starting LDS byte address
+shifted right by two; it does not select every cell touched by a wide access.
+Each static logical range has a separate table of immutable banks. The bank
+hash mixes dispatch fingerprint, workgroup coordinates, cluster-workgroup ID,
+and wave owner. It does not mix the access address, epoch, or a dynamic sequence.
+
+A publisher tries one bank; there is no search for another empty bank and no
+replacement of an older representative. A different retained window identity
+at that bank increments `saturated_windows`, even if other banks remain empty.
+The repeated-window check does not compare the packed access address or owner,
+so this counter is not a count of every discarded access. Saturation is an
+expected retention limit and does not itself make the verdict incomplete.
+Malformed publication and true evidence loss use separate counters and can
+make the analysis incomplete. See the [retention design](DESIGN.md#selection-and-retention)
+for the resulting detection blind spots.
 
 ConSan diagnostics attribute the retained instruction, wave owner and byte
 range. Exact masks and intra-wave diagnostics are limited to the locally proven
@@ -398,7 +408,11 @@ With no caller-owned buffer, the hook inventories the code and plans the
 ConSan report: admitted logical ranges, bounded window banks, synchronization
 metadata, and pending-acquire state.
 
-The automatic allocator requests the exact planned bytes. It never silently
+Automatic planning starts with eight banks per logical range, or the explicit
+requested bank count, and can repeatedly halve that count to fit the per-buffer
+ceiling, down to one. This preserves the static ranges and reserved sync slots;
+the achieved bank count, not the requested count, describes retention capacity.
+The automatic allocator then requests the exact planned bytes. It never silently
 shrinks site coverage or disables an event kind to fit. The per-buffer ceiling
 is 128 MiB, and aggregate live automatic-report memory is bounded at 4 GiB per
 process. Arithmetic overflow, a ceiling violation, or allocation failure is a
@@ -409,7 +423,7 @@ typed incomplete outcome.
 | `RJ_CONSAN_AUTO_REPORT_BUFFER_SIZE=N` | 128 MiB | Expert cap for HSA-tool-owned allocation; ordinary inventory still requests exact bytes below the cap. `0` disables automatic allocation. |
 | `RJ_CONSAN_REPORT_BUFFER=0xADDR` | unset | Caller-owned device-visible report buffer. |
 | `RJ_CONSAN_REPORT_BUFFER_SIZE=N` | `0` | Size of the caller-owned buffer; layout requirements depend on the enabled event families. |
-| `RJ_CONSAN_REQUIRE_RECORDS=0\|1` | `0` | At unload, require some visible auto-buffer ConSan access or synchronization evidence. |
+| `RJ_CONSAN_REQUIRE_RECORDS=0\|1` | `0` | At unload, require at least one visible auto-buffer ConSan watchpoint; standalone synchronization metadata does not satisfy this check. |
 | `RJ_CONSAN_REQUIRE_DIAGNOSTICS=0\|1` | `0` | Require at least one ConSan conflict. |
 | `RJ_CONSAN_FORBID_DIAGNOSTICS=0\|1` | `0` | Require zero diagnostics/conflicts. |
 | `RJ_CONSAN_FORBID_OVERFLOW=0\|1` | `0` | Fail if evidence was truly dropped. ConSan bounded saturation is reported separately from loss. |
@@ -434,6 +448,11 @@ publication state, and synchronization metadata are epoch-local and recycled.
 Final unload combines every analyzed epoch with the last live epoch, so earlier
 conflicts, diagnostics, saturation, and evidence are neither forgotten nor
 counted twice.
+
+These host report epochs are distinct from the per-wave barrier epoch inside a
+dispatch. The latter currently saturates at 1023 without making the trust verdict
+incomplete; see [the design limitation](DESIGN.md#identity-and-barrier-epochs).
+Recycling completed dispatches does not repair exhaustion inside a long kernel.
 
 For a long repeated workload where analyzing every iteration is unnecessary,
 `RJ_CONSAN_EPOCH_ANALYSIS` selects which synchronized epochs receive the

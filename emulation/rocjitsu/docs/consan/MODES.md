@@ -17,7 +17,7 @@ are its own.
 
 | Mode | Device work | Retained evidence | Host work | Meaning of a positive result |
 | --- | --- | --- | --- | --- |
-| **ConSan** | Select dynamic accesses and publish causal windows with associated synchronization metadata; check supported same-instruction collisions. | Bounded watchpoint banks, ordering metadata, and immediate-conflict evidence. | Analyze retained windows and report conflicts. | Selected evidence exposes an attributed conflict under the ConSan ordering model. |
+| **ConSan** | Select dynamic accesses and publish causal windows with associated synchronization metadata and supported exact-lane masks. | Bounded watchpoint banks, ordering metadata, and immediate-conflict evidence. | Analyze retained windows and exact-lane groups; report conflicts. | Selected evidence exposes an attributed conflict under the ConSan ordering model. |
 | **SuperCollider** | Preserve an LDS access, delay, repeat/read back, and compare. | Sticky mismatch marker. | Collect and report the marker. | A redundant observation changed; this is value-instability evidence, not a happens-before proof. |
 
 Report state survives kernel execution until the host retires it. ConSan
@@ -67,8 +67,9 @@ When the owner has the required entry-captured identity and scalar resources,
 ConSan places a uniform dispatch/workgroup gate before the shared per-access
 evidence body. Owners that need private workgroup identity or a compact
 scalar-spill layout use an in-body workgroup selector instead. Selected
-workgroups then apply the per-cell selector needed to preserve cross-wave
-evidence for a chosen LDS cell.
+workgroups then select the starting four-byte cell of each access. Overlapping
+wide accesses need not have the same starting cell. Owner-aware hashed banks
+retain the first representative; they are not a rolling history.
 
 Increasing the runtime stride does not make transformation, static patching,
 or report planning proportionally cheaper. Even at execution time, fallback
@@ -83,7 +84,10 @@ to remove workgroup and cell sampling. Bounded retention still applies at
 
 A **ConSan** diagnostic identifies a conflict in selected evidence. A clean
 report does not prove race freedom: the execution may not manifest the race,
-or sampling and retention may omit a conflicting pair.
+or sampling and retention may omit a conflicting pair. Identity aliasing and
+bounded synchronization matching add independent model limitations, including
+the current 1023 barrier-epoch saturation limit. See the
+[heuristic design](DESIGN.md#heuristics-and-their-failure-directions).
 
 A **SuperCollider** diagnostic says a redundant observation changed. It does
 not name a racing peer or prove missing happens-before.

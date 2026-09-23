@@ -1,5 +1,9 @@
 # ConSan RDNA4 (`gfx1201`) status
 
+Historical evidence: this ledger was not requalified during the September 2026
+documentation audit. Existing results describe their recorded runs, not the
+current branch. Rerun the linked procedure after relevant changes.
+
 This ledger summarizes accepted physical `gfx1201` evidence. Green rows have
 the clean, coverage, reviewed-fault, containment, health, and
 provenance evidence required by their row contract. Exact counts belong to the

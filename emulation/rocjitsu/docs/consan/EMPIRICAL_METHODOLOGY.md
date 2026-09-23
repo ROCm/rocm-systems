@@ -75,6 +75,13 @@ Every campaign records at least:
 - available device temperature, clock, health, and competing-process
   observations.
 
+Record resolved workgroup/cell strides and offsets, achieved bank geometry,
+FLAT provenance policy, owner/dispatch operating point, and host-epoch selection
+alongside the preset name. Names alone do not preserve meaning across policy
+changes. Interpret completeness against the
+[implemented assumptions](DESIGN.md#heuristics-and-their-failure-directions);
+it does not independently validate those assumptions.
+
 Required identity fields fail closed. Optional machine observations record an
 explicit unavailable or failed-probe state rather than disappearing.
 

@@ -1,5 +1,9 @@
 # ConSan `gfx1201` benchmark status
 
+Historical evidence: this ledger was not requalified during the September 2026
+documentation audit. Existing results describe their recorded runs, not the
+current branch. Rerun the linked procedure after relevant changes.
+
 For each mode, **Startup** sums instrumentation and the measured first run;
 **Run** is the absolute second-run latency followed by its ratio to the
 matching uninstrumented second run. PyTorch/Gluon use synchronized host

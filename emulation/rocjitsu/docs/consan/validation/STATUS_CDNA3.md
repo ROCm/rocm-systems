@@ -1,5 +1,9 @@
 # ConSan CDNA3 (`gfx942`) status
 
+Historical evidence: this ledger was not requalified during the September 2026
+documentation audit. Existing results describe their recorded runs, not the
+current branch. Rerun the linked procedure after relevant changes.
+
 Physical `gfx942` qualification is unavailable in the active workspace. The
 hip-moi rows have target-native simulator prerequisite coverage through
 RocJITsu `configs/gfx942_cdna3_kmd.json`; simulator evidence does not promote a

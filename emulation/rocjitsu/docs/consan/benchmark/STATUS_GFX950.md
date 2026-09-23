@@ -1,5 +1,9 @@
 # ConSan `gfx950` benchmark status
 
+Historical evidence: this ledger was not requalified during the September 2026
+documentation audit. Existing results describe their recorded runs, not the
+current branch. Rerun the linked procedure after relevant changes.
+
 For each mode, **Startup** is the total latency through the first synchronized
 run and its selected evidence checkpoints, including instrumentation, loading,
 binding, and warm-up; **Run** is the absolute second-run latency followed

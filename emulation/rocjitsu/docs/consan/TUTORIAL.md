@@ -98,7 +98,8 @@ SuperCollider is a separate ConSan mode. Select it with the same mode
 variable and use it for its complementary delayed redundant-observation signal:
 
 ```sh
-env HSA_TOOLS_LIB="$CONSAN_HOOK" HSA_TOOLS_DISABLE_REGISTER=1 \
+env -u RJ_CONSAN_PRESET \
+  HSA_TOOLS_LIB="$CONSAN_HOOK" HSA_TOOLS_DISABLE_REGISTER=1 \
   RJ_CONSAN_MODE=supercollider \
   RJ_CONSAN_LOG=1 \
   ./application

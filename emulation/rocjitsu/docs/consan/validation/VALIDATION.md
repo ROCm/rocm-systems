@@ -46,11 +46,16 @@ Build the test dependencies before running CTest:
 cmake --build /path/to/rocjitsu-build -j16
 ```
 
-Run the complete nonphysical ConSan gate with bounded host parallelism:
+Run the labeled nonphysical ConSan gate with bounded host parallelism.
+Also select the ConSan unit suites by name and run the hook unit binary:
+not every discovered GoogleTest case carries the `consan` label.
 
 ```sh
 ctest --test-dir /path/to/rocjitsu-build \
   -L consan -LE physical --output-on-failure -j16
+ctest --test-dir /path/to/rocjitsu-build \
+  -R '^ConSan' -LE 'physical|consan-device' --output-on-failure -j16
+/path/to/rocjitsu-build/tests/hsa_hooks_unit_test
 ```
 
 Run the simulator device matrix explicitly when isolating that layer:
@@ -98,18 +103,23 @@ Use one coherent SDK for configuration, compilation, and execution. For an
 installed TheRock development package:
 
 ```sh
-ROCM_SDK="$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel"
+# Set this to the installed development package directory in your environment.
+ROCM_SDK=/path/to/site-packages/_rocm_sdk_devel
 
 cmake -S /path/to/rocm-systems/emulation/rocjitsu \
   -B /path/to/rocjitsu-build -G Ninja \
-  -DCMAKE_C_COMPILER="$ROCM_SDK/lib/llvm/bin/clang" \
-  -DCMAKE_CXX_COMPILER="$ROCM_SDK/lib/llvm/bin/clang++" \
-  -DCMAKE_HIP_COMPILER="$ROCM_SDK/bin/hipcc" \
+  -DCMAKE_C_COMPILER="$ROCM_SDK/llvm/bin/clang" \
+  -DCMAKE_CXX_COMPILER="$ROCM_SDK/llvm/bin/clang++" \
   -DROCM_PATH="$ROCM_SDK"
 
-LD_LIBRARY_PATH="$ROCM_SDK/lib:$ROCM_SDK/lib/rocm_sysdeps/lib" \
-  ctest --test-dir /path/to/rocjitsu-build \
+cmake --build /path/to/rocjitsu-build -j16
+
+export LD_LIBRARY_PATH="$ROCM_SDK/lib:$ROCM_SDK/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+ctest --test-dir /path/to/rocjitsu-build \
   -L consan -LE physical --output-on-failure -j16
+ctest --test-dir /path/to/rocjitsu-build \
+  -R '^ConSan' -LE 'physical|consan-device' --output-on-failure -j16
+/path/to/rocjitsu-build/tests/hsa_hooks_unit_test
 ```
 
 For a source-built TheRock tree, use its `dist/rocm` directory consistently.

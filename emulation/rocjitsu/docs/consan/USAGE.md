@@ -35,10 +35,13 @@ A zero exit status alone does not mean ConSan checked the workload. After a run,
 require an applicable, complete verdict before treating it as a completed check:
 
 ```sh
-grep -q 'ConSan analysis verdict applicable=true analysis_complete=true ' consan.log
+grep -q 'ConSan analysis verdict applicable=true analysis_complete=true ' consan.log &&
+  ! grep -q 'ConSan analysis verdict .*analysis_complete=false' consan.log
 ```
 
-Run this check only after the application succeeds. A missing verdict means no
+Run this check only after the application succeeds. For multiple processes or
+hook sessions, check each expected participant's log; one complete verdict must
+not hide an unchecked participant. A missing verdict means no
 analysis was reported; an incomplete verdict is not a clean result, although
 diagnostics from the covered portion can still be useful. Sampling
 still permits false negatives even with a complete verdict.
@@ -163,10 +166,11 @@ ConSan auto report ... visible=N ... conflicts=N ...
 ConSan conflict ... first_instruction=... second_instruction=...
 ```
 
-- **A conflict diagnostic** identifies a race in retained evidence; inspect the
-  reported instructions, workgroup, and byte ranges.
-- **`modified=true`** confirms that transformed code was loaded, not that a race
-  was found. Check coverage and that the relevant kernels actually ran.
+- **A conflict diagnostic** identifies conflicting retained accesses under
+  ConSan's identity and synchronization model. Inspect the reported instructions,
+  workgroup, byte ranges, and [model limits](DESIGN.md#host-conflict-and-ordering-model).
+- **`modified=true`** records a successfully transformed candidate. Check that
+  loading succeeded and the relevant instrumented kernels actually ran.
 - **Incomplete analysis** means some supported instrumentation or required
   evidence is missing. Inspect the accompanying reason before trusting a clean
   result.
@@ -177,6 +181,10 @@ ConSan conflict ... first_instruction=... second_instruction=...
 
 Normal launch-and-synchronize loops recycle reports automatically. You do not
 need checkpoint calls or report-buffer tuning for ordinary repeated workloads.
+Host checkpoints do not reset the per-wave barrier counter inside a dispatch:
+that counter currently saturates at 1023, which can merge later synchronization
+phases without making `analysis_complete` false. See
+[identity and barrier epochs](DESIGN.md#identity-and-barrier-epochs).
 
 ## SuperCollider
 

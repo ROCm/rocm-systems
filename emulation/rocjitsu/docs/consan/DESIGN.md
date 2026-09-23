@@ -6,22 +6,20 @@ typed semantic inventory, lowers one selected analysis mode, validates the
 complete replacement independently, and binds its runtime evidence to the
 loaded executable. It never translates between GPU architectures.
 
-This document describes the code as it exists now. It is an ownership map and
-an invariant reference, not a development history. Everyday commands are in
+This document describes the code as it exists now. It explains the detection
+decisions, their assumptions and failure directions, and the invariants that constrain
+implementation changes. Everyday commands are in
 [USAGE.md](USAGE.md), detailed controls are in [EXPERT_CONTROLS.md](EXPERT_CONTROLS.md),
 mode tradeoffs are in [MODES.md](MODES.md), the
 supported semantic forms are in [CAPABILITIES.md](CAPABILITIES.md), and
 register/private-memory mechanics are expanded in [SPILLING.md](SPILLING.md).
 
-## C++ namespaces
-
-Core ConSan types and functions live in `rocjitsu::consan`. Runtime hooks live
-in `rocjitsu::consan::hook`, so they can refer directly to enclosing core names.
-Implementation helpers use nested `detail` namespaces. Within these namespaces,
-identifiers omit redundant ConSan prefixes; SuperCollider-specific identifiers
-retain their SuperCollider qualifier. Callers outside these namespaces qualify
-references explicitly, without `using namespace` directives. Unqualified C++
-type names in this document refer to `rocjitsu::consan` unless otherwise stated.
+Read the [detection strategy](#detection-strategy-and-design-tradeoffs) first for
+the algorithm and its limits. The [system overview](#system-overview) and
+[component boundaries](#component-direction-and-authority) describe how it is
+implemented; [reviewing a design change](#reviewing-a-design-change) states the
+questions a proposed change should answer. The final section records the
+[transform memory model](#transform-memory-accounting).
 
 ## Scope and guarantees
 
@@ -41,7 +39,7 @@ atomics, cache operations, and fences enter the ordering model when their
 address, scope, order, and dynamic-result requirements are known. Ordinary
 global-memory accesses are not generally race-checked.
 
-The static transformation guarantee is transactional:
+The static transformation contract is transactional:
 
 - `ModifiedValid` owns nonempty replacement bytes, at least one real patch,
   coherent semantic/coverage products, and successful independent final
@@ -58,6 +56,194 @@ selected mode's stated model. A clean report is meaningful only for what was
 admitted, instrumented, executed, retained, decoded, and judged trustworthy.
 Static coverage, dynamic completeness, overflow or saturation, and diagnostic
 presence are independent facts.
+
+## Detection strategy and design tradeoffs
+
+Final ISA exposes operations and machine state, but has lost much of the
+source-level address-space and synchronization intent. ConSan reconstructs
+what it can, selects a bounded subset of dynamic observations, and compares
+those observations on the host. These are separate decisions. A safe native
+rewrite does not imply a complete reconstruction of the program's concurrency.
+
+The default detector is designed around three cost constraints:
+
+- Instrument already allocated machine code without compiler cooperation.
+  Liveness, ownership, descriptor growth, and private spilling constrain where
+  a probe can be installed.
+- Bound device storage independently of dispatch count and loop trip count.
+  Static access ranges receive fixed banks instead of an unbounded event log.
+- Avoid recording every dynamic access. Workgroup and address selectors reduce
+  publication work, while checkpoints bound the lifetime of retained evidence.
+
+Those choices make detection incomplete by construction. They also introduce
+model assumptions that can produce a conflict for a program whose actual
+synchronization is outside the recognized model. `RJ_CONSAN_POLICY=strict` is an operational failure policy, not a different
+detection algorithm or a proof mode.
+
+### Heuristics and their failure directions
+
+| Decision | Implemented rule and purpose | Limitation / failure direction | Observable control or evidence |
+| --- | --- | --- | --- |
+| Recover group-FLAT provenance | Track address components through supported register, spill, and call forms; default policy admits exact and likely-group forms. | Incorrect likely-group inference can admit a non-LDS access; unresolved or strict-excluded accesses can hide races. | FLAT provenance policy and typed site exclusions. |
+| Identify execution | Retain dispatch fingerprint, workgroup coordinates, cluster-workgroup ID, and compact wave owner. | Fingerprint collisions can merge launches; owner aliasing can hide cross-wave conflicts. | Identity operating point and ownership restrictions; no universal collision alarm. |
+| Choose dynamic instances | Hash workgroup identity and select a residue of each access's starting four-byte LDS cell. | A conflicting pair may never be selected; overlapping ranges can start in different cells. | Presets, strides, offsets, selected evidence. |
+| Retain instances | One owner-aware hash bucket per static range; first publication wins. | Later addresses, lanes, phases, and owners can lose their representative, even with empty banks elsewhere. | Achieved bank count and saturation counters; not every omission is counted. |
+| Recognize ordering | Qualified barriers advance a bounded epoch; associated atomic release/acquire metadata can suppress a pair. | Missing ordering can create conservative diagnostics; matching an atomic object does not establish a dynamic reads-from edge. | Sync coverage, metadata validity, and incomplete-evidence counters. |
+| Fit a probe | Choose an owner-compatible register/private-state plan and a reachable placement. | Rejection reduces static coverage; accepted growth/spilling can change occupancy and timing. | Resource/placement outcomes, descriptor growth, runtime overhead. |
+| Interpret a run | Analyze retained evidence from selected report epochs and assess integrity separately. | A complete selected report can miss races and does not validate every model assumption. | Static/dynamic completeness, diagnostics, saturation, selected epoch policy. |
+
+### Recovering access semantics
+
+Native LDS instructions carry their address-space meaning directly. FLAT
+instructions require reconstructed provenance. Analysis follows supported
+SGPR/VGPR components, accumulator transfers, static private spills, and call
+relays. Its classifications distinguish exact group provenance from
+`MaybeGroup`; they are not probabilities calibrated against a workload corpus.
+
+There is also a deliberately narrow naming heuristic: a non-kernel helper whose
+name contains `lds_load_at` or `lds_store_at` can have its last matching FLAT
+load/store promoted from unknown or maybe-private to likely-group. This encodes
+a hip-moi helper convention, not a property guaranteed by arbitrary symbol
+names. The default `likely` policy admits it; `strict` provenance excludes it.
+Target-specific runtime guards, where implemented, do not make every static
+likely-group inference exact.
+
+Semantic admission precedes register and placement decisions. A lowering
+failure must remain a coverage failure; the emitter cannot reclassify a site
+as irrelevant merely because instrumentation is expensive.
+
+### Selection and retention
+
+A logical range is one statically identified access range. A dual-range
+instruction contributes two ranges, each with its own bank table. Selection
+and retention proceed as follows:
+
+1. Hash the dispatch fingerprint and workgroup coordinates (including the
+   cluster-workgroup ID), without the owner, and compare against the selected
+   workgroup residue. A uniform entry gate is used where resources permit;
+   otherwise the access body performs this check.
+2. For an active lane, shift the effective starting LDS byte address right by
+   two and select its residue modulo the cell stride. This selects starting
+   cells, not all four-byte cells overlapped by an access.
+3. Within the static range's table, hash dispatch/workgroup identity **with the
+   wave owner** to choose one bank. Neither address, epoch, nor a dynamic
+   sequence number participates in that hash.
+4. Claim that bank through the publication protocol and retain a representative
+   access. The first successful publication wins. A locally proven uniform
+   address can additionally carry the exact participating lane mask; general
+   accesses do not acquire exact lane provenance.
+5. An occupied bank is never searched around or replaced. A matching window
+   identity leaves its original representative unchanged. A different window
+   identity increments saturation. The repeated-window comparison checks
+   generation, dispatch, workgroup, epoch, record index, and publication state,
+   but does not compare the packed access address or owner. Consequently some
+   discarded observations do not increase saturation.
+
+For example, two owners can hash to the same bank while another bank is empty.
+The second owner's access is not retained independently. Likewise, a loop can
+first touch address A and later touch a racing address B at the same static
+site: the representative for A can survive while B is invisible. Increasing
+the number of banks can reduce collisions between identities, but cannot turn
+one owner's repeated accesses into a complete history.
+
+Automatic planning requests eight banks per range by default. An explicit
+power-of-two request may select up to 1024. The planner can halve the bank count
+to fit the per-buffer ceiling, preserving static ranges and reserved sync
+slots. The allocator then allocates the exact resulting layout. Always use the
+**achieved** geometry when interpreting a run.
+
+`max` removes workgroup and cell filtering; it does not remove bank collisions,
+representative-lane loss, or the first-publication policy. Sampling is
+deterministic for a given identity and configuration, not independent random
+sampling of accesses. Neither the stride product nor the bank count yields a
+justified race-detection probability. Offset sweeps vary selectors but cannot
+join evidence from different executions into one conflict.
+
+### Identity and barrier epochs
+
+These identities serve different purposes and must not be conflated:
+
+- The report generation rejects evidence from a different allocation lifetime.
+- The normal dispatch value is a 64-bit fingerprint incorporating queue pointer
+  and absolute queue-local dispatch ID. It is not an injective global launch
+  identifier; collisions and queue-address reuse remain assumptions. The
+  literal fallback under scalar pressure provides weaker launch separation.
+- Workgroup x/y/z and cluster-workgroup coordinates partition LDS evidence.
+- The default wave owner is derived from entry work-item x and wave size.
+  Workgroups whose distinct waves differ only in y/z can alias. The expert
+  hardware-owner path has its own target restrictions and supports access-only
+  checking; it is not a general replacement for barrier/atomic ownership.
+- A per-wave barrier epoch partitions accesses across recognized synchronization
+  phases **inside a dispatch**.
+- A host report epoch ends at a proven quiescent checkpoint and controls report
+  recycling across completed dispatches. It is not the barrier epoch.
+
+**Current limitation:** the packed barrier epoch is ten bits. The device
+barrier path advances through 1023 and then saturates; later phases share 1023.
+It does not currently publish an exhaustion counter or invalidate the trust
+verdict. Retained accesses from actually ordered later phases can therefore be
+compared as if they belonged to one phase. `analysis_complete=true` does not
+exclude this case. Host recycling after a dispatch cannot repair saturation
+inside that dispatch. This is an implementation limitation, not an intended
+synchronization guarantee.
+
+Barrier recognition is itself bounded: only qualified normalized sequences
+with established execution ownership advance the model. Recognizing supported
+single or split signal/wait templates does not establish the semantics of an
+arbitrary synchronization protocol or make divergent barriers safe.
+
+### Host conflict and ordering model
+
+After decoding stable evidence, the host performs two checks:
+
+1. An exact-lane group for a conflicting ordinary write can diagnose
+   same-instruction lane collisions. The explicit same-value-write opt-in
+   suppresses only locally proven uniform native LDS stores in this check;
+   cross-wave comparisons remain enabled.
+2. A pairwise scan compares retained accesses with matching report generation,
+   dispatch fingerprint, workgroup/cluster coordinates, and barrier epoch.
+   Disjoint complete static execution-owner sets exclude a pair. Otherwise,
+   different compact owners, overlapping byte ranges, and conflicting access
+   kinds form a candidate. Two reads and two atomic accesses do not conflict
+   under the access-kind model.
+
+When synchronization evidence is complete, associated atomic metadata can
+suppress a candidate. Both records must be valid atomics at exactly the same
+address and width, in the same unchanged epoch, with scopes covering the
+workgroup. One must have release and the other acquire role. Failed
+compare-exchange cannot supply release, but may supply acquire. The device
+publisher is responsible for attaching release metadata to accesses before the
+edge and acquire metadata to accesses after it; hashed slot order is not event
+order. Incomplete synchronization evidence disables this suppression.
+
+This is a bounded ordering approximation. The records do not retain a general
+happens-before graph, vector clocks, or an atomic reads-from relation. Matching
+roles and address do not alone show that the acquire observed that release.
+Repeated use of one atomic object can therefore suppress a pair without the
+full dynamic ordering evidence needed for a proof. Conversely, unrecognized
+synchronization can leave an actually ordered pair as a reported conflict.
+These are model limitations, separate from malformed evidence and sampling.
+
+The scan is quadratic in retained access count, with a separate linear
+exact-lane pass. Diagnostic limits bound stored examples and output, not the
+pair scan or conflict count. Sampling, report geometry, and checkpoint policy
+therefore affect device work, retained memory, and host work differently.
+
+### What completeness establishes
+
+Static completeness asks whether the selected semantic contract reached
+validated code. Dynamic completeness checks usable report evidence: allocation
+or cleanup failures, dropped windows, unusable snapshots, unsupported or
+malformed synchronization, and missing required records can make it false.
+The require-records check counts visible watchpoints, not standalone sync
+metadata.
+
+Expected selection misses and bank saturation do not themselves make the
+verdict incomplete. Neither do unvalidated assumptions such as fingerprint
+uniqueness or the current epoch-saturation limitation. Selective host-epoch
+policies intentionally discard unselected epochs; a complete verdict applies
+to the selected analysis. A successful application oracle and a complete,
+conflict-free report are useful observations, not a race-freedom certificate.
 
 ## System overview
 
@@ -92,6 +278,16 @@ that exact layout, producing `BoundRuntimeResources`, then returns the opaque
 relowers from the input or retries retained ConSan inventory. A caller cannot
 substitute a different inventory, request, or input between phases.
 
+## C++ namespaces
+
+Core ConSan types and functions live in `rocjitsu::consan`. Runtime hooks live
+in `rocjitsu::consan::hook`, so they can refer directly to enclosing core names.
+Implementation helpers use nested `detail` namespaces. Within these namespaces,
+identifiers omit redundant ConSan prefixes; SuperCollider-specific identifiers
+retain their SuperCollider qualifier. Callers outside these namespaces qualify
+references explicitly, without `using namespace` directives. Unqualified C++
+type names in this document refer to `rocjitsu::consan` unless otherwise stated.
+
 ## Component direction and authority
 
 The compiled source graph in `code/patch/consan/CMakeLists.txt` is exhaustive
@@ -108,7 +304,7 @@ contracts -> targets -> analysis -> transform -> validation -> orchestration
 | `rocjitsu_consan_targets` | Exact-target profiles and target-native decode, validation, fault, LDS, ABI, and SuperCollider operations. | Mode selection, per-kernel mutable state, report policy, orchestration. |
 | `rocjitsu_consan_analysis` | ELF/program inventory, CFG ownership, synchronization analysis, and fault-site selection. | Native patch emission or runtime binding. |
 | `rocjitsu_consan_transform` | Mode planning, evidence sizing, resources, placement, descriptor growth, relocation, mutation, and native emission. | HSA object lifetimes or loader policy. |
-| `rocjitsu_consan_validation` | Reconstruction and independent proof of the final encoded artifact. | Deciding what the selected mode ought to observe. |
+| `rocjitsu_consan_validation` | Reconstruction and independent checks of the final encoded artifact. | Deciding what the selected mode ought to observe. |
 | `rocjitsu_consan_orchestration` | Public transform entry points, composition, publication, and typed transaction outcome. | Reimplementing analysis, targets, modes, or validation. |
 
 The production CMake graph assigns implementation sources to components.
@@ -154,7 +350,7 @@ an access, or whether a probe can afford its registers.
 
 ## Semantic policy, intents, and coverage
 
-Policy converts inventory into a `ObservationPlan` through three domain
+Policy converts inventory into an `ObservationPlan` through three domain
 functions:
 
 - `plan_access_observation` decides LDS/group-FLAT applicability;
@@ -276,10 +472,13 @@ compose for validation but does not change those semantics.
 
 ### ConSan
 
-ConSan retains causal windows rather than a general event history. Selected
+ConSan retains causal windows rather than a general event history; the
+[selection and retention algorithm](#selection-and-retention) defines what
+those windows omit. Selected
 access instances publish immutable watchpoint banks; qualified barrier and
 atomic metadata shares their causal identity. The host distinguishes
-conflicts, statistical misses, saturation, and true evidence loss.
+conflicts, reported saturation, and true evidence loss. It cannot identify an
+unobserved race or count all selection and retention misses.
 Barrier-only execution owners still retain a barrier probe and advance their
 persistent sampled epoch. They publish no causal-window metadata because they
 have no selected LDS window; missing mappings for selected accesses remain
@@ -329,10 +528,13 @@ Resource planning is owner-aware. A direct site uses its kernel's liveness and
 descriptor. Shared helper text uses union live-before state and one assignment
 valid for every reachable owner. Unknown ownership is a typed rejection.
 
-The planner chooses a safe explicit override, dead registers, fresh
+The planner considers a checked explicit override, dead registers, fresh
 descriptor-backed registers, a supported spill-backed window, or rejection.
 Persistent owner/epoch/workgroup state and transient EXEC/VCC/SCC/router state
-are reconciled before emission. Private state and spill leases share one
+are reconciled before emission. This is a feasibility search, not a guarantee
+of minimum overhead or optimal occupancy. Descriptor growth can reduce resident
+waves and private spills add memory traffic; either can change which races
+manifest. Private state and spill leases share one
 owner-compatible layout; dynamic-stack recipes remain relative to the launch
 frame.
 
@@ -361,6 +563,8 @@ relays, islands, and continuations; ownership and descriptor growth; private,
 group, and dynamic-frame requirements; target-native ABI effects; and the
 relationships among intents, lowering outcomes, patches, and runtime mappings.
 
+These are checks of the encoded replacement and declared effects, not a formal
+proof of arbitrary guest semantics or of the detector's concurrency model.
 Only a coherent image becomes `ModifiedValid`. `TransformResult::well_formed`
 checks result-wide invariants, and `install_action(fail_closed)` derives loader
 policy. A runtime failure can demote a result through `discard_replacement` but
@@ -449,6 +653,34 @@ process teardown handles remaining quiescent reports.
 
 The compiled component, physical mode/target locality, typed inputs, and
 behavioral tests—not file size or an `.inc` suffix—define authority.
+
+## Reviewing a design change
+
+Changes to a heuristic should state the information available at the decision,
+the rule being changed, why the cost is acceptable, and which misses or
+conservative diagnostics it can add or remove. Preserve exclusions and
+achieved resource/retention geometry in the observable result. Do not promote a
+heuristic to an invariant merely because existing workloads pass.
+
+Validation should exercise both sides of the decision: an admitted and excluded
+FLAT provenance case; selected and unselected addresses; colliding banks with
+free capacity elsewhere; repeated accesses at one site; ordered and unordered
+atomic uses, including object reuse; owner aliases and dispatch lifetimes; and
+barrier counter boundaries. Tests of today's behavior are not evidence that a
+known approximation is sound for all programs. Keep physical qualification and
+performance results tied to exact binary and configuration provenance as
+required by [EMPIRICAL_METHODOLOGY.md](EMPIRICAL_METHODOLOGY.md).
+
+The key implementation and test entry points for this review are:
+
+| Decision | Implementation under `lib/rocjitsu/src/rocjitsu/` | Tests under `tests/` |
+| --- | --- | --- |
+| FLAT reconstruction and policy | `code/patch/consan/consan_analysis.inc`, `code/patch/consan/consan_access_policy.cpp` | `patch/consan/analysis_test.cpp`, `patch/consan/access_classifier_test.cpp` |
+| Selectors and publication | `code/patch/consan/consan_access_emission.cpp` | `patch/consan/probe_lowering_test.cpp`, device selection fixtures in `dbi/consan/` |
+| Bank sizing | `code/patch/consan/consan_report_plan.cpp` | `patch/consan/evidence_requirements_test.cpp`, `patch/consan_report_plan_test.cpp` |
+| Barrier epochs | `code/patch/consan/consan_sync.inc`, `code/patch/consan/consan_model.h.inc` | `patch/consan/barrier_policy_test.cpp`, `patch/consan/probe_lowering_test.cpp` |
+| Conflict and ordering predicates | `hooks/consan/rj_hsa_dbi_conflict_analysis.cpp`, `hooks/consan/rj_hsa_dbi_sync.h` | `dbt/hsa_hooks_unit_test.cpp`, `dbt/consan_report_test.cpp` |
+| Report trust | `hooks/consan/rj_hsa_dbi_report_trust.cpp` | `dbt/hsa_hooks_unit_test.cpp`, `dbt/consan_report_test.cpp` |
 
 ## Non-negotiable invariants
 

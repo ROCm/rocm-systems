@@ -31,10 +31,12 @@ a mode-specific lowering gap for a form admitted by the target family.
 <!-- END GENERATED CONSAN CAPABILITY CONTRACT -->
 
 A form marked **supported** is decoded into the shared semantic inventory and
-has a lowering path for the named mode. Register pressure, report capacity,
-placement, or bounded runtime-state exhaustion can still make a particular
-site dynamically incomplete. Those outcomes are reported explicitly; they do
-not turn an unsupported or incomplete run into a clean result.
+has a lowering path for the named mode. Register pressure, evidence planning,
+and placement can still reject a site statically. At runtime, missing or
+malformed evidence can separately make analysis dynamically incomplete.
+Neither completeness flag establishes exhaustive detection: sampling, bounded
+retention, identity assumptions, and the current barrier-epoch saturation limit
+remain relevant. See [the design assumptions](DESIGN.md#heuristics-and-their-failure-directions).
 
 ## Mode contract
 

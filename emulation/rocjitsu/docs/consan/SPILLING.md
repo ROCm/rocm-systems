@@ -23,7 +23,9 @@ The planner considers these alternatives:
 | Spill-backed window | Borrow an eligible live VGPR window, save per-lane values to an owner-compatible private layout, emit the probe, and restore before guest execution resumes. |
 | Rejected | Publish a typed resource failure; do not let placement or emission improvise another semantic plan. |
 
-The ordinary architectural VGPR namespace has 256 registers. ConSan does not
+The directly encoded VGPR window used by the allocator has 256 registers.
+Targets such as CDNA5 also have selectable VGPR-bank mechanics; this is not a
+claim that every target has only 256 architectural VGPRs. ConSan does not
 provide a general compiler-style SGPR or AccVGPR spill stack. It does provide
 bounded preservation of selected scalar windows by moving scalar
 values through spill-managed VGPRs and private memory. Indirect-router PC,
