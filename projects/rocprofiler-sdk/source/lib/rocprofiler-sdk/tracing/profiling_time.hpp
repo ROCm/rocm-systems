@@ -137,24 +137,38 @@ adjust_profiling_time(std::string_view _label,
         std::swap(_value.start, _value.end);
     }
 
-    // Preserve the measured duration when shifting a skewed interval into the CPU bounds.
-    // If it cannot fit, use both bounds: shifting the start forward after correcting the end
-    // would otherwise place completion after the CPU handler (and correlation retirement).
-    const auto duration = _value.end - _value.start;
-    if(duration > _bounds.end - _bounds.start)
+    const auto original_value = _value;
+
+    // below are hacks for clock skew issues:
+    //
+    // the timestamp of this handler will always be after when the profiling time ended
+    if(_bounds.end < _value.end) _value -= (_value.end - _bounds.end);
+
+    // the timestamp of the enqueue will always be before when the profiling time started
+    if(_value.start < _bounds.start) _value += (_bounds.start - _value.start);
+
+    // Shifts cannot fit a duration longer than the CPU window. Correct it separately so
+    // completion remains within the CPU bounds (and before correlation retirement).
+    const auto duration        = original_value.end - original_value.start;
+    const auto bounds_duration = _bounds.end - _bounds.start;
+    if(duration > bounds_duration)
     {
+        ROCP_WARNING << fmt::format(
+            "{} returned {} timestamps [{}, {}] with a duration longer than the CPU window "
+            "[{}, {}]. Clamping to the CPU bounds reduces the reported duration from {} to {}. "
+            "The adjusted timestamps do not preserve the measured duration. Set the environment "
+            "variable ROCPROFILER_CI_STRICT_TIMESTAMPS=1 to cause a failure instead",
+            _responsible,
+            _label,
+            original_value.start,
+            original_value.end,
+            _bounds.start,
+            _bounds.end,
+            duration,
+            bounds_duration);
+
         _value.start = _bounds.start;
         _value.end   = _bounds.end;
-    }
-    else if(_value.end > _bounds.end)
-    {
-        _value.end   = _bounds.end;
-        _value.start = _value.end - duration;
-    }
-    else if(_value.start < _bounds.start)
-    {
-        _value.start = _bounds.start;
-        _value.end   = _value.start + duration;
     }
 
     return _value;
