@@ -87,7 +87,7 @@ jobs:
             corpus_soft_timeout: 45
             corpus_hard_timeout: 60
             run_expensive_corpus: true
-            corpus_expensive_worker_limit: 2
+            corpus_expensive_worker_limit: 1
             corpus_expensive_timeout: 60
             corpus_sanitizer: none
           - name: asan-ubsan
@@ -110,7 +110,7 @@ jobs:
             corpus_soft_timeout: 180
             corpus_hard_timeout: 240
             run_expensive_corpus: true
-            corpus_expensive_worker_limit: 2
+            corpus_expensive_worker_limit: 1
             corpus_expensive_timeout: 180
             corpus_sanitizer: clang-asan
           - name: tsan
@@ -156,7 +156,7 @@ jobs:
             corpus_soft_timeout: 180
             corpus_hard_timeout: 240
             run_expensive_corpus: true
-            corpus_expensive_worker_limit: 2
+            corpus_expensive_worker_limit: 1
             corpus_expensive_timeout: 180
             corpus_sanitizer: none
 
@@ -427,7 +427,7 @@ jobs:
 
       - name: Run corpus tests
         if: matrix.run_simulator_corpus
-        timeout-minutes: 60
+        timeout-minutes: 90
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         env:
