@@ -4,6 +4,11 @@ Historical evidence: this ledger was not requalified during the September 2026
 documentation audit. Existing results describe their recorded runs, not the
 current branch. Rerun the linked procedure after relevant changes.
 
+Start any new revalidation with
+[rocprofv3-based allowlist discovery and application](VALIDATION.md#first-step-for-revalidation-generate-and-apply-kernel-allowlists).
+Apply this before retrying recorded timeouts or raising deadlines; update their
+status only after new runs provide evidence.
+
 This ledger summarizes accepted physical `gfx1201` evidence. Green rows have
 the clean, coverage, reviewed-fault, containment, health, and
 provenance evidence required by their row contract. Exact counts belong to the

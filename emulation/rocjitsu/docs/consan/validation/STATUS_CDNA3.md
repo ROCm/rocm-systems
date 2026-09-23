@@ -4,6 +4,11 @@ Historical evidence: this ledger was not requalified during the September 2026
 documentation audit. Existing results describe their recorded runs, not the
 current branch. Rerun the linked procedure after relevant changes.
 
+Start any new revalidation with
+[rocprofv3-based allowlist discovery and application](VALIDATION.md#first-step-for-revalidation-generate-and-apply-kernel-allowlists).
+Apply this before retrying recorded timeouts or raising deadlines; update their
+status only after new runs provide evidence.
+
 Physical `gfx942` qualification is unavailable in the active workspace. The
 hip-moi rows have target-native simulator prerequisite coverage through
 RocJITsu `configs/gfx942_cdna3_kmd.json`; simulator evidence does not promote a

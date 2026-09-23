@@ -13,6 +13,53 @@ The target ledgers record qualification state for
 [CDNA5 / gfx1250](STATUS_GFX1250.md). A ledger is not a substitute for rerunning
 the gates after a relevant source, toolchain, workload, or runtime change.
 
+## First step for revalidation: generate and apply kernel allowlists
+
+Start every new external-workload revalidation with the rocprofv3-based
+[allowlist procedure in USAGE.md](../USAGE.md#generate-and-use-a-kernel-allowlist),
+as already automated by the
+[benchmark runner](../benchmark/BENCHMARK.md#exact-two-pass-allowlist-workflow).
+This substantially reduced benchmark workload time by avoiding instrumentation
+of unrelated library kernels. Apply it before retrying historical validation
+timeouts or increasing their deadlines. It may resolve many of those timeouts;
+only new runs can establish which ones.
+
+For each workload:
+
+1. Resolve the exact native command and inputs with the runner's `explain`
+   interface. Profile that workload without ConSan using
+   `rocprofv3 --kernel-trace --output-format csv` from the matching ROCm stack.
+   Include setup, warm-up, and every execution stage to be validated.
+2. Convert the trace with `rocjitsu_consan_allowlist.py`. Reject empty or malformed
+   inventories; retain the trace and generated exact-name list with the new
+   campaign artifacts.
+3. Apply the generated file through `RJ_CONSAN_KERNEL_ALLOWLIST_FILE` to every
+   instrumented profile for that workload, with `RJ_CONSAN_KERNEL_ALLOWLIST`
+   unset. Use the same list across modes. Regenerate it when the workload,
+   inputs, execution paths, target, or software stack changes.
+4. Verify the effective child environment and the hook's
+   `ConSan kernel allowlist entry` records: selected kernels should be loaded,
+   instrumented, and dispatched. If discovery missed an executed path, repeat
+   discovery with that path included. Unlisted kernels are unchecked, and a
+   shared helper requires all its reachable kernel entries to be selected.
+5. Rerun the clean qualification and applicable fault trials with the existing
+   correctness, coverage, completeness, and containment checks. Record new
+   results and provenance before revising a timeout row or its status.
+
+**Runner integration:** `consan_validation.py` currently scrubs inherited
+`RJ_CONSAN_*` variables and does not automate this discovery workflow. Exporting
+`RJ_CONSAN_KERNEL_ALLOWLIST_FILE` in the parent shell alone does not apply the
+list. Before starting a new campaign, wire the per-workload generated file into
+the runner's explicit child environment and provenance, and verify it survives
+environment construction for clean, inventory, and fault runs. The commands
+below describe the existing runner interfaces; they do not perform this
+preparation automatically. If matching native profiling is unavailable, record
+that prerequisite gap explicitly.
+
+Historical ledgers retain the results of their original configurations. Their
+timeouts are priorities for revalidation with generated allowlists, not evidence
+that those retries will still time out or that the rows are already resolved.
+
 ## Validation layers
 
 ConSan uses four complementary layers:
@@ -206,6 +253,9 @@ python3 emulation/rocjitsu/tests/dbi/consan/consan_validation.py \
 untracked VMFB or weaken the output oracle.
 
 ### Clean qualification
+
+Complete [allowlist discovery and runner integration](#first-step-for-revalidation-generate-and-apply-kernel-allowlists)
+before these runs.
 
 Use a new artifact root for each source, binary, runtime, settings, or manifest
 state:
