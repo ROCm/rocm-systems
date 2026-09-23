@@ -25,7 +25,7 @@ none of those historical colors count as a pass for this campaign.
 - SDK: `/home/benoit/venv`, ROCm `10.2.0a20260915` development package.
 - Preparation: current hook and production matmul built; generated per-workload
   allowlists applied; Qwen build provenance verified through the campaign symlinks.
-- Fresh clean assessments: **42/42**; no cell has completed fresh fault qualification.
+- Fresh clean assessments: **42/42**; no cell has passed fresh fault qualification.
 - Preparation logs: `/home/benoit/workspace/consan-validation-artifacts/`.
 
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
@@ -34,7 +34,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | --- | ---: | --- | --- | --- |
 | Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) |
 | Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) |
-| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 Sep 23: clean pass; reviewed publication-barrier fault missed in 8/8 trials | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
+| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 Sep 23: clean pass; reviewed publication-barrier fault missed in 8/8 trials | 🟨 Sep 23: clean pass; reviewed publication-barrier fault missed in 8/8 trials |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟥 Sep 23: missing ConSan analysis verdict; exit 124 | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
@@ -47,8 +47,8 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | PyTorch | P3 | native histogram (`pytorch-torch-histc`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | llama.cpp | P3 | RMS norm (`llama-rdna4-rms-norm`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
-| Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟥 Sep 23: exit 1 |
-| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟥 Sep 23: exit 1 | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
+| Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟥 Sep 23: Release native pass; SuperCollider illegal instruction in SampledFastContext test |
+| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟥 Sep 23: Release native pass; Default illegal instruction in WideKey SampledFast test | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
@@ -209,3 +209,16 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   host ConSan tests pass again. Both matmul modes and precisions pass with the
   measured 300-second envelope, now adopted by the workload manifest; their
   earlier override runs remain explicitly recorded.
+- Qwen SuperCollider reviewed fault: 0/8 detections with the precommitted
+  delay settings (0, 4, 16, 64 NOPs, twice each). All mutations were installed,
+  all numerical oracles passed, and all pre/post health checks passed. The
+  minimum-detection requirement failed; the cell remains yellow. Evidence:
+  `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round1-qwen-supercollider/`.
+- Latest clean assessments: 36/42 pass across the recorded artifact roots.
+  Six gaps remain: both scatter-reduce modes and Default top-k are inapplicable;
+  Default TP1 decode times out; optimized D128 block SuperCollider and D128
+  pressure Default hit illegal instructions in sampled-fast cases. The latter
+  are ordinary numeric-reference tests, not intentional fault cases, and remain
+  in the clean workload filters. Other optimized hip-moi cells pass. This
+  count includes earlier hook hashes; final qualification must match the tested
+  binary/configuration and complete the reviewed fault checks.
