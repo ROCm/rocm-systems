@@ -92,8 +92,8 @@ Cons:
 
 ### Out-of-process
 
-On the other end of the spectrum is an "**out-of-process**" which is designed to address these inefficiencies. The
-diagram below illustrates one such architecture.
+On the other end of the spectrum is an "**out-of-process**" approach which is designed to address these inefficiencies.
+The diagram below illustrates one such architecture.
 
 ![](doc/img/out-of-process.png)
 
