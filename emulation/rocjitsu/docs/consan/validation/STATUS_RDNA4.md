@@ -318,3 +318,10 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   mutation or another meaningful fault is needed. Evidence: source
   `hip-moi/include/hip_moi/sampled_watchpoint_context.hpp` and
   `/home/benoit/workspace/consan-validation/rdna4-20260923/wmma-debug/original.asm`.
+- Precommitted torch.mode fault: drop the sole signal/wait publication pair
+  at .text+0x351e0/0x351e4 between cross-wave stride-64 swaps and the next
+  stride-32 compare stage. Reviewed ISA proves the pair is reached after EXEC
+  restoration; the row-bounds exit is false for the dispatched input. Require
+  at least one detection in eight trials per mode; SuperCollider delays cycle
+  through 0/4/16/64 NOPs twice. Independent numerical outcomes remain separate.
+  Review artifact: `/home/benoit/workspace/consan-validation/rdna4-20260923/torch-mode-debug/mode.asm`.
