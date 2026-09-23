@@ -64,5 +64,12 @@ kernel_dispatch_phase_exit_hook(const hsa::Queue&                           queu
 // True if any context currently has dispatch thread trace active.
 bool
 is_any_active();
+
+// True if an active dispatch thread trace context is configured for `agent_id`. Callers on a
+// per-queue path should prefer this over is_any_active(): a tracer is configured per agent, so
+// one set up for a single GPU must not pull queues on the other GPUs off the write interceptor's
+// fast path.
+bool
+is_active_on_agent(rocprofiler_agent_id_t agent_id);
 }  // namespace thread_trace
 }  // namespace rocprofiler

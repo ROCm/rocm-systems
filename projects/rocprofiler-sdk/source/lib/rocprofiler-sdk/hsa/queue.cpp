@@ -440,8 +440,14 @@ WriteInterceptor(const void* packets,
     const bool graph_launch_active = (gls != nullptr);
     // Thread trace no longer registers a queue-controller callback, so it does not count toward
     // get_notifiers(); detect it explicitly so an ATT-only run still enters the interceptor.
+    //
+    // Scoped to this queue's agent: a tracer is configured per agent, so queues on agents it was
+    // never configured for must stay on the fast path instead of paying interception and losing
+    // batching for dispatches that kernel_dispatch_phase_enter_hook() would filter out anyway.
+    const bool thread_trace_active =
+        thread_trace::is_active_on_agent(CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id);
     const bool no_real_consumers =
-        (queue.get_notifiers() == 0 && !thread_trace::is_any_active() &&
+        (queue.get_notifiers() == 0 && !thread_trace_active &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
     const bool has_kernel_replay = kernel_replay::has_active_replay_contexts();
@@ -1221,7 +1227,7 @@ WriteInterceptor(const void* packets,
     });
 
     // Thread trace requires per-packet mode; it no longer participates in the registry above.
-    if(thread_trace::is_any_active()) should_batch_packets = false;
+    if(thread_trace_active) should_batch_packets = false;
 
     if(should_batch_packets)
     {

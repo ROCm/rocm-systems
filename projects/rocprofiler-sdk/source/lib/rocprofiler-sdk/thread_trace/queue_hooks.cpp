@@ -94,5 +94,15 @@ is_any_active()
 {
     return !context::get_active_contexts(thread_trace_contexts_filter()).empty();
 }
+
+bool
+is_active_on_agent(rocprofiler_agent_id_t agent_id)
+{
+    for(const auto* ctx : context::get_active_contexts(thread_trace_contexts_filter()))
+    {
+        if(ctx->dispatch_thread_trace->collects_on(agent_id)) return true;
+    }
+    return false;
+}
 }  // namespace thread_trace
 }  // namespace rocprofiler

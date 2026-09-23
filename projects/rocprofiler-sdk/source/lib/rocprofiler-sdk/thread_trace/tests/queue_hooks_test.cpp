@@ -110,6 +110,16 @@ TEST(ThreadTraceQueueHooks, IsAnyActiveReturnsFalseWhenNoContextActive)
     EXPECT_FALSE(rocprofiler::thread_trace::is_any_active());
 }
 
+// is_active_on_agent is the per-queue form of the same gate, and with nothing active it must
+// agree with is_any_active() for every agent rather than falling back to "assume active".
+TEST(ThreadTraceQueueHooks, IsActiveOnAgentReturnsFalseWhenNoContextActive)
+{
+    EXPECT_FALSE(
+        rocprofiler::thread_trace::is_active_on_agent(rocprofiler_agent_id_t{.handle = 0}));
+    EXPECT_FALSE(
+        rocprofiler::thread_trace::is_active_on_agent(rocprofiler_agent_id_t{.handle = 1}));
+}
+
 // A dispatch instrumented while the context is active must still complete via
 // kernel_dispatch_phase_exit_hook after stop_context clears the active slot.
 TEST(ThreadTraceQueueHooks, StopContextInFlightCompletionRoutesViaHookPath)

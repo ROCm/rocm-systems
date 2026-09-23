@@ -178,6 +178,37 @@ TEST(thread_trace_per_agent, disjoint_agent_contexts_can_be_active_together)
     EXPECT_EQ(rocprofiler_stop_context(ctx_a), ROCPROFILER_STATUS_SUCCESS);
 }
 
+// The HSA write interceptor gates on is_active_on_agent(), so this is what decides whether a
+// queue on an unrelated GPU stays on the fast path and keeps packet batching. A tracer is
+// configured per agent, so an active context must claim only the agents it was configured for.
+TEST(thread_trace_per_agent, is_active_on_agent_follows_the_configured_agents)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto agents = get_two_agents();
+    if(!agents.second) GTEST_SKIP() << "fewer than two GPU agents available";
+
+    auto agent_a = agents.first->get_rocp_agent()->id;
+    auto agent_b = agents.second->get_rocp_agent()->id;
+
+    auto ctx = make_att_context(agent_b);
+
+    // Registered but never started, so it claims nothing.
+    EXPECT_FALSE(thread_trace::is_active_on_agent(agent_b));
+
+    ASSERT_EQ(rocprofiler_start_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+
+    EXPECT_TRUE(thread_trace::is_active_on_agent(agent_b));
+    EXPECT_FALSE(thread_trace::is_active_on_agent(agent_a));
+
+    // is_any_active() cannot draw that distinction, which is the reason the gate moved off it.
+    EXPECT_TRUE(thread_trace::is_any_active());
+
+    ASSERT_EQ(rocprofiler_stop_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_FALSE(thread_trace::is_active_on_agent(agent_b));
+}
+
 TEST(thread_trace_per_agent, overlapping_agent_contexts_still_conflict)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
