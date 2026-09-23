@@ -481,9 +481,11 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   // rcclSymKGetInfo reports this field and nothing set it after the 2.31 sync, so nchannels read -1.
   tuning->maxChannels = kBlocks;
-  // Every symmetric kernel sizes itself for ncclSymkMaxThreads, not just LL, so convert
-  // that thread count with the runtime wave size instead of keeping the 16-warp launch.
-  tuning->nWarps = ncclSymkMaxThreads / inputs->comm->WarpSize;
+  // The LSA kernels size themselves for ncclSymkMaxThreads. GIN carves its pipeline roles out of
+  // blockDim.x instead, so it keeps the full 16-warp launch.
+  tuning->nWarps = (ncclSymkGinKernelMask() >> tuning->symKernelId & 1)
+                     ? 16
+                     : ncclSymkMaxThreads / inputs->comm->WarpSize;
 #else
   tuning->nWarps = 16;
 #endif
