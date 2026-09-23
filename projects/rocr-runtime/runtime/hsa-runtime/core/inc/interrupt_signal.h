@@ -98,7 +98,10 @@ class InterruptSignal : private LocalSignal, public Signal {
   }
 
   explicit InterruptSignal(hsa_signal_value_t initial_value,
-                           HsaEvent* use_event = NULL);
+                           HsaEvent* use_event = NULL, bool large = false);
+
+  /// @brief Builds a batch member in @p slot. See LocalSignal.
+  InterruptSignal(hsa_signal_value_t initial_value, SignalBatch* batch, SharedSignal* slot);
 
   ~InterruptSignal();
 
@@ -210,6 +213,8 @@ class InterruptSignal : private LocalSignal, public Signal {
   }
 
   void SetEvent();
+
+  void AttachEvent(HsaEvent* use_event);
 
   DISALLOW_COPY_AND_ASSIGN(InterruptSignal);
 };

@@ -91,8 +91,20 @@ HsaEvent* InterruptSignal::CreateEvent(HSA_EVENTTYPE type, bool manual_reset) {
 
 void InterruptSignal::DestroyEvent(HsaEvent* evt) { HSAKMT_CALL(hsaKmtDestroyEvent(evt)); }
 
-InterruptSignal::InterruptSignal(hsa_signal_value_t initial_value, HsaEvent* use_event)
-    : LocalSignal(initial_value, false), Signal(signal()) {
+InterruptSignal::InterruptSignal(hsa_signal_value_t initial_value, HsaEvent* use_event,
+                                 bool large)
+    : LocalSignal(initial_value, false, large), Signal(signal()) {
+  AttachEvent(use_event);
+}
+
+InterruptSignal::InterruptSignal(hsa_signal_value_t initial_value, SignalBatch* batch,
+                                 SharedSignal* slot)
+    : LocalSignal(initial_value, batch, slot), Signal(signal()) {
+  host_access_via_hdp_ = batch->host_access_via_hdp();
+  AttachEvent(nullptr);
+}
+
+void InterruptSignal::AttachEvent(HsaEvent* use_event) {
   if (use_event != nullptr) {
     event_ = use_event;
     free_event_ = false;
@@ -126,16 +138,16 @@ hsa_signal_value_t InterruptSignal::LoadAcquire() {
 }
 
 void InterruptSignal::StoreRelaxed(hsa_signal_value_t value) {
-  atomic::Store(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kStore, value, std::memory_order_relaxed);
   SetEvent();
 }
 
 void InterruptSignal::StoreRelease(hsa_signal_value_t value) {
-  atomic::Store(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kStore, value, std::memory_order_release);
   SetEvent();
 }
 void InterruptSignal::StoreReleaseAndNotify(hsa_signal_value_t value) {
-  atomic::Store(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kStore, value, std::memory_order_release);
   if (event_ != nullptr) HSAKMT_CALL(hsaKmtSetEvent(event_));
 }
 
@@ -212,165 +224,153 @@ hsa_signal_value_t InterruptSignal::WaitAcquire(
 }
 
 void InterruptSignal::AndRelaxed(hsa_signal_value_t value) {
-  atomic::And(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kAnd, value, std::memory_order_relaxed);
   SetEvent();
 }
 
 void InterruptSignal::AndAcquire(hsa_signal_value_t value) {
-  atomic::And(&signal_.value, int64_t(value), std::memory_order_acquire);
+  UpdateValue(ValueOp::kAnd, value, std::memory_order_acquire);
   SetEvent();
 }
 
 void InterruptSignal::AndRelease(hsa_signal_value_t value) {
-  atomic::And(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kAnd, value, std::memory_order_release);
   SetEvent();
 }
 
 void InterruptSignal::AndAcqRel(hsa_signal_value_t value) {
-  atomic::And(&signal_.value, int64_t(value), std::memory_order_acq_rel);
+  UpdateValue(ValueOp::kAnd, value, std::memory_order_acq_rel);
   SetEvent();
 }
 
 void InterruptSignal::OrRelaxed(hsa_signal_value_t value) {
-  atomic::Or(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kOr, value, std::memory_order_relaxed);
   SetEvent();
 }
 
 void InterruptSignal::OrAcquire(hsa_signal_value_t value) {
-  atomic::Or(&signal_.value, int64_t(value), std::memory_order_acquire);
+  UpdateValue(ValueOp::kOr, value, std::memory_order_acquire);
   SetEvent();
 }
 
 void InterruptSignal::OrRelease(hsa_signal_value_t value) {
-  atomic::Or(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kOr, value, std::memory_order_release);
   SetEvent();
 }
 
 void InterruptSignal::OrAcqRel(hsa_signal_value_t value) {
-  atomic::Or(&signal_.value, int64_t(value), std::memory_order_acq_rel);
+  UpdateValue(ValueOp::kOr, value, std::memory_order_acq_rel);
   SetEvent();
 }
 
 void InterruptSignal::XorRelaxed(hsa_signal_value_t value) {
-  atomic::Xor(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kXor, value, std::memory_order_relaxed);
   SetEvent();
 }
 
 void InterruptSignal::XorAcquire(hsa_signal_value_t value) {
-  atomic::Xor(&signal_.value, int64_t(value), std::memory_order_acquire);
+  UpdateValue(ValueOp::kXor, value, std::memory_order_acquire);
   SetEvent();
 }
 
 void InterruptSignal::XorRelease(hsa_signal_value_t value) {
-  atomic::Xor(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kXor, value, std::memory_order_release);
   SetEvent();
 }
 
 void InterruptSignal::XorAcqRel(hsa_signal_value_t value) {
-  atomic::Xor(&signal_.value, int64_t(value), std::memory_order_acq_rel);
+  UpdateValue(ValueOp::kXor, value, std::memory_order_acq_rel);
   SetEvent();
 }
 
 void InterruptSignal::AddRelaxed(hsa_signal_value_t value) {
-  atomic::Add(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kAdd, value, std::memory_order_relaxed);
   SetEvent();
 }
 
 void InterruptSignal::AddAcquire(hsa_signal_value_t value) {
-  atomic::Add(&signal_.value, int64_t(value), std::memory_order_acquire);
+  UpdateValue(ValueOp::kAdd, value, std::memory_order_acquire);
   SetEvent();
 }
 
 void InterruptSignal::AddRelease(hsa_signal_value_t value) {
-  atomic::Add(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kAdd, value, std::memory_order_release);
   SetEvent();
 }
 
 void InterruptSignal::AddAcqRel(hsa_signal_value_t value) {
-  atomic::Add(&signal_.value, int64_t(value), std::memory_order_acq_rel);
+  UpdateValue(ValueOp::kAdd, value, std::memory_order_acq_rel);
   SetEvent();
 }
 
 void InterruptSignal::SubRelaxed(hsa_signal_value_t value) {
-  atomic::Sub(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kSub, value, std::memory_order_relaxed);
   SetEvent();
 }
 
 void InterruptSignal::SubAcquire(hsa_signal_value_t value) {
-  atomic::Sub(&signal_.value, int64_t(value), std::memory_order_acquire);
+  UpdateValue(ValueOp::kSub, value, std::memory_order_acquire);
   SetEvent();
 }
 
 void InterruptSignal::SubRelease(hsa_signal_value_t value) {
-  atomic::Sub(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kSub, value, std::memory_order_release);
   SetEvent();
 }
 
 void InterruptSignal::SubAcqRel(hsa_signal_value_t value) {
-  atomic::Sub(&signal_.value, int64_t(value), std::memory_order_acq_rel);
+  UpdateValue(ValueOp::kSub, value, std::memory_order_acq_rel);
   SetEvent();
 }
 
 hsa_signal_value_t InterruptSignal::ExchRelaxed(hsa_signal_value_t value) {
-  hsa_signal_value_t ret = hsa_signal_value_t(atomic::Exchange(
-      &signal_.value, int64_t(value), std::memory_order_relaxed));
+  hsa_signal_value_t ret = UpdateValue(ValueOp::kExchange, value, std::memory_order_relaxed);
   SetEvent();
   return ret;
 }
 
 hsa_signal_value_t InterruptSignal::ExchAcquire(hsa_signal_value_t value) {
-  hsa_signal_value_t ret = hsa_signal_value_t(atomic::Exchange(
-      &signal_.value, int64_t(value), std::memory_order_acquire));
+  hsa_signal_value_t ret = UpdateValue(ValueOp::kExchange, value, std::memory_order_acquire);
   SetEvent();
   return ret;
 }
 
 hsa_signal_value_t InterruptSignal::ExchRelease(hsa_signal_value_t value) {
-  hsa_signal_value_t ret = hsa_signal_value_t(atomic::Exchange(
-      &signal_.value, int64_t(value), std::memory_order_release));
+  hsa_signal_value_t ret = UpdateValue(ValueOp::kExchange, value, std::memory_order_release);
   SetEvent();
   return ret;
 }
 
 hsa_signal_value_t InterruptSignal::ExchAcqRel(hsa_signal_value_t value) {
-  hsa_signal_value_t ret = hsa_signal_value_t(atomic::Exchange(
-      &signal_.value, int64_t(value), std::memory_order_acq_rel));
+  hsa_signal_value_t ret = UpdateValue(ValueOp::kExchange, value, std::memory_order_acq_rel);
   SetEvent();
   return ret;
 }
 
 hsa_signal_value_t InterruptSignal::CasRelaxed(hsa_signal_value_t expected,
                                                hsa_signal_value_t value) {
-  hsa_signal_value_t ret = hsa_signal_value_t(
-      atomic::Cas(&signal_.value, int64_t(value), int64_t(expected),
-                  std::memory_order_relaxed));
+  hsa_signal_value_t ret = UpdateValue(ValueOp::kCas, value, std::memory_order_relaxed, expected);
   SetEvent();
   return ret;
 }
 
 hsa_signal_value_t InterruptSignal::CasAcquire(hsa_signal_value_t expected,
                                                hsa_signal_value_t value) {
-  hsa_signal_value_t ret = hsa_signal_value_t(
-      atomic::Cas(&signal_.value, int64_t(value), int64_t(expected),
-                  std::memory_order_acquire));
+  hsa_signal_value_t ret = UpdateValue(ValueOp::kCas, value, std::memory_order_acquire, expected);
   SetEvent();
   return ret;
 }
 
 hsa_signal_value_t InterruptSignal::CasRelease(hsa_signal_value_t expected,
                                                hsa_signal_value_t value) {
-  hsa_signal_value_t ret = hsa_signal_value_t(
-      atomic::Cas(&signal_.value, int64_t(value), int64_t(expected),
-                  std::memory_order_release));
+  hsa_signal_value_t ret = UpdateValue(ValueOp::kCas, value, std::memory_order_release, expected);
   SetEvent();
   return ret;
 }
 
 hsa_signal_value_t InterruptSignal::CasAcqRel(hsa_signal_value_t expected,
                                               hsa_signal_value_t value) {
-  hsa_signal_value_t ret = hsa_signal_value_t(
-      atomic::Cas(&signal_.value, int64_t(value), int64_t(expected),
-                  std::memory_order_acq_rel));
+  hsa_signal_value_t ret = UpdateValue(ValueOp::kCas, value, std::memory_order_acq_rel, expected);
   SetEvent();
   return ret;
 }

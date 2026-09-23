@@ -2910,6 +2910,7 @@ void Runtime::Unload() {
   // Clear signal and event pools before destroying agents, since the pools
   // contain allocations from memory regions owned by agents.
   SharedSignalPool.clear();
+  LargeSharedSignalPool.clear();
   EventPool.clear();
 
   // Clear system regions before destroying agents to prevent use-after-free

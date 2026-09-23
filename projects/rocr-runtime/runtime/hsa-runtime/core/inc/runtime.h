@@ -547,6 +547,8 @@ class Runtime {
 
   SharedSignalPool_t* GetSharedSignalPool() { return &SharedSignalPool; }
 
+  SharedSignalPool_t* GetLargeSharedSignalPool() { return &LargeSharedSignalPool; }
+
   InterruptSignal::EventPool* GetEventPool() { return &EventPool; }
 
   uint64_t sys_clock_freq() const { return sys_clock_freq_; }
@@ -1015,6 +1017,9 @@ class Runtime {
 
   // Pools memory for SharedSignal (Signal ABI blocks)
   SharedSignalPool_t SharedSignalPool;
+
+  // Pools 1024-byte slots for amd_signal_v2_t signals
+  SharedSignalPool_t LargeSharedSignalPool{sizeof(amd_signal_v2_t)};
 
   // Pools KFD Events for InterruptSignal
   InterruptSignal::EventPool EventPool;

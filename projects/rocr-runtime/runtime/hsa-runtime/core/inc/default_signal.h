@@ -173,8 +173,15 @@ class DefaultSignal : private LocalSignal, public BusyWaitSignal {
   static __forceinline bool IsType(Signal* ptr) { return ptr->IsType(&rtti_id()); }
 
   /// @brief See base class Signal.
-  explicit DefaultSignal(hsa_signal_value_t initial_value, bool enableIPC = false)
-      : LocalSignal(initial_value, enableIPC), BusyWaitSignal(signal(), enableIPC) {}
+  explicit DefaultSignal(hsa_signal_value_t initial_value, bool enableIPC = false,
+                         bool large = false)
+      : LocalSignal(initial_value, enableIPC, large), BusyWaitSignal(signal(), enableIPC) {}
+
+  /// @brief Builds a batch member in @p slot. See LocalSignal.
+  DefaultSignal(hsa_signal_value_t initial_value, SignalBatch* batch, SharedSignal* slot)
+      : LocalSignal(initial_value, batch, slot), BusyWaitSignal(signal(), false) {
+    host_access_via_hdp_ = batch->host_access_via_hdp();
+  }
 
  protected:
   bool _IsA(rtti_t id) const {

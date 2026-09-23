@@ -1467,6 +1467,22 @@ hsa_status_t HSA_API hsa_amd_agent_set_attribute(hsa_agent_t agent,
   return amdExtTable->hsa_amd_agent_set_attribute_fn(agent, attribute, value);
 }
 
+hsa_status_t HSA_API hsa_amd_signal_batch_create(uint32_t count,
+                                                 const hsa_signal_value_t* initial_values,
+                                                 uint32_t num_consumers,
+                                                 const hsa_agent_t* consumers,
+                                                 uint64_t attributes,
+                                                 hsa_amd_memory_pool_t pool,
+                                                 hsa_amd_signal_batch_t* batch,
+                                                 hsa_signal_t* signals) {
+  return amdExtTable->hsa_amd_signal_batch_create_fn(count, initial_values, num_consumers,
+                                                     consumers, attributes, pool, batch, signals);
+}
+
+hsa_status_t HSA_API hsa_amd_signal_batch_destroy(hsa_amd_signal_batch_t batch) {
+  return amdExtTable->hsa_amd_signal_batch_destroy_fn(batch);
+}
+
 // Tools only table interfaces.
 namespace rocr {
 

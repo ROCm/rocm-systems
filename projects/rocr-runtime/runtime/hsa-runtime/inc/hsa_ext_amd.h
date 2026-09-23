@@ -49,6 +49,7 @@
 #include "hsa_ext_image.h"
 #include "hsa_ven_amd_pc_sampling.h"
 #include "amd_launch_descriptor.h"
+#include "amd_hsa_signal.h"
 
 /**
  * - 1.0 - initial version
@@ -85,9 +86,12 @@
  * - 1.31 - hsa_amd_queue_get_info: queue read/write pointer addresses
  * - 1.32 - hsa_amd_svm_discard_and_prefetch_batch_async
  * - 1.33 - hsa_amd_agent_set_attribute: GL2 persisting cache size control
+ * - 1.34 - hsa_amd_signal_batch_create, hsa_amd_signal_batch_destroy, HSA_AMD_SIGNAL_LARGE,
+ *          HSA_AMD_AGENT_INFO_HOST_STORES_NEED_HDP_FLUSH, HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED,
+ *          hsa_amd_signal_set_hints, hsa_amd_signal_get_hints (inline)
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 33
+#define HSA_AMD_INTERFACE_VERSION_MINOR 34
 
 #ifdef __cplusplus
 extern "C" {
@@ -1002,8 +1006,25 @@ typedef enum hsa_amd_agent_info_s {
    * Returns the maximum supported persisting L2 cache size on this HW in bytes.
    * The type of this attribute is size_t.
    */
-  HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE = 0xA126
-
+  HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE = 0xA126,
+  /**
+   * Whether host stores to the agent's memory pass through HDP, and so are
+   * ordered with the agent's accesses only once flushed. Applies to anything
+   * the host writes there: queues, kernel arguments, signals. The host flushes
+   * by writing the HSA_AMD_AGENT_INFO_HDP_FLUSH register or by reading back its
+   * last store, before the agent can observe the data (for example before
+   * publishing a packet header or ringing a doorbell). One flush covers every
+   * earlier store. GPU agents only.
+   * The type of this attribute is bool.
+   */
+  HSA_AMD_AGENT_INFO_HOST_STORES_NEED_HDP_FLUSH = 0xA127,
+  /**
+   * Whether host atomic read-modify-write operations on the agent's memory are
+   * atomic with respect to the agent. When false, the host may only load and
+   * store there. GPU agents only.
+   * The type of this attribute is bool.
+   */
+  HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED = 0xA128,
 } hsa_amd_agent_info_t;
 
 /**
@@ -1366,6 +1387,12 @@ typedef enum {
    * another process is undefined.
    */
   HSA_AMD_SIGNAL_IPC = 2,
+  /**
+   * Signal uses the 1024-byte amd_signal_v2_t layout (see amd_hsa_signal.h)
+   * instead of the 64-byte amd_signal_t.  Cannot be combined with
+   * ::HSA_AMD_SIGNAL_IPC.
+   */
+  HSA_AMD_SIGNAL_LARGE = 4,
 } hsa_amd_signal_attribute_t;
 
 /**
@@ -1400,8 +1427,9 @@ typedef enum {
  * the required resources.
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p signal is NULL, @p
- * num_consumers is greater than 0 but @p consumers is NULL, or @p consumers
- * contains duplicates.
+ * num_consumers is greater than 0 but @p consumers is NULL, @p consumers
+ * contains duplicates, or @p attributes combines ::HSA_AMD_SIGNAL_LARGE with
+ * ::HSA_AMD_SIGNAL_IPC.
  */
 hsa_status_t HSA_API hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t num_consumers,
                                            const hsa_agent_t* consumers, uint64_t attributes,
@@ -2103,6 +2131,118 @@ hsa_status_t HSA_API
  *
  */
 hsa_status_t HSA_API hsa_amd_memory_pool_free(void* ptr);
+
+/**
+ * @brief Opaque handle to a batch of signals.
+ */
+typedef struct hsa_amd_signal_batch_s {
+  uint64_t handle;
+} hsa_amd_signal_batch_t;
+
+/**
+ * @brief Create @p count signals in one contiguous allocation from @p pool.
+ *
+ * Members are ordinary signals and may be used with every hsa_signal_* API.
+ * Each member must be destroyed with hsa_signal_destroy, and the batch with
+ * ::hsa_amd_signal_batch_destroy, in any order. The batch memory is released
+ * once all of them have been destroyed.
+ *
+ * Interrupt-capable members each consume a KFD event, of which a process has a
+ * limited number (about 4096). Members created after that limit busy-wait.
+ *
+ * @param[in] count Number of signals. Must be greater than 0.
+ *
+ * @param[in] initial_values Initial value of each signal, @p count entries.
+ *
+ * @param[in] num_consumers Size of @p consumers, as for ::hsa_amd_signal_create.
+ *
+ * @param[in] consumers Agents that might wait on the signals, as for
+ * ::hsa_amd_signal_create. Applies to every member.
+ *
+ * @param[in] attributes Signal attributes applied to every member.
+ * ::HSA_AMD_SIGNAL_LARGE selects 1024-byte members; otherwise members are
+ * 128 bytes.  ::HSA_AMD_SIGNAL_IPC is not supported.
+ *
+ * @param[in] pool Memory pool providing the signal memory: a fine-grained
+ * system memory pool, or a fine-grained or extended-scope fine-grained pool of
+ * a GPU whose memory is host visible. Device memory is made accessible to the
+ * host and to @p consumers, or to every GPU if @p num_consumers is 0, and its
+ * v2 members carry AMD_SIGNAL_PROPERTY_DEVICE_MEMORY. When the GPU reports
+ * ::HSA_AMD_AGENT_INFO_HOST_STORES_NEED_HDP_FLUSH, the hsa_signal_* APIs flush
+ * every host store they make, and a caller writing a member's value directly
+ * must flush it before an agent reads it. Without
+ * ::HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED, host read-modify-write operations
+ * are not atomic with respect to agents.
+ *
+ * @param[out] batch Handle to the new batch.
+ *
+ * @param[out] signals Array of @p count entries receiving the signal handles.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The HSA runtime failed to allocate
+ * the required resources.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_MEMORY_POOL @p pool is invalid or not a
+ * supported kind (see @p pool).
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p count is 0, @p initial_values,
+ * @p batch or @p signals is NULL, @p attributes requests ::HSA_AMD_SIGNAL_IPC, @p num_consumers is greater than
+ * 0 but @p consumers is NULL, or @p consumers contains duplicates.
+ */
+hsa_status_t HSA_API hsa_amd_signal_batch_create(uint32_t count,
+                                                 const hsa_signal_value_t* initial_values,
+                                                 uint32_t num_consumers,
+                                                 const hsa_agent_t* consumers,
+                                                 uint64_t attributes,
+                                                 hsa_amd_memory_pool_t pool,
+                                                 hsa_amd_signal_batch_t* batch,
+                                                 hsa_signal_t* signals);
+
+/**
+ * @brief Destroy a signal batch handle.
+ *
+ * Members not yet destroyed remain valid. Batch memory is released once every
+ * member has also been destroyed with hsa_signal_destroy.
+ *
+ * @param[in] batch Batch created by ::hsa_amd_signal_batch_create.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p batch is not a valid batch.
+ */
+hsa_status_t HSA_API hsa_amd_signal_batch_destroy(hsa_amd_signal_batch_t batch);
+
+/**
+ * @brief Return @p signal with its handle hints replaced by @p hints.
+ *
+ * @p hints combines ::amd_signal_hint_t values; 0 returns the plain handle.
+ * Hints are purely optional and not necessarily honoured: the consumer may
+ * ignore any of them, so the caller must be correct either way.
+ * Hints in bits 6-9 are legal only on an ::HSA_AMD_SIGNAL_LARGE signal, and set
+ * the format bit themselves. A hinted handle is only for the completion_signal
+ * of an AQL packet; pass the plain handle to every runtime API.
+ */
+static inline hsa_signal_t hsa_amd_signal_set_hints(hsa_signal_t signal, uint64_t hints) {
+  const uint64_t format =
+      (hints & AMD_SIGNAL_HINT_WIDE_MASK) ? AMD_SIGNAL_HINT_FORMAT_V2 : AMD_SIGNAL_HINT_FORMAT_V1;
+  const hsa_signal_t hinted_signal = {(signal.handle & ~amd_signal_hint_mask(signal.handle)) |
+                                      hints | format};
+  return hinted_signal;
+}
+
+/**
+ * @brief Return the hints carried by the handle of @p signal; 0 for a plain handle.
+ */
+static inline uint64_t hsa_amd_signal_get_hints(hsa_signal_t signal) {
+  return signal.handle & amd_signal_hint_mask(signal.handle);
+}
 
 /**
  * @brief Asynchronously copy a block of memory from the location pointed to by
