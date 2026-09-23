@@ -2,14 +2,23 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc. All Rights Reserved.
 """Inject an aie2/aie2p section (versioned header + kernel table + blob pool)
 into an hsaco. See docs/superpowers/specs/2026-07-12-aie-hsaco-loading-design.md."""
+
 import argparse
 import os
 import struct
 import subprocess
 import sys
 
-from aie_hsaco_format import (MAGIC, VERSION_MAJOR, VERSION_MINOR, ARCHES,
-                              _HDR, _HDR_SIZE, _ENTRY, _ENTRY_SIZE)
+from aie_hsaco_format import (
+    _ENTRY,
+    _ENTRY_SIZE,
+    _HDR,
+    _HDR_SIZE,
+    ARCHES,
+    MAGIC,
+    VERSION_MAJOR,
+    VERSION_MINOR,
+)
 
 
 def build_section(arch, kernels):
@@ -51,17 +60,42 @@ def build_section(arch, kernels):
         if kind not in (0, 1):
             raise ValueError(f"kernel {k['name']!r}: unknown kind {kind}")
         if kind == 1 and pdi_size:
-            raise ValueError(f"kernel {k['name']!r}: FullElf entries carry no separate PDI")
-        entries.append((name_off,
-                        blob_pool_offset + insts_off, insts_size,
-                        (blob_pool_offset + pdi_off) if pdi_size else 0, pdi_size,
-                        int(k.get("kernarg_size", 0)), int(k.get("num_cols", 1)),
-                        kind, 0, 0, 0))
+            raise ValueError(
+                f"kernel {k['name']!r}: FullElf entries carry no separate PDI"
+            )
+        entries.append(
+            (
+                name_off,
+                blob_pool_offset + insts_off,
+                insts_size,
+                (blob_pool_offset + pdi_off) if pdi_size else 0,
+                pdi_size,
+                int(k.get("kernarg_size", 0)),
+                int(k.get("num_cols", 1)),
+                kind,
+                0,
+                0,
+                0,
+            )
+        )
 
     out = bytearray()
-    out += struct.pack(_HDR, MAGIC, VERSION_MAJOR, VERSION_MINOR, header_size,
-                       len(kernels), _ENTRY_SIZE, string_table_offset,
-                       len(string_table), blob_pool_offset, 0, 0, 0, 0)
+    out += struct.pack(
+        _HDR,
+        MAGIC,
+        VERSION_MAJOR,
+        VERSION_MINOR,
+        header_size,
+        len(kernels),
+        _ENTRY_SIZE,
+        string_table_offset,
+        len(string_table),
+        blob_pool_offset,
+        0,
+        0,
+        0,
+        0,
+    )
     for e in entries:
         out += struct.pack(_ENTRY, *e)
     out += string_table
@@ -71,16 +105,26 @@ def build_section(arch, kernels):
 
 def _inject(hsaco_path, arch, section_bytes):
     import tempfile
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as f:
         f.write(section_bytes)
         sec_file = f.name
     try:
         # Remove an existing same-named section first (ignore error if absent).
-        subprocess.run(["llvm-objcopy", "--remove-section", arch, hsaco_path,
-                        hsaco_path], check=False)
-        subprocess.run(["llvm-objcopy", f"--add-section={arch}={sec_file}",
-                        f"--set-section-flags={arch}=noload,readonly",
-                        hsaco_path, hsaco_path], check=True)
+        subprocess.run(
+            ["llvm-objcopy", "--remove-section", arch, hsaco_path, hsaco_path],
+            check=False,
+        )
+        subprocess.run(
+            [
+                "llvm-objcopy",
+                f"--add-section={arch}={sec_file}",
+                f"--set-section-flags={arch}=noload,readonly",
+                hsaco_path,
+                hsaco_path,
+            ],
+            check=True,
+        )
     finally:
         os.unlink(sec_file)
 
@@ -95,7 +139,7 @@ def _kernel_name_from_symbol(symbol):
         i += 1
     if length == 0 or i + length > len(symbol):
         return symbol
-    return symbol[i:i + length]
+    return symbol[i : i + length]
 
 
 def kernels_from_full_elf(path, kernarg_size=0, num_cols=1):
@@ -109,7 +153,8 @@ def kernels_from_full_elf(path, kernarg_size=0, num_cols=1):
         elf = ELFFile(f)
         symtab = elf.get_section_by_name(".symtab")
         if not isinstance(symtab, SymbolTableSection):
-            raise ValueError(f"{path}: missing .symtab")
+            msg = f"{path}: missing .symtab"
+            raise TypeError(msg)
 
         names = []
         for sec in elf.iter_sections():
@@ -121,8 +166,17 @@ def kernels_from_full_elf(path, kernarg_size=0, num_cols=1):
 
     if not names:
         raise ValueError(f"{path}: no COMDAT groups; not a full ELF")
-    return [dict(name=n, insts=blob, pdi=None, kernarg_size=kernarg_size,
-                 num_cols=num_cols, kind=1) for n in sorted(names)]
+    return [
+        {
+            "name": n,
+            "insts": blob,
+            "pdi": None,
+            "kernarg_size": kernarg_size,
+            "num_cols": num_cols,
+            "kind": 1,
+        }
+        for n in sorted(names)
+    ]
 
 
 def pdi_from_xclbin(path):
@@ -130,14 +184,24 @@ def pdi_from_xclbin(path):
     import glob
     import shutil
     import tempfile
+
     if shutil.which("xclbinutil") is None:
         raise RuntimeError(
             "xclbinutil not found on PATH; it is needed to read a PDI out of an xclbin. "
-            "Install XRT or pass the PDI directly with the PDI+insts --kernel form.")
+            "Install XRT or pass the PDI directly with the PDI+insts --kernel form."
+        )
     with tempfile.TemporaryDirectory() as d:
-        subprocess.run(["xclbinutil", "--input", path,
-                        "--dump-section", f"AIE_PARTITION:JSON:{d}/aie.json"],
-                       check=True, capture_output=True)
+        subprocess.run(
+            [
+                "xclbinutil",
+                "--input",
+                path,
+                "--dump-section",
+                f"AIE_PARTITION:JSON:{d}/aie.json",
+            ],
+            check=True,
+            capture_output=True,
+        )
         pdis = glob.glob(f"{d}/**/*.pdi", recursive=True)
         if len(pdis) != 1:
             raise ValueError(f"{path}: expected exactly one PDI, found {len(pdis)}")
@@ -157,18 +221,28 @@ def _make_empty_elf64():
     shstrtab_off = ehsize
     shoff = shstrtab_off + len(shstrtab)
     null_sh = struct.pack(_SHDR, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-    shstrtab_sh = struct.pack(_SHDR, 1, 3, 0, 0, shstrtab_off, len(shstrtab), 0, 0, 1, 0)
+    shstrtab_sh = struct.pack(
+        _SHDR, 1, 3, 0, 0, shstrtab_off, len(shstrtab), 0, 0, 1, 0
+    )
     ehdr = (
-        b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8 +   # e_ident
-        struct.pack("<HHIQQQIHHHHHH",
-                    1,          # e_type = ET_REL
-                    224,        # e_machine = EM_AMDGPU
-                    1,          # e_version
-                    0, 0, shoff,  # e_entry, e_phoff, e_shoff
-                    0,          # e_flags
-                    ehsize,     # e_ehsize
-                    0, 0,       # e_phentsize, e_phnum
-                    shentsize, 2, 1)  # e_shentsize, e_shnum, e_shstrndx
+        b"\x7fELF\x02\x01\x01\x00"
+        + b"\x00" * 8  # e_ident
+        + struct.pack(
+            "<HHIQQQIHHHHHH",
+            1,  # e_type = ET_REL
+            224,  # e_machine = EM_AMDGPU
+            1,  # e_version
+            0,
+            0,
+            shoff,  # e_entry, e_phoff, e_shoff
+            0,  # e_flags
+            ehsize,  # e_ehsize
+            0,
+            0,  # e_phentsize, e_phnum
+            shentsize,
+            2,
+            1,
+        )  # e_shentsize, e_shnum, e_shstrndx
     )
     return ehdr + shstrtab + null_sh + shstrtab_sh
 
@@ -201,8 +275,16 @@ def _parse_kernel_arg(s):
         _, name, xclbin_path, insts_path, kernarg_size, num_cols = parts
         with open(insts_path, "rb") as f:
             insts = f.read()
-        return [dict(name=name, insts=insts, pdi=pdi_from_xclbin(xclbin_path),
-                     kernarg_size=int(kernarg_size), num_cols=int(num_cols), kind=0)]
+        return [
+            {
+                "name": name,
+                "insts": insts,
+                "pdi": pdi_from_xclbin(xclbin_path),
+                "kernarg_size": int(kernarg_size),
+                "num_cols": int(num_cols),
+                "kind": 0,
+            }
+        ]
     if len(parts) == 4:
         name, insts_path, kernarg_size, num_cols = parts
         pdi_path = None
@@ -216,8 +298,16 @@ def _parse_kernel_arg(s):
     if pdi_path:
         with open(pdi_path, "rb") as f:
             pdi = f.read()
-    return [dict(name=name, insts=insts, pdi=pdi, kernarg_size=int(kernarg_size),
-                 num_cols=int(num_cols), kind=0)]
+    return [
+        {
+            "name": name,
+            "insts": insts,
+            "pdi": pdi,
+            "kernarg_size": int(kernarg_size),
+            "num_cols": int(num_cols),
+            "kind": 0,
+        }
+    ]
 
 
 def main(argv=None):

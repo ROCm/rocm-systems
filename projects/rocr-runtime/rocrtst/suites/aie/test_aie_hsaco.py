@@ -2,38 +2,56 @@
 import os
 import struct
 
-import pytest
-
 import aie_hsaco
 import aie_hsaco_dump
+import pytest
 
 
 def _parse(section: bytes):
-    magic, vmaj, vmin, hdr_size, kcount, kentry, st_off, st_size, pool_off = \
+    magic, vmaj, vmin, hdr_size, kcount, kentry, st_off, _st_size, _pool_off = (
         struct.unpack_from("<IHHIIIIII", section, 0)
+    )
     assert magic == 0x4B454941
     assert (vmaj, vmin) == (1, 0)
     kernels = []
     for i in range(kcount):
         base = hdr_size + i * kentry
-        (name_off, insts_off, insts_size, pdi_off, pdi_size,
-         kernarg_size, num_cols) = struct.unpack_from("<IIIIIII", section, base)
+        name_off, insts_off, insts_size, pdi_off, pdi_size, kernarg_size, num_cols = (
+            struct.unpack_from("<IIIIIII", section, base)
+        )
         name_abs = st_off + name_off
         end = section.index(b"\x00", name_abs)
         name = section[name_abs:end].decode()
-        insts = section[insts_off:insts_off + insts_size]
-        pdi = section[pdi_off:pdi_off + pdi_size] if pdi_size else None
-        kernels.append(dict(name=name, insts=insts, pdi=pdi,
-                            kernarg_size=kernarg_size, num_cols=num_cols))
+        insts = section[insts_off : insts_off + insts_size]
+        pdi = section[pdi_off : pdi_off + pdi_size] if pdi_size else None
+        kernels.append(
+            {
+                "name": name,
+                "insts": insts,
+                "pdi": pdi,
+                "kernarg_size": kernarg_size,
+                "num_cols": num_cols,
+            }
+        )
     return kernels
 
 
 def test_build_section_round_trip():
     kernels = [
-        dict(name="add_one", insts=b"\x01\x02\x03\x04", pdi=b"\xaa\xbb",
-             kernarg_size=32, num_cols=1),
-        dict(name="no_pdi", insts=b"\x05\x06\x07\x08", pdi=None,
-             kernarg_size=16, num_cols=2),
+        {
+            "name": "add_one",
+            "insts": b"\x01\x02\x03\x04",
+            "pdi": b"\xaa\xbb",
+            "kernarg_size": 32,
+            "num_cols": 1,
+        },
+        {
+            "name": "no_pdi",
+            "insts": b"\x05\x06\x07\x08",
+            "pdi": None,
+            "kernarg_size": 16,
+            "num_cols": 2,
+        },
     ]
     section = aie_hsaco.build_section("aie2p", kernels)
     out = _parse(section)
@@ -43,8 +61,8 @@ def test_build_section_round_trip():
 def test_shared_blob_deduplicated():
     shared = b"\x09\x09\x09\x09"
     kernels = [
-        dict(name="a", insts=shared, pdi=None, kernarg_size=0, num_cols=1),
-        dict(name="b", insts=shared, pdi=None, kernarg_size=0, num_cols=1),
+        {"name": "a", "insts": shared, "pdi": None, "kernarg_size": 0, "num_cols": 1},
+        {"name": "b", "insts": shared, "pdi": None, "kernarg_size": 0, "num_cols": 1},
     ]
     section = aie_hsaco.build_section("aie2p", kernels)
     out = _parse(section)
@@ -54,8 +72,18 @@ def test_shared_blob_deduplicated():
 
 
 def test_dump_round_trip():
-    section = aie_hsaco.build_section("aie2", [
-        dict(name="k", insts=b"\x01\x02\x03\x04", pdi=b"\xaa", kernarg_size=8, num_cols=1)])
+    section = aie_hsaco.build_section(
+        "aie2",
+        [
+            {
+                "name": "k",
+                "insts": b"\x01\x02\x03\x04",
+                "pdi": b"\xaa",
+                "kernarg_size": 8,
+                "num_cols": 1,
+            }
+        ],
+    )
     info = aie_hsaco_dump.parse_section(section)
     assert info["arch_version"] == (1, 0)
     assert info["kernels"][0]["name"] == "k"
@@ -63,16 +91,40 @@ def test_dump_round_trip():
 
 
 def test_dump_rejects_bad_magic():
-    section = bytearray(aie_hsaco.build_section("aie2", [
-        dict(name="k", insts=b"\x01\x02\x03\x04", pdi=None, kernarg_size=0, num_cols=1)]))
+    section = bytearray(
+        aie_hsaco.build_section(
+            "aie2",
+            [
+                {
+                    "name": "k",
+                    "insts": b"\x01\x02\x03\x04",
+                    "pdi": None,
+                    "kernarg_size": 0,
+                    "num_cols": 1,
+                }
+            ],
+        )
+    )
     section[0] ^= 0xFF
     with pytest.raises(ValueError, match="magic"):
         aie_hsaco_dump.parse_section(bytes(section))
 
 
 def test_dump_rejects_blob_overrun():
-    section = bytearray(aie_hsaco.build_section("aie2", [
-        dict(name="k", insts=b"\x01\x02\x03\x04", pdi=None, kernarg_size=0, num_cols=1)]))
+    section = bytearray(
+        aie_hsaco.build_section(
+            "aie2",
+            [
+                {
+                    "name": "k",
+                    "insts": b"\x01\x02\x03\x04",
+                    "pdi": None,
+                    "kernarg_size": 0,
+                    "num_cols": 1,
+                }
+            ],
+        )
+    )
     # Corrupt insts_size in the first entry to overrun the section.
     entry_base = struct.unpack_from("<I", section, 8)[0]  # header_size
     struct.pack_into("<I", section, entry_base + 8, 0xFFFFFFFF)  # insts_size field
@@ -81,30 +133,57 @@ def test_dump_rejects_blob_overrun():
 
 
 def test_kind_defaults_to_pdi_insts():
-    sec = aie_hsaco.build_section("aie2p", [
-        dict(name="k", insts=b"\x01\x02\x03\x04", pdi=b"\xaa" * 8,
-             kernarg_size=16, num_cols=1),
-    ])
+    sec = aie_hsaco.build_section(
+        "aie2p",
+        [
+            {
+                "name": "k",
+                "insts": b"\x01\x02\x03\x04",
+                "pdi": b"\xaa" * 8,
+                "kernarg_size": 16,
+                "num_cols": 1,
+            },
+        ],
+    )
     parsed = aie_hsaco_dump.parse_section(sec)
     assert parsed["kernels"][0]["kind"] == 0
 
 
 def test_kind_full_elf_round_trips():
-    sec = aie_hsaco.build_section("aie2p", [
-        dict(name="main:sequence", insts=b"\x7fELF" + b"\x00" * 60, pdi=None,
-             kernarg_size=24, num_cols=1, kind=1),
-    ])
+    sec = aie_hsaco.build_section(
+        "aie2p",
+        [
+            {
+                "name": "main:sequence",
+                "insts": b"\x7fELF" + b"\x00" * 60,
+                "pdi": None,
+                "kernarg_size": 24,
+                "num_cols": 1,
+                "kind": 1,
+            },
+        ],
+    )
     parsed = aie_hsaco_dump.parse_section(sec)
     assert parsed["kernels"][0]["kind"] == 1
     assert parsed["kernels"][0]["pdi_size"] == 0
 
 
 def test_dump_rejects_unknown_kind():
-    sec = bytearray(aie_hsaco.build_section("aie2p", [
-        dict(name="k", insts=b"\x01\x02\x03\x04", kernarg_size=0, num_cols=1),
-    ]))
+    sec = bytearray(
+        aie_hsaco.build_section(
+            "aie2p",
+            [
+                {
+                    "name": "k",
+                    "insts": b"\x01\x02\x03\x04",
+                    "kernarg_size": 0,
+                    "num_cols": 1,
+                },
+            ],
+        )
+    )
     # kind is the first word of the entry's trailing reserved area.
-    hdr_size, kentry = aie_hsaco_dump.header_fields(bytes(sec))
+    hdr_size, _kentry = aie_hsaco_dump.header_fields(bytes(sec))
     struct.pack_into("<I", sec, hdr_size + 7 * 4, 99)
     with pytest.raises(ValueError, match="kind"):
         aie_hsaco_dump.parse_section(bytes(sec))
@@ -141,10 +220,21 @@ def test_ensure_hsaco_creates_loadable_container(tmp_path):
     assert out.exists()
     # A container created from nothing must accept an injected AIE section,
     # and the section must survive intact.
-    section = aie_hsaco.build_section("aie2p", [
-        dict(name="k", insts=b"\x01\x02\x03\x04", pdi=None, kernarg_size=0, num_cols=1)])
+    section = aie_hsaco.build_section(
+        "aie2p",
+        [
+            {
+                "name": "k",
+                "insts": b"\x01\x02\x03\x04",
+                "pdi": None,
+                "kernarg_size": 0,
+                "num_cols": 1,
+            }
+        ],
+    )
     aie_hsaco._inject(str(out), "aie2p", section)
     dumped = tmp_path / "aie2p.bin"
-    subprocess.run(["llvm-objcopy", f"--dump-section=aie2p={dumped}", str(out)],
-                   check=True)
+    subprocess.run(
+        ["llvm-objcopy", f"--dump-section=aie2p={dumped}", str(out)], check=True
+    )
     assert dumped.read_bytes() == section

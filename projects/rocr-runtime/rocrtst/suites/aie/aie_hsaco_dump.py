@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Advanced Micro Devices, Inc. All Rights Reserved.
 """Parse and validate an aie2/aie2p hsaco section; print human-readable summary."""
+
 import argparse
 import struct
 import sys
 
-from aie_hsaco_format import (MAGIC, _HDR, _HDR_SIZE, _ENTRY, KIND_COUNT, KIND_NAMES,
-                              header_fields)
-
-
-
+from aie_hsaco_format import (
+    _ENTRY,
+    _HDR,
+    _HDR_SIZE,
+    KIND_COUNT,
+    KIND_NAMES,
+    MAGIC,
+)
 
 
 def parse_section(section):
     if len(section) < _HDR_SIZE:
         raise ValueError("section smaller than header")
-    (magic, vmaj, vmin, hdr_size, kcount, kentry, st_off, st_size,
-     pool_off, *_res) = struct.unpack_from(_HDR, section, 0)
+    magic, vmaj, vmin, hdr_size, kcount, kentry, st_off, _st_size, _pool_off, *_res = (
+        struct.unpack_from(_HDR, section, 0)
+    )
     if magic != MAGIC:
         raise ValueError(f"bad magic 0x{magic:08x}")
     if kentry < struct.calcsize(_ENTRY):
@@ -25,13 +30,26 @@ def parse_section(section):
         raise ValueError("kernel table out of bounds")
 
     def in_section(off, ln):
-        return off <= len(section) if ln == 0 else (off < len(section) and off + ln <= len(section))
+        return (
+            off <= len(section)
+            if ln == 0
+            else (off < len(section) and off + ln <= len(section))
+        )
 
     kernels = []
     for i in range(kcount):
         base = hdr_size + i * kentry
-        (name_off, insts_off, insts_size, pdi_off, pdi_size,
-         kernarg_size, num_cols, kind, *_e) = struct.unpack_from(_ENTRY, section, base)
+        (
+            name_off,
+            insts_off,
+            insts_size,
+            pdi_off,
+            pdi_size,
+            kernarg_size,
+            num_cols,
+            kind,
+            *_e,
+        ) = struct.unpack_from(_ENTRY, section, base)
         if kind >= KIND_COUNT:
             raise ValueError(f"kernel {i}: unknown kind {kind}")
         if kind == 1 and pdi_size:
@@ -46,16 +64,24 @@ def parse_section(section):
         end = section.find(b"\x00", name_abs)
         if end == -1:
             raise ValueError(f"kernel {i}: name not terminated")
-        kernels.append(dict(name=section[name_abs:end].decode(),
-                            insts_size=insts_size, has_pdi=bool(pdi_size),
-                            pdi_size=pdi_size, kernarg_size=kernarg_size,
-                            num_cols=num_cols, kind=kind,
-                            kind_name=KIND_NAMES.get(kind, "?")))
-    return dict(arch_version=(vmaj, vmin), kernel_count=kcount, kernels=kernels)
+        kernels.append(
+            {
+                "name": section[name_abs:end].decode(),
+                "insts_size": insts_size,
+                "has_pdi": bool(pdi_size),
+                "pdi_size": pdi_size,
+                "kernarg_size": kernarg_size,
+                "num_cols": num_cols,
+                "kind": kind,
+                "kind_name": KIND_NAMES.get(kind, "?"),
+            }
+        )
+    return {"arch_version": (vmaj, vmin), "kernel_count": kcount, "kernels": kernels}
 
 
 def _read_section_from_hsaco(path, arch):
     from elftools.elf.elffile import ELFFile
+
     with open(path, "rb") as f:
         elf = ELFFile(f)
         for name in ("aie2", "aie2p"):
@@ -74,9 +100,11 @@ def main(argv=None):
     print(f"arch section: {arch}")
     print(f"version: {info['arch_version'][0]}.{info['arch_version'][1]}")
     for k in info["kernels"]:
-        print(f"  kernel {k['name']}: kind={k['kind_name']} insts={k['insts_size']}B "
-              f"pdi={'yes' if k['has_pdi'] else 'no'} "
-              f"kernarg={k['kernarg_size']} cols={k['num_cols']}")
+        print(
+            f"  kernel {k['name']}: kind={k['kind_name']} insts={k['insts_size']}B "
+            f"pdi={'yes' if k['has_pdi'] else 'no'} "
+            f"kernarg={k['kernarg_size']} cols={k['num_cols']}"
+        )
     return 0
 
 

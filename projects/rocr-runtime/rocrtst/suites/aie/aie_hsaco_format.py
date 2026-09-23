@@ -5,6 +5,7 @@
 This mirrors `core/inc/amd_aie_section.h`. The C++ header is authoritative; when a field is
 added or a reserved word repurposed there, change it here once rather than in each tool.
 """
+
 import struct
 
 # Section magic: 'A','I','E','K' little-endian. Must match kAieSectionMagic.
@@ -33,5 +34,7 @@ KIND_NAMES = {0: "PdiInsts", 1: "FullElf"}
 
 def header_fields(section):
     """Returns (hdr_size, kernel_entry_size) from a section's header."""
-    (_magic, _vmaj, _vmin, hdr_size, _kcount, kentry, *_rest) = struct.unpack_from(_HDR, section, 0)
+    _magic, _vmaj, _vmin, hdr_size, _kcount, kentry, *_rest = struct.unpack_from(
+        _HDR, section, 0
+    )
     return hdr_size, kentry
