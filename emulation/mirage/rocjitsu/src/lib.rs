@@ -1975,8 +1975,8 @@ mod tests {
             serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
         };
         let default = decode(&def);
+        assert_eq!(default["num_threads"], 1);
         for key in [
-            "num_threads",
             "cpu_dispatch_threads",
             "cpu_thread_budget",
             "async_helper_threads",
