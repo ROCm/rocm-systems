@@ -12,7 +12,8 @@
 ///
 /// When a plugin is added via add(), the group constructs an internal fanout sink
 /// combining all configured sinks + an optional per-plugin FileSink, and
-/// assigns it to the plugin.
+/// assigns it to the plugin. Every fanout in one group shares a sink mutex so
+/// asynchronous plugin writers cannot concurrently enter a configured sink.
 
 #pragma once
 
@@ -107,6 +108,7 @@ public:
     observes_memory_routing_ |= observes_memory_routing;
     observes_tensor_dma_memory_access_ |= observes_tensor_dma_memory_access;
     observes_sgpr_reads_ |= p->observes_sgpr_reads();
+    supports_async_instructions_ &= p->supports_async_instructions();
     SinkBundle sink = build_sink_bundle(p->name() + ".log");
     if (auto *configured_sink = sink.get())
       p->sink_ = configured_sink;
@@ -122,6 +124,9 @@ public:
 
   uint32_t num_plugins() const { return static_cast<uint32_t>(plugins_.size()); }
   bool empty() const { return plugins_.empty(); }
+
+  /// True only when every plugin opts into the async observation contract.
+  bool supports_async_instructions() const { return supports_async_instructions_; }
 
   /// Whether high-frequency callbacks are serialized for this group. Plugin
   /// policy is sampled when each plugin is added so hot dispatch stays O(1).
@@ -180,6 +185,11 @@ public:
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuAfterExecuteInstruction(pc, inst, wf);
     });
+  }
+
+  void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf) {
+    dispatch_async_hook(
+        [&](ExecutionPlugin &plugin) { plugin.onAmdgpuAsyncInstructionIssued(pc, inst, wf); });
   }
 
   void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) {
@@ -355,6 +365,26 @@ private:
       std::forward<Callback>(callback)();
   }
 
+  // Complete issue accounting for every observer even if one throws. Preserve
+  // the first exception for the issuer, which joins all accepted jobs.
+  template <typename Callback> void dispatch_async_hook(Callback &&callback) {
+    dispatch_with_optional_plugin_lock([&]() {
+      size_t index = 0;
+      try {
+        for (; index != plugins_.size(); ++index)
+          callback(*plugins_[index].plugin);
+      } catch (...) {
+        for (++index; index != plugins_.size(); ++index) {
+          try {
+            callback(*plugins_[index].plugin);
+          } catch (...) {
+          }
+        }
+        throw;
+      }
+    });
+  }
+
   // Infrequent hooks may synchronously fire hot register hooks. Recursive
   // acquisition preserves one cross-hook serialization domain without
   // deadlocking that same-thread re-entry.
@@ -366,19 +396,24 @@ private:
   bool observes_memory_routing_ = false;
   bool observes_tensor_dma_memory_access_ = false;
   bool observes_sgpr_reads_ = false;
+  bool supports_async_instructions_ = true;
 
   /// Internal fanout over sinks whose lifetime is guaranteed by the owning
   /// group or SinkBundle. It is deliberately not part of the public sink API.
   class FanoutSink final : public PluginSink {
   public:
+    explicit FanoutSink(std::mutex &mutex) : mutex_(mutex) {}
+
     void add(PluginSink &sink) { children_.push_back(&sink); }
     void write(std::string_view msg) override {
+      std::lock_guard<std::mutex> lock(mutex_);
       for (auto *sink : children_)
         sink->write(msg);
     }
     bool empty() const { return children_.empty(); }
 
   private:
+    std::mutex &mutex_;
     std::vector<PluginSink *> children_;
   };
 
@@ -399,13 +434,13 @@ private:
 
   /// Build a sink combining configured sinks + optional file sink.
   /// Returns an empty bundle if no sinks are configured.
-  [[nodiscard]] SinkBundle build_sink_bundle(const std::string &file_name) const {
+  [[nodiscard]] SinkBundle build_sink_bundle(const std::string &file_name) {
     bool has_file = !sink_dir_.empty() && !file_name.empty();
     if (configured_sinks_.empty() && !has_file)
       return {};
 
     SinkBundle result;
-    auto fanout = std::make_unique<FanoutSink>();
+    auto fanout = std::make_unique<FanoutSink>(sink_mutex_);
     for (const auto &s : configured_sinks_)
       fanout->add(*s);
     if (has_file) {
@@ -428,6 +463,7 @@ private:
 
   // These sinks are declared before plugin entries so plugins and their local
   // fanouts are destroyed before the configured sinks they reference.
+  std::mutex sink_mutex_;
   std::vector<std::unique_ptr<PluginSink>> configured_sinks_;
   std::string sink_dir_;
   /// Owns the sink assigned to one plugin. The plugin is declared last and is

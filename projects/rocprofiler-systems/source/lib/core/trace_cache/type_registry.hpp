@@ -40,7 +40,7 @@ private:
 
     template <typename T>
         requires type_traits::cacheable<T, TypeIdentifierEnum>
-    inline void register_type()
+    void register_type()
     {
         deserializers[T::type_identifier] = [](std::uint8_t*& data) -> variant_t {
             return deserialize<T>(data);
