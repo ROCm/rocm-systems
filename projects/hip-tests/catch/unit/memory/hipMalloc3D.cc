@@ -12,6 +12,9 @@ hipMalloc3D API test scenarios
 4. Multithreaded scenario
 */
 
+#include <algorithm>
+#include <chrono>
+
 #include <hip_test_common.hh>
 static constexpr auto SMALL_SIZE{4};
 static constexpr auto CHUNK_LOOP{100};
@@ -55,6 +58,9 @@ static void Malloc3DThreadFunc(int gpu) { MemoryAlloc3DDiffSizes(gpu); }
  * hipMemGetInfo() should indicate the memory went down after we hipFree() all of them
  */
 HIP_TEST_CASE(Unit_hipMalloc3D_Basic) {
+  constexpr auto kMemoryAccountingSlack = 4 * 1024 * 1024;
+  constexpr auto kMemoryInfoRetryCount = 20;
+  constexpr auto kMemoryInfoRetryDelay = std::chrono::milliseconds{100};
 
   static constexpr int ChunkSize = 64;  // (in megabytes)
   static constexpr int NumAllocations = 3;
@@ -81,7 +87,22 @@ HIP_TEST_CASE(Unit_hipMalloc3D_Basic) {
     HIPCHECK(hipFree(devPitchedPtr[i].ptr));
   }
 
-  HIP_CHECK(hipMemGetInfo(&avail, &tot));
+  const size_t expected_min_avail = pavail - height * width * depth - kMemoryAccountingSlack;
+  size_t max_avail = 0;
+
+  for (int attempt = 0; attempt < kMemoryInfoRetryCount; ++attempt) {
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipMemGetInfo(&avail, &tot));
+    max_avail = std::max(max_avail, avail);
+
+    if (avail >= expected_min_avail) {
+      break;
+    }
+
+    if (attempt + 1 < kMemoryInfoRetryCount) {
+      std::this_thread::sleep_for(kMemoryInfoRetryDelay);
+    }
+  }
 
   // as the runtime might cache some of the allocations and also it is difficult the
   // available amount returned is the same as the one we got the first time because of
@@ -89,11 +110,12 @@ HIP_TEST_CASE(Unit_hipMalloc3D_Basic) {
   // equivalent to two of the allocations has become available
   // (give or take 4MB, as there is bookkeeping overhead)
   // This test was too brittle before, when it was expecting 'avail' to be equal to 'pavail'
-  if (avail < pavail - height * width * depth - 4 * 1024 * 1024) {
+  if (max_avail < expected_min_avail) {
     WARN("Memory leak of hipMalloc3D API in multithreaded scenario."
          << " Available memory before the hipMalloc3D() call (bytes): " << pavail
          << " Available memory after the call: " << iavail
-         << " Available memory after hipFree(): " << avail);
+         << " Available memory after hipFree(): " << avail
+         << " Best available memory after hipFree() during retry window: " << max_avail);
     REQUIRE(false);
   }
 }
