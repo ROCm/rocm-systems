@@ -324,52 +324,39 @@ class Roofline:
                     peaks.append((f"{dt} {label}", peak))
         return peaks
 
-    def _roof_value_at(
-        self,
-        ai_value: float,
-        cache_key: str,
-        ceiling_data: dict[str, Any],
-        cap: float,
-    ) -> Optional[float]:
-        """Roofline throughput (peak) at this AI for the point's memory level:
-        min(bandwidth * AI, active compute cap); None when unavailable."""
-        bandwidth = self._peak_value(ceiling_data, cache_key)
-        if not bandwidth or ai_value <= 0:
-            return None
-        roof = bandwidth * ai_value
-        if cap != float("inf"):
-            roof = min(roof, cap)
-        return roof if roof > 0 else None
-
     def _determine_kernel_limiter(
         self,
         level_ai: dict[str, float],
         ceiling_data: dict[str, Any],
         performance: float,
         compute_peaks: list[tuple[str, float]],
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, Optional[float]]:
         """Name the specific binding roof for a kernel: the roof with the lowest
         achievable performance at the kernel's operating point. Each stacked
-        datatype's compute peak is judged on its own, and only peaks the
-        kernel's own measured performance doesn't already exceed are eligible
-        candidates, so the label names the specific datatype/op-path this
-        kernel is bound by instead of always the tallest peak drawn.
+        datatype's compute peak, and each memory level's own bandwidth * AI,
+        is judged on its own, and only candidates the kernel's own measured
+        performance doesn't already exceed are eligible, so the roof named (and
+        its value) is one this kernel could actually be bound by, instead of an
+        already-impossible ceiling or always the tallest peak drawn.
 
-        Returns (label, category), where category is "Memory" or "Compute"."""
+        Returns (label, category, roof_value); category is "Memory" or
+        "Compute", roof_value is None when no candidate is eligible."""
         candidates: list[tuple[float, str, str]] = []
         for level_name, ai_value in level_ai.items():
             bandwidth = self._peak_value(ceiling_data, level_name.lower())
             if bandwidth and ai_value > 0:
-                candidates.append((bandwidth * ai_value, level_name, "Memory"))
+                roof = bandwidth * ai_value
+                if roof >= performance:
+                    candidates.append((roof, level_name, "Memory"))
 
         for label, peak in compute_peaks:
             if peak >= performance:
                 candidates.append((peak, label, "Compute"))
 
         if not candidates:
-            return "Unknown", "Unknown"
-        _, label, category = min(candidates, key=lambda candidate: candidate[0])
-        return label, category
+            return "Unknown", "Unknown", None
+        roof_value, label, category = min(candidates, key=lambda candidate: candidate[0])
+        return label, category, roof_value
 
     def _build_kernel_traces(
         self,
@@ -389,14 +376,12 @@ class Roofline:
         pct_runtime = self.__ai_data.get("pctRuntime", [])
         time_unit = self.__ai_data.get("timeUnit", "")
         total_dispatches = sum(count for count in counts if count is not None)
-        compute_cap, _ = self._envelope_compute_cap(compute_peaks)
 
         for kernel_index, kernel_name in enumerate(kernel_names):
-            points, level_ai = self._build_kernel_points(
+            points, level_ai, bandwidth_html = self._build_kernel_points(
                 kernel_index=kernel_index,
                 sanitized_cache_hierarchy=sanitized_cache_hierarchy,
                 ceiling_data=ceiling_data,
-                compute_cap=compute_cap,
             )
             if not points:
                 continue
@@ -405,9 +390,19 @@ class Roofline:
                 values[kernel_index] if kernel_index < len(values) else None
                 for values in (kernel_colors, counts, total_time, pct_runtime)
             )
-            limiter, limiter_category = self._determine_kernel_limiter(
+            limiter, limiter_category, roof_value = self._determine_kernel_limiter(
                 level_ai, ceiling_data, points[0]["perf"], compute_peaks
             )
+            pct_roof = (
+                100.0 * points[0]["perf"] / roof_value if roof_value else None
+            )
+            hover_cells = [
+                format_hover_number(roof_value, ",.0f"),
+                format_hover_number(pct_roof, ",.2f"),
+                bandwidth_html,
+            ]
+            for point in points:
+                point["hoverCells"] = hover_cells
 
             traces.append(
                 go.Scatter(
@@ -449,11 +444,11 @@ class Roofline:
         kernel_index: int,
         sanitized_cache_hierarchy: list[str],
         ceiling_data: dict[str, Any],
-        compute_cap: float,
-    ) -> tuple[list[dict[str, Any]], dict[str, float]]:
+    ) -> tuple[list[dict[str, Any]], dict[str, float], str]:
         """One kernel's plotted points, one per memory level it has data for.
 
-        Also returns the level -> AI map the limiter is chosen from.
+        Also returns the level -> AI map the limiter is chosen from, and the
+        'Bandwidth:' hover block shared by every one of this kernel's points.
         """
         points: list[dict[str, Any]] = []
         bandwidth_entries: list[dict[str, Any]] = []
@@ -483,22 +478,13 @@ class Roofline:
                 })
                 continue
 
-            roof_perf = self._roof_value_at(
-                ai_value=ai_value,
-                cache_key=cache_key,
-                ceiling_data=ceiling_data,
-                cap=compute_cap,
-            )
             # This kernel's own achieved bandwidth at this level (not the
             # hardware ceiling): performance (FLOP/s) / AI (FLOP/Byte) = Byte/s.
             achieved_bandwidth = performance / ai_value
-            pct_roof = 100.0 * performance / roof_perf if roof_perf else None
             points.append({
                 "peak": level_name,
                 "ai": ai_value,
                 "perf": performance,
-                "roof_perf_txt": format_hover_number(roof_perf, ",.0f"),
-                "pct_roof_txt": format_hover_number(pct_roof, ",.2f"),
             })
             bandwidth_entries.append({
                 "level_name": level_name,
@@ -508,14 +494,7 @@ class Roofline:
             level_ai[level_name] = ai_value
 
         bandwidth_html = self._build_bandwidth_hover_html(bandwidth_entries)
-        for point in points:
-            point["hoverCells"] = [
-                point.pop("roof_perf_txt"),
-                point.pop("pct_roof_txt"),
-                bandwidth_html,
-            ]
-
-        return points, level_ai
+        return points, level_ai, bandwidth_html
 
     @staticmethod
     def _build_bandwidth_hover_html(bandwidth_entries: list[dict[str, Any]]) -> str:
