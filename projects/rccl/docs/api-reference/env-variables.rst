@@ -63,6 +63,12 @@ in the following table.
           Auto-detect is limited to gfx1250, the only architecture where the VMM
           path is validated. Use ``1`` to force it on elsewhere.
 
+    * - | ``NCCL_RMA_DISABLE``
+        | Disables the RMA proxy, the network path for one-sided RMA. The proxy
+          is never connected and windows are not registered with it.
+      - | ``0``: RMA proxy enabled (default).
+        | ``1``: RMA proxy disabled.
+
     * - | ``NCCL_MIN_CTAS``
         | Minimum number of CTAs (channels) used for a collective. Overrides
           the ``minCTAs`` field of ``ncclConfig_t``.
