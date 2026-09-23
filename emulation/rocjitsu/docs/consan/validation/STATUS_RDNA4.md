@@ -25,7 +25,7 @@ none of those historical colors count as a pass for this campaign.
 - SDK: `/home/benoit/venv`, ROCm `10.2.0a20260915` development package.
 - Preparation: rebuilding the current hook, integrating per-workload generated
   allowlists, preparing Qwen provenance, and building the production matmul.
-- Fresh clean assessments: **9/42**; no cell has completed fresh fault qualification.
+- Fresh clean assessments: **10/42**; no cell has completed fresh fault qualification.
 - Preparation logs: `/home/benoit/workspace/consan-validation-artifacts/`.
 
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
@@ -39,7 +39,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 exact; 352/352 accesses and 86/86 barriers; fault bundle | 🟩 exact; 352/352 accesses; fault bundle |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 exact; 704/704 accesses and 172/172 barriers; fault bundle | 🟩 exact; 704/704 accesses; fault bundle |
 | PyTorch | P1 | collision-heavy `scatter_reduce` (`pytorch-scatter-reduce`) | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log |
-| PyTorch | P2 | Inductor compiled softmax (`pytorch-rdna4-compiled-softmax`) | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log | 🟩 exact; 4/4 accesses; fault bundle |
+| PyTorch | P2 | Inductor compiled softmax (`pytorch-rdna4-compiled-softmax`) | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log |
 | PyTorch | P2 | split online softmax (`pytorch-rdna4-split-softmax`) | 🟩 exact; 8/8 accesses and 12/12 barriers; fault bundle | 🟩 exact; 8/8 accesses; fault bundle |
 | PyTorch | P2 | Qwen-vocabulary top-k (`pytorch-rdna4-llm-topk`) | 🟨 exact/complete; 418,292 accesses and 100,916 barriers; reviewed-fault refresh pending | 🟨 exact/complete; 58,992/58,992 accesses; reviewed-fault refresh pending |
 | llama.cpp | P2 | quantized matvec (`llama-rdna4-mul-mat-vec-q`) | 🟩 exact; 462 accesses and 88 barriers; fault bundle | 🟩 exact; 462/462 accesses; fault bundle |
@@ -75,3 +75,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `pytorch-torch-histc` / default: native rocprofv3 discovery failed; inspect discovery log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round1/pytorch-torch-histc-default`.
 - `pytorch-torch-histc` / supercollider: native rocprofv3 discovery failed; inspect discovery log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round1/pytorch-torch-histc-supercollider`.
 - `pytorch-rdna4-compiled-softmax` / default: native rocprofv3 discovery failed; inspect discovery log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round1/pytorch-rdna4-compiled-softmax-default`.
+- `pytorch-rdna4-compiled-softmax` / supercollider: native rocprofv3 discovery failed; inspect discovery log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round1/pytorch-rdna4-compiled-softmax-supercollider`.
