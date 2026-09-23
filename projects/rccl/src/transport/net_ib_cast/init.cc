@@ -12,8 +12,6 @@
 
 extern int64_t ncclParamIbCastQpsPerConn();
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
-extern int64_t ncclParamIbCastResiliencyPortFailover();
-extern int64_t ncclParamIbCastResiliencyPortRecovery();
 extern int64_t ncclParamIbCastGdrFlushDisable();
 // AMD AINIC
 RCCL_PARAM(IbCastCtsOffloadEnabled, "CTS_OFFLOAD_ENABLED", -1);
