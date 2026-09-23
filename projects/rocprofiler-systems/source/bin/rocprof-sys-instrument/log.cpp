@@ -53,8 +53,7 @@ log_entry::as_string(const char* _color, const char* _src, const char* _end) con
     _ss << " " << _color << std::regex_replace(m_message, std::regex{ "\n" }, " ... ")
         << _end;
 
-    return (_remove_color) ? rocprofsys::utility::string::strip_ansi(_ss.str())
-                           : _ss.str();
+    return _remove_color ? rocprofsys::utility::string::strip_ansi(_ss.str()) : _ss.str();
 }
 
 log_entry&

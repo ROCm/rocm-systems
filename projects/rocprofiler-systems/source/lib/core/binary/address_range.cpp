@@ -4,8 +4,10 @@
 #include "binary/address_range.hpp"
 #include <cstdint>
 
-#include "core/utility.hpp"
+#include "common/string_utility.hpp"
 #include "logger/debug.hpp"
+
+#include <fmt/format.h>
 
 namespace rocprofsys::binary
 {

@@ -15,6 +15,7 @@
 #include "logger/debug.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <regex>
