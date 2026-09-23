@@ -856,8 +856,8 @@ static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t
       CUCHECK(cuMemGetAllocationPropertiesFromHandle(&prop, handle));
 #if defined(__HIP_PLATFORM_AMD__)
 #if NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
-      // CLR rejects HostNuma; RCCL allocates host segments as CU_MEM_LOCATION_TYPE_HOST
-      // in native ROCm 7.12 and the 7.0.2.x backport.
+      // HIP rejects HostNuma. Host segments use hipMemLocationTypeHost on native
+      // ROCm 7.12 and the 7.0.2.x backport.
       if (prop.location.type == hipMemLocationTypeHost) {
         *hasSysmemSegment = true;
       }
