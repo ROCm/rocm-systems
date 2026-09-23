@@ -24,7 +24,7 @@ for the procedure and qualification rules.
 | PyTorch | P1 | collision-heavy `scatter_reduce` (`pytorch-scatter-reduce`) | 🟥 Global-atomic workload; traced kernels have no LDS/FLAT accesses; outside detector scope | 🟥 Global-atomic workload; traced kernels have no LDS/FLAT accesses; outside detector scope |
 | PyTorch | P2 | Inductor compiled softmax (`pytorch-rdna4-compiled-softmax`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8); same-value writes allowed | 🟨 delay-matrix: clean pass; fault trials running; same-value writes allowed |
 | PyTorch | P2 | split online softmax (`pytorch-rdna4-split-softmax`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8); same-value writes allowed | 🟩 delay matrix: fault 8/8; matching clean controls pass |
-| PyTorch | P2 | Qwen-vocabulary top-k (`pytorch-rdna4-llm-topk`) | 🟩 high (lowest passing): clean pass; fault 6/8 (bar 6/8) | 🟨 delay-matrix: clean pass; fault 0/8 (bar 6/8); matching-delay audit pending |
+| PyTorch | P2 | Qwen-vocabulary top-k (`pytorch-rdna4-llm-topk`) | 🟩 high (lowest passing): clean pass; fault 6/8 (bar 6/8) | 🟨 delay-matrix: clean pass; fault 0/8 (bar 6/8); sleep calibration queued |
 | llama.cpp | P2 | quantized matvec (`llama-rdna4-mul-mat-vec-q`) | 🟩 higher (lowest verified): clean pass; fault 7/8 (bar 6/8) | 🟨 delay-matrix: clean pass; fault 4/8 (bar 6/8); sleep calibration queued |
 | Main E2E | P2 | Sharktank TP2 family (`tp2-family`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 Clean pass; reviewed fault ready; delay=0 qualification queued |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 Clean pass; reviewed fault ready; delay=0 qualification queued |
@@ -35,4 +35,4 @@ for the procedure and qualification rules.
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 NOP delays: fault 0/8; matching sleep-delay calibration queued |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟨 Clean pass; atomic-scope fault applies offline; GPU qualification queued | 🟨 Clean pass; atomic-scope fault applies offline; GPU qualification queued |
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟨 Clean pass; atomic-scope fault applies offline; GPU qualification queued | 🟨 Clean pass; atomic-scope fault applies offline; GPU qualification queued |
-| Main E2E | P4 | hip-moi Jakub attention (`jakub-attention`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 delay-matrix: clean pass; fault 0/8 (bar 6/8); matching-delay audit pending |
+| Main E2E | P4 | hip-moi Jakub attention (`jakub-attention`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 delay-matrix: clean pass; fault 0/8 (bar 6/8); sleep calibration queued |
