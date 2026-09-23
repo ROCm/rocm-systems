@@ -1269,10 +1269,10 @@ bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRe
   }
   // Sub-comms are only built at nNodes >= 8; rcclHierarchicalAlgoInfo dereferences
   // them unconditionally, so bail out here if they are not initialized.
-  if (!comm->hierarchicalCommsInitialized) {
+  /*if (!comm->hierarchicalCommsInitialized) {
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: hierarchical sub-comms not initialized");
     return false;
-  }
+  }*/
   // If LSA already spans the whole comm, use CE path instead
   if (ncclDevrIsOneLsaTeam(comm)) {
     TRACE(NCCL_TUNING, "Skipping hierarchical CE collective: LSA spans the comm; use CE path instead");
@@ -1384,6 +1384,25 @@ static void ncclHierCollFreeChunkPlan(struct ncclHierChunkPlan* plan) {
   plan->chunkBytes = nullptr;
   plan->chunkOff = nullptr;
   plan->nPeers = 0;
+}
+
+// Chunk count / sizes for one peer transfer. Matches ncclHierCollBuildChunk's
+// per-peer layout so AlltoAll and AlltoAllv agree on signal counts.
+static void ncclHierCollPeerChunks(size_t bytes, size_t maxChunk, int* outNum, size_t* outUniform,
+                                   size_t* outLast) {
+  const size_t align = HIER_COLL_CHUNK_ALIGN;
+  if (bytes == 0 || maxChunk == 0 || bytes <= maxChunk) {
+    *outNum = bytes ? 1 : 0;
+    *outUniform = bytes;
+    *outLast = bytes;
+    return;
+  }
+  int numChunks = (int)((bytes + maxChunk - 1) / maxChunk);
+  size_t uniformSize = (bytes / numChunks / align) * align;
+  if (uniformSize < align) uniformSize = align;
+  *outNum = numChunks;
+  *outUniform = uniformSize;
+  *outLast = bytes - uniformSize * (numChunks - 1);
 }
 
 // Effective number of internal contexts for a hierarchical collective's rail
@@ -2129,7 +2148,8 @@ fail:
 
 // Hierarchical AlltoAllv: variable-size alltoall over RMA (inter-node) + CE (intra-node).
 // Same phase DAG as ncclHierCeAlltoAll; offsets/sizes come from gathered args->sizes.
-// First cut: one RMA put per non-zero remote peer (no uniform multi-peer chunk plan).
+// Inter-node puts are chunked like AlltoAll (max HIER_COLL_MAX_CHUNK_SIZE) so large
+// sparse peer transfers cannot emit a single oversized IB WR.
 ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
 
@@ -2161,11 +2181,19 @@ ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* p
   size_t* sendDispls = ncclAlltoAllvSendDispls(args->sizes, myRank, nRanks);
   size_t* recvSizes = ncclAlltoAllvRecvSizes(args->sizes, myRank, nRanks);
 
+  // numCtx must be identical on every rank: put/wait both derive ctx from
+  // chunk index (c % numCtx). A local maxSend (AlltoAll's perPeerBytes is
+  // uniform) can diverge under sparse AlltoAllv and deadlock RMA waits.
   size_t maxSend = 0;
-  for (int i = 0; i < nRanks; i++) {
-    if (sendSizes[i] > maxSend) maxSend = sendSizes[i];
+  for (int src = 0; src < nRanks; src++) {
+    size_t* ss = ncclAlltoAllvSendSizes(args->sizes, src, nRanks);
+    for (int dst = 0; dst < nRanks; dst++) {
+      if (ss[dst] > maxSend) maxSend = ss[dst];
+    }
   }
   int numCtx = ncclHierCollNumCtx(rmaProxyState, maxSend, persistent);
+  // Same width AlltoAll uses; must be identical on every rank (derived from global maxSend).
+  size_t maxChunk = ncclHierCollChunkWidth(maxSend, numCtx);
 
   struct ncclRmaProxyCtx* railProxyCtx = (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[railCtx];
 
@@ -2207,8 +2235,9 @@ ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* p
   NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
 
   // ====================================================================
-  // Phase 3: Build & submit put-signal-group (one put per non-zero remote peer).
-  // Context key is peer rank (peer % numCtx) so sender and waiter agree.
+  // Phase 3: Build & submit put-signal-group (chunked puts per non-zero remote
+  // peer). Chunk c of each peer lands on ctx c % numCtx — same rule as AlltoAll
+  // — so a single peerBytes > HIER_COLL_MAX_CHUNK_SIZE cannot produce a Bad WR.
   // ====================================================================
   {
     // Pass 1: count ops per context.
@@ -2216,7 +2245,12 @@ ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* p
       int n = (myNode + s) % nNodes;
       for (int lr = 0; lr < localRanks; lr++) {
         int peer = comm->nodeRanks[n].localRankToRank[lr];
-        if (sendSizes[peer] > 0) ctxOps[peer % numCtx]++;
+        size_t peerBytes = sendSizes[peer];
+        if (peerBytes == 0) continue;
+        int nChunks;
+        size_t uni, last;
+        ncclHierCollPeerChunks(peerBytes, maxChunk, &nChunks, &uni, &last);
+        for (int c = 0; c < nChunks; c++) ctxOps[c % numCtx]++;
       }
     }
 
@@ -2229,7 +2263,7 @@ ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* p
     NCCLCHECKGOTO(ncclCalloc(&groupStartParams, (size_t)nActiveCtx * startOps), ret, fail);
     NCCLCHECKGOTO(ncclCalloc(&groupDoneParams, (size_t)nActiveCtx * doneOps), ret, fail);
 
-    // Pass 2: build each put.
+    // Pass 2: build each chunk put.
     for (int s = 1; s < nNodes; s++) {
       int n = (myNode + s) % nNodes;
       for (int lr = 0; lr < localRanks; lr++) {
@@ -2243,12 +2277,20 @@ ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* p
         size_t peerWinOffset =
           ((const uint8_t*)recvbuff + peerRecvDispls[myRank]) - (const uint8_t*)recvWin->userPtr;
 
-        int k = peer % numCtx;
-        NCCLCHECKGOTO(ncclRmaProxyPutBuildOp(comm, (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[baseCtx + k],
-                                             baseCtx + k, persistent, sendWin, srcWinOffset, recvWin, peerWinOffset,
-                                             peerBytes, peer, /*signalIdx=*/0, NCCL_SIGNAL,
-                                             &groupOps[k][ctxFill[k]++]),
-                      ret, fail);
+        int nChunks;
+        size_t uni, last;
+        ncclHierCollPeerChunks(peerBytes, maxChunk, &nChunks, &uni, &last);
+        size_t off = 0;
+        for (int c = 0; c < nChunks; c++) {
+          size_t subBytes = (c == nChunks - 1) ? last : uni;
+          int k = c % numCtx;
+          NCCLCHECKGOTO(ncclRmaProxyPutBuildOp(comm, (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[baseCtx + k],
+                                               baseCtx + k, persistent, sendWin, srcWinOffset + off, recvWin,
+                                               peerWinOffset + off, subBytes, peer, /*signalIdx=*/0, NCCL_SIGNAL,
+                                               &groupOps[k][ctxFill[k]++]),
+                        ret, fail);
+          off += subBytes;
+        }
       }
     }
 
@@ -2305,8 +2347,8 @@ ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* p
   }
 
   // ====================================================================
-  // Phase 5: Aggregate wait for inbound RMA (one signal per non-zero remote sender).
-  // Remotes put to us with ctx = myRank % numCtx; wait on that same context.
+  // Phase 5: Aggregate wait for inbound RMA. Signal count per (peer, ctx)
+  // matches the chunk→ctx assignment in Phase 3 (c % numCtx).
   // ====================================================================
   {
     NCCLCHECKGOTO(ncclCalloc(&inboundCtxOps, numCtx), ret, fail);
@@ -2314,8 +2356,12 @@ ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* p
       int n = (myNode - s + nNodes) % nNodes;
       for (int lr = 0; lr < localRanks; lr++) {
         int peer = comm->nodeRanks[n].localRankToRank[lr];
-        // Peer raised signal on ctx (destination rank % numCtx) == (myRank % numCtx).
-        if (recvSizes[peer] > 0) inboundCtxOps[myRank % numCtx]++;
+        size_t peerBytes = recvSizes[peer];
+        if (peerBytes == 0) continue;
+        int nChunks;
+        size_t uni, last;
+        ncclHierCollPeerChunks(peerBytes, maxChunk, &nChunks, &uni, &last);
+        for (int c = 0; c < nChunks; c++) inboundCtxOps[c % numCtx]++;
       }
     }
 
@@ -2332,9 +2378,18 @@ ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* p
         int n = (myNode - s + nNodes) % nNodes;
         for (int lr = 0; lr < localRanks; lr++) {
           int peer = comm->nodeRanks[n].localRankToRank[lr];
-          if (recvSizes[peer] > 0 && (myRank % numCtx) == k) {
+          size_t peerBytes = recvSizes[peer];
+          if (peerBytes == 0) continue;
+          int nChunks;
+          size_t uni, last;
+          ncclHierCollPeerChunks(peerBytes, maxChunk, &nChunks, &uni, &last);
+          int sig = 0;
+          for (int c = 0; c < nChunks; c++) {
+            if (c % numCtx == k) sig++;
+          }
+          if (sig > 0) {
             waitPeers[k][wp] = peer;
-            waitSigCounts[k][wp] = 1;
+            waitSigCounts[k][wp] = sig;
             wp++;
           }
         }
