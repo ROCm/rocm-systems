@@ -6,12 +6,12 @@ description: >-
   triage_archive.ps1 + ensure_playback.ps1 (PowerShell); Docker replay requires
   Linux or WSL2. Never edits source. Print finding summary in the chat reply.
 inputs:
-  - HRR archive path (`capture.hrr/pid-*` directory, or capture root to resolve)
+  - HRR archive path: one `capture.hrr/pid-*` directory. A capture root has to be resolved to a process directory first, by hand (see Workflow step 1)
   - Optional Docker image from capture (`HRR_DOCKER_IMAGE`)
   - Optional GPU ordinal (`GPU`)
 outputs:
   - Finding summary markdown in chat (outcome, fault class, kernel, fault address, event seq, archive stats)
-  - Optional finding file under `HRR_TRIAGE_WORKDIR` (script default)
+  - Optional finding file under `HRR_TRIAGE_WORKDIR`, defaulting to a temporary directory and never the archive
 ---
 
 # HRR Decode & Triage
@@ -91,7 +91,7 @@ Environment variables on Windows:
 | `HIP_PATH` or `ROCM_PATH` | HIP SDK root (default: `C:\Program Files\AMD\ROCm\6.2`) |
 | `HRR_BUILD` | Dedicated HRR build dir for `--build` (default: `projects/hrr\build-playback`) |
 | `GPU` | GPU ordinal for replay (default: `0`) |
-| `HRR_TRIAGE_WORKDIR` | Output dir for findings + logs |
+| `HRR_TRIAGE_WORKDIR` | Output dir for findings + logs (default `$TMPDIR/hrr-triage`, never the archive) |
 | `HRR_CONTINUE=1` | Proceed past HIP/comgr version mismatch |
 | `HRR_SKIP_COMPAT=1` | Skip manifest preflight entirely |
 
@@ -114,7 +114,7 @@ Docker GPU replay (`--device=/dev/kfd`) is **Linux-only**. On Windows:
 #### W4 — Print finding summary
 
 The `.finding.md` written by `triage_archive.ps1` is identical in schema to the Linux version.
-Print or paste it directly in the chat reply using the same template in Step 5 below.
+Print or paste it directly in the chat reply using the same template in Step 6 below.
 
 #### Copying scripts to a remote machine (no Cursor installed)
 
@@ -151,7 +151,14 @@ Docker image used for capture:
 **Replay mode (`auto` default):** picks docker when `HRR_DOCKER_IMAGE` is set, else
 native. Use `--no-replay` for metadata-only (no GPU).
 
-1. Resolve `capture.hrr/pid-*` (largest `events.bin` if user gives root only).
+1. Resolve `capture.hrr/pid-*` yourself: no script does this, and `--archive` takes one
+   process directory. Read each `pid-*/manifest.json`: a process that died leaves
+   `"complete": false`, and one killed outright (SIGKILL, the OOM killer, a scheduler)
+   leaves no manifest at all. Prefer either of those over a process that shut down
+   cleanly, and triage each of them if there are several. Size is the wrong rule for a
+   crash, because the process that died is the one cut short. The archive still
+   travels whole. Where `projects/hrr/skills/enable-recording/scripts/inspect_archive.py`
+   is available, `--archive <root> --no-playback` prints that table for you.
 2. **Preflight** when `manifest.json` has `metadata`: block if capture used more
    GPUs than replay exposes or requested `GPU` is missing. HIP/comgr mismatch
    prompts for confirmation (exit 2 in agents — ask user, then `HRR_CONTINUE=1`).
@@ -233,7 +240,7 @@ than one kernel it stays unknown rather than guessing. Names that `--info`
 truncated to its column width are never used: a cut-off symbol cannot be looked
 up or handed to a kernel developer.
 
-### Finding summary template (Step 5 / W4)
+### Finding summary template (Step 6 / W4)
 
 Print a structured summary directly in the chat reply:
 
@@ -294,7 +301,7 @@ Classify each finding using these labels:
 
 | Situation | Action |
 |-----------|--------|
-| `--build` fails | Install `hrr-playback` under `$ROCM_PATH/bin` or set `HRR_PLAYBACK`; ensure a capture-enabled ROCm/HIP prefix (see README build section). |
+| `--build` fails | Install `hrr-playback` under `$ROCM_PATH/bin` or set `HRR_PLAYBACK`; ensure a capture-enabled ROCm/HIP prefix (see `../../README.md`, "Build `hrr-playback`"). |
 | Native replay fails (Linux) | Docker replay with capture image (Linux host). |
 | Native replay fails (Windows) | Check `HRR_PLAYBACK`, `HIP_PATH\bin` on `PATH`; use `--no-replay` as fallback. |
 | Windows host, no GPU | Metadata-only via `triage_archive.ps1 --no-replay` or `analyze_replay_finding.py --archive`. |
@@ -310,7 +317,8 @@ Classify each finding using these labels:
 | `--info` | Archive summary (events, kernels, blobs, complete flag), no GPU |
 | `--events` | Full event log with `--info` (includes Kernel Call Counts) |
 | `--timing` | Kernel + graph GPU time |
-| `--verbose` | Per-event trace |
+| `--verbose` | Per-event trace. It prints the API name per event and not the kernel, so it cannot tell you which kernel faulted |
+| `--trace-kernels` | Prints `[HRR launch] ... name="..."` before each launch. When a fault names no kernel, rerun by hand with `hrr-playback <pid-dir> --sync-after-launch --trace-kernels`: the last launch line before the fault is the one that faulted |
 | `--sync-after-launch` | Surface GPU errors per kernel |
 | `--kernel-filter STR` | Replay one kernel only |
 | `--multi-thread` | One thread per captured thread |

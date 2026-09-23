@@ -17,9 +17,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent.parent / "scripts"
 SCRIPT = SCRIPT_DIR / "triage_archive.sh"
-FIXTURE = SCRIPT_DIR.parent / "evals" / "fixtures" / "rocm_smi_vram.txt"
+FIXTURE = Path(__file__).resolve().parent / "fixtures" / "rocm_smi_vram.txt"
 
 
 def _shell_function(name: str) -> str:
@@ -231,3 +231,38 @@ class EnsurePlaybackTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorkdirDefaultTests(unittest.TestCase):
+    """The findings must never land in the archive being triaged.
+
+    Run from inside a customer's archive, the script used to default its
+    output directory to the working directory, which is the one place this
+    skill says not to write to.
+    """
+
+    def test_default_workdir_is_outside_the_archive_and_per_user(self):
+        line = next(
+            ln for ln in SCRIPT.read_text(encoding="utf-8").splitlines()
+            if ln.startswith("WORKDIR=")
+        )
+        self.assertNotIn("$(pwd)", line)
+        self.assertIn("id -u", line, "a shared /tmp directory locks out every other user")
+
+    def test_the_archive_is_untouched_by_a_metadata_only_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "capture.hrr" / "pid-1"
+            archive.mkdir(parents=True)
+            (archive / "events.bin").write_bytes(b"\0" * 64)
+            before = sorted(p.name for p in archive.iterdir())
+
+            subprocess.run(
+                ["bash", str(SCRIPT), "--archive", str(archive), "--no-replay"],
+                cwd=archive,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "HRR_TRIAGE_WORKDIR": str(Path(tmp) / "out")},
+                check=False,
+            )
+
+            self.assertEqual(before, sorted(p.name for p in archive.iterdir()))

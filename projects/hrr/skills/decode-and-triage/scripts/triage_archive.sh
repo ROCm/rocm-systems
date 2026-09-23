@@ -30,6 +30,7 @@ Options:
 
 Environment (common):
   HRR_TRIAGE_WORKDIR   Output directory for findings and replay logs
+                       (default: $TMPDIR/hrr-triage-<uid>, never the archive)
   HRR_DOCKER_IMAGE     Docker image for --replay docker / auto
   HRR_DOCKER_MOUNT_CLR=1  Overlay host CLR for docker replay (dev builds)
   GPU                  Replay GPU ordinal (default: auto-pick)
@@ -60,7 +61,11 @@ ARCHIVE="$(readlink -f "$ARCHIVE" 2>/dev/null || realpath "$ARCHIVE" 2>/dev/null
 
 name="$(basename "$ARCHIVE")"
 ts="$(date -u +%Y%m%dT%H%M%SZ)"
-WORKDIR="${HRR_TRIAGE_WORKDIR:-$(pwd)}"
+# Never the current directory by default: run from inside a customer's archive
+# and the finding and the replay log land in it, against this skill's own rule
+# that the archive is not to be written to. Per user, because a shared /tmp
+# directory belongs to whoever ran first and the next user cannot write in it.
+WORKDIR="${HRR_TRIAGE_WORKDIR:-${TMPDIR:-/tmp}/hrr-triage-$(id -u)}"
 mkdir -p "$WORKDIR"
 LOG=""
 ext=".finding.md"; [[ "$FORMAT" == "json" ]] && ext=".finding.json"
