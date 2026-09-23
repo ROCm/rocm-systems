@@ -568,7 +568,7 @@ TEST_F(NetIbMultiSegmentMPITest, SendQueueFatChainOversubscribe) {
     const char* stress = std::getenv("RCCL_MSEG_SQ_STRESS");
     const bool want = stress && std::atoi(stress) != 0;
     if (SyncSkip(!want))
-        GTEST_SKIP() << "set RCCL_MSEG_SQ_STRESS=1 to run the Point 1 SQ repro";
+        GTEST_SKIP() << "set RCCL_MSEG_SQ_STRESS=1 to run the send-queue stress";
     const char* net = std::getenv("NCCL_NET");
     const bool isCast = net && (strcasecmp(net, "IB-CAST") == 0 || strcasecmp(net, "ib-cast") == 0);
     if (SyncSkip(isCast))
