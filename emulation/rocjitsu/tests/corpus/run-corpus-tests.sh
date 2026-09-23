@@ -15,6 +15,7 @@
 #   --hard-timeout N     Per-test timeout for failed-test reruns (default: 60)
 #   --rerun-timeout N    Overall failed-test rerun budget (default: 1200)
 #   --sanitizer MODE     Launcher instrumentation: none, clang-asan, or gcc-asan
+#   --race-tests         Also run the RocJITsu race-detector HIP corpus
 #   --rerun-failed       Rerun only tests that failed the soft-timeout pass
 #   --warn-perf          Warn about passing tests close to the soft timeout
 #
@@ -39,10 +40,11 @@ rerun_timeout_seconds=1200
 rerun_failed=false
 warn_perf=false
 sanitizer_mode=none
+race_tests=false
 
 usage() {
   echo "Usage: $0 [--workers N] [--soft-timeout N] [--hard-timeout N] [--rerun-timeout N]" \
-    "[--sanitizer none|clang-asan|gcc-asan] [--rerun-failed] [--warn-perf]" >&2
+    "[--sanitizer none|clang-asan|gcc-asan] [--race-tests] [--rerun-failed] [--warn-perf]" >&2
 }
 
 targets=(
@@ -109,6 +111,10 @@ while (( $# )); do
       ;;
     --rerun-failed)
       rerun_failed=true
+      shift
+      ;;
+    --race-tests)
+      race_tests=true
       shift
       ;;
     --warn-perf)
@@ -257,6 +263,51 @@ run_pytest() {
   "${pytest_cmd[@]}" --timeout "${pytest_timeout_seconds}" "$@"
 }
 
+run_race_pytest() {
+  local timeout_seconds="$1"
+  local overall_timeout_seconds="$2"
+  local target_name="$3"
+  local config_path="$4"
+  local target_artifact_dir="$5"
+  local target_cache_dir="$6"
+  shift 6
+  local pytest_timeout_seconds=$((timeout_seconds + 15))
+  local run_wrapper=(
+    "${run_wrapper_prefix[@]}"
+    setpriv --pdeathsig TERM
+    "${corpus_process_supervisor}"
+    timeout --foreground --signal=TERM --kill-after=5s "${timeout_seconds}s"
+    "${rocjitsu_launcher}"
+    --config "{config}"
+    --
+  )
+  local run_wrapper_command
+  printf -v run_wrapper_command '%q ' "${run_wrapper[@]}"
+
+  local pytest_cmd=(
+    pytest tests/test_corpus.py
+    --target "${target_name}"
+    --suite race
+    --run-wrapper "${run_wrapper_command% }"
+    --artifact-directory "${target_artifact_dir}"
+    --durations=0
+    -vv
+    -o "cache_dir=${target_cache_dir}"
+    --tb=short
+    -n "${worker_count}"
+    -o "timeout_func_only=true"
+    -o "junit_duration_report=call"
+  )
+  if (( overall_timeout_seconds > 0 )); then
+    ROCJITSU_RACE_CONFIG="${config_path}" \
+      timeout --signal=TERM --kill-after=10s "${overall_timeout_seconds}s" \
+      "${pytest_cmd[@]}" --timeout "${pytest_timeout_seconds}" "$@"
+    return
+  fi
+  ROCJITSU_RACE_CONFIG="${config_path}" \
+    "${pytest_cmd[@]}" --timeout "${pytest_timeout_seconds}" "$@"
+}
+
 for target in "${targets[@]}"; do
   read -r name rocjitsu_config skip_tests_config <<< "${target}"
   echo "::group::(${name}) pytest"
@@ -304,6 +355,53 @@ for target in "${targets[@]}"; do
   fi
   echo "::endgroup::"
 done
+
+if [[ "${race_tests}" == true ]]; then
+  race_targets=(
+    "gfx950 ${ROCJITSU_SOURCE_DIR}/tests/race-detector/race_test_config.json"
+    "gfx1151 ${ROCJITSU_SOURCE_DIR}/configs/gfx1151.json"
+  )
+  export ROCJITSU_RACE_BUILD_ROOT="${corpus_work_dir}/.pytest-artifacts/race-build"
+
+  for target in "${race_targets[@]}"; do
+    read -r name config_path <<< "${target}"
+    echo "::group::(race-${name}) pytest"
+    artifact_dir="${corpus_work_dir}/.pytest-artifacts/race-${name}"
+    cache_dir="${corpus_work_dir}/.pytest-cache/race-${name}"
+    junit_xml="${junit_dir}/race-${name}.xml"
+
+    first_run_status=0
+    run_race_pytest "${soft_timeout_seconds}" 0 "${name}" "${config_path}" \
+      "${artifact_dir}" "${cache_dir}" --junitxml "${junit_xml}" || \
+      first_run_status=$?
+    if [[ -f "${junit_xml}" ]]; then
+      junit_xml_paths+=("${junit_xml}")
+    fi
+
+    if (( first_run_status == 0 )); then
+      echo "::endgroup::"
+      echo "All race (${name}) tests passed."
+      continue
+    fi
+
+    corpus_test_status=1
+    echo "::endgroup::"
+    echo "::error::Some race (${name}) tests failed."
+    if [[ "${rerun_failed}" == false ]]; then
+      continue
+    fi
+
+    echo "::group::(race-${name}) pytest rerun failed tests"
+    if run_race_pytest "${hard_timeout_seconds}" "${rerun_timeout_seconds}" \
+         "${name}" "${config_path}" "${artifact_dir}" "${cache_dir}" \
+         --last-failed --last-failed-no-failures=none; then
+      echo "::endgroup::"
+      echo "::warning::Retried race (${name}) tests passed."
+      continue
+    fi
+    echo "::endgroup::"
+  done
+fi
 
 # The reporting script's return code does not affect the corpus test status.
 if [[ "${warn_perf}" == true ]]; then
