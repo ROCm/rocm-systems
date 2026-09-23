@@ -4,7 +4,7 @@
 // Unit tests for the pp_power_profile_mode parser behind
 // rsmi_dev_power_profile_presets_get() / amdsmi_get_gpu_power_profile_presets().
 // Driven over real sysfs captures -- no GPU required at test time. The transposed
-// SMU 13.0.x fixtures were captured verbatim from a Navi 33 (gfx1102, device
+// SMU 13.0.7 fixtures were captured verbatim from a Navi 33 (gfx1102, device
 // 0x7480, host navi33-4) with each named profile forced current in turn; the
 // classic fixture is a verbatim Navi 21 (gfx1030, 0x73bf) capture.
 
@@ -88,7 +88,7 @@ constexpr char kGfx1102Window3dCurrent[] =
     "Gfx_IdleHystLimit             0                 2                 0                 0         "
     "        1                 1                 0                 2                 \n";
 
-TEST(PowerProfileParse, TransposedBootupDefaultCurrent) {
+TEST(GpuUnit, PowerProfileTransposedBootupDefaultCurrent) {
   rsmi_power_profile_status_t status{};
   std::map<rsmi_power_profile_preset_masks_t, uint32_t> ind_map;
   EXPECT_EQ(amd::smi::ParsePowerProfileMode(Lines(kGfx1102BootupCurrent), &status, &ind_map),
@@ -103,7 +103,7 @@ TEST(PowerProfileParse, TransposedBootupDefaultCurrent) {
 
 // Short current-profile name -> the '*' is its own token. COMPUTE must be current,
 // the driver index kept, and the stray marker must not be counted.
-TEST(PowerProfileParse, TransposedComputeCurrentSeparatedMarker) {
+TEST(GpuUnit, PowerProfileTransposedComputeCurrentSeparatedMarker) {
   rsmi_power_profile_status_t status{};
   std::map<rsmi_power_profile_preset_masks_t, uint32_t> ind_map;
   EXPECT_EQ(amd::smi::ParsePowerProfileMode(Lines(kGfx1102ComputeCurrent), &status, &ind_map),
@@ -114,7 +114,7 @@ TEST(PowerProfileParse, TransposedComputeCurrentSeparatedMarker) {
   EXPECT_EQ(ind_map[RSMI_PWR_PROF_PRST_COMPUTE_MASK], 5u);
 }
 
-TEST(PowerProfileParse, TransposedVideoCurrentSeparatedMarker) {
+TEST(GpuUnit, PowerProfileTransposedVideoCurrentSeparatedMarker) {
   rsmi_power_profile_status_t status{};
   std::map<rsmi_power_profile_preset_masks_t, uint32_t> ind_map;
   EXPECT_EQ(amd::smi::ParsePowerProfileMode(Lines(kGfx1102VideoCurrent), &status, &ind_map),
@@ -127,7 +127,7 @@ TEST(PowerProfileParse, TransposedVideoCurrentSeparatedMarker) {
 
 // WINDOW_3D current: now a modelled preset, so it is reported (not INVALID) and
 // its separated '*' marker is attributed to it, with the driver index kept.
-TEST(PowerProfileParse, TransposedWindow3dCurrent) {
+TEST(GpuUnit, PowerProfileTransposedWindow3dCurrent) {
   rsmi_power_profile_status_t status{};
   std::map<rsmi_power_profile_preset_masks_t, uint32_t> ind_map;
   EXPECT_EQ(amd::smi::ParsePowerProfileMode(Lines(kGfx1102Window3dCurrent), &status, &ind_map),
@@ -140,7 +140,7 @@ TEST(PowerProfileParse, TransposedWindow3dCurrent) {
 
 // No profile marked current (defensive path the driver never produces): current
 // unknown, profiles still parsed, no abort.
-TEST(PowerProfileParse, TransposedNoMarkerReportsUnknown) {
+TEST(GpuUnit, PowerProfileTransposedNoMarkerReportsUnknown) {
   std::string blob = kGfx1102BootupCurrent;
   blob.erase(blob.find('*'), 1);
   rsmi_power_profile_status_t status{};
@@ -226,7 +226,7 @@ constexpr char kClassicNavi21RealCapture[] =
     "                    2(       MEMCLK)       0       5       1       0       4     800  327680  "
     "-65536       0\n";
 
-TEST(PowerProfileParse, ClassicSingleMarker) {
+TEST(GpuUnit, PowerProfileClassicSingleMarker) {
   rsmi_power_profile_status_t status{};
   EXPECT_EQ(amd::smi::ParsePowerProfileMode(Lines(kClassicSingleMarker), &status, nullptr),
             RSMI_STATUS_SUCCESS);
@@ -236,7 +236,7 @@ TEST(PowerProfileParse, ClassicSingleMarker) {
                 RSMI_PWR_PROF_PRST_POWER_SAVING_MASK | RSMI_PWR_PROF_PRST_VIDEO_MASK);
 }
 
-TEST(PowerProfileParse, ClassicNoMarkerReportsUnknownWithoutAbort) {
+TEST(GpuUnit, PowerProfileClassicNoMarkerReportsUnknownWithoutAbort) {
   rsmi_power_profile_status_t status{};
   EXPECT_EQ(amd::smi::ParsePowerProfileMode(Lines(kClassicNoMarker), &status, nullptr),
             RSMI_STATUS_SUCCESS);
@@ -245,7 +245,7 @@ TEST(PowerProfileParse, ClassicNoMarkerReportsUnknownWithoutAbort) {
             RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT | RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK);
 }
 
-TEST(PowerProfileParse, ClassicMultipleMarkersKeepLast) {
+TEST(GpuUnit, PowerProfileClassicMultipleMarkersKeepLast) {
   // The driver marks exactly one profile current; a table with several markers
   // is malformed. The classic path keeps the last marker seen, matching this
   // path's long-standing release behavior (unchanged here).
@@ -255,7 +255,7 @@ TEST(PowerProfileParse, ClassicMultipleMarkersKeepLast) {
   EXPECT_EQ(status.current, RSMI_PWR_PROF_PRST_POWER_SAVING_MASK);
 }
 
-TEST(PowerProfileParse, ClassicNavi21RealCapture) {
+TEST(GpuUnit, PowerProfileClassicNavi21RealCapture) {
   const std::vector<std::string> lines = Lines(kClassicNavi21RealCapture);
   rsmi_power_profile_status_t status{};
   std::map<rsmi_power_profile_preset_masks_t, uint32_t> ind_map;
@@ -277,7 +277,7 @@ constexpr char kDigitFirstNonMonotonic[] =
     "  0   BOOTUP_DEFAULT:    0 0 1\n"
     "  1   COMPUTE*:          0 0 1\n";
 
-TEST(PowerProfileParse, DigitFirstButNonMonotonicIsClassic) {
+TEST(GpuUnit, PowerProfileDigitFirstButNonMonotonicIsClassic) {
   rsmi_power_profile_status_t status{};
   EXPECT_EQ(amd::smi::ParsePowerProfileMode(Lines(kDigitFirstNonMonotonic), &status, nullptr),
             RSMI_STATUS_SUCCESS);

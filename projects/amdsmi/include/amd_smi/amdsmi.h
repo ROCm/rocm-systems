@@ -2007,12 +2007,12 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
-  amdsmi_bit_field_t available_profiles;  //!< Which profiles are supported by this system
+  amdsmi_bit_field_t available_profiles;       //!< Which profiles are supported by this system
   amdsmi_power_profile_preset_masks_t current; /*!< Currently active power profile, or
                                                    AMDSMI_PWR_PROF_PRST_INVALID if none is marked
                                                    active or the active profile has no corresponding
                                                    AMD SMI preset */
-  uint32_t num_profiles;  //!< How many power profiles are available
+  uint32_t num_profiles;                       //!< How many power profiles are available
 } amdsmi_power_profile_status_t;
 
 /**
