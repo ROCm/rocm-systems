@@ -1,10 +1,17 @@
-# ConSan empirical correctness and detection methodology
+# Historical ConSan empirical correctness and detection methodology
 
-This document defines cross-cutting corpus, provenance, fault-detection, and
-recommendation rules for ConSan evaluation on real AMDGPU kernels. Correctness
-qualification is owned by [VALIDATION.md](validation/VALIDATION.md), while all
-performance measurement is owned by the separate
-[BENCHMARK.md](benchmark/BENCHMARK.md).
+This document preserves an earlier evaluation methodology for historical
+reference. It is not maintained as the current evaluation contract; the corpus,
+trial-count, admission, and recommendation rules below are historical guidance,
+not requirements for current work.
+
+The authoritative end-to-end evaluation signals come from the most recently
+rerun [benchmark campaigns](benchmark/BENCHMARK.md) and the
+[validation campaigns](validation/VALIDATION.md), with their recorded artifacts
+and provenance. Follow those maintained procedures for performance measurement
+and correctness qualification.
+
+## Historical methodology
 
 The methodology answers two separate questions:
 
@@ -74,13 +81,6 @@ Every campaign records at least:
 - warmups, iterations, process count, timeout, and randomization seed; and
 - available device temperature, clock, health, and competing-process
   observations.
-
-Record resolved workgroup/cell strides and offsets, achieved bank geometry,
-FLAT provenance policy, owner/dispatch operating point, and host-epoch selection
-alongside the preset name. Names alone do not preserve meaning across policy
-changes. Interpret completeness against the
-[implemented assumptions](DESIGN.md#heuristics-and-their-failure-directions);
-it does not independently validate those assumptions.
 
 Required identity fields fail closed. Optional machine observations record an
 explicit unavailable or failed-probe state rather than disappearing.

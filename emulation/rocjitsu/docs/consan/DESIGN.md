@@ -669,7 +669,10 @@ atomic uses, including object reuse; owner aliases and dispatch lifetimes; and
 barrier counter boundaries. Tests of today's behavior are not evidence that a
 known approximation is sound for all programs. Keep physical qualification and
 performance results tied to exact binary and configuration provenance as
-required by [EMPIRICAL_METHODOLOGY.md](EMPIRICAL_METHODOLOGY.md).
+required by the maintained [validation](validation/VALIDATION.md) and
+[benchmark](benchmark/BENCHMARK.md) procedures. The authoritative end-to-end
+signals are the most recently rerun campaigns recorded there, interpreted with
+their artifacts and provenance.
 
 The key implementation and test entry points for this review are:
 

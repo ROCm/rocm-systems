@@ -76,11 +76,12 @@ transformation invariants from detection heuristics and known limitations.
 `analysis_complete=true` describes the selected contract and usable evidence;
 it is not a race-freedom certificate or a check of every heuristic assumption.
 
-Qualification and benchmark ledgers preserve results from particular runs.
-They have not been rerun as part of this documentation audit. Their counts,
-colors, timings, and preset names must be interpreted with the recorded source,
-binary, configuration, and machine provenance, not as qualification of the
-current branch.
+The authoritative end-to-end performance and correctness signals come from the
+most recently rerun campaigns in [benchmark/](benchmark/BENCHMARK.md) and
+[validation/](validation/VALIDATION.md). Interpret their counts, qualification
+status, timings, and preset names with the recorded source, binary,
+configuration, and machine provenance. A documentation update does not rerun
+those campaigns or extend their results to a different source revision.
 
 ## Documents
 
@@ -103,11 +104,15 @@ current branch.
   gates behind those ledgers.
 - [BENCHMARK.md](benchmark/BENCHMARK.md): the separate reproducible performance
   contract, Aorta workload survey, and target-specific benchmark ledgers.
-- [EMPIRICAL_METHODOLOGY.md](EMPIRICAL_METHODOLOGY.md): cross-cutting corpus,
-  provenance, fault-detection, and recommendation principles.
 - [SPILLING.md](SPILLING.md): ConSan register selection, ownership, private
   layout, and runtime integration.
 - [AMDGPU register spilling](../spilling.md): reusable RocJitsu allocation and
   target-specific save/restore backends.
 - [MALFORMED_INPUT.md](MALFORMED_INPUT.md): finite malformed-input and GPU
   containment contract.
+
+## Historical reference
+
+- [EMPIRICAL_METHODOLOGY.md](EMPIRICAL_METHODOLOGY.md): earlier evaluation
+  methodology, retained for context; current evaluation follows `benchmark/`
+  and `validation/`.

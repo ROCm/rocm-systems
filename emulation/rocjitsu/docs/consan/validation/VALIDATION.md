@@ -293,6 +293,13 @@ literal fallback under scalar pressure. Qualification must report which
 representation was used; runtime trust cannot upgrade either representation
 into exact global launch identity.
 
+Record resolved workgroup/cell strides and offsets, achieved bank geometry,
+FLAT provenance policy, owner/dispatch operating point, and host-epoch selection
+alongside the preset name. Names alone do not preserve meaning across policy
+changes. Interpret completeness against the
+[implemented assumptions](../DESIGN.md#heuristics-and-their-failure-directions);
+it does not independently validate those assumptions.
+
 Fault qualification additionally separates mutation attempted, installed, and
 reached. Process completion alone is not proof that the selected instruction
 executed. Preserve oracle manifestations, ConSan diagnostics, timeouts,

@@ -12,8 +12,10 @@ The other `STATUS_*.md` files are placeholders, not required targets.
 The prepared MI350X campaign invocation and evidence layout are in
 [`GFX950.md`](GFX950.md).
 
-Existing ledgers are historical measurements, not a current-branch performance
-claim. Interpret preset labels using each artifact's resolved controls and
+The most recently rerun campaigns in these ledgers provide the authoritative
+end-to-end performance measurements for their recorded configurations. Results
+apply to the measured source revision; they do not automatically qualify later
+changes. Interpret preset labels using each artifact's resolved controls and
 source revision; a label reused after a policy change does not imply identical
 sampling. Machine-local artifact paths identify the original evidence location
 and are not portable download links.
