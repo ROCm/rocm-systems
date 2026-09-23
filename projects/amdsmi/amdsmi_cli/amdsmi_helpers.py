@@ -1178,6 +1178,8 @@ class AMDSMIHelpers:
                 return False, args.cpu
             else:
                 logging.debug("args.cpu has empty list")
+                # Callers ignore the 2nd value whenever the 1st is True; matches handle_gpus.
+                return True, args.cpu
         else:
             return False, args.cpu
 
@@ -1208,6 +1210,8 @@ class AMDSMIHelpers:
                 return False, args.core
             else:
                 logging.debug("args.core has empty list")
+                # Callers ignore the 2nd value whenever the 1st is True; matches handle_gpus.
+                return True, args.core
         else:
             return False, args.core
 

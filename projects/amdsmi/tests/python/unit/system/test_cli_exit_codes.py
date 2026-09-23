@@ -665,6 +665,30 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
             helpers.error_collector.resolve_exit_code(), int(self.ExitCode.MIXED_DEVICE_ERRORS)
         )
 
+    def test_handle_cores_and_handle_cpus_return_on_empty_list(self):
+        """An empty args.core/args.cpu must not fall through to an implicit
+        None -- every caller does `handled, handle = helpers.handle_cores(...)`,
+        which raises TypeError trying to unpack None. Only the bool matters
+        here; callers never read the 2nd value when it's True (see handle_gpus).
+        """
+        import argparse
+
+        from amdsmi_helpers import AMDSMIHelpers
+
+        class _FakeLogger:
+            def print_output(self, multiple_device_enabled=False):
+                pass
+
+        helpers = AMDSMIHelpers()
+        handled, _ = helpers.handle_cores(
+            argparse.Namespace(core=[]), _FakeLogger(), lambda *a, **k: None
+        )
+        self.assertTrue(handled)
+        handled, _ = helpers.handle_cpus(
+            argparse.Namespace(cpu=[]), _FakeLogger(), lambda *a, **k: None
+        )
+        self.assertTrue(handled)
+
     def test_handle_gpus_aggregates_multiple_device_failures_to_mixed(self):
         """`-g all` counterpart of the handle_cores test above. Guards
         handle_gpus' own gating arithmetic: only a list of length > 1 enters the
