@@ -39,28 +39,28 @@
               "oracle": "any",
               "trials": [
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 }
               ]
             }
@@ -229,28 +229,28 @@
               "oracle": "any",
               "trials": [
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 }
               ]
             }
@@ -421,28 +421,28 @@
               "oracle": "any",
               "trials": [
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 }
               ]
             }
@@ -630,28 +630,28 @@
               "oracle": "any",
               "trials": [
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 }
               ]
             }
@@ -833,28 +833,28 @@
               "oracle": "any",
               "trials": [
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 }
               ]
             }
@@ -1036,28 +1036,28 @@
               "oracle": "any",
               "trials": [
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 }
               ]
             }
@@ -1241,28 +1241,28 @@
               "oracle": "any",
               "trials": [
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 }
               ]
             }
@@ -1402,28 +1402,28 @@
               "oracle": "any",
               "trials": [
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 }
               ]
             }
@@ -1559,28 +1559,28 @@
               "oracle": "any",
               "trials": [
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 }
               ]
             }
@@ -1716,28 +1716,28 @@
               "oracle": "any",
               "trials": [
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 }
               ]
             }
@@ -1875,28 +1875,28 @@
               "oracle": "any",
               "trials": [
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                  "RJ_CONSAN_SC_DELAY": "0"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                  "RJ_CONSAN_SC_DELAY": "4"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                  "RJ_CONSAN_SC_DELAY": "16"
                 },
                 {
-                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                  "RJ_CONSAN_SC_DELAY": "64"
                 }
               ]
             }

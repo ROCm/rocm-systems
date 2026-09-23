@@ -89,6 +89,11 @@ and `higher`; retain an explicitly named `max` result where needed. Green in
 the status table qualifies that recorded configuration. The observed rate is
 not a lower confidence bound; retain counts and intervals in campaign artifacts.
 
+SuperCollider delay matrices must use `RJ_CONSAN_SC_DELAY`. The earlier
+September 23 matrices used an unrecognized variable and therefore ran at delay
+zero; their artifact snapshots retain that evidence. Revalidate with the
+correct variable before claiming coverage of multiple delay settings.
+
 ## Validation layers
 
 ConSan uses four complementary layers:
