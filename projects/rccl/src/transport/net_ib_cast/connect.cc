@@ -1799,7 +1799,8 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       qpCreateAttrs.cq = rCommDev->base.cq;
       qpCreateAttrs.pd = rCommDev->base.pd;
       qpCreateAttrs.maxRecvWorkRequest = 0;
-      qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
+      qpCreateAttrs.maxSendWorkRequest =
+        NET_IB_MAX_REQUESTS + NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS;
       qpCreateAttrs.qpContext = &rComm->base.stats;
       qpCreateAttrs.ctsQpSlot = NCCL_CTS_QP_SLOT_INVALID;
       qpCreateAttrs.isCtsEnabled = rComm->useCtsOffload;
