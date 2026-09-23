@@ -190,6 +190,52 @@
               ]
             }
           }
+        },
+        {
+          "id": "barrier-drop-reduction-publication-sc-delay-calibration",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine ELF fnv1a64:5d29deb0b917dbeb from the freshly built Qwen VMFB. main$async_dispatch_0_reduction_5x1024_f32 executes once in the native trace. Its signal at .text+0x2384 and associated wait at 0x23b0 publish per-wave sums: ds_store_b32 at 0x2370 executes in lane zero of each wave; EXEC is restored before the unconditional signal, and ds_load_b32 at 0x23c0 consumes peer-wave sums after the wait. This pair is on the executed straight-line path. Both engines prospectively require at least one detection; misses remain failed qualification, and numeric manifestations are recorded independently. Prospective SuperCollider delay calibration uses the recognized RJ_CONSAN_SC_DELAY control, 0/16/64/256 repeated twice, requiring 6/8 detections plus clean correctness, coverage, completeness, and health. Earlier mislabeled delay trials are retained as delay-zero evidence."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:5d29deb0b917dbeb|kernel=main$async_dispatch_0_reduction_5x1024_f32|kind=barrier|pc=0x0000000000002384|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:5d29deb0b917dbeb|kernel=main$async_dispatch_0_reduction_5x1024_f32|event=barrier|pc=0x0000000000002384|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:5d29deb0b917dbeb|kernel=main$async_dispatch_0_reduction_5x1024_f32|event=barrier|pc=0x00000000000023b0|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -376,6 +422,52 @@
                 },
                 {
                   "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-crosswave-sort-publication-sc-delay-calibration",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Pristine ELF fnv1a64:7fc1bc99054e6416, compute_mode<int,128>, native trace dispatches the single row of 128 values. Reviewed final ISA .text+0x351e0 signal and 0x351e4 wait form the sole barrier between conditional stride-64 LDS swaps at 0x351bc (plus byte flags at 0x351c4/0x351cc) and the next compare stage reads at 0x351f4/0x351fc/0x35204 (stride 32). EXEC is restored at 0x351d8 before the unconditional pair; the only kernel-entry bounds exit is false for the dispatched row. No duplicate barrier remains in this publication interval. Both profiles prospectively require at least one detection across eight trials; oracle manifestations are recorded independently. Prospective SuperCollider delay calibration uses the recognized RJ_CONSAN_SC_DELAY control, 0/16/64/256 repeated twice, requiring 6/8 detections plus clean correctness, coverage, completeness, and health. Earlier mislabeled delay trials are retained as delay-zero evidence."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:7fc1bc99054e6416|kernel=_ZN2at6native12compute_modeIiLj128EEEvPKT_NS_4cuda6detail10TensorInfoIS2_jEENS7_IljEEll|kind=barrier|pc=0x00000000000351e0|mnemonic=s_barrier_signal|occurrence=46",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:7fc1bc99054e6416|kernel=_ZN2at6native12compute_modeIiLj128EEEvPKT_NS_4cuda6detail10TensorInfoIS2_jEENS7_IljEEll|event=barrier|pc=0x00000000000351e0|mnemonic=s_barrier_signal|occurrence=46|sequence=singleton|associated-with=fnv1a64:7fc1bc99054e6416|kernel=_ZN2at6native12compute_modeIiLj128EEEvPKT_NS_4cuda6detail10TensorInfoIS2_jEENS7_IljEEll|event=barrier|pc=0x00000000000351e4|mnemonic=s_barrier_wait|occurrence=47|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
                 }
               ]
             }
@@ -591,6 +683,54 @@
               ]
             }
           }
+        },
+        {
+          "id": "barrier-drop-kv-publication-group-sc-delay-calibration",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Pristine release ELF fnv1a64:741a1c1b5b09bba4, FastContextPolicy WMMA attention. The native validation runs SampledFastContextMatchesHostReference. In each fixed key-tile iteration subgroup zero publishes K/V fragments, then every wave calls ctx.syncthreads before consuming peer LDS fragments. FastContext implements this logical edge with two __syncthreads around its epoch increment. Reviewed final ISA restores EXEC at .text+0x13228 after the V store at0x1321c, then executes signal/wait0x13234/0x13258 and signal/wait0x1326c/0x13270 without intervening control-flow branches. Select both exact pairs as one grouped drop, retaining four ordered physical members; dropping just one leaves redundant synchronization. Expect at least one detector detection in eight trials per profile; record independent numerical manifestations. Review source: hip-moi/tests/instrumented/010_rdna4_wmma_attention_block_test.hip:252-272; disassembly retained in rdna4-20260923/wmma-debug/original.asm. Prospective SuperCollider delay calibration uses the recognized RJ_CONSAN_SC_DELAY control, 0/16/64/256 repeated twice, requiring 6/8 detections plus clean correctness, coverage, completeness, and health. Earlier mislabeled delay trials are retained as delay-zero evidence."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:741a1c1b5b09bba4|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000013234|mnemonic=s_barrier_signal|occurrence=6",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:741a1c1b5b09bba4|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000013234|mnemonic=s_barrier_signal|occurrence=6|sequence=singleton|associated-with=fnv1a64:741a1c1b5b09bba4|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000013258|mnemonic=s_barrier_wait|occurrence=7|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:741a1c1b5b09bba4|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000001326c|mnemonic=s_barrier_signal|occurrence=8",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:741a1c1b5b09bba4|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000001326c|mnemonic=s_barrier_signal|occurrence=8|sequence=singleton|associated-with=fnv1a64:741a1c1b5b09bba4|kernel=_ZN12_GLOBAL__N_127wmma_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000013270|mnemonic=s_barrier_wait|occurrence=9|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -790,6 +930,52 @@
                 },
                 {
                   "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-initial-tile-publication-sc-delay-calibration",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Pristine production matmul ELF fnv1a64:0ffc359899105b1d, native-traced fp16_wmma_tiled_kernel<16,8,true,false,Correct,NoopPolicy,8,2,4,4>. Eight waves publish initial A/B fragments with ds_store_b128 at VA0x64bac,0x64be4,0x64bec,0x64c38,0x64c70,0x64c78. The validation uses K=128 and sampled production K=4096, so the K<48 single-group branch at0x64c90 is false and all waves take the multi-group path. Conditional global prefetch paths reconverge with EXEC restored at0x65230. Signal .text+0xc38 and associated wait0xc88 are the sole synchronization pair before peer LDS reads at0xc98,0xca0,0xca8. NoopPolicy adds no bookkeeping barrier. Source rdna4_matmul.hip:2046-2057 confirms initial publication, next-tile prefetch, sync_after_load(0), shared_to_compute_regs. Offline current-library inventory confirms both exact identities; pristine ELF, disassembly and inventory retained in rdna4-20260923/matmul-debug. Prospectively require at least one detection in eight trials per mode; record independent numeric manifestations. Prospective SuperCollider delay calibration uses the recognized RJ_CONSAN_SC_DELAY control, 0/16/64/256 repeated twice, requiring 6/8 detections plus clean correctness, coverage, completeness, and health. Earlier mislabeled delay trials are retained as delay-zero evidence."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:0ffc359899105b1d|kernel=_Z22fp16_wmma_tiled_kernelILi16ELi8ELb1ELb0EL8SyncMode0EN4tsan10NoopPolicyELi8ELi2ELi4ELi4EEvPKDF16_S4_Pfiii|kind=barrier|pc=0x0000000000000c38|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:0ffc359899105b1d|kernel=_Z22fp16_wmma_tiled_kernelILi16ELi8ELb1ELb0EL8SyncMode0EN4tsan10NoopPolicyELi8ELi2ELi4ELi4EEvPKDF16_S4_Pfiii|event=barrier|pc=0x0000000000000c38|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:0ffc359899105b1d|kernel=_Z22fp16_wmma_tiled_kernelILi16ELi8ELb1ELb0EL8SyncMode0EN4tsan10NoopPolicyELi8ELi2ELi4ELi4EEvPKDF16_S4_Pfiii|event=barrier|pc=0x0000000000000c88|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
                 }
               ]
             }
@@ -997,6 +1183,52 @@
               ]
             }
           }
+        },
+        {
+          "id": "barrier-drop-initial-tile-publication-sc-delay-calibration",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Pristine production ELF fnv1a64:0ffc359899105b1d, native-traced fp8_wmma_tiled_kernel<16,8,true,false,Correct,NoopPolicy,8,2,4,4>. Initial A/B LDS stores are VA0x4561ac,0x4561e4,0x456230,0x456268. K=128 and sampled production K=4096 both take the K>=48 multi-group path at0x456280; conditional next-tile global prefetch reconverges with EXEC restored at0x4567f8. Signal .text+0x3f2200 and wait0x3f2260 are the sole synchronization pair before peer ds_load_2addr_b64 at0x3f2270. NoopPolicy adds no bookkeeping barrier. Source pipeline branch confirms initial publication, next-tile prefetch, sync_after_load(0), shared_to_compute_regs. Current-library offline inventory confirms exact identities; pristine ELF, selected disassembly and inventory retained in rdna4-20260923/matmul-debug. Both modes prospectively require at least one detection in eight trials; numerical manifestations recorded independently. Prospective SuperCollider delay calibration uses the recognized RJ_CONSAN_SC_DELAY control, 0/16/64/256 repeated twice, requiring 6/8 detections plus clean correctness, coverage, completeness, and health. Earlier mislabeled delay trials are retained as delay-zero evidence."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:0ffc359899105b1d|kernel=_Z21fp8_wmma_tiled_kernelILi16ELi8ELb1ELb0EL8SyncMode0EN4tsan10NoopPolicyELi8ELi2ELi4ELi4EEvPKhS4_Pfiii|kind=barrier|pc=0x00000000003f2200|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:0ffc359899105b1d|kernel=_Z21fp8_wmma_tiled_kernelILi16ELi8ELb1ELb0EL8SyncMode0EN4tsan10NoopPolicyELi8ELi2ELi4ELi4EEvPKhS4_Pfiii|event=barrier|pc=0x00000000003f2200|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:0ffc359899105b1d|kernel=_Z21fp8_wmma_tiled_kernelILi16ELi8ELb1ELb0EL8SyncMode0EN4tsan10NoopPolicyELi8ELi2ELi4ELi4EEvPKhS4_Pfiii|event=barrier|pc=0x00000000003f2260|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -1200,6 +1432,52 @@
               ]
             }
           }
+        },
+        {
+          "id": "barrier-drop-wave-sum-publication-sc-delay-calibration",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine gfx1201 ELF fnv1a64:57d125f3f8a0c446 extracted from libggml-hip.so.0.13.1 used by the native RMS norm trace. The selected rms_norm_f32<256,false,false> kernel performs an eight-wave reduction. Lane zero of each wave stores its partial sum at .text+0x1810; EXEC is restored at 0x181c. The unconditional signal at 0x1824 and wait at 0x1830 publish those sums before lanes 0..7 in each wave load peer-wave sums at 0x184c. Source block_reduce in ggml-cuda/common.cuh agrees with this final ISA. Remove the associated signal/wait pair as one logical mutation. Both standard profiles require at least one detection in eight admitted/reached trials; numerical manifestations are recorded independently. Extraction, inventory and disassembly are retained in rdna4-20260923/llama-rms-debug. Prospective SuperCollider delay calibration uses the recognized RJ_CONSAN_SC_DELAY control, 0/16/64/256 repeated twice, requiring 6/8 detections plus clean correctness, coverage, completeness, and health. Earlier mislabeled delay trials are retained as delay-zero evidence."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:57d125f3f8a0c446|kernel=_ZL12rms_norm_f32ILi256ELb0ELb0EEvPKfPfilllfS1_lll15HIP_vector_typeIjLj3EES4_S4_S4_S1_lllS4_S4_S4_S4_|kind=barrier|pc=0x0000000000001824|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:57d125f3f8a0c446|kernel=_ZL12rms_norm_f32ILi256ELb0ELb0EEvPKfPfilllfS1_lll15HIP_vector_typeIjLj3EES4_S4_S4_S1_lllS4_S4_S4_S4_|event=barrier|pc=0x0000000000001824|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:57d125f3f8a0c446|kernel=_ZL12rms_norm_f32ILi256ELb0ELb0EEvPKfPfilllfS1_lll15HIP_vector_typeIjLj3EES4_S4_S4_S1_lllS4_S4_S4_S4_|event=barrier|pc=0x0000000000001830|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -1363,6 +1641,54 @@
               ]
             }
           }
+        },
+        {
+          "id": "barrier-drop-k-publication-group-sc-delay-calibration",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine gfx1201 ELF fnv1a64:51455fdce9fbef23 for the release hip-moi D128 block binary and its native FastContextPolicy dispatch. The K-fragment producer subgroup stores LDS at .text+0x554dc; EXEC is restored at 0x554e8. The unconditional publication pairs at 0x554f0/0x55508 and 0x5551c/0x55520 precede all-wave peer loads at 0x557c0. These are the two physical barriers implementing one logical ctx.syncthreads in the executed K-fragment loop (source 011_rdna4_d128_attention_block_test.hip:287). Remove both associated pairs as one grouped mutation; removing just one would retain publication. The following reuse barrier is retained. Eight trials per standard profile prospectively require at least one detection, with numerical manifestations recorded independently. Pristine extraction, disassembly and exact inventory: rdna4-20260923/d128-debug. Prospective SuperCollider delay calibration uses the recognized RJ_CONSAN_SC_DELAY control, 0/16/64/256 repeated twice, requiring 6/8 detections plus clean correctness, coverage, completeness, and health. Earlier mislabeled delay trials are retained as delay-zero evidence."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:51455fdce9fbef23|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x00000000000554f0|mnemonic=s_barrier_signal|occurrence=6",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:51455fdce9fbef23|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x00000000000554f0|mnemonic=s_barrier_signal|occurrence=6|sequence=singleton|associated-with=fnv1a64:51455fdce9fbef23|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000055508|mnemonic=s_barrier_wait|occurrence=7|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:51455fdce9fbef23|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x000000000005551c|mnemonic=s_barrier_signal|occurrence=8",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:51455fdce9fbef23|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000005551c|mnemonic=s_barrier_signal|occurrence=8|sequence=singleton|associated-with=fnv1a64:51455fdce9fbef23|kernel=_ZN12_GLOBAL__N_127d128_attention_block_kernelINS_17FastContextPolicyEEEvPKDv8_DF16_S4_S4_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000055520|mnemonic=s_barrier_wait|occurrence=9|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -1516,6 +1842,52 @@
                 },
                 {
                   "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-wave-max-publication-sc-delay-calibration",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed Triton gfx1201 ELF fnv1a64:dc46cdfe6cf1810e, matching the current compiled-softmax clean-run code_object identity and native kernel allowlist. triton_per_fused__softmax_prepare_softmax_online_0 uses two waves, publishes wave maxima through ds_store_b32 at .text+0x15c, and loads both maxima at 0x17c after its unconditional signal/wait pair at 0x168/0x16c. The pair is on the straight-line executed path. Remove it as one logical mutation; subsequent reduction barriers remain. Eight standard trials per profile require at least one detection, with numerical manifestations independent. Cached pristine ELF, exact inventory and disassembly are retained in rdna4-20260923/softmax-debug. Prospective SuperCollider delay calibration uses the recognized RJ_CONSAN_SC_DELAY control, 0/16/64/256 repeated twice, requiring 6/8 detections plus clean correctness, coverage, completeness, and health. Earlier mislabeled delay trials are retained as delay-zero evidence."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|kind=barrier|pc=0x0000000000000168|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000168|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:dc46cdfe6cf1810e|kernel=triton_per_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x000000000000016c|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
                 }
               ]
             }
@@ -1677,6 +2049,52 @@
               ]
             }
           }
+        },
+        {
+          "id": "barrier-drop-wave-max-publication-sc-delay-calibration",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed Triton gfx1201 ELF fnv1a64:045c766e416734e6, matching split-softmax clean-run code_object identity and native kernel allowlist. The eight-wave triton_red_fused__softmax_prepare_softmax_online_0 publishes wave maxima in 32 bytes LDS at .text+0xdd8. Its unconditional signal/wait pair at 0xde4/0xe28 precedes peer-wave loads at 0xe38. The only preceding scalar branch is the reduction loop backedge; completion reaches this pair for the recorded workload. Remove the associated pair as one logical mutation; retain later reduction barriers. Eight standard trials per profile require at least one detection; numerical manifestations remain independent. Exact pristine ELF, inventory and disassembly: rdna4-20260923/softmax-debug/split.* and split-inventory.txt. Prospective SuperCollider delay calibration uses the recognized RJ_CONSAN_SC_DELAY control, 0/16/64/256 repeated twice, requiring 6/8 detections plus clean correctness, coverage, completeness, and health. Earlier mislabeled delay trials are retained as delay-zero evidence."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|kind=barrier|pc=0x0000000000000de4|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000de4|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000e28|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -1830,6 +2248,52 @@
                 },
                 {
                   "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-wave-sum-publication-sc-delay-calibration",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine gfx1201 library ELF fnv1a64:fd5ac4e13780e469, matching quantized-matvec clean-run code_object identity and native-selected mul_mat_vec_q<ggml_type(2),1,false,false>. Waves 1..7 write partial sums at .text+0xb8b8; EXEC is restored at 0xb8c4 before the unconditional signal/wait at 0xb8cc/0xb8d0. Wave zero then reads peer-wave sums at 0xb8e8, 0xb8f0, 0xb8f8 and 0xb90c. Source ggml-cuda/mmvq.cu:591-627 confirms the same dependency. Remove the pair as one mutation. Eight standard trials per profile require at least one detection, recording numerical manifestations independently. Pristine ELF, exact inventory and disassembly: rdna4-20260923/llama-matvec-debug. Prospective SuperCollider delay calibration uses the recognized RJ_CONSAN_SC_DELAY control, 0/16/64/256 repeated twice, requiring 6/8 detections plus clean correctness, coverage, completeness, and health. Earlier mislabeled delay trials are retained as delay-zero evidence."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:fd5ac4e13780e469|kernel=_ZL13mul_mat_vec_qIL9ggml_type2ELi1ELb0ELb0EEvPKvS2_PKi31ggml_cuda_mm_fusion_args_devicePfj15HIP_vector_typeIjLj3EEjjjS8_jjjS8_jjjj|kind=barrier|pc=0x000000000000b8cc|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:fd5ac4e13780e469|kernel=_ZL13mul_mat_vec_qIL9ggml_type2ELi1ELb0ELb0EEvPKvS2_PKi31ggml_cuda_mm_fusion_args_devicePfj15HIP_vector_typeIjLj3EEjjjS8_jjjS8_jjjj|event=barrier|pc=0x000000000000b8cc|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:fd5ac4e13780e469|kernel=_ZL13mul_mat_vec_qIL9ggml_type2ELi1ELb0ELb0EEvPKvS2_PKi31ggml_cuda_mm_fusion_args_devicePfj15HIP_vector_typeIjLj3EEjjjS8_jjjS8_jjjj|event=barrier|pc=0x000000000000b8d0|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
                 }
               ]
             }
@@ -1993,6 +2457,54 @@
                 },
                 {
                   "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-kv-publication-group-sc-delay-calibration",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine gfx1201 ELF fnv1a64:dae0bb24d0c25859, matching D128-pressure clean logs and native-selected FullKvDoubleBuffered16Key/FastContextPolicy. Cooperating waves stage K/V fragments through LDS stores at .text+0x4111c and 0x41488. EXEC reconverges at 0x41760 before unconditional publication pairs at 0x41768/0x4178c and 0x417a0/0x417a4. All waves then read staged K fragments, starting at 0x41a3c. Source 012_rdna4_d128_attention_pressure_test.hip:345-402 confirms the executed staging loop and logical ctx.syncthreads. Remove both physical pairs as one grouped mutation; retain later barriers. Eight standard trials per profile require at least one detection, recording numerical manifestations independently. Exact ELF, inventory and disassembly: rdna4-20260923/pressure-debug. Prospective SuperCollider delay calibration uses the recognized RJ_CONSAN_SC_DELAY control, 0/16/64/256 repeated twice, requiring 6/8 detections plus clean correctness, coverage, completeness, and health. Earlier mislabeled delay trials are retained as delay-zero evidence."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:dae0bb24d0c25859|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv8_DF16_S5_S5_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x0000000000041768|mnemonic=s_barrier_signal|occurrence=6",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:dae0bb24d0c25859|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv8_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x0000000000041768|mnemonic=s_barrier_signal|occurrence=6|sequence=singleton|associated-with=fnv1a64:dae0bb24d0c25859|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv8_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x000000000004178c|mnemonic=s_barrier_wait|occurrence=7|sequence=singleton",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SITE_IDENTITY": "fnv1a64:dae0bb24d0c25859|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv8_DF16_S5_S5_PfN7hip_moi7context11storage_refE|kind=barrier|pc=0x00000000000417a0|mnemonic=s_barrier_signal|occurrence=8",
+            "RJ_CONSAN_FAULT_BARRIER_COMPANION_SEQUENCE_IDENTITY": "fnv1a64:dae0bb24d0c25859|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv8_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x00000000000417a0|mnemonic=s_barrier_signal|occurrence=8|sequence=singleton|associated-with=fnv1a64:dae0bb24d0c25859|kernel=_ZN12_GLOBAL__N_125attention_pressure_kernelINS_25FullKvDoubleBuffered16KeyENS_17FastContextPolicyEEEvPKDv8_DF16_S5_S5_PfN7hip_moi7context11storage_refE|event=barrier|pc=0x00000000000417a4|mnemonic=s_barrier_wait|occurrence=9|sequence=singleton"
+          },
+          "profiles": {
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "16"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "64"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "256"
                 }
               ]
             }
