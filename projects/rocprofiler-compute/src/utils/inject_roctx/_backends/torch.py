@@ -4,8 +4,8 @@
 """ROCTX instrumentation for PyTorch.
 
 ATen operators use torch_trace_collector when it is installed, otherwise
-TorchDispatchMode. No collector for the workload PyTorch version, or a
-failure to load the collector, terminates the process.
+TorchDispatchMode. An unsupported workload PyTorch version or a collector load
+failure falls back to TorchDispatchMode.
 """
 
 import importlib.util
@@ -14,11 +14,11 @@ import sys
 import threading
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from utils.inject_roctx import core
 from utils.inject_roctx._backends import torch_trace_collector
-from utils.inject_roctx.marker_format import cap_args, encode_args
+from utils.inject_roctx.marker_format import MAX_ARG_ITEMS, cap_args, encode_args
 from utils.inject_roctx.registry import register
 from utils.logger import console_log, console_warning
 
@@ -48,12 +48,11 @@ _STATE = _TorchState()
 _thread_local = threading.local()
 
 rangePush: Optional[Callable[[str], None]] = None
-rangePop: Optional[Callable[[], None]] = None
 
-# Wire the Python tier via core and reuse its roctx handles below.
+# Wire the Python tier via core and reuse its push handle below.
 _ROCTX_AVAILABLE = core.ensure_python_tier()
 if _ROCTX_AVAILABLE:
-    rangePush, rangePop = core.get_python_tier_io()
+    rangePush = core.get_python_tier_io()[0]
 
 
 # torch.distributed.* collectives; entries not listed here are not wrapped.
@@ -115,17 +114,17 @@ def _render_tensor(obj: object) -> Optional[str]:
         return None
 
 
-def format_wrap_args(args: tuple[object, ...], kwargs: dict[str, object]) -> str:
-    items: list[str] = []
+def format_wrap_args(args: Tuple[object, ...], kwargs: Dict[str, object]) -> str:
+    items: List[str] = []
     for value in args:
-        if len(items) >= 32:
+        if len(items) >= MAX_ARG_ITEMS:
             break
         rendered = _render_tensor(value)
         if rendered is None:
             continue
         items.append(rendered)
     for name, value in kwargs.items():
-        if len(items) >= 32:
+        if len(items) >= MAX_ARG_ITEMS:
             break
         rendered = _render_tensor(value)
         if rendered is None:
@@ -149,6 +148,22 @@ def _pop_scope() -> None:
     core._pop_scope()
 
 
+def _warn_launcher_tid_pop_failure_once() -> None:
+    """Warn once on this thread when native launcher context cannot be removed."""
+    if getattr(_thread_local, "warned_launcher_tid_pop_failure", False):
+        return
+    _thread_local.warned_launcher_tid_pop_failure = True
+    try:
+        console_warning(
+            "ml api trace",
+            "Could not remove the native autograd launcher-thread context; "
+            "later markers on this thread may carry a stale launcher ID. "
+            "Subsequent failures on this thread will be suppressed.",
+        )
+    except Exception:
+        pass
+
+
 # Structural wrappers for entry points the ATen dispatcher does not record.
 
 
@@ -161,9 +176,8 @@ def roctx_wrapper(
 ) -> Callable[..., Any]:
     """Wrap func so each call emits a ROCTX range. Idempotent.
 
-    A non-empty backend attributes the scope to that backend.
-    When publish_launcher_tid is true, also publish launcher OS tid for
-    autograd workers for the duration of the range.
+    A non-empty backend attributes the scope to that backend. When requested,
+    the native launcher thread ID is propagated for autograd worker correlation.
     """
     if getattr(func, "_roctx_wrapped", False):
         return func
@@ -179,13 +193,15 @@ def roctx_wrapper(
             args=format_wrap_args(args, kwargs),
         )
         try:
-            if publish_launcher_tid:
-                torch_trace_collector.push_launcher_tid()
+            launcher_tid_pushed = False
             try:
+                if publish_launcher_tid:
+                    launcher_tid_pushed = torch_trace_collector.push_launcher_tid()
                 return func(*args, **kwargs)
             finally:
-                if publish_launcher_tid:
-                    torch_trace_collector.pop_launcher_tid()
+                if launcher_tid_pushed:
+                    if not torch_trace_collector.pop_launcher_tid():
+                        _warn_launcher_tid_pop_failure_once()
         finally:
             _pop_scope()
 
@@ -217,6 +233,53 @@ def _walk_subclasses(cls: type, fn: Callable[[type], None]) -> None:
     for sub in cls.__subclasses__():
         fn(sub)
         _walk_subclasses(sub, fn)
+
+
+def _call_original_init_subclass(
+    base_class: type,
+    descriptor: Optional[object],
+    subclass: type,
+    kwargs: Dict[str, Any],
+) -> None:
+    """Invoke the hook replaced on base_class with correct descriptor binding."""
+    if descriptor is None:
+        super(base_class, subclass).__init_subclass__(**kwargs)
+        return
+    descriptor.__get__(None, subclass)(**kwargs)
+
+
+def _install_subclass_hook(
+    base_class: type,
+    sentinel: str,
+    callback: Callable[[type], None],
+    label: str,
+) -> None:
+    """Install one future-subclass hook while preserving the original hook."""
+    existing_hook = base_class.__init_subclass__
+    existing_function = getattr(existing_hook, "__func__", existing_hook)
+    if getattr(existing_function, sentinel, False):
+        return
+
+    existing_descriptor = base_class.__dict__.get("__init_subclass__")
+
+    def init_subclass_hook(cls: type, **kwargs: Any) -> None:
+        _call_original_init_subclass(base_class, existing_descriptor, cls, kwargs)
+        try:
+            callback(cls)
+        except Exception as error:
+            console_warning(
+                "ml api trace",
+                f"Could not instrument {label} subclass {cls.__name__}: {error}",
+            )
+
+    setattr(init_subclass_hook, sentinel, True)
+    try:
+        base_class.__init_subclass__ = classmethod(init_subclass_hook)
+    except Exception as error:
+        console_warning(
+            "ml api trace",
+            f"Could not install {label} subclass hook: {error}",
+        )
 
 
 def _emit_python_tier_fallback_warning() -> None:
@@ -309,7 +372,7 @@ def patch_process_group_methods() -> None:
     if process_group is None:
         return
 
-    wrapped_classes: set[type] = set()
+    wrapped_classes: Set[type] = set()
     wrapped_method_count = {"count": 0}
 
     def _wrap_one(cls: type) -> None:
@@ -340,36 +403,12 @@ def patch_process_group_methods() -> None:
     _wrap_one(process_group)
     _walk_subclasses(process_group, _wrap_one)
 
-    existing_isc = process_group.__init_subclass__
-    existing_isc_fn = getattr(existing_isc, "__func__", existing_isc)
-    if not getattr(existing_isc_fn, "_roctx_pg_subclass_hook", False):
-        original_init_subclass = existing_isc
-
-        def init_subclass_hook(cls: type, **kwargs: Any) -> None:
-            try:
-                original_init_subclass_fn = getattr(
-                    original_init_subclass,
-                    "__func__",
-                    original_init_subclass,
-                )
-                original_init_subclass_fn(cls, **kwargs)
-            except Exception:
-                pass
-            try:
-                _wrap_one(cls)
-            except Exception as exc:
-                console_warning(
-                    "ml api trace",
-                    f"_wrap_one({cls.__name__}) failed in "
-                    f"ProcessGroup.__init_subclass__: {exc}",
-                )
-
-        init_subclass_hook._roctx_pg_subclass_hook = True
-        try:
-            process_group.__init_subclass__ = classmethod(init_subclass_hook)
-        except Exception:
-            # C-defined on some builds; per-subclass walk above covers existing.
-            pass
+    _install_subclass_hook(
+        process_group,
+        "_roctx_pg_subclass_hook",
+        _wrap_one,
+        "ProcessGroup",
+    )
 
     if wrapped_method_count["count"]:
         console_log(
@@ -530,7 +569,7 @@ def dispatcher_marker_name_for(func: Callable[..., Any]) -> str:
     return raw
 
 
-def install_dispatcher_hook() -> str:
+def install_dispatcher_hook() -> None:
     """Enter TorchDispatchMode on this thread."""
     torch_dispatch_mode = _STATE.torch_dispatch_mode
     if torch_dispatch_mode is None:
@@ -539,12 +578,12 @@ def install_dispatcher_hook() -> str:
             "TorchDispatchMode is not importable on this PyTorch build; "
             "per-op coverage will be missing.",
         )
-        return "none"
+        return
 
     def start_disp(
         op_name: str,
-        args: tuple[object, ...] = (),
-        kwargs: Optional[dict[str, object]] = None,
+        args: Tuple[object, ...] = (),
+        kwargs: Optional[Dict[str, object]] = None,
     ) -> None:
         location = core.resolve_user_caller_location()
         _push_scope(
@@ -561,9 +600,9 @@ def install_dispatcher_hook() -> str:
         def __torch_dispatch__(
             self,
             func: Callable[..., Any],
-            types: tuple[type, ...],
-            args: tuple[object, ...] = (),
-            kwargs: Optional[dict[str, object]] = None,
+            types: Tuple[type, ...],
+            args: Tuple[object, ...] = (),
+            kwargs: Optional[Dict[str, object]] = None,
         ) -> object:
             kwargs = kwargs or {}
             op_name = dispatcher_marker_name_for(func)
@@ -587,14 +626,13 @@ def install_dispatcher_hook() -> str:
         mode.__enter__()
     except Exception as exc:
         console_warning("ml api trace", f"TorchDispatchMode activation failed: {exc}")
-        return "none"
+        return
 
     _STATE.active_dispatch_mode = mode
     console_log(
         "ml api trace",
         "Operator coverage: TorchDispatchMode (Python tier).",
     )
-    return "torch_dispatch_mode"
 
 
 def install_tensor_backward_wrapper() -> None:
@@ -602,6 +640,7 @@ def install_tensor_backward_wrapper() -> None:
     torch = _STATE.torch
     if getattr(torch.Tensor.backward, "_roctx_wrapped", False):
         return
+
     torch.Tensor.backward = roctx_wrapper(
         torch.Tensor.backward,
         "torch.Tensor.backward",
@@ -620,7 +659,7 @@ def wrap_method_on_subclasses(
 
     Returns the count of method definitions newly wrapped.
     """
-    wrapped_classes: set[type] = set()
+    wrapped_classes: Set[type] = set()
     wrapped_method_count = {"count": 0}
 
     def wrap_class(cls: type) -> None:
@@ -799,20 +838,20 @@ def _deep_tensor_method_wraps_enabled() -> bool:
     return value not in ("0", "false", "no", "off")
 
 
-def _selected_tensor_method_wraps() -> tuple[str, ...]:
+def _selected_tensor_method_wraps() -> Tuple[str, ...]:
     if _deep_tensor_method_wraps_enabled():
         return TENSOR_METHOD_WRAPS + DEEP_TENSOR_METHOD_WRAPS
     return TENSOR_METHOD_WRAPS
 
 
-def install_function_apply_wrappers() -> bool:
+def install_function_apply_wrappers() -> None:
     """Wrap Function.apply on every existing subclass.
 
     An __init_subclass__ hook wraps subclasses registered later.
     """
     function = _STATE.function
     if function is None:
-        return False
+        return
 
     def stamp_apply(cls: type) -> None:
         try:
@@ -850,34 +889,12 @@ def install_function_apply_wrappers() -> bool:
 
     _walk_subclasses(function, stamp_apply)
 
-    existing_isc = function.__init_subclass__
-    existing_isc_fn = getattr(existing_isc, "__func__", existing_isc)
-    if getattr(existing_isc_fn, "_roctx_function_subclass_hook", False):
-        return True
-
-    original_init_subclass = existing_isc
-
-    def init_subclass_hook(cls: type, **kwargs: Any) -> None:
-        try:
-            original_init_subclass_fn = getattr(
-                original_init_subclass,
-                "__func__",
-                original_init_subclass,
-            )
-            original_init_subclass_fn(cls, **kwargs)
-        except Exception:
-            pass
-        try:
-            stamp_apply(cls)
-        except Exception as exc:
-            console_warning(
-                "ml api trace",
-                f"stamp_apply({cls.__name__}) failed in __init_subclass__: {exc}",
-            )
-
-    init_subclass_hook._roctx_function_subclass_hook = True
-    function.__init_subclass__ = classmethod(init_subclass_hook)
-    return True
+    _install_subclass_hook(
+        function,
+        "_roctx_function_subclass_hook",
+        stamp_apply,
+        "torch.autograd.Function",
+    )
 
 
 def install_tensor_method_wrappers() -> None:
@@ -925,7 +942,7 @@ def install_tensor_method_wrappers() -> None:
 
 
 def install_extra_structural_wrappers() -> None:
-    """Wrap EXTRA_STRUCTURAL_WRAPS, tensor methods, cuda.{Event,Stream}."""
+    """Wrap EXTRA_STRUCTURAL_WRAPS and cuda.{Event,Stream}."""
     wrapped = []
     for module_path, attr_name, marker_name in EXTRA_STRUCTURAL_WRAPS:
         try:
@@ -941,8 +958,6 @@ def install_extra_structural_wrappers() -> None:
             ),
         ):
             wrapped.append(marker_name)
-
-    install_tensor_method_wrappers()
 
     cuda_mod = _STATE.cuda_mod
     if cuda_mod is not None:
@@ -974,15 +989,6 @@ def install_extra_structural_wrappers() -> None:
                     "ml api trace",
                     f"Could not patch torch.cuda.{cls_name}.__init__: {exc}",
                 )
-
-    try:
-        if install_function_apply_wrappers():
-            wrapped.append("torch.autograd.Function.apply")
-    except Exception as exc:
-        console_warning(
-            "ml api trace",
-            f"Could not patch torch.autograd.Function.apply: {exc}",
-        )
 
     if wrapped:
         console_log(

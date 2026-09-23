@@ -2,13 +2,13 @@
 # SPDX-License-Identifier:  MIT
 
 _MAX_ARGS_LEN = 512
-_MAX_ARG_ITEMS = 32
-_MAX_NESTED_ARG_ITEMS = 8
+MAX_ARG_ITEMS = 32
 
 
 def encode_args(args: str) -> str:
     return (
-        args.replace("%", "%25")
+        args
+        .replace("%", "%25")
         .replace("|", "%7C")
         .replace(";", "%3B")
         .replace("\r", "%0D")

@@ -3,16 +3,24 @@
 
 #include "torch_trace_collector.h"
 
-#include "args_capture.h"
+#include "argument_capture.h"
+#include "torch_abi/runtime.h"
 #include "wire_format.h"
 
 #include <ATen/record_function.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
+#include <array>
+#include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
+#include <mutex>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 
 extern "C"
 {
@@ -21,141 +29,227 @@ extern "C"
 
 namespace
 {
-using namespace torch_trace_collector::detail;
 
-constexpr const char* kRecordFnBackend = "torch";
+constexpr const char* kRecordFnBackend         = "torch";
+constexpr std::size_t kMarkerMetadataAllowance = 512;
+constexpr std::size_t kInlineMarkerSize = torch_trace_collector::detail::kMaxEncodedArgumentsSize +
+                                          kMarkerMetadataAllowance;
+using torch_trace_collector::detail::kUnavailable;
+
+std::atomic_flag g_callback_failure_warning = ATOMIC_FLAG_INIT;
 
 constexpr std::string_view kLauncherTidKindName{"ROCPROF_COMPUTE_LAUNCHER_TID"};
 const c10::DebugInfoKind   kLauncherTidKind{&kLauncherTidKindName};
 
-struct LauncherTidInfo : public c10::DebugInfoBase
+struct LauncherTidInfo final : c10::DebugInfoBase
 {
     std::uint64_t launcher_tid = 0;
 };
 
-thread_local int g_launcher_tid_depth = 0;
+thread_local std::size_t g_launcher_tid_depth = 0;
 
-std::string launcher_tid_for_marker()
+void warn_callback_failure_once() noexcept
 {
-    auto* base = c10::ThreadLocalDebugInfo::get(kLauncherTidKind);
-    if (base == nullptr)
+    if (!g_callback_failure_warning.test_and_set(std::memory_order_relaxed))
     {
-        return kUnavailable;
+        std::fputs("rocprof-compute: PyTorch RecordFunction callback failed; "
+                   "some operator markers may be missing.\n",
+                   stderr);
     }
-    auto* info = static_cast<LauncherTidInfo*>(base);
-    return std::to_string(info->launcher_tid);
 }
 
-struct RoctxObserverContext : public at::ObserverContext
+struct RoctxObserverContext final : at::ObserverContext
 {
-    bool pushed = false;
 };
 
-const char* record_scope_name(at::RecordScope scope)
+std::optional<std::uint64_t> launcher_tid_for_marker()
 {
-    switch (scope)
+    const auto* info = static_cast<const LauncherTidInfo*>(
+        c10::ThreadLocalDebugInfo::get(kLauncherTidKind));
+    if (info == nullptr)
     {
-    case at::RecordScope::FUNCTION:
-        return "FUNCTION";
-    case at::RecordScope::BACKWARD_FUNCTION:
-        return "BACKWARD_FUNCTION";
-    case at::RecordScope::TORCHSCRIPT_FUNCTION:
-        return "TORCHSCRIPT_FUNCTION";
-    case at::RecordScope::KERNEL_FUNCTION_DTYPE:
-        return "KERNEL_FUNCTION_DTYPE";
-    case at::RecordScope::CUSTOM_CLASS:
-        return "CUSTOM_CLASS";
-    case at::RecordScope::BUILD_FEATURE:
-        return "BUILD_FEATURE";
-    case at::RecordScope::LITE_INTERPRETER:
-        return "LITE_INTERPRETER";
-    case at::RecordScope::USER_SCOPE:
-        return "USER_SCOPE";
-    case at::RecordScope::STATIC_RUNTIME_OP:
-        return "STATIC_RUNTIME_OP";
-    case at::RecordScope::STATIC_RUNTIME_MODEL:
-        return "STATIC_RUNTIME_MODEL";
-    default:
-        return kUnavailable;
+        return std::nullopt;
     }
+    return info->launcher_tid;
 }
 
-std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& record_fn)
+std::string_view capture_args(
+    const at::RecordFunction&                                                  record_function,
+    std::array<char, torch_trace_collector::detail::kMaxEncodedArgumentsSize>& buffer) noexcept
 {
-    auto observer_ctx = std::make_unique<RoctxObserverContext>();
+    const std::size_t required = torch_trace_collector::detail::capture_args(record_function,
+                                                                             buffer.data(),
+                                                                             buffer.size());
+    if (required > buffer.size())
+    {
+        return kUnavailable;
+    }
+    return {buffer.data(), required - 1};
+}
+
+std::string_view scope_name(at::RecordScope scope)
+{
+    static constexpr auto names = std::to_array<std::string_view>({
+        "FUNCTION",
+        "BACKWARD_FUNCTION",
+        "TORCHSCRIPT_FUNCTION",
+        "KERNEL_FUNCTION_DTYPE",
+        "CUSTOM_CLASS",
+        "BUILD_FEATURE",
+        "LITE_INTERPRETER",
+        "USER_SCOPE",
+        "STATIC_RUNTIME_OP",
+        "STATIC_RUNTIME_MODEL",
+    });
+    static_assert(names.size() == torch_abi::kScopeCount);
+
+    const std::size_t index = static_cast<std::size_t>(scope);
+    if (index < names.size())
+    {
+        return names[index];
+    }
+    return kUnavailable;
+}
+
+bool push_range(const at::RecordFunction& record_function, std::string_view name, std::string_view arguments)
+{
+    std::array<char, kInlineMarkerSize> marker_buffer;
+    const auto                          launcher_tid = launcher_tid_for_marker();
+    const auto format = [&record_function, name, arguments, launcher_tid](std::span<char> destination)
+    {
+        const torch_trace_collector::detail::RangeNameFields fields{
+            .name               = name,
+            .context            = kUnavailable,
+            .sequence_number    = record_function.seqNr(),
+            .thread_id          = at::RecordFunction::currentThreadId(),
+            .forward_thread_id  = record_function.forwardThreadId(),
+            .launcher_thread_id = launcher_tid,
+            .scope              = scope_name(record_function.scope()),
+            .arguments          = arguments,
+            .backend            = kRecordFnBackend,
+        };
+        return torch_trace_collector::detail::format_range_name(destination, fields);
+    };
+
+    const std::size_t required = format(marker_buffer);
+    if (required <= marker_buffer.size())
+    {
+        return roctxRangePushA(marker_buffer.data()) >= 0;
+    }
+
+    std::string marker(required, '\0');
+    format(std::span<char>{marker.data(), marker.size()});
+    marker.resize(required - 1);
+    return roctxRangePushA(marker.c_str()) >= 0;
+}
+
+std::unique_ptr<at::ObserverContext> start_callback(const at::RecordFunction& record_function)
+{
     try
     {
-        const char* name = record_fn.name();
+        auto        context = std::make_unique<RoctxObserverContext>();
+        const char* name    = record_function.name();
         if (name == nullptr || name[0] == '\0')
         {
             name = "<anonymous>";
         }
-
-        const std::int64_t seqNrValue = record_fn.seqNr();
-        const std::string  seqNr      = (seqNrValue < 0) ? std::string{kUnavailable}
-                                                         : std::to_string(seqNrValue);
-        const std::string  tid        = std::to_string(at::RecordFunction::currentThreadId());
-        const std::string  ftid       = std::to_string(record_fn.forwardThreadId());
-        const std::string  ltid       = launcher_tid_for_marker();
-        const std::string  wire       = build_range_name(name,
-                                                         kUnavailable,
-                                                         seqNr,
-                                                         tid,
-                                                         ftid,
-                                                         ltid,
-                                                         record_scope_name(record_fn.scope()),
-                                                         capture_record_function_args(record_fn),
-                                                         kRecordFnBackend);
-        observer_ctx->pushed          = (roctxRangePushA(wire.c_str()) >= 0);
+        std::array<char, torch_trace_collector::detail::kMaxEncodedArgumentsSize> argument_buffer;
+        if (!push_range(record_function, name, capture_args(record_function, argument_buffer)))
+        {
+            return nullptr;
+        }
+        return context;
     }
     catch (...)
     {
-        observer_ctx->pushed = false;
+        warn_callback_failure_once();
+        return nullptr;
     }
-    return observer_ctx;
 }
 
-void end_cb(const at::RecordFunction& /*record_fn*/, at::ObserverContext* obs_ctx)
+// PyTorch's callback ABI requires a mutable ObserverContext pointer.
+// cppcheck-suppress constParameterCallback
+void end_callback(const at::RecordFunction&, at::ObserverContext* context)
 {
-    if (obs_ctx == nullptr)
-    {
-        return;
-    }
-    auto* observer_ctx = static_cast<RoctxObserverContext*>(obs_ctx);
-    if (observer_ctx->pushed)
+    if (context != nullptr)
     {
         roctxRangePop();
     }
 }
 
-at::CallbackHandle g_handle{};
+std::mutex         g_install_mutex;
+at::CallbackHandle g_handle = at::INVALID_CALLBACK_HANDLE;
+std::atomic<bool>  g_installed{false};
 
 bool install()
 {
-    if (g_handle > 0)
+    const std::lock_guard<std::mutex> lock{g_install_mutex};
+    if (g_handle != at::INVALID_CALLBACK_HANDLE)
     {
         return true;
     }
-    g_handle = at::addGlobalCallback(at::RecordFunctionCallback(start_cb, end_cb).needsInputs(true));
-    return g_handle > 0;
+    if (!torch_abi::runtime_is_supported())
+    {
+        return false;
+    }
+    g_handle = at::addGlobalCallback(
+        at::RecordFunctionCallback(start_callback, end_callback).needsInputs(true));
+    if (g_handle == at::INVALID_CALLBACK_HANDLE)
+    {
+        return false;
+    }
+    g_installed.store(true, std::memory_order_release);
+    return true;
+}
+
+bool push_launcher_tid(std::uint64_t launcher_tid)
+{
+    if (!g_installed.load(std::memory_order_acquire))
+    {
+        return false;
+    }
+    auto info          = std::make_shared<LauncherTidInfo>();
+    info->launcher_tid = launcher_tid;
+    c10::ThreadLocalDebugInfo::_push(kLauncherTidKind, std::move(info));
+    ++g_launcher_tid_depth;
+    return true;
+}
+
+bool pop_launcher_tid()
+{
+    if (!g_installed.load(std::memory_order_acquire) || g_launcher_tid_depth == 0)
+    {
+        return false;
+    }
+    c10::ThreadLocalDebugInfo::_pop(kLauncherTidKind);
+    --g_launcher_tid_depth;
+    return true;
 }
 
 }  // namespace
 
-extern "C" int torch_trace_collector_install(void)
+extern "C" std::uint32_t torch_trace_collector_abi_revision(void)
 {
-    return install() ? 0 : 1;
+    return TORCH_TRACE_COLLECTOR_ABI_REVISION;
 }
 
-extern "C" int torch_trace_collector_push_launcher_tid(uint64_t launcher_tid)
+extern "C" int torch_trace_collector_install(void)
 {
     try
     {
-        auto info          = std::make_shared<LauncherTidInfo>();
-        info->launcher_tid = launcher_tid;
-        c10::ThreadLocalDebugInfo::_push(kLauncherTidKind, info);
-        ++g_launcher_tid_depth;
-        return 0;
+        return install() ? 0 : 1;
+    }
+    catch (...)
+    {
+        return 1;
+    }
+}
+
+extern "C" int torch_trace_collector_push_launcher_tid(std::uint64_t launcher_tid)
+{
+    try
+    {
+        return push_launcher_tid(launcher_tid) ? 0 : 1;
     }
     catch (...)
     {
@@ -165,15 +259,9 @@ extern "C" int torch_trace_collector_push_launcher_tid(uint64_t launcher_tid)
 
 extern "C" int torch_trace_collector_pop_launcher_tid(void)
 {
-    if (g_launcher_tid_depth <= 0)
-    {
-        return 1;
-    }
     try
     {
-        c10::ThreadLocalDebugInfo::_pop(kLauncherTidKind);
-        --g_launcher_tid_depth;
-        return 0;
+        return pop_launcher_tid() ? 0 : 1;
     }
     catch (...)
     {
