@@ -538,10 +538,10 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
 
   const auto *expectation = harness_expectation(arch_name);
   ASSERT_NE(expectation, nullptr) << "Missing harness expectation for " << arch_name;
-  std::sort(unimpl_list.begin(), unimpl_list.end());
+  std::ranges::sort(unimpl_list);
   std::vector<std::string_view> expected(expectation->unimplemented.begin(),
                                          expectation->unimplemented.end());
-  std::sort(expected.begin(), expected.end());
+  std::ranges::sort(expected);
   EXPECT_EQ(unimpl_list, expected) << arch_name << " unimplemented instruction set changed";
 }
 
@@ -6716,7 +6716,7 @@ TEST(Cdna4GprIdxTest, WideConversionIndexesResolvedBaseBeforeDwordOffsets) {
   cu->write_vgpr(base + kScale, 0, std::bit_cast<uint32_t>(1.0f));
 
   uint8_t fp6_values[32];
-  std::fill(std::begin(fp6_values), std::end(fp6_values), 0x10u);
+  std::ranges::fill(fp6_values, 0x10u);
   uint32_t packed_fp6[6]{};
   util::pack_6bit(fp6_values, packed_fp6);
   const uint16_t expected_half = util::f32_to_f16(util::fp6_e2m3_to_f32(0x10u));
@@ -7179,7 +7179,7 @@ TEST(Gfx1250AtomicReturnTest, PackedHalfAddPreservesComponentsAcrossMemoryForms)
                    : (returns ? cdna5::kDsPkAddRtnF16Vds : cdna5::kDsPkAddF16Vds);
           const std::array<uint32_t, 2> ds =
               cdna5::build_vds(ds_op, {.addr = 2, .data0 = 1, .vdst = 0});
-          std::copy(ds.begin(), ds.end(), words.begin());
+          std::ranges::copy(ds, words.begin());
         }
         cu.write_sgpr(sb + 4, kAddr);
         cu.write_sgpr(sb + 5, 0);
@@ -7287,7 +7287,7 @@ TEST(Rdna4AtomicReturnTest, FlatPackedHalfAddPreservesLdsDenormals) {
                        : (returns ? rdna4::kDsPkAddRtnF16Vds : rdna4::kDsPkAddF16Vds);
               const std::array<uint32_t, 2> ds =
                   rdna4::build_vds(opcode, {.addr = 2, .data0 = 1, .vdst = 0});
-              std::copy(ds.begin(), ds.end(), words.begin());
+              std::ranges::copy(ds, words.begin());
             } else {
               const uint16_t opcode =
                   bf16 ? rdna4::kFlatAtomicPkAddBf16Vflat : rdna4::kFlatAtomicPkAddF16Vflat;
@@ -8696,7 +8696,7 @@ template <typename ComputeUnit> void check_flat_atomic_lds_policy(rj_code_arch_t
   } else {
     const std::array<uint32_t, 2> legacy_words = cdna4::build_flat(
         cdna4::kFlatAtomicAddF32Flat, {.sc0 = 1, .addr = 2, .data = 0, .saddr = 127, .vdst = 6});
-    std::copy(legacy_words.begin(), legacy_words.end(), words.begin());
+    std::ranges::copy(legacy_words, words.begin());
   }
   for (uint32_t mode : {0u, 0xf0u}) {
     wave->set_mode_raw(mode);

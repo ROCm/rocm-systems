@@ -71,7 +71,7 @@ public:
     compute_unit_->write_vgpr(base_ + 2, 0, c);
     compute_unit_->write_vgpr(base_ + 6, 0, 0xfacebeef);
     std::array<uint32_t, 4> padded{};
-    std::copy(words.begin(), words.end(), padded.begin());
+    std::ranges::copy(words, padded.begin());
     DecodeResult decoded = decoder_->decode(padded.data());
     if (decoded.failed())
       throw std::runtime_error("Instruction encoding rejected by decoder_");
