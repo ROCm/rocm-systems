@@ -2282,11 +2282,8 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   }
   collArgs.recvWin = recvWin;
 
-  // Unregistered (!fastPath) AllReduce pipelines AllGather through ceARTmpBuf
-  // slots below. A full-message AllGather into staging used to reject anything
-  // above ncclCeAllReduceStagingBufBytes (32 MiB); chunked AG only needs one
-  // slot (nRanks * chunkBytes), so FORCE-unregistered messages up to the
-  // 2-shot cap can run.
+  // !fastPath AllGather is chunked through one ceARTmpBuf slot, so the message
+  // may exceed staging (32 MiB) up to the 2-shot cap.
 
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
 
@@ -2326,12 +2323,8 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
         }
       }
     }
-    // A. Verify that the persistent kernel has fully consumed this slot from the prior loop
-    //
-    // ceARTmpBuf is double-buffered (NUM_SLOTS slots); chunk ch uses slot ch % NUM_SLOTS.
-    // The first NUM_SLOTS chunks get fresh slots — no drain wait. From chunk NUM_SLOTS on,
-    // scatterStream waits for the persistent reduce kernel to clear the slot (signal == 0)
-    // on all ranks before overwriting it (e.g. chunk 2 reuses slot 0 when NUM_SLOTS == 2).
+    // Drain the slot before reuse: after NUM_SLOTS chunks, wait until every rank's
+    // reduce signal is 0 (chunk 2 reuses slot 0).
     if (ch >= NUM_SLOTS) {
       for (int r = 0; r < comm->nRanks; r++) {
         if (r == comm->rank) {
@@ -2440,9 +2433,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     // recvbuff are visible before returning to the user.
     NCCLCHECKGOTO(ncclMemOpSync(comm, ceStream, &collArgs), ret, fail);
   } else {
-    // Slow path: user recv is not a contained symmetric window. Pipeline the
-    // AllGather through one ceARTmpBuf slot per chunk (nRanks * currentChunkBytes
-    // fits a slot) then copy each rank's reduced chunk into user recv.
+    // Slow path: AllGather each chunk into one staging slot, then copy into user recv.
     for (int ch = 0; ch < (int)chunksPerShard; ch++) {
       const bool isTail = (ch == (int)chunksPerShard - 1) && (tailChunkElems > 0);
       const size_t currentChunkBytes = isTail ? tailChunkElems * eltSize : chunkBytes;

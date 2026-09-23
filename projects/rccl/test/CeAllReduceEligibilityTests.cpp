@@ -370,9 +370,8 @@ TEST(RcclCeAllReduceEligibility, StagedUnregisteredRejectsUnsupportedDriver)
     ncclCudaDriverVersionCache = savedDriverVersion;
 }
 
-// FORCE + unregistered above the 32 MiB staging buffer still takes 2-shot up
-// to NCCL_CE_AR_TMPBUF_DEFAULT_BYTES. ncclCeAllReduce pipelines AllGather
-// through staging slots instead of requiring the whole message to fit.
+// FORCE + unregistered above the 32 MiB staging buffer still takes CE up to
+// the 2-shot cap; AllGather is pipelined through slots.
 TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredOverStagingSelectsTwoShot_Isolated)
 {
     ProcessIsolatedTestRunner::registerTest(
