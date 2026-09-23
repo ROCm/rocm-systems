@@ -1313,7 +1313,7 @@ def _fault(args: argparse.Namespace) -> int:
                 }
                 summaries.append(row)
                 profile_rows.append(row)
-                continue
+                break
             accepted, reasons = _fault_acceptance(result, policy)
             admitted, reached, reach_outcome, reach_reasons = (
                 _fault_admission_and_reach(result, fault.get("reach_witness"))
@@ -1333,6 +1333,8 @@ def _fault(args: argparse.Namespace) -> int:
             }
             summaries.append(row)
             profile_rows.append(row)
+            if not admitted:
+                break
         reached_rows = [row for row in profile_rows if row.get("reached") is True]
         detected = sum(row.get("detector") == "detected" for row in reached_rows)
         oracle_manifestations = sum(row.get("oracle") == "fail" for row in reached_rows)
@@ -1342,6 +1344,11 @@ def _fault(args: argparse.Namespace) -> int:
             reach_outcomes[outcome] = reach_outcomes.get(outcome, 0) + 1
         expected_detector = policy.get("detector")
         profile_reasons = []
+        if len(profile_rows) < len(trials):
+            profile_reasons.append(
+                "trial batch stopped after admission failure; "
+                f"attempted={len(profile_rows)}, planned={len(trials)}"
+            )
         if expected_detector == "statistical":
             minimum = policy.get("minimum_detections")
             if not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 1:
@@ -1370,6 +1377,7 @@ def _fault(args: argparse.Namespace) -> int:
                 "accepted": all(row["accepted"] for row in profile_rows)
                 and not profile_reasons,
                 "detector_policy": expected_detector,
+                "planned_trials": len(trials),
                 "attempted_trials": len(profile_rows),
                 "admitted_trials": sum(
                     row.get("admitted") is True for row in profile_rows

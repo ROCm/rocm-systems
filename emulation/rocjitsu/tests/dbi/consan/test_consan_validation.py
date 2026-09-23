@@ -6251,6 +6251,56 @@ class ConSanValidationTest(unittest.TestCase):
             any("reservation evidence shape is invalid" in reason for reason in reasons)
         )
 
+    def test_fault_batch_stops_on_admission_failure_but_not_detector_misses(self):
+        workload = validation.WORKLOAD_BY_ID["d128-block"]
+        fault = {
+            "id": "drop", "family": "barrier-drop",
+            "environment": {"RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+                            "RJ_CONSAN_FAULT_SITE_IDENTITY": "site-a"},
+            "profiles": {"default": {"detector": "statistical",
+                "minimum_detections": 1, "oracle": "any", "trials": [{}, {}, {}]}},
+        }
+        for admitted, missing_result, expected_calls in (
+            (False, False, 1), (False, True, 1), (True, False, 3)
+        ):
+            with self.subTest(admitted=admitted, missing_result=missing_result), temporary_root() as root:
+                spec = root / "fault.json"
+                spec.write_text("{}")
+                args = validation._parse_args([
+                    "--target", "gfx1201", "fault", "--workload", workload.id,
+                    "--profile", "default", "--spec", str(spec), "--fault", "drop",
+                    "--artifact-root", str(root / "artifacts"), "--allow-destructive",
+                ])
+                def run(command, **kwargs):
+                    if not missing_result:
+                        out = Path(command[command.index("--artifact-root") + 1])
+                        name = command[command.index("--name") + 1]
+                        row = out / name
+                        row.mkdir(parents=True)
+                        (row / "result.json").write_text(json.dumps({
+                            "sanitizer": {"outcome": "not_detected"},
+                            "oracle": {"outcome": "pass"},
+                        }))
+                with (
+                    mock.patch.object(validation_faults, "_workspace_from_environment", return_value=root),
+                    mock.patch.object(validation_faults, "_doctor", return_value={"ok": True}),
+                    mock.patch.object(validation_faults, "_load_fault", return_value=fault),
+                    mock.patch.object(validation_faults, "_write_provenance", return_value=root / "provenance.json"),
+                    mock.patch.object(validation_faults, "_health_smoke_command", return_value=["/bin/true"]),
+                    mock.patch.object(validation_faults, "_fault_acceptance", return_value=(admitted, [])),
+                    mock.patch.object(validation_faults, "_fault_admission_and_reach", return_value=(admitted, admitted, "reviewed", [])),
+                    mock.patch.object(validation.subprocess, "run", side_effect=run) as execute,
+                    redirect_stdout(io.StringIO()),
+                ):
+                    self.assertEqual(validation._fault(args), 1)
+                self.assertEqual(execute.call_count, expected_calls)
+                summary = json.loads((root / "artifacts" / workload.id / "faults" / "drop" / "summary.json").read_text())
+                profile = summary["profiles"][0]
+                self.assertFalse(profile["accepted"])
+                self.assertEqual(profile["planned_trials"], 3)
+                self.assertEqual(profile["attempted_trials"], expected_calls)
+                self.assertEqual(any("batch stopped" in reason for reason in profile["reasons"]), not admitted)
+
     def test_fault_does_not_execute_a_spec_not_applicable_profile(self) -> None:
         workload = validation.WORKLOAD_BY_ID["d128-block"]
         fault = {

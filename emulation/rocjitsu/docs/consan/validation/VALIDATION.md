@@ -325,6 +325,12 @@ spec bytes it loads into `fault-spec.snapshot.json` and hashes those bytes in
 the summary. Resuming a root with a different saved spec is rejected; use a new
 root for changed expectations or trial settings.
 
+A trial that fails mutation admission or produces no result stops the remaining
+trials for that profile. The summary retains planned and attempted counts and
+marks the incomplete batch rejected. Detector misses from admitted trials still
+run the full precommitted matrix. Diagnose the admission failure before starting
+a new batch.
+
 ### Contained fault execution
 
 Fault runs are destructive experiments. Run them one at a time and acknowledge

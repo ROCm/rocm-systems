@@ -453,3 +453,9 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   not detector misses. Repetitions added no sensitivity evidence. The remaining
   FP8 queue was stopped from scheduling further trials while its active contained
   child finishes health checks. Next step is one isolated transform diagnosis.
+- Runner fix: stop a profile's remaining trials after failed mutation admission
+  or a missing result, retaining planned/attempted counts and rejected status.
+  Admitted detector misses still execute the full matrix. All 196 validation
+  tests pass, including regression cases for failed admission, missing results,
+  and continuing admitted misses. A single FP16 transform diagnostic is running
+  with a 900-second diagnostic deadline; no further matrix is scheduled.
