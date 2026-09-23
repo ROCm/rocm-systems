@@ -102,10 +102,12 @@ auto WriteBlobToTempFile(const std::vector<uint8_t>& blob,
 
 using AttrId = amd::smi::details::AMDGpuMetricAttributeId_t;
 
-// Serializes a dynamic (v1.9) gpu_metrics table of uint64 attributes, laid out
-// as the driver emits it: header, attribute count, then encoded id + values.
-auto BuildDynamicU64Blob(const std::vector<std::pair<AttrId, std::vector<uint64_t>>>& attrs)
-    -> std::vector<std::byte> {
+using AttrType = amd::smi::details::AMDGpuMetricAttributeType_t;
+
+// Serializes a dynamic (v1.9) gpu_metrics table, laid out as the driver emits
+// it: header, attribute count, then encoded id + values, all of one type.
+auto BuildDynamicBlob(const std::vector<std::pair<AttrId, std::vector<uint64_t>>>& attrs,
+                      AttrType type = AttrType::TYPE_UINT64) -> std::vector<std::byte> {
   std::vector<std::byte> blob;
   auto put = [&blob](const auto& v) {
     const auto* p = reinterpret_cast<const std::byte*>(&v);
@@ -114,10 +116,15 @@ auto BuildDynamicU64Blob(const std::vector<std::pair<AttrId, std::vector<uint64_
   put(amd::smi::details::AMDGpuDynamicMetricsHeader_v1_t{0, 1, 9});
   put(static_cast<uint32_t>(attrs.size()));
   for (const auto& [id, values] : attrs) {
-    put(amd::smi::details::amdgpu_metrics_encode_attr(
-        0, static_cast<uint64_t>(amd::smi::details::AMDGpuMetricAttributeType_t::TYPE_UINT64),
-        static_cast<uint64_t>(id), values.size()));
-    for (const auto v : values) put(v);
+    put(amd::smi::details::amdgpu_metrics_encode_attr(0, static_cast<uint64_t>(type),
+                                                      static_cast<uint64_t>(id), values.size()));
+    for (const auto v : values) {
+      if (type == AttrType::TYPE_UINT32) {
+        put(static_cast<uint32_t>(v));
+      } else {
+        put(v);
+      }
+    }
   }
   const auto size = static_cast<uint16_t>(blob.size());
   std::memcpy(blob.data(), &size, sizeof(size));
@@ -231,7 +238,7 @@ TEST(GpuUnit, XCPMetricDynamicVersionSupported) {
 // MI450 publishes one xGMI read/write data counter (its GPU-CPU link). It must
 // land in link 0 rather than be dropped, leaving every link "not reported".
 TEST(GpuUnit, DynamicMetricsXgmiSingleInstanceFillsFirstLink) {
-  const auto out = ToPublicMetrics(BuildDynamicU64Blob({
+  const auto out = ToPublicMetrics(BuildDynamicBlob({
       {AttrId::XGMI_READ_DATA_ACC, {449353}},
       {AttrId::XGMI_WRITE_DATA_ACC, {0}},
   }));
@@ -243,11 +250,37 @@ TEST(GpuUnit, DynamicMetricsXgmiSingleInstanceFillsFirstLink) {
 
 // Per-link arrays keep mapping element by element.
 TEST(GpuUnit, DynamicMetricsXgmiPerLinkArrayCopiesEachLink) {
-  const auto out = ToPublicMetrics(BuildDynamicU64Blob({
+  const auto out = ToPublicMetrics(BuildDynamicBlob({
       {AttrId::XGMI_READ_DATA_ACC, {10, 20, 30}},
   }));
   EXPECT_EQ(out.xgmi_read_data_acc[0], 10u);
   EXPECT_EQ(out.xgmi_read_data_acc[1], 20u);
   EXPECT_EQ(out.xgmi_read_data_acc[2], 30u);
   EXPECT_EQ(out.xgmi_read_data_acc[3], UINT64_MAX);
+}
+
+// A driver may declare the counter narrower than the public field; the value
+// still lands in link 0 rather than being dropped.
+TEST(GpuUnit, DynamicMetricsXgmiSingleInstanceNarrowerTypeFillsFirstLink) {
+  const auto out = ToPublicMetrics(
+      BuildDynamicBlob({{AttrId::XGMI_READ_DATA_ACC, {1234}}}, AttrType::TYPE_UINT32));
+  EXPECT_EQ(out.xgmi_read_data_acc[0], 1234u);
+  EXPECT_EQ(out.xgmi_read_data_acc[1], UINT64_MAX);
+}
+
+// A narrower all-ones "not reported" value must stay unavailable instead of
+// widening into a real-looking 4294967295.
+TEST(GpuUnit, DynamicMetricsXgmiSingleInstanceNarrowerUnsetStaysUnset) {
+  const auto out = ToPublicMetrics(
+      BuildDynamicBlob({{AttrId::XGMI_READ_DATA_ACC, {UINT32_MAX}}}, AttrType::TYPE_UINT32));
+  EXPECT_EQ(out.xgmi_read_data_acc[0], UINT64_MAX);
+}
+
+// A value wider than the public field must not be truncated into a
+// plausible-looking reading; a value that fits maps through.
+TEST(GpuUnit, DynamicMetricsSingleInstanceOutOfRangeStaysUnset) {
+  const auto wide = ToPublicMetrics(BuildDynamicBlob({{AttrId::XGMI_LINK_STATUS, {70000}}}));
+  EXPECT_EQ(wide.xgmi_link_status[0], UINT16_MAX);
+  const auto fits = ToPublicMetrics(BuildDynamicBlob({{AttrId::XGMI_LINK_STATUS, {1}}}));
+  EXPECT_EQ(fits.xgmi_link_status[0], 1u);
 }

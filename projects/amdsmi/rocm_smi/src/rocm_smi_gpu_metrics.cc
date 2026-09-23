@@ -2448,8 +2448,20 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBaseDynamic_t::copy_internal_to_externa
     auto v = std::get_if<std::vector<T>>(&r.m_value);
     if (!v) {
       // A single-instance row parses as a scalar (MI450's one xGMI data
-      // counter); it is element 0.
-      if (const auto* x = std::get_if<T>(&r.m_value)) dst[0] = *x;
+      // counter); it is element 0. The driver may declare another width, so
+      // keep its all-ones "not reported", and values that do not fit, unset.
+      std::visit(
+          [&](const auto& x) {
+            using S = std::decay_t<decltype(x)>;
+            if constexpr (std::is_unsigned_v<S>) {
+              bool unset = x == std::numeric_limits<S>::max();
+              if constexpr (sizeof(S) > sizeof(T)) {
+                unset = unset || x > std::numeric_limits<T>::max();
+              }
+              dst[0] = unset ? init_max_uint_types<T>() : static_cast<T>(x);
+            }
+          },
+          r.m_value);
       return;
     }
     const std::size_t n = std::min<std::size_t>(v->size(), cap);
