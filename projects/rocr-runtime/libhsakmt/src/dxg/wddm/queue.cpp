@@ -289,26 +289,18 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
   bool ret = device->CreateQueue(this, !native_aql_ ? reinterpret_cast<uint64_t>(_ring_rptr) : 0);
   assert(ret);
 
+  // Device-side enqueue rings this doorbell straight from the shader, so it must be GPU
+  // visible; the host path goes through hsaKmtQueueRingDoorbell and never reads it.
   GpuMemoryCreateInfo create_info{};
   create_info.size = dxg_runtime->page_size;
   create_info.domain = Wkmi::kSystem;
-  GpuMemory* gpu_mem = nullptr;
-  auto code = device->CreateGpuMemory(create_info, &gpu_mem);
-  assert(code == ErrorCode::Success);
-  amd_queue_mem_ = gpu_mem->GetGpuMemoryHandle();
-  amd_queue_ = reinterpret_cast<amd_queue_v2_t*>(gpu_mem->GpuAddress());
-
-  // Device-side enqueue rings this doorbell straight from the shader, so it must be GPU
-  // visible; the host path goes through hsaKmtQueueRingDoorbell and never reads it.
   GpuMemory* doorbell_mem = nullptr;
-  code = device->CreateGpuMemory(create_info, &doorbell_mem);
+  auto code = device->CreateGpuMemory(create_info, &doorbell_mem);
   assert(code == ErrorCode::Success);
   doorbell_mem_ = doorbell_mem->GetGpuMemoryHandle();
   doorbell_ptr_ = reinterpret_cast<uint64_t*>(doorbell_mem->GpuAddress());
   *doorbell_ptr_ = 0;
 
-  amd_queue_rocr_ =
-      (amd_queue_v2_t*)((char*)ring_rptr - offsetof(amd_queue_v2_t, read_dispatch_id));
   // Native AQL submission bypasses the PM4 translation thread.
   if (!native_aql_) {
     aql_to_pm4_thread_ = std::thread(AqlToPm4Thread, this);
@@ -329,17 +321,12 @@ ComputeQueue::~ComputeQueue() {
     aql_to_pm4_thread_.join();
   }
 
-  // doorbell_signal_->Release();
-
   device->DestroyQueue(this);
 
   if (scratch_base_) {
     auto scratch_gpu_mem = GpuMemory::Convert(scratch_mem_);
     delete scratch_gpu_mem;
   }
-
-  auto amd_queue_gpu_mem = GpuMemory::Convert(amd_queue_mem_);
-  delete amd_queue_gpu_mem;
 
   auto doorbell_gpu_mem = GpuMemory::Convert(doorbell_mem_);
   delete doorbell_gpu_mem;
@@ -451,47 +438,38 @@ void ComputeQueue::InitScratchSRD() {
   }
 
   // Update Queue's Scratch descriptor's property
-  amd_queue_->scratch_resource_descriptor[0] = srd0.u32All;
-  amd_queue_->scratch_resource_descriptor[1] = srd1_u32;
-  amd_queue_->scratch_resource_descriptor[2] = srd2.u32All;
-  amd_queue_->scratch_resource_descriptor[3] = srd3_u32;
+  amd_queue_rocr_->scratch_resource_descriptor[0] = srd0.u32All;
+  amd_queue_rocr_->scratch_resource_descriptor[1] = srd1_u32;
+  amd_queue_rocr_->scratch_resource_descriptor[2] = srd2.u32All;
+  amd_queue_rocr_->scratch_resource_descriptor[3] = srd3_u32;
 
-  // Populate flat scratch parameters in amd_queue_.
-  amd_queue_->scratch_backing_memory_location = scratch_base;
+  // Populate flat scratch parameters in amd_queue_rocr_.
+  amd_queue_rocr_->scratch_backing_memory_location = scratch_base;
 
   // For backwards compatibility this field records the per-lane scratch
   // for a 64 lane wavefront. If scratch was allocated for 32 lane waves
   // then the effective size for a 64 lane wave is halved.
-  amd_queue_->scratch_wave64_lane_byte_size = scratch_size_per_wave_ / 64;
+  amd_queue_rocr_->scratch_wave64_lane_byte_size = scratch_size_per_wave_ / 64;
 
   if (device->Major() < 11) {
     COMPUTE_TMPRING_SIZE tmpring_size;
     tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ / 1024;
     tmpring_size.bits.WAVES = scratch_waves_;
 
-    amd_queue_->compute_tmpring_size = tmpring_size.u32All;
+    amd_queue_rocr_->compute_tmpring_size = tmpring_size.u32All;
   } else if (device->Major() == 11) {
     COMPUTE_TMPRING_SIZE_GFX11 tmpring_size;
     tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ >> 8;
     tmpring_size.bits.WAVES = scratch_waves_ / device->NumShaderEngine();
 
-    amd_queue_->compute_tmpring_size = tmpring_size.u32All;
+    amd_queue_rocr_->compute_tmpring_size = tmpring_size.u32All;
   } else {
     COMPUTE_TMPRING_SIZE_GFX12 tmpring_size = {};
     tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ >> 8;
     tmpring_size.bits.WAVES = scratch_waves_ / device->NumShaderEngine();
 
-    amd_queue_->compute_tmpring_size = tmpring_size.u32All;
+    amd_queue_rocr_->compute_tmpring_size = tmpring_size.u32All;
   }
-
-  // Update the amd_queue_rocr_
-  amd_queue_rocr_->compute_tmpring_size = amd_queue_->compute_tmpring_size;
-  amd_queue_rocr_->scratch_resource_descriptor[0] = amd_queue_->scratch_resource_descriptor[0];
-  amd_queue_rocr_->scratch_resource_descriptor[1] = amd_queue_->scratch_resource_descriptor[1];
-  amd_queue_rocr_->scratch_resource_descriptor[2] = amd_queue_->scratch_resource_descriptor[2];
-  amd_queue_rocr_->scratch_resource_descriptor[3] = amd_queue_->scratch_resource_descriptor[3];
-  amd_queue_rocr_->scratch_backing_memory_location = amd_queue_->scratch_backing_memory_location;
-  amd_queue_rocr_->scratch_wave64_lane_byte_size = amd_queue_->scratch_wave64_lane_byte_size;
 
   return;
 }

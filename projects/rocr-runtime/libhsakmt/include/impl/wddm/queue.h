@@ -261,9 +261,7 @@ private:
   uint32_t ScratchSizePerWave() { return scratch_size_per_wave_; }
   uint64_t GetKernelObjAddr(uint64_t addr) const;
   void InitScratchSRD();
-  GpuMemoryHandle amd_queue_mem_;
   GpuMemory* amd_queue_memory_;     //!< Memory object associated with amd_queue_t structure from ROCr
-  amd_queue_v2_t *amd_queue_;
   amd_queue_v2_t *amd_queue_rocr_;  //!< AQL queue, allocated in rocr and pointing to the header
   uint64_t amd_queue_size_rocr_;    //!< Size of the AQL queue allocated in ROCR, including header
   GpuMemoryHandle doorbell_mem_;
