@@ -176,7 +176,7 @@ thread_data<Tp, Tag, MaxThreads>::instance()
 }
 
 template <typename Tp, typename Tag, size_t MaxThreads>
-typename thread_data<Tp, Tag, MaxThreads>::array_type&
+thread_data<Tp, Tag, MaxThreads>::array_type&
 thread_data<Tp, Tag, MaxThreads>::instances()
 {
     return private_instance()->m_data;
@@ -193,7 +193,7 @@ thread_data<Tp, Tag, MaxThreads>::instance(construct_on_thread&& _t, Args&&... _
 
 template <typename Tp, typename Tag, size_t MaxThreads>
 template <typename... Args>
-typename thread_data<Tp, Tag, MaxThreads>::array_type&
+thread_data<Tp, Tag, MaxThreads>::array_type&
 thread_data<Tp, Tag, MaxThreads>::instances(construct_on_init, Args&&... _args)
 {
     static auto& _v = [&]() -> array_type& {
@@ -560,9 +560,9 @@ struct component_bundle_cache_impl
     using allocator_type = tim::data::ring_buffer_allocator<bundle_type>;
     using array_type     = std::vector<bundle_type*>;
 
-    using iterator         = typename array_type::iterator;
-    using const_iterator   = typename array_type::const_iterator;
-    using reverse_iterator = typename array_type::reverse_iterator;
+    using iterator         = array_type::iterator;
+    using const_iterator   = array_type::const_iterator;
+    using reverse_iterator = array_type::reverse_iterator;
 
     component_bundle_cache_impl()  = default;
     ~component_bundle_cache_impl() = default;

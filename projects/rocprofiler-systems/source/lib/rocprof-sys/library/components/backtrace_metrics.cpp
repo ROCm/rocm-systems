@@ -71,7 +71,7 @@ namespace rocprofsys
 {
 namespace component
 {
-using hw_counters           = typename backtrace_metrics::hw_counters;
+using hw_counters           = backtrace_metrics::hw_counters;
 using signal_type_instances = thread_data<std::set<int>, category::sampling>;
 using backtrace_metrics_init_instances =
     thread_data<backtrace_metrics, category::sampling>;

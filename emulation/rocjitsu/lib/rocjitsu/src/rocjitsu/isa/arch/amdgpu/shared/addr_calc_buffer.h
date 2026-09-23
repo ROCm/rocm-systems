@@ -40,6 +40,40 @@ constexpr uint64_t buffer_total_offset(uint32_t index, uint32_t stride, uint32_t
   return static_cast<uint64_t>(index) * stride + offset_part + soffset;
 }
 
+/// @brief RDNA V# OOB_SELECT policies from SQ_BUF_RSRC_WORD3[29:28].
+enum class RdnaBufferOobSelect : uint32_t {
+  IndexAndOffset = 0,
+  IndexOnly = 1,
+  NumRecordsZero = 2,
+  Complete = 3,
+};
+
+/// @brief Return whether one RDNA buffer payload passes the selected bounds check.
+/// @details COMPLETE is the mode used by compiler-generated raw buffers. Unlike
+/// the legacy index/offset modes, it checks the final byte range, including the
+/// scalar offset, against NUM_RECORDS. This prevents a coalesced request from
+/// turning lanes that hardware would zero/drop into a VM fault at the end of a
+/// sub-page allocation.
+constexpr bool rdna_buffer_access_in_range(RdnaBufferOobSelect select, uint32_t index,
+                                           uint32_t stride, uint32_t offset_part, uint32_t soffset,
+                                           uint32_t num_records, uint64_t payload) {
+  switch (select) {
+  case RdnaBufferOobSelect::IndexAndOffset:
+    if (stride == 0)
+      return offset_part < num_records;
+    return index < num_records && offset_part < stride;
+  case RdnaBufferOobSelect::IndexOnly:
+    return index < num_records;
+  case RdnaBufferOobSelect::NumRecordsZero:
+    return num_records != 0;
+  case RdnaBufferOobSelect::Complete: {
+    const uint64_t total_offset = buffer_total_offset(index, stride, offset_part, soffset);
+    return total_offset <= num_records && payload <= num_records - total_offset;
+  }
+  }
+  return false;
+}
+
 /// @brief GFX9 MUBUF buffer_{load,store}_format[_d16][_hi]_* opcodes.
 constexpr bool gfx9_mubuf_is_format_op(uint32_t op) { return op <= 15 || op == 38 || op == 39; }
 
@@ -200,12 +234,12 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   //
   // Address = base + soffset + (index * stride) + voffset + inst_offset
   //
-  // RDNA OOB modes (srd[3] bit 31); GFX9/CDNA: gfx9_buffer_lane_offset, gfx9_buffer_elems_in_range.
-  //   1 = raw:        OOB if (voffset + inst_offset) >= num_records
-  //   0 = structured: OOB if stride > 0 ? (index >= num_records)
-  //                              else    (voffset + inst_offset) >= num_records
+  // RDNA OOB_SELECT is srd[3][29:28]. COMPLETE checks the entire final
+  // byte range; the other modes retain their index/offset-specific checks.
+  // GFX9/CDNA instead use gfx9_buffer_lane_offset and
+  // gfx9_buffer_elems_in_range.
   uint32_t stride = (srd1 >> 16) & 0x3FFF;
-  bool oob_raw = (srd3 >> 31) & 1;
+  const auto rdna_oob_select = static_cast<RdnaBufferOobSelect>((srd3 >> 28) & 0x3);
   const bool gfx9 = arch_is_cdna_4_or_lower(wf.cu().arch());
   const Gfx9BufferResource gfx9_srd = gfx9_buffer_resource(srd1, srd3);
   const bool format_op = gfx9_mubuf_is_format_op(inst.op);
@@ -249,12 +283,11 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
                                            .index = index,
                                            .byte_offset = uint64_t{offset_part} + soffset_val},
                                           per_element);
-    } else if (oob_raw) {
-      oob = offset_part >= num_records;
-    } else if (stride > 0) {
-      oob = index >= num_records;
     } else {
-      oob = offset_part >= num_records;
+      const uint64_t payload =
+          std::max<uint64_t>(1, static_cast<uint64_t>(d.elem_size) * d.num_elems);
+      oob = !rdna_buffer_access_in_range(rdna_oob_select, index, stride, offset_part, soffset_val,
+                                         num_records, payload);
     }
     if (oob) {
       d.lane_mask &= ~(1ULL << lane);
@@ -317,7 +350,7 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
   }
   uint32_t num_records = srd2;
   uint32_t stride = (srd1 >> 16) & 0x3FFF;
-  bool oob_raw = (srd3 >> 31) & 1;
+  const auto rdna_oob_select = static_cast<RdnaBufferOobSelect>((srd3 >> 28) & 0x3);
   const bool gfx9 = arch_is_cdna_4_or_lower(wf.cu().arch());
   const Gfx9BufferResource gfx9_srd = gfx9_buffer_resource(srd1, srd3);
   if (gfx9)
@@ -356,12 +389,11 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
                                            .index = index,
                                            .byte_offset = uint64_t{offset_part} + soffset_val},
                                           /*per_element=*/false);
-    } else if (oob_raw) {
-      oob = offset_part >= num_records;
-    } else if (stride > 0) {
-      oob = index >= num_records;
     } else {
-      oob = offset_part >= num_records;
+      const uint64_t payload =
+          std::max<uint64_t>(1, static_cast<uint64_t>(d.elem_size) * d.num_elems);
+      oob = !rdna_buffer_access_in_range(rdna_oob_select, index, stride, offset_part, soffset_val,
+                                         num_records, payload);
     }
     if (oob) {
       d.lane_mask &= ~(1ULL << lane);
