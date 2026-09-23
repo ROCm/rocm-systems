@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Multi-segment DMA-BUF registration tests for ncclRmaIbProxy (AIRUNTIME-2351).
-// Run with NCCL_NET=IB NCCL_CUMEM_ENABLE=1.
+// Multi-segment DMA-BUF registration tests for ncclRmaIbProxy / IbCastRmaIbProxy
+// (AIRUNTIME-2351). Run with NCCL_NET=IB or NCCL_NET=IB-CAST and NCCL_CUMEM_ENABLE=1.
 
 #ifdef MPI_TESTS_ENABLED
 #ifdef RCCL_HAS_RMA_IB_PROXY
@@ -1287,6 +1287,13 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalOutOfRangeRejectedNoCorruption)
                                    /*signalOff=*/4, sigMh, 0,
                                    NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req))
             << "unaligned signal atomic must be rejected";
+        // 8-byte aligned offset past the end of the signal window. A
+        // cross-segment 8-byte atomic cannot exist on an 8-aligned boundary.
+        EXPECT_EQ(ncclInvalidArgument,
+                  rma_->iputSignal(rmaCtx_, 0, 0, sendMh, /*size=*/0, 0, recvMh, 1,
+                                   /*signalOff=*/kSignalSize, sigMh, 0,
+                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req))
+            << "signal offset at the window end must be rejected";
         EXPECT_EQ(req, nullptr) << "rejected iputSignal must not produce a request";
     }
     Barrier();

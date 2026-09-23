@@ -18,6 +18,7 @@
 
 // Pure helpers under test (no ibverbs / RCCL deps).
 #include "../src/transport/net_ib/multiseg.h"
+#include "../src/transport/net_ib/rma_multiseg.h"
 
 namespace {
 
@@ -97,6 +98,17 @@ TEST(NetIbMultiSeg, MultiSegRegistrationAcceptedWithPeerCapability) {
 TEST(NetIbMultiSeg, SingleSegmentRegistrationNeverDeclined) {
     EXPECT_FALSE(ncclIbDeclineMultiSegRegistration(0u, 1));
     EXPECT_FALSE(ncclIbDeclineMultiSegRegistration(NCCL_IB_CAP_MULTISEG, 1));
+}
+
+TEST(NetIbMultiSeg, RmaQueueCreditsBoundSegmentedChains) {
+    constexpr int sendDepth = NCCL_RMA_MAX_SEND_QP_WRS;
+    constexpr int flushDepth = NCCL_RMA_MAX_FLUSH_QP_WRS;
+    constexpr int requests = NCCL_RMA_MAX_INFLIGHT_REQUESTS;
+    EXPECT_TRUE(ncclRmaWrCreditsAvailable(2 * requests, 0, sendDepth));
+    EXPECT_TRUE(ncclRmaWrCreditsAvailable(2 * (requests - 1), NCCL_RMA_MAX_SIGNAL_WRS, sendDepth));
+    EXPECT_FALSE(ncclRmaWrCreditsAvailable(2 * requests, NCCL_RMA_MAX_SIGNAL_WRS, sendDepth));
+    EXPECT_TRUE(ncclRmaWrCreditsAvailable(requests - 1, NCCL_RMA_MAX_FLUSH_WRS, flushDepth));
+    EXPECT_FALSE(ncclRmaWrCreditsAvailable(requests, NCCL_RMA_MAX_FLUSH_WRS, flushDepth));
 }
 
 // === Segment selection and uniformity helpers ===============================
