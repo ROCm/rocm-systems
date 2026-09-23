@@ -109,6 +109,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Affects `--afid --folder`, `--afid --cper-file`, and `--cper`, which previously exited `0`.
   - The exit code is the underlying `AMDSMI_STATUS_*`, for example `43`. When files fail with different codes, the command exits `205`.
   - The failing file shows `[AMDSMI_STATUS_<name>] <message>` in place of its AFIDs.
+  - A record that decodes successfully but carries no AFIDs (e.g. a corrected entry) shows `N/A` in place of its AFIDs.
   - `--json` and `--csv` gain `status`, `message`, and `code` fields. Existing fields are unchanged.
   - `--afid --csv` now emits CSV instead of the human-readable table.
 
