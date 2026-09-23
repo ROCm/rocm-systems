@@ -255,17 +255,34 @@ struct uchar2Holder {
 } __attribute__((aligned(8)));
 
 __device__ static inline unsigned int __byte_perm(unsigned int x, unsigned int y, unsigned int s) {
-  struct uchar2Holder cHoldVal;
-  struct ucharHolder cHoldKey;
-  cHoldKey.ui = s;
-  cHoldVal.ui[0] = x;
-  cHoldVal.ui[1] = y;
-  unsigned int result;
-  result = cHoldVal.c[cHoldKey.c[0] & 0x07];
-  result += (cHoldVal.c[(cHoldKey.c[0] & 0x70) >> 4] << 8);
-  result += (cHoldVal.c[cHoldKey.c[1] & 0x07] << 16);
-  result += (cHoldVal.c[(cHoldKey.c[1] & 0x70) >> 4] << 24);
-  return result;
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_perm)) {
+    // v_perm_b32 takes one selector byte (8 bits) per output byte and indexes {src0, src1} as
+    // in[7:4] = src0, in[3:0] = src1.
+    // However, __byte_perm takes one selector nibble (4 bits) per output byte and indexes {src0, src1}
+    // as in[0:3] = src0, in[4:7] = src1
+    // Therefore, we spread the four nibbles of s into four bytes and pass x as the second operand.
+    //
+    //
+    // The first perm produces {0, s[15:8], 0, s[7:0]}
+    // The shift-or then moves each odd nibble into its own byte, and the & mask drops bit 3 of
+    // every nibble, which __byte_perm ignores, as it exceeds the indexing of (0-7).
+    unsigned int sel = __builtin_amdgcn_perm(0u, s, 0x04010400u);
+    sel = (sel | (sel << 4)) & 0x07070707u;
+    return __builtin_amdgcn_perm(y, x, sel);
+  } else {
+    // Pre-gfx8 fallback
+    struct uchar2Holder cHoldVal;
+    struct ucharHolder cHoldKey;
+    cHoldKey.ui = s;
+    cHoldVal.ui[0] = x;
+    cHoldVal.ui[1] = y;
+    unsigned int result;
+    result = cHoldVal.c[cHoldKey.c[0] & 0x07];
+    result += (cHoldVal.c[(cHoldKey.c[0] & 0x70) >> 4] << 8);
+    result += (cHoldVal.c[cHoldKey.c[1] & 0x07] << 16);
+    result += (cHoldVal.c[(cHoldKey.c[1] & 0x70) >> 4] << 24);
+    return result;
+  }
 }
 
 __device__ static inline int __hadd(int x, int y) { return ((long long)x + (long long)y) >> 1; }
