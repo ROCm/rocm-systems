@@ -924,6 +924,47 @@ def install_tensor_method_wrappers() -> None:
         )
 
 
+def _cuda_init_wrapper(
+    init: Callable[..., Any], marker_name: str
+) -> Callable[..., Any]:
+    """Wrap a cuda class __init__. Event and Stream construct in __new__."""
+    if init is object.__init__:
+        return _marker_only_init_wrapper(marker_name, backend=_BACKEND_NAME)
+    return roctx_wrapper(init, marker_name, backend=_BACKEND_NAME)
+
+
+def _wrap_one_cuda_class_init(cuda_mod: object, cls_name: str) -> Optional[str]:
+    """Patch ``torch.cuda.{cls_name}.__init__``. Return the marker name on success."""
+    cls = getattr(cuda_mod, cls_name, None)
+    if cls is None:
+        return None
+    init = getattr(cls, "__init__", None)
+    if init is None or getattr(init, "_roctx_wrapped", False):
+        return None
+    marker_name = f"torch.cuda.{cls_name}"
+    try:
+        cls.__init__ = _cuda_init_wrapper(init, marker_name)
+    except Exception as exc:
+        console_warning(
+            "ml api trace",
+            f"Could not patch torch.cuda.{cls_name}.__init__: {exc}",
+        )
+        return None
+    return marker_name
+
+
+def _wrap_cuda_event_stream_inits(cuda_mod: Optional[object]) -> list:
+    """Patch torch.cuda.Event and Stream __init__. Return wrapped marker names."""
+    if cuda_mod is None:
+        return []
+    wrapped_names = []
+    for cls_name in ("Event", "Stream"):
+        marker_name = _wrap_one_cuda_class_init(cuda_mod, cls_name)
+        if marker_name is not None:
+            wrapped_names.append(marker_name)
+    return wrapped_names
+
+
 def install_extra_structural_wrappers() -> None:
     """Wrap EXTRA_STRUCTURAL_WRAPS, tensor methods, cuda.{Event,Stream}."""
     wrapped = []
@@ -943,37 +984,7 @@ def install_extra_structural_wrappers() -> None:
             wrapped.append(marker_name)
 
     install_tensor_method_wrappers()
-
-    cuda_mod = _STATE.cuda_mod
-    if cuda_mod is not None:
-        for cls_name in ("Event", "Stream"):
-            cls = getattr(cuda_mod, cls_name, None)
-            if cls is None:
-                continue
-            init = getattr(cls, "__init__", None)
-            if init is None or getattr(init, "_roctx_wrapped", False):
-                continue
-            try:
-                # cuda.{Event,Stream} construct in __new__; __init__ is
-                # inherited from object.
-                if init is object.__init__:
-                    cls.__init__ = _marker_only_init_wrapper(
-                        f"torch.cuda.{cls_name}",
-                        backend=_BACKEND_NAME,
-                    )
-                else:
-                    wrapped_init = roctx_wrapper(
-                        init,
-                        f"torch.cuda.{cls_name}",
-                        backend=_BACKEND_NAME,
-                    )
-                    cls.__init__ = wrapped_init
-                wrapped.append(f"torch.cuda.{cls_name}")
-            except Exception as exc:
-                console_warning(
-                    "ml api trace",
-                    f"Could not patch torch.cuda.{cls_name}.__init__: {exc}",
-                )
+    wrapped.extend(_wrap_cuda_event_stream_inits(_STATE.cuda_mod))
 
     try:
         if install_function_apply_wrappers():
