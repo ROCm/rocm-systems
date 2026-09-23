@@ -21,7 +21,7 @@ using cuid::gim::GimDeviceEntry;
 namespace {
 
 bool gim_dev_present() {
-  struct stat st {};
+  struct stat st{};
   return ::stat("/dev/gim-smi0", &st) == 0;
 }
 
@@ -174,11 +174,10 @@ void TestGimDeviceEnumeration::Run() {
 
   std::set<std::string> seen_bdfs;
   std::set<uint64_t> seen_serials;
-  for (const auto &dev : devices) {
+  for (const auto& dev : devices) {
     // Canonical "dddd:bb:dd.f" is exactly 12 characters and must be unique.
     EXPECT_EQ(dev.bdf.size(), 12u) << "malformed BDF: '" << dev.bdf << "'";
-    EXPECT_NE(dev.bdf.find(':'), std::string::npos)
-        << "malformed BDF: '" << dev.bdf << "'";
+    EXPECT_NE(dev.bdf.find(':'), std::string::npos) << "malformed BDF: '" << dev.bdf << "'";
     EXPECT_TRUE(seen_bdfs.insert(dev.bdf).second)
         << "duplicate BDF indicates a wrong ABI stride: " << dev.bdf;
 
@@ -190,7 +189,7 @@ void TestGimDeviceEnumeration::Run() {
 
     uint64_t serial = 0;
     EXPECT_TRUE(GimClient::parse_asic_serial(info.asic_serial, serial))
-        << "unparseable serial '" << info.asic_serial << "' for " << dev.bdf;
+        << "unparsable serial '" << info.asic_serial << "' for " << dev.bdf;
     // The per-GPU ASIC serial is the CUID hardware fingerprint; duplicates
     // would collapse multiple GPUs into a single CUID.
     EXPECT_TRUE(seen_serials.insert(serial).second)

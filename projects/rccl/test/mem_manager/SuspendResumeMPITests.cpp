@@ -63,6 +63,7 @@
 #include "DeviceBufferHelpers.hpp"
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
+#include "SymmetricMemPrereq.hpp"
 #include "TestChecks.hpp"
 
 #include <algorithm>
@@ -88,6 +89,17 @@
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
+
+static ncclResult_t ncclMemUntrack(struct ncclMemManager* manager, void* ptr, size_t size)
+{
+    struct ncclMemUntrackInfo info = {};
+    ncclResult_t r = ncclMemUntrackDynamic(manager, ptr, &info);
+    if(r != ncclSuccess)
+        return r;
+    if(info.memType == ncclMemPersist)
+        return ncclMemUntrackPersist(manager, ptr, size);
+    return ncclSuccess;
+}
 
 // ---------------------------------------------------------------------------
 // VMM helpers
@@ -422,6 +434,13 @@ protected:
         if (!validateTestPrerequisites(/*min_processes=*/1, kNoProcessLimit)) {
             GTEST_SKIP() << "AnyRanks suite needs at least 1 rank";
         }
+        // Gate in SetUp so every MPI rank skips the whole test before entering
+        // any bootstrap barriers. GTEST_SKIP inside allocateVmmPosixFd only
+        // returned from that helper, so the caller continued with an empty
+        // allocation and peer-coupled tests deadlocked.
+        if (!ncclCuMemRuntimeSupported()) {
+            GTEST_SKIP() << "HIP VMM/posix-fd not supported on this platform";
+        }
         ASSERT_EQ(createTestCommunicator(), ncclSuccess);
     }
 };
@@ -650,6 +669,9 @@ protected:
         MPITestBase::SetUp();
         if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2)) {
             GTEST_SKIP() << "Two-rank suite, run with mpirun -np 2";
+        }
+        if (!ncclCuMemRuntimeSupported()) {
+            GTEST_SKIP() << "HIP VMM/posix-fd not supported on this platform";
         }
         ASSERT_EQ(createTestCommunicator(), ncclSuccess);
     }

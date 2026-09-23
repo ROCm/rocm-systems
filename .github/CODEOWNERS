@@ -7,10 +7,12 @@
 # Project-specific ownership
 /projects/amdsmi/                                                     @ROCm/smi-reviewers
 /projects/clr/                                                        @ROCm/clr-reviewers
+/projects/clr/hipamd/src/hrr/                                         @ROCm/clr-reviewers @ROCm/hrr-reviewers
 /projects/hip/                                                        @ROCm/hip-reviewers
 /projects/hipfile/                                                    @ROCm/hipfile-reviewers
 /projects/hipother/                                                   @ROCm/hipother-reviewers
 /projects/hip-tests/                                                  @ROCm/hip-tests-reviewers
+/projects/hrr/                                                        @ROCm/hrr-reviewers
 /projects/rccl/                                                       @ROCm/rccl-reviewers @ROCm/rccl-leads
 /projects/rccl/src/include/api_trace.h                                @ROCm/rccl-reviewers @ROCm/rccl-leads @ROCm/ROCM-DevTools-Team
 /projects/rccl/tools/scripts/test_runner/configs/ci-precheckin.json   @ROCm/rccl-ci
@@ -32,6 +34,8 @@
 # Language runtime build infra code owners
 /projects/clr/**/*.cmake                                              @ROCm/clr-reviewers @ROCm/lrt-build-infra
 /projects/clr/**/CMakeLists.txt                                       @ROCm/clr-reviewers @ROCm/lrt-build-infra
+/projects/clr/hipamd/src/hrr/**/*.cmake                               @ROCm/clr-reviewers @ROCm/hrr-reviewers @ROCm/lrt-build-infra
+/projects/clr/hipamd/src/hrr/**/CMakeLists.txt                        @ROCm/clr-reviewers @ROCm/hrr-reviewers @ROCm/lrt-build-infra
 /projects/hip/**/*.cmake                                              @ROCm/hip-reviewers @ROCm/lrt-build-infra
 /projects/hip/**/CMakeLists.txt                                       @ROCm/hip-reviewers @ROCm/lrt-build-infra
 /projects/hipother/**/*.cmake                                         @ROCm/hipother-reviewers @ROCm/lrt-build-infra
@@ -131,3 +135,6 @@
 /projects/hipfile/docs/                                               @ROCm/hipfile-docs-reviewers @ROCm/hipfile-reviewers
 
 /projects/rocprof-trace-decoder/**/*.md                               @ROCm/rocm-devtools-team @ROCm/rocm-documentation
+
+# Runtimes
+/runtimes/                                                            @atgutier @saleelk

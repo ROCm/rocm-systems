@@ -148,7 +148,7 @@ void check_int_case(const IntCase &c, uint64_t exec, uint32_t clamp) {
       cu->write_vgpr(vb + kDstVgpr, lane, DST_SENTINEL);
     }
     wf->set_exec(exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);
@@ -235,7 +235,7 @@ uint32_t run_modern_dot4(rj_code_arch_t arch, uint32_t opcode, uint32_t src0_val
     cu->write_vgpr(vb + kDstVgpr, lane, DST_SENTINEL);
   }
   wf->set_exec(1);
-  cu->execute_instruction(inst, *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
   const uint32_t result = cu->read_vgpr(vb + kDstVgpr, 0);
   delete inst;
   return result;
@@ -337,7 +337,7 @@ void check_f16_case(uint64_t exec, uint32_t neg, uint32_t neg_hi, uint32_t clamp
       cu->write_vgpr(vb + kDstVgpr, lane, DST_SENTINEL);
     }
     wf->set_exec(exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);

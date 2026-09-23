@@ -1,14 +1,15 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_KMD_LINUX_SIMULATED_KFD_H_
-#define ROCJITSU_KMD_LINUX_SIMULATED_KFD_H_
+#pragma once
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
+#include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
@@ -27,6 +28,7 @@ RJ_DIAGNOSTIC_POP
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -77,6 +79,10 @@ struct IpcObject {
 /// shared mutable state.
 class SimulatedKfd : public LinuxKfd {
 public:
+  /// Minimum backing descriptor requested when the process limit permits it.
+  /// Shared with the interposer so its early table growth covers this range.
+  static constexpr int kBackingFdMin = 4096;
+
   /// @brief Test seam invoked between procfs authorization and pidfd revalidation.
   using DebugIdentityValidationHook = std::function<void()>;
 
@@ -125,6 +131,38 @@ public:
   uint32_t open_process(pid_t client_pid = 0);
   void set_process_client_pid(uint32_t process_id, pid_t client_pid);
 
+  /// @brief Binds one GPU's memory to this driver for fault reporting.
+  /// @details Every GPU has its own GpuMemory, and the report has to name the
+  /// device that faulted: the runtime maps gpu_id to a node and surfaces it, so
+  /// a shared reporter that guessed would misattribute a fault from any device
+  /// but the first.
+  class GpuFaultReporter : public amdgpu::MemoryFaultReporter {
+  public:
+    GpuFaultReporter(SimulatedKfd *driver, uint32_t gpu_id, std::shared_ptr<KfdProcess> process)
+        : driver_(driver), gpu_id_(gpu_id), process_(std::move(process)) {}
+
+    void report_memory_fault(uint32_t vmid, uint64_t addr,
+                             amdgpu::MemoryFaultCause cause) override {
+      if (process_ != nullptr && process_->process_id() == vmid)
+        driver_->report_memory_fault(process_, addr, gpu_id_, cause);
+    }
+
+  private:
+    SimulatedKfd *driver_ = nullptr;
+    uint32_t gpu_id_ = 0;
+    std::shared_ptr<KfdProcess> process_;
+  };
+
+  /// @brief Deliver a GPU memory violation to the faulting process.
+  /// @details Hardware raises a VM fault and KFD reports it as an event of type
+  /// KFD_IOC_EVENT_MEMORY; the runtime parks a handler thread on that event and
+  /// decides whether to abort. Emulating the report rather than choosing a
+  /// policy here is what makes an invalid GPU access behave as it would on
+  /// silicon. A process that registered no such event gets a warning instead,
+  /// because the violation would otherwise vanish silently.
+  void report_memory_fault(const std::shared_ptr<KfdProcess> &process, uint64_t addr,
+                           uint32_t gpu_id, amdgpu::MemoryFaultCause cause);
+
   int ioctl(uint32_t process_id, unsigned long request, void *arg, int *target_mem_fd = nullptr,
             int target_proc_fd = -1);
   void *mmap(uint32_t process_id, void *addr, size_t length, int prot, int flags, off_t offset);
@@ -157,6 +195,10 @@ public:
 
   uint32_t gpu_id() const { return gpus_.empty() ? 0 : gpus_[0].gpu_id; }
   uint32_t num_gpus() const { return static_cast<uint32_t>(gpus_.size()); }
+  /// @brief KFD gpu_id of the device at @p index, for callers that must name one.
+  uint32_t gpu_id_at(uint32_t index) const {
+    return index < gpus_.size() ? gpus_[index].gpu_id : 0;
+  }
   const Sysfs &topology() const { return topology_; }
   std::string topology_path() const override { return topology_.path(); }
   std::string drm_path() const override { return topology_.drm_path(); }
@@ -241,6 +283,10 @@ public:
   struct GpuDevice {
     SoC *soc = nullptr;
     uint32_t gpu_id = 0;
+    /// Legacy KFD binding factory layered over the frontend-neutral VM service.
+    std::unique_ptr<amdgpu::LegacyGpuVmAdapter> legacy_vm;
+    /// One revocable route owned by this frontend and carried only by its queues.
+    amdgpu::InterruptSubscription interrupt_subscription;
     bool cps_initialized = false;
     /// Whether the "no CWSR layout for this architecture" warning has been
     /// logged for this GPU. The check now runs per faulting access rather than
@@ -252,6 +298,12 @@ public:
   };
 
 private:
+  /// @brief Publish one process to every GPU memory/VM service atomically.
+  /// @details The caller holds process_mutex_. A failed address-space
+  /// registration unwinds every memory and VM registration made for @p proc.
+  [[nodiscard]] bool register_process_address_spaces(const std::shared_ptr<KfdProcess> &proc,
+                                                     pid_t client_pid, bool passthrough);
+
   /// @brief Look up the local-mode process.
   std::shared_ptr<KfdProcess> find_local_process() const;
 
@@ -275,7 +327,8 @@ private:
   }
 
   void map_to_gpu(KfdProcess &proc, uint64_t gpu_va, void *host_ptr, size_t size,
-                  amdgpu::Mtype mtype = amdgpu::Mtype::RW);
+                  amdgpu::Mtype mtype = amdgpu::Mtype::RW,
+                  KfdProcess::HostExtentOwner owner = KfdProcess::HostExtentOwner::Application);
   void unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size);
 
   void update_cp_doorbell_base(uint32_t gpu_ordinal, uint32_t process_id, void *base);
@@ -302,6 +355,7 @@ private:
   int unmap_memory_ioctl(KfdProcess &proc, void *arg);
   int create_queue_ioctl(KfdProcess &proc, void *arg);
   int update_queue_ioctl(KfdProcess &proc, void *arg);
+  int set_cu_mask_ioctl(KfdProcess &proc, void *arg);
   int destroy_queue_ioctl(KfdProcess &proc, void *arg);
   int create_event_ioctl(KfdProcess &proc, void *arg);
   int set_memory_policy_ioctl(KfdProcess &proc, void *arg);
@@ -495,7 +549,11 @@ private:
   /// state under alloc_mutex_, release it, then call the CP.
   mutable std::mutex process_mutex_;
   std::unordered_map<uint32_t, std::shared_ptr<KfdProcess>> processes_;
-  uint32_t next_process_id_ = 1;
+  // Hardware-visible VMIDs/PASIDs share the SoC namespace even when tests or
+  // an embedder attach more than one KFD frontend to that SoC. A per-driver
+  // counter would let two live frontends publish the same numeric identity and
+  // silently replace each other's memory binding.
+  inline static std::atomic<uint32_t> next_process_id_{1};
 
   /// @brief Debugger sessions keyed by the target inferior's Linux pid.
   /// @details Decoupled from KfdProcess so a debugger (rocgdb) can enable a
@@ -570,5 +628,3 @@ private:
 };
 
 } // namespace rocjitsu
-
-#endif // ROCJITSU_KMD_LINUX_SIMULATED_KFD_H_

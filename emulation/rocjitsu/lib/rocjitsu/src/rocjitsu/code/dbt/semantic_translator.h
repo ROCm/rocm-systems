@@ -31,7 +31,7 @@
 #include <span>
 #include <vector>
 
-#include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/dbt/processor_revision.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
 #include "rocjitsu/code/rj_code.h"

@@ -44,9 +44,12 @@ struct WavefrontSnapshot {
   uint64_t exec = 0;
   uint64_t vcc = 0;
   uint32_t status = 0;
-  uint32_t mode_raw = 0;            ///< MODE register at halt.
-  uint8_t vgpr_msb_mode = 0;        ///< Decoded s_set_vgpr_msb layout at halt.
-  uint64_t lds_size_bytes = 0;      ///< Size of the LDS region visible to this wave.
+  uint32_t mode_raw = 0;       ///< MODE register at halt.
+  uint8_t vgpr_msb_mode = 0;   ///< Decoded s_set_vgpr_msb layout at halt.
+  uint64_t lds_size_bytes = 0; ///< Size of the LDS region visible to this wave.
+  uint64_t scratch_base = 0;   ///< Per-wave scratch base after dispatch setup.
+  uint32_t scratch_scoreboard_id = 0;
+  uint32_t shader_engine_id = 0;
   simdojo::ComponentID cu_id = 0;   ///< Originating CU component id (for per-CU grouping).
   std::vector<uint32_t> sgprs;      ///< Full physical SGPR block (sgprs_per_wf).
   std::array<uint32_t, 16> ttmps{}; ///< Trap-temporary file (TTMP0-15).
@@ -125,6 +128,9 @@ public:
     s.mode_raw = wf.mode_raw();
     s.vgpr_msb_mode = wf.vgpr_msb_mode();
     s.lds_size_bytes = wf.lds().size_bytes();
+    s.scratch_base = wf.scratch_base();
+    s.scratch_scoreboard_id = wf.scratch_scoreboard_id();
+    s.shader_engine_id = wf.shader_engine_id();
     s.cu_id = wf.cu().id();
 
     // Read the live register file through the instruction-facing facade rather
@@ -192,6 +198,8 @@ public:
     counts_[wf.cu().id()]++;
     total_++;
   }
+
+  bool requires_serial_hot_hooks() const override { return false; }
 
   uint32_t total() const {
     std::lock_guard<std::mutex> lk(mutex_);

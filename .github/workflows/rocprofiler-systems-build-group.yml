@@ -469,7 +469,7 @@ jobs:
           max_attempts: 5
           shell: bash
           command: |
-            dnf install -y --enablerepo=crb tbb-devel
+            dnf install -y --enablerepo=crb tbb-devel fmt-devel spdlog-devel
             dnf install -y binutils-devel
             dnf clean all
 

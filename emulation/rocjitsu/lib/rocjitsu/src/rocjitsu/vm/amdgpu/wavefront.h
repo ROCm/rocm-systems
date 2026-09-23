@@ -4,12 +4,13 @@
 /// @file wavefront.h
 /// @brief AMDGPU wavefront execution state and ISA-parameterized wavefront.
 
-#ifndef ROCJITSU_VM_AMDGPU_WAVEFRONT_H_
-#define ROCJITSU_VM_AMDGPU_WAVEFRONT_H_
+#pragma once
 
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/vm/amdgpu/gpu_handles.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/plugins/wavefront_state.h"
@@ -19,6 +20,7 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -29,14 +31,23 @@ namespace amdgpu {
 // Forward declaration - wavefront accesses registers through its CU.
 class ComputeUnitCore;
 class Lds;
+enum class VmAccessOutcome : uint8_t;
 
 /// @brief Wavefront execution state.
 enum class WfState : uint8_t {
-  HALTED,  ///< Slot is currently unused and is available for dispatch.
-  RUNNING, ///< In a running state and can be considered for scheduling.
-  WAITCNT, ///< Stalled at a waitcnt.
-  BARRIER, ///< Stalled at a barrier.
-  ENDING,  ///< s_endpgm executed but outstanding memory ops are draining.
+  HALTED,   ///< Slot is currently unused and is available for dispatch.
+  RUNNING,  ///< In a running state and can be considered for scheduling.
+  WAITCNT,  ///< Stalled at a waitcnt.
+  VM_RETRY, ///< A prepared memory operation is waiting for backing availability.
+  BARRIER,  ///< Stalled at a barrier.
+  ENDING,   ///< s_endpgm executed but outstanding memory ops are draining.
+};
+
+/// @brief Simulator execution failures that are not architectural wave state.
+enum class InstructionExecutionError : uint8_t {
+  None,
+  UnsupportedOperandValue,
+  UnimplementedInstruction,
 };
 
 /// @brief Allocation slice within a register file.
@@ -187,6 +198,9 @@ public:
   /// @returns Permanent slot index.
   uint32_t wf_id() const { return wf_id_; }
 
+  /// @brief Generation of the current occupant of this reusable wave slot.
+  uint64_t dispatch_generation() const { return dispatch_generation_; }
+
   /// @brief Return the workgroup ID assigned at dispatch.
   /// @returns Workgroup ID.
   uint32_t wg_id() const { return wg_id_; }
@@ -232,6 +246,12 @@ public:
   /// @brief Set the owning process ID at dispatch time.
   void set_process_id(uint32_t id) { process_id_ = id; }
 
+  /// @brief Return the generation-safe identity of the owning GPU address space.
+  AddressSpaceHandle address_space() const { return address_space_; }
+
+  /// @brief Set the owning GPU address space at dispatch time.
+  void set_address_space(AddressSpaceHandle address_space) { address_space_ = address_space; }
+
   /// @brief Return the per-WG LDS base offset assigned at dispatch.
   uint32_t lds_base() const { return lds_base_; }
 
@@ -276,11 +296,18 @@ public:
   /// @brief Return whether this wave's compute unit has GPU memory backing.
   bool has_gpu_memory() const;
 
+  /// @brief Capture the current translated address-space view for one operation.
+  /// @details The returned access retains the translator, physical backing, and
+  /// invalidation generation needed to resume an unavailable operation without
+  /// exposing the owning compute unit or reclassifying the address through the
+  /// legacy memory path.
+  [[nodiscard]] std::optional<GpuVmAccess> snapshot_vm_access() const;
+
   /// @brief Read GPU memory in this wave's process address space.
-  void read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const;
+  [[nodiscard]] VmAccessOutcome read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const;
 
   /// @brief Write GPU memory in this wave's process address space.
-  void write_gpu_memory(uint64_t addr, std::span<const uint8_t> src);
+  [[nodiscard]] VmAccessOutcome write_gpu_memory(uint64_t addr, std::span<const uint8_t> src);
 
   /// @brief Return this workgroup's rank within its cluster.
   uint32_t cluster_rank() const { return cluster_rank_; }
@@ -609,6 +636,25 @@ public:
   /// @retval false Slot is active (running, waiting, or at a barrier).
   bool is_halted() const { return state_ == WfState::HALTED; }
 
+  /// @brief Record a fail-closed instruction execution error.
+  /// @details Execution callbacks use this for inputs whose architectural
+  /// behavior is not implemented. Callers must not treat it as a hardware trap.
+  void report_instruction_execution_error(InstructionExecutionError error) {
+    instruction_execution_error_ = error;
+  }
+
+  InstructionExecutionError instruction_execution_error() const {
+    return instruction_execution_error_;
+  }
+
+  bool instruction_execution_failed() const {
+    return instruction_execution_error_ != InstructionExecutionError::None;
+  }
+
+  void clear_instruction_execution_error() {
+    instruction_execution_error_ = InstructionExecutionError::None;
+  }
+
   // -- KFD debugger (trap) state --
   //
   // These model the wave-level state the AMD trap handler maintains for
@@ -832,6 +878,7 @@ public:
     aql_packet_id_ = 0;
     code_load_bias_ = 0;
     wave_in_group_ = 0;
+    address_space_ = {};
     process_id_ = 0;
     lds_base_ = 0;
     lds_size_ = 0;
@@ -872,6 +919,7 @@ public:
       t = 0;
     trapsts_ = 0;
     pending_alu_causes_ = 0;
+    instruction_execution_error_ = InstructionExecutionError::None;
     sleep_cycles_ = 0;
     in_trap_handler_ = false;
     trap_interrupt_sent_ = false;
@@ -904,20 +952,23 @@ protected:
 
   ComputeUnitCore &cu_; ///< Parent CU (permanent, set at construction).
   InstructionComputeUnitView cu_view_;
-  uint32_t wf_id_ = 0; ///< Slot index within the CU (permanent).
-  uint32_t wg_id_ = 0; ///< Workgroup ID (set per dispatch).
+  uint32_t wf_id_ = 0;               ///< Slot index within the CU (permanent).
+  uint64_t dispatch_generation_ = 0; ///< Incremented whenever this slot is dispatched.
+  uint32_t wg_id_ = 0;               ///< Workgroup ID (set per dispatch).
   std::array<uint32_t, 3> wg_coord_{};
-  uint32_t dispatch_id_ = 0;    ///< Dispatch ID (set per dispatch, unique per dispatch).
-  uint32_t aql_packet_id_ = 0;  ///< AQL ring packet id of the dispatch (debugger correlation).
-  uint64_t code_load_bias_ = 0; ///< GPU load bias for code-object-relative call targets.
-  uint32_t wave_in_group_ = 0;  ///< Position of this wave within its workgroup (debugger).
-  uint32_t process_id_ = 0;     ///< Owning process ID (PASID analog, set per dispatch).
-  uint32_t queue_id_ = 0;       ///< KFD queue ID that launched this wave (debugger correlation).
-  uint32_t lds_base_ = 0;       ///< Per-WG LDS base offset (set per dispatch).
-  uint32_t lds_size_ = 0;       ///< Aligned per-WG LDS allocation size.
-  Lds *lds_ = nullptr;          ///< Placement-selected LDS backing; nullptr means CU-local LDS.
-  uint32_t cluster_rank_ = 0;   ///< Workgroup rank inside the dispatch cluster.
-  uint32_t cluster_size_ = 1;   ///< Number of workgroups in the dispatch cluster.
+  uint32_t dispatch_id_ = 0;         ///< Dispatch ID (set per dispatch, unique per dispatch).
+  uint32_t aql_packet_id_ = 0;       ///< AQL ring packet id of the dispatch (debugger correlation).
+  uint64_t code_load_bias_ = 0;      ///< GPU load bias for code-object-relative call targets.
+  uint32_t wave_in_group_ = 0;       ///< Position of this wave within its workgroup (debugger).
+  AddressSpaceHandle address_space_; ///< Generation-safe GPU address-space identity.
+  uint32_t process_id_ = 0;          ///< Owning process ID (PASID analog, set per dispatch).
+  uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
+  InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
+  uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
+  uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
+  Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.
+  uint32_t cluster_rank_ = 0; ///< Workgroup rank inside the dispatch cluster.
+  uint32_t cluster_size_ = 1; ///< Number of workgroups in the dispatch cluster.
 
   uint32_t wf_size_ = 0;         ///< Lanes in the current dispatched wavefront.
   uint32_t default_wf_size_ = 0; ///< ISA default wavefront width.
@@ -1064,5 +1115,3 @@ public:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_WAVEFRONT_H_
