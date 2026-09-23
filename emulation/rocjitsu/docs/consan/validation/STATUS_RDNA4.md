@@ -29,7 +29,7 @@ for the procedure and qualification rules.
 | Main E2E | P2 | Sharktank TP2 family (`tp2-family`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟩 sleep=1: clean pass; fault 8/8 (bar 6/8) |
 | PyTorch | P3 | native histogram (`pytorch-torch-histc`) | 🟨 max + 256 banks: clean pass; fault 0/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
-| llama.cpp | P3 | RMS norm (`llama-rdna4-rms-norm`) | 🟩 higher (lowest verified): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
+| llama.cpp | P3 | RMS norm (`llama-rdna4-rms-norm`) | 🟩 higher (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 higher (lowest verified): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 higher (lowest verified): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 sleep=15: clean pass; fault 0/8 (bar 6/8) |
