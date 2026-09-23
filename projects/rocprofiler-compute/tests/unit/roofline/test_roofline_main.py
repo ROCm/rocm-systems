@@ -182,9 +182,11 @@ def pct_roof(kernel: dict, point_index: int = 0) -> float:
 
 
 def test_kernel_traces_score_against_the_tallest_drawn_ceiling() -> None:
-    """A stacked figure caps points at the tallest compute roof drawn, so the
-    reported peak and limiter do not depend on the order datatypes were
-    stacked."""
+    """A stacked figure caps every point's percent-of-roofline at the tallest
+    compute roof drawn, so that score does not depend on the order datatypes
+    were stacked -- but the limiter still only names a compute peak the
+    kernel's own performance does not exceed, falling back to the memory
+    level when no stacked peak is high enough to explain it."""
     ai_data = {"ai_hbm": [[100.0], [50000.0]], "kernelNames": ["kA"]}
 
     matrix_traces, matrix_capped = kernel_traces(make_roofline(["FP32"]), ai_data)
@@ -195,7 +197,22 @@ def test_kernel_traces_score_against_the_tallest_drawn_ceiling() -> None:
     assert pct_roof(matrix_capped[0]) < 100.0
     assert pct_roof(valu_capped[0]) > 100.0
     assert "Limited by Compute: FP32 MFMA" in matrix_traces[0].hovertemplate
-    assert "Limited by Compute: FP32 VALU" in valu_traces[0].hovertemplate
+    assert "Limited by Memory: HBM" in valu_traces[0].hovertemplate
+
+
+def test_kernel_traces_name_the_specific_peak_not_the_tallest_stacked_one() -> None:
+    """When several compute peaks are stacked, the limiter names whichever one
+    actually bounds this kernel's own performance, not whichever peak happens
+    to be tallest on the figure."""
+    ai_data = {"ai_hbm": [[100.0], [50000.0]], "kernelNames": ["kA"]}
+
+    traces, _ = kernel_traces(
+        make_roofline(["FP32"]),
+        ai_data,
+        compute_peaks=[("FP32 MFMA", 90000.0), ("FP16 MFMA", 180000.0)],
+    )
+
+    assert "Limited by Compute: FP32 MFMA" in traces[0].hovertemplate
 
 
 def test_kernel_traces_name_the_roof_that_binds() -> None:
