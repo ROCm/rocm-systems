@@ -170,6 +170,71 @@ consumers query `local_context_override()` at dispatch time, fronted by
 See [Callback API](kernel_replay_callback_api.md#localized-context-control) for the tool-facing
 contract.
 
+## Verification
+
+### The isolation window is model-checked
+
+The three layers above were modelled in TLA+ and checked exhaustively with TLC. The model covers the
+per-agent reader/writer lock, the release of the reader lock at the end of submit while the GPU work
+it launched is still in flight, and the agent-wide drain that exists precisely to close that gap.
+
+The safety invariant is the one the feature rests on:
+
+```text
+MemoryStable == InWindow => (InFlight = {} /\ readers = {})
+```
+
+that is, no ordinary dispatch may be in flight or mid-submit while the replayer sits between
+`snap()` and the final `restore()`.
+
+**With the guards in place, TLC finds no violation** over the entire reachable state space — 34
+distinct states with two application threads, 92 with three. `LockExclusion` (the writer excludes
+all readers) holds as well.
+
+**With the HIP-graph fast path allowed to bypass the reader lock and `async_started()`,
+`MemoryStable` is violated in five states**, exactly as the comment on that guard in `queue.cpp`
+predicts: the replayer takes the writer lock, drains to empty, enters `snap` — and a graph launch
+then lands *inside* the window, where the next `restore()` will revert its writes. This is why the
+graph fast path is excluded whenever a replay service is active, and why the exclusion is a
+correctness guard rather than an optimization.
+
+### Per-pass service isolation
+
+The claim that replay can run several services with each one in its own pass was checked with CBMC
+over all combinations of global context state and tool pass-schedule:
+
+* among the override-aware services — counters, SPM and thread trace — **at most one collects per
+  pass**, proven;
+* including PC sampling, the same property **fails**, and re-running with PC sampling not started
+  makes it hold again, which isolates PC sampling as the sole cause.
+
+PC sampling is agent-wide and does not consult `local_context_override()`. Because a replayed
+dispatch reserves a single dispatch id for all of its passes, an N-pass replay attributes roughly N
+times the PC samples to one dispatch, with nothing in the record to separate them. A tool combining
+multi-pass counter collection with PC sampling will therefore see an inflated PC profile. Wiring a
+consumer for the override, or excluding PC sampling from replayed dispatches, would close this.
+
+### Cost
+
+The window is dominated by the snapshot, not by re-executing the kernel. `snap()` copies every
+tracked device allocation to the host, and `restore()` copies it back between passes; the final pass
+deliberately skips restore. At ~45 GB/s effective host-device bandwidth:
+
+| tracked device memory | passes | snapshot | restores | kernel | total | host RAM |
+|---|---|---|---|---|---|---|
+| 4 GB | 4 | 0.09 s | 0.27 s | 0.0002 s | **0.36 s** | 4 GB |
+| 16 GB | 4 | 0.36 s | 1.07 s | 0.0002 s | **1.42 s** | 16 GB |
+| 80 GB | 4 | 1.78 s | 5.33 s | 0.0002 s | **7.11 s** | 80 GB |
+
+Kernel execution is five to six orders of magnitude below the copy cost, so the window is entirely
+bandwidth-bound. Two consequences worth stating plainly: replay is practical for small working sets
+and impractical for large ones, and because the snapshot is a full copy rather than a dirty-page
+diff, the host must have as much free memory as the agent has tracked device memory. Dirty-page
+tracking is the obvious lever if replay needs to scale.
+
+The models and harnesses are in `tests/formal/` (CBMC, TLA+) and `tests/perf-common/` (the
+GPU-free executable form of the cost model).
+
 ## Source reference
 
 All paths are relative to `projects/rocprofiler-sdk/`.
