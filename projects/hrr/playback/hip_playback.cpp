@@ -1046,6 +1046,17 @@ hipError_t playback_hipLaunchByPtr(PlaybackContext& ctx,
 // Stored in co_modules keyed by the full 32-char hex hash — collision-free
 // and consistent with load_module(), so kernel name scans find it automatically.
 
+// A well-formed offload bundle starts with one of the two magics the bundler
+// emits: the clang text magic, or the compressed-bundle "CCOB" magic.
+static bool is_offload_bundle(const void* p, size_t n) {
+    if (!p) return false;
+    static const char kClangMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
+    const size_t kClangMagicLen = sizeof(kClangMagic) - 1;  // 24, no NUL
+    if (n >= kClangMagicLen && std::memcmp(p, kClangMagic, kClangMagicLen) == 0) return true;
+    if (n >= 4 && std::memcmp(p, "CCOB", 4) == 0) return true;
+    return false;
+}
+
 hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
                                            const uint8_t* payload) {
     const auto* a = reinterpret_cast<const hrr_args___hipRegisterFatBinary*>(payload);
@@ -1077,12 +1088,17 @@ hipError_t playback___hipRegisterFatBinary(PlaybackContext& ctx,
     hipError_t err = hipModuleLoadData(&mod, blob);
     if (err != hipSuccess) {
         // A bundle with nothing built for the live GPU is expected, not a defect:
-        // see co_no_device_code. No launch in the archive can reference it, since
-        // the capture ran on this same architecture, so record it and move on
-        // rather than reporting a failure the recorded process never saw.
-        if (err == hipErrorInvalidImage || err == hipErrorNoBinaryForGpu) {
-            std::unique_lock lk(ctx.map_mutex);
-            ctx.co_no_device_code.insert(hex);
+        // see co_no_device_code. Launches are assumed not to reference it because
+        // the archive is replayed on the capture's architecture — nothing checks
+        // that, so on a cross-arch replay this is where missing kernels start.
+        // Only a well-formed bundle qualifies; anything else is a damaged blob
+        // and is reported below.
+        if ((err == hipErrorInvalidImage || err == hipErrorNoBinaryForGpu) &&
+            is_offload_bundle(blob, sz)) {
+            {
+                std::unique_lock lk(ctx.map_mutex);
+                ctx.co_no_device_code.insert(hex);
+            }
             if (ctx.verbose)
                 fprintf(stderr, "[HRR] Fat binary %s holds no code for this GPU — skipped\n",
                         hex.c_str());

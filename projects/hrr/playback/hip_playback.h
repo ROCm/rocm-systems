@@ -16,7 +16,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <chrono>
-#include <set>
+#include <unordered_set>
 
 #include "hrr/hrr_api_args.h"  // for HRR_API_COUNT, hrr_api_id_t
 #include "hrr_region_map.h"    // external region annotations (regions/*.hrrr)
@@ -99,7 +99,7 @@ struct PlaybackContext {
     // notices, because registration does not extract device code — only an
     // eager load does. Remembering them keeps the load from being retried, and
     // re-reported, on every repeat registration of the same binary.
-    std::set<std::string> co_no_device_code;
+    std::unordered_set<std::string> co_no_device_code;
 
     // Kernel function cache: mangled name -> resolved hipFunction_t.
     // Populated on first launch of each kernel; avoids repeated hipModuleGetFunction
