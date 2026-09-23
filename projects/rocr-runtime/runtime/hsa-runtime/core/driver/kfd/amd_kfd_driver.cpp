@@ -52,7 +52,6 @@
 #endif
 
 #include "hsakmt/hsakmt.h"
-#include "hsakmt/linux/kfd_ioctl.h"
 
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
@@ -674,8 +673,7 @@ hsa_status_t KfdDriver::QueryDmaBufInfo(int dmabuf_fd, core::DmaBufInfo* info) c
 
   info->size = kmt_info.Size;
   info->node_id = kmt_info.GpuId;
-  // GTT and USERPTR are both host-resident; only VRAM is device-local.
-  info->is_device_memory = (kmt_info.Flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) != 0;
+  info->is_device_memory = kmt_info.IsDeviceMemory != 0;
   return HSA_STATUS_SUCCESS;
 }
 

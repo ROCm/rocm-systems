@@ -1577,9 +1577,9 @@ typedef struct _HsaHandleImportFlags {
 } HsaHandleImportFlags;
 
 typedef struct _HsaDmaBufInfo {
-    HSAuint64 Size;    // allocation size in bytes
-    HSAuint32 GpuId;   // KFD id of the node owning the buffer object
-    HSAuint32 Flags;   // KFD_IOC_ALLOC_MEM_FLAGS_*
+    HSAuint64 Size;             // allocation size in bytes
+    HSAuint32 GpuId;            // KFD id of the node owning the buffer object
+    HSAuint32 IsDeviceMemory;   // non-zero when device-local (VRAM), zero for host (GTT/USERPTR)
 } HsaDmaBufInfo;
 
 typedef struct _HsaStructureSizes {

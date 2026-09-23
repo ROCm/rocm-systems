@@ -1110,7 +1110,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueryDmaBufInfoCtx(HsaKFDContext *ctx,
 
 	Info->Size  = args.size;
 	Info->GpuId = args.gpu_id;
-	Info->Flags = args.flags;
+	/* GTT and USERPTR are both host-resident; only VRAM is device-local. */
+	Info->IsDeviceMemory = !!(args.flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM);
 	return HSAKMT_STATUS_SUCCESS;
 }
 

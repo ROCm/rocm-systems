@@ -4792,6 +4792,14 @@ hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* memor
  *
  * Returns the allocation properties of an existing handle
  *
+ * For a handle obtained from ::hsa_amd_vmem_import_shareable_handle, the
+ * returned pool identifies placement class only -- host versus device -- and is
+ * not the pool the exporting process allocated from. A shareable handle carries
+ * neither a NUMA node nor an allocation grain, so a host-resident import names
+ * the canonical fine-grained system region regardless of the node or grain of
+ * the original allocation. Consumers must not treat the returned pool as the
+ * source pool, and must not infer NUMA placement from it.
+ *
  * @param[in] memory_handle memory handle to be queried
  * @param[out] pool memory pool that owns this handle
  * @param[out] memory type
@@ -4807,7 +4815,7 @@ hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(
 /**
  * @brief Returns the size of an allocation handle
  *
- * Works for both locally created and imported handles.
+ * Works for both locally created and driver-describable POSIX DMA-BUF imports.
  *
  * @param[in] memory_handle memory handle to be queried
  * @param[out] size allocation size in bytes
