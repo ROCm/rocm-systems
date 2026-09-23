@@ -10,7 +10,7 @@
 #include "ce_coll.h"
 #include "channel.h"
 #include "checks.h"
-#include "collective_execution_policy.h"
+#include "policy_adapter.h"
 #include "collectives.h"
 #include "comm.h"
 #include "config/collconfig.h"
@@ -214,15 +214,21 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, const str
     }
   }
 
-  bool useShm = hasPolicy &&
-                policy.transport == RCCL_EXECUTION_TRANSPORT_SHM;
+  bool policyUsesShm =
+    hasPolicy &&
+    policy.transport == RCCL_EXECUTION_TRANSPORT_SHM;
+  bool useAlternateShm =
+    policyUsesShm &&
+    rcclPolicyP2pConnectorIndex(
+      comm, base, peer, isSendNotRecv,
+      policy.transport) == RCCL_CONN_IDX_P2P_SHM;
   if (hasPolicy && (policy.nChannels > 0 ||
                     policy.transferMode != RCCL_P2P_TRANSFER_AUTO ||
-                    useShm)) {
+                    policyUsesShm)) {
     int policyChannels =
       policy.nChannels > 0 ? std::min(comm->p2pnChannels, policy.nChannels) : comm->p2pnChannels;
     int policyChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, policyChannels);
-    if (useShm) {
+    if (useAlternateShm) {
       postTuneP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, policyChannels,
                                         policyChannelsPerPeer, RCCL_CONN_IDX_P2P_SHM,
                                         needShmPreconnect);
@@ -230,7 +236,9 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, const str
       postTuneP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, policyChannels,
                                         policyChannelsPerPeer, /*default P2P connIndex=*/1,
                                         needDefaultPreconnect);
-      if (policy.transferMode != RCCL_P2P_TRANSFER_AUTO && !comm->p2pNet) {
+      if (!policyUsesShm &&
+          policy.transferMode != RCCL_P2P_TRANSFER_AUTO &&
+          !comm->p2pNet) {
         postTuneP2pMarkPreconnectChannels(comm, peer, isSendNotRecv, base, policyChannels,
                                           policyChannelsPerPeer, RCCL_CONN_IDX_P2P_ALT,
                                           needSecondaryPreconnect);

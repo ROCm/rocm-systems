@@ -126,4 +126,6 @@ __attribute__((weak)) ncclResult_t ncclTransportP2pSetupSpecific(
 // ppc64le TOC references survive --gc-sections, so netTransport must have
 // a definition even though the code path that uses it is dead.
 #include "transport.h"
+__attribute__((weak)) struct ncclTransport p2pTransport = {};
+__attribute__((weak)) struct ncclTransport shmTransport = {};
 struct ncclTransport netTransport = {};

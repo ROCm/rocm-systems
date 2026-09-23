@@ -10,6 +10,7 @@
 #include "collectives.h"
 #include "config/collconfig.h"
 #include "enqueue.h"
+#include "policy_adapter.h"
 #include "graph/topo.h"
 #include "nccl.h"
 #include "api_trace.h"

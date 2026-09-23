@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include "rccl_common.h"
-#include "collective_execution_policy.h"
 #include "comm.h"
 #include "graph/topo.h"
 #include "enqueue.h"
@@ -236,58 +235,8 @@ ncclResult_t rcclGetAlgoProtoIndex(const char* envStr, const char* algoProtoStri
 
 extern int64_t ncclParamMinNchannels();
 extern int64_t ncclParamMaxNchannels();
-extern int64_t ncclParamShmDisable();
 extern int64_t rcclParamForceCe();
 RCCL_PARAM(ChannelTuningEnable, "CHANNEL_TUNING_ENABLE", 1);
-RCCL_PARAM(RuntimeTransportToggle, "RUNTIME_TRANSPORT_TOGGLE", 0);
-
-// Dual-connector path used by execution-policy transport outputs.
-bool rcclRuntimeTransportToggleEligible(const struct ncclComm* comm) {
-  const char* p2pDisable = ncclGetEnv("NCCL_P2P_DISABLE");
-  bool transportExplicitlyRequested =
-    p2pDisable != nullptr && p2pDisable[0] != '\0';
-  return comm != nullptr && rcclParamRuntimeTransportToggle() == 1 &&
-         !transportExplicitlyRequested &&
-         ncclParamP2pDisable() == 0 && ncclParamShmDisable() == 0 &&
-         comm->nNodes == 1 && comm->nRanks == 8 &&
-         IsArchMatch(comm->archName, "gfx1201");
-}
-
-int rcclRuntimeCollectiveConnIndex(const struct ncclComm* comm,
-                                   const struct ncclTaskColl* info,
-                                   size_t nBytes) {
-  if (!rcclRuntimeTransportToggleEligible(comm) || info == nullptr ||
-      info->algorithm != NCCL_ALGO_RING ||
-      info->protocol != NCCL_PROTO_SIMPLE ||
-      info->regBufType != 0)
-    return -1;
-  int connIndex;
-  if (info->executionTransport == RCCL_EXECUTION_TRANSPORT_SHM) {
-    connIndex = RCCL_CONN_IDX_COLL_SHM;
-  } else if (info->executionTransport == RCCL_EXECUTION_TRANSPORT_IPC ||
-             info->executionTransport == RCCL_EXECUTION_TRANSPORT_UNKNOWN) {
-    connIndex = 0;
-  } else {
-    return -1;
-  }
-  if (comm->rank == 0) {
-    INFO(NCCL_TUNING,
-         "RCCL execution-policy transport: bytes=%zu transport=%s connIndex=%d",
-         nBytes, connIndex == RCCL_CONN_IDX_COLL_SHM ? "SHM" : "IPC",
-         connIndex);
-  }
-  return connIndex;
-}
-
-int rcclRuntimeP2pConnIndex(const struct ncclComm* comm, int transport) {
-  if (!rcclRuntimeTransportToggleEligible(comm)) return -1;
-  if (transport == RCCL_EXECUTION_TRANSPORT_SHM)
-    return RCCL_CONN_IDX_P2P_SHM;
-  if (transport == RCCL_EXECUTION_TRANSPORT_IPC ||
-      transport == RCCL_EXECUTION_TRANSPORT_UNKNOWN)
-    return 1;
-  return -1;
-}
 
 ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t nBytes, int& nc) {
   const bool isGfx_110x_120x = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110") ||

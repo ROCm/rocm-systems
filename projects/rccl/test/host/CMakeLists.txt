@@ -395,6 +395,7 @@ if(BUILD_TESTS)
     enqueue-test.cc
     ${PROJECT_BINARY_DIR}/hipify/src/tuning/collective_execution_policy.cc
     ${PROJECT_BINARY_DIR}/hipify/src/tuning/collective_execution_policy_rules.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/tuning/policy_adapter.cc
     fakes/enqueue_fakes.cc               # ResetEnqueueFakes chain only
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
@@ -435,6 +436,7 @@ if(BUILD_TESTS)
   set_source_files_properties(
     ${PROJECT_BINARY_DIR}/hipify/src/tuning/collective_execution_policy.cc
     ${PROJECT_BINARY_DIR}/hipify/src/tuning/collective_execution_policy_rules.cc
+    ${PROJECT_BINARY_DIR}/hipify/src/tuning/policy_adapter.cc
     PROPERTIES GENERATED TRUE)
 
   add_executable(rccl-UnitTestsMicroEnqueue ${TEST_MICRO_ENQUEUE_SOURCE_FILES})
@@ -974,6 +976,7 @@ set(TEST_MICRO_ENQUEUE_SOURCE_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/enqueue-test.cc
   ${RCCL_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
   ${RCCL_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
+  ${RCCL_HIPIFY_DIR}/src/tuning/policy_adapter.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/enqueue_fakes.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/bootstrap_stubs.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/fakes/topo_stubs.cc
@@ -1004,6 +1007,7 @@ set(TEST_MICRO_ENQUEUE_SOURCE_FILES
 set_source_files_properties(
   ${RCCL_HIPIFY_DIR}/src/tuning/collective_execution_policy.cc
   ${RCCL_HIPIFY_DIR}/src/tuning/collective_execution_policy_rules.cc
+  ${RCCL_HIPIFY_DIR}/src/tuning/policy_adapter.cc
   PROPERTIES GENERATED TRUE)
 
 # Two binaries, for the same reason the init pair above exists: enqueue.cc gates

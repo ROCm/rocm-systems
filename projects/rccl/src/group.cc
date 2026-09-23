@@ -9,6 +9,7 @@
 #include "group.h"
 #include "debug.h"
 #include "rccl_common.h"
+#include "policy_adapter.h"
 #include "enqueue.h"
 #include "enqueue/task_sched.h"
 #include "transport.h"
@@ -238,7 +239,7 @@ ncclResult_t ncclP2PPreconnectFunc(struct ncclAsyncJob* job_) {
   if (!job_->isThreadMain && ncclOsCpuCount(comm->cpuAffinity)) ncclOsSetAffinity(comm->cpuAffinity);
   NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 1));
   NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
-  if (rcclRuntimeTransportToggleEligible(comm)) {
+  if (rcclPolicyTransportToggleEligible(comm)) {
     NCCLCHECK(ncclTransportP2pSetupSpecific(
       comm, NULL, RCCL_CONN_IDX_P2P_SHM, nullptr, TRANSPORT_SHM));
   }
