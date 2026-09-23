@@ -67,3 +67,36 @@ regexes = [
   '''[A-Z][A-Z0-9_]*SHA512\s*[=:]''',
   '''[A-Z][A-Z0-9_]*MD5\s*[=:]''',
 ]
+
+# ---------------------------------------------------------------------------
+# `generic-api-key` fires on any high-entropy value sitting near a word like
+# "key", "token" or "api". In this tree those words name collective entry
+# points and tensor dtypes, so the entries below anchor on the shape of the
+# value rather than on file paths -- a real credential in the same files is
+# still reported.
+# ---------------------------------------------------------------------------
+
+[[allowlists]]
+description = "RCCL UBX API registry entries"
+# `Event(kind="api_added", api="SymmAllocator.combine_bf16_bf16", ...)` in
+# contrib/nccl_ubx declares a collective entry point. The value is always
+# `ClassName.method_name`: CamelCase type, dot, snake_case member.
+regexes = [
+  '''^[A-Z][A-Za-z0-9]*\.[a-z_][a-z0-9_]*$''',
+]
+
+[[allowlists]]
+description = "Tensor framework dtype and attribute references"
+# `assert tokens_bf16.dtype == torch.bfloat16`.
+regexes = [
+  '''^(?:torch|np|numpy|tf|jax)\.[a-z][a-z0-9_]*$''',
+]
+
+[[allowlists]]
+description = "Log-parsing key prefixes"
+# `const std::string key = "chunksPerShard=";` -- the literal searched for in
+# RCCL log output, carrying the trailing `=` that precedes the value it reads.
+# Anchored so nothing follows the `=`: a key prefix, never a key.
+regexes = [
+  '''^[A-Za-z_][A-Za-z0-9_]*=$''',
+]
