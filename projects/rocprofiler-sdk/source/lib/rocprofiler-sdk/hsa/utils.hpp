@@ -246,3 +246,31 @@ struct formatter<hsa_fabric_handle_t>
 {};
 }  // namespace fmt
 #endif
+
+#if ROCPROFILER_HSA_RUNTIME_EXT_AMD_VERSION >= 13300
+namespace fmt
+{
+// Not a handle struct, so handle_formatter does not apply. The struct-size member
+// is reported alongside the payload because it bounds which members ROCr actually
+// filled in -- a trace without it cannot tell an unset member from a zero one.
+template <>
+struct formatter<hsa_amd_vmem_handle_info_t>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename Ctx>
+    auto format(const hsa_amd_vmem_handle_info_t& v, Ctx& ctx) const
+    {
+        return fmt::format_to(ctx.out(),
+                              "size={}, alloc_size={}, agent={}",
+                              v.size,
+                              v.alloc_size,
+                              v.agent);
+    }
+};
+}  // namespace fmt
+#endif
