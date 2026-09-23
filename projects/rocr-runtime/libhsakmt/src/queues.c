@@ -629,17 +629,10 @@ static int handle_concrete_asic(HsaKFDContext *ctx,
 		q->total_mem_alloc_size = (q->ctx_save_restore_size +
 					q->debug_memory_size) * node.NumXcc;
 
-		/* GPU_ALWAYS_MAPPED is rejected under XNACK-stall, and without it
-		 * an SVM save area cannot satisfy kfd_queue_buffer_svm_get(). Only
-		 * replay-on-fault parts need the flag, so only they take the SVM
-		 * path; everything else falls through to the BO-backed save area.
-		 */
-		bool svm_save_area = (q->gfxv < GFX_VERSION_SIENNA_CICHLID);
-
 		/* Allocate unified memory for context save restore
 		 * area on dGPU.
 		 */
-		if (!q->use_ats && ctx->hsakmt_is_svm_api_supported && svm_save_area) {
+		if (!q->use_ats && ctx->hsakmt_is_svm_api_supported) {
 			uint32_t size = PAGE_ALIGN_UP(q->total_mem_alloc_size);
 
 			pr_info("Allocating GTT for CWSR\n");
@@ -676,9 +669,7 @@ static int handle_concrete_asic(HsaKFDContext *ctx,
 			q->ctx_save_restore = allocate_exec_aligned_memory(ctx,
 							q->total_mem_alloc_size,
 							q->use_ats, gpu_id, NodeId,
-							/* nonPaged */ true,
-							/* DeviceLocal */ false,
-							/* Uncached */ false);
+							false, false, false);
 
 			if (!q->ctx_save_restore)
 				return HSAKMT_STATUS_NO_MEMORY;
