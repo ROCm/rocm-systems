@@ -1807,6 +1807,7 @@ __device__ inline int GDAContext::tile_put(void* dst_data, const void* src_data,
                                            const size_t* start_coord, const size_t* boundary,
                                            int ndim, size_t element_size, int pe,
                                            [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   const TileView view = tile_make_view(
@@ -1873,6 +1874,7 @@ __device__ inline int GDAContext::tile_put_wave(void* dst_data, const void* src_
                                                 const size_t* start_coord, const size_t* boundary,
                                                 int ndim, size_t element_size, int pe,
                                                 [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   int local_pe{-1};
   const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
 
@@ -1903,6 +1905,7 @@ __device__ inline int GDAContext::tile_put_wg(void* dst_data, const void* src_da
                                               const size_t* start_coord, const size_t* boundary,
                                               int ndim, size_t element_size, int pe,
                                               [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   int local_pe{-1};
   const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
 
@@ -1936,6 +1939,7 @@ __device__ inline int GDAContext::tile_get(void* dst_data, const void* src_data,
                                            const size_t* start_coord, const size_t* boundary,
                                            int ndim, size_t element_size, int pe,
                                            [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   const TileView view = tile_make_view(
@@ -2002,6 +2006,7 @@ __device__ inline int GDAContext::tile_get_wave(void* dst_data, const void* src_
                                                 const size_t* start_coord, const size_t* boundary,
                                                 int ndim, size_t element_size, int pe,
                                                 [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   int local_pe{-1};
   const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
 
@@ -2032,6 +2037,7 @@ __device__ inline int GDAContext::tile_get_wg(void* dst_data, const void* src_da
                                               const size_t* start_coord, const size_t* boundary,
                                               int ndim, size_t element_size, int pe,
                                               [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   int local_pe{-1};
   const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
 
@@ -2344,7 +2350,7 @@ __device__ inline int GDAContext::tile_reduce_typed_impl(
   const int my_pe_in_team = team_obj->my_pe;
   const int root_pe_world = team_obj->get_pe_in_world(root);
 
-  if (root < 0 || root >= team_size || ndim <= 0) {
+  if (root < 0 || root >= team_size || ndim < 1 || ndim > 2) {
     LOGD_WARN("Invalid tile reduce arguments for GDA backend");
     return ROCSHMEM_ERROR;
   }
