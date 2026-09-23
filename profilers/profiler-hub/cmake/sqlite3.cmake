@@ -67,19 +67,19 @@ else()
     )
 
     add_library(
-        profiler-hub-sqlite3-static
-        STATIC
+        profiler-hub-sqlite3-shared
+        SHARED
         ${SQLITE3_AMALG_C}
         ${SQLITE3_AMALG_H}
     )
 
     target_include_directories(
-        profiler-hub-sqlite3-static
+        profiler-hub-sqlite3-shared
         PUBLIC $<BUILD_INTERFACE:${SQLITE3_SOURCE_DIR}>
     )
 
     target_compile_definitions(
-        profiler-hub-sqlite3-static
+        profiler-hub-sqlite3-shared
         PRIVATE
             SQLITE_DEFAULT_MEMSTATUS=0
             SQLITE_THREADSAFE=1
@@ -90,23 +90,40 @@ else()
             SQLITE_OMIT_SHARED_CACHE=1
     )
 
-    # Seal the bundled SQLite symbols so no shared library linking this archive
-    # exports them, and they cannot collide with (or be interposed by) other
-    # sqlite3 versions bundled by sibling components on TheRock.
-    target_compile_options(
-        profiler-hub-sqlite3-static
-        PRIVATE -O2 -fPIC -fvisibility=hidden
-    )
+    target_compile_options(profiler-hub-sqlite3-shared PRIVATE -O2 -fPIC)
 
     set_target_properties(
-        profiler-hub-sqlite3-static
-        PROPERTIES POSITION_INDEPENDENT_CODE ON C_STANDARD 11
+        profiler-hub-sqlite3-shared
+        PROPERTIES
+            POSITION_INDEPENDENT_CODE ON
+            C_STANDARD 11
+            OUTPUT_NAME profiler-hub-sqlite3
+    )
+
+    set(SQLITE3_VERSION_SCRIPT "${PROJECT_BINARY_DIR}/profiler-hub-sqlite3.lds")
+    file(
+        GENERATE OUTPUT ${SQLITE3_VERSION_SCRIPT}
+        CONTENT "PROFILER_HUB_SQLITE3_1.0 {\n    global: *;\n};\n"
+    )
+    target_link_options(
+        profiler-hub-sqlite3-shared
+        PRIVATE "-Wl,--version-script=${SQLITE3_VERSION_SCRIPT}"
+    )
+    set_property(
+        TARGET profiler-hub-sqlite3-shared
+        APPEND
+        PROPERTY LINK_DEPENDS ${SQLITE3_VERSION_SCRIPT}
+    )
+
+    install(
+        TARGETS profiler-hub-sqlite3-shared
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT profiler-hub
     )
 
     add_library(profiler-hub-sqlite3 INTERFACE)
     target_link_libraries(
         profiler-hub-sqlite3
-        INTERFACE profiler-hub-sqlite3-static ${CMAKE_DL_LIBS}
+        INTERFACE profiler-hub-sqlite3-shared ${CMAKE_DL_LIBS}
     )
 
     message(

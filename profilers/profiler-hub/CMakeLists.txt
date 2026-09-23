@@ -201,15 +201,8 @@ add_library(profiler-hub SHARED $<TARGET_OBJECTS:profiler-hub-objects>)
 add_library(profiler-hub-static STATIC $<TARGET_OBJECTS:profiler-hub-objects>)
 set_target_properties(profiler-hub-static PROPERTIES OUTPUT_NAME profiler-hub)
 
-# Guarded on the target rather than on PROFILER_HUB_FETCH_DEPENDENCIES: what
-# --exclude-libs needs is the static archive, and the flag is only a proxy for
-# whether one exists.
-if(TARGET profiler-hub-sqlite3-static)
-    target_link_options(
-        profiler-hub
-        PRIVATE
-            -Wl,--exclude-libs,$<TARGET_FILE_NAME:profiler-hub-sqlite3-static>
-    )
+if(TARGET profiler-hub-sqlite3-shared)
+    set_target_properties(profiler-hub PROPERTIES INSTALL_RPATH "$ORIGIN")
 endif()
 
 # Embed semantic version + ABI version on the shared library so that
