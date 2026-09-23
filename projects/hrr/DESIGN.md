@@ -168,22 +168,9 @@ Handle-creating and handle-destroying events (malloc, free, stream/event/module 
 | `projects/clr/hipamd/src/hrr/hip_capture_generated.cpp` | ~517 capture shims + `hip_capture_build_table()` |
 | `projects/hrr/playback/hip_playback_generated.cpp` | ~504 playback shims + `hrr_playback_dispatch[]` |
 
-The checked-in generated files above are the compilation inputs. During CLR and standalone HRR builds, `projects/clr/cmake/HrrCodegen.cmake` generates temporary copies in the binary directory, runs `--check-hrr-coverage`, and fails the build if any temporary file differs from its checked-in counterpart.
+The checked-in generated files above are the compilation inputs. During CLR and standalone HRR builds, `projects/clr/cmake/HrrCodegen.cmake` generates temporary copies in the binary directory, runs `--check-hrr-coverage`, and updates any checked-in generated file that differs from its temporary counterpart. The build prints a warning listing every updated file and requires the developer to review and include those changes in the PR.
 
-For code review or debugging, generate temporary copies from the repository root without modifying the source tree:
-
-```bash
-rm -rf /tmp/hrr-codegen-inspect
-python3 projects/hrr/tools/gen_hrr_api_args.py \
-  --input projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp \
-  --public-header projects/hip/include/hip/hip_runtime_api.h \
-  --output-header /tmp/hrr-codegen-inspect/include/hrr/hrr_api_args.h \
-  --output-capture /tmp/hrr-codegen-inspect/hip_capture_generated.cpp \
-  --output-playback /tmp/hrr-codegen-inspect/hip_playback_generated.cpp \
-  --check-hrr-coverage
-```
-
-When the generated output is intentionally updated, run `python3 projects/hrr/tools/gen_hrr_api_args.py --check-hrr-coverage` from the repository root to refresh the checked-in files.
+When a build updates generated files, review them with `git diff` and include them in the PR. The generator can also be run directly from the repository root with `python3 projects/hrr/tools/gen_hrr_api_args.py --check-hrr-coverage` to refresh all checked-in generated files.
 
 ### Build
 ```bash

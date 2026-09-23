@@ -335,7 +335,7 @@ inline std::pair<int, std::string> run_playback_raw(const fs::path& cap_path,
 // ===========================================================================
 
 // Replay behaviour HRR's generator declares for an API.  These mirror the
-// classification sets in projects/clr/hipamd/src/hrr/tools/gen_hrr_api_args.py: every API
+// classification sets in projects/hrr/tools/gen_hrr_api_args.py: every API
 // is exactly one of these at replay time.
 enum class HrrReplayClass {
   kReal,       // A real handler ran (GENERATED, MANUAL or CUSTOM).

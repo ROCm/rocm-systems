@@ -7,6 +7,8 @@ include_guard(GLOBAL)
 set(_hrr_codegen_module_dir "${CMAKE_CURRENT_LIST_DIR}")
 
 function(hrr_verify_generated_files)
+  set(updated_files)
+
   foreach(kind HEADER CAPTURE PLAYBACK)
     set(generated "${GENERATED_${kind}}")
     set(expected "${EXPECTED_${kind}}")
@@ -22,12 +24,22 @@ function(hrr_verify_generated_files)
       COMMAND "${CMAKE_COMMAND}" -E compare_files "${generated}" "${expected}"
       RESULT_VARIABLE compare_result)
     if(NOT compare_result EQUAL 0)
-      message(FATAL_ERROR
-        "HRR generated ${kind} file is stale: ${expected}\n"
-        "Run from the repository root to update checked-in generated files:\n"
-        "  python3 projects/hrr/tools/gen_hrr_api_args.py --check-hrr-coverage")
+      execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${generated}" "${expected}"
+        RESULT_VARIABLE copy_result)
+      if(NOT copy_result EQUAL 0)
+        message(FATAL_ERROR "Failed to update checked-in HRR generated file: ${expected}")
+      endif()
+      list(APPEND updated_files "${expected}")
     endif()
   endforeach()
+
+  if(updated_files)
+    string(JOIN "\n  " updated_files_text ${updated_files})
+    message(WARNING
+      "HRR generated files were stale relative to newly generated output and were updated in the working tree:\n"
+      "  ${updated_files_text}\n\n")
+  endif()
 endfunction()
 
 if(HRR_CODEGEN_VERIFY)
