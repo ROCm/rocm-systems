@@ -106,7 +106,7 @@ def _run_with_marker(
     marker_prefix: str,
     thunk: Callable[[], Any],
 ) -> object:
-    """Run ``thunk`` inside its own ROCTX range."""
+    """Run thunk inside a ROCTX range."""
     kernel_name = _extract_kernel_name(self_obj)
     marker = f"{marker_prefix}.{kernel_name}"
     location = resolve_user_caller_location()
