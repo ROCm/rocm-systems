@@ -45,11 +45,11 @@ destroy_hsa_signal(signal_t& signal)
 {
     // the handle is left in place rather than nulled. The only caller is pool::clear(), which
     // retires its storage instead of freeing it, so AsyncSignalHandler can still reach this
-    // object through packet_data_t::pooled_signal afterwards -- and it exempts the pooled
-    // completion signal from destruction by comparing the dispatch-time copy of the handle
-    // against this field. Nulling turns that exemption off and destroys the handle a second
-    // time. Nor is that read a data race: the only other writer is construct_hsa_signal, which
-    // pool::acquire() runs on every acquire, and a retired object can never be re-acquired.
+    // object through packet_data_t::pooled_signal afterwards -- and signal_t::matches() uses the
+    // preserved identity to exempt the pooled completion signal from destruction. Nulling turns
+    // that exemption off and destroys the handle a second time. Nor is that read a data race:
+    // the only other writer is construct_hsa_signal, which pool::acquire() runs on every acquire,
+    // and a retired object can never be re-acquired.
     if(get_core_table() && get_core_table()->hsa_signal_destroy_fn)
         get_core_table()->hsa_signal_destroy_fn(signal.value);
 }
