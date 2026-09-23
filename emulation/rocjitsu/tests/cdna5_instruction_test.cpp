@@ -4,6 +4,10 @@
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
 
+#include <atomic>
+#include <mutex>
+#include <thread>
+
 namespace {
 
 using namespace rocjitsu;
@@ -13,19 +17,168 @@ class BarrierSpanPlugin final : public ExecutionPlugin {
 public:
   BarrierSpanPlugin() : ExecutionPlugin("barrier_span") {}
 
+  struct Resolution {
+    size_t span_size = 0;
+    std::vector<uint32_t> workgroup_ids;
+    std::thread::id callback_thread;
+    uint32_t active_instructions = 0;
+  };
+
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
+                                        amdgpu::Wavefront &) override {
+    active_instructions_.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &,
+                                       amdgpu::Wavefront &) override {
+    active_instructions_.fetch_sub(1, std::memory_order_relaxed);
+  }
+
   void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) override {
-    span_sizes.push_back(wavefronts.size());
+    Resolution resolution;
+    resolution.span_size = wavefronts.size();
+    resolution.callback_thread = std::this_thread::get_id();
+    resolution.active_instructions = active_instructions_.load(std::memory_order_relaxed);
     std::vector<uint32_t> workgroups;
     for (const auto *wf : wavefronts)
       workgroups.push_back(wf->wg_id());
     std::ranges::sort(workgroups);
     workgroups.erase(std::unique(workgroups.begin(), workgroups.end()), workgroups.end());
-    workgroup_ids.push_back(std::move(workgroups));
+    resolution.workgroup_ids = std::move(workgroups);
+    std::lock_guard<std::mutex> lock(mutex_);
+    resolutions_.push_back(std::move(resolution));
   }
 
-  std::vector<size_t> span_sizes;
-  std::vector<std::vector<uint32_t>> workgroup_ids;
+  std::vector<Resolution> resolutions() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return resolutions_;
+  }
+
+private:
+  std::atomic<uint32_t> active_instructions_{0};
+  mutable std::mutex mutex_;
+  std::vector<Resolution> resolutions_;
 };
+
+class ForceScalarGuard {
+public:
+  ForceScalarGuard() : original_(util::force_scalar()) {}
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(original_); }
+
+private:
+  bool original_;
+};
+
+TEST(Gfx1250SimulationTest, VClsI32CountsLeadingSignBits) {
+  struct Case {
+    uint32_t input;
+    uint32_t expected;
+  };
+  constexpr std::array cases{
+      Case{0x00000000u, 0xFFFFFFFFu}, Case{0xFFFFFFFFu, 0xFFFFFFFFu}, Case{0x00000001u, 31u},
+      Case{0x00000002u, 30u},         Case{0x00000003u, 30u},         Case{0x00000007u, 29u},
+      Case{0x0000FFFFu, 16u},         Case{0x40000000u, 1u},          Case{0x7FFFFFFFu, 1u},
+      Case{0x80000000u, 1u},          Case{0xFFFFFFFEu, 31u},         Case{0xFFFFFC00u, 22u},
+  };
+  constexpr uint32_t kSrc = 0;
+  constexpr uint32_t kDst = 2;
+  const auto vop1 = cdna5::build_vop1(cdna5::kVClsI32Vop1, {.src0 = 256 + kSrc, .vdst = kDst});
+  const auto vop3 = cdna5::build_vop3(cdna5::kVClsI32Vop3, {.vdst = kDst, .src0 = 256 + kSrc});
+
+  ForceScalarGuard force_scalar_guard;
+  for (const bool force_scalar : {false, true}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    SCOPED_TRACE(force_scalar ? "scalar" : "simd");
+
+    Gfx1250Sim sim;
+    auto *wf = sim.dispatch_scratch_wf();
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_size(), 32u);
+    wf->set_exec((uint64_t{1} << cases.size()) - 1);
+
+    const uint32_t vgpr_base = wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < cases.size(); ++lane)
+      sim.cu()->write_vgpr(vgpr_base + kSrc, lane, cases[lane].input);
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_NE(decoder, nullptr);
+    auto check_encoding = [&](const auto &words, std::string_view expected_mnemonic) {
+      SCOPED_TRACE(expected_mnemonic);
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_EQ(std::string_view(inst->mnemonic()), expected_mnemonic);
+
+      for (uint32_t lane = 0; lane < cases.size(); ++lane)
+        sim.cu()->write_vgpr(vgpr_base + kDst, lane, 0xDEADBEEFu);
+      EXPECT_TRUE(sim.cu()->execute_instruction(inst.get(), *wf).succeeded());
+
+      for (uint32_t lane = 0; lane < cases.size(); ++lane) {
+        EXPECT_EQ(sim.cu()->read_vgpr(vgpr_base + kDst, lane), cases[lane].expected)
+            << "lane " << lane << ", input 0x" << std::hex << cases[lane].input;
+      }
+    };
+
+    check_encoding(vop1, "v_cls_i32_e32");
+    check_encoding(vop3, "v_cls_i32");
+  }
+}
+
+TEST(Gfx1250SimulationTest, PackedBf16ArithmeticRoundsOnceAndHonorsOverflowMode) {
+  struct Case {
+    uint16_t opcode;
+    uint16_t a, b, c;
+    uint16_t expected, saturated;
+  };
+  constexpr std::array cases{
+      // Exact midpoint rounds down to even, or up when the retained bit is odd.
+      Case{cdna5::kVPkAddBf16Vop3p, 0x3f80, 0x3b80, 0, 0x3f80, 0x3f80},
+      Case{cdna5::kVPkAddBf16Vop3p, 0x3f81, 0x3b80, 0, 0x3f82, 0x3f82},
+      Case{cdna5::kVPkMulBf16Vop3p, 0xbfed, 0x4007, 0, 0xc07a, 0xc07a},
+      Case{cdna5::kVPkMulBf16Vop3p, 0x8000, 0x3f80, 0, 0x8000, 0x8000},
+      Case{cdna5::kVPkMulBf16Vop3p, 0x0001, 0x3f80, 0, 0x0001, 0x0001},
+      Case{cdna5::kVPkMulBf16Vop3p, 0x7f7f, 0x4000, 0, 0x7f80, 0x7f7f},
+      Case{cdna5::kVPkMulBf16Vop3p, 0xff7f, 0x4000, 0, 0xff80, 0xff7f},
+      Case{cdna5::kVPkMulBf16Vop3p, 0x7f80, 0x3f80, 0, 0x7f80, 0x7f80},
+      Case{cdna5::kVPkAddBf16Vop3p, 0x7f7f, 0x7f7f, 0, 0x7f80, 0x7f7f},
+      // Tiny addend breaks an otherwise exact BF16 midpoint. Rounding via F32 loses it.
+      Case{cdna5::kVPkFmaBf16Vop3p, 0x3fc0, 0x3f83, 0x0001, 0x3fc5, 0x3fc5},
+      Case{cdna5::kVPkFmaBf16Vop3p, 0x7f7f, 0x4000, 0xff7f, 0x7f7f, 0x7f7f},
+      Case{cdna5::kVPkFmaBf16Vop3p, 0x7f7f, 0x4000, 0x0000, 0x7f80, 0x7f7f},
+  };
+  Gfx1250Sim sim;
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  const uint32_t vb = wf->vgpr_alloc().base;
+  wf->set_exec(1);
+  auto pack = [](uint16_t low, uint16_t high) { return uint32_t{low} | (uint32_t{high} << 16); };
+  for (const Case &c : cases) {
+    SCOPED_TRACE(c.opcode);
+    SCOPED_TRACE(c.a);
+    const std::array<uint32_t, 2> words = cdna5::build_vop3p(
+        c.opcode,
+        {.vdst = 3, .opsel_hi_2 = 1, .src0 = 256, .src1 = 257, .src2 = 258, .opsel_hi = 3});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    // Use distinct halves and an inactive lane to cover packing and EXEC.
+    sim.cu()->write_vgpr(vb, 0, pack(c.a, 0x4000));
+    sim.cu()->write_vgpr(vb + 1, 0, pack(c.b, 0x4000));
+    sim.cu()->write_vgpr(vb + 2, 0, pack(c.c, 0));
+    for (uint32_t round_mode = 0; round_mode < 4; ++round_mode) {
+      for (bool overflow : {false, true}) {
+        // All MODE rounding fields vary; denorm flushing is requested throughout.
+        wf->set_mode_raw(round_mode | (round_mode << 2) |
+                         (overflow ? amdgpu::Wavefront::FP16_OVFL_BIT : 0));
+        sim.cu()->write_vgpr(vb + 3, 1, 0xdeadbeef);
+        EXPECT_TRUE(sim.cu()->execute_instruction(inst.get(), *wf).succeeded());
+        EXPECT_EQ(sim.cu()->read_vgpr(vb + 3, 0),
+                  pack(overflow ? c.saturated : c.expected, 0x4080));
+        EXPECT_EQ(sim.cu()->read_vgpr(vb + 3, 1), 0xdeadbeefu);
+      }
+    }
+  }
+}
 
 TEST(Gfx1250SimulationTest, SGetPcI64ReturnsNextInstructionAddress) {
   constexpr uint64_t kKernelAddr = 0x10000;
@@ -82,7 +235,7 @@ TEST(Gfx1250SimulationTest, SAddPcI64WrapsAtUnsignedBoundaries) {
   const auto add_one = cdna5::build_sop1(cdna5::kSAddPcI64Sop1, {.ssrc0 = 129});
   const auto add_minus_one = cdna5::build_sop1(cdna5::kSAddPcI64Sop1, {.ssrc0 = 193});
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> increment(decode_valid(*decoder, add_one.data()));
   std::unique_ptr<Instruction> decrement(decode_valid(*decoder, add_minus_one.data()));
@@ -94,15 +247,15 @@ TEST(Gfx1250SimulationTest, SAddPcI64WrapsAtUnsignedBoundaries) {
   ASSERT_NE(wf, nullptr);
 
   wf->pc = 0x7fffffffffffffffULL;
-  sim.cu()->execute_instruction(increment.get(), *wf);
+  EXPECT_TRUE(sim.cu()->execute_instruction(increment.get(), *wf).succeeded());
   EXPECT_EQ(wf->pc, 0x8000000000000000ULL);
 
   wf->pc = 0;
-  sim.cu()->execute_instruction(decrement.get(), *wf);
+  EXPECT_TRUE(sim.cu()->execute_instruction(decrement.get(), *wf).succeeded());
   EXPECT_EQ(wf->pc, 0xffffffffffffffffULL);
 
   wf->pc = 0x8000000000000000ULL;
-  sim.cu()->execute_instruction(decrement.get(), *wf);
+  EXPECT_TRUE(sim.cu()->execute_instruction(decrement.get(), *wf).succeeded());
   EXPECT_EQ(wf->pc, 0x7fffffffffffffffULL);
 }
 
@@ -283,7 +436,7 @@ TEST(Gfx1250SimulationTest, NamedBarrierSignalIsfirstPreservesSccWithoutAllocati
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 1> signal_words = {0xBE804F7Du};
   std::unique_ptr<Instruction> signal(decode_valid(*decoder, signal_words.data()));
@@ -291,7 +444,7 @@ TEST(Gfx1250SimulationTest, NamedBarrierSignalIsfirstPreservesSccWithoutAllocati
 
   wf->set_m0((2u << 16) | 1u);
   wf->write_scc(true);
-  sim.cu()->execute_instruction(signal.get(), *wf);
+  EXPECT_TRUE(sim.cu()->execute_instruction(signal.get(), *wf).succeeded());
   EXPECT_TRUE(wf->read_scc());
 }
 
@@ -304,7 +457,7 @@ void expect_barrier_init_reads_implicit_m0(uint32_t init_encoding, uint32_t init
   ASSERT_NE(wf1, nullptr);
   cu->begin_workgroup(0, 0, 2, 4);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 1> init_words = {init_encoding};
   const std::array<uint32_t, 1> join_words = {0xBE805281u};   // s_barrier_join 1
@@ -320,21 +473,21 @@ void expect_barrier_init_reads_implicit_m0(uint32_t init_encoding, uint32_t init
   ASSERT_NE(state, nullptr);
 
   wf0->set_m0(init_m0);
-  cu->execute_instruction(init.get(), *wf0);
+  EXPECT_TRUE(cu->execute_instruction(init.get(), *wf0).succeeded());
   for (auto *wf : {wf0, wf1})
-    cu->execute_instruction(join.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(join.get(), *wf).succeeded());
 
-  cu->execute_instruction(signal.get(), *wf0);
+  EXPECT_TRUE(cu->execute_instruction(signal.get(), *wf0).succeeded());
   EXPECT_TRUE(wf0->read_scc());
-  cu->execute_instruction(state.get(), *wf0);
+  EXPECT_TRUE(cu->execute_instruction(state.get(), *wf0).succeeded());
   EXPECT_EQ(read_wave_sgpr(*cu, *wf0, 4), 0x01010021u);
   wf0->barrier_wait(1);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::BARRIER);
 
-  cu->execute_instruction(signal.get(), *wf1);
+  EXPECT_TRUE(cu->execute_instruction(signal.get(), *wf1).succeeded());
   EXPECT_FALSE(wf1->read_scc());
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
-  cu->execute_instruction(state.get(), *wf1);
+  EXPECT_TRUE(cu->execute_instruction(state.get(), *wf1).succeeded());
   EXPECT_EQ(read_wave_sgpr(*cu, *wf1, 4), 0x01000021u);
 }
 
@@ -355,7 +508,7 @@ TEST(Gfx1250SimulationTest, NamedBarrierSynchronizesJoinedWavesAcrossPhases) {
   ASSERT_NE(wf1, nullptr);
   cu->begin_workgroup(0, 0, 2, 4);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 1> join_words = {0xBE80527Du};
   const std::array<uint32_t, 1> signal_words = {0xBE804F7Du};
@@ -376,33 +529,33 @@ TEST(Gfx1250SimulationTest, NamedBarrierSynchronizesJoinedWavesAcrossPhases) {
 
   for (auto *wf : {wf0, wf1}) {
     wf->set_m0(1);
-    cu->execute_instruction(join.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(join.get(), *wf).succeeded());
     wf->set_m0((2u << 16) | 1u);
   }
 
-  cu->execute_instruction(signal.get(), *wf0);
+  EXPECT_TRUE(cu->execute_instruction(signal.get(), *wf0).succeeded());
   EXPECT_TRUE(wf0->read_scc());
-  cu->execute_instruction(wait.get(), *wf0);
+  EXPECT_TRUE(cu->execute_instruction(wait.get(), *wf0).succeeded());
   EXPECT_EQ(wf0->state(), amdgpu::WfState::BARRIER);
 
-  cu->execute_instruction(signal.get(), *wf1);
+  EXPECT_TRUE(cu->execute_instruction(signal.get(), *wf1).succeeded());
   EXPECT_FALSE(wf1->read_scc());
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
-  cu->execute_instruction(wait.get(), *wf1);
+  EXPECT_TRUE(cu->execute_instruction(wait.get(), *wf1).succeeded());
   EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
 
-  cu->execute_instruction(state.get(), *wf0);
+  EXPECT_TRUE(cu->execute_instruction(state.get(), *wf0).succeeded());
   EXPECT_EQ(read_wave_sgpr(*cu, *wf0, 4), 0x01000021u);
 
-  cu->execute_instruction(signal.get(), *wf1);
+  EXPECT_TRUE(cu->execute_instruction(signal.get(), *wf1).succeeded());
   EXPECT_TRUE(wf1->read_scc());
-  cu->execute_instruction(wait.get(), *wf1);
+  EXPECT_TRUE(cu->execute_instruction(wait.get(), *wf1).succeeded());
   EXPECT_EQ(wf1->state(), amdgpu::WfState::BARRIER);
 
-  cu->execute_instruction(signal.get(), *wf0);
+  EXPECT_TRUE(cu->execute_instruction(signal.get(), *wf0).succeeded());
   EXPECT_FALSE(wf0->read_scc());
   EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
-  cu->execute_instruction(wait.get(), *wf0);
+  EXPECT_TRUE(cu->execute_instruction(wait.get(), *wf0).succeeded());
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
 }
 
@@ -494,15 +647,15 @@ TEST(Gfx1250SimulationTest, WorkgroupSignalIsfirstAcceptsNegativeInlineBarrierId
   ASSERT_NE(wf1, nullptr);
   cu->begin_workgroup(0, 0, 2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 1> signal_words = {0xBE804FC1u}; // s_barrier_signal_isfirst -1
   std::unique_ptr<Instruction> signal(decode_valid(*decoder, signal_words.data()));
   ASSERT_NE(signal, nullptr);
 
-  cu->execute_instruction(signal.get(), *wf0);
+  EXPECT_TRUE(cu->execute_instruction(signal.get(), *wf0).succeeded());
   EXPECT_TRUE(wf0->read_scc());
-  cu->execute_instruction(signal.get(), *wf1);
+  EXPECT_TRUE(cu->execute_instruction(signal.get(), *wf1).succeeded());
   EXPECT_FALSE(wf1->read_scc());
 }
 
@@ -555,7 +708,7 @@ TEST(Gfx1250SimulationTest, AqlDescriptorAllocatesNamedBarriersForTwoWaveKernel)
     EXPECT_EQ(wf.sgpr(4), 0x01000021u);
 }
 
-TEST(Gfx1250SimulationTest, ClusterBarrierSynchronizesWorkgroupsAcrossComputeUnits) {
+TEST(Gfx1250SimulationTest, ParallelClusterBarrierSynchronizesWorkgroupsAcrossComputeUnits) {
   constexpr auto read_first_workitem =
       cdna5::build_vop1(cdna5::kVReadfirstlaneB32Vop1, {.src0 = 256, .vdst = 4});
   constexpr auto is_first_wave =
@@ -575,11 +728,14 @@ TEST(Gfx1250SimulationTest, ClusterBarrierSynchronizesWorkgroupsAcrossComputeUni
   auto plugin = std::make_unique<BarrierSpanPlugin>();
   auto *barrier_span = plugin.get();
   ASSERT_TRUE(sim.plugin_group->add(std::move(plugin)));
+  sim.cp()->set_dispatch_threads(2);
+  ASSERT_EQ(sim.cp()->dispatch_threads(), 2u);
   uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 104, 32, 2, false,
                                             false, false, 0, 0, 0, 0, 0, 1);
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
                            /*workgroup_size_x=*/64);
+  const auto cp_thread = std::this_thread::get_id();
   step_until_xcd_halted(sim);
 
   ASSERT_EQ(sim.snapshot->snapshots().size(), 4u);
@@ -590,9 +746,12 @@ TEST(Gfx1250SimulationTest, ClusterBarrierSynchronizesWorkgroupsAcrossComputeUni
     EXPECT_EQ((state >> 16) & 0x7fu, 0u);
     EXPECT_TRUE(member_count == 1 || member_count == 2);
   }
-  ASSERT_EQ(barrier_span->span_sizes.size(), 1u);
-  EXPECT_EQ(barrier_span->span_sizes[0], 4u);
-  EXPECT_EQ(barrier_span->workgroup_ids[0], (std::vector<uint32_t>{0, 1}));
+  const auto resolutions = barrier_span->resolutions();
+  ASSERT_EQ(resolutions.size(), 1u);
+  EXPECT_EQ(resolutions[0].span_size, 4u);
+  EXPECT_EQ(resolutions[0].workgroup_ids, (std::vector<uint32_t>{0, 1}));
+  EXPECT_EQ(resolutions[0].callback_thread, cp_thread);
+  EXPECT_EQ(resolutions[0].active_instructions, 0u);
 }
 
 TEST(Gfx1250SimulationTest, ClusterBarrierCompletesAfterWorkgroupTerminatesEarly) {
@@ -917,7 +1076,7 @@ TEST(Gfx1250SimulationTest, VCvtF64DppPreservesBothMaskedHighDstDwords) {
   raw.src0 = amdgpu::SRC_DPP;
   raw.vsrc0 = kSrc;
   raw.vdst = kDst;
-  raw.dpp_ctrl = 0xB1; // quad_perm:[1,0,3,2]
+  raw.dpp_ctrl = amdgpu::dpp::ROW_SELECT_BASE; // row-select lane 0
   raw.bound_ctrl = 1;
   raw.bank_mask = 0xF;
   raw.row_mask = 0x1;
@@ -930,8 +1089,7 @@ TEST(Gfx1250SimulationTest, VCvtF64DppPreservesBothMaskedHighDstDwords) {
         static_cast<uint64_t>(cu.read_vgpr(vb + kHighBank + kDst, lane)) |
         (static_cast<uint64_t>(cu.read_vgpr(vb + kHighBank + kDst + 1, lane)) << 32);
     const uint64_t expected =
-        lane < 16 ? std::bit_cast<uint64_t>(static_cast<double>(kSourceBase + (lane ^ 1u)))
-                  : kOldDstBase + lane;
+        lane < 16 ? std::bit_cast<uint64_t>(static_cast<double>(kSourceBase)) : kOldDstBase + lane;
     EXPECT_EQ(actual, expected) << "lane " << lane;
     EXPECT_EQ(cu.read_vgpr(vb + kDst, lane), kLowDstLoBase + lane) << "lane " << lane;
     EXPECT_EQ(cu.read_vgpr(vb + kDst + 1, lane), kLowDstHiBase + lane) << "lane " << lane;
@@ -985,7 +1143,7 @@ TEST(Gfx1250SimulationTest, VAddF32Vop3DppPreservesMaskedHighDestinationLanes) {
   }
 }
 
-TEST(Gfx1250SimulationTest, VMovDppComposesVgprMsbWithGprIdx) {
+TEST(Gfx1250SimulationTest, ModeBit27DoesNotIndexVmovDppOperands) {
   Gfx1250Sim sim;
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
@@ -1002,10 +1160,10 @@ TEST(Gfx1250SimulationTest, VMovDppComposesVgprMsbWithGprIdx) {
 
   wf->set_vgpr_msb_mode(0x01); // SRC0=bank 1; DST=bank 0.
   wf->set_mode_raw(wf->mode_raw() | amdgpu::Wavefront::GPR_IDX_EN_BIT);
-  wf->set_m0((1u << 8u) | kGprIdxOffset); // Index SRC0 only.
+  wf->set_m0((1u << 12u) | kGprIdxOffset); // Index SRC0 only.
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-    cu.write_vgpr(vb + kHighBank + kSrc, lane, 0u);
-    cu.write_vgpr(vb + kHighBank + kGprIdxOffset + kSrc, lane, kExpectedBase + lane);
+    cu.write_vgpr(vb + kHighBank + kSrc, lane, kExpectedBase + lane);
+    cu.write_vgpr(vb + kHighBank + kGprIdxOffset + kSrc, lane, 0u);
   }
 
   cdna5::Vop1VopDpp16MachineInst raw{};
@@ -1024,7 +1182,7 @@ TEST(Gfx1250SimulationTest, VMovDppComposesVgprMsbWithGprIdx) {
     EXPECT_EQ(cu.read_vgpr(vb + kDst, lane), kExpectedBase + (lane ^ 1u)) << "lane " << lane;
 }
 
-TEST(Gfx1250SimulationTest, PackedTrue16SourcesHonorGprIdx) {
+TEST(Gfx1250SimulationTest, PackedTrue16SourcesIgnoreModeBit27) {
   Gfx1250Sim sim;
   // Resident wave: this test drives Operand reads against live VGPR banks.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf();
@@ -1036,17 +1194,19 @@ TEST(Gfx1250SimulationTest, PackedTrue16SourcesHonorGprIdx) {
   auto &cu = *sim.cu();
 
   wf->set_mode_raw(amdgpu::Wavefront::GPR_IDX_EN_BIT);
-  wf->set_m0((1u << 8u) | 16u);
+  wf->set_m0((1u << 12u) | 16u);
   cu.write_vgpr(vb + 2, kLane, 0xAAAA1111u);
   cu.write_vgpr(vb + 18, kLane, 0xBBBB2222u);
 
   cdna5::Operand lo(16, cdna5::OperandType::OPR_VGPR, 2, true);
   cdna5::Operand hi(16, cdna5::OperandType::OPR_VGPR, 128 + 2, true);
-  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(lo, kLane), 0x2222u);
-  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(hi, kLane), 0xBBBBu);
+  lo.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  hi.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(lo, kLane), 0x1111u);
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(hi, kLane), 0xAAAAu);
 }
 
-TEST(Gfx1250SimulationTest, PackedTrue16InstructionComposesHighBanksWithGprIdx) {
+TEST(Gfx1250SimulationTest, PackedTrue16InstructionIgnoresModeBit27) {
   Gfx1250Sim sim;
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
@@ -1064,12 +1224,12 @@ TEST(Gfx1250SimulationTest, PackedTrue16InstructionComposesHighBanksWithGprIdx) 
 
   wf->set_vgpr_msb_mode(0x41); // SRC0=bank 1; DST=bank 1.
   wf->set_mode_raw(wf->mode_raw() | amdgpu::Wavefront::GPR_IDX_EN_BIT);
-  wf->set_m0((0x9u << 8u) | kGprIdxOffset); // Index SRC0 and DST.
+  wf->set_m0((0x9u << 12u) | kGprIdxOffset); // Index SRC0 and DST.
   cu.write_vgpr(vb + kSrc, 0, kLowAlias);
   cu.write_vgpr(vb + kDst, 0, kLowAlias);
-  cu.write_vgpr(vb + kBankStride + kSrc, 0, kLowAlias);
-  cu.write_vgpr(vb + kBankStride + kDst, 0, kLowAlias);
-  cu.write_vgpr(vb + kBankStride + kGprIdxOffset + kSrc, 0, 0xABCD1234u);
+  cu.write_vgpr(vb + kBankStride + kSrc, 0, 0xABCD1234u);
+  cu.write_vgpr(vb + kBankStride + kDst, 0, 0xEEEE1111u);
+  cu.write_vgpr(vb + kBankStride + kGprIdxOffset + kSrc, 0, kLowAlias);
   cu.write_vgpr(vb + kBankStride + kGprIdxOffset + kDst, 0, 0xEEEE1111u);
 
   cdna5::Vop1MachineInst raw{};
@@ -1078,9 +1238,9 @@ TEST(Gfx1250SimulationTest, PackedTrue16InstructionComposesHighBanksWithGprIdx) 
   cdna5::VMovB16Vop1 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
-  EXPECT_EQ(cu.read_vgpr(vb + kBankStride + kGprIdxOffset + kDst, 0), 0xEEEEABCDu);
+  EXPECT_EQ(cu.read_vgpr(vb + kBankStride + kDst, 0), 0xEEEEABCDu);
+  EXPECT_EQ(cu.read_vgpr(vb + kBankStride + kGprIdxOffset + kDst, 0), 0xEEEE1111u);
   EXPECT_EQ(cu.read_vgpr(vb + kDst, 0), kLowAlias);
-  EXPECT_EQ(cu.read_vgpr(vb + kBankStride + kDst, 0), kLowAlias);
 }
 
 TEST(Gfx1250SimulationTest, DsPermuteUsesIndependentHighOperandBanks) {
@@ -1228,6 +1388,90 @@ TEST(Gfx1250SimulationTest, DsStorexchg2addrB64ExchangesBothAddresses) {
                              (static_cast<uint64_t>(cu.read_vgpr(vb + kDst + 3, 0)) << 32);
   EXPECT_EQ(returned0, kOld0);
   EXPECT_EQ(returned1, kOld1);
+}
+
+TEST(Gfx1250SimulationTest, NonReturningDsAddU32DoesNotWriteVgpr) {
+  Gfx1250Sim sim;
+  auto *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  auto &cu = *sim.cu();
+  wf->set_lds_base(cu.allocate_lds(64));
+  constexpr uint32_t kAddr = 1;
+  constexpr uint32_t kData = 2;
+  constexpr uint32_t kUnusedVdst = 4;
+  constexpr uint32_t kAddress = 0x20;
+  constexpr uint32_t kInitial = 0x1020'3040u;
+  constexpr uint32_t kAddend = 0x0102'0304u;
+  constexpr uint32_t kVgprSentinel = 0xA1A2'A3A4u;
+  const uint32_t vb = wf->vgpr_alloc().base;
+
+  cu.write_vgpr(vb + kAddr, 0, kAddress);
+  cu.write_vgpr(vb + kData, 0, kAddend);
+  cu.write_vgpr(vb + kUnusedVdst, 0, kVgprSentinel);
+  cu.lds().write32(wf->lds_base() + kAddress, kInitial);
+
+  cdna5::VdsMachineInst raw{};
+  raw.addr = kAddr;
+  raw.data0 = kData;
+  raw.vdst = kUnusedVdst;
+  auto *inst = new cdna5::DsAddU32Vds(reinterpret_cast<const cdna5::MachineInst *>(&raw));
+  inst->execute_impl(*wf);
+
+  auto *state = inst->data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  EXPECT_FALSE(state->is_load);
+
+  amdgpu::LocalMemPipeline local_pipeline;
+  local_pipeline.issue(inst, *wf);
+
+  EXPECT_EQ(cu.lds().read32(wf->lds_base() + kAddress), kInitial + kAddend);
+  EXPECT_EQ(cu.read_vgpr(vb + kUnusedVdst, 0), kVgprSentinel);
+}
+
+TEST(Gfx1250SimulationTest, NonReturningDsAddU64DoesNotWriteVgpr) {
+  Gfx1250Sim sim;
+  auto *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  auto &cu = *sim.cu();
+  wf->set_lds_base(cu.allocate_lds(64));
+  constexpr uint32_t kAddr = 1;
+  constexpr uint32_t kData = 2;
+  constexpr uint32_t kUnusedVdst = 4;
+  constexpr uint32_t kAddress = 0x20;
+  constexpr uint64_t kInitial = 0x0102'0304'0506'0708ULL;
+  constexpr uint64_t kAddend = 0x1011'1213'1415'1617ULL;
+  constexpr uint64_t kVgprSentinel = 0xA1A2'A3A4'B1B2'B3B4ULL;
+  const uint32_t vb = wf->vgpr_alloc().base;
+
+  cu.write_vgpr(vb + kAddr, 0, kAddress);
+  cu.write_vgpr(vb + kData, 0, static_cast<uint32_t>(kAddend));
+  cu.write_vgpr(vb + kData + 1, 0, static_cast<uint32_t>(kAddend >> 32));
+  cu.write_vgpr(vb + kUnusedVdst, 0, static_cast<uint32_t>(kVgprSentinel));
+  cu.write_vgpr(vb + kUnusedVdst + 1, 0, static_cast<uint32_t>(kVgprSentinel >> 32));
+  cu.lds().write64(wf->lds_base() + kAddress, kInitial);
+
+  cdna5::VdsMachineInst raw{};
+  raw.addr = kAddr;
+  raw.data0 = kData;
+  raw.vdst = kUnusedVdst;
+  auto *inst = new cdna5::DsAddU64Vds(reinterpret_cast<const cdna5::MachineInst *>(&raw));
+  inst->execute_impl(*wf);
+
+  auto *state = inst->data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  EXPECT_FALSE(state->is_load);
+
+  amdgpu::LocalMemPipeline local_pipeline;
+  local_pipeline.issue(inst, *wf);
+
+  EXPECT_EQ(cu.lds().read64(wf->lds_base() + kAddress), kInitial + kAddend);
+  const uint64_t vgpr_value = cu.read_vgpr(vb + kUnusedVdst, 0) |
+                              (static_cast<uint64_t>(cu.read_vgpr(vb + kUnusedVdst + 1, 0)) << 32);
+  EXPECT_EQ(vgpr_value, kVgprSentinel);
 }
 
 TEST(Gfx1250SimulationTest, DsStorexchg2addrStride64B32UsesScaledOffsetsForActiveLanes) {
@@ -1428,12 +1672,12 @@ TEST(Gfx1250SimulationTest, VopdFmamkUsesSrc2HighBank) {
   cu->write_vgpr(vb + kAddend, 0, std::bit_cast<uint32_t>(100.0f));
   cu->write_vgpr(vb + kSrc2Bank * kBankStride + kAddend, 0, std::bit_cast<uint32_t>(4.0f));
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_dual_fmamk_f32 :: v_dual_mov_b32");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr(vb + kDst, 0), std::bit_cast<uint32_t>(6.0f));
 }
@@ -1553,6 +1797,41 @@ TEST(Gfx1250SimulationTest, AddtidStoresUseSrc1HighBank) {
   EXPECT_EQ(global_value, kExpected);
 }
 
+TEST(Gfx1250SimulationTest, DsLoadTransposeIgnoresExecForAddressesAndMasks) {
+  for (const uint64_t architectural_exec : {uint64_t{0}, uint64_t{1} << 7}) {
+    SCOPED_TRACE(architectural_exec);
+    Gfx1250Sim sim;
+    amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(architectural_exec);
+
+    constexpr uint32_t kAddr = 5;
+    constexpr uint32_t kDst = 10;
+    constexpr uint32_t kOffset = 16;
+    const uint32_t vgpr_base = wf->vgpr_alloc().base;
+    auto &cu = *sim.cu();
+    wf->set_lds_base(cu.allocate_lds(512));
+    wf->set_lds_size(512);
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+      cu.write_vgpr(vgpr_base + kAddr, lane, lane * 8u);
+
+    cdna5::VdsMachineInst raw{};
+    raw.addr = kAddr;
+    raw.vdst = kDst;
+    raw.offset0 = kOffset;
+    cdna5::DsLoadTr8B64Vds instruction(reinterpret_cast<const cdna5::MachineInst *>(&raw));
+    instruction.execute_impl(*wf);
+
+    auto *state = instruction.data_as<amdgpu::VectorMemState>();
+    ASSERT_NE(state, nullptr);
+    EXPECT_EQ(state->lane_mask, 0xFFFF'FFFFu);
+    EXPECT_EQ(state->exec_mask, 0xFFFF'FFFFu);
+    EXPECT_EQ(wf->exec(), architectural_exec);
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+      EXPECT_EQ(state->per_lane_addr[lane], wf->lds_base() + kOffset + lane * 8u);
+  }
+}
+
 TEST(Gfx1250SimulationTest, DsAddtidLoadAndStoreUseM0ByteBaseAddresses) {
   Gfx1250Sim sim;
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
@@ -1564,7 +1843,7 @@ TEST(Gfx1250SimulationTest, DsAddtidLoadAndStoreUseM0ByteBaseAddresses) {
   constexpr uint32_t kM0ByteBase = 0x1000;
   wf->set_m0(kM0ByteBase);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t kLane0Data = 0x12345678u;
@@ -1578,7 +1857,7 @@ TEST(Gfx1250SimulationTest, DsAddtidLoadAndStoreUseM0ByteBaseAddresses) {
   std::unique_ptr<Instruction> store(decode_valid(*decoder, store_words));
   ASSERT_NE(store, nullptr);
   ASSERT_EQ(std::string_view(store->mnemonic()), "ds_store_addtid_b32");
-  cu.execute_instruction(store.get(), *wf);
+  EXPECT_TRUE(cu.execute_instruction(store.get(), *wf).succeeded());
   auto *store_state = store->data_as<amdgpu::VectorMemState>();
   ASSERT_NE(store_state, nullptr);
   EXPECT_EQ(store_state->per_lane_addr[0], expected0);
@@ -1598,7 +1877,7 @@ TEST(Gfx1250SimulationTest, DsAddtidLoadAndStoreUseM0ByteBaseAddresses) {
   std::unique_ptr<Instruction> load(decode_valid(*decoder, load_words));
   ASSERT_NE(load, nullptr);
   ASSERT_EQ(std::string_view(load->mnemonic()), "ds_load_addtid_b32");
-  cu.execute_instruction(load.get(), *wf);
+  EXPECT_TRUE(cu.execute_instruction(load.get(), *wf).succeeded());
   auto *load_state = load->data_as<amdgpu::VectorMemState>();
   ASSERT_NE(load_state, nullptr);
   EXPECT_EQ(load_state->per_lane_addr[0], expected0);
@@ -1611,7 +1890,7 @@ TEST(Gfx1250SimulationTest, DsAddtidLoadAndStoreUseM0ByteBaseAddresses) {
   wf->set_m0(0);
   std::unique_ptr<Instruction> default_m0_store(decode_valid(*decoder, store_words));
   ASSERT_NE(default_m0_store, nullptr);
-  cu.execute_instruction(default_m0_store.get(), *wf);
+  EXPECT_TRUE(cu.execute_instruction(default_m0_store.get(), *wf).succeeded());
   auto *default_m0_state = default_m0_store->data_as<amdgpu::VectorMemState>();
   ASSERT_NE(default_m0_state, nullptr);
   EXPECT_EQ(default_m0_state->per_lane_addr[0], wf->lds_base() + 0x1234);
@@ -1730,7 +2009,7 @@ TEST(Gfx1250ExecutionTest, Vopd3CndmaskAppliesB32NegModifiers) {
   wf->set_exec(0x3u);
   wf->set_vcc(0x1u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, cndmask.data()));
   ASSERT_NE(inst, nullptr);
@@ -1746,7 +2025,7 @@ TEST(Gfx1250ExecutionTest, Vopd3CndmaskAppliesB32NegModifiers) {
   cu->write_vgpr(vb + 4, 0, 0x3F800000u);
   cu->write_vgpr(vb + 4, 1, 0x3F000000u);
 
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x11223344u);
   EXPECT_EQ(cu->read_vgpr(vb + 2, 1), 0xBF000000u);

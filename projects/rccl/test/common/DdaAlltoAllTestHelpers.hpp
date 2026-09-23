@@ -8,23 +8,26 @@
 
 #include <cstring>
 
-#include "algorithms/CollCommon.h"
+#include "algorithms/dda/device/CollCommon.h"
 #include "archinfo.h"
 #include "collectives.h"
 #include "comm.h"
 #include "enqueue.h"
 #include "group.h"
-#include "dda_init_detail.h"
+#include "algorithms/dda/dda_init_detail.h"
 #include "rccl_common.h"
 
 namespace RcclUnitTesting
 {
 
 // Use the production rcclDdaEnabled() from rccl_common.h directly.
-// Threshold constants kDdaAlltoAllGfx{942,950,1250}ThresholdBytes are also in rccl_common.h.
 
 inline size_t testAlltoAllTotalBytes(size_t count, int nRanks, ncclDataType_t datatype) {
   return static_cast<size_t>(nRanks) * count * static_cast<size_t>(ncclTypeSize(datatype));
+}
+
+inline size_t testDdaAlltoAllThreshold(const ncclComm* comm) {
+  return rcclDdaEntryThreshold(comm, ncclFuncAlltoAll);
 }
 
 inline bool testRcclDdaAlltoAllThresholdEnabled(
@@ -34,16 +37,14 @@ inline bool testRcclDdaAlltoAllThresholdEnabled(
   return rcclDdaEnabled(
       comm,
       testAlltoAllTotalBytes(count, comm->nRanks, datatype),
-      kDdaAlltoAllGfx942ThresholdBytes,
-      kDdaAlltoAllGfx950ThresholdBytes,
-      kDdaAlltoAllGfx1250ThresholdBytes);
+      testDdaAlltoAllThreshold(comm));
 }
 
 // Mirrors dda_alltoall_ipc.cu: in-kernel staging copy on single-block launches only.
 // The fabric path always stages via a pre-kernel memcpy.
 inline bool testAlltoAllUsesInKernelStagingCopy(size_t countPerRank, ncclDataType_t datatype) {
   const size_t bytesPerRank = countPerRank * static_cast<size_t>(ncclTypeSize(datatype));
-  return meta::comms::ddaAlltoAllSingleBlockGrid(bytesPerRank, /* typeSize= */ 1);
+  return dda::common::ddaAlltoAllSingleBlockGrid(bytesPerRank, /* typeSize= */ 1);
 }
 
 inline size_t testAlltoAllDdaIpcStagingBytes(size_t count, int nRanks, size_t typeSize) {
@@ -73,7 +74,7 @@ struct DdaAlltoAllMockComm
 
 // Largest float32 per-rank count whose 8-rank AlltoAll totals exactly 4 MiB.
 constexpr size_t kAlltoAllFloat32CountAt4MbThreshold =
-    kDdaAlltoAllGfx942ThresholdBytes /
+    4194304UL /
     (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
 
 // 4 KiB/rank float32: single-block grid on 8-rank IPC launch (in-kernel copy path).

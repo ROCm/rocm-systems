@@ -355,8 +355,6 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"v_fract_f16", {0x7E009000U, 0x00000000U}},
     {"v_sin_f16", {0x7E009200U, 0x00000000U}},
     {"v_cos_f16", {0x7E009400U, 0x00000000U}},
-    {"v_exp_legacy_f32", {0x7E009600U, 0x00000000U}},
-    {"v_log_legacy_f32", {0x7E009800U, 0x00000000U}},
     {"v_cvt_norm_i16_f16", {0x7E009A00U, 0x00000000U}},
     {"v_cvt_norm_u16_f16", {0x7E009C00U, 0x00000000U}},
     {"v_sat_pk_u8_i16", {0x7E009E00U, 0x00000000U}},
@@ -737,8 +735,6 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"v_fract_f16", {0xD1880000U, 0x00000000U}},
     {"v_sin_f16", {0xD1890000U, 0x00000000U}},
     {"v_cos_f16", {0xD18A0000U, 0x00000000U}},
-    {"v_exp_legacy_f32", {0xD18B0000U, 0x00000000U}},
-    {"v_log_legacy_f32", {0xD18C0000U, 0x00000000U}},
     {"v_cvt_norm_i16_f16", {0xD18D0000U, 0x00000000U}},
     {"v_cvt_norm_u16_f16", {0xD18E0000U, 0x00000000U}},
     {"v_sat_pk_u8_i16", {0xD18F0000U, 0x00000000U}},
@@ -1436,7 +1432,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"flat_atomic_dec_x2", {0xDDB00000U, 0x00000000U}},
 };
 
-inline constexpr size_t NUM_ENCODINGS = 1415;
+inline constexpr size_t NUM_ENCODINGS = 1411;
 
 } // namespace rocjitsu::cdna4::test_data
 

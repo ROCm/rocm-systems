@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 option(INSTALL_GTEST "Install GTest" OFF)
 
 # Help tests find libraries at runtime
@@ -91,7 +94,11 @@ add_executable(${TEST} ${tstSources} ${unitSources} ${functSources})
 # any subdirectory depth.
 target_include_directories(
     ${TEST}
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ROCM_INC_DIR}/..
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
+        ${ROCM_INC_DIR}/..
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/amd_smi
 )
 
 # Absolute path to the committed mock CPER fixtures (unit/gpu/mock_cper).

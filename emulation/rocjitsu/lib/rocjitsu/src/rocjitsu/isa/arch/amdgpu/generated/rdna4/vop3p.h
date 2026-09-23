@@ -274,6 +274,9 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VFmaMixloF16Vop3p : public Vop3p {
@@ -285,6 +288,9 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VFmaMixhiF16Vop3p : public Vop3p {
@@ -296,6 +302,9 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VDot4F32Fp8Bf8Vop3p : public Vop3p {

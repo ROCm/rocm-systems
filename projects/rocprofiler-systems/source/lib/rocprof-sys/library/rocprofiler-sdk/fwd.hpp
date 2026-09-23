@@ -6,6 +6,7 @@
 #include "common/synchronized.hpp"
 #include "core/agent_manager.hpp"
 #include "core/perfetto.hpp"
+#include "core/state.hpp"
 #include "core/timemory.hpp"
 #include <cstdint>
 
@@ -24,9 +25,7 @@
 #include <memory>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 using hardware_counter_info = ::tim::hardware_counters::info;
 
@@ -116,34 +115,28 @@ struct client_data
     using context_id_vec_t     = std::array<rocprofiler_context_id_t, num_contexts>;
     using agent_vec_t          = std::vector<rocprofiler_agent_v0_t>;
 
-    rocprofiler_client_id_t*                  client_id                 = nullptr;
-    rocprofiler_client_finalize_t             client_fini               = nullptr;
-    rocprofiler_context_id_t                  primary_ctx               = { 0 };
-    rocprofiler_context_id_t                  counter_ctx               = { 0 };
-    rocprofiler_context_id_t                  code_object_ctx           = { 0 };
-    rocprofiler_context_id_t                  control_ctx               = { 0 };
-    rocprofiler_buffer_id_t                   kernel_dispatch_buffer    = { 0 };
-    rocprofiler_buffer_id_t                   scratch_memory_buffer     = { 0 };
-    rocprofiler_buffer_id_t                   memory_copy_buffer        = { 0 };
-    rocprofiler_buffer_id_t                   memory_alloc_buffer       = { 0 };
-    rocprofiler_buffer_id_t                   counter_collection_buffer = { 0 };
-    rocprofiler_buffer_id_t                   kfd_page_fault_buffer     = { 0 };
-    rocprofiler_buffer_id_t                   kfd_page_migrate_buffer   = { 0 };
-    rocprofiler_buffer_id_t                   kfd_queue_buffer          = { 0 };
-    rocprofiler_buffer_id_t                   kfd_event_queue_buffer    = { 0 };
-    rocprofiler_buffer_id_t                   kfd_event_unmap_buffer    = { 0 };
-    rocprofiler_buffer_id_t                   kfd_event_dropped_buffer  = { 0 };
-    std::vector<tool_agent>                   cpu_agents                = {};
-    std::vector<tool_agent>                   gpu_agents                = {};
-    std::vector<hardware_counter_info>        events_info               = {};
-    agent_counter_id_map_t                    agent_events              = {};
-    agent_counter_info_map_t                  agent_counter_info        = {};
-    agent_counter_profile_map_t               agent_counter_profiles    = {};
-    common::synchronized<code_object_vec_t>   code_object_records       = {};
-    common::synchronized<kernel_symbol_vec_t> kernel_symbol_records     = {};
-    buffer_name_info_t                        buffered_tracing_info     = {};
-    callback_name_info_t                      callback_tracing_info     = {};
-    backtrace_operation_map_t                 backtrace_operations      = {};
+    rocprofiler_client_id_t*           client_id                 = nullptr;
+    rocprofiler_client_finalize_t      client_fini               = nullptr;
+    rocprofiler_context_id_t           primary_ctx               = { 0 };
+    rocprofiler_context_id_t           counter_ctx               = { 0 };
+    rocprofiler_context_id_t           code_object_ctx           = { 0 };
+    rocprofiler_context_id_t           control_ctx               = { 0 };
+    rocprofiler_buffer_id_t            kernel_dispatch_buffer    = { 0 };
+    rocprofiler_buffer_id_t            scratch_memory_buffer     = { 0 };
+    rocprofiler_buffer_id_t            memory_copy_buffer        = { 0 };
+    rocprofiler_buffer_id_t            memory_alloc_buffer       = { 0 };
+    rocprofiler_buffer_id_t            counter_collection_buffer = { 0 };
+    std::vector<tool_agent>            cpu_agents                = {};
+    std::vector<tool_agent>            gpu_agents                = {};
+    std::vector<hardware_counter_info> events_info               = {};
+    agent_counter_id_map_t             agent_events              = {};
+    agent_counter_info_map_t           agent_counter_info        = {};
+    agent_counter_profile_map_t        agent_counter_profiles    = {};
+    common::synchronized<code_object_vec_t, state::thread>   code_object_records   = {};
+    common::synchronized<kernel_symbol_vec_t, state::thread> kernel_symbol_records = {};
+    buffer_name_info_t                                       buffered_tracing_info = {};
+    callback_name_info_t                                     callback_tracing_info = {};
+    backtrace_operation_map_t                                backtrace_operations  = {};
 
     void                        initialize();
     void                        initialize_event_info();
@@ -192,12 +185,10 @@ client_data::get_code_obj_context() const
 inline client_data::buffer_id_vec_t
 client_data::get_buffers() const
 {
-    return buffer_id_vec_t{ kernel_dispatch_buffer,    scratch_memory_buffer,
-                            memory_copy_buffer,        memory_alloc_buffer,
-                            counter_collection_buffer, kfd_page_fault_buffer,
-                            kfd_page_migrate_buffer,   kfd_queue_buffer,
-                            kfd_event_queue_buffer,    kfd_event_unmap_buffer,
-                            kfd_event_dropped_buffer };
+    return buffer_id_vec_t{
+        kernel_dispatch_buffer, scratch_memory_buffer,     memory_copy_buffer,
+        memory_alloc_buffer,    counter_collection_buffer,
+    };
 }
 
 inline const rocprofsys_agent_t*
@@ -261,13 +252,12 @@ client_data::get_code_object_info(std::uint64_t code_object_id) const
         });
 }
 
-inline constexpr client_data*
+constexpr client_data*
 as_client_data(void* _ptr)
 {
     return static_cast<client_data*>(_ptr);
 }
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk
 
 #if !defined(ROCPROFILER_CALL)
 #    define ROCPROFILER_CALL(result)                                                     \

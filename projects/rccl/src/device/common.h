@@ -21,8 +21,8 @@
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
 #define STORE(DST, SRC) \
   { \
-    __hip_atomic_store((__attribute__((address_space(1))) __typeof__(*(DST))*)(DST), (SRC), __ATOMIC_RELAXED, \
-                       __HIP_MEMORY_SCOPE_SYSTEM); \
+    __scoped_atomic_store_n((__attribute__((address_space(1))) __typeof__(*(DST))*)(DST), (SRC), __ATOMIC_RELAXED, \
+                            __MEMORY_SCOPE_SYSTEM); \
   }
 #elif defined(__GFX9__)
 #define STORE(DST, SRC) \
@@ -95,6 +95,10 @@ struct ncclShmemData {
   uint64_t faults;
 #endif
   uint64_t barrier_pat;
+#if RCCL_TDM_STAGE_BYTES_PER_WARP
+  // A separate __shared__ should work better as it does not instantiate this for LL and LL128
+  alignas(RCCL_TDM_ALIGN) char tdmStage[RCCL_TDM_STAGE_BYTES_PER_WARP * (NCCL_MAX_NTHREADS / WARP_SIZE)];
+#endif
 };
 
 #ifdef RCCL_DEVICE_LINKER
@@ -108,6 +112,12 @@ extern __shared__ ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2
 extern __shared__ ulong2
   ncclShmemPerWarp[ncclShmemScratchWarpSize() * (NCCL_MAX_NTHREADS / WARP_SIZE) / sizeof(ulong2)];
 #endif
+#endif
+
+#if RCCL_TDM_STAGE_BYTES_PER_WARP
+__device__ inline void* ncclTdmStageForWarp(int warp) {
+  return ncclShmem.tdmStage + warp * RCCL_TDM_STAGE_BYTES_PER_WARP;
+}
 #endif
 
 #ifdef ENABLE_FAULT_INJECTION
@@ -273,10 +283,13 @@ __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncc
     // the nextExtends warp rotation stays correct. alignas(16) keeps bcastPacks >= 1.
     static_assert(sizeof(struct ncclDevWorkBcast) % 16 == 0 && sizeof(struct ncclDevWorkBcast) >= 16,
                   "ncclDevWorkBcast must be a non-zero multiple of the 16B pack size");
-    constexpr int bcastPacks = sizeof(struct ncclDevWorkBcast)/16; // 3 packs/work
+    constexpr int bcastPacks = sizeof(struct ncclDevWorkBcast) / 16; // 3 packs/work
     bool isBcast = batch.workType == (int)ncclDevWorkTypeBcast;
     for (int pk = tid; pk < nPacks; pk += tn) {
-      if (isBcast) { dstWork = pk/bcastPacks; packInWork = pk - dstWork*bcastPacks; }
+      if (isBcast) {
+        dstWork = pk / bcastPacks;
+        packInWork = pk - dstWork * bcastPacks;
+      }
       int srcWork = fnsOfBitset[dstWork]; // find n'th set bit in batch.offsetBitset
       ulonglong2 tmp;
       // The loads done in these two cases must be kept separate since we are
@@ -315,7 +328,7 @@ __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncc
 
     if (batch.nextExtends) {
       batchIx += batch.nextJump;
-      tid -= 2*WARP_SIZE; // Rotate threads so we use the next two warps for next batch struct.
+      tid -= 2 * WARP_SIZE; // Rotate threads so we use the next two warps for next batch struct.
       if (tid < 0) tid += tn;
     } else {
       if (tid == 0) {
@@ -352,12 +365,35 @@ template <ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto, int US
           int UserRegMode = 0>
 struct RunWorkBatch;
 
-// Specialized for P2p in sendrecv.h
+// Specialized for P2p in sendrecv.h. The add_unroll.sh hipify pass appends the trailing
+// USE_ACC/COLL_UNROLL/Pipeline/UserRegMode template parameters; UserRegMode selects the
+// latency-protocol kernel variant (0 = legacy LL, 1 = LL128, launched on gfx942/gfx950 only).
 template <typename T, typename RedOp>
 struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE>;
 
 template <typename T, typename RedOp, int Proto>
 struct RunWorkBatch<ncclFuncAllGatherV, T, RedOp, NCCL_ALGO_RING, Proto>;
+
+#define START 0
+#define STOP 1
+#define FINI 2
+
+__device__ __forceinline__ bool profilerEnabled(int workItemIdx) {
+  return (ncclShmem.workType == ncclDevWorkTypeP2p) ?
+           ((struct ncclDevWorkP2p*)ncclShmem.workStorage)[workItemIdx].profilerEnabled :
+           ((struct ncclDevWorkColl*)ncclShmem.workStorage)[workItemIdx].profilerEnabled;
+}
+
+__device__ __forceinline__ void profilerPhase(int phaseId) {
+  uint64_t ts = globaltimer();
+  int idx = 0;
+  uint64_t wc = ncclShmem.channel.workCounter + 1;
+  for (; wc <= ncclShmem.channel.workCounter + ncclShmem.nWorks; wc++) {
+    if (!profilerEnabled(idx++)) continue;
+    int slot = wc % MAX_PROFILER_EVENTS_PER_CHANNEL;
+    ncclShmem.comm.workPhases[ncclShmem.channelId].data[slot].timestamps[phaseId] = ts;
+  }
+}
 
 // Specialized here for non-P2p (Coll and CollReg)
 template <ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto, int USE_ACC, int COLL_UNROLL, int Pipeline,
@@ -380,6 +416,11 @@ struct RunWorkBatch {
       __syncthreads();
     }
 
+    // Block-uniform gate so a profiler-off launch keeps the baseline cost (no extra
+    // sync/stamps). profilerEnabled(0) is uniform; nWorks>0 guards workStorage[0].
+    bool profOn = (ncclShmem.nWorks > 0) && profilerEnabled(0);
+    if (profOn && threadIdx.x == 0) profilerPhase(NCCL_KERNEL_PHASE_AFTER_OPEN); // end of initial sync
+
 #pragma unroll 1
     for (int w = 0; w < ncclShmem.nWorks; w++) {
       struct ncclDevWorkColl* work = (struct ncclDevWorkColl*)(ncclShmem.workStorage + w * ncclShmem.workSize);
@@ -391,9 +432,10 @@ struct RunWorkBatch {
       int subtn = work->nWarps * WARP_SIZE;
 #ifdef ENABLE_WARP_SPEED
       if (tid < subtn) {
+        int ch = ncclShmem.warpChannelId[tid / WARP_SIZE];
         if (ncclShmem.warpComm == 0 || Algo != NCCL_ALGO_RING)
           RunWorkColl<Fn, T, RedOp, Algo, Proto>().run(tid, subtn, work);
-        else if (ncclShmem.warpChannelId[tid / WARP_SIZE] >= 0)
+        else if (ch >= work->channelLo && ch <= work->channelHi)
           RunWorkColl<Fn, T, RedOp, Algo, Proto>().run(tid % WARP_SIZE, WARP_SIZE, work);
       }
 #else
@@ -403,36 +445,51 @@ struct RunWorkBatch {
       if (tid < subtn) RunWorkColl<Fn, T, RedOp, Algo, Proto>().run(tid, subtn, work);
 #endif
     }
+    // End of compute. Sync so thread 0's stamp reflects the last worker finishing.
+    if (profOn) {
+      __syncthreads();
+      if (threadIdx.x == 0) profilerPhase(NCCL_KERNEL_PHASE_BEFORE_CLOSE);
+    }
   }
 };
-
-#define START 0
-#define STOP 1
-#define FINI 2
-
-__device__ __forceinline__ bool profilerEnabled(int workItemIdx) {
-  return (ncclShmem.workType == ncclDevWorkTypeP2p) ?
-           ((struct ncclDevWorkP2p*)ncclShmem.workStorage)[workItemIdx].profilerEnabled :
-           ((struct ncclDevWorkColl*)ncclShmem.workStorage)[workItemIdx].profilerEnabled;
-}
 
 __device__ __forceinline__ void profiler(int action) {
   if (threadIdx.x == 0) {
     int idx = 0;
     uint64_t wc = ncclShmem.channel.workCounter + 1;
     if (action == START) {
+      // workStarted timestamp+counter share one 16B slot (single cache line), so no
+      // fence is needed; the BEGIN phase stamp is ordered by STOP's fence below.
       for (; wc <= ncclShmem.channel.workCounter + ncclShmem.nWorks; wc++) {
         if (!profilerEnabled(idx++)) continue;
-        ncclShmem.comm.workStarted[ncclShmem.channelId].data[wc % MAX_PROFILER_EVENTS_PER_CHANNEL].timestamp =
-          globaltimer();
-        ncclShmem.comm.workStarted[ncclShmem.channelId].data[wc % MAX_PROFILER_EVENTS_PER_CHANNEL].counter = wc;
+        uint64_t ts = globaltimer();
+        int slot = wc % MAX_PROFILER_EVENTS_PER_CHANNEL;
+        ncclShmem.comm.workPhases[ncclShmem.channelId].data[slot].timestamps[NCCL_KERNEL_PHASE_BEGIN] = ts;
+        ncclShmem.comm.workStarted[ncclShmem.channelId].data[slot].timestamp = ts;
+        ncclShmem.comm.workStarted[ncclShmem.channelId].data[slot].counter = wc;
       }
     } else {
+      bool fenceNeeded = false;
       for (; wc <= ncclShmem.channel.workCounter + ncclShmem.nWorks; wc++) {
         if (!profilerEnabled(idx++)) continue;
-        ncclShmem.comm.workCompleted[ncclShmem.channelId].data[wc % MAX_PROFILER_EVENTS_PER_CHANNEL].timestamp =
-          globaltimer();
-        ncclShmem.comm.workCompleted[ncclShmem.channelId].data[wc % MAX_PROFILER_EVENTS_PER_CHANNEL].counter = wc;
+        uint64_t ts = globaltimer();
+        int slot = wc % MAX_PROFILER_EVENTS_PER_CHANNEL;
+        ncclShmem.comm.workCompleted[ncclShmem.channelId].data[slot].timestamp = ts;
+        ncclShmem.comm.workPhases[ncclShmem.channelId].data[slot].timestamps[NCCL_KERNEL_PHASE_END] = ts;
+        fenceNeeded = true;
+      }
+      // workPhases stamps span the kernel and straddle cache lines, so fence once
+      // before publishing the counters to order all phase stamps ahead of them.
+      if (fenceNeeded) {
+        __threadfence_system();
+        idx = 0;
+        for (uint64_t wc2 = ncclShmem.channel.workCounter + 1; wc2 <= ncclShmem.channel.workCounter + ncclShmem.nWorks;
+             wc2++) {
+          if (!profilerEnabled(idx++)) continue;
+          int slot = wc2 % MAX_PROFILER_EVENTS_PER_CHANNEL;
+          ncclShmem.comm.workPhases[ncclShmem.channelId].data[slot].counter = wc2;
+          ncclShmem.comm.workCompleted[ncclShmem.channelId].data[slot].counter = wc2;
+        }
       }
       ncclShmem.channel.workCounter += ncclShmem.nWorks;
       if (action == FINI)
@@ -454,6 +511,12 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   int localWarpId = tid / WARP_SIZE;
   int globalWarpId = (warpCount * blockIdx.x) + localWarpId;
   int laneId = tid % WARP_SIZE;
+  // Under WarpSpeed the launch grid is compressed: block b covers logical
+  // channels [b*warpsPerBlock .. (b+1)*warpsPerBlock-1]. Map blockIdx.x to
+  // the lead warp's index among enabled channels for channelId/workCounter.
+  int channelNth = args->warpLevelComm ? (warpCount * blockIdx.x) : blockIdx.x;
+#else
+  int channelNth = blockIdx.x;
 #endif
   // Copy kernel args to shmem and then only read those. Otherwise the compiler
   // will end up putting the args into thread local stack which is very wasteful.
@@ -476,7 +539,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       if (args->channelMask.masks[i] & (1ull << x)) {
         y = __popcll(args->channelMask.masks[i] & ((1ull << x) - 1));
         y = total + y;
-        if (blockIdx.x == y) {
+        if (channelNth == y) {
           // channelId is the absolute bit position in the global mask:
           // i*CHANNELS_PER_MASK_WORD + x. Using `x + total` was only correct
           // when prior mask words were densely packed (which broke for sparse
@@ -491,7 +554,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         if (args->channelMask.masks[i] & (1ull << x)) {
           y = __popcll(args->channelMask.masks[i] & ((1ull << x) - 1));
           y = y + total;
-          if (blockIdx.x == y) {
+          if (channelNth == y) {
             ncclShmem.channelId = x + i * CHANNELS_PER_MASK_WORD;
             break;
           }
@@ -556,7 +619,14 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       // Coverity reports a possible thread divergence due to not all threads participating in the collective.
       // However, the code ensures that the participation is on a per-warp basis.
       // coverity[device_thread_diverged:FALSE]
+#ifdef ENABLE_WARP_SPEED
+      // batchZero is dense in enabled-channel order (finishPlan), not keyed by
+      // absolute channel id. WarpSpeed packs warpCount logical channels per block.
+      int batchIx = args->warpLevelComm ? (warpCount * blockIdx.x) : blockIdx.x;
+      loadWorkBatchToShmem(subtid, subtn, args, batchIx);
+#else
       loadWorkBatchToShmem(subtid, subtn, args, /*batchIx=*/blockIdx.x);
+#endif
     }
     break;
   }

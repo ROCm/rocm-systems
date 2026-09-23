@@ -28,7 +28,8 @@ ScratchLoadU8Vscratch::ScratchLoadU8Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -58,7 +59,8 @@ ScratchLoadI8Vscratch::ScratchLoadI8Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -88,7 +90,8 @@ ScratchLoadU16Vscratch::ScratchLoadU16Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -118,7 +121,8 @@ ScratchLoadI16Vscratch::ScratchLoadI16Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -148,7 +152,8 @@ ScratchLoadB32Vscratch::ScratchLoadB32Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -178,7 +183,8 @@ ScratchLoadB64Vscratch::ScratchLoadB64Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -208,7 +214,8 @@ ScratchLoadB96Vscratch::ScratchLoadB96Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -238,7 +245,8 @@ ScratchLoadB128Vscratch::ScratchLoadB128Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -268,7 +276,8 @@ ScratchStoreB8Vscratch::ScratchStoreB8Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -298,7 +307,8 @@ ScratchStoreB16Vscratch::ScratchStoreB16Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -328,7 +338,8 @@ ScratchStoreB32Vscratch::ScratchStoreB32Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -358,7 +369,8 @@ ScratchStoreB64Vscratch::ScratchStoreB64Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -388,7 +400,8 @@ ScratchStoreB96Vscratch::ScratchStoreB96Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -418,7 +431,8 @@ ScratchStoreB128Vscratch::ScratchStoreB128Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -448,7 +462,8 @@ ScratchLoadD16U8Vscratch::ScratchLoadD16U8Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -461,19 +476,6 @@ DecodeResult decodeScratchLoadD16U8Vscratch(const MachineInst *opcode,
   return std::make_unique<ScratchLoadD16U8Vscratch>(opcode);
 }
 } // namespace detail
-
-void ScratchLoadD16U8Vscratch::implicit_uses(RegisterSet &uses) const {
-  Vscratch::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void ScratchLoadD16U8Vscratch::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vscratch::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
 
 ScratchLoadD16I8Vscratch::ScratchLoadD16I8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
@@ -491,7 +493,8 @@ ScratchLoadD16I8Vscratch::ScratchLoadD16I8Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -504,19 +507,6 @@ DecodeResult decodeScratchLoadD16I8Vscratch(const MachineInst *opcode,
   return std::make_unique<ScratchLoadD16I8Vscratch>(opcode);
 }
 } // namespace detail
-
-void ScratchLoadD16I8Vscratch::implicit_uses(RegisterSet &uses) const {
-  Vscratch::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void ScratchLoadD16I8Vscratch::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vscratch::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
 
 ScratchLoadD16B16Vscratch::ScratchLoadD16B16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
@@ -534,7 +524,8 @@ ScratchLoadD16B16Vscratch::ScratchLoadD16B16Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -547,19 +538,6 @@ DecodeResult decodeScratchLoadD16B16Vscratch(const MachineInst *opcode,
   return std::make_unique<ScratchLoadD16B16Vscratch>(opcode);
 }
 } // namespace detail
-
-void ScratchLoadD16B16Vscratch::implicit_uses(RegisterSet &uses) const {
-  Vscratch::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void ScratchLoadD16B16Vscratch::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vscratch::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
 
 ScratchLoadD16HiU8Vscratch::ScratchLoadD16HiU8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
@@ -577,7 +555,8 @@ ScratchLoadD16HiU8Vscratch::ScratchLoadD16HiU8Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -590,19 +569,6 @@ DecodeResult decodeScratchLoadD16HiU8Vscratch(const MachineInst *opcode,
   return std::make_unique<ScratchLoadD16HiU8Vscratch>(opcode);
 }
 } // namespace detail
-
-void ScratchLoadD16HiU8Vscratch::implicit_uses(RegisterSet &uses) const {
-  Vscratch::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void ScratchLoadD16HiU8Vscratch::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vscratch::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
 
 ScratchLoadD16HiI8Vscratch::ScratchLoadD16HiI8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
@@ -620,7 +586,8 @@ ScratchLoadD16HiI8Vscratch::ScratchLoadD16HiI8Vscratch(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -633,19 +600,6 @@ DecodeResult decodeScratchLoadD16HiI8Vscratch(const MachineInst *opcode,
   return std::make_unique<ScratchLoadD16HiI8Vscratch>(opcode);
 }
 } // namespace detail
-
-void ScratchLoadD16HiI8Vscratch::implicit_uses(RegisterSet &uses) const {
-  Vscratch::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void ScratchLoadD16HiI8Vscratch::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vscratch::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
 
 ScratchLoadD16HiB16Vscratch::ScratchLoadD16HiB16Vscratch(const MachineInst *inst)
     : Vscratch("scratch_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
@@ -663,7 +617,8 @@ ScratchLoadD16HiB16Vscratch::ScratchLoadD16HiB16Vscratch(const MachineInst *inst
   gpumem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -677,19 +632,6 @@ DecodeResult decodeScratchLoadD16HiB16Vscratch(const MachineInst *opcode,
   return std::make_unique<ScratchLoadD16HiB16Vscratch>(opcode);
 }
 } // namespace detail
-
-void ScratchLoadD16HiB16Vscratch::implicit_uses(RegisterSet &uses) const {
-  Vscratch::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
-void ScratchLoadD16HiB16Vscratch::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vscratch::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
 
 ScratchStoreD16HiB8Vscratch::ScratchStoreD16HiB8Vscratch(const MachineInst *inst)
     : Vscratch("scratch_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
@@ -707,7 +649,8 @@ ScratchStoreD16HiB8Vscratch::ScratchStoreD16HiB8Vscratch(const MachineInst *inst
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -738,7 +681,8 @@ ScratchStoreD16HiB16Vscratch::ScratchStoreD16HiB16Vscratch(const MachineInst *in
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -771,7 +715,8 @@ ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {
@@ -803,7 +748,8 @@ ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
-  flags_ |= MEMORY_OP;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
 }
 
 namespace detail {

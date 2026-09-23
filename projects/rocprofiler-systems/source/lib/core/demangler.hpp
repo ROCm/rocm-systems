@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "core/state.hpp"
+
 #include <cstdlib>
 #include <cxxabi.h>
 #include <functional>
@@ -13,9 +15,7 @@
 #include <string>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace utility
+namespace rocprofsys::utility
 {
 
 struct cxa_demangle_wrapper_impl
@@ -58,7 +58,7 @@ struct demangler
 private:
     std::shared_mutex                               m_mutex;
     std::map<std::string, std::string, std::less<>> m_cache;
-    using cache_iterator = typename decltype(m_cache)::iterator;
+    using cache_iterator = decltype(m_cache)::iterator;
 
     struct cache_result
     {
@@ -79,6 +79,7 @@ private:
 
     cache_result try_get_from_cache(std::string_view _mangled_name)
     {
+        auto _state_guard = state::thread::scoped(state::thread::Internal);
         const std::shared_lock<std::shared_mutex> _read_lock{ m_mutex };
 
         auto _it = m_cache.find(_mangled_name);
@@ -92,6 +93,7 @@ private:
 
     std::string demangle_and_cache(std::string_view _mangled_name)
     {
+        auto _state_guard = state::thread::scoped(state::thread::Internal);
         const std::unique_lock<std::shared_mutex> _write_lock{ m_mutex };
 
         auto _it = m_cache.find(_mangled_name);
@@ -126,5 +128,4 @@ demangle(std::string_view name)
     return get_demangler().demangle(name);
 }
 
-}  // namespace utility
-}  // namespace rocprofsys
+}  // namespace rocprofsys::utility

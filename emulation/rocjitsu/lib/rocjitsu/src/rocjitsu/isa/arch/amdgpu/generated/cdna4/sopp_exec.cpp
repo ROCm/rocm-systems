@@ -7,7 +7,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/sopp.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -151,13 +150,14 @@ void SSetGprIdxOffSopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SSetGprIdxModeSopp::execute_impl(amdgpu::Wavefront &wf) {
-  wf.set_m0((wf.m0() & 0xFFFFF0FFu) |
-            ((amdgpu::RegisterAccess(wf).read_scalar(simm16) & 0xF) << 8));
+  amdgpu::execute_s_set_gpr_idx_mode_sopp(*this, wf);
 }
 
 void SEndpgmOrderedPsDoneSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
 
-void SSetValuCoexecModeSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSetValuCoexecModeSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_set_valu_coexec_mode_sopp(*this, wf);
+}
 
 } // namespace cdna4
 } // namespace rocjitsu

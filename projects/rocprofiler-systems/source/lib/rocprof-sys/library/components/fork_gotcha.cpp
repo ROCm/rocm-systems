@@ -24,9 +24,7 @@
 #include <pthread.h>
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace component
+namespace rocprofsys::component
 {
 namespace
 {
@@ -137,7 +135,7 @@ postfork_child()
     settings::enabled() = false;
     settings::verbose() = -127;
     settings::debug()   = false;
-    rocprofsys::sampling::shutdown();
+    rocprofsys::sampling::postfork_child_release_samplers();
     rocprofsys::categories::shutdown();
     state::thread::set(state::thread::Disabled);
 
@@ -191,5 +189,4 @@ fork_gotcha::operator()(const gotcha_data_t&, pid_t (*_real_fork)()) const
 
     return _pid;
 }
-}  // namespace component
-}  // namespace rocprofsys
+}  // namespace rocprofsys::component

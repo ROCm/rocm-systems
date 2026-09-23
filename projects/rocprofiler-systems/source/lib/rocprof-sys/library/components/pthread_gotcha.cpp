@@ -11,7 +11,6 @@
 #include "library/thread_data.hpp"
 
 #include <timemory/backends/threading.hpp>
-#include <timemory/utility/macros.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <pthread.h>
@@ -19,9 +18,7 @@
 #include <array>
 #include <vector>
 
-namespace tim
-{
-namespace operation
+namespace tim::operation
 {
 template <>
 struct stop<rocprofsys::component::pthread_create_gotcha_t>
@@ -36,8 +33,7 @@ struct stop<rocprofsys::component::pthread_create_gotcha_t>
     void operator()(type&, Args&&...)
     {}
 };
-}  // namespace operation
-}  // namespace tim
+}  // namespace tim::operation
 
 namespace rocprofsys
 {

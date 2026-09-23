@@ -21,16 +21,17 @@
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu {
 namespace amdgpu {
 class Wavefront;
-struct VectorMemState;
+class VectorMemState;
 } // namespace amdgpu
 
 namespace rdna4 {
 
-uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf);
+std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf);
 
 void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d);

@@ -308,6 +308,24 @@ class GraphKernelArgManager {
   virtual address AllocKernArg(size_t size, size_t alignment, int devId) = 0;
 };
 
+struct GraphKernargSlot {
+  address addr;
+  size_t size;
+  int devId;
+};
+
+struct GraphPacketCaptureContext {
+  std::vector<uint8_t*>* gpuPackets = nullptr;  //!< Receives the captured GPU packets
+  std::vector<uint8_t*>* gpuMetadataPackets = nullptr;  //!< Metadata packets (parallel to gpuPackets); null disables metadata capture
+  std::vector<uint8_t*>* reusableGpuPackets = nullptr;  //!< Prior capture's packets eligible for buffer reuse
+  std::vector<uint8_t*>* reusableGpuMetadataPackets = nullptr;
+  std::vector<GraphKernargSlot>* kernargSlots = nullptr;  //!< Per-node kernarg slot cache
+  size_t* kernargSlotIndex = nullptr;  //!< Next slot to consume in kernargSlots
+  bool reuseKernargSlots = true;  //!< Reuse matching kernarg slots instead of allocating fresh
+  GraphKernelArgManager* kernArgMgr = nullptr;  //!< KernelMgr for graph
+  const std::string** capturedKernelName = nullptr;  //!< Kernel under capture
+};
+
 /*! \brief An operation that is submitted to a command queue.
  *
  *  %Command is the abstract base type of all OpenCL operations
@@ -326,11 +344,8 @@ class Command : public Event {
   const Event* waitingEvent_;  //!< Waiting event associated with the marker
 
   bool packetCapturing_ = false;       //!< Flag to enable/disable graph gpu packet capture
-  std::vector<uint8_t*>* gpuPackets_;  //!< GPU packets captured when graph capturing is enabled
-  std::vector<uint8_t*>* gpuMetadataPackets_ = nullptr;  //!< Metadata packets (parallel to gpuPackets_)
-  GraphKernelArgManager* graphKernArgMgr_ = nullptr;  //!< KernelMgr for graph
+  GraphPacketCaptureContext* graphCapture_ = nullptr;  //!< Capture context, owned by the graph node
   address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
-  const std::string** capturedKernelName_ = nullptr;  //!< Kernel under capture
  protected:
   bool cpu_wait_ = false;  //!< If true, then the command was issued for CPU/GPU sync
 
@@ -375,31 +390,33 @@ class Command : public Event {
   }
   bool getPktCapturingState() const { return packetCapturing_; }
 
-  //! Sets AQL capture state, aql packet to capture and where to copy kernArgs.
-  //! |metadataPacket|, when non-null, also enables capturing the metadata-prefetch
-  //! packet that parallels each captured AQL packet.
-  void setPktCapturingState(bool state, std::vector<uint8_t*>* packet,
-                            amd::GraphKernelArgManager* graphKernArgMgr,
-                            const std::string** capturedKernelName,
-                            std::vector<uint8_t*>* metadataPackets = nullptr) {
+  //! Sets AQL capture state and context; a non-null ctx->gpuMetadataPackets also captures metadata packets.
+  void setPktCapturingState(bool state, GraphPacketCaptureContext* ctx) {
     packetCapturing_ = state;
-    gpuPackets_ = packet;
-    gpuMetadataPackets_ = metadataPackets;
-    graphKernArgMgr_ = graphKernArgMgr;
-    capturedKernelName_ = capturedKernelName;
+    graphCapture_ = ctx;
   }
 
   //! Updates kernel name with the captured kernel name (stores pointer, no copy)
   void SetKernelName(const std::string& kernelName) {
-    if (capturedKernelName_ != nullptr) {
-      *capturedKernelName_ = &kernelName;
+    if (graphCapture_ != nullptr && graphCapture_->capturedKernelName != nullptr) {
+      *graphCapture_->capturedKernelName = &kernelName;
     }
   }
 
   //! Returns the graph executable object command belongs to.
   const uint8_t* getAqlPacket() const {
-    uint8_t* packet = new uint8_t[64];
-    gpuPackets_->push_back(packet);
+    std::vector<uint8_t*>& gpuPackets = *graphCapture_->gpuPackets;
+    std::vector<uint8_t*>* reusablePackets = graphCapture_->reusableGpuPackets;
+    uint8_t* packet = nullptr;
+    const size_t packetIndex = gpuPackets.size();
+    if (reusablePackets != nullptr && packetIndex < reusablePackets->size()) {
+      packet = (*reusablePackets)[packetIndex];
+      (*reusablePackets)[packetIndex] = nullptr;
+    }
+    if (packet == nullptr) {
+      packet = new uint8_t[64];
+    }
+    gpuPackets.push_back(packet);
     return packet;
   }
 
@@ -407,21 +424,54 @@ class Command : public Event {
   //! Returns nullptr if metadata capture is not enabled.
   //! The buffer is initialized with HSA_PACKET_TYPE_INVALID
   uint8_t* getMetadataPacket() const {
-    if (gpuMetadataPackets_ == nullptr) {
+    if (graphCapture_ == nullptr || graphCapture_->gpuMetadataPackets == nullptr) {
       return nullptr;
     }
-    uint8_t* packet = new uint8_t[256]();
+    std::vector<uint8_t*>& metadataPackets = *graphCapture_->gpuMetadataPackets;
+    std::vector<uint8_t*>* reusablePackets = graphCapture_->reusableGpuMetadataPackets;
+    uint8_t* packet = nullptr;
+    const size_t packetIndex = metadataPackets.size();
+    if (reusablePackets != nullptr && packetIndex < reusablePackets->size()) {
+      packet = (*reusablePackets)[packetIndex];
+      (*reusablePackets)[packetIndex] = nullptr;
+    }
+    if (packet == nullptr) {
+      packet = new uint8_t[256];
+    }
+    memset(packet, 0, 256);
     static constexpr size_t kHdrOff[4] = {0, 64, 128, 192};
     static constexpr uint32_t kInvalidMetadataHeader = 1;  // HSA_PACKET_TYPE_INVALID
     for (size_t h = 0; h < 4; ++h) {
       memcpy(packet + kHdrOff[h], &kInvalidMetadataHeader, sizeof(kInvalidMetadataHeader));
     }
-    gpuMetadataPackets_->push_back(packet);
+    metadataPackets.push_back(packet);
     return packet;
   }
 
   address getGraphKernArg(int size, int alignment, int devId) {
-    return graphKernArgMgr_->AllocKernArg(size, alignment, devId);
+    std::vector<GraphKernargSlot>* kernargSlots = graphCapture_->kernargSlots;
+    size_t* kernargSlotIndex = graphCapture_->kernargSlotIndex;
+    if (kernargSlots == nullptr || kernargSlotIndex == nullptr) {
+      return graphCapture_->kernArgMgr->AllocKernArg(size, alignment, devId);
+    }
+
+    const size_t slotIndex = (*kernargSlotIndex)++;
+    if (graphCapture_->reuseKernargSlots && slotIndex < kernargSlots->size()) {
+      GraphKernargSlot& slot = (*kernargSlots)[slotIndex];
+      if (slot.addr != nullptr && slot.devId == devId && slot.size >= static_cast<size_t>(size) &&
+          reinterpret_cast<uintptr_t>(slot.addr) % alignment == 0) {
+        return slot.addr;
+      }
+    }
+
+    address addr = graphCapture_->kernArgMgr->AllocKernArg(size, alignment, devId);
+    GraphKernargSlot slot{addr, static_cast<size_t>(size), devId};
+    if (slotIndex < kernargSlots->size()) {
+      (*kernargSlots)[slotIndex] = slot;
+    } else {
+      kernargSlots->push_back(slot);
+    }
+    return addr;
   }
 
   //! Overload new/delete for fast commands allocation/destruction
@@ -1518,12 +1568,6 @@ class NDRangeKernelCommand : public Command {
   //! Return the kernel NDRange.
   const NDRangeContainer& sizes() const { return sizes_; }
 
-  //! updates kernel NDRange.
-  void setSizes(const size_t* globalWorkOffset, const size_t* globalWorkSize,
-                const size_t* localWorkSize) {
-    sizes_.update(3, globalWorkOffset, globalWorkSize, localWorkSize);
-  }
-
   //! Return the shared memory size
   uint32_t sharedMemBytes() const { return sharedMemBytes_; }
 
@@ -1560,9 +1604,6 @@ class NDRangeKernelCommand : public Command {
 
   const DynDataPrefetchConfig& dynDataPrefetchConfig() const { return dynDataPrefetchConfig_; }
   void setDynDataPrefetchConfig(const DynDataPrefetchConfig& cfg) { dynDataPrefetchConfig_ = cfg; }
-
-  //! Set the local work size.
-  void setLocalWorkSize(const NDRange& local) { sizes_.local() = local; }
 
   //! Set the number of workgroups
   void setNumWorkgroups() {
@@ -1674,21 +1715,23 @@ class Marker : public Command {
 };
 
 class AccumulateCommand : public Command {
- private:
-  //! Stable kernel name pointers — one entry per kernel dispatch slot (base and
-  //! ext variants). Resolved from KernelMap at dispatch time; point into Kernel
-  //! objects that live for the device lifetime. Non-dispatch slots (barriers,
-  //! SDMA) are skipped so kernelNames_ and timestamps_ are always parallel.
-  //! "<unknown>" is used when the kernel_object is not found in KernelMap.
-  std::vector<const char*> kernelNames_;
-  //! GPU timestamps — one entry per kernel dispatch slot, parallel to
-  //! kernelNames_, populated at signal completion time.
-  struct KernelTimestamp {
-    uint64_t start;
-    uint64_t end;
-    uint32_t queue_index;  //!< vGPU index of the stream that ran this kernel
+ public:
+  //! One graph kernel dispatch. The name and queue are known when the AQL packet
+  //! is written; its signal fills the timing later by dispatch slot, so signal
+  //! drain order cannot change which name receives the timing.
+  struct KernelDispatch {
+    const char* kernel_name;
+    //! vGPU slot of the stream this dispatch ran on; one accumulate command can
+    //! span several streams when the graph is segmented.
+    uint32_t queue_index;
+    uint64_t start_ns;
+    uint64_t end_ns;
   };
-  std::vector<KernelTimestamp> timestamps_;
+
+ private:
+  //! Graph kernel dispatches in AQL packet order. Non-dispatch packets are
+  //! omitted; an unprocessed or invalid signal leaves its slot timing at zero.
+  std::vector<KernelDispatch> kernel_dispatches_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
   //! When false, the destructor does not destroy hw_events_ (an external owner,
@@ -1726,20 +1769,23 @@ class AccumulateCommand : public Command {
   //! them across launches instead.
   void setOwnsHwEvents(bool owns) { owns_hw_events_ = owns; }
 
-  //! Record a stable kernel name pointer for one kernel dispatch slot.
-  //! Must not be nullptr — use "<unknown>" when the name cannot be resolved.
-  void addKernelName(const char* name) { kernelNames_.push_back(name); }
-
-  //! Add GPU timestamps for one dispatch slot (called at signal completion).
-  void addTimestamps(uint64_t startTs, uint64_t endTs, uint32_t queue_index = UINT32_MAX) {
-    timestamps_.push_back({startTs, endTs, queue_index});
+  //! Reserve one graph kernel dispatch slot and return its index. |name| must
+  //! not be nullptr — use "<unknown>" when it cannot be resolved.
+  uint32_t addKernelDispatch(const char* name, uint32_t queue_index) {
+    kernel_dispatches_.push_back({name, queue_index, 0, 0});
+    return static_cast<uint32_t>(kernel_dispatches_.size() - 1);
   }
 
-  //! Return kernel name pointers (one per dispatch slot)
-  const std::vector<const char*>& getKernelNames() const { return kernelNames_; }
+  //! Fill the timing for the dispatch slot owned by a completed signal.
+  void setDispatchTiming(uint32_t dispatch_slot, uint64_t start_ns, uint64_t end_ns) {
+    kernel_dispatches_[dispatch_slot].start_ns = start_ns;
+    kernel_dispatches_[dispatch_slot].end_ns = end_ns;
+  }
 
-  //! Return GPU timestamps (one per dispatch slot, populated at signal completion)
-  const std::vector<KernelTimestamp>& getTimestamps() const { return timestamps_; }
+  //! Return graph kernel dispatches in AQL packet order.
+  const std::vector<KernelDispatch>& getKernelDispatches() const {
+    return kernel_dispatches_;
+  }
 
   //! The command implementation
   virtual void submit(device::VirtualDevice& device) { device.submitAccumulate(*this); }

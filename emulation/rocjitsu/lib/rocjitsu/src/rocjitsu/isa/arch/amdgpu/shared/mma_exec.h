@@ -24,6 +24,7 @@
 ///     Input B[col][k]: use input_loc(dim=N, K, B, i=col, k, b, bits).
 
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "util/data_types.h"
@@ -32,6 +33,7 @@
 #include "util/simd.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cassert>
 #include <cmath>
@@ -98,6 +100,16 @@ inline uint32_t src_base(uint32_t vb, int ev) {
   if (ev >= 768)
     return vb + ACC_VGPR_OFFSET + static_cast<uint32_t>(ev - 768);
   return (ev >= 256) ? vb + static_cast<uint32_t>(ev - 256) : vb + static_cast<uint32_t>(ev);
+}
+
+/// Apply GPR_IDX only when an MMA operand resolves to the architectural VGPR
+/// bank. AccVGPRs occupy the unified storage range above ACC_VGPR_OFFSET but
+/// are not selected by MODE.GPR_IDX_EN.
+inline uint32_t apply_gpr_idx_to_mma_base(const Wavefront &wf, uint32_t vb, uint32_t base,
+                                          VgprMsbRole role) {
+  if (base >= vb + ACC_VGPR_OFFSET)
+    return base;
+  return vb + apply_gpr_idx(wf, base - vb, role);
 }
 
 /// Sentinel value indicating the accumulator comes from a register, not a constant.
@@ -248,7 +260,7 @@ inline void require_gfx12_wmma_wave_size(uint32_t wave_size) {
     throw util::ConfigError("gfx12 WMMA requires wave32 or wave64");
 }
 
-// gfx1250 WMMA is wave32-only. 16x16 WMMA v3 operands interleave the K
+// CDNA5 WMMA is wave32-only. 16x16 WMMA v3 operands interleave the K
 // dimension across the two lane groups in two register blocks.
 inline InputLoc wmma_input_loc(uint32_t dim, uint32_t K, uint32_t i, uint32_t k,
                                uint32_t data_bits) {
@@ -260,6 +272,10 @@ inline InputLoc wmma_input_loc(uint32_t dim, uint32_t K, uint32_t i, uint32_t k,
 
   if (dim == 16 && K >= 32) {
     uint32_t block_elems = elems_per_group / 2;
+    // CDNA5 K=128 dense WMMA uses 16-element K blocks. Do not change the
+    // pre-existing K=64 family, which uses the default 16-element blocks too.
+    if (data_bits == 8 && K == 128)
+      block_elems = 16;
     if (data_bits == 4 && K == 128)
       block_elems = 16;
     if (block_elems != 0) {
@@ -301,6 +317,20 @@ inline InputLoc wmma_packed_input_loc(uint32_t lane, uint32_t slot, uint32_t dat
   return {bit / 32, lane, sub_element, bit_in_word, data_bits};
 }
 
+/// Compute an input element location for CDNA4 block-scale F8F6F4 MFMA.
+///
+/// Scaled MFMA uses the same dense operand layout as the corresponding
+/// unscaled F8F6F4 operation. The supported shapes both use one matrix block
+/// distributed across a wave64.
+inline InputLoc mfma_scale_f8f6f4_input_loc(uint32_t dim, uint32_t K, uint32_t index, uint32_t k,
+                                            uint32_t data_bits) {
+  if (!((dim == 16 && K == 128) || (dim == 32 && K == 64)))
+    throw util::UnimplementedInst("unsupported CDNA4 block-scale MFMA input shape");
+  if (data_bits != 4 && data_bits != 6 && data_bits != 8)
+    throw util::UnimplementedInst("unsupported CDNA4 block-scale MFMA input format");
+  return input_loc(dim, K, /*B=*/1, index, k, /*b=*/0, data_bits);
+}
+
 inline InputLoc gfx12_wmma_input_loc(uint32_t wave_size, uint32_t dim, uint32_t K, uint32_t i,
                                      uint32_t k, uint32_t data_bits) {
   require_gfx12_wmma_wave_size(wave_size);
@@ -316,7 +346,7 @@ inline InputLoc gfx12_wmma_input_loc(uint32_t wave_size, uint32_t dim, uint32_t 
 
 inline InputLoc wmma_f8f6f4_ab_input_loc(uint32_t dim, uint32_t K, uint32_t i, uint32_t k,
                                          uint32_t data_bits) {
-  if (dim == 16 && K == 128 && data_bits <= 8) {
+  if (dim == 16 && K == 128 && data_bits < 8) {
     const uint32_t lane = i + 16u * ((k >> 2) & 1u);
     const uint32_t reg = ((k >> 1) & 1u) + 2u * ((k >> 3) & 1u) + 4u * ((k >> 4) & 1u) +
                          8u * ((k >> 5) & 1u) + 16u * ((k >> 6) & 1u);
@@ -361,6 +391,34 @@ inline InputLoc wmma_b_input_loc(uint32_t N, uint32_t K, uint32_t col, uint32_t 
   return wmma_f8f6f4_input_loc(N, K, col, k, b_bits, b_bits < 8 && a_bits == 8);
 }
 
+/// Compute the CDNA5 block-scaled WMMA input layout. Unlike the ordinary
+/// F8F6F4 WMMA layout, each operand format stores contiguous K ranges in each
+/// lane group: 16 values for 8-bit inputs and 32 values for 4/6-bit inputs.
+inline InputLoc wmma_block_scaled_input_loc(uint32_t dim, uint32_t K, uint32_t index, uint32_t k,
+                                            uint32_t data_bits) {
+  if (dim != 16 || K != 128 || (data_bits != 4 && data_bits != 6 && data_bits != 8))
+    throw util::UnimplementedInst("unsupported CDNA5 block-scaled WMMA input shape");
+  const uint32_t block_elems = data_bits == 8 ? 16u : 32u;
+  const uint32_t lane = index + 16u * ((k / block_elems) & 1u);
+  const uint32_t local = (k / (2u * block_elems)) * block_elems + (k % block_elems);
+  return wmma_packed_input_loc(lane, local, data_bits);
+}
+
+inline InputLoc wmma_block_scaled_a_input_loc(uint32_t M, uint32_t K, uint32_t row, uint32_t k,
+                                              uint32_t a_bits) {
+  if (M == 32 && K == 128 && a_bits == 4) {
+    auto loc = wmma_block_scaled_input_loc(16, K, row % 16, k, a_bits);
+    loc.vgpr_offset += 8u * (row / 16u);
+    return loc;
+  }
+  return wmma_block_scaled_input_loc(M, K, row, k, a_bits);
+}
+
+inline InputLoc wmma_block_scaled_b_input_loc(uint32_t N, uint32_t K, uint32_t col, uint32_t k,
+                                              uint32_t b_bits) {
+  return wmma_block_scaled_input_loc(N, K, col, k, b_bits);
+}
+
 inline InputLoc gfx12_wmma_a_input_loc(uint32_t wave_size, uint32_t M, uint32_t K, uint32_t row,
                                        uint32_t k, uint32_t a_bits, uint32_t b_bits) {
   if (wave_size == WMMA_WAVE32)
@@ -386,6 +444,17 @@ inline OutputLoc wmma_output_loc_32(uint32_t M, uint32_t N, uint32_t row, uint32
   uint32_t lane = (row / elems_per_lane) * N + col;
   uint32_t reg = row % elems_per_lane;
   return {reg, lane};
+}
+
+/// Map one logical F64 CDNA5 WMMA output to its pair of consecutive VGPRs.
+///
+/// The public CDNA5 ISA reference, section 7.12.2, maps the eight logical
+/// 16x16 C/D components per lane with the same row/lane ordering represented
+/// by wmma_output_loc_32(). The checked-in FMT_WMMA_DC_16X16_F64 data format
+/// then maps each logical F64 component to two consecutive 32-bit VGPRs.
+inline OutputLoc wmma_output_loc_64(uint32_t M, uint32_t N, uint32_t row, uint32_t col) {
+  const auto logical = wmma_output_loc_32(M, N, row, col);
+  return {2u * logical.reg, logical.lane};
 }
 
 inline OutputLoc gfx12_wmma_output_loc_32(uint32_t wave_size, uint32_t M, uint32_t N, uint32_t row,
@@ -489,6 +558,12 @@ inline SwmmacIndexLoc swmmac_index_loc(uint32_t M, uint32_t K, uint32_t elem_bit
     }
     return {row + 16u * ((group / 2u) & 1u), 2u * (group & 1u) + 4u * (group / 4u) + slot};
   }
+  // This generic routing is also intentional for gfx1250 K=128 8-bit
+  // SWMMAC. Hardware-reference Tensile kernels require contiguous 32-entry
+  // selector blocks even though sparse A changes lane halves every 16 packed
+  // K elements. That differs from the association described by the public
+  // CDNA5 ISA Sections 7.12.3 and 7.12.5; retain the validated behavior
+  // pending specification clarification.
   return {row + (compressed_k / index_entries) * M, compressed_k % index_entries};
 }
 
@@ -545,6 +620,15 @@ inline InputLoc swmmac_a_input_loc(uint32_t wave_size, uint32_t M, uint32_t K, u
 
 inline InputLoc swmmac_b_input_loc(uint32_t N, uint32_t K, uint32_t col, uint32_t dense_k,
                                    uint32_t elem_bits) {
+  if (N == 16 && K == 128 && elem_bits == 8) {
+    // Hardware-reference gfx1250 Tensile kernels require this 32-element
+    // SWMMAC B ordering. It differs from both dense K=128 WMMA and the public
+    // CDNA5 ISA Section 7.12.5; retain the validated instruction-specific
+    // layout pending specification clarification.
+    const uint32_t lane = col + 16u * ((dense_k >> 5) & 1u);
+    const uint32_t slot = (dense_k & 31u) + 32u * (dense_k >> 6);
+    return wmma_packed_input_loc(lane, slot, elem_bits);
+  }
   if (N == 16 && K == 32) {
     if (elem_bits == 8)
       return wmma_packed_input_loc(col + 16u * (dense_k / 16u), dense_k % 16u, elem_bits);
@@ -630,10 +714,26 @@ inline uint32_t permute_b_lane(uint32_t lane, uint32_t blgp) {
 
 inline uint32_t packed_mask(uint32_t bits) { return bits >= 32 ? UINT32_MAX : ((1u << bits) - 1u); }
 
+inline uint32_t matrix_vgpr_word(const RegisterAccess::VgprReadRegion &region,
+                                 uint32_t physical_reg, uint32_t lane) {
+  assert(physical_reg >= region.base() && physical_reg - region.base() < region.reg_count() &&
+         "matrix read exceeds acquired VGPR region");
+  return region.lane(physical_reg - region.base(), lane);
+}
+
+inline uint32_t matrix_vgpr_word(RegisterAccess::VgprReadRegion &region, uint32_t physical_reg,
+                                 uint32_t lane) {
+  return matrix_vgpr_word(std::as_const(region), physical_reg, lane);
+}
+
+inline uint32_t matrix_vgpr_word(auto &cu, uint32_t physical_reg, uint32_t lane) {
+  return RegisterAccess(cu).read_vgpr(physical_reg, lane);
+}
+
 inline uint32_t read_packed(auto &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane) >> loc.bit_offset;
+  uint32_t raw = matrix_vgpr_word(cu, base + loc.vgpr_offset, loc.lane) >> loc.bit_offset;
   if (loc.bit_offset + loc.data_bits > 32) {
-    uint32_t next = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset + 1, loc.lane);
+    uint32_t next = matrix_vgpr_word(cu, base + loc.vgpr_offset + 1, loc.lane);
     raw |= next << (32 - loc.bit_offset);
   }
   return raw & packed_mask(loc.data_bits);
@@ -641,14 +741,14 @@ inline uint32_t read_packed(auto &cu, uint32_t base, const InputLoc &loc) {
 
 struct ExtractF32 {
   float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
-    return std::bit_cast<float>(RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane));
+    return std::bit_cast<float>(matrix_vgpr_word(cu, base + loc.vgpr_offset, loc.lane));
   }
 };
 inline constexpr ExtractF32 extract_f32{};
 
 struct ExtractF16 {
   float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
-    uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
+    uint32_t raw = matrix_vgpr_word(cu, base + loc.vgpr_offset, loc.lane);
     return util::f16_to_f32(static_cast<uint16_t>((raw >> (loc.sub_element * 16)) & 0xFFFF));
   }
 };
@@ -656,7 +756,7 @@ inline constexpr ExtractF16 extract_f16{};
 
 struct ExtractBf16 {
   float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
-    uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
+    uint32_t raw = matrix_vgpr_word(cu, base + loc.vgpr_offset, loc.lane);
     return util::bf16_to_f32(static_cast<uint16_t>((raw >> (loc.sub_element * 16)) & 0xFFFF));
   }
 };
@@ -664,7 +764,7 @@ inline constexpr ExtractBf16 extract_bf16{};
 
 struct ExtractI8 {
   int32_t operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
-    uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
+    uint32_t raw = matrix_vgpr_word(cu, base + loc.vgpr_offset, loc.lane);
     return static_cast<int32_t>(static_cast<int8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
   }
 };
@@ -672,7 +772,7 @@ inline constexpr ExtractI8 extract_i8{};
 
 struct ExtractU8 {
   int32_t operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
-    uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
+    uint32_t raw = matrix_vgpr_word(cu, base + loc.vgpr_offset, loc.lane);
     return static_cast<int32_t>((raw >> (loc.sub_element * 8)) & 0xFF);
   }
 };
@@ -699,7 +799,7 @@ inline constexpr ExtractU4 extract_u4{};
 
 struct ExtractFp8Ocp {
   float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
-    uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
+    uint32_t raw = matrix_vgpr_word(cu, base + loc.vgpr_offset, loc.lane);
     return util::fp8_e4m3_ocp_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
   }
 };
@@ -707,7 +807,7 @@ inline constexpr ExtractFp8Ocp extract_fp8_ocp{};
 
 struct ExtractBf8Ocp {
   float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
-    uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
+    uint32_t raw = matrix_vgpr_word(cu, base + loc.vgpr_offset, loc.lane);
     return util::bf8_e5m2_ocp_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
   }
 };
@@ -715,7 +815,7 @@ inline constexpr ExtractBf8Ocp extract_bf8_ocp{};
 
 struct ExtractFp8Fnuz {
   float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
-    uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
+    uint32_t raw = matrix_vgpr_word(cu, base + loc.vgpr_offset, loc.lane);
     return util::fp8_e4m3_fnuz_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
   }
 };
@@ -723,7 +823,7 @@ inline constexpr ExtractFp8Fnuz extract_fp8_fnuz{};
 
 struct ExtractBf8Fnuz {
   float operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
-    uint32_t raw = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
+    uint32_t raw = matrix_vgpr_word(cu, base + loc.vgpr_offset, loc.lane);
     return util::bf8_e5m2_fnuz_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
   }
 };
@@ -766,8 +866,8 @@ inline constexpr ExtractBf6 extract_bf6{};
 
 struct ExtractF64 {
   double operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
-    uint32_t lo = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset, loc.lane);
-    uint32_t hi = RegisterAccess(cu).read_vgpr(base + loc.vgpr_offset + 1, loc.lane);
+    uint32_t lo = matrix_vgpr_word(cu, base + loc.vgpr_offset, loc.lane);
+    uint32_t hi = matrix_vgpr_word(cu, base + loc.vgpr_offset + 1, loc.lane);
     return std::bit_cast<double>(static_cast<uint64_t>(hi) << 32 | lo);
   }
 };
@@ -779,6 +879,8 @@ inline float decode_wmma_scale_byte(uint8_t raw, uint32_t fmt) {
   switch (fmt) {
   case 0:
     return decode_e8m0_scale(raw);
+  case 1:
+    return util::fp8_e5m3_to_f32(raw);
   case 2:
     return util::fp8_e4m3_to_f32(raw);
   default:
@@ -817,6 +919,10 @@ inline uint32_t wmma_f8f6f4_scale_byte(uint32_t k, uint32_t data_bits, bool mixe
   if (mixed_pair || data_bits == 8)
     return k >> 5;
   return 2u * (k >> 6) + ((k >> 2) & 1u);
+}
+
+inline uint32_t wmma_block_scale_byte(uint32_t k, bool scale16) {
+  return k / (scale16 ? 16u : 32u);
 }
 
 template <typename Run> bool dispatch_matrix_fmt_pair(uint32_t a_fmt, uint32_t b_fmt, Run run) {
@@ -1020,6 +1126,10 @@ inline uint64_t mfma_full_lane_mask(uint32_t wf_size) {
   return wf_size >= 64 ? ~uint64_t{0} : ((uint64_t{1} << wf_size) - 1);
 }
 
+inline bool is_gfx1251_wmma_execution_state_valid(uint32_t wf_size, uint64_t exec_mask) {
+  return wf_size == WMMA_WAVE32 && exec_mask == mfma_full_lane_mask(WMMA_WAVE32);
+}
+
 inline uint32_t mfma_dense_reg_count(uint64_t element_count, uint32_t element_bits,
                                      uint32_t wf_size) {
   uint64_t bits_per_reg = static_cast<uint64_t>(wf_size) * 32u;
@@ -1142,6 +1252,25 @@ public:
   std::optional<RegisterAccess::VgprReadRegion> acc;
 };
 
+inline MatrixReadRegions read_mixed_matrix_fast_path_regions(auto &cu, uint32_t s0, uint32_t s1,
+                                                             uint32_t s2, uint64_t a_elements,
+                                                             uint32_t a_bits, uint64_t b_elements,
+                                                             uint32_t b_bits, uint64_t acc_elements,
+                                                             uint32_t acc_bits, uint32_t const_acc,
+                                                             uint32_t wf_size) {
+  RegisterAccess regs(cu);
+  const uint64_t lane_mask = mfma_full_lane_mask(wf_size);
+  const uint32_t a_regs = mfma_dense_reg_count(a_elements, a_bits, wf_size);
+  const uint32_t b_regs = mfma_dense_reg_count(b_elements, b_bits, wf_size);
+  std::optional<RegisterAccess::VgprReadRegion> acc_region;
+  if (const_acc == ACC_FROM_VGPR) {
+    const uint32_t acc_regs = mfma_dense_reg_count(acc_elements, acc_bits, wf_size);
+    acc_region.emplace(regs.read_vgpr_region(s2, acc_regs, lane_mask));
+  }
+  return MatrixReadRegions(regs.read_vgpr_region(s0, a_regs, lane_mask),
+                           regs.read_vgpr_region(s1, b_regs, lane_mask), std::move(acc_region));
+}
+
 inline MatrixReadRegions read_mfma_fast_path_regions(auto &cu, uint32_t s0, uint32_t s1,
                                                      uint32_t s2, uint32_t M, uint32_t N,
                                                      uint32_t K, uint32_t B, uint32_t data_bits,
@@ -1237,10 +1366,51 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
   std::vector<Result> results;
   results.reserve(M * N * B);
 
+  constexpr size_t MAX_AB = 2048;      // max M*K over all MFMA shapes
+  constexpr size_t MAX_BSTRIDE = 4096; // max K*stride over all MFMA shapes
+  constexpr size_t MAX_C = 1024;       // max M*stride over all MFMA shapes
+  static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(float) <= 48 * 1024,
+                "MFMA staging buffers exceed the 48 KiB stack budget");
+
+  auto stage_operands = [&](uint32_t block, uint32_t b_stride, float *a_values, float *b_values) {
+    for (uint32_t row = 0; row < M; ++row) {
+      for (uint32_t k = 0; k < K; ++k) {
+        auto al = input_loc(M, K, B, row, k, block, a_bits);
+        if (cbsz != 0)
+          al.lane = permute_a_lane(al.lane, cbsz, abid);
+        a_values[static_cast<size_t>(row) * K + k] = ea(cu, s0, physicalize_loc(al, wf));
+      }
+    }
+    for (uint32_t k = 0; k < K; ++k) {
+      for (uint32_t col = 0; col < N; ++col) {
+        auto bl = input_loc(N, K, B, col, k, block, b_bits);
+        if (blgp != 0)
+          bl.lane = permute_b_lane(bl.lane, blgp);
+        b_values[static_cast<size_t>(k) * b_stride + col] = eb(cu, s1, physicalize_loc(bl, wf));
+      }
+    }
+  };
+
   // Scalar reference: D[i][j] = C[i][j] + sum_k A[i][k] * B[k][j], accumulated
   // per output in K order (non-fused multiply-add).
   auto run_scalar = [&]() {
+    const size_t a_count = static_cast<size_t>(M) * K;
+    const size_t b_count = static_cast<size_t>(K) * N;
+    // Real ISA shapes use bounded per-block stack storage. Preserve support
+    // for direct callers with larger dimensions through one overflow buffer.
+    alignas(64) float a_stack[MAX_AB];
+    alignas(64) float b_stack[MAX_BSTRIDE];
+    std::vector<float> overflow;
+    float *a_values = a_stack;
+    float *b_values = b_stack;
+    if (a_count > MAX_AB || b_count > MAX_BSTRIDE) {
+      overflow.resize(a_count + b_count);
+      a_values = overflow.data();
+      b_values = overflow.data() + a_count;
+    }
+
     for (uint32_t b = 0; b < B; ++b) {
+      stage_operands(b, N, a_values, b_values);
       for (uint32_t row = 0; row < M; ++row) {
         for (uint32_t col = 0; col < N; ++col) {
           // AMD convention: i=row (register dimension), j=col (lane dimension).
@@ -1250,17 +1420,8 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
                   ? std::bit_cast<float>(const_acc)
                   : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
           for (uint32_t k = 0; k < K; ++k) {
-            auto al = input_loc(M, K, B, row, k, b, a_bits);
-            auto bl = input_loc(N, K, B, col, k, b, b_bits);
-            // Apply cbsz/abid lane permutation to A input.
-            if (cbsz != 0)
-              al.lane = permute_a_lane(al.lane, cbsz, abid);
-            // Apply blgp lane permutation to B input.
-            if (blgp != 0)
-              bl.lane = permute_b_lane(bl.lane, blgp);
-            float a_val = ea(cu, s0, physicalize_loc(al, wf));
-            float b_val = eb(cu, s1, physicalize_loc(bl, wf));
-            acc += a_val * b_val;
+            acc += a_values[static_cast<size_t>(row) * K + k] *
+                   b_values[static_cast<size_t>(k) * N + col];
           }
           results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
         }
@@ -1283,13 +1444,6 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
     // (no per-call heap allocation). MAX_* bound every real MFMA shape;
     // anything larger (or a forced-scalar run) falls back to the scalar path.
     constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
-    constexpr size_t MAX_AB = 2048;      // max M*K over all MFMA shapes
-    constexpr size_t MAX_BSTRIDE = 4096; // max K*stride
-    constexpr size_t MAX_C = 1024;       // max M*stride
-    // Combined stack frame for the three staging buffers below (currently 28
-    // KiB); tripwire so an added/larger shape can't silently blow the stack.
-    static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(float) <= 48 * 1024,
-                  "MFMA SIMD staging buffers exceed the 48 KiB stack budget");
     const uint32_t stride = ((N + W - 1) / W) * W;
     if (util::force_scalar() || static_cast<size_t>(M) * K > MAX_AB ||
         static_cast<size_t>(K) * stride > MAX_BSTRIDE || static_cast<size_t>(M) * stride > MAX_C) {
@@ -1302,6 +1456,7 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
       alignas(64) float Bbuf[MAX_BSTRIDE] = {};
       alignas(64) float Cbuf[MAX_C] = {};
       for (uint32_t b = 0; b < B; ++b) {
+        stage_operands(b, stride, Abuf, Bbuf);
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t col = 0; col < N; ++col) {
             auto out = physicalize_out(output_loc_32(M, N, row, col, b), wf);
@@ -1309,20 +1464,6 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
                 (const_acc != ACC_FROM_VGPR)
                     ? std::bit_cast<float>(const_acc)
                     : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
-          }
-        for (uint32_t row = 0; row < M; ++row)
-          for (uint32_t k = 0; k < K; ++k) {
-            auto al = input_loc(M, K, B, row, k, b, a_bits);
-            if (cbsz != 0)
-              al.lane = permute_a_lane(al.lane, cbsz, abid);
-            Abuf[row * K + k] = ea(cu, s0, physicalize_loc(al, wf));
-          }
-        for (uint32_t k = 0; k < K; ++k)
-          for (uint32_t col = 0; col < N; ++col) {
-            auto bl = input_loc(N, K, B, col, k, b, b_bits);
-            if (blgp != 0)
-              bl.lane = permute_b_lane(bl.lane, blgp);
-            Bbuf[k * stride + col] = eb(cu, s1, physicalize_loc(bl, wf));
           }
         wmma_simd_matmul<float>(M, N, K, W, stride, Abuf, Bbuf, Cbuf);
         for (uint32_t row = 0; row < M; ++row)
@@ -1392,8 +1533,8 @@ void exec_f32(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t
 
 /// Column (N) leading-dimension pitch rounding A/B/C buffers up to a SIMD-width
 /// multiple, so every matmul row starts W-aligned. Bounds every real WMMA shape
-/// (M,N <= 16, K <= 128); anything larger falls back to the scalar path.
-constexpr size_t WMMA_SIMD_MAX_AB = 2048;      // max M*K
+/// (M <= 32, N <= 16, K <= 128); anything larger falls back to the scalar path.
+constexpr size_t WMMA_SIMD_MAX_AB = 4096;      // max M*K
 constexpr size_t WMMA_SIMD_MAX_BSTRIDE = 4096; // max K*stride
 constexpr size_t WMMA_SIMD_MAX_C = 1024;       // max M*stride
 // Combined stack frame for the WMMA/SWMMAC staging buffers (currently 28 KiB for
@@ -1605,26 +1746,30 @@ void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t 
         static_cast<size_t>(M) * stride > WMMA_SIMD_MAX_C) {
       run_scalar();
     } else {
+      auto reads = read_mixed_matrix_fast_path_regions(cu, s0, s1, s2, static_cast<uint64_t>(M) * K,
+                                                       a_bits, static_cast<uint64_t>(N) * K, b_bits,
+                                                       static_cast<uint64_t>(M) * N,
+                                                       /*acc_bits=*/32, const_acc, wave_size);
       alignas(64) float Abuf[WMMA_SIMD_MAX_AB] = {};
       alignas(64) float Bbuf[WMMA_SIMD_MAX_BSTRIDE] = {};
       alignas(64) float Cbuf[WMMA_SIMD_MAX_C] = {};
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = gfx12_wmma_output_loc_32(wave_size, M, N, row, col);
-          Cbuf[row * stride + col] = apply_wmma_c_modifier(
-              (const_acc != ACC_FROM_VGPR)
-                  ? std::bit_cast<float>(const_acc)
-                  : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane)),
-              c_modifier);
+          Cbuf[row * stride + col] =
+              apply_wmma_c_modifier((const_acc != ACC_FROM_VGPR)
+                                        ? std::bit_cast<float>(const_acc)
+                                        : std::bit_cast<float>(reads.acc->lane(out.reg, out.lane)),
+                                    c_modifier);
         }
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t k = 0; k < K; ++k)
           Abuf[row * K + k] =
-              ea(cu, s0, gfx12_wmma_a_input_loc(wave_size, M, K, row, k, a_bits, b_bits));
+              ea(reads.a, s0, gfx12_wmma_a_input_loc(wave_size, M, K, row, k, a_bits, b_bits));
       for (uint32_t k = 0; k < K; ++k)
         for (uint32_t col = 0; col < N; ++col)
           Bbuf[k * stride + col] =
-              eb(cu, s1, gfx12_wmma_b_input_loc(wave_size, N, K, col, k, a_bits, b_bits));
+              eb(reads.b, s1, gfx12_wmma_b_input_loc(wave_size, N, K, col, k, a_bits, b_bits));
       wmma_simd_matmul<float>(M, N, K, W, stride, Abuf, Bbuf, Cbuf);
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
@@ -1636,8 +1781,9 @@ void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t 
     run_scalar();
   }
 
+  auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wave_size);
   for (const auto &r : results)
-    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
+    writes.set_lane(r.reg, r.lane, r.val);
 }
 
 template <typename ExtractA, typename ExtractB>
@@ -1788,9 +1934,7 @@ void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, ui
   };
   std::vector<Result> results;
   results.reserve(M * N);
-  const bool mixed_subbyte_a = a_bits < 8 && b_bits == 8;
-  const bool mixed_subbyte_b = b_bits < 8 && a_bits == 8;
-  const bool mixed_pair = mixed_subbyte_a || mixed_subbyte_b;
+  const uint32_t num_scale_blocks = scale16 ? 8u : 4u;
 
   auto scale_for = [](uint64_t scale_word, uint32_t scale_byte, uint32_t scale_fmt) -> float {
     return decode_wmma_scale_byte(static_cast<uint8_t>((scale_word >> (scale_byte * 8)) & 0xffu),
@@ -1809,14 +1953,18 @@ void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, ui
         const uint64_t a_scale_word =
             scale_a_word(wmma_a_scale_lane(M, K, row, matrix_a_scale, a_bits, b_bits));
         const uint64_t b_scale_word = scale_b_word(wmma_scale_lane(col, matrix_b_scale));
-        for (uint32_t k = 0; k < K; ++k) {
-          auto al = wmma_a_input_loc(M, K, row, k, a_bits, b_bits);
-          auto bl = wmma_b_input_loc(N, K, col, k, a_bits, b_bits);
-          const uint32_t a_scale_byte = wmma_f8f6f4_scale_byte(k, a_bits, mixed_pair, scale16);
-          const uint32_t b_scale_byte = wmma_f8f6f4_scale_byte(k, b_bits, mixed_pair, scale16);
-          acc += ea(cu, s0, al) * eb(cu, s1, bl) *
-                 scale_for(a_scale_word, a_scale_byte, matrix_a_scale_fmt) *
-                 scale_for(b_scale_word, b_scale_byte, matrix_b_scale_fmt);
+        for (uint32_t block = 0; block < num_scale_blocks; ++block) {
+          float block_sum = 0.0f;
+          for (uint32_t k = 0; k < K; ++k) {
+            if (wmma_block_scale_byte(k, scale16) != block)
+              continue;
+            auto al = wmma_block_scaled_a_input_loc(M, K, row, k, a_bits);
+            auto bl = wmma_block_scaled_b_input_loc(N, K, col, k, b_bits);
+            block_sum = std::fma(ea(cu, s0, al), eb(cu, s1, bl), block_sum);
+          }
+          block_sum *= scale_for(a_scale_word, block, matrix_a_scale_fmt);
+          block_sum *= scale_for(b_scale_word, block, matrix_b_scale_fmt);
+          acc += block_sum;
         }
         results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
       }
@@ -1831,50 +1979,84 @@ void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, ui
         static_cast<size_t>(M) * stride > WMMA_SIMD_MAX_C) {
       run_scalar();
     } else {
+      auto reads = read_mixed_matrix_fast_path_regions(cu, s0, s1, s2, static_cast<uint64_t>(M) * K,
+                                                       a_bits, static_cast<uint64_t>(N) * K, b_bits,
+                                                       static_cast<uint64_t>(M) * N,
+                                                       /*acc_bits=*/32, const_acc, /*wf_size=*/32);
       alignas(64) float Abuf[WMMA_SIMD_MAX_AB] = {};
       alignas(64) float Bbuf[WMMA_SIMD_MAX_BSTRIDE] = {};
-      alignas(64) float Cbuf[WMMA_SIMD_MAX_C] = {};
+      alignas(64) float Cacc[WMMA_SIMD_MAX_C] = {};
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = wmma_output_loc_32(M, N, row, col);
-          Cbuf[row * stride + col] = apply_wmma_c_modifier(
-              (const_acc != ACC_FROM_VGPR)
-                  ? std::bit_cast<float>(const_acc)
-                  : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane)),
-              c_modifier);
+          Cacc[row * N + col] =
+              apply_wmma_c_modifier((const_acc != ACC_FROM_VGPR)
+                                        ? std::bit_cast<float>(const_acc)
+                                        : std::bit_cast<float>(reads.acc->lane(out.reg, out.lane)),
+                                    c_modifier);
         }
       for (uint32_t row = 0; row < M; ++row) {
-        const uint64_t a_scale_word =
-            scale_a_word(wmma_a_scale_lane(M, K, row, matrix_a_scale, a_bits, b_bits));
         for (uint32_t k = 0; k < K; ++k) {
-          auto al = wmma_a_input_loc(M, K, row, k, a_bits, b_bits);
-          const uint32_t a_scale_byte = wmma_f8f6f4_scale_byte(k, a_bits, mixed_pair, scale16);
-          Abuf[row * K + k] =
-              ea(cu, s0, al) * scale_for(a_scale_word, a_scale_byte, matrix_a_scale_fmt);
+          auto al = wmma_block_scaled_a_input_loc(M, K, row, k, a_bits);
+          Abuf[row * K + k] = ea(reads.a, s0, al);
         }
       }
       for (uint32_t col = 0; col < N; ++col) {
-        const uint64_t b_scale_word = scale_b_word(wmma_scale_lane(col, matrix_b_scale));
         for (uint32_t k = 0; k < K; ++k) {
-          auto bl = wmma_b_input_loc(N, K, col, k, a_bits, b_bits);
-          const uint32_t b_scale_byte = wmma_f8f6f4_scale_byte(k, b_bits, mixed_pair, scale16);
-          Bbuf[k * stride + col] =
-              eb(cu, s1, bl) * scale_for(b_scale_word, b_scale_byte, matrix_b_scale_fmt);
+          auto bl = wmma_block_scaled_b_input_loc(N, K, col, k, b_bits);
+          Bbuf[k * stride + col] = eb(reads.b, s1, bl);
         }
       }
-      wmma_simd_matmul<float>(M, N, K, W, stride, Abuf, Bbuf, Cbuf);
+      for (uint32_t row = 0; row < M; ++row) {
+        const uint64_t a_scale_word =
+            scale_a_word(wmma_a_scale_lane(M, K, row, matrix_a_scale, a_bits, b_bits));
+        for (uint32_t block = 0; block < num_scale_blocks; ++block) {
+          uint32_t col = 0;
+          alignas(64) float block_sums[64];
+          for (; col + W <= N; col += W) {
+            util::native<float> block_sum(0.0f);
+            for (uint32_t k = 0; k < K; ++k) {
+              if (wmma_block_scale_byte(k, scale16) != block)
+                continue;
+              util::native<float> a(Abuf[row * K + k]);
+              util::native<float> bv;
+              bv.copy_from(&Bbuf[k * stride + col], util::stdx::vector_aligned);
+              block_sum = util::stdx::fma(a, bv, block_sum);
+            }
+            block_sum.copy_to(block_sums, util::stdx::vector_aligned);
+            for (uint32_t j = 0; j < W; ++j) {
+              float scaled = block_sums[j] * scale_for(a_scale_word, block, matrix_a_scale_fmt);
+              const uint64_t b_scale_word = scale_b_word(wmma_scale_lane(col + j, matrix_b_scale));
+              scaled *= scale_for(b_scale_word, block, matrix_b_scale_fmt);
+              Cacc[row * N + col + j] += scaled;
+            }
+          }
+          for (; col < N; ++col) {
+            float block_sum = 0.0f;
+            for (uint32_t k = 0; k < K; ++k) {
+              if (wmma_block_scale_byte(k, scale16) == block)
+                block_sum = std::fma(Abuf[row * K + k], Bbuf[k * stride + col], block_sum);
+            }
+            block_sum *= scale_for(a_scale_word, block, matrix_a_scale_fmt);
+            const uint64_t b_scale_word = scale_b_word(wmma_scale_lane(col, matrix_b_scale));
+            block_sum *= scale_for(b_scale_word, block, matrix_b_scale_fmt);
+            Cacc[row * N + col] += block_sum;
+          }
+        }
+      }
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = wmma_output_loc_32(M, N, row, col);
-          results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(Cbuf[row * stride + col])});
+          results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(Cacc[row * N + col])});
         }
     }
   } else {
     run_scalar();
   }
 
+  auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, /*wf_size=*/32);
   for (const auto &r : results)
-    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
+    writes.set_lane(r.reg, r.lane, r.val);
 }
 
 template <typename ExtractA, typename ExtractB>
@@ -2169,29 +2351,36 @@ void exec_wmma_f32_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
   }
 }
 
+/// Return whether an f32-accumulating matrix output row divides into complete
+/// native SIMD chunks.
+constexpr bool mma_f32_native_width_supported(uint32_t n, uint32_t width) {
+  return width > 1 && n % width == 0;
+}
+
 /// Fast path for the f32-input WMMA shapes (v_wmma_f32_*_f32). f32 inputs, so no
 /// F16C convert — the hoist reads each operand word straight through observed
-/// register-access regions.
-/// Compile-time M/N/K fully unroll the matmul, looped over N in zmm-width chunks
-/// (N a multiple of 16). Falls back to generic exec_wmma_f32 without AVX-512 /
-/// under force-scalar.
+/// register-access regions. Compile-time M/N/K fully unroll the matmul, looped
+/// over N in native-width chunks. The specialization is bypassed when host SIMD
+/// is unavailable, the native width is one or does not evenly divide N, or
+/// force-scalar is enabled. The generic exec_wmma_f32 path may still use
+/// native-width SIMD with a scalar tail when SIMD is available but N is not
+/// divisible by the native width.
 template <uint32_t M, uint32_t N, uint32_t K>
 void exec_wmma_f32_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                             uint32_t const_acc = ACC_FROM_VGPR, uint32_t c_modifier = 0) {
   constexpr uint32_t in_bits = 32;
-  static_assert(N % 16 == 0, "specialized f32 WMMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
     exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
                   const_acc, c_modifier);
     return;
   } else {
-    if (util::force_scalar() || util::native<float>::size() != 16) {
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    if (util::force_scalar() || !mma_f32_native_width_supported(N, W)) {
       exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
                     const_acc, c_modifier);
       return;
     }
     require_wmma_wave32(cu);
-    constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
     auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
                                              const_acc, wf);
@@ -2970,19 +3159,11 @@ void exec_swmmac_bf16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_
       [](float val) { return util::f32_to_bf16(val); }, const_acc, wave_size);
 }
 
-/// Scaled MFMA execute for f32 output with FP8/FP6/FP4 input (VOP3PX2).
-///
-/// Applies per-32-K-element-block E8M0 exponent biases from scale VGPRs.
-/// Scale format: 8-bit biased exponent (bias=127), so 2^(scale - 127).
-/// Each lane's scale VGPR holds packed 8-bit scale values (one byte per block).
-///
-/// @param scale_a_base  VGPR base for A-matrix scale values.
-/// @param scale_b_base  VGPR base for B-matrix scale values.
-template <typename ExtractA, typename ExtractB>
-void exec_f32_scaled(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t in_bits,
-                     uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
-                     uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp,
-                     uint32_t scale_a_base, uint32_t scale_b_base) {
+template <typename ExtractA, typename ExtractB, typename ScaleBlock>
+void exec_f32_scaled_impl(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t a_bits,
+                          uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                          ExtractA ea, ExtractB eb, ScaleBlock scale_block_sum, uint32_t const_acc,
+                          uint32_t c_modifier) {
   constexpr uint32_t BLOCK_K = 32;
   const uint32_t wf = cu.wf_size();
   struct Result {
@@ -2994,16 +3175,6 @@ void exec_f32_scaled(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, u
   results.reserve(M * N * B);
   uint32_t num_blocks = (K + BLOCK_K - 1) / BLOCK_K;
 
-  // Per-block E8M0 scale factor for output (row,col,b) in K-block blk.
-  auto scale_exp_for = [&](uint32_t row, uint32_t col, uint32_t b, uint32_t blk) -> int {
-    auto out = physicalize_out(output_loc_32(M, N, row, col, b), wf);
-    uint32_t sa_raw = RegisterAccess(cu).read_vgpr(scale_a_base, out.lane);
-    uint32_t sb_raw = RegisterAccess(cu).read_vgpr(scale_b_base, out.lane);
-    uint8_t sa_e8m0 = static_cast<uint8_t>((sa_raw >> (blk * 8)) & 0xFF);
-    uint8_t sb_e8m0 = static_cast<uint8_t>((sb_raw >> (blk * 8)) & 0xFF);
-    return static_cast<int>(sa_e8m0) + static_cast<int>(sb_e8m0) - 254;
-  };
-
   auto run_scalar = [&]() {
     for (uint32_t b = 0; b < B; ++b) {
       for (uint32_t row = 0; row < M; ++row) {
@@ -3013,21 +3184,19 @@ void exec_f32_scaled(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, u
               (const_acc != ACC_FROM_VGPR)
                   ? std::bit_cast<float>(const_acc)
                   : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
+          acc = apply_wmma_c_modifier(acc, c_modifier);
           for (uint32_t blk = 0; blk < num_blocks; ++blk) {
             float block_sum = 0.0f;
             uint32_t k_start = blk * BLOCK_K;
             uint32_t k_end = std::min(k_start + BLOCK_K, K);
             for (uint32_t k = k_start; k < k_end; ++k) {
-              auto al = input_loc(M, K, B, row, k, b, in_bits);
-              auto bl = input_loc(N, K, B, col, k, b, in_bits);
-              if (cbsz != 0)
-                al.lane = permute_a_lane(al.lane, cbsz, abid);
-              if (blgp != 0)
-                bl.lane = permute_b_lane(bl.lane, blgp);
-              block_sum +=
-                  ea(cu, s0, physicalize_loc(al, wf)) * eb(cu, s1, physicalize_loc(bl, wf));
+              auto al = mfma_scale_f8f6f4_input_loc(M, K, row, k, a_bits);
+              auto bl = mfma_scale_f8f6f4_input_loc(N, K, col, k, b_bits);
+              const float a = ea(cu, s0, physicalize_loc(al, wf));
+              const float b_val = eb(cu, s1, physicalize_loc(bl, wf));
+              block_sum = std::fma(a, b_val, block_sum);
             }
-            acc += std::ldexp(block_sum, scale_exp_for(row, col, b, blk));
+            acc += scale_block_sum(block_sum, row, col, b, blk);
           }
           results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
         }
@@ -3054,6 +3223,10 @@ void exec_f32_scaled(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, u
         static_cast<size_t>(K) * stride > MAX_BSTRIDE || static_cast<size_t>(M) * N > MAX_C) {
       run_scalar();
     } else {
+      auto reads = read_mixed_matrix_fast_path_regions(
+          cu, s0, s1, s2, static_cast<uint64_t>(M) * K * B, a_bits,
+          static_cast<uint64_t>(N) * K * B, b_bits, static_cast<uint64_t>(M) * N * B,
+          /*acc_bits=*/32, const_acc, wf);
       // Zero-initialized staging buffers (uniform convention; see
       // wmma_simd_matmul). Cacc is pre-seeded below.
       alignas(64) float Abuf[MAX_AB] = {};
@@ -3062,25 +3235,22 @@ void exec_f32_scaled(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, u
       for (uint32_t b = 0; b < B; ++b) {
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t k = 0; k < K; ++k) {
-            auto al = input_loc(M, K, B, row, k, b, in_bits);
-            if (cbsz != 0)
-              al.lane = permute_a_lane(al.lane, cbsz, abid);
-            Abuf[row * K + k] = ea(cu, s0, physicalize_loc(al, wf));
+            auto al = mfma_scale_f8f6f4_input_loc(M, K, row, k, a_bits);
+            Abuf[row * K + k] = ea(reads.a, s0, physicalize_loc(al, wf));
           }
         for (uint32_t k = 0; k < K; ++k)
           for (uint32_t col = 0; col < N; ++col) {
-            auto bl = input_loc(N, K, B, col, k, b, in_bits);
-            if (blgp != 0)
-              bl.lane = permute_b_lane(bl.lane, blgp);
-            Bbuf[k * stride + col] = eb(cu, s1, physicalize_loc(bl, wf));
+            auto bl = mfma_scale_f8f6f4_input_loc(N, K, col, k, b_bits);
+            Bbuf[k * stride + col] = eb(reads.b, s1, physicalize_loc(bl, wf));
           }
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t col = 0; col < N; ++col) {
             auto out = physicalize_out(output_loc_32(M, N, row, col, b), wf);
-            Cacc[row * N + col] =
+            Cacc[row * N + col] = apply_wmma_c_modifier(
                 (const_acc != ACC_FROM_VGPR)
                     ? std::bit_cast<float>(const_acc)
-                    : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
+                    : std::bit_cast<float>(reads.acc->lane(out.reg, out.lane)),
+                c_modifier);
           }
         for (uint32_t row = 0; row < M; ++row) {
           for (uint32_t blk = 0; blk < num_blocks; ++blk) {
@@ -3098,13 +3268,13 @@ void exec_f32_scaled(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, u
               }
               acc.copy_to(bs, util::stdx::vector_aligned);
               for (uint32_t j = 0; j < W; ++j)
-                Cacc[row * N + col + j] += std::ldexp(bs[j], scale_exp_for(row, col + j, b, blk));
+                Cacc[row * N + col + j] += scale_block_sum(bs[j], row, col + j, b, blk);
             }
             for (; col < N; ++col) {
               float block_sum = 0.0f;
               for (uint32_t k = k_start; k < k_end; ++k)
                 block_sum = std::fma(Abuf[row * K + k], Bbuf[k * stride + col], block_sum);
-              Cacc[row * N + col] += std::ldexp(block_sum, scale_exp_for(row, col, b, blk));
+              Cacc[row * N + col] += scale_block_sum(block_sum, row, col, b, blk);
             }
           }
         }
@@ -3119,8 +3289,39 @@ void exec_f32_scaled(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, u
     run_scalar();
   }
 
+  auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
   for (const auto &r : results)
-    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
+    writes.set_lane(r.reg, r.lane, r.val);
+}
+
+inline uint8_t mfma_inline_scale_e8m0(uint32_t selector) {
+  switch (selector) {
+  case 240: // +0.5f
+  case 241: // -0.5f
+    return 126;
+  case 242: // +1.0f
+  case 243: // -1.0f
+    return 127;
+  case 244: // +2.0f
+  case 245: // -2.0f
+    return 128;
+  case 246: // +4.0f
+  case 247: // -4.0f
+    return 129;
+  case 248: // 1/(2*pi)
+    return 124;
+  default:
+    return 0;
+  }
+}
+
+inline uint8_t read_mfma_scale_e8m0(auto &cu, uint32_t vgpr_base, uint32_t selector, uint32_t lane,
+                                    uint32_t byte_index) {
+  if (selector >= 240 && selector <= 248)
+    return mfma_inline_scale_e8m0(selector);
+  uint8_t byte_mask = static_cast<uint8_t>(1u << byte_index);
+  uint32_t raw = RegisterAccess(cu).read_vgpr(src_base(vgpr_base, selector), lane, byte_mask);
+  return static_cast<uint8_t>((raw >> (byte_index * 8)) & 0xffu);
 }
 
 /// Scaled MFMA for mixed-format f8f6f4: A and B may have different bit widths.
@@ -3129,47 +3330,19 @@ template <typename ExtractA, typename ExtractB>
 void exec_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
                            uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1,
                            uint32_t s2, ExtractA ea, ExtractB eb, uint32_t const_acc,
-                           uint32_t scale_a_base, uint32_t scale_b_base) {
-  constexpr uint32_t BLOCK_K = 32;
-  const uint32_t wf = cu.wf_size();
-  struct Result {
-    uint32_t reg;
-    uint32_t lane;
-    uint32_t val;
+                           uint32_t vgpr_base, uint32_t scale_a, uint32_t scale_b,
+                           uint32_t scale_a_byte, uint32_t scale_b_byte, uint32_t c_modifier = 0) {
+  auto scale_block_sum = [&](float block_sum, uint32_t row, uint32_t col, uint32_t,
+                             uint32_t blk) -> float {
+    uint8_t sa_e8m0 = read_mfma_scale_e8m0(cu, vgpr_base, scale_a, M * blk + row, scale_a_byte);
+    uint8_t sb_e8m0 = read_mfma_scale_e8m0(cu, vgpr_base, scale_b, N * blk + col, scale_b_byte);
+    if (sa_e8m0 == 0xffu || sb_e8m0 == 0xffu)
+      return std::numeric_limits<float>::quiet_NaN();
+    int scale_exp = static_cast<int>(sa_e8m0) + static_cast<int>(sb_e8m0) - 254;
+    return std::ldexp(block_sum, scale_exp);
   };
-  std::vector<Result> results;
-  results.reserve(M * N * B);
-  uint32_t num_blocks = (K + BLOCK_K - 1) / BLOCK_K;
-  for (uint32_t b = 0; b < B; ++b) {
-    for (uint32_t row = 0; row < M; ++row) {
-      for (uint32_t col = 0; col < N; ++col) {
-        auto out = physicalize_out(output_loc_32(M, N, row, col, b), wf);
-        float acc =
-            (const_acc != ACC_FROM_VGPR)
-                ? std::bit_cast<float>(const_acc)
-                : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
-        for (uint32_t blk = 0; blk < num_blocks; ++blk) {
-          float block_sum = 0.0f;
-          uint32_t k_start = blk * BLOCK_K;
-          uint32_t k_end = std::min(k_start + BLOCK_K, K);
-          for (uint32_t k = k_start; k < k_end; ++k) {
-            auto al = input_loc(M, K, B, row, k, b, a_bits);
-            auto bl = input_loc(N, K, B, col, k, b, b_bits);
-            block_sum += ea(cu, s0, physicalize_loc(al, wf)) * eb(cu, s1, physicalize_loc(bl, wf));
-          }
-          uint32_t sa_raw = RegisterAccess(cu).read_vgpr(scale_a_base, M * blk + row);
-          uint32_t sb_raw = RegisterAccess(cu).read_vgpr(scale_b_base, N * blk + col);
-          uint8_t sa_e8m0 = static_cast<uint8_t>(sa_raw & 0xFFu);
-          uint8_t sb_e8m0 = static_cast<uint8_t>(sb_raw & 0xFFu);
-          int scale_exp = static_cast<int>(sa_e8m0) + static_cast<int>(sb_e8m0) - 254;
-          acc += std::ldexp(block_sum, scale_exp);
-        }
-        results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
-      }
-    }
-  }
-  for (const auto &r : results)
-    RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
+  exec_f32_scaled_impl(cu, M, N, K, B, a_bits, b_bits, dst, s0, s1, s2, ea, eb, scale_block_sum,
+                       const_acc, c_modifier);
 }
 
 /// MFMA execute for i32 output with i8 input: D = C + A x B.
@@ -3588,6 +3761,91 @@ inline void exec_swmmac_i32_i8(auto &cu, uint32_t M, uint32_t N, uint32_t K, uin
                                uint32_t const_acc = ACC_FROM_VGPR) {
   exec_swmmac_i32(cu, M, N, K, 8, dst, s0, s1, acc_base, index_base, index_entries, index_key,
                   extract_i8, extract_i8, false, const_acc);
+}
+
+/// Execute gfx1251 wave32 V_WMMA_F64_16X16X4_F64.
+///
+/// Public evidence for the logical matrix operation, vector widths, modifiers,
+/// and register tuple sizes comes from LLVM's F64_F64X4_WMMA_w32 profile and
+/// gfx1251_asm_wmma_w32.s. The physical mapping combines section 7.12.2 of the
+/// public CDNA5 ISA reference with the checked-in FMT_WMMA_AB_16X4_F64 and
+/// FMT_WMMA_DC_16X16_F64 component layouts:
+///   A[row][k] / B[col][k]: lane = row-or-col + 16*(k/2), VGPR = 2*(k%2)
+///   C/D[row][col]: lane = col + 16*(row/8), VGPR = 2*(row%8)
+///
+/// Matrix reuse bits are scheduling hints and therefore do not enter this
+/// functional helper. All source and accumulator values are staged before any
+/// destination write so overlapping C/D and A/B tuples preserve read-before-
+/// write behavior. CDNA5 also requires EXEC to contain all 32 wave lanes.
+inline void exec_wmma_f64_16x16x4_f64(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                                      uint64_t const_acc, uint32_t neg, uint32_t neg_hi,
+                                      [[maybe_unused]] uint64_t exec_mask) {
+  // LLVM marks GFX12 WMMA as ReadsModeReg=0. Until physical gfx1251 validation
+  // establishes a more specific fixed arithmetic policy, use the IEEE baseline:
+  // round-to-nearest-even and preserve input/output denormals.
+  constexpr uint32_t kRoundNearestEven = 0;
+  constexpr uint32_t kPreserveInputOutputDenormals = 3;
+  // TODO(hanchung): Validate gfx1251 F64 WMMA lane/register mapping and fixed
+  // arithmetic behavior against a physical gfx1251 KFD/ROCm execution capture.
+  constexpr uint32_t M = 16;
+  constexpr uint32_t N = 16;
+  constexpr uint32_t K = 4;
+  const uint64_t kFullExec = mfma_full_lane_mask(WMMA_WAVE32);
+  assert(is_gfx1251_wmma_execution_state_valid(cu.wf_size(), exec_mask) &&
+         "gfx1251 F64 WMMA requires wave32 with EXEC set to all ones");
+
+  auto toggle_sign = [](uint64_t value, bool toggle) {
+    return toggle ? value ^ (uint64_t{1} << 63) : value;
+  };
+  auto modify_acc = [](uint64_t value, uint32_t modifier) {
+    if (modifier & 0x2u)
+      value &= ~(uint64_t{1} << 63);
+    if (modifier & 0x1u)
+      value ^= uint64_t{1} << 63;
+    return value;
+  };
+
+  std::array<uint64_t, M * K> a{};
+  std::array<uint64_t, K * N> b{};
+  std::array<uint64_t, M * N> result{};
+  {
+    auto reads =
+        read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, /*data_bits=*/64, /*acc_bits=*/64,
+                                    const_acc == ACC_FROM_VGPR ? ACC_FROM_VGPR : 0u, WMMA_WAVE32);
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t k = 0; k < K; ++k) {
+        const auto loc = wmma_input_loc(M, K, row, k, /*data_bits=*/64);
+        a[row * K + k] = toggle_sign(reads.a.lane64(loc.vgpr_offset, loc.lane), (neg & 0x1u) != 0);
+      }
+    for (uint32_t k = 0; k < K; ++k)
+      for (uint32_t col = 0; col < N; ++col) {
+        const auto loc = wmma_input_loc(N, K, col, k, /*data_bits=*/64);
+        b[k * N + col] = toggle_sign(reads.b.lane64(loc.vgpr_offset, loc.lane), (neg & 0x2u) != 0);
+      }
+
+    const uint32_t c_modifier = wmma_c_modifier(neg, neg_hi);
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t col = 0; col < N; ++col) {
+        const auto out = wmma_output_loc_64(M, N, row, col);
+        uint64_t acc =
+            const_acc == ACC_FROM_VGPR ? reads.acc->lane64(out.reg, out.lane) : const_acc;
+        acc = modify_acc(acc, c_modifier);
+        for (uint32_t k = 0; k < K; ++k)
+          acc = fp_mode::fma_f64(a[row * K + k], b[k * N + col], acc, kRoundNearestEven,
+                                 kPreserveInputOutputDenormals);
+        result[row * N + col] = acc;
+      }
+  }
+
+  RegisterAccess regs(cu);
+  auto writes = regs.write_vgpr_region(dst, /*reg_count=*/16, kFullExec);
+  for (uint32_t row = 0; row < M; ++row)
+    for (uint32_t col = 0; col < N; ++col) {
+      const auto out = wmma_output_loc_64(M, N, row, col);
+      const uint64_t value = result[row * N + col];
+      writes.set_lane(out.reg, out.lane, static_cast<uint32_t>(value));
+      writes.set_lane(out.reg + 1, out.lane, static_cast<uint32_t>(value >> 32));
+    }
 }
 
 /// MFMA execute for f64 output with f64 input: D = C + A x B.
@@ -4113,47 +4371,30 @@ void exec_smfmac_f32_32x32x64_fp8(auto &cu, uint32_t dst, uint32_t s0, uint32_t 
     RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
-/// Fast path for v_mfma_f32_16x16x32_f16. This single MFMA shape is the only
-/// MFMA variant fired by OPT-125M fp16 eager forward (488k invocations per
-/// forward; ~4B internal MACs). Kept as a dedicated specialization (rather
-/// than forwarding to generic exec_f32) because the compile-time M/N/K/B let
-/// the compiler fully unroll the 16-row x 32-K inner matmul into straight-line
-/// AVX-512 FMAs — a runtime-dimension loop is materially slower on this hot
-/// path. Hoists A and B into dense f32 buffers via extract_f16, runs the
-/// matmul as 16 zmm-wide f32 FMA rows (512 zmm FMAs per MFMA). Batched shapes
-/// stage every result on the stack and publish only after all operand reads,
-/// preserving destructive-overlap semantics without a heap-backed Result
-/// vector. VGPR access is batched through observed register-access regions
-/// (one view per operand, no per-element virtual read_vgpr/write_vgpr). Falls
-/// back to the generic exec_f32 when:
-///   - <experimental/simd> is unavailable
-///   - host native_simd<float> is not 16 lanes (i.e. no AVX-512)
-///   - cbsz/blgp lane permutation is non-default
-///   - RJ_FORCE_SCALAR is set
 /// Fast path for the f32-input MFMA shapes (v_mfma_f32_*_f32). Like the f16
 /// specialization but the inputs are already f32, so there is no F16C convert —
 /// the hoist reads each operand word straight through observed register-access
-/// regions. BATCH covers the batched shapes (e.g. 32x32x1x2). Compile-time M/N/K/BATCH fully unroll
-/// the matmul; it loops over N in zmm-width chunks (N must be a multiple of 16,
-/// so the 4x4 shape stays on the generic path). Falls back to the generic
-/// exec_f32 without AVX-512 / under force-scalar / with cbsz|blgp.
+/// regions. BATCH covers the batched shapes (e.g. 32x32x1x2). Compile-time
+/// M/N/K/BATCH fully unroll the matmul; it loops over N in native-width chunks.
+/// Falls back to the generic exec_f32 without host SIMD, when the native width
+/// is one or does not divide N, for non-wave64 execution, under force-scalar,
+/// or with cbsz/blgp.
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH>
 void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                             uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
   constexpr uint32_t in_bits = 32;
-  static_assert(N % 16 == 0, "specialized f32 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
     exec_f32(cu, M, N, K, BATCH, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
              const_acc, cbsz, abid, blgp);
     return;
   } else {
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || util::native<float>::size() != 16 ||
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    if (util::force_scalar() || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
         cu.wf_size() != 64) {
       exec_f32(cu, M, N, K, BATCH, in_bits, dst, s0, s1, s2, amdgpu::extract_f32,
                amdgpu::extract_f32, const_acc, cbsz, abid, blgp);
       return;
     }
-    constexpr uint32_t W = 16;
     const uint32_t wf = cu.wf_size();
     auto reads =
         read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, BATCH, in_bits, const_acc, wf);
@@ -4222,23 +4463,34 @@ void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
   }
 }
 
+/// Fast path for the f16-input f32 MFMA shapes. The original target,
+/// v_mfma_f32_16x16x32_f16, accounts for 488k invocations and about 4B
+/// internal MACs per OPT-125M fp16 eager forward. Compile-time M/N/K/B let the
+/// compiler fully unroll the inner matmul into straight-line native SIMD FMAs;
+/// a runtime-dimension loop is materially slower on this hot path. The path
+/// snapshots packed f16 inputs through observed register-access regions,
+/// bulk-converts them into dense f32 buffers, and publishes staged results only
+/// after every operand read. It falls back to the generic exec_f32 when:
+///   - <experimental/simd> is unavailable
+///   - host native_simd<float> has no usable width for the output columns
+///   - cbsz/blgp lane permutation is non-default
+///   - RJ_FORCE_SCALAR is set
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
 void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                             uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
   constexpr uint32_t B = BATCH, in_bits = 16;
-  static_assert(N % 16 == 0, "specialized f16 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
     exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
              const_acc, cbsz, abid, blgp);
     return;
   } else {
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || util::native<float>::size() != 16 ||
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    if (util::force_scalar() || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
         cu.wf_size() != 64) {
       exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
                const_acc, cbsz, abid, blgp);
       return;
     }
-    constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
     auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
     auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
@@ -4278,7 +4530,7 @@ void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
           auto bl = input_loc(N, K, B, col, k, b, in_bits);
           B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
         }
-      // Dense MxKxN matmul, W-lane (zmm) stdx FMA over N (N/W chunks per row).
+      // Dense MxKxN matmul, W-lane native SIMD FMA over N (N/W chunks per row).
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t c0 = 0; c0 < N; c0 += W) {
           util::native<float> c_row;
@@ -4315,25 +4567,24 @@ void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
 
 /// Fast path for the bf16-input MFMA shapes (v_mfma_f32_*_bf16). Identical to
 /// the f16 specialization except the bulk input convert is the bf16 zero-extend
-/// (no F16C needed). Falls back to the generic exec_f32 without AVX-512 / under
-/// force-scalar / with cbsz|blgp.
+/// (no F16C needed). Falls back to the generic exec_f32 without usable host
+/// SIMD, under force-scalar, or with cbsz/blgp.
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
 void exec_f32_mfma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                              uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
   constexpr uint32_t B = BATCH, in_bits = 16;
-  static_assert(N % 16 == 0, "specialized bf16 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
     exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16, amdgpu::extract_bf16,
              const_acc, cbsz, abid, blgp);
     return;
   } else {
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || util::native<float>::size() != 16 ||
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    if (util::force_scalar() || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
         cu.wf_size() != 64) {
       exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16, amdgpu::extract_bf16,
                const_acc, cbsz, abid, blgp);
       return;
     }
-    constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
     auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
     auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
@@ -4371,7 +4622,7 @@ void exec_f32_mfma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, u
           auto bl = input_loc(N, K, B, col, k, b, in_bits);
           B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
         }
-      // Dense MxKxN matmul, W-lane (zmm) stdx FMA over N (N/W chunks per row).
+      // Dense MxKxN matmul, W-lane native SIMD FMA over N (N/W chunks per row).
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t c0 = 0; c0 < N; c0 += W) {
           util::native<float> c_row;

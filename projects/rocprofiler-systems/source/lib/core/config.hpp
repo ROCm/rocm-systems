@@ -11,13 +11,12 @@
 #include <cstdint>
 
 #include <timemory/backends/threading.hpp>
-#include <timemory/macros/language.hpp>
 
 #include <fstream>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_set>
+#include <vector>
 
 #if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
     (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
@@ -26,12 +25,10 @@
 #    define ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED 0
 #endif
 
-namespace rocprofsys
-{
 //
 //      Initialization routines
 //
-inline namespace config
+namespace rocprofsys::inline config
 {
 using signal_handler_t = void (*)(void);
 
@@ -274,12 +271,6 @@ get_perfetto_backend();
 std::string
 get_perfetto_output_filename();
 
-double
-get_trace_delay();
-
-double
-get_trace_duration();
-
 std::string
 get_trace_region();
 
@@ -342,6 +333,9 @@ get_sampling_gpus();
 
 std::string
 get_gpu_perf_counters();
+
+std::vector<std::string>
+get_rocm_counter_events();
 
 std::string
 get_sampling_ainics();
@@ -426,7 +420,6 @@ struct tmp_file
 
     bool open(int, int);
     bool open(std::ios::openmode = std::ios::binary | std::ios::in | std::ios::out);
-    bool fopen(const char* = "r+");
     bool flush();
     bool close();
     bool remove();
@@ -435,7 +428,6 @@ struct tmp_file
 
     std::string  filename = {};
     std::fstream stream   = {};
-    FILE*        file     = nullptr;
     int          fd       = -1;
 
 private:
@@ -483,5 +475,4 @@ get_causal_source_exclude();
 
 std::vector<std::string>
 get_causal_function_exclude();
-}  // namespace config
-}  // namespace rocprofsys
+}  // namespace rocprofsys::inline config

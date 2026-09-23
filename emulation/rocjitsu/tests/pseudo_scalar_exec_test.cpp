@@ -70,7 +70,7 @@ struct PseudoScalarProfile {
 constexpr std::array<PseudoScalarProfile, 2> kProfiles{{
     {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4_encoding, rdna4::kSSetregB32Sopk,
      rdna4::kSSetregImm32B32Sopk},
-    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", gfx1250_encoding, cdna5::kSSetregB32Sopk,
+    {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", gfx1250_encoding, cdna5::kSSetregB32Sopk,
      cdna5::kSSetregImm32B32Sopk},
 }};
 
@@ -711,7 +711,8 @@ TEST_P(PseudoScalarExecTest, ExecutesAtExecZeroWithDestinationOpselZeroAndUsesLo
   fixture.compute_unit->write_sgpr(fixture.sgpr_base() + kDestinationSgpr, kDestinationSentinel);
   fixture.wavefront->set_exec(0);
 
-  fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront);
+  EXPECT_TRUE(
+      fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront).succeeded());
 
   EXPECT_EQ(fixture.compute_unit->read_sgpr(fixture.sgpr_base() + kDestinationSgpr),
             test_case.expected);
@@ -740,8 +741,9 @@ TEST_P(PseudoScalarExecTest, ExecutesWithVccAsSourceAndDestination) {
     const uint64_t expected = selector == kVccSelectors[0]
                                   ? (uint64_t{kOtherHalfSentinel} << 32) | test_case.expected
                                   : (uint64_t{test_case.expected} << 32) | kOtherHalfSentinel;
-    fixture.wavefront->set_vcc(source);
-    fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront);
+    fixture.wavefront->set_vcc_raw(source);
+    EXPECT_TRUE(fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront)
+                    .succeeded());
     EXPECT_EQ(fixture.wavefront->vcc(), expected);
   }
 }
@@ -904,7 +906,8 @@ TEST_P(PseudoScalarSpecialExecTest, CoversLiteralModifierAndModeBehavior) {
   fixture.wavefront->set_mode_raw(test_case.mode);
   fixture.wavefront->set_exec(0);
 
-  fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront);
+  EXPECT_TRUE(
+      fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront).succeeded());
 
   EXPECT_EQ(fixture.compute_unit->read_sgpr(fixture.sgpr_base() + kDestinationSgpr),
             test_case.expected);
@@ -940,8 +943,10 @@ TEST(PseudoScalarModeIntegrationTest, SetregInstructionsUpdateModesConsumedByPse
     fixture.wavefront->set_mode_raw(0);
     fixture.compute_unit->write_sgpr(fixture.sgpr_base() + kModeSgpr, 1u);
     fixture.compute_unit->write_sgpr(fixture.sgpr_base() + kSourceSgpr, f32_bits(0.5f));
-    fixture.compute_unit->execute_instruction(set_round.get(), *fixture.wavefront);
-    fixture.compute_unit->execute_instruction(exp.get(), *fixture.wavefront);
+    EXPECT_TRUE(
+        fixture.compute_unit->execute_instruction(set_round.get(), *fixture.wavefront).succeeded());
+    EXPECT_TRUE(
+        fixture.compute_unit->execute_instruction(exp.get(), *fixture.wavefront).succeeded());
     EXPECT_EQ(fixture.wavefront->mode_raw(), 1u);
     EXPECT_EQ(fixture.compute_unit->read_sgpr(fixture.sgpr_base() + kDestinationSgpr), 0x3FB504F4u);
 
@@ -959,8 +964,10 @@ TEST(PseudoScalarModeIntegrationTest, SetregInstructionsUpdateModesConsumedByPse
 
     fixture.wavefront->set_mode_raw(0);
     fixture.compute_unit->write_sgpr(fixture.sgpr_base() + kSourceSgpr, 0xCAFE0001u);
-    fixture.compute_unit->execute_instruction(set_denorm.get(), *fixture.wavefront);
-    fixture.compute_unit->execute_instruction(log.get(), *fixture.wavefront);
+    EXPECT_TRUE(fixture.compute_unit->execute_instruction(set_denorm.get(), *fixture.wavefront)
+                    .succeeded());
+    EXPECT_TRUE(
+        fixture.compute_unit->execute_instruction(log.get(), *fixture.wavefront).succeeded());
     EXPECT_EQ(fixture.wavefront->mode_raw(), 1u << 6);
     EXPECT_EQ(fixture.compute_unit->read_sgpr(fixture.sgpr_base() + kDestinationSgpr), 0x0000CE00u);
   }

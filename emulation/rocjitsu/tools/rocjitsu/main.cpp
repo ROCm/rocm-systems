@@ -8,14 +8,21 @@
 ///   rocjitsu --config foo.json -- ./app           (local mode: in-process simulation)
 ///   rocjitsu --daemon --config foo.json -- ./app  (daemon mode: fork daemon + launch app)
 ///   rocjitsu --daemon --config foo.json           (daemon-only: run daemon server)
+///
+/// Builds configured with ROCJITSU_ENABLE_VFIO additionally support
+///   rocjitsu --config foo.json --vfio-socket <path>  (serve a PCI device to a VMM)
 
 #include "rocjitsu/daemon/rj_daemon.h"
+#if defined(RJ_ENABLE_VFIO_USER)
+#include "rocjitsu/vmm/vfu/vfio_server.h"
+#endif
 
+#include "rocjitsu/base/rj_version.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
-#include "rocjitsu/version.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
 
 #include "embedded_schema.h"
 #include "launch_preload.h"
@@ -381,9 +388,24 @@ void print_usage() {
          "  rocjitsu --daemon --config foo.json -- ./app Daemon mode (fork daemon + launch app)\n"
          "  rocjitsu --daemon --config foo.json          Daemon-only (run server)\n"
          "  rocjitsu --attach --config foo.json -- ./app Attach to running daemon\n"
+         "  rocjitsu --config foo.json --vfio-socket <path>\n"
+         "                                               Serve a PCI device to a VMM\n"
          "\n"
          "Options:\n"
          "  --config <path>   Simulation config JSON (required)\n"
+         "  --vfio-socket <path>\n"
+         "                    Serve the configured GPU as a PCI function to a VMM over\n"
+         "                    the vfio-user protocol on this AF_UNIX socket, instead of\n"
+         "                    launching an application. Requires a build with\n"
+         "                    ROCJITSU_ENABLE_VFIO.\n"
+         "                    The VMM must share guest RAM through an mmap-able\n"
+         "                    descriptor or the device cannot reach it; with QEMU that\n"
+         "                    means -object\n"
+         "                    memory-backend-memfd,id=mem,size=<N>,share=on together\n"
+         "                    with -machine memory-backend=mem.\n"
+         "  --thread-budget-table\n"
+         "                    Print engine / dispatch allocations without running a VM\n"
+         "  --check-vfio-user Report whether this binary includes VFIO-user support\n"
          "  --version, -v     Print version and exit\n"
          "  --help, -h        Print this help and exit\n";
 }
@@ -394,6 +416,9 @@ int main(int argc, char *argv[]) {
   std::signal(SIGPIPE, SIG_IGN);
 
   const char *config_path = nullptr;
+  const char *vfio_socket = nullptr;
+  bool thread_budget_table = false;
+  int vfio_ready_fd = -1;
   bool daemon_mode = false;
   bool attach_mode = false;
   int separator_idx = -1;
@@ -406,15 +431,35 @@ int main(int argc, char *argv[]) {
     }
     if (arg == "--config" && i + 1 < argc) {
       config_path = argv[++i];
+    } else if (arg == "--vfio-socket" && i + 1 < argc) {
+      vfio_socket = argv[++i];
+    } else if (arg == "--thread-budget-table") {
+      thread_budget_table = true;
+    } else if (arg == "--vfio-ready-fd" && i + 1 < argc) {
+      std::string_view value(argv[++i]);
+      auto [ptr, error] = std::from_chars(value.data(), value.data() + value.size(), vfio_ready_fd);
+      if (error != std::errc{} || ptr != value.data() + value.size() || vfio_ready_fd < 0) {
+        std::cerr << "rocjitsu: --vfio-ready-fd requires a nonnegative descriptor\n";
+        return 1;
+      }
     } else if (arg == "--daemon") {
       daemon_mode = true;
     } else if (arg == "--attach") {
       attach_mode = true;
+    } else if (arg == "--check-vfio-user") {
+#if defined(RJ_ENABLE_VFIO_USER)
+      std::cout << "vfio-user support enabled\n";
+      return 0;
+#else
+      std::cerr << "rocjitsu: this build has no vfio-user support; reconfigure with "
+                   "-DROCJITSU_ENABLE_VFIO=ON\n";
+      return 1;
+#endif
     } else if (arg == "--help" || arg == "-h") {
       print_usage();
       return 0;
     } else if (arg == "--version" || arg == "-v") {
-      std::cout << "rocjitsu " << ROCJITSU_VERSION << "\n";
+      std::cout << rj_get_version_string() << "\n";
       return 0;
     } else {
       std::cerr << std::format("rocjitsu: unknown option: {}\n", arg);
@@ -432,6 +477,65 @@ int main(int argc, char *argv[]) {
   auto abs_config = std::filesystem::absolute(config_path).string();
   if (!std::filesystem::exists(abs_config)) {
     std::cerr << std::format("rocjitsu: config file not found: {}\n", abs_config);
+    return 1;
+  }
+
+  if (thread_budget_table) {
+    if (vfio_socket || vfio_ready_fd >= 0 || daemon_mode || attach_mode || separator_idx >= 0) {
+      std::cerr << "rocjitsu: --thread-budget-table cannot be combined with a launch mode\n";
+      return 1;
+    }
+    try {
+      auto settings =
+          rocjitsu::config::load_execution_thread_settings(abs_config, rocjitsu::kEmbeddedSchema);
+      const uint32_t host = rocjitsu::amdgpu::available_host_threads();
+      std::cout
+          << "Budget | num_threads | cpu_dispatch_threads per GPU | async_helper_threads | Total\n";
+      auto print = [&](const std::string &label) {
+        const auto plan = settings.resolve(host);
+        uint64_t total = uint64_t{plan.engines} + plan.helpers;
+        std::string dispatch;
+        for (uint32_t width : plan.dispatch) {
+          if (!dispatch.empty())
+            dispatch += ",";
+          dispatch += std::to_string(width);
+          total += width - 1;
+        }
+        std::cout << std::format("{} | {} | {} | {} | {}\n", label, plan.engines, dispatch,
+                                 plan.helpers, total);
+      };
+      print("Configured");
+      for (uint32_t budget : {1u, 2u, 4u, 8u, 12u, 16u, 24u, 32u, 34u, 36u, 40u, 48u, 64u}) {
+        settings.request.budget = budget;
+        print(std::to_string(budget));
+      }
+      return 0;
+    } catch (const std::exception &e) {
+      std::cerr << std::format("rocjitsu: thread allocation failed: {}\n", e.what());
+      return 1;
+    }
+  }
+
+  // Serving a VMM builds its own machine, with the PCI function inside it, so
+  // this is dispatched before the parse that builds one here -- not because no
+  // machine is needed, but because the one it needs is assembled differently.
+  if (vfio_socket != nullptr) {
+    if (daemon_mode || attach_mode || (separator_idx >= 0 && separator_idx + 1 < argc)) {
+      std::cerr << "rocjitsu: --vfio-socket serves a VMM and cannot be combined with "
+                   "--daemon, --attach, or an application\n";
+      return 1;
+    }
+#if defined(RJ_ENABLE_VFIO_USER)
+    return rocjitsu::run_vfio_server(abs_config, vfio_socket, vfio_ready_fd);
+#else
+    std::cerr << "rocjitsu: this build has no vfio-user support; reconfigure with "
+                 "-DROCJITSU_ENABLE_VFIO=ON\n";
+    return 1;
+#endif
+  }
+
+  if (vfio_ready_fd >= 0) {
+    std::cerr << "rocjitsu: --vfio-ready-fd requires --vfio-socket\n";
     return 1;
   }
 
@@ -498,6 +602,12 @@ int main(int argc, char *argv[]) {
 
   pid_t my_pid = getpid();
 
+  // Set only where this process forked the daemon itself. A client authorizes
+  // that process to reach into its address space, so which PID it is has to
+  // come from whoever started it rather than from the socket, and this exec
+  // is the last point that still knows.
+  std::optional<pid_t> launched_daemon_pid;
+
   if (attach_mode) {
     auto sock_path = rpc_default_socket_path();
     if (!std::filesystem::exists(sock_path)) {
@@ -552,6 +662,7 @@ int main(int argc, char *argv[]) {
       cleanup_runtime_files(my_pid);
       return 1;
     }
+    launched_daemon_pid = daemon_pid;
   } else {
     if (!rocjitsu::config::write_dbt_runtime_config_handoff(abs_config, dbt_guest_config, my_pid)) {
       std::cerr << "rocjitsu: failed to write config file\n";
@@ -586,6 +697,8 @@ int main(int argc, char *argv[]) {
   // holding config_path/daemon.sock. Attach mode creates no such dir.
   if (!attach_mode)
     launch_environment.set(rocjitsu::kRpcInvocationDirEnv, rpc_invocation_runtime_dir(my_pid));
+  if (launched_daemon_pid)
+    launch_environment.set(rocjitsu::kRpcDaemonPidEnv, std::to_string(*launched_daemon_pid));
   rocjitsu::cli::execvp_with_environment(app_argv[0], app_argv, launch_environment);
 
   std::cerr << std::format("rocjitsu: execvp failed: {}\n", strerror(errno));

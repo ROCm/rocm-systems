@@ -3,6 +3,8 @@
     "Device-API benchmark matrix for run-device-api-ci.sh.",
     "Add a mode by appending a suites entry. Each suite runs every bin as:",
     "  mpirun -np $NP <base_env + suite env> -x LD_LIBRARY_PATH ./build/<bin> $bench_args <args>",
+    "After the matrix, run-device-api-ci.sh runs pytest test/test_AllToAllDevtime.py",
+    "(GIN -D 3 device-timing smoke: -B 1/2 and -B 2 -H 1; ENABLE_DEVICE_API build).",
     "bench_args: common bench flags | base_env: -x on every run",
     "debug_env:  -x added only when RCCL_CI_DEBUG=1",
     "  {LOGDIR} in debug_env is replaced by the runner with the per-job debug dir,",
