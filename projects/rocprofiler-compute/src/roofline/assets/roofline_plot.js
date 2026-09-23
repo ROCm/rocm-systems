@@ -17,11 +17,13 @@
 
   // ---- Config forwarded from roofline_html.py via the model ---------------
   var ALL_PEAKS_VALUE = model.allPeaksValue;
+  var LIMITING_PEAK_VALUE = model.limitingPeakValue;
   var ROOF_EXTREME_MAX_AI = model.roofExtremeMaxAi;
   var KERNEL_NAME_FONT_FAMILY = model.kernelNameFontFamily;
 
   // ---- Own presentation ---------------------------------------------------
   var ALL_PEAKS_LABEL = "All peaks";
+  var LIMITING_PEAK_LABEL = "Limited by";
   var KERNEL_LIST_NAME_MAX_LENGTH = 200;
   var FALLBACK_COLOR = "#888888";
   var PLOT_DIM_OPACITY = 0.15;
@@ -353,6 +355,11 @@
     var peak = effectivePeak();
     if (peak === ALL_PEAKS_VALUE) {
       return points;
+    }
+    if (peak === LIMITING_PEAK_VALUE) {
+      return points.filter(function (point) {
+        return point.peak === kernel.limitingPeak;
+      });
     }
     return points.filter(function (point) {
       return point.peak === peak;
@@ -1243,9 +1250,13 @@
 
   function exportViewSubtitle() {
     var peak = effectivePeak();
-    var parts = [
-      "AI axis: " + (peak === ALL_PEAKS_VALUE ? ALL_PEAKS_LABEL : peak),
-    ];
+    var peakLabel =
+      peak === ALL_PEAKS_VALUE
+        ? ALL_PEAKS_LABEL
+        : peak === LIMITING_PEAK_VALUE
+        ? LIMITING_PEAK_LABEL
+        : peak;
+    var parts = ["AI axis: " + peakLabel];
     if (hasRuntimeData && isFinite(state.runtimeThreshold)) {
       parts.push("runtime shown: " + state.runtimeThreshold.toFixed(3) + "%");
     }
@@ -1511,6 +1522,10 @@
     if (!peakSelect) {
       return;
     }
+    var limitingEl = document.createElement("option");
+    limitingEl.value = LIMITING_PEAK_VALUE;
+    limitingEl.textContent = LIMITING_PEAK_LABEL;
+    peakSelect.appendChild(limitingEl);
     model.peaks.forEach(function (peak) {
       var el = document.createElement("option");
       el.value = peak;
