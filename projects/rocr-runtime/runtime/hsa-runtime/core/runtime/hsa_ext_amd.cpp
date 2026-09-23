@@ -2070,13 +2070,18 @@ hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(hsa_amd_vmem_alloc_ha
   CATCH;
 }
 
-hsa_status_t hsa_amd_vmem_get_alloc_size_from_handle(hsa_amd_vmem_alloc_handle_t allocHandle,
-                                                     size_t* size) {
+hsa_status_t hsa_amd_vmem_get_vmem_info(hsa_amd_vmem_alloc_handle_t allocHandle,
+                                        hsa_amd_vmem_handle_info_t* info) {
   TRY;
   IS_OPEN();
-  IS_BAD_PTR(size);
+  IS_BAD_PTR(info);
 
-  return core::Runtime::runtime_singleton_->VMemoryGetAllocSizeFromHandle(allocHandle, size);
+  /* The caller stamps the layout it was compiled against. Reject a size that
+   * cannot hold even the first member; Runtime fills only what fits. */
+  if (info->size < offsetof(hsa_amd_vmem_handle_info_t, alloc_size) + sizeof(size_t))
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  return core::Runtime::runtime_singleton_->VMemoryGetHandleInfo(allocHandle, info);
   CATCH;
 }
 

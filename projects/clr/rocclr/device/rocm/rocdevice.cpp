@@ -2476,28 +2476,31 @@ bool Device::getVmmAllocInfo(uint64_t hsa_handle, amd::Device::VmmLocationType* 
                              size_t* size) const {
   if (location_type == nullptr || size == nullptr || hsa_handle == 0) return false;
 
+  // Enhancement entry point: an older ROCr does not export it. Report failure so
+  // the caller keeps its legacy device/size-zero behaviour.
+  if (!Hsa::vmem_get_vmem_info_available()) return false;
+
   hsa_amd_vmem_alloc_handle_t handle{hsa_handle};
-  hsa_amd_memory_pool_t pool{};
-  hsa_amd_memory_type_t type{};
+  hsa_amd_vmem_handle_info_t info{};
+  info.size = sizeof(info);
 
-  if (Hsa::vmem_get_alloc_properties_from_handle(handle, &pool, &type) != HSA_STATUS_SUCCESS ||
-      pool.handle == 0) {
-    return false;
-  }
-  if (Hsa::vmem_get_alloc_size_from_handle(handle, size) != HSA_STATUS_SUCCESS) {
+  // Fails for an import whose placement ROCr could not recover, which is the
+  // case the caller's fallback exists for.
+  if (Hsa::vmem_get_vmem_info(handle, &info) != HSA_STATUS_SUCCESS || info.agent.handle == 0) {
     return false;
   }
 
-  // Any pool belonging to a CPU agent is host memory; everything else is device local.
-  *location_type = amd::Device::VmmLocationType::kDevice;
-  for (const auto& cpu_agent : cpu_agents_) {
-    if (pool.handle == cpu_agent.fine_grain_pool.handle ||
-        pool.handle == cpu_agent.coarse_grain_pool.handle ||
-        pool.handle == cpu_agent.ext_fine_grain_pool.handle) {
-      *location_type = amd::Device::VmmLocationType::kHost;
-      break;
-    }
+  // Ask the owning agent what it is. The allocation's pool is deliberately not
+  // consulted: for an imported handle it names a placement class, not the pool
+  // the exporter allocated from.
+  hsa_device_type_t dev_type{};
+  if (Hsa::agent_get_info(info.agent, HSA_AGENT_INFO_DEVICE, &dev_type) != HSA_STATUS_SUCCESS) {
+    return false;
   }
+
+  *size = info.alloc_size;
+  *location_type = (dev_type == HSA_DEVICE_TYPE_CPU) ? amd::Device::VmmLocationType::kHost
+                                                     : amd::Device::VmmLocationType::kDevice;
   return true;
 }
 

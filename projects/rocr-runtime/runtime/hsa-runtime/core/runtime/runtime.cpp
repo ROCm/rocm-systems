@@ -5096,14 +5096,36 @@ hsa_status_t Runtime::VMemoryGetAllocPropertiesFromHandle(hsa_amd_vmem_alloc_han
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t Runtime::VMemoryGetAllocSizeFromHandle(hsa_amd_vmem_alloc_handle_t allocHandle,
-                                                    size_t* size) {
+hsa_status_t Runtime::VMemoryGetHandleInfo(hsa_amd_vmem_alloc_handle_t allocHandle,
+                                           hsa_amd_vmem_handle_info_t* info) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
   if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  *size = memoryHandle->imported ? memoryHandle->imported_size
-                                 : memoryHandle->driver_handle.size;
+  const MemoryRegion* region =
+      memoryHandle->imported ? memoryHandle->imported_region : memoryHandle->region;
+
+  /* An import whose placement and size the driver could not describe -- a fabric
+   * handle, or a dma-buf on a kernel or thunk without the query -- carries no
+   * recoverable information. Say so rather than reporting a zero size that a
+   * caller cannot tell apart from a genuinely empty allocation. */
+  if (memoryHandle->imported && region == nullptr && memoryHandle->imported_size == 0)
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+
+  /* Fill only the members that fit in the layout the caller was built against.
+   * Members are append-only, so a prefix is always well defined. */
+  const uint32_t caller_size = info->size;
+  auto fits = [caller_size](size_t end_offset) { return caller_size >= end_offset; };
+
+  if (fits(offsetof(hsa_amd_vmem_handle_info_t, alloc_size) + sizeof(info->alloc_size))) {
+    info->alloc_size =
+        memoryHandle->imported ? memoryHandle->imported_size : memoryHandle->driver_handle.size;
+  }
+  if (fits(offsetof(hsa_amd_vmem_handle_info_t, agent) + sizeof(info->agent))) {
+    info->agent = (region != nullptr && region->owner() != nullptr)
+        ? core::Agent::Convert(region->owner())
+        : hsa_agent_t{0};
+  }
   return HSA_STATUS_SUCCESS;
 }
 

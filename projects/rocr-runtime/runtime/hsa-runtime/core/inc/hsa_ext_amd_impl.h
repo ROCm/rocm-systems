@@ -390,8 +390,8 @@ hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(hsa_amd_vmem_alloc_ha
                                                            hsa_amd_memory_type_t* type);
 
 // Mirrors Amd Extension Apis
-hsa_status_t hsa_amd_vmem_get_alloc_size_from_handle(hsa_amd_vmem_alloc_handle_t allocHandle,
-                                                     size_t* size);
+hsa_status_t hsa_amd_vmem_get_vmem_info(hsa_amd_vmem_alloc_handle_t allocHandle,
+                                        hsa_amd_vmem_handle_info_t* info);
 
 // Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_vmem_export_fabric_handle(hsa_fabric_handle_t *fabric_handle,

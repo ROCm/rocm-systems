@@ -84,7 +84,7 @@
  * - 1.30 - hsa_amd_queue_get_info: engine type and SDMA engine ID
  * - 1.31 - hsa_amd_queue_get_info: queue read/write pointer addresses
  * - 1.32 - hsa_amd_svm_discard_and_prefetch_batch_async
- * - 1.33 - hsa_amd_vmem_get_alloc_size_from_handle
+ * - 1.33 - hsa_amd_vmem_get_vmem_info
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
 #define HSA_AMD_INTERFACE_VERSION_MINOR 33
@@ -4813,19 +4813,60 @@ hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(
     hsa_amd_memory_type_t* type);
 
 /**
- * @brief Returns the size of an allocation handle
+ * @brief Information about a virtual memory allocation handle.
  *
- * Works for both locally created and driver-describable POSIX DMA-BUF imports.
+ * Within a ROCr major version this structure can only grow: members are
+ * appended, never reordered or resized. @p size lets ROCr fill only the members
+ * present in the layout the caller was compiled against, so a newer ROCr stays
+ * compatible with an older caller and vice versa.
+ */
+typedef struct hsa_amd_vmem_handle_info_s {
+  /**
+   * Size of this structure in bytes. Must be set by the caller to
+   * sizeof(hsa_amd_vmem_handle_info_t) prior to the call. ROCr writes only the
+   * members that fit within this many bytes and leaves the rest untouched.
+   */
+  uint32_t size;
+  /**
+   * Size of the allocation in bytes.
+   */
+  size_t alloc_size;
+  /**
+   * Agent on which the allocation resides: a CPU agent for host-resident
+   * memory, the owning GPU agent for device-resident memory. For an imported
+   * handle this identifies placement class only -- see the NUMA and grain
+   * caveats on ::hsa_amd_vmem_get_alloc_properties_from_handle.
+   */
+  hsa_agent_t agent;
+} hsa_amd_vmem_handle_info_t;
+
+/**
+ * @brief Returns information about an allocation handle
+ *
+ * Supports handles created locally by ::hsa_amd_vmem_handle_create, and handles
+ * from ::hsa_amd_vmem_import_shareable_handle whose placement and size the
+ * kernel driver was able to describe.
+ *
+ * An imported handle whose properties could not be recovered -- a fabric handle
+ * from ::hsa_amd_vmem_import_fabric_handle, a POSIX dma-buf on a kernel without
+ * GET_DMABUF_INFO support, or a thunk lacking the query -- reports
+ * ::HSA_STATUS_ERROR_INVALID_ALLOCATION rather than succeeding with a zero
+ * size, so callers can distinguish an unrecoverable handle from a genuinely
+ * empty allocation.
  *
  * @param[in] memory_handle memory handle to be queried
- * @param[out] size allocation size in bytes
+ * @param[in,out] info handle information, with @p info->size set by the caller
  *
  * @retval ::HSA_STATUS_SUCCESS
  *
- * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION Invalid memory_handle
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p info is NULL, or @p info->size
+ * is too small to hold any member
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION Invalid memory_handle, or an
+ * imported handle whose properties could not be recovered
  */
-hsa_status_t hsa_amd_vmem_get_alloc_size_from_handle(
-    hsa_amd_vmem_alloc_handle_t memory_handle, size_t* size);
+hsa_status_t hsa_amd_vmem_get_vmem_info(
+    hsa_amd_vmem_alloc_handle_t memory_handle, hsa_amd_vmem_handle_info_t* info);
 
 /**
  * @brief 128-bit globally unique identifier for a ROCr shared memory
