@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -114,6 +115,143 @@ inline double multiply_viewport_scale(float position, float scale) {
     return product;
   const double unit = std::ldexp(1.0, std::ilogb(position) + std::ilogb(scale) - 23);
   return std::trunc(product / unit) * unit;
+}
+
+enum class BlendFactorMode { Direct, One, Inverse };
+
+inline float blend_input(float value) {
+  const uint32_t bits = std::bit_cast<uint32_t>(value);
+  return (bits & 0x7f800000u) == 0 ? std::bit_cast<float>(bits & 0x80000000u) : value;
+}
+
+inline float blend_nan() { return std::bit_cast<float>(0xffc00000u); }
+
+inline float blend_minmax(float a, float b, bool maximum) {
+  if (std::isnan(a))
+    a = b;
+  else if (std::isnan(b))
+    b = a;
+  if (std::isnan(a))
+    return blend_nan();
+  const float result = maximum ? std::max(a, b) : std::min(a, b);
+  return result == 0 ? 0 : result;
+}
+
+// Saturation retains the selected factor's arithmetic path. Exact ties in
+// [0,1] select the inverse; other ties select the source. Opposite negative
+// source/positive destination alphas stop retaining ONE after 26 bits.
+inline bool blend_saturate_uses_source(float source, float destination) {
+  if (std::isnan(source))
+    return false;
+  if (std::isnan(destination))
+    return true;
+  if (!std::isfinite(source) || !std::isfinite(destination))
+    return source < 1.0 - double(destination);
+  if (source == -destination && source <= -0x1p26f)
+    return false;
+  // Preserve the comparison when adding a tiny alpha would round back to one.
+  if (source == 1)
+    return destination < 0;
+  if (destination == 1)
+    return std::signbit(source);
+  const double sum = double(source) + destination;
+  return sum < 1 || (sum == 1 && (source < 0 || source > 1));
+}
+
+// Blending aligns product terms using their input exponents, retaining
+// multiplication carries: 35 bits for FP32 and 23 for UNORM8. The built-in ONE
+// factor has exponent -1; a shader alpha of 1.0 has exponent 0. Discarded bits
+// remain sticky for FP32 rounding, even when the products have opposite signs.
+// FP32 input subnormals must already be flushed to signed zero.
+// Inverse factors take the original factor value, before subtracting from one.
+inline double blend_products(float a, float af, BlendFactorMode a_mode, float b, float bf,
+                             BlendFactorMode b_mode, bool negate_a, bool negate_b,
+                             bool unorm = false) {
+  const auto ignored = [](float factor, BlendFactorMode mode) {
+    return (mode == BlendFactorMode::Direct && std::bit_cast<uint32_t>(factor) == 0) ||
+           (mode == BlendFactorMode::Inverse && factor == 1);
+  };
+  // Positive-zero coefficients suppress even NaN and infinity colors.
+  if (ignored(af, a_mode))
+    a = 0;
+  if (ignored(bf, b_mode))
+    b = 0;
+  if (!std::isfinite(a) || !std::isfinite(b) || !std::isfinite(af) || !std::isfinite(bf)) {
+    const auto product = [&](float color, float factor, BlendFactorMode mode, bool negate) {
+      if (color == 0 && (mode == BlendFactorMode::One || (mode == BlendFactorMode::Inverse &&
+                                                          std::bit_cast<uint32_t>(factor) == 0)))
+        return 0.0;
+      const double coefficient = mode == BlendFactorMode::Inverse ? 1.0 - double(factor) : factor;
+      const double value = ignored(factor, mode) ? 0 : double(color) * coefficient;
+      return negate ? -value : value;
+    };
+    const double result = product(a, af, a_mode, negate_a) + product(b, bf, b_mode, negate_b);
+    return std::isnan(result) ? blend_nan() : float(result);
+  }
+  struct Term {
+    double value;
+    int exponent;
+  };
+  std::array<Term, 4> terms;
+  unsigned count = 0;
+  const auto append = [&](double value, int exponent) {
+    terms[count++] = {value, value == 0 ? -1000 : exponent};
+  };
+  const auto product = [&](float color, float factor, BlendFactorMode mode, bool negate) {
+    const float signed_color = negate ? -color : color;
+    const int ec = color == 0 ? -1000 : std::ilogb(color);
+    const int ef = factor == 0 ? -1000 : std::ilogb(factor);
+    if (mode != BlendFactorMode::Inverse) {
+      // A positive-zero coefficient clears the product sign before subtraction.
+      // The built-in ONE instead clears a zero color sign after subtraction.
+      const double raw = std::bit_cast<uint32_t>(factor) == 0 ? 0 : double(color) * factor;
+      const double value = mode == BlendFactorMode::One && color == 0 ? 0 : negate ? -raw : raw;
+      append(value, ec + (mode == BlendFactorMode::One ? -1 : ef));
+    } else if (factor == 0) {
+      // Unlike positive zero, a negative-zero base retains the color zero sign.
+      append(color == 0 && !std::signbit(factor) ? 0 : signed_color, ec - 1);
+    } else if (factor >= 0.5f && factor < 3.0f) {
+      // A compact complement keeps at least the ONE factor's exponent.
+      const double inverse = 1.0 - factor;
+      const int ei = inverse == 0 ? -1000 : std::ilogb(inverse);
+      const double raw = inverse == 0 ? 0 : double(color) * inverse;
+      append(negate ? -raw : raw, ec + std::max(-1, ei));
+    } else {
+      // Outside that range, align the ONE and original-factor products
+      // independently. Multiplying by a wide complement loses this rounding.
+      append(signed_color, ec - 1);
+      append(-double(signed_color) * factor, ec + ef);
+    }
+  };
+  product(a, af, a_mode, negate_a);
+  product(b, bf, b_mode, negate_b);
+  int e = -1000;
+  for (unsigned i = 0; i < count; ++i)
+    e = std::max(e, terms[i].exponent);
+  const double unit = e == -1000 ? 1 : std::ldexp(1.0, e - (unorm ? 22 : 34));
+  double sum = 0;
+  bool sticky = false;
+  for (unsigned i = 0; i < count; ++i) {
+    const double q = std::trunc(terms[i].value / unit) * unit;
+    sum = i == 0 ? q : sum + q;
+    sticky |= q != terms[i].value;
+  }
+  // UNORM quantizes the aligned sum directly to the attachment's byte value.
+  // Its discarded product bits do not affect that final rounding.
+  if (unorm)
+    return sum;
+  // Round the significand before flushing underflow; host conversion would
+  // first reduce subnormal precision and can incorrectly round up to normal.
+  const double scale = std::abs(sum) < 0x1p-126 ? 0x1p126 : 1;
+  sum *= scale;
+  float result = static_cast<float>(sum);
+  if (sticky && std::abs(double(result)) < std::abs(sum)) {
+    const float away = std::bit_cast<float>(std::bit_cast<uint32_t>(result) + 1);
+    if (std::abs(sum) - std::abs(double(result)) == std::abs(double(away)) - std::abs(sum))
+      result = away;
+  }
+  const double unscaled = double(result) / scale;
+  return std::abs(unscaled) < 0x1p-126 ? std::copysign(0.0f, unscaled) : float(unscaled);
 }
 
 // Projection and translation each truncate to single precision before the

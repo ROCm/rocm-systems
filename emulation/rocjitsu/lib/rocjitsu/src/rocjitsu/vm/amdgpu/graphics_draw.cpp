@@ -150,18 +150,113 @@ T blend_factor(uint32_t factor, uint32_t component, const std::array<T, 4> &sour
   }
 }
 
+// SX can bypass blending when the source contribution is zero and the
+// destination factor is one. RGB flags consider every exported RGB channel,
+// including channels masked off by CB_TARGET_MASK.
+template <typename T>
+bool blend_preserves_destination(uint32_t opt, uint32_t component, uint32_t export_mask,
+                                 const std::array<T, 4> &source) {
+  const uint32_t operation = (opt >> 8) & 7;
+  if (operation != 1 && operation != 5) // OPT_COMB_ADD / OPT_COMB_REVSUBTRACT
+    return false;
+  bool c0 = (export_mask & 7) != 0, c1 = c0;
+  for (unsigned i = 0; i < 3; ++i) {
+    if (export_mask & (1u << i)) {
+      c0 &= source[i] == 0;
+      c1 &= source[i] == 1;
+    }
+  }
+  const bool a0 = (export_mask & 8) && source[3] == 0;
+  const bool a1 = (export_mask & 8) && source[3] == 1;
+  // SX_BLEND_OPT: preserve/ignore all, color zero/one, alpha zero/one, or none.
+  const bool ignore[]{true, false, c0, c1, a0, a1, a0, false};
+  const bool preserve[]{false, true, c1, c0, a1, a0, false, false};
+  return (ignore[opt & 7] || (component == 3 ? a0 : c0)) && preserve[(opt >> 4) & 7];
+}
+
+enum class BlendCopy { None, Source, Destination };
+
+// Constant zero/one equations can bypass arithmetic for the whole pixel.
+// Color constants are checked across RGB even for partial exports or writes.
+BlendCopy fixed_blend_copy(uint32_t control, uint32_t write_mask,
+                           const std::array<float, 4> &constant) {
+  const auto factor_is = [&](uint32_t factor, bool one, bool alpha) {
+    if (factor == kBlendZero)
+      return !one;
+    if (factor == kBlendOne)
+      return one;
+    const bool color = factor == kBlendConstantColor || factor == kBlendInvConstantColor;
+    if (!color && factor != kBlendConstantAlpha && factor != kBlendInvConstantAlpha)
+      return false;
+    const bool inverse = factor == kBlendInvConstantColor || factor == kBlendInvConstantAlpha;
+    const uint32_t bits = one != inverse ? 0x3f800000u : 0;
+    if (alpha || !color)
+      return std::bit_cast<uint32_t>(constant[3]) == bits;
+    return std::bit_cast<uint32_t>(constant[0]) == bits &&
+           std::bit_cast<uint32_t>(constant[1]) == bits &&
+           std::bit_cast<uint32_t>(constant[2]) == bits;
+  };
+  bool source = true, destination = true;
+  for (bool alpha : {false, true}) {
+    if (!(write_mask & (alpha ? 8u : 7u)))
+      continue;
+    const uint32_t equation = alpha && (control & kBlendSeparateAlpha) ? control >> 16 : control;
+    const uint32_t operation = (equation >> 5) & 7;
+    source &= (operation == kBlendAdd || operation == kBlendSubtract) &&
+              factor_is(equation & 31, true, alpha) &&
+              factor_is((equation >> 8) & 31, false, alpha);
+    destination &= (operation == kBlendAdd || operation == kBlendReverseSubtract) &&
+                   factor_is(equation & 31, false, alpha) &&
+                   factor_is((equation >> 8) & 31, true, alpha);
+  }
+  return source ? BlendCopy::Source : destination ? BlendCopy::Destination : BlendCopy::None;
+}
+
 template <typename T>
 T blend_component(uint32_t control, uint32_t component, const std::array<T, 4> &source,
-                  const std::array<T, 4> &destination, const std::array<T, 4> &constant) {
+                  const std::array<T, 4> &destination, const std::array<T, 4> &constant,
+                  bool fp32 = false, bool unorm = false) {
   const uint32_t operation = (control >> 5) & 7;
   if (operation == kBlendMin)
-    return std::min(source[component], destination[component]);
+    return fp32 ? raster::blend_minmax(source[component], destination[component], false)
+                : std::min(source[component], destination[component]);
   if (operation == kBlendMax)
-    return std::max(source[component], destination[component]);
+    return fp32 ? raster::blend_minmax(source[component], destination[component], true)
+                : std::max(source[component], destination[component]);
+  const uint32_t src = control & 31, dst = (control >> 8) & 31;
+  const auto factor_mode = [](uint32_t factor) {
+    if (factor == kBlendOne)
+      return raster::BlendFactorMode::One;
+    if (factor == kBlendInvSrcColor || factor == kBlendInvSrcAlpha || factor == kBlendInvDstAlpha ||
+        factor == kBlendInvDstColor || factor == kBlendInvConstantColor ||
+        factor == kBlendInvConstantAlpha)
+      return raster::BlendFactorMode::Inverse;
+    return raster::BlendFactorMode::Direct;
+  };
+  if (fp32 || unorm) {
+    const auto resolve = [&](uint32_t factor) {
+      if (factor != kBlendSrcAlphaSaturate)
+        return factor;
+      if (component == 3)
+        return kBlendOne;
+      return raster::blend_saturate_uses_source(source[3], destination[3]) ? kBlendSrcAlpha
+                                                                           : kBlendInvDstAlpha;
+    };
+    const uint32_t sfactor = resolve(src), dfactor = resolve(dst);
+    const auto sm = factor_mode(sfactor), dm = factor_mode(dfactor);
+    // Inverse factors immediately follow their base factors in the encoding.
+    const T sf = blend_factor(sfactor - (sm == raster::BlendFactorMode::Inverse), component, source,
+                              destination, constant);
+    const T df = blend_factor(dfactor - (dm == raster::BlendFactorMode::Inverse), component, source,
+                              destination, constant);
+    return raster::blend_products(source[component], sf, sm, destination[component], df, dm,
+                                  operation == kBlendReverseSubtract, operation == kBlendSubtract,
+                                  unorm);
+  }
   const T source_term =
-      source[component] * blend_factor(control & 31, component, source, destination, constant);
-  const T destination_term = destination[component] * blend_factor((control >> 8) & 31, component,
-                                                                   source, destination, constant);
+      source[component] * blend_factor(src, component, source, destination, constant);
+  const T destination_term =
+      destination[component] * blend_factor(dst, component, source, destination, constant);
   if (operation == kBlendSubtract)
     return source_term - destination_term;
   if (operation == kBlendReverseSubtract)
@@ -169,6 +264,13 @@ T blend_component(uint32_t control, uint32_t component, const std::array<T, 4> &
   if (operation == kBlendAdd)
     return source_term + destination_term;
   throw std::runtime_error("unsupported graphics blend operation");
+}
+
+uint8_t unorm_color_byte(double value) {
+  const double scaled = (std::isnan(value) ? 0 : std::clamp(value, 0.0, 1.0)) * 255;
+  const auto lower = static_cast<uint32_t>(scaled);
+  const double fraction = scaled - lower;
+  return lower + (fraction > 0.5 || (fraction == 0.5 && (lower & 1)));
 }
 
 // Color-buffer quantization thresholds for FP16 sRGB exports. Each entry is
@@ -1236,22 +1338,63 @@ void GraphicsDraw::write_outputs(const GpuVmAccess &memory) {
           if (color.memory_format == kBufRgba16Float)
             for (auto &value : constant)
               value = std::bit_cast<float>(std::bit_cast<uint32_t>(value) & ~0xfffu);
-          for (uint32_t c = 0; c < 4; ++c) {
-            const uint32_t control = c == 3 && (blend & kBlendSeparateAlpha) ? blend >> 16 : blend;
-            float result =
-                color.memory_format == kBufRgba8Unorm
-                    ? blend_component(control, c, source, destination, constant)
-                    : static_cast<float>(blend_component(control, c, widen(source),
-                                                         widen(destination), widen(constant)));
-            // Floating attachments preserve signed and out-of-range values.
-            // The FP16 blend result truncates on its way back to the attachment.
-            if (color.memory_format == kBufRgba16Float)
-              result = util::f16_to_f32(util::f32_to_f16_rtz(result));
-            components[c] = std::bit_cast<uint32_t>(result);
+          const uint32_t opt_disable = context_[0x1d7] >> (4 * target);
+          const uint32_t opt = context_[0x1d8 + target];
+          const auto preserves_group = [&](bool alpha) {
+            return !(write_mask & (alpha ? 8u : 7u)) ||
+                   (!(opt_disable & (alpha ? 2u : 1u)) &&
+                    blend_preserves_destination(opt >> (alpha ? 16 : 0), alpha ? 3 : 0,
+                                                component_mask, source));
+          };
+          // A destination bypass retains the whole pixel. A written group that
+          // needs arithmetic also prevents the other group from bypassing.
+          const bool preserve_destination = preserves_group(false) && preserves_group(true);
+          bool copy_source = false;
+          if (color.memory_format == kBufRgba32Float) {
+            auto copy = fixed_blend_copy(blend, write_mask, constant);
+            // GFX11 exposes overrides for automatic source/destination bypass.
+            const uint32_t info = context_[0x3b0 + target];
+            if (arch_ != ROCJITSU_CODE_ARCH_RDNA4 &&
+                ((copy == BlendCopy::Source && ((info >> 20) & 7)) ||
+                 (copy == BlendCopy::Destination && ((info >> 23) & 7))))
+              copy = BlendCopy::None;
+            // Test bypass before input flushing or widening, preserving the raw
+            // destination bits even for subnormals and signaling NaNs.
+            if (preserve_destination || copy == BlendCopy::Destination)
+              continue;
+            copy_source = copy == BlendCopy::Source;
+            if (!copy_source)
+              for (uint32_t c = 0; c < 4; ++c) {
+                source[c] = raster::blend_input(source[c]);
+                destination[c] = raster::blend_input(destination[c]);
+                constant[c] = raster::blend_input(constant[c]);
+              }
+          }
+          if (!copy_source) {
+            for (uint32_t c = 0; c < 4; ++c) {
+              const uint32_t control =
+                  c == 3 && (blend & kBlendSeparateAlpha) ? blend >> 16 : blend;
+              const double blended = blend_component(
+                  control, c, widen(source), widen(destination), widen(constant),
+                  color.memory_format == kBufRgba32Float, color.memory_format == kBufRgba8Unorm);
+              if (color.memory_format == kBufRgba8Unorm) {
+                // Keep blend precision through byte quantization. Rounding to
+                // FP32 first can cross a UNORM midpoint, even with FP16 exports.
+                bytes[c] = unorm_color_byte(blended);
+                continue;
+              }
+              float result = static_cast<float>(blended);
+              // Floating attachments preserve signed and out-of-range values.
+              // The FP16 blend result truncates on its way back to the attachment.
+              if (color.memory_format == kBufRgba16Float)
+                result = util::f16_to_f32(util::f32_to_f16_rtz(result));
+              components[c] = std::bit_cast<uint32_t>(result);
+            }
           }
         }
-        pack_buffer_format(color.memory_format, 0xfac, components,
-                           std::span{bytes}.first(color.bytes));
+        if (!(blend & kBlendEnable) || color.memory_format != kBufRgba8Unorm)
+          pack_buffer_format(color.memory_format, 0xfac, components,
+                             std::span{bytes}.first(color.bytes));
         if (color.srgb)
           for (uint32_t c = 0; c < 3; ++c)
             bytes[c] = srgb_color_byte(std::bit_cast<float>(components[c]));
