@@ -467,3 +467,11 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   passes all 834 tests. Offline timing verification is running; the installed
   hook has not been replaced while the original GPU diagnostic is active.
   Evidence: `matmul-debug/lazy-dominance-tests.log` under the campaign root.
+- Lazy-dominance verification: the offline FP16 SuperCollider transformation
+  with the reviewed publication mutation succeeds in **26.397 seconds**. The
+  original GPU-path diagnostic was stopped while still transforming after
+  300 seconds; its subsequent rocminfo and 1,048,576-result HIP smoke pass.
+  Rebuilt the hook only after that process exited. Round 11 refreshes FP16
+  clean comparators, followed by the original reviewed Default fault matrix
+  at its maintained 300-second deadline. No timeout override is used for these
+  qualification attempts. Timing artifact: `matmul-debug/transform-fixed-result.json`.
