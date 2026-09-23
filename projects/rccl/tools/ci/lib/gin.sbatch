@@ -241,7 +241,7 @@ set +a
 # --- unit test: SDMA factory gtest (single-node, no MPI needed). ---
 # Self-contained: compiles factory + anvil.cpp directly, no librccl.so link.
 echo "==> [6/7] run SDMA factory unit tests"
-sdma_factory_test="${rccl_build}/test/rccl-UnitTestsGinAnvilSdmaFactory"
+sdma_factory_test="${RCCL_FIXTURES_BIN_DIR}/rccl-UnitTestsGinAnvilSdmaFactory"
 if [[ -x "${sdma_factory_test}" ]]; then
   _sysdeps_lib=""
   for _sp in "${ROCM_PATH}/lib/rocm_sysdeps/lib" "${ROCM_PATH}/core/lib/rocm_sysdeps/lib"; do
