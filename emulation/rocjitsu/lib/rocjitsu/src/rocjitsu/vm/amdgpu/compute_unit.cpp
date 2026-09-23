@@ -927,14 +927,7 @@ void ComputeUnitCore::report_memory_wait(void *context,
     }
     return std::string("unknown register");
   }();
-  if (hazard.lds_address) {
-    util::Logger::warn(std::format(
-        "memory-wait: {} wg={} wave={} pc={:#x}: LDS {} at {:#x} overlaps an unfinished "
-        "access from pc={:#x} ({}). A wait threshold <= {} is required; "
-        "memory_wait_diagnostics=off silences this diagnostic.",
-        cu.full_path(), wf.wg_id(), wf.wf_id(), hazard.consumer_pc, hazard.write ? "write" : "read",
-        *hazard.lds_address, hazard.producer.pc, counter_name, required));
-  } else if (replay) {
+  if (replay) {
     util::Logger::warn(std::format(
         "xcnt-wait: {} wg={} wave={} pc={:#x}: overwrite of {} before the replay source from "
         "pc={:#x} is known safe to reuse. XNACK replay may need the original value. "
@@ -956,76 +949,6 @@ void ComputeUnitCore::report_memory_wait(void *context,
     util::Logger::warn(replay ? "xcnt-wait: further diagnostics on this CU are suppressed"
                               : "memory-wait: further diagnostics on this CU are suppressed");
 }
-
-namespace {
-
-std::optional<MemoryWaitScoreboard::LdsEvent>
-memory_wait_lds_access(const Instruction &inst, const Wavefront &wf, rj_code_arch_t arch) {
-  using LdsKind = MemoryWaitScoreboard::LdsKind;
-  if (!inst.data() || (inst.data()->tag() != LOCAL_MEM && inst.data()->tag() != GLOBAL_MEM))
-    return std::nullopt;
-  const auto &d = *inst.data_as<VectorMemState>();
-  const bool ds = d.tag() == LOCAL_MEM;
-  if (!ds && !d.lds_dst && !d.lds_src)
-    return std::nullopt;
-  // A multicast destination in another workgroup is outside a per-wave check.
-  if (d.cluster_multicast && wf.cluster_size() > 1 &&
-      !(d.cluster_mcast_mask & cluster_multicast_rank_mask(wf.cluster_rank())))
-    return std::nullopt;
-  const bool async = d.wait_counter_type == WaitCounterType::ASYNCCNT;
-  const auto counter = ds      ? WaitCounterKind::Ds
-                       : async ? WaitCounterKind::Async
-                               : WaitCounterKind::Load;
-  const auto kind = ds ? LdsKind::Ds : async ? LdsKind::Async : LdsKind::Direct;
-  MemoryWaitScoreboard::LdsEvent access{{0, wf.pc, 0, {}, counter, 0},
-                                        kind,
-                                        ds ? !d.is_load || d.atomic_op != AtomicOp::NONE
-                                           : d.lds_dst,
-                                        {}};
-  const auto bytes = d.atomic_op != AtomicOp::NONE ? d.elem_size : d.num_elems * d.elem_size;
-  const auto lanes = ds ? transpose_request_lane_mask(d, wf.wf_size())
-                     : d.lds_src || arch_is_cdna_4_or_lower(arch) ? d.exec_mask
-                                                                  : d.lane_mask;
-  const uint64_t end = uint64_t{wf.lds_base()} + wf.lds_size();
-  auto add = [&](uint64_t address) {
-    // Address calculation has already rejected invalid LDS lanes. Restrict
-    // retained ranges to this wave's allocation, including async OOB sentinels.
-    if (!bytes || address < wf.lds_base() || address >= end || bytes > end - address)
-      return;
-    const auto begin = static_cast<uint32_t>(address);
-    const auto range_end = static_cast<uint32_t>(address + bytes);
-    // Common contiguous or broadcast lanes need just one retained range.
-    if (!access.ranges.empty() && begin >= access.ranges.back().begin &&
-        begin <= access.ranges.back().end)
-      access.ranges.back().end = std::max(access.ranges.back().end, range_end);
-    else
-      access.ranges.push_back({begin, range_end});
-  };
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(lanes & (uint64_t{1} << lane)))
-      continue;
-    if (ds) {
-      add(d.per_lane_addr[lane]);
-      if (d.ds2_active)
-        add(d.ds2_per_lane_addr[lane]);
-    } else {
-      add(d.lds_src || d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * bytes);
-    }
-  }
-  // Coalesce lanes without turning holes into false overlaps.
-  std::ranges::sort(access.ranges, {}, &MemoryWaitScoreboard::LdsRange::begin);
-  size_t size = 0;
-  for (const auto range : access.ranges) {
-    if (size && range.begin <= access.ranges[size - 1].end)
-      access.ranges[size - 1].end = std::max(access.ranges[size - 1].end, range.end);
-    else
-      access.ranges[size++] = range;
-  }
-  access.ranges.resize(size);
-  return access;
-}
-
-} // namespace
 
 void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
                                         uint64_t flat_shared_lanes) {
@@ -1151,13 +1074,6 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
     scoreboard.access(d.reg, d.lanes & ~shared_lanes, d.bytes, true, ordered_counter);
     scoreboard.access(d.reg, shared_lanes, d.bytes, true);
   }
-  auto lds_access =
-      std::ranges::any_of(classified.value(),
-                          [](const auto &event) { return event.kind == WaitEventKind::Gds; })
-          ? std::nullopt
-          : memory_wait_lds_access(inst, wf, config_.arch);
-  if (lds_access)
-    scoreboard.access_lds(lds_access->ranges, lds_access->kind, lds_access->write);
   for (const auto &event : classified.value()) {
     const auto counter = event.counter;
     if (counter == WaitCounterKind::X) {
@@ -1205,11 +1121,6 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
     if (event.kind == WaitEventKind::Smem && inst.data() && inst.data()->tag() == SCALAR_MEM)
       units = inst.data_as<ScalarMemState>()->num_dwords > 1 ? 2 : 1;
     const auto sequence = scoreboard.issue(event, config_.arch, units);
-    if (lds_access && counter == lds_access->completion.counter) {
-      lds_access->completion.sequence = sequence;
-      scoreboard.add_lds(std::move(*lds_access));
-      lds_access.reset();
-    }
     if (event.special_reg && inst.memory_wait_result_written()) {
       scoreboard.access(*event.special_reg, ~uint64_t{0}, MemoryWaitScoreboard::kFullDwordByteMask,
                         true);

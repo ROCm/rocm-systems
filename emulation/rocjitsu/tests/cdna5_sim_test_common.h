@@ -298,7 +298,9 @@ constexpr std::array<uint32_t, 3> make_vopd3_pair(VopdSlot x, VopdSlot y, uint8_
 
 template <size_t N>
 void append_instruction(std::vector<uint32_t> &code, const std::array<uint32_t, N> &words) {
-  code.insert(code.end(), words.begin(), words.end());
+  // Avoid GCC 13's null-range warning when inserting into an empty vector.
+  for (uint32_t word : words)
+    code.push_back(word);
 }
 
 inline void append_instruction(std::vector<uint32_t> &code, uint32_t word) { code.push_back(word); }

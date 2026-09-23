@@ -80,16 +80,15 @@ embedded EXP wait.
 
 ## Limits of the guarantee
 
-Both false negatives and false positives are possible. LDS byte-range checks cover
-unordered direct/async transfers and their conflicts with DS accesses within one
-wave. Other memory dependencies can still be hidden by eager execution. Conversely,
+Both false negatives and false positives are possible. Eager global/LDS memory
+effects can hide memory-ordering dependencies even within one wave. Conversely,
 architecturally sufficient instruction spacing can make a dependency safe without
 an explicit wait; latency and instruction spacing are not modeled here.
 See [diagnostic limitations](memory-wait-diagnostics.md#false-negatives-and-false-positives).
 
-The diagnostic checks pending register results and conflicting LDS byte ranges. It
-does not prove general memory visibility, validate source lifetime beyond the XCNT
-policy, check tensor transfer footprints, or detect communication hazards between
+The diagnostic checks pending register results and the qualified XCNT source
+lifetimes. It does not compare memory addresses, prove memory visibility, check LDS
+or tensor transfer footprints, or detect communication hazards within or between
 waves. ASYNC, TENSOR and store-only producers still count without a register result.
 
 The [XCNT policy](memory-wait-diagnostics.md#xcnt-replay-source-diagnostics)

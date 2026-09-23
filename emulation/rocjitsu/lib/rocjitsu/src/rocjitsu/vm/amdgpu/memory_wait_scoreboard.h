@@ -95,26 +95,8 @@ public:
     RegisterRef reg;
     bool write;
     uint32_t required_wait;
-    std::optional<uint32_t> lds_address;
   };
   using Reporter = void (*)(void *, const Hazard &);
-
-  struct LdsRange {
-    uint32_t begin;
-    uint32_t end;
-  };
-  enum class LdsKind { Ds, Direct, Async };
-  struct LdsEvent {
-    Event completion;
-    LdsKind kind;
-    bool write;
-    std::vector<LdsRange> ranges;
-  };
-  /// Ranges are sorted, nonempty, and disjoint. Compare physical LDS bytes,
-  /// including conflicts between different lanes of the same wave.
-  void access_lds(const std::vector<LdsRange> &ranges, LdsKind kind, bool write);
-  void add_lds(LdsEvent event);
-  const std::vector<LdsEvent> &lds_events() const { return lds_events_; }
 
   bool empty() const { return events_.empty(); }
   void clear();
@@ -193,7 +175,6 @@ private:
   std::vector<Translation> translations_;
   MemoryWaitShadow &pending_;
   std::vector<Event> events_;
-  std::vector<LdsEvent> lds_events_;
   uint64_t pc_ = 0;
   void *context_ = nullptr;
   Reporter reporter_ = nullptr;

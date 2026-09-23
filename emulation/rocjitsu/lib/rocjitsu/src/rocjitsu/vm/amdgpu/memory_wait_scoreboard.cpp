@@ -39,7 +39,6 @@ void check_active_memory_wait(RegisterRef reg, uint64_t lanes, uint8_t bytes, bo
 
 void MemoryWaitScoreboard::clear() {
   events_.clear();
-  lds_events_.clear();
   pending_.reset();
   issued_.fill(0);
   retired_.fill(0);
@@ -142,46 +141,6 @@ uint32_t MemoryWaitScoreboard::required_wait(const Event &event) const {
   return static_cast<uint32_t>(std::min<uint64_t>(required, UINT32_MAX));
 }
 
-void MemoryWaitScoreboard::add_lds(LdsEvent event) {
-  if (event.ranges.empty())
-    return;
-  stamp_order(event.completion);
-  lds_events_.push_back(std::move(event));
-}
-
-void MemoryWaitScoreboard::access_lds(const std::vector<LdsRange> &ranges, LdsKind kind,
-                                      bool write) {
-  for (auto &old : lds_events_) {
-    // Ordinary DS instructions from one wave access LDS in order. Direct
-    // VMEM loads are checked against DS, but same-path direct-load ordering
-    // is not qualified here. CDNA5 async LDS writes explicitly may reorder,
-    // including two async loads (CDNA5 ISA 10.8).
-    if ((!write && !old.write) || (kind == old.kind && kind != LdsKind::Async))
-      continue;
-    size_t a = 0, b = 0;
-    while (a < ranges.size() && b < old.ranges.size()) {
-      const auto &current = ranges[a];
-      const auto &previous = old.ranges[b];
-      if (current.begin < previous.end && previous.begin < current.end) {
-        old.completion.reported = true;
-        if (reporter_)
-          reporter_(context_, {old.completion,
-                               pc_,
-                               {},
-                               write,
-                               required_wait(old.completion),
-                               std::max(current.begin, previous.begin)});
-        break;
-      }
-      if (current.end <= previous.end)
-        ++a;
-      else
-        ++b;
-    }
-  }
-  std::erase_if(lds_events_, [](const LdsEvent &event) { return event.completion.reported; });
-}
-
 void MemoryWaitScoreboard::add(Event event) {
   if (!event.lanes || !event.bytes || !event.reg.width)
     return;
@@ -263,10 +222,6 @@ void MemoryWaitScoreboard::wait(WaitCounterKind counter, uint32_t threshold) {
 }
 
 void MemoryWaitScoreboard::retire_completed() {
-  std::erase_if(lds_events_, [&](const LdsEvent &event) {
-    const auto &e = event.completion;
-    return completed(e.counter, e.sequence, e.order, e.order_sequence);
-  });
   const auto size = events_.size();
   std::erase_if(events_, [&](const Event &event) {
     const bool retire = completed(event.counter, event.sequence, event.order, event.order_sequence);
@@ -369,7 +324,7 @@ void MemoryWaitScoreboard::access_pending(RegisterRef reg, uint64_t lanes, uint8
       continue;
     event.reported = true;
     if (reporter_) {
-      reporter_(context_, {event, pc_, reg, write, required_wait(event), std::nullopt});
+      reporter_(context_, {event, pc_, reg, write, required_wait(event)});
     }
   }
   const auto size = events_.size();

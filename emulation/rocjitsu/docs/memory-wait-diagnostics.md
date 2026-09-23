@@ -1,10 +1,9 @@
 # Memory wait diagnostics
 
 Functional execution computes memory results eagerly. A core, per-wave scoreboard
-separately tracks whether a register result or LDS access is known complete.
-Reading or overwriting an outstanding destination, or conflicting with an unordered
-LDS access, prints a `memory-wait` warning with the issuing PC, consuming PC,
-register or LDS address, counter, and sufficient wait
+separately tracks whether a register result is known complete.
+Reading or overwriting an outstanding destination prints a `memory-wait` warning
+with the issuing PC, consuming PC, register, counter, and sufficient wait
 threshold. Execution continues with the eager value. The first conflicting access
 reports the producer and recovers its readiness to avoid cascading warnings. Each CU
 prints at most 16 warnings during its lifetime.
@@ -75,19 +74,12 @@ reads its registers. Counter-only operations count, but unordered younger operat
 cannot establish FIFO completion of an older result. This does not infer readiness
 of scalar-memory, GDS, or legacy CDNA FLAT results from backpressure.
 
-LDS checks compare executed byte ranges across lanes, including DS dual accesses,
-transpose request lanes, direct-to-LDS loads, and gfx1250 async LDS loads/stores.
-They diagnose read/write, write/read and write/write conflicts across these paths.
-Two gfx1250 async loads can also write overlapping LDS bytes out of order, despite
-their in-order completion notifications. Ordinary same-wave DS operations stay
-ordered and do not need a memory-order warning. Disjoint ranges, read/read pairs,
-inactive lanes, and rejected out-of-range async accesses do not conflict. For cluster
-multicast, only the issuing workgroup's selected destination is checked.
-
 Completion dependencies survive ordinary branches and CU scheduling; branches
 implicitly drain XCNT. State is reset when a wave slot is freed and is not serialized
-in checkpoints. The checker does not validate general store visibility, source
-lifetime beyond the qualified XCNT checks above, or communication between waves.
+in checkpoints. The checker does not compare memory addresses or check overlapping
+LDS accesses, including accesses from lanes of the same wave. It does not validate
+store visibility, source lifetime beyond the qualified XCNT checks above, or
+communication between waves.
 A warning describes a possible missing wait under
 delayed completion or replay even though eager execution already has a value. The
 feature does not model GPU latency.
@@ -95,10 +87,11 @@ feature does not model GPU latency.
 ## False negatives and false positives
 
 A clean run does not prove that all required waits are present, even within one
-wave. The LDS checks above catch dependencies hidden by eager transfers, but tensor
-DMA footprints, same-path legacy direct-load write ordering, global/scalar cache
-coherence and accesses from other waves are outside their coverage. Not every
-store/read pair needs a wait: ordinary same-wave DS accesses are ordered, and
+wave. Memory effects execute eagerly, so a global or LDS write followed by a read
+can appear correct even when a memory-ordering wait is missing. Direct/async LDS
+transfers, tensor DMA footprints, cache coherence and accesses from other waves are
+outside this register-dependency check. Not every store/read pair needs a wait:
+ordinary same-wave DS accesses are ordered, and
 CDNA5 VMEM stores and loads to the same global address stay ordered too.
 
 Warnings can also be false positives. The checker does not model instruction
@@ -115,10 +108,10 @@ validate hazards such as memory visibility and communication between waves.
 
 ## Cost
 
-The scoreboard retains dependency records and coalesced LDS byte ranges, not memory
-payloads or decoded instructions. LDS ranges are built only for instructions that
-access LDS. A byte of shadow state per register rejects unrelated accesses before any
-thread-local lookup. The 1,280-byte shadow is present in each wave slot, including when
+The scoreboard retains register dependency records, not memory addresses, payloads
+or decoded instructions. A byte of shadow state per register rejects unrelated
+accesses before any thread-local lookup. The 1,280-byte shadow is present in each
+wave slot, including when
 tracking is disabled. Detailed records are allocated on first tracked memory issue and
 reused across wave slot activations. Retirement clears affected shadow bytes and
 restores overlapping live records. Formatting occurs only when reporting a hazard.

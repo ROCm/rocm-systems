@@ -1093,7 +1093,7 @@ template <bool ReadCarry, typename Inst, typename CarryOp, typename WriteResult>
 }
 
 /// Unconstrained fallback for the carry path; see the binary-path note above.
-template <typename Inst, typename CarryOp, typename WriteResult>
+template <bool ReadCarry, typename Inst, typename CarryOp, typename WriteResult>
 [[nodiscard]] bool try_execute_binary_vop2_carry_simd(Inst &, Wavefront &, CarryOp, WriteResult) {
   return false;
 }
