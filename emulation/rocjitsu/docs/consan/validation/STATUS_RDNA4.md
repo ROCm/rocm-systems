@@ -20,4 +20,4 @@
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 high (lowest passing): clean pass; fault 8/8 (bar 6/8) | 🟨 NOP delays: fault 0/8; matching sleep-delay calibration queued |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟨 Clean pass; application atomic-scope fault reviewed; qualification queued | 🟨 Clean pass; application atomic-scope fault reviewed; qualification queued |
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟨 Clean pass; application atomic-scope fault reviewed; qualification queued | 🟨 Clean pass; application atomic-scope fault reviewed; qualification queued |
-| Main E2E | P4 | hip-moi Jakub attention (`jakub-attention`) | 🟨 default: clean pass; fault 0/8 (bar 6/8) | 🟨 Clean pass; reviewed fault ready; delay-matrix qualification queued |
+| Main E2E | P4 | hip-moi Jakub attention (`jakub-attention`) | 🟨 high: clean pass; fault running | 🟨 Clean pass; reviewed fault ready; delay-matrix qualification queued |
