@@ -1913,7 +1913,49 @@ def gen_vector_cvt_scale(
     else:
         raise ValueError(f'unsupported vector_cvt_scale direction: {direction}')
 
+    low_fmt = in_fmt if direction == 'unpack' else out_fmt
+    wide_fmt = out_fmt if direction == 'unpack' else in_fmt
+    low_fmt_cpp = {
+        'fp4': 'Fp4E2m1',
+        'fp6': 'Fp6E2m3',
+        'bf6': 'Bf6E3m2',
+        'fp8': 'Fp8E4m3',
+        'bf8': 'Bf8E5m2',
+    }[low_fmt]
+    wide_fmt_cpp = {'f32': 'F32', 'f16': 'F16', 'bf16': 'Bf16'}[wide_fmt]
+    direction_cpp = 'Unpack' if direction == 'unpack' else 'Pack'
+    stochastic_cpp = 'true' if stochastic else 'false'
+    scale_src = src[2] if stochastic else src[1]
+    seed_src = src[1]
+
     L: list[str] = []
+    # Keep force-scalar execution bit-for-bit on the original path, including
+    # the zero-EXEC behavior where no operand is resolved at all.  Besides
+    # preserving semantics for malformed encodings, this makes the in-process
+    # scalar/SIMD benchmark a clean comparison of the execution mechanism.
+    L.append('  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {')
+    L.append(
+        '    uint32_t simd_dst_base = wf.vgpr_alloc().base + '
+        '*Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, '
+        'vdst.vgpr_msb_role());'
+    )
+    L.append(
+        '    uint32_t simd_src_base = wf.vgpr_alloc().base + '
+        '*Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, '
+        'src0.vgpr_msb_role());'
+    )
+    L.append(
+        '    if (amdgpu::try_execute_mxfp_cvt_scale_simd<'
+        f'amdgpu::MxfpFormat::{low_fmt_cpp}, '
+        f'amdgpu::MxfpWideFormat::{wide_fmt_cpp}, {count}u, '
+        f'amdgpu::MxfpDirection::{direction_cpp}, {stochastic_cpp}>('
+    )
+    L.append(
+        f'            wf, simd_dst_base, simd_src_base, {scale_src}, {seed_src}, '
+        'inst_.opsel & 0x3u))'
+    )
+    L.append('      return;')
+    L.append('  }')
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -1928,7 +1970,6 @@ def gen_vector_cvt_scale(
         f'!regs.owns_vgpr_range(dst_base, {dst_word_count}u))'
     )
     L.append('      continue;')
-    scale_src = src[2] if stochastic else src[1]
     if direction == 'unpack':
         L.extend(_scale_e8m0_unpack_scale(scale_src))
     else:
@@ -1981,7 +2022,8 @@ def gen_vector_cvt_scale(
             L.append(f'    uint32_t dst_words[{dst_word_count}] = {{}};')
             L.append(f'    for (uint32_t index = 0; index < {count}u; ++index) {{')
             L.append(
-                f'      uint32_t bits = {conv}(read_scaled_src(index) * scale, wf.fp16_ovfl());'
+                f'      uint32_t bits = {conv}(read_scaled_src(index) * scale, '
+                'wf.fp16_ovfl());'
             )
             L.append('      dst_words[index / 2u] |= bits << ((index & 1u) * 16u);')
             L.append('    }')

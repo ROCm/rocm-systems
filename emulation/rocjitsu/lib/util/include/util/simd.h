@@ -561,6 +561,19 @@ inline native<uint32_t> pack_bf16_simd(native<uint32_t> bits, bool overflow) {
   return out;
 }
 
+/// Vectorized, bit-exact port of `f32_to_bf16_rne`. Finite lanes add the
+/// round-to-nearest-even bias before truncation. Inf is unchanged and NaN
+/// forces the least-significant retained payload bit, matching data_types.h.
+inline native<uint32_t> f32_to_bf16_rne_simd(native<float> val) {
+  return pack_bf16_simd(std::bit_cast<native<uint32_t>>(val), false);
+}
+
+/// Vectorized counterpart of `f32_to_bf16_rne_mode`. MODE.FP16_OVFL clamps
+/// only finite values that rounded to BF16 infinity; true Inf/NaN is retained.
+inline native<uint32_t> f32_to_bf16_rne_mode_simd(native<float> val, bool fp16_ovfl) {
+  return pack_bf16_simd(std::bit_cast<native<uint32_t>>(val), fp16_ovfl);
+}
+
 /// Vectorized, bit-exact port of `f32_to_f16` (util/data_types.h). Returns the
 /// f16 bits in the low 16 bits of each lane (high bits zero). All conditions
 /// are expressed as unsigned comparisons on the biased f32 exponent `fe`, so
@@ -933,6 +946,63 @@ inline native<float> fp8_e5m3_to_f32_simd(native<uint32_t> value) {
   return std::bit_cast<F>(result);
 }
 
+/// Vector port of `util::e8m0_to_f32` over the low byte of each lane. E8M0 is
+/// an unsigned exponent-only OCP MX scale: code 0 is 2^-127 (the f32 value
+/// 0x00400000), code 255 is NaN, and every other code maps directly to the f32
+/// exponent field. High input bits are ignored.
+inline native<float> e8m0_to_f32_simd(native<uint32_t> v) {
+  using U = native<uint32_t>;
+  const U code = v & U(0xFFu);
+  U bits = code << 23;
+  stdx::where(code == 0u, bits) = U(0x00400000u);
+  stdx::where(code == 0xFFu, bits) = U(0x7FC00000u);
+  return std::bit_cast<native<float>>(bits);
+}
+
+/// Vector port of `util::fp4_e2m1_to_f32` over the low nibble of each lane.
+/// The only exponent-zero non-zero value is 0.5, and signed zero is preserved.
+inline native<float> fp4_e2m1_to_f32_simd(native<uint32_t> v) {
+  using U = native<uint32_t>;
+  const U b = v & U(0xFu);
+  const U signbit = ((b >> 3) & U(1u)) << 31;
+  const U exp = (b >> 1) & U(0x3u);
+  const U mant = b & U(0x1u);
+  U bits = signbit | ((exp + U(126u)) << 23) | (mant << 22);
+  U exp_zero = signbit;
+  stdx::where(mant != 0u, exp_zero) = signbit | U(0x3F000000u);
+  stdx::where(exp == 0u, bits) = exp_zero;
+  return std::bit_cast<native<float>>(bits);
+}
+
+/// Vector port of `util::fp6_e2m3_to_f32` over the low six bits of each lane.
+/// Exponent-zero values are exact multiples of 2^-3, so the SIMD conversion and
+/// multiply are bit-exact for every three-bit mantissa.
+inline native<float> fp6_e2m3_to_f32_simd(native<uint32_t> v) {
+  using U = native<uint32_t>;
+  const U b = v & U(0x3Fu);
+  const U signbit = ((b >> 5) & U(1u)) << 31;
+  const U exp = (b >> 3) & U(0x3u);
+  const U mant = b & U(0x7u);
+  U bits = signbit | ((exp + U(126u)) << 23) | (mant << 20);
+  const native<float> denorm = stdx::static_simd_cast<native<float>>(mant) * native<float>(0.125f);
+  stdx::where(exp == 0u, bits) = std::bit_cast<U>(denorm) | signbit;
+  return std::bit_cast<native<float>>(bits);
+}
+
+/// Vector port of `util::bf6_e3m2_to_f32` over the low six bits of each lane.
+/// Exponent-zero values are exact multiples of 2^-4.
+inline native<float> bf6_e3m2_to_f32_simd(native<uint32_t> v) {
+  using U = native<uint32_t>;
+  const U b = v & U(0x3Fu);
+  const U signbit = ((b >> 5) & U(1u)) << 31;
+  const U exp = (b >> 2) & U(0x7u);
+  const U mant = b & U(0x3u);
+  U bits = signbit | ((exp + U(124u)) << 23) | (mant << 21);
+  const native<float> denorm = stdx::static_simd_cast<native<float>>(mant) * native<float>(0.0625f);
+  stdx::where(exp == 0u, bits) = std::bit_cast<U>(denorm) | signbit;
+  return std::bit_cast<native<float>>(bits);
+}
+
 /// Vector port of `util::fp8_e4m3_to_f32` over the low byte of each lane (E4M3:
 /// 1 sign / 4 exp / 3 mantissa, bias 7, no Inf). Bit-identical to the scalar:
 /// the denormal path `mant * 2^-9` is exact for mant in [0,7] and folds the ±0
@@ -979,6 +1049,293 @@ inline native<float> bf8_e5m2_to_f32_simd(native<uint32_t> v) {
   stdx::where(exp == 0u, out) = dnb;
   stdx::where(exp == 31u, out) = inf_nan;
   return std::bit_cast<native<float>>(out);
+}
+
+namespace detail {
+
+/// Bit-exact vector port shared by the finite-only OCP MX formats (E2M1,
+/// E2M3, and E3M2). Destination NaN/Inf encodings do not exist: NaN maps to
+/// +0 and finite overflow/Inf saturates to signed max, matching data_types.h.
+///
+/// Every variable shift is initialized to one and replaced only on active
+/// subnormal lanes. This is intentional: std::experimental::simd evaluates
+/// all lanes before a where-blend, so an invalid shift in a lane that will be
+/// overwritten later is still undefined/miscompiled on some hosts.
+template <uint32_t ExpBits, uint32_t MantBits, int32_t Bias, bool Stochastic>
+inline native<uint32_t> f32_to_finite_mx_simd(native<float> val, native<uint32_t> seed) {
+  using U = native<uint32_t>;
+  static_assert(ExpBits > 0 && MantBits > 0);
+  static_assert(ExpBits + MantBits + 1 <= 8);
+  static_assert(Bias > 0 && Bias < 127);
+
+  constexpr uint32_t kSign = 1u << (ExpBits + MantBits);
+  constexpr uint32_t kMaxCode = kSign - 1u;
+  constexpr uint32_t kMaxExp = (1u << ExpBits) - 1u;
+  constexpr uint32_t kMantLimit = 1u << MantBits;
+  constexpr uint32_t kMantMask = kMantLimit - 1u;
+  constexpr uint32_t kExpDelta = 127u - static_cast<uint32_t>(Bias);
+  constexpr uint32_t kHalfMinBits = (127u - static_cast<uint32_t>(Bias) - MantBits) << 23;
+  constexpr uint32_t kMaxBits =
+      ((127u - static_cast<uint32_t>(Bias) + kMaxExp) << 23) | (kMantMask << (23u - MantBits));
+  constexpr uint32_t kNormalDrop = 23u - MantBits;
+  constexpr uint32_t kNormalDropMask = (1u << kNormalDrop) - 1u;
+
+  const U f = std::bit_cast<U>(val);
+  const U sign = (f >> 31) * U(kSign);
+  const U mag = f & U(0x7FFFFFFFu);
+  const U fe = (f >> 23) & U(0xFFu);
+  const U fm = f & U(0x7FFFFFu);
+
+  // Normal result. Unsigned exponent wrap in inactive subnormal lanes is
+  // harmless and defined; those lanes are overwritten below.
+  U exp = fe - U(kExpDelta);
+  U mant = fm >> kNormalDrop;
+  if constexpr (Stochastic) {
+    const U trunc = fm & U(kNormalDropMask);
+    const U random_add = seed >> (32u - kNormalDrop);
+    stdx::where((trunc + random_add) > U(kNormalDropMask), mant) = mant + U(1u);
+  } else {
+    const U round_bit = (fm >> (kNormalDrop - 1u)) & U(1u);
+    U sticky(0u);
+    stdx::where((fm & U((1u << (kNormalDrop - 1u)) - 1u)) != 0u, sticky) = U(1u);
+    mant = mant + (round_bit & (sticky | (mant & U(1u))));
+  }
+  const auto normal_carry = mant >= U(kMantLimit);
+  stdx::where(normal_carry, mant) = U(0u);
+  stdx::where(normal_carry, exp) = exp + U(1u);
+  U out = sign | (exp << MantBits) | mant;
+  stdx::where(exp > U(kMaxExp), out) = sign | U(kMaxCode);
+
+  // Subnormal result. The half-smallest-subnormal threshold makes the active
+  // shift range [24-MantBits, 24].
+  const auto active_sub = (mag >= U(kHalfMinBits)) && (fe <= U(kExpDelta));
+  U shift(1u);
+  stdx::where(active_sub, shift) = U(151u - MantBits - static_cast<uint32_t>(Bias)) - fe;
+  const U full_mant = fm | U(0x800000u);
+  U sub_result = full_mant >> shift;
+  const U sub_limit = U(1u) << shift;
+  if constexpr (Stochastic) {
+    const U trunc = full_mant & (sub_limit - U(1u));
+    const U random_add = seed >> (U(32u) - shift);
+    stdx::where((trunc + random_add) >= sub_limit, sub_result) = sub_result + U(1u);
+  } else {
+    const U round_bit = (full_mant >> (shift - U(1u))) & U(1u);
+    U sticky(0u);
+    stdx::where((full_mant & ((U(1u) << (shift - U(1u))) - U(1u))) != 0u, sticky) = U(1u);
+    sub_result = sub_result + (round_bit & (sticky | (sub_result & U(1u))));
+  }
+  U sub_out = sign | (sub_result & U(kMantMask));
+  stdx::where(sub_result >= U(kMantLimit), sub_out) = sign | U(kMantLimit);
+  stdx::where(active_sub, out) = sub_out;
+
+  // Preserve the scalar branch ordering. In particular, exact half-minimum is
+  // rounded above, while values below it become signed zero. NaN is always +0.
+  stdx::where(mag < U(kHalfMinBits), out) = sign;
+  stdx::where(mag > U(kMaxBits), out) = sign | U(kMaxCode);
+  stdx::where(mag > U(0x7F800000u), out) = U(0u);
+  return out;
+}
+
+/// OCP E4M3FN narrowing. Unlike the finite-only formats, exponent 15 with
+/// mantissas 0..6 is finite and mantissa 7 is the terminal NaN encoding.
+template <bool Stochastic>
+inline native<uint32_t> f32_to_fp8_e4m3_simd(native<float> val, native<uint32_t> seed) {
+  using U = native<uint32_t>;
+  const U f = std::bit_cast<U>(val);
+  const U sign = (f >> 24) & U(0x80u);
+  const U fe = (f >> 23) & U(0xFFu);
+  const U fm = f & U(0x7FFFFFu);
+
+  U exp = fe - U(120u); // 127 - bias(7)
+  U mant = fm >> 20;
+  if constexpr (Stochastic) {
+    const U trunc = fm & U(0xFFFFFu);
+    const U random_add = seed >> 12;
+    stdx::where((trunc + random_add) > U(0xFFFFFu), mant) = mant + U(1u);
+  } else {
+    const U round_bit = (fm >> 19) & U(1u);
+    U sticky(0u);
+    stdx::where((fm & U(0x7FFFFu)) != 0u, sticky) = U(1u);
+    mant = mant + (round_bit & (sticky | (mant & U(1u))));
+  }
+  const auto carry = mant > U(0x7u);
+  stdx::where(carry, mant) = U(0u);
+  stdx::where(carry, exp) = exp + U(1u);
+  U out = sign | (exp << 3) | mant;
+  stdx::where((exp > U(15u)) || ((exp == U(15u)) && (mant >= U(7u))), out) = sign | U(0x7Fu);
+
+  // exp in [-3,0] is the only live subnormal range (f32 exponents 117..120).
+  const auto active_sub = (fe >= U(117u)) && (fe <= U(120u));
+  U shift(1u);
+  stdx::where(active_sub, shift) = U(141u) - fe;
+  const U full_mant = fm | U(0x800000u);
+  U sub_result = full_mant >> shift;
+  const U sub_limit = U(1u) << shift;
+  if constexpr (Stochastic) {
+    const U trunc = full_mant & (sub_limit - U(1u));
+    const U random_add = seed >> (U(32u) - shift);
+    stdx::where((trunc + random_add) >= sub_limit, sub_result) = sub_result + U(1u);
+  } else {
+    const U round_bit = (full_mant >> (shift - U(1u))) & U(1u);
+    U sticky(0u);
+    stdx::where((full_mant & ((U(1u) << (shift - U(1u))) - U(1u))) != 0u, sticky) = U(1u);
+    sub_result = sub_result + (round_bit & (sticky | (sub_result & U(1u))));
+  }
+  U sub_out = sign | (sub_result & U(0x7u));
+  stdx::where(sub_result >= U(8u), sub_out) = sign | U(0x08u);
+  stdx::where(active_sub, out) = sub_out;
+  stdx::where(fe < U(117u), out) = sign;
+  // Both f32 Inf and NaN map to the signed terminal NaN encoding.
+  stdx::where(fe == U(0xFFu), out) = sign | U(0x7Fu);
+  return out;
+}
+
+/// OCP E5M2 narrowing. Exponent 31 is reserved for Inf/NaN, so finite
+/// overflow and a carry out of exponent 30 produce signed Inf.
+template <bool Stochastic>
+inline native<uint32_t> f32_to_bf8_e5m2_simd(native<float> val, native<uint32_t> seed) {
+  using U = native<uint32_t>;
+  const U f = std::bit_cast<U>(val);
+  const U sign = (f >> 24) & U(0x80u);
+  const U fe = (f >> 23) & U(0xFFu);
+  const U fm = f & U(0x7FFFFFu);
+
+  U exp = fe - U(112u); // 127 - bias(15)
+  U mant = fm >> 21;
+  if constexpr (Stochastic) {
+    const U trunc = fm & U(0x1FFFFFu);
+    const U random_add = seed >> 11;
+    stdx::where((trunc + random_add) > U(0x1FFFFFu), mant) = mant + U(1u);
+  } else {
+    const U round_bit = (fm >> 20) & U(1u);
+    U sticky(0u);
+    stdx::where((fm & U(0xFFFFFu)) != 0u, sticky) = U(1u);
+    mant = mant + (round_bit & (sticky | (mant & U(1u))));
+  }
+  const auto carry = mant > U(0x3u);
+  stdx::where(carry, mant) = U(0u);
+  stdx::where(carry, exp) = exp + U(1u);
+  U out = sign | (exp << 2) | mant;
+  stdx::where(exp >= U(31u), out) = sign | U(0x7Cu);
+
+  // exp in [-2,0] is the only live subnormal range (f32 exponents 110..112).
+  const auto active_sub = (fe >= U(110u)) && (fe <= U(112u));
+  U shift(1u);
+  stdx::where(active_sub, shift) = U(134u) - fe;
+  const U full_mant = fm | U(0x800000u);
+  U sub_result = full_mant >> shift;
+  const U sub_limit = U(1u) << shift;
+  if constexpr (Stochastic) {
+    const U trunc = full_mant & (sub_limit - U(1u));
+    const U random_add = seed >> (U(32u) - shift);
+    stdx::where((trunc + random_add) >= sub_limit, sub_result) = sub_result + U(1u);
+  } else {
+    const U round_bit = (full_mant >> (shift - U(1u))) & U(1u);
+    U sticky(0u);
+    stdx::where((full_mant & ((U(1u) << (shift - U(1u))) - U(1u))) != 0u, sticky) = U(1u);
+    sub_result = sub_result + (round_bit & (sticky | (sub_result & U(1u))));
+  }
+  U sub_out = sign | (sub_result & U(0x3u));
+  stdx::where(sub_result >= U(4u), sub_out) = sign | U(0x04u);
+  stdx::where(active_sub, out) = sub_out;
+  stdx::where(fe < U(110u), out) = sign;
+
+  U special = sign | U(0x7Cu);
+  stdx::where(fm != U(0u), special) = sign | U(0x7Fu);
+  stdx::where(fe == U(0xFFu), out) = special;
+  return out;
+}
+
+} // namespace detail
+
+inline native<uint32_t> f32_to_fp4_e2m1_rne_simd(native<float> val) {
+  return detail::f32_to_finite_mx_simd<2, 1, 1, false>(val, native<uint32_t>(0u));
+}
+
+inline native<uint32_t> f32_to_fp4_e2m1_sr_simd(native<float> val, native<uint32_t> seed) {
+  return detail::f32_to_finite_mx_simd<2, 1, 1, true>(val, seed);
+}
+
+inline native<uint32_t> f32_to_fp6_e2m3_rne_simd(native<float> val) {
+  return detail::f32_to_finite_mx_simd<2, 3, 1, false>(val, native<uint32_t>(0u));
+}
+
+inline native<uint32_t> f32_to_fp6_e2m3_sr_simd(native<float> val, native<uint32_t> seed) {
+  return detail::f32_to_finite_mx_simd<2, 3, 1, true>(val, seed);
+}
+
+inline native<uint32_t> f32_to_bf6_e3m2_rne_simd(native<float> val) {
+  return detail::f32_to_finite_mx_simd<3, 2, 3, false>(val, native<uint32_t>(0u));
+}
+
+inline native<uint32_t> f32_to_bf6_e3m2_sr_simd(native<float> val, native<uint32_t> seed) {
+  return detail::f32_to_finite_mx_simd<3, 2, 3, true>(val, seed);
+}
+
+inline native<uint32_t> f32_to_fp8_e4m3_rne_simd(native<float> val) {
+  return detail::f32_to_fp8_e4m3_simd<false>(val, native<uint32_t>(0u));
+}
+
+inline native<uint32_t> f32_to_fp8_e4m3_sr_simd(native<float> val, native<uint32_t> seed) {
+  return detail::f32_to_fp8_e4m3_simd<true>(val, seed);
+}
+
+inline native<uint32_t> f32_to_fp8_e4m3_rne_mode_simd(native<float> val, bool fp16_ovfl) {
+  native<uint32_t> out = f32_to_fp8_e4m3_rne_simd(val);
+  if (!fp16_ovfl)
+    return out;
+  using U = native<uint32_t>;
+  const U f = std::bit_cast<U>(val);
+  const auto nan = ((f & U(0x7F800000u)) == U(0x7F800000u)) && ((f & U(0x007FFFFFu)) != U(0u));
+  stdx::where(!nan && ((out & U(0x7Fu)) == U(0x7Fu)), out) = (out & U(0x80u)) | U(0x7Eu);
+  return out;
+}
+
+inline native<uint32_t> f32_to_fp8_e4m3_sr_mode_simd(native<float> val, native<uint32_t> seed,
+                                                     bool fp16_ovfl) {
+  native<uint32_t> out = f32_to_fp8_e4m3_sr_simd(val, seed);
+  if (!fp16_ovfl)
+    return out;
+  using U = native<uint32_t>;
+  const U f = std::bit_cast<U>(val);
+  const auto nan = ((f & U(0x7F800000u)) == U(0x7F800000u)) && ((f & U(0x007FFFFFu)) != U(0u));
+  stdx::where(!nan && ((out & U(0x7Fu)) == U(0x7Fu)), out) = (out & U(0x80u)) | U(0x7Eu);
+  return out;
+}
+
+inline native<uint32_t> f32_to_bf8_e5m2_rne_simd(native<float> val) {
+  return detail::f32_to_bf8_e5m2_simd<false>(val, native<uint32_t>(0u));
+}
+
+inline native<uint32_t> f32_to_bf8_e5m2_sr_simd(native<float> val, native<uint32_t> seed) {
+  return detail::f32_to_bf8_e5m2_simd<true>(val, seed);
+}
+
+inline native<uint32_t> f32_to_bf8_e5m2_rne_mode_simd(native<float> val, bool fp16_ovfl) {
+  native<uint32_t> out = f32_to_bf8_e5m2_rne_simd(val);
+  if (!fp16_ovfl)
+    return out;
+  using U = native<uint32_t>;
+  const U f = std::bit_cast<U>(val);
+  const auto nan = ((f & U(0x7F800000u)) == U(0x7F800000u)) && ((f & U(0x007FFFFFu)) != U(0u));
+  stdx::where(!nan && ((out & U(0x7Fu)) == U(0x7Cu)), out) = (out & U(0x80u)) | U(0x7Bu);
+  return out;
+}
+
+inline native<uint32_t> f32_to_bf8_e5m2_sr_mode_simd(native<float> val, native<uint32_t> seed,
+                                                     bool fp16_ovfl) {
+  native<uint32_t> out = f32_to_bf8_e5m2_sr_simd(val, seed);
+  if (!fp16_ovfl)
+    return out;
+  using U = native<uint32_t>;
+  const U f = std::bit_cast<U>(val);
+  const auto nan = ((f & U(0x7F800000u)) == U(0x7F800000u)) && ((f & U(0x007FFFFFu)) != U(0u));
+  stdx::where(!nan && ((out & U(0x7Fu)) == U(0x7Cu)), out) = (out & U(0x80u)) | U(0x7Bu);
+  return out;
+}
+
+inline native<uint32_t> prng_advance_simd(native<uint32_t> seed) {
+  return (seed << 1) ^ ((seed >> 31) * native<uint32_t>(197u));
 }
 
 /// Vector ports of the IEEE-2019 maximum / minimum operations (the non-"num"
@@ -1386,6 +1743,33 @@ inline native<double> floor_simd(native<double>) { return {}; }
 inline native<double> rndne_simd(native<double>) { return {}; }
 inline native<uint32_t> mul_hi_u32_simd(native<uint32_t>, native<uint32_t>) { return {}; }
 inline native<uint32_t> mul_hi_i32_simd(native<uint32_t>, native<uint32_t>) { return {}; }
+inline native<uint32_t> f32_to_bf16_rne_simd(native<float>) { return {}; }
+inline native<uint32_t> f32_to_bf16_rne_mode_simd(native<float>, bool) { return {}; }
+inline native<float> e8m0_to_f32_simd(native<uint32_t>) { return {}; }
+inline native<float> fp4_e2m1_to_f32_simd(native<uint32_t>) { return {}; }
+inline native<float> fp6_e2m3_to_f32_simd(native<uint32_t>) { return {}; }
+inline native<float> bf6_e3m2_to_f32_simd(native<uint32_t>) { return {}; }
+inline native<float> fp8_e4m3_to_f32_simd(native<uint32_t>) { return {}; }
+inline native<float> bf8_e5m2_to_f32_simd(native<uint32_t>) { return {}; }
+inline native<uint32_t> f32_to_fp4_e2m1_rne_simd(native<float>) { return {}; }
+inline native<uint32_t> f32_to_fp4_e2m1_sr_simd(native<float>, native<uint32_t>) { return {}; }
+inline native<uint32_t> f32_to_fp6_e2m3_rne_simd(native<float>) { return {}; }
+inline native<uint32_t> f32_to_fp6_e2m3_sr_simd(native<float>, native<uint32_t>) { return {}; }
+inline native<uint32_t> f32_to_bf6_e3m2_rne_simd(native<float>) { return {}; }
+inline native<uint32_t> f32_to_bf6_e3m2_sr_simd(native<float>, native<uint32_t>) { return {}; }
+inline native<uint32_t> f32_to_fp8_e4m3_rne_simd(native<float>) { return {}; }
+inline native<uint32_t> f32_to_fp8_e4m3_sr_simd(native<float>, native<uint32_t>) { return {}; }
+inline native<uint32_t> f32_to_fp8_e4m3_rne_mode_simd(native<float>, bool) { return {}; }
+inline native<uint32_t> f32_to_fp8_e4m3_sr_mode_simd(native<float>, native<uint32_t>, bool) {
+  return {};
+}
+inline native<uint32_t> f32_to_bf8_e5m2_rne_simd(native<float>) { return {}; }
+inline native<uint32_t> f32_to_bf8_e5m2_sr_simd(native<float>, native<uint32_t>) { return {}; }
+inline native<uint32_t> f32_to_bf8_e5m2_rne_mode_simd(native<float>, bool) { return {}; }
+inline native<uint32_t> f32_to_bf8_e5m2_sr_mode_simd(native<float>, native<uint32_t>, bool) {
+  return {};
+}
+inline native<uint32_t> prng_advance_simd(native<uint32_t>) { return {}; }
 #endif
 
 } // namespace util

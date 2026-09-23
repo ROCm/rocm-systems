@@ -43,6 +43,7 @@
 #include <limits>
 #include <optional>
 #include <span>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -863,6 +864,57 @@ struct ExtractBf6 {
   }
 };
 inline constexpr ExtractBf6 extract_bf6{};
+
+/// Stage a contiguous run of matrix inputs into f32 scratch storage. The
+/// packed-field gather remains scalar because matrix layouts freely permute
+/// lanes and cross DWORD boundaries, but MX decodes are independent and can
+/// be performed a native vector at a time.
+template <bool EnableByteSimd = true, typename Source, typename Extract, typename LocFn>
+inline void stage_f32_extracts(Source &source, uint32_t base, float *dst, uint32_t count,
+                               Extract extract, LocFn loc_for) {
+#if __has_include(<experimental/simd>)
+  using X = std::remove_cvref_t<Extract>;
+  constexpr bool is_fp4 = std::is_same_v<X, ExtractFp4>;
+  constexpr bool is_fp6 = std::is_same_v<X, ExtractFp6>;
+  constexpr bool is_bf6 = std::is_same_v<X, ExtractBf6>;
+  constexpr bool is_fp8 = std::is_same_v<X, ExtractFp8> || std::is_same_v<X, ExtractFp8Ocp>;
+  constexpr bool is_bf8 = std::is_same_v<X, ExtractBf8> || std::is_same_v<X, ExtractBf8Ocp>;
+
+  if constexpr (is_fp4 || is_fp6 || is_bf6 || (EnableByteSimd && (is_fp8 || is_bf8))) {
+    using U = util::native<uint32_t>;
+    using F = util::native<float>;
+    constexpr uint32_t W = static_cast<uint32_t>(U::size());
+    alignas(U) uint32_t raw[W];
+    alignas(F) float decoded_lanes[W];
+    for (uint32_t begin = 0; begin < count; begin += W) {
+      const uint32_t active = std::min(W, count - begin);
+      for (uint32_t lane = 0; lane < active; ++lane)
+        raw[lane] = read_packed(source, base, loc_for(begin + lane));
+      for (uint32_t lane = active; lane < W; ++lane)
+        raw[lane] = 0;
+
+      const U codes(raw, util::stdx::element_aligned);
+      F decoded;
+      if constexpr (is_fp4)
+        decoded = util::fp4_e2m1_to_f32_simd(codes);
+      else if constexpr (is_fp6)
+        decoded = util::fp6_e2m3_to_f32_simd(codes);
+      else if constexpr (is_bf6)
+        decoded = util::bf6_e3m2_to_f32_simd(codes);
+      else if constexpr (is_fp8)
+        decoded = util::fp8_e4m3_to_f32_simd(codes);
+      else
+        decoded = util::bf8_e5m2_to_f32_simd(codes);
+      decoded.copy_to(decoded_lanes, util::stdx::element_aligned);
+      std::copy_n(decoded_lanes, active, dst + begin);
+    }
+    return;
+  }
+#endif
+
+  for (uint32_t i = 0; i < count; ++i)
+    dst[i] = extract(source, base, loc_for(i));
+}
 
 struct ExtractF64 {
   double operator()(auto &cu, uint32_t base, const InputLoc &loc) const {
@@ -1763,13 +1815,13 @@ void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t 
                                     c_modifier);
         }
       for (uint32_t row = 0; row < M; ++row)
-        for (uint32_t k = 0; k < K; ++k)
-          Abuf[row * K + k] =
-              ea(reads.a, s0, gfx12_wmma_a_input_loc(wave_size, M, K, row, k, a_bits, b_bits));
+        stage_f32_extracts<false>(reads.a, s0, &Abuf[row * K], K, ea, [&](uint32_t k) {
+          return gfx12_wmma_a_input_loc(wave_size, M, K, row, k, a_bits, b_bits);
+        });
       for (uint32_t k = 0; k < K; ++k)
-        for (uint32_t col = 0; col < N; ++col)
-          Bbuf[k * stride + col] =
-              eb(reads.b, s1, gfx12_wmma_b_input_loc(wave_size, N, K, col, k, a_bits, b_bits));
+        stage_f32_extracts<false>(reads.b, s1, &Bbuf[k * stride], N, eb, [&](uint32_t col) {
+          return gfx12_wmma_b_input_loc(wave_size, N, K, col, k, a_bits, b_bits);
+        });
       wmma_simd_matmul<float>(M, N, K, W, stride, Abuf, Bbuf, Cbuf);
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
@@ -1995,18 +2047,14 @@ void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, ui
                                         : std::bit_cast<float>(reads.acc->lane(out.reg, out.lane)),
                                     c_modifier);
         }
-      for (uint32_t row = 0; row < M; ++row) {
-        for (uint32_t k = 0; k < K; ++k) {
-          auto al = wmma_block_scaled_a_input_loc(M, K, row, k, a_bits);
-          Abuf[row * K + k] = ea(reads.a, s0, al);
-        }
-      }
-      for (uint32_t col = 0; col < N; ++col) {
-        for (uint32_t k = 0; k < K; ++k) {
-          auto bl = wmma_block_scaled_b_input_loc(N, K, col, k, b_bits);
-          Bbuf[k * stride + col] = eb(reads.b, s1, bl);
-        }
-      }
+      for (uint32_t row = 0; row < M; ++row)
+        stage_f32_extracts(reads.a, s0, &Abuf[row * K], K, ea, [&](uint32_t k) {
+          return wmma_block_scaled_a_input_loc(M, K, row, k, a_bits);
+        });
+      for (uint32_t k = 0; k < K; ++k)
+        stage_f32_extracts(reads.b, s1, &Bbuf[k * stride], N, eb, [&](uint32_t col) {
+          return wmma_block_scaled_b_input_loc(N, K, col, k, b_bits);
+        });
       for (uint32_t row = 0; row < M; ++row) {
         const uint64_t a_scale_word =
             scale_a_word(wmma_a_scale_lane(M, K, row, matrix_a_scale, a_bits, b_bits));
