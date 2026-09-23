@@ -24,7 +24,7 @@ THE SOFTWARE.
 __device__ int data = 0;
 extern "C" __global__ void first(int* res, int ticks_for_100us) {
   uint64_t start = wall_clock64();
-  while (atomicAdd(&data, 0) != 1) {
+  while (__scoped_atomic_load_n(&data, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) != 1) {
     __builtin_amdgcn_s_sleep(10);
     if (wall_clock64() - start >= ticks_for_100us) {
       *res = 2;
