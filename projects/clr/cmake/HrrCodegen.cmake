@@ -81,6 +81,7 @@ function(hrr_add_codegen_check)
       --output-capture "${capture}"
       --output-playback "${playback}"
       --check-hrr-coverage
+      --silent
     COMMAND ${CMAKE_COMMAND}
       "-DGENERATED_HEADER=${header}"
       "-DEXPECTED_HEADER=${expected_header}"

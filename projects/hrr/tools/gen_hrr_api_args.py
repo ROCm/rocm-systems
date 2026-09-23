@@ -1248,7 +1248,8 @@ def parse_hip_api_trace(path: Path) -> List[ApiEntry]:
     return entries
 
 
-def validate_capture_coverage(entries: List[ApiEntry], capture_cpp: str) -> None:
+def validate_capture_coverage(entries: List[ApiEntry], capture_cpp: str,
+                              silent: bool = False) -> None:
     """Fail when an active dispatch-table slot lacks a capture shim."""
     errors: List[str] = []
     for entry in entries:
@@ -1264,7 +1265,8 @@ def validate_capture_coverage(entries: List[ApiEntry], capture_cpp: str) -> None
             errors.append(f"{entry.table}:{entry.name}: missing generated shim")
     if errors:
         sys.exit("ERROR: HRR capture coverage check failed:\n  " + "\n  ".join(errors))
-    print(f"  HRR capture coverage: {sum(not e.reserved for e in entries)} active dispatch slots")
+    if not silent:
+        print(f"  HRR capture coverage: {sum(not e.reserved for e in entries)} active dispatch slots")
 
 
 # ---------------------------------------------------------------------------
@@ -2620,7 +2622,7 @@ def parse_public_api_signatures(path: Path) -> Dict[str, List[PublicDecl]]:
 
 def validate_playback_signatures(entries: List[ApiEntry],
                                  public: Dict[str, List[PublicDecl]],
-                                 public_path: Path) -> None:
+                                 public_path: Path, silent: bool = False) -> None:
     """Fail generation if a playback cast would disagree with its callee.
 
     An API is safe when the public header offers a declaration that both
@@ -2676,8 +2678,9 @@ def validate_playback_signatures(entries: List[ApiEntry],
             "\n\nResolve each by adding an entry to _PLAYBACK_ARG_BRIDGES with the\n"
             "guard and conversion the public header requires.")
 
-    print(f"  Public API signatures: {checked} verified against "
-          f"{public_path.name}, {skipped} declared elsewhere (skipped)")
+    if not silent:
+        print(f"  Public API signatures: {checked} verified against "
+              f"{public_path.name}, {skipped} declared elsewhere (skipped)")
 
 
 # ---------------------------------------------------------------------------
@@ -2717,7 +2720,13 @@ def main() -> None:
                         help="Path to generated hip_playback_generated.cpp")
     parser.add_argument("--check-hrr-coverage", action="store_true",
                         help="Fail when an active dispatch-table slot lacks a capture shim")
+    parser.add_argument("--silent", action="store_true",
+                        help="Suppress normal progress output; warnings and errors remain visible")
     args = parser.parse_args()
+
+    def log(message: str) -> None:
+        if not args.silent:
+            print(message)
 
     in_path       = Path(args.input)
     public_path   = Path(args.public_header)
@@ -2728,7 +2737,7 @@ def main() -> None:
     if not in_path.exists():
         sys.exit(f"ERROR: input file not found: {in_path}")
 
-    print(f"Parsing {in_path} ...")
+    log(f"Parsing {in_path} ...")
     entries = parse_hip_api_trace(in_path)
     n_compiler       = sum(1 for e in entries if e.table == "compiler")
     n_runtime        = sum(1 for e in entries if e.table == "runtime")
@@ -2736,8 +2745,8 @@ def main() -> None:
     n_manual_cap     = sum(1 for e in entries if e.name in MANUAL_CAPTURE_APIS)
     n_manual_play    = sum(1 for e in entries if e.name in MANUAL_PLAYBACK_APIS)
     n_noop_play      = sum(1 for e in entries if e.name in NOOP_PLAYBACK_APIS)
-    print(f"  Found {n_compiler} compiler + {n_runtime} runtime = {len(entries)} total"
-          f" ({n_reserved} reserved slots)")
+    log(f"  Found {n_compiler} compiler + {n_runtime} runtime = {len(entries)} total"
+        f" ({n_reserved} reserved slots)")
 
     # -------------------------------------------------------------------------
     # Cross-validate classification sets against parsed API names.
@@ -2779,11 +2788,11 @@ def main() -> None:
         for n in shadowed:
             print(f"  '{n}'")
         sys.exit(1)
-    print(f"  Manual capture (hand-written in hip_capture.cpp):  {n_manual_cap}")
-    print(f"  Manual playback (hand-written in hip_playback.cpp): {n_manual_play}")
-    print(f"  No-op playback (inline hipSuccess stubs):           {n_noop_play}")
-    print(f"  Generated capture shims:  {len(entries) - n_manual_cap}")
-    print(f"  Generated playback shims: {len(entries) - n_manual_play - n_noop_play}")
+    log(f"  Manual capture (hand-written in hip_capture.cpp):  {n_manual_cap}")
+    log(f"  Manual playback (hand-written in hip_playback.cpp): {n_manual_play}")
+    log(f"  No-op playback (inline hipSuccess stubs):           {n_noop_play}")
+    log(f"  Generated capture shims:  {len(entries) - n_manual_cap}")
+    log(f"  Generated playback shims: {len(entries) - n_manual_play - n_noop_play}")
 
     # -------------------------------------------------------------------------
     # Playback calls the public API, not the dispatch table. Refuse to generate
@@ -2800,28 +2809,29 @@ def main() -> None:
                  f"generate anyway (unsafe).")
     else:
         public_decls = parse_public_api_signatures(public_path)
-        validate_playback_signatures(entries, public_decls, public_path)
+        validate_playback_signatures(entries, public_decls, public_path, args.silent)
 
     capture_cpp = generate_capture_cpp(entries)
     if args.check_hrr_coverage:
-        validate_capture_coverage(entries, capture_cpp)
+        validate_capture_coverage(entries, capture_cpp, args.silent)
 
     header_path.parent.mkdir(parents=True, exist_ok=True)
     header = generate_header(entries)
     header_path.write_text(header, encoding='utf-8')
-    print(f"Written header   -> {header_path}")
+    log(f"Written header   -> {header_path}")
 
     capture_path.parent.mkdir(parents=True, exist_ok=True)
     capture_path.write_text(capture_cpp, encoding="utf-8")
-    print(f"Written capture  -> {capture_path}")
+    log(f"Written capture  -> {capture_path}")
 
     playback_path.parent.mkdir(parents=True, exist_ok=True)
     playback_cpp = generate_playback_cpp(entries)
     playback_path.write_text(playback_cpp, encoding='utf-8')
-    print(f"Written playback -> {playback_path}")
+    log(f"Written playback -> {playback_path}")
 
     # Spot-check a few important structs
-    _spot_check(entries)
+    if not args.silent:
+        _spot_check(entries)
 
 
 def _spot_check(entries: List[ApiEntry]) -> None:
