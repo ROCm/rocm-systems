@@ -139,7 +139,7 @@ function(rocprofiler_sdk_spm_disabled _VAR)
     rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
     list(GET rocprofiler-sdk-tests-gfx-info 0 spm-gpu-0-gfx-info)
 
-    if("${spm-gpu-0-gfx-info}" MATCHES "^gfx94[0-9]$")
+    if("${spm-gpu-0-gfx-info}" MATCHES "^(gfx94[0-9]|gfx1250(-strict)?)$")
         # spm is enabled on this architecture.
         set(${_VAR}
             FALSE

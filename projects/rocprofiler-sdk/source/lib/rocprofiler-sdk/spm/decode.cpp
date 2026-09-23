@@ -47,10 +47,21 @@ get_buffer_mut()
 void
 decode_cb(uint64_t timestamp, uint64_t value, uint64_t index, int shader_engine, void* userdata)
 {
-    auto& samples   = *reinterpret_cast<spm_sample_vec*>(userdata);
-    bool  is_global = (shader_engine < 0);
-    if(is_global) shader_engine = 0;
-    samples.emplace_back(spm_sample_t{timestamp, value, index, shader_engine, is_global});
+    auto& samples = *reinterpret_cast<spm_sample_vec*>(userdata);
+
+    const bool is_global = (shader_engine < 0);
+    int        se        = is_global ? 0 : shader_engine;
+    int        sa        = -1;
+    int        wgp       = -1;
+
+    if(const auto* sym = construct_spm_interface();
+       sym && sym->spm_decode_shader_engine &&
+       sym->spm_decode_shader_engine(shader_engine, &se, &sa, &wgp) == HSA_STATUS_SUCCESS)
+    {
+        if(is_global) se = 0;
+    }
+
+    samples.emplace_back(spm_sample_t{timestamp, value, index, se, sa, wgp, is_global});
 }
 
 /** @brief  Callback for aqlprofile to return SPM data
@@ -105,6 +116,13 @@ aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, voi
             counters::set_dim_in_rec(instance_id,
                                      rocprofiler::counters::ROCPROFILER_DIMENSION_SHADER_ENGINE,
                                      s.shader_engine);
+        if(s.shader_array >= 0)
+            counters::set_dim_in_rec(instance_id,
+                                     rocprofiler::counters::ROCPROFILER_DIMENSION_SHADER_ARRAY,
+                                     s.shader_array);
+        if(s.wgp >= 0)
+            counters::set_dim_in_rec(
+                instance_id, rocprofiler::counters::ROCPROFILER_DIMENSION_WGP, s.wgp);
 
         if(buf)
         {
