@@ -123,8 +123,8 @@ Build and install rocDecode using the following commands:
 .. note::
 
    * Set ``ROCM_PATH`` to the TheRock build output directory. The VA-API headers and
-     import libraries are found there at build time. At run time, the VA-API driver is
-     located through ``LIBVA_DRIVERS_PATH``; see :doc:`../reference/rocDecode-env-vars`.
+     import libraries are found there at build time, and libva uses it at run time to
+     locate the VA-API driver.
    * To include FFmpeg support for samples and the host decoder, add ``-DFFMPEG_ROOT=<path-to-ffmpeg>``.
 
 To verify the build, build and run a sample from the installed location:
@@ -134,7 +134,6 @@ To verify the build, build and run a sample from the installed location:
    mkdir rocdecode-sample && cd rocdecode-sample
    cmake %ROCM_PATH%\share\rocdecode\samples\videoDecodeRaw -DROCM_PATH=%ROCM_PATH%
    cmake --build . --config Release
-   set PATH=%ROCM_PATH%\bin;%PATH%
-   set LIBVA_DRIVERS_PATH=%ROCM_PATH%\lib\rocm_sysdeps\bin
+   set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%PATH%
    Release\videodecoderaw.exe -i %ROCM_PATH%\share\rocdecode\video\AMD_driving_virtual_20-H265.265 -f 5
 

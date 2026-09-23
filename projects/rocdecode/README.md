@@ -143,8 +143,8 @@ cmake --install . --config Release
 
 > [!NOTE]
 > * Set `ROCM_PATH` to the TheRock build output directory. The VA-API headers and import
->   libraries are found there at build time. At run time, the VA-API driver is located through
->   `LIBVA_DRIVERS_PATH` — set it to `%ROCM_PATH%\lib\rocm_sysdeps\bin`.
+>   libraries are found there at build time, and libva uses it at run time to locate the
+>   VA-API driver.
 > * To include FFmpeg support, add `-DFFMPEG_ROOT=<path-to-ffmpeg>`.
 
 ### Run tests
@@ -157,12 +157,12 @@ cmake --install . --config Release
 
   **Windows:**
 
-  Before running tests or samples, add the rocDecode and FFmpeg DLL directories to your PATH so that
-  executables can locate the required DLLs at runtime:
+  Before running tests or samples, add the rocDecode, VA-API, and FFmpeg DLL directories to your PATH
+  so that executables can locate the required DLLs at runtime. `ROCM_PATH` must stay set as well, so
+  that libva can locate the VA-API driver:
 
   ```bat
-  set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
-  set LIBVA_DRIVERS_PATH=%ROCM_PATH%\lib\rocm_sysdeps\bin
+  set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
   ctest -C Release
   ```
 
@@ -233,8 +233,7 @@ guide for other options.
   mkdir rocdecode-sample && cd rocdecode-sample
   cmake %ROCM_PATH%\share\rocdecode\samples\videoDecode -DROCM_PATH=%ROCM_PATH% -DFFMPEG_ROOT=%FFMPEG_ROOT%
   cmake --build . --config Release
-  set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
-  set LIBVA_DRIVERS_PATH=%ROCM_PATH%\lib\rocm_sysdeps\bin
+  set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
   Release\videodecode.exe -i %ROCM_PATH%\share\rocdecode\video\AMD_driving_virtual_20-H265.mp4
   ```
 
@@ -254,8 +253,7 @@ guide for other options.
   mkdir rocdecode-test && cd rocdecode-test
   cmake %ROCM_PATH%\share\rocdecode\test -DROCM_PATH=%ROCM_PATH% -DFFMPEG_ROOT=%FFMPEG_ROOT%
   cmake --build . --config Release
-  set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
-  set LIBVA_DRIVERS_PATH=%ROCM_PATH%\lib\rocm_sysdeps\bin
+  set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
   ctest -C Release -VV
   ```
 
