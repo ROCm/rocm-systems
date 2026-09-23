@@ -1051,7 +1051,6 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
       // that touches every non-zero entry and every segment it overlaps.
       struct ibv_send_wr flushWrs[NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS];
       int nFlushWrs = 0;
-      memset(flushWrs, 0, sizeof(flushWrs));
       for (int r = 0; r < n; r++) {
         if (sizes[r] == 0) continue;
         struct ncclIbMrHandle* mhandle = (struct ncclIbMrHandle*)mhandles[r];
@@ -1075,6 +1074,7 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
               ret = ncclInternalError;
               goto iflushFail;
             }
+            memset(&flushWrs[nFlushWrs], 0, sizeof(flushWrs[0]));
             flushWrs[nFlushWrs].wr.rdma.remote_addr = (uint64_t)(rangeStart > segBase ? rangeStart : segBase);
             flushWrs[nFlushWrs].wr.rdma.rkey = flushMr->rkey;
             nFlushWrs++;
@@ -1086,6 +1086,7 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
             ret = ncclInternalError;
             goto iflushFail;
           }
+          memset(&flushWrs[nFlushWrs], 0, sizeof(flushWrs[0]));
           flushWrs[nFlushWrs].wr.rdma.remote_addr = (uint64_t)data[r];
           flushWrs[nFlushWrs].wr.rdma.rkey = flushMr->rkey;
           nFlushWrs++;
