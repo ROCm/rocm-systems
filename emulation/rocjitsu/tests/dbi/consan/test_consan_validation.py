@@ -1861,6 +1861,13 @@ class ConSanValidationTest(unittest.TestCase):
             self.assertEqual(vmfb.read_bytes(), b"canonical-vmfb")
             self.assertTrue(validation._qwen_build_check(workspace, "gfx1250")["ok"])
 
+            # Campaign workspaces may link to an existing source/build pair.
+            alias = workspace / "campaign"
+            alias.mkdir()
+            for directory in ("iree-test-suites", "iree-test-suites-build"):
+                (alias / directory).symlink_to(workspace / directory)
+            self.assertTrue(validation._qwen_build_check(alias, "gfx1250")["ok"])
+
             source.write_text("module { func.func @changed() }\n", encoding="utf-8")
             stale = validation._qwen_build_check(workspace, "gfx1250")
             self.assertFalse(stale["ok"])

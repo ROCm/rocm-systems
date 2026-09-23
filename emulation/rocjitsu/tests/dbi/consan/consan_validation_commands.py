@@ -553,7 +553,7 @@ def _qwen_compile_options(target: str, encoder_output: Path) -> tuple[str, ...]:
     return (
         f"--iree-rocm-target={target}",
         *QWEN_COMPILE_OPTIONS,
-        f"--iree-parameter-encoder-output-file={encoder_output}",
+        f"--iree-parameter-encoder-output-file={encoder_output.resolve()}",
     )
 
 
