@@ -31,6 +31,7 @@
 #    include <windows.h>
 //
 #    include <shellapi.h>
+#    include <tlhelp32.h>
 #endif
 #include <cerrno>
 #include <cstring>
@@ -101,6 +102,37 @@ get_clock_period_ns_impl(clockid_t _clk_id)
 #else
     (void) _clk_id;
     return 1;  // QPC already returns ns in get_ticks; period = 1 ns
+#endif
+}
+
+pid_t
+get_ppid()
+{
+#if !defined(_WIN32)
+    return ::getppid();
+#else
+    auto _snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if(_snapshot == INVALID_HANDLE_VALUE) return 0;
+
+    auto _self    = static_cast<DWORD>(get_pid());
+    auto _ppid    = pid_t{0};
+    auto _entry   = PROCESSENTRY32W{};
+    _entry.dwSize = sizeof(_entry);
+
+    if(::Process32FirstW(_snapshot, &_entry) != 0)
+    {
+        do
+        {
+            if(_entry.th32ProcessID == _self)
+            {
+                _ppid = static_cast<pid_t>(_entry.th32ParentProcessID);
+                break;
+            }
+        } while(::Process32NextW(_snapshot, &_entry) != 0);
+    }
+
+    ::CloseHandle(_snapshot);
+    return _ppid;
 #endif
 }
 

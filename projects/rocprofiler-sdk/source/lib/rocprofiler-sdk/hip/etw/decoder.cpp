@@ -79,8 +79,9 @@ struct record_data
 
 struct domain_mapping
 {
-    rocprofiler_buffer_tracing_kind_t buffered = ROCPROFILER_BUFFER_TRACING_NONE;
-    uint32_t                          table    = 0;
+    rocprofiler_buffer_tracing_kind_t buffered     = ROCPROFILER_BUFFER_TRACING_NONE;
+    rocprofiler_buffer_tracing_kind_t buffered_ext = ROCPROFILER_BUFFER_TRACING_NONE;
+    uint32_t                          table        = 0;
 };
 
 // Everything below is touched only from the single thread running ProcessTrace(), so none of
@@ -234,9 +235,13 @@ bool
 map_domain(uint32_t producer_domain, domain_mapping& out)
 {
     if(producer_domain == producer_domain_runtime)
-        out = {ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API, ROCPROFILER_HIP_TABLE_ID_Runtime};
+        out = {ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
+               ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT,
+               ROCPROFILER_HIP_TABLE_ID_Runtime};
     else if(producer_domain == producer_domain_compiler)
-        out = {ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API, ROCPROFILER_HIP_TABLE_ID_Compiler};
+        out = {ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
+               ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT,
+               ROCPROFILER_HIP_TABLE_ID_Compiler};
     else
         return false;
 
@@ -244,20 +249,23 @@ map_domain(uint32_t producer_domain, domain_mapping& out)
 }
 
 void
-emit_record(const record_data& value, uint64_t end_timestamp)
+emit_record(const record_data& value, uint64_t end_timestamp, int32_t retval)
 {
     auto mapping = domain_mapping{};
     if(!map_domain(value.domain, mapping)) return;
 
     auto contexts        = tracing::buffered_context_data_vec_t{};
+    auto ext_contexts    = tracing::buffered_context_data_vec_t{};
     auto extern_corr_ids = tracing::external_correlation_id_map_t{};
 
     // External correlation ids are structurally unavailable out-of-process: the tool's
     // rocprofiler_push_external_correlation_id calls happen on the producer's threads, which
     // this process cannot see. populate_contexts leaves them as empty_user_data.
     tracing::populate_contexts(mapping.buffered, value.operation, contexts, extern_corr_ids);
+    tracing::populate_contexts(
+        mapping.buffered_ext, value.operation, ext_contexts, extern_corr_ids);
 
-    if(contexts.empty()) return;
+    if(contexts.empty() && ext_contexts.empty()) return;
 
     auto* corr_id = tracing::correlation_service::construct(1);
     if(!corr_id) return;  // finalization has begun
@@ -265,19 +273,46 @@ emit_record(const record_data& value, uint64_t end_timestamp)
     // The correlation id is allocated here rather than carried in the event: the producer has no
     // use for one now that a call is a single self-contained event. ancestor reflects this
     // consumer thread's correlation stack rather than the producer's, so it is always 0 today.
-    auto record = common::init_public_api_struct(rocprofiler_buffer_tracing_hip_api_record_t{});
+    if(!contexts.empty())
+    {
+        auto record = common::init_public_api_struct(rocprofiler_buffer_tracing_hip_api_record_t{});
 
-    record.start_timestamp = value.start_timestamp;
-    record.end_timestamp   = end_timestamp;
+        record.start_timestamp = value.start_timestamp;
+        record.end_timestamp   = end_timestamp;
 
-    tracing::execute_buffer_record_emplace(contexts,
-                                           value.thread_id,
-                                           corr_id->internal,
-                                           extern_corr_ids,
-                                           corr_id->ancestor,
-                                           mapping.buffered,
-                                           value.operation,
-                                           record);
+        tracing::execute_buffer_record_emplace(contexts,
+                                               value.thread_id,
+                                               corr_id->internal,
+                                               extern_corr_ids,
+                                               corr_id->ancestor,
+                                               mapping.buffered,
+                                               value.operation,
+                                               record);
+    }
+
+    if(!ext_contexts.empty())
+    {
+        auto record =
+            common::init_public_api_struct(rocprofiler_buffer_tracing_hip_api_ext_record_t{});
+
+        record.start_timestamp = value.start_timestamp;
+        record.end_timestamp   = end_timestamp;
+
+        // The exit event carries the return value but not the call arguments, so args stays
+        // zero-filled. A tool cannot tell that apart from a call whose arguments were all zero,
+        // which is why argument capture is documented as unavailable on Windows rather than
+        // approximated here.
+        record.retval.int_retval = retval;
+
+        tracing::execute_buffer_record_emplace(ext_contexts,
+                                               value.thread_id,
+                                               corr_id->internal,
+                                               extern_corr_ids,
+                                               corr_id->ancestor,
+                                               mapping.buffered_ext,
+                                               value.operation,
+                                               record);
+    }
 
     corr_id->sub_ref_count();
     context::pop_latest_correlation_id(corr_id);
@@ -340,6 +375,14 @@ handle_event(const EVENT_RECORD* event_record)
         return;
     }
 
+    // retval trails start_qpc, which trails the inline op_name.
+    auto retval = int32_t{0};
+    if(!read_scalar(event_record, name_end + static_cast<uint32_t>(sizeof(uint64_t)), retval))
+    {
+        ++get_stats().events_dropped;
+        return;
+    }
+
     // The producer samples QueryPerformanceCounter on entry and ETW stamps the header on
     // return, and the session sets Wnode.ClientContext = 1, so both are QPC ticks.
     auto value = record_data{common::qpc_ticks_to_ns(start_qpc),
@@ -349,7 +392,8 @@ handle_event(const EVENT_RECORD* event_record)
 
     emit_record(value,
                 common::qpc_ticks_to_ns(
-                    static_cast<uint64_t>(event_record->EventHeader.TimeStamp.QuadPart)));
+                    static_cast<uint64_t>(event_record->EventHeader.TimeStamp.QuadPart)),
+                retval);
 }
 
 decoder_stats

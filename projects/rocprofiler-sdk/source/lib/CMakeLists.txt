@@ -34,12 +34,18 @@ if(NOT WIN32)
         add_subdirectory(rocprofiler-sdk-rocattach)
     endif()
 
-    set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "tools")
-    add_subdirectory(att-tool)
-    add_subdirectory(rocprofiler-sdk-tool)
-
     add_subdirectory(python)
 endif()
+
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "tools")
+
+# att-tool is the ATT decoder, which has no Windows build; rocprofiler-sdk-tool only needs
+# the CodeobjLoadInfo header from it.
+if(NOT WIN32)
+    add_subdirectory(att-tool)
+endif()
+
+add_subdirectory(rocprofiler-sdk-tool)
 
 if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)

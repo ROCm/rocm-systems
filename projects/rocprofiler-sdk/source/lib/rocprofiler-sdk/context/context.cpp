@@ -359,6 +359,8 @@ start_context(rocprofiler_context_id_t context_id)
     // Refcounted and a no-op off Windows.
     if(cfg->is_tracing_one_of(ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
                               ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
+                              ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT,
+                              ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT,
                               ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
                               ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API))
     {
@@ -397,6 +399,8 @@ stop_context(rocprofiler_context_id_t idx)
             // no-op off Windows.
             if(_expected->is_tracing_one_of(ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
                                             ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
+                                            ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT,
+                                            ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT,
                                             ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
                                             ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API))
             {

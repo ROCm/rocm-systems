@@ -58,4 +58,10 @@ rocprofiler_at_intercept_table_registration(rocprofiler_intercept_library_cb_t, 
 {
     return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
 }
+
+rocprofiler_status_t
+rocprofiler_query_intercept_table_name(rocprofiler_intercept_table_t, const char**, uint64_t*)
+{
+    return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+}
 }

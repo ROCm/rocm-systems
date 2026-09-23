@@ -161,6 +161,12 @@ get_pid()
 #endif
 }
 
+// Windows does not keep a parent link in the process itself, so this is a system-wide
+// snapshot lookup there rather than the constant-time read getppid() is. Returns 0 if the
+// parent cannot be determined.
+pid_t
+get_ppid();
+
 // returns the process start time (in CLOCK_BOOTTIME nanoseconds) via /proc/<pid>/stat
 uint64_t
 get_process_start_time_ns(pid_t _pid);

@@ -132,12 +132,6 @@ get_hostname()
 }
 
 pid_t
-get_parent_process_id()
-{
-    return getppid();
-}
-
-pid_t
 get_process_group_id()
 {
     return getpgid(getpid());
@@ -183,51 +177,6 @@ get_hostname()
     return std::string{_hostname_buff.data()};
 }
 
-// Windows does not track a parent link in the process itself, so the only way to recover it
-// is to find this process in a system-wide snapshot. The same snapshot answers the sibling
-// question, so both go through it.
-std::vector<pid_t>
-snapshot_processes(pid_t& parent_of_self)
-{
-    parent_of_self = 0;
-
-    auto _snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if(_snapshot == INVALID_HANDLE_VALUE) return {};
-
-    auto _self    = static_cast<DWORD>(common::get_pid());
-    auto _entries = std::vector<std::pair<pid_t, pid_t> >{};
-    auto _entry   = PROCESSENTRY32W{};
-    _entry.dwSize = sizeof(_entry);
-
-    if(::Process32FirstW(_snapshot, &_entry) != 0)
-    {
-        do
-        {
-            if(_entry.th32ProcessID == _self)
-                parent_of_self = static_cast<pid_t>(_entry.th32ParentProcessID);
-            _entries.emplace_back(static_cast<pid_t>(_entry.th32ProcessID),
-                                  static_cast<pid_t>(_entry.th32ParentProcessID));
-        } while(::Process32NextW(_snapshot, &_entry) != 0);
-    }
-
-    ::CloseHandle(_snapshot);
-
-    auto _siblings = std::vector<pid_t>{};
-    if(parent_of_self > 0)
-        for(const auto& itr : _entries)
-            if(itr.second == parent_of_self) _siblings.emplace_back(itr.first);
-
-    return _siblings;
-}
-
-pid_t
-get_parent_process_id()
-{
-    auto _ppid = pid_t{0};
-    snapshot_processes(_ppid);
-    return _ppid;
-}
-
 // Windows has no process group. Report 0 rather than substituting the job object, which is
 // not the same concept and is usually absent.
 pid_t
@@ -246,11 +195,32 @@ get_session_id()
     return static_cast<pid_t>(_sid);
 }
 
+// A process holds no list of its children, so the siblings have to be found by walking a
+// system-wide snapshot looking for everything that shares our parent.
 std::vector<pid_t>
 get_siblings()
 {
-    auto _ppid = pid_t{0};
-    return snapshot_processes(_ppid);
+    auto _ppid = common::get_ppid();
+    if(_ppid <= 0) return {};
+
+    auto _snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if(_snapshot == INVALID_HANDLE_VALUE) return {};
+
+    auto _data    = std::vector<pid_t>{};
+    auto _entry   = PROCESSENTRY32W{};
+    _entry.dwSize = sizeof(_entry);
+
+    if(::Process32FirstW(_snapshot, &_entry) != 0)
+    {
+        do
+        {
+            if(static_cast<pid_t>(_entry.th32ParentProcessID) == _ppid)
+                _data.emplace_back(static_cast<pid_t>(_entry.th32ProcessID));
+        } while(::Process32NextW(_snapshot, &_entry) != 0);
+    }
+
+    ::CloseHandle(_snapshot);
+    return _data;
 }
 #endif
 
@@ -321,7 +291,7 @@ output_keys(std::string _tag)
     auto _dmp_size      = fmt::format("{}", (_mpi_size) > 0 ? _mpi_size : 1);
     auto _dmp_rank      = fmt::format("{}", (_mpi_rank) > 0 ? _mpi_rank : 0);
     auto _proc_id       = fmt::format("{}", common::get_pid());
-    auto _parent_id     = fmt::format("{}", get_parent_process_id());
+    auto _parent_id     = fmt::format("{}", common::get_ppid());
     auto _pgroup_id     = fmt::format("{}", get_process_group_id());
     auto _session_id    = fmt::format("{}", get_session_id());
     auto _proc_size     = fmt::format("{}", get_num_siblings());

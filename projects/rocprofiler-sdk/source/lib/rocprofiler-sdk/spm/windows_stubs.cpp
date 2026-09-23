@@ -22,12 +22,15 @@
 
 // Windows stand-ins for the SPM sources excluded from this build. SPM streams counter
 // data out of aqlprofile-built AQL packets, which the ETW tracing path cannot emit, so
-// no SPM context can be started and no aqlprofile stream can be decoded.
+// no SPM context can be started and no aqlprofile stream can be decoded. The public API
+// stays exported so that tools built against the headers still load; every entry point
+// reports that the service is unavailable.
 
 #include "lib/rocprofiler-sdk/spm/core.hpp"
 #include "lib/rocprofiler-sdk/spm/decode.hpp"
 #include "lib/rocprofiler-sdk/spm/interface.hpp"
 
+#include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/fwd.h>
 
 #include <cstddef>
@@ -60,3 +63,36 @@ aql_data_callback(size_t, void*, size_t, int, void*)
 {}
 }  // namespace spm
 }  // namespace rocprofiler
+
+extern "C" {
+rocprofiler_status_t
+rocprofiler_spm_query_agent_configurations(rocprofiler_agent_id_t,
+                                           rocprofiler_spm_available_configurations_cb_t,
+                                           void*)
+{
+    // No agent advertises a configuration, so the callback is never invoked. Reporting
+    // success keeps callers that only enumerate configurations from treating this as fatal.
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t,
+                                      rocprofiler_counter_id_t*,
+                                      size_t,
+                                      rocprofiler_spm_parameters_t**,
+                                      size_t,
+                                      rocprofiler_counter_config_id_t*)
+{
+    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+}
+
+rocprofiler_status_t
+rocprofiler_spm_configure_callback_dispatch_service(rocprofiler_context_id_t,
+                                                    rocprofiler_spm_dispatch_counting_service_cb_t,
+                                                    void*,
+                                                    rocprofiler_spm_dispatch_counting_record_cb_t,
+                                                    void*)
+{
+    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+}
+}
