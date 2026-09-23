@@ -2051,8 +2051,9 @@ public:
     if (!file)
       return -EBADF;
     std::vector<std::shared_ptr<SyncobjEntry>> entries;
-    std::vector<std::shared_ptr<SyncobjFence>> fences(request.count_handles);
+    std::vector<std::shared_ptr<SyncobjFence>> fences;
     try {
+      fences.resize(request.count_handles);
       entries.reserve(request.count_handles);
     } catch (const std::bad_alloc &) {
       return -ENOMEM;
@@ -4164,7 +4165,19 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
           InterposerContext::ctx.drm_vm(drm_file, static_cast<drm_amdgpu_vm *>(arg)->in.op));
     if (type == kDrmIoctlType && nr == _IOC_NR(DRM_IOCTL_SYNCOBJ_WAIT) && arg) {
       auto *wait = static_cast<drm_syncobj_wait *>(arg);
-      std::vector<uint64_t> points(wait->count_handles, 0);
+      constexpr uint32_t kSupportedFlags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL |
+                                           DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT |
+                                           DRM_SYNCOBJ_WAIT_FLAGS_WAIT_DEADLINE;
+      if ((wait->flags & ~kSupportedFlags) != 0)
+        return kfd_ioctl_ret(-EINVAL);
+      std::vector<uint64_t> points;
+      try {
+        points.resize(wait->count_handles, 0);
+      } catch (const std::bad_alloc &) {
+        return kfd_ioctl_ret(-ENOMEM);
+      } catch (const std::length_error &) {
+        return kfd_ioctl_ret(-ENOMEM);
+      }
       drm_syncobj_timeline_wait timeline{};
       timeline.handles = wait->handles;
       timeline.points = reinterpret_cast<uint64_t>(points.data());
