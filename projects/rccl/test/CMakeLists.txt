@@ -258,6 +258,7 @@ if(BUILD_TESTS)
     AllToAllVTests.cpp
     AsymmetricVisibilityTests.cpp
     CollImplInfoTests.cpp
+    DeviceResourceRequirementTests.cpp
     BroadcastTests.cpp
     DoneEventOrderingTests.cpp
     GatherTests.cpp
