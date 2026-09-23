@@ -248,13 +248,13 @@ inline std::make_unsigned_t<T> vop3_integer_sub(std::make_unsigned_t<T> lhs,
 }
 
 /// @brief Return whether V_DOT4 integer instructions honor the encoded CLAMP bit.
-/// @details GFX12 (RDNA4) and the CDNA5-backed gfx1250 profile explicitly ignore CLAMP
-/// for the integer DOT4 forms; earlier CDNA/RDNA profiles retain the ordinary
-/// integer saturation behavior. Keep this policy shared by scalar generation
-/// and SIMD execution.
+/// @details The RDNA4 ISA manual says V_DOT4_I32_IU8 and V_DOT4_U32_U8 ignore
+/// CLAMP, but experiments with those instructions on gfx1201 hardware show
+/// saturation when CLAMP is set. The CDNA5-backed gfx1250 profile still ignores
+/// it. Keep this policy shared by scalar and SIMD execution.
 inline bool dot4_clamp_supported(const Wavefront &wf) {
   const rj_code_arch_t arch = wf.cu().arch();
-  return arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5;
+  return arch != ROCJITSU_CODE_ARCH_CDNA5;
 }
 
 inline uint32_t sign_extend_u32(uint32_t value, unsigned bits) {

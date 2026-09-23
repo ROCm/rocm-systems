@@ -336,6 +336,11 @@ inline InputLoc gfx12_wmma_input_loc(uint32_t wave_size, uint32_t dim, uint32_t 
   require_gfx12_wmma_wave_size(wave_size);
   if (wave_size == WMMA_WAVE32)
     return wmma_input_loc(dim, K, i, k, data_bits);
+  if (dim == 16 && data_bits == 4 && (K == 16 || K == 32)) {
+    const uint32_t block = k / 8u;
+    const uint32_t lane_block = K == 16 ? block : ((block & 1u) << 1u) | (block >> 1u);
+    return wmma_packed_input_loc(i + 16u * lane_block, k & 7u, data_bits);
+  }
   if (dim == 16 && K == 16) {
     const uint32_t lane = i + 16u * ((k >> 2) & 1u) + 32u * ((k >> 3) & 1u);
     const uint32_t slot = 2u * ((k >> 1) & 1u) + (k & 1u);
@@ -573,6 +578,11 @@ inline SwmmacIndexLoc swmmac_index_loc(uint32_t wave_size, uint32_t M, uint32_t 
   require_gfx12_wmma_wave_size(wave_size);
   if (wave_size == WMMA_WAVE32)
     return swmmac_index_loc(M, K, elem_bits, row, compressed_k, index_entries);
+  if (M == 16 && elem_bits == 4 && index_entries == 16 && (K == 32 || K == 64)) {
+    const uint32_t block = compressed_k / 8u;
+    const uint32_t lane_block = K == 32 ? block : ((block & 1u) << 1u) | (block >> 1u);
+    return {row + 16u * lane_block, compressed_k & 7u};
+  }
   if (M == 16 && K == 32 && index_entries == 16) {
     const uint32_t group = compressed_k / 2u;
     const uint32_t slot = compressed_k & 1u;
@@ -605,6 +615,11 @@ inline InputLoc swmmac_a_input_loc(uint32_t wave_size, uint32_t M, uint32_t K, u
   require_gfx12_wmma_wave_size(wave_size);
   if (wave_size == WMMA_WAVE32)
     return swmmac_a_input_loc(M, K, row, compressed_k, elem_bits);
+  if (M == 16 && elem_bits == 4 && (K == 32 || K == 64)) {
+    const uint32_t block = compressed_k / 8u;
+    const uint32_t lane_block = K == 32 ? block : ((block & 1u) << 1u) | (block >> 1u);
+    return wmma_packed_input_loc(row + 16u * lane_block, compressed_k & 7u, elem_bits);
+  }
   if (M == 16 && K == 32) {
     const uint32_t group = compressed_k / 2u;
     const uint32_t slot = compressed_k & 1u;
@@ -630,7 +645,7 @@ inline InputLoc swmmac_b_input_loc(uint32_t N, uint32_t K, uint32_t col, uint32_
     return wmma_packed_input_loc(lane, slot, elem_bits);
   }
   if (N == 16 && K == 32) {
-    if (elem_bits == 8)
+    if (elem_bits == 4 || elem_bits == 8)
       return wmma_packed_input_loc(col + 16u * (dense_k / 16u), dense_k % 16u, elem_bits);
     if (elem_bits >= 16) {
       const uint32_t lane = col + 16u * ((dense_k / 8u) & 1u);
@@ -646,6 +661,12 @@ inline InputLoc swmmac_b_input_loc(uint32_t wave_size, uint32_t N, uint32_t K, u
   require_gfx12_wmma_wave_size(wave_size);
   if (wave_size == WMMA_WAVE32)
     return swmmac_b_input_loc(N, K, col, dense_k, elem_bits);
+  if (N == 16 && elem_bits == 4 && (K == 32 || K == 64)) {
+    const uint32_t values_per_lane = K == 32 ? 8u : 16u;
+    const uint32_t block = dense_k / values_per_lane;
+    const uint32_t lane_block = ((block & 1u) << 1u) | (block >> 1u);
+    return wmma_packed_input_loc(col + 16u * lane_block, dense_k % values_per_lane, elem_bits);
+  }
   if (N == 16 && K == 32) {
     if (elem_bits == 8) {
       const uint32_t lane = col + 32u * ((dense_k >> 3) & 1u) + 16u * (dense_k >> 4);
