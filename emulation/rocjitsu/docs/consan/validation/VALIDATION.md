@@ -89,6 +89,8 @@ checks passing. Precommit the preset and threshold before running. Select indepe
 need to test `low`. Choose the lowest passing preset at or above `default`
 and name it in the cell. Reuse matching recorded evidence; while lower presets
 are being tested, show only the lowest already-qualified preset in the cell.
+Use “lowest verified” while smaller presets remain unqualified, and “lowest
+passing” once every smaller preset from `default` has been tested and failed.
 Keep unsuccessful presets and search progress in the campaign artifacts. Green in
 the status table qualifies that recorded configuration. The observed rate is
 not a lower confidence bound; retain counts and intervals in campaign artifacts.
