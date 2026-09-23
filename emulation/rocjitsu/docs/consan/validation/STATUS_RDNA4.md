@@ -25,7 +25,7 @@ none of those historical colors count as a pass for this campaign.
 - SDK: `/home/benoit/venv`, ROCm `10.2.0a20260915` development package.
 - Preparation: rebuilding the current hook, integrating per-workload generated
   allowlists, preparing Qwen provenance, and building the production matmul.
-- Fresh clean assessments: **32/42**; no cell has completed fresh fault qualification.
+- Fresh clean assessments: **33/42**; no cell has completed fresh fault qualification.
 - Preparation logs: `/home/benoit/workspace/consan-validation-artifacts/`.
 
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
@@ -48,7 +48,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | PyTorch | P3 | native histogram (`pytorch-torch-histc`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | llama.cpp | P3 | RMS norm (`llama-rdna4-rms-norm`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟥 Sep 23: native oracle passes; strict load rejects relocation of `s_swappc_b64` at `.text+121248`; fix in progress | 🟥 Sep 23: strict load rejects the same indirect-call relocation; fix in progress |
-| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 exact; 12 accesses and 8 barriers; fault bundle | 🟩 exact; 12/12 accesses; fault bundle |
+| Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟥 Sep 23: ConSan rejected a code object before execution; exit 92 | 🟩 exact; 12/12 accesses; fault bundle |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 exact; 12 accesses and 8 barriers; fault bundle | 🟩 exact; 12/12 accesses; fault bundle |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟩 exact; 4 accesses, 15 atomics, 8 barriers; fault bundle | 🟩 exact; 4/4 accesses; fault bundle |
 | Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟩 exact; 4 accesses, 15 atomics, 8 barriers; fault bundle | 🟩 exact; 4/4 accesses; fault bundle |
@@ -121,3 +121,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `llama-rdna4-mul-mat-vec-q` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/llama-rdna4-mul-mat-vec-q-supercollider`.
 - `llama-rdna4-rms-norm` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/llama-rdna4-rms-norm-default`.
 - `llama-rdna4-rms-norm` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/llama-rdna4-rms-norm-supercollider`.
+- `d128-pressure` / default: ConSan rejected a code object before execution; exit 92. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/d128-pressure-default`.
