@@ -12,7 +12,7 @@
 
 #include "RmaMPITestBase.hpp"
 #include "RmaMultiSegmentHelpers.hpp"
-#include "../../HybridVmmHelpers.hpp"
+#include "HybridVmmHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "../../../src/transport/net_ib/gin.h"
 
@@ -195,9 +195,18 @@ protected:
         return !SyncSkip(*src == nullptr || *dst == nullptr);
     }
 
+    // Skip only when no rank took the per-segment path. A mixed result is a
+    // failure: SyncSkip(ANY miss) would hide a unilateral-success bug.
     bool MultiSegmentPathAvailable()
     {
-        return !SyncSkip(!AllTookMultiSegPath());
+        const bool local =
+            readAllLogs().find(kMultiSegMarker) != std::string::npos;
+        if (!MPIHelpers::anyRankTrue(local)) return false;
+        if (!AllTookMultiSegPath()) {
+            ADD_FAILURE() << "multi-segment registration was asymmetric across ranks";
+            return true;
+        }
+        return true;
     }
 
     void ExpectPayloadIsolated(const void* window, size_t totalSize,
@@ -236,13 +245,18 @@ protected:
                 FillSentinel(dst->ptr, total, sentinel);
 
             Barrier();
+            bool putOk = true;
             if (worldRank_ == 0)
             {
                 void* req = nullptr;
-                ASSERT_EQ(ncclSuccess,
-                          rma_->iput(rmaCtx_, 0, offset, srcMh, size,
-                                     offset, dstMh, 1, &req));
-                ASSERT_TRUE(PollUntilDone(req));
+                putOk = rma_->iput(rmaCtx_, 0, offset, srcMh, size,
+                                   offset, dstMh, 1, ncclRmaOptFlagsDefault, &req) == ncclSuccess;
+                if (putOk) putOk = PollUntilDone(req);
+            }
+            if (!MPIHelpers::allRanksTrue(putOk))
+            {
+                ADD_FAILURE() << "iput sweep failed " << context;
+                return;
             }
             Barrier();
 
@@ -273,13 +287,13 @@ TEST_F(RmaMultiSegmentMPITest, Reproducer_MultiSegmentRegistrationAndTransfer)
         FillBuf(sb->ptr, kSize, /*seed=*/0xA0);
 
     void *sendMh = nullptr, *sendGh = nullptr, *recvMh = nullptr, *recvGh = nullptr;
-    EXPECT_EQ(ncclSuccess, RegMr(sb->ptr, kSize, &sendMh, &sendGh))
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, kSize, &sendMh, &sendGh))
         << "multi-segment send buffer registration failed (the AIRUNTIME-2351 bug)";
-    EXPECT_EQ(ncclSuccess, RegMr(rb->ptr, kSize, &recvMh, &recvGh))
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, kSize, &recvMh, &recvGh))
         << "multi-segment recv buffer registration failed (the AIRUNTIME-2351 bug)";
 
     // Confirm the per-segment path fired; otherwise the feature isn't exercised.
-    if (SyncSkip(!AllTookMultiSegPath()))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "Buffer registered as a single MR (cuMem disabled or "
                         "range not segmented) - multi-segment path not exercised";
 
@@ -290,7 +304,7 @@ TEST_F(RmaMultiSegmentMPITest, Reproducer_MultiSegmentRegistrationAndTransfer)
         ASSERT_EQ(ncclSuccess,
                   rma_->iput(rmaCtx_, /*context=*/0,
                              /*srcOff=*/0, sendMh, kSize,
-                             /*dstOff=*/0, recvMh, /*peerRank=*/1, &req));
+                             /*dstOff=*/0, recvMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -329,7 +343,7 @@ TEST_F(RmaMultiSegmentMPITest, PartialFinalSegmentRegistrationAndTransfer)
     ASSERT_EQ(ncclSuccess,
               RegMr(rb->ptr, registeredBytes, &recvMh, &recvGh));
 
-    if (SyncSkip(!AllTookMultiSegPath()))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     Barrier();
@@ -338,7 +352,7 @@ TEST_F(RmaMultiSegmentMPITest, PartialFinalSegmentRegistrationAndTransfer)
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
                   rma_->iput(rmaCtx_, 0, transferOffset, sendMh, transferBytes,
-                             transferOffset, recvMh, 1, &req));
+                             transferOffset, recvMh, 1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -373,7 +387,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutCrossSegmentBoundaryAtOffset)
     ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, sb->totalSize, &sendMh, &sendGh));
     ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, rb->totalSize, &recvMh, &recvGh));
 
-    if (SyncSkip(!AllTookMultiSegPath()))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     Barrier();
@@ -382,7 +396,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutCrossSegmentBoundaryAtOffset)
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
                   rma_->iput(rmaCtx_, 0, /*srcOff=*/off, sendMh, kSize,
-                             /*dstOff=*/off, recvMh, 1, &req));
+                             /*dstOff=*/off, recvMh, 1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -412,7 +426,7 @@ TEST_F(RmaMultiSegmentMPITest, IGetMultiSegment)
     void *mh = nullptr, *gh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(bb->ptr, kSize, &mh, &gh));
 
-    if (SyncSkip(!AllTookMultiSegPath()))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     Barrier();
@@ -421,7 +435,7 @@ TEST_F(RmaMultiSegmentMPITest, IGetMultiSegment)
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
                   rma_->iget(rmaCtx_, 0, /*remoteOff=*/0, mh, kSize,
-                             /*localOff=*/0, mh, /*peerRank=*/1, &req));
+                             /*localOff=*/0, mh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
         EXPECT_TRUE(VerifyBuf(bb->ptr, kSize, /*seed=*/0xC3))
             << "iget data corrupted across segment boundaries";
@@ -455,7 +469,7 @@ TEST_F(RmaMultiSegmentMPITest, IGetCrossSegmentBoundaryAtOffset)
     ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, sb->totalSize, &srcMh, &srcGh));
     ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, rb->totalSize, &dstMh, &dstGh));
 
-    if (SyncSkip(!AllTookMultiSegPath()))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     Barrier();
@@ -464,7 +478,7 @@ TEST_F(RmaMultiSegmentMPITest, IGetCrossSegmentBoundaryAtOffset)
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
                   rma_->iget(rmaCtx_, 0, /*remoteOff=*/off, srcMh, kSize,
-                             /*localOff=*/off, dstMh, /*peerRank=*/1, &req));
+                             /*localOff=*/off, dstMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
 
         ExpectPayloadIsolated(rb->ptr, rb->totalSize, off, kSize,
@@ -502,7 +516,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_EngramMixedWindowIGet)
 
     void *mh = nullptr, *gh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
-    if (SyncSkip(!AllTookMultiSegPath()))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "DeepEP window did not take the multi-segment RMA registration path";
 
     Barrier();
@@ -512,7 +526,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_EngramMixedWindowIGet)
         ASSERT_EQ(ncclSuccess,
                   rma_->iget(rmaCtx_, 0,
                              /*remoteOff=*/kRemoteOff, mh, kPayload,
-                             /*localOff=*/kLocalOff, mh, /*peerRank=*/1, &req));
+                             /*localOff=*/kLocalOff, mh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
         ExpectPayloadIsolated(window->ptr, kGpuBytes, kLocalOff, kPayload,
                               /*seed=*/0x4D, kSentinel,
@@ -546,7 +560,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_MultiNodeEngramMixedWindowIGetStress)
 
     void *mh = nullptr, *gh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
-    if (SyncSkip(!AllTookMultiSegPath()))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "DeepEP window did not take the multi-segment RMA registration path";
 
     for (int i = 0; i < kIterations; ++i)
@@ -571,7 +585,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_MultiNodeEngramMixedWindowIGetStress)
             void* req = nullptr;
             ASSERT_EQ(ncclSuccess,
                       rma_->iget(rmaCtx_, 0, remoteOff, mh, len,
-                                 localOff, mh, /*peerRank=*/1, &req))
+                                 localOff, mh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req))
                 << "DeepEP Engram IGet post failed at iteration " << i;
             ASSERT_TRUE(PollUntilDone(req))
                 << "DeepEP Engram IGet stalled at iteration " << i;
@@ -584,14 +598,14 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_MultiNodeEngramMixedWindowIGetStress)
 }
 
 // DeepEP HybridElasticSymmetricMemory:
-// [GPU][CPU local-rank 0][CPU local-rank 1]. Each process imports the same
+// [GPU][CPU local-rank 0]...[CPU local-rank 3]. Each process imports the same
 // local CPU handles before registration. Fetch from the matching CPU segment
 // on the other node into a non-zero local GPU offset.
 TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
 {
-    if (!SetUpFixture(/*minProcesses=*/4, /*maxProcesses=*/4,
+    if (!SetUpFixture(/*minProcesses=*/8, /*maxProcesses=*/8,
                       /*minNodes=*/2, /*maxNodes=*/2))
-        GTEST_SKIP() << "requires exactly 4 ranks across 2 nodes";
+        GTEST_SKIP() << "requires exactly 8 ranks across 2 nodes";
 
     constexpr size_t kGpuBytes = 8 * kMiB;
     constexpr size_t kCpuBytes = 2 * kMiB;
@@ -602,7 +616,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
     std::string reason;
     RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
     if (!AllocHybridForLocalRanks(
-            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/2, &window, &reason))
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason))
         GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
 
     const size_t remoteOff = kGpuBytes + static_cast<size_t>(window->localRank) * kCpuBytes + 4096;
@@ -615,14 +629,14 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
 
     void *mh = nullptr, *gh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
-    if (SyncSkip(!AllTookMultiSegPath()))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "hybrid window did not take the multi-segment RMA path";
 
     Barrier();
     void* req = nullptr;
     ASSERT_EQ(ncclSuccess,
               rma_->iget(rmaCtx_, 0, remoteOff, mh, kPayload,
-                         kLocalOff, mh, peer, &req));
+                         kLocalOff, mh, peer, ncclRmaOptFlagsDefault, &req));
     ASSERT_TRUE(PollUntilDone(req));
     ExpectPayloadIsolated(window->ptr, kGpuBytes, kLocalOff, kPayload,
                           static_cast<uint8_t>(0x30 + peer), kSentinel,
@@ -636,9 +650,9 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
 // local/remote cursors with sentinel protection.
 TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
 {
-    if (!SetUpFixture(/*minProcesses=*/4, /*maxProcesses=*/4,
+    if (!SetUpFixture(/*minProcesses=*/8, /*maxProcesses=*/8,
                       /*minNodes=*/2, /*maxNodes=*/2))
-        GTEST_SKIP() << "requires exactly 4 ranks across 2 nodes";
+        GTEST_SKIP() << "requires exactly 8 ranks across 2 nodes";
 
     constexpr size_t kGpuBytes = 8 * kMiB;
     constexpr size_t kCpuBytes = 2 * kMiB;
@@ -652,12 +666,12 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
     std::string reason;
     RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
     if (!AllocHybridForLocalRanks(
-            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/2, &window, &reason))
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason))
         GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
 
     void *mh = nullptr, *gh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
-    if (SyncSkip(!AllTookMultiSegPath()))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "hybrid window did not take the multi-segment RMA path";
 
     for (int i = 0; i < kIterations; ++i)
@@ -684,7 +698,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
                   rma_->iget(rmaCtx_, 0, remoteOff, mh, len,
-                             localOff, mh, peer, &req))
+                             localOff, mh, peer, ncclRmaOptFlagsDefault, &req))
             << "hybrid IGet post failed at iteration " << i;
         ASSERT_TRUE(PollUntilDone(req))
             << "hybrid IGet stalled at iteration " << i;
@@ -700,9 +714,9 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
 // segment must be rejected before posting and leave the GPU destination intact.
 TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridOutOfRangeIGetRejected)
 {
-    if (!SetUpFixture(/*minProcesses=*/4, /*maxProcesses=*/4,
+    if (!SetUpFixture(/*minProcesses=*/8, /*maxProcesses=*/8,
                       /*minNodes=*/2, /*maxNodes=*/2))
-        GTEST_SKIP() << "requires exactly 4 ranks across 2 nodes";
+        GTEST_SKIP() << "requires exactly 8 ranks across 2 nodes";
 
     constexpr size_t kGpuBytes = 8 * kMiB;
     constexpr size_t kCpuBytes = 2 * kMiB;
@@ -711,7 +725,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridOutOfRangeIGetRejected)
     std::string reason;
     RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
     if (!AllocHybridForLocalRanks(
-            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/2, &window, &reason))
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason))
         GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
 
     void *mh = nullptr, *gh = nullptr;
@@ -724,7 +738,7 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridOutOfRangeIGetRejected)
     void* req = nullptr;
     EXPECT_EQ(ncclInvalidArgument,
               rma_->iget(rmaCtx_, 0, window->totalSize - 32, mh, 64,
-                         /*localOff=*/0, mh, peer, &req));
+                         /*localOff=*/0, mh, peer, ncclRmaOptFlagsDefault, &req));
     EXPECT_EQ(req, nullptr);
     EXPECT_TRUE(AllSentinel(window->ptr, kGpuBytes, kSentinel));
     Barrier();
@@ -750,7 +764,7 @@ TEST_F(RmaMultiSegmentMPITest, IFlushMultiSegment)
     ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, kSize, &sendMh, &sendGh));
     ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, kSize, &recvMh, &recvGh));
 
-    if (SyncSkip(!AllTookMultiSegPath()))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     Barrier();
@@ -758,7 +772,7 @@ TEST_F(RmaMultiSegmentMPITest, IFlushMultiSegment)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  rma_->iput(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, /*peerRank=*/1, &req));
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -802,7 +816,7 @@ TEST_F(RmaMultiSegmentMPITest, IFlushAfterPartialMultiSegmentPut)
     ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, sb->totalSize, &sendMh, &sendGh));
     ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, rb->totalSize, &recvMh, &recvGh));
 
-    if (SyncSkip(!AllTookMultiSegPath()))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     Barrier();
@@ -811,7 +825,7 @@ TEST_F(RmaMultiSegmentMPITest, IFlushAfterPartialMultiSegmentPut)
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
                   rma_->iput(rmaCtx_, 0, /*srcOff=*/off, sendMh, kSize,
-                             /*dstOff=*/off, recvMh, /*peerRank=*/1, &req));
+                             /*dstOff=*/off, recvMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -834,7 +848,7 @@ TEST_F(RmaMultiSegmentMPITest, IFlushAfterPartialMultiSegmentPut)
 // must still fence and verify. IFlushMultiSegment only covers the multi-segment
 // handle and SingleSegmentRegression never flushes, so the nSeg==1 flush path --
 // which the multi-segment change must not regress -- is otherwise untested. No
-// AllTookMultiSegPath gate: a single-segment buffer intentionally does NOT take
+// nSegments gate: a single-segment buffer intentionally does NOT take
 // the per-segment path.
 TEST_F(RmaMultiSegmentMPITest, IFlushSingleSegmentRegression)
 {
@@ -858,7 +872,7 @@ TEST_F(RmaMultiSegmentMPITest, IFlushSingleSegmentRegression)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  rma_->iput(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, /*peerRank=*/1, &req));
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -898,7 +912,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalMultiSegment)
     ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, kSize,       &recvMh, &recvGh));
     ASSERT_EQ(ncclSuccess, RegMr(sigBuf,  kSignalSize, &sigMh,  &sigGh));
 
-    if (SyncSkip(!AllTookMultiSegPath()))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     Barrier();
@@ -910,7 +924,7 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalMultiSegment)
                                    /*srcOff=*/0, sendMh, kSize,
                                    /*dstOff=*/0, recvMh, /*peerRank=*/1,
                                    /*signalOff=*/0, sigMh, /*signalValue=*/0,
-                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, &req));
+                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -987,7 +1001,7 @@ TEST_F(RmaMultiSegmentMPITest, RegisterExceedsMaxSegmentsRejected)
 
         void *pmh = nullptr, *pgh = nullptr;
         EXPECT_EQ(ncclSuccess, RegMr(probe->ptr, probe->totalSize, &pmh, &pgh));
-        if (SyncSkip(!AllTookMultiSegPath()))
+        if (!MultiSegmentPathAvailable())
             GTEST_SKIP() << "multi-segment path not exercised on this host";
     }
 
@@ -1029,7 +1043,7 @@ TEST_F(RmaMultiSegmentMPITest, SingleSegmentRegression)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  rma_->iput(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, 1, &req));
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, kSize, 0, recvMh, 1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -1055,12 +1069,13 @@ TEST_F(RmaMultiSegmentMPITest, RegisterAsymmetricSegmentCountRejected)
     ncclResult_t r = RegMr(bb->ptr, bb->totalSize, &mh, &gh);
 
     // Both ranks must have taken the per-segment path, else there is nothing to test.
-    if (SyncSkip(!AllTookMultiSegPath()))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     // If enumeration happened to return identical counts there is no asymmetry
     // to reject (registration succeeds on both ranks); skip rather than misfire.
-    if (SyncSkip(r == ncclSuccess))
+    // Skip only if every rank succeeded (identical enumeration). any-rank skip hid unilateral success.
+    if (MPIHelpers::allRanksTrue(r == ncclSuccess))
         GTEST_SKIP() << "ranks enumerated identical segment counts; no asymmetry";
 
     EXPECT_EQ(r, ncclInvalidUsage)
@@ -1069,11 +1084,10 @@ TEST_F(RmaMultiSegmentMPITest, RegisterAsymmetricSegmentCountRejected)
     EXPECT_EQ(mh, nullptr) << "no MR handle should be produced on rejection";
 }
 
-// NEGATIVE: equal segment counts are not sufficient symmetry. Rank 0 maps
-// [4 MiB GPU][2 MiB CPU], while rank 1 maps [2 MiB GPU][4 MiB CPU]. The total
-// size and count match, but using either rank's local boundary for the other's
-// MR would address the wrong registration.
-TEST_F(RmaMultiSegmentMPITest, RegisterEqualCountDifferentBoundariesRejected)
+// POSITIVE: equal segment counts with different per-rank boundaries (asymmetric
+// windows / mixed GPU+CPU splits). Registration keeps a per-rank segOff table
+// and splits the full-window put on each side independently.
+TEST_F(RmaMultiSegmentMPITest, RegisterEqualCountDifferentBoundariesTransfer)
 {
     if (!SetUpFixture(2, 2)) return;
 
@@ -1084,12 +1098,29 @@ TEST_F(RmaMultiSegmentMPITest, RegisterEqualCountDifferentBoundariesRejected)
         GTEST_SKIP() << "mixed GPU/CPU VMM allocation unavailable on this host";
 
     void *mh = nullptr, *gh = nullptr;
-    const ncclResult_t r = RegMr(bb->ptr, bb->totalSize, &mh, &gh);
-    if (SyncSkip(!AllTookMultiSegPath()))
+    ASSERT_EQ(ncclSuccess, RegMr(bb->ptr, bb->totalSize, &mh, &gh));
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
-    EXPECT_EQ(r, ncclInvalidUsage);
-    EXPECT_EQ(mh, nullptr);
+    constexpr size_t kTotal = 6 * kMiB;
+    constexpr uint8_t kSentinel = 0xC3;
+    if (worldRank_ == 0)
+        FillBuf(bb->ptr, kTotal, /*seed=*/0x5A);
+    if (worldRank_ == 1)
+        FillSentinel(bb->ptr, kTotal, kSentinel);
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iput(rmaCtx_, 0, 0, mh, kTotal, 0, mh, 1, ncclRmaOptFlagsDefault, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+        EXPECT_TRUE(VerifyBuf(bb->ptr, kTotal, /*seed=*/0x5A));
 }
 
 // NEGATIVE: only rank 0 exceeds the segment cap. Rank 1 successfully registers
@@ -1105,7 +1136,7 @@ TEST_F(RmaMultiSegmentMPITest, RankLocalRegistrationFailureRejectedCollectively)
     void *probeMh = nullptr, *probeGh = nullptr;
     ASSERT_EQ(ncclSuccess,
               RegMr(probe->ptr, probe->totalSize, &probeMh, &probeGh));
-    if (SyncSkip(!AllTookMultiSegPath()))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     const int myNSeg =
@@ -1146,15 +1177,15 @@ TEST_F(RmaMultiSegmentMPITest, IPutOutOfRangeRejectedNoCorruption)
         void* req = nullptr;
         // size exactly one byte past the window.
         EXPECT_EQ(ncclInvalidArgument,
-                  rma_->iput(rmaCtx_, 0, 0, sendMh, total + 1, 0, recvMh, 1, &req))
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, total + 1, 0, recvMh, 1, ncclRmaOptFlagsDefault, &req))
             << "oversized transfer must be rejected";
         // valid size but srcOff pushes the source past the end.
         EXPECT_EQ(ncclInvalidArgument,
-                  rma_->iput(rmaCtx_, 0, /*srcOff=*/1, sendMh, total, 0, recvMh, 1, &req))
+                  rma_->iput(rmaCtx_, 0, /*srcOff=*/1, sendMh, total, 0, recvMh, 1, ncclRmaOptFlagsDefault, &req))
             << "src offset overrun must be rejected";
         // valid size but dstOff pushes the destination past the end.
         EXPECT_EQ(ncclInvalidArgument,
-                  rma_->iput(rmaCtx_, 0, 0, sendMh, total, /*dstOff=*/1, recvMh, 1, &req))
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, total, /*dstOff=*/1, recvMh, 1, ncclRmaOptFlagsDefault, &req))
             << "dst offset overrun must be rejected";
         EXPECT_EQ(req, nullptr) << "rejected iput must not produce a request";
     }
@@ -1185,13 +1216,13 @@ TEST_F(RmaMultiSegmentMPITest, IGetOutOfRangeRejected)
     {
         void* req = nullptr;
         EXPECT_EQ(ncclInvalidArgument,
-                  rma_->iget(rmaCtx_, 0, /*remoteOff=*/0, mh, total + 1, 0, mh, 1, &req))
+                  rma_->iget(rmaCtx_, 0, /*remoteOff=*/0, mh, total + 1, 0, mh, 1, ncclRmaOptFlagsDefault, &req))
             << "oversized iget must be rejected";
         EXPECT_EQ(ncclInvalidArgument,
-                  rma_->iget(rmaCtx_, 0, /*remoteOff=*/1, mh, total, 0, mh, 1, &req))
+                  rma_->iget(rmaCtx_, 0, /*remoteOff=*/1, mh, total, 0, mh, 1, ncclRmaOptFlagsDefault, &req))
             << "remote offset overrun must be rejected";
         EXPECT_EQ(ncclInvalidArgument,
-                  rma_->iget(rmaCtx_, 0, 0, mh, total, /*localOff=*/1, mh, 1, &req))
+                  rma_->iget(rmaCtx_, 0, 0, mh, total, /*localOff=*/1, mh, 1, ncclRmaOptFlagsDefault, &req))
             << "local offset overrun must be rejected";
         EXPECT_EQ(req, nullptr) << "rejected iget must not produce a request";
     }
@@ -1229,18 +1260,18 @@ TEST_F(RmaMultiSegmentMPITest, IPutSignalOutOfRangeRejectedNoCorruption)
         EXPECT_EQ(ncclInvalidArgument,
                   rma_->iputSignal(rmaCtx_, 0, 0, sendMh, total + 1, 0, recvMh, 1,
                                    /*signalOff=*/0, sigMh, 0, NCCL_NET_SIGNAL_OP_INC,
-                                   /*isStrongSignal=*/false, &req))
+                                   /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req))
             << "oversized iputSignal payload must be rejected";
         // Signal atomic straddles the end of the signal window (signalOff+8 > size).
         EXPECT_EQ(ncclInvalidArgument,
                   rma_->iputSignal(rmaCtx_, 0, 0, sendMh, total, 0, recvMh, 1,
                                    /*signalOff=*/kSignalSize - 4, sigMh, 0,
-                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, &req))
+                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req))
             << "out-of-range signal offset must be rejected";
         EXPECT_EQ(ncclInvalidArgument,
                   rma_->iputSignal(rmaCtx_, 0, 0, sendMh, total, 0, recvMh, 1,
                                    /*signalOff=*/4, sigMh, 0,
-                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, &req))
+                                   NCCL_NET_SIGNAL_OP_INC, /*isStrongSignal=*/false, ncclRmaOptFlagsDefault, &req))
             << "unaligned signal atomic must be rejected";
         EXPECT_EQ(req, nullptr) << "rejected iputSignal must not produce a request";
     }
@@ -1276,7 +1307,7 @@ TEST_F(RmaMultiSegmentMPITest, BoundaryStressNoCorruption)
     ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, total, &sendMh, &sendGh));
     ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, total, &recvMh, &recvGh));
 
-    if (SyncSkip(!AllTookMultiSegPath()))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     // Straddle each interior boundary k*seg with a chunk that lands in both the
@@ -1298,7 +1329,7 @@ TEST_F(RmaMultiSegmentMPITest, BoundaryStressNoCorruption)
         {
             void* req = nullptr;
             ASSERT_EQ(ncclSuccess,
-                      rma_->iput(rmaCtx_, 0, off, sendMh, len, off, recvMh, 1, &req))
+                      rma_->iput(rmaCtx_, 0, off, sendMh, len, off, recvMh, 1, ncclRmaOptFlagsDefault, &req))
                 << "iput failed straddling boundary " << k;
             ASSERT_TRUE(PollUntilDone(req)) << "iput stalled at boundary " << k;
         }
@@ -1323,7 +1354,7 @@ TEST_F(RmaMultiSegmentMPITest, BoundaryStressNoCorruption)
     {
         void* req = nullptr;
         ASSERT_EQ(ncclSuccess,
-                  rma_->iput(rmaCtx_, 0, 0, sendMh, total, 0, recvMh, 1, &req));
+                  rma_->iput(rmaCtx_, 0, 0, sendMh, total, 0, recvMh, 1, ncclRmaOptFlagsDefault, &req));
         ASSERT_TRUE(PollUntilDone(req));
     }
     Barrier();
@@ -1359,7 +1390,7 @@ TEST_F(RmaMultiSegmentMPITest, MultiNodeAsymmetricIGetBoundaryStress)
     void *srcMh, *srcGh, *dstMh, *dstGh;
     ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, total, &srcMh, &srcGh));
     ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, total, &dstMh, &dstGh));
-    if (SyncSkip(!AllTookMultiSegPath()))
+    if (!MultiSegmentPathAvailable())
         GTEST_SKIP() << "multi-segment path not exercised on this host";
 
     for (int i = 0; i < kIterations; ++i)
@@ -1384,7 +1415,7 @@ TEST_F(RmaMultiSegmentMPITest, MultiNodeAsymmetricIGetBoundaryStress)
             void* req = nullptr;
             ASSERT_EQ(ncclSuccess,
                       rma_->iget(rmaCtx_, 0, remoteOff, srcMh, len,
-                                 localOff, dstMh, /*peerRank=*/1, &req))
+                                 localOff, dstMh, /*peerRank=*/1, ncclRmaOptFlagsDefault, &req))
                 << "iget post failed at iteration " << i;
             ASSERT_TRUE(PollUntilDone(req)) << "iget stalled at iteration " << i;
             ExpectPayloadIsolated(rb->ptr, total, localOff, len, seed,
