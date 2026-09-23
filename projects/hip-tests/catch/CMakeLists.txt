@@ -121,8 +121,8 @@ if(NOT WIN32)
   endif() # end BUILD_SHARED_LIBS
 endif() # end win32
 
-# Resolves ENABLE_SANITIZER and applies the sanitizer flags to this scope. Must sit after
-# before GPU_TARGETS is consumed, it rewrites that to xnack+.
+# Resolves ENABLE_SANITIZER, applies the sanitizer flags to this scope, and defines
+# hip_tests_sanitizer_rewrite_offload_archs().
 include(cmake/hip-tests-sanitizers.cmake)
 
 string(REPLACE "." ";" VERSION_LIST ${HIP_VERSION})
@@ -285,6 +285,10 @@ endif()
 
 # Trim any trailing spaces, this trips up the cxx function call
 string(STRIP "${OFFLOAD_ARCH_STR}" OFFLOAD_ARCH_STR)
+
+if(ENABLE_SANITIZER STREQUAL "ASAN")
+  hip_tests_sanitizer_rewrite_offload_archs(OFFLOAD_ARCH_STR)
+endif()
 
 message(STATUS "Using offload arch string: ${OFFLOAD_ARCH_STR}")
 if(DEFINED OFFLOAD_ARCH_STR)

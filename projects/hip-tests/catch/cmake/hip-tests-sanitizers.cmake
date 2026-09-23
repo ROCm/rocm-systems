@@ -52,13 +52,6 @@ if(ENABLE_SANITIZER STREQUAL "ASAN" AND NOT CMAKE_HIP_COMPILER_ID MATCHES "Clang
     "host code.")
 endif()
 
-# Device instrumentation only applies on xnack+ targets; Rewrites GPU_TARGETS 
-# to use xnack+ when possible.
-if(ENABLE_SANITIZER STREQUAL "ASAN" AND DEFINED GPU_TARGETS)
-  list(TRANSFORM GPU_TARGETS REPLACE "^(gfx942|gfx950)$" "\\1:xnack+")
-  message(STATUS "Device instrumentation targets: ${GPU_TARGETS}")
-endif()
-
 if(NOT ENABLE_SANITIZER STREQUAL "OFF")
   # Host instrumentation. Skipped under TheRock, which already instruments the C and C++
   # compile lines through CMAKE_CXX_FLAGS_INIT.
@@ -86,3 +79,12 @@ if(NOT ENABLE_SANITIZER STREQUAL "OFF")
   add_compile_definitions(ENABLE_ADDRESS_SANITIZER)
   message(STATUS "Building catch tests with Address Sanitizer options (${ENABLE_SANITIZER})")
 endif()
+
+# Device instrumentation is only emitted for xnack+ targets. Rewrite offload_archs
+# to use xnack+ when possible
+function(hip_tests_sanitizer_rewrite_offload_archs offload_arch_str_var)
+  separate_arguments(_archs UNIX_COMMAND "${${offload_arch_str_var}}")
+  list(TRANSFORM _archs REPLACE "^--offload-arch=(gfx942|gfx950)$" "--offload-arch=\\1:xnack+")
+  string(JOIN " " _rewritten ${_archs})
+  set(${offload_arch_str_var} "${_rewritten}" PARENT_SCOPE)
+endfunction()
