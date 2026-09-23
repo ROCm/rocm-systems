@@ -32,7 +32,7 @@ int ncclIbScanPeerMemClients(const char* const* basePaths) {
     }
     closedir(dir);
   }
-  if (found == 0) INFO(NCCL_INIT, "No peer memory client found, GDR via peermem disabled");
+  if (found == 0) INFO(NCCL_INIT, "No peer memory client found in sysfs");
   return found;
 }
 

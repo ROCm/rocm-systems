@@ -22,6 +22,43 @@ RCCL_PARAM(ForceEnableGdrdma, "FORCE_ENABLE_GDRDMA", -1);
 
 extern int64_t ncclParamIbPciRelaxedOrdering();
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// A peer-memory client can complete registration without publishing a sysfs group under
+// memory_peers, so the directory scan reports no client on hosts where registering device
+// memory still works. Probe the registration itself before giving up on peermem: one page of
+// device memory on the first IB device, with the access flags the data path uses.
+static int ncclIbProbePeerMemRegistration() {
+  if (ncclNIbDevs < 1) return 0;
+  if (rocmLibraryInit() != ncclSuccess) return 0;
+
+  size_t pageSize = sysconf(_SC_PAGESIZE);
+  void* gpuPtr = NULL;
+  if (hipMalloc(&gpuPtr, pageSize) != hipSuccess) return 0;
+
+  int found = 0;
+  struct ibv_pd* pd = NULL;
+  if (wrap_ibv_alloc_pd(&pd, ncclIbDevs[0].context) == ncclSuccess) {
+    // wrap_direct_ibv_reg_mr() is used so that an expected failure stays silent.
+    struct ibv_mr* mr =
+      wrap_direct_ibv_reg_mr(pd, gpuPtr, pageSize,
+                             IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
+                               IBV_ACCESS_REMOTE_ATOMIC);
+    if (mr != NULL) {
+      found = 1;
+      (void)wrap_ibv_dereg_mr(mr);
+    }
+    (void)wrap_ibv_dealloc_pd(pd);
+  }
+  (void)hipFree(gpuPtr);
+
+  if (found) {
+    INFO(NCCL_INIT, "Device memory registered on %s with no memory_peers client present, GDR via peermem enabled",
+         ncclIbDevs[0].devName);
+  }
+  return found;
+}
+#endif
+
 static void ibGdrSupportInitOnce() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (rcclParamForceEnableGdrdma() == 1) {
@@ -33,7 +70,7 @@ static void ibGdrSupportInitOnce() {
   }
 
   if (ncclIbGdrModuleLoaded == 0) {
-    if (ncclIbScanDefaultPeerMemClients()) ncclIbGdrModuleLoaded = 1;
+    if (ncclIbScanDefaultPeerMemClients() || ncclIbProbePeerMemRegistration()) ncclIbGdrModuleLoaded = 1;
 
     char strValue[MAX_STR_LEN];
     (void)ncclOsTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue, sizeof(strValue));
