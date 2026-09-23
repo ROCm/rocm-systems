@@ -5,9 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace cpu
+namespace rocprofsys::cpu
 {
 
 struct cpu_info
@@ -34,5 +32,4 @@ device_count();
 void
 query_cpu_agents();
 
-}  // namespace cpu
-}  // namespace rocprofsys
+}  // namespace rocprofsys::cpu
