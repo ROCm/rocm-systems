@@ -8,6 +8,8 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * New HIP APIs
     - Module Management: support for API parity with corresponding CUDA API.
       * `hipModuleEnumerateFunctions` returns the function handles defined in a loaded module.
+    - Library Management: support for API parity with corresponding CUDA API.
+      * `hipLibraryGetUnifiedFunction` looks up a unified function in a library. Mirrors `cuLibraryGetUnifiedFunction` / `cudaLibraryGetUnifiedFunction`. No AMD GPU supports unified function pointers, so on the AMD platform it returns `hipErrorNotFound` for valid arguments.
 
 ## HIP 10.1.0 for ROCm 10.1.0
 

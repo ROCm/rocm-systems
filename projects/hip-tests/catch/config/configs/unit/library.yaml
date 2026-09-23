@@ -92,3 +92,12 @@ library:
   Unit_hipLibrary_LoadUnloadCycle:
     <<: *level_2
     tags: [module]
+  Unit_hipLibraryGetUnifiedFunction_Negative_Parameters:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetUnifiedFunction_Negative_NotFound:
+    <<: *level_2
+    tags: [module]
+  Unit_hipLibraryGetUnifiedFunction_NoDeviceReportsSupport:
+    <<: *level_2
+    tags: [module]

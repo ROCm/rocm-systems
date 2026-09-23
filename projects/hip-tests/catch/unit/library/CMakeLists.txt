@@ -11,6 +11,7 @@ set(TEST_SRC
     library_invariants.cc
     hipKernelGetAttribute.cc
     lib_attribute.cc
+    library_get_unified_function.cc
 )
 
 if (HIP_PLATFORM MATCHES "amd")

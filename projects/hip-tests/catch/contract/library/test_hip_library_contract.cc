@@ -388,3 +388,59 @@ HIP_TEST_CASE(Contract_Library_HipKernelGetLibrary_Default_RoundTrips) {
   HIP_CHECK(hipKernelGetLibrary(&resolved, kernel));
   REQUIRE(resolved == library);
 }
+
+// @asserts: hipLibraryGetUnifiedFunction - a null function out-parameter is rejected with a non-success status
+HIP_TEST_CASE(Contract_Library_HipLibraryGetUnifiedFunction_NullFunctionOut_IsRejected) {
+  std::vector<char> code;
+  hipLibrary_t library = nullptr;
+  LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
+
+  // A null destination must be reported rather than written through. The exact
+  // error code is backend-specific, so only a non-success status is required.
+  const hipError_t status = hipLibraryGetUnifiedFunction(nullptr, library, kWriteKernelName);
+  REQUIRE(status != hipSuccess);
+}
+
+// @asserts: hipLibraryGetUnifiedFunction - a null library handle is rejected with a non-success status
+HIP_TEST_CASE(Contract_Library_HipLibraryGetUnifiedFunction_NullLibrary_IsRejected) {
+  // Looking up a function in a null library must fail rather than return a bogus
+  // pointer. Backends may report an invalid-value or invalid-handle status; the
+  // contract only requires a non-success status. hipFree(0) primes the primary
+  // context that the NVIDIA driver-API path needs.
+  HIP_CHECK(hipFree(0));
+  void* function = nullptr;
+  const hipError_t status = hipLibraryGetUnifiedFunction(&function, nullptr, kWriteKernelName);
+  REQUIRE(status != hipSuccess);
+}
+
+// @asserts: hipLibraryGetUnifiedFunction - an ordinary kernel symbol does not resolve as a unified function
+HIP_TEST_CASE(Contract_Library_HipLibraryGetUnifiedFunction_KernelSymbol_IsNotUnified) {
+  std::vector<char> code;
+  hipLibrary_t library = nullptr;
+  LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
+
+  // A kernel is not a unified function, so looking one up must fail on every
+  // backend. The exact error code is backend-specific.
+  void* function = nullptr;
+  const hipError_t status = hipLibraryGetUnifiedFunction(&function, library, kWriteKernelName);
+  REQUIRE(status != hipSuccess);
+}
+
+// @asserts: hipLibraryGetUnifiedFunction - resolving an undefined symbol fails with a non-success status
+HIP_TEST_CASE(Contract_Library_HipLibraryGetUnifiedFunction_UnknownSymbol_IsRejected) {
+  std::vector<char> code;
+  hipLibrary_t library = nullptr;
+  LoadContractLibrary(code, library);
+  hip::contract::ContractCleanup cleanup;
+  cleanup.Add([library] { (void)hipLibraryUnload(library); });
+
+  // A symbol the library does not define must not resolve. The exact error code
+  // is backend-specific, so only a non-success status is required.
+  void* function = nullptr;
+  const hipError_t status = hipLibraryGetUnifiedFunction(&function, library, "no_such_function");
+  REQUIRE(status != hipSuccess);
+}

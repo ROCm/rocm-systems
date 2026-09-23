@@ -3366,3 +3366,9 @@ hipError_t hipModuleEnumerateFunctions(hipFunction_t* functions, unsigned int nu
   return hip::GetHipDispatchTable()->hipModuleEnumerateFunctions_fn(functions, numFunctions, mod);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipLibraryGetUnifiedFunction(void** fptr, hipLibrary_t library,
+                                                       const char* symbol) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipLibraryGetUnifiedFunction_fn(fptr, library, symbol);
+  CATCH;
+}
