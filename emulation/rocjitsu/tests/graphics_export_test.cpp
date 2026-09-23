@@ -90,10 +90,11 @@ protected:
     (void)cu_->execute_instruction(instruction.get(), *wave_);
   }
 
-  void sample(uint8_t opcode, uint8_t dim) {
+  void sample(uint8_t opcode, uint8_t dim, bool a16 = false) {
     std::array<uint32_t, 4> words{};
     if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
       const auto encoded = rdna4::build_vsample(opcode, {.dim = dim,
+                                                         .a16 = a16,
                                                          .dmask = 15,
                                                          .vdata = 12,
                                                          .rsrc = 8,
@@ -105,7 +106,8 @@ protected:
       std::copy(encoded.begin(), encoded.end(), words.begin());
     } else {
       const auto encoded = rdna3::build_mimg(
-          opcode, {.dim = dim, .dmask = 15, .vaddr = 0, .vdata = 12, .srsrc = 2, .ssamp = 1});
+          opcode,
+          {.dim = dim, .dmask = 15, .a16 = a16, .vaddr = 0, .vdata = 12, .srsrc = 2, .ssamp = 1});
       std::copy(encoded.begin(), encoded.end(), words.begin());
     }
     auto decoded = decoder_->decode(words.data());
@@ -2906,6 +2908,8 @@ TEST_P(GraphicsExportTest, SampleLodUsesMipViewsDerivativesAndBias) {
       {"view base", 29, 1, 1, 0, 0, 3, 0, {1, 0, 0, 1}},
       {"view upper bound", 29, 1, 1, 3, 0, 3, 0, {0, 0, 1, 1}},
       {"explicit derivatives", 28, 1, 0, 0, 0, 3, 0.5f, {0, 1, 0, 1}},
+      {"half derivatives", 57, 1, 0, 0, 0, 3, 0.5f, {0, 1, 0, 1}},
+      {"packed coordinates with half derivatives", 57, 1, 0, 0, 0, 3, 0.5f, {0, 1, 0, 1}, true},
       {"implicit derivatives", 27, 1, 0, 0, 0, 3, 0.5f, {0, 1, 0, 1}},
       {"shader bias", 30, 1, 0, 1, 0, 3, 0.25f, {0, 1, 0, 1}},
       {"forced zero", 31, 1, 0, 0, 0, 3, 0.5f, {0, 0, 0, 1}},
@@ -2943,12 +2947,22 @@ TEST_P(GraphicsExportTest, SampleLodUsesMipViewsDerivativesAndBias) {
       std::array<float, 6> values{u, v, test.lod};
       if (test.opcode == 28)
         values = {test.coordinate_step, 0, 0, test.coordinate_step, u, v};
+      if (test.opcode == 57)
+        values = {0, 0, u, v};
       if (test.opcode == 30)
         values = {test.lod, u, v};
       for (uint32_t r = 0; r < values.size(); ++r)
         wave_->debug_write_vgpr(address_regs[r], lane, std::bit_cast<uint32_t>(values[r]));
+      if (test.opcode == 57) {
+        wave_->debug_write_vgpr(address_regs[0], lane, util::f32_to_f16(test.coordinate_step));
+        wave_->debug_write_vgpr(address_regs[1], lane,
+                                uint32_t(util::f32_to_f16(test.coordinate_step)) << 16);
+      }
       if (test.a16) {
-        const uint32_t prefix = test.opcode == 28 ? 4 : test.opcode == 30 ? 1 : 0;
+        const uint32_t prefix = test.opcode == 28   ? 4
+                                : test.opcode == 57 ? 2
+                                : test.opcode == 30 ? 1
+                                                    : 0;
         wave_->debug_write_vgpr(address_regs[prefix], lane,
                                 util::f32_to_f16(values[prefix]) |
                                     (uint32_t(util::f32_to_f16(values[prefix + 1])) << 16));
@@ -2958,6 +2972,7 @@ TEST_P(GraphicsExportTest, SampleLodUsesMipViewsDerivativesAndBias) {
     }
     std::array<uint32_t, 4> words{};
     const uint8_t second_address = test.a16 && (test.opcode == 27 || test.opcode == 31) ? 255 : 0;
+    const uint8_t fourth_address = test.a16 && test.opcode == 57 ? 255 : 8;
     if (gfx12) {
       const auto encoded = rdna4::build_vsample(test.opcode, {.dim = 1,
                                                               .a16 = test.a16,
@@ -2968,7 +2983,7 @@ TEST_P(GraphicsExportTest, SampleLodUsesMipViewsDerivativesAndBias) {
                                                               .vaddr0 = 6,
                                                               .vaddr1 = second_address,
                                                               .vaddr2 = 4,
-                                                              .vaddr3 = 8});
+                                                              .vaddr3 = fourth_address});
       std::copy(encoded.begin(), encoded.end(), words.begin());
     } else {
       const auto encoded = rdna3::build_mimg(test.opcode, {.nsa = 1,
@@ -2980,7 +2995,7 @@ TEST_P(GraphicsExportTest, SampleLodUsesMipViewsDerivativesAndBias) {
                                                            .srsrc = 2,
                                                            .ssamp = 1});
       std::copy(encoded.begin(), encoded.end(), words.begin());
-      words[2] = second_address | (4 << 8) | (8 << 16) | (9 << 24);
+      words[2] = second_address | (4 << 8) | (uint32_t(fourth_address) << 16) | (9 << 24);
     }
     auto decoded = decoder_->decode(words.data());
     ASSERT_FALSE(decoded.failed());
@@ -2995,6 +3010,70 @@ TEST_P(GraphicsExportTest, SampleLodUsesMipViewsDerivativesAndBias) {
       for (uint32_t c = 0; c < 4; ++c)
         EXPECT_EQ(wave_->debug_read_vgpr(6 + c, lane), std::bit_cast<uint32_t>(test.expected[c]))
             << lane << "," << c;
+  }
+}
+
+TEST_P(GraphicsExportTest, PackedGradientComponentsSelectMipIndependentlyOfCoordinates) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  for (bool cube : {false, true}) {
+    // The non-square 2D image distinguishes U/V halves. Cube neighbors select
+    // opposite faces, so implicit derivatives would select a different mip.
+    const uint32_t height = cube ? 8 : 4, layers = cube ? 6 : 1;
+    cu_->l1_vector().invalidate_all();
+    cache_.invalidate_all();
+    for (uint32_t layer = 0; layer < layers; ++layer)
+      for (uint32_t level = 0; level < 4; ++level) {
+        const auto mip = amdgpu::image_mip_layout(gfx12, 0, 4, 8, height, 4, level);
+        ASSERT_TRUE(mip);
+        const uint64_t base = 0x100000 + layer * mip->slice_size + mip->offset;
+        for (uint32_t y = 0; y < mip->height; ++y)
+          for (uint32_t x = 0; x < mip->width; ++x) {
+            const auto address = gfx12 ? amdgpu::gfx12_image_address(base, x, y, mip->pitch, 4, 0)
+                                       : amdgpu::gfx11_image_address(base, x, y, mip->pitch, 4, 0);
+            ASSERT_TRUE(address);
+            memory_.write32(*address, 0xff000000 | (layer << 8) | level);
+          }
+      }
+    const std::array<uint32_t, 8> descriptor{
+        0x1000,
+        (46u << (gfx12 ? 17 : 20)) | (3u << 30) | (3u << (gfx12 ? 12 : 16)),
+        1 | ((height - 1) << 14),
+        ((cube ? 11u : 9u) << 28) | 0xfac | (3u << (gfx12 ? 15 : 16)),
+        layers - 1,
+        0,
+        0,
+        0};
+    for (uint32_t i = 0; i < descriptor.size(); ++i)
+      wave_->debug_write_sgpr(8 + i, descriptor[i]);
+    wave_->debug_write_sgpr(4, 2 | (2 << 3) | (2 << 6));
+    wave_->debug_write_sgpr(5, 768u << (gfx12 ? 13 : 12));
+    wave_->debug_write_sgpr(6, 1u << 26);
+    wave_->debug_write_sgpr(7, 0);
+    wave_->set_exec(15);
+    for (bool a16 : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "cube=" << cube << ", a16=" << a16);
+      for (uint32_t lane = 0; lane < 4; ++lane) {
+        // Each lane supplies exactly one nonzero explicit derivative. Body
+        // coordinates are constant, so their quad differences cannot stand in.
+        const uint32_t gradient = uint32_t(util::f32_to_f16(0.5f)) << (16 * (lane % 2));
+        wave_->debug_write_vgpr(0, lane, lane < 2 ? gradient : 0);
+        wave_->debug_write_vgpr(1, lane, lane >= 2 ? gradient : 0);
+        const float coordinate = cube ? 1.25f : 0.25f;
+        const uint32_t packed = util::f32_to_f16(coordinate);
+        wave_->debug_write_vgpr(
+            2, lane, a16 ? packed | (packed << 16) : std::bit_cast<uint32_t>(coordinate));
+        wave_->debug_write_vgpr(
+            3, lane, a16 ? util::f32_to_f16(float(lane)) : std::bit_cast<uint32_t>(coordinate));
+        wave_->debug_write_vgpr(4, lane, std::bit_cast<uint32_t>(float(lane)));
+      }
+      wave_->debug_write_vgpr(12, 4, 0xdeadbeef);
+      ASSERT_NO_FATAL_FAILURE(sample(57, cube ? 3 : 1, a16));
+      for (uint32_t lane = 0; lane < 4; ++lane) {
+        EXPECT_EQ(wave_->debug_read_vgpr(12, lane), cube || !(lane & 1) ? 2u : 1u) << lane;
+        EXPECT_EQ(wave_->debug_read_vgpr(13, lane), cube ? lane : 0u) << lane;
+      }
+      EXPECT_EQ(wave_->debug_read_vgpr(12, 4), 0xdeadbeefu);
+    }
   }
 }
 
@@ -3018,6 +3097,7 @@ TEST_P(GraphicsExportTest, SampledArrayViewsClampLayersAndKeepMipCoordinatesSepa
       for (bool array : {false, true})
         for (const auto [opcode, name] : {std::pair{27u, "IMAGE_SAMPLE"},
                                           {28u, "IMAGE_SAMPLE_D"},
+                                          {57u, "IMAGE_SAMPLE_D_G16"},
                                           {29u, "IMAGE_SAMPLE_L"},
                                           {30u, "IMAGE_SAMPLE_B"},
                                           {31u, "IMAGE_SAMPLE_LZ"}}) {
@@ -3039,7 +3119,7 @@ TEST_P(GraphicsExportTest, SampledArrayViewsClampLayersAndKeepMipCoordinatesSepa
           wave_->debug_write_sgpr(6, 1u << 26);
           wave_->debug_write_sgpr(7, 0);
           wave_->set_exec(15);
-          const uint32_t prefix = opcode == 28 ? 4 : opcode == 30 ? 1 : 0;
+          const uint32_t prefix = opcode == 28 ? 4 : opcode == 57 ? 2 : opcode == 30 ? 1 : 0;
           const std::array<uint32_t, 7> registers{6, 0, 4, 8, 9, 10, 11};
           for (uint32_t lane = 0; lane < 4; ++lane) {
             std::array<float, 7> values{};
@@ -3055,6 +3135,10 @@ TEST_P(GraphicsExportTest, SampledArrayViewsClampLayersAndKeepMipCoordinatesSepa
               values[prefix + 2 + array] = 1.0f;
             for (uint32_t i = 0; i < values.size(); ++i)
               wave_->debug_write_vgpr(registers[i], lane, std::bit_cast<uint32_t>(values[i]));
+            if (opcode == 57) {
+              wave_->debug_write_vgpr(registers[0], lane, util::f32_to_f16(0.5f));
+              wave_->debug_write_vgpr(registers[1], lane, uint32_t(util::f32_to_f16(0.5f)) << 16);
+            }
             if (a16) {
               const uint32_t count = 2 + array + (opcode == 29);
               for (uint32_t i = 0; i < count; i += 2)
@@ -3093,6 +3177,7 @@ TEST_P(GraphicsExportTest, SampledArrayViewsClampLayersAndKeepMipCoordinatesSepa
           auto decoded = decoder_->decode(words.data());
           ASSERT_FALSE(decoded.failed());
           auto instruction = std::move(decoded).value();
+          ASSERT_TRUE(instruction->is_memory_op());
           ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
           ASSERT_FALSE(wave_->instruction_execution_failed());
           amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
@@ -4037,19 +4122,35 @@ TEST_P(GraphicsExportTest, CubeSamplingRemapsEdgesCornersAndArrayViewFaces) {
       {65520, {0x3facee23u, 0x3fae39fau, 0x3fafa932u, 0x3fb10c5au}},
       {65535, {0x3f8d244eu, 0x3f8e3680u, 0x3f8f5febu, 0x3f908115u}},
   };
-  wave_->set_exec((1u << std::size(witnesses)) - 1);
-  for (uint32_t lane = 0; lane < std::size(witnesses); ++lane) {
-    const uint32_t q = witnesses[lane].query;
-    const float values[] = {1 + ((q & 255) + 0.5f) / 256, 1 + ((q >> 8) + 0.5f) / 256,
-                            float((q >> 4) % 6)};
-    for (uint32_t i = 0; i < 3; ++i)
-      wave_->debug_write_vgpr(i, lane, std::bit_cast<uint32_t>(values[i]));
-  }
-  ASSERT_NO_FATAL_FAILURE(sample(31, 3)); // IMAGE_SAMPLE_LZ, cube.
-  for (uint32_t lane = 0; lane < std::size(witnesses); ++lane)
-    for (uint32_t c = 0; c < 4; ++c)
-      EXPECT_EQ(wave_->debug_read_vgpr(12 + c, lane), witnesses[lane].expected[c])
-          << lane << "," << c;
+  for (const auto [opcode, name] : {std::pair{31u, "IMAGE_SAMPLE_LZ"}, {57u, "IMAGE_SAMPLE_D_G16"}})
+    for (bool a16 : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "opcode=" << name << ", a16=" << a16);
+      const uint32_t prefix = opcode == 57 ? 2 : 0;
+      wave_->set_exec((1u << std::size(witnesses)) - 1);
+      for (uint32_t lane = 0; lane < std::size(witnesses); ++lane) {
+        const uint32_t q = witnesses[lane].query;
+        const float values[] = {1 + ((q & 255) + 0.5f) / 256, 1 + ((q >> 8) + 0.5f) / 256,
+                                float((q >> 4) % 6)};
+        for (uint32_t i = 0; i < prefix; ++i)
+          wave_->debug_write_vgpr(i, lane, 0);
+        if (a16) {
+          wave_->debug_write_vgpr(prefix, lane,
+                                  util::f32_to_f16(values[0]) |
+                                      (uint32_t(util::f32_to_f16(values[1])) << 16));
+          wave_->debug_write_vgpr(prefix + 1, lane, util::f32_to_f16(values[2]));
+        } else {
+          for (uint32_t i = 0; i < 3; ++i)
+            wave_->debug_write_vgpr(prefix + i, lane, std::bit_cast<uint32_t>(values[i]));
+        }
+      }
+      wave_->debug_write_vgpr(12, 31, 0xdeadbeef);
+      ASSERT_NO_FATAL_FAILURE(sample(opcode, 3, a16));
+      for (uint32_t lane = 0; lane < std::size(witnesses); ++lane)
+        for (uint32_t c = 0; c < 4; ++c)
+          EXPECT_EQ(wave_->debug_read_vgpr(12 + c, lane), witnesses[lane].expected[c])
+              << lane << "," << c;
+      EXPECT_EQ(wave_->debug_read_vgpr(12, 31), 0xdeadbeefu);
+    }
 }
 
 TEST_P(GraphicsExportTest, ImplicitCubeSamplingUnfoldsAdjacentFacesAndBoundsOppositeFaces) {

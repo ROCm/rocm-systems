@@ -334,6 +334,16 @@ class CodeGenerator:
     _DST_OPERANDS_CAPACITY = 3
     _MEMORY_COUNTER_OBLIGATIONS_CAPACITY = 3
 
+    # Supported image sampling modes shared by execution and issue metadata.
+    _IMAGE_SAMPLE_MODES = {
+        'IMAGE_SAMPLE': 'Implicit',
+        'IMAGE_SAMPLE_LZ': 'Zero',
+        'IMAGE_SAMPLE_L': 'Explicit',
+        'IMAGE_SAMPLE_B': 'Bias',
+        'IMAGE_SAMPLE_D': 'Derivatives',
+        'IMAGE_SAMPLE_D_G16': 'Derivatives16',
+    }
+
     # Memory-pipeline semantics recognized by code generation. This table is
     # also the source of truth for the MEMORY_OP instruction flag: every entry
     # has explicit issue-counter and completion-order metadata before it can
@@ -7656,11 +7666,7 @@ class CodeGenerator:
         ) and inst.name.upper() in (
             'IMAGE_LOAD',
             'IMAGE_STORE',
-            'IMAGE_SAMPLE',
-            'IMAGE_SAMPLE_LZ',
-            'IMAGE_SAMPLE_L',
-            'IMAGE_SAMPLE_B',
-            'IMAGE_SAMPLE_D',
+            *self._IMAGE_SAMPLE_MODES,
         ):
             gfx12 = self.isa_spec.arch_name == 'rdna4'
             sample = inst.name.upper().startswith('IMAGE_SAMPLE')
@@ -7677,7 +7683,7 @@ class CodeGenerator:
                 unsupported += ' || inst_.nv'
             if sample:
                 unsupported += ' || inst_.unorm || inst_.lwe'
-            if inst.name.upper() == 'IMAGE_SAMPLE_D':
+            if inst.name.upper() in ('IMAGE_SAMPLE_D', 'IMAGE_SAMPLE_D_G16'):
                 coords = (
                     '{inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, '
                     'inst_.vaddr3 + 1u, inst_.vaddr3 + 2u, inst_.vaddr3 + 3u}'
@@ -7705,13 +7711,7 @@ class CodeGenerator:
                     'inst_.nsa ? (raw_words_[2] >> 8) & 255 : inst_.vaddr + 2u}'
                 )
             if sample:
-                mode = {
-                    'IMAGE_SAMPLE': 'Implicit',
-                    'IMAGE_SAMPLE_LZ': 'Zero',
-                    'IMAGE_SAMPLE_L': 'Explicit',
-                    'IMAGE_SAMPLE_B': 'Bias',
-                    'IMAGE_SAMPLE_D': 'Derivatives',
-                }[inst.name.upper()]
+                mode = self._IMAGE_SAMPLE_MODES[inst.name.upper()]
                 sampler += f', amdgpu::ImageSampleMode::{mode}, inst_.a16'
             else:
                 sampler = ', ~0u, amdgpu::ImageSampleMode::Implicit, inst_.a16'
@@ -8155,20 +8155,10 @@ class CodeGenerator:
 
     def _memory_issue_semantic_class(self, sem: InstructionSemantics) -> str:
         """Return the issue-metadata variant for one decoded instruction."""
-        if self.isa_spec.arch_name == 'rdna4' and sem.name in (
-            'IMAGE_SAMPLE',
-            'IMAGE_SAMPLE_LZ',
-            'IMAGE_SAMPLE_L',
-            'IMAGE_SAMPLE_B',
-            'IMAGE_SAMPLE_D',
-        ):
+        if self.isa_spec.arch_name == 'rdna4' and sem.name in self._IMAGE_SAMPLE_MODES:
             return 'image_sample_2d'
         if self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4') and sem.name in (
-            'IMAGE_SAMPLE',
-            'IMAGE_SAMPLE_LZ',
-            'IMAGE_SAMPLE_L',
-            'IMAGE_SAMPLE_B',
-            'IMAGE_SAMPLE_D',
+            *self._IMAGE_SAMPLE_MODES,
             'IMAGE_LOAD',
             'IMAGE_STORE',
         ):

@@ -24,7 +24,7 @@
 
 namespace rocjitsu::amdgpu {
 
-enum class ImageSampleMode { Implicit, Zero, Explicit, Bias, Derivatives };
+enum class ImageSampleMode { Implicit, Zero, Explicit, Bias, Derivatives, Derivatives16 };
 
 inline double round_sample_fixed8(double value) {
   const double scaled = value * 256, lo = std::floor(scaled);
@@ -96,6 +96,8 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   uint32_t min_filter = 0, mag_filter = 0, mip_filter = 0, max_anisotropy = 1;
   uint32_t aniso_threshold = 0, aniso_bias = 0;
   double min_lod = 0, max_lod = 0, lod_bias = 0;
+  const bool g16 = sample_mode == ImageSampleMode::Derivatives16;
+  const bool derivatives = g16 || sample_mode == ImageSampleMode::Derivatives;
   uint32_t coordinate_offset = 0;
   uint32_t wrap_x = 2, wrap_y = 2;
   if (sample) {
@@ -141,9 +143,10 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
                             format == 22 || format == 50 || format == 63;
     if (min_lod > max_lod || ((min_filter || mag_filter || mip_filter == 2) && !filterable))
       return unsupported();
-    coordinate_offset = sample_mode == ImageSampleMode::Bias          ? 1
-                        : sample_mode == ImageSampleMode::Derivatives ? 4
-                                                                      : 0;
+    if (sample_mode == ImageSampleMode::Bias)
+      coordinate_offset = 1;
+    else if (derivatives)
+      coordinate_offset = g16 ? 2 : 4;
     if (min_filter || mag_filter || mip_filter == 2 || wrap_x == 6 || wrap_y == 6) {
       if ((s[3] >> 30) == 3)
         return unsupported(); // Custom border-color tables.
@@ -258,11 +261,19 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
                  (max_level || min_filter != mag_filter || (min_filter & 2) || (mag_filter & 2))) {
         double dxu, dxv, dyu, dyv;
         bool unbounded_cube_footprint = false;
-        if (sample_mode == ImageSampleMode::Derivatives) {
-          dxu = read(0, lane);
-          dxv = read(1, lane);
-          dyu = read(2, lane);
-          dyv = read(3, lane);
+        if (derivatives) {
+          // G16 stores (dxu, dxv), then (dyu, dyv), low half first.
+          // A16 independently controls the coordinate body after the gradients.
+          const auto gradient = [&](uint32_t component) {
+            const uint32_t value =
+                wf.debug_read_vgpr(coords[g16 ? component / 2 : component], lane);
+            return g16 ? util::f16_to_f32(static_cast<uint16_t>(value >> (16 * (component % 2))))
+                       : std::bit_cast<float>(value);
+          };
+          dxu = gradient(0);
+          dxv = gradient(1);
+          dyu = gradient(2);
+          dyv = gradient(3);
         } else {
           // Neighboring quad lanes may select different cube faces. Unfold
           // their coordinates onto this lane's face before taking derivatives.

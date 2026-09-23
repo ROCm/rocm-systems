@@ -228,8 +228,19 @@ void ImageGetLodVsample::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageSampleDG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+  if (!amdgpu::prepare_image_transfer(
+          wf, *d, inst_.rsrc, inst_.vdata,
+          {inst_.vaddr0, inst_.vaddr1, inst_.vaddr2, inst_.vaddr3, inst_.vaddr3 + 1u,
+           inst_.vaddr3 + 2u, inst_.vaddr3 + 3u},
+          inst_.dim, inst_.dmask, inst_.d16,
+          inst_.r128 || inst_.tfe || inst_.nv || inst_.unorm || inst_.lwe, inst_.samp,
+          amdgpu::ImageSampleMode::Derivatives16, inst_.a16))
+    return;
+  set_data(std::move(d));
 }
 
 void ImageSampleCDG16Vsample::execute_impl(amdgpu::Wavefront &wf) {
