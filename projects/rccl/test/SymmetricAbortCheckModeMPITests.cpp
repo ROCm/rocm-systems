@@ -240,6 +240,15 @@ protected:
         float* sendPtr = static_cast<float*>(sendBuf);
         float* recvPtr = static_cast<float*>(recvBuf);
 
+        // Every rank contributes ones, so a correct sum is nRanks in every element. Filled through
+        // sendBuf before any deviation moves sendPtr, and recorded in res rather than returned, so
+        // that every rank still makes the same calls below.
+        ncclResult_t res = ncclSuccess;
+        std::vector<float> host(count, 1.0f);
+        if (hipMemcpy(sendBuf, host.data(), count * sizeof(float), hipMemcpyHostToDevice) != hipSuccess) {
+            res = ncclInternalError;
+        }
+
         if (isOdd && deviation == Deviation::Unregistered) {
             // Hand the collective a symmetric buffer that no window covers: every
             // peer still passes a registered buffer, so registrationCheck()
@@ -253,18 +262,9 @@ protected:
             sendPtr = reinterpret_cast<float*>(static_cast<char*>(sendBuf) + 8192);
         }
 
-        // Every rank contributes ones, so a correct sum is nRanks in every element. Checking the
-        // payload and not just the status is what makes an accepted call meaningful. Failures here
-        // record into res rather than returning, so every rank still reaches the agreement below.
-        ncclResult_t res = ncclSuccess;
-        std::vector<float> host(count, 1.0f);
-        if (hipMemcpy(sendPtr, host.data(), count * sizeof(float), hipMemcpyHostToDevice) != hipSuccess) {
-            res = ncclInternalError;
-        }
-
-        if (res == ncclSuccess) {
-            res = ncclAllReduce(sendPtr, recvPtr, count, ncclFloat, ncclSum, comm, stream);
-        }
+        // Unconditional: a rank that skipped the collective would leave its peers blocked in it.
+        ncclResult_t collRes = ncclAllReduce(sendPtr, recvPtr, count, ncclFloat, ncclSum, comm, stream);
+        if (res == ncclSuccess) res = collRes;
         if (res == ncclSuccess && hipStreamSynchronize(stream) != hipSuccess) {
             res = ncclInternalError;
         }
