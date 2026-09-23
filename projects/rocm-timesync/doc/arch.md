@@ -16,7 +16,7 @@ The simplest design is to simply extend ROCR with mechanisms to measure, store, 
 "**in-process**" because everything is done through threads that are part of main host process. The diagram
 below illustrates the architecture
 
-![](doc/img/in-process.png)
+![](./img/in-process.png)
 
 The key steps:
 - A new thread `ROCR-timesync-r_m` queries KFD for crosststamps of the form (`CLOCK_REALTIME` timestamp, GPU `m`
@@ -47,7 +47,7 @@ Cons:
 On the other end of the spectrum is an "**out-of-process**" approach which is designed to address these inefficiencies.
 The diagram below illustrates one such architecture.
 
-![](doc/img/out-of-process.png)
+![](./img/out-of-process.png)
 
 The key steps:
 - A standalone `ROCm-timesync` system service is deployed. It runs `rocm-timesync-d_m` which query KFD for
