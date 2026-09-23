@@ -589,6 +589,9 @@ add_executable(
     division_test.cpp
     division_macro_test.cpp
     valu_floating_policy_test.cpp
+    gfx11_dot2_test.cpp
+    gfx12_dot_test.cpp
+    packed_wmma_test.cpp
     atomic_semantics_and_decode_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
