@@ -35,7 +35,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🩶 unassessed | 🩶 unassessed |
 | Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟩 exact; 227/227 accesses and 48/48 barriers; reviewed fault bundle | 🟧 exact; only 75/227 accesses supported |
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟩 exact; 20/20 accesses and 26/26 barriers; 17/32 fault sweep | 🟩 exact; 20/20 accesses; fault bundle |
-| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log |
+| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 exact; 352/352 accesses and 86/86 barriers; fault bundle | 🟩 exact; 352/352 accesses; fault bundle |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟩 exact; 704/704 accesses and 172/172 barriers; fault bundle | 🟩 exact; 704/704 accesses; fault bundle |
 | PyTorch | P1 | collision-heavy `scatter_reduce` (`pytorch-scatter-reduce`) | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log |
@@ -92,3 +92,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   same indirect-call relocation failure (now `.text+59912`). Compiler refresh
   alone does not resolve this failure.
 - `pytorch-torch-mode` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/pytorch-torch-mode-default`.
+- `pytorch-torch-mode` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/pytorch-torch-mode-supercollider`.
