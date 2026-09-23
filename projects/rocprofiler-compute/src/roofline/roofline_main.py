@@ -421,6 +421,11 @@ class Roofline:
             limiter, limiter_category, roof_value = self._determine_kernel_limiter(
                 level_ai, ceiling_data, points[0]["perf"], compute_peaks
             )
+            limiting_peak = (
+                limiter
+                if limiter_category == "Memory"
+                else min(points, key=lambda point: point["ai"])["peak"]
+            )
             pct_roof = (
                 100.0 * points[0]["perf"] / roof_value if roof_value else None
             )
@@ -463,6 +468,7 @@ class Roofline:
                 "color": color,
                 "points": points,
                 "pctRuntime": pct_val,
+                "limitingPeak": limiting_peak,
             })
 
         return traces, kernels_model
