@@ -57,10 +57,8 @@ def build_kernel_hover_template(
         name_html,
         [
             f"<b>Limited by {limiter_category}: {limiter}</b>",
+            f"Performance: %{{customdata[1]}}% (%{{y:,.0f}} / %{{customdata[0]}} {unit})",
             "AI: %{x:.6g}",
-            f"Achieved throughput: %{{y:,.3f}} {unit}",
-            f"Peak throughput: %{{customdata[0]}} {unit}",
-            "Percent of roofline achieved: %{customdata[1]} %",
             "Cache level bandwidth: %{customdata[2]}",
             f"Total dispatches: {_format_integer(count)}",
             f"Aggregate time in kernel: {time_txt}",
