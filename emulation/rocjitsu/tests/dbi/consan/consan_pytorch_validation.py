@@ -791,18 +791,19 @@ def main() -> int:
         raise
     _write_oracle_result("pass", {"workload": args.workload, "result": result})
     print(json.dumps(result, sort_keys=True), flush=True)
-    if args.workload != "tdm-descriptor-add":
+    hook_path = os.environ.get("HSA_TOOLS_LIB")
+    # Native profiling must finalize normally so rocprofv3 flushes its traces.
+    # Keep the bounded explicit-hook teardown only for instrumented runs.
+    if args.workload != "tdm-descriptor-add" and hook_path:
         # The large precompiled operator library can spend far longer tearing
         # down a software GPU process than executing this fully synchronized
         # workload. Finalize an active DBI hook so its validation verdict is
         # preserved, then avoid charging unrelated runtime shutdown to the
         # validation timeout.
-        hook_path = os.environ.get("HSA_TOOLS_LIB")
-        if hook_path:
-            hook = ctypes.CDLL(hook_path)
-            hook.OnUnload.argtypes = []
-            hook.OnUnload.restype = None
-            hook.OnUnload()
+        hook = ctypes.CDLL(hook_path)
+        hook.OnUnload.argtypes = []
+        hook.OnUnload.restype = None
+        hook.OnUnload()
         os._exit(0)
     return 0
 

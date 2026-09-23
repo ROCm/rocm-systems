@@ -80,3 +80,14 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `pytorch-rdna4-split-softmax` / supercollider: native rocprofv3 discovery failed; inspect discovery log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round1/pytorch-rdna4-split-softmax-supercollider`.
 - `pytorch-rdna4-llm-topk` / default: native rocprofv3 discovery failed; inspect discovery log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round1/pytorch-rdna4-llm-topk-default`.
 - `pytorch-rdna4-llm-topk` / supercollider: native rocprofv3 discovery failed; inspect discovery log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round1/pytorch-rdna4-llm-topk-supercollider`.
+- PyTorch discovery repair: native validation now exits normally so rocprofv3
+  can flush its CSV. A fresh `torch.mode` native profile passed its oracle and
+  produced two exact kernel names. PyTorch uses the existing
+  `/home/benoit/gpu-venv-r102` stack (`2.14.0+rocm10.2.0a20260918`) and its
+  matching profiler; the older PyTorch venv loaded incompatible profiler SDKs.
+  The initial discovery failures above are being retried with this fix.
+- All 2,013 labeled nonphysical tests and all 389 gfx1201 physical fixture tests
+  passed. These gates do not substitute for the external workload cells.
+- D128 Default attempt 03, rebuilt with the September 15 SDK: native pass,
+  same indirect-call relocation failure (now `.text+59912`). Compiler refresh
+  alone does not resolve this failure.
