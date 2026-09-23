@@ -17,7 +17,7 @@ Use a RocJitsu CMake build directory, separate from the source tree:
 cmake --build "$ROCJITSU_BUILD_DIR" --target rocjitsu_dbi_hooks
 export CONSAN_HOOK="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
 
-env HSA_TOOLS_LIB="$CONSAN_HOOK" \
+env HSA_TOOLS_LIB="$CONSAN_HOOK" HSA_TOOLS_DISABLE_REGISTER=1 \
   RJ_CONSAN_LOG=1 \
   ./application 2>consan.log
 ```
@@ -26,6 +26,24 @@ Loading the hook enables ConSan; no separate enable variable is needed.
 Registers and report buffers are managed automatically. The hook also runs
 waitcheck at code-object load time, reports missing waits, and continues with
 ConSan instrumentation. No separate waitcheck tool or settings are required.
+
+`HSA_TOOLS_DISABLE_REGISTER=1` selects ROCr's environment-driven tools path.
+Without it, profiler registration in frameworks such as PyTorch can take
+precedence and prevent the hook from loading at all.
+
+A zero exit status alone does not mean ConSan checked the workload. After a run,
+require an applicable, complete verdict before treating it as a completed check:
+
+```sh
+grep -q 'ConSan analysis verdict applicable=true analysis_complete=true ' consan.log
+```
+
+Run this check only after the application succeeds. A missing verdict means no
+analysis was reported; an incomplete verdict is not a clean result, although
+diagnostics from the covered portion can still be useful. Sampling
+still permits false negatives even with a complete verdict.
+Rejected configurations print an explicit unchecked-run warning; under
+`RJ_CONSAN_POLICY=strict` they terminate with exit code 92.
 
 ## Core controls
 
@@ -55,7 +73,7 @@ more. The preset does not change the analysis mode.
 For a small repro:
 
 ```sh
-env HSA_TOOLS_LIB="$CONSAN_HOOK" \
+env HSA_TOOLS_LIB="$CONSAN_HOOK" HSA_TOOLS_DISABLE_REGISTER=1 \
   RJ_CONSAN_PRESET=higher RJ_CONSAN_LOG=1 \
   ./repro 2>consan.log
 ```
@@ -112,7 +130,7 @@ lists. Keep the trace and regenerate the list when the workload or stack changes
 
 ```sh
 env -u RJ_CONSAN_KERNEL_ALLOWLIST \
-  HSA_TOOLS_LIB="$CONSAN_HOOK" \
+  HSA_TOOLS_LIB="$CONSAN_HOOK" HSA_TOOLS_DISABLE_REGISTER=1 \
   RJ_CONSAN_LOG=1 \
   RJ_CONSAN_KERNEL_ALLOWLIST_FILE="$PWD/consan-kernels.txt" \
   ./application 2>consan.log
@@ -168,10 +186,14 @@ or establish a happens-before violation. Compare known-correct and suspect runs;
 a mismatch alone is not a causal race diagnosis. See [MODES.md](MODES.md).
 
 ```sh
-env -u RJ_CONSAN_PRESET HSA_TOOLS_LIB="$CONSAN_HOOK" \
-  RJ_CONSAN_MODE=supercollider RJ_CONSAN_LOG=1 \
+env -u RJ_CONSAN_PRESET HSA_TOOLS_LIB="$CONSAN_HOOK" HSA_TOOLS_DISABLE_REGISTER=1 \
+  RJ_CONSAN_MODE=supercollider RJ_CONSAN_POLICY=strict RJ_CONSAN_LOG=1 \
   ./application 2>consan.log
 ```
+
+Use strict policy when collecting validation evidence: it rejects ineffective
+instrumentation and terminates with exit code 92 on a load rejection. The default
+policy may continue with incomplete analysis; that is not a clean result.
 
 Leave `RJ_CONSAN_PRESET` unset or empty: SuperCollider currently rejects every
 explicit nonempty preset, including `default`. It automatically allocates a
@@ -181,6 +203,7 @@ non-trapping mismatch marker; no expert controls are needed to start.
 
 | Situation | Next action |
 | --- | --- |
+| The application exits 0 with no ConSan output | Set `RJ_CONSAN_LOG=1` and `HSA_TOOLS_DISABLE_REGISTER=1`; check for a rejected configuration and require an applicable verdict. |
 | Startup is expensive or transformation uses too much memory | Generate an allowlist to avoid transforming unrelated code. |
 | Recording overhead is too high | Try `low` in the default mode, accepting reduced coverage. |
 | A small known-racy repro gives no diagnostic | Confirm instrumentation and dispatch, then try `higher` and `max`. Use `high` for larger grids. |

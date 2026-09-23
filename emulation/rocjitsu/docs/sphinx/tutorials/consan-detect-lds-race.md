@@ -94,7 +94,8 @@ Load the hook through `HSA_TOOLS_LIB`. For this small testcase, select the
 `max` preset to remove workgroup and cell sampling filters:
 
 ``` bash
-env HSA_TOOLS_LIB="$CONSAN_HOOK" \
+env HSA_TOOLS_DISABLE_REGISTER=1 \
+  HSA_TOOLS_LIB="$CONSAN_HOOK" \
   RJ_CONSAN_PRESET=max \
   RJ_CONSAN_LOG=1 \
   /tmp/race_example
@@ -106,7 +107,8 @@ evidence, SuperCollider repeats or reads back supported LDS accesses and
 sets an automatic marker on mismatch:
 
 ``` bash
-env HSA_TOOLS_LIB="$CONSAN_HOOK" \
+env HSA_TOOLS_DISABLE_REGISTER=1 \
+  HSA_TOOLS_LIB="$CONSAN_HOOK" \
   RJ_CONSAN_MODE=supercollider \
   RJ_CONSAN_LOG=1 \
   /tmp/race_example
@@ -180,7 +182,8 @@ Recompile and rerun:
 ``` bash
 hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx1201
 
-env HSA_TOOLS_LIB="$CONSAN_HOOK" \
+env HSA_TOOLS_DISABLE_REGISTER=1 \
+  HSA_TOOLS_LIB="$CONSAN_HOOK" \
   RJ_CONSAN_MODE=default \
   RJ_CONSAN_PRESET=max \
   RJ_CONSAN_FORBID_DIAGNOSTICS=1 \

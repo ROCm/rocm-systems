@@ -16,7 +16,8 @@ For a hands-on walkthrough, see [Detect an LDS data race with ConSan](/tutorials
 ConSan loads through the HSA tools interface. Set `HSA_TOOLS_LIB` to the built hook shared library and select an instrumentation mode with `RJ_CONSAN_MODE`. Loading the hook activates ConSan; when the mode is unset or empty, it defaults to `default`.
 
 ``` bash
-env HSA_TOOLS_LIB="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so" \
+env HSA_TOOLS_DISABLE_REGISTER=1 \
+  HSA_TOOLS_LIB="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so" \
   RJ_CONSAN_LOG=1 \
   ./application
 ```
