@@ -44,11 +44,9 @@
 ////////////////////////////////////////////////////////////////////////////////
 // CUDA driver memory-location enum shim (host-NUMA)
 //
-// CU_MEM_LOCATION_TYPE_HOST_NUMA is CUDA enumerator 3. HIP has no host-NUMA
-// member and CLR rejects that location, so the enumerator is undeclared on AMD
-// below 7.12. AMD host VMM still writes 3 into ginSegmentInfos so gin__funcs.h
-// device put-fence sees sysmem. Define it to 3 on those builds; NVIDIA and
-// ROCm >= 7.12 already provide the real enumerator.
+// CUDA host-NUMA is enumerator 3. HIP omits that member below 7.12, so define it
+// to 3: AMD host VMM still stores 3 in ginSegmentInfos for the device put-fence.
+// NVIDIA and ROCm >= 7.12 already provide the real enumerator.
 ////////////////////////////////////////////////////////////////////////////////
 
 #if defined(__HIP_PLATFORM_AMD__) && (!defined(ROCM_VERSION) || ROCM_VERSION < 71200)
