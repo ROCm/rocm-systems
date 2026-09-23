@@ -84,6 +84,7 @@
 #include <rocprofiler-sdk/version.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
+#include <rocprofiler-sdk/cxx/pc_sampling.hpp>
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -277,10 +278,11 @@ struct buffer_ids
     rocprofiler_buffer_id_t hip_graph_trace         = {};
     rocprofiler_buffer_id_t rocshmem_api_trace      = {};
     rocprofiler_buffer_id_t hipfile_api_trace       = {};
+    rocprofiler_buffer_id_t hip_event_trace         = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 17>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 18>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
@@ -296,7 +298,8 @@ struct buffer_ids
                                                        ompt_trace,
                                                        hip_graph_trace,
                                                        rocshmem_api_trace,
-                                                       hipfile_api_trace};
+                                                       hipfile_api_trace,
+                                                       hip_event_trace};
     }
     auto pc_sampling_buffers_as_array() const
     {
@@ -1272,6 +1275,16 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                         *record, attr.stream_id, attr.graph_exec_id, attr.graph_node_id},
                     domain_type::MEMORY_COPY);
             }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_EVENT)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_hip_event_record_t*>(header->payload);
+
+                auto attr = get_ext_attribution(record);
+                tool::write_ring_buffer(
+                    tool::tool_buffer_tracing_hip_event_ext_record_t{*record, attr.stream_id},
+                    domain_type::HIP_EVENT);
+            }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)
             {
                 auto* record = static_cast<rocprofiler_buffer_tracing_memory_allocation_record_t*>(
@@ -1834,13 +1847,40 @@ pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
                 auto* pc_sample = static_cast<rocprofiler_pc_sampling_record_stochastic_v0_t*>(
                     cur_header->payload);
 
-                auto pc_sample_tool_record =
-                    rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t(
-                        *pc_sample, get_instruction_index(pc_sample->pc));
+                auto instruction_index = get_instruction_index(pc_sample->pc);
 
-                rocprofiler::tool::write_ring_buffer(pc_sample_tool_record,
-                                                     domain_type::PC_SAMPLING_STOCHASTIC);
-                valid_samples_cnt++;
+                // For unknown code objects/agents, we simply provide samples as is.
+                // In other cases, we try to verify them first.
+                auto verification_status = ROCPROFILER_STATUS_SUCCESS;
+                if(pc_sample->pc.code_object_id != ROCPROFILER_CODE_OBJECT_ID_NONE)
+                {
+                    if(auto agent_id = CHECK_NOTNULL(tool_metadata)
+                                           ->get_code_object_agent(pc_sample->pc.code_object_id))
+                    {
+                        if(const auto* agent = tool_metadata->get_agent(*agent_id))
+                        {
+                            verification_status = rocprofiler::sdk::pc_sampling::verify_sample(
+                                *pc_sample,
+                                tool_metadata->get_instruction(instruction_index),
+                                agent->gfx_target_version);
+                        }
+                    }
+                }
+
+                if(verification_status == ROCPROFILER_STATUS_ERROR)
+                {
+                    invalid_samples_cnt++;
+                }
+                else
+                {
+                    auto pc_sample_tool_record =
+                        rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t(
+                            *pc_sample, instruction_index);
+
+                    rocprofiler::tool::write_ring_buffer(pc_sample_tool_record,
+                                                         domain_type::PC_SAMPLING_STOCHASTIC);
+                    valid_samples_cnt++;
+                }
             }
             else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE)
             {
@@ -3092,7 +3132,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                             ompt_ops},
                       buffer_service_config{tool::get_config().hip_graph_trace,
                                             ROCPROFILER_BUFFER_TRACING_HIP_GRAPH,
-                                            get_buffers().hip_graph_trace}})
+                                            get_buffers().hip_graph_trace},
+                      buffer_service_config{tool::get_config().hip_event_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
+                                            get_buffers().hip_event_trace}})
 
     {
         if(itr.option)
@@ -3513,11 +3556,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(tool::get_config().benchmark_mode != tool::config::benchmark::execution_profile)
     {
         auto external_corr_id_request_kinds =
-            std::array<rocprofiler_external_correlation_id_request_kind_t, 4>{
+            std::array<rocprofiler_external_correlation_id_request_kind_t, 5>{
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION,
-                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_RUNTIME_API};
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_RUNTIME_API,
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_EVENT};
 
         ROCPROFILER_CALL(rocprofiler_configure_external_correlation_id_request_service(
                              get_client_ctx(),
@@ -3815,13 +3859,14 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
     // function can warn if data was left unflushed, but nothing is written.
     if(skip_output) return;
 
-    // OMPT, rocSHMEM, hipFILE do not produce direct CSV/stats output. OMPT is rocpd-only (not
-    // emitted to JSON either), while rocSHMEM is emitted directly only to JSON and rocpd;
-    // both rely on `rocpd convert` for CSV/Perfetto/OTF2. The record count above is still
-    // tallied so that rocpd/JSON output is produced even when one of these is the only
+    // OMPT, rocSHMEM, hipFILE, and HIP_EVENT do not produce direct CSV/stats output. OMPT is
+    // rocpd-only (not emitted to JSON either), while rocSHMEM is emitted directly only to JSON
+    // and rocpd; all rely on `rocpd convert` for CSV/Perfetto/OTF2. HIP_EVENT is handled by
+    // csv.py, the libpyrocpd Perfetto writer, and otf2.py. The record count above is
+    // still tallied so that rocpd/JSON output is produced even when one of these is the only
     // active trace domain.
     if constexpr(DomainT != domain_type::OMPT && DomainT != domain_type::ROCSHMEM &&
-                 DomainT != domain_type::HIPFILE)
+                 DomainT != domain_type::HIPFILE && DomainT != domain_type::HIP_EVENT)
     {
         if(tool::get_config().stats || tool::get_config().summary_output)
         {
@@ -3883,6 +3928,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
     auto rocjpeg_output  = tool::rocjpeg_buffered_output_t{tool::get_config().rocjpeg_api_trace};
     auto rocshmem_output = tool::rocshmem_buffered_output_t{tool::get_config().rocshmem_api_trace};
     auto hipfile_output  = tool::hipfile_buffered_output_t{tool::get_config().hipfile_api_trace};
+    auto hip_event_output =
+        tool::hip_event_buffered_output_ext_t{tool::get_config().hip_event_trace};
     auto pc_sampling_stochastic_output =
         tool::pc_sampling_stochastic_buffered_output_t{tool::get_config().pc_sampling_stochastic};
 
@@ -3930,6 +3977,7 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
     generate_output(hip_graph_output, outdata, contributions, cleanups, skip_output);
     generate_output(rocshmem_output, outdata, contributions, cleanups, skip_output);
     generate_output(hipfile_output, outdata, contributions, cleanups, skip_output);
+    generate_output(hip_event_output, outdata, contributions, cleanups, skip_output);
 
     if(!skip_output && tool::get_config().advanced_thread_trace &&
        !tool_metadata->att_filenames.empty())
@@ -3998,7 +4046,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                          spm_counters_output.get_generator(),
                          hip_graph_output.get_generator(),
                          rocshmem_output.get_generator(),
-                         hipfile_output.get_generator());
+                         hipfile_output.get_generator(),
+                         hip_event_output.get_generator());
         json_ar.finish_process();
 
         tool::close_json(json_ar);
@@ -4044,7 +4093,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                           ompt_output.get_generator(),
                           hip_graph_output.get_generator(),
                           rocshmem_output.get_generator(),
-                          hipfile_output.get_generator());
+                          hipfile_output.get_generator(),
+                          hip_event_output.get_generator());
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&

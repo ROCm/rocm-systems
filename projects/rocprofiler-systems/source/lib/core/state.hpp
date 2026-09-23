@@ -20,19 +20,19 @@ namespace rocprofsys::state
 
 enum class process_lifecycle : std::uint16_t
 {
-    PreInit = 0,
-    Init,
-    Active,
-    Finalized,
-    Disabled,
+    pre_init = 0,
+    init,
+    active,
+    finalized,
+    disabled,
 };
 
 enum class thread_lifecycle : std::uint16_t
 {
-    Enabled = 0,
-    Internal,
-    Completed,
-    Disabled,
+    enabled = 0,
+    internal,
+    completed,
+    disabled,
 };
 }  // namespace rocprofsys::state
 
@@ -41,16 +41,16 @@ namespace rocprofsys::mode
 
 enum class process : std::uint16_t
 {
-    Trace = 0,
-    Sampling,
-    Causal,
-    Coverage,
+    trace = 0,
+    sampling,
+    causal,
+    coverage,
 };
 
 enum class process_causal : std::uint16_t
 {
-    Line = 0,
-    Function,
+    line = 0,
+    function,
 };
 }  // namespace rocprofsys::mode
 
@@ -58,9 +58,9 @@ namespace rocprofsys::backend
 {
 enum class causal : std::uint16_t
 {
-    Perf = 0,
-    Timer,
-    Auto,
+    perf = 0,
+    timer,
+    automatic,
 };
 
 }  // namespace rocprofsys::backend
@@ -75,11 +75,11 @@ struct fmt::formatter<rocprofsys::state::process_lifecycle>
         std::string_view str = {};
         switch(pl_state)
         {
-            case rocprofsys::state::process_lifecycle::PreInit: str = "PreInit"; break;
-            case rocprofsys::state::process_lifecycle::Init: str = "Init"; break;
-            case rocprofsys::state::process_lifecycle::Active: str = "Active"; break;
-            case rocprofsys::state::process_lifecycle::Disabled: str = "Disabled"; break;
-            case rocprofsys::state::process_lifecycle::Finalized:
+            case rocprofsys::state::process_lifecycle::pre_init: str = "PreInit"; break;
+            case rocprofsys::state::process_lifecycle::init: str = "Init"; break;
+            case rocprofsys::state::process_lifecycle::active: str = "Active"; break;
+            case rocprofsys::state::process_lifecycle::disabled: str = "Disabled"; break;
+            case rocprofsys::state::process_lifecycle::finalized:
                 str = "Finalized";
                 break;
         }
@@ -97,10 +97,10 @@ struct fmt::formatter<rocprofsys::state::thread_lifecycle>
         std::string_view str = {};
         switch(tl_state)
         {
-            case rocprofsys::state::thread_lifecycle::Enabled: str = "Enabled"; break;
-            case rocprofsys::state::thread_lifecycle::Internal: str = "Internal"; break;
-            case rocprofsys::state::thread_lifecycle::Completed: str = "Completed"; break;
-            case rocprofsys::state::thread_lifecycle::Disabled: str = "Disabled"; break;
+            case rocprofsys::state::thread_lifecycle::enabled: str = "Enabled"; break;
+            case rocprofsys::state::thread_lifecycle::internal: str = "Internal"; break;
+            case rocprofsys::state::thread_lifecycle::completed: str = "Completed"; break;
+            case rocprofsys::state::thread_lifecycle::disabled: str = "Disabled"; break;
         }
         return fmt::formatter<std::string_view>::format(str, ctx);
     }
@@ -115,10 +115,10 @@ struct fmt::formatter<rocprofsys::mode::process> : fmt::formatter<std::string_vi
         std::string_view str = {};
         switch(p_mode)
         {
-            case rocprofsys::mode::process::Trace: str = "Trace"; break;
-            case rocprofsys::mode::process::Sampling: str = "Sampling"; break;
-            case rocprofsys::mode::process::Causal: str = "Causal"; break;
-            case rocprofsys::mode::process::Coverage: str = "Coverage"; break;
+            case rocprofsys::mode::process::trace: str = "Trace"; break;
+            case rocprofsys::mode::process::sampling: str = "Sampling"; break;
+            case rocprofsys::mode::process::causal: str = "Causal"; break;
+            case rocprofsys::mode::process::coverage: str = "Coverage"; break;
         }
         return fmt::formatter<std::string_view>::format(str, ctx);
     }
@@ -133,8 +133,8 @@ struct fmt::formatter<rocprofsys::mode::process_causal> : fmt::formatter<std::st
         std::string_view str = {};
         switch(c_mode)
         {
-            case rocprofsys::mode::process_causal::Line: str = "Line"; break;
-            case rocprofsys::mode::process_causal::Function: str = "Function"; break;
+            case rocprofsys::mode::process_causal::line: str = "Line"; break;
+            case rocprofsys::mode::process_causal::function: str = "Function"; break;
         }
         return fmt::formatter<std::string_view>::format(str, ctx);
     }
@@ -153,11 +153,11 @@ public:
 
     // Explicit aliases instead of `using enum` — GCC added `using enum`
     // support only in GCC 11; the CI matrix still builds with GCC 10.3.
-    static constexpr State PreInit   = State::PreInit;
-    static constexpr State Init      = State::Init;
-    static constexpr State Active    = State::Active;
-    static constexpr State Finalized = State::Finalized;
-    static constexpr State Disabled  = State::Disabled;
+    static constexpr State PreInit   = State::pre_init;
+    static constexpr State Init      = State::init;
+    static constexpr State Active    = State::active;
+    static constexpr State Finalized = State::finalized;
+    static constexpr State Disabled  = State::disabled;
 
     process()                          = delete;
     process(const process&)            = delete;
@@ -209,10 +209,10 @@ public:
 
     // Explicit aliases instead of `using enum` — GCC added `using enum`
     // support only in GCC 11; the CI matrix still builds with GCC 10.3.
-    static constexpr State Enabled   = State::Enabled;
-    static constexpr State Internal  = State::Internal;
-    static constexpr State Completed = State::Completed;
-    static constexpr State Disabled  = State::Disabled;
+    static constexpr State Enabled   = State::enabled;
+    static constexpr State Internal  = State::internal;
+    static constexpr State Completed = State::completed;
+    static constexpr State Disabled  = State::disabled;
 
     thread()                         = delete;
     thread(const thread&)            = delete;

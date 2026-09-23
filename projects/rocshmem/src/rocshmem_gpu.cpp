@@ -651,7 +651,7 @@ __device__ __forceinline__ void *direct_ctx_shmem_ptr(rocshmem_ctx_t ctx,
  * collective synchronization implementation (internal_sync/
  * internal_direct_barrier/internal_atomic_barrier, plus a quiet() call) --
  * inlining that into shared test kernels that call multiple of the
- * regular/wave/wg variants from one kernel body grows resource usage enough 
+ * regular/wave/wg variants from one kernel body grows resource usage enough
  * to drop occupancy by a full wave (5->4 waves/SIMD, confirmed via gfx950
  * all_backends resource-usage comparison). This happened even without
  * __forceinline__: because these helpers now live in the same translation
@@ -680,7 +680,7 @@ ROCSHMEM_DIRECT_CTX_SYNC_HELPER(sync_all_wave, NUM_SYNC_ALL_WAVE, sync_all_wave)
 
 #undef ROCSHMEM_DIRECT_CTX_SYNC_HELPER
 
-__device__ __noinline__ void direct_ctx_barrier(rocshmem_ctx_t ctx, 
+__device__ __noinline__ void direct_ctx_barrier(rocshmem_ctx_t ctx,
                                                 rocshmem_team_t team) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_BARRIER);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, barrier(team));
@@ -2557,8 +2557,8 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team, int src_pe,
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,         \
       int nreduce) {                                                              \
     return rocshmem_reduce_wave<T, Op>(ctx, team, dest, source, nreduce);         \
-  }    
-    
+  }
+
 #define REDUCE_SCATTER_DEF_GEN(T, TNAME, Op_API, Op)                              \
   __device__ int rocshmem_ctx_##TNAME##_##Op_API##_reduce_scatter_wg(             \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,         \

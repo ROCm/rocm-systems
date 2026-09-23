@@ -12,7 +12,6 @@
 
 #include <timemory/components/metadata.hpp>
 #include <timemory/components/properties.hpp>
-#include <timemory/defines.h>
 #include <timemory/enum.h>
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/utility/type_list.hpp>
@@ -35,11 +34,11 @@ struct component_value_type
 template <has_value_type Type>
 struct component_value_type<Type>
 {
-    using type = typename Type::value_type;
+    using type = Type::value_type;
 };
 
 template <typename Type>
-using component_value_type_t = typename component_value_type<Type>::type;
+using component_value_type_t = component_value_type<Type>::type;
 
 //--------------------------------------------------------------------------------------//
 
@@ -68,7 +67,7 @@ struct get_availability<type_list<Types...>>
 
     static data_type get_info(data_type& _v)
     {
-        TIMEMORY_FOLD_EXPRESSION(_v.emplace_back(get_availability<Types>::get_info()));
+        (_v.emplace_back(get_availability<Types>::get_info()), ...);
         return _v;
     }
 
@@ -93,7 +92,7 @@ get_availability<Type>::get_info()
 {
     using namespace tim;
     using value_type     = component_value_type_t<Type>;
-    using category_types = typename trait::component_apis<Type>::type;
+    using category_types = trait::component_apis<Type>::type;
 
     auto _cleanup = [](std::string _type, const std::string& _pattern) {
         auto _pos = std::string::npos;

@@ -190,6 +190,43 @@
         "NCCL_DMABUF_ENABLE": "1"
       }
     },
+    "net_ib_multithread_independent": {
+      "extends": "net_ib_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "tests": [
+        {
+          "name": "NetIB_MultiThread_IndependentSimpleSendRecv",
+          "description": "Concurrent workers each transfer on an independent NET/IB context and connection",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "NetIB_MultiThread_IndependentSequentialTransfers",
+          "description": "Concurrent workers each run repeated transfers on an independent connection",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        },
+        {
+          "name": "NetIB_MultiThread_MultipleSizes",
+          "description": "Concurrent workers sweep the size ladder into the shared per-device MR cache",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "NetIB_MultiThread_MemoryRegistrationStorm",
+          "description": "Concurrent register/deregister storms race the per-device MR cache",
+          "test_filter": "NetIbMPITest.MemoryRegistrationStorm"
+        },
+        {
+          "name": "NetIB_MultiThread_MrCacheRefCount",
+          "description": "All workers register the same address, contending on one cache entry's refcount",
+          "test_filter": "NetIbMPITest.MrCacheRefCount"
+        },
+        {
+          "name": "NetIB_MultiThread_LongRunningEndurance",
+          "description": "Sustained concurrent traffic with the RDMA leak check around the whole run",
+          "test_filter": "NetIbMPITest.LongRunningEndurance"
+        }
+      ]
+    },
     "net_ib_gdr_flush": {
       "extends": "net_ib_base",
       "timeout": 120,
@@ -199,7 +236,7 @@
       "tests": [
         {
           "name": "GdrFlush_CuMemDmaBuf_NoAsyncFatal",
-          "description": "Whitebox ncclIbIflush over a dma-buf (cuMem/UBR) RO=0 flush scratchpad - the exact path that used to raise the mlx5 'invalid request local work queue error'. The read-only flush (RDMA_READ fence, WRITE removed) must complete cleanly with correct data.",
+          "description": "Whitebox ncclIbIflush over a dma-buf (cuMem/UBR) RO=0 flush scratchpad - the exact path that used to raise the mlx5 'invalid request local work queue error'. The RO=0 write+read fence must complete cleanly with correct data.",
           "test_filter": "GdrFlushTest.CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal"
         },
         {
@@ -222,11 +259,6 @@
           "name": "GdrFlush_RepeatedFlushBurst",
           "description": "50-iteration GPU recv+flush burst over the dma-buf scratchpad; an intermittent QP async-fatal would surface as a non-success flush. The whole burst must stay clean.",
           "test_filter": "GdrFlushTest.RepeatedFlush_NoFaultBurst"
-        },
-        {
-          "name": "GdrFlush_ForcedScratchpadWrite_ReproducesFault",
-          "description": "Regression guard (ENABLE_FAULT_INJECTION debug builds only): forces the removed scratchpad RDMA_WRITE back on a dma-buf buffer and asserts the flush QP faults, proving the WRITE was the culprit. Absent/skipped when fault injection is not compiled in.",
-          "test_filter": "GdrFlushTest.ForcedScratchpadWrite_ReproducesFault"
         }
       ]
     },
@@ -248,7 +280,7 @@
       "tests": [
         {
           "name": "GdrFlush_CuMem_AllGatherUnregistered_MultiNode",
-          "description": "Cross-node AllGather over cuMem/DMA-BUF GDR with unregistered buffers (base GDR recv+flush path). The fix removes the redundant scratchpad RDMA_WRITE and keeps the RO=0 RDMA_READ fence, so the collective completes cleanly with correct data. Regression guard for the QP async-fatal 'invalid request local work queue error' that the pre-fix WRITE triggered on a dma-buf scratchpad.",
+          "description": "Cross-node AllGather over cuMem/DMA-BUF GDR with unregistered buffers (base GDR recv+flush path). The flush fences the relaxed-ordered data through the RO=0 scratchpad (RDMA_WRITE then RDMA_READ), so the collective completes cleanly with correct data. Regression guard for the QP async-fatal 'invalid request local work queue error' that the write raises when the flush QP lacks REMOTE_WRITE.",
           "test_filter": "GdrFlush_CuMem.AllGatherUnregistered_MultiNode"
         }
       ]
@@ -611,6 +643,31 @@
         }
       ]
     },
+    "cast_grh": {
+      "extends": "cast_base",
+      "timeout": 60,
+      "tests": [
+        {
+          "name": "Cast_GrhSetOnRoceQp",
+          "description": "RoCE QPs use global (GRH/GID) addressing: is_global=1 read back from the driver via ibv_query_qp on every RoCE QP, plus a data-integrity send/recv",
+          "test_filter": "NetIbMPITest.CastGrhSetOnRoceQp"
+        }
+      ]
+    },
+    "cast_subnet_routing": {
+      "extends": "cast_base",
+      "timeout": 60,
+      "env_variables": {
+        "NCCL_IB_SUBNET_AWARE_ROUTING": "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_SubnetAwareRoutingSameSubnet",
+          "description": "NCCL_IB_SUBNET_AWARE_ROUTING=1 smoke test on single-subnet hardware: exercises the default-device-matches-peer-subnet fast path plus a data-integrity send/recv",
+          "test_filter": "NetIbMPITest.CastSubnetAwareRoutingSameSubnet"
+        }
+      ]
+    },
     "cast_four_qp": {
       "extends": "cast_base",
       "timeout": 120,
@@ -672,7 +729,7 @@
         "RCCL_IB_QP_SCHED_RESET_INTERVAL": "1000",
         "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "2000",
         "NCCL_IB_RETURN_ASYNC_EVENTS": "1",
-        "RCCL_IB_FAULT_INJECTION":     "1"
+        "RCCL_IB_FAULT_INJECTION": "1"
       },
       "tests": [
         {
@@ -1102,6 +1159,32 @@
         "NCCL_NET": "ib-cast"
       }
     },
+    "net_ib_transfer_cast_by_order_no_cts": {
+      "extends": "net_ib_transfer_cast",
+      "description": "ib-cast data path with software BY_ORDER matching and CTS offload forced off (the no-offload BY_ORDER arm). QP scheduler left off so TX fan-out stays at base nqps.",
+      "env_variables": {
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "2"
+      }
+    },
+    "net_ib_multirecv_cast_by_order_no_cts": {
+      "extends": "net_ib_multirecv_cast",
+      "description": "ib-cast irecv batching under software BY_ORDER with CTS offload off — completion matching by posted WR identity rather than CTS slot.",
+      "env_variables": {
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "2",
+        "RCCL_IB_QP_SCHED_ENABLE": "0"
+      }
+    },
+    "net_ib_stress_multi_qp_nosplit_cast_by_order_no_cts": {
+      "extends": "net_ib_stress_multi_qp_nosplit_cast",
+      "description": "ib-cast multi-QP (QPS=4, splitData=0) send/recv under software BY_ORDER with CTS offload off. Exercises FIFO-order matching across QPs without WRR reducing the sender QP count.",
+      "env_variables": {
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "2",
+        "RCCL_IB_QP_SCHED_ENABLE": "0"
+      }
+    },
     "unit_tests_fixtures": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsFixtures",
@@ -1191,7 +1274,12 @@
         {
           "name": "ParameterApiTests",
           "description": "Public ncclParam C API tests",
-          "test_filter": "ParameterApiTests.*"
+          "test_filter": "ParameterApiTests.*:ParameterApiTypedTests*"
+        },
+        {
+          "name": "CollConfigTests",
+          "description": "Per-collective ncclCollConfig_t validation tests",
+          "test_filter": "CollConfigTests.*:CollConfigTypedTests*"
         },
         {
           "name": "ArgCheck",
@@ -1237,6 +1325,114 @@
           "name": "DdaIpcEligibilityTest",
           "description": "Dda IPC eligibility tests",
           "test_filter": "DdaIpcEligibilityTest.*"
+        },
+        {
+          "name": "CeAlltoAllEligibilityTest",
+          "description": "CE AlltoAll eligibility gating tests matching taskAppend (CTA_POLICY_ZERO, sysmem, capture, group depth)",
+          "test_filter": "CeAlltoAllEligibilityTest.*"
+        },
+        {
+          "name": "CeAllReduceEligibilityTest",
+          "description": "CE AllReduce eligibility gate tests. RCCL_CE_AR_MAX_MSG_BYTES activates 2-shot on gfx1250 (ceNonRegMax[AllReduce]=0 by table design).",
+          "test_filter": "CeAllReduceEligibilityTest.*:RcclCeAllReduceEligibility.*",
+          "env_variables": {
+            "RCCL_CE_AR_MAX_MSG_BYTES": "268435456"
+          }
+        },
+        {
+          "name": "DdaFabricEligibilityTest",
+          "description": "DDA fabric eligibility tests for AllReduce, AllGather, ReduceScatter, AlltoAll across LL/LL128/VMM tiers on gfx1250",
+          "test_filter": "DdaFabricEligibilityTest.*:DdaFabricLL128EligibilityTest.*"
+        },
+        {
+          "name": "DdaFabricMaxBlocksTest",
+          "description": "DDA fabric max-blocks CU cap computation and env-override tests",
+          "test_filter": "DdaFabricMaxBlocksTest.*"
+        },
+        {
+          "name": "DdaFabricScratchSizingTest",
+          "description": "DDA fabric scratch-buffer sizing tests covering LL floor, LL128 floor, and CE scratch interplay",
+          "test_filter": "DdaFabricScratchSizingTest.*"
+        },
+        {
+          "name": "DdaAlltoAllThresholdTest",
+          "description": "DDA AlltoAll threshold tests for gfx1250/gfx942/gfx950: entry gate, rank count, staging copy selection",
+          "test_filter": "DdaAlltoAllThresholdTest.*:DdaAlltoAllThreshold.*"
+        },
+        {
+          "name": "RcclDdaTierThresholds",
+          "description": "Arch-table tier threshold resolution tests: gfx1250 table, env overrides, IGNORE_ARCH_TABLE fallback",
+          "test_filter": "RcclDdaTierThresholds.*"
+        },
+        {
+          "name": "RcclAllReduceDdaDecision",
+          "description": "AllReduce DDA dispatch decision tests across gfx1250/gfx942/gfx950: symk yield, CE yield, rank gate",
+          "test_filter": "RcclAllReduceDdaDecision.*"
+        },
+        {
+          "name": "RcclAllGatherCeRegisteredWindow",
+          "description": "AllGather CE-registered window eligibility tests: ceRegMax gate, recv-registered requirement",
+          "test_filter": "RcclAllGatherCeRegisteredWindow.*"
+        },
+        {
+          "name": "RcclCeGraphLatch",
+          "description": "CE AllReduce graph-mode latch tests: set on capture, cleared when all plan refs dropped",
+          "test_filter": "RcclCeGraphLatch.*"
+        },
+        {
+          "name": "RcclAlltoAllDecision",
+          "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
+          "test_filter": "RcclAlltoAllDecision.*"
+        },
+        {
+          "name": "RcclCeAr2ShotMax",
+          "description": "CE AllReduce 2-shot arch threshold upper-bound tests",
+          "test_filter": "RcclCeAr2ShotMax.*"
+        },
+        {
+          "name": "RcclCeArGrownBuffer",
+          "description": "CE AllReduce grown-buffer (ceRegMax) eligibility tests",
+          "test_filter": "RcclCeArGrownBuffer.*"
+        },
+        {
+          "name": "SkipPresetTopoMatching",
+          "description": "SkipPreset arch topology matching and threshold lookup tests",
+          "test_filter": "SkipPresetTopoMatching.*"
+        },
+        {
+          "name": "GetPlaneIndexDedup",
+          "description": "IbCastGetPlaneIndex dedups plane IDs into a compact index space",
+          "test_filter": "NetIbCastPlaneRail.GetPlaneIndexDedup"
+        },
+        {
+          "name": "GetPlaneIndexRejectsVirtBit",
+          "description": "IbCastGetPlaneIndex rejects plane IDs with the VIRT_BIT set",
+          "test_filter": "NetIbCastPlaneRail.GetPlaneIndexRejectsVirtBit"
+        },
+        {
+          "name": "GetPlaneIndexNullArgs",
+          "description": "IbCastGetPlaneIndex rejects null count/planes/idx arguments",
+          "test_filter": "NetIbCastPlaneRail.GetPlaneIndexNullArgs"
+        },
+        {
+          "name": "GidSameSubnetIPv4",
+          "description": "gidSameSubnet IPv4 prefix-length matching",
+          "test_filter": "NetIbCastSubnet.GidSameSubnetIPv4"
+        },
+        {
+          "name": "GidSameSubnetIPv6",
+          "description": "gidSameSubnet IPv6 prefix-length matching",
+          "test_filter": "NetIbCastSubnet.GidSameSubnetIPv6"
+        },
+        {
+          "name": "GidSameSubnetFamilyMismatch",
+          "description": "gidSameSubnet rejects AF_INET vs AF_INET6 comparisons",
+          "test_filter": "NetIbCastSubnet.GidSameSubnetFamilyMismatch"
+        },
+        {
+          "name": "SubnetMatchesAny",
+          "description": "subnetMatchesAny skips invalid/zero GIDs and matches against the remaining set",
+          "test_filter": "NetIbCastSubnet.SubnetMatchesAny"
         }
       ]
     },
@@ -2431,7 +2627,7 @@
         {
           "name": "CE_Internal_Init",
           "description": "ncclCeInit lifecycle: allocates sync window; ncclCeFinalize tears it down; double-fini is safe; independent state per comm",
-          "test_filter": "CeInternalMPITest.InitSetsWindowPointers:CeInternalMPITest.FiniNullsPointers:CeInternalMPITest.DoubleFiniIsSafe:CeInternalMPITest.IndependentCeStatePerComm:CeInternalMPITest.FiniAfterZeroCollectives"
+          "test_filter": "CeInternalMPITest.InitSetsWindowPointers:CeInternalMPITest.FiniNullsPointers:CeInternalMPITest.DoubleFiniIsSafe:CeInternalMPITest.IndependentCeStatePerComm:CeInternalMPITest.FiniAfterZeroCollectives:CeInternalMPITest.FreeBatchOpsParamsIsIdempotent"
         },
         {
           "name": "CE_Internal_Sync",
@@ -2747,14 +2943,20 @@
       "enabled": true
     },
     {
+      "name": "NET IB - Multithread Independent Connections (4)",
+      "description": "4 worker threads/rank, each on an independent NET/IB context and connection",
+      "config": "net_ib_multithread_independent",
+      "enabled": true
+    },
+    {
       "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank)",
-      "description": "Whitebox coverage of the NET/IB GDR flush fix: dma-buf and peermem RO=0 scratchpad reads, feature-disabled fallback, repeated-flush burst, and the fault-injection regression guard",
+      "description": "Whitebox coverage of the NET/IB GDR flush: dma-buf and peermem RO=0 scratchpad fence, feature-disabled fallback, and repeated-flush burst",
       "config": "net_ib_gdr_flush",
       "enabled": true
     },
     {
       "name": "GDR Flush - cuMem AllGather (Multi-Node)",
-      "description": "Cross-node AllGather over cuMem/DMA-BUF GDR exercising the base recv+flush path with the redundant scratchpad RDMA_WRITE removed",
+      "description": "Cross-node AllGather over cuMem/DMA-BUF GDR exercising the base recv+flush path with the RO=0 scratchpad write+read fence",
       "config": "gdr_flush_cumem_multinode",
       "enabled": true
     },
@@ -2834,6 +3036,18 @@
       "name": "NET IB - CAST Single QP (QPS=1)",
       "description": "WRR bypass path: single-QP connection must skip scheduler initialisation",
       "config": "cast_single_qp",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST GRH on RoCE QP",
+      "description": "RoCE QPs use global (GRH/GID) addressing: is_global=1 verified via ibv_query_qp, plus data-integrity send/recv",
+      "config": "cast_grh",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Subnet-Aware Routing (same subnet)",
+      "description": "NCCL_IB_SUBNET_AWARE_ROUTING=1 smoke test: default-device-matches-peer-subnet fast path plus data-integrity send/recv",
+      "config": "cast_subnet_routing",
       "enabled": true
     },
     {
@@ -2951,6 +3165,12 @@
       "enabled": true
     },
     {
+      "name": "NET IB - Data Transfer (ib-cast, BY_ORDER, CTS offload off)",
+      "description": "ib-cast SimpleSendRecv / multiple sizes / large / outstanding transfers with NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=2 and RCCL_CTS_OFFLOAD_ENABLED=0",
+      "config": "net_ib_transfer_cast_by_order_no_cts",
+      "enabled": true
+    },
+    {
       "name": "NET IB - Coverage Env (ib-cast)",
       "description": "Coverage-env transfer tests via ib-cast plugin: exercises CAST GID auto-select and relaxed-ordering paths (NCCL_NET=ib-cast)",
       "config": "net_ib_coverage_env_cast",
@@ -2960,6 +3180,12 @@
       "name": "NET IB - MultiRecv (ib-cast)",
       "description": "InfiniBand multi-recv path via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_multirecv_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - MultiRecv (ib-cast, BY_ORDER, CTS offload off)",
+      "description": "ib-cast MultiRecv under software BY_ORDER with CTS offload disabled",
+      "config": "net_ib_multirecv_cast_by_order_no_cts",
       "enabled": true
     },
     {
@@ -2996,6 +3222,12 @@
       "name": "NET IB - Stress Multi-QP NoSplit (ib-cast)",
       "description": "InfiniBand multi-QP no-split stress via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_stress_multi_qp_nosplit_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Multi-QP NoSplit (ib-cast, BY_ORDER, CTS offload off)",
+      "description": "ib-cast multi-QP no-split stress with NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=2 and RCCL_CTS_OFFLOAD_ENABLED=0",
+      "config": "net_ib_stress_multi_qp_nosplit_cast_by_order_no_cts",
       "enabled": true
     },
     {

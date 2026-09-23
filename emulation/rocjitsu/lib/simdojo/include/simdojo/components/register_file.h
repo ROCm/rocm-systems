@@ -26,7 +26,7 @@ namespace simdojo {
 
 /// @brief Backing-store layout for a physical register file.
 enum class RegisterFileStorage {
-  CONTIGUOUS,    ///< Contiguous storage used by the small scalar register file.
+  CONTIGUOUS,    ///< Contiguous, eagerly initialized register storage.
   SOFTWARE_LAZY, ///< Portable chunk storage allocated on first mutable access.
 };
 
@@ -84,9 +84,11 @@ private:
 /// allocating. Mutable access materializes and zero-initializes the containing
 /// chunk. The storage retains CU-global register indices but deliberately does
 /// not expose a single contiguous pointer spanning multiple chunks.
+///
+/// @tparam MaxRegisters Maximum logical register count for fixed-capacity storage,
+/// or zero to size the chunk table at initialization.
 template <typename RegType, size_t MaxRegisters> class SoftwareLazyRegisterStorage {
 public:
-  static_assert(MaxRegisters > 0);
   static_assert(std::is_trivially_copyable_v<RegType>);
   static_assert(std::is_trivially_destructible_v<RegType>);
 
@@ -98,9 +100,13 @@ public:
 
   void init(uint32_t count) {
     assert(total_regs_ == 0 && "SoftwareLazyRegisterStorage already initialized");
-    assert(count <= MaxRegisters && "register count exceeds lazy storage capacity");
-    if (count > MaxRegisters)
-      std::abort();
+    if constexpr (MaxRegisters == 0) {
+      chunks_.resize((static_cast<size_t>(count) + REGS_PER_CHUNK - 1) / REGS_PER_CHUNK);
+    } else {
+      assert(count <= MaxRegisters && "register count exceeds lazy storage capacity");
+      if (count > MaxRegisters)
+        std::abort();
+    }
     total_regs_ = count;
   }
 
@@ -272,7 +278,9 @@ private:
   }
 
   inline static const RegType zero_register_{};
-  std::array<std::unique_ptr<Chunk>, MAX_CHUNKS> chunks_{};
+  std::conditional_t<MaxRegisters == 0, std::vector<std::unique_ptr<Chunk>>,
+                     std::array<std::unique_ptr<Chunk>, MAX_CHUNKS>>
+      chunks_{};
   uint32_t total_regs_ = 0;
 };
 
@@ -302,7 +310,8 @@ using RegisterStorage = std::conditional_t<Storage == RegisterFileStorage::CONTI
 ///
 /// @tparam RegType Register element type (default: uint32_t).
 /// @tparam Storage Backing-store layout (default: contiguous storage).
-/// @tparam MaxRegisters Maximum logical register count for fixed-capacity storage.
+/// @tparam MaxRegisters Maximum logical register count for fixed-capacity storage,
+/// or zero to size the backing storage at initialization.
 template <typename RegType = uint32_t,
           RegisterFileStorage Storage = RegisterFileStorage::CONTIGUOUS, size_t MaxRegisters = 0>
 class RegisterFile : public Component {

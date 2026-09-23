@@ -12,25 +12,35 @@
 //! contains it, then any env var in [`LibSearch::home_env`] holding an
 //! install root (with the library under `<root>/lib`).
 //!
-//! Absent an override, the backend-specific
-//! [`LibSearch::binary_relative_dirs`] (resolved relative to the
-//! `mirage` binary) are always searched — this lets an in-tree
-//! `cargo build` of the monorepo find a freshly-built emulator without
-//! any extra configuration.
-//!
-//! Backends that opt in via [`LibSearch::system_fallbacks`] also search
-//! a set of generic locations (first match wins), as implemented by
-//! `LibSearch::search_dirs`:
+//! Absent an override, `LibSearch::search_dirs` walks one fixed list
+//! (first match wins). Step 3 is searched by every backend; the rest are
+//! generic locations only backends that opt in via
+//! [`LibSearch::system_fallbacks`] look at:
 //!
 //! 1. Every directory on `$LD_LIBRARY_PATH`.
-//! 2. `$ROCM_HOME` / `$ROCM_PATH` — the ROCm install root
+//! 2. `<prefix>/lib`, where `<prefix>` is the parent of the directory
+//!    holding the `mirage` binary — the library installed beside it. It
+//!    comes before step 3 deliberately: an installed prefix that happens
+//!    to sit inside the checkout must ship its own library rather than
+//!    whatever the host last built into `emulation/rocjitsu/build`.
+//! 3. The backend-specific [`LibSearch::binary_relative_dirs`] (resolved
+//!    relative to the `mirage` binary), searched **even when
+//!    `system_fallbacks` is off** — this lets an in-tree `cargo build`
+//!    of the monorepo find a freshly-built emulator without any extra
+//!    configuration.
+//! 4. `$ROCM_HOME` / `$ROCM_PATH` — the ROCm install root
 //!    (`<root>/lib`).
-//! 3. The ROCm SDK install root reported by `rocm-sdk path --root`
+//! 5. The ROCm SDK install root reported by `rocm-sdk path --root`
 //!    (`<root>/lib`) — present when a ROCm Python wheel venv is
 //!    active.
-//! 4. `../lib` relative to the `mirage` binary.
-//! 5. Standard system / ROCm library directories: `/opt/rocm/lib`,
+//! 6. Standard system / ROCm library directories: `/opt/rocm/lib`,
 //!    `/usr/local/lib`, `/usr/lib`, `/usr/lib/x86_64-linux-gnu`.
+//!
+//! Note what step 2 outranks: an install prefix beside the binary now
+//! wins over `$ROCM_HOME` / `$ROCM_PATH` too, so those variables cannot
+//! redirect a `mirage` that is running out of a prefix which ships its
+//! own copy. [`LibSearch::file_env`] (`$ROCJITSU_LIB` and friends) is the
+//! override that still wins from anywhere.
 //!
 //! Every one of those locations is a fact about the machine mirage is
 //! running on, and the only question a user has when a backend reports
@@ -70,11 +80,13 @@ pub struct LibSearch<'a> {
     /// binary's own directory (e.g. an in-tree build output). Empty
     /// for backends with no such location.
     pub binary_relative_dirs: &'a [&'a str],
-    /// Whether to also search the generic system fallback locations
-    /// (`$LD_LIBRARY_PATH`, `$ROCM_HOME`/`$ROCM_PATH`, `../lib`, and the
-    /// standard system/ROCm dirs). Backends with a tightly-scoped
-    /// discovery contract (e.g. HotSwap) set this `false` so discovery
-    /// is limited to their explicit overrides and build outputs.
+    /// Whether to also search the generic fallback locations —
+    /// `$LD_LIBRARY_PATH`, the install prefix beside the binary, the
+    /// ROCm roots and the standard system dirs. See the module docs for
+    /// the order; it is written down once, there. Backends with a
+    /// tightly-scoped discovery contract (e.g. HotSwap) set this `false`
+    /// so discovery is limited to their explicit overrides and build
+    /// outputs.
     pub system_fallbacks: bool,
 }
 
@@ -166,9 +178,22 @@ impl LibSearch<'_> {
             }
         }
 
-        // Always: backend-specific build outputs, relative to the mirage
-        // binary.
+        // Everything relative to the mirage binary, in one place because
+        // the order between these two is the whole point: the library a
+        // prefix installed beside the binary outranks any build output
+        // an ancestor of that prefix happens to hold.
         if let Some(dir) = &exe_dir {
+            // Opt-in: `<prefix>/lib` beside `<prefix>/bin/mirage`.
+            // Built from `parent()` rather than joining `../lib`, so the
+            // path that ends up in `LD_PRELOAD`, in a container bind
+            // mount and in every "we looked here" report is the
+            // directory's own name and not `<prefix>/bin/../lib`.
+            if self.system_fallbacks
+                && let Some(prefix) = dir.parent()
+            {
+                dirs.push(prefix.join("lib"));
+            }
+            // Always: backend-specific build outputs.
             for rel in self.binary_relative_dirs {
                 dirs.push(dir.join(rel));
             }
@@ -186,10 +211,6 @@ impl LibSearch<'_> {
             // `<venv>/lib/pythonX.Y/site-packages/_rocm_sdk_devel/lib`.
             if let Some(root) = rocm_sdk_root() {
                 dirs.push(root.join("lib"));
-            }
-            // ../lib relative to the mirage binary.
-            if let Some(dir) = &exe_dir {
-                dirs.push(dir.join("../lib"));
             }
             // Standard system / ROCm library directories.
             for dir in STANDARD_LIB_DIRS {
@@ -552,6 +573,93 @@ mod tests {
         assert!(guidance.contains("definitely-not-a-real-lib-xyz.so"));
     }
 
+    /// The two locations resolved relative to the `mirage` binary, as
+    /// exact paths.
+    ///
+    /// Both assertions below are written against these rather than
+    /// against a substring of the candidate list, because
+    /// `$LD_LIBRARY_PATH` is spliced into that list ahead of them and is
+    /// not the test's to control: a shell exporting the in-tree rocjitsu
+    /// build — the single most likely state for someone working on this
+    /// code — would otherwise fail the ordering test, and an entry
+    /// containing `../lib` would pass it without exercising anything.
+    fn binary_relative_pair(lib_name: &str) -> (PathBuf, PathBuf) {
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(Path::to_path_buf))
+            .expect("a running test binary has a directory");
+        let installed_sibling = exe_dir
+            .parent()
+            .expect("a test binary's directory has a parent")
+            .join("lib")
+            .join(lib_name);
+        let in_tree_build = exe_dir.join("rocjitsu/build").join(lib_name);
+        (installed_sibling, in_tree_build)
+    }
+
+    /// The library installed beside the binary outranks any in-tree
+    /// build directory.
+    #[test]
+    fn the_installed_sibling_outranks_an_in_tree_build() {
+        let s = LibSearch {
+            file_env: &[],
+            dir_env: &[],
+            home_env: &[],
+            lib_name: "definitely-not-a-real-lib-xyz.so",
+            binary_relative_dirs: &["rocjitsu/build"],
+            system_fallbacks: true,
+        };
+        let (installed_sibling, in_tree_build) = binary_relative_pair(s.lib_name);
+
+        let candidates = s.candidate_paths();
+        let position = |wanted: &Path| {
+            candidates
+                .iter()
+                .position(|p| p == wanted)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{} is not searched at all: {candidates:?}",
+                        wanted.display()
+                    )
+                })
+        };
+
+        assert!(
+            position(&installed_sibling) < position(&in_tree_build),
+            "the installed sibling must be searched first: {candidates:?}"
+        );
+    }
+
+    /// A backend with a tightly-scoped discovery contract keeps it: the
+    /// installed-sibling rule is part of the generic fallbacks, so it
+    /// must stay behind `system_fallbacks` where it was moved from —
+    /// while the build outputs, which are not, must survive opting out.
+    #[test]
+    fn the_installed_sibling_is_a_system_fallback() {
+        let s = LibSearch {
+            file_env: &[],
+            dir_env: &[],
+            home_env: &[],
+            lib_name: "definitely-not-a-real-lib-xyz.so",
+            binary_relative_dirs: &["rocjitsu/build"],
+            system_fallbacks: false,
+        };
+        let (installed_sibling, in_tree_build) = binary_relative_pair(s.lib_name);
+
+        let candidates = s.candidate_paths();
+        // The positive control: without it this test passes on an empty
+        // candidate list, which is what an unresolvable `current_exe()`
+        // would produce.
+        assert!(
+            candidates.contains(&in_tree_build),
+            "build outputs are searched whatever `system_fallbacks` says: {candidates:?}"
+        );
+        assert!(
+            !candidates.contains(&installed_sibling),
+            "an opted-out backend must not gain the installed sibling: {candidates:?}"
+        );
+    }
+
     /// A search that finds nothing must say where it looked and what to
     /// set, because "not found" on its own is the one answer a user
     /// cannot act on.
@@ -611,9 +719,9 @@ mod tests {
     }
 
     /// A long probe list is elided in the middle rather than at the
-    /// end: the first entries are the build outputs beside the binary
-    /// and the last are the standard system directories, and a user
-    /// needs to see both.
+    /// end: the first entries are the ones a user configured or
+    /// installed and the last are the standard system directories, and a
+    /// user needs to see both.
     #[test]
     fn a_long_report_keeps_both_ends_of_the_search() {
         let searched: Vec<PathBuf> = (0..40)

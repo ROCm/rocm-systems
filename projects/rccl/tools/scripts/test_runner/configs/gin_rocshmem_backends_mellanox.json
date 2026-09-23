@@ -55,7 +55,7 @@
     "gin_perf_gda": {
       "extends": "gin_perf_base",
       "env_variables": {
-        "NCCL_GIN_TYPE": "5"
+        "NCCL_GIN_TYPE": "6"
       },
       "tests": [
         { "name": "GIN_GDA_D3", "description": "GDA alltoall, GinAlltoAllKernel, pure-GIN (-R 2 -D 3)", "command_args": "-R 2 -D 3" },
@@ -68,7 +68,7 @@
       "num_ranks": 8,
       "num_nodes": 1,
       "env_variables": {
-        "NCCL_GIN_TYPE": "5"
+        "NCCL_GIN_TYPE": "6"
       },
       "tests": [
         { "name": "GIN_GDA_1N_D3", "description": "GDA alltoall single-node, GinAlltoAllKernel, pure-GIN (-R 2 -D 3)", "command_args": "-R 2 -D 3" },
@@ -81,7 +81,7 @@
       "num_ranks": 8,
       "num_nodes": 1,
       "env_variables": {
-        "NCCL_GIN_TYPE": "6"
+        "NCCL_GIN_TYPE": "7"
       },
       "tests": [
         { "name": "GIN_SDMA_D3", "description": "SDMA alltoall, GinAlltoAllKernel, pure-GIN (-R 2 -D 3)", "command_args": "-R 2 -D 3" },
@@ -95,7 +95,7 @@
       "num_nodes": 1,
       "command_args": "-b 1 -e 4G -f 2 -g 1",
       "env_variables": {
-        "NCCL_GIN_TYPE": "6"
+        "NCCL_GIN_TYPE": "7"
       },
       "tests": [
         { "name": "GIN_SDMA_INTERNAL", "description": "GIN-SDMA alltoall via ncclAlltoAll (-R 2)", "command_args": "-R 2" }
@@ -133,6 +133,11 @@
           "name": "BarrierSession_Hybrid", "description": "ncclBarrierSession hybrid inner-LSA + outer rail-GIN (2 ranks/node)", "test_filter": "GinMPIDeviceTests.BarrierSession_Hybrid",
           "num_ranks": 4, "num_gpus": 2
         },
+        { "name": "Barrier_WorldMultiIndex", "description": "World-team GIN barrier, 4 concurrent barrier indices", "test_filter": "GinMPIDeviceTests.Barrier_WorldMultiIndex" },
+        {
+          "name": "BarrierPools_NoCrossTalk", "description": "Generic and specialized GIN barrier sessions keep separate signal pools (2 ranks/node, self-skips on a single node)", "test_filter": "GinMPIDeviceTests.BarrierPools_NoCrossTalk",
+          "num_ranks": 4, "num_gpus": 2
+        },
         { "name": "SignalAdd_AndShadow",      "description": "GIN device signal-add and shadow counter",              "test_filter": "GinMPIDeviceTests.SignalAdd_AndShadow" },
         { "name": "SymPtr_PutAndPutValue",    "description": "GIN symmetric-pointer put and put-value",               "test_filter": "GinMPIDeviceTests.SymPtr_PutAndPutValue" },
         { "name": "Alltoall_PureReference",   "description": "GIN pure-reference alltoall kernel",                    "test_filter": "GinMPIDeviceTests.Alltoall_PureReference" },
@@ -143,7 +148,7 @@
         },
         {
           "name": "Alltoall_SdmaInternal", "description": "GIN-SDMA alltoall via ncclAlltoAll (SDMA only, 8 ranks)", "test_filter": "GinMPIDeviceTests.Alltoall_SdmaInternal",
-          "num_ranks": 8, "num_gpus": 8
+          "num_ranks": 8, "num_nodes": 1, "num_gpus": 8
         },
         { "name": "MultiContext_AllFourRoute","description": "GIN multi-context, all four routes",                    "test_filter": "GinMPIDeviceTests.MultiContext_AllFourRoute" },
         {
@@ -180,22 +185,38 @@
         {
           "name": "ReduceScatter_Symmetric_Avg", "description": "Symmetric-memory ReduceScatter avg (2 ranks/node)", "test_filter": "GinMPIDeviceTests.ReduceScatter_Symmetric_Avg",
           "num_ranks": 4, "num_gpus": 2
-        }
+        },
+        { "name": "BarrierFence_PutMakesInboundPutVisible", "description": "Put-fenced barrier makes inbound put visible (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_PutMakesInboundPutVisible_SingleNode" },
+        { "name": "BarrierFence_PutIncludesSelfPut", "description": "Put-fenced barrier covers self-put (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_PutIncludesSelfPut_SingleNode" },
+        { "name": "BarrierFence_GetMakesLocalGetVisible", "description": "Get-fenced barrier makes local get visible (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_GetMakesLocalGetVisible_SingleNode" },
+        { "name": "BarrierFence_DefaultIncludesGet", "description": "Default fence covers local get (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_DefaultIncludesGet_SingleNode" },
+        { "name": "BarrierFence_DefaultIncludesPut", "description": "Default fence covers inbound put (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_DefaultIncludesPut_SingleNode" },
+        { "name": "BarrierFence_AllContextsPut", "description": "Put-fenced AllContexts barrier (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_AllContextsPut_SingleNode" },
+        { "name": "BarrierFence_AllContextsGet", "description": "Get-fenced AllContexts barrier exercises FlushAsync/Wait (single-node)", "test_filter": "GinMPIDeviceTests.BarrierFence_AllContextsGet_SingleNode" }
       ]
     },
     "gin_devmpi_gda": {
       "extends": "gin_devmpi_common",
       "env_variables": {
-        "NCCL_GIN_TYPE": "5"
+        "NCCL_GIN_TYPE": "6"
       }
     },
     "gin_devmpi_sdma": {
       "extends": "gin_devmpi_common",
       "description": "SDMA is a single-node backend: every GinMPIDeviceTests case runs on a single node (num_nodes=1). Cross-node cases (Put_CrossNode/Alltoall_CrossNode/ReduceScatter_Symmetric*) self-skip.",
       "num_nodes": 1,
+      "num_gpus": 2,
       "env_variables": {
-        "NCCL_GIN_TYPE": "6"
-      }
+        "NCCL_GIN_TYPE": "7"
+      },
+      "tests": [
+        { "name": "BarrierSession_LsaOnly",      "num_gpus": 4 },
+        { "name": "BarrierSession_Hybrid",       "num_gpus": 4 },
+        { "name": "BarrierPools_NoCrossTalk",    "num_gpus": 4 },
+        { "name": "AlltoallHybrid_Reference",    "num_gpus": 4 },
+        { "name": "ReduceScatter_Symmetric",     "num_gpus": 4 },
+        { "name": "ReduceScatter_Symmetric_Avg", "num_gpus": 4 }
+      ]
     },
 
     "gin_a2a_eligibility": {

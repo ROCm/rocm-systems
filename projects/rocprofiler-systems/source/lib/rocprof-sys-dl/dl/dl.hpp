@@ -149,19 +149,16 @@ extern "C"
 #endif  // ROCPROFSYS_DL_SOURCE
 }
 
-namespace rocprofsys
+namespace rocprofsys::dl
 {
-namespace dl
+enum class instrument_mode : int
 {
-enum class InstrumentMode : int
-{
-    None          = -1,
-    BinaryRewrite = 0,
-    ProcessCreate = 1,  // runtime instrumentation at start of process
-    PythonProfile = 2,  // python setprofile
-    Last,
+    none           = -1,
+    binary_rewrite = 0,
+    process_create = 1,  // runtime instrumentation at start of process
+    python_profile = 2,  // python setprofile
+    last,
 };
-}  // namespace dl
-}  // namespace rocprofsys
+}  // namespace rocprofsys::dl
 
 #endif  // ROCPROFSYS_DL_HPP_ 1

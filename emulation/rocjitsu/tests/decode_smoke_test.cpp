@@ -197,8 +197,9 @@ TEST(Gfx1250DecodeTest, DisassemblesDpp8Selectors) {
 
 TEST(DecoderSmokeTest, Gfx1201DisassemblesDpp16Attributes) {
   const uint32_t words[] = {
-      0xD6410800u, 0x000002FAu, // v_mad_u16 with a DPP16 source.
-      0xFF0D0104u,              // v4, row_shl:1, full masks, bound_ctrl and fi.
+      0xD6410800u,
+      0x000002FAu, // v_mad_u16 with a DPP16 source.
+      0xFF0D0104u, // v4, row_shl:1, full masks, bound_ctrl and fi.
   };
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
@@ -328,7 +329,8 @@ TEST(DecoderSmokeTest, Gfx1201NonPackedVop3pUsesZeroOpSelHiDefault) {
 
 TEST(DecoderSmokeTest, Gfx950DisassemblesVop3pAttributes) {
   const uint32_t words[] = {
-      0xD38F4805u, 0x18020501u, // v_pk_add_f16 v5, v1, v2 op_sel:[1,0].
+      0xD38F4805u,
+      0x18020501u, // v_pk_add_f16 v5, v1, v2 op_sel:[1,0].
   };
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
@@ -1076,6 +1078,15 @@ TEST(FieldlessOperandDecodeTest, SaveexecExposesInertExecAndSccOperands) {
   expect_inert_fieldless_operand(inst->dst_operand(2), 1, 253);  // SCC write.
   expect_inert_fieldless_operand(inst->src_operand(1), 64, 126); // EXEC read.
 
+  // The fieldless special operands are inert for ordinary register/SIMD access
+  // (asserted above), but each still reports its architectural special register
+  // through to_special_reg_class() -- the special-effect counterpart of
+  // to_register_ref(). The ordinary sdst carries no special class.
+  EXPECT_EQ(sdst->to_special_reg_class(), std::nullopt);
+  EXPECT_EQ(inst->dst_operand(1)->to_special_reg_class(), RegClass::EXEC);
+  EXPECT_EQ(inst->dst_operand(2)->to_special_reg_class(), RegClass::SCC);
+  EXPECT_EQ(inst->src_operand(1)->to_special_reg_class(), RegClass::EXEC);
+
   EXPECT_EQ(inst->disassemble(), "s_and_saveexec_b64 s[0:1], s[0:1]");
 }
 
@@ -1600,7 +1611,7 @@ TEST_P(RdnaVopdExecutionSmokeTest, RejectsWave64Execution) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
 
-  EXPECT_THROW(cu->execute_instruction(inst.get(), *wf), util::UnimplementedInst);
+  EXPECT_THROW((void)cu->execute_instruction(inst.get(), *wf), util::UnimplementedInst);
 }
 
 TEST_P(RdnaVopdExecutionSmokeTest, PreservesFpRoundingAndDx9ZeroSemantics) {
@@ -1656,7 +1667,7 @@ TEST_P(RdnaVopdExecutionSmokeTest, PreservesFpRoundingAndDx9ZeroSemantics) {
     cu->write_vgpr(vb + kDx9Dst, lane, 0xDEADBEEFu);
   }
 
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     EXPECT_EQ(cu->read_vgpr(vb + kFmaDst, lane), expected_fma) << tc.arch_name << " lane " << lane;
@@ -1710,7 +1721,7 @@ TEST_P(RdnaVopdExecutionSmokeTest, DualCndmaskConsumesVccLo) {
     cu->write_vgpr(vb + 8, lane, kYTrue | lane);
   }
 
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     const bool select_true = ((kVcc >> lane) & 1u) != 0;
@@ -1779,7 +1790,7 @@ TEST_P(RdnaVopdExecutionSmokeTest, DualCndmaskAfterScalarVccMerge) {
   const auto execute = [&](const std::array<uint32_t, 3> &inst_words) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, inst_words.data()));
     ASSERT_NE(inst, nullptr);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   };
 
   const uint32_t sb = wf->sgpr_alloc().base;

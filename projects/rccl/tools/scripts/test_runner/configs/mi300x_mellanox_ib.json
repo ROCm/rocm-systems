@@ -283,7 +283,7 @@
       "tests": [
         {
           "name": "GdrFlush_CuMem_AllGatherUnregistered_MultiNode",
-          "description": "Cross-node AllGather over cuMem/DMA-BUF GDR with unregistered buffers (base GDR recv+flush path). The fix removes the redundant scratchpad RDMA_WRITE and keeps the RO=0 RDMA_READ fence, so the collective completes cleanly with correct data. Regression guard for the QP async-fatal 'invalid request local work queue error' that the pre-fix WRITE triggered on a dma-buf scratchpad. Compile-guarded pre-fix reproduction lives in GdrFlushTests.cpp (ForcedScratchpadWrite_ReproducesFault, ENABLE_FAULT_INJECTION).",
+          "description": "Cross-node AllGather over cuMem/DMA-BUF GDR with unregistered buffers (base GDR recv+flush path). The flush fences the relaxed-ordered data through the RO=0 scratchpad (RDMA_WRITE then RDMA_READ), so the collective completes cleanly with correct data. Regression guard for the QP async-fatal 'invalid request local work queue error' that the write raises when the flush QP lacks REMOTE_WRITE.",
           "test_filter": "GdrFlush_CuMem.AllGatherUnregistered_MultiNode"
         }
       ]
@@ -297,7 +297,7 @@
       "tests": [
         {
           "name": "GdrFlush_CuMemDmaBuf_NoAsyncFatal",
-          "description": "Whitebox ncclIbIflush over a dma-buf (cuMem/UBR) RO=0 flush scratchpad - the exact path that used to raise the mlx5 'invalid request local work queue error'. The read-only flush (RDMA_READ fence, WRITE removed) must complete cleanly with correct data.",
+          "description": "Whitebox ncclIbIflush over a dma-buf (cuMem/UBR) RO=0 flush scratchpad - the exact path that used to raise the mlx5 'invalid request local work queue error'. The RO=0 write+read fence must complete cleanly with correct data.",
           "test_filter": "GdrFlushTest.CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal"
         },
         {
@@ -320,11 +320,6 @@
           "name": "GdrFlush_RepeatedFlushBurst",
           "description": "50-iteration GPU recv+flush burst over the dma-buf scratchpad; an intermittent QP async-fatal would surface as a non-success flush. The whole burst must stay clean.",
           "test_filter": "GdrFlushTest.RepeatedFlush_NoFaultBurst"
-        },
-        {
-          "name": "GdrFlush_ForcedScratchpadWrite_ReproducesFault",
-          "description": "Regression guard (ENABLE_FAULT_INJECTION debug builds only): forces the removed scratchpad RDMA_WRITE back on a dma-buf buffer and asserts the flush QP faults, proving the WRITE was the culprit. Absent/skipped when fault injection is not compiled in.",
-          "test_filter": "GdrFlushTest.ForcedScratchpadWrite_ReproducesFault"
         }
       ]
     },
@@ -435,6 +430,76 @@
         }
       ]
     },
+    "maxp2ppeers_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_IB_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "MaxP2pPeers_ConfigField_HonoredAcrossRanks",
+          "description": "ncclConfig_t::maxP2pPeers resolves to the requested value on every rank and all ranks agree",
+          "test_filter": "MaxP2pPeersMPITest.ConfigField_HonoredAcrossRanks",
+          "timeout": 120
+        },
+        {
+          "name": "MaxP2pPeers_Env_HonoredAcrossRanks",
+          "description": "NCCL_P2P_MAX_PEERS is honored across ranks (own mpirun so the per-process NCCL_PARAM cache is fresh)",
+          "test_filter": "MaxP2pPeersMPITest.Env_HonoredAcrossRanks",
+          "timeout": 120
+        },
+        {
+          "name": "MaxP2pPeers_Env_OverridesConfig_AcrossRanks",
+          "description": "NCCL_P2P_MAX_PEERS overrides an explicit config field consistently on every rank (own mpirun for a fresh param cache)",
+          "test_filter": "MaxP2pPeersMPITest.Env_OverridesConfig_AcrossRanks",
+          "timeout": 120
+        },
+        {
+          "name": "MaxP2pPeers_Default_LeavesUndefAndP2pMaxPeersEqualsNRanks",
+          "description": "With neither config nor env set the field stays UNDEF and the divisor resolves to the communicator size",
+          "test_filter": "MaxP2pPeersMPITest.Default_LeavesUndefAndP2pMaxPeersEqualsNRanks",
+          "timeout": 120
+        },
+        {
+          "name": "MaxP2pPeers_AboveRankCount_CappedToNRanks",
+          "description": "A maxP2pPeers above the rank count is capped to the communicator size rather than rejected",
+          "test_filter": "MaxP2pPeersMPITest.AboveRankCount_CappedToNRanks",
+          "timeout": 120
+        },
+        {
+          "name": "MaxP2pPeers_Zero_RejectedWithInvalidArgument",
+          "description": "maxP2pPeers <= 0 through ncclConfig_t fails communicator init with ncclInvalidArgument",
+          "test_filter": "MaxP2pPeersMPITest.Zero_RejectedWithInvalidArgument",
+          "timeout": 120
+        },
+        {
+          "name": "MaxP2pPeers_MultiNode_PerPeerChannelsRespondToMaxP2pPeers",
+          "description": "Multi-node per-peer channel count responds to maxP2pPeers and the halving loop stops at the maximal value for it",
+          "test_filter": "MaxP2pPeersMPITest.MultiNode_PerPeerChannelsRespondToMaxP2pPeers",
+          "timeout": 300
+        },
+        {
+          "name": "MaxP2pPeers_MultiNode_SaturateDividesByMaxP2pPeers",
+          "description": "With RCCL_SATURATE_P2P_NCHANNELS on, the per-peer count is pool/maxP2pPeers exactly; pins the divisor to an observable value",
+          "test_filter": "MaxP2pPeersMPITest.MultiNode_SaturateDividesByMaxP2pPeers",
+          "timeout": 180
+        },
+        {
+          "name": "MaxP2pPeers_Functional_AlltoAll_WithMaxP2pPeers",
+          "description": "A communicator built with maxP2pPeers set runs a correct AllToAll across all ranks",
+          "test_filter": "MaxP2pPeersMPITest.Functional_AlltoAll_WithMaxP2pPeers",
+          "timeout": 180
+        }
+      ]
+    },
     "net_ib_base": {
       "extends": "default",
       "is_gtest": true,
@@ -445,6 +510,43 @@
       "env_variables": {
         "NCCL_DMABUF_ENABLE": "1"
       }
+    },
+    "net_ib_multithread_independent": {
+      "extends": "net_ib_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "tests": [
+        {
+          "name": "NetIB_MultiThread_IndependentSimpleSendRecv",
+          "description": "Concurrent workers each transfer on an independent NET/IB context and connection",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "NetIB_MultiThread_IndependentSequentialTransfers",
+          "description": "Concurrent workers each run repeated transfers on an independent connection",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        },
+        {
+          "name": "NetIB_MultiThread_MultipleSizes",
+          "description": "Concurrent workers sweep the size ladder into the shared per-device MR cache",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "NetIB_MultiThread_MemoryRegistrationStorm",
+          "description": "Concurrent register/deregister storms race the per-device MR cache",
+          "test_filter": "NetIbMPITest.MemoryRegistrationStorm"
+        },
+        {
+          "name": "NetIB_MultiThread_MrCacheRefCount",
+          "description": "All workers register the same address, contending on one cache entry's refcount",
+          "test_filter": "NetIbMPITest.MrCacheRefCount"
+        },
+        {
+          "name": "NetIB_MultiThread_LongRunningEndurance",
+          "description": "Sustained concurrent traffic with the RDMA leak check around the whole run",
+          "test_filter": "NetIbMPITest.LongRunningEndurance"
+        }
+      ]
     },
     "net_ib_initialization": {
       "extends": "net_ib_base",
@@ -772,7 +874,12 @@
         {
           "name": "ParameterApiTests",
           "description": "Public ncclParam C API tests",
-          "test_filter": "ParameterApiTests.*"
+          "test_filter": "ParameterApiTests.*:ParameterApiTypedTests*"
+        },
+        {
+          "name": "CollConfigTests",
+          "description": "Per-collective ncclCollConfig_t validation tests",
+          "test_filter": "CollConfigTests.*:CollConfigTypedTests*"
         },
         {
           "name": "ArgCheck",
@@ -852,18 +959,51 @@
         },
         {
           "name": "DdaFabricEligibilityTest",
-          "description": "Dda Fabric eligibility tests",
-          "test_filter": "DdaFabricEligibilityTest.*"
-	},
-	{
+          "description": "Dda Fabric eligibility and block-cap tests",
+          "test_filter": "DdaFabricEligibilityTest.*:DdaFabricMaxBlocksTest.*:DdaFabricScratchSizingTest.*"
+        },
+        {
           "name": "CeAlltoAllvEligibilityTest",
           "description": "CE AlltoAllv eligibility, metadata layout, and ncclCeImplemented/ncclCeAvailable gating tests",
           "test_filter": "CeAlltoAllvEligibilityTest.*"
         },
         {
+          "name": "CeAlltoAllEligibilityTest",
+          "description": "CE AlltoAll eligibility gating tests matching taskAppend (CTA_POLICY_ZERO, sysmem, capture, group depth)",
+          "test_filter": "CeAlltoAllEligibilityTest.*"
+        },
+        {
           "name": "TimeoutTests",
           "description": "ncclTimeout host API unit tests: enum ordering, error string, async-error set/get/clear, argument validation",
           "test_filter": "TimeoutTests.*"
+        },
+        {
+          "name": "ChannelDefaults",
+          "description": "P2P channel pool and per-peer defaults, including the maxP2pPeers saturate divisor",
+          "test_filter": "ChannelDefaults.*"
+        },
+        {
+          "name": "P2pMaxNchannels",
+          "description": "NCCL_MAX_P2P_NCHANNELS resolution, p2pnChannels upper bound, and the multi-node maxP2pPeers per-peer reduction",
+          "test_filter": "P2pMaxNchannels*",
+          "name": "RcclAlltoAllDecision",
+          "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
+          "test_filter": "RcclAlltoAllDecision.*"
+        },
+        {
+          "name": "RcclCeAr2ShotMax",
+          "description": "CE AllReduce 2-shot arch threshold upper-bound tests",
+          "test_filter": "RcclCeAr2ShotMax.*"
+        },
+        {
+          "name": "RcclCeArGrownBuffer",
+          "description": "CE AllReduce grown-buffer (ceRegMax) eligibility tests",
+          "test_filter": "RcclCeArGrownBuffer.*"
+        },
+        {
+          "name": "SkipPresetTopoMatching",
+          "description": "SkipPreset arch topology matching and threshold lookup tests",
+          "test_filter": "SkipPresetTopoMatching.*"
         }
       ]
     },
@@ -955,6 +1095,9 @@
     },
     "host_api_custom_gin_plugin": {
       "extends": "host_api_tests_symmem",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
       "env_variables": {
         "NCCL_GIN_PLUGIN": "example",
         "NCCL_GIN_ENABLE": "1"
@@ -962,7 +1105,7 @@
       "tests": [
         {
           "name": "HostApi_CustomGinPluginPutSignal",
-          "description": "Host API put/wait with NCCL_GIN_PLUGIN=example (NCCL 2.30.7 regression)",
+          "description": "Host API put/wait with NCCL_GIN_PLUGIN=example (NCCL 2.30.7 regression). Single-node only: 2n hangs on the RMA IB proxy path (AICOMRCCL-2331).",
           "test_filter": "HostApiCustomGinPluginTest.PutSignalWithExternalGinPlugin"
         }
       ]
@@ -1315,6 +1458,37 @@
           "name": "CommMPITests_GinRmaFinalizeWithSplitComm",
           "description": "RMA and GIN hold separate contexts that a shared split child inherits and finalizes without a NULL access",
           "test_filter": "GinRmaContextMPITest.RmaAndGinFinalizeWithSplitComm"
+        },
+        {
+          "name": "CommMPITests_GraphStreamOrdering_ConfigOverride",
+          "description": "ncclConfig_t graphStreamOrdering stored on comm when NCCL_GRAPH_STREAM_ORDERING is unset",
+          "test_filter": "GraphStreamOrderingConfigMPITest.ConfigOverrideAppliesGraphStreamOrdering"
+        },
+        {
+          "name": "CommMPITests_GraphStreamOrdering_IncompatibleMixingFallback",
+          "description": "graphStreamOrdering=0 with graphUsageMode=2 falls back to ordering=1",
+          "test_filter": "GraphStreamOrderingConfigMPITest.IncompatibleMixingFallsBackToEnabledOrdering"
+        },
+        {
+          "name": "CommMPITests_GraphStreamOrdering_EnvOverride_Zero",
+          "description": "NCCL_GRAPH_STREAM_ORDERING=0 overrides ncclConfig_t at init",
+          "test_filter": "GraphStreamOrderingConfigMPITest.EnvOverrideAppliesGraphStreamOrdering",
+          "env_variables": {
+            "NCCL_GRAPH_STREAM_ORDERING": "0"
+          }
+        },
+        {
+          "name": "CommMPITests_GraphStreamOrdering_EnvOverride_One",
+          "description": "NCCL_GRAPH_STREAM_ORDERING=1 overrides ncclConfig_t at init",
+          "test_filter": "GraphStreamOrderingConfigMPITest.EnvOverrideAppliesGraphStreamOrdering",
+          "env_variables": {
+            "NCCL_GRAPH_STREAM_ORDERING": "1"
+          }
+        },
+        {
+          "name": "CommMPITests_GraphStreamOrdering_DisabledOrderingGraphCaptureSmoke",
+          "description": "graphStreamOrdering=0 with graphUsageMode=1 captures and replays AllReduce",
+          "test_filter": "GraphStreamOrderingConfigMPITest.DisabledOrderingGraphCaptureSmoke"
         }
       ]
     },
@@ -1868,7 +2042,7 @@
       "timeout": 300,
       "env_variables": {
         "NCCL_DEBUG": "INFO",
-        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_DEBUG_SUBSYS": "REG,INIT,TUNING",
         "NCCL_GRAPH_REGISTER": "1",
         "NCCL_LEGACY_CUDA_REGISTER": "1",
         "NCCL_LOCAL_REGISTER": "1",
@@ -1884,6 +2058,30 @@
           "name": "GraphCapture_AllReduce_MultiNode",
           "description": "AllReduce graph capture with buffer registration on multi-node",
           "test_filter": "GraphCapture_AllReduce.MultiNode"
+        },
+        {
+          "name": "GraphCapture_WindowRegister_SymmetricAllReduce_MultiNode",
+          "description": "Graph-captured symmetric AllReduce on two nodes; expects legacy fallback (no multi-node AllReduce symmetric kernel)",
+          "test_filter": "GraphCapture_WindowRegister.SymmetricAllReduce",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1"
+          }
+        },
+        {
+          "name": "GraphCapture_WindowRegister_SymmetricAllGather_MultiNode",
+          "description": "Graph-captured symmetric AllGather on two nodes; expects fallback when LSA store multimem is unavailable",
+          "test_filter": "GraphCapture_WindowRegister.SymmetricAllGather",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1"
+          }
+        },
+        {
+          "name": "GraphCapture_WindowRegister_SymmetricReduceScatter_MultiNode",
+          "description": "Graph-captured symmetric ReduceScatter on two nodes; uses GIN RailA2A when available, otherwise fallback",
+          "test_filter": "GraphCapture_WindowRegister.SymmetricReduceScatter",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1"
+          }
         }
       ]
     },
@@ -1892,13 +2090,15 @@
       "extends": "default",
       "is_gtest": true,
       "binary": "rccl-UnitTestsMPI",
-      "num_ranks": 2,
+      "num_ranks": 8,
       "num_nodes": 1,
-      "num_gpus": 2,
-      "timeout": 180,
+      "num_gpus": 8,
+      "timeout": 360,
       "env_variables": {
         "NCCL_DEBUG": "INFO",
-        "NCCL_CUMEM_ENABLE": "1"
+        "NCCL_DEBUG_SUBSYS": "INIT,TUNING",
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
       },
       "tests": [
         {
@@ -1970,9 +2170,127 @@
           "name": "SymWin_WindowLifecycle_Repeated",
           "description": "Repeated register/deregister cycles",
           "test_filter": "SymWin_WindowLifecycle.RepeatedRegisterDeregister"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_MultipleAsymmetric",
+          "description": "Several windows registered at once with different asymmetric size patterns",
+          "test_filter": "SymWin_WindowLifecycle.MultipleAsymmetricWindows"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_RepeatedAsymmetric",
+          "description": "Repeated register/deregister cycles at asymmetric sizes",
+          "test_filter": "SymWin_WindowLifecycle.RepeatedRegisterDeregister_AsymmetricSizes"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_ReregisterAsymmetricPattern",
+          "description": "Re-registration of one allocation at a different size, where a different rank registers the most",
+          "test_filter": "SymWin_WindowLifecycle.ReregisterWithDifferentAsymmetricPattern"
+        },
+        {
+          "name": "SymWin_AsymRegister_AscendingSizes",
+          "description": "Collective registration where the window size grows with rank",
+          "test_filter": "SymWin_AsymRegister.AscendingSizes"
+        },
+        {
+          "name": "SymWin_AsymRegister_DescendingSizes",
+          "description": "Collective registration where the largest window is on rank 0",
+          "test_filter": "SymWin_AsymRegister.DescendingSizes"
+        },
+        {
+          "name": "SymWin_AsymRegister_SingleRankLarger",
+          "description": "One rank registers a much larger window than the others",
+          "test_filter": "SymWin_AsymRegister.SingleRankLarger"
+        },
+        {
+          "name": "SymWin_AsymRegister_ExtremeSizeRatio",
+          "description": "One rank registers a much smaller window than the others",
+          "test_filter": "SymWin_AsymRegister.ExtremeSizeRatio"
+        },
+        {
+          "name": "SymWin_AsymRegister_SubRangeOfEqualAllocations",
+          "description": "Equal allocations registered with unequal sizes",
+          "test_filter": "SymWin_AsymRegister.SubRangeOfEqualAllocations"
+        },
+        {
+          "name": "SymWin_AsymCollective_AllReduce_OutOfPlace",
+          "description": "AllReduce on asymmetric windows over the range valid on every rank",
+          "test_filter": "SymWin_AsymCollective.AllReduce_OutOfPlace"
+        },
+        {
+          "name": "SymWin_AsymCollective_AllReduce_InPlace",
+          "description": "In-place AllReduce on a single asymmetric window",
+          "test_filter": "SymWin_AsymCollective.AllReduce_InPlace_SingleWindow"
+        },
+        {
+          "name": "SymWin_AsymCollective_AllReduce_OnlySendWindow",
+          "description": "AllReduce with only the send window registered (relaxed one-buffer path)",
+          "test_filter": "SymWin_AsymCollective.AllReduce_OnlySendWindow"
+        },
+        {
+          "name": "SymWin_AsymCollective_AllReduce_SubRange",
+          "description": "AllReduce over unequal registered sizes of equal allocations",
+          "test_filter": "SymWin_AsymCollective.AllReduce_SubRangeOfEqualAllocations"
+        },
+        {
+          "name": "SymWin_AsymCollective_AllGather_Padded",
+          "description": "AllGather with rank-dependent window padding",
+          "test_filter": "SymWin_AsymCollective.AllGather_PaddedWindows"
+        },
+        {
+          "name": "SymWin_AsymCollective_ReduceScatter_Padded",
+          "description": "ReduceScatter with rank-dependent window padding",
+          "test_filter": "SymWin_AsymCollective.ReduceScatter_PaddedWindows"
+        },
+        {
+          "name": "SymWin_AsymCollective_AllReduce_Repeated",
+          "description": "Repeated AllReduce iterations on one asymmetric window",
+          "test_filter": "SymWin_AsymCollective.AllReduce_RepeatedIterations"
+        },
+        {
+          "name": "SymWin_AsymLsa_PeerContent",
+          "description": "Peer window contents sampled up to each peer's own registered size",
+          "test_filter": "SymWin_AsymLsa.PeerContent_UpToEachPeerSize"
+        },
+        {
+          "name": "SymWin_AsymLsa_PeerPointerStride",
+          "description": "Peer pointer stride fixed at init and window slots sized from the LSA team maximum, not a rank's own size",
+          "test_filter": "SymWin_AsymLsa.PeerPointerStride_IndependentOfRankSizes"
+        },
+        {
+          "name": "SymWin_AsymLsa_OffsetBound",
+          "description": "Peer pointer offset past the local window end is rejected, while a smaller peer's end is not bounds-checked",
+          "test_filter": "SymWin_AsymLsa.PointerOffsetAtLocalWindowEnd_Rejected"
+        },
+        {
+          "name": "SymWin_GraphCapture_SymmetricAllReduce",
+          "description": "Symmetric window registration during HIP graph capture with captured AllReduce replay",
+          "test_filter": "GraphCapture_WindowRegister.SymmetricAllReduce"
+        },
+        {
+          "name": "SymWin_GraphCapture_SymmetricAllGather",
+          "description": "Symmetric window registration during HIP graph capture with captured AllGather replay",
+          "test_filter": "GraphCapture_WindowRegister.SymmetricAllGather"
+        },
+        {
+          "name": "SymWin_GraphCapture_SymmetricReduceScatter",
+          "description": "Symmetric window registration during HIP graph capture with captured ReduceScatter replay",
+          "test_filter": "GraphCapture_WindowRegister.SymmetricReduceScatter"
         }
       ]
     },
+
+    "symmetric_window_tests_multinode": {
+      "extends": "symmetric_window_tests",
+      "num_ranks": 16,
+      "num_nodes": 2,
+      "num_gpus": 8,
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2"
+      }
+    },
+
     "symmetric_abort_checkmode_tests": {
       "extends": "default",
       "is_gtest": true,
@@ -2603,7 +2921,7 @@
         {
           "name": "CE_Internal_Init",
           "description": "ncclCeInit lifecycle: allocates sync window; ncclCeFinalize tears it down; double-fini is safe; independent state per comm",
-          "test_filter": "CeInternalMPITest.InitSetsWindowPointers:CeInternalMPITest.FiniNullsPointers:CeInternalMPITest.DoubleFiniIsSafe:CeInternalMPITest.IndependentCeStatePerComm:CeInternalMPITest.FiniAfterZeroCollectives"
+          "test_filter": "CeInternalMPITest.InitSetsWindowPointers:CeInternalMPITest.FiniNullsPointers:CeInternalMPITest.DoubleFiniIsSafe:CeInternalMPITest.IndependentCeStatePerComm:CeInternalMPITest.FiniAfterZeroCollectives:CeInternalMPITest.FreeBatchOpsParamsIsIdempotent"
         },
         {
           "name": "CE_Internal_Sync",
@@ -3751,6 +4069,25 @@
             "NCCL_GIN_TYPE": "2",
             "NCCL_GIN_ENABLE": "1"
           }
+        },
+        {
+          "name": "GIN_Barrier_WorldMultiIndex",
+          "description": "ncclGinBarrierSession world team with 4 concurrent barrier indices, one per CTA, exercising the cell striding of the pool auto-allocated from worldGinBarrierCount",
+          "test_filter": "GinMPIDeviceTests.Barrier_WorldMultiIndex",
+          "num_ranks": 2, "num_nodes": 2, "num_gpus": 1,
+          "env_variables": {
+            "NCCL_GIN_TYPE": "2",
+            "NCCL_GIN_ENABLE": "1"
+          }
+        },
+        {
+          "name": "GIN_BarrierPools_NoCrossTalk",
+          "description": "Generic ncclBarrierSession and the specialized GIN sessions run on the same barrier index and must advance only their own signal pools, covering the hybrid world arm the default fence selects under fully connected GIN",
+          "test_filter": "GinMPIDeviceTests.BarrierPools_NoCrossTalk",
+          "env_variables": {
+            "NCCL_GIN_TYPE": "2",
+            "NCCL_GIN_ENABLE": "1"
+          }
         }
       ]
     },
@@ -3962,20 +4299,32 @@
       "enabled": true
     },
     {
+      "name": "MaxP2pPeers MPI Tests - Multi-Node (4-rank, 2-node)",
+      "description": "ncclConfig_t::maxP2pPeers and NCCL_P2P_MAX_PEERS: resolution across ranks, cap, rejection, and the per-peer channel divisor",
+      "config": "maxp2ppeers_multinode",
+      "enabled": true
+    },
+    {
       "name": "NET Transport - Ethernet (Multi-Node)",
       "description": "Network transport tests over Ethernet",
       "config": "net_transport_eth_multinode",
       "enabled": true
     },
     {
+      "name": "NET IB - Multithread Independent Connections (4)",
+      "description": "4 worker threads/rank, each on an independent NET/IB context and connection",
+      "config": "net_ib_multithread_independent",
+      "enabled": true
+    },
+    {
       "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank)",
-      "description": "Whitebox coverage of the NET/IB GDR flush fix: dma-buf and peermem RO=0 scratchpad reads, feature-disabled fallback, repeated-flush burst, and the fault-injection regression guard",
+      "description": "Whitebox coverage of the NET/IB GDR flush: dma-buf and peermem RO=0 scratchpad fence, feature-disabled fallback, and repeated-flush burst",
       "config": "net_ib_gdr_flush",
       "enabled": true
     },
     {
       "name": "GDR Flush - cuMem AllGather (Multi-Node)",
-      "description": "Cross-node AllGather over cuMem/DMA-BUF GDR exercising the base recv+flush path with the redundant scratchpad RDMA_WRITE removed",
+      "description": "Cross-node AllGather over cuMem/DMA-BUF GDR exercising the base recv+flush path with the RO=0 scratchpad write+read fence",
       "config": "gdr_flush_cumem_multinode",
       "enabled": true
     },
@@ -4669,14 +5018,23 @@
     },
     {
       "name": "Host API Tests - Custom GIN Plugin",
-      "description": "Host API regression for NCCL 2.30.7 custom GIN plugin + one-sided host APIs",
+      "description": "Single-node Host API regression for NCCL 2.30.7 custom GIN plugin + one-sided host APIs (excluded from multi-node; AICOMRCCL-2331)",
       "config": "host_api_custom_gin_plugin",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
       "enabled": true
     },
     {
       "name": "Symmetric Window Tests - Single Node",
-      "description": "Symmetric window registration tests for relaxed one-buffer path validation",
+      "description": "Symmetric window registration tests for relaxed one-buffer path and asymmetric per-rank window size validation",
       "config": "symmetric_window_tests",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric Window Tests - Two Node",
+      "description": "Symmetric window tests on two nodes (two LSA teams)",
+      "config": "symmetric_window_tests_multinode",
       "enabled": true
     },
     {

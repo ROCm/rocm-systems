@@ -118,7 +118,7 @@ def warn_deprecated_output_formats(output_formats):
         warning(
             "The following direct rocprofv3 output format(s) are deprecated: "
             f"{', '.join(display_names[itr] for itr in deprecated_formats)}. "
-            "Some tracing features, including hipFILE and rocSHMEM tracing, might not "
+            "Some tracing features, including hipFILE, rocSHMEM, and HIP event tracing, might not "
             "produce output in these formats. Use `--output-format rocpd` (the default), "
             "then run `rocpd convert -i <database>.db --output-format csv` when CSV "
             "output is needed."
@@ -582,13 +582,13 @@ For attachment profiling of running processes:
         aggregate_tracing_options,
         "-r",
         "--runtime-trace",
-        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
+        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, HIP event barriers, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
     )
     add_parser_bool_argument(
         aggregate_tracing_options,
         "-s",
         "--sys-trace",
-        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
+        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, HIP event barriers, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
     )
 
     basic_tracing_options = parser.add_argument_group("Basic tracing options")
@@ -597,7 +597,7 @@ For attachment profiling of running processes:
     add_parser_bool_argument(
         basic_tracing_options,
         "--hip-trace",
-        help="Combination of --hip-runtime-trace and --hip-compiler-trace. This option only enables the tracing of the HIP API. Unlike previous iterations of rocprof, this does not enable kernel tracing, memory copy tracing, etc",
+        help="Combination of --hip-runtime-trace and --hip-compiler-trace (which in turn enables --hip-event-trace and --hip-graph-trace). This option only enables the tracing of the HIP API. Unlike previous iterations of rocprof, this does not enable kernel tracing, memory copy tracing, etc",
     )
     add_parser_bool_argument(
         basic_tracing_options,
@@ -613,6 +613,11 @@ For attachment profiling of running processes:
         basic_tracing_options,
         "--hip-graph-trace",
         help="For collecting one record per hipGraphLaunch invocation. Emits graph launch records to JSON and rocpd with the graph_exec_id and kernel_dispatch_count for each launch. Independent of --kernel-trace; kernel-dispatch records are emitted by --kernel-trace. Automatically enabled by --hip-trace and --hip-runtime-trace.",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--hip-event-trace",
+        help="Trace GPU-side HIP event barriers produced by hipEventRecord and hipStreamWaitEvent. Emits hip_event records to JSON and rocpd with the operation, event handle, queue, and source queue for cross-stream dependencies. Independent of --kernel-trace. Automatically enabled by --hip-trace and --hip-runtime-trace. Use rocpd convert for CSV or Perfetto output.",
     )
     add_parser_bool_argument(
         basic_tracing_options,
@@ -1824,6 +1829,7 @@ def run(app_args, args, **kwargs):
             "rocjpeg_trace",
             "rocshmem_trace",
             "hipfile_trace",
+            "hip_event_trace",
         ):
             setattrifnone(args, itr, True)
 
@@ -1842,6 +1848,7 @@ def run(app_args, args, **kwargs):
             "rocjpeg_trace",
             "rocshmem_trace",
             "hipfile_trace",
+            "hip_event_trace",
         ):
             setattrifnone(args, itr, True)
 
@@ -1854,8 +1861,9 @@ def run(app_args, args, **kwargs):
             setattrifnone(args, f"hip_{itr}_trace", True)
 
     if args.hip_runtime_trace:
-        # HIP graphs are part of the HIP runtime
+        # HIP graphs and HIP events are part of the HIP runtime
         setattrifnone(args, "hip_graph_trace", True)
+        setattrifnone(args, "hip_event_trace", True)
 
     if args.hsa_trace:
         for itr in ("core", "amd", "image", "finalizer"):
@@ -1894,6 +1902,7 @@ def run(app_args, args, **kwargs):
             ["kfd_queue_trace", "KFD_QUEUE_TRACE"],
             ["kfd_dropped_events_trace", "KFD_DROPPED_EVENTS_TRACE"],
             ["scratch_memory_trace", "SCRATCH_MEMORY_TRACE"],
+            ["hip_event_trace", "HIP_EVENT_TRACE"],
             ["group_by_queue", "GROUP_BY_QUEUE"],
         ]
     ).items():
@@ -2533,17 +2542,6 @@ def main(argv=None):
                     "Each --pmc must specify at least one counter."
                 )
 
-    # Validate incompatible options
-    if cli_multipass and cmd_args.pid:
-        fatal_error(
-            "Multi-pass counter collection (multiple --pmc flags) is not compatible with attach mode (--pid)"
-        )
-
-    if cli_multipass and cmd_args.collection_period:
-        fatal_error(
-            "Multi-pass counter collection (multiple --pmc flags) is not compatible with --collection-period"
-        )
-
     def validate_selected_regions_conflicts(_args):
         if getattr(_args, "selected_regions", False) and getattr(
             _args, "att_no_intercept", False
@@ -2600,6 +2598,48 @@ def main(argv=None):
     if replay_enabled and cli_has_pmc:
         cmd_args.pmc = [g if isinstance(g, list) else [g] for g in cmd_args.pmc]
         cli_multipass = False
+
+    def multipass_source(cmd_args, inp_args):
+        """Return why the arguments request application-replay counter multi-pass."""
+        cli_pmc = getattr(cmd_args, "pmc", None)
+        input_pmc_jobs = [itr for itr in inp_args if has_set_attr(itr, "pmc")]
+
+        if (
+            cli_pmc is not None
+            and len(cli_pmc) > 1
+            and getattr(cmd_args, "replay_mode", None) != "kernel"
+        ):
+            return "multiple --pmc flags"
+        if len(input_pmc_jobs) > 1:
+            return "multiple input-file jobs"
+        if cli_pmc is not None and input_pmc_jobs:
+            return "--pmc combined with input-file pmc"
+        return None
+
+    def multipass_incompatible_message(cmd_args, inp_args):
+        """Return an error for options incompatible with counter multi-pass."""
+        source = multipass_source(cmd_args, inp_args)
+        if source is None:
+            return None
+        if has_set_attr(cmd_args, "pid") or any(
+            has_set_attr(itr, "pid") for itr in inp_args
+        ):
+            return (
+                f"Multi-pass counter collection ({source}) is not compatible "
+                "with attach mode (--pid)"
+            )
+        if has_set_attr(cmd_args, "collection_period") or any(
+            has_set_attr(itr, "collection_period") for itr in inp_args
+        ):
+            return (
+                f"Multi-pass counter collection ({source}) is not compatible "
+                "with --collection-period"
+            )
+        return None
+
+    incompatible = multipass_incompatible_message(cmd_args, inp_args)
+    if incompatible is not None:
+        fatal_error(incompatible)
 
     use_multipass = cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
 

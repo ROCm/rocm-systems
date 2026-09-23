@@ -12,10 +12,13 @@
 #include "decode_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
@@ -29,22 +32,30 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -71,6 +82,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cfenv>
 #include <cmath>
 #include <cstdint>
 #include <exception>
@@ -179,7 +191,7 @@ struct ForceScalarGuard {
   bool old_force_scalar;
 };
 
-TEST(CdnaVop3pPackedF32Test, SgprSourcesReadBothRegisters) {
+TEST(CdnaVop3pPackedF32Test, SgprSourcesUseArchitectureSpecificWidth) {
   struct ArchCase {
     rj_code_arch_t arch;
     std::string_view name;
@@ -257,12 +269,14 @@ TEST(CdnaVop3pPackedF32Test, SgprSourcesReadBothRegisters) {
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr) << arch.name;
       ASSERT_EQ(std::string_view(inst->mnemonic()), "v_pk_fma_f32") << arch.name;
-      cu->execute_instruction(inst.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
+      // CDNA5 ISA 7.7.1 replicates s8; earlier CDNA reads the s[8:9] pair.
+      const float expected_hi = arch.arch == ROCJITSU_CODE_ARCH_CDNA5 ? 12.0f : 15.0f;
       for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
         EXPECT_EQ(cu->read_vgpr(vb + 2, lane), std::bit_cast<uint32_t>(8.0f))
             << arch.name << " force_scalar=" << force_scalar << " lane " << lane;
-        EXPECT_EQ(cu->read_vgpr(vb + 3, lane), std::bit_cast<uint32_t>(15.0f))
+        EXPECT_EQ(cu->read_vgpr(vb + 3, lane), std::bit_cast<uint32_t>(expected_hi))
             << arch.name << " force_scalar=" << force_scalar << " lane " << lane;
       }
 
@@ -287,7 +301,7 @@ public:
   }
 
   void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
-    execute_instruction(inst, wf);
+    EXPECT_TRUE(execute_instruction(inst, wf).succeeded());
     if (inst->is_memory_op())
       route_memory_inst(inst, wf);
     else
@@ -310,7 +324,7 @@ public:
   }
 
   void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
-    execute_instruction(inst, wf);
+    EXPECT_TRUE(execute_instruction(inst, wf).succeeded());
     if (inst->is_memory_op())
       route_memory_inst(inst, wf);
     else
@@ -470,10 +484,16 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
     amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wf, nullptr) << "Failed to dispatch WF for " << te.mnemonic;
 
-    // Execute and catch UnimplementedInst.
+    // Expected rejections use the result and retain a reason for diagnostics.
     try {
-      cu->execute_instruction(inst.get(), *wf);
-      ++executed;
+      if (cu->execute_instruction(inst.get(), *wf).succeeded()) {
+        ++executed;
+      } else if (wf->instruction_execution_error() ==
+                 amdgpu::InstructionExecutionError::UnimplementedInstruction) {
+        unimpl_list.emplace_back(te.mnemonic);
+      } else {
+        execution_fail_list.emplace_back(te.mnemonic);
+      }
     } catch (const util::UnimplementedInst &) {
       unimpl_list.emplace_back(te.mnemonic);
     } catch (const std::exception &error) {
@@ -578,7 +598,7 @@ TEST(Rdna4ExecMaskTest, Wave32ExecHiRemainsAvailableAsScalarScratch) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), sequence[i].second);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     if (i == 1) {
       EXPECT_EQ(wf->exec(), 0x0000ffffu);
       EXPECT_EQ(wf->exec_raw(), 0xffff0000'0000ffffULL);
@@ -597,7 +617,7 @@ TEST(Rdna4ExecMaskTest, Wave32ExecHiRemainsAvailableAsScalarScratch) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, mov_b64.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "s_mov_b64");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(wf->exec_raw(), kRawExec);
   EXPECT_EQ(wf->exec(), static_cast<uint32_t>(kRawExec));
@@ -856,7 +876,7 @@ TEST(Rdna2MovrelModifierTest, RelativeSourceIsSelectedBeforeDppAndSdwaStaging) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_TRUE(std::string_view(inst->mnemonic()).starts_with("v_movrels_b32"));
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   };
 
   // LLVM 23 gfx1030 encodings. DPP16 row_shr:1 reads the M0-adjusted source
@@ -956,7 +976,7 @@ TEST(Cdna4GprIdxTest, MadmkVsrc1UsesSrc2SelectorBit) {
     SCOPED_TRACE(selector_case.mask);
     wf->set_m0(kIndex | (selector_case.mask << 12));
     cu->write_vgpr(base + kDst, 0, 0xCAFE0000u);
-    cu->execute_instruction(instruction.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(base + kDst, 0), util::f32_to_f16(selector_case.expected));
   }
 }
@@ -996,7 +1016,7 @@ TEST(Cdna4GprIdxTest, SwapWritesEachDestinationWithItsAssignedRole) {
   cu->write_vgpr(base + kSrc, 0, 0x11111111u);
   cu->write_vgpr(base + kSrc + kIndex, 0, 0x22222222u);
   cu->write_vgpr(base + kDst, 0, 0x33333333u);
-  cu->execute_instruction(instruction.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(base + kSrc, 0), 0x11111111u);
   EXPECT_EQ(cu->read_vgpr(base + kSrc + kIndex, 0), 0x33333333u);
   EXPECT_EQ(cu->read_vgpr(base + kDst, 0), 0x22222222u);
@@ -1005,7 +1025,7 @@ TEST(Cdna4GprIdxTest, SwapWritesEachDestinationWithItsAssignedRole) {
   cu->write_vgpr(base + kSrc, 0, 0x44444444u);
   cu->write_vgpr(base + kDst, 0, 0x55555555u);
   cu->write_vgpr(base + kDst + kIndex, 0, 0x66666666u);
-  cu->execute_instruction(instruction.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(base + kSrc, 0), 0x66666666u);
   EXPECT_EQ(cu->read_vgpr(base + kDst, 0), 0x55555555u);
   EXPECT_EQ(cu->read_vgpr(base + kDst + kIndex, 0), 0x44444444u);
@@ -1064,7 +1084,7 @@ TEST(Cdna4GprIdxTest, MfmaIndexesArchitecturalVgprsButNotAccvgprs) {
 
   initialize_sources(7.0f, 2.0f);
   wf->set_m0(kIndex | (0x1u << 12));
-  cu->execute_instruction(vgpr_instruction.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(vgpr_instruction.get(), *wf).succeeded());
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
     for (uint32_t dword = 0; dword < kDstDwords; ++dword)
       EXPECT_EQ(cu->read_vgpr(base + kDst + dword, lane), std::bit_cast<uint32_t>(29.0f));
@@ -1076,7 +1096,7 @@ TEST(Cdna4GprIdxTest, MfmaIndexesArchitecturalVgprsButNotAccvgprs) {
       cu->write_vgpr(base + kDst + dword, lane, 0x11111111u);
       cu->write_vgpr(base + kDst + kIndex + dword, lane, 0x22222222u);
     }
-  cu->execute_instruction(vgpr_instruction.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(vgpr_instruction.get(), *wf).succeeded());
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
     for (uint32_t dword = 0; dword < kDstDwords; ++dword) {
       EXPECT_EQ(cu->read_vgpr(base + kDst + dword, lane), 0x11111111u);
@@ -1094,7 +1114,7 @@ TEST(Cdna4GprIdxTest, MfmaIndexesArchitecturalVgprsButNotAccvgprs) {
       cu->write_vgpr(acc_base + dword, lane, 0x22222222u);
       cu->write_vgpr(acc_base + kIndex + dword, lane, 0x33333333u);
     }
-  cu->execute_instruction(acc_instruction.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(acc_instruction.get(), *wf).succeeded());
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
     for (uint32_t dword = 0; dword < kDstDwords; ++dword) {
       EXPECT_EQ(cu->read_vgpr(acc_base + dword, lane), std::bit_cast<uint32_t>(29.0f));
@@ -1133,7 +1153,7 @@ TEST(Rdna4ScalarSccTest, AddSubCoI32UseSignedOverflow) {
     cu->write_sgpr(sb + 0, lhs);
     cu->write_sgpr(sb + 1, rhs);
     wf->write_scc(!expected_scc);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(cu->read_sgpr(sb + 2), expected_result) << mnemonic;
     EXPECT_EQ(wf->read_scc(), expected_scc) << mnemonic;
@@ -1192,7 +1212,7 @@ void run_scalar_cvt_preserves_scc(rj_code_arch_t arch, std::string_view arch_nam
       cu->write_sgpr(sb + 0, tc.src);
       cu->write_sgpr(sb + 1, 0u);
       wf->write_scc(initial_scc);
-      cu->execute_instruction(inst.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
       EXPECT_EQ(cu->read_sgpr(sb + 1), tc.expected) << arch_name << " " << tc.mnemonic;
       EXPECT_EQ(wf->read_scc(), initial_scc)
@@ -1296,7 +1316,7 @@ TEST(Cdna4Vop3Test, CmpClassF16WritesWave64UpperMaskDword) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_class_f16");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(cu->read_sgpr(sb + 0), static_cast<uint32_t>(expected_mask));
     EXPECT_EQ(cu->read_sgpr(sb + 1), static_cast<uint32_t>(expected_mask >> 32));
@@ -1338,7 +1358,7 @@ TEST(Cdna4Vop3Test, BcntAddsSourceAccumulator) {
     std::unique_ptr<Instruction> inst = std::move(decoded.value());
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_bcnt_u32_b32");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(cu->raw_vgpr_reg<64>(vb + 2)[0], 9u);
     if (!wf->is_halted())
@@ -1390,7 +1410,7 @@ TEST(CdnaVop3True16Test, B16I16U16OpsUseOpSelAndCdnaDestinationPolicy) {
         std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
         ASSERT_NE(inst, nullptr) << arch.name << " " << mnemonic;
         ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic) << arch.name;
-        cu->execute_instruction(inst.get(), *wf);
+        EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
       };
 
       for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -1473,7 +1493,7 @@ TEST(Rdna3Dot2ExecutionTest, Vop2Dot2accF32F16AccumulatesDst) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_dot2acc_f32_f16_e32");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), std::bit_cast<uint32_t>(16.0f));
 
@@ -1514,7 +1534,7 @@ TEST(Rdna4Dot2True16ExecutionTest, F16IgnoresOutputModifiersAndUsesSelectedHalve
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_dot2_f16_f16");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr(vb + 3, 0), pack16(0xBEEFu, util::f32_to_f16(23.5f)));
 
@@ -1555,7 +1575,7 @@ TEST(Rdna4Dot2True16ExecutionTest, Bf16UsesSelectedAccumulatorAndDestinationHalf
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_dot2_bf16_bf16");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr(vb + 3, 0), pack16(util::f32_to_bf16(16.0f), 0xCAFEu));
 
@@ -1608,7 +1628,7 @@ void run_cdna4_dot2_f32_bf16(bool force_scalar) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_dot2_f32_bf16");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   // 1.0*3.0 + 2.0*4.0 + 0.5 = 11.5, computed in exact f32 (all inputs represent
   // exactly in BF16). Floating DOT ignores the encoded CLAMP field; a wrong
@@ -2065,7 +2085,9 @@ protected:
     if (!inst)
       return 0;
     EXPECT_EQ(inst->size(), has_prefix && abid == 1u ? 16u : 8u);
-    static_cast<amdgpu::ComputeUnitCore &>(*cu).execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(static_cast<amdgpu::ComputeUnitCore &>(*cu)
+                    .execute_instruction(inst.get(), *wf)
+                    .succeeded());
     return cu->read_vgpr(vgpr_base + kDst, 0);
   }
 
@@ -2315,8 +2337,8 @@ TEST(Cdna4OmodExecutionTest, IeeeSuppressesTrigPreopOmod) {
   ASSERT_NE(omod, nullptr);
 
   wf->set_mode_raw(amdgpu::Wavefront::IEEE_BIT);
-  cu->execute_instruction(plain.get(), *wf);
-  cu->execute_instruction(omod.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(plain.get(), *wf).succeeded());
+  EXPECT_TRUE(cu->execute_instruction(omod.get(), *wf).succeeded());
   const auto read_f64 = [&](uint32_t reg) {
     return static_cast<uint64_t>(cu->read_vgpr(vb + reg, 0)) |
            (static_cast<uint64_t>(cu->read_vgpr(vb + reg + 1, 0)) << 32);
@@ -2325,7 +2347,7 @@ TEST(Cdna4OmodExecutionTest, IeeeSuppressesTrigPreopOmod) {
   EXPECT_EQ(read_f64(6), read_f64(4));
 
   wf->set_mode_raw(0u);
-  cu->execute_instruction(omod.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(omod.get(), *wf).succeeded());
   EXPECT_EQ(read_f64(6), 0x3FF45F306DC9C882ULL);
 
   if (!wf->is_halted())
@@ -2421,7 +2443,7 @@ TEST(NewerOmodExecutionTest, MulReportsOnlyPermittedExceptionClasses) {
       ASSERT_NE(suppressed, nullptr);
       wf->set_trapsts(0u);
       wf->clear_pending_alu_causes();
-      cu->execute_instruction(suppressed.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(suppressed.get(), *wf).succeeded());
       EXPECT_EQ(wf->pending_alu_causes() & (kUnderflow | kInexact), 0u);
       EXPECT_EQ(wf->trapsts() & (kUnderflow | kInexact), 0u);
 
@@ -2436,7 +2458,7 @@ TEST(NewerOmodExecutionTest, MulReportsOnlyPermittedExceptionClasses) {
       ASSERT_EQ(overflow->mnemonic(), "v_mul_f32");
       wf->set_trapsts(0u);
       wf->clear_pending_alu_causes();
-      cu->execute_instruction(overflow.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(overflow.get(), *wf).succeeded());
       EXPECT_EQ(wf->pending_alu_causes() & kOverflow, kOverflow);
       EXPECT_EQ(wf->trapsts() & kOverflow, kOverflow);
 
@@ -2489,7 +2511,7 @@ TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsInScalarAndSimdPaths) 
       const auto f32_words = encode_vop3(test_case.mul_f32_opcode, 2, 256, 257, 0, 0, 0, 1, 3);
       std::unique_ptr<Instruction> f32_inst(decode_valid(*decoder, f32_words.data()));
       ASSERT_NE(f32_inst, nullptr);
-      cu->execute_instruction(f32_inst.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(f32_inst.get(), *wf).succeeded());
       EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0u);
       EXPECT_EQ(cu->read_vgpr(vb + 2, 1), 0u);
 
@@ -2505,7 +2527,7 @@ TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsInScalarAndSimdPaths) 
       const auto f64_words = encode_vop3(test_case.add_f64_opcode, 8, 260, 262, 0, 0, 0, 1, 3);
       std::unique_ptr<Instruction> f64_inst(decode_valid(*decoder, f64_words.data()));
       ASSERT_NE(f64_inst, nullptr);
-      cu->execute_instruction(f64_inst.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(f64_inst.get(), *wf).succeeded());
       for (uint32_t lane = 0; lane < 2; ++lane) {
         EXPECT_EQ(cu->read_vgpr(vb + 8, lane), 0u);
         EXPECT_EQ(cu->read_vgpr(vb + 9, lane), 0u);
@@ -2529,7 +2551,7 @@ TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsInScalarAndSimdPaths) 
       std::unique_ptr<Instruction> unclamped_f32(
           decode_valid(*decoder, unclamped_f32_words.data()));
       ASSERT_NE(unclamped_f32, nullptr);
-      cu->execute_instruction(unclamped_f32.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(unclamped_f32.get(), *wf).succeeded());
       for (std::size_t lane = 0; lane < kF32Inputs.size(); ++lane)
         EXPECT_EQ(cu->read_vgpr(vb + 2, lane), 0u);
 
@@ -2551,7 +2573,7 @@ TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsInScalarAndSimdPaths) 
       std::unique_ptr<Instruction> unclamped_f64(
           decode_valid(*decoder, unclamped_f64_words.data()));
       ASSERT_NE(unclamped_f64, nullptr);
-      cu->execute_instruction(unclamped_f64.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(unclamped_f64.get(), *wf).succeeded());
       for (std::size_t lane = 0; lane < kF64Inputs.size(); ++lane) {
         EXPECT_EQ(cu->read_vgpr(vb + 8, lane), 0u);
         EXPECT_EQ(cu->read_vgpr(vb + 9, lane), 0u);
@@ -2620,7 +2642,7 @@ TEST(Cdna4PkFmacF16Vop3ExecutionTest, PackedAccumulatorModifiersModeAndPartialEx
                      active ? pack16(0x3C00u, 0x4000u) : kInactiveSentinel); // (1, 2)
     }
 
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       const bool active = (kExec & (uint64_t{1} << lane)) != 0;
@@ -2676,7 +2698,7 @@ TEST(Cdna4Permlane16SwapExecutionTest, Wave64SwapsAllFourGroups) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_permlane16_swap_b32_e32");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   for (uint32_t base = 0; base < 64; base += 32) {
     for (uint32_t i = 0; i < 16; ++i) {
@@ -2848,7 +2870,7 @@ TEST(Gfx1250WmmaTest, F16Fp8K64MatchesReferenceLayout) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, wmma_words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_wmma_f16_16x16x64_fp8_fp8");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   expect_reference();
 
   if (!wf->is_halted())
@@ -2991,7 +3013,7 @@ TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f16_e32");
   EXPECT_EQ(inst->disassemble(), "v_add_f16_dpp v4.l, v2.l, v3.l dpp8:[7,0,3,2,5,4,1,6]");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     const uint32_t src_lane = amdgpu::dpp::dpp8_src_lane(lane, lane_sel);
@@ -3032,7 +3054,7 @@ TEST(Gfx1250ExecMaskTest, CmpxNeqAndScalarOrRestoreExec) {
   std::unique_ptr<Instruction> save_exec(decode_valid(*decoder, save_exec_words));
   ASSERT_NE(save_exec, nullptr);
   ASSERT_EQ(std::string_view(save_exec->mnemonic()), "s_mov_b32");
-  cu->execute_instruction(save_exec.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(save_exec.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 1), static_cast<uint32_t>(all_lanes));
 
   const uint32_t v4 = wf->vgpr_alloc().base + 4;
@@ -3046,7 +3068,7 @@ TEST(Gfx1250ExecMaskTest, CmpxNeqAndScalarOrRestoreExec) {
   std::unique_ptr<Instruction> mask_zero_lane(decode_valid(*decoder, mask_zero_lane_words));
   ASSERT_NE(mask_zero_lane, nullptr);
   ASSERT_EQ(std::string_view(mask_zero_lane->mnemonic()), "v_cmpx_neq_f32_e32");
-  cu->execute_instruction(mask_zero_lane.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(mask_zero_lane.get(), *wf).succeeded());
   EXPECT_EQ(wf->exec(), all_lanes & ~(1ULL << 4));
 
   // s_or_b32 exec_lo, exec_lo, s1
@@ -3054,7 +3076,7 @@ TEST(Gfx1250ExecMaskTest, CmpxNeqAndScalarOrRestoreExec) {
   std::unique_ptr<Instruction> restore_exec(decode_valid(*decoder, restore_exec_words));
   ASSERT_NE(restore_exec, nullptr);
   ASSERT_EQ(std::string_view(restore_exec->mnemonic()), "s_or_b32");
-  cu->execute_instruction(restore_exec.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(restore_exec.get(), *wf).succeeded());
   EXPECT_EQ(wf->exec(), all_lanes);
 
   if (!wf->is_halted())
@@ -3094,7 +3116,7 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpxGtI32KeepsInRangeLanesActive) {
   std::unique_ptr<Instruction> in_range(decode_valid(*decoder, in_range_words));
   ASSERT_NE(in_range, nullptr);
   ASSERT_EQ(std::string_view(in_range->mnemonic()), "v_cmpx_gt_i32");
-  cu->execute_instruction(in_range.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(in_range.get(), *wf).succeeded());
   EXPECT_EQ(wf->exec(), all_lanes);
 
   if (!wf->is_halted())
@@ -3138,7 +3160,7 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpF32PreservesHighMaskSgprOnWave32) {
   std::unique_ptr<Instruction> compare(decode_valid(*decoder, compare_words));
   ASSERT_NE(compare, nullptr);
   ASSERT_EQ(std::string_view(compare->mnemonic()), "v_cmp_eq_f32");
-  cu->execute_instruction(compare.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(compare.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 0), 1u << 4);
   EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 1), saved_exec);
@@ -3180,7 +3202,7 @@ TEST(Gfx1250True16Vop3Test, SelectedHalfArithmeticPreservesDestinationHalf) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   };
 
   // v_mul_lo_u16 v3.h, v3.l, v2.l op_sel:[0,0,1]
@@ -3255,7 +3277,7 @@ TEST(Gfx1250True16Vop2Test, AddF16UsesSelectedHighVsrc1AndPreservesLowDestinatio
   EXPECT_NE(inst->disassemble().find("v2.h"), std::string::npos);
   EXPECT_NE(inst->disassemble().find("v0.h"), std::string::npos);
   EXPECT_NE(inst->disassemble().find("v1.h"), std::string::npos);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x4600CAFEu); // high=6.0h, low preserved
 
@@ -3297,7 +3319,7 @@ TEST(Gfx1250True16Vop2Test, FmacF16HighDestinationUsesSelectedAccumulatorHalf) {
   EXPECT_NE(inst->disassemble().find("v0.h"), std::string::npos);
   EXPECT_NE(inst->disassemble().find("v1.h"), std::string::npos);
   EXPECT_NE(inst->disassemble().find("v2.h"), std::string::npos);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0x4B003C00u); // high=14.0h, low preserved
 
@@ -3335,7 +3357,7 @@ TEST(Gfx1250True16Vop3Test, MulLoU16UsesSelectedHighSourceHalf) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_mul_lo_u16");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xAAAA625Cu);
 
@@ -3376,7 +3398,7 @@ TEST(Gfx1250True16Vop3Test, CmpLtI16UsesSelectedHighSourceHalf) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_lt_i16");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_sgpr(sb + 0), 0u);
   EXPECT_EQ(cu->read_sgpr(sb + 1), 0xDEADBEEFu);
@@ -3423,7 +3445,7 @@ TEST(Gfx1250True16Vop3Test, CmpClassF16UsesSelectedMaskHalf) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_class_f16");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(cu->read_sgpr(sb + 0), 0x1u);
     EXPECT_EQ(cu->read_sgpr(sb + 1), 0xDEADBEEFu);
@@ -3469,7 +3491,7 @@ TEST(Gfx1250True16Vop3Test, CmpxClassF16UsesSelectedMaskHalf) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmpx_class_f16");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(wf->exec(), 0x1u);
     EXPECT_EQ(wf->vcc(), 0xA5A5u);
@@ -3510,7 +3532,7 @@ TEST(Gfx1250True16Vop3Test, SpecialVop3OpsUseSelectedHalves) {
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
-      cu->execute_instruction(inst.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     };
 
     cu->write_vgpr(vb + 0, 0, pack16(2u, 7u));
@@ -3594,7 +3616,7 @@ TEST(Gfx1250True16VopcTest, CmpLtI16ReadsPackedHighVsrc1) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_lt_i16_e32");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(wf->vcc(), 0x2u);
 
@@ -3640,7 +3662,7 @@ TEST(Rdna4True16Vop3Test, CmpGeF16UsesSelectedHighSourceHalf) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_ge_f16");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(cu->read_sgpr(sb + 0), 0x2u);
     EXPECT_EQ(cu->read_sgpr(sb + 1), 0xDEADBEEFu);
@@ -3688,7 +3710,7 @@ TEST(Rdna4True16Vop3Test, CmpClassF16UsesSelectedMaskHalf) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_class_f16");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(cu->read_sgpr(sb + 0), 0x1u);
     EXPECT_EQ(cu->read_sgpr(sb + 1), 0xDEADBEEFu);
@@ -3735,7 +3757,7 @@ TEST(Rdna4True16Vop3Test, CmpClassF16InlineConstantUsesF16Broadcast) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_class_f16");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(cu->read_sgpr(sb + 0), 0x3u);
     EXPECT_EQ(cu->read_sgpr(sb + 1), 0xDEADBEEFu);
@@ -3781,7 +3803,7 @@ TEST(Rdna4True16Vop3Test, CmpxClassF16UsesSelectedMaskHalf) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmpx_class_f16");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(wf->exec(), 0x1u);
     EXPECT_EQ(wf->vcc(), 0xA5A5u);
@@ -3870,17 +3892,17 @@ TEST(Rdna4True16Vop3Test, ClassF16HelperSequenceMovesMaskIntoSelectedHighHalf) {
     cu->write_sgpr(sb + 0, 0);
     cu->write_sgpr(sb + 1, 0);
 
-    cu->execute_instruction(mov.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(mov.get(), *wf).succeeded());
     for (const auto &test : cases) {
       EXPECT_EQ(cu->read_vgpr(vb + 0, test.lane), pack16(test.value, test.mask))
           << "lane " << test.lane;
     }
 
-    cu->execute_instruction(cmp.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(cmp.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_sgpr(sb + 0), static_cast<uint32_t>(expected_mask));
     EXPECT_EQ(cu->read_sgpr(sb + 1), static_cast<uint32_t>(expected_mask >> 32));
 
-    cu->execute_instruction(select.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(select.get(), *wf).succeeded());
     for (const auto &test : cases) {
       EXPECT_EQ(cu->read_vgpr(vb + 0, test.lane), test.expected ? 1u : 0u) << "lane " << test.lane;
     }
@@ -3923,7 +3945,7 @@ TEST(Rdna4True16Vop3Test, RcpF16WritesSelectedHighDestinationHalf) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_rcp_f16");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0xB8004000u); // high=-0.5h, low preserved
 
@@ -3965,7 +3987,7 @@ TEST(Rdna4True16Vop3Test, CvtF32F16AppliesAbsToSelectedSourceHalf) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_f32_f16");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(cu->read_vgpr(vb + 4, 0), 0x40800000u);
 
@@ -4015,7 +4037,7 @@ TEST(Rdna4True16Vop3Test, AddF16UsesSelectedHalvesAndPreservesDestinationHalf) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f16");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), pack16(0xBEEFu, util::f32_to_f16(5.0f)));
     EXPECT_EQ(cu->read_vgpr(vb + 2, 1), pack16(0x1234u, util::f32_to_f16(-0.5f)));
@@ -4151,7 +4173,7 @@ TEST(Rdna4True16Vop3Test, UnaryDpp16ScalarAndSimdMatchMaskedLaneRouting) {
         decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_rcp_f16");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     for (uint32_t lane = 0; lane < kWaveSize; ++lane)
       outputs[mode][lane] = cu->read_vgpr(vb + kDst, lane);
 
@@ -4243,7 +4265,7 @@ TEST(Rdna4True16Vop3Test, VopcDpp16ScalarAndSimdMatchMaskedLaneRouting) {
         decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_ge_f16");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     outputs[mode] = static_cast<uint64_t>(cu->read_sgpr(sb)) |
                     (static_cast<uint64_t>(cu->read_sgpr(sb + 1)) << 32);
 
@@ -4334,7 +4356,7 @@ TEST(Rdna4True16Vop3Test, UnaryDpp8ScalarAndSimdMatchPermutedLanes) {
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_rcp_f16");
     EXPECT_EQ(inst->disassemble(), "v_rcp_f16_e64_dpp v2.l, v0.l dpp8:[7,0,5,2,3,6,1,4] fi:1");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     for (uint32_t lane = 0; lane < kWaveSize; ++lane)
       outputs[mode][lane] = cu->read_vgpr(vb + kDst, lane);
 
@@ -4395,7 +4417,7 @@ TEST(Rdna4True16Vop3Test, FmacF16UsesSelectedAccumulatorHalfAndPreservesDestinat
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_fmac_f16");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(cu->read_vgpr(vb + 3, 0), pack16(0xBEEFu, util::f32_to_f16(10.0f)));
     EXPECT_EQ(cu->read_vgpr(vb + 3, 1), pack16(0x1234u, util::f32_to_f16(0.5f)));
@@ -4447,7 +4469,7 @@ TEST(Rdna4True16Vop3Test, TernaryI16U16UsesSelectedHalvesAndPreservesDestination
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
-      cu->execute_instruction(inst.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
       EXPECT_EQ(cu->read_vgpr(vb + dst, 0),
                 pack16(static_cast<uint16_t>(0xA000u | dst), expected_high))
           << mnemonic;
@@ -4498,7 +4520,7 @@ TEST(Rdna4True16Vop3Test, SpecialVop3OpsUseSelectedHalves) {
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
-      cu->execute_instruction(inst.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     };
 
     cu->write_vgpr(vb + 0, 0, pack16(2u, 7u));
@@ -4591,7 +4613,7 @@ TEST(Rdna4Vop3CndmaskTest, B32AppliesNegModifierBeforeSelect) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cndmask_b32");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x11223344u);
     EXPECT_EQ(cu->read_vgpr(vb + 2, 1), 0xBF000000u);
@@ -4637,7 +4659,7 @@ TEST(Rdna4Atan2F16Test, SignedHalfCompareFeedsQuadrantSelect) {
     std::unique_ptr<Instruction> i16_cmp(decode_valid(*decoder, i16_cmp_words));
     ASSERT_NE(i16_cmp, nullptr);
     ASSERT_EQ(std::string_view(i16_cmp->mnemonic()), "v_cmp_gt_i16_e32");
-    cu->execute_instruction(i16_cmp.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(i16_cmp.get(), *wf).succeeded());
     EXPECT_EQ(wf->vcc() & 0x3u, 0x1u);
 
     // v_cndmask_b32_e64 v6, 0, 0x40490fdb, vcc_lo
@@ -4645,7 +4667,7 @@ TEST(Rdna4Atan2F16Test, SignedHalfCompareFeedsQuadrantSelect) {
     std::unique_ptr<Instruction> pi_select(decode_valid(*decoder, pi_select_words));
     ASSERT_NE(pi_select, nullptr);
     ASSERT_EQ(std::string_view(pi_select->mnemonic()), "v_cndmask_b32");
-    cu->execute_instruction(pi_select.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(pi_select.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 6, 0), 0x40490FDBu);
     EXPECT_EQ(cu->read_vgpr(vb + 6, 1), 0x00000000u);
 
@@ -4654,7 +4676,7 @@ TEST(Rdna4Atan2F16Test, SignedHalfCompareFeedsQuadrantSelect) {
     std::unique_ptr<Instruction> f16_cmp(decode_valid(*decoder, f16_cmp_words));
     ASSERT_NE(f16_cmp, nullptr);
     ASSERT_EQ(std::string_view(f16_cmp->mnemonic()), "v_cmp_gt_f16_e32");
-    cu->execute_instruction(f16_cmp.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(f16_cmp.get(), *wf).succeeded());
     EXPECT_EQ(wf->vcc() & 0x3u, 0x1u);
 
     if (!wf->is_halted())
@@ -4696,7 +4718,7 @@ TEST(Rdna4Atan2F16Test, DualCndmaskReadsOldPairedSlotSource) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_dual_cndmask_b32 :: v_dual_mov_b32");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr(vb + 4, 0), 0x4016CBE4u);
   EXPECT_EQ(cu->read_vgpr(vb + 4, 1), 0x3F490FDBu);
@@ -4758,7 +4780,7 @@ TEST(Rdna4Atan2F16Test, TailSequenceKeepsNegativeXQuadrant) {
   for (const auto &words : program) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   }
 
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0) & 0xFFFFu, 0xC0B6u);
@@ -4803,7 +4825,7 @@ TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
     std::unique_ptr<Instruction> abs_src0_inst(decode_valid(*decoder, abs_src0_words));
     ASSERT_NE(abs_src0_inst, nullptr);
     ASSERT_EQ(std::string_view(abs_src0_inst->mnemonic()), "v_fma_mix_f32");
-    cu->execute_instruction(abs_src0_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(abs_src0_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0x41800000u); // 16.0f, not -16.0f
 
     cu->write_sgpr(sb + 0, 0x40400000u); // 3.0f
@@ -4816,7 +4838,7 @@ TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
     std::unique_ptr<Instruction> abs_src2_inst(decode_valid(*decoder, abs_src2_words));
     ASSERT_NE(abs_src2_inst, nullptr);
     ASSERT_EQ(std::string_view(abs_src2_inst->mnemonic()), "v_fma_mix_f32");
-    cu->execute_instruction(abs_src2_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(abs_src2_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0x41B00000u); // 22.0f, not -10.0f
 
     cu->write_vgpr(vb + 0, 0, 0x40000000u); // old src2/dst = 2.0f
@@ -4827,7 +4849,7 @@ TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
     std::unique_ptr<Instruction> inline_one_f32_inst(decode_valid(*decoder, inline_one_f32_words));
     ASSERT_NE(inline_one_f32_inst, nullptr);
     ASSERT_EQ(std::string_view(inline_one_f32_inst->mnemonic()), "v_fma_mix_f32");
-    cu->execute_instruction(inline_one_f32_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inline_one_f32_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0x41900000u); // 16.0f * 1.0f + 2.0f
 
     cu->write_vgpr(vb + 0, 0, 0xBEEF0000u);
@@ -4838,7 +4860,7 @@ TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
     std::unique_ptr<Instruction> inline_one_f16_inst(decode_valid(*decoder, inline_one_f16_words));
     ASSERT_NE(inline_one_f16_inst, nullptr);
     ASSERT_EQ(std::string_view(inline_one_f16_inst->mnemonic()), "v_fma_mixlo_f16");
-    cu->execute_instruction(inline_one_f16_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inline_one_f16_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0xBEEF4C00u); // high half preserved
 
     cu->write_sgpr(sb + 0, 0x3F800000u); // 1.0f
@@ -4850,7 +4872,7 @@ TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
     std::unique_ptr<Instruction> atanh_den_inst(decode_valid(*decoder, atanh_den_words));
     ASSERT_NE(atanh_den_inst, nullptr);
     ASSERT_EQ(std::string_view(atanh_den_inst->mnemonic()), "v_fma_mix_f32");
-    cu->execute_instruction(atanh_den_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(atanh_den_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0x3E800000u); // abs(-0.75h) * -1.0f + 1.0f
 
     cu->write_vgpr(vb + 3, 0, 0xDEADCAFEu);
@@ -4860,7 +4882,7 @@ TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
     std::unique_ptr<Instruction> atanh_num_inst(decode_valid(*decoder, atanh_num_words));
     ASSERT_NE(atanh_num_inst, nullptr);
     ASSERT_EQ(std::string_view(atanh_num_inst->mnemonic()), "v_fma_mix_f32");
-    cu->execute_instruction(atanh_num_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(atanh_num_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 3, 0), 0x3FE00000u); // abs(-0.75h) * 1.0f + 1.0f
 
     cu->write_sgpr(sb + 0, 0x3EB17218u); // 0.5 * ln(2)
@@ -4872,7 +4894,7 @@ TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
     std::unique_ptr<Instruction> atanh_scale_inst(decode_valid(*decoder, atanh_scale_words));
     ASSERT_NE(atanh_scale_inst, nullptr);
     ASSERT_EQ(std::string_view(atanh_scale_inst->mnemonic()), "v_fma_mixhi_f16");
-    cu->execute_instruction(atanh_scale_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(atanh_scale_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0xBBC9BEEFu);
 
     if (!wf->is_halted())
@@ -4920,7 +4942,7 @@ TEST(Rdna4True16Vop3Test, B16BitwiseLiteralPreservesInputSignBit) {
     EXPECT_EQ(and_inst->src_operand(0)->name(), "0x8000");
     EXPECT_NE(and_inst->disassemble().find("0x8000"), std::string::npos);
     EXPECT_EQ(and_inst->disassemble().find("0x-"), std::string::npos);
-    cu->execute_instruction(and_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(and_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0x11118000u);
 
     cu->write_vgpr(vb + 1, 0, 0x22220000u);
@@ -4935,7 +4957,7 @@ TEST(Rdna4True16Vop3Test, B16BitwiseLiteralPreservesInputSignBit) {
     EXPECT_EQ(and_high_inst->src_operand(0)->name(), "0x8000");
     EXPECT_NE(and_high_inst->disassemble().find("0x8000"), std::string::npos);
     EXPECT_EQ(and_high_inst->disassemble().find("0x-"), std::string::npos);
-    cu->execute_instruction(and_high_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(and_high_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0x22228000u);
 
     cu->write_vgpr(vb + 1, 0, 0x33330000u);
@@ -4951,7 +4973,7 @@ TEST(Rdna4True16Vop3Test, B16BitwiseLiteralPreservesInputSignBit) {
     EXPECT_EQ(and_src1_high_inst->src_operand(1)->name(), "0x8000");
     EXPECT_NE(and_src1_high_inst->disassemble().find("0x8000"), std::string::npos);
     EXPECT_EQ(and_src1_high_inst->disassemble().find("0x-"), std::string::npos);
-    cu->execute_instruction(and_src1_high_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(and_src1_high_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0x33338000u);
 
     // v_xor_b16 v0.l, v1.l, v0.l
@@ -4959,7 +4981,7 @@ TEST(Rdna4True16Vop3Test, B16BitwiseLiteralPreservesInputSignBit) {
     std::unique_ptr<Instruction> xor_inst(decode_valid(*decoder, xor_words));
     ASSERT_NE(xor_inst, nullptr);
     ASSERT_EQ(std::string_view(xor_inst->mnemonic()), "v_xor_b16");
-    cu->execute_instruction(xor_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(xor_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0xCAFEB4D0u);
 
     if (!wf->is_halted())
@@ -5004,7 +5026,7 @@ TEST(Gfx1250True16Vop3Test, CndmaskB16UsesSelectedSourceHalfAndPreservesDestinat
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cndmask_b16");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x5678CAFEu);
   EXPECT_EQ(cu->read_vgpr(vb + 2, 1), 0x1234CAFEu);
@@ -5044,7 +5066,7 @@ TEST(Gfx1250True16Vop3Test, LshrrevB16UsesSelectedSourceHalfAndPreservesDestinat
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_lshrrev_b16");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr(vb + 16, 0), 0x00125555u);
 
@@ -5087,7 +5109,7 @@ TEST(Gfx1250True16Vop3Test, Bitop3B16UsesSelectedSourceHalfAndPreservesDestinati
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   };
 
   // v_or_b16 v2.l, v8.l, 1
@@ -5147,7 +5169,7 @@ TEST(Gfx1250True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_mov_b16_e32");
   EXPECT_NE(inst->disassemble().find("v2.h"), std::string::npos);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x12345555u);
 
@@ -5186,7 +5208,7 @@ TEST(Rdna3True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_mov_b16_e32");
   EXPECT_NE(inst->disassemble().find("v2.h"), std::string::npos);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x12345555u);
 
@@ -5223,7 +5245,7 @@ TEST(Rdna35True16Vop1Test, SwapHighSourcePreservesBothUnselectedHalves) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->disassemble(), "v_swap_b16 v5.l, v1.h");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr(vb + 5, 0), 0xAAAA2222u);
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0x1111BBBBu);
@@ -5275,7 +5297,7 @@ TEST(Rdna3DppTest, VAddF32RowShrMatchesWaveReduceSequence) {
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
       ASSERT_NE(inst, nullptr);
       ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f32_e32");
-      cu->execute_instruction(inst.get(), *wf);
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     }
 
     EXPECT_EQ(cu->read_vgpr(vb + 3, 15), std::bit_cast<uint32_t>(-4.0f));
@@ -5285,14 +5307,14 @@ TEST(Rdna3DppTest, VAddF32RowShrMatchesWaveReduceSequence) {
     std::unique_ptr<Instruction> swizzle_inst(decode_valid(*decoder, swizzle_words));
     ASSERT_NE(swizzle_inst, nullptr);
     ASSERT_EQ(std::string_view(swizzle_inst->mnemonic()), "ds_swizzle_b32");
-    cu->execute_instruction(swizzle_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(swizzle_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 4, 31), std::bit_cast<uint32_t>(-4.0f));
 
     const uint32_t final_add_words[] = {0xD5030003U, 0x02020903U};
     std::unique_ptr<Instruction> final_add_inst(decode_valid(*decoder, final_add_words));
     ASSERT_NE(final_add_inst, nullptr);
     ASSERT_EQ(std::string_view(final_add_inst->mnemonic()), "v_add_f32");
-    cu->execute_instruction(final_add_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(final_add_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 3, 31), std::bit_cast<uint32_t>(-2.0f));
 
     if (!wf->is_halted())
@@ -5336,7 +5358,7 @@ TEST(Rdna3ScalarOperandTest, NullSdstDoesNotClobberM0) {
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_co_ci_u32");
   EXPECT_NE(inst->disassemble().find("null"), std::string::npos);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(wf->m0(), 0xDEADBEEFu);
   EXPECT_EQ(cu->read_vgpr(vb + 5, 0), 1u);
@@ -5378,7 +5400,7 @@ TEST(Gfx1250True16Vop1Test, CvtF16F32HighDestinationPreservesLowHalf) {
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_f16_f32_e32");
   EXPECT_NE(inst->disassemble().find("v0.h"), std::string::npos);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0x3C005555u);
 
@@ -5416,7 +5438,7 @@ TEST(Gfx1250CvtFp8Test, F16DecodeVop3UsesSelectedByte) {
   std::unique_ptr<Instruction> fp8_inst(decode_valid(*decoder, fp8_words));
   ASSERT_NE(fp8_inst, nullptr);
   ASSERT_EQ(std::string_view(fp8_inst->mnemonic()), "v_cvt_f16_fp8");
-  cu->execute_instruction(fp8_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(fp8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0xBEEF3C00u);
 
   cu->write_vgpr(vb + 0, 0, 0x3C000000u);
@@ -5427,7 +5449,7 @@ TEST(Gfx1250CvtFp8Test, F16DecodeVop3UsesSelectedByte) {
   std::unique_ptr<Instruction> bf8_inst(decode_valid(*decoder, bf8_words));
   ASSERT_NE(bf8_inst, nullptr);
   ASSERT_EQ(std::string_view(bf8_inst->mnemonic()), "v_cvt_f16_bf8");
-  cu->execute_instruction(bf8_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(bf8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0xBEEF3C00u);
 
   if (!wf->is_halted())
@@ -5467,12 +5489,12 @@ TEST(Gfx1250CvtFp8Test, F16E5M3OverflowHonorsFp16OvflMode) {
 
   wf->set_mode_raw(0);
   cu->write_vgpr(vb + 1, 0, 0xBEEF5555u);
-  cu->execute_instruction(fp8_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(fp8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0xBEEF7C00u);
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   cu->write_vgpr(vb + 1, 0, 0xBEEF5555u);
-  cu->execute_instruction(fp8_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(fp8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0xBEEF7BFFu);
 
   // Same conversion with OPSEL[3]=1 writes the high destination half.
@@ -5481,7 +5503,7 @@ TEST(Gfx1250CvtFp8Test, F16E5M3OverflowHonorsFp16OvflMode) {
   ASSERT_NE(fp8_high_inst, nullptr);
   ASSERT_EQ(std::string_view(fp8_high_inst->mnemonic()), "v_cvt_f16_fp8");
   cu->write_vgpr(vb + 1, 0, 0x5555BEEFu);
-  cu->execute_instruction(fp8_high_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(fp8_high_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0), 0x7BFFBEEFu);
 
   if (!wf->is_halted())
@@ -5517,7 +5539,7 @@ TEST(Gfx1250CvtFp8Test, F32DecodeVop3UsesSelectedByte) {
   std::unique_ptr<Instruction> fp8_inst(decode_valid(*decoder, fp8_words));
   ASSERT_NE(fp8_inst, nullptr);
   ASSERT_EQ(std::string_view(fp8_inst->mnemonic()), "v_cvt_f32_fp8");
-  cu->execute_instruction(fp8_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(fp8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0), std::bit_cast<uint32_t>(1.0f));
 
   cu->write_vgpr(vb + 0, 0, 0x3C000000u);
@@ -5527,7 +5549,7 @@ TEST(Gfx1250CvtFp8Test, F32DecodeVop3UsesSelectedByte) {
   std::unique_ptr<Instruction> bf8_inst(decode_valid(*decoder, bf8_words));
   ASSERT_NE(bf8_inst, nullptr);
   ASSERT_EQ(std::string_view(bf8_inst->mnemonic()), "v_cvt_f32_bf8");
-  cu->execute_instruction(bf8_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(bf8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0), std::bit_cast<uint32_t>(1.0f));
 
   if (!wf->is_halted())
@@ -5565,12 +5587,12 @@ TEST(Gfx1250CvtFp8Test, E4M3OverflowHonorsFp16OvflMode) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_pk_fp8_f32");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FF7Fu);
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FE7Eu);
 
   if (!wf->is_halted())
@@ -5608,12 +5630,12 @@ TEST(Gfx1250CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_pk_bf8_f32");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FC7Cu);
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FB7Bu);
 
   if (!wf->is_halted())
@@ -5658,17 +5680,17 @@ TEST(Gfx1250CvtF16Test, SrPackedF16ConsumesAdvancedSeedAndFp16OvflMode) {
   cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(sr_value));
   cu->write_vgpr(vb + 6, 0, std::bit_cast<uint32_t>(sr_value));
   cu->write_vgpr(vb + 7, 0, kSeed);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), pack16(expected_lo, expected_hi));
 
   cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(70000.0f));
   cu->write_vgpr(vb + 6, 0, std::bit_cast<uint32_t>(-70000.0f));
   cu->write_vgpr(vb + 7, 0, 0xFFFFFFFFu);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), pack16(0x7C00u, 0xFC00u));
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), pack16(0x7BFFu, 0xFBFFu));
 
   if (!wf->is_halted())
@@ -5706,12 +5728,12 @@ TEST(Rdna4CvtFp8Test, E4M3OverflowHonorsFp16OvflMode) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_pk_fp8_f32");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FF7Fu);
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FE7Eu);
 
   if (!wf->is_halted())
@@ -5751,12 +5773,12 @@ TEST(Rdna4CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
   ASSERT_EQ(std::string_view(packed_inst->mnemonic()), "v_cvt_pk_bf8_f32");
 
   wf->set_mode_raw(0);
-  cu->execute_instruction(packed_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(packed_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FC7Cu);
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-  cu->execute_instruction(packed_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(packed_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FB7Bu);
 
   cu->write_vgpr(vb + 6, 0, 0u);
@@ -5769,12 +5791,12 @@ TEST(Rdna4CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
   ASSERT_EQ(std::string_view(sr_inst->mnemonic()), "v_cvt_sr_bf8_f32");
 
   wf->set_mode_raw(0);
-  cu->execute_instruction(sr_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(sr_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5BE7Cu);
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-  cu->execute_instruction(sr_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(sr_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5BE7Bu);
 
   if (!wf->is_halted())
@@ -5811,12 +5833,12 @@ TEST(Rdna4CvtF16Test, F32OverflowHonorsFp16OvflMode) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_f16_f32");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A57C00u);
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A57BFFu);
 
   if (!wf->is_halted())
@@ -5858,12 +5880,12 @@ TEST(Rdna4CvtF16Test, U16OverflowHonorsFp16OvflModeInScalarAndSimdPaths) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_f16_u16");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A57C00u);
 
     wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
     cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A57BFFu);
 
     if (!wf->is_halted())
@@ -5906,12 +5928,12 @@ TEST(Rdna4Fp16ValuTest, AddOverflowHonorsFp16OvflModeInScalarAndSimdPaths) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f16");
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A57C00u);
 
     wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
     cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A57BFFu);
 
     if (!wf->is_halted())
@@ -5976,16 +5998,16 @@ TEST(Cdna4CvtSrTest, SingleResultF16Bf16ConsumesSeedAndFp16OvflMode) {
   cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(f16_value));
   cu->write_vgpr(vb + 6, 0, kSeedLo);
   cu->write_vgpr(vb + 2, 0, 0xA5A50000u);
-  cu->execute_instruction(f16_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(f16_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A50000u | f16_seed_lo);
   cu->write_vgpr(vb + 6, 0, kSeedHi);
   cu->write_vgpr(vb + 2, 0, 0x5A5A0000u);
-  cu->execute_instruction(f16_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(f16_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x5A5A0000u | f16_seed_hi);
 
   cu->write_vgpr(vb + 6, 0, kSeedLo);
   cu->write_vgpr(vb + 2, 0, 0x0000BEEFu);
-  cu->execute_instruction(f16_hi_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(f16_hi_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), (static_cast<uint32_t>(f16_seed_lo) << 16) | 0xBEEFu);
 
   constexpr uint32_t kOverflowSeed = 0xFFFFFFFFu;
@@ -5998,11 +6020,11 @@ TEST(Cdna4CvtSrTest, SingleResultF16Bf16ConsumesSeedAndFp16OvflMode) {
   cu->write_vgpr(vb + 6, 0, kOverflowSeed);
   wf->set_mode_raw(0);
   cu->write_vgpr(vb + 2, 0, 0xA5A50000u);
-  cu->execute_instruction(f16_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(f16_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A50000u | f16_clear);
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   cu->write_vgpr(vb + 2, 0, 0x5A5A0000u);
-  cu->execute_instruction(f16_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(f16_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x5A5A0000u | f16_set);
 
   const float bf16_value = std::bit_cast<float>(0x3F808000u);
@@ -6013,16 +6035,16 @@ TEST(Cdna4CvtSrTest, SingleResultF16Bf16ConsumesSeedAndFp16OvflMode) {
   cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(bf16_value));
   cu->write_vgpr(vb + 6, 0, kSeedLo);
   cu->write_vgpr(vb + 3, 0, 0xA5A50000u);
-  cu->execute_instruction(bf16_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(bf16_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 3, 0), 0xA5A50000u | bf16_seed_lo);
   cu->write_vgpr(vb + 6, 0, kSeedHi);
   cu->write_vgpr(vb + 3, 0, 0x5A5A0000u);
-  cu->execute_instruction(bf16_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(bf16_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 3, 0), 0x5A5A0000u | bf16_seed_hi);
 
   cu->write_vgpr(vb + 6, 0, kSeedLo);
   cu->write_vgpr(vb + 3, 0, 0x0000BEEFu);
-  cu->execute_instruction(bf16_hi_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(bf16_hi_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 3, 0), (static_cast<uint32_t>(bf16_seed_lo) << 16) | 0xBEEFu);
 
   const float bf16_overflow = std::numeric_limits<float>::max();
@@ -6034,11 +6056,11 @@ TEST(Cdna4CvtSrTest, SingleResultF16Bf16ConsumesSeedAndFp16OvflMode) {
   cu->write_vgpr(vb + 6, 0, kOverflowSeed);
   wf->set_mode_raw(0);
   cu->write_vgpr(vb + 3, 0, 0xA5A50000u);
-  cu->execute_instruction(bf16_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(bf16_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 3, 0), 0xA5A50000u | bf16_clear);
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   cu->write_vgpr(vb + 3, 0, 0x5A5A0000u);
-  cu->execute_instruction(bf16_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(bf16_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 3, 0), 0x5A5A0000u | bf16_set);
 
   if (!wf->is_halted())
@@ -6078,11 +6100,11 @@ TEST(Cdna4CvtPkTest, F16Bf16F32OverflowHonorsFp16OvflMode) {
   cu->write_vgpr(vb + 6, 0, std::bit_cast<uint32_t>(-70000.0f));
 
   wf->set_mode_raw(0);
-  cu->execute_instruction(f16_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(f16_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xFC007C00u);
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
-  cu->execute_instruction(f16_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(f16_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xFBFF7BFFu);
 
   // v_cvt_pk_bf16_f32 v2, v5, v6
@@ -6096,16 +6118,16 @@ TEST(Cdna4CvtPkTest, F16Bf16F32OverflowHonorsFp16OvflMode) {
   cu->write_vgpr(vb + 6, 0, std::bit_cast<uint32_t>(-std::numeric_limits<float>::max()));
 
   wf->set_mode_raw(0);
-  cu->execute_instruction(bf16_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(bf16_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xFF807F80u);
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
-  cu->execute_instruction(bf16_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(bf16_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xFF7F7F7Fu);
 
   cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(std::numeric_limits<float>::infinity()));
   cu->write_vgpr(vb + 6, 0, std::bit_cast<uint32_t>(-std::numeric_limits<float>::infinity()));
-  cu->execute_instruction(bf16_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(bf16_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xFF807F80u);
 
   if (!wf->is_halted())
@@ -6162,13 +6184,13 @@ TEST(CdnaLegacyCvtF16Test, SetregImm32ModeControlsOverflowingF32ToF16) {
     ASSERT_EQ(std::string_view(setreg_inst->mnemonic()), "s_setreg_imm32_b32");
 
     wf->set_mode_raw(0);
-    cu->execute_instruction(cvt_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(cvt_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0) & 0xFFFFu, 0x7C00u);
 
     cu->write_vgpr(vb + 2, 0, 0);
-    cu->execute_instruction(setreg_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(setreg_inst.get(), *wf).succeeded());
     EXPECT_TRUE(wf->fp16_ovfl());
-    cu->execute_instruction(cvt_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(cvt_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0) & 0xFFFFu, 0x7BFFu);
 
     if (!wf->is_halted())
@@ -6206,7 +6228,7 @@ TEST(Rdna4ScalarF16Test, AddDoesNotConsumeFp16OvflMode) {
   ASSERT_EQ(std::string_view(inst->mnemonic()), "s_add_f16");
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_sgpr(sb + 2) & 0xFFFFu, 0x7C00u);
 
   if (!wf->is_halted())
@@ -6242,11 +6264,11 @@ TEST(Rdna4ScalarF16Test, CvtF16F32ConsumesFp16OvflMode) {
   ASSERT_EQ(std::string_view(inst->mnemonic()), "s_cvt_f16_f32");
 
   wf->set_mode_raw(0);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_sgpr(sb + 2) & 0xFFFFu, 0x7C00u);
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_sgpr(sb + 2) & 0xFFFFu, 0x7BFFu);
 
   if (!wf->is_halted())
@@ -6295,14 +6317,14 @@ TEST(Cdna3CvtFp8Test, SetregImm32ModeChangeRecomputesFp16OvflRounding) {
   // NaN code and signed max finite.
   // Recompute through s_setreg_imm32_b32 so the conversion observes shader MODE updates end to end.
   wf->set_mode_raw(0);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x00008080u);
 
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-  cu->execute_instruction(setreg_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(setreg_inst.get(), *wf).succeeded());
   EXPECT_EQ(wf->mode_raw(), amdgpu::Wavefront::FP16_OVFL_BIT);
   EXPECT_TRUE(wf->fp16_ovfl());
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x0000FF7Fu);
 
   if (!wf->is_halted())
@@ -6344,12 +6366,12 @@ TEST(Gfx1250CvtFp8Test, F16SourceFp8Bf8ConversionsIgnoreFp16OvflMode) {
     cu->write_vgpr(vb + 5, 0, src);
     wf->set_mode_raw(0);
     cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), expected);
 
     wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
     cu->write_vgpr(vb + 2, 0, 0x5A5ABEEFu);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), (0x5A5A0000u | (expected & 0xFFFFu)));
   };
 
@@ -6364,12 +6386,12 @@ TEST(Gfx1250CvtFp8Test, F16SourceFp8Bf8ConversionsIgnoreFp16OvflMode) {
     cu->write_vgpr(vb + 6, 0, seed);
     wf->set_mode_raw(0);
     cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5BE00u | expected_byte);
 
     wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
     cu->write_vgpr(vb + 2, 0, 0x5A5ABEEFu);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x5A5ABE00u | expected_byte);
   };
 
@@ -6416,12 +6438,12 @@ TEST(Cdna3CvtFp8Test, Bf8AndStochasticPathsHonorFp16OvflMode) {
   ASSERT_EQ(std::string_view(bf8_inst->mnemonic()), "v_cvt_pk_bf8_f32");
 
   wf->set_mode_raw(0);
-  cu->execute_instruction(bf8_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(bf8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x00008080u);
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-  cu->execute_instruction(bf8_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(bf8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x0000FF7Fu);
 
   cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(300.0f));
@@ -6436,12 +6458,12 @@ TEST(Cdna3CvtFp8Test, Bf8AndStochasticPathsHonorFp16OvflMode) {
   ASSERT_EQ(std::string_view(sr_fp8_inst->mnemonic()), "v_cvt_sr_fp8_f32");
 
   wf->set_mode_raw(0);
-  cu->execute_instruction(sr_fp8_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(sr_fp8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5BE80u);
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-  cu->execute_instruction(sr_fp8_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(sr_fp8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5BE7Fu);
 
   cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(70000.0f));
@@ -6456,12 +6478,12 @@ TEST(Cdna3CvtFp8Test, Bf8AndStochasticPathsHonorFp16OvflMode) {
   ASSERT_EQ(std::string_view(sr_bf8_inst->mnemonic()), "v_cvt_sr_bf8_f32");
 
   wf->set_mode_raw(0);
-  cu->execute_instruction(sr_bf8_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(sr_bf8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5BE80u);
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-  cu->execute_instruction(sr_bf8_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(sr_bf8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5BE7Fu);
 
   if (!wf->is_halted())
@@ -6504,12 +6526,12 @@ TEST(Cdna4CvtScaleTest, ScaledFp8Bf8OverflowHonorsFp16OvflMode) {
   ASSERT_EQ(std::string_view(scaled_fp8_inst->mnemonic()), "v_cvt_scalef32_pk_fp8_f32");
 
   wf->set_mode_raw(0);
-  cu->execute_instruction(scaled_fp8_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(scaled_fp8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FF7Fu);
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-  cu->execute_instruction(scaled_fp8_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(scaled_fp8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FE7Eu);
 
   cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(std::numeric_limits<float>::infinity()));
@@ -6525,12 +6547,12 @@ TEST(Cdna4CvtScaleTest, ScaledFp8Bf8OverflowHonorsFp16OvflMode) {
   ASSERT_EQ(std::string_view(scaled_bf8_inst->mnemonic()), "v_cvt_scalef32_pk_bf8_f32");
 
   wf->set_mode_raw(0);
-  cu->execute_instruction(scaled_bf8_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(scaled_bf8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FC7Cu);
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-  cu->execute_instruction(scaled_bf8_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(scaled_bf8_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FB7Bu);
 
   auto run_scaled_f16_dst_case = [&](uint32_t op, std::string_view mnemonic, uint32_t packed_src,
@@ -6550,16 +6572,16 @@ TEST(Cdna4CvtScaleTest, ScaledFp8Bf8OverflowHonorsFp16OvflMode) {
 
     wf->set_mode_raw(0);
     cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-    cu->execute_instruction(low_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(low_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A57C00u);
 
     wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
     cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-    cu->execute_instruction(low_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(low_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A57BFFu);
 
     cu->write_vgpr(vb + 2, 0, 0x0000BEEFu);
-    cu->execute_instruction(high_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(high_inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x7BFFBEEFu);
   };
 
@@ -6580,12 +6602,12 @@ TEST(Cdna4CvtScaleTest, ScaledFp8Bf8OverflowHonorsFp16OvflMode) {
     cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
 
     wf->set_mode_raw(0);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), expected_clear);
 
     wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
     cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     EXPECT_EQ(cu->read_vgpr(vb + 2, 0), expected_set);
   };
 
@@ -6649,12 +6671,12 @@ TEST(Cdna4CvtScaleTest, WideFp6ToF16ConsumesFp16OvflMode) {
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_scalef32_pk32_f16_fp6");
 
   wf->set_mode_raw(0);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   for (uint32_t i = 0; i < 16; ++i)
     EXPECT_EQ(cu->read_vgpr(vb + 2 + i, 0), 0xFC007C00u) << "dst dword " << i;
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   for (uint32_t i = 0; i < 16; ++i)
     EXPECT_EQ(cu->read_vgpr(vb + 2 + i, 0), 0xFBFF7BFFu) << "dst dword " << i;
 
@@ -6707,7 +6729,7 @@ TEST(Cdna4GprIdxTest, WideConversionIndexesResolvedBaseBeforeDwordOffsets) {
   }
   for (uint32_t dword = 0; dword < 16; ++dword)
     cu->write_vgpr(base + kDst + dword, 0, 0xDEADBEEFu);
-  cu->execute_instruction(instruction.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
   for (uint32_t dword = 0; dword < 16; ++dword)
     EXPECT_EQ(cu->read_vgpr(base + kDst + dword, 0), expected) << dword;
 
@@ -6718,7 +6740,7 @@ TEST(Cdna4GprIdxTest, WideConversionIndexesResolvedBaseBeforeDwordOffsets) {
     cu->write_vgpr(base + kDst + dword, 0, 0x11111111u);
     cu->write_vgpr(base + kDst + kIndex + dword, 0, 0x22222222u);
   }
-  cu->execute_instruction(instruction.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
   for (uint32_t dword = 0; dword < 16; ++dword) {
     EXPECT_EQ(cu->read_vgpr(base + kDst + dword, 0), 0x11111111u) << dword;
     EXPECT_EQ(cu->read_vgpr(base + kDst + kIndex + dword, 0), expected) << dword;
@@ -6758,7 +6780,7 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
   std::unique_ptr<Instruction> decode_inst(decode_valid(*decoder, decode_words));
   ASSERT_NE(decode_inst, nullptr);
   ASSERT_EQ(std::string_view(decode_inst->mnemonic()), "v_cvt_f32_fp8");
-  cu->execute_instruction(decode_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(decode_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 1, 0), e5m3_0x38);
 
   cu->write_sgpr(sb + 5, e5m3_0x38);
@@ -6770,7 +6792,7 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
   std::unique_ptr<Instruction> pack_lo_inst(decode_valid(*decoder, pack_lo_words));
   ASSERT_NE(pack_lo_inst, nullptr);
   ASSERT_EQ(std::string_view(pack_lo_inst->mnemonic()), "v_cvt_pk_fp8_f32");
-  cu->execute_instruction(pack_lo_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(pack_lo_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A50838u);
 
   cu->write_vgpr(vb + 2, 0, 0xDEADBEEFu);
@@ -6780,7 +6802,7 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
   std::unique_ptr<Instruction> pack_hi_inst(decode_valid(*decoder, pack_hi_words));
   ASSERT_NE(pack_hi_inst, nullptr);
   ASSERT_EQ(std::string_view(pack_hi_inst->mnemonic()), "v_cvt_pk_fp8_f32");
-  cu->execute_instruction(pack_hi_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(pack_hi_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x0838BEEFu);
 
   cu->write_vgpr(vb + 2, 0, 0xDEADBEEFu);
@@ -6790,7 +6812,7 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
   std::unique_ptr<Instruction> sr_inst(decode_valid(*decoder, sr_words));
   ASSERT_NE(sr_inst, nullptr);
   ASSERT_EQ(std::string_view(sr_inst->mnemonic()), "v_cvt_sr_fp8_f32");
-  cu->execute_instruction(sr_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(sr_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xDE38BEEFu);
 
   cu->write_sgpr(sb + 5, util::f32_to_f16(std::ldexp(1.0f, -8)));
@@ -6802,7 +6824,7 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
   std::unique_ptr<Instruction> sr_f16_inst(decode_valid(*decoder, sr_f16_words));
   ASSERT_NE(sr_f16_inst, nullptr);
   ASSERT_EQ(std::string_view(sr_f16_inst->mnemonic()), "v_cvt_sr_fp8_f16");
-  cu->execute_instruction(sr_f16_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(sr_f16_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xDE38BEEFu);
 
   if (!wf->is_halted())
@@ -6842,7 +6864,7 @@ TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
   std::unique_ptr<Instruction> pk8_inst(decode_valid(*decoder, pk8_words));
   ASSERT_NE(pk8_inst, nullptr);
   ASSERT_EQ(std::string_view(pk8_inst->mnemonic()), "v_cvt_scale_pk8_f32_fp8");
-  cu->execute_instruction(pk8_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(pk8_inst.get(), *wf).succeeded());
   for (uint32_t i = 2; i <= 9; ++i)
     EXPECT_EQ(cu->read_vgpr(vb + i, 0), std::bit_cast<uint32_t>(0.5f)) << "vgpr=" << i;
 
@@ -6856,7 +6878,7 @@ TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
   std::unique_ptr<Instruction> pk16_inst(decode_valid(*decoder, pk16_words));
   ASSERT_NE(pk16_inst, nullptr);
   ASSERT_EQ(std::string_view(pk16_inst->mnemonic()), "v_cvt_scale_pk16_f32_fp6");
-  cu->execute_instruction(pk16_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(pk16_inst.get(), *wf).succeeded());
   for (uint32_t i = 18; i <= 33; ++i)
     EXPECT_EQ(cu->read_vgpr(vb + i, 0), std::bit_cast<uint32_t>(2.0f)) << "vgpr=" << i;
 
@@ -6903,7 +6925,7 @@ TEST(Gfx1250CvtScaleTest, WideUnpackRejectsDestinationRangeBeforeWriting) {
   std::unique_ptr<Instruction> inst = std::move(decoded).value();
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_scale_pk16_f32_fp6");
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   for (uint32_t reg = kDestinationBase; reg < cfg.vgprs_per_wf; ++reg)
     EXPECT_EQ(cu->read_vgpr(vb + reg, 0), kSentinel) << "vgpr=" << reg;
@@ -6955,7 +6977,7 @@ TEST(Gfx1250CvtScaleTest, WideRegionsRejectBoundariesBeforeCallbacksOrWrites) {
   ASSERT_EQ(std::string_view(unpack->mnemonic()), "v_cvt_scale_pk16_f32_fp6");
   recorder_ptr->read_registers.clear();
   recorder_ptr->write_registers.clear();
-  cu->execute_instruction(unpack.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(unpack.get(), *wf).succeeded());
   for (uint32_t reg = 20; reg < 36; ++reg)
     EXPECT_EQ(cu->read_vgpr_storage(vb + reg, 0), kSentinel) << "unpack dst vgpr=" << reg;
   EXPECT_TRUE(recorder_ptr->read_registers.empty());
@@ -6976,7 +6998,7 @@ TEST(Gfx1250CvtScaleTest, WideRegionsRejectBoundariesBeforeCallbacksOrWrites) {
   ASSERT_EQ(std::string_view(pack_source->mnemonic()), "v_cvt_scalef32_pk16_fp6_f32");
   recorder_ptr->read_registers.clear();
   recorder_ptr->write_registers.clear();
-  cu->execute_instruction(pack_source.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(pack_source.get(), *wf).succeeded());
   for (uint32_t reg = 40; reg < 43; ++reg)
     EXPECT_EQ(cu->read_vgpr_storage(vb + reg, 0), kSentinel) << "pack source dst vgpr=" << reg;
   EXPECT_TRUE(recorder_ptr->read_registers.empty());
@@ -6998,7 +7020,7 @@ TEST(Gfx1250CvtScaleTest, WideRegionsRejectBoundariesBeforeCallbacksOrWrites) {
   ASSERT_EQ(std::string_view(pack_destination->mnemonic()), "v_cvt_scalef32_pk16_fp6_f32");
   recorder_ptr->read_registers.clear();
   recorder_ptr->write_registers.clear();
-  cu->execute_instruction(pack_destination.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(pack_destination.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr_storage(vb + 1022, 0), kSentinel);
   EXPECT_EQ(cu->read_vgpr_storage(vb + 1023, 0), kSentinel);
   EXPECT_TRUE(recorder_ptr->read_registers.empty());
@@ -7043,7 +7065,7 @@ TEST(Gfx1250DsSwizzleTest, VdsBroadcastReadsAddrSource) {
   std::unique_ptr<Instruction> swizzle_inst(decode_valid(*decoder, swizzle_words));
   ASSERT_NE(swizzle_inst, nullptr);
   ASSERT_EQ(std::string_view(swizzle_inst->mnemonic()), "ds_swizzle_b32");
-  cu->execute_instruction(swizzle_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(swizzle_inst.get(), *wf).succeeded());
 
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
     EXPECT_EQ(cu->read_vgpr(vb + 2, lane), 0x100Fu) << "lane=" << lane;
@@ -7056,7 +7078,7 @@ TEST(Gfx1250DsSwizzleTest, VdsBroadcastReadsAddrSource) {
   std::unique_ptr<Instruction> quad_perm_inst(decode_valid(*decoder, quad_perm_words));
   ASSERT_NE(quad_perm_inst, nullptr);
   ASSERT_EQ(std::string_view(quad_perm_inst->mnemonic()), "ds_swizzle_b32");
-  cu->execute_instruction(quad_perm_inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(quad_perm_inst.get(), *wf).succeeded());
 
   constexpr uint32_t qd_src[4] = {1, 0, 3, 2};
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -7066,6 +7088,232 @@ TEST(Gfx1250DsSwizzleTest, VdsBroadcastReadsAddrSource) {
 
   if (!wf->is_halted())
     wf->halt();
+}
+
+TEST(Gfx1250AtomicReturnTest, PackedHalfAddPreservesComponentsAcrossMemoryForms) {
+  struct Case {
+    uint32_t old_value, source, expected;
+    bool input_denorm = false;
+    bool output_denorm = false;
+    uint32_t flushed_value = 0;
+  };
+  const std::array f16_cases{
+      Case{0x46004500, 0x40003c00, 0x48004600},
+      Case{0x3c013c00, 0x10001000, 0x3c023c00},
+      Case{0x00010001, 0x00010001, 0x00020002, true, true},
+      Case{0x04010401, 0x84008400, 0x00010001, false, true},
+      Case{0x7bff7bff, 0x7bff7bff, 0x7c007c00},
+      Case{0x80008000, 0x80008000, 0x80008000},
+      Case{0x7c007c00, 0x3c003c00, 0x7c007c00},
+      Case{0x7e027e00, 0x7e043c00, 0x7e027e00},
+      Case{0x3c00fc01, 0xfc023c00, 0xfe02fe01},
+      Case{0x7c00fc00, 0xfc007c00, 0xfe00fe00},
+      Case{0x00013c00, 0x00013c00, 0x00024000, true, true, 0x00004000},
+  };
+  const std::array bf16_cases{
+      Case{0x40c040a0, 0x40003f80, 0x410040c0},
+      Case{0x3f813f80, 0x3b803b80, 0x3f823f80},
+      Case{0x00010001, 0x00010001, 0x00020002, true, true},
+      Case{0x00810081, 0x80808080, 0x00010001, false, true},
+      Case{0x7f7f7f7f, 0x7f7f7f7f, 0x7f807f80},
+      Case{0x80008000, 0x80008000, 0x80008000},
+      Case{0x7f807f80, 0x3f803f80, 0x7f807f80},
+      Case{0x7fc27fc0, 0x7fc43f80, 0x7fc27fc0},
+      Case{0x3f80ff81, 0xff823f80, 0xffc2ffc1},
+      Case{0x7f80ff80, 0xff807f80, 0xffc0ffc0},
+      Case{0x00013f80, 0x00013f80, 0x00024000, true, true, 0x00004000},
+  };
+  enum class Form { Global, Buffer, Flat, Ds };
+  struct FormCase {
+    Form form;
+    const char *name;
+  };
+  const std::array forms{FormCase{Form::Global, "global"}, FormCase{Form::Buffer, "buffer"},
+                         FormCase{Form::Flat, "flat"}, FormCase{Form::Ds, "ds"}};
+  for (bool bf16 : {false, true}) {
+    for (const FormCase &form_case : forms) {
+      const Form form = form_case.form;
+      for (bool returns : {false, true}) {
+        amdgpu::GpuMemory memory("packed_atomic");
+        amdgpu::L2Cache l2("packed_atomic_l2");
+        amdgpu::ComputeUnitCore::Config cfg{};
+        cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+        cfg.num_wf_slots = 1;
+        cfg.sgprs_per_wf = 106;
+        cfg.vgprs_per_wf = 256;
+        cfg.lds_size_kb = 64;
+        Gfx1250MemoryTestCu cu("packed_atomic_cu", cfg, &memory, &l2);
+        amdgpu::Wavefront *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+        ASSERT_NE(wf, nullptr);
+        wf->set_exec(1);
+        std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+        ASSERT_NE(decoder, nullptr);
+        const uint32_t vb = wf->vgpr_alloc().base;
+        const uint32_t sb = wf->sgpr_alloc().base;
+        constexpr uint64_t kAddr = 0x1000;
+        const uint8_t th = returns ? 1 : 0;
+        const uint16_t atomic_op =
+            bf16 ? cdna5::kGlobalAtomicPkAddBf16Vglobal : cdna5::kGlobalAtomicPkAddF16Vglobal;
+        std::array<uint32_t, 3> words{};
+        if (form == Form::Global) {
+          words = cdna5::build_vglobal(
+              atomic_op, {.saddr = 4, .vdst = 0, .scope = 2, .th = th, .vsrc = 1, .vaddr = 2});
+        } else if (form == Form::Buffer) {
+          words = cdna5::build_vbuffer(atomic_op, {.soffset = amdgpu::kModernNullSelector,
+                                                   .vdata = 1,
+                                                   .rsrc = 4,
+                                                   .scope = 2,
+                                                   .th = th,
+                                                   .offen = 1,
+                                                   .vaddr = 2});
+        } else if (form == Form::Flat) {
+          words = cdna5::build_vflat(atomic_op, {.saddr = amdgpu::kModernNullSelector,
+                                                 .vdst = 0,
+                                                 .scope = 2,
+                                                 .th = th,
+                                                 .vsrc = 1,
+                                                 .vaddr = 2});
+        } else {
+          const uint16_t ds_op =
+              bf16 ? (returns ? cdna5::kDsPkAddRtnBf16Vds : cdna5::kDsPkAddBf16Vds)
+                   : (returns ? cdna5::kDsPkAddRtnF16Vds : cdna5::kDsPkAddF16Vds);
+          const std::array<uint32_t, 2> ds =
+              cdna5::build_vds(ds_op, {.addr = 2, .data0 = 1, .vdst = 0});
+          std::copy(ds.begin(), ds.end(), words.begin());
+        }
+        cu.write_sgpr(sb + 4, kAddr);
+        cu.write_sgpr(sb + 5, 0);
+        cu.write_sgpr(sb + 6, 4096);
+        cu.write_sgpr(sb + 7, 0);
+        cu.write_vgpr(vb + 2, 0, (form == Form::Flat || form == Form::Ds) ? kAddr : 0);
+        cu.write_vgpr(vb + 3, 0, 0);
+        const uint32_t dst = form == Form::Buffer ? 1 : 0;
+        for (const Case &c : bf16 ? bf16_cases : f16_cases) {
+          for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+            SCOPED_TRACE(::testing::Message()
+                         << "bf16=" << bf16 << " form=" << form_case.name << " returns=" << returns
+                         << " denorm=" << denorm << " old=" << std::hex << c.old_value);
+            // Atomics ignore round/VALU overflow controls. Opposing F32 and
+            // F16/F64 denorm fields also distinguish which field DS captures.
+            wf->set_mode_raw(0xf | ((denorm ^ 3u) << 4) | (denorm << 6) |
+                             amdgpu::Wavefront::FP16_OVFL_BIT);
+            if (form == Form::Ds)
+              cu.lds().write32(kAddr, c.old_value);
+            else
+              memory.write32(kAddr, c.old_value);
+            cu.write_vgpr(vb, 0, 0xdeadbeef);
+            cu.write_vgpr(vb + 1, 0, c.source);
+            cu.write_vgpr(vb + dst, 1, 0xdeadbeef);
+            std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+            ASSERT_NE(inst, nullptr);
+            cu.execute_and_route(inst.release(), *wf);
+            uint32_t expected = c.expected;
+            if (form == Form::Ds &&
+                ((c.input_denorm && !(denorm & 1u)) || (c.output_denorm && !(denorm & 2u))))
+              expected = c.flushed_value;
+            EXPECT_EQ(form == Form::Ds ? cu.lds().read32(kAddr) : memory.read32(kAddr), expected);
+            EXPECT_EQ(cu.read_vgpr(vb + dst, 0),
+                      returns ? c.old_value : (form == Form::Buffer ? c.source : 0xdeadbeef));
+            EXPECT_EQ(cu.read_vgpr(vb + dst, 1), 0xdeadbeefu);
+          }
+        }
+        wf->halt();
+      }
+    }
+  }
+}
+
+TEST(Rdna4AtomicReturnTest, FlatPackedHalfAddPreservesLdsDenormals) {
+  class TestCu : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, rdna4::Isa> {
+  public:
+    using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, rdna4::Isa>;
+    using amdgpu::ComputeUnitCore::route_memory_inst;
+    using Base::Base;
+    using Base::execute_instruction;
+  };
+  for (bool bf16 : {false, true}) {
+    for (bool returns : {false, true}) {
+      amdgpu::GpuMemory memory("flat_packed_lds");
+      amdgpu::L2Cache l2("flat_packed_lds_l2");
+      l2.set_backing_memory(&memory);
+      amdgpu::ComputeUnitCore::Config config{};
+      config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 106;
+      config.vgprs_per_wf = 256;
+      config.lds_size_kb = 64;
+      TestCu cu("flat_packed_lds_cu", config, &memory, &l2);
+      cu.set_memory(&memory);
+      cu.set_l2(&l2);
+      constexpr uint64_t kSharedBase = 0x100000000;
+      constexpr uint32_t kOffset = 0x80;
+      constexpr uint32_t kLdsBase = 0x100;
+      cu.set_apertures(kSharedBase, kSharedBase + 0xFFFF, 0, 0);
+      amdgpu::Wavefront *wave = cu.dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(1);
+      wave->set_lds_base(kLdsBase);
+      const uint32_t vgpr_base = wave->vgpr_alloc().base;
+      std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+      ASSERT_NE(decoder, nullptr);
+      struct Case {
+        uint32_t old_value;
+        uint32_t source;
+        uint32_t expected;
+        bool input_denorm;
+      };
+      const std::array<Case, 2> cases = {{
+          {0x00010001, 0x00010001, 0x00020002, true},
+          {bf16 ? 0x00810081u : 0x04010401u, bf16 ? 0x80808080u : 0x84008400u, 0x00010001, false},
+      }};
+      for (bool direct_ds : {false, true}) {
+        for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+          for (const Case &test : cases) {
+            SCOPED_TRACE(::testing::Message()
+                         << "bf16=" << bf16 << " returns=" << returns << " ds=" << direct_ds
+                         << " mode=" << denorm << " input_denorm=" << test.input_denorm);
+            wave->set_mode_raw((denorm << 6) | ((denorm ^ 3u) << 4));
+            cu.lds().write32(kLdsBase + kOffset, test.old_value);
+            memory.write32(kSharedBase + kOffset, 0xDEADBEEF);
+            cu.write_vgpr(vgpr_base, 0, 0xDEADBEEF);
+            cu.write_vgpr(vgpr_base, 1, 0xDEADBEEF);
+            cu.write_vgpr(vgpr_base + 1, 0, test.source);
+            cu.write_vgpr(vgpr_base + 2, 0, kOffset);
+            cu.write_vgpr(vgpr_base + 3, 0, kSharedBase >> 32);
+            std::array<uint32_t, 3> words{};
+            if (direct_ds) {
+              const uint16_t opcode =
+                  bf16 ? (returns ? rdna4::kDsPkAddRtnBf16Vds : rdna4::kDsPkAddBf16Vds)
+                       : (returns ? rdna4::kDsPkAddRtnF16Vds : rdna4::kDsPkAddF16Vds);
+              const std::array<uint32_t, 2> ds =
+                  rdna4::build_vds(opcode, {.addr = 2, .data0 = 1, .vdst = 0});
+              std::copy(ds.begin(), ds.end(), words.begin());
+            } else {
+              const uint16_t opcode =
+                  bf16 ? rdna4::kFlatAtomicPkAddBf16Vflat : rdna4::kFlatAtomicPkAddF16Vflat;
+              words = rdna4::build_vflat(opcode, {.saddr = amdgpu::kModernNullSelector,
+                                                  .vdst = 0,
+                                                  .scope = 2,
+                                                  .th = static_cast<uint8_t>(returns ? 1 : 0),
+                                                  .vsrc = 1,
+                                                  .vaddr = 2});
+            }
+            std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+            ASSERT_NE(inst, nullptr);
+            EXPECT_TRUE(cu.execute_instruction(inst.get(), *wave).succeeded());
+            cu.route_memory_inst(inst.release(), *wave);
+            const bool flush =
+                direct_ds && (!(denorm & 2u) || (test.input_denorm && !(denorm & 1u)));
+            EXPECT_EQ(cu.lds().read32(kLdsBase + kOffset), flush ? 0u : test.expected);
+            EXPECT_EQ(memory.read32(kSharedBase + kOffset), 0xDEADBEEFu);
+            EXPECT_EQ(cu.read_vgpr(vgpr_base, 0), returns ? test.old_value : 0xDEADBEEFu);
+            EXPECT_EQ(cu.read_vgpr(vgpr_base, 1), 0xDEADBEEFu);
+          }
+        }
+      }
+      wave->halt();
+    }
+  }
 }
 
 TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32ReturnsOldValue) {
@@ -7287,9 +7535,9 @@ TEST(HwregTest, GetregReadsModeAndStatusTargetIds) {
     wf->set_mode_raw(kMode);
     wf->set_status_raw(kStatus);
 
-    cu->execute_instruction(mode_inst.get(), *wf);
-    cu->execute_instruction(status_inst.get(), *wf);
-    cu->execute_instruction(unknown_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(mode_inst.get(), *wf).succeeded());
+    EXPECT_TRUE(cu->execute_instruction(status_inst.get(), *wf).succeeded());
+    EXPECT_TRUE(cu->execute_instruction(unknown_inst.get(), *wf).succeeded());
 
     const uint32_t sb = wf->sgpr_alloc().base;
     EXPECT_EQ(cu->read_sgpr(sb + 4), kMode);
@@ -7842,8 +8090,8 @@ TEST(HwregTest, GetregExtractsPartialModeAndStatusFields) {
     wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
     wf->set_status_raw(0x12345678u);
 
-    cu->execute_instruction(mode_inst.get(), *wf);
-    cu->execute_instruction(status_inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(mode_inst.get(), *wf).succeeded());
+    EXPECT_TRUE(cu->execute_instruction(status_inst.get(), *wf).succeeded());
 
     const uint32_t sb = wf->sgpr_alloc().base;
     EXPECT_EQ(cu->read_sgpr(sb + 4), 1u);
@@ -7889,7 +8137,7 @@ TEST(HwregTest, SetregImm32StatusIsReadOnly) {
 
     wf->set_mode_raw(0);
     wf->set_status_raw(0x12345678u);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     EXPECT_EQ(wf->status_raw(), 0x12345678u);
     EXPECT_EQ(wf->mode_raw(), 0u);
 
@@ -7930,7 +8178,7 @@ TEST(HwregTest, SetregImm32WritesModeFp16Ovfl) {
 
     wf->set_mode_raw(0);
     wf->set_status_raw(0x12345678u);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     EXPECT_EQ(wf->mode_raw(), amdgpu::Wavefront::FP16_OVFL_BIT);
     EXPECT_TRUE(wf->fp16_ovfl());
     EXPECT_EQ(wf->status_raw(), 0x12345678u);
@@ -7972,7 +8220,7 @@ TEST(HwregTest, SetregB32WritesModeFp16OvflFromSgpr) {
     wf->set_mode_raw(0);
     wf->set_status_raw(0x12345678u);
     cu->write_sgpr(sb + 4, amdgpu::Wavefront::FP16_OVFL_BIT);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     EXPECT_EQ(wf->mode_raw(), amdgpu::Wavefront::FP16_OVFL_BIT);
     EXPECT_TRUE(wf->fp16_ovfl());
     EXPECT_EQ(wf->status_raw(), 0x12345678u);
@@ -8015,7 +8263,7 @@ TEST(HwregTest, SetregImm32PartialBitfield) {
 
     wf->set_mode_raw(0xAAAAAAAAu);
     wf->set_status_raw(0x13579BDFu);
-    cu->execute_instruction(inst.get(), *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     EXPECT_EQ(wf->mode_raw(), 0xAAAAAAFAu) << "Partial bitfield write to MODE incorrect";
     EXPECT_EQ(wf->status_raw(), 0x13579BDFu);
 
@@ -8026,10 +8274,10 @@ TEST(HwregTest, SetregImm32PartialBitfield) {
 
 // Packed D16 FORMAT loads/stores carry partial-def metadata for liveness but are
 // deliberately non-executable (the memory pipeline does not model the packed
-// two-components-per-VGPR layout). Executing one must throw UnimplementedInst;
+// two-components-per-VGPR layout). Executing one must report failure;
 // this locks in that the metadata-only classification never silently starts
 // executing an incorrect layout.
-TEST(D16FormatExecution, PackedFormatD16LoadStoreThrowUnimplemented) {
+TEST(D16FormatExecution, PackedFormatD16LoadStoreReportFailure) {
   amdgpu::GpuMemory gpu_mem("d16_format_unimpl_mem");
   amdgpu::L2Cache l2("d16_format_unimpl_l2");
 
@@ -8051,22 +8299,102 @@ TEST(D16FormatExecution, PackedFormatD16LoadStoreThrowUnimplemented) {
 
   struct Case {
     std::string_view mnemonic;
-    std::array<uint32_t, 2> words;
+    std::array<uint32_t, 3> words;
   };
   const std::array<Case, 2> cases = {{
-      {"buffer_load_d16_format_xy", {0xC4024000U, 0x00000000U}},
-      {"buffer_store_d16_format_xy", {0xC4034000U, 0x00000000U}},
+      {"buffer_load_d16_format_xy", {0xC4024000U, 0x00000000U, 0x00000000U}},
+      {"buffer_store_d16_format_xy", {0xC4034000U, 0x00000000U, 0x00000000U}},
   }};
 
-  // The exec body throws before touching wavefront state, so a single wf can be
-  // reused across cases without any reset.
+  const uint32_t sgpr_base = wf->sgpr_alloc().base;
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  cu->write_sgpr(sgpr_base, 0x12345678u);
+  cu->write_vgpr(vgpr_base, 0, 0xabcdef01u);
+  wf->pc = 0x1000;
+  wf->set_exec(1);
+
+  // Rejection preserves architectural state; each call resets the failure reason.
   for (const auto &c : cases) {
     SCOPED_TRACE(c.mnemonic);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, c.words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), c.mnemonic);
     EXPECT_TRUE(inst->is_memory_op()) << c.mnemonic;
-    EXPECT_THROW(cu->execute_instruction(inst.get(), *wf), util::UnimplementedInst);
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(cu->read_sgpr(sgpr_base), 0x12345678u);
+    EXPECT_EQ(cu->read_vgpr(vgpr_base, 0), 0xabcdef01u);
+    EXPECT_EQ(wf->pc, 0x1000u);
+    EXPECT_EQ(wf->exec(), 1u);
+    EXPECT_FALSE(wf->is_halted());
+    EXPECT_EQ(inst->data(), nullptr);
+  }
+
+  // The CU must clear a rejection before the next instruction, without a
+  // redispatch or an explicit error reset by its caller.
+  constexpr std::array<uint32_t, 2> nop_words{0xBF800000u, 0};
+  std::unique_ptr<Instruction> nop(decode_valid(*decoder, nop_words.data()));
+  ASSERT_NE(nop, nullptr);
+  ASSERT_EQ(nop->mnemonic(), "s_nop");
+  EXPECT_TRUE(cu->execute_instruction(nop.get(), *wf).succeeded());
+  EXPECT_EQ(wf->instruction_execution_error(), amdgpu::InstructionExecutionError::None);
+}
+
+TEST(SparseMmaExecution, UnimplementedIntegerInstructionsReportFailure) {
+  struct Case {
+    rj_code_arch_t arch;
+    std::array<uint32_t, 2> words;
+  };
+  const std::array cases = {
+      Case{ROCJITSU_CODE_ARCH_CDNA3,
+           cdna3::build_vop3p_mfma(cdna3::kVSmfmacI3216x16x64I8Vop3pMfma,
+                                   {.src0 = 256, .src1 = 256, .src2 = 256})},
+      Case{ROCJITSU_CODE_ARCH_CDNA3,
+           cdna3::build_vop3p_mfma(cdna3::kVSmfmacI3232x32x32I8Vop3pMfma,
+                                   {.src0 = 256, .src1 = 256, .src2 = 256})},
+      Case{ROCJITSU_CODE_ARCH_CDNA4,
+           cdna4::build_vop3p_mfma(cdna4::kVSmfmacI3216x16x128I8Vop3pMfma,
+                                   {.src0 = 256, .src1 = 256, .src2 = 256})},
+      Case{ROCJITSU_CODE_ARCH_CDNA4,
+           cdna4::build_vop3p_mfma(cdna4::kVSmfmacI3232x32x64I8Vop3pMfma,
+                                   {.src0 = 256, .src1 = 256, .src2 = 256})},
+      Case{ROCJITSU_CODE_ARCH_CDNA4,
+           cdna4::build_vop3p_mfma(cdna4::kVSmfmacI3216x16x64I8Vop3pMfma,
+                                   {.src0 = 256, .src1 = 256, .src2 = 256})},
+      Case{ROCJITSU_CODE_ARCH_CDNA4,
+           cdna4::build_vop3p_mfma(cdna4::kVSmfmacI3232x32x32I8Vop3pMfma,
+                                   {.src0 = 256, .src1 = 256, .src2 = 256})},
+  };
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.arch);
+    amdgpu::GpuMemory memory("sparse_mma_unimpl_mem");
+    amdgpu::L2Cache l2("sparse_mma_unimpl_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = test_case.arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("sparse_mma_unimpl", cfg, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    auto decoder = Decoder::create(test_case.arch);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, test_case.words.data()));
+    ASSERT_NE(inst, nullptr);
+    SCOPED_TRACE(inst->mnemonic());
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_FALSE(wf->is_halted());
+
+    constexpr std::array<uint32_t, 2> nop_words{0xBF800000u, 0};
+    std::unique_ptr<Instruction> nop(decode_valid(*decoder, nop_words.data()));
+    ASSERT_NE(nop, nullptr);
+    EXPECT_TRUE(cu->execute_instruction(nop.get(), *wf).succeeded());
+    EXPECT_EQ(wf->instruction_execution_error(), amdgpu::InstructionExecutionError::None);
   }
 }
 
@@ -8201,7 +8529,7 @@ TEST(Cdna5VopdCndmaskTest, Wave32LaneMaskIsReadAtWaveWidth) {
 
   // Before the fix this call terminates the process:
   //   std::logic_error: Unsupported encoding value for scalar64 read: 107
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   // VCC_HI selects src1 on lanes 0 and 2, src0 on lanes 1 and 3. Had the model
   // read VCC_LO, or the whole 64-bit VCC, the pattern would be inverted.
@@ -8258,7 +8586,7 @@ TEST(Cdna5VopdCndmaskTest, Wave32LaneMaskIgnoresTheNeighbouringScalar) {
   const uint32_t words[] = {0xCF248101u, 0x01020104u, 0x03000000u};
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
-  cu->execute_instruction(inst.get(), *wf);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
 
   EXPECT_EQ(cu->read_vgpr(vb + 0, 0), 0x22220000u);
   EXPECT_EQ(cu->read_vgpr(vb + 0, 1), 0x11110001u);
@@ -8267,4 +8595,380 @@ TEST(Cdna5VopdCndmaskTest, Wave32LaneMaskIgnoresTheNeighbouringScalar) {
 
   if (!wf->is_halted())
     wf->halt();
+}
+
+namespace {
+TEST(RdnaDot2Bf16ExecutionTest, RoundingAndDenormalsAcrossTargets) {
+  struct Case {
+    const char *name;
+    uint32_t left;
+    uint32_t right;
+    uint16_t accumulator;
+    uint16_t expected;
+  };
+  const std::array cases{
+      Case{"round_product", 0xbfed, 0x4007, 0, 0xc07a},
+      Case{"tie_even_lower", 0x3f80, 0x3f80, 0x3b80, 0x3f80},
+      Case{"tie_even_upper", 0x3f81, 0x3f80, 0x3b80, 0x3f82},
+      Case{"flush_low_input", 0x0040, 0x4000, 0, 0},
+      Case{"flush_high_input", 0x00400000, 0x40000000, 0, 0},
+      Case{"flush_accumulator", 0, 0, 0x0040, 0},
+      Case{"flush_output", 0x0080, 0x3f00, 0, 0},
+      Case{"flush_negative_output", 0x8080, 0x3f00, 0, 0x8000},
+      Case{"finite_control", 0x3f80, 0x4000, 0x4040, 0x40a0},
+      Case{"infinity", 0x7f80, 0x3f80, 0, 0x7f80},
+  };
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    amdgpu::GpuMemory memory("dot2_policy_memory");
+    amdgpu::L2Cache cache("dot2_policy_cache");
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 106;
+    config.vgprs_per_wf = 256;
+    config.lds_size_kb = 64;
+    std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit =
+        amdgpu::ComputeUnitCore::create("dot2_policy", config, &memory, &cache);
+    std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+    amdgpu::Wavefront *wave = compute_unit->dispatch_wf(0, 0, 106, 256);
+    wave->set_exec(1);
+    const uint32_t base = wave->vgpr_alloc().base;
+    for (uint32_t mode : {0u, 0xffu}) {
+      wave->set_mode_raw(mode);
+      for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+        for (const Case &test : cases) {
+          SCOPED_TRACE(test.name);
+          SCOPED_TRACE(static_cast<int>(arch));
+          SCOPED_TRACE(mode);
+          SCOPED_TRACE(host_round);
+          compute_unit->write_vgpr(base, 0, test.left);
+          compute_unit->write_vgpr(base + 1, 0, test.right);
+          compute_unit->write_vgpr(base + 2, 0, test.accumulator);
+          compute_unit->write_vgpr(base + 3, 0, 0xcafe0000);
+          const std::array<uint32_t, 2> words =
+              encode_vop3(/*op=*/rdna4::kVDot2Bf16Bf16Vop3, /*vdst=*/3,
+                          /*src0=*/vgpr_src(0), /*src1=*/vgpr_src(1), /*src2=*/vgpr_src(2));
+          std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+          ASSERT_NE(instruction, nullptr);
+          const int saved_round = std::fegetround();
+          ASSERT_EQ(std::fesetround(host_round), 0);
+          EXPECT_TRUE(compute_unit->execute_instruction(instruction.get(), *wave).succeeded());
+          const int restored_round = std::fegetround();
+          std::fesetround(saved_round);
+          EXPECT_EQ(restored_round, host_round);
+          EXPECT_EQ(compute_unit->read_vgpr(base + 3, 0), 0xcafe0000u | test.expected);
+        }
+      }
+    }
+    wave->halt();
+  }
+}
+} // namespace
+
+namespace {
+template <typename ComputeUnit> void check_flat_atomic_lds_policy(rj_code_arch_t arch) {
+  amdgpu::GpuMemory memory("flat_atomic_policy_memory");
+  amdgpu::L2Cache cache("flat_atomic_policy_cache");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = arch;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  ComputeUnit compute_unit("flat_atomic_policy", config, &memory, &cache);
+  constexpr uint64_t kSharedBase = 0x100000000ULL;
+  compute_unit.set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
+  amdgpu::Wavefront *wave = compute_unit.dispatch_wf(0, 0, 106, 256);
+  wave->set_exec(1);
+  wave->set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
+  const uint32_t base = wave->vgpr_alloc().base;
+  std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+  const bool modern = arch == ROCJITSU_CODE_ARCH_CDNA5;
+  std::array<uint32_t, 3> words{};
+  if (modern) {
+    words =
+        cdna5::build_vflat(cdna5::kFlatAtomicAddF32Vflat,
+                           {.saddr = 124, .vdst = 6, .scope = 2, .th = 1, .vsrc = 0, .vaddr = 2});
+  } else {
+    const std::array<uint32_t, 2> legacy_words = cdna4::build_flat(
+        cdna4::kFlatAtomicAddF32Flat, {.sc0 = 1, .addr = 2, .data = 0, .saddr = 127, .vdst = 6});
+    std::copy(legacy_words.begin(), legacy_words.end(), words.begin());
+  }
+  for (uint32_t mode : {0u, 0xf0u}) {
+    wave->set_mode_raw(mode);
+    wave->lds().write32(0x100, 1);
+    compute_unit.write_vgpr(base, 0, 1);
+    compute_unit.write_vgpr(base + 2, 0, 0x100);
+    compute_unit.write_vgpr(base + 3, 0, static_cast<uint32_t>(kSharedBase >> 32));
+    std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+    ASSERT_NE(instruction, nullptr);
+    compute_unit.execute_and_route(instruction.release(), *wave);
+    EXPECT_EQ(wave->lds().read32(0x100), modern || mode ? 2u : 0u);
+    EXPECT_EQ(compute_unit.read_vgpr(base + 6, 0), 1u);
+  }
+  wave->halt();
+}
+
+TEST(AtomicPolicyRoutingTest, FlatLdsUsesTargetPolicy) {
+  check_flat_atomic_lds_policy<Cdna4MemoryTestCu>(ROCJITSU_CODE_ARCH_CDNA4);
+  check_flat_atomic_lds_policy<Gfx1250MemoryTestCu>(ROCJITSU_CODE_ARCH_CDNA5);
+}
+} // namespace
+
+TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
+  struct ArchCase {
+    rj_code_arch_t arch;
+    uint16_t add_f32;
+    uint16_t add_f16;
+    uint16_t mul_f32;
+    uint16_t mul_f16;
+    uint16_t rcp_f32;
+    uint16_t rcp_f16;
+    uint16_t packed_fmac_f16;
+    uint16_t mov_b32;
+    uint16_t frexp_exp_f32;
+  };
+  constexpr std::array kArchitectures{
+      ArchCase{ROCJITSU_CODE_ARCH_CDNA4, cdna4::kVAddF32Vop2, cdna4::kVAddF16Vop2,
+               cdna4::kVMulF32Vop2, cdna4::kVMulF16Vop2, cdna4::kVRcpF32Vop1, cdna4::kVRcpF16Vop1,
+               cdna4::kVPkFmacF16Vop2, cdna4::kVMovB32Vop1, cdna4::kVFrexpExpI32F32Vop1},
+      ArchCase{ROCJITSU_CODE_ARCH_CDNA3, cdna3::kVAddF32Vop2, cdna3::kVAddF16Vop2,
+               cdna3::kVMulF32Vop2, cdna3::kVMulF16Vop2, cdna3::kVRcpF32Vop1, cdna3::kVRcpF16Vop1,
+               cdna3::kVPkFmacF16Vop2, cdna3::kVMovB32Vop1, cdna3::kVFrexpExpI32F32Vop1},
+      ArchCase{ROCJITSU_CODE_ARCH_CDNA2, cdna2::kVAddF32Vop2, cdna2::kVAddF16Vop2,
+               cdna2::kVMulF32Vop2, cdna2::kVMulF16Vop2, cdna2::kVRcpF32Vop1, cdna2::kVRcpF16Vop1,
+               cdna2::kVPkFmacF16Vop2, cdna2::kVMovB32Vop1, cdna2::kVFrexpExpI32F32Vop1},
+      ArchCase{ROCJITSU_CODE_ARCH_CDNA1, cdna1::kVAddF32Vop2, cdna1::kVAddF16Vop2,
+               cdna1::kVMulF32Vop2, cdna1::kVMulF16Vop2, cdna1::kVRcpF32Vop1, cdna1::kVRcpF16Vop1,
+               cdna1::kVPkFmacF16Vop2, cdna1::kVMovB32Vop1, cdna1::kVFrexpExpI32F32Vop1},
+      ArchCase{ROCJITSU_CODE_ARCH_RDNA2, rdna2::kVAddF32Vop2, rdna2::kVAddF16Vop2,
+               rdna2::kVMulF32Vop2, rdna2::kVMulF16Vop2, rdna2::kVRcpF32Vop1, rdna2::kVRcpF16Vop1,
+               rdna2::kVPkFmacF16Vop2, rdna2::kVMovB32Vop1, rdna2::kVFrexpExpI32F32Vop1},
+      ArchCase{ROCJITSU_CODE_ARCH_RDNA1, rdna1::kVAddF32Vop2, rdna1::kVAddF16Vop2,
+               rdna1::kVMulF32Vop2, rdna1::kVMulF16Vop2, rdna1::kVRcpF32Vop1, rdna1::kVRcpF16Vop1,
+               rdna1::kVPkFmacF16Vop2, rdna1::kVMovB32Vop1, rdna1::kVFrexpExpI32F32Vop1},
+  };
+  struct ValueCase {
+    uint16_t opcode;
+    bool unary;
+    bool f16;
+    uint32_t src0;
+    uint32_t src1;
+    uint32_t omod;
+    uint32_t mode;
+    uint32_t expected;
+    uint32_t destination_selection = amdgpu::sdwa::DWORD;
+    bool clamp = false;
+    uint32_t initial_destination = 0xbeefbeefu;
+    uint32_t source_modifiers = 0;
+  };
+  for (const ArchCase &architecture : kArchitectures) {
+    const std::array values{
+        ValueCase{architecture.frexp_exp_f32, true, false, 0x3f800000u, 0, 2, 0, 1},
+        ValueCase{architecture.add_f32, false, false, 0xbf800000u, 0x3f800000u, 1, 0, 0x40800000u,
+                  amdgpu::sdwa::DWORD, false, 0xbeefbeefu, 1u << 21},
+        ValueCase{architecture.add_f16, false, true, 0xbc00u, 0x3c00u, 1, 0, 0x4400u,
+                  amdgpu::sdwa::DWORD, false, 0xbeefbeefu, 1u << 21},
+
+        ValueCase{architecture.mov_b32, true, false, 0x3f800000u, 0, 2, 0, 0x3f800000u},
+        ValueCase{architecture.packed_fmac_f16, false, false, 0x3c003c00u, 0x40004000u, 1, 0,
+                  0x44004400u, amdgpu::sdwa::DWORD, false, 0},
+
+        ValueCase{architecture.add_f32, false, false, 0x3f800000u, 0x3f800000u, 1, 0, 0x40800000u},
+        ValueCase{architecture.add_f32, false, false, 0x3f800000u, 0x3f800000u, 2, 0, 0x41000000u},
+        ValueCase{architecture.add_f32, false, false, 0x3f800000u, 0x3f800000u, 3, 0, 0x3f800000u},
+        ValueCase{architecture.add_f32, false, false, 0x3f800000u, 0x3f800000u, 1, 2u << 4,
+                  0x40000000u},
+        ValueCase{architecture.add_f32, false, false, 0x3f800000u, 0x3f800000u, 1,
+                  amdgpu::Wavefront::IEEE_BIT, 0x40000000u},
+        ValueCase{architecture.add_f32, false, false, 0x3f400000u, 0x3f400000u, 3, 0, 0x3f400000u,
+                  amdgpu::sdwa::DWORD, true},
+        ValueCase{architecture.mul_f32, false, false, 0x80000000u, 0x3f800000u, 1, 0, 0},
+        ValueCase{architecture.mul_f32, false, false, 0x00800000u, 0x3f800000u, 3, 0, 0},
+        ValueCase{architecture.rcp_f32, true, false, 0x40000000u, 0, 2, 0, 0x40000000u},
+        ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 0, 0x4400u},
+        ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 2, 0, 0x4800u},
+        ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 3, 0, 0x3c00u},
+        // SDWA scaling and directed guest rounding apply to the same wide result.
+        ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x1000u, 1, 1u << 2, 0x4001u},
+        ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x1000u, 1, 2u << 2, 0x4000u},
+        ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 2u << 6, 0x4000u},
+        ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1,
+                  amdgpu::Wavefront::IEEE_BIT, 0x4000u},
+        ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 2u << 4, 0x4400u},
+        ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 0, 0x4400beefu,
+                  amdgpu::sdwa::WORD_1},
+        // Scaling must precede F16 narrowing, including overflow and tiny results.
+        ValueCase{architecture.add_f16, false, true, 0x7bffu, 0x7bffu, 3, 0, 0x7bffu},
+        ValueCase{architecture.mul_f16, false, true, 0x0400u, 0x3800u, 2, 0, 0x0800u},
+        ValueCase{architecture.mul_f16, false, true, 0x0400u, 0x3c00u, 3, 0, 0},
+        ValueCase{architecture.mul_f16, false, true, 0x8000u, 0x3c00u, 1, 0, 0},
+        ValueCase{architecture.rcp_f16, true, true, 0x4000u, 0, 2, 0, 0x4000u},
+    };
+    for (bool force_scalar : {false, true}) {
+      ForceScalarGuard guard(force_scalar);
+      amdgpu::GpuMemory memory("sdwa_omod_memory");
+      amdgpu::L2Cache cache("sdwa_omod_cache");
+      amdgpu::ComputeUnitCore::Config config{};
+      config.arch = architecture.arch;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 106;
+      config.vgprs_per_wf = 256;
+      config.lds_size_kb = 64;
+      std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit =
+          amdgpu::ComputeUnitCore::create("sdwa_omod", config, &memory, &cache);
+      std::unique_ptr<Decoder> decoder = Decoder::create(architecture.arch);
+      amdgpu::Wavefront *wave = compute_unit->dispatch_wf(0, 0, 106, 256);
+      ASSERT_NE(wave, nullptr);
+      const uint32_t register_base = wave->vgpr_alloc().base;
+      const uint64_t full_mask = wave->wf_size() == 64 ? ~uint64_t{0} : uint64_t{0xffffffff};
+      for (uint64_t active_mask : {uint64_t{1}, full_mask}) {
+        wave->set_exec(active_mask);
+        for (const ValueCase &value : values) {
+          // Only CDNA profiles expose packed FMAC through SDWA.
+          if (value.opcode == architecture.packed_fmac_f16 && !value.unary &&
+              (architecture.arch == ROCJITSU_CODE_ARCH_RDNA1 ||
+               architecture.arch == ROCJITSU_CODE_ARCH_RDNA2))
+            continue;
+          SCOPED_TRACE(::testing::Message()
+                       << "arch=" << architecture.arch << " opcode=" << value.opcode
+                       << " omod=" << value.omod << " mode=" << value.mode
+                       << " scalar=" << force_scalar << " mask=" << active_mask);
+          wave->set_mode_raw(value.mode);
+          for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+            compute_unit->write_vgpr(register_base, lane, value.src0);
+            compute_unit->write_vgpr(register_base + 1, lane, value.src1);
+            compute_unit->write_vgpr(register_base + 6, lane, value.initial_destination);
+          }
+          const uint32_t source_selection = value.f16 ? amdgpu::sdwa::WORD_0 : amdgpu::sdwa::DWORD;
+          const std::array<uint32_t, 2> words{
+              value.unary
+                  ? (0x7e000000u | (6u << 17) | (uint32_t{value.opcode} << 9) | amdgpu::SRC_SDWA)
+                  : encode_vop2(value.opcode, 6, amdgpu::SRC_SDWA, 1)[0],
+              (value.destination_selection << 8) | (amdgpu::sdwa::UNUSED_PRESERVE << 11) |
+                  (uint32_t{value.clamp} << 13) | (value.omod << 14) | (source_selection << 16) |
+                  (value.unary ? 0 : source_selection << 24) | value.source_modifiers,
+          };
+          std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+          ASSERT_NE(instruction, nullptr);
+          EXPECT_TRUE(compute_unit->execute_instruction(instruction.get(), *wave).succeeded());
+          for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+            EXPECT_EQ(compute_unit->read_vgpr_storage(register_base + 6, lane),
+                      active_mask & (uint64_t{1} << lane) ? value.expected
+                                                          : value.initial_destination);
+        }
+      }
+      wave->halt();
+    }
+  }
+}
+
+TEST(SdwaOutputScalingTest, F32ScalingUsesExplicitRounding) {
+  struct Case {
+    uint32_t input;
+    uint32_t omod;
+    std::array<uint32_t, 4> expected;
+  };
+  constexpr std::array cases{
+      Case{0x7f7fffffu, 1, {0x7f800000u, 0x7f800000u, 0x7f7fffffu, 0x7f7fffffu}},
+      Case{0xff7fffffu, 2, {0xff800000u, 0xff7fffffu, 0xff800000u, 0xff7fffffu}},
+      Case{0x00ffffffu, 3, {0x00800000u, 0x00800000u, 0, 0}},
+      Case{0x80ffffffu, 3, {0x80800000u, 0, 0x80800000u, 0}},
+      Case{0x00800000u, 3, {0, 0, 0, 0}},
+      Case{0x00400000u, 1, {0x00800000u, 0x00800000u, 0x00800000u, 0x00800000u}},
+      Case{0x00000001u, 3, {0, 0, 0, 0}},
+      Case{0x80000000u, 1, {0, 0, 0, 0}},
+      Case{0xff800000u, 3, {0xff800000u, 0xff800000u, 0xff800000u, 0xff800000u}},
+      Case{0x7f812345u, 1, {0x7fc12345u, 0x7fc12345u, 0x7fc12345u, 0x7fc12345u}},
+      Case{0x3f800001u, 0, {0x3f800001u, 0x3f800001u, 0x3f800001u, 0x3f800001u}},
+  };
+  const int saved_round = std::fegetround();
+  for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    EXPECT_EQ(std::fesetround(host_round), 0);
+    for (const Case &test : cases) {
+      for (uint32_t mode = 0; mode < 4; ++mode) {
+        SCOPED_TRACE(::testing::Message() << "input=" << test.input << " omod=" << test.omod
+                                          << " mode=" << mode << " host=" << host_round);
+        EXPECT_EQ(amdgpu::sdwa::scale_f32(test.input, test.omod, mode), test.expected[mode]);
+        EXPECT_EQ(std::fegetround(), host_round);
+      }
+    }
+  }
+  EXPECT_EQ(std::fesetround(saved_round), 0);
+}
+
+TEST(SdwaOutputScalingTest, FloatingConversionsUseDestinationFormat) {
+  struct Architecture {
+    rj_code_arch_t arch;
+    uint16_t cvt_f16_i16;
+  };
+  constexpr std::array architectures{
+      Architecture{ROCJITSU_CODE_ARCH_CDNA4, cdna4::kVCvtF16I16Vop1},
+      Architecture{ROCJITSU_CODE_ARCH_CDNA3, cdna3::kVCvtF16I16Vop1},
+      Architecture{ROCJITSU_CODE_ARCH_CDNA2, cdna2::kVCvtF16I16Vop1},
+      Architecture{ROCJITSU_CODE_ARCH_CDNA1, cdna1::kVCvtF16I16Vop1},
+      Architecture{ROCJITSU_CODE_ARCH_RDNA2, rdna2::kVCvtF16I16Vop1},
+      Architecture{ROCJITSU_CODE_ARCH_RDNA1, rdna1::kVCvtF16I16Vop1},
+  };
+  struct Case {
+    uint16_t opcode;
+    uint32_t source;
+    uint32_t source_selection;
+    uint32_t expected;
+    uint32_t omod = 1;
+  };
+  for (const Architecture &architecture : architectures) {
+    const std::array cases{
+        Case{cdna4::kVCvtF32I32Vop1, 2u, amdgpu::sdwa::DWORD, 0x40800000u},
+        Case{architecture.cvt_f16_i16, 2u, amdgpu::sdwa::WORD_0, 0x4400u},
+        Case{cdna4::kVCvtF16F32Vop1, 0x40000000u, amdgpu::sdwa::DWORD, 0x4400u},
+        Case{cdna4::kVCvtF32F16Vop1, 0x4000u, amdgpu::sdwa::WORD_0, 0x40800000u},
+        Case{cdna4::kVCvtF32Ubyte0Vop1, 2u, amdgpu::sdwa::DWORD, 0x40800000u},
+        // Integer destinations keep their conversion controls, without floating modifiers.
+        Case{cdna4::kVCvtI32F32Vop1, 0x40000000u, amdgpu::sdwa::DWORD, 2u},
+        // Divide before F16 narrowing: 131008 / 2 is the largest finite half.
+        Case{cdna4::kVCvtF16F32Vop1, 0x47ffe000u, amdgpu::sdwa::DWORD, 0x7bffu, 3},
+    };
+    for (bool force_scalar : {false, true}) {
+      ForceScalarGuard scalar_override(force_scalar);
+      amdgpu::GpuMemory memory("sdwa_conversion_memory");
+      amdgpu::L2Cache cache("sdwa_conversion_cache");
+      amdgpu::ComputeUnitCore::Config config{};
+      config.arch = architecture.arch;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 106;
+      config.vgprs_per_wf = 256;
+      config.lds_size_kb = 64;
+      std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit =
+          amdgpu::ComputeUnitCore::create("sdwa_conversion", config, &memory, &cache);
+      std::unique_ptr<Decoder> decoder = Decoder::create(architecture.arch);
+      amdgpu::Wavefront *wave = compute_unit->dispatch_wf(0, 0, 106, 256);
+      ASSERT_NE(wave, nullptr);
+      wave->set_mode_raw(0);
+      wave->set_exec(0b101);
+      const uint32_t base = wave->vgpr_alloc().base;
+      for (const Case &test : cases) {
+        SCOPED_TRACE(::testing::Message() << "arch=" << architecture.arch << " op=" << test.opcode
+                                          << " scalar=" << force_scalar);
+        for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+          compute_unit->write_vgpr(base, lane, test.source);
+          compute_unit->write_vgpr(base + 6, lane, 0xbeefbeefu);
+        }
+        // Common VOP1 opcodes except the per-family F16 integer conversion above.
+        const std::array<uint32_t, 2> words{
+            0x7e000000u | (6u << 17) | (uint32_t{test.opcode} << 9) | amdgpu::SRC_SDWA,
+            (amdgpu::sdwa::DWORD << 8) | (test.omod << 14) | (test.source_selection << 16),
+        };
+        std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+        ASSERT_NE(instruction, nullptr);
+        EXPECT_TRUE(compute_unit->execute_instruction(instruction.get(), *wave).succeeded());
+        for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+          EXPECT_EQ(compute_unit->read_vgpr_storage(base + 6, lane),
+                    (wave->exec() & (uint64_t{1} << lane)) ? test.expected : 0xbeefbeefu);
+        }
+      }
+      wave->halt();
+    }
+  }
 }

@@ -57,6 +57,7 @@
 #ifdef ENABLE_WSL_BACKEND
 #include "amd_smi/impl/amd_smi_wsl_device.h"
 #endif
+#include "fwupd_carveout.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
@@ -5155,27 +5156,33 @@ amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor_handle,
   info->min_clk = static_cast<uint32_t>(min_freq);
   info->clk_deep_sleep = static_cast<uint8_t>(sleep_state_freq);
 
+  // gpu_metrics marks an unavailable clock with UINT16_MAX. Widen it to the uint32
+  // marker the DF case returns, so every clk_type reports unavailable the same way.
+  auto widen_unavailable = [](uint16_t clk) -> uint32_t {
+    return clk == UINT16_MAX ? UINT32_MAX : static_cast<uint32_t>(clk);
+  };
+
   switch (clk_type) {
     case AMDSMI_CLK_TYPE_GFX:
-      info->clk = metrics.current_gfxclk;
+      info->clk = widen_unavailable(metrics.current_gfxclk);
       break;
     case AMDSMI_CLK_TYPE_MEM:
-      info->clk = metrics.current_uclk;
+      info->clk = widen_unavailable(metrics.current_uclk);
       break;
     case AMDSMI_CLK_TYPE_VCLK0:
-      info->clk = metrics.current_vclk0;
+      info->clk = widen_unavailable(metrics.current_vclk0);
       break;
     case AMDSMI_CLK_TYPE_VCLK1:
-      info->clk = metrics.current_vclk1;
+      info->clk = widen_unavailable(metrics.current_vclk1);
       break;
     case AMDSMI_CLK_TYPE_DCLK0:
-      info->clk = metrics.current_dclk0;
+      info->clk = widen_unavailable(metrics.current_dclk0);
       break;
     case AMDSMI_CLK_TYPE_DCLK1:
-      info->clk = metrics.current_dclk1;
+      info->clk = widen_unavailable(metrics.current_dclk1);
       break;
     case AMDSMI_CLK_TYPE_SOC:
-      info->clk = metrics.current_socclk;
+      info->clk = widen_unavailable(metrics.current_socclk);
       break;
     // fclk/df not supported by gpu metrics so providing default value which cannot be contrued to
     // be valid
@@ -5400,11 +5407,17 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
     return AMDSMI_STATUS_INVAL;
   }
 
+  // Validate the buffer holds a full header before dereferencing any header field
+  if (buf_size < sizeof(amdsmi_cper_hdr_t)) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper buffer size: " << std::dec
+       << buf_size << " is smaller than the cper header: (" << sizeof(amdsmi_cper_hdr_t) << ")\n";
+    LOG_ERROR(ss);
+    return AMDSMI_STATUS_UNEXPECTED_SIZE;
+  }
   const amdsmi_cper_hdr_t* cper = reinterpret_cast<const amdsmi_cper_hdr_t*>(cper_buffer);
-  if (cper->record_length > buf_size) {
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper buffer size " << std::dec
-       << buf_size << " is smaller than cper record length " << std::dec << cper->record_length
-       << "\n";
+  if ((cper->record_length < sizeof(amdsmi_cper_hdr_t)) || (cper->record_length > buf_size)) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper record length: " << std::dec
+       << cper->record_length << " does not fit the buffer size: " << buf_size << "\n";
     LOG_ERROR(ss);
     return AMDSMI_STATUS_UNEXPECTED_SIZE;
   } else if (strncmp(cper->signature, "CPER", 4) != 0) {
@@ -5414,7 +5427,7 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
     return AMDSMI_STATUS_UNEXPECTED_DATA;
   }
   uint32_t i = 0;
-  for (int afid : cper_decode(cper)) {
+  for (int afid : cper_decode(cper, buf_size)) {
     if (i < *num_afids) {
       afids[i] = static_cast<uint64_t>(afid);
     }
@@ -5819,7 +5832,6 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
 
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
 
-  char buff[AMDSMI_MAX_STRING_LENGTH];
   FILE* fp;
   double pcie_speed = 0;
   unsigned pcie_width = 0;
@@ -5849,7 +5861,7 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
       "/sys/class/drm/" + gpu_device->get_gpu_path() + "/device/max_link_speed";
   fp = fopen(path_max_link_speed.c_str(), "r");
   if (fp) {
-    if (fscanf(fp, "%lf %s", &pcie_speed, buff) != 2) {
+    if (fscanf(fp, "%lf %*s", &pcie_speed) != 1) {
       fclose(fp);
       std::ostringstream ss;
       ss << __PRETTY_FUNCTION__ << " | Failed to parse: " << path_max_link_speed;
@@ -8455,6 +8467,17 @@ static bool is_dry_run() {
   return (dry_run != nullptr && std::string(dry_run) == "1");
 }
 
+// The fwupd UMA carveout is a platform-wide APU BIOS setting, so it must only be
+// consulted for the integrated (FUSION) GPU -- never a discrete GPU that merely
+// lacks the amdgpu sysfs node. Uses the ASIC AMDGPU_IDS_FLAGS_FUSION flag.
+static bool gpu_handle_is_apu(amdsmi_processor_handle processor_handle) {
+  amdsmi_asic_info_t asic_info = {};
+  if (amdsmi_get_gpu_asic_info(processor_handle, &asic_info) != AMDSMI_STATUS_SUCCESS) {
+    return false;
+  }
+  return (asic_info.flags & AMDGPU_IDS_FLAGS_FUSION) != 0;
+}
+
 static amdsmi_status_t get_gpu_uma_carveout_info_internal(amd::smi::AMDSmiGPUDevice* gpu_device,
                                                           amdsmi_uma_carveout_info_t* info) {
   if (gpu_device == nullptr || info == nullptr) {
@@ -8568,8 +8591,26 @@ amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(amdsmi_processor_handle process
   if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
 
-  SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
+  // Prefer the fwupd path; the amdgpu sysfs node is the fallback when fwupd is
+  // unavailable or when fwupd redacts it for an unprivileged caller (below).
+  if (gpu_handle_is_apu(processor_handle)) {
+    amdsmi_status_t fwupd_ret = amd::smi::fwupd_get_carveout_info(info);
+    if (fwupd_ret == AMDSMI_STATUS_SUCCESS) {
+      // fill current_index from it so an unprivileged `static`
+      // still shows the active carveout without a PolicyKit prompt.
+      if (info->current_index == info->num_options) {
+        SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
+        amdsmi_uma_carveout_info_t sysfs_info{};
+        if (get_gpu_uma_carveout_info_internal(gpu_device, &sysfs_info) == AMDSMI_STATUS_SUCCESS &&
+            sysfs_info.current_index < info->num_options) {
+          info->current_index = sysfs_info.current_index;
+        }
+      }
+      return AMDSMI_STATUS_SUCCESS;
+    }
+  }
 
+  SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
   return get_gpu_uma_carveout_info_internal(gpu_device, info);
 }
 
@@ -8585,6 +8626,16 @@ amdsmi_status_t amdsmi_set_gpu_uma_carveout(amdsmi_processor_handle processor_ha
 #ifdef ENABLE_WSL_BACKEND
   if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
+
+  // fwupd brokers PolicyKit auth (no root needed) instead of the root-only
+  // sysfs node; falls back to sysfs on NOT_SUPPORTED. Runs before the mutex
+  // since it never touches gpu_device.
+  if (gpu_handle_is_apu(processor_handle)) {
+    amdsmi_status_t fwupd_ret = amd::smi::fwupd_set_carveout(option_index);
+    if (fwupd_ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+      return fwupd_ret;
+    }
+  }
 
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
 

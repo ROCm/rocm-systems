@@ -112,8 +112,8 @@ def test_saturating_pack_codegen_covers_all_narrowing_modes():
 
 def test_perm_and_qsad_codegen_cover_multiword_results():
     perm = gen_vector_perm_pk16(['vdst'], ['src0', 'src1', 'src2'], 'b6', True)
-    qsad = gen_vector_qsad(['vdst'], ['src0', 'src1', 'src2'], 'sad_pk_u16', True)
-    mqsad = gen_vector_qsad(['vdst'], ['src0', 'src1', 'src2'], 'msad_u32', True)
+    qsad = gen_vector_qsad(['vdst'], ['src0', 'src1', 'src2'], 'sad_pk_u16', True, True)
+    mqsad = gen_vector_qsad(['vdst'], ['src0', 'src1', 'src2'], 'msad_u32', True, True)
 
     assert 'uint32_t packed[3]' in perm
     assert 'source_bit = index * 6u' in perm
@@ -122,11 +122,11 @@ def test_perm_and_qsad_codegen_cover_multiword_results():
     assert 'read_lane64(src1, lane)' in perm
     assert '(window + byte) * 8' in qsad
     assert 'write_lane64(vdst, lane, packed_result)' in qsad
-    assert 'value & 0xffffu' in qsad
+    assert 'inst_.clamp ? std::min(value, 0xffffu) : (value & 0xffffu)' in qsad
     assert 'if (b != 0)' in mqsad
     assert 'accum[window] = amdgpu::RegisterAccess(wf).read_lane' in mqsad
     assert 'if (std::optional<uint64_t> constant = src2.const_value())' in mqsad
-    assert 'accum[window] + sum' in mqsad
+    assert 'vop3_integer_add<uint32_t>(accum[window], sum, inst_.clamp)' in mqsad
 
 
 @pytest.mark.parametrize(
@@ -513,7 +513,12 @@ def test_vop3_div_fixup_f16_uses_true16_sources_and_destination():
     assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
     assert (
-        'uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());' in body
+        'uint32_t result_bits = amdgpu::narrow_div_fixup_f16(result, wf.fp16_ovfl());'
+        in body
+    )
+    assert (
+        'result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
+        in body
     )
     assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true)' in body
     assert 'std::bit_cast<float>(src0.read_lane' not in body

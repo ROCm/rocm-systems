@@ -6,10 +6,23 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Added
 * New HIP APIs
-    - Device Management: support for querying a device identifier.
-      * `hipDeviceGetLuid` returns the locally unique identifier (LUID) and device node mask for a device
-    - Device Management: support for API parity with corresponding CUDA API.
-      * `hipInitDevice` initializes the runtime state for the requested device, but does not make the device current for the calling thread. It also sets the requested flags and ensures the device's default stream is created.
+    - Device Management: Support for the following APIs for parity with corresponding CUDA APIs.
+      * `hipDeviceGetLuid` returns the locally unique identifier (LUID) and device node mask for the specified device.
+      * `hipInitDevice` initializes the runtime state for the specified device without making it the current device for the calling thread. It also applies to the requested flags and ensures the device's default stream is created.
+* New HIP device attribute
+    - `hipDeviceAttributeHostAllocDmaBufSupported` is now supported, enabling host-allocated buffer sharing.
+* Support for host-NUMA virtual memory management (VMM) in `hipMemCreate()` and related VMM APIs. These APIs now support `hipMemLocationTypeHostNuma` and `hipMemLocationTypeHostNumaCurrent`, enabling allocations backed by physical host memory on the selected NUMA node. Previously, support was limited to GPU VMM pools with deferred host access. This enhancement aligns HIP behavior with the corresponding CUDA APIs and expands support for NUMA-aware memory allocation.
+* Support for coarse-grained memory coherency on Windows. In supported Windows configurations, applications can now leverage unified memory to reduce memory footprint by up to 30% by eliminating unnecessary host-device data copies. Components interacting with the device can directly access host memory pointers and enable coarse-grained memory coherency by registering and pinning the associated host allocations using `hipHostRegister()` with the `hipExtHostRegisterCoarseGrained` flag. This provides behavior on Windows that is consistent with the existing Linux implementation while improving memory efficiency. 
+
+### Resolved issues
+* On Windows, HIP runtime now correctly handles non-P2P data transfers between GPUs and coordinates multi-GPU kernel execution, eliminates deadlocks and invalid values in multi-process workloads and resolve issues observed when running LLMs, such as Llama, on multi-GPU Windows configurations.
+* Resolved an out-of-memory issue affecting certain AMD APUs, such as Strix Halo, on Windows when loading large language models (LLMs) that could exceed dedicated graphics memory and spill into shared memory. The HIP runtime now correctly utilizes the full unified memory pool available on high-memory APUs, enabling system RAM to be dynamically allocated as graphics memory. This enhancement improves memory utilization and supports the execution of larger AI models on affected APU platforms.
+* Fixed a memory leak in the HIP/HSA runtime that could occur during stream and signal creation on certain GPUs. The issue was triggered by hipStreamCreate(), resulting in allocated signal objects not being properly released.
+The HIP/HSA runtime now correctly releases allocated signal objects during stream destruction and runtime cleanup, eliminating the memory leak and improving resource management.
+
+### Known issues
+
+* Under WSL2 (Windows Subsystem for Linux 2), GPU device-side memory faults may not be reported correctly and can result in the process hanging.
 
 ## HIP 10.0.0 for ROCm 10.0.0
 
@@ -164,7 +177,6 @@ The HIP runtime now includes the hostname, GPU index, and kernel name in GPU fau
 * New HIP device attributes
     - `hipDeviceAttributeExpertSchedMode` has been added to hipDeviceAttribute_t to indicate whether expert scheduling mode is supported on AMD GPUs.
     - `hipDeviceAttributeDmaBufSupported` is now supported, enabling buffer sharing.
-    - `hipDeviceAttributeHostAllocDmaBufSupported` is now supported, enabling host-allocated buffer sharing.
 
 ### Removed
 * roc-obj* tools and Perl dependency.

@@ -313,6 +313,7 @@ class Instruction(InstBase):
         self.name = name
         self.opcode = opcode
         self.operands = operands
+        self.required_flat_segment: int | None = None
         self.available_encodings = available_encodings
         self.source_addition = source_addition
         # Populated by an optional ISA-variant manifest after the base XML and

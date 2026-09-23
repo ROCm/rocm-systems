@@ -6,6 +6,7 @@
 #include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
+#include "common/string_utility.hpp"
 #include "component_categories.hpp"
 #include "defines.hpp"
 #include "enumerated_list.hpp"
@@ -50,13 +51,6 @@
 #include <tuple>
 #include <utility>
 #include <vector>
-
-#if defined(TIMEMORY_UNIX)
-#    include <sys/ioctl.h>  // ioctl() and TIOCGWINSZ
-#    include <unistd.h>     // for STDOUT_FILENO
-#elif defined(TIMEMORY_WINDOWS)
-#    include <windows.h>
-#endif
 
 using namespace tim;
 
@@ -318,34 +312,35 @@ main(int argc, char** argv)
                 return;
             }
 
-            auto _domain = p.get<std::string>("list-operations");
-            std::transform(_domain.begin(), _domain.end(), _domain.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
+            auto domain = rocprofsys::utility::string::to_lower(
+                p.get<std::string>("list-operations"));
 
-            auto _settings     = tim::settings::shared_instance();
-            auto _setting_name = rocm_setting_name_for_domain(_domain);
-            auto _sitr         = _settings->find(_setting_name);
+            auto settings_ptr = tim::settings::shared_instance();
+            auto setting_name = rocm_setting_name_for_domain(domain);
+            auto sitr         = settings_ptr->find(setting_name);
 
-            if(_sitr == _settings->end())
+            if(sitr == settings_ptr->end())
             {
-                std::cerr << "Error: Domain '" << _domain << "' not found.\n"
+                std::cerr << "Error: Domain '" << domain << "' not found.\n"
                           << "Use 'rocprof-sys-avail --list-domains' "
                              "to see available domains.\n";
                 return;
             }
 
-            auto _choices = _sitr->second->get_choices();
-            filter_operations(_setting_name, _choices);
+            auto choices = sitr->second->get_choices();
+            filter_operations(setting_name, choices);
 
-            if(_choices.empty())
+            if(choices.empty())
             {
-                std::cerr << "Domain '" << _domain << "' has no operations.\n";
+                std::cerr << "Domain '" << domain << "' has no operations.\n";
                 return;
             }
 
-            std::cout << "Operations for " << _domain << ":\n";
-            for(const auto& itr : _choices)
+            std::cout << "Operations for " << domain << ":\n";
+            for(const auto& itr : choices)
+            {
                 std::cout << "    " << itr << "\n";
+            }
         });
     parser.add_argument({ "--list-keys" }, "List the output keys")
         .max_count(1)
@@ -537,7 +532,8 @@ main(int argc, char** argv)
             else
             {
                 _config_file = _p.get<std::string>("generate-config");
-                if(rocprofsys::to_bool(_config_file, false) && !_out.empty())
+                if(rocprofsys::utility::string::to_bool(_config_file, false) &&
+                   !_out.empty())
                 {
                     _config_file = _out;
                 }
@@ -993,7 +989,7 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
 
     static constexpr size_t size = 8;
     using archive_type           = cereal::SettingsTextArchive;
-    using array_type             = typename archive_type::array_type;
+    using array_type             = archive_type::array_type;
     using width_type             = array_t<std::int64_t, size>;
     using width_bool             = array_t<bool, size>;
 
@@ -1329,10 +1325,12 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
     {
         for(const auto& itr : fitr.second)
         {
-            width_type _w = { { (std::int64_t) itr.symbol().length(), (std::int64_t) 4,
-                                (std::int64_t) 6,
-                                (std::int64_t) itr.short_description().length(),
-                                (std::int64_t) itr.long_description().length() } };
+            width_type _w = {
+                { static_cast<std::int64_t>(itr.symbol().length()),
+                  static_cast<std::int64_t>(4), static_cast<std::int64_t>(6),
+                  static_cast<std::int64_t>(itr.short_description().length()),
+                  static_cast<std::int64_t>(itr.long_description().length()) }
+            };
             for(auto& witr : _w)
                 witr += fmt_opts.padding;
 
@@ -1415,7 +1413,7 @@ template <typename IntArrayT, typename BoolArrayT>
 IntArrayT
 compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_opts)
 {
-    using value_type = typename IntArrayT::value_type;
+    using value_type = IntArrayT::value_type;
 
     if(fmt_opts.num_cols == 0) return _widths;
 
@@ -1672,8 +1670,8 @@ banner(IntArrayT _breaks, std::array<bool, N> _use, format_options& fmt_opts, ch
     ss << "\n";
     if(_remain != 0)
     {
-        printf("[banner]> non-zero remainder: %i with total: %i\n", (int) _remain,
-               (int) _total);
+        printf("[banner]> non-zero remainder: %i with total: %i\n",
+               static_cast<int>(_remain), static_cast<int>(_total));
     }
     return ss.str();
 }

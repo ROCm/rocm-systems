@@ -652,6 +652,36 @@ public:
   Operand saddr;
 };
 
+class GlobalLoadAddtidB32Flat : public Flat {
+public:
+  GlobalLoadAddtidB32Flat(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand saddr;
+  Operand gpumem;
+};
+
+class GlobalStoreAddtidB32Flat : public Flat {
+public:
+  GlobalStoreAddtidB32Flat(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand data;
+  Operand saddr;
+  Operand gpumem;
+};
+
+class GlobalAtomicCsubU32Flat : public Flat {
+public:
+  GlobalAtomicCsubU32Flat(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand data;
+  Operand gpumem;
+  Operand gpumem_in;
+  Operand saddr;
+};
+
 } // namespace rdna3_5
 } // namespace rocjitsu
 

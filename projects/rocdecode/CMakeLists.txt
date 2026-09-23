@@ -41,9 +41,11 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 set(CMAKE_CXX_EXTENSIONS ON)
-if (NOT DEFINED CMAKE_CXX_COMPILER)
-  set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
-  set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+if(NOT WIN32)
+  if (NOT DEFINED CMAKE_CXX_COMPILER)
+    set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
+    set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+  endif()
 endif()
 
 # rocdecode Version
@@ -91,15 +93,16 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "${DEFAULT_BUILD_TYPE}" CACHE STRING "rocdecode Default Build Type" FORCE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
 endif()
-if(CMAKE_BUILD_TYPE MATCHES Debug)
-  # -O0 -- Don't Optimize output file 
-  # -g  -- generate debugging information, generate debugging information, dwarf-4 for making valgrind work
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4")
-else()
-  # -O3       -- Optimize output file 
-  # -DNDEBUG  -- turn off asserts 
-  # -fPIC     -- Generate position-independent code if possible
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
+if(NOT WIN32)
+  if(CMAKE_BUILD_TYPE MATCHES Debug)
+    # -O0 -- Don't Optimize output file
+    # -g  -- generate debugging information, dwarf-4 for making valgrind work
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4")
+  else()
+    # -O3   -- Optimize output file
+    # -fPIC -- Generate position-independent code if possible
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC")
+  endif()
 endif()
 message("-- ${BoldBlue}${PROJECT_NAME} Build Type -- ${CMAKE_BUILD_TYPE}${ColourReset}")
 
@@ -112,20 +115,48 @@ option(ROCDECODE_ENABLE_HOST_DECODER "Enable rocdecode-host-based decoder suppor
 set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
 find_package(Libva QUIET)
-find_package(Libdrm_amdgpu QUIET)
+if(NOT WIN32)
+  find_package(Libdrm_amdgpu QUIET)
+endif()
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads QUIET)
 
-if(ROCDECODE_ENABLE_ROCPROFILER_REGISTER)
-  find_package(rocprofiler-register QUIET
-    HINTS $ENV{rocprofiler_register_ROOT} $ENV{ROCPROFILER_REGISTER_ROOT} ${CMAKE_INSTALL_PREFIX}
-    PATHS ${ROCM_PATH})
+if(NOT WIN32)
+  if(ROCDECODE_ENABLE_ROCPROFILER_REGISTER)
+    find_package(rocprofiler-register QUIET
+      HINTS $ENV{rocprofiler_register_ROOT} $ENV{ROCPROFILER_REGISTER_ROOT} ${CMAKE_INSTALL_PREFIX}
+      PATHS ${ROCM_PATH})
+  endif()
+else()
+  # Not available on Windows. Clear any value inherited from an enclosing scope
+  # -- a superbuild parent that found the package would otherwise leave
+  # rocprofiler-register_FOUND true here, and the link and compile-definition
+  # blocks below would act on a package this branch never searched for.
+  set(rocprofiler-register_FOUND FALSE)
+  if(ROCDECODE_ENABLE_ROCPROFILER_REGISTER)
+    # The option defaults to ON, so say plainly that it has no effect here
+    # rather than silently producing a build without profiling support.
+    message("-- ${Yellow}NOTE: rocprofiler-register is not available on Windows -- ROCDECODE_ENABLE_ROCPROFILER_REGISTER ignored${ColourReset}")
+  endif()
 endif()
 if(ROCDECODE_ENABLE_HOST_DECODER)
   find_package(FFmpeg QUIET)
 endif()
 
-if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
+# On Windows we don't need Libdrm_amdgpu (vaon12 replaces DRM)
+set(_deps_met FALSE)
+if(NOT WIN32)
+  if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
+    set(_deps_met TRUE)
+  endif()
+else()
+  # Win32 threads are provided by the CRT; no separate thread library is needed.
+  if(HIP_FOUND AND Libva_FOUND)
+    set(_deps_met TRUE)
+  endif()
+endif()
+
+if(_deps_met)
 
   # HIP
   set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
@@ -138,38 +169,75 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   include_directories(${LIBVA_INCLUDE_DIR})
   if(NOT (USING_THE_ROCK AND UNIX))
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
+    if(NOT WIN32)
+      # FindLibva only looks for va-drm on Linux. Referencing the variable on
+      # Windows would pick up a stale LIBVA_DRM_LIBRARY-NOTFOUND left in the
+      # cache by an earlier configure and pass it to the linker.
+      set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
+    endif()
   endif()
 
-  # DRM_AMDGPU
-  include_directories(${LIBDRM_AMDGPU_INCLUDE_DIR})
-  set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBDRM_AMDGPU_LIBRARY})
+  if(NOT WIN32)
+    # DRM_AMDGPU
+    include_directories(${LIBDRM_AMDGPU_INCLUDE_DIR})
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBDRM_AMDGPU_LIBRARY})
+  else()
+    # vaon12: va_win32.lib instead of va-drm; d3d12/dxgi for CreateSharedHandle interop
+    # FindLibva locates va/va_win32.h separately from va/va.h, so a staging
+    # layout that splits them would satisfy Libva_FOUND above and then fail on
+    # the include. Normally both resolve to the same directory and this is a
+    # no-op. Windows-only, for the same stale-cache reason as va-drm above.
+    include_directories(${LIBVA_WIN32_INCLUDE_DIR})
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_WIN32_LIBRARY} d3d12 dxgi)
+  endif()
 
   # rocprofiler
   if (rocprofiler-register_FOUND)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
   endif()
 
-  # Threads library (required for std::thread support)
-  set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} Threads::Threads)
+  if(NOT WIN32)
+    # Threads library (required for std::thread support)
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} Threads::Threads)
+  endif()
 
   # local include files
   include_directories(${CMAKE_CURRENT_SOURCE_DIR}/api ${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode ${CMAKE_CURRENT_SOURCE_DIR}/src/parser ${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode/vaapi)
   # source files
   file(GLOB_RECURSE SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
   list(FILTER SOURCES EXCLUDE REGEX "${CMAKE_CURRENT_SOURCE_DIR}/src/rocdecode-host/*.*")
-  # rocdecode.so
+  # rocdecode library
   add_library(${PROJECT_NAME} SHARED ${SOURCES})
 
-  # --all-warnings/-Wall       -- Enable most warning messages
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
+  if(NOT WIN32)
+    # --all-warnings/-Wall       -- Enable most warning messages
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
+  else()
+    target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
+    # /-prefixed flags are MSVC syntax: a GNU-driver compiler on Windows reads
+    # them as input filenames, so gate on the compiler rather than on WIN32.
+    if(MSVC)
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W3")
+      # Suppress warnings from pre-existing code and external headers:
+      # C4200: zero-sized array in va.h (vaon12 external header)
+      # C4018: signed/unsigned mismatch in parser files (pre-existing, also on Linux)
+      # C4267: size_t conversion in parser files (pre-existing, also on Linux)
+      # C4244: narrowing conversion in parser files (pre-existing, also on Linux)
+      # C4146: unary minus on unsigned in parser files (pre-existing, also on Linux)
+      target_compile_options(${PROJECT_NAME} PRIVATE /wd4200 /wd4018 /wd4267 /wd4244 /wd4146)
+    endif()
+  endif()
   target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
 
   set_target_properties(${PROJECT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
   set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
-  set_target_properties(${PROJECT_NAME} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
+  if(NOT WIN32)
+    set_target_properties(${PROJECT_NAME} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
+  else()
+    set_target_properties(${PROJECT_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  endif()
 
-  if(USING_THE_ROCK)
+  if(USING_THE_ROCK AND NOT WIN32)
     set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
     if(UNIX)
       # Enable dlopen-based VA isolation and link against libdl for dlopen/dlsym/dlclose.
@@ -204,8 +272,15 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/api/rocdecode_version.h.in ${CMAKE_CURRENT_BINARY_DIR}/rocdecode_version.h @ONLY )
 
   # install rocdecode libs -- {ROCM_PATH}/lib
-  install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_SKIP)
-  install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_ONLY)
+  if(NOT WIN32)
+    install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_SKIP)
+    install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_ONLY)
+  else()
+    install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  endif()
   # install rocdecode include files -- {ROCM_PATH}/include/rocdecode
   install(FILES api/rocdecode/rocdecode.h api/rocdecode/rocparser.h api/rocdecode/roc_bitstream_reader.h
           DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME})
@@ -221,6 +296,7 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   install(FILES samples/videoDecode/CMakeLists.txt samples/videoDecode/README.md samples/videoDecode/videodecode.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecode)
   install(FILES samples/videoDecodeRaw/CMakeLists.txt samples/videoDecodeRaw/README.md samples/videoDecodeRaw/videodecoderaw.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeRaw)
   install(FILES samples/videoDecodeMem/CMakeLists.txt samples/videoDecodeMem/README.md samples/videoDecodeMem/videodecodemem.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeMem)
+  install(FILES samples/videoDecodeCaps/CMakeLists.txt samples/videoDecodeCaps/README.md samples/videoDecodeCaps/videodecodecaps.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeCaps)
   install(FILES samples/videoDecodePerf/CMakeLists.txt samples/videoDecodePerf/README.md samples/videoDecodePerf/videodecodeperf.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodePerf)
   install(FILES samples/videoDecodeRGB/CMakeLists.txt samples/videoDecodeRGB/README.md samples/videoDecodeRGB/videodecrgb.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeRGB)
   install(FILES samples/videoDecodeBatch/CMakeLists.txt samples/videoDecodeBatch/README.md samples/videoDecodeBatch/videodecodebatch.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/videoDecodeBatch)
@@ -294,7 +370,12 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   # Option to build test binaries during the main build (without running them)
   option(BUILD_TESTS "Build test binaries and install to share/${PROJECT_NAME}/bin" OFF)
 
-  if(BUILD_TESTS)
+  # Not supported on Windows: the nested ExternalProject builds assume a
+  # single-config generator (CMAKE_BUILD_TYPE, an unsuffixed executable directly
+  # in BINARY_DIR) and $ORIGIN install RPATHs, none of which hold for the
+  # Visual Studio generator. Build the samples from share/rocdecode/samples
+  # instead, as documented in the install guide.
+  if(BUILD_TESTS AND NOT WIN32)
     include(ExternalProject)
     set(ROCDECODE_TEST_BIN_DIR ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/bin)
     set(ROCDECODE_STAGE_DIR ${CMAKE_BINARY_DIR}/stage)
@@ -310,18 +391,76 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
       COMMENT "Staging ${PROJECT_NAME} into build tree for test builds"
     )
 
-    # Helper macro to add one ExternalProject test and register its install
-    # ROCM_PATH keeps pointing at the real ROCm tree so find_package(HIP),
-    # libva, etc. resolve correctly. CMAKE_PREFIX_PATH is prepended with the
-    # stage dir so find_package(rocdecode) picks up the staged config instead
-    # of any previously installed version.
+    # Assemble the search prefix for the nested test configures.
+    #
+    # In a standalone build this is just the stage dir (so find_package(rocdecode)
+    # resolves the freshly staged config), and ROCM_PATH covers HIP, libva, etc.
+    #
+    # Under TheRock, ROCM_PATH is empty and every dependency lives in the
+    # super-project build tree. TheRock injects a dependency provider into the
+    # parent configure (via CMAKE_PROJECT_TOP_LEVEL_INCLUDES), but that provider
+    # errors on any find_package() for a package it knows about yet that was not
+    # declared as a dependency -- which includes rocdecode itself -- so it cannot
+    # be forwarded to the test configures. Instead forward the toolchain (for the
+    # HIP-aware compiler and flags) and turn the provider's package map
+    # (THEROCK_PACKAGE_DIR_<pkg>) into an ordinary CMAKE_PREFIX_PATH so the nested
+    # configures find HIP and friends by normal config search. These variables are
+    # undefined in a standalone build, leaving the prefix at just the stage dir.
+    set(ROCDECODE_TEST_PREFIX_PATH "${ROCDECODE_STAGE_DIR}")
+    foreach(_therock_pkg IN LISTS THEROCK_PROVIDED_PACKAGES)
+      if(DEFINED THEROCK_PACKAGE_DIR_${_therock_pkg})
+        list(APPEND ROCDECODE_TEST_PREFIX_PATH "${THEROCK_PACKAGE_DIR_${_therock_pkg}}")
+      endif()
+    endforeach()
+    # ExternalProject_Add splits CMAKE_ARGS on ';', so pass the multi-entry prefix
+    # through a custom LIST_SEPARATOR that the sub-build restores to ';'.
+    string(REPLACE ";" "|" ROCDECODE_TEST_PREFIX_PATH_ALT "${ROCDECODE_TEST_PREFIX_PATH}")
+
+    # Forward the toolchain only when the top-level build set one, and as an
+    # absolute path: a relative CMAKE_TOOLCHAIN_FILE is resolved against the
+    # top-level build dir, but each ExternalProject configures in its own build
+    # dir where that relative path would not resolve. Empty expands to no argument.
+    set(ROCDECODE_TEST_TOOLCHAIN_ARG "")
+    if(CMAKE_TOOLCHAIN_FILE)
+      get_filename_component(ROCDECODE_TEST_TOOLCHAIN_FILE
+        "${CMAKE_TOOLCHAIN_FILE}" ABSOLUTE BASE_DIR "${CMAKE_BINARY_DIR}")
+      set(ROCDECODE_TEST_TOOLCHAIN_ARG
+        "-DCMAKE_TOOLCHAIN_FILE=${ROCDECODE_TEST_TOOLCHAIN_FILE}")
+    endif()
+
+    # RPATH for the installed test binaries. They install under
+    # share/<project>/bin while librocdecode, HIP and the bundled sysdeps install
+    # to the lib dir -- so at runtime they must load the installed librocdecode
+    # (whose own RPATH resolves its sysdeps), not the build-tree stage copy the
+    # nested configure links against. Derive the $ORIGIN-relative hop from the bin
+    # dir to the lib dir so the RPATH tracks either path if it changes instead of
+    # hard-coding '../../..'. Use GNUInstallDirs' absolute CMAKE_INSTALL_FULL_*
+    # forms (not prefix + CMAKE_INSTALL_*, which is wrong if a *DIR is overridden
+    # with an absolute path) so file(RELATIVE_PATH) gets two real absolute paths.
+    # This keeps the tree relocatable as a whole -- the same $ORIGIN scheme
+    # librocdecode itself uses; relocating an individual binary out of the tree is
+    # unsupported, as for any $ORIGIN-relative ROCm binary. BUILD_WITH_INSTALL_RPATH
+    # bakes it into the built binary, which the macro copies verbatim
+    # (install(PROGRAMS) does no RPATH rewriting). '|' is the LIST_SEPARATOR
+    # restored to ';' in the sub-build.
+    file(RELATIVE_PATH ROCDECODE_TEST_BIN_TO_LIB
+      "${CMAKE_INSTALL_FULL_DATADIR}/${PROJECT_NAME}/bin"
+      "${CMAKE_INSTALL_FULL_LIBDIR}")
+    set(ROCDECODE_TEST_INSTALL_RPATH
+      "$ORIGIN/${ROCDECODE_TEST_BIN_TO_LIB}|$ORIGIN/${ROCDECODE_TEST_BIN_TO_LIB}/rocm_sysdeps/lib")
+
+    # Helper macro to add one ExternalProject test and register its install.
     macro(rocdecode_add_test_ext TEST_EXE TEST_SOURCE_DIR)
       ExternalProject_Add(test_${TEST_EXE}
         SOURCE_DIR ${TEST_SOURCE_DIR}
+        LIST_SEPARATOR "|"
         CMAKE_ARGS -DROCM_PATH=${ROCM_PATH}
-                   -DCMAKE_PREFIX_PATH=${ROCDECODE_STAGE_DIR}
+                   ${ROCDECODE_TEST_TOOLCHAIN_ARG}
+                   "-DCMAKE_PREFIX_PATH=${ROCDECODE_TEST_PREFIX_PATH_ALT}"
                    -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+                   -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
+                   "-DCMAKE_INSTALL_RPATH=${ROCDECODE_TEST_INSTALL_RPATH}"
         BUILD_ALWAYS ON
         INSTALL_COMMAND ""
         DEPENDS stage_${PROJECT_NAME}
@@ -333,8 +472,7 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
     # Samples that do NOT require FFmpeg
     rocdecode_add_test_ext(videodecoderaw    ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeRaw)
     rocdecode_add_test_ext(rocdecdecode      ${CMAKE_CURRENT_SOURCE_DIR}/samples/rocdecDecode)
-    # Negative API test (source under test/)
-    rocdecode_add_test_ext(rocdecodenegativetest ${CMAKE_CURRENT_SOURCE_DIR}/test/rocDecodeNegativeApiTests)
+    rocdecode_add_test_ext(videodecodecaps   ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeCaps)
 
     # Extended tests (require FFmpeg)
     if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
@@ -344,6 +482,12 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
       rocdecode_add_test_ext(videodecodergb   ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeRGB)
       rocdecode_add_test_ext(videodecodemem   ${CMAKE_CURRENT_SOURCE_DIR}/samples/videoDecodeMem)
     endif()
+  elseif(BUILD_TESTS)
+    # Reached only when BUILD_TESTS=ON and WIN32, which the branch above excludes.
+    message(WARNING "BUILD_TESTS=ON is ignored on Windows: no test binaries will be built "
+                    "or installed to ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/bin. "
+                    "Build the samples from ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples "
+                    "after installing instead -- see the install guide.")
   endif()
 
   # make test with CTest
@@ -360,10 +504,10 @@ else()
   if(NOT Libva_FOUND)
     message(FATAL_ERROR "-- ERROR!: libva Not Found!")
   endif()
-  if(NOT Libdrm_amdgpu_FOUND)
+  if(NOT WIN32 AND NOT Libdrm_amdgpu_FOUND)
     message(FATAL_ERROR "-- ERROR!: libdrm_amdgpu Not Found!")
   endif()
-  if(NOT Threads_FOUND)
+  if(NOT WIN32 AND NOT Threads_FOUND)
     message(FATAL_ERROR "-- ERROR!: Threads Not Found!")
   endif()
 endif()

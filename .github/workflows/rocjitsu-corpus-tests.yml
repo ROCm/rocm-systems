@@ -83,8 +83,11 @@ jobs:
             enable_expensive_checks: 0
             sanitizer_runtime: STATIC
             run_simulator_corpus: true
-            corpus_soft_timeout: 30
-            corpus_hard_timeout: 60
+            # Each simulator process can use many host threads. Bound Release
+            # fanout so long FPSAN cases do not starve under runner load.
+            corpus_worker_limit: 4
+            corpus_soft_timeout: 360
+            corpus_hard_timeout: 600
             corpus_rerun_timeout: 600
             corpus_sanitizer: none
           - name: asan-ubsan
@@ -103,6 +106,7 @@ jobs:
             enable_expensive_checks: 1
             sanitizer_runtime: SHARED
             run_simulator_corpus: true
+            corpus_worker_limit: 4
             corpus_soft_timeout: 240
             corpus_hard_timeout: 480
             corpus_rerun_timeout: 1200
@@ -122,6 +126,7 @@ jobs:
             enable_expensive_checks: 0
             sanitizer_runtime: SHARED
             run_simulator_corpus: false
+            corpus_worker_limit: 16
             corpus_soft_timeout: 0
             corpus_hard_timeout: 0
             corpus_rerun_timeout: 0
@@ -143,6 +148,7 @@ jobs:
             c_compiler: gcc
             cxx_compiler: g++
             run_simulator_corpus: true
+            corpus_worker_limit: 4
             corpus_soft_timeout: 240
             corpus_hard_timeout: 480
             corpus_rerun_timeout: 1200
@@ -232,10 +238,12 @@ jobs:
             "HipMemcpyTest\.RoundTripFloat"
             "HipMemcpyTest\.RoundTripInt"
             "HipMemcpyTest\.DeviceToDevice"
+            "HipMemcpyTest\.MaskedStreamLdsReuse"
             "HipVectorAddTest\.CorrectResult"
             "DaemonTest\.HipMemcpyRoundTripFloat"
             "DaemonTest\.HipMemcpyRoundTripInt"
             "DaemonTest\.HipMemcpyDeviceToDevice"
+            "DaemonTest\.HipMaskedStreamLdsReuse"
             "DaemonTest\.TwoIndependentClients"
           )
           TSAN_EXCLUDED_TESTS=(
@@ -251,10 +259,14 @@ jobs:
             "HipMemcpyTest\.RoundTripFloat"
             "HipMemcpyTest\.RoundTripInt"
             "HipMemcpyTest\.DeviceToDevice"
+            # SDMA ring publication also crosses the client's doorbell mapping
+            # and the simulator's private alias, which TSan cannot correlate.
+            "HipMemcpyTest\.MaskedStreamLdsReuse"
             "HipVectorAddTest\.CorrectResult"
             "DaemonTest\.HipMemcpyRoundTripFloat"
             "DaemonTest\.HipMemcpyRoundTripInt"
             "DaemonTest\.HipMemcpyDeviceToDevice"
+            "DaemonTest\.HipMaskedStreamLdsReuse"
             "DaemonTest\.TwoIndependentClients"
             # This test has a five-second wall-clock assertion that becomes
             # load-sensitive at the TSan job's CI-level parallelism.
@@ -263,13 +275,18 @@ jobs:
             # client's own AQL ring and buffers, so they hit the MAP_SHARED alias
             # limitation described below: every race is GpuMemory::read_mapped
             # reading a host buffer the test thread wrote. Their gtest assertions
-            # pass. The non-dispatching HsaDbiNop*Sim cases stay covered.
+            # pass.
             # The .* spans the per-target infix, so every target's dispatching
             # Sim case is excluded -- they all share the limitation.
             "HsaDbiNopAsm.*Sim\.PatchedKernelDispatchMatchesOriginal"
             "HsaDbiNopAsm.*Sim\.TrampolineIsActuallyExecutedByGpu"
             "HsaDbiNopProbe.*Sim\.PatchedKernelDispatchMatchesOriginal"
             "HsaDbiNopProbe.*Sim\.ProbeBodyIsActuallyCalledByGpu"
+            # Executable loading alone initializes ROCr's async-event thread.
+            # These cases pass their assertions, then report the same external
+            # ConcurrentAsyncEvents teardown race as the HIP clients above.
+            "HsaDbiNopAsm.*Sim\.PatchedElfLoadsAndValidatesInHsaExecutable"
+            "HsaDbiNopProbe.*Sim\.PatchedElfLoadsAndValidatesInHsaExecutable"
           )
 
           TEST_REGEX="${{ matrix.test_regex }}"
@@ -313,6 +330,7 @@ jobs:
             -DRJ_ENABLE_UBSAN=${{ matrix.enable_ubsan }} \
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
             -DRJ_ENABLE_EXPENSIVE_CHECKS=${{ matrix.enable_expensive_checks }} \
+            -DROCJITSU_ENABLE_PERFSIM_PLUGIN=ON \
             -DRJ_SANITIZER_RUNTIME=${{ matrix.sanitizer_runtime }}
 
           # Set a conservative number of workers to avoid OOM and excessive system load.
@@ -331,6 +349,26 @@ jobs:
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
+
+      # This lane exists to race the engine's worker threads against each
+      # other, and the shipped configs get there by omitting num_threads and
+      # taking the default of min(available host threads, XCD count). That
+      # default collapses to a single partition on a one-CPU allocation, which
+      # would leave the lane green while racing nothing. nproc honours the
+      # affinity mask, so it measures the same thing the runtime policy does.
+      #
+      # The configs' half of the policy is enforced by
+      # XcdPartitioningTest.ShippedConfigsOmitNumThreadsExceptTheDocumentedPin,
+      # which runs with the main suite above and covers every config rather
+      # than the handful a step-level grep would list.
+      - name: Verify the TSan lane can race the multi-partition engine
+        if: matrix.name == 'tsan'
+        shell: bash
+        run: |
+          if (( $(nproc) < 2 )); then
+            echo "::error::TSan lane needs more than one usable CPU (nproc=$(nproc))"
+            exit 1
+          fi
 
       - name: Test static ASan launcher preload
         if: matrix.run_static_asan_launch
@@ -397,9 +435,10 @@ jobs:
 
           corpus_test_status=0
 
+          WORKER_LIMIT=${{ matrix.corpus_worker_limit }}
           WORKERS="$(nproc)"
-          if (( WORKERS > 16 )); then
-            WORKERS=16
+          if (( WORKERS > WORKER_LIMIT )); then
+            WORKERS="${WORKER_LIMIT}"
           fi
           corpus_test_flags=(
             --workers "${WORKERS}"
