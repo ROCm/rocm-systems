@@ -172,6 +172,9 @@ process_t::detach ()
              state.  */
           set_precise_alu_exceptions (false);
 
+          /* Return LDS exceptions back to its default off state.  */
+          set_reporting_lds_exceptions (false);
+
           /* Resume all the waves halted at launch.  */
           set_wave_launch_mode (os_wave_launch_mode_t::normal);
 
@@ -560,6 +563,45 @@ process_t::set_precise_alu_exceptions (bool enabled)
   if (status != AMD_DBGAPI_STATUS_ERROR_PROCESS_EXITED
       && status != AMD_DBGAPI_STATUS_SUCCESS)
     fatal_error ("os_driver::set_precise_alu_exceptions failed (%s)",
+                 to_cstring (status));
+}
+
+void
+process_t::set_reporting_lds_exceptions (bool enabled)
+{
+  /* If no toggling is needed, bail early.  */
+  if (!!(m_process_flags & os_process_flags_t::report_lds_exception)
+      == enabled)
+    return;
+
+  /* The support status is being checked here after it has become
+     clear that the corresponding flag bit needs to be toggled.
+     This way, we're lenient toward cases where "enabled" is set to
+     "false" during the process_t::detach().  */
+  if (!m_supports_lds_exception)
+    throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+
+  auto new_flags = m_process_flags;
+  if (enabled)
+    new_flags = new_flags | os_process_flags_t::report_lds_exception;
+  else
+    new_flags = new_flags & ~os_process_flags_t::report_lds_exception;
+
+  auto set_lds_exception_on_success
+    = utils::make_scope_success ([=] () { m_process_flags = new_flags; });
+
+  /* If this is called before the runtime is loaded (or after the runtime is
+     unloaded), only record the setting in the process_t instance. The actual
+     change to the configuration will be done when the runtime is loaded and
+     the debug mode is activated.  */
+  if (m_runtime_state != AMD_DBGAPI_RUNTIME_STATE_LOADED_SUCCESS)
+    return;
+
+  amd_dbgapi_status_t status = os_driver ().set_process_flags (new_flags);
+
+  if (status != AMD_DBGAPI_STATUS_ERROR_PROCESS_EXITED
+      && status != AMD_DBGAPI_STATUS_SUCCESS)
+    fatal_error ("os_driver::set_reporting_lds_exceptions failed (%s)",
                  to_cstring (status));
 }
 
