@@ -1415,6 +1415,16 @@ rocprofiler_is_finalized(int* status)
 }
 
 rocprofiler_status_t
+rocprofiler_finalize()
+{
+    if(rocprofiler::registration::get_fini_status() != 0) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+
+    rocprofiler::registration::finalize();
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
 rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
 {
     using scoped_lock_t = rocprofiler::registration::scoped_lock_t;
