@@ -18,6 +18,7 @@ class BufferLoadU8Vbuffer : public Vbuffer {
 public:
   BufferLoadU8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -29,6 +30,7 @@ class BufferLoadI8Vbuffer : public Vbuffer {
 public:
   BufferLoadI8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -40,6 +42,7 @@ class BufferLoadU16Vbuffer : public Vbuffer {
 public:
   BufferLoadU16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -51,6 +54,7 @@ class BufferLoadI16Vbuffer : public Vbuffer {
 public:
   BufferLoadI16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -62,6 +66,7 @@ class BufferLoadB32Vbuffer : public Vbuffer {
 public:
   BufferLoadB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -73,6 +78,7 @@ class BufferLoadB64Vbuffer : public Vbuffer {
 public:
   BufferLoadB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -84,6 +90,7 @@ class BufferLoadB96Vbuffer : public Vbuffer {
 public:
   BufferLoadB96Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -95,6 +102,7 @@ class BufferLoadB128Vbuffer : public Vbuffer {
 public:
   BufferLoadB128Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -106,6 +114,7 @@ class BufferStoreB8Vbuffer : public Vbuffer {
 public:
   BufferStoreB8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -117,6 +126,7 @@ class BufferStoreB16Vbuffer : public Vbuffer {
 public:
   BufferStoreB16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -128,6 +138,7 @@ class BufferStoreB32Vbuffer : public Vbuffer {
 public:
   BufferStoreB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -139,6 +150,7 @@ class BufferStoreB64Vbuffer : public Vbuffer {
 public:
   BufferStoreB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -150,6 +162,7 @@ class BufferStoreB96Vbuffer : public Vbuffer {
 public:
   BufferStoreB96Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -161,6 +174,7 @@ class BufferStoreB128Vbuffer : public Vbuffer {
 public:
   BufferStoreB128Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -172,6 +186,7 @@ class BufferLoadD16U8Vbuffer : public Vbuffer {
 public:
   BufferLoadD16U8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -183,6 +198,7 @@ class BufferLoadD16I8Vbuffer : public Vbuffer {
 public:
   BufferLoadD16I8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -194,6 +210,7 @@ class BufferLoadD16B16Vbuffer : public Vbuffer {
 public:
   BufferLoadD16B16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -205,6 +222,7 @@ class BufferLoadD16HiU8Vbuffer : public Vbuffer {
 public:
   BufferLoadD16HiU8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -216,6 +234,7 @@ class BufferLoadD16HiI8Vbuffer : public Vbuffer {
 public:
   BufferLoadD16HiI8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -227,6 +246,7 @@ class BufferLoadD16HiB16Vbuffer : public Vbuffer {
 public:
   BufferLoadD16HiB16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -238,6 +258,7 @@ class BufferStoreD16HiB8Vbuffer : public Vbuffer {
 public:
   BufferStoreD16HiB8Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -249,6 +270,7 @@ class BufferStoreD16HiB16Vbuffer : public Vbuffer {
 public:
   BufferStoreD16HiB16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -260,6 +282,7 @@ class BufferAtomicSwapB32Vbuffer : public Vbuffer {
 public:
   BufferAtomicSwapB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -272,6 +295,7 @@ class BufferAtomicCmpswapB32Vbuffer : public Vbuffer {
 public:
   BufferAtomicCmpswapB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -285,6 +309,7 @@ class BufferAtomicAddU32Vbuffer : public Vbuffer {
 public:
   BufferAtomicAddU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -297,6 +322,7 @@ class BufferAtomicSubU32Vbuffer : public Vbuffer {
 public:
   BufferAtomicSubU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -309,6 +335,7 @@ class BufferAtomicSubClampU32Vbuffer : public Vbuffer {
 public:
   BufferAtomicSubClampU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -321,6 +348,7 @@ class BufferAtomicMinI32Vbuffer : public Vbuffer {
 public:
   BufferAtomicMinI32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -333,6 +361,7 @@ class BufferAtomicMinU32Vbuffer : public Vbuffer {
 public:
   BufferAtomicMinU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -345,6 +374,7 @@ class BufferAtomicMaxI32Vbuffer : public Vbuffer {
 public:
   BufferAtomicMaxI32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -357,6 +387,7 @@ class BufferAtomicMaxU32Vbuffer : public Vbuffer {
 public:
   BufferAtomicMaxU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -369,6 +400,7 @@ class BufferAtomicAndB32Vbuffer : public Vbuffer {
 public:
   BufferAtomicAndB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -381,6 +413,7 @@ class BufferAtomicOrB32Vbuffer : public Vbuffer {
 public:
   BufferAtomicOrB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -393,6 +426,7 @@ class BufferAtomicXorB32Vbuffer : public Vbuffer {
 public:
   BufferAtomicXorB32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -405,6 +439,7 @@ class BufferAtomicIncU32Vbuffer : public Vbuffer {
 public:
   BufferAtomicIncU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -417,6 +452,7 @@ class BufferAtomicDecU32Vbuffer : public Vbuffer {
 public:
   BufferAtomicDecU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -429,6 +465,7 @@ class BufferAtomicSwapB64Vbuffer : public Vbuffer {
 public:
   BufferAtomicSwapB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -441,6 +478,7 @@ class BufferAtomicCmpswapB64Vbuffer : public Vbuffer {
 public:
   BufferAtomicCmpswapB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -454,6 +492,7 @@ class BufferAtomicAddU64Vbuffer : public Vbuffer {
 public:
   BufferAtomicAddU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -466,6 +505,7 @@ class BufferAtomicSubU64Vbuffer : public Vbuffer {
 public:
   BufferAtomicSubU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -478,6 +518,7 @@ class BufferAtomicMinI64Vbuffer : public Vbuffer {
 public:
   BufferAtomicMinI64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -490,6 +531,7 @@ class BufferAtomicMinU64Vbuffer : public Vbuffer {
 public:
   BufferAtomicMinU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -502,6 +544,7 @@ class BufferAtomicMaxI64Vbuffer : public Vbuffer {
 public:
   BufferAtomicMaxI64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -514,6 +557,7 @@ class BufferAtomicMaxU64Vbuffer : public Vbuffer {
 public:
   BufferAtomicMaxU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -526,6 +570,7 @@ class BufferAtomicAndB64Vbuffer : public Vbuffer {
 public:
   BufferAtomicAndB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -538,6 +583,7 @@ class BufferAtomicOrB64Vbuffer : public Vbuffer {
 public:
   BufferAtomicOrB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -550,6 +596,7 @@ class BufferAtomicXorB64Vbuffer : public Vbuffer {
 public:
   BufferAtomicXorB64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -562,6 +609,7 @@ class BufferAtomicIncU64Vbuffer : public Vbuffer {
 public:
   BufferAtomicIncU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -574,6 +622,7 @@ class BufferAtomicDecU64Vbuffer : public Vbuffer {
 public:
   BufferAtomicDecU64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -586,6 +635,7 @@ class BufferAtomicCondSubU32Vbuffer : public Vbuffer {
 public:
   BufferAtomicCondSubU32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -598,6 +648,7 @@ class BufferAtomicMinNumF32Vbuffer : public Vbuffer {
 public:
   BufferAtomicMinNumF32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -610,6 +661,7 @@ class BufferAtomicMaxNumF32Vbuffer : public Vbuffer {
 public:
   BufferAtomicMaxNumF32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -622,6 +674,7 @@ class BufferAtomicAddF64Vbuffer : public Vbuffer {
 public:
   BufferAtomicAddF64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -634,6 +687,7 @@ class BufferAtomicAddF32Vbuffer : public Vbuffer {
 public:
   BufferAtomicAddF32Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -646,6 +700,7 @@ class BufferAtomicPkAddF16Vbuffer : public Vbuffer {
 public:
   BufferAtomicPkAddF16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -658,6 +713,7 @@ class BufferAtomicPkAddBf16Vbuffer : public Vbuffer {
 public:
   BufferAtomicPkAddBf16Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -670,6 +726,7 @@ class BufferAtomicMinNumF64Vbuffer : public Vbuffer {
 public:
   BufferAtomicMinNumF64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -682,6 +739,7 @@ class BufferAtomicMaxNumF64Vbuffer : public Vbuffer {
 public:
   BufferAtomicMaxNumF64Vbuffer(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdata;
   Operand vaddr;
   Operand rsrc;

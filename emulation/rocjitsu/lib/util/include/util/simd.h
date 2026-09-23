@@ -34,6 +34,12 @@
 #endif
 #endif
 
+#if defined(RJ_AVX512_EXECUTION_VARIANT)
+// Share the baseline image's force-scalar state without another load-time
+// initializer in the isolated AVX-512 execution object.
+extern "C" bool rj_cdna5_force_scalar();
+#endif
+
 namespace util {
 
 /// Round an IEEE F32/F64 value to an integral value with ties to even.
@@ -107,10 +113,14 @@ inline bool init_force_scalar() {
 /// would require a deliberate default-visibility attribute here (or a single
 /// state owner all modules call into); that is an explicit decision, not
 /// something to acquire by accident.
+/// The isolated CDNA5 AVX-512 object is part of its baseline image and calls
+/// back to that image's gate; it does not create a separate copy.
 ///
 /// Safe as a dynamic-init global because force_scalar() is only ever read at
 /// runtime instruction-execute, never during another TU's static construction.
+#if !defined(RJ_AVX512_EXECUTION_VARIANT)
 inline bool g_force_scalar = init_force_scalar();
+#endif
 
 } // namespace detail
 
@@ -125,7 +135,11 @@ inline bool g_force_scalar = init_force_scalar();
 /// (each module parses it at its own load), while a test-seam override applies
 /// only within the caller's module. e2e runs force the scalar codepath by
 /// setting the env var before launch, without recompiling.
+#if defined(RJ_AVX512_EXECUTION_VARIANT)
+inline bool force_scalar() { return ::rj_cdna5_force_scalar(); }
+#else
 inline bool force_scalar() { return detail::g_force_scalar; }
+#endif
 
 #if __has_include(<experimental/simd>)
 namespace stdx = std::experimental;
@@ -837,10 +851,11 @@ inline native<float> flush_denorm_f32_simd(native<float> v) {
 /// div/sqrt after the FTZ input flush; only NaN payload preservation with signaling NaNs quieted
 /// and the negative-domain canonical qNaN (0x7FC00000) need explicit blends. The 16-bit (f16) ops
 /// reuse these on the f16->f32 intermediate, matching the scalar `f32_to_f16(rcp_f32(f16_to_f32))`.
-// Canonical positive quiet-NaN (f32), broadcast across the vector. Shared by
-// the transcendental fast paths below, which blend it into out-of-domain
-// lanes (negative sqrt/rsqrt, log of a negative) to match the scalar refs.
-inline const native<float> kQNaN = std::bit_cast<native<float>>(native<uint32_t>(0x7FC00000u));
+// Construct on use: a namespace-scope native SIMD value would initialize at
+// image load and could execute AVX-512 before the runtime CPU check.
+inline native<float> qnan_f32_simd() {
+  return std::bit_cast<native<float>>(native<uint32_t>(0x7FC00000u));
+}
 
 inline native<float> rcp_f32_simd(native<float> a) {
   native<float> x = flush_denorm_f32_simd(a);
@@ -853,7 +868,7 @@ inline native<float> rcp_f32_simd(native<float> a) {
 inline native<float> rsq_f32_simd(native<float> a) {
   native<float> x = flush_denorm_f32_simd(a);
   native<float> r = flush_denorm_f32_simd(native<float>(1.0f) / stdx::sqrt(x));
-  stdx::where(x < native<float>(0.0f), r) = kQNaN; // negatives incl -Inf -> qNaN
+  stdx::where(x < native<float>(0.0f), r) = qnan_f32_simd(); // negatives incl -Inf -> qNaN
   stdx::where(stdx::isnan(a), r) =
       std::bit_cast<native<float>>(std::bit_cast<native<uint32_t>>(a) | 0x00400000u);
   return r;
@@ -862,7 +877,7 @@ inline native<float> rsq_f32_simd(native<float> a) {
 inline native<float> sqrt_f32_simd(native<float> a) {
   native<float> x = flush_denorm_f32_simd(a);
   native<float> r = stdx::sqrt(x);
-  stdx::where(x < native<float>(0.0f), r) = kQNaN;
+  stdx::where(x < native<float>(0.0f), r) = qnan_f32_simd();
   stdx::where(stdx::isnan(a), r) =
       std::bit_cast<native<float>>(std::bit_cast<native<uint32_t>>(a) | 0x00400000u);
   return r;
@@ -871,7 +886,7 @@ inline native<float> sqrt_f32_simd(native<float> a) {
 inline native<float> log_f32_simd(native<float> a) {
   native<float> x = flush_denorm_f32_simd(a);
   native<float> r = stdx::log2(x); // input-flush only; scalar log_f32 has no out-flush
-  stdx::where(x < native<float>(0.0f), r) = kQNaN;
+  stdx::where(x < native<float>(0.0f), r) = qnan_f32_simd();
   stdx::where(stdx::isnan(a), r) =
       std::bit_cast<native<float>>(std::bit_cast<native<uint32_t>>(a) | 0x00400000u);
   return r;

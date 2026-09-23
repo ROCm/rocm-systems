@@ -8530,3 +8530,31 @@ def test_sdwa_conversion_result_formats():
         assert CodeGenerator._sdwa_result_format(semantics) == (
             f'amdgpu::sdwa::ResultFormat::{expected}'
         )
+
+
+def test_cdna5_avx512_execution_declarations_leave_other_isas_unchanged(tmp_path):
+    generated = tmp_path / 'cdna5'
+    generated.mkdir()
+    instruction = generated / 'vop2.h'
+    instruction.write_text(
+        '  void execute_impl(amdgpu::Wavefront &wf);\n'
+        '  void execute_modifier_impl(amdgpu::Wavefront &wf);\n'
+    )
+    backend = generated / 'execution_backend.h'
+    backend.write_text('const IsaExecutionBackend &execution_backend();\n')
+
+    generator = CodeGenerator.__new__(CodeGenerator)
+    generator.out_path = str(tmp_path)
+    generator.isa_spec = SimpleNamespace(generated_dir_name='rdna4')
+    generator._add_cdna5_avx512_execution_declarations()
+    assert 'avx512' not in instruction.read_text()
+    assert 'avx512' not in backend.read_text()
+
+    generator.isa_spec = SimpleNamespace(generated_dir_name='cdna5')
+    generator._add_cdna5_avx512_execution_declarations()
+    assert 'void execute_impl_avx512(amdgpu::Wavefront &wf);' in instruction.read_text()
+    assert (
+        'void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);'
+        in instruction.read_text()
+    )
+    assert 'execution_backend_avx512();' in backend.read_text()

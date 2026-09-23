@@ -1741,9 +1741,46 @@ class CodeGenerator:
         self.gen_vopd()
         self.gen_insts()
         self.gen_execution_backend()
+        self._add_cdna5_avx512_execution_declarations()
         self.gen_isa_features()
         self.gen_decoder()
         self.gen_test_encodings()
+
+    def _add_cdna5_avx512_execution_declarations(self) -> None:
+        """Declare a second CDNA5 execution entry point without changing layout.
+
+        The AVX-512 implementation is compiled from the same generated execute
+        sources in a separate target.  Both variants must see identical class
+        definitions; only the out-of-line method *definitions* are renamed in
+        the AVX-512 target's build wrappers.
+        """
+        if self.generated_dir_name != 'cdna5':
+            return
+        arch_dir = os.path.join(self.out_path, self.generated_dir_name)
+        for name in os.listdir(arch_dir):
+            if not name.endswith('.h'):
+                continue
+            path = os.path.join(arch_dir, name)
+            with open(path) as f:
+                content = f.read()
+            updated = re.sub(
+                r'^([ \t]*)void (execute_impl|execute_modifier_impl)\(amdgpu::Wavefront &wf\);$',
+                lambda match: (
+                    f'{match.group(0)}\n{match.group(1)}void '
+                    f'{match.group(2)}_avx512(amdgpu::Wavefront &wf);'
+                ),
+                content,
+                flags=re.MULTILINE,
+            )
+            if name == 'execution_backend.h':
+                updated = updated.replace(
+                    'const IsaExecutionBackend &execution_backend();',
+                    'const IsaExecutionBackend &execution_backend();\n'
+                    'const IsaExecutionBackend &execution_backend_avx512();',
+                )
+            if updated != content:
+                with open(path, 'w') as f:
+                    f.write(updated)
 
     def gen_isa_features(self) -> None:
         """Emit stable feature and concrete-variant masks for this ISA input."""

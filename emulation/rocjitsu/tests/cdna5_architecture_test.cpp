@@ -5,8 +5,11 @@
 #include "decode_test_util.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna5/target_provider.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "util/data_types.h"
+#include "util/simd.h"
 
 #include <set>
 
@@ -14,6 +17,19 @@ namespace {
 
 using namespace rocjitsu;
 using namespace rocjitsu::test::cdna5;
+
+TEST(Gfx1250ExecutionTest, SelectsAvx512OnlyOnSupportedRunningCpu) {
+  const auto *selected = &cdna5::host_execution_backend();
+  const auto *baseline = &cdna5::execution_backend();
+#if defined(RJ_HAS_AVX512_EXECUTION)
+  const bool supported = __builtin_cpu_supports("avx2") && __builtin_cpu_supports("f16c") &&
+                         __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512dq") &&
+                         __builtin_cpu_supports("avx512bw") && __builtin_cpu_supports("avx512vl");
+  EXPECT_EQ(selected != baseline, supported && !util::force_scalar());
+#else
+  EXPECT_EQ(selected, baseline);
+#endif
+}
 
 template <typename T> void append_bytes(std::vector<uint8_t> &bytes, const T &value) {
   auto *src = reinterpret_cast<const uint8_t *>(&value);

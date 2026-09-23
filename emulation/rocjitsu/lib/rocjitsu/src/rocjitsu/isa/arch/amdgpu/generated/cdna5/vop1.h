@@ -18,23 +18,27 @@ class VNopVop1 : public Vop1 {
 public:
   VNopVop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VMovB32Vop1 : public Vop1 {
 public:
   VMovB32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VReadfirstlaneB32Vop1 : public Vop1 {
 public:
   VReadfirstlaneB32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 };
@@ -43,72 +47,85 @@ class VCvtI32F64Vop1 : public Vop1 {
 public:
   VCvtI32F64Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF64I32Vop1 : public Vop1 {
 public:
   VCvtF64I32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF32I32Vop1 : public Vop1 {
 public:
   VCvtF32I32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF32U32Vop1 : public Vop1 {
 public:
   VCvtF32U32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtU32F32Vop1 : public Vop1 {
 public:
   VCvtU32F32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtI32F32Vop1 : public Vop1 {
 public:
   VCvtI32F32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF16F32Vop1 : public Vop1 {
 public:
   VCvtF16F32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -116,194 +133,229 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF32F16Vop1 : public Vop1 {
 public:
   VCvtF32F16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtNearestI32F32Vop1 : public Vop1 {
 public:
   VCvtNearestI32F32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtFloorI32F32Vop1 : public Vop1 {
 public:
   VCvtFloorI32F32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtOffF32I4Vop1 : public Vop1 {
 public:
   VCvtOffF32I4Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF32F64Vop1 : public Vop1 {
 public:
   VCvtF32F64Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF64F32Vop1 : public Vop1 {
 public:
   VCvtF64F32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF32Ubyte0Vop1 : public Vop1 {
 public:
   VCvtF32Ubyte0Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF32Ubyte1Vop1 : public Vop1 {
 public:
   VCvtF32Ubyte1Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF32Ubyte2Vop1 : public Vop1 {
 public:
   VCvtF32Ubyte2Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF32Ubyte3Vop1 : public Vop1 {
 public:
   VCvtF32Ubyte3Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtU32F64Vop1 : public Vop1 {
 public:
   VCvtU32F64Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF64U32Vop1 : public Vop1 {
 public:
   VCvtF64U32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VTruncF64Vop1 : public Vop1 {
 public:
   VTruncF64Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCeilF64Vop1 : public Vop1 {
 public:
   VCeilF64Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VRndneF64Vop1 : public Vop1 {
 public:
   VRndneF64Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VFloorF64Vop1 : public Vop1 {
 public:
   VFloorF64Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VPipeflushVop1 : public Vop1 {
 public:
   VPipeflushVop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VMovB16Vop1 : public Vop1 {
 public:
   VMovB16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -311,34 +363,40 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VMovB64Vop1 : public Vop1 {
 public:
   VMovB64Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VTanhF32Vop1 : public Vop1 {
 public:
   VTanhF32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VTanhF16Vop1 : public Vop1 {
 public:
   VTanhF16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -346,122 +404,144 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VFractF32Vop1 : public Vop1 {
 public:
   VFractF32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VTruncF32Vop1 : public Vop1 {
 public:
   VTruncF32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCeilF32Vop1 : public Vop1 {
 public:
   VCeilF32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VRndneF32Vop1 : public Vop1 {
 public:
   VRndneF32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VFloorF32Vop1 : public Vop1 {
 public:
   VFloorF32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VExpF32Vop1 : public Vop1 {
 public:
   VExpF32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VLogF32Vop1 : public Vop1 {
 public:
   VLogF32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VRcpF32Vop1 : public Vop1 {
 public:
   VRcpF32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VRcpIflagF32Vop1 : public Vop1 {
 public:
   VRcpIflagF32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VRsqF32Vop1 : public Vop1 {
 public:
   VRsqF32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VRcpF64Vop1 : public Vop1 {
 public:
   VRcpF64Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 };
@@ -470,6 +550,7 @@ class VRsqF64Vop1 : public Vop1 {
 public:
   VRsqF64Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 };
@@ -478,17 +559,20 @@ class VSqrtF32Vop1 : public Vop1 {
 public:
   VSqrtF32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VSqrtF64Vop1 : public Vop1 {
 public:
   VSqrtF64Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 };
@@ -497,186 +581,219 @@ class VSinF32Vop1 : public Vop1 {
 public:
   VSinF32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCosF32Vop1 : public Vop1 {
 public:
   VCosF32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VNotB32Vop1 : public Vop1 {
 public:
   VNotB32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VBfrevB32Vop1 : public Vop1 {
 public:
   VBfrevB32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VClzI32U32Vop1 : public Vop1 {
 public:
   VClzI32U32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCtzI32B32Vop1 : public Vop1 {
 public:
   VCtzI32B32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VClsI32Vop1 : public Vop1 {
 public:
   VClsI32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VFrexpExpI32F64Vop1 : public Vop1 {
 public:
   VFrexpExpI32F64Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VFrexpMantF64Vop1 : public Vop1 {
 public:
   VFrexpMantF64Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VFractF64Vop1 : public Vop1 {
 public:
   VFractF64Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VFrexpExpI32F32Vop1 : public Vop1 {
 public:
   VFrexpExpI32F32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VFrexpMantF32Vop1 : public Vop1 {
 public:
   VFrexpMantF32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VMovreldB32Vop1 : public Vop1 {
 public:
   VMovreldB32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand m0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VMovrelsB32Vop1 : public Vop1 {
 public:
   VMovrelsB32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand m0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VMovrelsdB32Vop1 : public Vop1 {
 public:
   VMovrelsdB32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand m0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VMovrelsd2B32Vop1 : public Vop1 {
 public:
   VMovrelsd2B32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand m0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VPermlane16SwapB32Vop1 : public Vop1 {
 public:
   VPermlane16SwapB32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 };
@@ -685,6 +802,7 @@ class VTanhBf16Vop1 : public Vop1 {
 public:
   VTanhBf16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -692,23 +810,27 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VPrngB32Vop1 : public Vop1 {
 public:
   VPrngB32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF16U16Vop1 : public Vop1 {
 public:
   VCvtF16U16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -716,12 +838,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF16I16Vop1 : public Vop1 {
 public:
   VCvtF16I16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -729,12 +853,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtU16F16Vop1 : public Vop1 {
 public:
   VCvtU16F16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -742,12 +868,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtI16F16Vop1 : public Vop1 {
 public:
   VCvtI16F16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -755,12 +883,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VRcpF16Vop1 : public Vop1 {
 public:
   VRcpF16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -768,12 +898,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VSqrtF16Vop1 : public Vop1 {
 public:
   VSqrtF16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -781,12 +913,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VRsqF16Vop1 : public Vop1 {
 public:
   VRsqF16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -794,12 +928,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VLogF16Vop1 : public Vop1 {
 public:
   VLogF16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -807,12 +943,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VExpF16Vop1 : public Vop1 {
 public:
   VExpF16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -820,12 +958,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VFrexpMantF16Vop1 : public Vop1 {
 public:
   VFrexpMantF16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -833,12 +973,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VFrexpExpI16F16Vop1 : public Vop1 {
 public:
   VFrexpExpI16F16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -846,12 +988,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VFloorF16Vop1 : public Vop1 {
 public:
   VFloorF16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -859,12 +1003,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCeilF16Vop1 : public Vop1 {
 public:
   VCeilF16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -872,12 +1018,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VTruncF16Vop1 : public Vop1 {
 public:
   VTruncF16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -885,12 +1033,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VRndneF16Vop1 : public Vop1 {
 public:
   VRndneF16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -898,12 +1048,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VFractF16Vop1 : public Vop1 {
 public:
   VFractF16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -911,12 +1063,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VSinF16Vop1 : public Vop1 {
 public:
   VSinF16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -924,12 +1078,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCosF16Vop1 : public Vop1 {
 public:
   VCosF16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -937,12 +1093,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VSatPkU8I16Vop1 : public Vop1 {
 public:
   VSatPkU8I16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -950,12 +1108,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtNormI16F16Vop1 : public Vop1 {
 public:
   VCvtNormI16F16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -963,12 +1123,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtNormU16F16Vop1 : public Vop1 {
 public:
   VCvtNormU16F16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -976,12 +1138,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VSwapB32Vop1 : public Vop1 {
 public:
   VSwapB32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 };
@@ -990,6 +1154,7 @@ class VSwapB16Vop1 : public Vop1 {
 public:
   VSwapB16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -1000,6 +1165,7 @@ class VPermlane64B32Vop1 : public Vop1 {
 public:
   VPermlane64B32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 };
@@ -1008,6 +1174,7 @@ class VSwaprelB32Vop1 : public Vop1 {
 public:
   VSwaprelB32Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand m0;
@@ -1017,6 +1184,7 @@ class VNotB16Vop1 : public Vop1 {
 public:
   VNotB16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -1024,56 +1192,66 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtI32I16Vop1 : public Vop1 {
 public:
   VCvtI32I16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtU32U16Vop1 : public Vop1 {
 public:
   VCvtU32U16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF32Fp8Vop1 : public Vop1 {
 public:
   VCvtF32Fp8Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF32Bf8Vop1 : public Vop1 {
 public:
   VCvtF32Bf8Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtPkF32Fp8Vop1 : public Vop1 {
 public:
   VCvtPkF32Fp8Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 };
@@ -1082,6 +1260,7 @@ class VCvtPkF32Bf8Vop1 : public Vop1 {
 public:
   VCvtPkF32Bf8Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 };
@@ -1090,17 +1269,20 @@ class VCvtF32Bf16Vop1 : public Vop1 {
 public:
   VCvtF32Bf16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VSatPk4I4I8Vop1 : public Vop1 {
 public:
   VSatPk4I4I8Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -1108,12 +1290,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VSatPk4U4U8Vop1 : public Vop1 {
 public:
   VSatPk4U4U8Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -1121,34 +1305,40 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtPkF16Fp8Vop1 : public Vop1 {
 public:
   VCvtPkF16Fp8Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtPkF16Bf8Vop1 : public Vop1 {
 public:
   VCvtPkF16Bf8Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF16Fp8Vop1 : public Vop1 {
 public:
   VCvtF16Fp8Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -1156,12 +1346,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCvtF16Bf8Vop1 : public Vop1 {
 public:
   VCvtF16Bf8Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -1169,12 +1361,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VRcpBf16Vop1 : public Vop1 {
 public:
   VRcpBf16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -1182,12 +1376,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VSqrtBf16Vop1 : public Vop1 {
 public:
   VSqrtBf16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -1195,12 +1391,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VRsqBf16Vop1 : public Vop1 {
 public:
   VRsqBf16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -1208,12 +1406,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VLogBf16Vop1 : public Vop1 {
 public:
   VLogBf16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -1221,12 +1421,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VExpBf16Vop1 : public Vop1 {
 public:
   VExpBf16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -1234,12 +1436,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VSinBf16Vop1 : public Vop1 {
 public:
   VSinBf16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -1247,12 +1451,14 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 class VCosBf16Vop1 : public Vop1 {
 public:
   VCosBf16Vop1(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
@@ -1260,6 +1466,7 @@ public:
 
 private:
   void execute_modifier_impl(amdgpu::Wavefront &wf);
+  void execute_modifier_impl_avx512(amdgpu::Wavefront &wf);
 };
 
 } // namespace cdna5

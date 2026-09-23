@@ -18,6 +18,7 @@ class TensorLoadToLdsVimage : public Vimage {
 public:
   TensorLoadToLdsVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vaddr0;
   Operand vaddr1;
   Operand vaddr2;
@@ -28,6 +29,7 @@ class TensorStoreFromLdsVimage : public Vimage {
 public:
   TensorStoreFromLdsVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
   Operand vaddr0;
   Operand vaddr1;
   Operand vaddr2;

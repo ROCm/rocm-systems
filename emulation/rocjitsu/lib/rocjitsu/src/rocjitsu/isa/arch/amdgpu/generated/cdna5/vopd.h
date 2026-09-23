@@ -22,6 +22,7 @@ public:
   static Result validate_encoding(const MachineInst *inst,
                                   const util::DiagnosticEmitter &emit_error);
   void execute_impl(amdgpu::Wavefront &wf);
+  void execute_impl_avx512(amdgpu::Wavefront &wf);
 
 private:
   enum class Format : uint8_t { VopdXy, Vopd3 };
