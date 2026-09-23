@@ -339,6 +339,13 @@ class cli_analysis(OmniAnalyze_Base):
         forest_view = filter_forest_by_backends(
             self._runs[workload_path].ml_api_call_trees, backends
         )
+        name_to_id = {
+            str(kernel_name).strip(): idx
+            for idx, kernel_name in enumerate(kernel_top_df["Kernel_Name"].tolist())
+        }
+        for roots in forest_view.values():
+            for root in roots:
+                _assign_kernel_ids_from_top(root, name_to_id)
         framework_labels = [
             _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"] for backend in backends
         ]
