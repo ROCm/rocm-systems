@@ -221,8 +221,12 @@
         },
         {
           "name": "UBR_MultiSegment_Symmetric_Lsa",
-          "description": "Multi-segment registration on the symmetric-window LSA path (ncclCommWindowRegister, NCCL_WIN_COLL_SYMMETRIC)",
-          "test_filter": "UBR_MultiSegment.Symmetric_Lsa"
+          "description": "Symmetric-window LSA after CE AllReduce with CTA policy ZERO",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa",
+          "env_variables": {
+            "RCCL_CE_ALLREDUCE": "1",
+            "NCCL_CTA_POLICY": "2"
+          }
         },
         {
           "name": "UBR_MultiSegment_Symmetric_Elastic_Lsa",
