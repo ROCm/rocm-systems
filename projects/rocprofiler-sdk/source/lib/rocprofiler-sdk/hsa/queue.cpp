@@ -297,12 +297,12 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
         // SPM completion is migrated off the callback registry (see WriteInterceptor); invoke
         // it explicitly here.
-        spm::signal_completion_hook(&queue_info_session.queue,
-                                    packet.kernel_packet,
-                                    _session,
-                                    packet,
-                                    packet.instrumentation_packets,
-                                    dispatch_time);
+        spm::kernel_dispatch_phase_exit_hook(&queue_info_session.queue,
+                                             packet.kernel_packet,
+                                             _session,
+                                             packet,
+                                             packet.instrumentation_packets,
+                                             dispatch_time);
 
         CHECK_NOTNULL(hsa::get_queue_controller())
             ->serializer(&queue_info_session.queue)
@@ -442,7 +442,7 @@ WriteInterceptor(const void* packets,
     // get_notifiers(); detect it explicitly so an SPM-only run still enters the interceptor.
     // Scoped to this queue's agent: a context restricted via set_agents() must leave queues on
     // the other agents on the fast path instead of paying interception and losing batching for
-    // dispatches that write_hook() would filter out anyway.
+    // dispatches that kernel_dispatch_phase_enter_hook() would filter out anyway.
     const bool spm_active =
         spm::is_active_on_agent(CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id);
     const bool no_real_consumers =
@@ -846,15 +846,16 @@ WriteInterceptor(const void* packets,
 
             // SPM is migrated off the per-queue callback registry: call its hook explicitly
             // (the other services still flow through signal_callback above).
-            spm::write_hook(&queue,
-                            kernel_packet,
-                            kernel_id,
-                            dispatch_id,
-                            &_packet_data.user_data,
-                            _packet_data.tracing_data.external_correlation_ids,
-                            corr_id,
-                            _packet_data.instrumentation_packets,
-                            _packet_data.is_serialized);
+            spm::kernel_dispatch_phase_enter_hook(
+                &queue,
+                kernel_packet,
+                kernel_id,
+                dispatch_id,
+                &_packet_data.user_data,
+                _packet_data.tracing_data.external_correlation_ids,
+                corr_id,
+                _packet_data.instrumentation_packets,
+                _packet_data.is_serialized);
 
             bool inserted_before = false;
             if(_packet_data.is_serialized)

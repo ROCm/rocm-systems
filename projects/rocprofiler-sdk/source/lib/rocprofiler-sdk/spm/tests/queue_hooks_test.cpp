@@ -58,16 +58,16 @@ TEST(spm_queue_hooks, exit_hook_skips_when_inst_pkt_has_no_spm_client_id)
     auto packet = rocprofiler::hsa::packet_data_t{};
     auto fq_pkt = rocprofiler::hsa::rocprofiler_packet{};
 
-    rocprofiler::spm::signal_completion_hook(
+    rocprofiler::spm::kernel_dispatch_phase_exit_hook(
         nullptr, fq_pkt, sess, packet, inst_pkt, rocprofiler::kernel_dispatch::profiling_time{});
     SUCCEED();
 }
 
-// write_hook with no active SPM context must be a no-op: it must not append to inst_pkt
-// and must not change is_serialized. queue is nullptr because the hook returns before
+// kernel_dispatch_phase_enter_hook with no active SPM context must be a no-op: it must not append
+// to inst_pkt and must not change is_serialized. queue is nullptr because the hook returns before
 // dereferencing it when no dispatch_spm context is active (same no-HSA pattern as the
 // exit-hook test).
-TEST(spm_queue_hooks, write_hook_noop_when_no_context_active)
+TEST(spm_queue_hooks, enter_hook_noop_when_no_context_active)
 {
     EXPECT_FALSE(rocprofiler::spm::is_any_active());
 
@@ -81,7 +81,7 @@ TEST(spm_queue_hooks, write_hook_noop_when_no_context_active)
     const auto ext_corr_ids  = rocprofiler::hsa::queue_info_session_t::external_corr_id_map_t{};
     bool       is_serialized = true;
 
-    rocprofiler::spm::write_hook(
+    rocprofiler::spm::kernel_dispatch_phase_enter_hook(
         nullptr, fq_pkt, 0, 0, &user_data, ext_corr_ids, nullptr, inst_pkt, is_serialized);
 
     EXPECT_EQ(inst_pkt.size(), size_before);

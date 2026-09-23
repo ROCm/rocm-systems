@@ -1100,18 +1100,19 @@ TEST(spm_queue_hooks, stop_context_in_flight_completion_routes_via_hook_path)
             inst_pkt.emplace_back(
                 std::make_pair(std::move(ret_pkt.packet), hsa::queue_hooks::SPM_CLIENT_ID));
 
-            spm::signal_completion_hook(&fq,
-                                        pkt,
-                                        sess,
-                                        sess->packet_data.emplace_back(),
-                                        inst_pkt,
-                                        kernel_dispatch::profiling_time{});
+            spm::kernel_dispatch_phase_exit_hook(&fq,
+                                                 pkt,
+                                                 sess,
+                                                 sess->packet_data.emplace_back(),
+                                                 inst_pkt,
+                                                 kernel_dispatch::profiling_time{});
 
             size_t map_size_after_completion = 1;
             cb_info->packet_return_map.rlock(
                 [&](const auto& data) { map_size_after_completion = data.size(); });
             EXPECT_EQ(map_size_after_completion, 0U)
-                << "packet_return_map must drain via signal_completion_hook after stop_context";
+                << "packet_return_map must drain via kernel_dispatch_phase_exit_hook after "
+                   "stop_context";
 
             ROCPROFILER_CALL(rocprofiler_spm_destroy_counter_config(expected.id),
                              "Could not delete profile id");
@@ -1134,7 +1135,7 @@ TEST(spm_queue_hooks, stop_context_in_flight_completion_routes_via_hook_path)
 }
 
 // Verify that rocprofiler_spm_dispatch_counting_service_set_agents restricts serialization
-// and write_hook filtering to the configured agents.
+// and kernel_dispatch_phase_enter_hook filtering to the configured agents.
 TEST(spm_core, set_agents_restricts_collection)
 {
     rocprofiler::common::set_env("ROCPROFILER_SPM_BETA_ENABLED", true);

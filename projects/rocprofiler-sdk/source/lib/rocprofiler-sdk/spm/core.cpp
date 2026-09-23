@@ -271,7 +271,8 @@ start_context(const context::context* ctx)
     });
 
     // SPM no longer registers a per-queue callback with the queue controller; the HSA write
-    // interceptor calls spm::write_hook / signal_completion_hook directly (see hsa/queue.cpp).
+    // interceptor calls spm::kernel_dispatch_phase_enter_hook / kernel_dispatch_phase_exit_hook
+    // directly (see hsa/queue.cpp).
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
@@ -317,8 +318,8 @@ stop_context(const context::context* ctx)
         // teardown depends on. Keeping it.
         hsa::queue_controller_sync();
         controller->disable_serialization(ctx->dispatch_spm->agents);
-        // No per-queue callback to remove; spm::write_hook no-ops once dispatch_spm is
-        // disabled above.
+        // No per-queue callback to remove; spm::kernel_dispatch_phase_enter_hook no-ops once
+        // dispatch_spm is disabled above.
     }
 }
 
