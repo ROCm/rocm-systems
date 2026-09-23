@@ -9,6 +9,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/cube.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/graphics_instructions.h"
@@ -8385,60 +8386,50 @@ inline void execute_v_ctz_i32_b32_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cubeid_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
-      [](auto x, auto y, auto z) { return util::cube_id_f32_simd(x, y, z); });
+      [&inst, &wf](auto x, auto y, auto z) {
+        return ::rocjitsu::amdgpu::cube::apply_omod(
+            ::rocjitsu::amdgpu::cube::execute<::rocjitsu::amdgpu::cube::Operation::ID>(
+                x, y, z, wf.fp_round_mode_f32(), wf.cu().arch(), wf.ieee_mode()),
+            wf.fp_round_mode_f32(), wf.cu().arch(), wf.ieee_mode(), inst.inst_.omod);
+      },
+      false);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = [&]() {
-              auto x = [&]() {
-                float sv =
-                    std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-                if (inst.inst_.abs & (1u << 0))
-                  sv = std::fabs(sv);
-                if (inst.inst_.neg & (1u << 0))
-                  sv = -sv;
-                return sv;
-              }();
-              auto y = [&]() {
-                float sv =
-                    std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
-                if (inst.inst_.abs & (1u << 1))
-                  sv = std::fabs(sv);
-                if (inst.inst_.neg & (1u << 1))
-                  sv = -sv;
-                return sv;
-              }();
-              auto z = [&]() {
-                float sv =
-                    std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-                if (inst.inst_.abs & (1u << 2))
-                  sv = std::fabs(sv);
-                if (inst.inst_.neg & (1u << 2))
-                  sv = -sv;
-                return sv;
-              }();
-              float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
-              if (ax >= ay && ax >= az)
-                return x >= 0 ? 0.0f : 1.0f;
-              if (ay >= ax && ay >= az)
-                return y >= 0 ? 2.0f : 3.0f;
-              return z >= 0 ? 4.0f : 5.0f;
-            }();
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 1)
-              v *= 2.0f;
-            else if (effective_omod == 2)
-              v *= 4.0f;
-            else if (effective_omod == 3)
-              v *= 0.5f;
-            v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
-            return v;
-          }();
+          float v = ::rocjitsu::amdgpu::cube::apply_omod(
+              ::rocjitsu::amdgpu::cube::execute<::rocjitsu::amdgpu::cube::Operation::ID>(
+                  [&]() {
+                    float sv =
+                        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
+                    if (inst.inst_.abs & (1u << 0))
+                      sv = std::fabs(sv);
+                    if (inst.inst_.neg & (1u << 0))
+                      sv = -sv;
+                    return sv;
+                  }(),
+                  [&]() {
+                    float sv =
+                        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
+                    if (inst.inst_.abs & (1u << 1))
+                      sv = std::fabs(sv);
+                    if (inst.inst_.neg & (1u << 1))
+                      sv = -sv;
+                    return sv;
+                  }(),
+                  [&]() {
+                    float sv =
+                        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
+                    if (inst.inst_.abs & (1u << 2))
+                      sv = std::fabs(sv);
+                    if (inst.inst_.neg & (1u << 2))
+                      sv = -sv;
+                    return sv;
+                  }(),
+                  wf.fp_round_mode_f32(), wf.cu().arch(), wf.ieee_mode()),
+              wf.fp_round_mode_f32(), wf.cu().arch(), wf.ieee_mode(), inst.inst_.omod);
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
           return v;
@@ -8448,59 +8439,51 @@ inline void execute_v_cubeid_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_cubema_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32([](auto x, auto y, auto z) {
-    return 2.0f * util::stdx::fmax(util::stdx::abs(x),
-                                   util::stdx::fmax(util::stdx::abs(y), util::stdx::abs(z)));
-  });
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
+      [&inst, &wf](auto x, auto y, auto z) {
+        return ::rocjitsu::amdgpu::cube::apply_omod(
+            ::rocjitsu::amdgpu::cube::execute<::rocjitsu::amdgpu::cube::Operation::MA>(
+                x, y, z, wf.fp_round_mode_f32(), wf.cu().arch(), wf.ieee_mode()),
+            wf.fp_round_mode_f32(), wf.cu().arch(), wf.ieee_mode(), inst.inst_.omod);
+      },
+      false);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = [&]() {
-              auto x = [&]() {
-                float sv =
-                    std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-                if (inst.inst_.abs & (1u << 0))
-                  sv = std::fabs(sv);
-                if (inst.inst_.neg & (1u << 0))
-                  sv = -sv;
-                return sv;
-              }();
-              auto y = [&]() {
-                float sv =
-                    std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
-                if (inst.inst_.abs & (1u << 1))
-                  sv = std::fabs(sv);
-                if (inst.inst_.neg & (1u << 1))
-                  sv = -sv;
-                return sv;
-              }();
-              auto z = [&]() {
-                float sv =
-                    std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-                if (inst.inst_.abs & (1u << 2))
-                  sv = std::fabs(sv);
-                if (inst.inst_.neg & (1u << 2))
-                  sv = -sv;
-                return sv;
-              }();
-              float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
-              return 2.0f * std::fmax(ax, std::fmax(ay, az));
-            }();
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 1)
-              v *= 2.0f;
-            else if (effective_omod == 2)
-              v *= 4.0f;
-            else if (effective_omod == 3)
-              v *= 0.5f;
-            v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
-            return v;
-          }();
+          float v = ::rocjitsu::amdgpu::cube::apply_omod(
+              ::rocjitsu::amdgpu::cube::execute<::rocjitsu::amdgpu::cube::Operation::MA>(
+                  [&]() {
+                    float sv =
+                        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
+                    if (inst.inst_.abs & (1u << 0))
+                      sv = std::fabs(sv);
+                    if (inst.inst_.neg & (1u << 0))
+                      sv = -sv;
+                    return sv;
+                  }(),
+                  [&]() {
+                    float sv =
+                        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
+                    if (inst.inst_.abs & (1u << 1))
+                      sv = std::fabs(sv);
+                    if (inst.inst_.neg & (1u << 1))
+                      sv = -sv;
+                    return sv;
+                  }(),
+                  [&]() {
+                    float sv =
+                        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
+                    if (inst.inst_.abs & (1u << 2))
+                      sv = std::fabs(sv);
+                    if (inst.inst_.neg & (1u << 2))
+                      sv = -sv;
+                    return sv;
+                  }(),
+                  wf.fp_round_mode_f32(), wf.cu().arch(), wf.ieee_mode()),
+              wf.fp_round_mode_f32(), wf.cu().arch(), wf.ieee_mode(), inst.inst_.omod);
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
           return v;
@@ -8511,60 +8494,50 @@ inline void execute_v_cubema_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cubesc_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
-      [](auto x, auto y, auto z) { return util::cube_sc_f32_simd(x, y, z); });
+      [&inst, &wf](auto x, auto y, auto z) {
+        return ::rocjitsu::amdgpu::cube::apply_omod(
+            ::rocjitsu::amdgpu::cube::execute<::rocjitsu::amdgpu::cube::Operation::SC>(
+                x, y, z, wf.fp_round_mode_f32(), wf.cu().arch(), wf.ieee_mode()),
+            wf.fp_round_mode_f32(), wf.cu().arch(), wf.ieee_mode(), inst.inst_.omod);
+      },
+      false);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = [&]() {
-              auto x = [&]() {
-                float sv =
-                    std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-                if (inst.inst_.abs & (1u << 0))
-                  sv = std::fabs(sv);
-                if (inst.inst_.neg & (1u << 0))
-                  sv = -sv;
-                return sv;
-              }();
-              auto y = [&]() {
-                float sv =
-                    std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
-                if (inst.inst_.abs & (1u << 1))
-                  sv = std::fabs(sv);
-                if (inst.inst_.neg & (1u << 1))
-                  sv = -sv;
-                return sv;
-              }();
-              auto z = [&]() {
-                float sv =
-                    std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-                if (inst.inst_.abs & (1u << 2))
-                  sv = std::fabs(sv);
-                if (inst.inst_.neg & (1u << 2))
-                  sv = -sv;
-                return sv;
-              }();
-              float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
-              if (ax >= ay && ax >= az)
-                return x >= 0 ? z : -z;
-              if (ay >= ax && ay >= az)
-                return x;
-              return z >= 0 ? -x : x;
-            }();
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 1)
-              v *= 2.0f;
-            else if (effective_omod == 2)
-              v *= 4.0f;
-            else if (effective_omod == 3)
-              v *= 0.5f;
-            v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
-            return v;
-          }();
+          float v = ::rocjitsu::amdgpu::cube::apply_omod(
+              ::rocjitsu::amdgpu::cube::execute<::rocjitsu::amdgpu::cube::Operation::SC>(
+                  [&]() {
+                    float sv =
+                        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
+                    if (inst.inst_.abs & (1u << 0))
+                      sv = std::fabs(sv);
+                    if (inst.inst_.neg & (1u << 0))
+                      sv = -sv;
+                    return sv;
+                  }(),
+                  [&]() {
+                    float sv =
+                        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
+                    if (inst.inst_.abs & (1u << 1))
+                      sv = std::fabs(sv);
+                    if (inst.inst_.neg & (1u << 1))
+                      sv = -sv;
+                    return sv;
+                  }(),
+                  [&]() {
+                    float sv =
+                        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
+                    if (inst.inst_.abs & (1u << 2))
+                      sv = std::fabs(sv);
+                    if (inst.inst_.neg & (1u << 2))
+                      sv = -sv;
+                    return sv;
+                  }(),
+                  wf.fp_round_mode_f32(), wf.cu().arch(), wf.ieee_mode()),
+              wf.fp_round_mode_f32(), wf.cu().arch(), wf.ieee_mode(), inst.inst_.omod);
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
           return v;
@@ -8575,60 +8548,50 @@ inline void execute_v_cubesc_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_v_cubetc_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
-      [](auto x, auto y, auto z) { return util::cube_tc_f32_simd(x, y, z); });
+      [&inst, &wf](auto x, auto y, auto z) {
+        return ::rocjitsu::amdgpu::cube::apply_omod(
+            ::rocjitsu::amdgpu::cube::execute<::rocjitsu::amdgpu::cube::Operation::TC>(
+                x, y, z, wf.fp_round_mode_f32(), wf.cu().arch(), wf.ieee_mode()),
+            wf.fp_round_mode_f32(), wf.cu().arch(), wf.ieee_mode(), inst.inst_.omod);
+      },
+      false);
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>([&]() {
-          float v = [&]() {
-            float v = [&]() {
-              auto x = [&]() {
-                float sv =
-                    std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
-                if (inst.inst_.abs & (1u << 0))
-                  sv = std::fabs(sv);
-                if (inst.inst_.neg & (1u << 0))
-                  sv = -sv;
-                return sv;
-              }();
-              auto y = [&]() {
-                float sv =
-                    std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
-                if (inst.inst_.abs & (1u << 1))
-                  sv = std::fabs(sv);
-                if (inst.inst_.neg & (1u << 1))
-                  sv = -sv;
-                return sv;
-              }();
-              auto z = [&]() {
-                float sv =
-                    std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-                if (inst.inst_.abs & (1u << 2))
-                  sv = std::fabs(sv);
-                if (inst.inst_.neg & (1u << 2))
-                  sv = -sv;
-                return sv;
-              }();
-              float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
-              if (ax >= ay && ax >= az)
-                return -y;
-              if (ay >= ax && ay >= az)
-                return y >= 0 ? -z : z;
-              return -y;
-            }();
-            const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-                wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst.inst_.omod);
-            if (effective_omod == 1)
-              v *= 2.0f;
-            else if (effective_omod == 2)
-              v *= 4.0f;
-            else if (effective_omod == 3)
-              v *= 0.5f;
-            v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
-            return v;
-          }();
+          float v = ::rocjitsu::amdgpu::cube::apply_omod(
+              ::rocjitsu::amdgpu::cube::execute<::rocjitsu::amdgpu::cube::Operation::TC>(
+                  [&]() {
+                    float sv =
+                        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
+                    if (inst.inst_.abs & (1u << 0))
+                      sv = std::fabs(sv);
+                    if (inst.inst_.neg & (1u << 0))
+                      sv = -sv;
+                    return sv;
+                  }(),
+                  [&]() {
+                    float sv =
+                        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane));
+                    if (inst.inst_.abs & (1u << 1))
+                      sv = std::fabs(sv);
+                    if (inst.inst_.neg & (1u << 1))
+                      sv = -sv;
+                    return sv;
+                  }(),
+                  [&]() {
+                    float sv =
+                        std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
+                    if (inst.inst_.abs & (1u << 2))
+                      sv = std::fabs(sv);
+                    if (inst.inst_.neg & (1u << 2))
+                      sv = -sv;
+                    return sv;
+                  }(),
+                  wf.fp_round_mode_f32(), wf.cu().arch(), wf.ieee_mode()),
+              wf.fp_round_mode_f32(), wf.cu().arch(), wf.ieee_mode(), inst.inst_.omod);
           if (inst.inst_.clamp)
             v = amdgpu::clamp_floating_result(v, wf);
           return v;

@@ -590,6 +590,7 @@ add_executable(
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
     vop3_conversion_modifiers_test.cpp
+    cube_instruction_test.cpp
     division_test.cpp
     division_macro_test.cpp
     valu_floating_policy_test.cpp

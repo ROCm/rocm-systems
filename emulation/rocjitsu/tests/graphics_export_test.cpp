@@ -2256,6 +2256,205 @@ TEST_P(GraphicsExportTest, HardwareSampleFiltersFp16AndMipLevels) {
   }
 }
 
+TEST_P(GraphicsExportTest, NearestSamplingAndImageLoadsUseDistinctFloatRules) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint32_t kR16Float = 13, kRg16Float = 29, kRgba16Float = 57;
+  constexpr uint32_t kR32Float = 22, kRg32Float = 50, kRgba32Float = 63;
+  constexpr uint32_t kR32Uint = 20, kRg32Uint = 48, kRgba32Uint = 61;
+  constexpr uint32_t kImageLoad = 0, kImageSampleLz = 31;
+  struct Case {
+    const char *name;
+    uint32_t format;
+    std::array<uint32_t, 4> raw;
+    std::array<uint32_t, 4> loaded;
+    std::array<uint32_t, 4> sampled;
+  };
+  // Actual image-load and nearest-sample results from both physical RDNA3/4
+  // cards, including half NaN payloads and single-precision subnormals.
+  constexpr Case cases[] = {
+      {.name = "FP16 zero and finite",
+       .format = kRgba16Float,
+       .raw = {0x00000000u, 0x00000089u, 0x00000112u, 0x0000019bu},
+       .loaded = {0x00000000u, 0x37090000u, 0x37890000u, 0x37cd8000u},
+       .sampled = {0x00000000u, 0x37090000u, 0x37890000u, 0x37cd8000u}},
+      {.name = "FP16 positive subnormal",
+       .format = kRgba16Float,
+       .raw = {0x00000001u, 0x0000008au, 0x00000113u, 0x0000019cu},
+       .loaded = {0x33800000u, 0x370a0000u, 0x37898000u, 0x37ce0000u},
+       .sampled = {0x33800000u, 0x370a0000u, 0x37898000u, 0x37ce0000u}},
+      {.name = "FP16 signaling NaN",
+       .format = kRgba16Float,
+       .raw = {0x00007c01u, 0x00007c8au, 0x00007d13u, 0x00007d9cu},
+       .loaded = {0x7f802000u, 0x7f914000u, 0x7fa26000u, 0x7fb38000u},
+       .sampled = {0xffc00000u, 0xffc00000u, 0xffc00000u, 0xffc00000u}},
+      {.name = "FP16 quiet NaN",
+       .format = kRgba16Float,
+       .raw = {0x00007e00u, 0x00007e89u, 0x00007f12u, 0x00007f9bu},
+       .loaded = {0x7fc00000u, 0x7fd12000u, 0x7fe24000u, 0x7ff36000u},
+       .sampled = {0xffc00000u, 0xffc00000u, 0xffc00000u, 0xffc00000u}},
+      {.name = "FP16 negative zero",
+       .format = kRgba16Float,
+       .raw = {0x00008000u, 0x00008089u, 0x00008112u, 0x0000819bu},
+       .loaded = {0x80000000u, 0xb7090000u, 0xb7890000u, 0xb7cd8000u},
+       .sampled = {0x80000000u, 0xb7090000u, 0xb7890000u, 0xb7cd8000u}},
+      {.name = "FP16 negative signaling NaN",
+       .format = kRgba16Float,
+       .raw = {0x0000fc01u, 0x0000fc8au, 0x0000fd13u, 0x0000fd9cu},
+       .loaded = {0xff802000u, 0xff914000u, 0xffa26000u, 0xffb38000u},
+       .sampled = {0xffc00000u, 0xffc00000u, 0xffc00000u, 0xffc00000u}},
+      {.name = "FP32 zero and finite",
+       .format = kRgba32Float,
+       .raw = {0x00000000u, 0x00890000u, 0x01120000u, 0x019b0000u},
+       .loaded = {0x00000000u, 0x00890000u, 0x01120000u, 0x019b0000u},
+       .sampled = {0x00000000u, 0x00890000u, 0x01120000u, 0x019b0000u}},
+      {.name = "FP32 positive subnormal",
+       .format = kRgba32Float,
+       .raw = {0x00010049u, 0x008a0049u, 0x01130049u, 0x019c0049u},
+       .loaded = {0x00010049u, 0x008a0049u, 0x01130049u, 0x019c0049u},
+       .sampled = {0x00000000u, 0x008a0049u, 0x01130049u, 0x019c0049u}},
+      {.name = "FP32 signaling NaN",
+       .format = kRgba32Float,
+       .raw = {0x7f805b80u, 0x80095b80u, 0x80925b80u, 0x811b5b80u},
+       .loaded = {0x7f805b80u, 0x80095b80u, 0x80925b80u, 0x811b5b80u},
+       .sampled = {0xffc00000u, 0x80000000u, 0x80925b80u, 0x811b5b80u}},
+      {.name = "FP32 quiet NaN",
+       .format = kRgba32Float,
+       .raw = {0x7fc06dc0u, 0x80496dc0u, 0x80d26dc0u, 0x815b6dc0u},
+       .loaded = {0x7fc06dc0u, 0x80496dc0u, 0x80d26dc0u, 0x815b6dc0u},
+       .sampled = {0xffc00000u, 0x80000000u, 0x80d26dc0u, 0x815b6dc0u}},
+      {.name = "FP32 negative subnormal",
+       .format = kRgba32Float,
+       .raw = {0x80008000u, 0x80898000u, 0x81128000u, 0x819b8000u},
+       .loaded = {0x80008000u, 0x80898000u, 0x81128000u, 0x819b8000u},
+       .sampled = {0x80000000u, 0x80898000u, 0x81128000u, 0x819b8000u}},
+      {.name = "FP32 negative subnormal payload",
+       .format = kRgba32Float,
+       .raw = {0x80018049u, 0x808a8049u, 0x81138049u, 0x819c8049u},
+       .loaded = {0x80018049u, 0x808a8049u, 0x81138049u, 0x819c8049u},
+       .sampled = {0x80000000u, 0x808a8049u, 0x81138049u, 0x819c8049u}},
+      {.name = "FP32 negative signaling NaN",
+       .format = kRgba32Float,
+       .raw = {0xff80db80u, 0x0009db80u, 0x0092db80u, 0x011bdb80u},
+       .loaded = {0xff80db80u, 0x0009db80u, 0x0092db80u, 0x011bdb80u},
+       .sampled = {0xffc00000u, 0x00000000u, 0x0092db80u, 0x011bdb80u}},
+      {.name = "FP32 negative quiet NaN",
+       .format = kRgba32Float,
+       .raw = {0xffc0edc0u, 0x0049edc0u, 0x00d2edc0u, 0x015bedc0u},
+       .loaded = {0xffc0edc0u, 0x0049edc0u, 0x00d2edc0u, 0x015bedc0u},
+       .sampled = {0xffc00000u, 0x00000000u, 0x00d2edc0u, 0x015bedc0u}},
+      {.name = "UINT subnormal bits",
+       .format = kRgba32Uint,
+       .raw = {0x00010049u, 0x008a0049u, 0x01130049u, 0x019c0049u},
+       .loaded = {0x00010049u, 0x008a0049u, 0x01130049u, 0x019c0049u},
+       .sampled = {0x00010049u, 0x008a0049u, 0x01130049u, 0x019c0049u}},
+      {.name = "UINT NaN bits",
+       .format = kRgba32Uint,
+       .raw = {0x7f805b80u, 0x80095b80u, 0x80925b80u, 0x811b5b80u},
+       .loaded = {0x7f805b80u, 0x80095b80u, 0x80925b80u, 0x811b5b80u},
+       .sampled = {0x7f805b80u, 0x80095b80u, 0x80925b80u, 0x811b5b80u}},
+      {.name = "FP32 normal boundary",
+       .format = kRgba32Float,
+       .raw = {0x007fffffu, 0x00800000u, 0x807fffffu, 0x80800000u},
+       .loaded = {0x007fffffu, 0x00800000u, 0x807fffffu, 0x80800000u},
+       .sampled = {0x00000000u, 0x00800000u, 0x80000000u, 0x80800000u}},
+      {.name = "FP32 infinities and signed zero",
+       .format = kRgba32Float,
+       .raw = {0x7f800000u, 0xff800000u, 0x00000000u, 0x80000000u},
+       .loaded = {0x7f800000u, 0xff800000u, 0x00000000u, 0x80000000u},
+       .sampled = {0x7f800000u, 0xff800000u, 0x00000000u, 0x80000000u}},
+      {.name = "FP32 extreme NaN payloads",
+       .format = kRgba32Float,
+       .raw = {0x7f800001u, 0xff800001u, 0x7fffffffu, 0xffffffffu},
+       .loaded = {0x7f800001u, 0xff800001u, 0x7fffffffu, 0xffffffffu},
+       .sampled = {0xffc00000u, 0xffc00000u, 0xffc00000u, 0xffc00000u}},
+  };
+  constexpr uint64_t base = 0x180000;
+  wave_->set_exec(5);
+  // Sampling flushes FP32 texel subnormals even when VALU preserves them.
+  wave_->set_mode_raw(0xf0);
+  for (uint32_t components : {1u, 2u, 4u}) {
+    SCOPED_TRACE(components);
+    for (const auto &test : cases) {
+      SCOPED_TRACE(test.name);
+      const bool fp16 = test.format == kRgba16Float;
+      std::array<uint16_t, 4> halves{};
+      for (uint32_t c = 0; c < 4; ++c)
+        halves[c] = static_cast<uint16_t>(test.raw[c]);
+      ASSERT_EQ(
+          access_->write(
+              base, fp16 ? std::as_bytes(std::span<const uint16_t>(halves).first(components))
+                         : std::as_bytes(std::span<const uint32_t>(test.raw).first(components))),
+          amdgpu::VmAccessOutcome::Complete);
+      cache_.invalidate_all();
+      cu_->l1_vector().invalidate_all();
+      uint32_t format;
+      if (fp16)
+        format = components == 1 ? kR16Float : components == 2 ? kRg16Float : kRgba16Float;
+      else if (test.format == kRgba32Float)
+        format = components == 1 ? kR32Float : components == 2 ? kRg32Float : kRgba32Float;
+      else
+        format = components == 1 ? kR32Uint : components == 2 ? kRg32Uint : kRgba32Uint;
+      // Missing Vulkan components are supplied by the descriptor selectors.
+      const uint32_t selectors = components == 1 ? 0x204 : components == 2 ? 0x22c : 0xfac;
+      const std::array<uint32_t, 8> descriptor{
+          uint32_t(base >> 8), format << (gfx12 ? 17 : 20), 0, (9u << 28) | selectors, 0, 0, 0, 0};
+      for (uint32_t r = 0; r < descriptor.size(); ++r)
+        wave_->debug_write_sgpr(8 + r, descriptor[r]);
+      wave_->debug_write_sgpr(4, 2 | (2 << 3) | (2 << 6));
+      for (uint32_t r = 5; r < 8; ++r)
+        wave_->debug_write_sgpr(r, 0);
+      for (bool sample : {false, true}) {
+        SCOPED_TRACE(sample ? "IMAGE_SAMPLE_LZ" : "IMAGE_LOAD");
+        for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane) {
+          wave_->debug_write_vgpr(0, lane, sample ? std::bit_cast<uint32_t>(0.5f) : 0);
+          wave_->debug_write_vgpr(1, lane, sample ? std::bit_cast<uint32_t>(0.5f) : 0);
+          for (uint32_t c = 0; c < 4; ++c)
+            wave_->debug_write_vgpr(8 + c, lane, 0xdeadbeef);
+        }
+        std::array<uint32_t, 4> words{};
+        if (gfx12) {
+          if (sample) {
+            const auto encoded = rdna4::build_vsample(kImageSampleLz, {.dim = 1,
+                                                                       .dmask = 15,
+                                                                       .vdata = 8,
+                                                                       .rsrc = 8,
+                                                                       .samp = 4,
+                                                                       .vaddr0 = 0,
+                                                                       .vaddr1 = 1});
+            std::copy(encoded.begin(), encoded.end(), words.begin());
+          } else {
+            const auto encoded = rdna4::build_vimage(
+                kImageLoad,
+                {.dim = 1, .dmask = 15, .vdata = 8, .rsrc = 8, .vaddr0 = 0, .vaddr1 = 1});
+            std::copy(encoded.begin(), encoded.end(), words.begin());
+          }
+        } else {
+          const auto encoded = rdna3::build_mimg(
+              sample ? kImageSampleLz : kImageLoad,
+              {.dim = 1, .dmask = 15, .vaddr = 0, .vdata = 8, .srsrc = 2, .ssamp = 1});
+          std::copy(encoded.begin(), encoded.end(), words.begin());
+        }
+        auto decoded = decoder_->decode(words.data());
+        ASSERT_FALSE(decoded.failed());
+        auto instruction = std::move(decoded).value();
+        ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
+        ASSERT_FALSE(wave_->instruction_execution_failed());
+        ASSERT_NE(instruction->data(), nullptr);
+        amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &cache_);
+        pipeline.issue(instruction.release(), *wave_);
+        std::array<uint32_t, 4> expected = sample ? test.sampled : test.loaded;
+        for (uint32_t c = components; c < 4; ++c)
+          expected[c] = c == 3 ? (test.format == kRgba32Uint ? 1u : 0x3f800000u) : 0;
+        for (uint32_t c = 0; c < 4; ++c) {
+          for (uint32_t lane : {0u, 2u})
+            EXPECT_EQ(wave_->debug_read_vgpr(8 + c, lane), expected[c]) << c;
+          EXPECT_EQ(wave_->debug_read_vgpr(8 + c, 1), 0xdeadbeefu);
+        }
+      }
+    }
+  }
+}
+
 TEST_P(GraphicsExportTest, SampleLodUsesMipViewsDerivativesAndBias) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   const uint32_t colors[] = {0xff000000, 0xff0000ff, 0xff00ff00, 0xffff0000};

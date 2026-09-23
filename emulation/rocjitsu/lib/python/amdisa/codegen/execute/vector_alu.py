@@ -12,6 +12,7 @@ vop3_modifiers helpers.
 
 from __future__ import annotations
 
+from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.codegen.execute.vop3_modifiers import (
     vop3_src_mod,
@@ -947,58 +948,18 @@ def gen_vector_ternary(
             'maxmin_num': 'std::fmax(a, std::fmin(b, c))',
             'med3': 'std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b))',
         }
-        # Cube map operations: inputs are (x, y, z)
-        if op == 'cubeid':
-            L.append(
-                '    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);'
-            )
-            L.append('    float face;')
-            L.append('    if (az >= ax && az >= ay) face = c >= 0 ? 4.0f : 5.0f;')
-            L.append('    else if (ay >= ax) face = b >= 0 ? 2.0f : 3.0f;')
-            L.append('    else face = a >= 0 ? 0.0f : 1.0f;')
+        # Cube selection and MODE policy match the typed semantics path.
+        if op in CUBE_OPERATIONS:
+            result = cube_expression(op, 'a', 'b', 'c')
             if is_vop3:
-                L.extend(vop3_dst_mod('face'))
-            L.append(
-                f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(face));'
-            )
-        elif op == 'cubesc':
-            L.append(
-                '    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);'
-            )
-            L.append('    float sc;')
-            L.append('    if (az >= ax && az >= ay) sc = c >= 0 ? a : -a;')
-            L.append('    else if (ay >= ax) sc = a;')
-            L.append('    else sc = a >= 0 ? -c : c;')
+                result = cube_omod(result)
+            L.append(f'    float result = {result};')
             if is_vop3:
-                L.extend(vop3_dst_mod('sc'))
+                L.append(
+                    '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);'
+                )
             L.append(
-                f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(sc));'
-            )
-        elif op == 'cubetc':
-            L.append(
-                '    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);'
-            )
-            L.append('    float tc;')
-            L.append('    if (az >= ax && az >= ay) tc = -b;')
-            L.append('    else if (ay >= ax) tc = b >= 0 ? c : -c;')
-            L.append('    else tc = -b;')
-            if is_vop3:
-                L.extend(vop3_dst_mod('tc'))
-            L.append(
-                f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(tc));'
-            )
-        elif op == 'cubema':
-            L.append(
-                '    float ax = std::fabs(a), ay = std::fabs(b), az = std::fabs(c);'
-            )
-            L.append('    float ma;')
-            L.append('    if (az >= ax && az >= ay) ma = 2.0f * az;')
-            L.append('    else if (ay >= ax) ma = 2.0f * ay;')
-            L.append('    else ma = 2.0f * ax;')
-            if is_vop3:
-                L.extend(vop3_dst_mod('ma'))
-            L.append(
-                f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(ma));'
+                f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(result));'
             )
         elif op in f_map:
             expr = f_map[op]

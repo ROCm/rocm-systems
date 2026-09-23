@@ -28,6 +28,8 @@ excluded — those need their own helpers.
 
 from __future__ import annotations
 
+from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
+
 # template_name -> (cpp_element_type, cpp_binary_op_functor)
 #
 # template_name matches the symbol emitted by _generator.gen_shared_execute:
@@ -2103,13 +2105,15 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     'v_minimum3_f32_vop3': '[](auto a, auto b, auto c) { return util::ieee_minimum_simd(util::ieee_minimum_simd(a, b), c); }',
     'v_maximumminimum_f32_vop3': '[](auto a, auto b, auto c) { return util::ieee_minimum_simd(util::ieee_maximum_simd(a, b), c); }',
     'v_minimummaximum_f32_vop3': '[](auto a, auto b, auto c) { return util::ieee_maximum_simd(util::ieee_minimum_simd(a, b), c); }',
-    # Cubemap face ops: ternary f32, per-source abs/neg + result omod/clamp via
-    # the glue; the face-selection is a bit-exact where-cascade (helpers in
-    # simd_glue.h). cubema is inline (exact ×2 of fmax of abs).
-    'v_cubeid_f32_vop3': '[](auto x, auto y, auto z) { return util::cube_id_f32_simd(x, y, z); }',
-    'v_cubema_f32_vop3': '[](auto x, auto y, auto z) { return 2.0f * util::stdx::fmax(util::stdx::abs(x), util::stdx::fmax(util::stdx::abs(y), util::stdx::abs(z))); }',
-    'v_cubesc_f32_vop3': '[](auto x, auto y, auto z) { return util::cube_sc_f32_simd(x, y, z); }',
-    'v_cubetc_f32_vop3': '[](auto x, auto y, auto z) { return util::cube_tc_f32_simd(x, y, z); }',
+    # Cube applies OMOD itself; false leaves only CLAMP to the operand glue.
+    **{
+        f'v_{op}_f32_vop3': (
+            '[&inst, &wf](auto x, auto y, auto z) { return '
+            + cube_omod(cube_expression(op, 'x', 'y', 'z'), 'inst.inst_')
+            + '; }, false'
+        )
+        for op in CUBE_OPERATIONS
+    },
     # Share the bit-level fixup and guest MODE policy with the scalar executor.
     # FIXUP rounds OMOD explicitly; operand glue still applies CLAMP.
     'v_div_fixup_f32_vop3': (

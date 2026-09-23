@@ -12875,6 +12875,7 @@ class CodeGenerator:
                     ('rocjitsu/isa/arch/amdgpu/shared/simd_glue.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/fp_mode.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/division.h', False),
+                    ('rocjitsu/isa/arch/amdgpu/shared/cube.h', False),
                     ('util/except.h', False),
                 ]
                 _MEM_ENC_NAMES = frozenset(
@@ -13460,6 +13461,7 @@ class CodeGenerator:
                 'optional': 'std::optional',
                 'rocjitsu/base/rj_compiler.h': 'RJ_NOINLINE',
                 'rocjitsu/isa/arch/amdgpu/shared/fp_mode.h': 'fp_mode::',
+                'rocjitsu/isa/arch/amdgpu/shared/cube.h': 'cube::',
                 'rocjitsu/isa/arch/amdgpu/shared/division.h': (
                     'div_scale(',
                     'div_fmas(',
@@ -13924,6 +13926,7 @@ class CodeGenerator:
             '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/graphics_instructions.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/division.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/cube.h"',
             *simd_extra_includes(),
             '#include "util/data_types.h"',
             '#include "util/except.h"',

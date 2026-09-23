@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 
+from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.sema_ast import (
     ExecModel,
@@ -1734,24 +1735,7 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' if (w == 0) return 0u; uint32_t mask = (uint32_t{{1}} << w) - 1u;'
     ' uint32_t extracted = static_cast<uint32_t>(static_cast<int32_t>(src) >> off) & mask;'
     ' uint32_t signbit = uint32_t{{1}} << (w - 1u); return (extracted ^ signbit) - signbit; }}()',
-    'cubeid': '[&]() {{ auto x={0}; auto y={1}; auto z={2};'
-    ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
-    ' if (ax >= ay && ax >= az) return x >= 0 ? 0.0f : 1.0f;'
-    ' if (ay >= ax && ay >= az) return y >= 0 ? 2.0f : 3.0f;'
-    ' return z >= 0 ? 4.0f : 5.0f; }}()',
-    'cubesc': '[&]() {{ auto x={0}; auto y={1}; auto z={2};'
-    ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
-    ' if (ax >= ay && ax >= az) return x >= 0 ? z : -z;'
-    ' if (ay >= ax && ay >= az) return x;'
-    ' return z >= 0 ? -x : x; }}()',
-    'cubetc': '[&]() {{ auto x={0}; auto y={1}; auto z={2};'
-    ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
-    ' if (ax >= ay && ax >= az) return -y;'
-    ' if (ay >= ax && ay >= az) return y >= 0 ? -z : z;'
-    ' return -y; }}()',
-    'cubema': '[&]() {{ auto x={0}; auto y={1}; auto z={2};'
-    ' float ax=std::fabs(x), ay=std::fabs(y), az=std::fabs(z);'
-    ' return 2.0f * std::fmax(ax, std::fmax(ay, az)); }}()',
+    **{op: cube_expression(op, '{0}', '{1}', '{2}') for op in CUBE_OPERATIONS},
 }
 
 
@@ -1974,6 +1958,8 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
     if len(node.children) < 2:
         return '0'
     rhs = _lower_expr(node.children[1], ctx)
+    if any(_contains_call(node.children[1], op) for op in CUBE_OPERATIONS):
+        return cube_omod(rhs)
     is_f64 = node.ty and node.ty.size == 64
     fp_type = 'double' if is_f64 else 'float'
     suffix = '' if is_f64 else 'f'

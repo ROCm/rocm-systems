@@ -212,6 +212,9 @@ public:
   BufferFormatEncoding buffer_format_encoding = BufferFormatEncoding::Gfx11;
   uint32_t buffer_selectors = 0;
   bool image_srgb = false;
+  // Every sampler instruction uses floating-point texel rules, including
+  // nearest sampling without optional multi-tap image_sample state.
+  bool image_sampling = false;
   std::unique_ptr<ImageMetadataAccess> image_metadata;
   std::unique_ptr<ImageSampleAccess> image_sample;
   uint32_t buffer_components = 0;

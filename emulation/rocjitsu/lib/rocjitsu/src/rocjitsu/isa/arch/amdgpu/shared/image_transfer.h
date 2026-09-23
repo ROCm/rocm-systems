@@ -65,6 +65,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   const uint32_t first_level = gfx12 ? (r[1] >> 25) & 31 : (r[3] >> 12) & 15;
   const uint32_t last_level = gfx12 ? (r[3] >> 15) & 31 : (r[3] >> 16) & 15;
   const bool sample = sampler != ~0u;
+  d.image_sampling = sample;
   const uint32_t first_layer = (r[4] >> 16) & (gfx12 ? 0x3fff : 0x1fff);
   const uint32_t last_layer = r[4] & (gfx12 ? 0x3fff : 0x1fff);
   if ((type != 8 && type != 9 && type != 13) || (dim == 0 && type != 8) ||

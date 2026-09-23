@@ -391,6 +391,16 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
           // RDNA3/4 texture decoding rounds sRGB channels to BF16 precision.
           values[i] = std::bit_cast<uint32_t>(util::bf16_to_f32(util::f32_to_bf16_rne(linear)));
         }
+        if (d.image_sampling && format.number == Number::Float) {
+          // Before filtering, sampling canonicalizes decoded FP32 NaNs and
+          // flushes subnormals to signed zero, independently of VALU MODE.
+          // Image and buffer loads preserve the decoded texel bits.
+          const uint32_t magnitude = values[i] & 0x7fffffffu;
+          if (magnitude > 0x7f800000u)
+            values[i] = std::bit_cast<uint32_t>(kFilterNan);
+          else if (magnitude < 0x00800000u)
+            values[i] &= 0x80000000u;
+        }
       }
       return values;
     };
