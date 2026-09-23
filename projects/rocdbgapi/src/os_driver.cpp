@@ -162,7 +162,8 @@ to_string (os_agent_info_t os_agent_info)
     ".debugging_supported=%d, .address_watch_supported=%d, "
     ".address_watch_register_count=%zd, .address_watch_mask_bits=%#" PRIx64
     ", .watchpoint_exclusive=%d, .precise_memory_supported=%d, "
-    ".precise_alu_exceptions_supported=%d, .firmware_supported=%d, "
+    ".precise_alu_exceptions_supported=%d, "
+    ".lds_exception_supported=%d, .firmware_supported=%d, "
     "ttmps_always_initialized=%d }",
     os_agent_info.os_agent_id, os_agent_info.name.c_str (),
     os_agent_info.domain, os_agent_info.location_id, os_agent_info.gfxip[0],
@@ -182,7 +183,8 @@ to_string (os_agent_info_t os_agent_info)
     os_agent_info.address_watch_mask_bits, os_agent_info.watchpoint_exclusive,
     os_agent_info.precise_memory_supported,
     os_agent_info.precise_alu_exceptions_supported,
-    os_agent_info.firmware_supported, os_agent_info.ttmps_always_initialized);
+    os_agent_info.lds_exception_supported, os_agent_info.firmware_supported,
+    os_agent_info.ttmps_always_initialized);
 }
 
 template <>

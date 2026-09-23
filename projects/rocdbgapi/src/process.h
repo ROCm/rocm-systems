@@ -117,6 +117,8 @@ private:
 
   bool m_supports_precise_alu_exceptions{ false };
 
+  bool m_supports_lds_exception{ false };
+
   os_process_flags_t m_process_flags{};
 
   bool m_forward_progress_needed{ true };
