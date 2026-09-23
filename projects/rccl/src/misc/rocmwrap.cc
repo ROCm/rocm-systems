@@ -47,14 +47,20 @@ static int ncclCuMemSupported = 0;
 #define KERNEL_VERSION_CODE(major, minor) ((major << 16) | (minor << 8))
 
 static int ncclGetKernelVersionCode() {
-  struct utsname u;
-  int major = 0, minor = 0;
-
-  if (uname(&u) != 0) return -1;
-  sscanf(u.release, "%d.%d", &major, &minor);
-  INFO(NCCL_INIT, "Kernel version %d.%d", major, minor);
-
-  return KERNEL_VERSION_CODE(major, minor);
+  static std::once_flag once;
+  static int code = -1;
+  std::call_once(once, []() {
+    struct utsname u;
+    int major = 0, minor = 0;
+    if (uname(&u) != 0) {
+      code = -1;
+      return;
+    }
+    sscanf(u.release, "%d.%d", &major, &minor);
+    INFO(NCCL_INIT, "Kernel version %d.%d", major, minor);
+    code = KERNEL_VERSION_CODE(major, minor);
+  });
+  return code;
 }
 
 // Runtime probe: run the cuMem VMM cycle + register.cc pointer queries once; some ROCm builds advertise cuMem but reject the ops at runtime. Returns 1 if all succeed, 0 otherwise; never fatal.
