@@ -869,6 +869,71 @@
           }
         }
       ]
+    },
+    "pytorch-rdna4-split-softmax": {
+      "faults": [
+        {
+          "id": "barrier-drop-wave-max-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed Triton gfx1201 ELF fnv1a64:045c766e416734e6, matching split-softmax clean-run code_object identity and native kernel allowlist. The eight-wave triton_red_fused__softmax_prepare_softmax_online_0 publishes wave maxima in 32 bytes LDS at .text+0xdd8. Its unconditional signal/wait pair at 0xde4/0xe28 precedes peer-wave loads at 0xe38. The only preceding scalar branch is the reduction loop backedge; completion reaches this pair for the recorded workload. Remove the associated pair as one logical mutation; retain later reduction barriers. Eight standard trials per profile require at least one detection; numerical manifestations remain independent. Exact pristine ELF, inventory and disassembly: rdna4-20260923/softmax-debug/split.* and split-inventory.txt."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|kind=barrier|pc=0x0000000000000de4|mnemonic=s_barrier_signal|occurrence=0",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000de4|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:045c766e416734e6|kernel=triton_red_fused__softmax_prepare_softmax_online_0|event=barrier|pc=0x0000000000000e28|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 1,
+              "oracle": "any",
+              "trials": [
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 1,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "0"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "4"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "16"
+                },
+                {
+                  "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS": "64"
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }
