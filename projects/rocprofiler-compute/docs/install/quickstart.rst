@@ -95,7 +95,7 @@ Ensure ROCm is installed and follow the steps:
 
       python3 -m venv ~/.venvs/rocprof-compute-analyze
       source ~/.venvs/rocprof-compute-analyze/bin/activate
-      pip install --extra-index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm-profiler[compute-analyze]"
+      pip install --extra-index-url https://<stable/nightly>.repo.amd.com/rocm/whl-next/ "rocm-profiler[compute-analyze]"
 
    To check that the environment has everything analyze mode needs, run
    ``rocprof-compute analyze --verify-deps``.
