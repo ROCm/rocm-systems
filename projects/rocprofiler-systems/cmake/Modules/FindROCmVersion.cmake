@@ -377,12 +377,14 @@ function(ROCM_VERSION_PARSE_PACKAGE_VERSION)
     endforeach()
 
     foreach(_PKG rocm-core hip)
-        # QUIET because a missing package is an expected outcome here, not an error
+        # ROCmVersion_DIR comes first to match the version file search, which uses it as
+        # the sole search path when set. QUIET because a missing package is an expected
+        # outcome here, not an error.
         find_package(
             ${_PKG}
             QUIET
-            HINTS ${ROCM_PATH} ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-            PATHS ${ROCM_PATH} ${ROCPROFSYS_DEFAULT_ROCM_PATH}
+            HINTS ${ROCmVersion_DIR} ${ROCM_PATH} ${ROCPROFSYS_DEFAULT_ROCM_PATH}
+            PATHS ${ROCmVersion_DIR} ${ROCM_PATH} ${ROCPROFSYS_DEFAULT_ROCM_PATH}
         )
 
         # a package can be "found" without reporting a version, so test the version itself
@@ -401,8 +403,16 @@ function(ROCM_VERSION_PARSE_PACKAGE_VERSION)
                 set(_ROCM_ROOT)
             endif()
 
-            # take the first candidate that resolves to a real directory
-            foreach(_DIR "${_ROCM_ROOT}" "${ROCM_PATH}" "${ROCPROFSYS_DEFAULT_ROCM_PATH}")
+            # take the first candidate that resolves to a real directory. ROCmVersion_DIR
+            # comes first so that a caller-provided root is reported back unchanged rather
+            # than overwritten, which is how the version file search treats it too.
+            foreach(
+                _DIR
+                "${ROCmVersion_DIR}"
+                "${_ROCM_ROOT}"
+                "${ROCM_PATH}"
+                "${ROCPROFSYS_DEFAULT_ROCM_PATH}"
+            )
                 if(IS_DIRECTORY "${_DIR}")
                     set(ROCmVersion_DIR "${_DIR}" CACHE PATH "Root path to ROCm" FORCE)
                     rocm_version_watch_for_change(ROCmVersion_DIR)
