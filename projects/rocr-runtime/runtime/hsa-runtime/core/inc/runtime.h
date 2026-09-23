@@ -1164,6 +1164,16 @@ class Runtime {
   hsa_status_t VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, void* (*alloc)(size_t),
                               uint32_t* num_agents_accessible, hsa_agent_t** accessible);
 
+  /// @brief Answers @ref PtrInfo for an allocation whose driver is not the thunk's.
+  ///
+  /// The thunk knows KFD allocations only, so a pointer into memory another kernel driver
+  /// allocated -- an AIE agent's, say -- looks like an unknown address to it. The runtime's own
+  /// allocation map does know it, and the owning driver can say what address its agent reaches it
+  /// at. Callers must hold @ref memory_lock_.
+  hsa_status_t DriverPtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, void* (*alloc)(size_t),
+                             uint32_t* num_agents_accessible, hsa_agent_t** accessible,
+                             PtrInfoBlockData* block_info);
+
   hsa_status_t VMemoryMapAllowAccess(const void* va, hsa_access_permission_t perm,
                                      const hsa_agent_t* agents, size_t num_agents);
   hsa_status_t VMemorySetAccessPerHandle(void* va, MappedHandle& MappedHandle,
