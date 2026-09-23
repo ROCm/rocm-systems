@@ -192,7 +192,9 @@ public:
   ///
   /// @param[in] handle driver identity returned by @ref AllocateMemory.
   /// @param[out] device_address address the agent accesses the allocation at, or 0 if the
-  /// allocation has none, which also means the agent cannot reach it directly.
+  /// allocation has no address distinct from its host one. Zero does NOT mean unreachable: an
+  /// allocation shared with the host is reached at its host virtual address, which is what
+  /// XdnaDriver's GetBODevAddr reports zero for, and the caller should use that address.
   /// @retval HSA_STATUS_ERROR_INVALID_AGENT if the driver has no such notion.
   virtual hsa_status_t GetMemoryDeviceAddress(const DriverMemoryHandle& handle,
                                               uint64_t* device_address) const {

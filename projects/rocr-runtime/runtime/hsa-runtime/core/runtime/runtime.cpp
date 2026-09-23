@@ -1243,12 +1243,37 @@ hsa_status_t Runtime::DriverPtrInfo(const void* ptr, hsa_amd_pointer_info_t* inf
   info->userData = it->second.user_ptr;
   info->agentOwner = owner->public_handle();
 
+  // The same mapping VMemoryPtrInfo applies, in the same order. Reporting a subset here would
+  // make an allocation's flags depend on which path resolved it -- and the kernarg case is not
+  // hypothetical: AMD::MemoryRegion sets Uncached for a kernarg pool, so an AIE kernarg
+  // allocation would silently lose HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT.
   const HsaMemFlags& regionFlags = region->mem_flags();
   info->global_flags = regionFlags.ui32.CoarseGrain ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED
                                                     : HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
+  info->global_flags |=
+      regionFlags.ui32.Uncached ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT : 0;
+  info->global_flags |= regionFlags.ui32.ExtendedCoherent
+      ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED
+      : 0;
+
   info->alloc_flags = 0;
+  if (regionFlags.ui32.ReadOnly) info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_READONLY;
   if (regionFlags.ui32.HostAccess)
     info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_HOST_ACCESS;
+  if (regionFlags.ui32.AtomicAccessFull)
+    info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_FULL;
+  if (regionFlags.ui32.AtomicAccessPartial)
+    info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_PARTIAL;
+
+  // And the per-allocation flags, which are the caller's own request rather than a property of
+  // the pool -- allocation_map_ keeps them for exactly this.
+  const MemoryRegion::AllocateFlags af = it->second.alloc_flags;
+  if (af & core::MemoryRegion::AllocateExecutable)
+    info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_EXECUTABLE;
+  if (af & core::MemoryRegion::AllocateContiguous)
+    info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_CONTIGUOUS;
+  if (af & core::MemoryRegion::AllocateNonPaged)
+    info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_NONPAGED;
 
   if (block_info != nullptr) {
     // There is no suballocation here: the block is the allocation.
