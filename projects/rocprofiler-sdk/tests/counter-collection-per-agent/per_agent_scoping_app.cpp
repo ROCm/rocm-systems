@@ -133,6 +133,38 @@ records_on(rocprofiler_agent_id_t agent)
     return (itr == records_per_agent.end()) ? 0 : itr->second;
 }
 
+// This test only runs on a multi-GPU machine, so when it fails in CI there is no way to
+// reproduce it locally. Dump every agent the callbacks actually fired for, not just the two the
+// assertions read: a count of zero on GPU-0 otherwise cannot be told apart from callbacks that
+// fired and were attributed to some other agent handle.
+void
+dump_observations(const char* phase)
+{
+    auto lk = std::unique_lock{observed_mutex};
+    printf("[%s] dispatch callbacks fired for %zu agent(s):", phase, dispatch_per_agent.size());
+    for(const auto& [handle, count] : dispatch_per_agent)
+        printf(" %lu=%zu", static_cast<unsigned long>(handle), count);
+    printf("\n[%s] records delivered for %zu agent(s):", phase, records_per_agent.size());
+    for(const auto& [handle, count] : records_per_agent)
+        printf(" %lu=%zu", static_cast<unsigned long>(handle), count);
+    printf("\n");
+    fflush(stdout);
+}
+
+// A context can be started successfully and still not be visible to the dispatch path, which is
+// the distinction between "the service never engaged" and "the service engaged and collected
+// nothing".
+void
+report_context_state(const char* what, rocprofiler_context_id_t ctx)
+{
+    int status = -1;
+    if(rocprofiler_context_is_active(ctx, &status) != ROCPROFILER_STATUS_SUCCESS)
+        printf("[ctx] %s: rocprofiler_context_is_active failed\n", what);
+    else
+        printf("[ctx] %s: active=%d\n", what, status);
+    fflush(stdout);
+}
+
 void
 record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                 rocprofiler_counter_record_t*,
@@ -204,7 +236,17 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
         if(strcmp(info.name, "SQ_WAVES") == 0) collect.push_back(counter);
     }
 
-    if(collect.empty()) return;
+    if(collect.empty())
+    {
+        // Leaving *config unset means the dispatch is seen but never produces a record, which
+        // looks identical to a scoping failure in the record counts below.
+        printf("[profile] agent %lu exposes %zu counters but no SQ_WAVES; no records will be "
+               "produced for it\n",
+               static_cast<unsigned long>(agent_id.handle),
+               supported.size());
+        fflush(stdout);
+        return;
+    }
 
     rocprofiler_counter_config_id_t profile = {.handle = 0};
     ROCPROFILER_CALL(
@@ -408,7 +450,9 @@ main()
     // it doubles as the positive control for the timing measurement.
     reset_observations();
     ROCPROFILER_CALL(rocprofiler_start_context(ctx_all), "start unrestricted context");
+    report_context_state("unrestricted after start", ctx_all);
     const double unrestricted_ms = time_concurrent_workload(0);
+    dump_observations("unrestricted");
     ROCPROFILER_CALL(rocprofiler_stop_context(ctx_all), "stop unrestricted context");
     const size_t unrestricted_dispatches_gpu0 = dispatches_on(agent_0);
 
@@ -416,8 +460,10 @@ main()
     // untouched.
     reset_observations();
     ROCPROFILER_CALL(rocprofiler_start_context(ctx_scoped_gpu1), "start scoped context");
+    report_context_state("scoped-to-gpu1 after start", ctx_scoped_gpu1);
     time_concurrent_workload(1);
     const double scoped_ms = time_concurrent_workload(0);
+    dump_observations("scoped-to-gpu1");
     ROCPROFILER_CALL(rocprofiler_stop_context(ctx_scoped_gpu1), "stop scoped context");
     const size_t scoped_records_gpu1    = records_on(agent_1);
     const size_t scoped_dispatches_gpu0 = dispatches_on(agent_0);
