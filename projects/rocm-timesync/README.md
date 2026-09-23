@@ -48,6 +48,10 @@ with the provided GPU timestamp to produce the offset to translate to realtime.
 
 ## Components
 
+The following diagram lays out the current design of the system. We discuss each component below.
+
+![](./doc/img/out-of-process.png)
+
 ### rocm-timesyncd
 
 `rocm-timesync` is a new standalone ROCm system service. One instance of this service runs per node. The service:
@@ -88,8 +92,22 @@ wraps around to the front of the buffer.
 a backend (memory and/or storage), and uses that backend to implement time translation calls made to it by ROCR. This
 library is linked into the process runtime when ROCR declares it as a runtime dependency (more on this below)
 
-#### Configuration
+It is assumed that an arbitrarily long amount of time may elapse between a) when the library streams a crosststamp from the
+ringbuffer, and b) the point at which that crosststamp is needed to service a translaton request. Based no this
+assumption, a persistent backend time-series database is used to store crosststamps. The current version uses
+[InfluxDB](https://www.influxdata.com/).
 
+The library can be configured to only store data in memory rather than in a database, though this presents a tradeoff:
+either a) tolerate potentially excessive consumption of system memory, or b) require eviction of old timestamps, and
+thus tolerate a loss of precision for translations overlapping those entries. While the same tradeoff _is_ presented to
+a TSDB backend, one assumes that persistent disk storage is more readily available either on the node, or elsewhere in
+the cluster.
+
+When a TSDB is present, the library will still place a memory cache in front of it, so that it can quickly handle the
+common case of translating recently generated GPU timestamps directly from memory rather than requiring a database
+query.
+
+#### Configuration
 
 #### API
 
