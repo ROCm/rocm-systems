@@ -111,21 +111,14 @@ private:
 
 #include "fakes/sym_kernels_fakes.h"
 
-// The host location types, chosen per ROCm version.
+// Host location types. hipMemLocationTypeHost is in hip/driver_types.h from
+// 7.0.2.2 (the host-VMM window floor). HostNuma is still missing below 7.12;
+// hip_compat.h supplies CU_MEM_LOCATION_TYPE_HOST_NUMA as 3 on those builds.
+// This file is compiled as-is (not hipified), so it cannot rely on HIPIFY
+// rewriting the CUDA spelling.
 //
-// hipMemLocationTypeHost / ...HostNuma only exist from ROCm 7.12
-// (hip/driver_types.h); below that the enum stops at Device. hip_compat.h
-// supplies CU_MEM_LOCATION_TYPE_HOST_NUMA as a plain 3, but only on the
-// versions where the enumerator is missing. So neither spelling compiles on
-// both, and one has to be picked per version.
-//
-// Production does not need this: hipify rewrites CU_MEM_LOCATION_TYPE_HOST_NUMA
-// to the enumerator only where the enumerator exists, and leaves the macro
-// alone otherwise. This file is compiled as-is, not hipified, so it gets no
-// such rewrite.
-//
-// static const, not constexpr: below 7.12 these values fall outside the enum's
-// range, which makes them ill-formed as constant expressions.
+// static const, not constexpr: below 7.12 HostNuma falls outside the enum's
+// range, which makes it ill-formed as a constant expression.
 // ---------------------------------------------------------------------------
 // Shared fixture teardown for suites that leave windows registered.
 //
@@ -153,14 +146,13 @@ static void ReclaimDevrWindows(ncclComm* comm) {
   while (devr->memHead != nullptr) symMemoryDestroy(comm, devr->memHead);
 }
 
-#if defined(__HIP_PLATFORM_AMD__) && ROCM_VERSION < 71200
+#if defined(__HIP_PLATFORM_AMD__) && (!defined(ROCM_VERSION) || ROCM_VERSION < 71200)
 static const hipMemLocationType kLocHostNuma =
     static_cast<hipMemLocationType>(CU_MEM_LOCATION_TYPE_HOST_NUMA);
-static const hipMemLocationType kLocHost = static_cast<hipMemLocationType>(2);
 #else
 static const hipMemLocationType kLocHostNuma = hipMemLocationTypeHostNuma;
-static const hipMemLocationType kLocHost = hipMemLocationTypeHost;
 #endif
+static const hipMemLocationType kLocHost = hipMemLocationTypeHost;
 
 // ---------------------------------------------------------------------------
 // ncclSymIsHostSegment: true for host-NUMA on CUDA, and on AMD inside
@@ -3837,17 +3829,13 @@ TEST_F(DevrWindowRegisterInGroupSymTest, MisalignedWindow_ReturnsInvalidArgument
 // Branch: CPU-backed segments need the elastic-buffer param, and are rejected
 // with a specific code when it is off rather than failing later.
 //
-// Both this and the accepting case below depend on hipMemLocationTypeHost being
-// recognised as CPU-backed, which ncclSymIsHostSegment only does at
-// ROCM_VERSION >= 71200 (ncclSymIsHostSegment). Below that the segment is instead
-// rejected as an unsupported location type -- which for this test is the same
-// return code for an entirely different reason, so it would pass without
-// exercising the elastic-buffer gate at all.
-//
-// Compiled out rather than skipped at run time: below 7.12 the enumerator
-// itself does not exist (hip/driver_types.h stops at Device), so naming it
-// would not compile on the ROCm 7.0.2 backwards-compatibility build.
-#if ROCM_VERSION >= 71200
+// Both this and the accepting case depend on hipMemLocationTypeHost being
+// recognised as CPU-backed, which ncclSymIsHostSegment only does inside
+// NCCL_CUMEM_HOST_VERSION_SUPPORTED. Outside that window the segment is
+// rejected as an unsupported location type -- the same return code for a
+// different reason, so the test would pass without exercising the
+// elastic-buffer gate.
+#if NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
 TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithoutElasticParam_ReturnsInvalidArgument) {
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
   ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle, SegmentsOfType(kLocHost));
@@ -3863,8 +3851,8 @@ TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithoutElasticParam_Return
 }
 
 // Branch: with the param on, the same CPU-backed layout is accepted.
-// Same ROCM_VERSION dependency as the case above -- here it is load-bearing
-// rather than masked: below 7.12 the registration is rejected outright.
+// Same host-VMM window as the case above -- here it is load-bearing rather
+// than masked: outside the window the registration is rejected outright.
 TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithElasticParam_Registers) {
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
   ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle, SegmentsOfType(kLocHost));
@@ -3873,7 +3861,20 @@ TEST_F(DevrWindowRegisterInGroupSymTest, SysmemSegmentWithElasticParam_Registers
   ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
   EXPECT_EQ(comm->devrState.winSortedCount, 1);
 }
-#endif  // ROCM_VERSION >= 71200
+#endif  // NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+
+// Device windows must still register when elastic is off. g_loadParam avoids
+// NCCL_PARAM's first-read cache. An always-invalid helper would fail this.
+TEST_F(DevrWindowRegisterInGroupSymTest, DeviceSegmentWithoutElasticParam_Registers) {
+  ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(4096));
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "ELASTIC_BUFFER_REGISTER" ? 0 : deftVal;
+  });
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(ncclDevrWindowRegisterInGroup(comm, kUserPtr, 4096, 0, &out), ncclSuccess);
+  EXPECT_EQ(comm->devrState.winSortedCount, 1);
+}
 
 // Branch: a segment that is neither host nor device is rejected -- symmetric
 // memory has no mapping strategy for anything else.

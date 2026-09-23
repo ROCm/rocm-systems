@@ -40,6 +40,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <sys/mman.h>
 
 // Count hipMemAddressFree for skip-on vs skip-off finalize tests.
@@ -325,6 +326,10 @@ HIP_FAKE hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp
   if (prop) {
     *prop = hipMemAllocationProp{};
     prop->location.type = hipMemLocationTypeDevice;
+    const char* loc = std::getenv("RCCL_TEST_VMM_LOCATION");
+    if (loc != nullptr && std::strcmp(loc, "host") == 0) {
+      prop->location.type = hipMemLocationTypeHost;
+    }
   }
   return hipSuccess;
 }
@@ -349,7 +354,10 @@ HIP_FAKE hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t
 }
 HIP_FAKE hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr) {
   if (pbase) *pbase = dptr;
-  if (psize) *psize = 0;
+  if (psize) {
+    const char* sz = std::getenv("RCCL_TEST_VMM_SEGMENT_SIZE");
+    *psize = (sz != nullptr && sz[0] != '\0') ? static_cast<size_t>(std::strtoull(sz, nullptr, 0)) : 0;
+  }
   return hipSuccess;
 }
 
