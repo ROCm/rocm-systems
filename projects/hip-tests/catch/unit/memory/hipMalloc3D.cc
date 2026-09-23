@@ -14,6 +14,7 @@ hipMalloc3D API test scenarios
 
 #include <algorithm>
 #include <chrono>
+#include <thread>
 
 #include <hip_test_common.hh>
 static constexpr auto SMALL_SIZE{4};
@@ -87,7 +88,9 @@ HIP_TEST_CASE(Unit_hipMalloc3D_Basic) {
     HIPCHECK(hipFree(devPitchedPtr[i].ptr));
   }
 
-  const size_t expected_min_avail = pavail - height * width * depth - kMemoryAccountingSlack;
+  const size_t reclaimed_bytes_target = height * width * depth + kMemoryAccountingSlack;
+  const size_t expected_min_avail =
+      (pavail > reclaimed_bytes_target) ? (pavail - reclaimed_bytes_target) : 0;
   size_t max_avail = 0;
 
   for (int attempt = 0; attempt < kMemoryInfoRetryCount; ++attempt) {
