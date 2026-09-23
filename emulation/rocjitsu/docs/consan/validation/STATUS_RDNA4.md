@@ -34,7 +34,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 
 | Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |
-| Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟨 Sep 23: clean pass; fault transformation times out before admission; no sensitivity result | 🟨 Sep 23: clean pass; fault transformation times out before admission; no sensitivity result |
+| Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: clean pass; fault transformation times out before admission; no sensitivity result | 🟨 Sep 23: clean pass; fault transformation times out before admission; no sensitivity result |
 | Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟨 Sep 23: clean pass; fault transformation times out before admission; no sensitivity result | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: standard fault 0/8; preset=max clean passes and fault detects 7/8 (separate configuration) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: clean pass; reviewed publication-barrier fault missed in 8/8 trials |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: standard fault 0/8; preset=max clean passes and fault detects 8/8 (separate configuration) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: clean pass; reviewed cross-wave publication fault missed in 8/8 trials |
@@ -475,3 +475,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   clean comparators, followed by the original reviewed Default fault matrix
   at its maintained 300-second deadline. No timeout override is used for these
   qualification attempts. Timing artifact: `matmul-debug/transform-fixed-result.json`.
+- `rdna4-matmul-fp16-production` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round11/rdna4-matmul-fp16-production-default`.
