@@ -1870,10 +1870,61 @@ TEST_F(DispatchTest, PointerInfoReportsPoolFlags) {
   info.size = sizeof(info);
   ASSERT_EQ(hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS);
 
-  constexpr std::uint32_t kGrainMask = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED |
-                                       HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
-  EXPECT_EQ(info.global_flags & kGrainMask, pool_flags & kGrainMask);
+  // The WHOLE word, not just the grain bits. Checking a mask is what let an earlier revision
+  // drop KERNARG_INIT and EXTENDED_SCOPE_FINE_GRAINED without any test noticing: every bit it
+  // did look at still agreed.
+  EXPECT_EQ(info.global_flags, pool_flags);
   EXPECT_TRUE(info.registered);
+
+  EXPECT_EQ(hsa_amd_memory_pool_free(ptr), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, PointerInfoReportsKernargPoolFlags) {
+  // The kernarg pool is the case the grain bits cannot show: AMD::MemoryRegion sets Uncached for
+  // it, which surfaces as KERNARG_INIT. A path reporting only the grain bits looks correct on a
+  // device-pool allocation and drops this one.
+  find_pool_data kernarg{};
+  kernarg.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
+  kernarg.expected_allocatable = true;
+  if (hsa_amd_agent_iterate_memory_pools(aie_agents.front(), find_memory_pool, &kernarg) !=
+      HSA_STATUS_INFO_BREAK) {
+    GTEST_SKIP() << "no allocatable kernarg pool on this agent";
+  }
+
+  void* ptr = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg.pool, 4096, 0, &ptr), HSA_STATUS_SUCCESS);
+
+  std::uint32_t pool_flags = 0;
+  ASSERT_EQ(hsa_amd_memory_pool_get_info(kernarg.pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS,
+                                         &pool_flags),
+            HSA_STATUS_SUCCESS);
+
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(info);
+  ASSERT_EQ(hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(info.type, HSA_EXT_POINTER_TYPE_HSA);
+  EXPECT_EQ(info.global_flags, pool_flags);
+  EXPECT_TRUE(info.global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT);
+
+  EXPECT_EQ(hsa_amd_memory_pool_free(ptr), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, PointerInfoReportsPerAllocationFlags) {
+  // alloc_flags carries the caller's own request, not a property of the pool, so it cannot be
+  // derived from the region: it has to come out of allocation_map_. Requested and reported must
+  // agree, or an allocation reports flags it was not made with.
+  constexpr std::size_t kSize = 4096;
+  void* ptr = nullptr;
+  const hsa_amd_memory_pool_flag_t kFlag = HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
+  if (hsa_amd_memory_pool_allocate(dev_pool, kSize, kFlag, &ptr) != HSA_STATUS_SUCCESS) {
+    GTEST_SKIP() << "pool does not accept the executable allocation flag";
+  }
+
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(info);
+  ASSERT_EQ(hsa_amd_pointer_info(ptr, &info, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS);
+  ASSERT_EQ(info.type, HSA_EXT_POINTER_TYPE_HSA);
+  EXPECT_TRUE(info.alloc_flags & HSA_AMD_POINTER_INFO_ALLOC_FLAG_EXECUTABLE);
 
   EXPECT_EQ(hsa_amd_memory_pool_free(ptr), HSA_STATUS_SUCCESS);
 }
