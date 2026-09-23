@@ -66,6 +66,17 @@ static bool envCtaPolicyIsZero()
     return s == "ZERO";
 }
 
+// CAST jobs set NCCL_NET=IB-CAST (or ib-cast). Classic IB must not take this arm.
+static bool envNetIsIbCast()
+{
+    const char* net = std::getenv("NCCL_NET");
+    if (net == nullptr || net[0] == '\0') return false;
+    std::string s(net);
+    for (char& c : s)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return s == "IB-CAST";
+}
+
 // Env / driver gates are process-wide, so a rank-local skip is safe. Alloc
 // failure is not: that skip must run in the TEST body after allRanksTrue.
 static const char* ceRecvOffsetEnvSkipReason()
@@ -1227,8 +1238,10 @@ protected:
  *   recvbuff = [N * kSegmentSize,  2N * kSegmentSize)  covers last  N segments
  *
  * The collective operates on four segments per half, while ncclCommRegister
- * covers the complete eight-segment allocation. Skip unless some rank cached
- * netNSegments (NET register completed for every peer). That count must be 8.
+ * covers the complete eight-segment allocation. Under NCCL_NET=IB-CAST the
+ * CAST register arm must set NET_REG_COMPLETE and cache eight segments; skip
+ * would stay green if IbCastRegMrDmaBufMultiSeg were reverted. Classic IB still
+ * skips when no rank completed NET registration.
  */
 TEST_F(UBR_MultiSegment, Generic)
 {
@@ -1292,16 +1305,21 @@ TEST_F(UBR_MultiSegment, Generic)
     struct ncclReg* reg = nullptr;
     ncclRegFind(reinterpret_cast<struct ncclComm*>(getActiveCommunicator()), buf.vaBase, buf.totalSize, &reg);
     ASSERT_NE(reg, nullptr) << "ncclCommRegister did not publish a cache entry for the multi-segment buffer";
-    const bool netDone = reg->netNSegments != 0;
-    {
+    const bool netDone = (reg->state & NET_REG_COMPLETE) != 0 && reg->netNSegments != 0;
+    if (envNetIsIbCast()) {
+        ASSERT_TRUE(MPIHelpers::allRanksTrue(netDone))
+            << "CAST netIbCast register arm did not set NET_REG_COMPLETE";
+        ASSERT_EQ(reg->netNSegments, kNumSegments)
+            << "NET registration walked a prefix of the ncclCommRegister range, not the full 8-segment allocation";
+    } else {
         const std::string why = mpiCoordinatedSkipReason(
             !MPIHelpers::anyRankTrue(netDone),
             "NET full-range segment count not cached on any rank");
         if (!why.empty()) GTEST_SKIP() << why;
-    }
-    if (netDone) {
-        ASSERT_EQ(reg->netNSegments, kNumSegments)
-            << "NET registration walked a prefix of the ncclCommRegister range, not the full 8-segment allocation";
+        if (netDone) {
+            ASSERT_EQ(reg->netNSegments, kNumSegments)
+                << "NET registration walked a prefix of the ncclCommRegister range, not the full 8-segment allocation";
+        }
     }
 }
 

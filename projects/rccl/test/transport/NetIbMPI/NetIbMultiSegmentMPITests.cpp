@@ -127,12 +127,14 @@ protected:
             PostSingleRecv(pair.recvComm, buf, size, tag, recvMh_, &req);
             int sz = 0;
             EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
+            EXPECT_EQ(sz, static_cast<int>(size));
         } else {
             FillDevice(static_cast<uint8_t*>(sBuf) + srcOff, size, seed);
             void* buf = static_cast<uint8_t*>(sBuf) + srcOff;
             PostSendWithRetry(pair.sendComm, buf, size, tag, sendMh_, &req);
             int sz = 0;
             EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
+            EXPECT_EQ(sz, static_cast<int>(size));
         }
         MPI_Barrier(MPI_COMM_WORLD);
         if (rank == 0)
@@ -192,7 +194,7 @@ protected:
         const int rank = MPIEnvironment::world_rank;
         *comm = (rank == 0) ? pair.recvComm : pair.sendComm;
         *mh = nullptr;
-        ncclResult_t r = RegisterMultiSegmentMr(*comm, *buf, mh);
+        ncclResult_t r = RegisterMultiSegmentMr(*comm, *buf, net_ == &netIbCast, mh);
         EXPECT_EQ(r, ncclSuccess) << "multi-segment registration failed (the AIRUNTIME-2351 bug)";
         EXPECT_NE(*mh, nullptr);
         const bool ok = (r == ncclSuccess && *mh != nullptr);
@@ -307,7 +309,10 @@ TEST_F(NetIbMultiSegmentMPITest, WholeBufferSingleTransfer) {
 
 // NEGATIVE: a buffer with more than NCCL_IB_MAX_SEGMENTS physical segments is
 // rejected at registration with ncclInvalidUsage and produces no handle. The
-// wire protocol carries at most NCCL_IB_MAX_SEGMENTS segments.
+// wire protocol carries at most NCCL_IB_MAX_SEGMENTS segments. A registration
+// at exactly the cap is the positive control: declining by policy returns the
+// same ncclInvalidUsage/NULL pair, so only the at-cap success proves the
+// rejection below came from the segment count.
 TEST_F(NetIbMultiSegmentMPITest, ExceedsMaxSegmentsRejected) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit));
@@ -315,6 +320,8 @@ TEST_F(NetIbMultiSegmentMPITest, ExceedsMaxSegmentsRejected) {
     if (SyncSkip(!PtrSupported(NCCL_PTR_DMABUF))) GTEST_SKIP() << "DMA-BUF registration not supported";
 
     const int rank = MPIEnvironment::world_rank;
+    MultiSegmentVmmBuffer* atCap = AllocSym(NCCL_IB_MAX_SEGMENTS);
+    if (SyncSkip(atCap == nullptr)) GTEST_SKIP() << "could not allocate at-cap VMM window";
     MultiSegmentVmmBuffer* big = AllocSym(NCCL_IB_MAX_SEGMENTS + 1);
     if (SyncSkip(big == nullptr)) GTEST_SKIP() << "could not allocate over-cap VMM window";
 
@@ -322,13 +329,21 @@ TEST_F(NetIbMultiSegmentMPITest, ExceedsMaxSegmentsRejected) {
     ASSERT_SETUP_CONNECTION(0, pair, guard);
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
 
-    void* mh = nullptr;
-    ncclResult_t r = RegisterMultiSegmentMr(comm, *big, &mh);
 #if NCCL_CUMEM_DMABUF_EXPORT_GATE
+    {
+        void* atCapMh = nullptr;
+        ncclResult_t atCapRet = RegisterMultiSegmentMr(comm, *atCap, net_ == &netIbCast, &atCapMh);
+        NetMHandleGuard atCapGuard(atCapMh, NetMHandleDeleter(net_, comm));
+        ASSERT_EQ(atCapRet, ncclSuccess) << "registration at exactly NCCL_IB_MAX_SEGMENTS must succeed";
+        ASSERT_NE(atCapMh, nullptr) << "at-cap registration must produce a handle";
+    }
+
+    void* mh = nullptr;
+    ncclResult_t r = RegisterMultiSegmentMr(comm, *big, net_ == &netIbCast, &mh);
     EXPECT_EQ(r, ncclInvalidUsage) << "over-cap segment buffer must be rejected";
     EXPECT_EQ(mh, nullptr) << "no handle should be produced for an over-cap buffer";
 #else
-    (void)r;
+    (void)comm;
     GTEST_SKIP() << "dma-buf export API unavailable at build time";
 #endif
     MPI_Barrier(MPI_COMM_WORLD);
@@ -344,9 +359,8 @@ TEST_F(NetIbMultiSegmentMPITest, SingleSegmentThroughMultiSegPath) {
     SendRecvChunk(pair, lastBuf_->ptr, lastBuf_->ptr, 0, 65536, /*tag=*/300, /*seed=*/0x77);
 }
 
-// iflush after a recv into a non-zero segment must use that segment's MR, not
-// segment 0. With GDR flush off, iflush still succeeds (no request) without a
-// boundary error.
+// iflush after a recv into a non-zero segment must use that segment's MR.
+// GDR flush is required, so iflush must return a request.
 TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushSelectsSegmentMr) {
     if (SyncSkip(!directGdrFlushEnabled()))
         GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 "
@@ -374,11 +388,10 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushSelectsSegmentMr) {
         void* freq      = nullptr;
         EXPECT_EQ(FlushRecv(pair.recvComm, 1, fbufs, fsizes, fhs, &freq), ncclSuccess)
             << "iflush must handle a multi-segment handle (segment 2) without a boundary error";
-        if (freq != nullptr) {
-            int fsz = 0;
-            EXPECT_EQ(WaitForCompletion(freq, &fsz, kDefaultTimeoutMs), ncclSuccess)
-                << "flush RDMA read did not complete";
-        }
+        EXPECT_NE(freq, nullptr) << "GDR flush is enabled; iflush must return a request";
+        int fsz = 0;
+        EXPECT_EQ(WaitForCompletion(freq, &fsz, kDefaultTimeoutMs), ncclSuccess)
+            << "flush RDMA read did not complete";
         EXPECT_TRUE(VerifyDevice(rbuf, chunk, 0xC0)) << "data mismatch after flush";
     } else {
         void* sbuf = static_cast<uint8_t*>(lastBuf_->ptr) + off;
@@ -419,11 +432,10 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushTouchesEverySegment) {
         void* freq      = nullptr;
         EXPECT_EQ(FlushRecv(pair.recvComm, 1, fbufs, fsizes, fhs, &freq), ncclSuccess)
             << "iflush must fence every segment of a whole-buffer receive";
-        if (freq != nullptr) {
-            int fsz = 0;
-            EXPECT_EQ(WaitForCompletion(freq, &fsz, kDefaultTimeoutMs), ncclSuccess)
-                << "whole-buffer flush RDMA read did not complete";
-        }
+        EXPECT_NE(freq, nullptr) << "GDR flush is enabled; iflush must return a request";
+        int fsz = 0;
+        EXPECT_EQ(WaitForCompletion(freq, &fsz, kDefaultTimeoutMs), ncclSuccess)
+            << "whole-buffer flush RDMA read did not complete";
         EXPECT_TRUE(VerifyDevice(rbuf, total, 0xA5))
             << "whole-buffer payload mismatch after flush";
     } else {
@@ -451,7 +463,7 @@ TEST_F(NetIbMultiSegmentMPITest, MultiRecvFlushTouchesEveryHandle) {
     MultiSegmentVmmBuffer* buf1 = AllocSym(kNumSegments);
     if (SyncSkip(buf1 == nullptr)) GTEST_SKIP() << "second multi-segment VMM allocation unavailable";
     void* mh1 = nullptr;
-    ASSERT_EQ(RegisterMultiSegmentMr(comm, *buf1, &mh1), ncclSuccess);
+    ASSERT_EQ(RegisterMultiSegmentMr(comm, *buf1, net_ == &netIbCast, &mh1), ncclSuccess);
     ASSERT_NE(mh1, nullptr);
     NetMHandleGuard mhGuard1(mh1, NetMHandleDeleter(net_, comm));
 
@@ -474,10 +486,9 @@ TEST_F(NetIbMultiSegmentMPITest, MultiRecvFlushTouchesEveryHandle) {
         int flushSizes[2] = {static_cast<int>(chunk), static_cast<int>(chunk)};
         void* flushReq = nullptr;
         EXPECT_EQ(FlushRecv(pair.recvComm, 2, bufs, flushSizes, handles, &flushReq), ncclSuccess);
-        if (flushReq != nullptr) {
-            int flushSize = 0;
-            EXPECT_EQ(WaitForCompletion(flushReq, &flushSize, kDefaultTimeoutMs), ncclSuccess);
-        }
+        EXPECT_NE(flushReq, nullptr) << "GDR flush is enabled; iflush must return a request";
+        int flushSize = 0;
+        EXPECT_EQ(WaitForCompletion(flushReq, &flushSize, kDefaultTimeoutMs), ncclSuccess);
         EXPECT_TRUE(VerifyDevice(bufs[0], chunk, 0x62));
         EXPECT_TRUE(VerifyDevice(bufs[1], chunk, 0x63));
     } else {

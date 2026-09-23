@@ -58,6 +58,7 @@
 
 #include "ibvwrap.h"
 #include "mlx5/mlx5dvwrap.h"
+#include "net_ib/multiseg.h"
 
 #define MAXSUFFIXSIZE 16
 #define MAXNAMESIZE (64 + MAXSUFFIXSIZE)
@@ -154,9 +155,11 @@ extern bool IbCastUseInline;
 #define WR_IMM_RX_REQ_IDX_MASK 0xff
 #define WR_IMM_RX_REQ_IDX_SHIFT 24
 #define WR_IMM_SPLIT_DATA_FLAG 0x00800000
-#define WR_IMM_SIZE_MASK 0x007fffff
+#define WR_IMM_SEGMENTED_FLAG 0x00400000
+#define WR_IMM_SIZE_MASK 0x003fffff
 // QP sharing BY_ID imm_data layout: reqId in bits[7:0], receiver commId in bits[23:8].
 // reqId fits in 8 bits (NET_IB_MAX_REQUESTS <= 256); commId fits in 16 bits.
+// Mutually exclusive with the BY_INDEX size/flag encoding above.
 #define WR_IMM_BYID_REQ_ID_MASK   0xff
 #define WR_IMM_BYID_COMM_ID_SHIFT 8
 #define WR_IMM_BYID_COMM_ID_MASK  0xffff
@@ -218,6 +221,7 @@ struct ncclProfilerInfo {
 #define NCCL_NET_IB_REQ_FLUSH 3
 #define NCCL_NET_IB_REQ_GIN_IPUT 4
 #define NCCL_NET_IB_REQ_GIN_IGET 5
+#define NCCL_NET_IB_REQ_FAILED 6
 extern const char* IbCastReqTypeStr[];
 
 struct ncclIbQpSchedParms {
@@ -312,6 +316,9 @@ struct ncclIbRequestCompletionRecord {
   bool completions[NCCL_IB_MAX_QPS];
 };
 
+// Forward declaration; full definition (with multi-segment fields) is below.
+struct ncclIbMrHandle;
+
 struct ncclIbRequest {
   struct ncclIbNetCommBase* base;
   int type;
@@ -341,6 +348,13 @@ struct ncclIbRequest {
       int size;
       void* data;
       uint32_t lkeys[NCCL_IB_MAX_DEVS_PER_NIC];
+      // Local MR handle for this send; used by the multi-segment WR builder to
+      // resolve the per-segment local lkey. NULL/single-segment handles use
+      // lkeys[] directly on the fast path.
+      struct ncclIbMrHandle* mh;
+      // At most one segmented multi-recv group is active per communicator so
+      // its worst-case WR chain cannot overrun the data QP send queue.
+      bool segmented;
       // Tracks whether data was transmitted on a QP for this request.
       bool sentData[NCCL_IB_MAX_QPS];
     } send;
@@ -390,6 +404,24 @@ struct alignas(32) ncclIbSendFifoCtsInline {
   uint32_t idx;
   char padding[8];
 } __attribute__((packed));
+
+// Receiver layout for nSegments>1. Same [slot][recv] indexing as CTS. idx is the
+// last store so a sender waiting on idx cannot observe a half-written slot.
+struct alignas(64) ncclIbSegLayout {
+  uint32_t nSegments;
+  uint32_t pad;
+  uint64_t segStart[NCCL_IB_MAX_SEGMENTS];
+  uint32_t segRkeys[NCCL_IB_MAX_SEGMENTS][NCCL_IB_MAX_DEVS_PER_NIC];
+  uint64_t idx; // last store; sender waits on this as the slot arrival flag
+};
+
+// Worst-case work requests posted for one multi-recv send on a single QP: each
+// request's chunk may be split at every local and remote segment boundary it
+// spans. Single-segment sends use exactly one WR per request.
+#define NCCL_IB_MAX_WRS_PER_SEND (NCCL_NET_IB_MAX_RECVS * 2 * NCCL_IB_MAX_SEGMENTS)
+// Reserve the legacy two-WQE budget for every request plus one worst-case
+// segmented group. The data path admits only one such group at a time.
+#define NCCL_IB_MAX_SEND_WRS (2 * NET_IB_MAX_REQUESTS + NCCL_IB_MAX_WRS_PER_SEND + 1)
 
 struct ncclIbQpInitAttr {
   ibv_qp_state state;
@@ -476,9 +508,19 @@ struct alignas(8) ncclIbSendCommDev {
   struct ibv_sge sge;
 };
 
-// Wrapper to track an MR per-device, if needed
+// Wrapper to track an MR per-device, if needed.
+//
+// Single-segment buffers (the common case) use only mrs[]; nSegments == 1.
+// Multi-segment cuMem/VMM buffers register one dma-buf MR per physical segment
+// per device; segStart/segLen describe the segment VA layout and segMrs holds
+// the per-segment, per-device MRs. mrs[] aliases segment 0 for compatibility
+// with the single-segment fast path.
 struct ncclIbMrHandle {
   ibv_mr* mrs[NCCL_IB_MAX_DEVS_PER_NIC];
+  int nSegments; // 1 = legacy single MR
+  uintptr_t segStart[NCCL_IB_MAX_SEGMENTS];
+  size_t segLen[NCCL_IB_MAX_SEGMENTS];
+  ibv_mr* segMrs[NCCL_IB_MAX_SEGMENTS][NCCL_IB_MAX_DEVS_PER_NIC];
 };
 
 // Forward declaration
@@ -621,8 +663,15 @@ struct ncclIbSendComm {
   // 32B element (instead of 64B) and not used as a 2D array with
   // with each element of size 64B.
   struct ncclIbSendFifo ctsFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
-  struct ibv_sge sges[NCCL_NET_IB_MAX_RECVS];
-  struct ibv_send_wr wrs[NCCL_NET_IB_MAX_RECVS + 1];
+  // Side table immediately after ctsFifo so one covering MR registers both.
+  // The receiver RDMA-writes every CTS slot when the peer advertised
+  // NCCL_IB_CAP_MULTISEG (including nSegments==1) so the sender can wait on idx.
+  struct ncclIbSegLayout segLayoutFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  // A multi-segment send may split one request's per-QP chunk into up to one WR
+  // per local+remote segment boundary crossing. Size the WR/SGE pools
+  // for the worst case; single-segment sends use exactly one WR per request.
+  struct ibv_sge sges[NCCL_IB_MAX_WRS_PER_SEND];
+  struct ibv_send_wr wrs[NCCL_IB_MAX_WRS_PER_SEND + 1];
   // Each dev correlates to a mergedIbDev
   struct ncclIbSendCommDev devs[NCCL_IB_MAX_DEVS_PER_NIC];
   // Array of pointers to store the send requests for faster access. The
@@ -642,6 +691,7 @@ struct ncclIbSendComm {
   // Same reasoning as ncclIbQp::telQpStats: avoid re-resolving per completion.
   RcclChannelStats* telChStats;
   uint16_t remCommId;           // receiver's commId for imm_data encoding (QP sharing)
+  uint32_t peerCaps;
 };
 // The SendFifo needs to be 32-byte aligned and each element needs
 // to be a 32-byte multiple, so that an entry does not get split and
@@ -655,6 +705,10 @@ static_assert((sizeof(struct ncclIbSendFifoCtsInline) % 32) == 0,
               "ncclIbSendFifoCtsInline element size must be 32-byte aligned");
 static_assert((sizeof(struct ncclIbSendFifoCtsInline) <= 32),
               "struct ncclIbSendFifoCtsInline should fit within 32-bytes");
+static_assert((sizeof(struct ncclIbSegLayout) % 32) == 0, "ncclIbSegLayout element size must be 32-byte multiples");
+static_assert(offsetof(struct ncclIbSendComm, segLayoutFifo) ==
+                offsetof(struct ncclIbSendComm, ctsFifo) + sizeof(((struct ncclIbSendComm*)0)->ctsFifo),
+              "segLayoutFifo must immediately follow ctsFifo for a covering MR");
 static_assert((offsetof(struct ncclIbSendComm, sges) % 32) == 0, "sges must be 32-byte aligned");
 static_assert((offsetof(struct ncclIbSendComm, wrs) % 32) == 0, "wrs must be 32-byte aligned");
 
@@ -689,6 +743,11 @@ struct ncclIbRemCtsFifo {
   uint32_t flags;
 };
 
+struct alignas(64) ncclIbRemSegLayout {
+  struct ncclIbSegLayout elems[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  uint64_t addr;
+};
+
 struct alignas(16) ncclIbRecvCommDev {
   struct ncclIbNetCommDevBase base;
   struct ncclIbGpuFlush gpuFlush;
@@ -697,6 +756,7 @@ struct alignas(16) ncclIbRecvCommDev {
   // side to gather CTS messages (formatted by the receiver) and write them to
   // the sender's CTS FIFO.
   struct ibv_mr* ctsFifoMr;
+  struct ibv_mr* segLayoutFifoMr;
   // MR that is obtained after registering the completion records on the
   // receiver side. The RKey of this MR is provided to the sender side, to allow
   // the sender side to access receiver's completion records using RDMA
@@ -721,6 +781,8 @@ struct ncclIbRecvComm {
   // Structure to hold all the related structures regarding the CTS FIFO
   // structure.
   struct ncclIbRemCtsFifo remCtsFifo;
+  struct ncclIbRemSegLayout remSegLayout;
+  uint32_t peerCaps;
   // Structure to hold all the completion records of all the outstanding
   // receive requests on the receiver side.
   struct ncclIbRequestCompletionRecord cmplsRecords[NET_IB_MAX_REQUESTS];
@@ -779,6 +841,14 @@ ncclResult_t IbCastDmaBufSupport(int dev);
 
 void IbCastAddEvent(struct ncclIbRequest* req, int devIndex);
 void IbCastAddEventCTS(struct ncclIbRequest* req, int devIndex);
+
+static inline bool IbCastRequestHasEvents(struct ncclIbRequest* r) {
+  for (int i = 0; i < NCCL_IB_MAX_DEVS_PER_NIC; i++) {
+    if (r->events[i] != 0) return true;
+  }
+  return false;
+}
+
 ncclResult_t IbCastGetGidIndex(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
                                int* gidIndex);
 ncclResult_t IbCastGetRequest(struct ncclIbNetCommBase* base, struct ncclIbRequest** req);
