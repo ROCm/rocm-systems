@@ -27,7 +27,7 @@ incomplete; historical green results do not count as passes for this campaign.
 - Preparation: current hook and production matmul built; generated per-workload
   allowlists applied; Qwen build provenance verified through the campaign symlinks.
 - Fresh clean assessments: **42/42**, with **40 clean passes** across recorded
-  configurations. No standard-profile cell has passed fresh fault qualification;
+  configurations. FP8 SuperCollider has passed fresh standard-profile fault qualification;
   WMMA attention and FP16 matmul have qualified `preset=max` alternatives below.
 - Preparation logs: `/home/benoit/workspace/consan-validation-artifacts/`.
 
@@ -36,7 +36,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |
 | Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟨 Sep 23: standard fault 0/8; qualified preset=max alternative: clean pass, fault 8/8 | 🟨 Sep 23: clean pass; fault 0/8 detections; 8 trials admitted after transform fix |
-| Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟨 Sep 23: clean pass; publication fault 0/8 detections; fault qualification failed | 🟨 Sep 23: clean pass; publication fault 1/8 detections; qualification audit pending |
+| Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟨 Sep 23: clean pass; publication fault 0/8 detections; fault qualification failed | 🟩 Sep 23: clean pass; reviewed publication fault 1/8 |
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: standard fault 0/8; preset=max clean passes and fault detects 7/8 (separate configuration) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: clean pass; reviewed publication-barrier fault missed in 8/8 trials |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: standard fault 0/8; preset=max clean passes and fault detects 8/8 (separate configuration) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending; prior fault assessment: clean pass; reviewed cross-wave publication fault missed in 8/8 trials |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
@@ -532,3 +532,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - FP8 SuperCollider progress: trial 0 detects the installed publication fault; trial 1 is an admitted miss. Full eight-trial matrix and qualification audit remain pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round10-rdna4-matmul-fp8-production-supercollider/`.
 - Quantized matvec fault review: native-selected library ELF `fnv1a64:fd5ac4e13780e469` matches the clean log. Publication pair `.text+0xb8cc/0xb8d0` separates waves 1–7 partial-sum stores from wave-zero reads. Precommitted standard-profile fault matrices; live qualification pending. Artifacts: `/home/benoit/workspace/consan-validation/rdna4-20260923/llama-matvec-debug/`.
 - `rdna4-matmul-fp8-production` / supercollider: initial-tile publication fault detects 1/8; admitted 8, reached 8; aggregate accepted=True. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round10-rdna4-matmul-fp8-production-supercollider`. Final qualification requires comparator/provenance audit.
+- FP8 standard SuperCollider qualification audit passed: matching clean/fault executable, hook, allowlist and source hashes; all trials admitted/reached, complete without overflow, and healthy before/after. Detects 1/8; standard-profile statistical contract accepted. Audit: `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round10-rdna4-matmul-fp8-production-supercollider/rdna4-matmul-fp8-production/faults/barrier-drop-initial-tile-publication/qualification-audit.json`.
