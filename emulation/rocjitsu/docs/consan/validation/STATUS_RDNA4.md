@@ -36,7 +36,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | --- | ---: | --- | --- | --- |
 | Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) |
 | Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) |
-| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 Sep 23: clean pass; reviewed publication-barrier fault missed in 8/8 trials | 🟨 Sep 23: clean pass; reviewed publication-barrier fault missed in 8/8 trials |
+| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 Sep 23: standard fault 0/8; preset=max clean passes and fault detects 7/8 (separate configuration) | 🟨 Sep 23: clean pass; reviewed publication-barrier fault missed in 8/8 trials |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
@@ -268,3 +268,13 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   inapplicability. Original native lists remain unchanged; closure evidence is
   in `topk-debug/owner-closure.json`, and runs are in `clean-round7/` under
   `/home/benoit/workspace/consan-validation/rdna4-20260923/`.
+- Qwen dense clean comparator passes with complete static/dynamic coverage
+  (6/6 accesses, 12/12 barriers), required records, no diagnostics, and the
+  independent numerical oracle. Its hook, VMFB, inputs, parameters, expected
+  outputs, build manifest, allowlist, and tool hashes match the dense fault
+  campaign. Effective selection: static/workgroup/cell strides 1, offsets 0,
+  legacy-coupled selection; 8 banks per site (48 watchpoints), 128 MiB report
+  ceiling, every host epoch, likely group-FLAT provenance, automatic owner
+  selection. These results establish a passing clean/fault pair at `preset=max`;
+  the standard-profile miss remains yellow. Evidence:
+  `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round7/qwen-dense-comparator/`.
