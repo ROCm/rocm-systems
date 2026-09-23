@@ -46,82 +46,63 @@ via something like
 5. ROCR's implementation of this API vectors into ROCm timesync, which queries the persistent timestamp storage backend
 with the provided GPU timestamp to produce the offset to translate to realtime.
 
-## Architecture
+## Components
 
-Some key design questions include:
-- Which thread is responsible for producing crosststamps?
-- Which thread is responsbile for consuming and storing crosststamps?
-- Are these threads part of the same process or different processes?
-- Are these threads part of the ROCR process or a dedicated ROCM timesync process(es)?
-- What policy (or policies) are in place regarding regarding sampling rates and long-term persistence of timestamp data?
-  Are these configurable or static?
+### `rocm-timesyncd`
 
-We discuss two different models that land at different points in this design space below.
+`rocm-timesync` is a new standalone ROCm system service. One instance of this service runs per node. The service:
+- queries KFD for crosststamps by calling into
+  [libhsakmt](https://github.com/ROCm/rocm-systems/tree/users/bkocolos/precision-time/projects/rocr-runtime/libhsakmt).
+- stores crosststamps into a ringbuffer(s)
 
-### In-process
+### Configuration
 
-The simplest design is to simply extend ROCR with mechanisms to measure, store, and query crosststamps. We call this
-"**in-process**" because everything is done through threads that are part of main host process. The diagram
-below illustrates the architecture
+`rocm-timesync` accepts a config with the following format:
+```yml
+channels:
+  hz_precision_high:
+    hz: <hz>
+    order< <order>
+  hz_precision_low:
+    hz: <hz>
+    order: <order>
+```
 
-![](doc/img/in-process.png)
+`hz_precision_high` and `hz_precision_low` define parameters for 2 channels that the process can publish timestamp data
+to. By default:
+- `hz_precision_high.hz=100`
+- `hz_precision_high.order=20`
+- `hz_precision_low.hz=1`
+- `hz_precision_low.order=12`
 
-The key steps:
-- A new thread `ROCR-timesync-r_m` queries KFD for crosststamps of the form (`CLOCK_REALTIME` timestamp, GPU `m`
-  timestamp). It may use the existing `AMDKFD_IOC_GET_CLOCK_COUNTERS` `ioctl()` call or some TBD similar new interface.
-  It performs these queries at a frequency needed for the system/application's target precision. This can be
-  communicated via a system-wide configuration or an application-specific configuration like an HSA env variable.
-- This thread stores timestamps in its local memory using some searchable data-structure, possibly something as simple
-  as an `std::map` mapping GPU timestamp to system timestamp
-- ROCR's implementation of `hsa_amd_profiling_tick_to_system_domain()` invokes a translation function provided by `ROCm
-  timesync` -- i.e., `translate()` - which queries this data structure and applies the offset.
+This means the high precision channel contains crosststamps sampled at 100 Hz, and the channel consumes 2^20 = 1MiB
+of system memory. The low precision channel contains crosststamps sampled at 1 Hz and consumes 2^12 = 4KiB of system
+memory.
 
+These channels are internally implemented as ringbuffers. Old data will be overwritten by the producer once the pointer
+wraps around to the front of the buffer.
 
-#### Pros/Cons of in-process
+### `librocm-timesync`
 
-Pros:
-+ Simplicity: no new processes, standalone system daemons, or external SW dependencies are needed
-- Data retention: data is resident in memory as long as the process is running. When a process completes, its timestamp
-  data goes away
+`librocm-timesync` is a shared library that connects to the channels published by `rocm-timesyncd`, streams them into
+a backend (memory and/or storage), and uses that backend to implement time translation calls made to it by ROCR. This
+library is linked into the process runtime when ROCR declares it as a runtime dependency (more on this below)
 
-Cons:
-- Space inefficient: every ROCR instance stores timestamp data leading to duplication (nothing about a crosststamp is
-  process specific)
-- Time inefficient: an `std::map()` is likely not going to perform insertions/queries as efficiently as a mature
-  time-series database (TSDB)
-
-### Out-of-process
-
-On the other end of the spectrum is an "**out-of-process**" approach which is designed to address these inefficiencies.
-The diagram below illustrates one such architecture.
-
-![](doc/img/out-of-process.png)
-
-The key steps:
-- A standalone `ROCm-timesync` system service is deployed. It runs `rocm-timesync-d_m` which query KFD for
-  (`CLOCK_REALTIME`, GPU `m`) crosststamps. We envision one thread per GPU on the system 
-- These threads publish data streams through a tracing infrastructure such as [lttng](https://lttng.org/).
-- On the ROCR side, `ROCR-timesync-r_m` consumes the data streams it needs (e.g., the GPUs its process is using),
-  and stores this data in a shared TSDB.
-- ROCR's implementation of `hsa_amd_profiling_tick_to_system_domain()` invokes a translation function provided by `ROCm
-  timesync` -- i.e., `translate()` - which queries the TSDB and applies the offset.
+#### Configuration
 
 
-#### Pros/Cons of out-of-process
+#### API
 
-Pros:
-+ Space efficiency: while each consumer does independently populate timestamp data to a shared TSDB, the fact that
-consumers all consume data from a common set of lttng streams mean that the TSDB can perform deduplication (or simply
-overwrite) if multiple consumers store the same data. TSDBs also have built-in mechanisms for compression, downsampling,
-and other mechanisms that can drastically reduce the storage needed for timestamp data.
-+ Time efficiency: A mature TSDB will have very fast insertion and query mechanisms for time-series data.
-+ Producer/consumer can evolve independently
+### `rocr-runtime`
 
-Cons:
-- Simplicity: clearly this is not as simple as the in-process design; however, we strike some balance by using a
-  fully API-less design and relying on a system service in `lttng` that will likely already be shipping with future
-  versions of ROCm.
-- Data retention: the fact that data is now stored out of process means that it is not straightforward to reap old
-  data. There must be some mechanism to tag on insertion with the corresponding consumer process(es), or absent that a
-  downsampling process to gradually decrease and ultimately evict data as it ages.
+## Code
 
+- [source/producer](source/producer) implements the `rocm-timesyncd` system service, which calls into KFD to query
+  crosststamps at configurable intervals
+- [source/consumer](source/consumer) implements the `librocm-timesync` shared library, which is linked by
+  [rocr-runtime](https://github.com/ROCm/rocm-systems/tree/users/bkocolos/precision-time/projects/rocr-runtime). This
+  shared library streams crosststamps from the `rocm-timesyncd` into backend storage, and uses that storage to implement
+
+## Design Options
+
+[doc/arch.md](doc/arch.md) explores some of the key design considerations motivating this approach in more detail. 
