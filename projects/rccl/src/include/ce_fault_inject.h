@@ -45,8 +45,7 @@
 #define CE_FAULT_LAUNCH_OP 0x04U
 
 /** Omit recv window base in CE Phase 3 (legacy: rank * shardBytes, no window offset).
- * 0x08 is CE_FAULT_SKIP_FORCE_UNREGISTERED on
- * users/atulkulk/fix/ce-force-unregistered-select. */
+ * 0x08 is unused (previously CE_FAULT_SKIP_FORCE_UNREGISTERED). */
 #define CE_FAULT_LEGACY_RECV_OFFSET 0x10U
 
 // ---------------------------------------------------------------------------
