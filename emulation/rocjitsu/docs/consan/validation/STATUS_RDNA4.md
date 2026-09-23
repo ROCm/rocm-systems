@@ -14,7 +14,7 @@
 | Main E2E | P2 | Sharktank TP2 family (`tp2-family`) | 🟨 Clean pass; reviewed fault ready; lowest-preset search queued | 🟨 Clean pass; reviewed fault ready; delay=0 qualification queued |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟨 Clean pass; reviewed fault ready; lowest-preset search queued | 🟨 Clean pass; reviewed fault ready; delay=0 qualification queued |
 | PyTorch | P3 | native histogram (`pytorch-torch-histc`) | 🟨 Clean pass; reviewed fault ready; lowest-preset search queued | 🟨 Clean pass; reviewed fault ready; delay=0 qualification queued |
-| llama.cpp | P3 | RMS norm (`llama-rdna4-rms-norm`) | 🟩 higher: clean pass; fault 8/8 (bar 6/8) | 🟨 delay-matrix: clean pass; fault trials running |
+| llama.cpp | P3 | RMS norm (`llama-rdna4-rms-norm`) | 🟩 higher: clean pass; fault 8/8 (bar 6/8) | 🟨 delay-matrix: clean pass; fault 0/8 (bar 6/8) |
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 higher: clean pass; fault 8/8 (bar 6/8) | 🟨 Sep 23: clean pass; publication fault 0/8 detections; fault qualification failed |
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 higher: clean pass; fault 8/8 (bar 6/8) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 higher: clean pass; fault 8/8 (bar 6/8) | 🟨 Fault 0/8 across delays (bar 6/8); clean delay=0 passes |
