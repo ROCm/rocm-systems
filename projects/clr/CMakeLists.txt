@@ -118,11 +118,12 @@ if(CLR_BUILD_HIP)
     endif()
 endif()
 
-if(CLR_BUILD_HIP)
-    option(BUILD_SHARED_LIBS "Build the shared library" ON)
-    if (NOT BUILD_SHARED_LIBS)
-        add_compile_definitions(BUILD_STATIC_LIBS)
-    endif()
+option(BUILD_SHARED_LIBS "Build the shared library" ON)
+
+# Static HIP embeds rocclr objects into amdhip64 and requires BUILD_STATIC_LIBS.
+# OpenCL uses BUILD_SHARED_LIBS only to select the amdocl library type.
+if(CLR_BUILD_HIP AND NOT BUILD_SHARED_LIBS)
+    add_compile_definitions(BUILD_STATIC_LIBS)
 endif()
 
 # Applies the host sanitizer flags to this scope, so it has to sit below BUILD_SHARED_LIBS,

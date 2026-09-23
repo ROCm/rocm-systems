@@ -19,8 +19,7 @@ if(THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
       "line. Hip-tests does not add host flags when THEROCK_SANITIZER is set. For a standalone "
       "build pass -DENABLE_SANITIZER=${THEROCK_SANITIZER} instead.")
   endif()
-  set(ENABLE_SANITIZER "${THEROCK_SANITIZER}"
-      CACHE STRING "Sanitizer mode (driven by THEROCK_SANITIZER)" FORCE)
+  set(ENABLE_SANITIZER "${THEROCK_SANITIZER}")
 endif()
 
 set(_HIP_TESTS_SANITIZER_VALID OFF ASAN HOST_ASAN)
@@ -64,8 +63,15 @@ if(NOT ENABLE_SANITIZER STREQUAL "OFF")
   # Host instrumentation. Skipped under TheRock, which already instruments the C and C++
   # compile lines through CMAKE_CXX_FLAGS_INIT.
   if(NOT THEROCK_SANITIZER)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fno-omit-frame-pointer -g")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -g")
+
+    # -shared-libasan is a Clang spelling, and GCC rejects it outright. GCC links the
+    # shared ASan runtime by default, so omitting it there gives the same linkage.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      string(APPEND CMAKE_C_FLAGS " -shared-libasan")
+      string(APPEND CMAKE_CXX_FLAGS " -shared-libasan")
+    endif()
   endif()
 
   # The HIP flags are always set here: these sources compile as the HIP language, which

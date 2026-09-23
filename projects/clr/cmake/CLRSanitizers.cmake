@@ -20,8 +20,7 @@ if(THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
       "line. CLR does not add host flags when THEROCK_SANITIZER is set. For a standalone "
       "build pass -DENABLE_SANITIZER=${THEROCK_SANITIZER} instead.")
   endif()
-  set(ENABLE_SANITIZER "${THEROCK_SANITIZER}"
-      CACHE STRING "Sanitizer mode (driven by THEROCK_SANITIZER)" FORCE)
+  set(ENABLE_SANITIZER "${THEROCK_SANITIZER}")
 endif()
 
 set(_clr_sanitizer_valid OFF ASAN HOST_ASAN)
