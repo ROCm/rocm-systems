@@ -308,3 +308,13 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   These gates preserve the 40 clean passes as campaign evidence; external
   reviewed-fault qualification still needs to be completed against the final
   hook and each cell's recorded configuration.
+- WMMA fault review: `sampled_watchpoint_context::barrier()` executes two
+  `__syncthreads()` calls around `++epoch_`. The current FastContext ISA confirms
+  paired physical barriers around publication (for example .text+0x13234/0x13258
+  followed by 0x1326c/0x13270). Removing just one signal/wait pair retains a
+  barrier before the consumer and is not an adequate missing-publication fault.
+  The initial barrier belongs to context initialization. No such single-pair
+  trial is counted as sensitivity qualification. A reviewed logical-barrier
+  mutation or another meaningful fault is needed. Evidence: source
+  `hip-moi/include/hip_moi/sampled_watchpoint_context.hpp` and
+  `/home/benoit/workspace/consan-validation/rdna4-20260923/wmma-debug/original.asm`.
