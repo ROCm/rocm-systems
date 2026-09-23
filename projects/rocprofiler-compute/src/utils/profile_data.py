@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from utils import csv_compression, schema, utils_analysis
+from utils import csv_compression, utils_analysis
 from utils.logger import console_debug, console_error
 
 
@@ -60,12 +60,3 @@ def read_rocpd_pmc_csv(workload_dir: Path, verbose: int) -> pd.DataFrame:
     if verbose >= 2:
         console_debug(f"pmc_raw_data final_single_df {pmc_df.info}")
     return pmc_df
-
-
-def export_pmc_data(workload_dir: Path, pmc_df: pd.DataFrame) -> Path:
-    """Write the optional debug PMC export without making it an input."""
-    output_path = csv_compression.compressed_name(
-        workload_dir / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
-    )
-    pmc_df.to_csv(output_path, index=False, compression="gzip")
-    return output_path

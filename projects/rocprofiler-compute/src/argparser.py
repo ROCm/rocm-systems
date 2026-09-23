@@ -946,11 +946,6 @@ Examples:
         '"Top Stats" tables (DEFAULT: 10)',
     )
     analyze_advanced_group.add_argument(
-        "--gen-pmc",
-        action="store_true",
-        help="\t\tExport the normalized PMC data to pmc_perf.csv.gz for debugging.",
-    )
-    analyze_advanced_group.add_argument(
         "-n",
         "--normal-unit",
         dest="normal_unit",

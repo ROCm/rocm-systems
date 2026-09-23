@@ -349,18 +349,12 @@ def process_pc_sampling_kernel_trace(
 def create_df_pmc(
     raw_data_dir: str,
     verbose: int,
-    gen_pmc: bool = False,
 ) -> pd.DataFrame:
     """
     Read all raw PMC counters into one analysis DataFrame.
     """
     workload_dir = Path(raw_data_dir)
-    df = profile_data.read_rocpd_pmc_csv(workload_dir, verbose)
-
-    if gen_pmc and not df.empty:
-        profile_data.export_pmc_data(workload_dir, df)
-
-    return df
+    return profile_data.read_rocpd_pmc_csv(workload_dir, verbose)
 
 
 def collect_wave_occu_per_cu(in_dir: str, out_dir: str, num_se: int) -> None:

@@ -60,7 +60,6 @@ class tui_analysis(OmniAnalyze_Base):
         workload.raw_pmc = file_io.create_df_pmc(
             self.path,
             self.args.verbose,
-            getattr(self.args, "gen_pmc", False),
         )
 
         kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(

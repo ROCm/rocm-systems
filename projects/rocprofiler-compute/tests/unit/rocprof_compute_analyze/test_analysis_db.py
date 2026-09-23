@@ -787,7 +787,7 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
         }
     }
 
-    analyzer = db_analysis(MagicMock(verbose=0, gen_pmc=False), {})
+    analyzer = db_analysis(MagicMock(verbose=0), {})
     analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
     analyzer._runs = {
         workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
@@ -825,7 +825,7 @@ def test_calc_pmc_df_data_reads_compressed_results(tmp_path):
     """The reader consumes compressed ROCPD result artifacts."""
     common.write_result_csv(tmp_path, LONG_FORM_PMC_PERF)
 
-    analyzer = db_analysis(MagicMock(verbose=0, gen_pmc=False), {})
+    analyzer = db_analysis(MagicMock(verbose=0), {})
     analyzer._runs = {str(tmp_path): MagicMock()}
     analyzer._profiling_config = {}
 

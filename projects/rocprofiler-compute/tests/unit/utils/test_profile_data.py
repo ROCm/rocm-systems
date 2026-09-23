@@ -4,9 +4,8 @@
 """Unit tests for the Phase D profiling data reader."""
 
 import common
-import pandas as pd
 
-from utils.profile_data import export_pmc_data, read_rocpd_pmc_csv
+from utils.profile_data import read_rocpd_pmc_csv
 
 
 def test_reader_combines_result_files_in_memory(tmp_path) -> None:
@@ -31,13 +30,6 @@ def test_reader_combines_result_files_in_memory(tmp_path) -> None:
     assert pmc_df["SQ_WAVES"].iloc[0] == 4
     assert pmc_df["SQ_BUSY_CYCLES"].iloc[0] == 100
     assert pmc_df["Dispatch_Unit"].iloc[0] == 1
-
-
-def test_export_does_not_become_reader_input(tmp_path) -> None:
-    """The debug export is one-way and is not treated as profiling data."""
-    export_pmc_data(tmp_path, pd.DataFrame({"Kernel_Name": ["kernel_a"]}))
-
-    assert read_rocpd_pmc_csv(tmp_path, verbose=0).empty
 
 
 def test_reader_rejects_header_only_result_file(tmp_path, monkeypatch) -> None:

@@ -266,8 +266,8 @@ def test_create_df_pmc_missing_file_returns_empty(tmp_path) -> None:
     assert create_df_pmc(str(tmp_path), verbose=0).empty
 
 
-def test_create_df_pmc_ignores_debug_export_as_input(tmp_path) -> None:
-    """The optional pmc_perf export is never an analysis input."""
+def test_create_df_pmc_ignores_legacy_pmc_file(tmp_path) -> None:
+    """The legacy PMC file is never an analysis input."""
     common.write_pmc_perf(tmp_path, "Kernel_Name,GPU_ID\nkernel_a,0\n")
 
     assert create_df_pmc(str(tmp_path), verbose=0).empty

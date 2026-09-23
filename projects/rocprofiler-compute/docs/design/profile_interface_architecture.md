@@ -115,7 +115,7 @@ data from its storage path, and does all merging in memory: across processes
 writer. Collectors write their raw per-process artifacts directly and the reader is
 the only boundary that combines them.
 
-### AD-5: Analyze scripts don't generate intermediate `pmc_perf.csv` by default anymore
+### AD-5: Analyze scripts don't generate intermediate `pmc_perf.csv`
 
 Eliminate `pmc_perf.csv` generation step, so analysis converts profile output directly to pandas dataframe in memory.
 
@@ -127,11 +127,7 @@ Also this introduces unnecessary dependency as any output format reader is force
 Essentially, `pmc_perf.csv` is an intermediate not a public contract, so analyze should not depend on it.
 
 The merged frame depends on the user's **analysis filters**, so a one time materialize and reuse does not work.
-The reader builds the frame from source **per analysis run** with filters applied in memory and the `pmc_perf.csv` export is derived from that frame.
-
-However, `pmc_perf.csv` generation could be useful for debugging purposes and some users may use it in their flow.
-Therefore, we will add a new debug option `--gen-pmc` which implements one-way export of this file.
-However, analysis scripts will not read its back.
+The reader builds the frame from source **per analysis run** with filters applied in memory.
 
 ### AD-6: Native counter storage moves behind the Profiler Hub
 

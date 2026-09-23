@@ -599,7 +599,6 @@ class db_analysis(OmniAnalyze_Base):
             pmc_df = file_io.create_df_pmc(
                 workload_path,
                 self.get_args().verbose,
-                getattr(self.get_args(), "gen_pmc", False),
             )
             if pmc_df.empty:
                 continue
