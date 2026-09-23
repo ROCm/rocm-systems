@@ -239,20 +239,16 @@ jobs:
     env:
       AIS_INPUT_HIPFILE_PYTHON_SDIST_FILENAME: ${{ needs.build_python_bindings.outputs.hipfile_python_sdist_filename }}
     steps:
-      - name: Set early AIS CI environment variables
-        run: |
-          echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
-          echo "AIS_SAFE_COMPILER_NAME=$(echo "${AIS_INPUT_CXX_COMPILER}" | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
       - name: Set AIS CI container name
         run: |
-          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
+          AIS_PR_NUMBER="$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')"
+          AIS_SAFE_COMPILER_NAME="$(echo "${AIS_INPUT_CXX_COMPILER}" | sed 's|[\+]|plus|g')"
+          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:-${GITHUB_RUN_ID}}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
       - name: Fetching code repository...
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: rocm-systems
-          sparse-checkout: |
-            projects/hipfile
-            .github/workflows
+          sparse-checkout: projects/hipfile/python
       - name: Download hipFile runtime package
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -284,17 +280,6 @@ jobs:
             -v "${AIS_MOUNT_PATH}:/mnt/ais-fs" \
             --name "${AIS_CONTAINER_NAME}" \
             "${AIS_INPUT_CI_IMAGE}"
-      - name: Create hipfile IO test directory
-        run: |
-          docker exec -t "${AIS_CONTAINER_NAME}" /bin/bash -c "mkdir -p /mnt/ais-fs/${AIS_CONTAINER_NAME}"
-      - name: Make copy of the code repository
-        run: |
-          docker exec \
-            -t \
-            "${AIS_CONTAINER_NAME}" \
-            /bin/bash -c '
-              cp -R /mnt/ais /ais
-            '
       - name: Copy the hipFile packages into the container
         run: |
           docker cp \
@@ -322,31 +307,33 @@ jobs:
               }}
               ldconfig
             '
-      # The sdist arrived via the workspace bind-mount, so it is already inside
-      # the container at /ais/<filename> after the copy above.
+      # The sdist and the checkout both arrive via the read-only workspace
+      # bind-mount, so nothing needs copying into the container: the venv lives
+      # in /root and main.py imports only the *installed* hipfile package.
       - name: Create Python virtual environment and install the hipFile sdist
         run: |
           docker exec \
             -t \
-            -e "_AIS_SDIST=${AIS_INPUT_HIPFILE_PYTHON_SDIST_FILENAME}" \
-            -w /ais/rocm-systems/projects/hipfile \
+            -e "_AIS_SDIST=/mnt/ais/${AIS_INPUT_HIPFILE_PYTHON_SDIST_FILENAME}" \
+            -w /root \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
               python3.12 -m venv .venv
               .venv/bin/pip install --upgrade pip
-              .venv/bin/pip install "/ais/${_AIS_SDIST}"
+              .venv/bin/pip install "${_AIS_SDIST}"
             '
       - name: Run python/main.py against AIS hardware
         run: |
           docker exec \
             -t \
             -e "_AIS_IO_DIR=/mnt/ais-fs/${AIS_CONTAINER_NAME}" \
-            -w /ais/rocm-systems/projects/hipfile \
+            -w /root \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
               set -e
+              mkdir -p "${_AIS_IO_DIR}"
               head --bytes 2M /dev/urandom > "${_AIS_IO_DIR}/random_2MiB.bin"
-              .venv/bin/python python/main.py \
+              .venv/bin/python /mnt/ais/rocm-systems/projects/hipfile/python/main.py \
                 "${_AIS_IO_DIR}/random_2MiB.bin" \
                 "${_AIS_IO_DIR}/output.bin"
             '
