@@ -2714,7 +2714,7 @@ main(int argc, char** argv)
             // no newline: will append result later
             verbprintf(0, "Getting linked libraries for %s... ", cmdv0.c_str());
 
-            constexpr auto k_dep_read_timeout = std::chrono::milliseconds{ 1000 };
+            constexpr auto k_dep_read_timeout = std::chrono::milliseconds{ 3000 };
             const auto linked_libs = read_dynamic_dependencies(cmdv0, k_dep_read_timeout);
             if(!linked_libs)
             {
