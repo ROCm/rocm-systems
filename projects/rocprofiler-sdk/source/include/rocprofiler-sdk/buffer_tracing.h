@@ -91,6 +91,11 @@ typedef struct rocprofiler_buffer_tracing_hip_api_record_t
 
 /**
  * @brief ROCProfiler Buffer HIP API Tracer Record.
+ *
+ * @note On Windows, HIP is traced out of process over ETW and the events the HIP runtime emits
+ * do not carry the call arguments, so @ref args is zero-filled. A tool cannot distinguish that
+ * from a call whose arguments were genuinely all zero, so treat @ref args as unavailable on
+ * Windows rather than as observed data. @ref retval is populated.
  */
 typedef struct rocprofiler_buffer_tracing_hip_api_ext_record_t
 {
