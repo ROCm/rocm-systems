@@ -259,3 +259,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   comparator and explicit configuration qualification are still required.
   Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round2-qwen-dense/`.
 - `pytorch-rdna4-llm-topk` / default: missing ConSan analysis verdict; exit -6. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round7/pytorch-rdna4-llm-topk-default`.
+- `pytorch-rdna4-llm-topk` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round7/pytorch-rdna4-llm-topk-supercollider`.
