@@ -388,3 +388,11 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   This is preparation evidence, not physical fault qualification.
   Log: `/home/benoit/workspace/consan-validation/rdna4-20260923/wmma-debug/grouped-drop-tests.log`.
 - `rdna4-matmul-fp8-production` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round10/rdna4-matmul-fp8-production-default`.
+- Production FP16 fault review: current-library offline inventory confirms
+  ELF `fnv1a64:0ffc359899105b1d`, initial-tile publication signal/wait
+  `.text+0xc38/0xc88`. Both validation K sizes take this multi-group path;
+  NoopPolicy emits one physical pair for this logical edge. Precommitted
+  `barrier-drop-initial-tile-publication` requires at least one detection in
+  eight trials per mode. Live trials pending; both current-build clean cells
+  pass. Review evidence:
+  `/home/benoit/workspace/consan-validation/rdna4-20260923/matmul-debug/`.
