@@ -548,3 +548,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `rdna4-matmul-fp8-production` / default dense sampling: dense clean pass. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round17/rdna4-matmul-fp8-production-default-dense`.
 - `rdna4-matmul-fp8-production` / default dense sampling: dense fault missing summary; inspect runner log. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round13/rdna4-matmul-fp8-production-default-dense`.
 - `rdna4-matmul-fp8-production` / supercollider dense sampling: dense clean failed. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round17/rdna4-matmul-fp8-production-supercollider-dense`.
+- `pytorch-rdna4-compiled-softmax` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round18/pytorch-rdna4-compiled-softmax-default`.
