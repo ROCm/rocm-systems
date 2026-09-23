@@ -1520,24 +1520,37 @@ class AMDSMIHelpers:
                 break
         return accelerator_partition_profiles
 
-    def get_accelerator_partition_types(self):
-        # TYPE names are valid input regardless of privilege. Only the numeric
-        # profile INDEX values require sudo to enumerate.
-        return [
-            name
-            for name in amdsmi_interface.AmdSmiComputePartitionType.__members__
-            if name != "INVALID"
-        ]
+    def estimate_accelerator_partition_profile_indicies(self):
+        """Best-effort profile_type/profile_index pairing, used only when real
+        profiles can't be enumerated: not running as root (enumeration itself
+        needs sudo), or a device that doesn't support accelerator partitioning
+        at all. Assumes the driver's fixed SPX,DPX,TPX,QPX,CPX order, which the
+        CLI can't verify without querying the device -- an actual set attempt
+        is still validated by the amdsmi library/driver against the real
+        hardware either way. This estimate also feeds the CLI's hint text for
+        an invalid -C value.
+        """
+        estimated_profiles = {"profile_indices": [], "profile_types": []}
+        i = 0
+        for name in amdsmi_interface.AmdSmiComputePartitionType.__members__:
+            if name != "INVALID":
+                estimated_profiles["profile_types"].append(name)
+                estimated_profiles["profile_indices"].append(str(i))
+                i += 1
+        return estimated_profiles
 
     def get_accelerator_choices_types_indices(self):
-        empty_profiles = {"profile_indices": [], "profile_types": []}
+        # (choices, accelerator_profiles_dict)
         if os.geteuid() != 0:
-            # Not root: profile INDEX values need sudo to enumerate, so offer the
-            # static TYPE names. Profiles stay empty -> each device reports its own status.
+            # Not root: profile INDEX values need sudo to enumerate, so estimate them.
             logging.debug(
-                "AMDSMIHelpers.get_accelerator_choices_types_indices - Not root, using static partition types"
+                "AMDSMIHelpers.get_accelerator_choices_types_indices - Not root, estimating partition profiles"
             )
-            return (self.get_accelerator_partition_types(), empty_profiles)
+            estimated_profiles = self.estimate_accelerator_partition_profile_indicies()
+            compute_partitions_list = (
+                estimated_profiles["profile_types"] + estimated_profiles["profile_indices"]
+            )
+            return (compute_partitions_list, estimated_profiles)
 
         logging.debug(
             "AMDSMIHelpers.get_accelerator_choices_types_indices - Root, getting accelerator partition profiles"
@@ -1549,10 +1562,12 @@ class AMDSMIHelpers:
                 + accelerator_partition_profiles["profile_indices"]
             )
             return (compute_partitions_list, accelerator_partition_profiles)
-        # Root, but profiles couldn't be enumerated (e.g. device without accelerator
-        # partitions). Fall back to static TYPE names so `-C` still validates input
-        # and shows real choices in help.
-        return (self.get_accelerator_partition_types(), accelerator_partition_profiles)
+        # Device doesn't support partitioning; fall back to the same estimate.
+        estimated_profiles = self.estimate_accelerator_partition_profile_indicies()
+        compute_partitions_list = (
+            estimated_profiles["profile_types"] + estimated_profiles["profile_indices"]
+        )
+        return (compute_partitions_list, estimated_profiles)
 
     def get_memory_partition_types(self):
         memory_partitions_str = [
