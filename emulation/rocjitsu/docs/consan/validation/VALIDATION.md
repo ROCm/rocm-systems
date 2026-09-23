@@ -77,12 +77,17 @@ Run a matching clean comparator and precommit fault expectations for a changed
 preset. Label the preset explicitly in the ledger; a denser configuration's
 success cannot qualify the standard profile or erase its detection misses.
 
-For a separate SuperCollider sampling investigation, set
-`CONSAN_VALIDATION_SUPERCOLLIDER_SAMPLE_ALL=1`. This selects every workgroup
-and cell with zero offsets in both clean and fault children; native and Default
-runs are unaffected. Unset it or use `0` for the standard profile. Precommit the
-fault matrix and run a matching clean comparator. Record this explicitly as a
-separate configuration; its results do not qualify standard sampling.
+Default-engine presets apply to Default only. SuperCollider already defaults to
+runtime stride 1 and rejects independent workgroup/cell selectors; its replay
+and perturbation evidence must be assessed separately from Default event counts.
+
+For the September 23 RDNA4 calibration, qualify the named Default preset
+against at least **6 detections in 8 admitted/reached trials** (75% observed
+rate), with all clean correctness, applicable coverage, completeness and health
+checks passing. Precommit the preset and threshold before running. Try `high`
+and `higher`; retain an explicitly named `max` result where needed. Green in
+the status table qualifies that recorded configuration. The observed rate is
+not a lower confidence bound; retain counts and intervals in campaign artifacts.
 
 ## Validation layers
 

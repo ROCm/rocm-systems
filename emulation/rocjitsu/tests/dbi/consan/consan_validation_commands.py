@@ -892,17 +892,6 @@ def _clean_environment(
         if preset not in {"low", "default", "high", "higher", "max"}:
             raise ValidationError("invalid CONSAN_VALIDATION_DEFAULT_PRESET")
         environment["RJ_CONSAN_PRESET"] = preset
-    sample_all = os.environ.get("CONSAN_VALIDATION_SUPERCOLLIDER_SAMPLE_ALL")
-    if profile == "supercollider" and sample_all is not None:
-        if sample_all not in {"0", "1"}:
-            raise ValidationError("invalid CONSAN_VALIDATION_SUPERCOLLIDER_SAMPLE_ALL")
-        if sample_all == "1":
-            environment.update({
-                "RJ_CONSAN_WORKGROUP_SAMPLE_STRIDE": "1",
-                "RJ_CONSAN_WORKGROUP_SAMPLE_OFFSET": "0",
-                "RJ_CONSAN_CELL_SAMPLE_STRIDE": "1",
-                "RJ_CONSAN_CELL_SAMPLE_OFFSET": "0",
-            })
     environment.update(
         {
             "HSA_TOOLS_LIB": str(hook),
