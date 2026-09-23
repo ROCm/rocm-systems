@@ -745,5 +745,5 @@ threshold table introduced for gfx1250.
           GPU memory usage. This variable sizes the buffer only; the selector cap
           is controlled separately by ``RCCL_CE_AR_MAX_MSG_BYTES``.
       - | ``-1``: Use the compile-time default of 16 MiB (default).
-        | ``N`` (bytes): Allocate an ``N``-byte staging buffer.
+        | ``N`` (bytes): Set the per-slot payload capacity to ``N``; ``ceARTmpBuf`` is ``NCCL_CE_NUM_SLOTS`` (2) times that.
 
