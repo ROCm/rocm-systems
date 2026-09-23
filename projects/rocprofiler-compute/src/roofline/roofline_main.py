@@ -484,8 +484,8 @@ class Roofline:
                 "ai": ai_value,
                 "perf": performance,
                 "hoverCells": [
-                    format_hover_number(roof_perf, ",.3f"),
-                    format_hover_number(pct_roof, ".4f"),
+                    format_hover_number(roof_perf, ",.0f"),
+                    format_hover_number(pct_roof, ",.2f"),
                     format_bandwidth(achieved_bandwidth),
                 ],
             })
