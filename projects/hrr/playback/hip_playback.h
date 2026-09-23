@@ -231,7 +231,9 @@ struct PlaybackContext {
 
     // APIs this replay refused to reproduce (UNREPLAYABLE_PLAYBACK_APIS), and
     // APIs whose recorded call had already failed at capture and failed the
-    // same way here. Both are printed in the summary: the first is what the
+    // same way here. Each API is logged to stderr once, on first insertion
+    // (hrr_note_unreplayable / hrr_note_recorded_error); the maps de-duplicate
+    // those lines and are not printed in the summary. The first is what the
     // replay could not do, the second is what it faithfully reproduced but a
     // reader would otherwise misread as a replay error. Guarded by map_mutex.
     std::map<std::string, std::string> unreplayable_apis;  // api -> reason
