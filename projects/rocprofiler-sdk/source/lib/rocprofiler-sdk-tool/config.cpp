@@ -258,7 +258,8 @@ config::config()
 
     std::unordered_map<std::string_view, rocprofiler_spm_parameter_type_t> spm_type_map = {
         {"none", ROCPROFILER_SPM_PARAMETER_TYPE_NONE},
-        {"sclk_cycles", ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES}};
+        {"sclk_cycles", ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES},
+        {"refclk_cycles", ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES}};
 
     try
     {
@@ -302,7 +303,7 @@ config::config()
     {
         ROCP_FATAL << "Invalid value for ROCPROF_SPM_SAMPLE_INTERVAL_UNIT: "
                    << spm_sample_interval_unit << ". "
-                   << "Valid choices are: sclk_cycles\n";
+                   << "Valid choices are: sclk_cycles, refclk_cycles\n";
     }
 
     // Benchmarking Enable/Disable

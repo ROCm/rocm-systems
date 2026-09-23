@@ -819,7 +819,7 @@ For attachment profiling of running processes:
         help="Specifies the unit for the SPM sample interval. Used with --spm-sample-interval to define the sampling interval",
         default=None,
         type=str.lower,
-        choices=("sclk_cycles",),
+        choices=("sclk_cycles", "refclk_cycles"),
     )
 
     pc_sampling_options = parser.add_argument_group("PC sampling options")

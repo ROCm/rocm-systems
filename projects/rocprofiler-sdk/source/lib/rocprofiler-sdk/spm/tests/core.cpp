@@ -124,7 +124,7 @@ is_spm_supported_arch(const hsa::AgentCache& agent)
     auto rocp_agent = agent.get_rocp_agent();
     if(!rocp_agent) return false;
     auto v = rocp_agent->gfx_target_version;
-    return (v >= 90400 && v <= 90402) || v == 90500;
+    return (v >= 90400 && v <= 90402) || v == 90500 || v == 120500;
 }
 
 auto
@@ -892,19 +892,28 @@ TEST(spm_core, query_agent_configurations)
             ASSERT_GT(result.num_configs, 0) << "Expected at least one configuration";
 
             bool found_interval = false;
+            bool found_refclk   = false;
             for(const auto& cfg : result.configs)
             {
                 EXPECT_EQ(cfg.size, sizeof(rocprofiler_spm_available_configuration_t));
                 if(cfg.type == ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES)
                 {
                     found_interval = true;
-                    EXPECT_EQ(cfg.interval.min_interval, 32);
+                    EXPECT_EQ(cfg.interval.min_interval,
+                              rocp_agent->gfx_target_version == 120500 ? 1 : 32);
+                    EXPECT_GT(cfg.interval.max_interval, cfg.interval.min_interval);
+                }
+                if(cfg.type == ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES)
+                {
+                    found_refclk = true;
+                    EXPECT_EQ(cfg.interval.min_interval, 1);
                     EXPECT_GT(cfg.interval.max_interval, cfg.interval.min_interval);
                 }
                 EXPECT_NE(cfg.type, ROCPROFILER_SPM_PARAMETER_TYPE_NONE);
                 EXPECT_NE(cfg.type, ROCPROFILER_SPM_PARAMETER_TYPE_LAST);
             }
             EXPECT_TRUE(found_interval) << "Expected a sample interval configuration";
+            EXPECT_EQ(found_refclk, rocp_agent->gfx_target_version == 120500);
         }
     }
 
