@@ -87,7 +87,8 @@ rate), with all clean correctness, applicable coverage, completeness and health
 checks passing. Precommit the preset and threshold before running. Select independently for each workload, in ascending order:
 `low`, `default`, `high`, `higher`, `max`. Choose the lowest passing preset
 and name it in the cell. Reuse matching recorded evidence; while lower presets
-are being tested, retain any already-qualified configuration in the table. Green in
+are being tested, show only the lowest already-qualified preset in the cell.
+Keep unsuccessful presets and search progress in the campaign artifacts. Green in
 the status table qualifies that recorded configuration. The observed rate is
 not a lower confidence bound; retain counts and intervals in campaign artifacts.
 
