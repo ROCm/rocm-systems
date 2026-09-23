@@ -139,3 +139,18 @@ github actions:
     - .github/scripts/**/*
     - .github/*.json
     - .github/*.yml
+
+# Opts the PR into TheRock's host-ASAN presubmit, which builds the
+# compiler-runtime and runtime-tests stages and runs hip-tests and rocrtst.
+# Scoped to the projects that presubmit actually covers rather than every PR,
+# since ASAN runners are a shared and limited pool.
+# See .github/workflows/therock-multi-arch-ci-asan.yml and ROCm/TheRock#7202.
+"ci:host-asan":
+- changed-files:
+  - any-glob-to-any-file:
+    - 'projects/clr/**/*'
+    - 'projects/hip/**/*'
+    - 'projects/hipother/**/*'
+    - 'projects/hip-tests/**/*'
+    - 'projects/rocr-runtime/**/*'
+    - '.github/workflows/therock-multi-arch-ci-asan.yml'
