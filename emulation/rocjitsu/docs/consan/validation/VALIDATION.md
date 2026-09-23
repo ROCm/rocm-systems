@@ -85,7 +85,8 @@ For the September 23 RDNA4 calibration, qualify the named Default preset
 against at least **6 detections in 8 admitted/reached trials** (75% observed
 rate), with all clean correctness, applicable coverage, completeness and health
 checks passing. Precommit the preset and threshold before running. Select independently for each workload, in ascending order:
-`low`, `default`, `high`, `higher`, `max`. Choose the lowest passing preset
+`default`, `high`, `higher`, `max`. If `default` passes, stop; there is no
+need to test `low`. Choose the lowest passing preset at or above `default`
 and name it in the cell. Reuse matching recorded evidence; while lower presets
 are being tested, show only the lowest already-qualified preset in the cell.
 Keep unsuccessful presets and search progress in the campaign artifacts. Green in
