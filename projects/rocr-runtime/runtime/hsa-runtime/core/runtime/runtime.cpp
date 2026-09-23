@@ -5105,11 +5105,13 @@ hsa_status_t Runtime::VMemoryGetHandleInfo(hsa_amd_vmem_alloc_handle_t allocHand
   const MemoryRegion* region =
       memoryHandle->imported ? memoryHandle->imported_region : memoryHandle->region;
 
-  /* An import whose placement and size the driver could not describe -- a fabric
-   * handle, or a dma-buf on a kernel or thunk without the query -- carries no
-   * recoverable information. Say so rather than reporting a zero size that a
-   * caller cannot tell apart from a genuinely empty allocation. */
-  if (memoryHandle->imported && region == nullptr && memoryHandle->imported_size == 0)
+  /* An import whose placement could not be resolved carries no agent to report.
+   * That covers a fabric handle and a dma-buf the kernel or thunk cannot describe,
+   * but also a dma-buf the driver described against a node outside this process's
+   * topology, where the size is known yet no local region matches. Reporting
+   * success there would hand back a null agent that a caller cannot tell apart
+   * from a real one, so reject the handle instead. */
+  if (memoryHandle->imported && region == nullptr)
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
   /* Fill only the members that fit in the layout the caller was built against.
