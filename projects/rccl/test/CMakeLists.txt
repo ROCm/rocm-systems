@@ -257,9 +257,9 @@ if(BUILD_TESTS)
     AllToAllTests.cpp
     AllToAllVTests.cpp
     AsymmetricVisibilityTests.cpp
+    BroadcastTests.cpp
     CollImplInfoTests.cpp
     DeviceResourceRequirementTests.cpp
-    BroadcastTests.cpp
     DoneEventOrderingTests.cpp
     GatherTests.cpp
     GroupCallTests.cpp
