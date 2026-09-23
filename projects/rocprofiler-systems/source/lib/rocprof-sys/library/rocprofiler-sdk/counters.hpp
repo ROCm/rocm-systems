@@ -41,7 +41,7 @@ struct counter_data_tag
 {};
 
 using counter_data_tracker = component::data_tracker<double, counter_data_tag>;
-using counter_storage_type = typename counter_data_tracker::storage_type;
+using counter_storage_type = counter_data_tracker::storage_type;
 using counter_bundle_t     = tim::lightweight_tuple<counter_data_tracker>;
 using counter_track_type   = ::perfetto::CounterTrack;
 

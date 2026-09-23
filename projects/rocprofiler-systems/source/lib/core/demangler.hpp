@@ -60,7 +60,7 @@ struct demangler
 private:
     std::shared_mutex                               m_mutex;
     std::map<std::string, std::string, std::less<>> m_cache;
-    using cache_iterator = typename decltype(m_cache)::iterator;
+    using cache_iterator = decltype(m_cache)::iterator;
 
     struct cache_result
     {

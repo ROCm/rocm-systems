@@ -83,7 +83,7 @@ using ::tim::sampling::dynamic;
 using ::tim::sampling::overflow;
 using ::tim::sampling::timer;
 
-using hw_counters               = typename component::backtrace_metrics::hw_counters;
+using hw_counters               = component::backtrace_metrics::hw_counters;
 using signal_type_instances     = thread_data<std::set<int>, category::sampling>;
 using sampler_running_instances = thread_data<bool, category::sampling>;
 using bundle_t =
@@ -126,7 +126,7 @@ namespace rocprofsys::sampling
 {
 namespace
 {
-using sampler_allocator_t = typename sampler_t::allocator_t;
+using sampler_allocator_t = sampler_t::allocator_t;
 
 template <typename Category>
 inline std::string
@@ -300,9 +300,9 @@ cache_sampling_data(std::int64_t                               _tid,
             trace_cache::get_buffer_storage().store(trace_cache::backtrace_region_sample{
                 static_cast<std::uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING),
                 static_cast<std::uint64_t>(_thread_info->index_data->system_value),
-                _track_name.c_str(), _name.c_str(), itr.m_beg, itr.m_end,
-                trait::name<category::timer_sampling>::value, _call_stack.c_str(),
-                _line_info.c_str(), "{}" });
+                _track_name, _name, itr.m_beg, itr.m_end,
+                trait::name<category::timer_sampling>::value, _call_stack, _line_info,
+                "{}" });
         }
     }
 
@@ -333,9 +333,9 @@ cache_sampling_data(std::int64_t                               _tid,
             trace_cache::get_buffer_storage().store(trace_cache::backtrace_region_sample{
                 static_cast<std::uint32_t>(ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING),
                 static_cast<std::uint64_t>(_thread_info->index_data->system_value),
-                _track_name.c_str(), _name.c_str(), itr.m_beg, itr.m_end,
-                trait::name<category::overflow_sampling>::value, _call_stack.c_str(),
-                _line_info.c_str(), "{}" });
+                _track_name, _name, itr.m_beg, itr.m_end,
+                trait::name<category::overflow_sampling>::value, _call_stack, _line_info,
+                "{}" });
         }
     }
 }
@@ -503,9 +503,9 @@ get_offload_mutex()
     return _v;
 }
 
-using sampler_bundle_t = typename sampler_t::bundle_type;
+using sampler_bundle_t = sampler_t::bundle_type;
 using sampler_buffer_t = tim::data_storage::ring_buffer<sampler_bundle_t>;
-using pos_type         = typename std::fstream::pos_type;
+using pos_type         = std::fstream::pos_type;
 
 auto offload_seq_data = std::unordered_map<std::int64_t, std::set<pos_type>>{};
 
@@ -929,12 +929,6 @@ configure(bool _setup, std::int64_t _tid)
 
     return (_signal_types) ? *_signal_types : std::set<int>{};
 }
-
-std::vector<timer_sampling_data>
-parse_timer_data(std::int64_t, const bundle_t*, const std::vector<bundle_t*>&);
-
-std::vector<overflow_sampling_data>
-parse_overflow_data(std::int64_t, const bundle_t*, const std::vector<bundle_t*>&);
 
 void
 post_process_perfetto(std::int64_t, const std::vector<timer_sampling_data>&,

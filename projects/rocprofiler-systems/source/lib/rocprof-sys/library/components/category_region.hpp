@@ -432,9 +432,9 @@ private:
                            args_str.c_str());
     }
 
-    typename Policy::clock_type                           clock_{};
-    typename Policy::region_sink_type                     sink_{};
-    typename Policy::thread_metadata_type                 thread_meta_{};
+    Policy::clock_type                                    clock_{};
+    Policy::region_sink_type                              sink_{};
+    Policy::thread_metadata_type                          thread_meta_{};
     std::map<entry_key, std::vector<pending_cache_entry>> map_name_to_args{};
 };
 
@@ -781,7 +781,7 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
                                   Args&&... _args)
 {
-    start<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
+    start<OptsT...>(_data.tool_id, [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
         {
             std::int64_t _n = 0;
@@ -794,7 +794,7 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
 
     if constexpr(sizeof...(Args) > 0)
     {
-        append_cache_args(_data.tool_id.c_str(),
+        append_cache_args(_data.tool_id,
                           region_cache::serialize_annotation_args(_args...));
     }
 }
@@ -807,11 +807,10 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::outgoing,
 {
     if constexpr(sizeof...(Args) > 0)
     {
-        append_cache_args(_data.tool_id.c_str(),
-                          region_cache::serialize_return_arg(_args...));
+        append_cache_args(_data.tool_id, region_cache::serialize_return_arg(_args...));
     }
 
-    stop<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
+    stop<OptsT...>(_data.tool_id, [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
             tracing::add_perfetto_annotation(
                 ctx, "return",

@@ -531,6 +531,7 @@ def test_ancestor_ids(input_data):
     This test ensures that each memcpy can be traced back to either a
     hipMemcpyAsync or a hipMemcpyBatchAsync through ancestor IDs.
     """
+    
     data = input_data
     sdk_data = data["rocprofiler-sdk-json-tool"]
     buffer_records = sdk_data.buffer_records

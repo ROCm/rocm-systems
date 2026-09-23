@@ -4,62 +4,14 @@
 #ifndef ROCJITSU_VM_AMDGPU_WAIT_COUNTERS_H_
 #define ROCJITSU_VM_AMDGPU_WAIT_COUNTERS_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
 
 namespace rocjitsu {
 namespace amdgpu {
-
-/// @brief Counter types tracked by s_waitcnt and related instructions.
-///
-/// GFX9 (CDNA1-4) and GFX10 (RDNA1/2) use VMCNT/LGKMCNT/EXPCNT.
-/// GFX10 adds VSCNT for store-only tracking (S_WAITCNT_VSCNT).
-/// GFX11 (RDNA3/3.5) and GFX12 (RDNA4) use fine-grained counters:
-///   LOADCNT (≡ VMCNT for loads), STORECNT (≡ VSCNT), DSCNT (DS subset
-///   of LGKMCNT), KMCNT (scalar/constant subset of LGKMCNT), EXPCNT.
-/// GFX12.5 also adds TENSORCNT for tensor data mover operations and ASYNCCNT
-/// for async global/cluster transfers to or from LDS.
-enum class WaitCounterType : uint8_t {
-  VMCNT,     ///< Vector memory count (global loads; GFX9/10 stores too).
-  LGKMCNT,   ///< LDS/GDS/K(Constant)/Message count.
-  EXPCNT,    ///< Export count.
-  VSCNT,     ///< Vector store count (GFX10 only — S_WAITCNT_VSCNT).
-  LOADCNT,   ///< Vector load count (GFX11+; alias of VMCNT for loads).
-  STORECNT,  ///< Vector store count (GFX11+; alias of VSCNT).
-  DSCNT,     ///< DS (LDS/GDS) count (GFX11+; subset of LGKMCNT).
-  KMCNT,     ///< Scalar/constant memory count (GFX11+; subset of LGKMCNT).
-  TENSORCNT, ///< Tensor data mover count (GFX12.5).
-  ASYNCCNT,  ///< Async global/cluster LDS transfer count (GFX12.5).
-};
-
-/// @brief Return whether waiting on @p wait_type also constrains an event
-/// tracked by @p event_type.
-///
-/// Monolithic counters cover the corresponding split-counter families. Split
-/// waits constrain only their exact counter. Keeping this relationship next to
-/// WaitCounterType avoids reimplementing it in each consumer.
-[[nodiscard]] constexpr bool wait_counter_covers(WaitCounterType wait_type,
-                                                 WaitCounterType event_type) {
-  switch (wait_type) {
-  case WaitCounterType::VMCNT:
-    return event_type == WaitCounterType::VMCNT || event_type == WaitCounterType::LOADCNT;
-  case WaitCounterType::LGKMCNT:
-    return event_type == WaitCounterType::LGKMCNT || event_type == WaitCounterType::DSCNT ||
-           event_type == WaitCounterType::KMCNT;
-  case WaitCounterType::VSCNT:
-    return event_type == WaitCounterType::VSCNT || event_type == WaitCounterType::STORECNT;
-  case WaitCounterType::EXPCNT:
-  case WaitCounterType::LOADCNT:
-  case WaitCounterType::STORECNT:
-  case WaitCounterType::DSCNT:
-  case WaitCounterType::KMCNT:
-  case WaitCounterType::TENSORCNT:
-  case WaitCounterType::ASYNCCNT:
-    return event_type == wait_type;
-  }
-  return false;
-}
 
 /// @brief Outstanding memory operation counters for a wavefront.
 ///
@@ -91,7 +43,8 @@ struct WaitCounters {
            tensorcnt == 0 && asynccnt == 0;
   }
 
-  /// Hardware saturation limits for each counter type.
+  /// Storage maxima covering every supported ISA. Architecture-specific
+  /// VMCNT/LGKMCNT issue capacities live in generated IsaProperties.
   static constexpr uint8_t VMCNT_MAX = 63;
   static constexpr uint8_t LGKMCNT_MAX = 63;
   static constexpr uint8_t EXPCNT_MAX = 7;
