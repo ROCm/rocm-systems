@@ -7,8 +7,8 @@
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟨 Clean pass; reviewed fault ready; lowest-preset search queued | 🟨 Clean pass; reviewed fault ready; delay-matrix qualification queued |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟨 Clean pass; reviewed fault ready; lowest-preset search queued | 🟨 Clean pass; reviewed fault ready; delay-matrix qualification queued |
 | PyTorch | P1 | collision-heavy `scatter_reduce` (`pytorch-scatter-reduce`) | 🟥 Sep 23: no applicable code object; analysis incomplete | 🟥 Sep 23: no applicable code object; analysis incomplete |
-| PyTorch | P2 | Inductor compiled softmax (`pytorch-rdna4-compiled-softmax`) | 🟨 higher: numeric pass; same-wave LDS write conflicts; same-value policy investigation | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
-| PyTorch | P2 | split online softmax (`pytorch-rdna4-split-softmax`) | 🟨 higher: numeric pass; same-wave LDS write conflicts; same-value policy investigation | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
+| PyTorch | P2 | Inductor compiled softmax (`pytorch-rdna4-compiled-softmax`) | 🟨 higher: numeric pass; same-wave write conflicts; explicit same-value policy trials queued | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
+| PyTorch | P2 | split online softmax (`pytorch-rdna4-split-softmax`) | 🟨 higher: numeric pass; same-wave write conflicts; explicit same-value policy trials queued | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | PyTorch | P2 | Qwen-vocabulary top-k (`pytorch-rdna4-llm-topk`) | 🟨 Clean pass; reviewed fault ready; lowest-preset search queued | 🟨 Clean pass; reviewed fault ready; delay-matrix qualification queued |
 | llama.cpp | P2 | quantized matvec (`llama-rdna4-mul-mat-vec-q`) | 🟩 higher: clean pass; fault 7/8 (bar 6/8) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P2 | Sharktank TP2 family (`tp2-family`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
