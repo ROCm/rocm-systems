@@ -37,7 +37,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 Sep 23: clean pass; reviewed publication-barrier fault missed in 8/8 trials | 🟨 Sep 23: clean pass; reviewed publication-barrier fault missed in 8/8 trials |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
-| Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟥 Sep 23: missing ConSan analysis verdict; exit 124 (timeout override 300s) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) |
+| Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟥 Sep 23: illegal instruction, then teardown timeout at 300s; native oracle passes | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) |
 | PyTorch | P1 | collision-heavy `scatter_reduce` (`pytorch-scatter-reduce`) | 🟥 Sep 23: no applicable code object; analysis incomplete | 🟥 Sep 23: no applicable code object; analysis incomplete |
 | PyTorch | P2 | Inductor compiled softmax (`pytorch-rdna4-compiled-softmax`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | PyTorch | P2 | split online softmax (`pytorch-rdna4-split-softmax`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
@@ -216,7 +216,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round1-qwen-supercollider/`.
 - Latest clean assessments: 36/42 pass across the recorded artifact roots.
   Six gaps remain: both scatter-reduce modes and Default top-k are inapplicable;
-  Default TP1 decode times out; optimized D128 block SuperCollider and D128
+  Default TP1 decode hits an illegal instruction before teardown times out; optimized D128 block SuperCollider and D128
   pressure Default hit illegal instructions in sampled-fast cases. The latter
   are ordinary numeric-reference tests, not intentional fault cases, and remain
   in the clean workload filters. Other optimized hip-moi cells pass. This
@@ -224,3 +224,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   binary/configuration and complete the reviewed fault checks.
 - `tp1-decode-combined` / default: missing ConSan analysis verdict; exit 124. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round5/tp1-decode-combined-default`.
 - `tp1-decode-combined` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round5/tp1-decode-combined-supercollider`.
+- TP1 decode Default retry with the repaired hook reproduces `HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION`, followed by a 300-second teardown timeout. Its native baseline and SuperCollider run pass. A longer deadline does not resolve this failure. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round5/`.
