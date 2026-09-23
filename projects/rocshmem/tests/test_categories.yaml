@@ -83,6 +83,9 @@ test_categories:
       # Signal operations
       - "putsignal_.*"
       - "signalfetch_.*"
+      - "signaladd_.*"
+      - "signalset_.*"
+      - "signalwaituntil_.*"
 
       # Stream tests (basic)
       - "putmem_signal_on_stream_.*"

@@ -173,6 +173,9 @@ declare -A TEST_NUMBERS=(
   ["tile_reduce_wave"]="156"
   ["tile_reduce_wg"]="157"
   ["buffer_register_symmetric"]="162"
+  ["signaladd"]="163"
+  ["signalset"]="164"
+  ["signalwaituntil"]="165"
 )
 
 # Detect which runtime to use
@@ -789,6 +792,10 @@ TestSigOps() {
   ExecTest  "wgsignalfetch"    2       2            32
   ExecTest  "wavesignalfetch"  2       1            32
   ExecTest  "wavesignalfetch"  2       1            64
+
+  ExecTest  "signaladd"        2       2            32
+  ExecTest  "signalset"        2       2            32
+  ExecTest  "signalwaituntil"  2       1            1
 }
 
 TestColl() {
