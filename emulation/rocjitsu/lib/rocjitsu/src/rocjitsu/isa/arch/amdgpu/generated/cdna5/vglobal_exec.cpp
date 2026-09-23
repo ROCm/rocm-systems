@@ -1816,6 +1816,7 @@ void GlobalStoreAsyncFromLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::ASYNCCNT;
+  d->lds_src = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1832,6 +1833,7 @@ void GlobalStoreAsyncFromLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
     uint32_t lds_addr = async_lds_lane_address(inst_, wf, lane_lds_addr, 1);
+    d->per_lane_lds_addr[lane] = lds_addr;
     // Out-of-range LDS reads return zero; the global store still issues.
     lds.read(lds_addr, &d->store_data[lane * 1], 1);
   }
@@ -1844,6 +1846,7 @@ void GlobalStoreAsyncFromLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::ASYNCCNT;
+  d->lds_src = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1860,6 +1863,7 @@ void GlobalStoreAsyncFromLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
     uint32_t lds_addr = async_lds_lane_address(inst_, wf, lane_lds_addr, 4);
+    d->per_lane_lds_addr[lane] = lds_addr;
     // Out-of-range LDS reads return zero; the global store still issues.
     lds.read(lds_addr, &d->store_data[lane * 4], 4);
   }
@@ -1872,6 +1876,7 @@ void GlobalStoreAsyncFromLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 2;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::ASYNCCNT;
+  d->lds_src = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1888,6 +1893,7 @@ void GlobalStoreAsyncFromLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
     uint32_t lds_addr = async_lds_lane_address(inst_, wf, lane_lds_addr, 8);
+    d->per_lane_lds_addr[lane] = lds_addr;
     // Out-of-range LDS reads return zero; the global store still issues.
     lds.read(lds_addr, &d->store_data[lane * 8], 8);
   }
@@ -1900,6 +1906,7 @@ void GlobalStoreAsyncFromLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 4;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::ASYNCCNT;
+  d->lds_src = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1916,6 +1923,7 @@ void GlobalStoreAsyncFromLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
     uint32_t lds_addr = async_lds_lane_address(inst_, wf, lane_lds_addr, 16);
+    d->per_lane_lds_addr[lane] = lds_addr;
     // Out-of-range LDS reads return zero; the global store still issues.
     lds.read(lds_addr, &d->store_data[lane * 16], 16);
   }

@@ -12,6 +12,7 @@
 #include <fstream>
 #include <iterator>
 #include <thread>
+#include <tuple>
 
 namespace {
 using namespace rocjitsu;
@@ -63,6 +64,78 @@ TEST_F(MemoryWaitScoreboardTest, PartialWaitReleasesOnlyTheOlderLoad) {
   EXPECT_EQ(hazards[0].reg.index, 6u);
 }
 
+TEST_F(MemoryWaitScoreboardTest, MixedCounterPartialWaitUsesOnlyOrderedYoungerOperations) {
+  state.add({state.issue(WaitCounterKind::Ds, false, 1),
+             0x100,
+             1,
+             {RegClass::VGPR, 5, 1},
+             WaitCounterKind::Ds,
+             0xf});
+  state.issue(WaitCounterKind::Ds, true); // Unordered SMEM-like traffic.
+  state.issue(WaitCounterKind::Ds, false, 1);
+  state.wait(WaitCounterKind::Ds, 1);
+  read(5);
+  EXPECT_TRUE(hazards.empty());
+}
+
+TEST_F(MemoryWaitScoreboardTest, LdsChecksConflictsAcrossPathsAndAsyncWritesWithinOnePath) {
+  using Kind = MemoryWaitScoreboard::LdsKind;
+  for (auto older_kind : {Kind::Ds, Kind::Direct, Kind::Async})
+    for (auto newer_kind : {Kind::Ds, Kind::Direct, Kind::Async})
+      for (bool older_write : {false, true})
+        for (bool newer_write : {false, true}) {
+          state.clear();
+          hazards.clear();
+          const auto sequence = state.issue(WaitCounterKind::Async);
+          state.add_lds({{sequence, 0x100, 0, {}, WaitCounterKind::Async, 0},
+                         older_kind,
+                         older_write,
+                         {{16, 20}, {24, 28}}});
+          state.access_lds({{20, 24}}, newer_kind, newer_write); // A hole is not an overlap.
+          EXPECT_TRUE(hazards.empty());
+          state.access_lds({{27, 29}}, newer_kind, newer_write);
+          const bool expected = (older_write || newer_write) &&
+                                (older_kind != newer_kind || older_kind == Kind::Async);
+          ASSERT_EQ(hazards.size(), expected ? 1u : 0u);
+          if (expected) {
+            EXPECT_EQ(hazards[0].producer.pc, 0x100u);
+            EXPECT_EQ(hazards[0].consumer_pc, 0x200u);
+            EXPECT_EQ(hazards[0].lds_address, 27u);
+            state.access_lds({{27, 29}}, newer_kind, newer_write);
+            EXPECT_EQ(hazards.size(), 1u); // Recover without cascading reports.
+          }
+        }
+}
+
+TEST_F(MemoryWaitScoreboardTest, LdsPartialWaitAndAdmissionRetireOnlyProvenAccesses) {
+  using Kind = MemoryWaitScoreboard::LdsKind;
+  for (bool admission : {false, true}) {
+    state.clear();
+    hazards.clear();
+    auto add = [&](uint32_t address) {
+      state.add_lds({{state.issue(WaitCounterKind::Async), 0x100, 0, {}, WaitCounterKind::Async, 0},
+                     Kind::Async,
+                     true,
+                     {{address, address + 4}}});
+    };
+    add(16);
+    add(24);
+    state.wait(WaitCounterKind::Ds, 0); // Wrong counter.
+    ASSERT_EQ(state.lds_events().size(), 2u);
+    if (admission) {
+      for (unsigned i = 2; i < 63; ++i)
+        state.issue(WaitCounterKind::Async);
+      state.backpressure(WaitCounterKind::Async, 63);
+    } else {
+      state.wait(WaitCounterKind::Async, 1);
+    }
+    state.access_lds({{16, 20}}, Kind::Ds, false);
+    EXPECT_TRUE(hazards.empty());
+    state.access_lds({{24, 28}}, Kind::Ds, false);
+    ASSERT_EQ(hazards.size(), 1u);
+  }
+}
+
 TEST_F(MemoryWaitScoreboardTest, WrongCounterAndUnorderedPartialWaitDoNotProveReadiness) {
   load(5, WaitCounterKind::Km, ~uint64_t{0}, 0xf, true);
   load(6, WaitCounterKind::Km, ~uint64_t{0}, 0xf, true);
@@ -81,6 +154,98 @@ TEST_F(MemoryWaitScoreboardTest, CounterOnlyOperationsContributeToPartialWaits) 
   state.wait(WaitCounterKind::Load, 1);
   read(5);
   EXPECT_TRUE(hazards.empty());
+}
+
+TEST_F(MemoryWaitScoreboardTest, AdmissionAtCapacityReleasesOnlyTheOldestOrderedResult) {
+  for (uint32_t capacity : {7u, 15u, 31u, 63u}) {
+    state.clear();
+    load(5, WaitCounterKind::Ds);
+    load(6, WaitCounterKind::Ds);
+    for (uint32_t i = 2; i < capacity - 1; ++i)
+      state.issue(WaitCounterKind::Ds);
+    state.backpressure(WaitCounterKind::Ds, capacity);
+    EXPECT_TRUE(shadow.test(5));
+    state.issue(WaitCounterKind::Ds);
+    // The queue can hold exactly capacity requests. Only admission of another
+    // request forces the original result ready, before that request reads it.
+    EXPECT_TRUE(shadow.test(5));
+    state.backpressure(WaitCounterKind::Ds, capacity);
+    EXPECT_FALSE(shadow.test(5));
+    EXPECT_TRUE(shadow.test(6));
+    read(5);
+    EXPECT_TRUE(hazards.empty());
+  }
+}
+
+TEST_F(MemoryWaitScoreboardTest, BackpressureKeepsCounterMembershipSeparateFromOrder) {
+  load(5, WaitCounterKind::Ds);
+  for (uint32_t i = 0; i < 30; ++i) {
+    state.backpressure(WaitCounterKind::Ds, 15);
+    state.issue(WaitCounterKind::Ds, true);
+  }
+  EXPECT_TRUE(shadow.test(5)); // Unordered younger operations prove no progress.
+  for (uint32_t i = 1; i < 15; ++i)
+    state.issue(WaitCounterKind::Ds);
+  load(6, WaitCounterKind::Ds, 1, 0xf, true);
+  state.backpressure(WaitCounterKind::Ds, 15);
+  EXPECT_FALSE(shadow.test(5)); // A full ordered class must progress despite the mix.
+  EXPECT_TRUE(shadow.test(6));
+  state.wait(WaitCounterKind::Ds, 0);
+  EXPECT_FALSE(shadow.test(6));
+}
+
+TEST_F(MemoryWaitScoreboardTest, BackpressureDoesNotAssumeFifoForScalarGdsOrLegacyFlat) {
+  using namespace waitcheck_detail;
+  for (auto kind : {WaitEventKind::Smem, WaitEventKind::Gds, WaitEventKind::FlatLoad}) {
+    state.clear();
+    const ClassifiedEvent event{WaitCounterKind::Ds, kind};
+    const auto first = state.issue(event, ROCJITSU_CODE_ARCH_CDNA4);
+    state.add({first, 0x100, 1, {RegClass::VGPR, 5, 1}, WaitCounterKind::Ds, 0xf});
+    for (uint32_t i = 0; i < 32; ++i) {
+      state.backpressure(WaitCounterKind::Ds, 15);
+      state.issue(event, ROCJITSU_CODE_ARCH_CDNA4);
+    }
+    EXPECT_TRUE(shadow.test(5));
+  }
+}
+
+TEST_F(MemoryWaitScoreboardTest, AsyncDirectionsAndLegacyImageTypesHaveSeparateCompletionOrder) {
+  using namespace waitcheck_detail;
+  for (const auto &[arch, counter, first_kind, other_kind] :
+       {std::tuple{ROCJITSU_CODE_ARCH_CDNA5, WaitCounterKind::Async, WaitEventKind::AsyncLdsLoad,
+                   WaitEventKind::AsyncLdsStore},
+        {ROCJITSU_CODE_ARCH_RDNA1, WaitCounterKind::Load, WaitEventKind::VmemNoSamplerLoad,
+         WaitEventKind::Sample}}) {
+    state.clear();
+    const ClassifiedEvent first{counter, first_kind}, other{counter, other_kind};
+    state.add({state.issue(first, arch), 0x100, 1, {RegClass::VGPR, 5, 1}, counter, 0xf});
+    for (unsigned i = 0; i < 64; ++i) {
+      state.backpressure(counter, 63);
+      state.issue(other, arch);
+    }
+    state.wait(counter, 1);
+    EXPECT_TRUE(shadow.test(5)); // Neither admission nor the mixed wait proves this result.
+    for (unsigned i = 1; i < 63; ++i)
+      state.issue(first, arch);
+    state.backpressure(counter, 63);
+    EXPECT_FALSE(shadow.test(5));
+  }
+}
+
+TEST_F(MemoryWaitScoreboardTest, CompletionBackpressureAlsoProvesReplayTranslation) {
+  state.issue(WaitCounterKind::Load);
+  state.add({state.issue_xcnt(WaitCounterKind::Load, false),
+             0x100,
+             1,
+             {RegClass::VGPR, 5, 1},
+             WaitCounterKind::X,
+             0xf});
+  for (unsigned i = 1; i < 63; ++i)
+    state.issue(WaitCounterKind::Load);
+  EXPECT_TRUE(shadow.test(5, true));
+  state.backpressure(WaitCounterKind::Load, 63);
+  EXPECT_FALSE(shadow.test(5, true));
+  EXPECT_EQ(state.outstanding(WaitCounterKind::X), 0u);
 }
 
 TEST_F(MemoryWaitScoreboardTest, WaitThresholdLeavesExactlyTheRequestedQueueSuffix) {
@@ -462,6 +627,26 @@ TEST(MemoryWaitExecutionTest, InlineDsResultAndCounterOnlyNopUseOrderedQueue) {
     ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
     EXPECT_EQ(sim.snapshot->snapshots().front().vgpr(3, 0), 1u);
     EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), threshold == 2 ? 1u : 0u);
+  }
+}
+
+TEST(MemoryWaitExecutionTest, CounterAdmissionPrecedesTheIncomingInstructionsRegisterReads) {
+  for (unsigned younger : {61u, 62u}) {
+    std::vector<uint32_t> code;
+    append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 129, .vdst = 1}));
+    append_instruction(code, cdna5::build_vds(cdna5::kDsSwizzleB32Vds, {.addr = 1, .vdst = 2}));
+    for (unsigned i = 0; i < younger; ++i)
+      append_instruction(code, cdna5::build_vds(cdna5::kDsNopVds));
+    append_instruction(code, cdna5::build_vds(cdna5::kDsSwizzleB32Vds, {.addr = 2, .vdst = 3}));
+    append_instruction(code, S_ENDPGM_GFX12);
+    Gfx1250Sim sim;
+    auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
+    test::AqlQueue queue(sim.memory, sim.cp());
+    queue.dispatch(kernel, 32, 32);
+    step_until_halted(*sim.engine, *sim.cu());
+    ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
+    EXPECT_EQ(sim.snapshot->snapshots().front().vgpr(3, 0), 1u);
+    EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), younger == 61 ? 1u : 0u);
   }
 }
 
@@ -1140,6 +1325,126 @@ TEST(MemoryWaitExecutionTest, GlobalFlatResultNeedsOnlyItsLoadCounter) {
     ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
     EXPECT_EQ(sim.snapshot->snapshots().front().vgpr(3, 0), 0x12345678u);
     EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), (waits & 1) ? 0u : 1u);
+  }
+}
+
+TEST(MemoryWaitExecutionTest, EagerLdsTransfersStillDiagnoseMissingWaits) {
+  // RAW through DS, WAR through DS, DS -> async RAW, and async WAW all
+  // execute correctly with eager memory. Only an architectural wait proves
+  // them safe. DS -> DS is an ordered control requiring no memory wait.
+  for (unsigned pattern = 0; pattern < 5; ++pattern)
+    for (unsigned mode = 0; mode < 4; ++mode) {
+      SCOPED_TRACE(std::format("pattern={} mode={}", pattern, mode));
+      std::vector<uint32_t> code;
+      append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 255, .sdst = 0}));
+      append_instruction(code, 0x400000u);
+      append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 1}));
+      append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 0}));
+      append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 1}));
+      append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 129, .vdst = 2}));
+      auto async_load = [&] {
+        append_instruction(code, cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB32Vglobal,
+                                                      {.saddr = 0, .vdst = 1, .vaddr = 0}));
+      };
+      auto async_store = [&] {
+        append_instruction(code, cdna5::build_vglobal(cdna5::kGlobalStoreAsyncFromLdsB32Vglobal,
+                                                      {.saddr = 0, .vsrc = 1, .vaddr = 0}));
+      };
+      auto ds_store = [&] {
+        append_instruction(code, cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 1, .data0 = 2}));
+      };
+      if (pattern == 1)
+        async_store();
+      else if (pattern == 2 || pattern == 4)
+        ds_store();
+      else
+        async_load();
+      if (mode == 1)
+        append_instruction(code, cdna5::build_sopp(pattern == 2 || pattern == 4
+                                                       ? cdna5::kSWaitDscntSopp
+                                                       : cdna5::kSWaitAsynccntSopp,
+                                                   {.simm16 = 0}));
+      if (mode == 2)
+        append_instruction(code, cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = 0}));
+      if (pattern == 0 || pattern == 4)
+        append_instruction(code, cdna5::build_vds(cdna5::kDsLoadB32Vds, {.addr = 1, .vdst = 3}));
+      else if (pattern == 1)
+        ds_store();
+      else if (pattern == 2)
+        async_store();
+      else
+        async_load();
+      append_instruction(code, S_ENDPGM_GFX12);
+
+      std::ifstream file(kGfx1250ConfigPath);
+      std::string config((std::istreambuf_iterator<char>(file)), {});
+      if (mode == 3) {
+        const auto cu = config.find("\"type\": \"compute_unit\"");
+        const auto array = config.find('[', config.find("\"config\"", cu));
+        ASSERT_NE(array, std::string::npos);
+        config.insert(array + 1, "{\"key\":\"memory_wait_diagnostics\",\"value\":\"off\"},");
+      }
+      Gfx1250Sim sim(config);
+      write_global_u32(*sim.memory, 0x400000, 0x12345678);
+      const auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
+      hsa_kernel_dispatch_packet_t packet{};
+      packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+      packet.setup = 1;
+      packet.workgroup_size_x = packet.grid_size_x = 32;
+      packet.workgroup_size_y = packet.workgroup_size_z = packet.grid_size_y = packet.grid_size_z =
+          1;
+      packet.group_segment_size = 256;
+      packet.kernel_object = kernel;
+      test::AqlQueue queue(sim.memory, sim.cp());
+      queue.submit(packet);
+      step_until_halted(*sim.engine, *sim.cu());
+      ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
+      if (pattern == 0 || pattern == 4)
+        EXPECT_EQ(sim.snapshot->snapshots().front().vgpr(3, 0), pattern == 0 ? 0x12345678u : 1u);
+      EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(),
+                pattern != 4 && (mode == 0 || mode == 2) ? 1u : 0u);
+    }
+}
+
+TEST(MemoryWaitExecutionTest, LdsFootprintsUseExecutedLanesAndExactBytes) {
+  for (const auto [producer_exec, producer_address, consumer_address, expected] :
+       {std::tuple{1u, 8u, 8u, 1u},
+        {1u, 8u, 11u, 1u},
+        {1u, 8u, 12u, 0u},
+        {1u, 8u, 32u, 0u},
+        {0u, 8u, 8u, 0u},
+        {1u, 64u, 0u, 0u}}) {
+    SCOPED_TRACE(std::format("exec={} source={} consumer={}", producer_exec, producer_address,
+                             consumer_address));
+    Gfx1250Sim sim;
+    auto *cu = sim.cu();
+    auto *wf = sim.dispatch_scratch_wf();
+    cu->allocate_lds(256); // Check nonzero physical LDS allocation bases too.
+    wf->set_lds_base(cu->allocate_lds(256));
+    wf->set_lds_size(64);
+    wf->set_exec(producer_exec);
+    write_wave_sgpr(*cu, *wf, 0, 0x400000);
+    write_wave_sgpr(*cu, *wf, 1, 0);
+    cu->write_vgpr(wf->vgpr_alloc().base, 0, 0);
+    cu->write_vgpr(wf->vgpr_alloc().base + 1, 0, producer_address);
+    cu->write_vgpr(wf->vgpr_alloc().base + 1, 1, 32); // Inactive producer lane.
+    auto producer = decode_gfx1250(cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB32Vglobal,
+                                                        {.saddr = 0, .vdst = 1, .vaddr = 0}),
+                                   "global_load_async_to_lds_b32");
+    ASSERT_NE(producer, nullptr);
+    producer->execute(*producer, wf);
+    cu->track_memory_wait(*producer, *wf);
+    wf->set_exec(2); // A different lane can conflict with the same LDS bytes.
+    cu->write_vgpr(wf->vgpr_alloc().base + 1, 1, consumer_address);
+    const auto words = cdna5::build_vds(cdna5::kDsLoadU8Vds, {.addr = 1, .vdst = 3});
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    util::StringDiagnostic error;
+    auto decoded = decoder->decode_window(words, 0, error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    auto &consumer = decoded.value();
+    consumer->execute(*consumer, wf);
+    cu->track_memory_wait(*consumer, *wf);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), expected);
   }
 }
 

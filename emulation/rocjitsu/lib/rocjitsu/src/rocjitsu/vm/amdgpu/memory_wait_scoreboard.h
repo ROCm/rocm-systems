@@ -74,7 +74,10 @@ private:
 class MemoryWaitScoreboard {
 public:
   static constexpr uint8_t kFullDwordByteMask = 0xf;
-  explicit MemoryWaitScoreboard(MemoryWaitShadow &shadow) : pending_(shadow) {}
+  static constexpr uint16_t kUnordered = UINT16_MAX;
+  explicit MemoryWaitScoreboard(MemoryWaitShadow &shadow) : pending_(shadow) {
+    last_order_.fill(kUnordered);
+  }
   struct Event {
     uint64_t sequence;
     uint64_t pc;
@@ -83,6 +86,8 @@ public:
     WaitCounterKind counter;
     uint8_t bytes;
     bool reported = false;
+    uint16_t order = kUnordered;
+    uint64_t order_sequence = 0;
   };
   struct Hazard {
     Event producer;
@@ -90,8 +95,26 @@ public:
     RegisterRef reg;
     bool write;
     uint32_t required_wait;
+    std::optional<uint32_t> lds_address;
   };
   using Reporter = void (*)(void *, const Hazard &);
+
+  struct LdsRange {
+    uint32_t begin;
+    uint32_t end;
+  };
+  enum class LdsKind { Ds, Direct, Async };
+  struct LdsEvent {
+    Event completion;
+    LdsKind kind;
+    bool write;
+    std::vector<LdsRange> ranges;
+  };
+  /// Ranges are sorted, nonempty, and disjoint. Compare physical LDS bytes,
+  /// including conflicts between different lanes of the same wave.
+  void access_lds(const std::vector<LdsRange> &ranges, LdsKind kind, bool write);
+  void add_lds(LdsEvent event);
+  const std::vector<LdsEvent> &lds_events() const { return lds_events_; }
 
   bool empty() const { return events_.empty(); }
   void clear();
@@ -104,7 +127,11 @@ public:
   void xcnt_ordered_write(RegisterRef reg, uint64_t lanes, uint8_t bytes);
   /// Count every operation, including stores without a register destination.
   uint64_t issue(WaitCounterKind counter, bool unordered = false, uint32_t ordering_kind = 0,
+                 uint32_t units = 1, bool backpressure_ordered = true);
+  uint64_t issue(const waitcheck_detail::ClassifiedEvent &event, rj_code_arch_t arch,
                  uint32_t units = 1);
+  /// Admission can force completion before the incoming instruction reads its operands.
+  void backpressure(WaitCounterKind counter, uint32_t capacity);
   void add(Event event);
   void wait(WaitCounterKind counter, uint32_t threshold);
   uint64_t outstanding(WaitCounterKind counter) const {
@@ -136,19 +163,37 @@ private:
                       WaitCounterKind ordered_write_counter);
   void rebuild_mask();
   void clear_destination(const Event &event);
+  void retire_completed();
+  bool completed(WaitCounterKind counter, uint64_t sequence, uint16_t order,
+                 uint64_t order_sequence) const;
+  void stamp_order(Event &event) const;
+  uint32_t required_wait(const Event &event) const;
   std::array<uint64_t, kCounters> issued_{};
   std::array<uint64_t, kCounters> retired_{};
   std::array<bool, kCounters> unordered_{};
   std::array<uint32_t, kCounters> ordering_kinds_{};
+  struct Order {
+    WaitCounterKind counter;
+    uint32_t kind;
+    uint64_t issued = 0;
+    uint64_t retired = 0;
+  };
+  // Counter membership is not completion order. Only operations in the same
+  // ordered class can prove that an old result must have completed.
+  std::vector<Order> orders_;
+  std::array<uint16_t, kCounters> last_order_{};
   bool xcnt_scalar_ = false;
   struct Translation {
     uint64_t sequence;
     uint64_t completion_sequence;
     WaitCounterKind completion;
+    uint16_t order;
+    uint64_t order_sequence;
   };
   std::vector<Translation> translations_;
   MemoryWaitShadow &pending_;
   std::vector<Event> events_;
+  std::vector<LdsEvent> lds_events_;
   uint64_t pc_ = 0;
   void *context_ = nullptr;
   Reporter reporter_ = nullptr;

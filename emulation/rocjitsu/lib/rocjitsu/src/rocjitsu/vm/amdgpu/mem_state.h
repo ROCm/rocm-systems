@@ -227,6 +227,7 @@ public:
   /// They also propagate signaling NaNs instead of treating them as missing numbers.
   bool atomic_legacy_minmax = true;
   bool lds_dst = false; ///< Buffer load with LDS bit: write to LDS, not VGPRs.
+  bool lds_src = false; ///< Async store reads LDS at per_lane_lds_addr.
   /// Reference LDS address for LDS-destination loads. For ordinary LDS-dst
   /// paths this may include the lane-0 destination offset. For cluster
   /// multicast this must be exactly Wavefront::lds_base(), the source WG

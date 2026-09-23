@@ -8408,6 +8408,7 @@ class CodeGenerator:
         L.append(f'  d->num_elems = {ne};')
         L.append('  d->is_load = false;')
         self._append_wait_counter_type(L, sem, 'global_store_async_from_lds')
+        L.append('  d->lds_src = true;')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
@@ -8427,6 +8428,7 @@ class CodeGenerator:
         L.append(
             f'    uint32_t lds_addr = async_lds_lane_address(inst_, wf, lane_lds_addr, {stride});'
         )
+        L.append('    d->per_lane_lds_addr[lane] = lds_addr;')
         L.append(
             '    // Out-of-range LDS reads return zero; the global store still issues.'
         )

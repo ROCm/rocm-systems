@@ -280,10 +280,13 @@ TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromLdsAppliesIoffsetToGlobalAndLdsSo
   ASSERT_NE(state, nullptr);
   EXPECT_EQ(state->tag(), amdgpu::GLOBAL_MEM);
   EXPECT_FALSE(state->is_load);
+  EXPECT_TRUE(state->lds_src);
   EXPECT_EQ(state->wait_counter_type, amdgpu::WaitCounterType::ASYNCCNT);
   EXPECT_EQ(state->lane_mask, 0x3u);
   EXPECT_EQ(state->per_lane_addr[0], kGlobalBase + kEffectiveOffset);
   EXPECT_EQ(state->per_lane_addr[1], kGlobalBase + kEffectiveOffset + 16);
+  EXPECT_EQ(state->per_lane_lds_addr[0], wf->lds_base() + kEffectiveOffset);
+  EXPECT_EQ(state->per_lane_lds_addr[1], wf->lds_base() + kEffectiveOffset + 16);
   ASSERT_GE(state->store_data.size(), 8u);
 
   uint32_t lane0_value = 0;

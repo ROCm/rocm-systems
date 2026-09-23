@@ -28,13 +28,24 @@ have been satisfied.
 Scalar memory is unordered: nonzero waits do not prove individual results ready. This
 includes cache operations; their bank-level counter increments are not simulated. Routed
 SMEM transfers larger than a DWORD account for two units, but readiness still requires
-zero. Mixed hardware event types sharing a counter also conservatively require zero,
-following the target's ordering rules. Generic FLAT on older CDNA is treated
+zero. Mixed hardware event types sharing a counter retain separate ordered-class
+positions: a nonzero wait proves an ordered result complete only when at least that
+many younger operations in its own class follow it. Generic FLAT on older CDNA is treated
 conservatively as unordered. Zero waits reset this ordering state. FLAT keeps both queue
 entries even when all lanes use one segment; register dependencies are restricted using
 the resolved routing masks. Mixed global/shared FLAT functional execution still has the
 existing first-request-lane routing limitation; the checker does not repair memory
 routing.
+
+Before reading an incoming producer's operands, the checker applies the finite
+counter bound to each qualified ordered class in that counter. A capacity of `C`
+leaves at most `C-1` old operations before admission. Younger operations from a
+different completion class cannot prove readiness. Capacities come from the
+target's counter fields (for example, 15 for legacy CDNA LGKM and 63 for VMEM).
+SMEM, GDS, exports, messages and legacy CDNA FLAT do not acquire a FIFO guarantee
+from sharing a counter. CDNA5 async load and store completion classes are separate;
+async barrier arrive orders with async loads. Proven completion also releases the
+associated replay translation prefix.
 
 ## Producer accounting
 
@@ -69,17 +80,17 @@ embedded EXP wait.
 
 ## Limits of the guarantee
 
-Both false negatives and false positives are possible. Eager global/LDS
-write-then-read execution can hide missing waits even within one wave. Conversely,
-architecturally sufficient instruction spacing and finite-counter backpressure
-can make a dependency safe without an explicit wait; neither is modeled here.
+Both false negatives and false positives are possible. LDS byte-range checks cover
+unordered direct/async transfers and their conflicts with DS accesses within one
+wave. Other memory dependencies can still be hidden by eager execution. Conversely,
+architecturally sufficient instruction spacing can make a dependency safe without
+an explicit wait; latency and instruction spacing are not modeled here.
 See [diagnostic limitations](memory-wait-diagnostics.md#false-negatives-and-false-positives).
 
-The diagnostic checks use of or conflicting overwrite of a pending register result. It does
-not prove memory visibility, validate source lifetime beyond the XCNT policy, check LDS
-destinations of asynchronous or tensor transfers, or detect communication hazards
-between waves. ASYNC, TENSOR and store-only producers are counted without turning this
-feature into a memory-order sanitizer.
+The diagnostic checks pending register results and conflicting LDS byte ranges. It
+does not prove general memory visibility, validate source lifetime beyond the XCNT
+policy, check tensor transfer footprints, or detect communication hazards between
+waves. ASYNC, TENSOR and store-only producers still count without a register result.
 
 The [XCNT policy](memory-wait-diagnostics.md#xcnt-replay-source-diagnostics)
 covers SMEM sources and VMEM sources in multi-group replay mode. Single-group VMEM,

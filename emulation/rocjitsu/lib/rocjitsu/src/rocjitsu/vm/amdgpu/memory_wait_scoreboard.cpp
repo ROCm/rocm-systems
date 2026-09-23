@@ -39,27 +39,153 @@ void check_active_memory_wait(RegisterRef reg, uint64_t lanes, uint8_t bytes, bo
 
 void MemoryWaitScoreboard::clear() {
   events_.clear();
+  lds_events_.clear();
   pending_.reset();
   issued_.fill(0);
   retired_.fill(0);
   unordered_.fill(false);
   ordering_kinds_.fill(0);
+  orders_.clear();
+  last_order_.fill(kUnordered);
   xcnt_scalar_ = false;
   translations_.clear();
 }
 
 uint64_t MemoryWaitScoreboard::issue(WaitCounterKind counter, bool unordered,
-                                     uint32_t ordering_kind, uint32_t units) {
+                                     uint32_t ordering_kind, uint32_t units,
+                                     bool backpressure_ordered) {
   auto i = static_cast<size_t>(counter);
   ordering_kinds_[i] |= ordering_kind;
   unordered_[i] |= unordered || std::popcount(ordering_kinds_[i]) > 1;
   issued_[i] += units;
+  last_order_[i] = kUnordered;
+  if (!unordered && backpressure_ordered) {
+    const auto it = std::ranges::find_if(orders_, [&](const Order &order) {
+      return order.counter == counter && order.kind == ordering_kind;
+    });
+    const auto slot = static_cast<uint16_t>(it - orders_.begin());
+    if (it == orders_.end())
+      orders_.push_back({counter, ordering_kind});
+    orders_[slot].issued += units;
+    last_order_[i] = slot;
+  }
   return issued_[i];
+}
+
+uint64_t MemoryWaitScoreboard::issue(const waitcheck_detail::ClassifiedEvent &event,
+                                     rj_code_arch_t arch, uint32_t units) {
+  using namespace waitcheck_detail;
+  const auto model = waitcnt_model(arch).value();
+  const bool legacy_flat =
+      model == WaitcntModel::LegacyNoVscnt &&
+      (event.kind == WaitEventKind::FlatLoad || event.kind == WaitEventKind::FlatStore);
+  uint32_t kind = 0;
+  if (!(model == WaitcntModel::LegacyNoVscnt && event.counter == WaitCounterKind::Load))
+    if (auto normalized =
+            WaitcheckTarget::normalized_hardware_event_kind(event.counter, event.kind, model))
+      kind = uint32_t{1} << static_cast<unsigned>(*normalized);
+  // ASYNC loads and stores share a counter but return done out of order with
+  // respect to each other (CDNA5 ISA 10.8). Barrier arrive orders with loads.
+  if (event.counter == WaitCounterKind::Async)
+    kind = uint32_t{1} << static_cast<unsigned>(event.kind == WaitEventKind::AsyncLdsStore
+                                                    ? WaitEventKind::AsyncLdsStore
+                                                    : WaitEventKind::AsyncLdsLoad);
+  // Older RDNA samples and BVH operations share VMcnt, not a completion FIFO.
+  if (model == WaitcntModel::LegacyVscnt && event.counter == WaitCounterKind::Load &&
+      (event.kind == WaitEventKind::Sample || event.kind == WaitEventKind::Bvh))
+    kind = uint32_t{1} << static_cast<unsigned>(event.kind);
+  const bool ordered =
+      event.kind != WaitEventKind::Gds && event.kind != WaitEventKind::Export &&
+      event.kind != WaitEventKind::SqMessage && event.kind != WaitEventKind::SccWrite &&
+      event.kind != WaitEventKind::GlobalInv && event.kind != WaitEventKind::Unknown;
+  return issue(event.counter, event.kind == WaitEventKind::Smem || legacy_flat, kind, units,
+               ordered);
+}
+
+bool MemoryWaitScoreboard::completed(WaitCounterKind counter, uint64_t sequence, uint16_t order,
+                                     uint64_t order_sequence) const {
+  return sequence <= retired_[static_cast<size_t>(counter)] ||
+         (order != kUnordered && order_sequence <= orders_[order].retired);
+}
+
+void MemoryWaitScoreboard::backpressure(WaitCounterKind counter, uint32_t capacity) {
+  assert(capacity != 0);
+  bool changed = false;
+  for (auto &order : orders_) {
+    if (order.counter != counter || order.issued < capacity)
+      continue;
+    // Even an unordered incoming operation needs one counter slot. If an old
+    // result still had capacity-1 younger operations in its own ordered class,
+    // none could have completed and that slot could not be available.
+    const auto through = order.issued - (capacity - 1);
+    changed |= through > order.retired;
+    order.retired = std::max(order.retired, through);
+  }
+  if (changed)
+    retire_completed();
+}
+
+void MemoryWaitScoreboard::stamp_order(Event &event) const {
+  const auto counter = static_cast<size_t>(event.counter);
+  if (event.sequence == issued_[counter] && last_order_[counter] != kUnordered) {
+    event.order = last_order_[counter];
+    event.order_sequence = orders_[event.order].issued;
+  }
+}
+
+uint32_t MemoryWaitScoreboard::required_wait(const Event &event) const {
+  const auto i = static_cast<size_t>(event.counter);
+  const auto required = !unordered_[i] ? issued_[i] - event.sequence
+                        : event.order != kUnordered
+                            ? orders_[event.order].issued - event.order_sequence
+                            : 0;
+  return static_cast<uint32_t>(std::min<uint64_t>(required, UINT32_MAX));
+}
+
+void MemoryWaitScoreboard::add_lds(LdsEvent event) {
+  if (event.ranges.empty())
+    return;
+  stamp_order(event.completion);
+  lds_events_.push_back(std::move(event));
+}
+
+void MemoryWaitScoreboard::access_lds(const std::vector<LdsRange> &ranges, LdsKind kind,
+                                      bool write) {
+  for (auto &old : lds_events_) {
+    // Ordinary DS instructions from one wave access LDS in order. Direct
+    // VMEM loads are checked against DS, but same-path direct-load ordering
+    // is not qualified here. CDNA5 async LDS writes explicitly may reorder,
+    // including two async loads (CDNA5 ISA 10.8).
+    if ((!write && !old.write) || (kind == old.kind && kind != LdsKind::Async))
+      continue;
+    size_t a = 0, b = 0;
+    while (a < ranges.size() && b < old.ranges.size()) {
+      const auto &current = ranges[a];
+      const auto &previous = old.ranges[b];
+      if (current.begin < previous.end && previous.begin < current.end) {
+        old.completion.reported = true;
+        if (reporter_)
+          reporter_(context_, {old.completion,
+                               pc_,
+                               {},
+                               write,
+                               required_wait(old.completion),
+                               std::max(current.begin, previous.begin)});
+        break;
+      }
+      if (current.end <= previous.end)
+        ++a;
+      else
+        ++b;
+    }
+  }
+  std::erase_if(lds_events_, [](const LdsEvent &event) { return event.completion.reported; });
 }
 
 void MemoryWaitScoreboard::add(Event event) {
   if (!event.lanes || !event.bytes || !event.reg.width)
     return;
+  stamp_order(event);
   // A newer result covering the entire old destination is the stronger
   // dependency on an ordered counter. Discard the superseded record rather
   // than growing with a loop that repeatedly loads an unused destination.
@@ -113,40 +239,53 @@ void MemoryWaitScoreboard::wait(WaitCounterKind counter, uint32_t threshold) {
   // The caller normalizes split and legacy spellings into one sequence
   // domain for each architectural counter.
   const size_t i = static_cast<size_t>(counter);
-  if (threshold && unordered_[i])
-    return;
   const uint64_t through = issued_[i] > threshold ? issued_[i] - threshold : 0;
-  retired_[i] = std::max(retired_[i], through);
+  if (!threshold || !unordered_[i])
+    retired_[i] = std::max(retired_[i], through);
+  // A mixed counter still bounds every ordered class independently. It does
+  // not prove readiness of an unordered result such as SMEM.
+  for (auto &order : orders_)
+    if (order.counter == counter && order.issued > threshold)
+      order.retired = std::max(order.retired, order.issued - threshold);
+  if (!threshold) {
+    unordered_[i] = false;
+    ordering_kinds_[i] = 0;
+    for (auto &order : orders_)
+      if (order.counter == counter)
+        order.retired = order.issued;
+  }
+  retire_completed();
+  if (counter == WaitCounterKind::X) {
+    std::erase_if(translations_, [&](const auto &entry) { return entry.sequence <= through; });
+  } else if (xcnt_scalar_ && counter == WaitCounterKind::Km && !threshold) {
+    wait(WaitCounterKind::X, 0);
+  }
+}
+
+void MemoryWaitScoreboard::retire_completed() {
+  std::erase_if(lds_events_, [&](const LdsEvent &event) {
+    const auto &e = event.completion;
+    return completed(e.counter, e.sequence, e.order, e.order_sequence);
+  });
   const auto size = events_.size();
   std::erase_if(events_, [&](const Event &event) {
-    const bool retire = event.counter == counter && event.sequence <= through;
+    const bool retire = completed(event.counter, event.sequence, event.order, event.order_sequence);
     if (retire)
       clear_destination(event);
     return retire;
   });
-  if (!threshold) {
-    unordered_[i] = false;
-    ordering_kinds_[i] = 0;
-  }
   if (size != events_.size())
     rebuild_mask();
-  if (counter == WaitCounterKind::X) {
-    std::erase_if(translations_, [&](const auto &entry) { return entry.sequence <= through; });
-  } else if (outstanding(WaitCounterKind::X)) {
-    if (xcnt_scalar_) {
-      if (counter == WaitCounterKind::Km && !threshold)
-        wait(WaitCounterKind::X, 0);
-    } else {
-      // Completion proves translation. Map the waited counter position back
-      // into the ordered X queue; counts from mixed families are not X ages.
-      uint64_t translated = 0;
-      for (const auto &entry : translations_)
-        if (entry.completion == counter && entry.completion_sequence <= retired_[i])
-          translated = std::max(translated, entry.sequence);
-      if (translated)
-        wait(WaitCounterKind::X,
-             static_cast<uint32_t>(issued_[static_cast<size_t>(WaitCounterKind::X)] - translated));
-    }
+  if (!xcnt_scalar_ && outstanding(WaitCounterKind::X)) {
+    // Completion proves translation. Map the waited counter position back
+    // into the ordered X queue; counts from mixed families are not X ages.
+    uint64_t translated = 0;
+    for (const auto &entry : translations_)
+      if (completed(entry.completion, entry.completion_sequence, entry.order, entry.order_sequence))
+        translated = std::max(translated, entry.sequence);
+    if (translated > retired_[static_cast<size_t>(WaitCounterKind::X)])
+      wait(WaitCounterKind::X,
+           static_cast<uint32_t>(issued_[static_cast<size_t>(WaitCounterKind::X)] - translated));
   }
 }
 
@@ -158,8 +297,12 @@ void MemoryWaitScoreboard::xcnt_group(bool scalar) {
 
 uint64_t MemoryWaitScoreboard::issue_xcnt(WaitCounterKind completion, bool scalar) {
   const auto sequence = issue(WaitCounterKind::X, scalar);
-  if (!scalar)
-    translations_.push_back({sequence, issued_[static_cast<size_t>(completion)], completion});
+  if (!scalar) {
+    const auto i = static_cast<size_t>(completion);
+    const auto order = last_order_[i];
+    translations_.push_back(
+        {sequence, issued_[i], completion, order, order == kUnordered ? 0 : orders_[order].issued});
+  }
   return sequence;
 }
 
@@ -179,6 +322,25 @@ void MemoryWaitScoreboard::xcnt_ordered_write(RegisterRef reg, uint64_t lanes, u
 
 void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) {
   using namespace waitcheck_detail;
+  // Most kernels wait well before a queue is full. Avoid classifying the
+  // incoming instruction twice unless some ordered class can force progress.
+  const bool full =
+      inst.is_memory_wait_producer() && std::ranges::any_of(orders_, [&](const Order &order) {
+        const auto maximum = WaitcheckTarget::maximum_dependency_wait(arch, order.counter);
+        return maximum.succeeded() && order.issued - order.retired > maximum.value();
+      });
+  if (full) {
+    const auto events = WaitcheckTarget::classify_events(inst, arch);
+    if (events.succeeded())
+      for (const auto &event : events.value()) {
+        if (event.counter == WaitCounterKind::VmVsrc || event.counter == WaitCounterKind::VaVdst ||
+            event.counter == WaitCounterKind::Depctr)
+          continue;
+        const auto maximum = WaitcheckTarget::maximum_dependency_wait(arch, event.counter);
+        if (maximum.succeeded())
+          backpressure(event.counter, maximum.value() + 1);
+      }
+  }
   if (arch == ROCJITSU_CODE_ARCH_CDNA5 && outstanding(WaitCounterKind::X) &&
       WaitcheckTarget::is_xcnt_drain(inst))
     wait(WaitCounterKind::X, 0);
@@ -207,10 +369,7 @@ void MemoryWaitScoreboard::access_pending(RegisterRef reg, uint64_t lanes, uint8
       continue;
     event.reported = true;
     if (reporter_) {
-      const auto i = static_cast<size_t>(event.counter);
-      const auto required = unordered_[i] ? 0 : issued_[i] - event.sequence;
-      reporter_(context_, {event, pc_, reg, write,
-                           static_cast<uint32_t>(std::min<uint64_t>(required, UINT32_MAX))});
+      reporter_(context_, {event, pc_, reg, write, required_wait(event), std::nullopt});
     }
   }
   const auto size = events_.size();

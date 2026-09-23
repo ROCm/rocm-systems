@@ -1,9 +1,10 @@
 # Memory wait diagnostics
 
-Functional execution computes memory results eagerly. A core, per-wave register
-scoreboard separately tracks whether a wait has made a register result available to the
-program. Reading or overwriting an outstanding destination prints a `memory-wait`
-warning with the issuing PC, consuming PC, register and counter, and sufficient wait
+Functional execution computes memory results eagerly. A core, per-wave scoreboard
+separately tracks whether a register result or LDS access is known complete.
+Reading or overwriting an outstanding destination, or conflicting with an unordered
+LDS access, prints a `memory-wait` warning with the issuing PC, consuming PC,
+register or LDS address, counter, and sufficient wait
 threshold. Execution continues with the eager value. The first conflicting access
 reports the producer and recovers its readiness to avoid cascading warnings. Each CU
 prints at most 16 warnings during its lifetime.
@@ -61,31 +62,51 @@ halves and inactive vector lanes are not treated as consumed inputs. EXEC is con
 even when its eagerly computed value disables all vector lanes.
 
 The shared target model handles CDNA1 through CDNA5 and RDNA1 through RDNA4, including
-RDNA3.5. Each ordered counter retains the suffix requested by a wait. Scalar memory and
-mixed unordered event types require a zero wait. The [counter coverage document](memory-wait-counter-coverage.md) details producer families, multi-counter operations,
+RDNA3.5. Each ordered completion class retains the suffix requested by a wait.
+Scalar memory results require a zero wait. A mixed counter can prove an ordered
+result ready only using younger operations in that same completion class. The
+[counter coverage document](memory-wait-counter-coverage.md) details producer families, multi-counter operations,
 instruction units, and exceptions.
+
+Finite counter capacity also proves completion. For example, admitting a 64th
+operation to a six-bit counter forces the oldest of 63 outstanding operations in
+one ordered class to complete. Admission is checked before the new instruction
+reads its registers. Counter-only operations count, but unordered younger operations
+cannot establish FIFO completion of an older result. This does not infer readiness
+of scalar-memory, GDS, or legacy CDNA FLAT results from backpressure.
+
+LDS checks compare executed byte ranges across lanes, including DS dual accesses,
+transpose request lanes, direct-to-LDS loads, and gfx1250 async LDS loads/stores.
+They diagnose read/write, write/read and write/write conflicts across these paths.
+Two gfx1250 async loads can also write overlapping LDS bytes out of order, despite
+their in-order completion notifications. Ordinary same-wave DS operations stay
+ordered and do not need a memory-order warning. Disjoint ranges, read/read pairs,
+inactive lanes, and rejected out-of-range async accesses do not conflict. For cluster
+multicast, only the issuing workgroup's selected destination is checked.
 
 Completion dependencies survive ordinary branches and CU scheduling; branches
 implicitly drain XCNT. State is reset when a wave slot is freed and is not serialized
-in checkpoints. This register dependency checker does not validate store visibility,
-asynchronous LDS destinations, source lifetime beyond the qualified XCNT checks above,
-or communication between waves. A warning describes a possible missing wait under
+in checkpoints. The checker does not validate general store visibility, source
+lifetime beyond the qualified XCNT checks above, or communication between waves.
+A warning describes a possible missing wait under
 delayed completion or replay even though eager execution already has a value. The
 feature does not model GPU latency.
 
 ## False negatives and false positives
 
 A clean run does not prove that all required waits are present, even within one
-wave. Memory effects execute eagerly, so a global or LDS write followed by a read
-of the same address can observe the new value without the hardware-required wait.
-The register scoreboard does not diagnose that memory-ordering hazard.
+wave. The LDS checks above catch dependencies hidden by eager transfers, but tensor
+DMA footprints, same-path legacy direct-load write ordering, global/scalar cache
+coherence and accesses from other waves are outside their coverage. Not every
+store/read pair needs a wait: ordinary same-wave DS accesses are ordered, and
+CDNA5 VMEM stores and loads to the same global address stay ordered too.
 
 Warnings can also be false positives. The checker does not model instruction
 latency or distance: it cannot recognize a dependency made safe by
-architecturally sufficient instruction spacing. It also does not model finite
-hardware-counter backpressure, which can force older operations to complete in a
-long ordered sequence. Its logical queue positions are not hardware counter
-occupancy, so such completion is not a readiness proof in this checker.
+architecturally sufficient instruction spacing. Counter backpressure is modeled
+only where the target's counter capacity and completion ordering prove readiness;
+unqualified completion classes remain conservative. The checker does not simulate
+hardware occupancy or select a latency at which memory becomes visible.
 
 These are known limits, not an exhaustive list. Investigate warnings against the
 target's ordering rules; `memory_wait_diagnostics=off` suppresses both classes of
@@ -94,8 +115,9 @@ validate hazards such as memory visibility and communication between waves.
 
 ## Cost
 
-The scoreboard retains small dependency records, not memory payloads or decoded
-instructions. A byte of shadow state per register rejects unrelated accesses before any
+The scoreboard retains dependency records and coalesced LDS byte ranges, not memory
+payloads or decoded instructions. LDS ranges are built only for instructions that
+access LDS. A byte of shadow state per register rejects unrelated accesses before any
 thread-local lookup. The 1,280-byte shadow is present in each wave slot, including when
 tracking is disabled. Detailed records are allocated on first tracked memory issue and
 reused across wave slot activations. Retirement clears affected shadow bytes and
