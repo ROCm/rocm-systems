@@ -1,13 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-from __future__ import annotations
-
 import ctypes
 import os
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from utils.logger import console_error, console_log, console_warning
 from utils.native_tool_finder import find_prebuilt_artifacts
@@ -35,8 +33,8 @@ def _workload_torch_version() -> str:
         )
 
 
-def _collectors_by_version() -> dict[str, Path]:
-    artifacts: dict[str, Path] = {}
+def _collectors_by_version() -> Dict[str, Path]:
+    artifacts: Dict[str, Path] = {}
     for path in find_prebuilt_artifacts(_PACKAGE_ROOT, _ARTIFACT_NAME_GLOB):
         match = _ARTIFACT_NAME_PATTERN.match(path.name)
         if match is None:
