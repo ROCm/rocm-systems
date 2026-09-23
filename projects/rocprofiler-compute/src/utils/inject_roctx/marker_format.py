@@ -8,7 +8,8 @@ _MAX_NESTED_ARG_ITEMS = 8
 
 def encode_args(args: str) -> str:
     return (
-        args.replace("%", "%25")
+        args
+        .replace("%", "%25")
         .replace("|", "%7C")
         .replace(";", "%3B")
         .replace("\r", "%0D")
