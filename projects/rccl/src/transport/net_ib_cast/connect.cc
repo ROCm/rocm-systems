@@ -2558,7 +2558,7 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
     NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
     // Acquire QP sharing mutex only when this comm participates in sharing
-    std::unique_lock<std::mutex> lock(g_IbCastSharedQpMutex, std::defer_lock);
+    std::unique_lock<std::mutex> lock(g_IbCastQpSharingGlobalMutex, std::defer_lock);
     if (isSharing) lock.lock();
 
     // QP teardown: refcount-based for shared, direct destroy for non-shared
@@ -2649,7 +2649,7 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
     NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
     // Acquire QP sharing mutex only when this comm participates in sharing
-    std::unique_lock<std::mutex> lock(g_IbCastSharedQpMutex, std::defer_lock);
+    std::unique_lock<std::mutex> lock(g_IbCastQpSharingGlobalMutex, std::defer_lock);
     if (isSharing) lock.lock();
 
     // Data QP teardown: refcount-based for shared, direct destroy for non-shared
