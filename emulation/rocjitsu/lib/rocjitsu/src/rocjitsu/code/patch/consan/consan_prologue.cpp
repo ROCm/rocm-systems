@@ -40,6 +40,33 @@ namespace rocjitsu::consan::detail {
 using detail::OwnerEpochPrologueEmissionPlan;
 using detail::PrivateEpochPrologueEmissionPlan;
 
+// Descriptor aliases enter the same physical instruction stream. ABI register
+// remapping is not idempotent, so their entry prologue must execute only once.
+// Keep all descriptor owners for final validation and reject incompatible ABIs.
+[[nodiscard]] static bool append_shared_entry_prologue(std::vector<TextFragment> &fragments,
+                                                       std::vector<uint32_t> words, PatchInfo info,
+                                                       std::vector<std::string> &errors) {
+  const auto existing = std::ranges::find_if(fragments, [&](const TextFragment &fragment) {
+    return fragment.patch.anchor_offset == info.anchor_offset && fragment.patch.kind == info.kind;
+  });
+  if (existing == fragments.end()) {
+    fragments.push_back(TextFragment::entry_prefix(std::move(words), std::move(info)));
+    return true;
+  }
+  if (existing->before_words != words) {
+    errors.emplace_back("ConSan aliased kernel entry requires incompatible prologues");
+    return false;
+  }
+  for (uint64_t owner : info.owner_descriptor_file_offsets) {
+    auto &owners = existing->patch.owner_descriptor_file_offsets;
+    if (std::ranges::find(owners, owner) == owners.end())
+      owners.push_back(owner);
+  }
+  existing->patch.required_sgpr_count =
+      std::max(existing->patch.required_sgpr_count, info.required_sgpr_count);
+  return true;
+}
+
 [[nodiscard]] DispatchIdCapture dispatch_id_capture(const OperatingPoint &point) {
   if (auto sgpr = point.dispatch_sgpr.base())
     return DispatchIdCapture::in_sgprs(*sgpr);
@@ -1120,7 +1147,8 @@ void try_apply_private_epoch_prologue_patch(const Request &request,
       note_dispatch_id_patch_info(info, *item.emission.dispatch_plan,
                                   item.emission.dispatch_capture);
     info.owner_descriptor_file_offsets.push_back(item.kernel->descriptor_file_offset);
-    fragments.push_back(TextFragment::entry_prefix(std::move(*words), std::move(info)));
+    if (!append_shared_entry_prologue(fragments, std::move(*words), std::move(info), result.errors))
+      return;
   }
   result.replacement = std::move(patcher).emit();
   (void)stage_text_fragments(std::move(fragments), result);
@@ -1562,7 +1590,8 @@ void try_apply_owner_epoch_prologue_patch(
       note_dispatch_id_patch_info(info, *prologue_plan.dispatch_plan,
                                   prologue_plan.dispatch_capture);
     info.owner_descriptor_file_offsets.push_back(canonical_kernel->descriptor_file_offset);
-    fragments.push_back(TextFragment::entry_prefix(std::move(*words), std::move(info)));
+    if (!append_shared_entry_prologue(fragments, std::move(*words), std::move(info), result.errors))
+      return;
   }
 
   if (fragments.empty()) {

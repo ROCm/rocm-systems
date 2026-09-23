@@ -1465,6 +1465,51 @@ TEST(ConSan, PatchesAliasedAtomicOnceForEveryOwner) {
   EXPECT_EQ(result.outcome, TransformOutcome::ModifiedValid);
 }
 
+TEST(ConSan, AliasedKernelEntryInitializesOwnerEpochOnlyOnce) {
+  const auto bytes = make_rdna4_two_kernel_aliased_ordered_atomic_code_object();
+  ASSERT_FALSE(bytes.empty());
+  TestOptions options = test_options();
+  options.kernel_name_allowlist = {"shared_owner_0", "shared_owner_1"};
+  options.init_owner_epoch = true;
+  options.track_barriers = false;
+  options.track_atomics = true;
+  options.report_buffer_address = 0x123456780000ull;
+  options.report_buffer_size = direct_report_bytes(8u);
+  options.max_patches = 16u;
+  const TransformArtifacts result = test_lower_consan(bytes, options);
+  ASSERT_TRUE(patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  const auto owner =
+      std::ranges::find(original.kernels(), "shared_owner_0", &AmdGpuKernelInfo::name);
+  ASSERT_NE(owner, original.kernels().end());
+  const auto is_shared_entry = [&](const PatchInfo &patch) {
+    return patch.kind == PatchKind::KernelEntryOwnerEpochPrologue &&
+           std::ranges::find(patch.owner_descriptor_file_offsets, owner->descriptor_file_offset) !=
+               patch.owner_descriptor_file_offsets.end();
+  };
+  const auto entry = std::ranges::find_if(result.patches, is_shared_entry);
+  ASSERT_NE(entry, result.patches.end());
+  // Placement metadata is published per descriptor, but all aliases must
+  // describe the same physical prologue rather than consecutive remappings.
+  for (const auto &patch : result.patches) {
+    if (is_shared_entry(patch)) {
+      EXPECT_EQ(patch.trampoline_offset, entry->trampoline_offset);
+      EXPECT_EQ(patch.trampoline_size, entry->trampoline_size);
+    }
+  }
+  EXPECT_EQ(entry->owner_descriptor_file_offsets.size(), 2u);
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto first =
+      std::ranges::find(patched.kernels(), "shared_owner_0", &AmdGpuKernelInfo::name);
+  const auto alias =
+      std::ranges::find(patched.kernels(), "shared_owner_1", &AmdGpuKernelInfo::name);
+  ASSERT_NE(first, patched.kernels().end());
+  ASSERT_NE(alias, patched.kernels().end());
+  EXPECT_EQ(first->entry_text_offset, alias->entry_text_offset);
+}
+
 TEST(ConSan, Gfx1250OrderedLdsAtomicComposesAccessAndOrderingMetadata) {
   const std::array<uint32_t, 7> words = {
       0x360202ffu, 0x000000ffu, // release wait setup
