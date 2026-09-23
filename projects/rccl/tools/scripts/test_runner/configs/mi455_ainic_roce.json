@@ -575,7 +575,7 @@
         },
         {
           "name": "Cast_SplitDataThresholdBoundary",
-          "description": "Exact threshold boundary: size>=splitDataMin*nqps → split path (0 tokens); size<threshold → WRR path (1 token)",
+          "description": "Exact threshold boundary: size>=splitDataMin*nqps \u2192 split path (0 tokens); size<threshold \u2192 WRR path (1 token)",
           "test_filter": "NetIbMPITest.CastSplitDataThresholdBoundary"
         },
         {
@@ -588,7 +588,7 @@
         },
         {
           "name": "Cast_SendRecvMultipleSizes",
-          "description": "Sizes across split/WRR threshold: below threshold→1 token each; at/above threshold→0 tokens; data integrity verified",
+          "description": "Sizes across split/WRR threshold: below threshold\u21921 token each; at/above threshold\u21920 tokens; data integrity verified",
           "test_filter": "NetIbMPITest.CastSendRecvMultipleSizes"
         },
         {
@@ -613,7 +613,7 @@
       "tests": [
         {
           "name": "Cast_WeightsDistributionOneRound",
-          "description": "Two-phase WRR distribution: equal then triangular weights — both exhaust all active tokens after one full round",
+          "description": "Two-phase WRR distribution: equal then triangular weights \u2014 both exhaust all active tokens after one full round",
           "test_filter": "NetIbMPITest.CastWeightsDistributionOneRound",
           "env_variables": {
             "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "60000000"
@@ -2560,27 +2560,27 @@
       "tests": [
         {
           "name": "CE_AllGather_8Ranks",
-          "description": "AllGather CE correctness — default production topology (8 ranks)",
+          "description": "AllGather CE correctness \u2014 default production topology (8 ranks)",
           "test_filter": "CeMPI_AllGather.EightRanks"
         },
         {
           "name": "CE_AlltoAll_8Ranks",
-          "description": "AlltoAll CE correctness — default production topology (8 ranks)",
+          "description": "AlltoAll CE correctness \u2014 default production topology (8 ranks)",
           "test_filter": "CeMPI_AlltoAll.EightRanks"
         },
         {
           "name": "CE_Scatter_8Ranks",
-          "description": "Scatter CE correctness, root=0 — default production topology (8 ranks)",
+          "description": "Scatter CE correctness, root=0 \u2014 default production topology (8 ranks)",
           "test_filter": "CeMPI_Scatter.EightRanksRoot0"
         },
         {
           "name": "CE_Gather_8Ranks",
-          "description": "Gather CE correctness, root=0 — default production topology (8 ranks)",
+          "description": "Gather CE correctness, root=0 \u2014 default production topology (8 ranks)",
           "test_filter": "CeMPI_Gather.EightRanksRoot0"
         },
         {
           "name": "CE_AllReduce_8Ranks",
-          "description": "AllReduce CE correctness — default production topology (8 ranks)",
+          "description": "AllReduce CE correctness \u2014 default production topology (8 ranks)",
           "test_filter": "CeMPI_AllReduce.EightRanks"
         },
         {
@@ -4355,7 +4355,7 @@
     },
     {
       "name": "CE Tests - 8-Rank (AllGather, AlltoAll, Scatter, Gather)",
-      "description": "CE collective tests on 8 GPUs/ranks — default production topology. Skips automatically on unsupported driver version.",
+      "description": "CE collective tests on 8 GPUs/ranks \u2014 default production topology. Skips automatically on unsupported driver version.",
       "config": "ce_8rank",
       "enabled": true
     },
