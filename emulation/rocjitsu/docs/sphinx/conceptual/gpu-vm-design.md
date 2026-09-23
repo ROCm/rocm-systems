@@ -51,9 +51,18 @@ embedded in the code object, determines the grid and workgroup
 dimensions, and dispatches workgroups to available CUs across the shader
 engines within its XCD.
 
-The CP also handles SDMA packets for host-to-device and device-to-device
-copy, fill, GCR (global cache request), and HDP flush operations. A
-completion tracker inside each XCD monitors per-dispatch workgroup
+AQL, PM4, and SDMA use a common compile-time packet-processor contract but
+retain distinct concrete processors. The command processor owns the AQL and
+PM4 processors; the SoC-owned SDMA scheduler owns the SDMA processor. Queue
+owners, rather than packet processors or PCI/VFIO adapters, retain ring cursors,
+VM snapshots, retry state (including SDMA's opaque typed continuation), and
+scheduling policy. They also retain a VM binding lease until detach, preventing
+address-space teardown while future snapshots can still be created without
+conflating execution lifetime with frontend references.
+
+SDMA queues use the separate SoC-owned SDMA scheduler, ring consumer, and
+packet processor; no SDMA packet logic is part of the CP. A completion tracker
+inside each XCD monitors per-dispatch workgroup
 retirement and fires completion signals in submission order. When a
 hardware queue becomes idle, the tracker writes the queue-inactive
 signal.
@@ -100,10 +109,17 @@ hardware:
     `l2_assoc`. Atomic operations execute at the L2 level.
 -   **Memory-side cache** --- Sits between the L2 and GPU memory (VRAM),
     providing an additional caching layer for off-chip accesses.
--   **GpuMemory** --- Models VRAM with per-process VMID page tables.
-    Supports passthrough mode (GPU VA equals host VA) and daemon mode
-    (shared memfd mappings). The `local_mem_size` field in
+-   **GpuVm** --- Owns address-space identities, translation roots,
+    permissions, invalidation epochs, and immutable access snapshots shared by
+    KFD and PCI/VFIO queues.
+-   **GpuMemory** --- Stores sparse physical VRAM bytes only. HBM controllers
+    and frontend-specific backing adapters route translated accesses to it; it
+    owns no VMID table or transport endpoint. The `local_mem_size` field in
     `rj_vm_gpu_info_t` reports the configured VRAM capacity.
+
+PCI/VFIO remains a transport and MMIO layer. It publishes address-space and
+queue operations through the shared `GpuVm`, queue registry, CP, MES, and SDMA
+owners instead of duplicating their execution state.
 
 ## MTYPE-aware coherency
 

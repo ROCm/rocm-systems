@@ -2890,15 +2890,38 @@ def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():
         assert 's2, const_acc, 0u);' in body
 
 
+def test_gfx1251_f64_wmma_uses_wave32_mode_independent_executor():
+    operands = [
+        Operand('vdst', 512, 'OPR_VGPR', False, True, False, False, 0),
+        Operand('src0', 128, 'OPR_SRC_VGPR', True, False, False, False, 1),
+        Operand('src1', 128, 'OPR_SRC_VGPR', True, False, False, False, 2),
+        Operand('src2', 512, 'OPR_SRC_VGPR_OR_INLINE', True, False, False, False, 3),
+    ]
+    inst = Instruction('V_WMMA_F64_16X16X4_F64', 'ENC_VOP3P', 0, operands)
+
+    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna5')
+
+    assert 'amdgpu::exec_wmma_f64_16x16x4_f64(cu, dst,' in body
+    assert 'inst_.neg, inst_.neg_hi' in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar64(src2)' in body
+    assert 'wf.fp_round_mode_f16_f64()' not in body
+    assert 'wf.fp_denorm_mode_f16_f64()' not in body
+    assert 'wf.exec()' in body
+    assert 'amdgpu::exec_f64' not in body
+
+
 @pytest.mark.parametrize('dtype, mode', [('f32', 'f32'), ('f64', 'f16_f64')])
 def test_div_scale_delegates_classification_and_preserves_explicit_mask(dtype, mode):
     body = gen_vector_div_scale(
         ['vdst', 'sdst'], ['src0', 'src1', 'src2'], dtype, is_vop3=True
     )
 
+    nan_policy = (
+        ', wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA3' if dtype == 'f64' else ''
+    )
     assert (
-        f'div_scale(s0, s1, s2, wf.fp_round_mode_{mode}(), wf.fp_denorm_mode_{mode}())'
-        in body
+        f'div_scale(s0, s1, s2, wf.fp_round_mode_{mode}(), '
+        f'wf.fp_denorm_mode_{mode}(){nan_policy})' in body
     )
     assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc)' in body
 
@@ -3425,9 +3448,11 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     assert (
         '[[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);' in true16_binary
     )
-    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in true16_binary
     assert re.search(
-        r'read_vop3_true16_src\(src1,\s*wf,\s*lane,\s*opsel,\s*1\)',
+        r'read_vop3_true16_src\(\s*src0,\s*wf,\s*lane,\s*opsel,\s*0\)', true16_binary
+    )
+    assert re.search(
+        r'read_vop3_true16_src\(\s*src1,\s*wf,\s*lane,\s*opsel,\s*1\)',
         true16_binary,
     )
     assert 'write_vop3_true16_dst(vdst, wf, lane, opsel,' in true16_binary
@@ -3565,11 +3590,11 @@ def test_generated_vector_f16_arithmetic_consumes_fp16_ovfl(
 
     assert 'if (wf.fp16_ovfl())' in vop2
     assert 'f32_to_f16_ovfl_simd' in vop2
-    assert 'util::f32_to_f16_mode' in vop2
+    assert 'sdwa::finish_arithmetic_f16' in vop2
     assert 'wf.fp16_ovfl()' in vop2
     assert 'if (wf.fp16_ovfl())' in vop3
     assert 'f32_to_f16_ovfl_simd' in vop3
-    assert 'util::f32_to_f16_mode' in vop3
+    assert 'sdwa::finish_arithmetic_f16' in vop3
     assert 'wf.fp16_ovfl()' in vop3
 
 
@@ -5341,6 +5366,33 @@ def test_gfx1251_packed_f64_fma_rejects_undefined_layouts_and_register_tuples(
         assert f'{operand_name} <= 510u' in body
 
 
+def test_gfx1251_f64_wmma_validates_fields_sources_and_register_tuples(
+    gfx1250_generated_root: Path,
+):
+    source = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+    body = _generated_decode_body(source, 'VWmmaF6416x16x4F64Vop3p')
+
+    assert 'has an invalid F64 WMMA element layout' in body
+    assert 'has unsupported modifier bits' in body
+    assert 'vdst register tuple that exceeds the selector range' in body
+    assert 'invalid vdst register tuple alignment' in body
+    assert 'src0 register tuple outside the selector range' in body
+    assert 'invalid src0 register tuple alignment' in body
+    assert 'src1 register tuple outside the selector range' in body
+    assert 'invalid src1 register tuple alignment' in body
+    assert 'src0 < 256u ||' in body
+    assert 'src1 < 256u ||' in body
+    assert 'src0 == amdgpu::SRC_DPP ||' in body
+    assert 'amdgpu::dpp::is_src_dpp8' in body
+    assert 'requires a legal inline accumulator or ' in body
+    assert '16-register VGPR tuple' in body
+    assert 'src2 >= 128u &&' in body
+    assert 'src2 <= 208u' in body
+    assert 'src2 >= 240u &&' in body
+    assert 'src2 <= 248u' in body
+    assert 'invalid src2 register tuple alignment' in body
+
+
 def test_gfx1251_packed_f64_literals_use_f64_high_bits_widening(
     gfx1250_generated_root: Path,
 ):
@@ -5443,23 +5495,11 @@ def test_split_execution_ids_name_and_match_callbacks(
 def test_cdna5_variant_execution_callback_inventory(
     gfx1250_generated_root: Path,
 ) -> None:
-    model_only_classes = ('VWmmaF6416x16x4F64Vop3p',)
     header = (gfx1250_generated_root / 'vop3p.h').read_text()
     model = (gfx1250_generated_root / 'vop3p.cpp').read_text()
     backend_header = (gfx1250_generated_root / 'execution_backend.h').read_text()
     backend_source = (gfx1250_generated_root / 'execution_backend_exec.cpp').read_text()
     execution_source = (gfx1250_generated_root / 'vop3p_exec.cpp').read_text()
-
-    for class_name in model_only_classes:
-        class_body = header.split(f'class {class_name} ', 1)[1].split('\n};', 1)[0]
-        assert 'execute_impl' not in class_body
-        constructor = model.split(f'{class_name}::{class_name}(', 1)[1].split('\n}', 1)[
-            0
-        ]
-        assert 'nullptr' in constructor
-        assert class_name not in backend_header
-        assert class_name not in backend_source
-        assert class_name not in execution_source
 
     executable_classes = (
         'VPkFmaF64Vop3p',
@@ -5470,6 +5510,7 @@ def test_cdna5_variant_execution_callback_inventory(
         'VPkMaxNumF64Vop3p',
         'VPkMinNumF64Vop3p',
         'VPkLshlAddU64Vop3p',
+        'VWmmaF6416x16x4F64Vop3p',
     )
     for executable_class in executable_classes:
         class_body = header.split(f'class {executable_class} ', 1)[1].split('\n};', 1)[
@@ -5508,6 +5549,17 @@ def test_cdna5_variant_execution_callback_inventory(
     assert 'if (!reg || reg->cls != RegClass::VGPR)' in u32_read_helper
     assert 'read_lane(operand, lane)' in u32_read_helper
     assert 'read_lane_pair32(operand, lane)' in u32_read_helper
+    assert 'is_general_register' not in u64_read_helper
+    assert 'exec_wmma_f64_16x16x4_f64' in execution_source
+    execute_body = execution_source.split(
+        'void VWmmaF6416x16x4F64Vop3p::execute_impl', 1
+    )[1].split('void VWmmaScaleF32Vop3px2::execute_impl', 1)[0]
+    assert execute_body.index(
+        'is_gfx1251_wmma_execution_state_valid'
+    ) < execute_body.index('resolved_vgpr_offset')
+    assert 'report_instruction_execution_error' in execute_body
+    assert 'InstructionExecutionError::UnsupportedOperandValue' in execute_body
+    assert 'throw ' not in execute_body
 
 
 def test_generated_vop_execution_has_no_instruction_storage_bypass(
@@ -6434,7 +6486,11 @@ def test_gfx1250_generated_fp8_vop3_byte_select_uses_local_inst_member(
     assert 'amdgpu::vop3_fp8_decode_e5m3(*this)' in body
     assert 'util::fp8_e5m3_to_f32' in body
     assert 'util::fp8_e4m3_to_f32' in body
-    assert 'amdgpu::vop3_opsel(inst.inst_)' not in body
+    # The local SIMD probe binds an instruction alias; scalar execution still
+    # reads the encoding member directly.
+    assert 'auto &inst = *this;' in body
+    assert 'amdgpu::try_execute_words_simd<1, false, false, 0>' in body
+    assert 'amdgpu::vop3_opsel(inst.inst_)' in body
     assert 'amdgpu::vop3_fp8_decode_e5m3(inst_)' not in body
 
     body = _generated_method_body(gfx1250_vop3_cvt, 'VCvtF16Fp8Vop3', 'VCvtF16Bf8Vop3')
@@ -6964,7 +7020,7 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'throw util::InvalidInst' not in cpp
     assert 'if (vdstx < y_end && vdsty < x_end)' in cpp
     assert 'case 3:\n              case 7:' not in cpp
-    assert 'if (lhs == 0.0f || rhs == 0.0f)' in exec_cpp
+    assert 'if (lhs == 0.0f || rhs == 0.0f)' not in exec_cpp
     src_neg_start = exec_cpp.index('bool Vopd::uses_src_neg_modifier')
     src_neg_body = exec_cpp[
         src_neg_start : exec_cpp.index('uint32_t Vopd::apply_neg', src_neg_start)
@@ -6975,11 +7031,20 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'Vopd::execute_impl' not in cpp
     assert 'ROCJITSU_ISA_MODEL_ONLY' not in cpp
     execute_start = exec_cpp.index('uint32_t Vopd::execute_slot')
+    mul_dx9_start = exec_cpp.index('case kVopdMulDx9ZeroF32:', execute_start)
+    mul_dx9_case = exec_cpp[
+        mul_dx9_start : exec_cpp.index('case kVopdAddF32:', mul_dx9_start)
+    ]
+    assert 'fp_mode::Arithmetic::MUL_LEGACY' in mul_dx9_case
+    assert 'wf.fp_round_mode_f32()' in mul_dx9_case
+    assert 'wf.fp_denorm_mode_f32()' in mul_dx9_case
     fma_start = exec_cpp.index('case kVopdFmaF32', execute_start)
     fma_case = exec_cpp[fma_start : exec_cpp.index('case kVopdSubNcU32:', fma_start)]
-    assert 'std::fma(std::bit_cast<float>(src0),' in fma_case
+    assert 'fp_mode::Arithmetic::FMA' in fma_case
+    assert 'wf.fp_round_mode_f32()' in fma_case
+    assert 'wf.fp_denorm_mode_f32()' in fma_case
     assert 'std::bit_cast<float>(src1),' in fma_case
-    assert 'std::bit_cast<float>(src2))' in fma_case
+    assert 'std::bit_cast<float>(src2),' in fma_case
     assert 'constexpr uint16_t kVopdFmaF64 = 32;' in exec_cpp
     assert 'constexpr uint16_t kVopdAddF64 = 33;' in exec_cpp
     assert 'bool Vopd::is_float64_op' in cpp
@@ -8391,3 +8456,33 @@ def test_ds_subtraction_keeps_underflow_policy(profile_type, returning):
         sem = derive_semantics(name + suffix, 'ENC_VDS', profile_type())
         assert sem is not None
         assert sem.operation == operation
+
+
+@pytest.mark.parametrize(
+    'operation',
+    ['frexp_exp_f32', 'frexp_exp_f16', 'cvt_norm_i16_f16', 'cvt_norm_u16_f16'],
+)
+def test_sdwa_integer_results_ignore_float_modifiers(operation):
+    sem = SimpleNamespace(name='V_INTEGER_RESULT', operation=operation, data_type='f16')
+    assert CodeGenerator._sdwa_result_format(sem) == 'amdgpu::sdwa::ResultFormat::NONE'
+
+
+def test_sdwa_conversion_result_formats():
+    for name, expected in (
+        ('V_CVT_F16_F32', 'F16'),
+        ('V_CVT_F16_I16', 'F16'),
+        ('V_CVT_F16_U16', 'F16'),
+        ('V_CVT_F32_F16', 'F32'),
+        ('V_CVT_F32_I32', 'F32'),
+        ('V_CVT_F32_U32', 'F32'),
+        ('V_CVT_F32_UBYTE0', 'F32'),
+        ('V_CVT_I32_F32', 'NONE'),
+        ('V_CVT_U32_F32', 'NONE'),
+        ('V_CVT_I16_F16', 'NONE'),
+        ('V_CVT_NORM_I16_F16', 'NONE'),
+    ):
+        semantics = derive_semantics(name, 'VOP1')
+        assert semantics is not None
+        assert CodeGenerator._sdwa_result_format(semantics) == (
+            f'amdgpu::sdwa::ResultFormat::{expected}'
+        )

@@ -18,6 +18,7 @@ total (net effect) -- and keeps PARSER breakage distinct from baseline movement.
 Baselines seeded from origin/develop @ 4a99ef1f9c (develop, post-AllGatherV).
 """
 
+import importlib.util
 import os
 import re
 import subprocess
@@ -62,6 +63,10 @@ _COUNT_RE = re.compile(r"ncclSymkKernelCount\s*=\s*(\d+)\s*;")
 _LIST_BLOCK_RE = re.compile(r"ncclSymkKernelList\[\]\s*=\s*\{(.*?)\bnullptr\b", re.DOTALL)
 _CNAME_RE = re.compile(r"\(void\*\)\s*(ncclSymkDevKernel_\w+)")
 _PREFIX = "ncclSymkDevKernel_"
+
+# ncclSymkKernelRequirements[] entries: "    11080, /*  17 ncclSymkDevKernel_...*/".
+_REQ_BLOCK_RE = re.compile(r"ncclSymkKernelRequirements\[\]\s*=\s*\{(.*?)\};", re.DOTALL)
+_REQ_ENTRY_RE = re.compile(r"(\d+),\s*/\*\s*(\d+)\s+(\w+)\*/")
 
 DIMENSIONS = ("coll", "algo", "red", "ty")
 
@@ -184,6 +189,35 @@ def _list_cnames(host):
     return cnames
 
 
+def _requirements_entries(host):
+    """Parse ncclSymkKernelRequirements[] into ordered (cudart, index, name) tuples."""
+    block = _REQ_BLOCK_RE.search(host)
+    assert block is not None, (
+        "parser integrity: could not find ncclSymkKernelRequirements[] block -- "
+        "sym_kernels_host.cc format likely changed (this is NOT a requirements change)"
+    )
+    entries = [(int(c), int(i), n) for c, i, n in _REQ_ENTRY_RE.findall(block.group(1))]
+    assert entries, "parser integrity: ncclSymkKernelRequirements[] parsed but no entries found"
+    return entries
+
+
+@pytest.fixture(scope="session")
+def sym_module(tmp_path_factory):
+    """Import generate.py as a live module, so required_cuda()/enumerate_kernels() are called directly."""
+    if not GENERATE_PY.exists():
+        pytest.fail("symmetric generate.py not found: %s" % GENERATE_PY)
+    d = tmp_path_factory.mktemp("sym_module")
+    old_argv = sys.argv
+    sys.argv = [str(GENERATE_PY), str(d)]
+    try:
+        spec = importlib.util.spec_from_file_location("rccl_symmetric_generate", GENERATE_PY)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        sys.argv = old_argv
+    return module
+
+
 @pytest.mark.symmetric_generator
 def test_count_literal_matches_list_matches_records_matches_baseline(sym_host):
     # Chain each equality with its own message so a break points at the exact link.
@@ -212,6 +246,45 @@ def test_per_collective_and_dimension_baselines(sym_host):
         EXPECTED_DIMS, _dims(records),
     )
     assert report is None, report
+
+
+# --- ncclSymkKernelRequirements[] vs required_cuda(): generator-logic-vs-emitted-text diff --------
+@pytest.mark.symmetric_generator
+def test_requirements_entries_are_ordered_and_indexed_correctly(sym_host):
+    entries = _requirements_entries(sym_host)
+    cnames = _list_cnames(sym_host)
+    assert len(entries) == len(cnames), (
+        "ncclSymkKernelRequirements[] has %d entries, ncclSymkKernelList[] has %d" % (len(entries), len(cnames))
+    )
+    for position, (cudart, index, name) in enumerate(entries):
+        assert index == position, "entry %d claims index %d in its own comment" % (position, index)
+        assert name == cnames[position], (
+            "entry %d names %r, but ncclSymkKernelList[] position %d is %r"
+            % (position, name, position, cnames[position])
+        )
+
+
+@pytest.mark.symmetric_generator
+def test_requirements_values_match_required_cuda(sym_host, sym_module):
+    entries = _requirements_entries(sym_host)
+    kernel_list = list(sym_module.enumerate_kernels())
+    assert len(entries) == len(kernel_list), (
+        "ncclSymkKernelRequirements[] has %d entries, enumerate_kernels() yields %d" % (len(entries), len(kernel_list))
+    )
+    mismatches = []
+    for (emitted_cudart, index, name), k in zip(entries, kernel_list):
+        # Anchors the zip to identity: only 3 distinct cudart values exist, so a reorder could hide behind one.
+        assert name == sym_module.kernel_cname(k), (
+            "position %d: ncclSymkKernelRequirements[] names %r, enumerate_kernels() yields %r"
+            % (index, name, sym_module.kernel_cname(k))
+        )
+        expected_cudart, _, _ = sym_module.required_cuda(k)
+        expected_cudart = expected_cudart or 0
+        if emitted_cudart != expected_cudart:
+            mismatches.append(
+                "index %d (%s): emitted %d, required_cuda() says %d" % (index, name, emitted_cudart, expected_cudart)
+            )
+    assert not mismatches, "ncclSymkKernelRequirements[] disagrees with required_cuda():\n" + "\n".join(mismatches)
 
 
 # --- anchored name parser: valid cases --------------------------------------

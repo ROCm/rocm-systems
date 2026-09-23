@@ -20,11 +20,30 @@ HIP kernels are used for color conversion. After the frame has been decoded, the
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir video_decode_rgb_sample && cd video_decode_rgb_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir video_decode_rgb_sample && cd video_decode_rgb_sample
+cmake .. -DROCM_PATH=<path-to-TheRock-build>
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> Add the rocDecode and FFmpeg DLL directories to your PATH before configuring — CMake
+> locates FFmpeg by probing PATH — and keep them there when running:
+> ```bat
+> set PATH=%ROCM_PATH%\bin;<path-to-ffmpeg>\bin;%PATH%
+> ```
+> If FFmpeg is installed somewhere CMake cannot discover, pass
+> `-DFFMPEG_ROOT=<path-to-ffmpeg>` to the configure step.
 
 ## Run
 

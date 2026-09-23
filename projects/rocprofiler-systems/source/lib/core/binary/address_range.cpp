@@ -6,9 +6,7 @@
 
 #include "logger/debug.hpp"
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 address_range::address_range(uintptr_t _v)
 : low{ _v }
@@ -185,5 +183,4 @@ address_range::hash() const
     return (is_range()) ? tim::get_hash_id(hash_value_t{ low }, high)
                         : hash_value_t{ low };
 }
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary

@@ -20,13 +20,23 @@ test_categories:
       - "RasMicrotest.*"
       - "RasClientMicrotest.*"
       - "RmaProxyProgressTest.*"
+      - "RmaCeLaunchTest.*"
+      - "RmaCeInitTest.*"
+      - "RmaCeFinalizeTest.*"
+      - "RmaCePutLaunchTest.*"
+      - "RmaCeNonPersistTest.*"
+      - "RmaCePersistTest.*"
+      - "RmaCeWaitLaunchTest.*"
+      - "RmaWaitSignalTest.*"
+      - "RmaPutTest.*"
+      - "RmaLaunchTest.*"
+      - "RmaScheduleTest.*"
+      - "RmaDebugLoggingTest.*"
+      - "RmaProxyGatingTest.*"
+      - "RmaProxyReadyTest.*"
       - "GroupEndInternalTest.*"
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
-      # src/dev_runtime.cc (folded in from test_categories_micro_devruntime.yaml).
-      # Prefix globs rather than named suites, so adding a suite to an existing
-      # family does not silently fall out of CI gating. "Dev*" subsumes the
-      # "Devcomm*" entry these replaced.
       - "Alloc*"
       - "Comm*"
       - "Compute*"
