@@ -26,7 +26,7 @@ incomplete; historical green results do not count as passes for this campaign.
 - SDK: `/home/benoit/venv`, ROCm `10.2.0a20260915` development package.
 - Preparation: current hook and production matmul built; generated per-workload
   allowlists applied; Qwen build provenance verified through the campaign symlinks.
-- Fresh clean assessments: **42/42**, with **39 clean passes** across recorded
+- Fresh clean assessments: **42/42**, with **40 clean passes** across recorded
   configurations. No cell has passed fresh fault qualification.
 - Preparation logs: `/home/benoit/workspace/consan-validation-artifacts/`.
 
@@ -287,3 +287,17 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   `/home/benoit/workspace/consan-validation/rdna4-20260923/preset-runner-tests.log`.
 - `pytorch-rdna4-llm-topk` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round8/pytorch-rdna4-llm-topk-default`.
 - `pytorch-rdna4-llm-topk` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round8/pytorch-rdna4-llm-topk-supercollider`.
+- Round 8: **40/42 clean assessments pass** across recorded configurations.
+  Top-k Default and SuperCollider both pass with the owner-complete allowlist.
+  Fix `60b0a2c5585` emits one compatible entry prologue per physical kernel
+  entry while retaining every descriptor owner. Previously, eight aliases
+  executed eight consecutive register-remapping prologues, corrupting the
+  kernarg pointer and causing the memory fault. Incompatible prologues now
+  fail closed. The new alias regression and all 60 related shared/alias tests
+  pass. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round8/`
+  and `topk-debug/alias-tests.log` in that campaign root. Only the two
+  scatter-reduce modes still lack accepted clean evidence.
+- New fault inventories are complete for WMMA attention (36 sites / 18 barrier
+  sequences) and scatter-reduce (16 atomic sites per weakening family).
+  These are static candidates requiring review, not fault-detection passes.
+  Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/inventory-round2/`.
