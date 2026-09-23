@@ -41,9 +41,7 @@
 #    include <mpi.h>
 #endif
 
-namespace rocprofsys
-{
-namespace mpi
+namespace rocprofsys::mpi
 {
 //--------------------------------------------------------------------------------------//
 
@@ -712,8 +710,7 @@ comm_spawn_multiple([[maybe_unused]] int count, [[maybe_unused]] char** commands
 
 //--------------------------------------------------------------------------------------//
 
-}  // namespace mpi
-}  // namespace rocprofsys
+}  // namespace rocprofsys::mpi
 
 #if defined(ROCPROFSYS_UNDEFINE_OMPI_SKIP_MPICXX) && ROCPROFSYS_UNDEFINE_OMPI_SKIP_MPICXX
 #    undef OMPI_SKIP_MPICXX
