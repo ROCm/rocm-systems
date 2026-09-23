@@ -209,10 +209,10 @@ class TestPlotMemChartGfx9:
         output = render_gfx9_chart({"LDS Util": 45})
         assert "Util 45.0%" in output
 
-    def test_gfx908_no_mall_no_io(self):
+    def test_gfx908_no_mall_has_xgmi(self):
         output = render_gfx9_chart(GFX9_SAMPLE_METRICS, gpu_arch="gfx908")
         assert "MALL" not in output
-        assert "xGMI" not in output
+        assert "xGMI" in output
         assert "PCIe" not in output
 
     def test_gfx940_has_mall_and_xgmi(self):
@@ -270,20 +270,16 @@ class TestPanelYamlGfx9:
             )
             for arch in base_archs
         }
-        # gfx908 has no MALL or xGMI; gfx90a has xGMI; gfx940-942 have
-        # MALL + xGMI.  Group architectures with matching capabilities.
-        by_count: dict[int, list[str]] = {}
-        for arch, count in line_counts.items():
-            by_count.setdefault(count, []).append(arch)
-        for count, archs in by_count.items():
-            assert len(archs) >= 1, (
-                f"Unexpected line count {count} for {archs}; full map: {line_counts}"
-            )
-        # gfx90a / gfx940-942 share the same xGMI-capable count
-        xgmi_archs = [a for a in base_archs if a != "gfx908"]
-        xgmi_counts = {line_counts[a] for a in xgmi_archs}
-        assert len(xgmi_counts) == 1, (
-            f"xGMI architectures should share a line count: {line_counts}"
+        # All archs have xGMI.  gfx908/gfx90a have no MALL; gfx940-942 have MALL.
+        no_mall = [a for a in base_archs if a not in ("gfx940", "gfx941", "gfx942")]
+        mall = [a for a in base_archs if a in ("gfx940", "gfx941", "gfx942")]
+        no_mall_counts = {line_counts[a] for a in no_mall}
+        assert len(no_mall_counts) == 1, (
+            f"Non-MALL architectures should share a line count: {line_counts}"
+        )
+        mall_counts = {line_counts[a] for a in mall}
+        assert len(mall_counts) == 1, (
+            f"MALL architectures should share a line count: {line_counts}"
         )
 
     @pytest.mark.parametrize("architecture", GFX9_ARCHITECTURES)
