@@ -1036,6 +1036,13 @@ endif()
 #   Does not enable alltoall_wg offload.
 if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   add_rocshmem_targets()
+  # add_rocshmem_targets runs in this directory. Export its resolved paths to
+  # the top-level scope so sibling test targets can compile and link the GIN
+  # backend against the same rocSHMEM build.
+  set(ROCSHMEM_SOURCE_DIR "${ROCSHMEM_SOURCE_DIR}" PARENT_SCOPE)
+  set(ROCSHMEM_INSTALL_DIR "${ROCSHMEM_INSTALL_DIR}" PARENT_SCOPE)
+  set(ROCSHMEM_INCLUDE_DIR "${ROCSHMEM_INCLUDE_DIR}" PARENT_SCOPE)
+  set(ROCSHMEM_BUILD_DIR "${ROCSHMEM_BUILD_DIR}" PARENT_SCOPE)
   # Ensure rocSHMEM is fully built/installed before compiling rccl
   if (TARGET rocshmem_ext)
     add_dependencies(rccl rocshmem_ext)
@@ -1049,7 +1056,7 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/include)
     if (ROCSHMEM_BUILD_DIR)
-      target_include_directories(rccl PRIVATE ${ROCSHMEM_BUILD_DIR})
+      target_include_directories(rccl PRIVATE ${ROCSHMEM_BUILD_DIR}/include ${ROCSHMEM_BUILD_DIR}/include/rocshmem)
     else()
       target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/build/include ${ROCSHMEM_SOURCE_DIR}/build/include/rocshmem)
     endif()

@@ -981,6 +981,7 @@ add_test_executable(rccl-HostUnitTests
   ${RCCL_TEST_DIR}/RomeTopoConsensusTests.cpp
   RomeTopoConsensusLogTests.cpp
   ${RCCL_TEST_DIR}/MiscTests.cpp
+  ${RCCL_TEST_DIR}/RmaSegmentMathTests.cpp
   ${RCCL_TEST_DIR}/VersionGateTests.cpp
   ${RCCL_TEST_DIR}/TimeoutTests.cpp
   ${RCCL_TEST_DIR}/EnqueueCountTests.cpp
