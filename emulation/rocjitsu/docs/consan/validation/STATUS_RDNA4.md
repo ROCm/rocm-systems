@@ -37,7 +37,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) |
 | Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending (timeout override 300s) |
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟨 Sep 23: standard fault 0/8; preset=max clean passes and fault detects 7/8 (separate configuration) | 🟨 Sep 23: clean pass; reviewed publication-barrier fault missed in 8/8 trials |
-| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: clean pass; reviewed cross-wave publication fault missed in 8/8 standard trials | 🟨 Sep 23: clean pass; reviewed cross-wave publication fault missed in 8/8 trials |
+| PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: standard fault 0/8; preset=max clean passes and fault detects 8/8 (separate configuration) | 🟨 Sep 23: clean pass; reviewed cross-wave publication fault missed in 8/8 trials |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | PyTorch | P1 | collision-heavy `scatter_reduce` (`pytorch-scatter-reduce`) | 🟥 Sep 23: no applicable code object; analysis incomplete | 🟥 Sep 23: no applicable code object; analysis incomplete |
@@ -356,3 +356,18 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   numerical oracles and pre/post health checks passed. The saved spec snapshot
   fixes the earlier provenance issue, but sensitivity remains unqualified.
   Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round4-mode-supercollider/`.
+- `pytorch-torch-mode` / Default dense diagnostic: **8/8 detections**
+  with `RJ_CONSAN_PRESET=max`; all trials admitted and reached the reviewed
+  publication fault, all numerical oracles passed, and all before/after GPU
+  health and HIP smoke checks passed. The matching dense clean comparator
+  passes with 244/244 access and 102/102 barrier sites covered and complete
+  dynamic analysis. Both use hook SHA256
+  `70aabce67d009663ac06cce576751563dd1be9370974c95081e7a168842a0c46`.
+  Standard Default and SuperCollider remain 0/8; this separate configuration
+  does not promote either standard cell to green.
+  Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/fault-round4-mode-dense/`
+  and `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round9/mode-dense-comparator/`.
+- Round 10 begins a clean regression sweep of all 42 cells using the current
+  hook above, release hip-moi binaries, native trace allowlists, and the
+  reviewed top-k owner-expanded allowlist. Each completed cell is recorded
+  below; earlier fault assessments remain visible.
