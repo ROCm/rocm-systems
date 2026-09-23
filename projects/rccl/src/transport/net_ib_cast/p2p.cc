@@ -1346,7 +1346,6 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
     } else {
       struct ibv_send_wr flushWrs[NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS];
       int nFlushWrs = 0;
-      memset(flushWrs, 0, sizeof(flushWrs));
       for (int r = 0; r < n; r++) {
         if (sizes[r] == 0) continue;
         struct ncclIbMrHandle* mhandle = (struct ncclIbMrHandle*)mhandles[r];
@@ -1359,11 +1358,13 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
             int seg = flushSeg[s];
             uintptr_t segBase = mhandle->segStart[seg];
             uintptr_t rangeStart = (uintptr_t)data[r];
+            memset(&flushWrs[nFlushWrs], 0, sizeof(flushWrs[0]));
             flushWrs[nFlushWrs].wr.rdma.remote_addr = (uint64_t)(rangeStart > segBase ? rangeStart : segBase);
             flushWrs[nFlushWrs].wr.rdma.rkey = mhandle->segMrs[seg][i]->rkey;
             nFlushWrs++;
           }
         } else {
+          memset(&flushWrs[nFlushWrs], 0, sizeof(flushWrs[0]));
           flushWrs[nFlushWrs].wr.rdma.remote_addr = (uint64_t)data[r];
           flushWrs[nFlushWrs].wr.rdma.rkey = mhandle->mrs[i]->rkey;
           nFlushWrs++;
