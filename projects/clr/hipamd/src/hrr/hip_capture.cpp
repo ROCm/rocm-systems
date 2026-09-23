@@ -715,13 +715,16 @@ struct ProgramCodeObject {
 static std::mutex g_prog_hash_mu;
 static std::unordered_map<const amd::Program*, ProgramCodeObject> g_prog_hash;
 
-// Fetch a program's device binary as (pointer, length) without touching it.
+// Fetch a program's device binary as (pointer, length) without dereferencing
+// the bytes (the call itself still goes through binary_'s inserting
+// operator[] — see above).
 // Caller must hold g_prog_hash_mu.
 static void program_binary_span_locked(amd::Program* prog, const uint8_t*& data, size_t& size) {
   data = nullptr;
   size = 0;
   if (!prog) return;
   const int dev = hip::ihipGetDevice();
+  if (dev < 0 || static_cast<size_t>(dev) >= hip::g_devices.size()) return;
   const amd::Device* device = hip::g_devices[dev]->devices()[0];
   const auto& bin = prog->binary(*device);
   data = std::get<0>(bin);
@@ -751,7 +754,8 @@ static hrr_cap::Hash128 hash_program_image(const amd::Program* prog, const uint8
   if (!image_looks_loadable(data, size)) {
     LogPrintfWarning("[HRR capture] program %p: %llu bytes at %p are not a loadable image"
                      " (no ELF/bundle magic) — not recording a code object for it;"
-                     " launches will resolve by kernel name",
+                     " its module event (if any) will not replay, and launches fall back"
+                     " to name resolution",
                      (const void*)prog, (unsigned long long)size, (const void*)data);
     return {0, 0};
   }
@@ -763,6 +767,7 @@ static hrr_cap::Hash128 hash_program_image(const amd::Program* prog, const uint8
 // a raw ELF).  The runtime unbundles/extracts the device ELF internally and
 // stores it in the amd::Program.  We read it back from there so we always
 // capture the processed ELF, not the raw (possibly bundled) input image.
+// It also seeds the launch-path hash cache (g_prog_hash) for this program.
 static hrr_cap::Hash128 write_module_code_object(hipModule_t module) {
   amd::Program* prog = as_amd(reinterpret_cast<cl_program>(module));
   if (!prog) return {0, 0};
@@ -856,18 +861,20 @@ hipError_t capture_hipModuleLoad(hipModule_t* module, const char* fname) {
         fclose(fh);
       }
     }
-    // Seed the launch-path cache with the file bytes, so a kernel from this
-    // module never falls back to re-reading the program's binary later.
+    // Seed the launch-path cache — keyed by the program's device-image span,
+    // valued with the file's hash — so a kernel from this module resolves to
+    // the same code object the module event records.
     if (amd::Program* prog = as_amd(reinterpret_cast<cl_program>(*module))) {
       const uint8_t* image = nullptr;
       size_t size = 0;
       program_binary_span(prog, image, size);
       // The file snapshot is the preferred hash, but it is not always
-      // available: fname can be null, unreadable, or truncated. Seeding {0,0}
-      // would be worse than not seeding at all — replay refuses a module event
-      // with no hash, and the seed itself stops the launch path from ever
-      // hashing this program again. Fall back to the extracted device image,
-      // which is what the LoadData/LoadDataEx shims record.
+      // available: fname can be null, unreadable, or truncated. Replay refuses
+      // a module event with no hash, so fall back to the extracted device
+      // image, which is what the LoadData/LoadDataEx shims record. If that is
+      // not loadable either, the {0,0} seed below is deliberate: the launch
+      // path would read the same span and reach the same answer, so caching it
+      // only avoids re-warning on every launch.
       if (!h.lo && !h.hi) {
         h = hash_program_image(prog, image, size);
         if (h.lo || h.hi)
