@@ -25,7 +25,7 @@ none of those historical colors count as a pass for this campaign.
 - SDK: `/home/benoit/venv`, ROCm `10.2.0a20260915` development package.
 - Preparation: rebuilding the current hook, integrating per-workload generated
   allowlists, preparing Qwen provenance, and building the production matmul.
-- Fresh clean assessments: **16/42**; no cell has completed fresh fault qualification.
+- Fresh clean assessments: **17/42**; no cell has completed fresh fault qualification.
 - Preparation logs: `/home/benoit/workspace/consan-validation-artifacts/`.
 
 Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggregate applicable-site support or another substantial gap · 🟨 timeout-only blocker or at least 80% aggregate applicable-site support · 🟩 accepted workload/profile contract.
@@ -33,7 +33,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Set | Priority | Workload / validation ID | Default | SuperCollider |
 | --- | ---: | --- | --- | --- |
 | Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟥 Sep 23: missing ConSan coverage record; exit 124 | 🟥 Sep 23: missing ConSan coverage record; exit 124 |
-| Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟩 exact; 227/227 accesses and 48/48 barriers; reviewed fault bundle | 🟧 exact; only 75/227 accesses supported |
+| Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟥 Sep 23: missing ConSan analysis verdict; exit 124 | 🟧 exact; only 75/227 accesses supported |
 | Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟩 exact; 20/20 accesses and 26/26 barriers; 17/32 fault sweep | 🟩 exact; 20/20 accesses; fault bundle |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟩 exact; 352/352 accesses and 86/86 barriers; fault bundle | 🟩 exact; 352/352 accesses; fault bundle |
@@ -105,3 +105,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `pytorch-rdna4-llm-topk` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/pytorch-rdna4-llm-topk-supercollider`.
 - `rdna4-matmul-fp16-production` / default: missing ConSan coverage record; exit 124. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/rdna4-matmul-fp16-production-default`.
 - `rdna4-matmul-fp16-production` / supercollider: missing ConSan coverage record; exit 124. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/rdna4-matmul-fp16-production-supercollider`.
+- `rdna4-matmul-fp8-production` / default: missing ConSan analysis verdict; exit 124. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/rdna4-matmul-fp8-production-default`.
