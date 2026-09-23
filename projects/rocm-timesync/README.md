@@ -58,6 +58,38 @@ Some key design questions include:
 
 We discuss two different models that land at different points in this design space below.
 
+### In-process
+
+The simplest design is to simply extend ROCR with mechanisms to measure, store, and query crosststamps. We call this
+"**in-process**" because everything is done through threads that are part of main host process. The diagram
+below illustrates the architecture
+
+![](doc/img/in-process.png)
+
+The key steps:
+- A new thread `ROCR-timesync-r_m` queries KFD for crosststamps of the form (`CLOCK_REALTIME` timestamp, GPU `m`
+  timestamp). It may use the existing `AMDKFD_IOC_GET_CLOCK_COUNTERS` `ioctl()` call or some TBD similar new interface.
+  It performs these queries at a frequency needed for the system/application's target precision. This can be
+  communicated via a system-wide configuration or an application-specific configuration like an HSA env variable.
+- This thread stores timestamps in its local memory using some searchable data-structure, possibly something as simple
+  as an `std::map` mapping GPU timestamp to system timestamp
+- ROCR's implementation of `hsa_amd_profiling_tick_to_system_domain()` invokes a translation function provided by `ROCm
+  timesync` -- i.e., `translate()` - which queries this data structure and applies the offset.
+
+
+#### Pros/Cons of in-process
+
+Pros:
++ Simplicity: no new processes, standalone system daemons, or external SW dependencies are needed
+- Data retention: data is resident in memory as long as the process is running. When a process completes, its timestamp
+  data goes away
+
+Cons:
+- Space inefficient: every ROCR instance stores timestamp data leading to duplication (nothing about a crosststamp is
+  process specific)
+- Time inefficient: an `std::map()` is likely not going to perform insertions/queries as efficiently as a mature
+  time-series database (TSDB)
+
 ### Out-of-process
 
 On the other end of the spectrum is an "**out-of-process**" which is designed to address these inefficiencies. The
@@ -92,36 +124,4 @@ Cons:
 - Data retention: the fact that data is now stored out of process means that it is not straightforward to reap old
   data. There must be some mechanism to tag on insertion with the corresponding consumer process(es), or absent that a
   downsampling process to gradually decrease and ultimately evict data as it ages.
-
-### In-process
-
-The simplest design is to simply extend ROCR with mechanisms to measure, store, and query crosststamps. We call this
-"**in-process**" because everything is done through threads that are part of main host process. The diagram
-below illustrates the architecture
-
-![](doc/img/in-process.png)
-
-The key steps:
-- A new thread `ROCR-timesync-r_m` queries KFD for crosststamps of the form (`CLOCK_REALTIME` timestamp, GPU `m`
-  timestamp). It may use the existing `AMDKFD_IOC_GET_CLOCK_COUNTERS` `ioctl()` call or some TBD similar new interface.
-  It performs these queries at a frequency needed for the system/application's target precision. This can be
-  communicated via a system-wide configuration or an application-specific configuration like an HSA env variable.
-- This thread stores timestamps in its local memory using some searchable data-structure, possibly something as simple
-  as an `std::map` mapping GPU timestamp to system timestamp
-- ROCR's implementation of `hsa_amd_profiling_tick_to_system_domain()` invokes a translation function provided by `ROCm
-  timesync` -- i.e., `translate()` - which queries this data structure and applies the offset.
-
-
-#### Pros/Cons of in-process
-
-Pros:
-+ Simplicity: no new processes, standalone system daemons, or external SW dependencies are needed
-- Data retention: data is resident in memory as long as the process is running. When a process completes, its timestamp
-  data goes away
-
-Cons:
-- Space inefficient: every ROCR instance stores timestamp data leading to duplication (nothing about a crosststamp is
-  process specific)
-- Time inefficient: an `std::map()` is likely not going to perform insertions/queries as efficiently as a mature
-  time-series database (TSDB)
 
