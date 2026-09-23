@@ -23,6 +23,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
+from utils.parser import MEMBW_ANALYSIS_PANEL_ID
 from utils.specs import MachineSpecs
 from utils.utils_common import (
     INVALID_BLOCK_HINT,
@@ -486,7 +487,7 @@ class OmniSoC_Base:
             # Do not profile block 30 unless explicitly requested
             exclude_file_ids: set[str] = set()
             if not args.membw_analysis:
-                exclude_file_ids.add("3000")
+                exclude_file_ids.add(str(MEMBW_ANALYSIS_PANEL_ID))
 
             # Select all sections by default
             for file_id, filename in config_filename_dict.items():
@@ -620,7 +621,7 @@ class OmniSoC_Base:
             return
         exclude: set[str] = set()
         if not args.membw_analysis:
-            exclude.add("3000")
+            exclude.add(str(MEMBW_ANALYSIS_PANEL_ID))
 
         for ypath in sorted(config_root.glob("*.yaml")):
             stem_id = ypath.name.split("_")[0]
