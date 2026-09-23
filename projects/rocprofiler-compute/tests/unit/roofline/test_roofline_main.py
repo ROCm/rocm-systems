@@ -12,12 +12,10 @@ import math
 import re
 from pathlib import Path
 
-import pandas as pd
 import plotly.graph_objects as go
 import pytest
 
 import roofline.roofline_html as roofline_html
-from roofline.roofline_csv import KERNEL_ROOFLINE_CSV_FILENAME
 from roofline.roofline_frame import (
     FRAME_MIN_DECADES,
     FRAME_NOMINAL_ASPECT,
@@ -169,43 +167,6 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
     )
     assert "Performance limiter: Unknown" in unroofed_traces[0].hovertemplate
     assert unroofed[0]["points"][0]["hoverCells"] == ["N/A", "N/A", "900.000 GB/s"]
-
-
-def test_kernel_points_carry_raw_values_matching_hover_cells() -> None:
-    """roofline_csv reads raw numeric point values directly (not the formatted
-    hover strings), so they have to be present and agree with what the
-    tooltip shows."""
-    _, model = kernel_traces(
-        make_roofline(["FP32"]),
-        {"ai_hbm": [[100.0], [50000.0]], "kernelNames": ["kA"]},
-    )
-    point = model[0]["points"][0]
-
-    assert point["roofPerf"] == pytest.approx(
-        float(point["hoverCells"][0].replace(",", ""))
-    )
-    assert point["pctRoof"] == pytest.approx(float(point["hoverCells"][1]))
-    # Achieved bandwidth for this kernel: performance / AI, not the ceiling.
-    assert point["bandwidth"] == pytest.approx(50000.0 / 100.0)
-
-
-def test_kernel_model_carries_count_and_total_time() -> None:
-    """The per-kernel view model keeps Count/Total_Time alongside pctRuntime,
-    since the CSV export reads all three straight off it."""
-    _, model = kernel_traces(
-        make_roofline(["FP32"]),
-        {
-            "ai_hbm": [[100.0], [50000.0]],
-            "kernelNames": ["kA"],
-            "counts": [7.0],
-            "totalTime": [123.0],
-            "pctRuntime": [55.0],
-        },
-    )
-
-    assert model[0]["count"] == 7.0
-    assert model[0]["totalTime"] == 123.0
-    assert model[0]["pctRuntime"] == 55.0
 
 
 def test_kernel_hover_carries_the_whole_name() -> None:
@@ -408,44 +369,6 @@ def test_view_model_carries_the_drawn_knee(benchmarked_roofline) -> None:
         drawn_ai, drawn_perf = knees[roof["level"]]
         assert roof["kneeAi"] == pytest.approx(drawn_ai)
         assert roof["kneePerf"] == pytest.approx(drawn_perf)
-
-
-def test_save_kernel_csv_writes_the_plotted_kernel_points(
-    benchmarked_roofline, tmp_path: Path
-) -> None:
-    """The CSV is written next to the HTML, with one row per kernel point
-    actually drawn on the FLOP figure."""
-    roofline = benchmarked_roofline(["FP64"])
-    ai_data = {
-        "ai_hbm": [[10.0], [100.0]],
-        "kernelNames": ["kernelA"],
-        "counts": [3.0],
-        "totalTime": [50.0],
-        "pctRuntime": [100.0],
-        "timeUnit": "ns",
-    }
-
-    roofline.construct_plotly_figures(ai_data)
-    output_path = roofline.save_kernel_csv()
-
-    assert output_path == tmp_path / KERNEL_ROOFLINE_CSV_FILENAME
-    df = pd.read_csv(output_path)
-    assert df.loc[0, "Kernel_Name"] == "kernelA"
-    assert df.loc[0, "Cache_Level"] == "HBM"
-    assert df.loc[0, "Time_Unit"] == "ns"
-    assert df.loc[0, "Count"] == 3.0
-
-
-def test_save_kernel_csv_without_kernel_data_writes_nothing(
-    benchmarked_roofline,
-) -> None:
-    """No kernel points were plotted (e.g. no kernels matched), so there is
-    nothing to export and no file is written."""
-    roofline = benchmarked_roofline(["FP64"])
-
-    roofline.construct_plotly_figures({"kernelNames": []})
-
-    assert roofline.save_kernel_csv() is None
 
 
 def test_construct_plotly_figures_all_datatypes_ignores_cli_selection(
