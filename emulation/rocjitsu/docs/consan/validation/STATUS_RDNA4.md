@@ -168,3 +168,19 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `rdna4-matmul-fp16-production` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round3/rdna4-matmul-fp16-production-default`.
 - `rdna4-matmul-fp16-production` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round3/rdna4-matmul-fp16-production-supercollider`.
 - `rdna4-matmul-fp8-production` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round3/rdna4-matmul-fp8-production-default`.
+
+- Qwen relocation diagnosis: the moved initializer retained its original
+  `s_getpc_b64`-relative constant displacement. The data-address decoder missed
+  RDNA4 `s_sext_i32_i16` canonicalization and `s_add_co_u32` /
+  `s_add_co_ci_u32`. Local fix `1b9668bdbb3` recognizes that sequence and preserves
+  carry across `s_wait_alu`; regression cases reject high-half and SCC clobbers.
+  All 155 selected relocation/CFG host tests pass. An offline transform of the
+  actual Qwen ELF now adjusts the constant displacement correctly. GPU retry
+  remains pending; these host results do not promote either Qwen cell.
+  Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/qwen-debug/`.
+- Matmul follow-up: FP16 Default and SuperCollider, and FP8 Default, pass clean
+  qualification with the explicit 300-second diagnostic deadline. FP8 Default
+  spends about 58 seconds in preparation and another 58 seconds in patching;
+  the original 60-second contract is still exceeded. Fault qualification remains
+  pending. The table records the timeout override, and original failures remain
+  in the earlier artifact roots.
