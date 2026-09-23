@@ -1,7 +1,7 @@
 # ConSan validation on RDNA4 (gfx1201)
 
-This table tracks end-to-end ConSan revalidation of the external workloads on
-this host’s gfx1201 GPU. **Default** names the sampling preset used by the
+This table records the September 23, 2026 end-to-end ConSan revalidation of
+external workloads on this host’s gfx1201 GPU. **Default** names the sampling preset used by the
 Default engine; **SuperCollider** records its replay and timing-perturbation
 configuration. Fault counts such as **8/8** mean eight detections in eight
 fault-injection trials, not eight passing workloads. **Bar 6/8** means at least
