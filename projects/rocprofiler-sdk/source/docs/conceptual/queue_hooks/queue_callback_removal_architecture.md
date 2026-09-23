@@ -204,5 +204,62 @@ completion path becomes an application hang rather than data loss.
    Consolidating the predicate into one `needs_interception(queue)` helper would remove the
    recurring conflict.
 3. `counters::is_any_active()` forces `should_batch_packets = false` for every dispatch while any
-   counter context is active. The performance effect of that, combined with kernel replay's own
-   gate, has not been measured.
+   counter context is active. The cost of the *predicate itself* is now measured (section 7); the
+   cost of **losing packet batching** is not, and needs a GPU to measure.
+
+## 7. Cost and verification
+
+### 7.1 The per-dispatch gate
+
+Each service that replaces a registry callback with an explicit hook adds a
+`get_active_contexts()` walk to the `WriteInterceptor` gate. `develop` already performs one walk;
+counters and SPM each add another.
+
+`context_array_t` is `small_vector<const context*>`, whose default inline capacity works out to
+**6 elements in 64 bytes** — `(64 - sizeof(header)) / sizeof(T)` with a 16-byte header and 8-byte
+pointers. Below that bound a walk never reaches the heap. `get_active_contexts()` also early-outs on
+a single acquire load when no context is active, so a run with no profiling never touches the
+container at all.
+
+Measured at `-O2` on x86-64 for the gate pattern (atomic early-out, per-slot acquire load, filter
+predicate, `small_vector` accumulation):
+
+| active contexts | 1 walk | 3 walks | added per dispatch batch | heap? |
+|---|---|---|---|---|
+| 0 | 1.9 ns | 5.2 ns | **3.2 ns** | no |
+| 4 | 12.0 ns | 37.5 ns | 25.4 ns | no |
+| 6 | 13.6 ns | 40.0 ns | 26.3 ns | no |
+| 8 | 26.5 ns | 79.7 ns | **53.2 ns** | **yes** |
+
+Two conclusions. With nothing profiling, the migration costs about **3 ns per dispatch batch**,
+which is under 0.2% of a typical HIP launch. But there is a **cliff above 6 active contexts**: every
+walk then allocates, on every dispatch. A tool running counters, SPM, ATT, PC sampling and several
+tracing services crosses it. Two mitigations are available if that becomes real: raise the inline
+capacity, or front each predicate with a process-global atomic in the style of
+`kernel_replay::has_active_replay_contexts()`, which checks a configured-flag before walking.
+
+### 7.2 Serialization refcount
+
+`QueueController::update_serialization()` is now shared by every service, so the refcount is the one
+piece of state all four migrations contend on. It was model-checked with CBMC over a bounded space
+(up to 4 clients, 3 agents, 8 operations), with three properties:
+
+* **P1** the serializer state mirrors the refcount exactly — no drift, no spurious toggle;
+* **P2** counts never go negative;
+* **P3** if any client still holds a claim covering an agent, that agent stays serialized.
+
+**With every caller balanced, all three hold** — 0 of 65 obligations failed, including CBMC's own
+bounds and signed-overflow checks.
+
+**If any caller is unbalanced, P3 fails** while P1 and P2 still hold. The minimal counterexample is
+two operations: client C enables for `{gpu0, gpu1}`, then client A — which never enabled — releases
+for `{gpu0}`, dropping `per_agent[gpu0]` to zero and disabling a serializer that C still depends on.
+The saturating `else if(count > 0) --count` prevents underflow but does not stop one service from
+consuming another's count.
+
+Every current caller is balanced, so this is not a live defect. It is a statement about where the
+correctness argument actually rests: on a caller contract that nothing enforces. Adding ownership
+tracking, or an assertion that a release matches a prior acquire, would make it structural.
+
+The harnesses live in `tests/formal/`; the executable form of the cost model and the semantics it
+pins are in `tests/perf-common/`, which runs without a GPU.
