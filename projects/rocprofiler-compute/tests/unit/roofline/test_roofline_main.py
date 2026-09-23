@@ -181,12 +181,14 @@ def pct_roof(kernel: dict, point_index: int = 0) -> float:
     return float(kernel["points"][point_index]["hoverCells"][1])
 
 
-def test_kernel_traces_score_against_the_tallest_drawn_ceiling() -> None:
-    """A stacked figure caps every point's percent-of-roofline at the tallest
-    compute roof drawn, so that score does not depend on the order datatypes
-    were stacked -- but the limiter still only names a compute peak the
-    kernel's own performance does not exceed, falling back to the memory
-    level when no stacked peak is high enough to explain it."""
+def test_kernel_traces_score_against_the_roof_that_binds_not_the_tallest_drawn() -> None:
+    """The percentage is scored against whichever roof the limiter actually
+    names, not always the tallest compute roof stacked on the figure: dropping
+    the tall MFMA peak from the candidate set changes both the label (falls
+    back to the memory level, since VALU's peak is below this kernel's own
+    performance) and the percentage (scored against HBM's own 150,000
+    GFLOP/s implied ceiling instead of MFMA's 90,000), and neither case's
+    percentage exceeds 100%."""
     ai_data = {"ai_hbm": [[100.0], [50000.0]], "kernelNames": ["kA"]}
 
     matrix_traces, matrix_capped = kernel_traces(make_roofline(["FP32"]), ai_data)
@@ -194,8 +196,8 @@ def test_kernel_traces_score_against_the_tallest_drawn_ceiling() -> None:
         make_roofline(["FP32"]), ai_data, compute_peaks=[("FP32 VALU", 9000.0)]
     )
 
-    assert pct_roof(matrix_capped[0]) < 100.0
-    assert pct_roof(valu_capped[0]) > 100.0
+    assert pct_roof(matrix_capped[0]) == pytest.approx(55.56, abs=0.01)
+    assert pct_roof(valu_capped[0]) == pytest.approx(33.33, abs=0.01)
     assert "Limited by Compute: FP32 MFMA" in matrix_traces[0].hovertemplate
     assert "Limited by Memory: HBM" in valu_traces[0].hovertemplate
 
@@ -213,6 +215,22 @@ def test_kernel_traces_name_the_specific_peak_not_the_tallest_stacked_one() -> N
     )
 
     assert "Limited by Compute: FP32 MFMA" in traces[0].hovertemplate
+
+
+def test_kernel_traces_ignore_a_memory_roof_the_kernel_already_exceeds() -> None:
+    """A memory level's implied ceiling (bandwidth * AI) that the kernel's own
+    measured performance already exceeds is not an achievable roof, so the
+    limiter must not name it -- exactly as compute peaks below performance are
+    already excluded. Here HBM implies a 1,500 GFLOP/s ceiling but the kernel
+    measures 5,000 GFLOP/s, so the limiter must fall through to the cheapest
+    eligible compute peak instead of naming the impossible memory ceiling."""
+    traces, _ = kernel_traces(
+        make_roofline(["FP32"]),
+        {"ai_hbm": [[1.0], [5000.0]], "kernelNames": ["kA"]},
+    )
+
+    assert "Limited by Compute: FP32 VALU" in traces[0].hovertemplate
+    assert "Limited by Memory: HBM" not in traces[0].hovertemplate
 
 
 def test_kernel_traces_name_the_roof_that_binds() -> None:
@@ -244,6 +262,35 @@ def test_kernel_traces_name_the_roof_that_binds() -> None:
         "N/A",
         "Bandwidth:<br>\u2003HBM: N/A% (900.000 GB/s/N/A)",
     ]
+
+
+def test_kernel_traces_share_one_performance_value_across_a_kernels_points() -> None:
+    """A kernel's HBM point and L2 point measure the same achieved performance
+    but sit at different arithmetic intensities, so today each point is scored
+    against its own level's bandwidth -- 25.00% at HBM, 66.67% at L2. Once the
+    limiter's own closest-roof search (L2's 1,500 GFLOP/s implied ceiling beats
+    HBM's 4,000) drives the displayed percentage too, both of the kernel's
+    points must show that same 66.67% / 1,500, not their own per-level value."""
+    ceiling = {
+        "hbm": [[0.01, 1.0], [1.0, 2000.0], 2000.0],
+        "l2": [[0.01, 1.0], [1.0, 3000.0], 3000.0],
+    }
+
+    _, model = kernel_traces(
+        make_roofline(["FP32"]),
+        {
+            "ai_hbm": [[2.0], [1000.0]],
+            "ai_l2": [[0.5], [1000.0]],
+            "kernelNames": ["kA"],
+        },
+        sanitized_cache_hierarchy=["HBM", "L2"],
+        ceiling_data=ceiling,
+        compute_peaks=[],
+    )
+
+    points = {point["peak"]: point for point in model[0]["points"]}
+    assert points["HBM"]["hoverCells"][:2] == ["1,500", "66.67"]
+    assert points["L2"]["hoverCells"][:2] == ["1,500", "66.67"]
 
 
 def test_bandwidth_hover_shows_zero_levels() -> None:
