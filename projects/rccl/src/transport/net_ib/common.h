@@ -302,6 +302,8 @@ struct alignas(64) ncclIbSegLayout {
 // request's chunk may be split at every local and remote segment boundary it
 // spans. Single-segment sends use exactly one WR per request.
 #define NCCL_IB_MAX_WRS_PER_SEND (NCCL_NET_IB_MAX_RECVS * 2 * NCCL_IB_MAX_SEGMENTS)
+// 2*MAX request budget plus one worst-case segmented send. Matches CAST P2P.
+#define NCCL_IB_MAX_SEND_WRS (2 * NET_IB_MAX_REQUESTS + NCCL_IB_MAX_WRS_PER_SEND + 1)
 
 struct ncclIbQpInitAttr {
   ibv_qp_state state;
