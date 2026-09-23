@@ -6388,6 +6388,317 @@
           }
         }
       ]
+    },
+    "tp2-family": {
+      "faults": [
+        {
+          "id": "barrier-drop-prefill-tile-publication",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine TP2 ELF fnv1a64:2c96234e60a2a4dd compiled with the exact two-device workload HIP flags; identity matches the clean TP2 log. Native allowlist selects prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32 during the first prefill stage of the family. Cooperative LDS tile stores at VA 0x2441c..0x24458 precede unconditional signal/wait 0x24470/0x24488 (.text+0x9b70/0x9b88, occurrences 2/3). Subsequent loads starting at 0x2448c consume cross-wave WMMA operands. The recorded nonempty prefill and K=128 execute this initial tile publication. Remove that pair, retaining the earlier initialization barrier and subsequent reuse/publication synchronization. Exact compile metadata, pristine binary and final ISA: rdna4-20260923/tp2-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses a named preset; initial SuperCollider qualification uses delay=0 for all trials and its clean comparator."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|kind=barrier|pc=0x0000000000009b70|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|event=barrier|pc=0x0000000000009b70|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|event=barrier|pc=0x0000000000009b88|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            },
+            "supercollider": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                },
+                {
+                  "RJ_CONSAN_SC_DELAY": "0"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-prefill-tile-publication-preset-low",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine TP2 ELF fnv1a64:2c96234e60a2a4dd compiled with the exact two-device workload HIP flags; identity matches the clean TP2 log. Native allowlist selects prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32 during the first prefill stage of the family. Cooperative LDS tile stores at VA 0x2441c..0x24458 precede unconditional signal/wait 0x24470/0x24488 (.text+0x9b70/0x9b88, occurrences 2/3). Subsequent loads starting at 0x2448c consume cross-wave WMMA operands. The recorded nonempty prefill and K=128 execute this initial tile publication. Remove that pair, retaining the earlier initialization barrier and subsequent reuse/publication synchronization. Exact compile metadata, pristine binary and final ISA: rdna4-20260923/tp2-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses a named preset; initial SuperCollider qualification uses delay=0 for all trials and its clean comparator."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|kind=barrier|pc=0x0000000000009b70|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|event=barrier|pc=0x0000000000009b70|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|event=barrier|pc=0x0000000000009b88|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "low"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-prefill-tile-publication-preset-default",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine TP2 ELF fnv1a64:2c96234e60a2a4dd compiled with the exact two-device workload HIP flags; identity matches the clean TP2 log. Native allowlist selects prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32 during the first prefill stage of the family. Cooperative LDS tile stores at VA 0x2441c..0x24458 precede unconditional signal/wait 0x24470/0x24488 (.text+0x9b70/0x9b88, occurrences 2/3). Subsequent loads starting at 0x2448c consume cross-wave WMMA operands. The recorded nonempty prefill and K=128 execute this initial tile publication. Remove that pair, retaining the earlier initialization barrier and subsequent reuse/publication synchronization. Exact compile metadata, pristine binary and final ISA: rdna4-20260923/tp2-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses a named preset; initial SuperCollider qualification uses delay=0 for all trials and its clean comparator."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|kind=barrier|pc=0x0000000000009b70|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|event=barrier|pc=0x0000000000009b70|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|event=barrier|pc=0x0000000000009b88|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "default"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-prefill-tile-publication-preset-high",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine TP2 ELF fnv1a64:2c96234e60a2a4dd compiled with the exact two-device workload HIP flags; identity matches the clean TP2 log. Native allowlist selects prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32 during the first prefill stage of the family. Cooperative LDS tile stores at VA 0x2441c..0x24458 precede unconditional signal/wait 0x24470/0x24488 (.text+0x9b70/0x9b88, occurrences 2/3). Subsequent loads starting at 0x2448c consume cross-wave WMMA operands. The recorded nonempty prefill and K=128 execute this initial tile publication. Remove that pair, retaining the earlier initialization barrier and subsequent reuse/publication synchronization. Exact compile metadata, pristine binary and final ISA: rdna4-20260923/tp2-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses a named preset; initial SuperCollider qualification uses delay=0 for all trials and its clean comparator."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|kind=barrier|pc=0x0000000000009b70|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|event=barrier|pc=0x0000000000009b70|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|event=barrier|pc=0x0000000000009b88|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "high"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-prefill-tile-publication-preset-higher",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine TP2 ELF fnv1a64:2c96234e60a2a4dd compiled with the exact two-device workload HIP flags; identity matches the clean TP2 log. Native allowlist selects prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32 during the first prefill stage of the family. Cooperative LDS tile stores at VA 0x2441c..0x24458 precede unconditional signal/wait 0x24470/0x24488 (.text+0x9b70/0x9b88, occurrences 2/3). Subsequent loads starting at 0x2448c consume cross-wave WMMA operands. The recorded nonempty prefill and K=128 execute this initial tile publication. Remove that pair, retaining the earlier initialization barrier and subsequent reuse/publication synchronization. Exact compile metadata, pristine binary and final ISA: rdna4-20260923/tp2-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses a named preset; initial SuperCollider qualification uses delay=0 for all trials and its clean comparator."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|kind=barrier|pc=0x0000000000009b70|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|event=barrier|pc=0x0000000000009b70|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|event=barrier|pc=0x0000000000009b88|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "higher"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "barrier-drop-prefill-tile-publication-preset-max",
+          "family": "barrier-drop",
+          "reach_witness": {
+            "kind": "reviewed-unconditional-final-isa",
+            "evidence": "Reviewed pristine TP2 ELF fnv1a64:2c96234e60a2a4dd compiled with the exact two-device workload HIP flags; identity matches the clean TP2 log. Native allowlist selects prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32 during the first prefill stage of the family. Cooperative LDS tile stores at VA 0x2441c..0x24458 precede unconditional signal/wait 0x24470/0x24488 (.text+0x9b70/0x9b88, occurrences 2/3). Subsequent loads starting at 0x2448c consume cross-wave WMMA operands. The recorded nonempty prefill and K=128 execute this initial tile publication. Remove that pair, retaining the earlier initialization barrier and subsequent reuse/publication synchronization. Exact compile metadata, pristine binary and final ISA: rdna4-20260923/tp2-debug. Require 6/8 detections plus matching clean correctness, coverage, completeness and health checks. Default uses a named preset; initial SuperCollider qualification uses delay=0 for all trials and its clean comparator."
+          },
+          "environment": {
+            "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|kind=barrier|pc=0x0000000000009b70|mnemonic=s_barrier_signal|occurrence=2",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|event=barrier|pc=0x0000000000009b70|mnemonic=s_barrier_signal|occurrence=2|sequence=singleton|associated-with=fnv1a64:2c96234e60a2a4dd|kernel=prefill_bs1$async_dispatch_27_matmul_Dx256x128_f16xf16xf32|event=barrier|pc=0x0000000000009b88|mnemonic=s_barrier_wait|occurrence=3|sequence=singleton"
+          },
+          "profiles": {
+            "default": {
+              "detector": "statistical",
+              "minimum_detections": 6,
+              "oracle": "any",
+              "trials": [
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                },
+                {
+                  "RJ_CONSAN_PRESET": "max"
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   }
 }
