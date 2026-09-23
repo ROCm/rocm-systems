@@ -919,7 +919,8 @@ WORKLOADS = (
         overhead_processes=1,
         fault_families=("barrier-drop", "lds-wrong-address"),
         targets=("gfx1201",),
-        run_timeout_seconds=60,
+        # Allowlisted host preparation/patching takes 114–145s on gfx1201.
+        run_timeout_seconds=300,
         self_timed_device_minimum_ms=EMPIRICAL_MINIMUM_TIMED_MS,
     ),
     Workload(
@@ -938,7 +939,8 @@ WORKLOADS = (
         overhead_processes=1,
         fault_families=("barrier-drop", "lds-wrong-address"),
         targets=("gfx1201",),
-        run_timeout_seconds=60,
+        # Allowlisted host preparation/patching takes 114–145s on gfx1201.
+        run_timeout_seconds=300,
         self_timed_device_minimum_ms=EMPIRICAL_MINIMUM_TIMED_MS,
     ),
     Workload(
