@@ -97,6 +97,12 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
 
   int nqps = 0;
   NCCLCHECK(ncclIbCommBaseGetNqpsPerRequest(&comm->base, &nqps));
+#ifdef NCCL_ENABLE_NET_PROFILING
+  if (nqps > MAX_QPS_PER_REQ) {
+    WARN("NET/IB: QP count %d exceeds maximum profiler event handle capacity %d", nqps, MAX_QPS_PER_REQ);
+    return ncclInternalError;
+  }
+#endif
   if (nqps > NCCL_IB_MAX_QPS) {
     WARN("NET/IB: QP count %d exceeds maximum QP capacity %d", nqps, NCCL_IB_MAX_QPS);
     return ncclInternalError;
@@ -318,6 +324,24 @@ static ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int sl
 
     for (int k = 0; k < w - 1; k++) comm->wrs[k].next = comm->wrs + k + 1;
     comm->wrs[w - 1].next = NULL;
+
+#ifdef NCCL_ENABLE_NET_PROFILING
+    for (int r = 0; r < nreqs; r++) {
+      int nEventHandles = reqs[r]->pInfo[0].nEventHandles;
+      reqs[r]->pInfo[0].qpIndex[nEventHandles] = qpIndex;
+      int64_t pluginId = NCCL_PROFILER_NET_TYPE_IB | NCCL_PROFILER_NET_IB_VER;
+      reqs[r]->pInfo[0].data.type = ncclProfileQp;
+      reqs[r]->pInfo[0].data.qp.device = devIndex;
+      reqs[r]->pInfo[0].data.qp.wr_id = lastWr->wr_id;
+      reqs[r]->pInfo[0].data.qp.opcode = lastWr->opcode;
+      reqs[r]->pInfo[0].data.qp.qpNum = qp->qp->qp_num;
+      reqs[r]->pInfo[0].data.qp.length = chunkLen[r];
+      void* pHandle = reqs[r]->pInfo[0].pHandle;
+      NCCLCHECK(ncclProfilerFunction(&reqs[r]->pInfo[0].qpEventHandles[nEventHandles], ncclProfilerNetEventStart,
+                                     pHandle, pluginId, &reqs[r]->pInfo[0].data));
+      reqs[r]->pInfo[0].nEventHandles++;
+    }
+#endif
 
     struct ibv_send_wr* bad_wr;
     if (ncclIbWqeLatEnabled) ncclIbWqeLatMonStampSend(qp, comm->wrs);
