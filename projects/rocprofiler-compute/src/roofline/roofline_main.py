@@ -17,7 +17,7 @@ from roofline.roofline_hover import (
     build_compute_peak_hover,
     build_kernel_hover_template,
     build_roof_hover,
-    format_bandwidth,
+    format_bandwidth_pair,
     format_hover_number,
     truncate_kernel_name,
     wrap_hover_name,
@@ -516,8 +516,7 @@ class Roofline:
             lines.append(
                 f"\u2003{entry['level_name']}: "
                 f"{format_hover_number(pct_bandwidth, ',.2f')}% "
-                f"({format_bandwidth(achieved_bandwidth)}/"
-                f"{format_bandwidth(peak_bandwidth)})"
+                f"({format_bandwidth_pair(achieved_bandwidth, peak_bandwidth)})"
             )
         return "<br>".join(lines)
 
