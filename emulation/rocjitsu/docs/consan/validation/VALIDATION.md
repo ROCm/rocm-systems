@@ -59,6 +59,17 @@ Historical ledgers retain the results of their original configurations. Their
 timeouts are priorities for revalidation with generated allowlists, not evidence
 that those retries will still time out or that the rows are already resolved.
 
+## Explicit sampling configurations
+
+For a separate Default-engine sampling investigation, set
+`CONSAN_VALIDATION_DEFAULT_PRESET=low|default|high|higher|max`. The runner passes
+this as `RJ_CONSAN_PRESET` to Default clean and fault children and captures it in
+the effective environment/provenance. It does not affect native baselines or
+SuperCollider. With no override, the standard profile remains the contract.
+Run a matching clean comparator and precommit fault expectations for a changed
+preset. Label the preset explicitly in the ledger; a denser configuration's
+success cannot qualify the standard profile or erase its detection misses.
+
 ## Validation layers
 
 ConSan uses four complementary layers:

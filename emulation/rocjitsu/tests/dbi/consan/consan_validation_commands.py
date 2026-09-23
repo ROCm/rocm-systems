@@ -887,6 +887,11 @@ def _clean_environment(
     allowlist = _kernel_allowlist_file(target, workload)
     config = PROFILES[profile]
     environment.update(config.environment)
+    preset = os.environ.get("CONSAN_VALIDATION_DEFAULT_PRESET")
+    if profile == "default" and preset is not None:
+        if preset not in {"low", "default", "high", "higher", "max"}:
+            raise ValidationError("invalid CONSAN_VALIDATION_DEFAULT_PRESET")
+        environment["RJ_CONSAN_PRESET"] = preset
     environment.update(
         {
             "HSA_TOOLS_LIB": str(hook),

@@ -6565,6 +6565,30 @@ class SharktankValidationLifecycleTests(unittest.TestCase):
         self.assertEqual(FakeToyLlama.live, 0)
 
 
+class DefaultPresetEnvironmentTest(unittest.TestCase):
+    def test_preset_applies_to_default_clean_and_fault_only(self):
+        with temporary_root() as root, mock.patch.dict(os.environ, {
+            "CONSAN_VALIDATION_DEFAULT_PRESET": "max",
+            "RJ_CONSAN_PRESET": "low",
+        }, clear=True):
+            workload = validation.WORKLOAD_BY_ID["d128-block"]
+            clean = validation_commands._clean_environment(
+                "default", workload, root / "hook.so", "gfx1201", root)
+            fault = validation_faults._fault_trial_environment(
+                "default", workload, root / "hook.so", "gfx1201",
+                {"environment": {}}, {}, {}, root)
+            for environment in (clean, fault):
+                self.assertEqual(environment["RJ_CONSAN_PRESET"], "max")
+            for profile in (None, "supercollider"):
+                environment = validation_commands._clean_environment(
+                    profile, workload, root / "hook.so", "gfx1201", root)
+                self.assertNotIn("RJ_CONSAN_PRESET", environment)
+            os.environ["CONSAN_VALIDATION_DEFAULT_PRESET"] = "typo"
+            with self.assertRaises(validation.ValidationError):
+                validation_commands._clean_environment(
+                    "default", workload, root / "hook.so", "gfx1201", root)
+
+
 class GeneratedAllowlistEnvironmentTest(unittest.TestCase):
     def test_allowlist_survives_clean_inventory_and_fault_environment(self):
         with temporary_root() as root:
