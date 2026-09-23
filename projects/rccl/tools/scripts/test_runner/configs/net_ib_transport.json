@@ -429,6 +429,97 @@
       ]
     },
 
+    "net_ib_multisegment": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 600,
+      "description": "Classic NET/IB multi-segment DMA-BUF path: per-segment registration, asymmetric offsets, boundary splitting and the segment cap. One rank per node so the DeepEP multi-node stress test is not skipped; the fixture needs DMA-BUF export (NCCL_DMABUF_ENABLE from net_ib_base) and GDR, and skips gracefully without them. The flush tests are in net_ib_multisegment_flush because they need a non-default RCCL_PARAM.",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,REG"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiSeg_PerSegmentRegistrationAndTransfer",
+          "description": "Register a 4-segment VMM window through ncclIbRegMrDmaBufMultiSeg and move every segment end to end",
+          "test_filter": "NetIbMultiSegmentMPITest.PerSegmentRegistrationAndTransfer"
+        },
+        {
+          "name": "NetIB_MultiSeg_IntraSegmentOffsetSelection",
+          "description": "Transfers anchored at three offsets inside each segment: per-segment lkey/rkey selection must follow the address, not segment 0",
+          "test_filter": "NetIbMultiSegmentMPITest.IntraSegmentOffsetSelection"
+        },
+        {
+          "name": "NetIB_MultiSeg_DeepEP_AsymmetricOffsetTransfer",
+          "description": "DeepEP-style per-peer window: sender starts in segment 1 while the receiver starts in segment 0, so a shared cursor would pick the wrong key",
+          "test_filter": "NetIbMultiSegmentMPITest.DeepEP_AsymmetricOffsetTransfer"
+        },
+        {
+          "name": "NetIB_MultiSeg_CrossBoundaryTransferSucceeds",
+          "description": "One transfer straddling the seg0/seg1 boundary is split at the receiver's boundary using the per-segment rkeys from the CTS FIFO",
+          "test_filter": "NetIbMultiSegmentMPITest.CrossBoundaryTransferSucceeds"
+        },
+        {
+          "name": "NetIB_MultiSeg_DeepEP_MultiNodeAsymmetricCrossBoundaryStress",
+          "description": "32 iterations crossing independently selected source and destination boundaries in an 8-segment window, with a sentinel-checked destination; requires ranks on two nodes",
+          "test_filter": "NetIbMultiSegmentMPITest.DeepEP_MultiNodeAsymmetricCrossBoundaryStress"
+        },
+        {
+          "name": "NetIB_MultiSeg_WholeBufferSingleTransfer",
+          "description": "A single transfer spanning the whole window crosses every boundary and exercises the full splitting builder",
+          "test_filter": "NetIbMultiSegmentMPITest.WholeBufferSingleTransfer"
+        },
+        {
+          "name": "NetIB_MultiSeg_ExceedsMaxSegmentsRejected",
+          "description": "A buffer with more than NCCL_IB_MAX_SEGMENTS segments is rejected with ncclInvalidUsage and produces no handle",
+          "test_filter": "NetIbMultiSegmentMPITest.ExceedsMaxSegmentsRejected"
+        },
+        {
+          "name": "NetIB_MultiSeg_SingleSegmentThroughMultiSegPath",
+          "description": "Regression: a 1-segment window through the multi-segment entry point still takes the unmodified nSegments==1 fast path",
+          "test_filter": "NetIbMultiSegmentMPITest.SingleSegmentThroughMultiSegPath"
+        },
+        {
+          "name": "NetIB_MultiSeg_HostAndDeviceSingleSegmentRegression",
+          "description": "Regression: plain host (NCCL_PTR_HOST) and device (NCCL_PTR_CUDA) registrations still transfer through the unchanged single-region path",
+          "test_filter": "NetIbMultiSegmentMPITest.HostAndDeviceSingleSegmentRegression"
+        }
+      ]
+    },
+
+    "net_ib_multisegment_flush": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 300,
+      "description": "Per-segment iflush chain. RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING defaults to 1, which routes ncclIbIflush through the RO=0 scratchpad and never reaches the segment-aware branch; 0 selects the direct GDR read per segment. RCCL_PARAM caches on first read, so this must be set before launch. Extends net_ib_base rather than net_ib_multisegment so it does not also re-run that suite's tests under this env.",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,REG",
+        "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiSeg_FlushSelectsSegmentMr",
+          "description": "After receiving into segment 2, iflush must fence with that segment's MR (selected by ncclIbMrForRange), not segment 0's",
+          "test_filter": "NetIbMultiSegmentMPITest.MultiSegmentFlushSelectsSegmentMr"
+        },
+        {
+          "name": "NetIB_MultiSeg_FlushTouchesEverySegment",
+          "description": "A whole-window receive must fence every physical segment, not only data[0]",
+          "test_filter": "NetIbMultiSegmentMPITest.MultiSegmentFlushTouchesEverySegment"
+        },
+        {
+          "name": "NetIB_MultiSeg_MultiRecvFlushTouchesEveryHandle",
+          "description": "A multi-recv mixing two composite handles must fence every non-zero entry, not only the last receive",
+          "test_filter": "NetIbMultiSegmentMPITest.MultiRecvFlushTouchesEveryHandle"
+        }
+      ]
+    },
+
     "net_ib_cts_stress": {
       "extends": "net_ib_base",
       "timeout": 600,
@@ -1400,6 +1491,18 @@
       "name": "NET IB - MultiRecv",
       "description": "irecv(n>1) multi-slot batching tests",
       "config": "net_ib_multirecv",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multi-Segment DMA-BUF",
+      "description": "Classic NET/IB multi-segment registration, asymmetric offsets, boundary splitting, segment cap and single-region regressions",
+      "config": "net_ib_multisegment",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multi-Segment Flush (direct GDR)",
+      "description": "Per-segment iflush chain; needs RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0, so these tests skip in every other config",
+      "config": "net_ib_multisegment_flush",
       "enabled": true
     },
     {

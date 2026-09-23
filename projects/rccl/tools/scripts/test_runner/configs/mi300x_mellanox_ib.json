@@ -266,6 +266,11 @@
           "name": "UBR_MultiSegment_Symmetric_LsaGin",
           "description": "Cross-node ReduceScatter over multi-segment symmetric windows exercising both the LSA (intra-node) and GIN (inter-node) legs; requires >=2 nodes and >=2 ranks per node",
           "test_filter": "UBR_MultiSegment.Symmetric_LsaGin"
+        },
+        {
+          "name": "UBR_MultiSegment_NetProxyPartialFinalSegment",
+          "description": "AllReduce over two full VMM mappings plus half of a third; the only test driving netIbRegMrMultiSeg with a clipped final MR. Requires exactly two nodes",
+          "test_filter": "UBR_MultiSegment.NetProxyPartialFinalSegment"
         }
       ]
     },

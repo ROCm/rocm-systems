@@ -695,8 +695,8 @@ static ncclResult_t ncclIbSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
-  // GIN iput can post NCCL_RMA_MAX_SIGNAL_WRS on top of the classic 2*MAX data budget.
-  qpCreateAttrs.maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS;
+  // Segmented multi-recv chain plus the 2*MAX request budget.
+  qpCreateAttrs.maxSendWorkRequest = NCCL_IB_MAX_SEND_WRS;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
     // For example, if there are 2 devices and 4 QPs, the QPs will be created
@@ -981,8 +981,9 @@ ib_recv_dev_list:
                                   sizeof(comm->putSignalScratchpad), IBV_ACCESS_LOCAL_WRITE),
                   ret, fail);
 
-    // Prepare my CTS FIFO
-    NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->ctsFifoMr, commDev->base.pd, comm->ctsFifo, sizeof(comm->ctsFifo),
+    // Prepare my CTS FIFO + multi-seg side table (one covering MR).
+    NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->ctsFifoMr, commDev->base.pd, comm->ctsFifo,
+                                  sizeof(comm->ctsFifo) + sizeof(comm->segLayoutFifo),
                                   IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ),
                   ret, fail);
     devInfo->rkey = commDev->ctsFifoMr->rkey;
@@ -1049,6 +1050,7 @@ ib_recv_dev_list:
   meta.remSpeedBufAddr = comm->remoteSpeedMr ? (uint64_t)&comm->remoteSpeedBuf : 0;
   meta.remSpeedBufRkey = comm->remoteSpeedMr ? comm->remoteSpeedMr->rkey : 0;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
+  ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
 
   stage->state = ncclIbCommStateSend;
   stage->offset = 0;
@@ -1073,6 +1075,7 @@ ib_connect:
   if (stage->offset != sizeof(remMeta)) return ncclSuccess;
 
   memcpy(&remMeta, stage->buffer, sizeof(ncclIbConnectionMetadata));
+  comm->peerCaps = ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName));
 
   // ensure that the remote devices have the same link layer than the local devices used in the connection.
   if (comm->base.vProps.ndevs > 0) {
@@ -1207,13 +1210,12 @@ static ncclResult_t ncclIbReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = NET_IB_MAX_REQUESTS;
-  // CTS messages are posted using send work requests.
-  // Note that because only specific CTS messages are signaled, the send queue
-  // size needs to be double the number of max requests.
-  // When resiliency is enabled, the number of send work requests is same as the
-  // number of max requests because every CTS message is signaled.
+  // CTS messages are posted using send work requests. Multi-segment CTS posts
+  // an unsignaled side-table WR before the CTS WR (two WRs per slot). Because
+  // only specific CTS WRs are signaled, the send queue needs 2x max requests
+  // times two WRs. Resiliency signals every CTS WR, so 1x times two WRs.
   // +1 reserves space for one in-flight speed update RDMA write on qps[0].
-  qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS * (rComm->base.resiliency ? 1 : 2) +
+  qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS * (rComm->base.resiliency ? 1 : 2) * 2 +
                                      ((ncclParamIbEventBasedLb() && ncclParamIbEventBasedLbRemote()) ? 1 : 0);
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
@@ -1357,8 +1359,11 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     qpCreateAttrs.cq = rCommDev->base.cq;
     qpCreateAttrs.pd = rCommDev->base.pd;
     qpCreateAttrs.maxRecvWorkRequest = 0;
-    // GIN flush posts one RDMA read per segment on top of NET_IB_MAX_REQUESTS.
-    qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_FLUSH_WRS;
+    // Classic iflush can post one RDMA_READ per recv per segment (up to
+    // NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS). GIN needs one extra per
+    // segment on top of NET_IB_MAX_REQUESTS.
+    qpCreateAttrs.maxSendWorkRequest =
+      NET_IB_MAX_REQUESTS + NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS;
     qpCreateAttrs.qpContext = &comm->base.stats;
     NCCLCHECK(ncclIbQpCreate(flushQp, &qpCreateAttrs));
     // Loopback flush QP: local and remote device indices are this recv device.
@@ -1684,7 +1689,9 @@ ib_recv:
   }
 
   // Store the remote CTS FIFO info provided by the remote peer
+  rComm->peerCaps = ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName));
   rComm->remCtsFifo.addr = remMeta.addr;
+  rComm->remSegLayout.addr = remMeta.addr + sizeof(((struct ncclIbSendComm*)0)->ctsFifo);
   for (int i = 0; i < rComm->base.nRemDevs; i++) {
     rComm->remCtsFifo.rkeys[i] = remMeta.devs[i].rkey;
   }
@@ -1697,6 +1704,10 @@ ib_recv:
                                   IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ),
                   ret, fail);
     rCommDev->sge.lkey = rCommDev->ctsFifoMr->lkey;
+    NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->segLayoutFifoMr, rCommDev->base.pd, &rComm->remSegLayout.elems,
+                                  sizeof(rComm->remSegLayout.elems),
+                                  IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ),
+                  ret, fail);
 
     // Register completion records
     NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->cmplsRecordsMr, rCommDev->base.pd, &rComm->cmplsRecords,
@@ -1851,6 +1862,7 @@ ib_recv:
   meta.ndevs = rComm->base.vProps.ndevs;
   meta.isP2p = remMeta.isP2p;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
+  ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
 
   stage->state = ncclIbCommStateSend;
   stage->offset = 0;
@@ -1959,6 +1971,7 @@ ncclResult_t ncclIbCloseRecv(void* recvComm) {
         if (commDev->gpuFlush.hostMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.hostMr));
       }
       if (commDev->ctsFifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->ctsFifoMr));
+      if (commDev->segLayoutFifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->segLayoutFifoMr));
       if (commDev->cmplsRecordsMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->cmplsRecordsMr));
       if (commDev->speedUpdateMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->speedUpdateMr));
       if (comm->base.resiliency) {

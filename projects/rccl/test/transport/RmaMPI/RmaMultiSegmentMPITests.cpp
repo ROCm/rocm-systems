@@ -18,8 +18,10 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <string>
+#include <strings.h>
 #include <vector>
 
 namespace RCCLRmaTests
@@ -1424,6 +1426,74 @@ TEST_F(RmaMultiSegmentMPITest, MultiNodeAsymmetricIGetBoundaryStress)
         }
         Barrier();
     }
+}
+
+// Flood 40 in-flight 16-seg iputSignals (~17 WQEs each) without Test().
+// Opt-in: RCCL_MSEG_SQ_STRESS=1. Use NCCL_NET=IB.
+TEST_F(RmaMultiSegmentMPITest, IPutSignalSendQueueOversubscribe)
+{
+    const char* stress = std::getenv("RCCL_MSEG_SQ_STRESS");
+    const bool want = stress && std::atoi(stress) != 0;
+    if (SyncSkip(!want))
+        GTEST_SKIP() << "set RCCL_MSEG_SQ_STRESS=1 to run the send-queue stress";
+    const char* net = std::getenv("NCCL_NET");
+    const bool isCast = net && (strcasecmp(net, "IB-CAST") == 0 || strcasecmp(net, "ib-cast") == 0);
+    if (SyncSkip(isCast))
+        GTEST_SKIP() << "CAST GIN waits on WR credits; use NCCL_NET=IB";
+
+    if (!SetUpFixture(2, 2)) return;
+
+    constexpr int kSegs = NCCL_RMA_MAX_SEGMENTS;
+    constexpr int kInflight = 40;
+    constexpr int kWaitMs = 15000;
+
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb, kSegs))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t kSize = sb->totalSize;
+    void* sigBuf = AllocBuf(kSignalSize);
+    ASSERT_NE(sigBuf, nullptr);
+
+    if (worldRank_ == 0)
+        FillBuf(sb->ptr, kSize, /*seed=*/0x51);
+
+    void *sendMh, *sendGh, *recvMh, *recvGh, *sigMh, *sigGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sb->ptr, kSize,       &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(rb->ptr, kSize,       &recvMh, &recvGh));
+    ASSERT_EQ(ncclSuccess, RegMr(sigBuf,  kSignalSize, &sigMh,  &sigGh));
+
+    if (!MultiSegmentPathAvailable())
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* reqs[kInflight] = {};
+        int posted = 0;
+        for (int i = 0; i < kInflight; i++)
+        {
+            ncclResult_t st = rma_->iputSignal(rmaCtx_, 0,
+                                               /*srcOff=*/0, sendMh, kSize,
+                                               /*dstOff=*/0, recvMh, /*peerRank=*/1,
+                                               /*signalOff=*/0, sigMh, /*signalValue=*/0,
+                                               NCCL_NET_SIGNAL_OP_INC,
+                                               /*isStrongSignal=*/false,
+                                               ncclRmaOptFlagsDefault, &reqs[i]);
+            EXPECT_EQ(st, ncclSuccess)
+                << "iputSignal " << i << " of " << kInflight
+                << " failed (SQ oversubscribe / fatal post)";
+            if (st != ncclSuccess) break;
+            posted = i + 1;
+        }
+        for (int i = 0; i < posted; i++)
+        {
+            if (reqs[i] == nullptr) continue;
+            EXPECT_TRUE(PollUntilDone(reqs[i], kWaitMs))
+                << "iputSignal " << i << " did not complete (SQ oversubscribe)";
+        }
+    }
+    Barrier();
 }
 
 } // namespace RCCLRmaTests
