@@ -50,6 +50,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   aborting mid-run.
 - Fix a deadlock that may occur in libunwind when call-stack sampling is enabled.
   Timemory commit: [ROCm/timemory@8fefbca](https://github.com/ROCm/timemory/commit/8fefbca)
+- Fixed `rocprof-sys-attach` aborting the target process when attaching to a process
+  running in a different mount namespace (for example, a container). The tool library
+  path is now validated against the target's mount namespace before attaching, failing
+  cleanly with a diagnostic instead.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1
 
