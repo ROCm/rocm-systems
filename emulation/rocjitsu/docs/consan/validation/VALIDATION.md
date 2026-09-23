@@ -42,6 +42,13 @@ For each workload:
    instrumented, and dispatched. If discovery missed an executed path, repeat
    discovery with that path included. Unlisted kernels are unchecked, and a
    shared helper requires all its reachable kernel entries to be selected.
+   A native trace may name only one descriptor for code shared by several
+   aliased kernels (as in rocPRIM). If owner filtering excludes those sites,
+   inspect the pristine code object's ownership inventory and add the exact
+   names of every owner of the selected shared sites to a separate expanded
+   list. Retain the native list, code-object hash, added names, and reason for
+   expansion. Use the expanded list for both modes and recheck coverage; do not
+   infer completeness from a successful numerical oracle alone.
 5. Rerun the clean qualification and applicable fault trials with the existing
    correctness, coverage, completeness, and containment checks. Record new
    results and provenance before revising a timeout row or its status.
