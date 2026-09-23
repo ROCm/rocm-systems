@@ -619,9 +619,7 @@ TEST(rocrtstFunc, GpuDiscoveryDeprecatedDoorbellTest) {
   // present. Regression test for: a single pre-Vega GPU (e.g. Polaris/gfx803)
   // would abort HSA initialization for ALL devices in the system.
   GpuDiscoveryDeprecatedTest gdt;
-  RunCustomTestProlog(&gdt);
-  gdt.Run();
-  RunCustomTestEpilog(&gdt);
+  RunGenericTest(&gdt);
 }
 
 TEST(rocrtstFunc, SvmMemory_Basic_Test) {

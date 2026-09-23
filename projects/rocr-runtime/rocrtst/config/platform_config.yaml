@@ -198,4 +198,9 @@ platforms:
       - rocrtstNeg.*
       - rocrtstFunc.TrapHandler_Abort
       - rocrtstFunc.TrapHandler_Generic
+      # Reads host KFD sysfs directly; under FFM model mode (HSA_MODEL_TOPOLOGY)
+      # that path is absent and the model exposes only DoorbellType 2 GPUs, so
+      # there is nothing deprecated to skip. DoorbellTypeValidation.* (pure
+      # logic) still runs on FFM.
+      - rocrtstFunc.GpuDiscoveryDeprecatedDoorbellTest
 
