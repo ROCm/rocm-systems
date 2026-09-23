@@ -6657,6 +6657,24 @@ class DefaultPresetEnvironmentTest(unittest.TestCase):
 
 
 class SuperColliderDelayEnvironmentTest(unittest.TestCase):
+    def test_ignored_delay_name_cannot_silently_create_a_matrix(self):
+        obsolete = "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS"
+        for policy in (
+            {"environment": {obsolete: "16"}},
+            {"trials": [{obsolete: "16"}]},
+            {"trial_axis": {obsolete: {"start": 0, "stop": 2}}},
+        ):
+            with self.subTest(policy=policy), self.assertRaisesRegex(
+                validation.ValidationError, "use RJ_CONSAN_SC_DELAY"
+            ):
+                validation_faults._fault_trials(
+                    {"profiles": {"supercollider": policy}}, "supercollider")
+        _, trials = validation_faults._fault_trials(
+            {"profiles": {"supercollider": {
+                "trials": [{"RJ_CONSAN_SC_DELAY": "16"}]
+            }}}, "supercollider")
+        self.assertEqual(trials, [{"RJ_CONSAN_SC_DELAY": "16"}])
+
     def test_matching_delay_controls_apply_only_to_supercollider(self):
         with temporary_root() as root, mock.patch.dict(os.environ, {
             "CONSAN_VALIDATION_SC_DELAY": "4",

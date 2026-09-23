@@ -461,6 +461,13 @@ def _fault_trials(fault: dict, profile: str) -> tuple[dict, list[dict[str, str]]
             for key, value in trial.items()
         ):
             raise ValidationError(f"invalid trial environment for {profile}")
+    obsolete_delay = "RJ_CONSAN_SUPERCOLLIDER_DELAY_NOPS"
+    if obsolete_delay in policy_environment or any(
+        obsolete_delay in trial for trial in trials
+    ):
+        raise ValidationError(
+            f"{obsolete_delay} is ignored by the hook; use RJ_CONSAN_SC_DELAY"
+        )
     return policy, trials
 
 
