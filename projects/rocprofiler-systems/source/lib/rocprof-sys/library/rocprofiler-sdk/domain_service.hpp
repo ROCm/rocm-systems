@@ -8,7 +8,7 @@
 #include "library/rocprofiler-sdk/callback_domain.hpp"
 #include "library/rocprofiler-sdk/domain_registry.hpp"
 #include "library/rocprofiler-sdk/domain_selection.hpp"
-#include "library/rocprofiler-sdk/external_correlation_domain.hpp"
+#include "library/rocprofiler-sdk/stream_stack_service.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 #include "logger/debug.hpp"
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
@@ -71,6 +71,8 @@ public:
         {
             configure_domain(config);
         }
+
+        configure_pending_external_correlation_id();
 
         SdkBackend::start_context(context());
     }
@@ -164,9 +166,9 @@ private:
         m_buffered_domains.emplace_back(definition, context(), std::move(operations));
         m_buffered_domains.back().configure();
 
-        if(definition.correlation_dependency != nullptr)
+        if(definition.correlation_dependency.has_value())
         {
-            configure_correlation_dependency(*definition.correlation_dependency);
+            m_correlation_domains.emplace_back(*definition.correlation_dependency);
         }
 
         if(definition.on_configure)
@@ -188,9 +190,9 @@ private:
         m_callback_domains.emplace_back(definition, context(), std::move(operations));
         m_callback_domains.back().configure();
 
-        if(definition.correlation_dependency != nullptr)
+        if(definition.correlation_dependency.has_value())
         {
-            configure_correlation_dependency(*definition.correlation_dependency);
+            m_correlation_domains.emplace_back(*definition.correlation_dependency);
         }
 
         if(definition.on_configure)
@@ -199,23 +201,18 @@ private:
         }
     }
 
-    void configure_correlation_dependency(
-        const domains::external_correlation_domain_definition<SdkBackend>& dependency)
+    void configure_pending_external_correlation_id()
     {
-        using kind_t = SdkBackend::external_correlation_request_kind_t;
-        if constexpr(std::is_enum_v<kind_t>)
+        if(m_correlation_domains.empty())
         {
-            LOG_DEBUG("Configuring external-correlation dependency (kind {})",
-                      static_cast<std::underlying_type_t<kind_t>>(dependency.kind));
-        }
-        else
-        {
-            LOG_DEBUG("Configuring external-correlation dependency (kind {})",
-                      dependency.kind);
+            return;
         }
 
-        m_correlation_domains.emplace_back(dependency, context());
-        m_correlation_domains.back().configure();
+        SdkBackend::configure_external_correlation_id_request_service(
+            m_context, m_correlation_domains.data(), m_correlation_domains.size(),
+            rocprofiler_sdk::stream_stack_service<
+                SdkBackend>::request_stream_correlation_id,
+            nullptr);
     }
 
     SdkBackend::context_id_t context()
@@ -232,12 +229,13 @@ private:
     }
 
 private:
-    std::vector<domains::domain_info>                             m_available_domains;
-    std::vector<domains::domain_configuration>                    m_configuration;
-    std::vector<domains::buffered_domain<SdkBackend>>             m_buffered_domains;
-    std::vector<domains::callback_domain<SdkBackend>>             m_callback_domains;
-    std::vector<domains::external_correlation_domain<SdkBackend>> m_correlation_domains;
-    SdkBackend::context_id_t                                      m_context{};
+    std::vector<domains::domain_info>                 m_available_domains;
+    std::vector<domains::domain_configuration>        m_configuration;
+    std::vector<domains::buffered_domain<SdkBackend>> m_buffered_domains;
+    std::vector<domains::callback_domain<SdkBackend>> m_callback_domains;
+    std::vector<typename SdkBackend::external_correlation_request_kind_t>
+                             m_correlation_domains;
+    SdkBackend::context_id_t m_context{};
 
     std::vector<domains::domain_info> filter_supported_domains(
         const auto& table, domains::collection_mode mode)
