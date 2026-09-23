@@ -1578,11 +1578,9 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceUsable = rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr);
   const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed && ceUsable && (force || symReg);
 
-    // (3) Eager CE 2-shot through ceARTmpBuf. Staging is allocated lazily on the
-    // first CE AllReduce (enqueue REGISTERED path below). Skip this arm until
-    // that buffer exists so the first FORCE-unregistered call still goes through
-    // enqueue, which initializes CE. Symmetric-window operands copy through the
-    // user windows via CE-registered, so skip when those windows exist (symReg).
+    // (3) Eager 2-shot once ceARTmpBuf exists. Skip until then so the first
+    // FORCE-unregistered call enqueues REGISTERED and initializes CE. Skip
+    // when symReg: those operands use CE-registered user windows, not staging.
     if (!symkRequested && !symReg && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
       decision->algo = RCCL_CE_2SHOT;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
@@ -1679,9 +1677,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceRegEnvCapOk = rcclParamCeArRegMaxMsgBytes() < 0 || ceRegInWindow;
   const bool ceRegZero = ceZeroPolicy && ceArRegMax != 0 && ceRegEnvCapOk;
   const bool ceRegForce = force && !symEligible && ceRegInWindow;
-  // FORCE unregistered that did not take 2-shot (first call, staging still
-  // unallocated) enqueues CE so ncclCeInit runs before ncclCeAllReduce. Cap is
-  // ceUsable (2-shot max), not the 32 MiB staging buffer.
+  // First FORCE-unregistered call enqueues CE so ncclCeInit runs. Cap is ceUsable
+  // (2-shot max), not the 32 MiB staging buffer.
   const bool ceStagedUnregistered =
     rcclCeStagedUnregisteredEligible(comm->nRanks, msgBytes, datatype, op, force, ceArGraphAllowed, ceUsable);
   if (!hasSysmemSegment && ((ceAvailable && (ceRegZero || ceRegForce)) || ceStagedUnregistered)) {

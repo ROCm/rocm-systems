@@ -4108,8 +4108,6 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RecvWinSysmemSegmentBlocksCeRegister
 }
 
 // CE 2-shot: unregistered FORCE AllReduce with staging already allocated.
-// Uses `force` (via RCCL_FORCE_CE_ALLREDUCE), matching rcclUseCeAr2Shot's
-// ForceBypassesCtaPolicy test precedent.
 TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenEligibleAndStagingBufferReady) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_CeTwoShotChosenWhenEligibleAndStagingBufferReady",
@@ -4166,9 +4164,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenNeitherForceNo
       });
 }
 
-// Complementary proof: the first FORCE-unregistered AllReduce must enqueue CE
-// (RCCL_CE_REGISTERED) so ncclCeInit runs before staging is allocated. Eager
-// 2-shot waits for ceARTmpBuf.
+// First FORCE-unregistered AllReduce enqueues CE so ncclCeInit can allocate
+// staging. Eager 2-shot waits for ceARTmpBuf.
 TEST(WrapMicrotestIsolated, SelectAllReduce_ForceUnregisteredEnqueuesCeWhenStagingBufferNotInitialized) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_ForceUnregisteredEnqueuesCeWhenStagingBufferNotInitialized",
