@@ -548,6 +548,30 @@ TEST(UtilSimd, FractF64_VectorMatchesScalar_BitExact) {
   expect_f64_unary_bit_exact([](double x) { return x - std::floor(x); },
                              [](util::native<double> x) { return x - util::floor_simd(x); });
 }
+TEST(UtilSimd, RcpF32MatchesPhysicalHardwareBits) {
+  SKIP_IF_NO_SIMD();
+  RestoreEnvironment restore;
+  const uint32_t cases[][2] = {
+      {0x3FC00000u, 0x3F2AAAAAu}, {0x3F802922u, 0x3F7FADD6u}, {0xBFB0333Cu, 0xBF39F868u},
+      {0x00800000u, 0x7E800000u}, {0xFF7FFFFFu, 0x80000000u}, {0x80000001u, 0xFF800000u},
+      {0x7F800000u, 0x00000000u}, {0xFFA12345u, 0xFFE12345u},
+  };
+  using V = util::native<float>;
+  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    ASSERT_EQ(std::fesetround(mode), 0);
+    for (unsigned start = 0; start < std::size(cases); ++start) {
+      std::array<uint32_t, V::size()> input_bits;
+      for (unsigned lane = 0; lane < V::size(); ++lane)
+        input_bits[lane] = cases[(start + lane) % std::size(cases)][0];
+      const V input = util::load<float>(input_bits.data());
+      const V result = util::rcp_f32_simd(input);
+      for (unsigned lane = 0; lane < V::size(); ++lane)
+        EXPECT_EQ(std::bit_cast<uint32_t>(float(result[lane])),
+                  cases[(start + lane) % std::size(cases)][1]);
+    }
+  }
+}
+
 TEST(UtilSimd, RcpF64_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
   expect_f64_unary_bit_exact([](double x) { return 1.0f / x; },

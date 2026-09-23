@@ -11,9 +11,12 @@
 /// They are used by the simulator's execute() bodies for V_RCP_F32,
 /// V_RSQ_F32, V_SQRT_F32, V_LOG_F32, V_EXP_F32, V_SIN_F32, V_COS_F32,
 /// V_RCP_F64, V_RSQ_F64, V_SQRT_F64.
+/// The F32 reciprocal additionally matches the captured RDNA3/4 hardware mapping.
 ///
 /// All functions handle special cases (NaN, Inf, denormals, ±0) per the
 /// AMD ISA specification.
+
+#include "util/amdgpu_rcp.h"
 
 #include <bit>
 #include <cmath>
@@ -28,7 +31,7 @@ namespace transcendental {
 ///
 /// @details AMD transcendental micro-ops always operate in FTZ mode
 /// regardless of the shader's denorm mode.  This helper reproduces
-/// that behaviour for rcp, rsq, sqrt, exp, and log.
+/// that behaviour for rsq, sqrt, exp, and log.
 inline float flush_denorm_f32(float x) {
   uint32_t bits = std::bit_cast<uint32_t>(x);
   if ((bits & 0x7F800000u) == 0 && (bits & 0x007FFFFFu) != 0)
@@ -36,17 +39,8 @@ inline float flush_denorm_f32(float x) {
   return x;
 }
 
-/// @brief 1.0 / x (single-precision reciprocal, ~0.5 ULP).
-inline float rcp_f32(float x) {
-  x = flush_denorm_f32(x);
-  if (std::isnan(x))
-    return std::bit_cast<float>(std::bit_cast<uint32_t>(x) | 0x00400000u);
-  if (x == 0.0f)
-    return std::copysign(std::numeric_limits<float>::infinity(), x);
-  if (std::isinf(x))
-    return std::copysign(0.0f, x);
-  return flush_denorm_f32(1.0f / x);
-}
+/// @brief AMD single-precision reciprocal matching physical RDNA3/4 (within 1 ULP).
+inline float rcp_f32(float x) { return util::amdgpu_rcp_f32(x); }
 
 /// @brief 1.0 / sqrt(x) (single-precision reciprocal square root, ~1 ULP).
 inline float rsq_f32(float x) {

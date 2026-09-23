@@ -266,6 +266,59 @@ TEST(GraphicsRasterMathTest, ViewportTruncationMatchesPhysicalRdna3AndRdna4) {
               test.subpixel / 256.0);
 }
 
+TEST(GraphicsRasterMathTest, ViewportScalePrecedesPerspectiveDivision) {
+  // Exact vertex inputs and subpixel coordinates recovered independently on
+  // physical RDNA3 and RDNA4. These include the conditional-rendering triangle
+  // and the buffer-device-address edge, plus a sweep over positive W values.
+  struct Case {
+    uint32_t position, w;
+    double expected;
+  };
+  const Case cases[] = {
+      {0xc0148f6e, 0x410f9103, 155.67578125}, {0x408c7bd1, 0x40a00000, 394.3828125},
+      {0xbea6cd92, 0x3f3e6086, 118.00390625}, {0xbe9e11f8, 0x3f295d42, 112.00390625},
+      {0xc11cde0d, 0x4129ce7e, 16.00390625},  {0x401d634c, 0x409be672, 316.0},
+      {0xbeebb3df, 0x3f11952c, 40.00390625},  {0x40289793, 0x405d463d, 370.00390625},
+      {0xc0cba720, 0x41686f4e, 118.00390625}, {0xc042be5d, 0x404c7b98, 10.00390625},
+      {0xc0b5cd8b, 0x41378df1, 106.00390625}, {0xbff25182, 0x400756bc, 22.00390625},
+      {0xc07311dd, 0x409103cc, 34.00390625},  {0xbf60af9f, 0x3fb01000, 76.00390625},
+  };
+  for (const auto &test : cases)
+    EXPECT_EQ(amdgpu::raster::viewport_coordinate(std::bit_cast<float>(test.position),
+                                                  std::bit_cast<float>(test.w), 210, 210),
+              test.expected);
+}
+
+TEST(GraphicsRasterMathTest, ReciprocalMatchesPhysicalRdna3AndRdna4) {
+  // Raw pull-model reciprocal-W captures cover sticky-bit boundaries, seed
+  // segment boundaries, values differing from IEEE division, and exponents.
+  constexpr std::array<std::array<uint32_t, 2>, 24> cases{{
+      {0x3f800000u, 0x3f800000u}, {0x3f800001u, 0x3f7ffffeu}, {0x3f8003ffu, 0x3f7ff802u},
+      {0x3f800400u, 0x3f7ff800u}, {0x3f800401u, 0x3f7ff7feu}, {0x3f81ffffu, 0x3f7c0fc3u},
+      {0x3f820000u, 0x3f7c0fc1u}, {0x3f820001u, 0x3f7c0fbfu}, {0x3fb55555u, 0x3f34b4b5u},
+      {0x3fc00000u, 0x3f2aaaabu}, {0x3fc00001u, 0x3f2aaaaau}, {0x3fffffffu, 0x3f000001u},
+      {0x3f800556u, 0x3f7ff555u}, {0x3f8d547cu, 0x3f67dac1u}, {0x3f9bd297u, 0x3f524a58u},
+      {0x3fabe70du, 0x3f3e9ea1u}, {0x3fbd7fffu, 0x3f2ceb11u}, {0x3fd1446du, 0x3f1c959du},
+      {0x3fe7be07u, 0x3f0d6601u}, {0x3fffeaa9u, 0x3f000aadu}, {0x02000000u, 0x7d000000u},
+      {0x30000000u, 0x4f000000u}, {0x60000000u, 0x1f000000u}, {0x7e000000u, 0x01000000u},
+  }};
+  for (const auto &test : cases)
+    EXPECT_EQ(std::bit_cast<uint32_t>(amdgpu::raster::reciprocal(std::bit_cast<float>(test[0]))),
+              test[1])
+        << std::hex << test[0];
+}
+
+TEST(GraphicsRasterMathTest, ReciprocalCompleteNormalizedHardwareDigest) {
+  // FNV-style hash of raw reciprocal-W words captured independently on gfx1100 and gfx1201.
+  uint64_t digest = 14695981039346656037ull;
+  for (uint32_t mantissa = 0; mantissa < (1u << 23); ++mantissa) {
+    const float input = std::bit_cast<float>(0x3f800000u | mantissa);
+    digest =
+        (digest ^ std::bit_cast<uint32_t>(amdgpu::raster::reciprocal(input))) * 1099511628211ull;
+  }
+  EXPECT_EQ(digest, 0xdb90a52d4704a833ull);
+}
+
 TEST(GraphicsRasterMathTest, PerspectiveProductsMatchPhysicalRdna3AndRdna4) {
   // Raw barycentric captures with power-of-two plane gradients isolate the
   // interpolation multiplier from triangle setup and parameter interpolation.

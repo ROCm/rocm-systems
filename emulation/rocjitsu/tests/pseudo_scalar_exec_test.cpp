@@ -238,7 +238,7 @@ constexpr std::array<PseudoScalarSpecialCase, 85> kSpecialCases{{
      "",
      {.source_opsel = true},
      3u << 2},
-    {"f32_negative_round_toward_negative", "v_s_rcp_f32", f32_bits(-3.0f), 0xBEAAAAABu, "", {}, 2u},
+    {"f32_negative_round_toward_negative", "v_s_rcp_f32", f32_bits(-3.0f), 0xBEAAAAAAu, "", {}, 2u},
     {"f32_negative_round_toward_zero", "v_s_rcp_f32", f32_bits(-3.0f), 0xBEAAAAAAu, "", {}, 3u},
     {"f16_negative_round_toward_negative",
      "v_s_rcp_f16",
@@ -430,14 +430,14 @@ constexpr std::array<PseudoScalarSpecialCase, 85> kSpecialCases{{
     {"f32_rcp_omod_destination_overflow_round_toward_negative",
      "v_s_rcp_f32",
      0x00800000u,
-     0x7F7FFFFFu,
+     0x7F800000u,
      "",
      {.omod = 2},
      2u},
     {"f32_rcp_omod_destination_overflow_round_toward_zero",
      "v_s_rcp_f32",
      0x00800000u,
-     0x7F7FFFFFu,
+     0x7F800000u,
      "",
      {.omod = 2},
      3u},
@@ -840,6 +840,41 @@ TEST(PseudoScalarHelperTest, HandlesExplicitSpecialCasesWithoutHostInvalidOrDivi
   EXPECT_NE(f16_signaling_nan & 0x0200u, 0u);
 }
 
+TEST(PseudoScalarHelperTest, ReciprocalMatchesPhysicalGfx12ModesAndModifiers) {
+  // Physical V_S_RCP_F32 captures are identical for all sixteen combinations
+  // of FP_ROUND and FP_DENORM. OMOD also retains reciprocal's overflow policy.
+  const uint32_t cases[][5] = {
+      {0x7F7FFFFFu, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u},
+      {0xFF7FFFFFu, 0x80000000u, 0x00000000u, 0x00000000u, 0x00000000u},
+      {0x00800000u, 0x7E800000u, 0x7F000000u, 0x7F800000u, 0x7E000000u},
+      {0x00000001u, 0x7F800000u, 0x7F800000u, 0x7F800000u, 0x7F800000u},
+      {0x3F800000u, 0x3F800000u, 0x40000000u, 0x40800000u, 0x3F000000u},
+      {0x40400000u, 0x3EAAAAAAu, 0x3F2AAAAAu, 0x3FAAAAAAu, 0x3E2AAAAAu},
+      {0x007FFFFFu, 0x7F800000u, 0x7F800000u, 0x7F800000u, 0x7F800000u},
+      {0x80800000u, 0xFE800000u, 0xFF000000u, 0xFF800000u, 0xFE000000u},
+  };
+  std::fenv_t saved_environment{};
+  ASSERT_EQ(std::fegetenv(&saved_environment), 0);
+  for (int host_mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    EXPECT_EQ(std::fesetround(host_mode), 0);
+    for (const auto &test : cases)
+      for (uint32_t round_mode = 0; round_mode < 4; ++round_mode)
+        for (uint32_t denorm_mode = 0; denorm_mode < 4; ++denorm_mode)
+          for (uint32_t omod = 0; omod < 4; ++omod)
+            EXPECT_EQ(amdgpu::pseudo_scalar::execute_f32(
+                          amdgpu::pseudo_scalar::Operation::RCP, std::bit_cast<float>(test[0]),
+                          false, false, round_mode, denorm_mode, omod, false),
+                      test[omod + 1])
+                << "host rounding mode=" << host_mode;
+    for (uint32_t sign : {0u, 0x80000000u})
+      EXPECT_EQ(amdgpu::pseudo_scalar::execute_f32(amdgpu::pseudo_scalar::Operation::RCP,
+                                                   std::bit_cast<float>(0x00800000u | sign), false,
+                                                   false, 3, 3, 2, true),
+                sign ? 0u : 0x3F800000u);
+  }
+  EXPECT_EQ(std::fesetenv(&saved_environment), 0);
+}
+
 TEST(PseudoScalarHelperTest, PreservesAndFlushesSignedDenormals) {
   using amdgpu::pseudo_scalar::Operation;
 
@@ -853,7 +888,7 @@ TEST(PseudoScalarHelperTest, PreservesAndFlushesSignedDenormals) {
   EXPECT_TRUE(std::isnan(std::bit_cast<float>(f32_allowed_negative_input)));
   EXPECT_EQ(amdgpu::pseudo_scalar::execute_f32(Operation::RCP, f32_negative_maximum, false, false,
                                                0, 2, 0, false),
-            0x80200000u);
+            0x80000000u);
   EXPECT_EQ(amdgpu::pseudo_scalar::execute_f32(Operation::RCP, f32_negative_maximum, false, false,
                                                0, 0, 0, false),
             0x80000000u);

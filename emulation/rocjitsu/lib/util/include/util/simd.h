@@ -4,6 +4,7 @@
 #ifndef UTIL_SIMD_H_
 #define UTIL_SIMD_H_
 
+#include "util/amdgpu_rcp.h"
 #include "util/bit.h"
 
 #include <bit>
@@ -823,7 +824,7 @@ inline double trunc_scalar(double a) { return quiet_snan_scalar(a, std::trunc(a)
 /// `amdgpu::transcendental::flush_denorm_f32`: a lane with biased exponent 0 and
 /// nonzero mantissa becomes ±0 (sign preserved); every other lane (normal, Inf,
 /// NaN, ±0) passes through unchanged. AMD transcendental micro-ops always run in
-/// FTZ mode, so the f32 rcp/rsq/exp/log SIMD ports below funnel through this.
+/// FTZ mode, so the f32 rsq/sqrt/exp/log SIMD ports below funnel through this.
 inline native<float> flush_denorm_f32_simd(native<float> v) {
   using U = native<uint32_t>;
   U b = std::bit_cast<U>(v);
@@ -833,21 +834,17 @@ inline native<float> flush_denorm_f32_simd(native<float> v) {
 
 /// Vector ports of `amdgpu::transcendental::*_f32`, mirroring the scalar
 /// reference body bit-for-bit so the VOP1 SIMD fast path agrees with the
-/// forced-scalar path on every lane. The ±0/Inf special cases fall out of IEEE
-/// div/sqrt after the FTZ input flush; only NaN payload preservation with signaling NaNs quieted
-/// and the negative-domain canonical qNaN (0x7FC00000) need explicit blends. The 16-bit (f16) ops
-/// reuse these on the f16->f32 intermediate, matching the scalar `f32_to_f16(rcp_f32(f16_to_f32))`.
+/// forced-scalar path on every lane. Reciprocal uses the shared integer hardware mapping;
+/// the other helpers use host arithmetic with explicit NaN and FTZ handling.
+/// The f16 operations reuse these helpers after promotion to f32.
 // Canonical positive quiet-NaN (f32), broadcast across the vector. Shared by
 // the transcendental fast paths below, which blend it into out-of-domain
 // lanes (negative sqrt/rsqrt, log of a negative) to match the scalar refs.
 inline const native<float> kQNaN = std::bit_cast<native<float>>(native<uint32_t>(0x7FC00000u));
 
 inline native<float> rcp_f32_simd(native<float> a) {
-  native<float> x = flush_denorm_f32_simd(a);
-  native<float> r = flush_denorm_f32_simd(native<float>(1.0f) / x);
-  stdx::where(stdx::isnan(a), r) =
-      std::bit_cast<native<float>>(std::bit_cast<native<uint32_t>>(a) | 0x00400000u);
-  return r;
+  return map_native_convert_scalar<float, float>(a,
+                                                 [](float value) { return amdgpu_rcp_f32(value); });
 }
 
 inline native<float> rsq_f32_simd(native<float> a) {

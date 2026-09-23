@@ -31,6 +31,33 @@ TEST(TranscendentalTest, RcpF32SpecialCases) {
   EXPECT_FLOAT_EQ(rcp_f32(2.0f), 0.5f);
 }
 
+TEST(TranscendentalTest, RcpF32MatchesPhysicalRdna3AndRdna4) {
+  const uint32_t cases[][2] = {
+      {0x3f800000u, 0x3f800000u}, {0x3f800001u, 0x3f7ffffeu}, {0x3f81ffffu, 0x3f7c0fc3u},
+      {0x3f820000u, 0x3f7c0fc1u}, {0x3f83ffffu, 0x3f783e12u}, {0x3f840000u, 0x3f783e10u},
+      {0x3fc00000u, 0x3f2aaaaau}, {0x3fffffffu, 0x3f000001u}, {0x3f802922u, 0x3f7fadd6u},
+      {0x3f932eddu, 0x3f5ea262u}, {0x3fb0333cu, 0x3f39f868u}, {0x3ffff486u, 0x3f0005beu},
+      {0x00800000u, 0x7e800000u}, {0x7f000000u, 0x00000000u}, {0x00000001u, 0x7f800000u},
+      {0x7fa12345u, 0x7fe12345u},
+  };
+  for (const auto &test : cases)
+    for (uint32_t sign : {0u, 0x80000000u})
+      EXPECT_EQ(std::bit_cast<uint32_t>(rcp_f32(std::bit_cast<float>(test[0] | sign))),
+                test[1] | sign)
+          << std::hex << test[0] << " sign=" << sign;
+}
+
+TEST(TranscendentalTest, RcpF32CompleteNormalizedHardwareDigest) {
+  // FNV-style hash of raw result words captured independently on gfx1100 and gfx1201.
+  // Check the complete mantissa domain without storing the 32 MiB capture.
+  uint64_t digest = 14695981039346656037ull;
+  for (uint32_t mantissa = 0; mantissa < (1u << 23); ++mantissa) {
+    const float input = std::bit_cast<float>(0x3f800000u | mantissa);
+    digest = (digest ^ std::bit_cast<uint32_t>(rcp_f32(input))) * 1099511628211ull;
+  }
+  EXPECT_EQ(digest, 0xd54ec24992572df9ull);
+}
+
 TEST(TranscendentalTest, RsqF32SpecialCases) {
   EXPECT_EQ(rsq_f32(0.0f), std::numeric_limits<float>::infinity());
   EXPECT_TRUE(std::isnan(rsq_f32(-1.0f)));

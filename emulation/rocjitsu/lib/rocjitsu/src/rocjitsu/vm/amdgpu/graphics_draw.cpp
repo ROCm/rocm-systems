@@ -916,13 +916,17 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
       return clip_xy ? screen[vertex].barycentric[component] : double(vertex == component);
     };
     const auto perspective_plane = [&](uint32_t component) {
-      return plane(original_weight(0, component) / screen[0].w,
-                   original_weight(1, component) / screen[1].w,
-                   original_weight(2, component) / screen[2].w);
+      return plane(original_weight(0, component) * raster::reciprocal(screen[0].w),
+                   original_weight(1, component) * raster::reciprocal(screen[1].w),
+                   original_weight(2, component) * raster::reciprocal(screen[2].w));
     };
     const raster::Plane plane_iw = perspective_plane(1);
     const raster::Plane plane_jw = perspective_plane(2);
-    const raster::Plane plane_rw = plane(1.0 / screen[0].w, 1.0 / screen[1].w, 1.0 / screen[2].w);
+    const raster::Plane plane_rw =
+        plane(raster::reciprocal(screen[0].w), raster::reciprocal(screen[1].w),
+              raster::reciprocal(screen[2].w));
+    // Reconstruct clipped noperspective weights in wide precision; these are not
+    // the vertex reciprocal-W values captured from primitive setup.
     const raster::Plane plane_i = clip_xy ? plane(original_weight(0, 1) * v[1].w / screen[0].w,
                                                   original_weight(1, 1) * v[1].w / screen[1].w,
                                                   original_weight(2, 1) * v[1].w / screen[2].w)
@@ -996,6 +1000,7 @@ void GraphicsDraw::rasterize(const GpuVmAccess &memory) {
           f.linear_j = b2;
           f.pull_model = {plane_iw.at_quad(dx, dy, q), plane_jw.at_quad(dx, dy, q),
                           plane_rw.at_quad(dx, dy, q)};
+          // Per-fragment W reconstruction is distinct from the vertex reciprocal unit.
           const float w = 1.0f / f.pull_model[2];
           f.i = raster::multiply_perspective(f.pull_model[0], w);
           f.j = raster::multiply_perspective(f.pull_model[1], w);
