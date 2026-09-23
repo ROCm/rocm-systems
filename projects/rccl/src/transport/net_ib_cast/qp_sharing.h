@@ -66,7 +66,7 @@ static inline void IbCastCommInitSharingFields(struct ncclIbNetCommBase* base) {
   base->isSharedQpPrimary = false;
   base->sharedGroupIdx = -1;
   base->remIbDevIdx = -1;
-  base->sharedPrimaryNqps = 0;
+  base->sharedGroupNqps = 0;
   // peerProcTag is intentionally not reset: it is peer identity captured on the
   // dev-list receive, and the accept path can re-enter this call afterwards.
 }

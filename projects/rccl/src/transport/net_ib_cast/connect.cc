@@ -1077,7 +1077,7 @@ static ncclResult_t IbCastQpSharingSenderSetup(
 
     comm->base.isSharedQpPrimary = false;
     int primaryNqps = IbCastCountGroupQpSlots(&probeKey.peerAddr, peerProcTag, probeRemIbDevIdx, true, groupIdx);
-    comm->base.sharedPrimaryNqps = primaryNqps;
+    comm->base.sharedGroupNqps = primaryNqps;
 
     IbCastSharedQpKey key;
     memset(&key, 0, sizeof(key));
@@ -1929,7 +1929,7 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
 
     rComm->base.isSharedQpPrimary = false;
     int primaryNqps = IbCastCountGroupQpSlots(&recvPeerAddr, recvPeerProcTag, remMeta->senderIbDevIdx, false, remMeta->sharedGroupIdx);
-    rComm->base.sharedPrimaryNqps = primaryNqps;
+    rComm->base.sharedGroupNqps = primaryNqps;
     rComm->useCtsOffload = false;
 
     IbCastSharedQpKey recvKey;

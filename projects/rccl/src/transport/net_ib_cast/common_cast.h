@@ -584,7 +584,7 @@ struct alignas(32) ncclIbNetCommBase {
   bool     isSharedQpPrimary;
   int      sharedGroupIdx;
   int      remIbDevIdx;
-  int      sharedPrimaryNqps;
+  int      sharedGroupNqps;
   uint64_t peerProcTag;         // remote process identity, 0 = unknown
 };
 
