@@ -485,6 +485,8 @@ static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 89);
 static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 91);
 #    elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x13
 static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 92);
+#    elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x14
+static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 93);
 #    else
 #        if !defined(ROCPROFILER_UNSAFE_NO_VERSION_CHECK) &&                                       \
             (defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0)
