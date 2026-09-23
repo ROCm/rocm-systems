@@ -1495,8 +1495,11 @@ bool rcclCeArGraphSafe(struct ncclComm* comm) {
 
 bool rcclCeStagedUnregisteredEligible(int nRanks, size_t msgBytes, ncclDataType_t datatype, ncclRedOp_t op,
                                       bool force, bool ceArGraphAllowed, bool ceUsable) {
-  return force && ceArGraphAllowed && ceUsable && ncclCeImplemented(ncclFuncAllReduce, (int)op, datatype) &&
-         msgBytes <= ncclCeAllReduceStagingBufBytes(nRanks);
+  // Cap is ceUsable's 2-shot window (table/env, 256 MiB default), not the 32 MiB
+  // staging allocation. ncclCeAllReduce pipelines AllGather through slots.
+  (void)nRanks;
+  (void)msgBytes;
+  return force && ceArGraphAllowed && ceUsable && ncclCeImplemented(ncclFuncAllReduce, (int)op, datatype);
 }
 
 // Single source of truth for AllReduce implementation selection. See the header
@@ -1618,12 +1621,10 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
          (int)symkRequested, (int)ceAllReduceAllowed, (int)twoShotWindow,
          arTwoShotMin, arTwoShotMax, (int)force, (int)ctaZero,
          (int)ceAr2ShotEligible, (int)(comm->ceColl.ceARTmpBuf != NULL));
-    // (3) Eager CE 2-shot (staging buffer). Requires !symkRequested and an
-    // initialized ceARTmpBuf (first call, before init, falls through to enqueue).
-    // Gated on the raw symk signal, not symEligible: symmetric-window operands copy
-    // through the user windows via CE-registered, so they must not be diverted into
-    // the staging buffer just because symMaxR2 withdrew symk.
-    if (!symkRequested && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
+    // Skip until ceARTmpBuf exists so the first forced call still initializes CE.
+    // Registered windows take CE-registered instead of this staging arm.
+    const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType, sendWin, recvWin);
+    if (!symkRequested && !symReg && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
       decision->algo = RCCL_CE_2SHOT;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
       return ncclSuccess;
@@ -1719,8 +1720,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceRegEnvCapOk = rcclParamCeArRegMaxMsgBytes() < 0 || ceRegInWindow;
   const bool ceRegZero = ceZeroPolicy && ceArRegMax != 0 && ceRegEnvCapOk;
   const bool ceRegForce = force && !symEligible && ceRegInWindow;
-  // FORCE unregistered CE copies through ceARTmpBuf. Also require a driver that
-  // implements CE and a message that fits the staging buffer.
+  // First forced call, before ceARTmpBuf exists, enqueues CE so init runs first.
+  // The cap is the 2-shot window, and the driver must implement CE.
   const bool ceStagedUnregistered =
     rcclCeStagedUnregisteredEligible(comm->nRanks, msgBytes, datatype, op, force, ceArGraphAllowed, ceAllReduceAllowed);
   if (!hasSysmemSegment && ((ceAvailable && (ceRegZero || ceRegForce)) || ceStagedUnregistered)) {
