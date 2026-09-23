@@ -598,9 +598,9 @@ void
 DispatchThreadTracer::start_context() const
 {
     // Thread trace no longer registers a per-queue callback with the queue controller; the
-    // HSA write interceptor now calls thread_trace::write_hook / signal_completion_hook
-    // directly (see hsa/queue.cpp). Scope serialization to the agents configured on this
-    // context. An empty set still means every agent.
+    // HSA write interceptor now calls thread_trace::kernel_dispatch_phase_enter_hook /
+    // kernel_dispatch_phase_exit_hook directly (see hsa/queue.cpp). Scope serialization to the
+    // agents configured on this context. An empty set still means every agent.
     const auto serialization_agents = configured_agents();
     CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization(serialization_agents);
     enabled.store(true, std::memory_order_release);
@@ -610,7 +610,8 @@ void
 DispatchThreadTracer::stop_context() const
 {
     // Stop injecting ATT packets before transitioning serialization. Completion hooks continue
-    // to route already-tagged packets via signal_completion_hook even after the context stops.
+    // to route already-tagged packets via kernel_dispatch_phase_exit_hook even after the context
+    // stops.
     if(!enabled.exchange(false, std::memory_order_acq_rel)) return;
 
     const auto serialization_agents = configured_agents();

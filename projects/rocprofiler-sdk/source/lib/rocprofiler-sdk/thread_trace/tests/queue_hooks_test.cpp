@@ -111,7 +111,7 @@ TEST(ThreadTraceQueueHooks, IsAnyActiveReturnsFalseWhenNoContextActive)
 }
 
 // A dispatch instrumented while the context is active must still complete via
-// signal_completion_hook after stop_context clears the active slot.
+// kernel_dispatch_phase_exit_hook after stop_context clears the active slot.
 TEST(ThreadTraceQueueHooks, StopContextInFlightCompletionRoutesViaHookPath)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
@@ -158,9 +158,11 @@ TEST(ThreadTraceQueueHooks, StopContextInFlightCompletionRoutesViaHookPath)
 
     hsa::inst_pkt_t inst_pkt;
     bool            is_serialized = false;
-    thread_trace::write_hook(fq, pkt, 1, 1, &user_data, {}, &corr_id, inst_pkt, is_serialized);
+    thread_trace::kernel_dispatch_phase_enter_hook(
+        fq, pkt, 1, 1, &user_data, {}, &corr_id, inst_pkt, is_serialized);
 
-    ASSERT_FALSE(inst_pkt.empty()) << "write_hook must inject ATT control packet";
+    ASSERT_FALSE(inst_pkt.empty())
+        << "kernel_dispatch_phase_enter_hook must inject ATT control packet";
     EXPECT_GE(tracer.pending_post_moves(), 1);
 
     ASSERT_EQ(rocprofiler_stop_context(ctx), ROCPROFILER_STATUS_SUCCESS);
@@ -170,10 +172,10 @@ TEST(ThreadTraceQueueHooks, StopContextInFlightCompletionRoutesViaHookPath)
     auto packet_data      = hsa::packet_data_t{};
     packet_data.user_data = user_data;
 
-    thread_trace::signal_completion_hook(fq, pkt, sess, packet_data, inst_pkt, {});
+    thread_trace::kernel_dispatch_phase_exit_hook(fq, pkt, sess, packet_data, inst_pkt, {});
 
     EXPECT_EQ(tracer.pending_post_moves(), 0)
-        << "post_move_data must drain via signal_completion_hook after stop_context";
+        << "post_move_data must drain via kernel_dispatch_phase_exit_hook after stop_context";
 
     registration::set_init_status(1);
     registration::finalize();
@@ -231,15 +233,15 @@ TEST(ThreadTraceQueueHooks, CompletionRoutingStaysWithTheProducingTracer)
         corr_id.internal   = static_cast<int64_t>(queue_id);
         data.user_data     = rocprofiler_user_data_t{.value = corr_id.internal};
         bool is_serialized = false;
-        thread_trace::write_hook(*data.queue,
-                                 data.pkt,
-                                 1,
-                                 1,
-                                 &data.user_data,
-                                 {},
-                                 &corr_id,
-                                 data.inst_pkt,
-                                 is_serialized);
+        thread_trace::kernel_dispatch_phase_enter_hook(*data.queue,
+                                                       data.pkt,
+                                                       1,
+                                                       1,
+                                                       &data.user_data,
+                                                       {},
+                                                       &corr_id,
+                                                       data.inst_pkt,
+                                                       is_serialized);
         EXPECT_FALSE(data.inst_pkt.empty());
 
         return data;
@@ -256,7 +258,7 @@ TEST(ThreadTraceQueueHooks, CompletionRoutingStaysWithTheProducingTracer)
     auto packet_data_a      = hsa::packet_data_t{};
     packet_data_a.user_data = ctx_a.user_data;
 
-    thread_trace::signal_completion_hook(
+    thread_trace::kernel_dispatch_phase_exit_hook(
         *ctx_a.queue, ctx_a.pkt, sess_a, packet_data_a, ctx_a.inst_pkt, {});
 
     EXPECT_EQ(ctx_a.tracer->pending_post_moves(), 0);
@@ -268,7 +270,7 @@ TEST(ThreadTraceQueueHooks, CompletionRoutingStaysWithTheProducingTracer)
         hsa::queue_info_session_t{.queue = *ctx_b.queue});
     auto packet_data_b      = hsa::packet_data_t{};
     packet_data_b.user_data = ctx_b.user_data;
-    thread_trace::signal_completion_hook(
+    thread_trace::kernel_dispatch_phase_exit_hook(
         *ctx_b.queue, ctx_b.pkt, sess_b, packet_data_b, ctx_b.inst_pkt, {});
     EXPECT_EQ(ctx_b.tracer->pending_post_moves(), 0);
 

@@ -222,7 +222,7 @@ TEST(thread_trace_per_agent, serialization_is_scoped_to_the_contexts_agents)
     EXPECT_FALSE(controller->is_serialization_enabled(agent_b));
 }
 
-TEST(thread_trace_per_agent, write_hook_ignores_dispatches_on_other_agents)
+TEST(thread_trace_per_agent, enter_hook_ignores_dispatches_on_other_agents)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
@@ -243,7 +243,7 @@ TEST(thread_trace_per_agent, write_hook_ignores_dispatches_on_other_agents)
         bool is_serialized = false;
         auto user_data     = rocprofiler_user_data_t{.value = corr_id.internal};
 
-        thread_trace::write_hook(
+        thread_trace::kernel_dispatch_phase_enter_hook(
             queue_a, packet, 42, 1, &user_data, {}, &corr_id, inst_pkt, is_serialized);
 
         EXPECT_FALSE(is_serialized)

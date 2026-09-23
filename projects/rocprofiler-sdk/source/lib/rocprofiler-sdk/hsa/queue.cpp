@@ -297,12 +297,12 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
         // Thread trace completion is migrated off the callback registry (see WriteInterceptor);
         // invoke it explicitly here.
-        thread_trace::signal_completion_hook(queue_info_session.queue,
-                                             packet.kernel_packet,
-                                             _session,
-                                             packet,
-                                             packet.instrumentation_packets,
-                                             dispatch_time);
+        thread_trace::kernel_dispatch_phase_exit_hook(queue_info_session.queue,
+                                                      packet.kernel_packet,
+                                                      _session,
+                                                      packet,
+                                                      packet.instrumentation_packets,
+                                                      dispatch_time);
 
         CHECK_NOTNULL(hsa::get_queue_controller())
             ->serializer(&queue_info_session.queue)
@@ -841,15 +841,16 @@ WriteInterceptor(const void* packets,
 
             // Thread trace is migrated off the per-queue callback registry: call its hook
             // explicitly (the other services still flow through signal_callback above).
-            thread_trace::write_hook(queue,
-                                     kernel_packet,
-                                     kernel_id,
-                                     dispatch_id,
-                                     &_packet_data.user_data,
-                                     _packet_data.tracing_data.external_correlation_ids,
-                                     corr_id,
-                                     _packet_data.instrumentation_packets,
-                                     _packet_data.is_serialized);
+            thread_trace::kernel_dispatch_phase_enter_hook(
+                queue,
+                kernel_packet,
+                kernel_id,
+                dispatch_id,
+                &_packet_data.user_data,
+                _packet_data.tracing_data.external_correlation_ids,
+                corr_id,
+                _packet_data.instrumentation_packets,
+                _packet_data.is_serialized);
 
             bool inserted_before = false;
             if(_packet_data.is_serialized)
