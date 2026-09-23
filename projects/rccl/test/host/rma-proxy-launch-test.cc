@@ -27,6 +27,7 @@
 
 #include "nccl.h"
 #include "comm.h"
+#include "dev_runtime_internal.h"
 #include "gdrwrap.h"
 #include "rma/rma_proxy.h"
 
@@ -47,6 +48,7 @@ struct RmaProxyCpuFreeCall {
 static int g_rmaProxyCpuAllocFailAt = -1;
 static int g_rmaProxyCpuAllocErrorAfterAllocAt = -1;
 static int g_rmaProxyCpuAllocCallIndex = 0;
+static bool g_rmaProxyCpuAllocUseGdrHandle = true;
 static std::vector<RmaProxyCpuAllocCall> g_rmaProxyCpuAllocCalls;
 static std::vector<RmaProxyCpuFreeCall> g_rmaProxyCpuFreeCalls;
 
@@ -54,6 +56,7 @@ static void ResetRmaProxyCpuAllocFake() {
   g_rmaProxyCpuAllocFailAt = -1;
   g_rmaProxyCpuAllocErrorAfterAllocAt = -1;
   g_rmaProxyCpuAllocCallIndex = 0;
+  g_rmaProxyCpuAllocUseGdrHandle = true;
   g_rmaProxyCpuAllocCalls.clear();
   g_rmaProxyCpuFreeCalls.clear();
 }
@@ -67,7 +70,9 @@ static ncclResult_t RmaProxyAllocMemCPUAccessible(T** ptr, T** devPtr, size_t ne
   *ptr = static_cast<T*>(std::calloc(nelem, sizeof(T)));
   if (*ptr == nullptr && nelem != 0) return ncclSystemError;
   *devPtr = *ptr;
-  *gdrHandle = reinterpret_cast<void*>(0xA000 + call * 0x10);
+  *gdrHandle = g_rmaProxyCpuAllocUseGdrHandle
+                   ? reinterpret_cast<void*>(0xA000 + call * 0x10)
+                   : nullptr;
   g_rmaProxyCpuAllocCalls.push_back({nelem, *ptr, *devPtr, *gdrHandle});
   if (call == g_rmaProxyCpuAllocErrorAfterAllocAt) return ncclSystemError;
   return ncclSuccess;
@@ -507,6 +512,7 @@ protected:
 
 TEST_F(RmaProxyDescriptorTest, PutDesc_PersistentOwnsDedicatedSequencesUntilDestroyed) {
   plan_->persistent = true;
+  g_rmaProxyCpuAllocUseGdrHandle = false;
   auto* desc = static_cast<ncclRmaProxyDesc*>(std::calloc(1, sizeof(ncclRmaProxyDesc)));
   ASSERT_NE(nullptr, desc);
 
@@ -673,19 +679,29 @@ TEST_F(RmaProxyDescriptorTest, WaitDesc_AllocationFailureLeavesArraysForDescript
 }
 
 TEST_F(RmaProxyDescriptorTest, PutOp_NoSignalCopiesTheDataOperationOnly) {
+  ncclDevrMemory srcMemory{};
+  ncclDevrMemory dstMemory{};
+  srcMemory.bigOffset = 1000;
+  dstMemory.bigOffset = 2000;
+  srcMemory.rmaHostWins[kContext] = reinterpret_cast<void*>(0x7550);
+  dstMemory.rmaHostWins[kContext] = reinterpret_cast<void*>(0x7660);
+  srcWin_.memory = &srcMemory;
+  dstWin_.memory = &dstMemory;
+  srcWin_.bigOffset = 1064;
+  dstWin_.bigOffset = 2144;
   ncclRmaPutSignalOp op{};
   op.request = reinterpret_cast<void*>(0x7770);
   op.signal.op = NCCL_NET_SIGNAL_OP_ADD;
 
   ASSERT_EQ(ncclSuccess,
-            ncclRmaProxyPutBuildOp(comm_.get(), ctx_.get(), kContext, false,
+            ncclRmaProxyPutBuildOp(comm_.get(), ctx_.get(), kContext + 1, false,
                                    &srcWin_, 17, &dstWin_, 29, 4096, kPeer, 1,
                                    NCCL_SIGNAL_NONE, &op));
 
-  EXPECT_EQ(17u, op.srcOff);
-  EXPECT_EQ(srcWin_.rmaHostWins[kContext], op.srcHandle);
-  EXPECT_EQ(29u, op.dstOff);
-  EXPECT_EQ(dstWin_.rmaHostWins[kContext], op.dstHandle);
+  EXPECT_EQ(81u, op.srcOff);
+  EXPECT_EQ(srcMemory.rmaHostWins[kContext], op.srcHandle);
+  EXPECT_EQ(173u, op.dstOff);
+  EXPECT_EQ(dstMemory.rmaHostWins[kContext], op.dstHandle);
   EXPECT_EQ(4096u, op.size);
   EXPECT_EQ(kPeer, op.targetRank);
   EXPECT_EQ(nullptr, op.request);
@@ -996,10 +1012,11 @@ protected:
   };
 
   ncclTaskRma* PushWait(ncclFunc_t func, ncclSignalMode_t signalMode,
-                        std::initializer_list<WaitSpec> waits = {}) {
+                        std::initializer_list<WaitSpec> waits = {},
+                        int context = 0) {
     auto task = std::make_unique<ncclTaskRma>();
     task->func = func;
-    task->ctx = 0;
+    task->ctx = context;
     task->signalMode = signalMode;
     task->npeers = waits.size();
     if (waits.size() != 0) {
@@ -1166,13 +1183,17 @@ TEST_F(RmaProxyLaunchTest, PutLaunch_LaterFullQueueFlushesEarlierTaskBeforeRetry
   PushPut(0, 3, 128);
   contexts_[0].pis[3] = kQueueSize;
   contexts_[0].cis[3] = 0;
+  FullQueueConsumerAdvance advance(&contexts_[0].cis[3], 0, kQueueSize);
   std::vector<BatchCall> calls;
-  auto batch = RecordBatches(&calls, [&](size_t callCount) {
-    if (callCount == 1) contexts_[0].cis[3] = contexts_[0].pis[3];
-  });
+  auto batch = RecordBatches(&calls);
 
-  ASSERT_EQ(ncclSuccess, ncclRmaProxyPutLaunchUut(comm_.get(), plan_.get(), nullptr));
+  ncclResult_t result =
+      ncclRmaProxyPutLaunchUut(comm_.get(), plan_.get(), nullptr);
+  advance.Wait();
 
+  ASSERT_EQ(ncclSuccess, result);
+  EXPECT_FALSE(advance.timedOut());
+  EXPECT_EQ(1, advance.fullReads());
   ASSERT_EQ(4u, calls.size());
   EXPECT_EQ(4, batch.callCount());
   ASSERT_EQ(1u, calls[0].params.size());
@@ -1246,12 +1267,12 @@ TEST_F(RmaProxyLaunchTest, WaitLaunch_NonWaitTaskIsRejectedWithoutTouchingWaitAr
   EXPECT_EQ(0, std::count(g_rmaProxyFreeCalls.begin(),
                           g_rmaProxyFreeCalls.end(), signalIdxs));
   EXPECT_EQ(task, reinterpret_cast<ncclTaskRma*>(comm_->memPool_ncclTaskRma.head));
-  if (std::find(g_rmaProxyFreeCalls.begin(), g_rmaProxyFreeCalls.end(), peers) ==
-      g_rmaProxyFreeCalls.end()) std::free(peers);
-  if (std::find(g_rmaProxyFreeCalls.begin(), g_rmaProxyFreeCalls.end(), nsignals) ==
-      g_rmaProxyFreeCalls.end()) std::free(nsignals);
-  if (std::find(g_rmaProxyFreeCalls.begin(), g_rmaProxyFreeCalls.end(), signalIdxs) ==
-      g_rmaProxyFreeCalls.end()) std::free(signalIdxs);
+  for (int* array : {peers, nsignals, signalIdxs}) {
+    if (std::find(g_rmaProxyFreeCalls.begin(), g_rmaProxyFreeCalls.end(), array) ==
+        g_rmaProxyFreeCalls.end()) {
+      std::free(array);
+    }
+  }
   task->peers = nullptr;
   task->nsignals = nullptr;
   task->signalIdxs = nullptr;
@@ -1291,14 +1312,14 @@ TEST_F(RmaProxyLaunchTest, WaitLaunch_NoSignalReturnsTheTaskWithoutSubmittingMem
 
 TEST_F(RmaProxyLaunchTest, WaitLaunch_SignalTaskSubmitsAccumulatedPeerWaits) {
   ncclTaskRma* task = PushWait(ncclFuncWaitSignal, NCCL_SIGNAL,
-                               {{2, 5, 1}, {3, 7, 2}});
+                               {{2, 5, 1}, {3, 7, 2}}, 1);
   int* peers = task->peers;
   int* nsignals = task->nsignals;
   int* signalIdxs = task->signalIdxs;
   const size_t firstSlot = ncclRmaSignalSlot(kNRanks, 1, 2);
   const size_t secondSlot = ncclRmaSignalSlot(kNRanks, 2, 3);
-  contexts_[0].signalsHost[firstSlot] = 11;
-  contexts_[0].signalsHost[secondSlot] = 13;
+  contexts_[1].signalsHost[firstSlot] = 11;
+  contexts_[1].signalsHost[secondSlot] = 13;
   hipStream_t stream = reinterpret_cast<hipStream_t>(0x8880);
   std::vector<BatchCall> calls;
   auto batch = RecordBatches(&calls);
@@ -1310,10 +1331,10 @@ TEST_F(RmaProxyLaunchTest, WaitLaunch_SignalTaskSubmitsAccumulatedPeerWaits) {
   for (const BatchCall& call : calls) EXPECT_EQ(stream, call.stream);
   std::vector<hipStreamBatchMemOpParams> params = FlattenParams(calls);
   ASSERT_EQ(2u, params.size());
-  EXPECT_EQ(reinterpret_cast<hipDeviceptr_t>(&contexts_[0].signalsDev[firstSlot]),
+  EXPECT_EQ(reinterpret_cast<hipDeviceptr_t>(&contexts_[1].signalsDev[firstSlot]),
             params[0].waitValue.address);
   EXPECT_EQ(16u, params[0].waitValue.value64);
-  EXPECT_EQ(reinterpret_cast<hipDeviceptr_t>(&contexts_[0].signalsDev[secondSlot]),
+  EXPECT_EQ(reinterpret_cast<hipDeviceptr_t>(&contexts_[1].signalsDev[secondSlot]),
             params[1].waitValue.address);
   EXPECT_EQ(20u, params[1].waitValue.value64);
   EXPECT_EQ(nullptr, task->peers);
