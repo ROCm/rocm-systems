@@ -23,8 +23,8 @@ none of those historical colors count as a pass for this campaign.
 
 - Host: AMD Radeon RX 9070 (`gfx1201`); native HIP shared-memory smoke passed.
 - SDK: `/home/benoit/venv`, ROCm `10.2.0a20260915` development package.
-- Preparation: rebuilding the current hook, integrating per-workload generated
-  allowlists, preparing Qwen provenance, and building the production matmul.
+- Preparation: current hook and production matmul built; generated per-workload
+  allowlists applied; Qwen build provenance verified through the campaign symlinks.
 - Fresh clean assessments: **42/42**; no cell has completed fresh fault qualification.
 - Preparation logs: `/home/benoit/workspace/consan-validation-artifacts/`.
 
@@ -34,7 +34,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | --- | ---: | --- | --- | --- |
 | Production HIP | P0 | FP16 matmul (`rdna4-matmul-fp16-production`) | 🟥 Sep 23: missing ConSan coverage record; exit 124 | 🟥 Sep 23: missing ConSan coverage record; exit 124 |
 | Production HIP | P0 | FP8 matmul (`rdna4-matmul-fp8-production`) | 🟥 Sep 23: missing ConSan analysis verdict; exit 124 | 🟥 Sep 23: missing ConSan analysis verdict; exit 124 |
-| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟥 Sep 23: exit 1 | 🟥 Sep 23: exit 1 |
+| Main E2E | P0 | Qwen3-0.6B prefill (`qwen-prefill`) | 🟥 Sep 23: numerical mismatch under instrumentation; native pass | 🟥 Sep 23: numerical mismatch under instrumentation; native pass |
 | PyTorch | P0 | `torch.mode` (`pytorch-torch-mode`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P1 | Sharktank TP1 prefill (`tp1-prefill`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P1 | Sharktank TP1 decode/combined (`tp1-decode-combined`) | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log | 🟥 Sep 23: native rocprofv3 discovery failed; inspect discovery log |
@@ -133,3 +133,28 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `jakub-attention` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round2/jakub-attention-supercollider`.
 - `tp1-prefill` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round3/tp1-prefill-default`.
 - `tp1-prefill` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round3/tp1-prefill-supercollider`.
+
+### September 23 follow-up fixes and diagnosis
+
+- Out-of-tree access checked with `doctor --workload all`: all workload sources,
+  executables, libraries, weights, and input/expected data remain accessible.
+  The check exposed a Qwen manifest path mismatch through campaign symlinks;
+  canonicalizing the encoder path fixed it without rebuilding or weakening hashes.
+- Validation runner: 192 tests pass, including symlinked Qwen provenance and
+  retaining matmul child diagnostics when the outer runner times out.
+- Production matmul now honors `SKIP_BENCH` after both numerical checks. Native
+  FP16 and FP8 profiling passes, with three exact kernel names each. External
+  source fix: `sanitizer-strategy` local commit `16c5ad0`.
+- FP8 Default's 60-second failure spent 58.3 seconds in inventory and reached
+  patching before the deadline. A separate 300-second diagnostic retry is queued;
+  any result uses a new artifact root and records the changed deadline.
+- Qwen's native baseline and native profile pass. Both instrumented modes fail
+  the numeric oracle at output index 151936 (4.23818 versus 5.36443) despite
+  complete coverage reports. Coverage completeness does not qualify this cell.
+- Sharktank's first discovery attempt lacked IREE Python bindings. The retry uses
+  the local `iree-build` compiler/runtime bindings via recorded `PYTHONPATH` and
+  `ml_dtypes` 0.6.0 in the existing SDK venv. TP1 prefill now passes both clean modes.
+- An isolated Release hip-moi build is being prepared to investigate the
+  unoptimized binaries' indirect-call and shared-helper limitations. A compiler
+  optimization change requires new discovery, binary hashes, and fault review;
+  it does not resolve the recorded unoptimized-binary failures by itself.
