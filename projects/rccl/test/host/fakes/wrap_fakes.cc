@@ -168,9 +168,14 @@ ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) { return g_commCou
 // ---------------------------------------------------------------------------
 
 #ifdef ENABLE_ROCSHMEM_GIN
-// The real definitions live in gin_all_reduce_sdma.cu, which this host-only
-// binary intentionally does not compile. Keep GIN-SDMA out of the selector by
-// default so ENABLE_ROCSHMEM_GIN builds retain the non-GIN test behaviour.
+// The real definitions live in gin_alltoall_sdma.cu / gin_all_reduce_sdma.cu,
+// which this host-only binary intentionally does not compile. Keep GIN-SDMA
+// out of the selector by default so ENABLE_ROCSHMEM_GIN builds retain the
+// non-GIN test behaviour.
+bool ncclAllToAllGinSdmaEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+  return false;
+}
+
 bool ncclAllReduceGinSdmaEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
   return false;
 }
