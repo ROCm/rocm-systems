@@ -68,7 +68,8 @@ if(NOT cxx_std_20 IN_LIST CMAKE_CXX_COMPILE_FEATURES)
 endif()
 
 add_library(
-    torch-trace-collector-module MODULE
+    torch-trace-collector-module
+    MODULE
     torch_trace_collector.cpp
     schema_arg_names.cpp
 )
