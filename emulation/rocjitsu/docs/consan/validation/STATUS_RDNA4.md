@@ -18,6 +18,6 @@
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟩 higher: clean pass; fault 8/8 (bar 6/8) | 🟨 Sep 23: clean pass; publication fault 0/8 detections; fault qualification failed |
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟩 higher: clean pass; fault 8/8 (bar 6/8) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 higher: clean pass; fault 8/8 (bar 6/8) | 🟨 Fault 0/8 across delays (bar 6/8); clean delay=0 passes |
-| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
-| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
+| Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟨 Clean pass; fault review: redundant LDS waits preserve publication | 🟨 Clean pass; fault review: redundant LDS waits preserve publication |
+| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟨 Clean pass; fault review: redundant LDS waits preserve publication | 🟨 Clean pass; fault review: redundant LDS waits preserve publication |
 | Main E2E | P4 | hip-moi Jakub attention (`jakub-attention`) | 🟨 Clean pass; reviewed fault ready; lowest-preset search queued | 🟨 Clean pass; reviewed fault ready; delay-matrix qualification queued |
