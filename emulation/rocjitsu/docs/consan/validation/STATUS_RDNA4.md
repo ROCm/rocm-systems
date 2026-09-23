@@ -51,7 +51,7 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟥 Sep 23: exit 1 | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P4 | hip-moi Stream-K arrival (`streamk-arrival`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
-| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟥 Sep 23: no applicable code object; analysis incomplete |
+| Main E2E | P4 | hip-moi tree atomic-OR (`tree-atomic-or`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P4 | hip-moi Jakub attention (`jakub-attention`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 
 ### September 23 cell evidence
@@ -196,3 +196,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
 - `streamk-arrival` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round4/streamk-arrival-default`.
 - `streamk-arrival` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round4/streamk-arrival-supercollider`.
 - `tree-atomic-or` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round4/tree-atomic-or-default`.
+- `tree-atomic-or` / supercollider: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round4/tree-atomic-or-supercollider`.
