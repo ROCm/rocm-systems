@@ -192,6 +192,7 @@ performance:
   Performance_hipDeviceGetStreamPriorityRange: *level_2
   Performance_hipStreamQuery: *level_2
   Performance_hipStreamSynchronize: *level_2
+  Performance_SplitBarrier_ImbalancedWorkgroup: *level_2
   Performance_Reduce_Sync_Add: *level_2
   Performance_Reduce_Sync_Min: *level_2
   Performance_Reduce_Sync_Max: *level_2
@@ -215,6 +216,7 @@ performance:
   Performance_GraphTopology_Parallel: *level_2
   Performance_GraphTopology_Hexagon: *level_2
   Performance_GraphTopology_Mixed: *level_2
+  Performance_GraphExecUpdate_Linear: *level_2
   Performance_PyFR_Couette_IndividualGraphs: *level_2
   Performance_PyFR_Couette_StepSimulation: *level_2
   Performance_PyFR_Couette_SingleIteration: *level_2

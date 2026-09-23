@@ -29,7 +29,7 @@ concept pthread_lock_type =
 template <typename Policy>
 struct pthread_mutex_gotcha : tim::component::base<pthread_mutex_gotcha<Policy>, void>
 {
-    using gotcha_data_t = typename Policy::gotcha_data_t;
+    using gotcha_data_t = Policy::gotcha_data_t;
 
     static constexpr size_t gotcha_capacity = 13;
 

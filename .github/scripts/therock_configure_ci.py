@@ -150,6 +150,8 @@ SKIPPABLE_PATH_PATTERNS = [
     "*/.wordlist.txt",
     "projects/*/docs/*",
     "shared/*/docs/*",
+    # Vendored API headers are not yet integrated into TheRock builds.
+    "runtimes/api-headers/*",
     # Changes to experimental code do not run standard build/test workflows.
     "experimental/*",
     # WSL support files (should these still be excluded?)
@@ -196,6 +198,9 @@ def check_rccl_changes(
 ) -> bool:
     """Returns true if any files under projects/rccl/ were modified.
 
+    Skippable RCCL paths (docs, etc., see SKIPPABLE_PATH_PATTERNS) don't count
+    on their own, so an RCCL PR touching only those doesn't trigger this job.
+
     include_host_test_workflow also matches the host-test workflow's own path, so
     that workflow stays self-testing. It defaults to False because only the
     CPU-only host tests want it: the GPU job (therock-rccl-ci-linux) starts with a
@@ -203,7 +208,8 @@ def check_rccl_changes(
     """
     if modified_paths is None:
         return False
-    if any(path.startswith("projects/rccl/") for path in modified_paths):
+    rccl_paths = [p for p in modified_paths if p.startswith("projects/rccl/")]
+    if rccl_paths and any(not is_path_skippable(p) for p in rccl_paths):
         return True
     return include_host_test_workflow and any(
         path == RCCL_HOST_TESTS_WORKFLOW for path in modified_paths

@@ -45,6 +45,11 @@ private:
 public:
     Gfx10CmdBuilder(const reg_base_offset_table* _table)
     : CmdBuilder(_table){};
+
+    // The uint32_t override below hides the base's other BuildCopyRegDataPacket
+    // overloads, re-expose them
+    using CmdBuilder::BuildCopyRegDataPacket;
+
     static constexpr bool IsPrivilegedConfigReg(uint32_t addr)
     {
         return ((addr >= CONFIG_SPACE_START) && (addr <= CONFIG_SPACE_END));

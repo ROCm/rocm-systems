@@ -15,6 +15,7 @@
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
+#include "rocjitsu/code/patch/probe_live_in.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
@@ -26,6 +27,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocjitsu {
@@ -85,11 +87,12 @@ TEST(ProbeFixture, NopProbeBuildsCallable) {
   const auto resolved = resolve_probe_symbol(*co, "rj_nop_probe", &err);
   ASSERT_TRUE(resolved.has_value()) << err;
 
-  const auto callable = build_probe_callable(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, &err);
+  const auto callable =
+      build_probe_callable(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/0, &err);
   ASSERT_TRUE(callable.has_value()) << err;
   EXPECT_EQ(callable->symbol, "rj_nop_probe");
   EXPECT_EQ(callable->arch, ROCJITSU_CODE_ARCH_CDNA2);
-  EXPECT_EQ(callable->cc, ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31);
+  EXPECT_EQ(callable->abi, *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31));
   EXPECT_EQ(callable->body_words.size(), resolved->body_size / sizeof(uint32_t));
   EXPECT_EQ(callable->output_text_offset, 0u);
 }
@@ -103,7 +106,8 @@ TEST(ProbeFixture, NopProbeClobberSummaryIsEmpty) {
   std::string err;
   const auto resolved = resolve_probe_symbol(*co, "rj_nop_probe", &err);
   ASSERT_TRUE(resolved.has_value()) << err;
-  const auto callable = build_probe_callable(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, &err);
+  const auto callable =
+      build_probe_callable(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/0, &err);
   ASSERT_TRUE(callable.has_value()) << err;
 
   const auto summary = build_probe_clobber_summary(*callable, &err);
@@ -115,6 +119,96 @@ TEST(ProbeFixture, NopProbeClobberSummaryIsEmpty) {
   EXPECT_FALSE(summary->touches_m0);
   EXPECT_FALSE(summary->touches_flat_scratch);
   EXPECT_FALSE(summary->uses_private_segment);
+}
+
+// The premise the whole probe-argument feature rests on: the AMDGPU calling
+// convention puts explicit argument 0 in v0. Everything else asserts that
+// against a hand-assembled body; this asserts it against amdclang++'s output.
+//
+// The two declarations are what make it a check rather than a restatement. At
+// count 1 the ABI supplies v0, so the probe's read of it subtracts away and
+// nothing is left over. At count 0 nothing supplies v0, so the same body reports
+// it as an input the site cannot satisfy. If the toolchain ever placed the
+// argument somewhere else, the count-1 case would start reporting that register
+// instead and this fails.
+TEST(ProbeFixture, ArgProbeReceivesItsArgumentInV0) {
+  Executable exec(kernel_hsaco_path("rj_arg_probe_gfx90a"));
+  ASSERT_TRUE(exec.is_valid()) << "failed to load rj_arg_probe_gfx90a.hsaco";
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX90A), 0u);
+  const AmdGpuCodeObject *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX90A, 0);
+  ASSERT_NE(co, nullptr);
+
+  std::string err;
+  const auto resolved = resolve_probe_symbol(*co, "rj_arg_probe", &err);
+  ASSERT_TRUE(resolved.has_value()) << err;
+
+  // Declared with one argument: accepted, and the body's read of v0 is covered.
+  const auto with_arg =
+      build_probe_callable(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/1, &err);
+  ASSERT_TRUE(with_arg.has_value()) << err;
+  EXPECT_EQ(with_arg->abi.num_arg_vgprs, 1);
+  const auto live_with_arg =
+      analyze_probe_live_ins(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, with_arg->abi, &err);
+  ASSERT_TRUE(live_with_arg.has_value()) << err;
+  EXPECT_TRUE(live_with_arg->none()) << "compiler placed the argument outside the ABI's window: "
+                                     << format_register_set(*live_with_arg);
+
+  // Declared with none: the same body now reads a register nothing supplies, and
+  // the residual names it.
+  const auto no_args =
+      build_probe_callable(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, /*num_arg_dwords=*/0, &err);
+  ASSERT_TRUE(no_args.has_value()) << err;
+  const auto live_no_args =
+      analyze_probe_live_ins(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, no_args->abi, &err);
+  ASSERT_TRUE(live_no_args.has_value()) << err;
+  EXPECT_EQ(format_register_set(*live_no_args), "v0");
+}
+
+TEST(ProbeFixture, CallableSgprUseExceedsKernelDescriptor) {
+  Executable exec(kernel_hsaco_path("callable_sgpr_probe_gfx950"));
+  ASSERT_TRUE(exec.is_valid()) << "failed to load callable_sgpr_probe_gfx950.hsaco";
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+  const AmdGpuCodeObject *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+  EXPECT_EQ(co->target_id(), ROCJITSU_CODE_TARGET_GFX950);
+
+  const auto descriptor_sgprs = co->min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(descriptor_sgprs.has_value());
+  EXPECT_EQ(*descriptor_sgprs, 40u);
+
+  std::string err;
+  const auto resolved = resolve_probe_symbol(*co, "callable_sgpr_probe", &err);
+  ASSERT_TRUE(resolved.has_value()) << err;
+  EXPECT_GT(resolved->body_size, 0u);
+  EXPECT_EQ(resolved->body_size % sizeof(uint32_t), 0u);
+
+  const auto *image = reinterpret_cast<const uint8_t *>(co->image_data());
+  const size_t num_words = resolved->body_size / sizeof(uint32_t);
+  std::vector<uint32_t> body(num_words + 1, 0);
+  std::memcpy(body.data(), image + resolved->body_file_offset, resolved->body_size);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  constexpr uint32_t kMovS40One = 0xBEA80081u;
+  bool saw_s40_write = false;
+  size_t word = 0;
+  while (word < num_words) {
+    auto decoded = decoder->decode(&body[word]);
+    ASSERT_TRUE(decoded.succeeded());
+    std::unique_ptr<Instruction> inst = std::move(decoded).value();
+    ASSERT_NE(inst, nullptr);
+    const int size = inst->size();
+    ASSERT_TRUE(size == 4 || size == 8) << "unexpected instruction size in callable body";
+    if (body[word] == kMovS40One) {
+      EXPECT_EQ(std::string_view(inst->mnemonic()), "s_mov_b32");
+      saw_s40_write = true;
+    }
+    word += static_cast<size_t>(size) / sizeof(uint32_t);
+  }
+
+  EXPECT_TRUE(saw_s40_write);
+  EXPECT_LT(*descriptor_sgprs, 41u) << "the entry descriptor unexpectedly includes callable s40";
 }
 
 } // namespace

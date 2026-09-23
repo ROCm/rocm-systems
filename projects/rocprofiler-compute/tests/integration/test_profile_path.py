@@ -83,12 +83,12 @@ def test_path_rocpd(
     # Validate profile outputs (results_*.csv for rocpd format)
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
 
-    # Run analyze to create merged pmc_perf.csv
+    # Run analyze to create merged pmc_perf.csv.gz
     code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
     assert code == 0
 
-    # Validate merged pmc_perf.csv content
-    assert common.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
+    # Validate merged pmc_perf.csv.gz content
+    assert common.check_file_pattern("Counter_Name", common.pmc_perf_path(workload_dir))
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 

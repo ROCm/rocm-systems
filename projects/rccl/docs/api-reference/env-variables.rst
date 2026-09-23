@@ -75,6 +75,21 @@ in the following table.
       - | Positive integer (values ``<= 0`` are ignored).
         | Default: unset (uses the RCCL default).
 
+    * - | ``NCCL_ENV_PLUGIN``
+        | Loads an external environment plugin that intercepts all RCCL parameter
+          lookups. See :ref:`using-rccl-env-plugin` for full details.
+      - | Path to a plugin ``.so`` file, a bare name expanded to
+          ``librccl-env-<name>.so``, or ``none`` to disable.
+        | Default: unset (tries ``librccl-env.so``, then reads from the process
+          environment).
+
+    * - | ``NCCL_ENV_JSON_FILE``
+        | Path to a JSON configuration file used by ``librccl-env-json.so``.
+          Has no effect unless ``NCCL_ENV_PLUGIN`` points to that plugin.
+      - | Path to a flat JSON file mapping variable names to string values.
+          Relative paths are resolved from the application's working directory.
+        | Default: unset (falls back to ``getenv()`` for all lookups).
+
     * - | ``NCCL_ALLGATHERV_ENABLE``
         | Fuses grouped multi-root ``ncclBroadcast`` calls into a single AllGatherV
           ring kernel when two or more distinct roots appear in a group.
@@ -147,6 +162,71 @@ in the following table.
         | Write logs to a file rather than ``stdout``.
       - | The filename can be formatted using ``%h`` for hostname, ``%p`` for pid, and ``%%`` to escape the ``%`` character. It is recommended to use ``%p`` to output to individual files per pid to avoid mixing or potentially overwriting the output. Example usage: ``NCCL_DEBUG_FILE=debugfile.%h.%p``
 
+    * - | ``NCCL_CHECK_MODE``
+        | Selects how thoroughly RCCL validates the arguments of every
+          collective call. Checking costs latency, so it is disabled by default
+          and intended for development and bring-up. See
+          :ref:`check-mode` for what each mode detects.
+      - | ``DEFAULT``: No argument validation (default).
+        | ``DEBUG_LOCAL``: Validate the buffer pointers locally on each rank.
+          Replaces the deprecated ``NCCL_CHECK_POINTERS``.
+        | ``DEBUG_GLOBAL``: Also validate arguments across ranks, including
+          symmetric buffer registration.
+        | Values other than ``DEBUG_LOCAL`` and ``DEBUG_GLOBAL`` leave the mode
+          unchanged, so writing ``DEFAULT`` does not switch checking off again.
+
+    * - | ``NCCL_CHECK_POINTERS``
+        | Deprecated. Enables local validation of the buffer pointers passed to
+          each collective.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled, equivalent to ``NCCL_CHECK_MODE=DEBUG_LOCAL``.
+        | Use ``NCCL_CHECK_MODE`` instead. When both are set, ``DEBUG_LOCAL`` or
+          ``DEBUG_GLOBAL`` wins; any other ``NCCL_CHECK_MODE`` value keeps the
+          mode selected by ``NCCL_CHECK_POINTERS=1``.
+
+.. _check-mode:
+
+Validating collective arguments
+-------------------------------
+
+``NCCL_CHECK_MODE=DEBUG_LOCAL`` inspects only what a rank can see by itself: it
+verifies that the ``sendbuff`` and ``recvbuff`` arguments are valid device
+pointers that belong to the device the communicator was created on. Passing a
+host pointer or a pointer from another device makes the collective return
+``ncclInvalidArgument`` instead of faulting inside the kernel.
+
+``NCCL_CHECK_MODE=DEBUG_GLOBAL`` adds cross-rank validation of symmetric buffer
+registration. The symmetric kernels require every rank to describe its buffers
+identically, because a rank addresses a peer's buffer by applying its own offsets
+to the peer's symmetric window. RCCL cannot verify that from a single rank, so at
+group launch the ranks exchange the identity of the windows backing their buffers
+and compare against rank 0. A collective is rejected with
+``ncclInvalidArgument`` when:
+
+* Some ranks pass buffers registered with ``NCCL_WIN_COLL_SYMMETRIC`` while
+  others pass unregistered buffers.
+* The ranks pass buffers from windows registered at different positions in the
+  symmetric address space.
+* The ranks pass buffers at different offsets inside their windows.
+
+Each rejection is reported by rank 0 with a ``WARN`` message naming the
+collective, the message size, and the first rank that disagrees, so set
+``NCCL_DEBUG=WARN`` when using this mode. Setting ``NCCL_DEBUG=INFO`` with
+``NCCL_DEBUG_SUBSYS=COLL`` additionally prints a ``SymCheck`` line per rank with
+the window and user offsets that were compared.
+
+Without this mode such a mismatch is not diagnosed: RCCL silently falls back to
+the general kernels for calls it cannot serve symmetrically, so the collective
+still produces correct results but loses the performance of the symmetric path.
+Enable ``DEBUG_GLOBAL`` when a workload registers symmetric windows yet does not
+reach the expected symmetric performance.
+
+.. note::
+
+   ``DEBUG_GLOBAL`` adds a bootstrap all-gather to every group launch, which is
+   far more expensive than the collective itself for small messages. Use it to
+   diagnose a configuration, not in production.
+
 Algorithm and protocol control
 ==============================
 
@@ -170,6 +250,15 @@ collected in the following table.
       - | Protocol name string
         | Used to override automatic protocol selection
 
+    * - | ``RCCL_DIRECT_ALLGATHER_DISABLE``
+        | Controls the direct AllGather algorithm. Because the algorithm builds a full
+          point-to-point mesh, its queue-pair footprint grows with the square
+          of the job size.
+      - | ``-1``: Automatic (default). Not selected on AINIC above 8 nodes.
+        | ``0``: Skips the automatic AINIC check. The size, architecture and
+          CTA-policy gates in ``rcclUseAllGatherDirect`` still apply.
+        | Any other value: Disabled.
+
 Network and topology
 ====================
 
@@ -192,6 +281,31 @@ in the following table.
         | Defines the Global ID index used in RoCE mode.
       - | Integer value (default: ``-1``)
         | See InfiniBand ``show_gids`` command for valid values
+
+    * - | ``NCCL_IB_QUERY_PORT_SPEED``
+        | Controls whether RCCL queries the extended port speed
+          (``ibv_query_port`` active speed extension) for bandwidth reporting.
+          Disabling it falls back to the legacy ``active_speed``/
+          ``active_width`` computation and disables runtime speed-change
+          detection.
+      - | ``1``: Query the extended speed (default).
+        | ``0``: Use the legacy speed field only.
+
+    * - | ``NCCL_IB_SUBNET_AWARE_ROUTING``
+        | Enables subnet-aware device selection.
+          When a peer's GID subnet does not match the default device's RoCE
+          ports, RCCL searches other locally merged devices for one whose
+          ports do match, so the connection uses a device on the same subnet
+          as the peer. Only meaningfully exercised on a multi-subnet RoCE
+          fabric (for example, behind an IB router); on a single-subnet
+          cluster the default device already matches and this is a no-op.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``NCCL_IB_SUBNET_PREFIX_LEN``
+        | Prefix length, in bits, used when comparing two GIDs' subnets for
+          ``NCCL_IB_SUBNET_AWARE_ROUTING``.
+      - | Integer value, bits (default: ``24``)
 
     * - | ``NCCL_PXN_C2C``
         | Allows PXN routing through a C2C link to reach a NIC attached to a
@@ -303,6 +417,28 @@ in the following table.
         | Values ``> MAXCHANNELS`` set through ``ncclConfig_t`` are rejected
         | with ``ncclInvalidArgument`` at communicator initialization.
 
+    * - | ``NCCL_P2P_MAX_PEERS``
+        | Sets the maximum number of peers a rank communicates with concurrently
+        | over P2P. This overrides the value of the ``maxP2pPeers`` field in
+        | ``ncclConfig_t``. Where it applies, RCCL divides the P2P channel pool
+        | among this many peers instead of among all ranks, so a smaller value
+        | gives each peer more channels, affecting ``ncclSend``/``ncclRecv`` and
+        | the send/recv-based collectives (all-to-all, scatter, gather). It does
+        | not restrict which peers a rank is allowed to communicate with.
+        | It is read in two places only: the per-peer channel tiling enabled by
+        | ``RCCL_SATURATE_P2P_NCHANNELS`` (on by default for gfx1250 only), and
+        | the multi-node per-peer reduction, which requires more than one node
+        | and ``NCCL_NCHANNELS_PER_NET_PEER`` / ``nChannelsPerNetPeer`` unset.
+        | A single-node job on another architecture with default settings is
+        | therefore unaffected.
+      - | Integer value, ``1`` to the number of ranks (default: unset, which
+        | means the number of ranks in the communicator)
+        | Values ``<= 0`` are ignored and a message is logged.
+        | Values greater than the communicator size are capped to it.
+        | Values ``<= 0`` other than ``NCCL_CONFIG_UNDEF_INT`` set through
+        | ``ncclConfig_t`` are rejected with ``ncclInvalidArgument`` at
+        | communicator initialization.
+
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.
       - | Ring topology specification string
@@ -391,7 +527,7 @@ application adds explicit synchronization between streams.
 Inspector profiling
 ===================
 
-The NCCL Inspector is a profiler plugin that emits per-communicator,
+The RCCL Inspector is a profiler plugin that emits per-communicator,
 per-operation performance data (collectives and point-to-point) as JSON or
 Prometheus textfile metrics. For a full walkthrough, see
 :doc:`../how-to/using-rccl-inspector-plugin`. The Inspector environment
@@ -423,6 +559,13 @@ variables are collected in the following table.
       - | ``0``: JSON output (default).
         | ``1``: Prometheus textfile output.
 
+    * - | ``NCCL_INSPECTOR_CLUSTER``
+        | Overrides the Prometheus ``cluster`` label. When unset, the Inspector
+        | uses ``SLURM_CLUSTER_NAME``. Set this when that name is missing.
+      - | String.
+        | Default: unset (falls back to ``SLURM_CLUSTER_NAME``, else
+        | ``unknown``).
+
     * - | ``NCCL_INSPECTOR_DUMP_THREAD_ENABLE``
         | Enables the internal dump thread. When disabled, output is only
         | written at communicator teardown, regardless of the configured
@@ -442,7 +585,8 @@ variables are collected in the following table.
         | Output directory for Inspector logs/metrics. For Prometheus mode,
         | point this at the node-exporter textfile collector directory.
       - | String path.
-        | Default: ``nccl-inspector-<slurm_job_id>`` or
+        | Default: ``nccl-inspector-<jobid>`` from ``SLURM_JOB_ID``,
+        | ``SLURM_JOBID``, ``PBS_JOBID``, or ``LSB_JOBID``, else
         | ``nccl-inspector-unknown-jobid``.
 
     * - | ``NCCL_INSPECTOR_DUMP_VERBOSE``

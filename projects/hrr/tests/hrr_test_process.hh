@@ -1,0 +1,348 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+#pragma once
+
+#include <atomic>
+#include <cerrno>
+#include <chrono>
+#include <cstring>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <csignal>
+#include <unistd.h>
+#include <sys/wait.h>
+#endif
+
+namespace hrr::test {
+
+// Minimal, shell-free subprocess helper for HRR behavior tests.
+//
+// It implements only what the migrated HRR tests need: overriding environment
+// variables for the child, launching a child process without going through a
+// shell, and optionally capturing its stdout. It replaces the hip-tests
+// SpawnProc helper. Extend only this file if Windows ever needs richer process
+// semantics rather than re-importing the hip-tests process helpers.
+//
+// POSIX: the child is launched with fork()/execvp(). The argument string is
+// split on whitespace into argv tokens; no shell is involved, so quote
+// characters are literal parts of a token (a token like "name" is passed to the
+// child including the quotes — Catch2's own test-spec parser then strips them).
+// Environment overrides are applied in the child only (via setenv after fork),
+// so the parent's environment is never mutated; from the child's point of view
+// an overridden variable such as PATH is replaced entirely with the given value.
+//
+// run() returns the child's exit code, or 128 + signal number if it was killed
+// by a signal (127 if the process could not be launched). Both the capturing
+// and non-capturing paths use the same normalization.
+//
+// runWithTimeout() adds a deadline. Some replays do not fail, they hang: an API
+// that is a no-op at replay leaves a program waiting forever on a value that is
+// never written. Without a deadline that becomes a CI job that runs until the
+// harness kills it, which is both slower to diagnose and easy to misread as
+// infrastructure flake. Killing the child ourselves turns the hang into an
+// assertable outcome, reported as kKilledOnTimeout.
+class SpawnProc {
+ public:
+  // capture_stderr merges the child's stderr into the same captured stream as
+  // its stdout, so a test asserting on diagnostics written to stderr sees them
+  // in getOutput(). It has no effect unless capture_stdout is also set.
+  explicit SpawnProc(std::string exe, bool capture_stdout = false,
+                     bool capture_stderr = false)
+      : exe_(std::move(exe)),
+        capture_stdout_(capture_stdout),
+        capture_stderr_(capture_stderr) {}
+
+  void setEnv(const std::string& key, const std::string& value) {
+    env_.push_back({key, value});
+  }
+
+  // Exit code reported when the deadline fired and the child had to be killed.
+  // 128 + SIGKILL matches the encoding run() already uses for a signalled
+  // child, so callers that only distinguish "crashed" from "clean" need no
+  // special case; callers that care about the hang check for this value.
+  static constexpr int kKilledOnTimeout = 128 + 9;
+
+  int run(const std::string& args) { return run_impl(args, 0); }
+
+  // As run(), but kill the child after timeout_seconds and return
+  // kKilledOnTimeout. A timeout_seconds of 0 or less means no deadline.
+  int runWithTimeout(const std::string& args, int timeout_seconds) {
+    return run_impl(args, timeout_seconds);
+  }
+
+  const std::string& getOutput() const { return output_; }
+
+ private:
+  int run_impl(const std::string& args, int timeout_seconds) {
+    output_.clear();
+    timeout_seconds_ = timeout_seconds;
+    std::vector<std::string> tokens = split_args(args);
+
+#if defined(_WIN32)
+    return run_windows(tokens);
+#else
+    return run_posix(tokens);
+#endif
+  }
+
+  // Split on whitespace into argv tokens, keeping every other character
+  // (including quotes) literal. No shell-style quote or escape processing.
+  static std::vector<std::string> split_args(const std::string& args) {
+    std::vector<std::string> out;
+    std::string cur;
+    bool in_token = false;
+    for (char c : args) {
+      if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+        if (in_token) {
+          out.push_back(cur);
+          cur.clear();
+          in_token = false;
+        }
+      } else {
+        cur.push_back(c);
+        in_token = true;
+      }
+    }
+    if (in_token) out.push_back(cur);
+    return out;
+  }
+
+#if !defined(_WIN32)
+  int run_posix(const std::vector<std::string>& tokens) {
+    // argv[0] is the executable itself; execvp performs the PATH lookup (using
+    // the child's environment) when exe_ is not an absolute/relative path.
+    std::vector<char*> argv;
+    argv.push_back(const_cast<char*>(exe_.c_str()));
+    for (const auto& t : tokens) argv.push_back(const_cast<char*>(t.c_str()));
+    argv.push_back(nullptr);
+
+    int pipefd[2] = {-1, -1};
+    if (capture_stdout_ && ::pipe(pipefd) != 0) return 127;
+
+    pid_t pid = ::fork();
+    if (pid < 0) {
+      if (capture_stdout_) {
+        ::close(pipefd[0]);
+        ::close(pipefd[1]);
+      }
+      return 127;
+    }
+
+    if (pid == 0) {
+      // Child: apply environment overrides (affects this process only), wire up
+      // stdout capture if requested, then exec. On failure exit with 127.
+      for (const auto& kv : env_) {
+        ::setenv(kv.first.c_str(), kv.second.c_str(), 1);
+      }
+      if (capture_stdout_) {
+        ::close(pipefd[0]);
+        ::dup2(pipefd[1], STDOUT_FILENO);
+        if (capture_stderr_) ::dup2(pipefd[1], STDERR_FILENO);
+        ::close(pipefd[1]);
+      }
+      ::execvp(exe_.c_str(), argv.data());
+      ::_exit(127);
+    }
+
+    // Parent. Arm the deadline before draining the pipe: the read below blocks
+    // until the child exits or is killed, so the kill has to come from another
+    // thread.
+    std::atomic<bool> finished{false};
+    std::thread watchdog;
+    if (timeout_seconds_ > 0) {
+      watchdog = std::thread([&finished, pid, secs = timeout_seconds_]() {
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(secs);
+        while (!finished.load() && std::chrono::steady_clock::now() < deadline)
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        if (!finished.load()) ::kill(pid, SIGKILL);
+      });
+    }
+
+    if (capture_stdout_) {
+      ::close(pipefd[1]);
+      char buffer[4096];
+      ssize_t n;
+      while (true) {
+        n = ::read(pipefd[0], buffer, sizeof(buffer));
+        if (n > 0) {
+          output_.append(buffer, static_cast<size_t>(n));
+        } else if (n == 0) {
+          break;
+        } else if (errno != EINTR) {
+          break;
+        }
+      }
+      ::close(pipefd[0]);
+    }
+
+    int status = 0;
+    int rc = 0;
+    while (::waitpid(pid, &status, 0) < 0) {
+      if (errno != EINTR) {
+        rc = 127;
+        break;
+      }
+    }
+    finished.store(true);
+    if (watchdog.joinable()) watchdog.join();
+    if (rc == 127) return 127;
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return 127;
+  }
+#endif
+
+#if defined(_WIN32)
+  int run_windows(const std::vector<std::string>& tokens) {
+    // Build a command line: the executable followed by the raw tokens. Callers
+    // are responsible for quoting paths that contain spaces (CreateProcess does
+    // not use a shell). Rejoining with single spaces preserves the caller's
+    // quoting.
+    std::string cmdline = exe_;
+    for (const auto& t : tokens) {
+      cmdline += " ";
+      cmdline += t;
+    }
+
+    // Build the child environment block: inherit the parent's environment, then
+    // apply overrides, without mutating the parent's environment.
+    std::string env_block = build_env_block();
+
+    HANDLE read_h = nullptr;
+    HANDLE write_h = nullptr;
+    SECURITY_ATTRIBUTES sa;
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = nullptr;
+
+    if (capture_stdout_) {
+      if (!CreatePipe(&read_h, &write_h, &sa, 0)) return 127;
+      SetHandleInformation(read_h, HANDLE_FLAG_INHERIT, 0);
+    }
+
+    STARTUPINFOA si;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    if (capture_stdout_) {
+      si.dwFlags |= STARTF_USESTDHANDLES;
+      si.hStdOutput = write_h;
+      si.hStdError = capture_stderr_ ? write_h : GetStdHandle(STD_ERROR_HANDLE);
+      si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    }
+
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&pi, sizeof(pi));
+
+    std::vector<char> cmd_mutable(cmdline.begin(), cmdline.end());
+    cmd_mutable.push_back('\0');
+
+    BOOL ok = CreateProcessA(
+        nullptr, cmd_mutable.data(), nullptr, nullptr,
+        /*bInheritHandles=*/capture_stdout_ ? TRUE : FALSE, 0,
+        env_block.empty() ? nullptr : env_block.data(), nullptr, &si, &pi);
+
+    if (!ok) {
+      if (capture_stdout_) {
+        CloseHandle(read_h);
+        CloseHandle(write_h);
+      }
+      return 127;
+    }
+
+    // Arm the deadline before draining the pipe, for the same reason as the
+    // POSIX path: the read below blocks until the child goes away.
+    std::atomic<bool> finished{false};
+    std::thread watchdog;
+    if (timeout_seconds_ > 0) {
+      HANDLE proc_h = pi.hProcess;
+      watchdog = std::thread([&finished, proc_h, secs = timeout_seconds_]() {
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(secs);
+        while (!finished.load() && std::chrono::steady_clock::now() < deadline)
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        if (!finished.load())
+          TerminateProcess(proc_h, static_cast<UINT>(kKilledOnTimeout));
+      });
+    }
+
+    if (capture_stdout_) {
+      CloseHandle(write_h);
+      char buffer[4096];
+      DWORD n = 0;
+      while (ReadFile(read_h, buffer, sizeof(buffer), &n, nullptr) && n > 0) {
+        output_.append(buffer, n);
+      }
+      CloseHandle(read_h);
+    }
+
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    finished.store(true);
+    if (watchdog.joinable()) watchdog.join();
+    DWORD exit_code = 127;
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    return static_cast<int>(exit_code);
+  }
+
+  std::string build_env_block() const {
+    // Start from the parent's environment, apply overrides (case-insensitive on
+    // the variable name, per Windows semantics), and emit a double-null
+    // terminated block for CreateProcess.
+    std::vector<std::pair<std::string, std::string>> vars;
+    LPCH env = GetEnvironmentStringsA();
+    if (env) {
+      for (LPCH p = env; *p != '\0';) {
+        std::string entry(p);
+        p += entry.size() + 1;
+        size_t eq = entry.find('=');
+        if (eq == std::string::npos || eq == 0) continue;  // skip drive entries
+        vars.push_back({entry.substr(0, eq), entry.substr(eq + 1)});
+      }
+      FreeEnvironmentStringsA(env);
+    }
+    auto ieq = [](const std::string& a, const std::string& b) {
+      return a.size() == b.size() && _stricmp(a.c_str(), b.c_str()) == 0;
+    };
+    for (const auto& kv : env_) {
+      bool replaced = false;
+      for (auto& v : vars) {
+        if (ieq(v.first, kv.first)) {
+          v.second = kv.second;
+          replaced = true;
+          break;
+        }
+      }
+      if (!replaced) vars.push_back(kv);
+    }
+    std::string block;
+    for (const auto& v : vars) {
+      block += v.first;
+      block += '=';
+      block += v.second;
+      block.push_back('\0');
+    }
+    block.push_back('\0');
+    return block;
+  }
+#endif
+
+  std::string exe_;
+  int timeout_seconds_ = 0;
+  bool capture_stdout_ = false;
+  bool capture_stderr_ = false;
+  std::string output_;
+  std::vector<std::pair<std::string, std::string>> env_;
+};
+
+}  // namespace hrr::test

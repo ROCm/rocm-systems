@@ -1,5 +1,5 @@
 name: Resolve CI config
-description: Resolve runner labels from ROCm/therock-ci-config
+description: Resolve build and GPU runner labels from ROCm/therock-ci-config
 
 inputs:
   config-path:
@@ -38,8 +38,15 @@ inputs:
     description: Runner label for gfx1151 if the shared CI config cannot be loaded
     required: false
     default: linux-gfx1151-gpu-rocm
+  fallback-linux-build-runner:
+    description: Linux build runner label if the shared CI config cannot be loaded
+    required: false
+    default: aws-linux-scale-rocm-prod
 
 outputs:
+  linux_build_runner:
+    description: Linux CPU build runner label
+    value: ${{ steps.runner.outputs.linux_build_runner }}
   gfx90a_runner:
     description: Linux gfx90a test runner label
     value: ${{ steps.runner.outputs.gfx90a_runner }}
@@ -89,4 +96,5 @@ runs:
         FALLBACK_GFX110X_RUNNER: ${{ inputs.fallback-gfx110x-runner }}
         FALLBACK_GFX120X_RUNNER: ${{ inputs.fallback-gfx120x-runner }}
         FALLBACK_GFX1151_RUNNER: ${{ inputs.fallback-gfx1151-runner }}
+        FALLBACK_LINUX_BUILD_RUNNER: ${{ inputs.fallback-linux-build-runner }}
       run: python3 "${GITHUB_ACTION_PATH}/resolve_ci_config.py"

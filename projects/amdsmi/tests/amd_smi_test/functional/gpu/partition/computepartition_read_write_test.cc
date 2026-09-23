@@ -1,24 +1,6 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include "computepartition_read_write.h"
 
 #include <gtest/gtest.h>
@@ -139,15 +121,14 @@ static const std::map<amdsmi_accelerator_partition_type_t, std::string> accelera
     {AMDSMI_ACCELERATOR_PARTITION_MAX, "AMDSMI_ACCELERATOR_PARTITION_MAX"},
 };
 
-static void system_wait(int seconds) {
+static void system_wait(uint32_t wait_time_seconds) {
   // Adding a delay - since changing partitions depends on gpus not
   // being in an active state, we'll wait a few seconds before starting
   // full testing
   auto start = std::chrono::high_resolution_clock::now();
-  int waitTime = seconds;
-  std::cout << "** Waiting for " << std::dec << waitTime << " seconds, for any GPU"
+  std::cout << "** Waiting for " << std::dec << wait_time_seconds << " seconds, for any GPU"
             << " activity to clear up. **" << std::endl;
-  sleep(waitTime);
+  sleep(wait_time_seconds);
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   std::cout << "** Waiting took " << duration.count() / 1000000 << " seconds **" << std::endl;

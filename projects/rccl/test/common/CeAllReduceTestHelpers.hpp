@@ -28,9 +28,15 @@ inline bool isCeRuntimeDriverSupported()
            (driverVer >= 70051831 && driverVer < 70060000);
 }
 
-// The chunk-size helpers live in ce_coll.h (ncclCeAllReduceMaxChunkBytes,
-// ncclCeAllReduceSlotChunkBytes, ncclCeAllReduceChooseChunkBytes) so these tests
-// exercise the same code ncclCeAllReduce() uses instead of a copy that can drift.
+// Default ceARTmpBuf capacity. Matches NCCL_CE_AR_TMPBUF_DEFAULT_BYTES.
+// Per-rank chunk capacity is that size / nRanks, same as ncclCeInit.
+constexpr size_t kCeArMaxMsgBytesDefault = NCCL_CE_AR_TMPBUF_DEFAULT_BYTES;
+
+inline size_t ceAllReduceMaxChunkBytes(int nRanks,
+                                       size_t ceArMaxBytes = kCeArMaxMsgBytesDefault)
+{
+    return ceArMaxBytes / static_cast<size_t>(nRanks);
+}
 
 // Minimal ncclComm stand-in for CE AllReduce eligibility unit tests.
 struct CeAllReduceMockComm
@@ -47,6 +53,11 @@ struct CeAllReduceMockComm
         comm.rank             = 0;
         comm.symmetricSupport = true;
         comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        // Keep mock LSA state initialized so eligibility does not inspect absent topology.
+        comm.devrState.bigSize = 1;
+        comm.devrState.lsaSize = comm.nRanks;
+        comm.devrState.lsaSelf = comm.rank;
+        comm.ceColl.ceArMaxBytes  = kCeArMaxMsgBytesDefault;
     }
 
     ncclComm* get() { return &comm; }

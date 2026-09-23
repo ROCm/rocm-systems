@@ -14,17 +14,18 @@
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu {
 namespace amdgpu {
 class Wavefront;
-struct VectorMemState;
+class VectorMemState;
 } // namespace amdgpu
 
 namespace cdna4 {
 
 /// @brief Compute scalar address for SMEM encoding.
-uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf);
+std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf);
 
 /// @brief Compute per-lane addresses for FLAT/GLOBAL/SCRATCH encoding.
 void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf,
