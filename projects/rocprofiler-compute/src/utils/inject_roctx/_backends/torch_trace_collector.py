@@ -65,8 +65,7 @@ def install() -> bool:
         if collector_path is None:
             console_warning(
                 "ml api trace",
-                "torch_trace_collector was not built for this installation; "
-                "using TorchDispatchMode.",
+                "torch_trace_collector was not built for this installation.",
             )
             return False
         if _torch_cpu_library is None:
@@ -79,13 +78,12 @@ def install() -> bool:
     except Exception as error:
         console_warning(
             "ml api trace",
-            "C++ RecordFunction tier unavailable "
-            f"({type(error).__name__}: {error}); using TorchDispatchMode.",
+            f"Failed to load torch_trace_collector ({type(error).__name__}: {error}).",
         )
         return False
 
     _collector_library = collector
-    console_log("ml api trace", f"loaded prebuilt .so: {collector_path}")
+    console_log("ml api trace", f"Loaded {collector_path}")
     return True
 
 
@@ -101,8 +99,7 @@ def _validate_identity(identity: _TorchIdentity) -> bool:
         "ml api trace",
         "native torch_trace_collector does not support this PyTorch build "
         f"(version={identity.version}, git={identity.git_version or 'unknown'}, "
-        f"debug={identity.debug}, cxx11_abi={identity.uses_cxx11_abi}); using "
-        "TorchDispatchMode. "
+        f"debug={identity.debug}, cxx11_abi={identity.uses_cxx11_abi}). "
         f"Validated builds: {', '.join(validated_versions)}.",
     )
     return False
@@ -123,8 +120,7 @@ def _validate_collector_interface(collector: ctypes.CDLL) -> bool:
     console_warning(
         "ml api trace",
         "torch_trace_collector has an incompatible interface revision "
-        f"{revision}; expected {_EXPECTED_COLLECTOR_ABI_REVISION}. "
-        "Using TorchDispatchMode.",
+        f"{revision}; expected {_EXPECTED_COLLECTOR_ABI_REVISION}.",
     )
     return False
 
@@ -138,7 +134,7 @@ def _install_collector_callback(collector: ctypes.CDLL, path: Path) -> bool:
 
     console_warning(
         "ml api trace",
-        f"torch_trace_collector_install failed for {path}; using TorchDispatchMode.",
+        f"torch_trace_collector_install failed for {path}.",
     )
     return False
 
@@ -161,8 +157,7 @@ def _workload_torch_identity() -> _TorchIdentity:
     except Exception as error:
         console_warning(
             "ml api trace",
-            "could not determine the PyTorch build identity; using "
-            "TorchDispatchMode "
+            "Could not determine the PyTorch build identity "
             f"({type(error).__name__}: {error}).",
         )
         return _TorchIdentity(

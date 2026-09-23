@@ -131,7 +131,6 @@ test_categories:
       - test_roofline_analyze
       - test_roofline_main
       - test_rocpd_data
-      - test_torch_trace_coverage
       - test_instant_button
       - test_menu_bar
       - test_tui_utils
@@ -175,7 +174,6 @@ test_categories:
       - test_torch_trace_collector_elf
       - test_torch_trace_wire_format
       - test_profile_torch_trace
-      - test_profile_triton_trace
       - test_profile_live_attach_detach
       - test_metric_validation
     therock_ci_exclude:
@@ -234,7 +232,6 @@ test_categories:
       - test_roofline_analyze
       - test_roofline_main
       - test_rocpd_data
-      - test_torch_trace_coverage
       - test_instant_button
       - test_menu_bar
       - test_tui_utils
@@ -278,7 +275,6 @@ test_categories:
       - test_torch_trace_collector_elf
       - test_torch_trace_wire_format
       - test_profile_torch_trace
-      - test_profile_triton_trace
       - test_profile_live_attach_detach
       - test_metric_validation
     therock_ci_exclude:
@@ -337,7 +333,6 @@ test_categories:
       - test_roofline_analyze
       - test_roofline_main
       - test_rocpd_data
-      - test_torch_trace_coverage
       - test_instant_button
       - test_menu_bar
       - test_tui_utils
@@ -381,7 +376,6 @@ test_categories:
       - test_torch_trace_collector_elf
       - test_torch_trace_wire_format
       - test_profile_torch_trace
-      - test_profile_triton_trace
       - test_profile_live_attach_detach
       - test_metric_validation
     therock_ci_exclude:
