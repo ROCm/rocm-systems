@@ -14,7 +14,7 @@
 | Main E2E | P2 | Sharktank TP2 family (`tp2-family`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P3 | Sharktank CLIP BF16 (`clip-bf16`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | PyTorch | P3 | native histogram (`pytorch-torch-histc`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
-| llama.cpp | P3 | RMS norm (`llama-rdna4-rms-norm`) | 🟨 Sep 23: clean pass; publication fault 0/8 detections; fault qualification failed | 🟨 Sep 23: clean pass; publication fault 0/8 detections; fault qualification failed |
+| llama.cpp | P3 | RMS norm (`llama-rdna4-rms-norm`) | 🟨 high: clean pass; fault trials running | 🟨 Sep 23: clean pass; publication fault 0/8 detections; fault qualification failed |
 | Main E2E | P4 | hip-moi D128 block (`d128-block`) | 🟨 Sep 23: clean pass; publication fault 0/8 detections; fault qualification failed | 🟨 Sep 23: clean pass; publication fault 0/8 detections; fault qualification failed |
 | Main E2E | P4 | hip-moi D128 pressure (`d128-pressure`) | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending | 🟨 Sep 23: fresh clean pass; reviewed fault qualification pending |
 | Main E2E | P4 | hip-moi WMMA attention (`wmma-attention`) | 🟩 Sep 23: preset=max: clean pass, fault 8/8 | 🟨 Sep 23: clean pass; grouped publication fault 0/8 detections; fault qualification failed |
