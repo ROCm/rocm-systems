@@ -3955,8 +3955,18 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall)",
-          "test_filter": "GinMPIDeviceTests.*:-GinMPIDeviceTests.VASignal_*:-GinMPIDeviceTests.SignalAdd_PutValue:-GinMPIDeviceTests.SignalInc_MixingRule:-GinMPIDeviceTests.Signal_WaitRead_Low32Bits:-GinMPIDeviceTests.SignalShadow_GetPtr:-GinMPIDeviceTests.MultiContext_NonPowerOf2:-GinMPIDeviceTests.RailConnection_Create:-GinMPIDeviceTests.*_MultiContext",
+          "test_filter": "GinMPIDeviceTests.*:-GinMPIDeviceTests.VASignal_*:-GinMPIDeviceTests.SignalAdd_PutValue:-GinMPIDeviceTests.SignalInc_MixingRule:-GinMPIDeviceTests.Signal_WaitRead_Low32Bits:-GinMPIDeviceTests.SignalShadow_GetPtr:-GinMPIDeviceTests.MultiContext_NonPowerOf2:-GinMPIDeviceTests.RailConnection_Create:-GinMPIDeviceTests.*_MultiContext:-GinMPIDeviceTests.Signal_ExplicitWeak:-GinMPIDeviceTests.Signal_ExplicitStrong",
           "timeout": 600
+        },
+        {
+          "name": "GIN_Signal_ExplicitWeak",
+          "description": "Weak GIN signal publishes its bundled put over the IB proxy",
+          "test_filter": "GinMPIDeviceTests.Signal_ExplicitWeak"
+        },
+        {
+          "name": "GIN_Signal_ExplicitStrong",
+          "description": "Strong GIN signal publishes its bundled and preceding puts over the IB proxy",
+          "test_filter": "GinMPIDeviceTests.Signal_ExplicitStrong"
         },
         {
           "name": "GIN_DeviceMPI_MultiContext",
