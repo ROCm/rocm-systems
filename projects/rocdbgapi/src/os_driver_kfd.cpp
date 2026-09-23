@@ -675,6 +675,9 @@ kfd_driver_base_t::agent_snapshot (
       agent_info.precise_alu_exceptions_supported
         = (entry.capability
            & HSA_CAP_TRAP_DEBUG_PRECISE_ALU_OPERATIONS_SUPPORTED);
+      agent_info.lds_exception_supported
+        = (entry.capability2
+           & HSA_CAP2_TRAP_DEBUG_LDS_OUT_OF_ADDR_RANGE_SUPPORTED);
       agent_info.firmware_supported
         = entry.capability & HSA_CAP_TRAP_DEBUG_FIRMWARE_SUPPORTED;
       agent_info.address_watch_mask_bits = utils::bit_mask (
@@ -2056,13 +2059,15 @@ to_string (kfd_dbg_device_info_entry entry)
     ".gpuvm_limit=%#llx, .gpu_id=%d, .location_id=%#x, .vendor_id=%#x, "
     ".device_id=%#x, .fw_version=%d, .gfx_target_version=%#x, "
     ".simd_count=%d, .max_waves_per_simd=%d, .array_count=%d, "
-    ".simd_arrays_per_engine=%d, .capability=%#x, .debug_prop=%#x }",
+    ".simd_arrays_per_engine=%d, .capability=%#x, .capability2=%#x, "
+    ".debug_prop=%#x }",
     entry.exception_status, entry.lds_base, entry.lds_limit,
     entry.scratch_base, entry.scratch_limit, entry.gpuvm_base,
     entry.gpuvm_limit, entry.gpu_id, entry.location_id, entry.vendor_id,
     entry.device_id, entry.fw_version, entry.gfx_target_version,
     entry.simd_count, entry.max_waves_per_simd, entry.array_count,
-    entry.simd_arrays_per_engine, entry.capability, entry.debug_prop);
+    entry.simd_arrays_per_engine, entry.capability, entry.capability2,
+    entry.debug_prop);
 }
 
 } /* namespace amd::dbgapi */
