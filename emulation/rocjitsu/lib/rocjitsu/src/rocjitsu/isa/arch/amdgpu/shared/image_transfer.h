@@ -9,6 +9,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/image_address.h"
 #include "rocjitsu/vm/amdgpu/image_cube.h"
+#include "rocjitsu/vm/amdgpu/image_filter.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -66,6 +67,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   const uint32_t max_level = gfx12 ? (r[1] >> 12) & 31 : (r[1] >> 16) & 15;
   const uint32_t first_level = gfx12 ? (r[1] >> 25) & 31 : (r[3] >> 12) & 15;
   const uint32_t last_level = gfx12 ? (r[3] >> 15) & 31 : (r[3] >> 16) & 15;
+  const uint32_t perf_mod = (r[5] >> 20) & 7;
   const bool sample = sampler != ~0u;
   if (dim == 3 && !sample)
     return unsupported();
@@ -92,6 +94,7 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
   height = mip->height;
   bool normalized = true, seamless_cube = false;
   uint32_t min_filter = 0, mag_filter = 0, mip_filter = 0, max_anisotropy = 1;
+  uint32_t aniso_threshold = 0, aniso_bias = 0;
   double min_lod = 0, max_lod = 0, lod_bias = 0;
   uint32_t coordinate_offset = 0;
   uint32_t wrap_x = 2, wrap_y = 2;
@@ -115,6 +118,8 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
     if (ratio > 4)
       return unsupported();
     max_anisotropy = 1u << ratio;
+    aniso_threshold = (s[0] >> 16) & 7;
+    aniso_bias = (s[0] >> 21) & 63;
     const auto supported_wrap = [](uint32_t wrap) { return wrap <= 3 || wrap == 6; };
     if (!supported_wrap(wrap_x) || !supported_wrap(wrap_y) ||
         (s[0] & ((7u << 12) | (3u << 29) | (3u << 19))) || (s[2] & (3u << 24)) || mip_filter > 2)
@@ -315,8 +320,9 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
           const double minor = std::sqrt(std::max(0.0, (a + c - spread) * 0.5));
           rho = std::max(minor, major / max_anisotropy);
           const double footprint = std::max(1.0, rho);
-          const double ratio = std::clamp(major / footprint, 1.0, double(max_anisotropy));
-          filter_count = 1u << static_cast<uint32_t>(std::ceil(std::log2(ratio)));
+          const double geometric_ratio = std::clamp(major / footprint, 1.0, double(max_anisotropy));
+          filter_count = image_anisotropic_filter_count(major, minor, max_anisotropy,
+                                                        aniso_threshold, aniso_bias, perf_mod);
           if (filter_count > 1) {
             double direction_u = b, direction_v = major * major - a;
             if (b == 0) {
@@ -325,8 +331,10 @@ inline bool prepare_image_transfer(Wavefront &wf, VectorMemState &d, uint32_t re
             }
             const double direction_length = std::hypot(direction_u, direction_v);
             double spacing = major / filter_count;
-            if (ratio <= 2)
-              spacing = footprint * std::clamp(2 * (ratio - 1), 0.0, 1.0);
+            // Spacing still uses the geometric footprint; its hardware
+            // quantization is separate from the count controls above.
+            if (geometric_ratio <= 2)
+              spacing = footprint * std::clamp(2 * (geometric_ratio - 1), 0.0, 1.0);
             sample_step_u = direction_u / direction_length * spacing / sx;
             sample_step_v = direction_v / direction_length * spacing / sy;
           }

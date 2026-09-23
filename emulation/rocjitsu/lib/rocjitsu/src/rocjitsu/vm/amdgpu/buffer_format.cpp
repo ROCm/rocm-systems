@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/image_filter.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -465,17 +466,33 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
           return filtered;
         };
         const uint32_t filter_count = d.image_sample->filter_counts[lane];
-        double filtered = filter_sample(0);
+        double filtered;
         if (filter_count > 1) {
+          const auto weighted_filter = [&](uint32_t index) {
+            const double value =
+                filter_sample(index) * image_anisotropic_filter_weight(filter_count, index);
+            // The UNORM accumulator normalizes after summation. Each weighted
+            // contribution retains nineteen fractional texel-value bits.
+            return unorm8 ? round_even(std::ldexp(value * std::bit_floor(filter_count), 19)) /
+                                std::ldexp(1.0, 19)
+                          : value;
+          };
+          filtered = weighted_filter(0);
           for (uint32_t filter_index = 1; filter_index < filter_count; ++filter_index)
-            filtered += filter_sample(filter_index);
-          filtered /= filter_count;
+            filtered += weighted_filter(filter_index);
+        } else {
+          filtered = filter_sample(0);
         }
         if (unorm8) {
-          // Preserve thirteen fractional texel bits, then normalize by byte replication.
-          // Convert its 34 fractional bits to FP32 with midpoints rounded up.
-          const uint64_t numerator = static_cast<uint64_t>(round_even(std::ldexp(filtered, 13)))
-                                     << 13;
+          // Anisotropic accumulation rounds half up before normalization, then
+          // discards the normalization remainder. A single filter rounds even.
+          const uint64_t rounded_unorm =
+              filter_count > 1 ? static_cast<uint64_t>(std::floor(std::ldexp(filtered, 13) + 0.5)) /
+                                     std::bit_floor(filter_count)
+                               : static_cast<uint64_t>(round_even(std::ldexp(filtered, 13)));
+          // Normalize by byte replication, converting its 34 fractional bits
+          // to FP32 with midpoints rounded up.
+          const uint64_t numerator = rounded_unorm << 13;
           uint64_t normalized = numerator + (numerator >> 8) + (numerator >> 16) +
                                 (numerator >> 24) + (numerator >> 32);
           const uint32_t bits = std::bit_width(normalized);

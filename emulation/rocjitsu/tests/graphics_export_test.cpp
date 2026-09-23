@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/graphics_draw.h"
 #include "rocjitsu/vm/amdgpu/graphics_stage.h"
 #include "rocjitsu/vm/amdgpu/image_address.h"
+#include "rocjitsu/vm/amdgpu/image_filter.h"
 #include "rocjitsu/vm/amdgpu/image_metadata.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -3756,6 +3757,132 @@ TEST(GraphicsImageMetadataTest, HtileEndpointClearsAndExplicitClearRegister) {
   }
 }
 
+TEST(GraphicsImageFilterTest, AnisotropicDescriptorControlsMatchPhysicalFilterCounts) {
+  // FNV-1a digests of counts recovered from R32 impulse readbacks. The first
+  // corpus covers every bias/PERF_MOD pair on GFX11; the independent threshold
+  // corpus agrees byte-for-byte on physical GFX11 and GFX12.
+  uint64_t digest = 14695981039346656037ull;
+  for (uint32_t perf = 0; perf < 8; ++perf)
+    for (uint32_t bias = 0; bias < 64; ++bias)
+      for (uint32_t i = 0; i < 512; ++i) {
+        const auto count =
+            amdgpu::image_anisotropic_filter_count(1.0 + i / 32.0, 1, 16, 0, bias, perf);
+        digest = (digest ^ count) * 1099511628211ull;
+      }
+  EXPECT_EQ(digest, 0x19dbaf1b0e5faf7cull);
+  digest = 14695981039346656037ull;
+  struct Control {
+    uint32_t threshold, bias;
+  };
+  constexpr Control controls[] = {{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0},  {5, 0},
+                                  {6, 0}, {7, 0}, {0, 4}, {2, 4}, {2, 32}, {2, 63}};
+  for (const auto [threshold, bias] : controls)
+    for (uint32_t i = 0; i < 4096; ++i) {
+      const auto count =
+          amdgpu::image_anisotropic_filter_count(1.0 + i / 256.0, 1, 16, threshold, bias, 4);
+      digest = (digest ^ count) * 1099511628211ull;
+    }
+  EXPECT_EQ(digest, 0x435635cf362ec9fcull);
+}
+
+TEST(GraphicsImageFilterTest, AnisotropicTwoAxisCountsMatchPhysicalBoundaries) {
+  struct Witness {
+    float major, minor;
+    uint32_t max_anisotropy, threshold, bias, perf_mod, expected;
+  };
+  // Physical R32 impulse counts on both GFX11 and GFX12. Non-unit minor
+  // axes expose the two precision reductions; small axes expose bias ordering.
+  constexpr Witness witnesses[] = {
+      {2.420099f, 1.03f, 16, 2, 4, 4, 2},    {5.9045086f, 1.33f, 16, 2, 4, 4, 4},
+      {17.743763f, 2.07f, 16, 2, 4, 4, 8},   {22.065083f, 2.07f, 16, 2, 4, 4, 10},
+      {26.418175f, 2.07f, 16, 2, 4, 4, 12},  {30.701893f, 2.07f, 16, 2, 4, 4, 14},
+      {2.015625f, 0.484375f, 4, 0, 4, 4, 4}, {2.015625f, 0.5f, 4, 0, 4, 4, 2},
+      {4.125f, 0.5f, 8, 0, 4, 4, 6},         {4.125f, 0.515625f, 8, 0, 4, 4, 4},
+      {8.25f, 0.5f, 16, 0, 4, 4, 10},        {8.25f, 0.515625f, 16, 0, 4, 4, 8},
+      {16.5f, 1, 16, 0, 32, 7, 10},
+  };
+  for (const auto &witness : witnesses)
+    EXPECT_EQ(amdgpu::image_anisotropic_filter_count(witness.major, witness.minor,
+                                                     witness.max_anisotropy, witness.threshold,
+                                                     witness.bias, witness.perf_mod),
+              witness.expected)
+        << witness.major << "," << witness.minor << "," << witness.max_anisotropy;
+}
+
+TEST_P(GraphicsExportTest, AnisotropicSamplingUsesPhysicalNonuniformWeights) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  const auto layout = amdgpu::image_mip_layout(gfx12, 0, 4, 64, 16, 1, 0);
+  ASSERT_TRUE(layout);
+  for (uint32_t y = 0; y < 16; ++y)
+    for (uint32_t x = 0; x < 64; ++x) {
+      const auto address = gfx12 ? amdgpu::gfx12_image_address(0x100000, x, y, layout->pitch, 4, 0)
+                                 : amdgpu::gfx11_image_address(0x100000, x, y, layout->pitch, 4, 0);
+      ASSERT_TRUE(address);
+      memory_.write32(*address, x == 32 ? 0x3f800000 : 0);
+    }
+  const std::array<uint32_t, 8> descriptor{0x1000,
+                                           (22u << (gfx12 ? 17 : 20)) | (3u << 30),
+                                           15 | (15u << 14),
+                                           (9u << 28) | 0x204,
+                                           0,
+                                           4u << 20,
+                                           0,
+                                           0};
+  for (uint32_t i = 0; i < descriptor.size(); ++i)
+    wave_->debug_write_sgpr(8 + i, descriptor[i]);
+  wave_->debug_write_sgpr(4, 0x92 | (4u << 9) | (2u << 16) | (4u << 21) | (1u << 27));
+  wave_->debug_write_sgpr(5, 0);
+  wave_->debug_write_sgpr(6, (2u << 20) | (2u << 22));
+  wave_->debug_write_sgpr(7, 0);
+  struct Witness {
+    uint32_t count;
+    std::array<uint32_t, 14> expected;
+  };
+  // Raw R32 impulse outputs for nearest anisotropic filtering on both cards.
+  constexpr Witness witnesses[] = {
+      {6, {0x3e2a0000, 0x3e2b0000, 0x3e2b0000, 0x3e2b0000, 0x3e2b0000, 0x3e2a0000}},
+      {10,
+       {0x3dcc0000, 0x3dcd0000, 0x3dcd0000, 0x3dcd0000, 0x3dcd0000, 0x3dcd0000, 0x3dcd0000,
+        0x3dcd0000, 0x3dcd0000, 0x3dcc0000}},
+      {12,
+       {0x3daa0000, 0x3daa0000, 0x3dab0000, 0x3dab0000, 0x3dab0000, 0x3dab0000, 0x3dab0000,
+        0x3dab0000, 0x3dab0000, 0x3dab0000, 0x3daa0000, 0x3daa0000}},
+      {14,
+       {0x3d920000, 0x3d920000, 0x3d920000, 0x3d920000, 0x3d920000, 0x3d930000, 0x3d930000,
+        0x3d930000, 0x3d930000, 0x3d920000, 0x3d920000, 0x3d920000, 0x3d920000, 0x3d920000}},
+  };
+  for (const auto &witness : witnesses) {
+    wave_->set_exec((1u << witness.count) - 1);
+    for (uint32_t lane = 0; lane < witness.count; ++lane) {
+      const float offset = float(lane) + 0.125f - witness.count * 0.5f;
+      const float values[] = {witness.count / 64.0f, 0,        0, 1.0f / 16,
+                              (32.5f + offset) / 64, 8.5f / 16};
+      for (uint32_t i = 0; i < std::size(values); ++i)
+        wave_->debug_write_vgpr(i, lane, std::bit_cast<uint32_t>(values[i]));
+    }
+    wave_->debug_write_vgpr(12, 31, 0xdeadbeef);
+    ASSERT_NO_FATAL_FAILURE(sample(28, 1)); // IMAGE_SAMPLE_D, 2D.
+    for (uint32_t lane = 0; lane < witness.count; ++lane) {
+      EXPECT_EQ(wave_->debug_read_vgpr(12, lane), witness.expected[lane])
+          << witness.count << "," << lane;
+      EXPECT_EQ(wave_->debug_read_vgpr(13, lane), 0u);
+      EXPECT_EQ(wave_->debug_read_vgpr(14, lane), 0u);
+      EXPECT_EQ(wave_->debug_read_vgpr(15, lane), 0x3f800000u);
+    }
+    EXPECT_EQ(wave_->debug_read_vgpr(12, 31), 0xdeadbeefu);
+  }
+  // A footprint above the sampler's maximum still applies bias before the
+  // count cap. Both cards select ten filters here; pre-capping selects eight.
+  wave_->debug_write_sgpr(13, 7u << 20);
+  wave_->debug_write_sgpr(4, 0x92 | (4u << 9) | (32u << 21) | (1u << 27));
+  wave_->set_exec(1);
+  const float values[] = {16.5f / 64, 0, 0, 1.0f / 16, 33.75f / 64, 8.5f / 16};
+  for (uint32_t i = 0; i < std::size(values); ++i)
+    wave_->debug_write_vgpr(i, 0, std::bit_cast<uint32_t>(values[i]));
+  ASSERT_NO_FATAL_FAILURE(sample(28, 1));
+  EXPECT_EQ(wave_->debug_read_vgpr(12, 0), 0x3dcd0000u);
+}
+
 TEST_P(GraphicsExportTest, AnisotropicArraySamplingUsesIndependentLaneFootprints) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   const auto layout = amdgpu::image_mip_layout(gfx12, 0, 4, 64, 16, 1, 0);
@@ -3777,43 +3904,64 @@ TEST_P(GraphicsExportTest, AnisotropicArraySamplingUsesIndependentLaneFootprints
                                            15 | (15u << 14),
                                            (13u << 28) | 0xfac,
                                            (2u << 16) | 2,
-                                           0,
+                                           4u << 20,
                                            0,
                                            0};
   for (uint32_t i = 0; i < descriptor.size(); ++i)
     wave_->debug_write_sgpr(8 + i, descriptor[i]);
-  wave_->debug_write_sgpr(4, 0x92 | (4u << 9));
+  wave_->debug_write_sgpr(4, 0x92 | (4u << 9) | (2u << 16) | (4u << 21));
   wave_->debug_write_sgpr(5, 0);
   wave_->debug_write_sgpr(6, (3u << 20) | (3u << 22));
   wave_->debug_write_sgpr(7, 0);
+  struct Footprint {
+    float major, minor, u, v;
+  };
   struct Witness {
-    uint32_t query;
+    Footprint footprint;
     std::array<uint32_t, 4> expected;
   };
   // Exact raw outputs from 64x16 RGBA8 image samples on both physical targets.
   const Witness witnesses[] = {
-      {905, {0x3e7c3030u, 0x3f197dfeu, 0x3e8f1515u, 0x3f800000u}},
-      {1929, {0x3e999091u, 0x3f019fe0u, 0x3ea60000u, 0x3f800000u}},
-      {3977, {0x3eb72f2fu, 0x3ecd8505u, 0x3ee05adbu, 0x3f800000u}},
-      {8073, {0x3eca9e5eu, 0x3ec755b6u, 0x3ec3de9fu, 0x3f800000u}},
-      {16265, {0x3ee2acadu, 0x3ef34c2cu, 0x3ecb8707u, 0x3f800000u}},
-      {17289, {0x3e7c3030u, 0x3f197dfeu, 0x3e8f1515u, 0x3f800000u}},
-      {18313, {0x3e999091u, 0x3f019fe0u, 0x3ea60000u, 0x3f800000u}},
-      {20361, {0x3eb72f2fu, 0x3ecd8505u, 0x3ee05adbu, 0x3f800000u}},
-      {24457, {0x3eca9e5eu, 0x3ec755b6u, 0x3ec3de9fu, 0x3f800000u}},
-      {32649, {0x3ee2acadu, 0x3ef34c2cu, 0x3ecb8707u, 0x3f800000u}},
-      {33673, {0x3e80b8b9u, 0x3f1c46c7u, 0x3e9e9515u, 0x3f800000u}},
-      {34697, {0x3e7c3030u, 0x3f197dfeu, 0x3e8f1515u, 0x3f800000u}},
-      {36745, {0x3ec3b9bau, 0x3ec38081u, 0x3eda5f5fu, 0x3f800000u}},
-      {40841, {0x3ecbf373u, 0x3ead7afbu, 0x3ea282c3u, 0x3f800000u}},
-      {49033, {0x3ee7f373u, 0x3eed5959u, 0x3eb10525u, 0x3f800000u}},
+      {{1.0f, 0.5f, 0.537109375f, 0.37f}, {0x3e7c3030u, 0x3f197dfeu, 0x3e8f1515u, 0x3f800000u}},
+      {{2.0f, 0.5f, 0.537109375f, 0.37f}, {0x3e999091u, 0x3f019fe0u, 0x3ea60000u, 0x3f800000u}},
+      {{4.0f, 0.5f, 0.537109375f, 0.37f}, {0x3eb72f2fu, 0x3ecd8505u, 0x3ee05adbu, 0x3f800000u}},
+      {{8.0f, 0.5f, 0.537109375f, 0.37f}, {0x3eca9e5eu, 0x3ec755b6u, 0x3ec3de9fu, 0x3f800000u}},
+      {{16.0f, 0.5f, 0.537109375f, 0.37f}, {0x3ee2acadu, 0x3ef34c2cu, 0x3ecb8707u, 0x3f800000u}},
+      {{1.0f, 1.0f, 0.537109375f, 0.37f}, {0x3e7c3030u, 0x3f197dfeu, 0x3e8f1515u, 0x3f800000u}},
+      {{2.0f, 1.0f, 0.537109375f, 0.37f}, {0x3e999091u, 0x3f019fe0u, 0x3ea60000u, 0x3f800000u}},
+      {{4.0f, 1.0f, 0.537109375f, 0.37f}, {0x3eb72f2fu, 0x3ecd8505u, 0x3ee05adbu, 0x3f800000u}},
+      {{8.0f, 1.0f, 0.537109375f, 0.37f}, {0x3eca9e5eu, 0x3ec755b6u, 0x3ec3de9fu, 0x3f800000u}},
+      {{6.0f, 1.0f, 0.537109375f, 0.37f}, {0x3ec2abdcu, 0x3eb81151u, 0x3ed71adbu, 0x3f800000u}},
+      {{16.0f, 1.0f, 0.537109375f, 0.37f}, {0x3ee2acadu, 0x3ef34c2cu, 0x3ecb8707u, 0x3f800000u}},
+      {{1.0f, 2.0f, 0.537109375f, 0.37f}, {0x3e80b8b9u, 0x3f1c46c7u, 0x3e9e9515u, 0x3f800000u}},
+      {{2.0f, 2.0f, 0.537109375f, 0.37f}, {0x3e7c3030u, 0x3f197dfeu, 0x3e8f1515u, 0x3f800000u}},
+      {{4.0f, 2.0f, 0.537109375f, 0.37f}, {0x3ec3b9bau, 0x3ec38081u, 0x3eda5f5fu, 0x3f800000u}},
+      {{8.0f, 2.0f, 0.537109375f, 0.37f}, {0x3ecbf373u, 0x3ead7afbu, 0x3ea282c3u, 0x3f800000u}},
+      {{16.0f, 2.0f, 0.537109375f, 0.37f}, {0x3ee7f373u, 0x3eed5959u, 0x3eb10525u, 0x3f800000u}},
+      // Additional phase sweeps isolate anisotropic UNORM accumulation and
+      // normalization rounding for power-of-two and uneven filter counts.
+      {{2.0f, 1.0f, 0.00121093751f, 0.0319140628f},
+       {0x3ca9f3f4u, 0x3ca44040u, 0x3d1e1495u, 0x3f800000u}},
+      {{4.0f, 1.0f, 0.00121093751f, 0.0319140628f},
+       {0x3dc22c6cu, 0x3d9a6cedu, 0x3e45e3a4u, 0x3f800000u}},
+      {{6.0f, 1.0f, 0.415273428f, 0.0319140628f},
+       {0x3e9744b5u, 0x3eff4464u, 0x3ed18919u, 0x3f800000u}},
+      {{6.0f, 1.0f, 0.458242178f, 0.0397265628f},
+       {0x3e9894e5u, 0x3eb67737u, 0x3ed33e2eu, 0x3f800000u}},
+      {{8.0f, 1.0f, 0.0168359373f, 0.0319140628f},
+       {0x3e95eddeu, 0x3e98fd7du, 0x3e9a1e9fu, 0x3f800000u}},
+      {{14.0f, 1.0f, 0.0441796891f, 0.0319140628f},
+       {0x3eb64aabu, 0x3ec83d3du, 0x3eb293c4u, 0x3f800000u}},
+      {{14.0f, 1.0f, 0.219960943f, 0.0319140628f},
+       {0x3f12ca22u, 0x3f166d55u, 0x3f0ebe0eu, 0x3f800000u}},
+      {{16.0f, 1.0f, 0.376210928f, 0.0319140628f},
+       {0x3ed37e5eu, 0x3f04e8c9u, 0x3f059921u, 0x3f800000u}},
   };
   wave_->set_exec((1u << std::size(witnesses)) - 1);
   for (uint32_t lane = 0; lane < std::size(witnesses); ++lane) {
-    const uint32_t q = witnesses[lane].query;
-    const float major = (1 + ((q >> 8) & 63)) * 0.25f;
-    const float minor = 0.5f * (1u << (q >> 14));
-    const float values[] = {major / 64, 0, 0, minor / 16, ((q & 255) + 0.5f) / 256, 0.37f, 0};
+    const auto &footprint = witnesses[lane].footprint;
+    const float values[] = {footprint.major / 64, 0,           0, footprint.minor / 16,
+                            footprint.u,          footprint.v, 0};
     for (uint32_t i = 0; i < std::size(values); ++i)
       wave_->debug_write_vgpr(i, lane, std::bit_cast<uint32_t>(values[i]));
   }
