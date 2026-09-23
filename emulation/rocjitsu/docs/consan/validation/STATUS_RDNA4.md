@@ -416,3 +416,4 @@ Legend: 🩶 unseen · 🟥 broken before useful evidence · 🟧 below 80% aggr
   WMMA and then FP16/FP8 fault trials are queued after the complete round-10
   clean sweep; each completed fault cell will be recorded separately.
   Review: `/home/benoit/workspace/consan-validation/rdna4-20260923/matmul-debug/fp8-inventory.txt`.
+- `pytorch-rdna4-split-softmax` / default: fresh clean pass; fault qualification pending. Evidence: `/home/benoit/workspace/consan-validation/rdna4-20260923/clean-round10/pytorch-rdna4-split-softmax-default`.
