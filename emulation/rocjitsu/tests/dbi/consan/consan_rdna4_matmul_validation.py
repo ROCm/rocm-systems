@@ -146,10 +146,10 @@ def main(argv: list[str] | None = None) -> int:
 
     command = [str(args.executable)]
     variant = WORKLOADS[args.workload]
-    completed = subprocess.run(
+    process = subprocess.Popen(
         command,
-        check=False,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         env=_environment(
             variant,
@@ -159,9 +159,16 @@ def main(argv: list[str] | None = None) -> int:
             args.minimum_timed_ms,
         ),
     )
-    output = completed.stdout + completed.stderr
-    if output:
-        print(output, file=sys.stderr, end="" if output.endswith("\n") else "\n")
+    # Preserve transform/coverage evidence even when the outer runner kills
+    # this process group at its deadline. Buffering until exit loses it all.
+    assert process.stdout is not None
+    lines = []
+    with process.stdout:
+        for line in process.stdout:
+            lines.append(line)
+            print(line, file=sys.stderr, end="", flush=True)
+    completed = subprocess.CompletedProcess(command, process.wait())
+    output = "".join(lines)
     (
         architecture,
         correctness,

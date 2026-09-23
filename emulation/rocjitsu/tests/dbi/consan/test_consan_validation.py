@@ -5023,6 +5023,33 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(aggregate_ms, 253.25)
         self.assertEqual(timing_matches, 1)
 
+    def test_rdna4_matmul_timeout_retains_child_diagnostics(self) -> None:
+        with temporary_root() as root:
+            executable = root / "matmul"
+            executable.write_text(
+                f"#!{sys.executable}\n"
+                "import sys, time\n"
+                "print('transform progress', file=sys.stderr, flush=True)\n"
+                "time.sleep(60)\n",
+                encoding="utf-8",
+            )
+            executable.chmod(0o755)
+            returncode, _, output = validation._run_process(
+                [
+                    sys.executable,
+                    rdna4_matmul_validation.__file__,
+                    "--executable", str(executable),
+                    "--workload", "fp16-production",
+                    "--phase", "clean",
+                    "--minimum-timed-ms", "250",
+                    "--label", "timeout-test",
+                ],
+                os.environ.copy(), root / "run.log", 1,
+            )
+        self.assertEqual(returncode, 124)
+        self.assertIn("transform progress", output)
+        self.assertIn("validation timeout after 1s", output)
+
     def test_rdna4_matmul_environment_clears_ambient_fixed_iterations(self) -> None:
         variant = rdna4_matmul_validation.WORKLOADS["fp8-production"]
         with mock.patch.dict(os.environ, {"BENCH_FIXED_ITERS": "7"}, clear=False):
