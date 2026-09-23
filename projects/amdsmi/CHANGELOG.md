@@ -115,7 +115,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amd-smi set --compute-partition` / `-C` now attempts each GPU individually.**
   - An unsupported GPU reports `NOT_SUPPORTED` on its own, instead of the whole command aborting up front.
   - Input is validated against the static partition type names when profiles cannot be enumerated.
-  - The `-C` help now lists `SPX, DPX, TPX, QPX, CPX` instead of `N/A`.
+  - A numeric profile INDEX (e.g. `-C 0`) is also accepted, matched against an estimated `SPX, DPX, TPX, QPX, CPX` ordering.
+  - The `-C` help now lists `SPX, DPX, TPX, QPX, CPX` and `0-4` instead of `N/A`.
 
 ### Removed
 
