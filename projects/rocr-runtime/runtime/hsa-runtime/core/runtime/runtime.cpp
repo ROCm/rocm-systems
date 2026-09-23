@@ -5014,11 +5014,11 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   auto memoryHandle = std::make_unique<MemoryHandle>(owned_fd);
   if (have_info) {
     memoryHandle->imported_region = ResolveImportedRegion(info);
-    /* Every allocation reachable through this path was created with
-     * MEMORY_TYPE_PINNED; the driver query cannot confirm it, so this is an
-     * assumption rather than a recovered value. */
-    memoryHandle->imported_alloc_flag = MemoryRegion::AllocatePinned;
     memoryHandle->imported_size = info.size;
+    /* imported_alloc_flag stays AllocateNoFlags: the dmabuf carries no memory-type
+     * metadata, and the exporter may legitimately have created the allocation with
+     * MEMORY_TYPE_NONE. Reporting a recovered type we cannot observe would be worse
+     * than reporting none. */
   }
   *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
   memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));

@@ -609,7 +609,12 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtModelEnabled) = (HSAKMT_DEF(hsaKmtModelEnabled)*)(&hsaKmtModelEnabled);
       HSAKMT_PFN(hsaKmtAisReadWriteFile) = (HSAKMT_DEF(hsaKmtAisReadWriteFile)*)(&hsaKmtAisReadWriteFile);
       HSAKMT_PFN(hsaKmtHandleImport) = (HSAKMT_DEF(hsaKmtHandleImport)*)(&hsaKmtHandleImport);
+#if defined(_WIN32)
+      // The DXG thunk has no dmabuf notion; KfdDriver guards each call on a null pfn.
+      HSAKMT_PFN(hsaKmtQueryDmaBufInfo) = nullptr;
+#else
       HSAKMT_PFN(hsaKmtQueryDmaBufInfo) = (HSAKMT_DEF(hsaKmtQueryDmaBufInfo)*)(&hsaKmtQueryDmaBufInfo);
+#endif
       HSAKMT_PFN(hsaKmtImportExternalSemaphore) = (HSAKMT_DEF(hsaKmtImportExternalSemaphore)*)(&hsaKmtImportExternalSemaphore);
       HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) = (HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)*)(&hsaKmtDestroyExternalSemaphore);
       HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore)*)(&hsaKmtQueueSignalExternalSemaphore);
