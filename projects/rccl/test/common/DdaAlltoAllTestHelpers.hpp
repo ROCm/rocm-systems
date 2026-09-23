@@ -56,6 +56,9 @@ struct DdaAlltoAllMockComm
     ncclComm comm{};
     char archNameBuf[64]{};
 
+    DdaAlltoAllMockComm(const DdaAlltoAllMockComm&)            = delete;
+    DdaAlltoAllMockComm& operator=(const DdaAlltoAllMockComm&) = delete;
+
     DdaAlltoAllMockComm() { reset("gfx950:sramecc+:xnack-"); }
 
     void reset(const char* archName)

@@ -44,6 +44,9 @@ struct CeAllReduceMockComm
     ncclComm comm{};
     char archNameBuf[64]{};
 
+    CeAllReduceMockComm(const CeAllReduceMockComm&)            = delete;
+    CeAllReduceMockComm& operator=(const CeAllReduceMockComm&) = delete;
+
     CeAllReduceMockComm() { reset(); }
 
     void reset(const char* archName = nullptr)
